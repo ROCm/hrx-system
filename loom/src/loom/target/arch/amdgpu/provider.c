@@ -166,6 +166,7 @@ static iree_status_t loom_amdgpu_provider_contribute_pipeline(
 const loom_target_provider_t loom_amdgpu_target_provider = {
     .profile_type = &loom_amdgpu_target_profile_type,
     .materialize_definition = loom_amdgpu_target_materialize_definition,
+    .select_low_call_policy = loom_target_select_low_call_policy_require_inline,
     .register_context = loom_amdgpu_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_amdgpu_low_descriptor_registry_initialize,
@@ -203,6 +204,7 @@ const loom_target_provider_t loom_amdgpu_target_provider = {
     .select_profile = loom_amdgpu_target_provider_select_profile,
     .release_profile_selection =
         loom_amdgpu_target_provider_release_profile_selection,
+    .target_fact_type = &loom_amdgpu_target_fact_type,
 };
 
 static const loom_target_provider_t* const kLoomAmdgpuTargetProviders[] = {

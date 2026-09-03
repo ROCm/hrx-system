@@ -57,6 +57,7 @@ loom_cc_library(
     hdrs = ["provider.h"],
     visibility = _LLVMIR_PROVIDER_VISIBILITY,
     deps = [
+        ":facts",
         ":math_policy",
         "//loom/src/loom/ops/llvmir",
         "//loom/src/loom/target:provider",

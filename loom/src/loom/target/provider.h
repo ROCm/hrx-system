@@ -80,6 +80,38 @@ typedef void (*loom_target_release_profile_selection_fn_t)(
     const loom_target_provider_t* provider,
     loom_target_profile_selection_t* selection);
 
+// Target disposition for a retained low.func.call edge.
+typedef enum loom_target_low_call_policy_e {
+  // The target can preserve and emit the direct Low call boundary.
+  LOOM_TARGET_LOW_CALL_POLICY_DIRECT = 0,
+  // The target has no Low call ABI and requires the edge to inline.
+  LOOM_TARGET_LOW_CALL_POLICY_REQUIRE_INLINE = 1,
+} loom_target_low_call_policy_t;
+
+// Selects Low call policy for one caller's resolved target context.
+//
+// The query is intentionally per resolved caller rather than per module: one
+// module may carry versions owned by different target providers.
+typedef loom_target_low_call_policy_t (
+    *loom_target_select_low_call_policy_fn_t)(
+    const loom_resolved_target_t* resolved_target);
+
+// Selects direct Low call preservation for every resolved target.
+static inline loom_target_low_call_policy_t
+loom_target_select_low_call_policy_direct(
+    const loom_resolved_target_t* resolved_target) {
+  (void)resolved_target;
+  return LOOM_TARGET_LOW_CALL_POLICY_DIRECT;
+}
+
+// Selects required Low call inlining for every resolved target.
+static inline loom_target_low_call_policy_t
+loom_target_select_low_call_policy_require_inline(
+    const loom_resolved_target_t* resolved_target) {
+  (void)resolved_target;
+  return LOOM_TARGET_LOW_CALL_POLICY_REQUIRE_INLINE;
+}
+
 // Target emission artifact storage release callback.
 typedef void (*loom_target_emit_artifact_storage_release_fn_t)(void* storage);
 
@@ -297,6 +329,14 @@ struct loom_target_provider_t {
   // Releases selections returned by |select_profile|. This must be present
   // exactly when |select_profile| is present.
   loom_target_release_profile_selection_fn_t release_profile_selection;
+  // Optional per-caller Low call policy selector. Missing permits direct Low
+  // calls. A REQUIRE_INLINE result is a target emission requirement, not an
+  // authored inline hint.
+  loom_target_select_low_call_policy_fn_t select_low_call_policy;
+  // Target-family fact representation owned by this provider. This is required
+  // for providers with authored target definitions but no structured profile.
+  // When |profile_type| is also present, both must name the same fact type.
+  const loom_target_fact_type_t* target_fact_type;
 };
 
 // Static target provider table linked into a binary or embedding.
@@ -460,6 +500,16 @@ const loom_target_provider_t* loom_target_environment_lookup_profile_provider(
 // so successful lookup is independent of provider registration order.
 const loom_target_provider_t* loom_target_environment_lookup_family_provider(
     const loom_target_environment_t* environment, iree_string_view_t family);
+
+// Returns the provider owning |fact_type|, or NULL when not linked.
+//
+// Authored concrete target definitions carry typed target facts without an
+// embedding profile. This lookup recovers the same family owner used by
+// profile-based specialization so compiler-created authored roots retain a
+// complete resolved target.
+const loom_target_provider_t* loom_target_environment_lookup_fact_provider(
+    const loom_target_environment_t* environment,
+    const loom_target_fact_type_t* fact_type);
 
 // Invokes target-provider pass-pipeline contributions for |phase|. The caller
 // owns phase ordering, surrounding pass.for/pass.where scopes, and global

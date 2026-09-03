@@ -13,36 +13,40 @@ loom_cc_library(
   NAME
     lower
   HDRS
+    "call_predicates.h"
     "context.h"
     "contract_query.h"
     "function_boundary.h"
-    "low_invoke.h"
     "lower.h"
     "module_state.h"
     "report.h"
+    "representation_projection.h"
     "rule_descriptor.h"
     "rule_emit.h"
     "rule_match.h"
     "rule_source_memory.h"
     "rule_value.h"
     "rules.h"
+    "source_call.h"
     "source_plan.h"
     "source_query.h"
   SRCS
+    "call_predicates.c"
     "context.c"
     "contract_query.c"
     "function_boundary.c"
-    "low_invoke.c"
     "lower.c"
     "module_state.c"
     "policy.c"
     "report.c"
+    "representation_projection.c"
     "rule_descriptor.c"
     "rule_emit.c"
     "rule_match.c"
     "rule_source_memory_match.c"
     "rule_source_memory_materialize.c"
     "rule_value.c"
+    "source_call.c"
     "source_plan.c"
     "source_query.c"
   DEPS
@@ -58,10 +62,12 @@ loom_cc_library(
     loom::analysis::vector_memory_footprint
     loom::analysis::view_regions
     loom::codegen::low::builder
+    loom::codegen::low::descriptor_traits
     loom::codegen::low::descriptors
     loom::codegen::low::memory_access
     loom::codegen::low::memory_access_ir
     loom::codegen::low::source_memory_plan
+    loom::codegen::low::target_binding
     loom::decision::predicate
     loom::error::emitter
     loom::error::error_defs

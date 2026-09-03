@@ -1206,7 +1206,8 @@ command.program.def public @dispatch() launch() {
   }
 }
 
-TEST(AmdgpuTargetTest, CompileSpecializesRetainedHelpersForEachTargetContext) {
+TEST(AmdgpuTargetTest,
+     CompileSpecializesAndInlinesHelpersForEachTargetContext) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   ContextPtr context = CreateAmdgpuContext(target_environment.get());
   WorkspacePtr workspace = CreateWorkspace();
@@ -1295,32 +1296,13 @@ kernel.def @wave64_root() {
   ASSERT_NE(text_artifact, nullptr);
   const std::string module_text = ToString(text_artifact->contents);
 
-  const size_t wave32_leaf = module_text.find(
-      "low.func.def target<amdgpu.rdna3_5.core>"
-      "(@__loom_target_context_0_0) @read_subgroup_size()");
-  const size_t wave64_leaf = module_text.find(
-      "low.func.def target<amdgpu.cdna3.core>"
-      "(@__loom_target_context_0_1) "
-      "@read_subgroup_size_spec0()");
-  const size_t wave32_forward = module_text.find(
-      "low.func.def target<amdgpu.rdna3_5.core>"
-      "(@__loom_target_context_0_0) @forward_subgroup_size()");
-  const size_t wave64_forward = module_text.find(
-      "low.func.def target<amdgpu.cdna3.core>"
-      "(@__loom_target_context_0_1) "
-      "@forward_subgroup_size_spec0()");
   const size_t wave32_root = module_text.find(
       "low.kernel.def target<amdgpu.rdna3_5.core>"
-      "(@__loom_target_context_0_0)",
-      wave64_forward);
+      "(@__loom_target_context_0_0)");
   const size_t wave64_root = module_text.find(
       "low.kernel.def target<amdgpu.cdna3.core>"
       "(@__loom_target_context_0_1)",
       wave32_root);
-  ASSERT_NE(wave32_leaf, std::string::npos) << module_text;
-  ASSERT_NE(wave64_leaf, std::string::npos) << module_text;
-  ASSERT_NE(wave32_forward, std::string::npos) << module_text;
-  ASSERT_NE(wave64_forward, std::string::npos) << module_text;
   ASSERT_NE(wave32_root, std::string::npos) << module_text;
   ASSERT_NE(wave64_root, std::string::npos) << module_text;
   EXPECT_LT(module_text.find("@wave32_root()", wave32_root), wave64_root)
@@ -1328,24 +1310,13 @@ kernel.def @wave64_root() {
   EXPECT_NE(module_text.find("@wave64_root()", wave64_root), std::string::npos)
       << module_text;
 
-  const size_t wave32_constant = module_text.find("s_mov_b32 32", wave32_leaf);
-  const size_t wave64_constant = module_text.find("s_mov_b32 64", wave64_leaf);
-  EXPECT_LT(wave32_constant, wave64_leaf) << module_text;
-  EXPECT_LT(wave64_constant, wave32_forward) << module_text;
-
-  const size_t wave32_leaf_call = module_text.find(
-      "low.func.call pure @read_subgroup_size()", wave32_forward);
-  const size_t wave64_leaf_call = module_text.find(
-      "low.func.call pure @read_subgroup_size_spec0()", wave64_forward);
-  EXPECT_LT(wave32_leaf_call, wave64_forward) << module_text;
-  EXPECT_LT(wave64_leaf_call, wave32_root) << module_text;
-
-  const size_t wave32_forward_call = module_text.find(
-      "low.func.call pure @forward_subgroup_size()", wave32_root);
-  const size_t wave64_forward_call = module_text.find(
-      "low.func.call pure @forward_subgroup_size_spec0()", wave64_root);
-  EXPECT_LT(wave32_forward_call, wave64_root) << module_text;
-  EXPECT_NE(wave64_forward_call, std::string::npos) << module_text;
+  const size_t wave32_constant = module_text.find("s_mov_b32 32", wave32_root);
+  const size_t wave64_constant = module_text.find("s_mov_b32 64", wave64_root);
+  EXPECT_LT(wave32_constant, wave64_root) << module_text;
+  EXPECT_NE(wave64_constant, std::string::npos) << module_text;
+  EXPECT_EQ(module_text.find("low.func.def"), std::string::npos) << module_text;
+  EXPECT_EQ(module_text.find("low.func.call"), std::string::npos)
+      << module_text;
   EXPECT_EQ(module_text.find("target.subgroup.size"), std::string::npos)
       << module_text;
   EXPECT_NE(module_text.find("amdgpu.target<gfx1151>"), std::string::npos)

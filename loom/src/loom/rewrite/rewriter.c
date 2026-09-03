@@ -691,6 +691,32 @@ static bool loom_rewriter_op_is_ancestor_of(const loom_op_t* ancestor,
   return false;
 }
 
+static bool loom_rewriter_op_belongs_to_module(const loom_module_t* module,
+                                               const loom_op_t* op) {
+  if (!module || !op) return false;
+  const loom_op_t* root_op = op;
+  while (root_op->parent_op != NULL) root_op = root_op->parent_op;
+  return root_op->parent_block != NULL &&
+         root_op->parent_block->parent_region == module->body;
+}
+
+static bool loom_rewriter_parent_owns_block(const loom_module_t* module,
+                                            const loom_op_t* parent_op,
+                                            const loom_block_t* block) {
+  if (!module || !block || !block->parent_region) return false;
+  uint16_t block_index = 0;
+  if (!loom_region_try_block_index(block->parent_region, block, &block_index)) {
+    return false;
+  }
+  if (parent_op == NULL) return block->parent_region == module->body;
+  if (!loom_rewriter_op_belongs_to_module(module, parent_op)) return false;
+  loom_region_t* const* regions = loom_op_regions(parent_op);
+  for (uint8_t i = 0; i < parent_op->region_count; ++i) {
+    if (regions[i] == block->parent_region) return true;
+  }
+  return false;
+}
+
 static void loom_rewriter_record_subtree_summaries(loom_module_t* module,
                                                    loom_op_t* op) {
   loom_module_record_op_summaries(module, op);
@@ -720,6 +746,15 @@ iree_status_t loom_rewriter_move_before(loom_rewriter_t* rewriter,
       !op->parent_block || !before_op->parent_block) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "cannot move dead or unlinked operation");
+  }
+  // Same-module detached regions are valid move sources (materialization uses
+  // them for staged IR), so source ownership cannot be inferred from ancestry.
+  // The insertion point must be rooted in the rewrite module: it is the side
+  // whose ancestry and region summaries this rewriter will update.
+  if (!loom_rewriter_op_belongs_to_module(rewriter->module, before_op)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "move insertion target must belong to the rewrite "
+                            "module");
   }
   if (loom_rewriter_op_is_ancestor_of(op, before_op)) {
     return iree_make_status(
@@ -756,6 +791,65 @@ iree_status_t loom_rewriter_move_before(loom_rewriter_t* rewriter,
       loom_rewriter_add_parent_summary_ops_to_worklist(rewriter, op));
   IREE_RETURN_IF_ERROR(
       loom_rewriter_add_parent_summary_ops_to_worklist(rewriter, before_op));
+  rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
+  return iree_ok_status();
+}
+
+iree_status_t loom_rewriter_move_to_block_end(loom_rewriter_t* rewriter,
+                                              loom_op_t* op,
+                                              loom_block_t* target_block,
+                                              loom_op_t* target_parent_op) {
+  if (!op || !target_block) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "move requires live op and target block");
+  }
+  if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD) || !op->parent_block ||
+      !target_block->parent_region) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "cannot move dead or unlinked operation");
+  }
+  if (!loom_rewriter_op_belongs_to_module(rewriter->module, op) ||
+      !loom_rewriter_parent_owns_block(rewriter->module, target_parent_op,
+                                       target_block)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "move source and target must belong to the rewrite module");
+  }
+  if (target_parent_op != NULL &&
+      loom_rewriter_op_is_ancestor_of(op, target_parent_op)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "cannot move an operation into one of its descendants");
+  }
+  if (op->parent_block == target_block && op->next_op == NULL &&
+      op->parent_op == target_parent_op) {
+    return iree_ok_status();
+  }
+
+  loom_module_t* module = rewriter->module;
+  loom_block_t* original_block = op->parent_block;
+  loom_op_t* original_next_op = op->next_op;
+  loom_op_t* original_parent_op = op->parent_op;
+
+  loom_block_unlink_op(module, op);
+  op->parent_block = NULL;
+  op->parent_op = target_parent_op;
+  iree_status_t status = loom_block_append_op(module, target_block, op);
+  if (!iree_status_is_ok(status)) {
+    op->parent_block = NULL;
+    op->parent_op = original_parent_op;
+    iree_status_t restore_status = loom_block_insert_before_op(
+        module, original_block, original_next_op, op);
+    if (iree_status_is_ok(restore_status)) {
+      loom_rewriter_record_subtree_summaries(module, op);
+    }
+    return iree_status_join(status, restore_status);
+  }
+  loom_rewriter_record_subtree_summaries(module, op);
+
+  IREE_RETURN_IF_ERROR(loom_rewriter_add_to_worklist(rewriter, op));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_add_parent_summary_ops_to_worklist(rewriter, op));
   rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
   return iree_ok_status();
 }

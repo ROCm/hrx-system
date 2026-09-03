@@ -653,6 +653,47 @@ func.def public @host() {
 }
 
 TEST_F(TargetCallgraphSpecializationTest,
+       SeedsAuthoredPublicRootWithoutProfileRequests) {
+  ModulePtr module = Parse(R"(
+test.target<low_core> @wave32 {subgroup_size = 32}
+
+func.def target(@wave32) @helper() {
+  func.call @root() : ()
+  func.return
+}
+
+func.def public target(@wave32) @root() {
+  func.call @helper() : ()
+  func.return
+}
+)");
+  loom_function_version_owner_t owner = {};
+  loom_function_version_owner_initialize(&version_arena_, &owner);
+
+  EXPECT_TRUE(Run(module.get(), &owner));
+
+  ASSERT_EQ(owner.list.count, 2u);
+  const loom_target_function_version_t* root_version =
+      Version(owner, Function(module.get(), IREE_SV("root")));
+  const loom_target_function_version_t* helper_version =
+      Version(owner, Function(module.get(), IREE_SV("helper")));
+  ASSERT_NE(root_version, nullptr);
+  ASSERT_NE(helper_version, nullptr);
+  EXPECT_EQ(root_version->resolved_target.provider, &kTestProvider);
+  EXPECT_EQ(helper_version->resolved_target.provider, &kTestProvider);
+  EXPECT_EQ(root_version->target_context_ordinal,
+            helper_version->target_context_ordinal);
+  EXPECT_EQ(root_version->resolved_target.facts->storage.snapshot.subgroup_size,
+            32u);
+  EXPECT_EQ(
+      helper_version->resolved_target.facts->storage.snapshot.subgroup_size,
+      32u);
+
+  EXPECT_FALSE(Run(module.get(), &owner));
+  EXPECT_EQ(owner.list.count, 2u);
+}
+
+TEST_F(TargetCallgraphSpecializationTest,
        RejectsMultipleContextsForExternallyReachableCalleeBeforeMutation) {
   ModulePtr module = Parse(R"(
 func.def public @shared() {

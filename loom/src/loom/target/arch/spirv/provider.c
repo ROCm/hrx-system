@@ -69,6 +69,7 @@ static const loom_target_legalizer_provider_t* const
 const loom_target_provider_t loom_spirv_target_provider = {
     .profile_type = &loom_spirv_target_profile_type,
     .materialize_definition = loom_spirv_target_materialize_definition,
+    .select_low_call_policy = loom_target_select_low_call_policy_require_inline,
     .register_context = loom_spirv_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_spirv_low_descriptor_registry_initialize,
@@ -89,6 +90,7 @@ const loom_target_provider_t loom_spirv_target_provider = {
     .select_profile = loom_spirv_target_provider_select_profile,
     .release_profile_selection =
         loom_spirv_target_provider_release_profile_selection,
+    .target_fact_type = &loom_spirv_target_fact_type,
 };
 
 static const loom_target_provider_t* const kLoomSpirvTargetProviders[] = {

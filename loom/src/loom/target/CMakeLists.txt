@@ -126,6 +126,7 @@ loom_cc_library(
     ::function_contract
     ::function_version
     ::pass_environment
+    ::provider
     iree::base
     iree::base::internal::arena
     loom::analysis::symbol_facts
@@ -626,6 +627,7 @@ loom_cc_library(
     loom::ops::cfg
     loom::ops::func
     loom::ops::kernel
+    loom::ops::low
     loom::ops::op_defs
     loom::ops::scf
     loom::ops::type_registry

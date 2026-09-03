@@ -13,6 +13,7 @@
 #define LOOM_OPS_LOW_OPS_H_
 
 #include "loom/ops/op_defs.h"
+#include "loom/ir/ir.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -134,25 +135,27 @@ LOOM_DEFINE_ATTR_DICT(loom_low_func_def_export_attrs, 7)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_visibility, 8, loom_low_visibility_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_cc, 9, loom_low_cc_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_purity, 10, loom_low_purity_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_allocation, 11, loom_low_allocation_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_schedule, 12, loom_low_schedule_t)
-LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_def_predicates, 13)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_retain, 14, loom_low_retain_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_inline_policy, 11, loom_inline_policy_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_allocation, 12, loom_low_allocation_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_schedule, 13, loom_low_schedule_t)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_def_predicates, 14)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_retain, 15, loom_low_retain_t)
 LOOM_DEFINE_REGION(loom_low_func_def_body, 0)
 enum loom_low_func_def_build_flag_bits_e {
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_RETAIN = 1u << 1,
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_CC = 1u << 2,
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_PURITY = 1u << 3,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ALLOCATION = 1u << 4,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_SCHEDULE = 1u << 5,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET = 1u << 6,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI = 1u << 7,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 8,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 9,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI_LAYOUT = 1u << 10,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 11,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 12,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 4,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ALLOCATION = 1u << 5,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_SCHEDULE = 1u << 6,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET = 1u << 7,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI = 1u << 8,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 9,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 10,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI_LAYOUT = 1u << 11,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 12,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 13,
 };
 typedef uint32_t loom_low_func_def_build_flags_t;
 iree_status_t loom_low_func_def_build(
@@ -162,6 +165,7 @@ iree_status_t loom_low_func_def_build(
     loom_optional uint8_t retain,
     loom_optional uint8_t cc,
     loom_optional uint8_t purity,
+    loom_optional uint8_t inline_policy,
     loom_optional uint8_t allocation,
     loom_optional uint8_t schedule,
     loom_string_id_t descriptor_set,
@@ -278,28 +282,30 @@ LOOM_DEFINE_ATTR_DICT(loom_low_func_decl_export_attrs, 7)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_visibility, 8, loom_low_visibility_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_cc, 9, loom_low_cc_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_purity, 10, loom_low_purity_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_allocation, 11, loom_low_allocation_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_schedule, 12, loom_low_schedule_t)
-LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_decl_predicates, 13)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_retain, 14, loom_low_retain_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_import_kind, 15, loom_low_func_decl_import_kind_t)
-LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_code_symbol, 16)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_inline_policy, 11, loom_inline_policy_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_allocation, 12, loom_low_allocation_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_schedule, 13, loom_low_schedule_t)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_decl_predicates, 14)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_retain, 15, loom_low_retain_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_import_kind, 16, loom_low_func_decl_import_kind_t)
+LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_code_symbol, 17)
 enum loom_low_func_decl_build_flag_bits_e {
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_RETAIN = 1u << 1,
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CC = 1u << 2,
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_PURITY = 1u << 3,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ALLOCATION = 1u << 4,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_SCHEDULE = 1u << 5,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_KIND = 1u << 6,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CODE_SYMBOL = 1u << 7,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_TARGET = 1u << 8,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI = 1u << 9,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 10,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 11,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_LAYOUT = 1u << 12,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 13,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 14,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 4,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ALLOCATION = 1u << 5,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_SCHEDULE = 1u << 6,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_KIND = 1u << 7,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CODE_SYMBOL = 1u << 8,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_TARGET = 1u << 9,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI = 1u << 10,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 11,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 12,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_LAYOUT = 1u << 13,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 14,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 15,
 };
 typedef uint32_t loom_low_func_decl_build_flags_t;
 iree_status_t loom_low_func_decl_build(
@@ -309,6 +315,7 @@ iree_status_t loom_low_func_decl_build(
     loom_optional uint8_t retain,
     loom_optional uint8_t cc,
     loom_optional uint8_t purity,
+    loom_optional uint8_t inline_policy,
     loom_optional uint8_t allocation,
     loom_optional uint8_t schedule,
     loom_optional uint8_t import_kind,
@@ -353,14 +360,17 @@ LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_func_call_operands, 0)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_low_func_call_results, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_low_func_call_callee, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_call_purity, 1, loom_low_purity_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_call_inline_policy, 2, loom_inline_policy_t)
 enum loom_low_func_call_build_flag_bits_e {
   LOOM_LOW_FUNC_CALL_BUILD_FLAG_HAS_PURITY = 1u << 0,
+  LOOM_LOW_FUNC_CALL_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 1,
 };
 typedef uint32_t loom_low_func_call_build_flags_t;
 iree_status_t loom_low_func_call_build(
     loom_builder_t* builder,
     loom_low_func_call_build_flags_t build_flags,
     loom_optional uint8_t purity,
+    loom_optional uint8_t inline_policy,
     loom_symbol_ref_t callee,
     loom_may_consume const loom_value_id_t* operands,
     iree_host_size_t operands_count,
@@ -484,21 +494,24 @@ iree_status_t loom_low_concat_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_LOW_INVOKE: Required-inline edge from source IR to an explicitly selected target-Low function. The call site retains source value types; source-to-Low lowering maps them to the helper register signature, proves directional target and representation compatibility, and clones the helper body into the caller. The helper must be a module-local low.func.def with virtual register allocation and one outer body block. Function-entry resources and nested calls cannot cross the boundary. Caller facts must prove every authored helper argument predicate before lowering reifies those predicates as low.assume identities at the inline site. schedule(locked) helpers must be straight-line and preserve their authored instruction order.
+// LOOM_OP_LOW_INVOKE: Source-typed call edge to an explicitly selected target-Low function. Source-to-Low lowering maps the source operands and results to the helper register signature, proves the helper argument predicates, and normalizes the edge to low.func.call. Authored inline policy has the same meaning as on low.func.call; targets without a Low call ABI may require the normalized edge to inline before emission.
 // %result = low.invoke @extern_add(%lhs, %rhs) : (i32, i32) -> (i32)
 LOOM_DEFINE_ISA(loom_low_invoke_isa, LOOM_OP_LOW_INVOKE)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_invoke_operands, 0)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_low_invoke_results, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_low_invoke_callee, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_invoke_purity, 1, loom_low_purity_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_invoke_inline_policy, 2, loom_inline_policy_t)
 enum loom_low_invoke_build_flag_bits_e {
   LOOM_LOW_INVOKE_BUILD_FLAG_HAS_PURITY = 1u << 0,
+  LOOM_LOW_INVOKE_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 1,
 };
 typedef uint32_t loom_low_invoke_build_flags_t;
 iree_status_t loom_low_invoke_build(
     loom_builder_t* builder,
     loom_low_invoke_build_flags_t build_flags,
     loom_optional uint8_t purity,
+    loom_optional uint8_t inline_policy,
     loom_symbol_ref_t callee,
     loom_may_consume const loom_value_id_t* operands,
     iree_host_size_t operands_count,

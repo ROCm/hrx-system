@@ -174,6 +174,7 @@ loom_cc_library(
     iree::base
     loom::analysis::availability
     loom::ir
+    loom::ops::cfg
     loom::ops::func
     loom::ops::op_defs
   PUBLIC
@@ -191,10 +192,12 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir
+    loom::ops::cfg
     loom::ops::func
     loom::ops::op_defs
     loom::ops::template
     loom::ops::test
+    loom::verify
 )
 
 loom_cc_library(

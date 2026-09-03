@@ -1,0 +1,35 @@
+// RUN: emit source-low output=low
+
+// x86 has no Low call ABI, so its target policy flattens an ordinary
+// low.invoke after source-to-Low normalizes the edge to low.func.call.
+x86.target<scalar> @target
+
+low.func.def target<x86.scalar.core>(@target) @identity(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  return %value
+}
+
+func.def target(@target) @caller(%value: i32) -> (i32) {
+  %result = low.invoke @identity(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @caller(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  return %value
+}
+
+// ====
+
+// A user-authored noinline boundary conflicts with x86 emission rather than
+// silently leaving an unsupported Low call in the output.
+x86.target<scalar> @target
+
+low.func.def target<x86.scalar.core>(@target) @identity(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  return %value
+}
+
+func.def target(@target) @noinline_caller(%value: i32) -> (i32) {
+  // ERROR@+1: LOWERING/044 {op_name="low.func.call", phase_name="inline-callables", callee_name="identity", failure_code="target_requires_inline"}
+  %result = low.invoke noinline @identity(%value) : (i32) -> (i32)
+  func.return %result : i32
+}

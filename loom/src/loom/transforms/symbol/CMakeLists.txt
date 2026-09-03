@@ -203,12 +203,17 @@ loom_cc_library(
     loom::analysis::symbol_references
     loom::error::error_defs
     loom::ir
+    loom::ops::cfg
     loom::ops::func
+    loom::ops::low
     loom::ops::op_defs
+    loom::pass::pipeline
     loom::pass::types
     loom::rewrite::callable
     loom::rewrite::rewriter
+    loom::target::function_version
     loom::target::pass_environment
+    loom::target::provider
   PUBLIC
 )
 

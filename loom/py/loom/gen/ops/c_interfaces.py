@@ -574,7 +574,7 @@ def emit_target_like_descriptor(op: Op, iface: TargetLikeInterface, lines: list[
     prefix = c_prefix(op)
     if iface.fact_type is None:
         fact_type = f"{prefix}_fact_type"
-        lines.append(f"static const loom_target_fact_type_t {fact_type} = {{")
+        lines.append(f"const loom_target_fact_type_t {fact_type} = {{")
         lines.append(f'    .name = IREE_SVL("{op.group.name}"),')
         lines.append("    .storage_size = sizeof(loom_target_facts_t),")
         lines.append("    .satisfies_identity_requirement = loom_target_facts_selector_satisfies_identity_requirement,")
@@ -687,6 +687,16 @@ def target_like_fact_type_symbols(ops: Sequence[Op]) -> list[str]:
         if iface is None or iface.fact_type is None:
             continue
         symbols.add(c_symbols.normalize_c_symbol_reference(iface.fact_type))
+    return sorted(symbols)
+
+
+def target_like_generated_fact_type_symbols(ops: Sequence[Op]) -> list[str]:
+    symbols: set[str] = set()
+    for op in ops:
+        iface = c_queries.find_interface(op, TargetLikeInterface)
+        if iface is None or iface.bundle_table is None or iface.fact_type is not None:
+            continue
+        symbols.add(f"{c_prefix(op)}_fact_type")
     return sorted(symbols)
 
 

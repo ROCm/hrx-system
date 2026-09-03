@@ -1,0 +1,24 @@
+// RUN: emit source-low output=low
+
+// Wasm has a direct Low call ABI, so a noinline low.invoke becomes the same
+// preserved low.func.call boundary as an authored Low-to-Low call.
+wasm.target<simd128> @target
+
+low.func.def target<wasm.core.simd128>(@target) @identity(%value: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  return %value
+}
+
+func.def target(@target) @caller(%value: i32) -> (i32) {
+  %result = low.invoke noinline @identity(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) @identity(%value: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  return %value
+}
+
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @caller(%value: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %result = low.func.call noinline @identity(%value) : (reg<wasm.i32>) -> (reg<wasm.i32>)
+  return %result
+}

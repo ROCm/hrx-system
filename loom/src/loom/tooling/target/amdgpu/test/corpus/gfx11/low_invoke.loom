@@ -1,6 +1,6 @@
 // A target-Low schedule fragment invoked from an otherwise High kernel. The
-// helper is authored once against the gfx11 family contract and is required to
-// inline before scheduling and register allocation.
+// helper is authored once against the gfx11 family contract; AMDGPU policy
+// flattens its Low call before scheduling and register allocation.
 amdgpu.target<gfx11-generic> @low_invoke_target
 
 low.func.def schedule(locked) target<amdgpu.gfx11.generic.core>(@low_invoke_target) @low_invoke_pack_pair(%even: reg<amdgpu.vgpr x2>, %odd: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>) asm {
@@ -84,5 +84,37 @@ check.case public @low_invoke_schedule_free_pack_pair_case {
   %expected = check.generate.fill value(1.0) : tensor<8xf16>
   kernel.launch @low_invoke_schedule_free_pack_pair_kernel(%input, %output) : (tensor<8xf16>, tensor<8xf16>)
   check.expect.equal actual(%output) expected(%expected) : tensor<8xf16>
+  check.return
+}
+
+// The AMDGPU target policy flattens this ordinary Low call before emission.
+// Its branch and block argument exercise CFG composition through the default
+// source-to-Low pipeline without requiring a locked schedule.
+low.func.def target<amdgpu.gfx11.generic.core>(@low_invoke_target) @low_invoke_cfg_identity(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+  low.br ^exit(%value: reg<amdgpu.vgpr>)
+^exit(%forwarded: reg<amdgpu.vgpr>):
+  low.return %forwarded : reg<amdgpu.vgpr>
+}
+
+kernel.def target(@low_invoke_target) @low_invoke_cfg_identity_kernel() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %input = buffer.view %input_buffer[%base] : buffer -> view<1xi32>
+  %output = buffer.view %output_buffer[%base] : buffer -> view<1xi32>
+  %value = vector.load %input[%c0] : view<1xi32> -> vector<1xi32>
+  %forwarded = low.invoke @low_invoke_cfg_identity(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  vector.store %forwarded, %output[%c0] : vector<1xi32>, view<1xi32>
+  kernel.return
+}
+
+check.case public @low_invoke_cfg_identity_case {
+  %input = check.generate.fill value(37) : tensor<1xi32>
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  %expected = check.generate.fill value(37) : tensor<1xi32>
+  kernel.launch @low_invoke_cfg_identity_kernel(%input, %output) : (tensor<1xi32>, tensor<1xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
   check.return
 }

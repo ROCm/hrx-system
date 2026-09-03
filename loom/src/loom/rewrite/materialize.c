@@ -155,8 +155,10 @@ static iree_status_t loom_ir_clone_op_operands(
 typedef struct loom_ir_clone_region_projection_t {
   // Source region whose operations are being cloned.
   const loom_region_t* source_region;
-  // Target region with blocks at the same ordinals as |source_region|.
+  // Target region receiving the cloned blocks.
   loom_region_t* target_region;
+  // Target ordinal corresponding to source block zero.
+  uint16_t target_block_index;
 } loom_ir_clone_region_projection_t;
 
 static iree_status_t loom_ir_clone_op_successors(
@@ -169,8 +171,9 @@ static iree_status_t loom_ir_clone_op_successors(
     if (region_projection &&
         loom_region_try_block_index(region_projection->source_region,
                                     source_successors[i], &block_index)) {
-      target_successors[i] =
-          loom_region_block(region_projection->target_region, block_index);
+      target_successors[i] = loom_region_block(
+          region_projection->target_region,
+          region_projection->target_block_index + block_index);
       continue;
     }
     IREE_RETURN_IF_ERROR(loom_ir_remap_resolve_block(
@@ -269,6 +272,7 @@ static iree_status_t loom_ir_clone_region_ops(
   const loom_ir_clone_region_projection_t region_projection = {
       .source_region = source_region,
       .target_region = target_region,
+      .target_block_index = 0,
   };
   loom_builder_ip_t saved_ip = loom_builder_save(builder);
   loom_op_t* parent_op = builder->ip.parent_op;
@@ -501,6 +505,116 @@ iree_status_t loom_ir_clone_region(loom_builder_t* builder,
   IREE_RETURN_IF_ERROR(status);
   *out_target_region = target_region;
   return iree_ok_status();
+}
+
+static void loom_ir_reverse_block_range(loom_block_t** blocks,
+                                        uint16_t block_count) {
+  for (uint16_t i = 0; i < block_count / 2; ++i) {
+    loom_block_t* temporary = blocks[i];
+    blocks[i] = blocks[block_count - i - 1];
+    blocks[block_count - i - 1] = temporary;
+  }
+}
+
+static iree_status_t loom_ir_insert_region_blocks(loom_module_t* module,
+                                                  loom_region_t* region,
+                                                  uint16_t block_index,
+                                                  uint16_t block_count) {
+  if (block_count == 0) return iree_ok_status();
+  const uint16_t old_block_count = region->block_count;
+  for (uint16_t i = 0; i < block_count; ++i) {
+    loom_block_t* block = NULL;
+    IREE_RETURN_IF_ERROR(loom_region_append_block(module, region, &block));
+  }
+
+  // Rotate [old tail, new blocks] to [new blocks, old tail]. Appending grows
+  // the table geometrically; the rotation shifts the existing tail only once.
+  const uint16_t tail_block_count = old_block_count - block_index;
+  loom_ir_reverse_block_range(&region->blocks[block_index], tail_block_count);
+  loom_ir_reverse_block_range(&region->blocks[old_block_count], block_count);
+  loom_ir_reverse_block_range(&region->blocks[block_index],
+                              tail_block_count + block_count);
+  for (uint16_t i = block_index; i < region->block_count; ++i) {
+    region->blocks[i]->region_index = i;
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_ir_clone_region_blocks(loom_builder_t* builder,
+                                          const loom_region_t* source_region,
+                                          loom_region_t* target_region,
+                                          uint16_t target_block_index,
+                                          loom_ir_remap_t* remap) {
+  if (!builder || !source_region || !target_region || !remap) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "region block cloning requires builder, source, target, and remap");
+  }
+  if (builder->module != remap->target_module) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "builder module must be the remap target module");
+  }
+  if (source_region == target_region) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "source and target regions must be distinct");
+  }
+  if (source_region->block_count > 0 && target_region->block_count > 0 &&
+      target_block_index == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "cannot insert cloned blocks before an existing region entry block");
+  }
+  if (target_block_index > target_region->block_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "target block insertion index %u is outside region with %u blocks",
+        (unsigned)target_block_index, (unsigned)target_region->block_count);
+  }
+  if (source_region->block_count > UINT16_MAX - target_region->block_count) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "cloned region block count exceeds UINT16_MAX");
+  }
+
+  IREE_RETURN_IF_ERROR(loom_ir_insert_region_blocks(
+      builder->module, target_region, target_block_index,
+      source_region->block_count));
+  for (uint16_t source_index = 0; source_index < source_region->block_count;
+       ++source_index) {
+    const loom_block_t* source_block =
+        loom_region_const_block(source_region, source_index);
+    loom_block_t* target_block =
+        loom_region_block(target_region, target_block_index + source_index);
+    target_block->flags = source_block->flags;
+    IREE_RETURN_IF_ERROR(
+        loom_ir_clone_block_comments(remap, source_block, target_block));
+    IREE_RETURN_IF_ERROR(
+        loom_ir_clone_block_args(remap, source_block, target_block));
+  }
+
+  const loom_ir_clone_region_projection_t region_projection = {
+      .source_region = source_region,
+      .target_region = target_region,
+      .target_block_index = target_block_index,
+  };
+  loom_builder_ip_t saved_ip = loom_builder_save(builder);
+  loom_op_t* parent_op = builder->ip.parent_op;
+  iree_status_t status = iree_ok_status();
+  for (uint16_t source_index = 0;
+       source_index < source_region->block_count && iree_status_is_ok(status);
+       ++source_index) {
+    const loom_block_t* source_block =
+        loom_region_const_block(source_region, source_index);
+    loom_block_t* target_block =
+        loom_region_block(target_region, target_block_index + source_index);
+    builder->ip.block = target_block;
+    builder->ip.parent_op = parent_op;
+    builder->ip.before_op = NULL;
+    status = loom_ir_clone_block_ops_impl(builder, source_block, remap,
+                                          &region_projection,
+                                          /*options=*/NULL);
+  }
+  loom_builder_restore(builder, saved_ip);
+  return status;
 }
 
 //===----------------------------------------------------------------------===//

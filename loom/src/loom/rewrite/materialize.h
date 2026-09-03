@@ -69,6 +69,22 @@ iree_status_t loom_ir_clone_region(loom_builder_t* builder,
                                    loom_ir_remap_t* remap,
                                    loom_region_t** out_target_region);
 
+// Clones all blocks from |source_region| into the existing |target_region|.
+//
+// New blocks are inserted beginning at |target_block_index| with one block
+// table shift. Block arguments are mapped through |remap| before any operation
+// is cloned, and successor edges are projected by source block ordinal. The
+// builder's current parent op is retained as the parent of cloned ops.
+// Block labels are intentionally omitted: labels are region-local presentation
+// names and retaining them while splicing into an existing region can create
+// duplicate names. Block comments, flags, value names, locations, and all
+// operation payloads are preserved.
+iree_status_t loom_ir_clone_region_blocks(loom_builder_t* builder,
+                                          const loom_region_t* source_region,
+                                          loom_region_t* target_region,
+                                          uint16_t target_block_index,
+                                          loom_ir_remap_t* remap);
+
 // Rewrites every remappable payload in an existing op subtree through |remap|.
 //
 // This mutates ordinary operands, explicitly mapped successor targets, result
