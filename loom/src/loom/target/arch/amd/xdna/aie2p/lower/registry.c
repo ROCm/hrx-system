@@ -41,13 +41,25 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
       loom_type_is_all_static(source_type)) {
     const int64_t lane_count = loom_type_dim_static_size_at(source_type, 0);
     const loom_scalar_type_t element_type = loom_type_element_type(source_type);
+    if (lane_count == 8 && element_type == LOOM_SCALAR_TYPE_BF16) {
+      return loom_low_lower_make_register_type(
+          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_EWL, 1, out_low_type);
+    }
+    if (lane_count == 64 && element_type == LOOM_SCALAR_TYPE_BF16) {
+      return loom_low_lower_make_register_type(
+          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_VEC256, 4, out_low_type);
+    }
     if (lane_count == 64 && element_type == LOOM_SCALAR_TYPE_I32) {
       return loom_low_lower_make_register_type(
           context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMS, 4, out_low_type);
     }
     if (lane_count == 32 && element_type == LOOM_SCALAR_TYPE_F32) {
       return loom_low_lower_make_register_type(
-          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MCMS, 1, out_low_type);
+          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMS, 2, out_low_type);
+    }
+    if (lane_count == 64 && element_type == LOOM_SCALAR_TYPE_F32) {
+      return loom_low_lower_make_register_type(
+          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMS, 4, out_low_type);
     }
     if (lane_count > 0 && lane_count <= 64 &&
         element_type == LOOM_SCALAR_TYPE_I1) {

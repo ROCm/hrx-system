@@ -274,9 +274,51 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @multiply
   %rhs_value = vlda.512.bf16x32 %rhs_view, 0
   %18 = mova.i32 60
   %19 = vmul.bf16x32 %lhs_value, %rhs_value, %18
-  %20 = slice %19[0] : reg<aie2p.mcms x2> -> reg<aie2p.mcms>
+  %20 = slice %19[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
   set.rounding 12
   %product = vconv.bf16.fp32 %20
   vst.512.bf16x32 %product, %output_view, 0
   return
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @outer_product_bf16bf16_m8n8k1(%lhs: buffer, %rhs: buffer) -> (vector<64xf32>) {
+  %lhs_aligned, %rhs_aligned = buffer.assume.alignment %lhs, %rhs {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<8xbf16>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<8xbf16>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 1 : index
+  %lhs_value = vector.load %lhs_view[0] : view<8xbf16> -> vector<8xbf16>
+  %rhs_value = vector.load %rhs_view[0] : view<8xbf16> -> vector<8xbf16>
+  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] : vector<8xbf16>
+  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<8xbf16>
+  %accumulator_init = vector.constant 0.0 : vector<64xf32>
+  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xf32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<8xbf16>, vector<8xbf16>, vector<64xf32>
+  func.return %product : vector<64xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @outer_product_bf16bf16_m8n8k1() -> (reg<aie2p.mbms x4>) asm {
+  %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %lhs_fragment = vlda.128.bf16x8 %lhs_view, 0
+  %rhs_fragment = vlda.128.bf16x8 %rhs_view, 0
+  %accumulator_fragment = acc.clear.f32x64
+  %24 = vbroadcast.bf16x8.to.bf16x32 %lhs_fragment, 0
+  %25 = mova.i32 52
+  %26 = vshuffle.bf16x32 %24, %24, %25
+  %27 = mova.i32 53
+  %28 = vshuffle.bf16x32 %24, %24, %27
+  %29 = concat(%26, %28) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %30 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment, 0
+  %31 = vmov.bf16x32 %30
+  %32 = concat(%30, %31) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %33 = mova.i32 60
+  %product = mma.bf16bf16.m8n8k1 %accumulator_fragment, %29, %32, %33
+  return %product
 }
