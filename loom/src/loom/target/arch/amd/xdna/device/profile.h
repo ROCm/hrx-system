@@ -74,16 +74,6 @@ typedef struct loom_xdna_device_profile_t {
   uint8_t native_elf_abi_minor;
   // Driver-visible resource limits.
   loom_xdna_device_limits_t limits;
-  // Driver version used by the retained hardware witness.
-  const char* qualified_driver_version;
-  // Firmware build used by the retained hardware witness.
-  const char* qualified_firmware_version;
-  // XRT version used by the retained hardware witness.
-  const char* qualified_xrt_version;
-  // XRT source revision used by the retained hardware witness.
-  const char* qualified_xrt_source_commit;
-  // Pinned XDNA driver source revision defining this profile.
-  const char* xdna_driver_source_commit;
 } loom_xdna_device_profile_t;
 
 // Resolves an exact PCI identity without a device-family fallback.

@@ -22,7 +22,6 @@ TEST(XdnaDeviceProfileTest, ResolvesExactStrixHaloPciRevision) {
   EXPECT_EQ(profile->firmware_abi_identity, UINT64_C(0x4E5055320006000C));
   EXPECT_EQ(profile->firmware_protocol_major, 6u);
   EXPECT_EQ(profile->firmware_protocol_minor, 12u);
-  EXPECT_STREQ(profile->qualified_firmware_version, "1.0.21.44");
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_NOT_FOUND,

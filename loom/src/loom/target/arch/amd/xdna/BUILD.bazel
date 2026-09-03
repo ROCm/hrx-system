@@ -58,6 +58,7 @@ loom_cc_library(
     srcs = ["device/profile.c"],
     hdrs = ["device/profile.h"],
     textual_hdrs = [":device/profile_tables.inl"],
+    visibility = ["//visibility:public"],
     deps = [
         ":array_facts",
         "//runtime/src/iree/base",

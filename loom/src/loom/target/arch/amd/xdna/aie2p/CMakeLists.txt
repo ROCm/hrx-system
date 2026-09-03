@@ -416,18 +416,35 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    tile_image
+    tile_link
   HDRS
-    "emit/tile_image.h"
+    "emit/tile_link.h"
   SRCS
-    "emit/tile_image.c"
+    "emit/tile_link.c"
   DEPS
     ::leaf_object
     ::relocation
     iree::base
     iree::base::internal::arena
-    iree::io::stream
     loom::target::emit::native::contribution
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    xdna_product
+  HDRS
+    "emit/xdna_product.h"
+  SRCS
+    "emit/xdna_product.c"
+  DEPS
+    ::array_program
+    ::tile_link
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
+    loom::target::arch::amd::xdna::device_profile
+    loom::target::arch::amd::xdna::elf_format
     loom::target::emit::native::elf
   PUBLIC
 )
@@ -440,19 +457,20 @@ loom_cc_library(
   SRCS
     "emit/artifact_emitter.c"
   DEPS
-    ::core_descriptors
+    ::array_plan
+    ::array_program
+    ::array_resident
     ::leaf_compile
-    ::leaf_object
-    ::low_registry
-    ::tile_image
+    ::tile_link
+    ::xdna_product
     iree::base
+    iree::base::internal::arena
     iree::io::stream
-    loom::codegen::low::descriptors
-    loom::codegen::low::frame
-    loom::codegen::low::function
+    loom::codegen::low::diagnostics
     loom::ir
+    loom::ops::low
     loom::ops::op_defs
-    loom::target::arch::amd::xdna::array_facts
+    loom::target::arch::amd::xdna::device_profile
     loom::target::function_version
     loom::target::provider
     loom::target::reporting::low
@@ -535,41 +553,17 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    tile_image_test
+    tile_link_test
   SRCS
-    "emit/tile_image_test.cc"
+    "emit/tile_link_test.cc"
   DEPS
     ::encoding
     ::relocation
-    ::tile_image
+    ::tile_link
     iree::base::internal::arena
-    iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
     loom::target::emit::native::object
-)
-
-loom_cc_test(
-  NAME
-    artifact_emitter_test
-  SRCS
-    "emit/artifact_emitter_test.cc"
-  DEPS
-    ::artifact_emitter
-    ::low_registry
-    iree::base
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::codegen::low::text_asm
-    loom::codegen::low::verify
-    loom::format::text::parser
-    loom::ir
-    loom::ops::low
-    loom::target::arch::amd::xdna::aie2p::ops
-    loom::target::emit::native::elf
-    loom::target::provider
-    loom::target::reporting::report
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

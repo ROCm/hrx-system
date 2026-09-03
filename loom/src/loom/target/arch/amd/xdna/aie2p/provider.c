@@ -13,7 +13,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/ops/registry.h"
 
 static const loom_target_emitter_t* const kAie2pTargetEmitters[] = {
-    &loom_aie2p_tile_elf_emitter,
+    &loom_aie2p_xdna_emitter,
 };
 
 static const loom_low_verify_provider_t* const kAie2pLowVerifyProviders[] = {
