@@ -175,6 +175,9 @@ typedef struct loom_link_module_index_symbol_t {
   iree_host_size_t module_symbol_ordinal;
   // Borrowed module-local symbol name without an '@' sigil.
   iree_string_view_t name;
+  // Borrowed public name of the operation defining this symbol, or empty when
+  // the symbol has no defining operation.
+  iree_string_view_t defining_op_name;
   // Canonical in-memory symbol kind.
   loom_symbol_kind_t kind;
   // Dense family identity for template family symbols and providers, or

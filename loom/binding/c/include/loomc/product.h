@@ -89,17 +89,20 @@ LOOMC_API_EXPORT const loomc_product_descriptor_t* loomc_product_descriptor(
 LOOMC_API_EXPORT loomc_host_size_t
 loomc_product_artifact_count(const loomc_product_t* product);
 
-/// Returns an artifact by product-local ordinal.
+/// Looks up an artifact by product-local ordinal.
 ///
 /// @param product Product to inspect.
 /// @param ordinal Zero-based artifact ordinal.
-/// @return Borrowed artifact view, or NULL when `ordinal` is out of range.
+/// @param out_artifact Receives the borrowed artifact view when found.
+/// @return True when `ordinal` was valid and `out_artifact` was populated.
 ///
 /// @lifetime
-/// The returned view and its strings remain valid while `product` is retained.
-/// Callers that need independent byte ownership retain `artifact->contents`.
-LOOMC_API_EXPORT const loomc_artifact_t* loomc_product_artifact_at(
-    const loomc_product_t* product, loomc_host_size_t ordinal);
+/// The output strings and contents remain valid while `product` is retained.
+/// Callers that need independent byte ownership retain
+/// `out_artifact->contents`.
+LOOMC_API_EXPORT bool loomc_product_artifact_at(const loomc_product_t* product,
+                                                loomc_host_size_t ordinal,
+                                                loomc_artifact_t* out_artifact);
 
 /// Returns the number of roots exported by `product`.
 ///

@@ -24,13 +24,15 @@
 /// release builds can write the same artifact object to a `FILE*` or path.
 ///
 /// @par Example
-/// Save the first executable artifact from a result:
+/// Save the kernel payload from a result:
 ///
 /// @code{.c}
 /// for (loomc_host_size_t i = 0; i < loomc_result_artifact_count(result);
 ///      ++i) {
 ///   const loomc_artifact_t* artifact = loomc_result_artifact_at(result, i);
-///   if (artifact->kind != LOOMC_ARTIFACT_KIND_EXECUTABLE) continue;
+///   if (!loomc_string_view_equal(
+///           artifact->role,
+///           loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL))) continue;
 ///   return loomc_artifact_write_to_path(
 ///       artifact, loomc_make_cstring_view("kernel.hsaco"),
 ///       loomc_allocator_system());
@@ -50,23 +52,29 @@ extern "C" {
 /// JSON report artifact format.
 #define LOOMC_ARTIFACT_FORMAT_JSON "json"
 
-/// Artifact category.
-typedef enum loomc_artifact_kind_e {
-  /// Executable or loadable binary artifact.
-  LOOMC_ARTIFACT_KIND_EXECUTABLE = 0,
+/// Loadable or inspectable kernel payload role.
+#define LOOMC_ARTIFACT_ROLE_KERNEL "kernel"
 
-  /// Human-readable textual artifact.
-  LOOMC_ARTIFACT_KIND_TEXT = 1,
+/// Portable command-program payload role.
+#define LOOMC_ARTIFACT_ROLE_COMMAND_PROGRAM "command-program"
 
-  /// Machine-readable report artifact.
-  LOOMC_ARTIFACT_KIND_REPORT = 2,
+/// Loom source or bytecode module role.
+#define LOOMC_ARTIFACT_ROLE_MODULE "module"
 
-  /// Loom module artifact. The format indicates text or bytecode.
-  LOOMC_ARTIFACT_KIND_MODULE = 3,
+/// Compiled kernel launch-configuration program role.
+#define LOOMC_ARTIFACT_ROLE_LAUNCH_CONFIG "launch-config"
 
-  /// Compiled kernel launch-configuration program.
-  LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG = 4,
-} loomc_artifact_kind_t;
+/// Structured artifact-manifest role.
+#define LOOMC_ARTIFACT_ROLE_ARTIFACT_MANIFEST "artifact-manifest"
+
+/// Structured compile-report role.
+#define LOOMC_ARTIFACT_ROLE_COMPILE_REPORT "compile-report"
+
+/// Structured link-dependency report role.
+#define LOOMC_ARTIFACT_ROLE_LINK_DEPENDENCY_REPORT "link-dependency-report"
+
+/// Target-owned human-readable listing role.
+#define LOOMC_ARTIFACT_ROLE_LISTING "listing"
 
 /// Borrowed artifact view owned by a producer-specific result or product.
 ///
@@ -76,10 +84,14 @@ typedef enum loomc_artifact_kind_e {
 /// that owner is released. Callers retaining contents independently use
 /// `loomc_byte_sequence_retain`.
 typedef struct loomc_artifact_t {
-  /// Artifact kind.
-  loomc_artifact_kind_t kind;
+  /// Semantic role within the owning product or operation result.
+  ///
+  /// Roles are open stable names. They describe how an artifact participates
+  /// in its product independently of whether its format is text, binary, an
+  /// object container, or a loadable image.
+  loomc_string_view_t role;
 
-  /// Stable format string, such as `amdgpu-hsaco`, `spirv`,
+  /// Stable format string, such as `amdgpu-hsaco`, `spirv-binary`,
   /// `LOOMC_ARTIFACT_FORMAT_LOOM_TEXT`, or `LOOMC_ARTIFACT_FORMAT_JSON`.
   loomc_string_view_t format;
 

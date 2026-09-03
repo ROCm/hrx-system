@@ -6,41 +6,6 @@
 
 #include "loom/tooling/compile/artifact.h"
 
-iree_status_t loom_artifact_provider_select_target(
-    const loom_artifact_provider_t* provider, iree_string_view_t target_key,
-    iree_allocator_t allocator, loom_artifact_target_t* out_target) {
-  IREE_ASSERT_ARGUMENT(provider);
-  IREE_ASSERT_ARGUMENT(out_target);
-  *out_target = (loom_artifact_target_t){0};
-
-  target_key = iree_string_view_trim(target_key);
-  if (iree_string_view_is_empty(target_key)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "offline target key must not be empty");
-  }
-  if (provider->select_target == NULL) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "artifact provider '%.*s' does not support explicit target "
-        "specialization",
-        (int)provider->name.size, provider->name.data);
-  }
-  return provider->select_target(provider, target_key, allocator, out_target);
-}
-
-const loom_artifact_provider_t* loom_artifact_provider_registry_lookup(
-    const loom_artifact_provider_registry_t* registry,
-    iree_string_view_t name) {
-  IREE_ASSERT_ARGUMENT(registry);
-  for (iree_host_size_t i = 0; i < registry->provider_count; ++i) {
-    const loom_artifact_provider_t* provider = registry->providers[i];
-    if (iree_string_view_equal(provider->name, name)) {
-      return provider;
-    }
-  }
-  return NULL;
-}
-
 static iree_status_t loom_artifact_candidate_publish_report(
     const loom_compile_options_t* options,
     const loom_artifact_candidate_t* candidate) {

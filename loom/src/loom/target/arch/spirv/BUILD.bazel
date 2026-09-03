@@ -317,6 +317,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/spirv/descriptors:low_registry",
         "//loom/src/loom/target/arch/spirv/lower",
         "//loom/src/loom/target/arch/spirv/ops",
+        "//loom/src/loom/target/arch/spirv/records:target_records",
         "//runtime/src/iree/base",
     ],
 )
@@ -333,7 +334,9 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_registry",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/pass:builder",
         "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/spirv/ops",
         "//loom/src/loom/target/arch/spirv/records:target_records",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base",

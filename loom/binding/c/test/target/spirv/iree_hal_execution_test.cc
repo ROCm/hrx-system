@@ -123,7 +123,8 @@ TEST(LoomcSpirvIreeHalExecutionTest,
   target.target_pipeline_kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW;
   target.control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG;
   target.source_to_low_max_errors = 20;
-  target.artifact_format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV);
+  target.artifact_format =
+      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY);
   target.artifact_identifier =
       loomc_make_cstring_view("double_i32_at_byte_offset.spv");
   target.executable_target_selection = {

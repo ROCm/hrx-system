@@ -18,6 +18,7 @@ loom_generated_cc_library(
   SRCS
     "fact_projection.c"
     "registry.c"
+    "target.c"
   GENERATED_SRC_FLAGS
     "--builders"
     "--tables"
@@ -29,6 +30,7 @@ loom_generated_cc_library(
   HDRS
     "ops.h"
     "registry.h"
+    "target.h"
     "types.h"
   ARGS
     "--dialect=spirv"
@@ -43,6 +45,7 @@ loom_generated_cc_library(
     loom::target::arch::spirv::isa
     loom::target::arch::spirv::records::target_records
     loom::target::arch::spirv::scalar_types
+    loom::target::resolved_target
     loom::target::types
 )
 endif()

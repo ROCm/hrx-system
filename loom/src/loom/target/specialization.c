@@ -27,6 +27,9 @@ typedef struct loom_target_resolved_specialization_t {
   // Structured profile borrowed from the request.
   const loom_target_profile_t* target_profile;
 
+  // Optional product contract borrowed from the request.
+  const loom_target_product_contract_t* product_contract;
+
   // Provider and exact target-family facts resolved for this specialization.
   loom_resolved_target_t resolved_target;
 
@@ -60,6 +63,9 @@ typedef struct loom_target_resolved_specialization_t {
 typedef struct loom_target_resolved_declaration_binding_t {
   // Structured profile borrowed from the binding.
   const loom_target_profile_t* target_profile;
+
+  // Optional product contract borrowed from the binding.
+  const loom_target_product_contract_t* product_contract;
 
   // Provider selected from the target environment for |target_profile|.
   const loom_target_provider_t* target_provider;
@@ -249,6 +255,7 @@ static iree_status_t loom_target_specialization_resolve_declaration_binding(
       binding_ordinal, &target_provider));
   *out_binding = (loom_target_resolved_declaration_binding_t){
       .target_profile = binding->target_profile,
+      .product_contract = binding->product_contract,
       .target_provider = target_provider,
   };
   bindings_by_target_symbol[target_symbol_id] = out_binding;
@@ -306,7 +313,8 @@ static iree_status_t loom_target_specialization_prepare_versions(
     specialization->projected_profile_owner_ordinal = i;
     for (iree_host_size_t j = 0; j < i; ++j) {
       const loom_target_resolved_specialization_t* prior = &specializations[j];
-      if (prior->target_profile == specialization->target_profile) {
+      if (prior->target_profile == specialization->target_profile &&
+          prior->product_contract == specialization->product_contract) {
         specialization->projected_profile_facts =
             prior->projected_profile_facts;
         specialization->projected_profile_owner_ordinal =
@@ -318,6 +326,10 @@ static iree_status_t loom_target_specialization_prepare_versions(
       loom_target_facts_t* projected_profile_facts = NULL;
       IREE_RETURN_IF_ERROR(loom_target_profile_project_facts(
           specialization->target_profile, arena, &projected_profile_facts));
+      if (specialization->product_contract != NULL) {
+        IREE_RETURN_IF_ERROR(loom_target_product_contract_apply(
+            specialization->product_contract, projected_profile_facts));
+      }
       specialization->projected_profile_facts = projected_profile_facts;
     }
   }
@@ -398,9 +410,15 @@ static iree_status_t loom_target_specialization_prepare_versions(
             : loom_target_facts_identity_name(resolved_facts);
     bool contract_valid = false;
     const loom_target_facts_t* function_facts = NULL;
-    IREE_RETURN_IF_ERROR(loom_target_function_contract_refine_facts(
-        module, specialization->function_facts, target_name, resolved_facts,
-        diagnostic_emitter, arena, &contract_valid, &function_facts));
+    if (specialization->product_contract != NULL) {
+      IREE_RETURN_IF_ERROR(loom_target_function_contract_refine_facts(
+          module, specialization->function_facts, target_name, resolved_facts,
+          diagnostic_emitter, arena, &contract_valid, &function_facts));
+    } else {
+      IREE_RETURN_IF_ERROR(loom_target_function_contract_refine_target_facts(
+          module, specialization->function_facts, target_name, resolved_facts,
+          diagnostic_emitter, arena, &contract_valid, &function_facts));
+    }
     if (!contract_valid) {
       if (*out_error_count != UINT32_MAX) {
         ++*out_error_count;
@@ -527,6 +545,7 @@ iree_status_t loom_target_specialize_functions(
         module, request->function_name, specialized_symbols, &fact_table,
         &specializations[i]));
     specializations[i].target_profile = request->target_profile;
+    specializations[i].product_contract = request->product_contract;
     specializations[i].resolved_target.provider = target_provider;
   }
 
@@ -546,6 +565,8 @@ iree_status_t loom_target_specialize_functions(
         &specializations[next_specialization_ordinal]));
     specializations[next_specialization_ordinal].target_profile =
         binding->target_profile;
+    specializations[next_specialization_ordinal].product_contract =
+        binding->product_contract;
     specializations[next_specialization_ordinal].resolved_target.provider =
         binding->target_provider;
     ++next_specialization_ordinal;

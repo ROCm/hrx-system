@@ -728,6 +728,8 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
       .function_name = entry_symbol,
       .target_profile =
           provider->compile_device_target.artifact_target.target_profile,
+      .product_contract = provider->context->device_provider->artifact_provider
+                              ->product_contract,
   };
   pipeline_options.target_specializations =
       (loom_target_specialization_request_list_t){

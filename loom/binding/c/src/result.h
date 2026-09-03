@@ -37,7 +37,7 @@ LOOMC_API_PRIVATE loomc_status_t loomc_result_add_artifact(
 
 // Adds an artifact whose contents storage is transferred on success.
 LOOMC_API_PRIVATE loomc_status_t loomc_result_add_artifact_take_contents(
-    loomc_result_t* result, loomc_artifact_kind_t kind,
+    loomc_result_t* result, loomc_string_view_t role,
     loomc_string_view_t format, loomc_string_view_t identifier,
     loomc_byte_span_t contents);
 

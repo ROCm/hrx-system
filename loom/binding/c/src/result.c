@@ -26,6 +26,8 @@ typedef struct loomc_owned_diagnostic_t {
 typedef struct loomc_owned_artifact_t {
   // Public artifact view returned to callers.
   loomc_artifact_t value;
+  // Storage for value.role.
+  loomc_string_view_t role_storage;
   // Storage for value.format.
   loomc_string_view_t format_storage;
   // Storage for value.identifier.
@@ -90,6 +92,7 @@ static void loomc_owned_diagnostic_deinitialize(
 
 static void loomc_owned_artifact_deinitialize(
     loomc_allocator_t allocator, loomc_owned_artifact_t* artifact) {
+  loomc_allocator_free(allocator, (void*)artifact->role_storage.data);
   loomc_allocator_free(allocator, (void*)artifact->format_storage.data);
   loomc_allocator_free(allocator, (void*)artifact->identifier_storage.data);
   loomc_byte_sequence_release(artifact->contents_storage);
@@ -185,8 +188,9 @@ loomc_status_t loomc_result_add_diagnostic(
 }
 
 static loomc_status_t loomc_result_prepare_artifact(
-    loomc_result_t* result, loomc_string_view_t format,
-    loomc_string_view_t identifier, loomc_owned_artifact_t** out_artifact) {
+    loomc_result_t* result, loomc_string_view_t role,
+    loomc_string_view_t format, loomc_string_view_t identifier,
+    loomc_owned_artifact_t** out_artifact) {
   *out_artifact = NULL;
   if (result == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
@@ -198,8 +202,12 @@ static loomc_status_t loomc_result_prepare_artifact(
       (void**)&result->artifacts));
   loomc_owned_artifact_t* target = &result->artifacts[result->artifact_count];
   *target = (loomc_owned_artifact_t){0};
-  loomc_status_t status = loomc_string_view_clone(format, result->allocator,
-                                                  &target->format_storage);
+  loomc_status_t status =
+      loomc_string_view_clone(role, result->allocator, &target->role_storage);
+  if (loomc_status_is_ok(status)) {
+    status = loomc_string_view_clone(format, result->allocator,
+                                     &target->format_storage);
+  }
   if (loomc_status_is_ok(status)) {
     status = loomc_string_view_clone(identifier, result->allocator,
                                      &target->identifier_storage);
@@ -213,12 +221,11 @@ static loomc_status_t loomc_result_prepare_artifact(
 }
 
 static void loomc_result_commit_artifact(loomc_result_t* result,
-                                         loomc_artifact_kind_t kind,
                                          loomc_owned_artifact_t* artifact,
                                          loomc_byte_sequence_t* contents) {
   artifact->contents_storage = contents;
   artifact->value = (loomc_artifact_t){
-      .kind = kind,
+      .role = artifact->role_storage,
       .format = artifact->format_storage,
       .identifier = artifact->identifier_storage,
       .contents = contents,
@@ -235,15 +242,14 @@ loomc_status_t loomc_result_add_artifact(loomc_result_t* result,
   }
   loomc_owned_artifact_t* target = NULL;
   LOOMC_RETURN_IF_ERROR(loomc_result_prepare_artifact(
-      result, artifact->format, artifact->identifier, &target));
+      result, artifact->role, artifact->format, artifact->identifier, &target));
   loomc_byte_sequence_retain(artifact->contents);
-  loomc_result_commit_artifact(result, artifact->kind, target,
-                               artifact->contents);
+  loomc_result_commit_artifact(result, target, artifact->contents);
   return loomc_ok_status();
 }
 
 loomc_status_t loomc_result_add_artifact_take_contents(
-    loomc_result_t* result, loomc_artifact_kind_t kind,
+    loomc_result_t* result, loomc_string_view_t role,
     loomc_string_view_t format, loomc_string_view_t identifier,
     loomc_byte_span_t contents) {
   if (contents.data == NULL && contents.data_length != 0) {
@@ -252,7 +258,7 @@ loomc_status_t loomc_result_add_artifact_take_contents(
   }
   loomc_owned_artifact_t* target = NULL;
   LOOMC_RETURN_IF_ERROR(
-      loomc_result_prepare_artifact(result, format, identifier, &target));
+      loomc_result_prepare_artifact(result, role, format, identifier, &target));
 
   iree_byte_span_t storage =
       iree_make_byte_span((uint8_t*)contents.data, contents.data_length);
@@ -261,7 +267,7 @@ loomc_status_t loomc_result_add_artifact_take_contents(
       loomc_status_from_iree(iree_byte_sequence_create_from_span_move(
           &storage, iree_allocator_from_loomc(result->allocator), &sequence));
   if (loomc_status_is_ok(status)) {
-    loomc_result_commit_artifact(result, kind, target,
+    loomc_result_commit_artifact(result, target,
                                  loomc_byte_sequence_from_iree(sequence));
   } else {
     loomc_owned_artifact_deinitialize(result->allocator, target);

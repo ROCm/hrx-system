@@ -165,11 +165,10 @@ SourcePtr CreateTextSource(const char* identifier, const char* contents) {
 }
 
 const loomc_artifact_t* FindArtifact(const loomc_result_t* result,
-                                     loomc_artifact_kind_t kind,
-                                     const char* format) {
+                                     const char* role, const char* format) {
   for (loomc_host_size_t i = 0; i < loomc_result_artifact_count(result); ++i) {
     const loomc_artifact_t* artifact = loomc_result_artifact_at(result, i);
-    if (artifact != nullptr && artifact->kind == kind &&
+    if (artifact != nullptr && ToString(artifact->role) == role &&
         ToString(artifact->format) == format) {
       return artifact;
     }
@@ -567,9 +566,8 @@ void ExpectReplayEmission(const loomc_result_t* result, const char* selector,
                           const char* feature_list = nullptr) {
   ExpectSucceededResult(result);
 
-  const loomc_artifact_t* hsaco =
-      FindArtifact(result, LOOMC_ARTIFACT_KIND_EXECUTABLE,
-                   LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO);
+  const loomc_artifact_t* hsaco = FindArtifact(
+      result, LOOMC_ARTIFACT_ROLE_KERNEL, LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO);
   ASSERT_NE(hsaco, nullptr);
   const std::string hsaco_contents = ToString(hsaco->contents);
   static constexpr uint8_t kElfMagic[] = {0x7F, 'E', 'L', 'F'};
@@ -579,7 +577,7 @@ void ExpectReplayEmission(const loomc_result_t* result, const char* selector,
   EXPECT_NE(hsaco_contents.find(code_object_target), std::string::npos);
 
   const loomc_artifact_t* manifest =
-      FindArtifact(result, LOOMC_ARTIFACT_KIND_REPORT,
+      FindArtifact(result, LOOMC_ARTIFACT_ROLE_ARTIFACT_MANIFEST,
                    LOOMC_ARTIFACT_FORMAT_ARTIFACT_MANIFEST_JSON);
   ASSERT_NE(manifest, nullptr);
   const std::string manifest_text = ToString(manifest->contents);
@@ -602,7 +600,7 @@ void ExpectReplayEmission(const loomc_result_t* result, const char* selector,
   }
 
   const loomc_artifact_t* report =
-      FindArtifact(result, LOOMC_ARTIFACT_KIND_REPORT,
+      FindArtifact(result, LOOMC_ARTIFACT_ROLE_COMPILE_REPORT,
                    LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON);
   ASSERT_NE(report, nullptr);
   const std::string report_text = ToString(report->contents);
@@ -719,7 +717,7 @@ kernel.def target(@gfx11_wave64) @target_specialized_launch(%expert_count: index
     ResultPtr result_ptr(result);
     ExpectSucceededResult(result_ptr.get());
     const loomc_artifact_t* artifact =
-        FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
+        FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_ROLE_LAUNCH_CONFIG,
                      LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE);
     ASSERT_NE(artifact, nullptr);
 
@@ -807,7 +805,7 @@ kernel.def target(@gfx1151) @decode(%row_count: i32, %scale: bf16) {
   ResultPtr result_ptr(result);
   ExpectSucceededResult(result_ptr.get());
   const loomc_artifact_t* artifact =
-      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
+      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_ROLE_LAUNCH_CONFIG,
                    LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE);
   ASSERT_NE(artifact, nullptr);
 
@@ -918,7 +916,7 @@ config.def @test.workgroup_size_x = 64 : index
   ExpectSucceededResult(result_ptr.get());
 
   const loomc_artifact_t* text_artifact =
-      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_KIND_MODULE,
+      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_ROLE_MODULE,
                    LOOMC_ARTIFACT_FORMAT_LOOM_TEXT);
   ASSERT_NE(text_artifact, nullptr);
   EXPECT_EQ(ToString(text_artifact->identifier), "configured_store.loom");
@@ -950,14 +948,14 @@ config.def @test.workgroup_size_x = 64 : index
   ExpectSucceededResult(emit_result.get());
 
   const loomc_artifact_t* hsaco_artifact =
-      FindArtifact(emit_result.get(), LOOMC_ARTIFACT_KIND_EXECUTABLE,
+      FindArtifact(emit_result.get(), LOOMC_ARTIFACT_ROLE_KERNEL,
                    LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO);
   ASSERT_NE(hsaco_artifact, nullptr);
   const std::string hsaco = ToString(hsaco_artifact->contents);
   EXPECT_NE(hsaco.find("amdgcn-amd-amdhsa--gfx1151"), std::string::npos);
 
   const loomc_artifact_t* manifest_artifact =
-      FindArtifact(emit_result.get(), LOOMC_ARTIFACT_KIND_REPORT,
+      FindArtifact(emit_result.get(), LOOMC_ARTIFACT_ROLE_ARTIFACT_MANIFEST,
                    LOOMC_ARTIFACT_FORMAT_ARTIFACT_MANIFEST_JSON);
   ASSERT_NE(manifest_artifact, nullptr);
   const std::string manifest = ToString(manifest_artifact->contents);
@@ -1056,10 +1054,10 @@ command.program.def public target(@device) @dispatch() launch() {
   ProductPtr kernel_product_ptr(kernel_product);
   ResultPtr compile_result_ptr(compile_result);
   ExpectSucceededResult(compile_result_ptr.get());
-  const loomc_artifact_t* text_artifact =
-      loomc_product_artifact_at(kernel_product_ptr.get(), 0);
-  ASSERT_NE(text_artifact, nullptr);
-  const std::string module_text = ToString(text_artifact->contents);
+  loomc_artifact_t text_artifact = {};
+  ASSERT_TRUE(
+      loomc_product_artifact_at(kernel_product_ptr.get(), 0, &text_artifact));
+  const std::string module_text = ToString(text_artifact.contents);
   EXPECT_NE(module_text.find("target<amdgpu.rdna3_5.core>"), std::string::npos)
       << module_text;
   EXPECT_NE(module_text.find("workgroup_size(32, 1, 1)"), std::string::npos)
@@ -1195,7 +1193,7 @@ command.program.def public @dispatch() launch() {
     ResultPtr compile_result_ptr(compile_result);
     ExpectSucceededResult(compile_result_ptr.get());
     const loomc_artifact_t* text_artifact =
-        FindArtifact(compile_result_ptr.get(), LOOMC_ARTIFACT_KIND_MODULE,
+        FindArtifact(compile_result_ptr.get(), LOOMC_ARTIFACT_ROLE_MODULE,
                      LOOMC_ARTIFACT_FORMAT_LOOM_TEXT);
     ASSERT_NE(text_artifact, nullptr);
     const std::string module_text = ToString(text_artifact->contents);
@@ -1292,7 +1290,7 @@ kernel.def @wave64_root() {
   ExpectSucceededResult(result_ptr.get());
 
   const loomc_artifact_t* text_artifact =
-      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_KIND_MODULE,
+      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_ROLE_MODULE,
                    LOOMC_ARTIFACT_FORMAT_LOOM_TEXT);
   ASSERT_NE(text_artifact, nullptr);
   const std::string module_text = ToString(text_artifact->contents);
@@ -1465,17 +1463,21 @@ kernel.def @wave64_root() {
   ExpectSucceededResult(result_ptr.get());
 
   const loomc_artifact_t* text_artifact =
-      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_KIND_MODULE,
+      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_ROLE_MODULE,
                    LOOMC_ARTIFACT_FORMAT_LOOM_TEXT);
   ASSERT_NE(text_artifact, nullptr);
   const std::string module_text = ToString(text_artifact->contents);
   EXPECT_NE(
       module_text.find("amdgpu.target<gfx1151> @__loom_target_context_0_0 "
-                       "{subgroup_size = 32}"),
+                       "{abi = hal_kernel, artifact_format = elf, "
+                       "codegen_format = low_native, linkage = default, "
+                       "subgroup_size = 32}"),
       std::string::npos)
       << module_text;
   EXPECT_NE(module_text.find("amdgpu.target<gfx942> @__loom_target_context_0_1 "
-                             "{features = [sramecc, -xnack]}"),
+                             "{abi = hal_kernel, artifact_format = elf, "
+                             "codegen_format = low_native, features = "
+                             "[sramecc, -xnack], linkage = default}"),
             std::string::npos)
       << module_text;
   const size_t wave32_root = module_text.find(
@@ -1552,12 +1554,15 @@ kernel.def @wave64_root() {
   EXPECT_EQ(text_archive_text, bytecode_archive_text);
   EXPECT_NE(text_archive_text.find(
                 "amdgpu.target<gfx1151> @__loom_target_context_0_0 "
-                "{subgroup_size = 32}"),
+                "{abi = hal_kernel, artifact_format = elf, codegen_format = "
+                "low_native, linkage = default, subgroup_size = 32}"),
             std::string::npos)
       << text_archive_text;
   EXPECT_NE(
       text_archive_text.find("amdgpu.target<gfx942> @__loom_target_context_0_1 "
-                             "{features = [sramecc, -xnack]}"),
+                             "{abi = hal_kernel, artifact_format = elf, "
+                             "codegen_format = low_native, features = "
+                             "[sramecc, -xnack], linkage = default}"),
       std::string::npos)
       << text_archive_text;
   EXPECT_NE(text_archive_text.find(
@@ -1583,7 +1588,8 @@ kernel.def @wave64_root() {
                  bytecode_link_index.get(), &wave32_root_symbol, 1);
   static constexpr const char kWave32Target[] =
       "amdgpu.target<gfx1151> @__loom_target_context_0_0 "
-      "{subgroup_size = 32}";
+      "{abi = hal_kernel, artifact_format = elf, codegen_format = "
+      "low_native, linkage = default, subgroup_size = 32}";
   static constexpr const char kWave32Contract[] =
       "target<amdgpu.rdna3_5.core>(@__loom_target_context_0_0)";
   ExpectSelectivelyLinkedTarget(text_wave32.get(), kWave32Target,
@@ -1605,7 +1611,8 @@ kernel.def @wave64_root() {
                  bytecode_link_index.get(), &wave64_root_symbol, 1);
   static constexpr const char kWave64Target[] =
       "amdgpu.target<gfx942> @__loom_target_context_0_1 "
-      "{features = [sramecc, -xnack]}";
+      "{abi = hal_kernel, artifact_format = elf, codegen_format = low_native, "
+      "features = [sramecc, -xnack], linkage = default}";
   static constexpr const char kWave64Contract[] =
       "target<amdgpu.cdna3.core>(@__loom_target_context_0_1)";
   ExpectSelectivelyLinkedTarget(text_wave64.get(), kWave64Target,
@@ -1722,7 +1729,7 @@ TEST(AmdgpuTargetTest, EmitRuntimeGlobalsFromAmdgpuOptions) {
   ASSERT_EQ(loomc_result_artifact_count(result.get()), 1u);
   const loomc_artifact_t* artifact = loomc_result_artifact_at(result.get(), 0);
   ASSERT_NE(artifact, nullptr);
-  EXPECT_EQ(artifact->kind, LOOMC_ARTIFACT_KIND_EXECUTABLE);
+  EXPECT_EQ(ToString(artifact->role), LOOMC_ARTIFACT_ROLE_KERNEL);
   EXPECT_EQ(ToString(artifact->format), LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO);
 
   const std::string hsaco = ToString(artifact->contents);

@@ -20,6 +20,7 @@ package(
 
 _LLVMIR_VISIBILITY = [
     "//loom/src/loom/target/emit/llvmir:__pkg__",
+    "//loom/src/loom/tooling/compile/configured:__pkg__",
     "//loom/src/loom/tools/loom-compile:__pkg__",
 ]
 

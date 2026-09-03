@@ -19,6 +19,7 @@
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 #include "loom/target/function_version.h"
+#include "loom/target/product_contract.h"
 #include "loom/target/profile.h"
 
 #ifdef __cplusplus
@@ -34,6 +35,10 @@ typedef struct loom_target_specialization_request_t {
 
   // Structured target profile borrowed for the specialization lifetime.
   const loom_target_profile_t* target_profile;
+
+  // Optional product contract applied after target profile projection.
+  // NULL keeps the specialization target-only.
+  const loom_target_product_contract_t* product_contract;
 } loom_target_specialization_request_t;
 
 // Borrowed list of per-function target specialization requests.
@@ -52,6 +57,10 @@ typedef struct loom_target_declaration_binding_t {
 
   // Structured target profile borrowed for the specialization lifetime.
   const loom_target_profile_t* target_profile;
+
+  // Optional product contract applied after target profile projection.
+  // NULL keeps the specialization target-only.
+  const loom_target_product_contract_t* product_contract;
 } loom_target_declaration_binding_t;
 
 // Borrowed list of target declaration bindings.

@@ -199,10 +199,10 @@ const loom_artifact_provider_t kFakeArtifactProvider = {
     /*.target_family_name=*/IREE_SVL("fake"),
     /*.artifact_kind=*/LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_EXECUTABLE,
     /*.default_pipeline_options=*/{},
-    /*.select_target=*/{},
-    /*.deinitialize_target=*/{},
     /*.emit_artifact=*/FakeHalEmitArtifact,
     /*.deinitialize_artifact=*/FakeHalDeinitializeArtifact,
+    /*.target_profile_type=*/&kFakeTargetProfileType,
+    /*.product_contract=*/nullptr,
 };
 
 const loom_device_provider_t kFakeDeviceProvider = {

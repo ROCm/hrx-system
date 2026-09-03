@@ -55,6 +55,7 @@ loom_cc_library(
     visibility = [
         "//loom/binding/c/target/cmd:__pkg__",
         "//loom/src/loom/target/arch/cmd:__subpackages__",
+        "//loom/src/loom/tooling/target/cmd:__pkg__",
         "//loom/src/loom/tools/loom-compile:__pkg__",
     ],
     deps = [
@@ -73,6 +74,7 @@ loom_cc_library(
     hdrs = ["artifact_builder.h"],
     visibility = [
         "//loom/binding/c/target/cmd:__pkg__",
+        "//loom/src/loom/tooling/target/cmd:__pkg__",
         "//loom/src/loom/tools/loom-compile:__pkg__",
     ],
     deps = [
@@ -83,6 +85,28 @@ loom_cc_library(
         "//loom/src/loom/target/arch/cmd/lower:program_plan_index",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "product",
+    srcs = ["product.c"],
+    hdrs = ["product.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":artifact_set",
+        "//loom/src/loom/product:registry",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "product_test",
+    srcs = ["product_test.cc"],
+    deps = [
+        ":product",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -105,6 +129,7 @@ loom_cc_library(
     visibility = [
         "//loom/src/loom/target/all:__pkg__",
         "//loom/src/loom/target/arch/cmd/check:__pkg__",
+        "//loom/src/loom/target/configured:__pkg__",
         "//loom/src/loom/tools/loom-compile:__pkg__",
     ],
     deps = [

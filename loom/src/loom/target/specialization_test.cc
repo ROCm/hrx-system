@@ -410,6 +410,201 @@ func.def public @right() {
             right_version->function_target_facts);
 }
 
+TEST_F(TargetSpecializationTest, AppliesProductContractAfterTargetProjection) {
+  ModulePtr module = Parse(R"(
+func.def public @entry() {
+  func.return
+}
+)");
+  static const loom_target_product_contract_t kKernelContract = {
+      /*.name=*/IREE_SVL("test-kernel"),
+      /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
+      /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_COFF,
+      /*.abi_kind=*/LOOM_TARGET_ABI_HAL_KERNEL,
+      /*.linkage=*/LOOM_TARGET_LINKAGE_DEFAULT,
+  };
+  const TestTargetProfile profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const loom_target_specialization_request_t request = {
+      /*.function_name=*/IREE_SV("entry"),
+      /*.target_profile=*/&profile.base,
+      /*.product_contract=*/&kKernelContract,
+  };
+
+  const loom_target_specialization_result_t result =
+      Specialize(module.get(), &request, 1);
+  ASSERT_EQ(result.error_count, 0u);
+  ASSERT_EQ(result.function_versions.list.count, 1u);
+  const loom_target_function_version_t* version =
+      loom_target_function_version_const_cast(
+          result.function_versions.list.values[0]);
+  ASSERT_NE(version, nullptr);
+  ASSERT_NE(version->resolved_target.facts, nullptr);
+  EXPECT_EQ(version->resolved_target.facts->storage.snapshot.codegen_format,
+            LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE);
+  EXPECT_EQ(version->resolved_target.facts->storage.snapshot.artifact_format,
+            LOOM_TARGET_ARTIFACT_FORMAT_COFF);
+  EXPECT_TRUE(loom_target_facts_field_is_explicit(
+      version->resolved_target.facts, LOOM_TARGET_FACT_FIELD_ARTIFACT_FORMAT));
+  ASSERT_NE(version->function_target_facts, nullptr);
+  EXPECT_EQ(version->function_target_facts->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_HAL_KERNEL);
+}
+
+TEST_F(TargetSpecializationTest, RejectsFunctionAbiOutsideProductContract) {
+  ModulePtr module = Parse(R"(
+func.def public abi(object_function) @entry() {
+  func.return
+}
+)");
+  static const loom_target_product_contract_t kKernelContract = {
+      /*.name=*/IREE_SVL("test-kernel"),
+      /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
+      /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_COFF,
+      /*.abi_kind=*/LOOM_TARGET_ABI_HAL_KERNEL,
+      /*.linkage=*/LOOM_TARGET_LINKAGE_DEFAULT,
+  };
+  const TestTargetProfile profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const loom_target_specialization_request_t request = {
+      /*.function_name=*/IREE_SV("entry"),
+      /*.target_profile=*/&profile.base,
+      /*.product_contract=*/&kKernelContract,
+  };
+  DiagnosticCollector diagnostic_collector;
+
+  const loom_target_specialization_result_t result =
+      Specialize(module.get(), &request, 1, &diagnostic_collector);
+  EXPECT_EQ(result.error_count, 1u);
+  EXPECT_EQ(result.function_versions.list.count, 0u);
+  EXPECT_EQ(diagnostic_collector.error, LOOM_ERR_TARGET_022);
+}
+
+TEST_F(TargetSpecializationTest, RejectsFunctionLinkageOutsideProductContract) {
+  ModulePtr module = Parse(R"(
+func.def public export("entry", {linkage = "dso_local"}) @entry() {
+  func.return
+}
+)");
+  static const loom_target_product_contract_t kKernelContract = {
+      /*.name=*/IREE_SVL("test-kernel"),
+      /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
+      /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_COFF,
+      /*.abi_kind=*/LOOM_TARGET_ABI_HAL_KERNEL,
+      /*.linkage=*/LOOM_TARGET_LINKAGE_DEFAULT,
+  };
+  const TestTargetProfile profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const loom_target_specialization_request_t request = {
+      /*.function_name=*/IREE_SV("entry"),
+      /*.target_profile=*/&profile.base,
+      /*.product_contract=*/&kKernelContract,
+  };
+  DiagnosticCollector diagnostic_collector;
+
+  const loom_target_specialization_result_t result =
+      Specialize(module.get(), &request, 1, &diagnostic_collector);
+  EXPECT_EQ(result.error_count, 1u);
+  EXPECT_EQ(result.function_versions.list.count, 0u);
+  EXPECT_EQ(diagnostic_collector.error, LOOM_ERR_TARGET_022);
+}
+
+TEST_F(TargetSpecializationTest,
+       DistinguishesProductContractsInProfileProjectionCache) {
+  ModulePtr module = Parse(R"(
+func.def public @elf_entry() {
+  func.return
+}
+
+func.def public @coff_entry() {
+  func.return
+}
+)");
+  static const loom_target_product_contract_t kElfContract = {
+      /*.name=*/IREE_SVL("elf-object"),
+      /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
+      /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+      /*.abi_kind=*/LOOM_TARGET_ABI_OBJECT_FUNCTION,
+      /*.linkage=*/LOOM_TARGET_LINKAGE_DSO_LOCAL,
+  };
+  static const loom_target_product_contract_t kCoffContract = {
+      /*.name=*/IREE_SVL("coff-object"),
+      /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
+      /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_COFF,
+      /*.abi_kind=*/LOOM_TARGET_ABI_OBJECT_FUNCTION,
+      /*.linkage=*/LOOM_TARGET_LINKAGE_DEFAULT,
+  };
+  uint32_t projection_count = 0;
+  TestTargetProfile profile = MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  profile.projection_count = &projection_count;
+  const loom_target_specialization_request_t requests[] = {
+      {
+          /*.function_name=*/IREE_SV("elf_entry"),
+          /*.target_profile=*/&profile.base,
+          /*.product_contract=*/&kElfContract,
+      },
+      {
+          /*.function_name=*/IREE_SV("coff_entry"),
+          /*.target_profile=*/&profile.base,
+          /*.product_contract=*/&kCoffContract,
+      },
+  };
+
+  const loom_target_specialization_result_t result =
+      Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
+  ASSERT_EQ(result.error_count, 0u);
+  EXPECT_EQ(projection_count, 2u);
+  const loom_target_function_version_t* elf_version =
+      loom_target_function_version_list_find(
+          &result.function_versions.list,
+          Function(module.get(), IREE_SV("elf_entry")));
+  const loom_target_function_version_t* coff_version =
+      loom_target_function_version_list_find(
+          &result.function_versions.list,
+          Function(module.get(), IREE_SV("coff_entry")));
+  ASSERT_NE(elf_version, nullptr);
+  ASSERT_NE(coff_version, nullptr);
+  EXPECT_NE(elf_version->resolved_target.facts,
+            coff_version->resolved_target.facts);
+  EXPECT_EQ(
+      elf_version->resolved_target.facts->storage.snapshot.artifact_format,
+      LOOM_TARGET_ARTIFACT_FORMAT_ELF);
+  EXPECT_EQ(
+      coff_version->resolved_target.facts->storage.snapshot.artifact_format,
+      LOOM_TARGET_ARTIFACT_FORMAT_COFF);
+}
+
+TEST_F(TargetSpecializationTest, RejectsAuthoredProductContractConflict) {
+  ModulePtr module = Parse(R"(
+test.target<low_core> @requirement {artifact_format = coff}
+
+func.def public target(@requirement) @entry() {
+  func.return
+}
+)");
+  static const loom_target_product_contract_t kElfContract = {
+      /*.name=*/IREE_SVL("elf-object"),
+      /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
+      /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+      /*.abi_kind=*/LOOM_TARGET_ABI_OBJECT_FUNCTION,
+      /*.linkage=*/LOOM_TARGET_LINKAGE_DSO_LOCAL,
+  };
+  const TestTargetProfile profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const loom_target_specialization_request_t request = {
+      /*.function_name=*/IREE_SV("entry"),
+      /*.target_profile=*/&profile.base,
+      /*.product_contract=*/&kElfContract,
+  };
+  DiagnosticCollector diagnostic_collector;
+
+  const loom_target_specialization_result_t result =
+      Specialize(module.get(), &request, 1, &diagnostic_collector);
+  EXPECT_EQ(result.error_count, 1u);
+  EXPECT_EQ(result.function_versions.list.count, 0u);
+  EXPECT_EQ(diagnostic_collector.error, LOOM_ERR_TARGET_052);
+}
+
 TEST_F(TargetSpecializationTest, PreservesMatchingAuthoredExactTarget) {
   ModulePtr module = Parse(R"(
 test.target<low_core> @exact

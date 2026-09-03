@@ -473,18 +473,21 @@ static loomc_status_t inspect_kernel_products(jit_scheduler_t* scheduler,
       continue;
     }
 
-    const loomc_artifact_t* artifact =
-        loomc_product_artifact_at(output->product, 0);
+    loomc_artifact_t artifact;
+    const bool has_artifact =
+        loomc_product_artifact_at(output->product, 0, &artifact);
     const bool product_is_valid =
         loomc_product_descriptor(output->product) ==
             loomc_compiled_module_product_descriptor() &&
         loomc_product_export_count(output->product) ==
             loomc_request_root_count(output->request) &&
         loomc_product_requirement_count(output->product) == 0 &&
-        loomc_product_artifact_count(output->product) == 1 &&
-        artifact != NULL &&
+        loomc_product_artifact_count(output->product) == 1 && has_artifact &&
         loomc_string_view_equal(
-            artifact->format,
+            artifact.role,
+            loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_MODULE)) &&
+        loomc_string_view_equal(
+            artifact.format,
             loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE));
     if (!product_is_valid) {
       status = loomc_status_join(

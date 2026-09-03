@@ -215,10 +215,12 @@ static bool loom_amdgpu_target_facts_satisfy_specialization_requirement(
     return false;
   }
 
-  // ABI and export facts belong to the function contract. Target
-  // specialization compares representation, limits, memory spaces, and
-  // required target feature bits.
-  return loom_target_snapshot_satisfies_specialization_requirement(
+  // Product fields constrain specialization only after either side selects
+  // them explicitly. Machine limits, memory spaces, and required target
+  // feature bits always participate in the target relation.
+  return loom_target_facts_product_contract_satisfies_specialization_requirement(
+             effective_base, requirement_base) &&
+         loom_target_snapshot_satisfies_specialization_requirement(
              &effective_snapshot, &requirement_snapshot) &&
          iree_all_bits_set(
              effective->base.storage.config.contract_feature_bits,

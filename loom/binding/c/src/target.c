@@ -46,6 +46,10 @@ struct loomc_target_profile_t {
   // Target-family profile carrying structured compiler target facts.
   loom_target_profile_t* target_profile;
 
+  // Unique product contract exposed by the profile's target environment, or
+  // NULL when product selection remains external.
+  const loom_target_product_contract_t* product_contract;
+
   // Releases target_profile when the final public reference is released.
   loomc_target_profile_deinitialize_fn_t target_profile_deinitialize;
 };
@@ -386,6 +390,7 @@ loomc_status_t loomc_target_specialization_options_validate_environment(
 
 loomc_status_t loomc_target_specialization_options_make_lists(
     const loomc_target_specialization_options_t* options,
+    loomc_target_specialization_list_flags_t flags,
     iree_arena_allocator_t* arena,
     loom_target_specialization_request_list_t* out_requests,
     loom_target_declaration_binding_list_t* out_bindings) {
@@ -408,6 +413,12 @@ loomc_status_t loomc_target_specialization_options_make_lists(
               iree_string_view_from_loomc(specialization->function_symbol),
           .target_profile = loomc_target_profile_loom_target_profile(
               specialization->target_profile),
+          .product_contract =
+              iree_any_bit_set(
+                  flags,
+                  LOOMC_TARGET_SPECIALIZATION_LIST_FLAG_APPLY_PRODUCT_CONTRACT)
+                  ? specialization->target_profile->product_contract
+                  : NULL,
       };
     }
     *out_requests = (loom_target_specialization_request_list_t){
@@ -427,6 +438,12 @@ loomc_status_t loomc_target_specialization_options_make_lists(
           .target_name = iree_string_view_from_loomc(binding->target_symbol),
           .target_profile =
               loomc_target_profile_loom_target_profile(binding->target_profile),
+          .product_contract =
+              iree_any_bit_set(
+                  flags,
+                  LOOMC_TARGET_SPECIALIZATION_LIST_FLAG_APPLY_PRODUCT_CONTRACT)
+                  ? binding->target_profile->product_contract
+                  : NULL,
       };
     }
     *out_bindings = (loom_target_declaration_binding_list_t){
@@ -576,6 +593,21 @@ loomc_status_t loomc_target_profile_create(
     profile->target_environment = target_environment;
     loomc_target_environment_retain(profile->target_environment);
     profile->target_profile = pending_target_profile;
+    const loom_target_emitter_list_t emitters =
+        loom_target_environment_emitter_list(&target_environment->environment);
+    for (iree_host_size_t i = 0; i < emitters.count; ++i) {
+      const loom_target_product_contract_t* product_contract =
+          emitters.values[i]->product_contract;
+      if (product_contract == NULL) {
+        continue;
+      }
+      if (profile->product_contract != NULL &&
+          profile->product_contract != product_contract) {
+        profile->product_contract = NULL;
+        break;
+      }
+      profile->product_contract = product_contract;
+    }
     profile->target_profile_deinitialize = deinitialize;
     pending_target_profile = NULL;
     status =

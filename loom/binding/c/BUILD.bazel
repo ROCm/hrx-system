@@ -157,6 +157,7 @@ loom_cc_library(
         "src/workspace.c",
     ],
     hdrs = LOOMC_PUBLIC_HDRS + [
+        "src/artifact.h",
         "src/config.h",
         "src/context.h",
         "src/diagnostic.h",
@@ -219,6 +220,8 @@ loom_cc_library(
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/pass:tooling",
         "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/product",
+        "//loom/src/loom/product:artifact",
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:function_version_projection",

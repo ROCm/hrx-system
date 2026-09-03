@@ -7,7 +7,7 @@
 #ifndef LOOMC_PRODUCT_STORAGE_H_
 #define LOOMC_PRODUCT_STORAGE_H_
 
-#include "iree/base/internal/atomics.h"
+#include "loom/product/product.h"
 #include "loomc/product.h"
 #include "visibility.h"
 
@@ -15,51 +15,42 @@
 extern "C" {
 #endif
 
-// Destroys a concrete product after its final reference is released.
-typedef void(LOOMC_API_PTR* loomc_product_destroy_fn_t)(
-    loomc_product_t* product);
+// Reinterprets an opaque public product as its core representation.
+static inline loom_product_t* loomc_product_to_product(
+    loomc_product_t* product) {
+  return (loom_product_t*)product;
+}
 
-// Process-local descriptor implemented by one concrete product type.
-struct loomc_product_descriptor_t {
-  // Destroys |product| and all of its owned storage.
-  loomc_product_destroy_fn_t destroy;
-};
+// Reinterprets an opaque public product as its immutable core representation.
+static inline const loom_product_t* loomc_product_to_const_product(
+    const loomc_product_t* product) {
+  return (const loom_product_t*)product;
+}
 
-// Base structure embedded at offset zero by concrete product types.
-struct loomc_product_t {
-  // Atomic reference count controlling the product lifetime.
-  iree_atomic_ref_count_t ref_count;
+// Reinterprets a core product as its public opaque handle.
+static inline loomc_product_t* loomc_product_from_product(
+    loom_product_t* product) {
+  return (loomc_product_t*)product;
+}
 
-  // Process-local concrete representation descriptor.
-  const loomc_product_descriptor_t* descriptor;
+// Reinterprets a public product descriptor as its core identity.
+static inline const loom_product_descriptor_t*
+loomc_product_descriptor_to_product(
+    const loomc_product_descriptor_t* descriptor) {
+  return (const loom_product_descriptor_t*)descriptor;
+}
 
-  // Borrowed immutable artifact views owned by the concrete product.
-  struct {
-    // Product-owned artifact table.
-    const loomc_artifact_t* values;
-
-    // Number of entries in |values|.
-    loomc_host_size_t count;
-  } artifacts;
-
-  // Number of exported roots addressable by child-root ordinal.
-  loomc_host_size_t export_count;
-
-  // Number of unresolved parent-local requirements.
-  loomc_host_size_t requirement_count;
-};
-
-// Initializes an implementation-provided product base.
-LOOMC_API_PRIVATE void loomc_product_initialize(
-    const loomc_product_descriptor_t* descriptor,
-    const loomc_artifact_t* artifacts, loomc_host_size_t artifact_count,
-    loomc_host_size_t export_count, loomc_host_size_t requirement_count,
-    loomc_product_t* out_product);
+// Reinterprets a core product descriptor as its public opaque identity.
+static inline const loomc_product_descriptor_t*
+loomc_product_descriptor_from_product(
+    const loom_product_descriptor_t* descriptor) {
+  return (const loomc_product_descriptor_t*)descriptor;
+}
 
 // Returns true when |product| has the given process-local descriptor.
 LOOMC_API_PRIVATE bool loomc_product_isa(
     const loomc_product_t* product,
-    const loomc_product_descriptor_t* descriptor);
+    const loom_product_descriptor_t* descriptor);
 
 // Allocates an immutable request and transfers |*inout_source| on success.
 //

@@ -202,16 +202,28 @@ bool loom_target_facts_are_equivalent(const loom_target_facts_t* lhs,
                                       const loom_target_facts_t* rhs);
 
 // Common structural relation for target families whose selector, snapshot,
-// and configuration fully define compatibility. Function ABI and export facts
-// do not participate.
+// product contract, and configuration fully define compatibility. Function
+// export symbols do not participate.
 bool loom_target_facts_structural_satisfy_specialization_requirement(
     const loom_target_facts_t* effective,
     const loom_target_facts_t* requirement);
 
-// Returns whether |effective_snapshot| satisfies the structural requirements
-// in |target_requirement|. Representation widths and address spaces must
-// match, fixed subgroup sizes must agree, and effective capacity limits must
-// meet or exceed nonzero required limits.
+// Returns whether product-owned facts satisfy an authored requirement.
+//
+// Product fields constrain specialization only when authored explicitly. An
+// effective target with no selected product accepts those constraints so they
+// can survive target-only specialization. Once a product contract marks an
+// effective field explicit, the values must match.
+bool loom_target_facts_product_contract_satisfies_specialization_requirement(
+    const loom_target_facts_t* effective,
+    const loom_target_facts_t* requirement);
+
+// Returns whether the machine and execution-environment fields in
+// |effective_snapshot| satisfy |target_requirement|. Representation widths and
+// address spaces must match, fixed subgroup sizes must agree, and effective
+// capacity limits must meet or exceed nonzero required limits. Codegen and
+// artifact formats are product-owned and are compared by the fact relation
+// above using explicit-presence information.
 bool loom_target_snapshot_satisfies_specialization_requirement(
     const loom_target_snapshot_t* effective_snapshot,
     const loom_target_snapshot_t* target_requirement);

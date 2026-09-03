@@ -8,61 +8,50 @@
 
 #include <string.h>
 
+#include "artifact.h"
 #include "iree/base/api.h"
 
-void loomc_product_initialize(const loomc_product_descriptor_t* descriptor,
-                              const loomc_artifact_t* artifacts,
-                              loomc_host_size_t artifact_count,
-                              loomc_host_size_t export_count,
-                              loomc_host_size_t requirement_count,
-                              loomc_product_t* out_product) {
-  iree_atomic_ref_count_init(&out_product->ref_count);
-  out_product->descriptor = descriptor;
-  out_product->artifacts.values = artifacts;
-  out_product->artifacts.count = artifact_count;
-  out_product->export_count = export_count;
-  out_product->requirement_count = requirement_count;
-}
-
 bool loomc_product_isa(const loomc_product_t* product,
-                       const loomc_product_descriptor_t* descriptor) {
-  return product != NULL && product->descriptor == descriptor;
+                       const loom_product_descriptor_t* descriptor) {
+  return loom_product_isa(loomc_product_to_const_product(product), descriptor);
 }
 
 void loomc_product_retain(loomc_product_t* product) {
-  if (product == NULL) return;
-  iree_atomic_ref_count_inc(&product->ref_count);
+  loom_product_retain(loomc_product_to_product(product));
 }
 
 void loomc_product_release(loomc_product_t* product) {
-  if (product == NULL) return;
-  if (iree_atomic_ref_count_dec(&product->ref_count) == 1) {
-    product->descriptor->destroy(product);
-  }
+  loom_product_release(loomc_product_to_product(product));
 }
 
 const loomc_product_descriptor_t* loomc_product_descriptor(
     const loomc_product_t* product) {
-  return product ? product->descriptor : NULL;
+  return loomc_product_descriptor_from_product(
+      loom_product_descriptor(loomc_product_to_const_product(product)));
 }
 
 loomc_host_size_t loomc_product_artifact_count(const loomc_product_t* product) {
-  return product ? product->artifacts.count : 0;
+  return loom_product_artifact_count(loomc_product_to_const_product(product));
 }
 
-const loomc_artifact_t* loomc_product_artifact_at(
-    const loomc_product_t* product, loomc_host_size_t ordinal) {
-  if (product == NULL || ordinal >= product->artifacts.count) return NULL;
-  return &product->artifacts.values[ordinal];
+bool loomc_product_artifact_at(const loomc_product_t* product,
+                               loomc_host_size_t ordinal,
+                               loomc_artifact_t* out_artifact) {
+  const loom_product_artifact_t* artifact = loom_product_artifact_at(
+      loomc_product_to_const_product(product), ordinal);
+  if (artifact == NULL || out_artifact == NULL) return false;
+  *out_artifact = loomc_artifact_from_product(artifact);
+  return true;
 }
 
 loomc_host_size_t loomc_product_export_count(const loomc_product_t* product) {
-  return product ? product->export_count : 0;
+  return loom_product_export_count(loomc_product_to_const_product(product));
 }
 
 loomc_host_size_t loomc_product_requirement_count(
     const loomc_product_t* product) {
-  return product ? product->requirement_count : 0;
+  return loom_product_requirement_count(
+      loomc_product_to_const_product(product));
 }
 
 struct loomc_request_t {
@@ -76,7 +65,7 @@ struct loomc_request_t {
   loomc_source_t* source;
 
   // Required process-local successful product representation.
-  const loomc_product_descriptor_t* product_descriptor;
+  const loom_product_descriptor_t* product_descriptor;
 
   // Canonical roots in the request source.
   struct {
@@ -126,7 +115,8 @@ loomc_status_t loomc_request_create_take_source(
   iree_atomic_ref_count_init(&request->ref_count);
   request->allocator = allocator;
   request->source = *inout_source;
-  request->product_descriptor = product_descriptor;
+  request->product_descriptor =
+      loomc_product_descriptor_to_product(product_descriptor);
   request->roots.count = root_count;
   request->bindings.count = binding_count;
 
@@ -216,7 +206,9 @@ void loomc_request_release(loomc_request_t* request) {
 
 const loomc_product_descriptor_t* loomc_request_product_descriptor(
     const loomc_request_t* request) {
-  return request ? request->product_descriptor : NULL;
+  return request ? loomc_product_descriptor_from_product(
+                       request->product_descriptor)
+                 : NULL;
 }
 
 loomc_source_t* loomc_request_source(const loomc_request_t* request) {

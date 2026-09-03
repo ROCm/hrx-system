@@ -191,6 +191,14 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "product_contract",
+    srcs = ["product_contract.c"],
+    hdrs = ["product_contract.h"],
+    visibility = _SPIRV_C_API_VISIBILITY + _SPIRV_TOOLING_VISIBILITY,
+    deps = ["//loom/src/loom/target:product_contract"],
+)
+
+loom_cc_library(
     name = "loom_check",
     srcs = ["check/loom_check.c"],
     hdrs = ["check/loom_check.h"],
@@ -248,6 +256,7 @@ loom_cc_test(
 
 loom_check_test_suite(
     name = "loom_check_file_test",
+    size = "medium",
     srcs = [
         "test/atomic.loom-test",
         "test/atomic_diagnostics.loom-test",

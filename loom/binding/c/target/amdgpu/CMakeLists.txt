@@ -36,6 +36,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info
     loom::target::emit::native::amdgpu::hal_kernel_library
+    loom::target::emit::native::amdgpu::product_contract
     loom::target::provider
     loom::target::types
   ALWAYSLINK

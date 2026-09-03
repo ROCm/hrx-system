@@ -8,10 +8,11 @@
 
 #include "loom/target/arch/spirv/descriptors/low_registry.h"
 #include "loom/target/arch/spirv/low_verify.h"
+#include "loom/target/arch/spirv/profile.h"
 #include "loom/target/emit/spirv/module_builder.h"
 #include "loom/target/emit/spirv/module_emitter.h"
+#include "loom/target/emit/spirv/product_contract.h"
 #include "loom/target/entry_selection.h"
-#include "loom/target/function_contract.h"
 #include "loom/target/reporting/artifact_manifest_collect.h"
 
 typedef struct loom_spirv_compile_artifact_storage_t {
@@ -47,8 +48,8 @@ static bool loom_spirv_artifact_provider_bundle_is_compatible(
              LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY &&
          export_plan->abi_kind == LOOM_TARGET_ABI_HAL_KERNEL &&
          (selected_bundle == NULL ||
-          loom_target_function_contract_bundles_compatible(bundle,
-                                                           selected_bundle));
+          iree_string_view_equal(bundle->config->contract_set_key,
+                                 selected_bundle->config->contract_set_key));
 }
 
 static iree_status_t loom_spirv_artifact_provider_emit_entries(
@@ -261,4 +262,6 @@ const loom_artifact_provider_t loom_spirv_vulkan_artifact_provider = {
         },
     .emit_artifact = loom_spirv_artifact_provider_emit_artifact,
     .deinitialize_artifact = loom_spirv_artifact_provider_deinitialize_artifact,
+    .target_profile_type = &loom_spirv_target_profile_type,
+    .product_contract = &loom_spirv_binary_kernel_product_contract,
 };

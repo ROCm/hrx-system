@@ -37,6 +37,7 @@ loom_cc_library(
     hdrs = ["device_provider.h"],
     deps = [
         "//loom/src/loom/target:profile",
+        "//loom/src/loom/target:provider",
         "//loom/src/loom/tooling/compile:artifact",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",

@@ -31,6 +31,7 @@ loom_cc_library(
     iree::base
     iree::hal
     loom::target::profile
+    loom::target::provider
     loom::tooling::compile::artifact
   PUBLIC
 )

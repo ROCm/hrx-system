@@ -255,6 +255,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/cmd/check:__pkg__",
         "//loom/src/loom/target/arch/cmd/lower:__pkg__",
         "//loom/src/loom/tooling/compile:__pkg__",
+        "//loom/src/loom/tooling/target/cmd:__pkg__",
         "//loom/src/loom/tools/loom-check:__pkg__",
         "//loom/src/loom/tools/loom-compile:__pkg__",
         "//loom/src/loom/tools/loom-opt:__pkg__",

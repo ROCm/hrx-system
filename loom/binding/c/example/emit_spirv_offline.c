@@ -124,14 +124,14 @@ static loomc_status_t require_successful_result(const loomc_result_t* result,
 }
 
 static const loomc_artifact_t* find_result_artifact(
-    const loomc_result_t* result, loomc_artifact_kind_t kind,
+    const loomc_result_t* result, loomc_string_view_t role,
     loomc_string_view_t format) {
   for (loomc_host_size_t i = 0; i < loomc_result_artifact_count(result); ++i) {
     const loomc_artifact_t* artifact = loomc_result_artifact_at(result, i);
     if (artifact == NULL) {
       continue;
     }
-    if (artifact->kind == kind &&
+    if (loomc_string_view_equal(artifact->role, role) &&
         loomc_string_view_equal(artifact->format, format)) {
       return artifact;
     }
@@ -338,7 +338,8 @@ static loomc_status_t emit_spirv_artifact(emit_spirv_offline_state_t* state) {
       .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
       .structure_size = sizeof(emit_options),
       .next = &option_dict,
-      .artifact_format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
+      .artifact_format =
+          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY),
       .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };
   loomc_status_t status = loomc_emit_module(
@@ -353,11 +354,11 @@ static loomc_status_t emit_spirv_artifact(emit_spirv_offline_state_t* state) {
 static loomc_status_t summarize_and_maybe_write_artifact(
     emit_spirv_offline_state_t* state) {
   const loomc_artifact_t* artifact = find_result_artifact(
-      state->result, LOOMC_ARTIFACT_KIND_EXECUTABLE,
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV));
+      state->result, loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
+      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY));
   if (artifact == NULL) {
     return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
-                             "SPIR-V executable artifact was not produced");
+                             "SPIR-V kernel artifact was not produced");
   }
   const uint64_t artifact_length =
       loomc_byte_sequence_length(artifact->contents);

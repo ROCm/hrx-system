@@ -101,7 +101,7 @@ LaunchArtifact CompileLaunchArtifact(const char* text) {
       loomc_byte_sequence_create_copy(loomc_source_contents(source_ptr.get()),
                                       loomc_allocator_system(), &contents));
   const loomc_artifact_t artifact = {
-      /*.kind=*/LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
+      /*.role=*/loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_LAUNCH_CONFIG),
       /*.format=*/loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE),
       /*.identifier=*/loomc_make_cstring_view("launch_config.loombc"),
       /*.contents=*/contents,
