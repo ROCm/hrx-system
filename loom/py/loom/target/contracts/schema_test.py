@@ -140,6 +140,25 @@ def test_structural_register_emits_validate_program_shape() -> None:
             result=ValueRef.result("result"),
             unit_offset=0x10000,
         )
+    with pytest.raises(ValueError, match="register slice unit count must be"):
+        EmitRegisterSlice(
+            source=ValueRef.operand("source"),
+            result=ValueRef.result("result"),
+            unit_count=0,
+        )
+    with pytest.raises(ValueError, match="cannot specify both unit count"):
+        EmitRegisterSlice(
+            source=ValueRef.operand("source"),
+            result=ValueRef.temporary("element"),
+            unit_count=1,
+            result_type=Scalar("i32"),
+        )
+    with pytest.raises(ValueError, match="only valid for temporary results"):
+        EmitRegisterSlice(
+            source=ValueRef.operand("source"),
+            result=ValueRef.result("result"),
+            unit_count=1,
+        )
     with pytest.raises(
         ValueError,
         match="temporary 'pair' needs an explicit result type binding",

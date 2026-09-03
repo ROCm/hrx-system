@@ -728,6 +728,9 @@ typedef struct loom_low_lower_emit_t {
   uint16_t source_memory_ordinal;
   // Register-unit offset consumed by REGISTER_SLICE.
   uint16_t structural_offset;
+  // Explicit result register-unit count consumed by REGISTER_SLICE. Zero maps
+  // the result type through the normal result reference or type pattern.
+  uint16_t structural_unit_count;
 } loom_low_lower_emit_t;
 
 typedef uint16_t loom_low_lower_rule_flags_t;

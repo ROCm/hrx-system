@@ -93,11 +93,27 @@ class EmitRegisterSlice:
     source: ValueRef
     result: ValueRef
     unit_offset: int = 0
+    unit_count: int | None = None
     result_type: ResultTypeBinding | None = None
 
     def __post_init__(self) -> None:
         if self.unit_offset < 0 or self.unit_offset > 0xFFFF:
             raise ValueError("register slice unit offset must fit u16")
+        if self.unit_count is not None and (
+            self.unit_count <= 0 or self.unit_count > 0xFFFF
+        ):
+            raise ValueError("register slice unit count must be in [1, 65535]")
+        if self.unit_count is not None and self.result_type is not None:
+            raise ValueError(
+                "register slice cannot specify both unit count and result type"
+            )
+        if (
+            self.unit_count is not None
+            and self.result.kind is not SourceValueKind.TEMPORARY
+        ):
+            raise ValueError(
+                "register slice unit count is only valid for temporary results"
+            )
 
     def validate(
         self,
@@ -118,6 +134,7 @@ class EmitRegisterSlice:
             self.result_type,
             "register slice result",
             defined_temporaries,
+            has_derived_type=self.unit_count is not None,
         )
 
 
@@ -612,6 +629,8 @@ def _validate_structural_result(
     result_type: ResultTypeBinding | None,
     subject: str,
     defined_temporaries: set[str],
+    *,
+    has_derived_type: bool = False,
 ) -> tuple[str, ...]:
     if result.kind not in (SourceValueKind.RESULT, SourceValueKind.TEMPORARY):
         raise ValueError(
@@ -623,7 +642,7 @@ def _validate_structural_result(
             raise ValueError(
                 f"{source_op.name}: {subject} redefines temporary '{result.field}'"
             )
-        if result_type is None:
+        if result_type is None and not has_derived_type:
             raise ValueError(
                 f"{source_op.name}: {subject} temporary '{result.field}' "
                 "needs an explicit result type binding"

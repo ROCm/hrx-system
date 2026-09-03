@@ -1025,6 +1025,26 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op(
                                           emit, low_results.values);
 }
 
+// Changes a carrier width only when doing so cannot silently invent or discard
+// a semantic register value type. An unchanged width preserves the complete
+// type; a changed carrier-only type remains carrier-only. Typed width changes
+// require a target-owned relation and are rejected by the caller.
+static bool loom_low_lower_rule_try_register_type_with_unit_count(
+    loom_type_t type, uint32_t unit_count, loom_type_t* out_type) {
+  *out_type = loom_type_none();
+  IREE_ASSERT(loom_low_type_is_register(type));
+  IREE_ASSERT_GT(unit_count, 0);
+  if (unit_count == loom_low_register_type_unit_count(type)) {
+    *out_type = type;
+    return true;
+  }
+  if (loom_type_register_has_value_type(type)) {
+    return false;
+  }
+  *out_type = loom_low_register_carrier_type_with_unit_count(type, unit_count);
+  return true;
+}
+
 static iree_status_t loom_low_lower_rule_emit_register_slice(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
@@ -1038,15 +1058,26 @@ static iree_status_t loom_low_lower_rule_emit_register_slice(
   loom_value_id_t* low_operands = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_build_low_operands(
       context, rule_set, source_op, state, emit, NULL, NULL, &low_operands));
-  loom_type_t* result_types = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_rule_build_result_types(
-      context, rule_set, source_op, resolved_emit, &result_types));
+  loom_type_t result_type = loom_type_none();
+  if (emit->structural_unit_count != 0) {
+    const loom_type_t source_type = loom_module_value_type(
+        loom_low_lower_context_module(context), low_operands[0]);
+    if (!loom_low_lower_rule_try_register_type_with_unit_count(
+            source_type, emit->structural_unit_count, &result_type)) {
+      return loom_low_lower_emit_register_width_relation_unsupported(
+          context, source_op, source_type, emit->structural_unit_count);
+    }
+  } else {
+    loom_type_t* result_types = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_lower_rule_build_result_types(
+        context, rule_set, source_op, resolved_emit, &result_types));
+    result_type = result_types[0];
+  }
 
   loom_op_t* slice_op = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_low_slice_build(loom_low_lower_context_builder(context),
-                           low_operands[0], emit->structural_offset,
-                           result_types[0], source_op->location, &slice_op));
+  IREE_RETURN_IF_ERROR(loom_low_slice_build(
+      loom_low_lower_context_builder(context), low_operands[0],
+      emit->structural_offset, result_type, source_op->location, &slice_op));
   const loom_value_id_t low_result = loom_low_slice_result(slice_op);
   return loom_low_lower_rule_bind_results(context, rule_set, source_op, state,
                                           emit, &low_result);
@@ -1085,26 +1116,6 @@ static const loom_tied_result_t* loom_low_lower_rule_emit_tied_results(
   return emit->tied_result_count == 0
              ? NULL
              : &rule_set->tied_results[emit->tied_result_start];
-}
-
-// Changes a carrier width only when doing so cannot silently invent or discard
-// a semantic register value type. An unchanged width preserves the complete
-// type; a changed carrier-only type remains carrier-only. Typed width changes
-// require a target-owned relation and are rejected by the caller.
-static bool loom_low_lower_rule_try_register_type_with_unit_count(
-    loom_type_t type, uint32_t unit_count, loom_type_t* out_type) {
-  *out_type = loom_type_none();
-  IREE_ASSERT(loom_low_type_is_register(type));
-  IREE_ASSERT_GT(unit_count, 0);
-  if (unit_count == loom_low_register_type_unit_count(type)) {
-    *out_type = type;
-    return true;
-  }
-  if (loom_type_register_has_value_type(type)) {
-    return false;
-  }
-  *out_type = loom_low_register_carrier_type_with_unit_count(type, unit_count);
-  return true;
 }
 
 static iree_status_t loom_low_lower_rule_slice_register_units(
