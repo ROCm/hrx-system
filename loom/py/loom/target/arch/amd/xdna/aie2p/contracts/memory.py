@@ -18,10 +18,13 @@ from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_VECTOR_MEMORY_ELEMENT_TYPES,
 )
 from loom.target.contracts import (
+    ContractEmit,
     DescriptorEmitForm,
     DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
+    EmitRegisterConcat,
+    EmitRegisterSlice,
     Guard,
     Scalar,
     SourceMemoryAddressLayout,
@@ -39,6 +42,8 @@ from loom.target.low_descriptors import Descriptor
 
 _I32 = Scalar("i32")
 _OFFSET = Scalar("offset")
+_F32X64_ACCUMULATOR = Vector("f32", lanes=64)
+_ACCUMULATOR_CHUNK_BYTE_OFFSETS = (0, 64, 128, 192)
 _VECTOR_MEMORY_SHAPES = tuple(
     (
         width_bits,
@@ -92,6 +97,7 @@ def _memory_constraint(
     minimum_alignment: int,
     immediate_offset_minimum: int,
     immediate_offset_maximum: int,
+    maximum_additional_static_byte_offset: int = 0,
 ) -> SourceMemoryConstraint:
     dynamic = address_form in (
         _MemoryAddressForm.DYNAMIC_ZERO_STATIC,
@@ -100,13 +106,19 @@ def _memory_constraint(
     )
     if address_form is _MemoryAddressForm.IMMEDIATE:
         static_minimum = immediate_offset_minimum
-        static_maximum = immediate_offset_maximum
+        static_maximum = (
+            immediate_offset_maximum - maximum_additional_static_byte_offset
+        )
     elif address_form is _MemoryAddressForm.DYNAMIC_ZERO_STATIC:
         static_minimum = static_maximum = 0
     elif address_form is _MemoryAddressForm.DYNAMIC_SMALL_STATIC:
         static_minimum, static_maximum = -64, 63
     else:
         static_minimum, static_maximum = _I32_MIN, _I32_MAX
+    static_maximum = min(
+        static_maximum,
+        _I32_MAX - maximum_additional_static_byte_offset,
+    )
     return SourceMemoryConstraint(
         operation=operation,
         root_kind=root_kind,
@@ -137,9 +149,17 @@ def _byte_offset_materializer() -> SourceMemoryByteOffsetMaterializer:
 def _register_address_emits(
     source_memory: SourceMemoryConstraint,
     address_form: _MemoryAddressForm,
+    *,
+    additional_static_byte_offset: int = 0,
+    temporary_suffix: str = "",
 ) -> tuple[tuple[EmitDescriptorOp, ...], ValueRef]:
     emits: list[EmitDescriptorOp] = []
-    byte_offset = ValueRef.temporary("byte_offset")
+    byte_offset = ValueRef.temporary(f"byte_offset{temporary_suffix}")
+    static_byte_offset = (
+        SourceMemoryProject.static_byte_offset_plus(additional_static_byte_offset)
+        if additional_static_byte_offset
+        else SourceMemoryProject.static_byte_offset()
+    )
     if address_form is _MemoryAddressForm.MATERIALIZED_STATIC:
         emits.append(
             EmitDescriptorOp(
@@ -148,28 +168,34 @@ def _register_address_emits(
                 ),
                 results={"dst": byte_offset},
                 result_types={"dst": _OFFSET},
-                immediates={"i": SourceMemoryProject.static_byte_offset()},
+                immediates={"i": static_byte_offset},
                 source_memory=source_memory,
                 form=DescriptorEmitForm.OP,
             )
         )
-    elif address_form is _MemoryAddressForm.DYNAMIC_ZERO_STATIC:
+    elif (
+        address_form is _MemoryAddressForm.DYNAMIC_ZERO_STATIC
+        and additional_static_byte_offset == 0
+    ):
         byte_offset = ValueRef.source_memory_dynamic_byte_offset()
-    elif address_form is _MemoryAddressForm.DYNAMIC_SMALL_STATIC:
+    elif (
+        address_form is _MemoryAddressForm.DYNAMIC_SMALL_STATIC
+        and additional_static_byte_offset == 0
+    ):
         emits.append(
             EmitDescriptorOp(
                 descriptor=_descriptor("amd.xdna.aie2p.add.i32.immediate"),
                 operands={"s0": ValueRef.source_memory_dynamic_byte_offset()},
                 results={"d0": byte_offset},
                 result_types={"d0": _OFFSET},
-                immediates={"imm": SourceMemoryProject.static_byte_offset()},
+                immediates={"imm": static_byte_offset},
                 source_memory=source_memory,
                 source_memory_byte_offset_materializer=_byte_offset_materializer(),
                 form=DescriptorEmitForm.OP,
             )
         )
     else:
-        static_offset = ValueRef.temporary("static_byte_offset")
+        static_offset = ValueRef.temporary(f"static_byte_offset{temporary_suffix}")
         emits.extend(
             (
                 EmitDescriptorOp(
@@ -178,7 +204,7 @@ def _register_address_emits(
                     ),
                     results={"dst": static_offset},
                     result_types={"dst": _OFFSET},
-                    immediates={"i": SourceMemoryProject.static_byte_offset()},
+                    immediates={"i": static_byte_offset},
                     source_memory=source_memory,
                     form=DescriptorEmitForm.OP,
                 ),
@@ -199,8 +225,11 @@ def _register_address_emits(
             )
         )
 
-    address_index = ValueRef.temporary("address_index")
-    materialize_dynamic_offset = address_form is _MemoryAddressForm.DYNAMIC_ZERO_STATIC
+    address_index = ValueRef.temporary(f"address_index{temporary_suffix}")
+    materialize_dynamic_offset = (
+        address_form is _MemoryAddressForm.DYNAMIC_ZERO_STATIC
+        and additional_static_byte_offset == 0
+    )
     emits.append(
         EmitDescriptorOp(
             descriptor=_descriptor("amd.xdna.aie2p.move.to.address-index"),
@@ -314,6 +343,130 @@ def _memory_rule(
     )
 
 
+def _accumulator_memory_rule(
+    operation: SourceMemoryOperation,
+    address_form: _MemoryAddressForm,
+    *,
+    root_kind: SourceMemoryRootKind,
+    memory_spaces: tuple[str, ...],
+    volatile: bool,
+) -> DescriptorRule:
+    is_load = operation is SourceMemoryOperation.LOAD
+    immediate_memory = address_form is _MemoryAddressForm.IMMEDIATE
+    source_op = vector.vector_load if is_load else vector.vector_store
+    descriptor_family = "load" if is_load else "store"
+    address_family = "immediate" if immediate_memory else "register"
+    descriptor_key = (
+        f"amd.xdna.aie2p.{descriptor_family}.accumulator."
+        f"f32x16.indexed.{address_family}"
+    )
+    if volatile:
+        descriptor_key = f"{descriptor_key}.volatile"
+    memory_descriptor = _descriptor(descriptor_key)
+    source_memory = _memory_constraint(
+        operation,
+        address_form,
+        root_kind=root_kind,
+        memory_spaces=memory_spaces,
+        element_byte_count=4,
+        vector_lane_count=64,
+        minimum_alignment=64,
+        immediate_offset_minimum=-512,
+        immediate_offset_maximum=448,
+        maximum_additional_static_byte_offset=(_ACCUMULATOR_CHUNK_BYTE_OFFSETS[-1]),
+    )
+
+    emits: list[ContractEmit] = []
+    loaded_chunks: list[ValueRef] = []
+    for chunk_index, chunk_byte_offset in enumerate(_ACCUMULATOR_CHUNK_BYTE_OFFSETS):
+        chunk = ValueRef.temporary(f"chunk_{chunk_index}")
+        if is_load:
+            loaded_chunks.append(chunk)
+        else:
+            emits.append(
+                EmitRegisterSlice(
+                    source=ValueRef.operand("value"),
+                    result=chunk,
+                    unit_offset=chunk_index,
+                    unit_count=1,
+                )
+            )
+
+        memory_operands = (
+            {"ptr": ValueRef.operand("view")}
+            if is_load
+            else {"src": chunk, "ptr": ValueRef.operand("view")}
+        )
+        memory_results = {"dst": chunk} if is_load else {}
+        if immediate_memory:
+            static_byte_offset = (
+                SourceMemoryProject.static_byte_offset_plus(chunk_byte_offset)
+                if chunk_byte_offset
+                else SourceMemoryProject.static_byte_offset()
+            )
+            emits.append(
+                EmitDescriptorOp(
+                    descriptor=memory_descriptor,
+                    operands=memory_operands,
+                    results=memory_results,
+                    result_types=({"dst": DescriptorResultType()} if is_load else None),
+                    immediates={"imm": static_byte_offset},
+                    source_memory=source_memory,
+                    form=DescriptorEmitForm.OP,
+                )
+            )
+        else:
+            address_emits, address_index = _register_address_emits(
+                source_memory,
+                address_form,
+                additional_static_byte_offset=chunk_byte_offset,
+                temporary_suffix=f"_{chunk_index}",
+            )
+            emits.extend(address_emits)
+            memory_operands["dj"] = address_index
+            emits.append(
+                EmitDescriptorOp(
+                    descriptor=memory_descriptor,
+                    operands=memory_operands,
+                    results=memory_results,
+                    result_types=({"dst": DescriptorResultType()} if is_load else None),
+                    source_memory=source_memory,
+                    form=DescriptorEmitForm.OP,
+                )
+            )
+
+    if is_load:
+        emits.append(
+            EmitRegisterConcat(
+                sources=loaded_chunks,
+                result=ValueRef.result("result"),
+            )
+        )
+
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=memory_descriptor,
+        guards=(
+            *(
+                (Guard.instance_flags_has_all("memory_flags", "volatile"),)
+                if volatile
+                else ()
+            ),
+            *(
+                (Guard.operand_segment_count("indices", 0),)
+                if address_form
+                in (
+                    _MemoryAddressForm.IMMEDIATE,
+                    _MemoryAddressForm.MATERIALIZED_STATIC,
+                )
+                else ()
+            ),
+            Guard.value_type("result" if is_load else "value", _F32X64_ACCUMULATOR),
+        ),
+        emit=tuple(emits),
+    )
+
+
 def _scalar_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
     return tuple(
         _memory_rule(
@@ -394,9 +547,26 @@ def _vector_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
     )
 
 
+def _accumulator_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
+    return tuple(
+        _accumulator_memory_rule(
+            operation,
+            address_form,
+            root_kind=root_kind,
+            memory_spaces=memory_spaces,
+            volatile=volatile,
+        )
+        for root_kind, memory_spaces in _MEMORY_ROOTS
+        for operation in (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
+        for address_form in _MemoryAddressForm
+    )
+
+
 AIE2P_MEMORY_RULES: tuple[DescriptorRule, ...] = (
     *_scalar_memory_rules(volatile=True),
     *_vector_memory_rules(volatile=True),
+    *_accumulator_memory_rules(volatile=True),
     *_scalar_memory_rules(volatile=False),
     *_vector_memory_rules(volatile=False),
+    *_accumulator_memory_rules(volatile=False),
 )

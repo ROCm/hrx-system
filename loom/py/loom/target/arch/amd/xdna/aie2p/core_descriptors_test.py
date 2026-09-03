@@ -918,6 +918,21 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
         1,
     ]
 
+    f32_add = descriptors["amd.xdna.aie2p.add.f32x64.configured"]
+    assert [operand.field_name for operand in f32_add.operands[:4]] == [
+        "dst",
+        "acc1",
+        "acc2",
+        "acc",
+    ]
+    assert [operand.reg_alts[0].reg_class for operand in f32_add.operands[:4]] == [
+        "aie2p.mbms",
+        "aie2p.mbms",
+        "aie2p.mbms",
+        "aie2p.er",
+    ]
+    assert [operand.unit_count for operand in f32_add.operands[:4]] == [4, 4, 4, 1]
+
     bf16_broadcast = descriptors["amd.xdna.aie2p.broadcast.bf16x8.to.bf16x32"]
     assert [operand.reg_alts[0].reg_class for operand in bf16_broadcast.operands] == [
         "aie2p.vec256",
@@ -951,6 +966,27 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
         "aie2p.ep",
     ]
     assert accumulator_store.effects[0].width_bits == 512
+
+    float_accumulator_load = descriptors[
+        "amd.xdna.aie2p.load.accumulator.f32x16.indexed.register"
+    ]
+    assert [
+        operand.reg_alts[0].reg_class for operand in float_accumulator_load.operands
+    ] == ["aie2p.mbms", "aie2p.ep", "aie2p.edj"]
+    assert [operand.unit_count for operand in float_accumulator_load.operands] == [
+        1,
+        1,
+        1,
+    ]
+    assert float_accumulator_load.effects[0].width_bits == 512
+
+    float_accumulator_store = descriptors[
+        "amd.xdna.aie2p.store.accumulator.f32x16.indexed.register"
+    ]
+    assert [
+        operand.reg_alts[0].reg_class for operand in float_accumulator_store.operands
+    ] == ["aie2p.mbms", "aie2p.ep", "aie2p.edj"]
+    assert float_accumulator_store.effects[0].width_bits == 512
 
     narrow = descriptors["amd.xdna.aie2p.narrow.trunc.signed.i16x32"]
     assert [operand.reg_alts[0].reg_class for operand in narrow.operands[:3]] == [

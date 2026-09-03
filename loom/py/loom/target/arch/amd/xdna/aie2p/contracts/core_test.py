@@ -20,6 +20,7 @@ from loom.target.arch.amd.xdna.aie2p.contracts.core import (
     _BF16_ELEMENTWISE_MULTIPLY_CONTROL,
     _BF16_OUTER_PRODUCT_MULTIPLY_CONTROL,
     _BF16_OUTER_PRODUCT_SHUFFLE_CONTROLS,
+    _F32_ACCUMULATOR_ADD_CONTROL,
     _I16_ELEMENTWISE_MULTIPLY_CONTROL,
     AIE2P_CORE_CONTRACT_FRAGMENT,
 )
@@ -409,7 +410,8 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert product_slice.source.field == "wide_product"
     assert product_slice.result.field == "product"
     assert product_slice.unit_offset == 0
-    assert product_slice.result_type == Vector("f32", lanes=32)
+    assert product_slice.unit_count == 2
+    assert product_slice.result_type is None
     assert _BF16_ELEMENTWISE_MULTIPLY_CONTROL == 0x3C
     assert bf16_multiply.emit[0].immediates == {"i": _BF16_ELEMENTWISE_MULTIPLY_CONTROL}
     assert _BF16_CONVERSION_ROUNDING == 12
@@ -455,6 +457,17 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert bf16_outer_product.emit[9].immediates == {
         "i": _BF16_OUTER_PRODUCT_MULTIPLY_CONTROL
     }
+
+    f32_add_rules = [rule for rule in rules if rule.source_op is vector.vector_addf]
+    assert len(f32_add_rules) == 1
+    f32_add = f32_add_rules[0]
+    assert f32_add.descriptor.key == "amd.xdna.aie2p.add.f32x64.configured"
+    assert [emit.descriptor.key for emit in f32_add.emit] == [
+        "amd.xdna.aie2p.constant.i32.mova",
+        "amd.xdna.aie2p.add.f32x64.configured",
+    ]
+    assert _F32_ACCUMULATOR_ADD_CONTROL == 0x3C
+    assert f32_add.emit[0].immediates == {"i": _F32_ACCUMULATOR_ADD_CONTROL}
 
     vector_bitwise_rules = [
         rule
