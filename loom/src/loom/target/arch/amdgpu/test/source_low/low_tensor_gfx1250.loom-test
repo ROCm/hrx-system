@@ -1,8 +1,9 @@
 // RUN: emit amdgpu-assembly @tensor_d4_and_wait fixed=%d0:physical_register:0:4 fixed=%d1:physical_register:8:8 fixed=%d2:physical_register:16:4 fixed=%d3:physical_register:20:4
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @tensor_d4_and_wait(%d0: reg<amdgpu.sgpr x4>, %d1: reg<amdgpu.sgpr x8>, %d2: reg<amdgpu.sgpr x4>, %d3: reg<amdgpu.sgpr x4>) asm {
-  tensor_load_to_lds_d4 %d0, %d1, %d2, %d3 {scope = 0, th = 0}
+  tensor_load_to_lds_d4 %d0, %d1, %d2, %d3
   s_wait_tensorcnt {tensorcnt = 0}
   return
 }
@@ -16,6 +17,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @tensor_d4_and_wait(%d0:
 // RUN: emit amdgpu-assembly @tensor_d2_and_wait fixed=%d0:physical_register:0:4 fixed=%d1:physical_register:8:8
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @tensor_d2_and_wait(%d0: reg<amdgpu.sgpr x4>, %d1: reg<amdgpu.sgpr x8>) asm {
   tensor_load_to_lds_d2 %d0, %d1 {nv = 1, scope = 1, th = 2}
   s_wait_tensorcnt {tensorcnt = 65535}
@@ -31,6 +33,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @tensor_d2_and_wait(%d0:
 // RUN: emit amdgpu-wait-counter-plan-json @tensor_counter_progress strategy=source
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @tensor_counter_progress(%d0: reg<amdgpu.sgpr x4>, %d1: reg<amdgpu.sgpr x8>) asm {
   tensor_load_to_lds_d2 %d0, %d1
   s_wait_tensorcnt {tensorcnt = 0}

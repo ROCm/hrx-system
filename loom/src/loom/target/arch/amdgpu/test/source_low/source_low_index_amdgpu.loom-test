@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @index_uniform_i64_multiply(%lhs_i64: i64) -> (index) {
   %bounded_i64 = scalar.assume %lhs_i64 [range(%lhs_i64, 0, 1023)] : i64
   %lhs_index = index.cast %bounded_i64 : i64 to index
@@ -20,6 +21,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_u
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @offset_loop_narrows_induction_operand() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -77,6 +79,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @index_uniform_multiply(%lhs: i32) -> (index) {
   %lhs_index = index.cast %lhs : i32 to index
   %bounded_lhs = index.assume %lhs_index [range(%lhs_index, 0, 1023)] : index
@@ -95,6 +98,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_u
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @index_uniform_signed32_subtract(%value_i32: i32) -> (index) {
   %value0 = index.cast %value_i32 : i32 to index
   %value = index.assume %value0 [range(%value0, 1, 32768)] : index
@@ -113,6 +117,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_u
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @index_uniform_signed_shifts(%value0: index, %amount0: index) -> (index, index, index) {
   %value = index.assume %value0 [range(%value0, -1024, -1)] : index
   %amount = index.assume %amount0 [range(%amount0, 1, 4)] : index
@@ -133,6 +138,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_u
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @index_uniform_madd(%row_i32: i32, %column_i32: i32) -> (index) {
   %row_index = index.cast %row_i32 : i32 to index
   %column_index = index.cast %column_i32 : i32 to index
@@ -154,6 +160,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_u
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @index_uniform_scale_offset(%index_i32: i32, %stride_i32: i32) -> (offset) {
   %index0 = index.cast %index_i32 : i32 to index
   %index = index.assume %index0 [range(%index0, 0, 1023)] : index
@@ -172,6 +179,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_u
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @index_uniform_shift_mask(%value: i32) -> (index, index) {
   %value_index = index.cast %value : i32 to index
   %bounded_value = index.assume %value_index [range(%value_index, 0, 1024)] : index
@@ -194,6 +202,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_u
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @index_uniform_div_rem_power_of_two(%value: i32) -> (index, index) {
   %value_index = index.cast %value : i32 to index
   %bounded_value = index.assume %value_index [range(%value_index, 0, 31)] : index
@@ -215,6 +224,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_u
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @index_uniform_div_rem_magic_mul(%value: i32) -> (index, index) {
   %value_index = index.cast %value : i32 to index
   %bounded_value = index.assume %value_index [range(%value_index, 0, 24)] : index
@@ -240,6 +250,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_u
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @index_matvec_block_lane_range_global_b32() {
   %unit = index.constant 1 : index
   %lane_count = index.constant 64 : index
@@ -297,6 +308,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @index_divergent_shift_mask(%values: vector<2xi32>) {
   %lane_i32 = vector.extract %values[0] : vector<2xi32> -> i32
   %lane = index.cast %lane_i32 : i32 to index
@@ -321,6 +333,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_d
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @index_cast_compare_uniform(%lhs: i32, %rhs: i32) -> (i1) {
   %lhs_index = index.cast %lhs : i32 to index
   %rhs_index = index.cast %rhs : i32 to index
@@ -337,6 +350,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_c
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @index_cast_compare_divergent(%values: vector<2xi32>, %limit: i32) {
   %lane_i32 = vector.extract %values[0] : vector<2xi32> -> i32
   %lane = index.cast %lane_i32 : i32 to index
@@ -357,6 +371,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_c
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @index_divergent_i1_bitwise_select(%values: vector<2xi32>, %lower: i32, %upper: i32, %true_value: f32, %false_value: f32) -> (f32) {
   %lane_i32 = vector.extract %values[0] : vector<2xi32> -> i32
   %lane = index.cast %lane_i32 : i32 to index
@@ -392,6 +407,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_d
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @index_mixed_uniform_divergent_i1_bitwise_select(%values: vector<2xi32>, %reference_count: i32, %lower: i32, %true_value: f32, %false_value: f32) -> (f32) {
   %lane_i32 = vector.extract %values[0] : vector<2xi32> -> i32
   %lane = index.cast %lane_i32 : i32 to index
@@ -425,6 +441,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_m
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @dynamic_vector_extract_i32(%values: vector<2xi32>, %lane_index: index, %limit: i32) {
   %lane = vector.extract %values[%lane_index] : vector<2xi32> -> i32
   %condition = scalar.cmpi slt, %lane, %limit : i32
@@ -443,6 +460,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dynamic
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @dynamic_exact_vector_extract_i32(%values: vector<2xi32>) -> (i32) {
   %lane_index = index.constant 1 : index
   %lane = vector.extract %values[%lane_index] : vector<2xi32> -> i32
@@ -458,6 +476,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dynamic
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @dynamic_exact_iota_extract_i32() -> (i32) {
   %lane_index = index.constant 2 : index
   %start = scalar.constant 3 : i32
@@ -476,6 +495,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dynamic
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @dynamic_base_iota_i32(%start: i32) -> (vector<4xi32>) {
   %step = scalar.constant 1 : i32
   %lanes = vector.iota %start step %step : vector<4xi32>
@@ -495,6 +515,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dynamic
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @dynamic_step_iota_i32(%start: i32, %step: i32) -> (vector<4xi32>) {
   %lanes = vector.iota %start step %step : vector<4xi32>
   func.return %lanes : vector<4xi32>
@@ -517,6 +538,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dynamic
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @offset_compare_uniform(%lhs: offset, %rhs: offset) -> (i1) {
   %result = index.cmp ult, %lhs, %rhs : offset
   func.return %result : i1

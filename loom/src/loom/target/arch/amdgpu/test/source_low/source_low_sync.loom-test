@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @workgroup_barrier() {
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   func.return
@@ -16,6 +17,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @workgro
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @subgroup_shared_memory_barrier() {
   kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
   func.return

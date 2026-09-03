@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @cluster_gather_b32() {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -34,6 +35,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @cluster_gather_packet_widths() {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -85,6 +87,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @cluster_gather_dynamic_addresses() {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -123,6 +126,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @cluster_gather_two_stage_wait_depth() {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -187,6 +191,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @cluster_gather_same_root_disjoint_slots() {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -250,6 +255,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @cluster_gather_disjoint_workgroup_store() {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index

@@ -2,9 +2,9 @@
 
 amdgpu.target<gfx1100> @gfx11_target
 
-low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @storage_address_requires_one_vgpr() {
-  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @storage_address_requires_one_vgpr() asm {
+  %storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
   // ERROR@+1: AMDGPU/049 {function_name="storage_address_requires_one_vgpr", op_name="low.storage.address", result_name="address", actual_type="reg<amdgpu.sgpr>", expected_reg_class_id="1", expected_unit_count="1"}
-  %address = low.storage.address %storage : low.storage<private> -> reg<amdgpu.sgpr>
-  low.return
+  %address = storage_address %storage : low.storage<private> -> reg<amdgpu.sgpr>
+  return
 }

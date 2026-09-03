@@ -11,6 +11,7 @@
 // RUN: emit amdgpu-assembly @p10_f32 waits=none strategy=source fixed=%p10:physical_register:1:1 fixed=%i:physical_register:2:1 fixed=%p0:physical_register:3:1 fixed=%result:physical_register:0:1
 
 amdgpu.target<gfx1151> @target
+
 low.func.def target<amdgpu.rdna3_5.core>(@target) @p10_f32(%p10: reg<amdgpu.vgpr>, %i: reg<amdgpu.vgpr>, %p0: reg<amdgpu.vgpr>, %m0: reg<amdgpu.m0>) asm {
   %result = v_interp_p10_f32 %p10, %i, %p0, %m0
   return
@@ -25,6 +26,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @p10_f32(%p10: reg<amdgpu.vgpr
 // RUN: emit amdgpu-assembly @p2_f32 waits=none strategy=source fixed=%p20:physical_register:1:1 fixed=%j:physical_register:2:1 fixed=%p10:physical_register:3:1 fixed=%result:physical_register:0:1
 
 amdgpu.target<gfx1151> @target
+
 low.func.def target<amdgpu.rdna3_5.core>(@target) @p2_f32(%p20: reg<amdgpu.vgpr>, %j: reg<amdgpu.vgpr>, %p10: reg<amdgpu.vgpr>, %m0: reg<amdgpu.m0>) asm {
   %result = v_interp_p2_f32 %p20, %j, %p10, %m0
   return
@@ -39,6 +41,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @p2_f32(%p20: reg<amdgpu.vgpr>
 // RUN: emit amdgpu-assembly @p10_f16_f32 waits=none strategy=source fixed=%p10:physical_register:1:1 fixed=%i:physical_register:2:1 fixed=%p0:physical_register:3:1 fixed=%result:physical_register:0:1
 
 amdgpu.target<gfx1151> @target
+
 low.func.def target<amdgpu.rdna3_5.core>(@target) @p10_f16_f32(%p10: reg<amdgpu.vgpr>, %i: reg<amdgpu.vgpr>, %p0: reg<amdgpu.vgpr>, %m0: reg<amdgpu.m0>) asm {
   %result = v_interp_p10_f16_f32_p10_lo_p0_hi %p10, %i, %p0, %m0
   return
@@ -53,6 +56,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @p10_f16_f32(%p10: reg<amdgpu.
 // RUN: emit amdgpu-assembly @p2_f16_f32 waits=none strategy=source fixed=%p20:physical_register:1:1 fixed=%j:physical_register:2:1 fixed=%p10:physical_register:3:1 fixed=%result:physical_register:0:1
 
 amdgpu.target<gfx1151> @target
+
 low.func.def target<amdgpu.rdna3_5.core>(@target) @p2_f16_f32(%p20: reg<amdgpu.vgpr>, %j: reg<amdgpu.vgpr>, %p10: reg<amdgpu.vgpr>, %m0: reg<amdgpu.m0>) asm {
   %result = v_interp_p2_f16_f32_p20_hi_result_lo %p20, %j, %p10, %m0
   return
@@ -67,6 +71,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @p2_f16_f32(%p20: reg<amdgpu.v
 // RUN: emit amdgpu-assembly @p10_rtz_f16_f32 waits=none strategy=source fixed=%p10:physical_register:1:1 fixed=%i:physical_register:2:1 fixed=%p0:physical_register:3:1 fixed=%result:physical_register:0:1
 
 amdgpu.target<gfx1151> @target
+
 low.func.def target<amdgpu.rdna3_5.core>(@target) @p10_rtz_f16_f32(%p10: reg<amdgpu.vgpr>, %i: reg<amdgpu.vgpr>, %p0: reg<amdgpu.vgpr>, %m0: reg<amdgpu.m0>) asm {
   %result = v_interp_p10_rtz_f16_f32_p10_hi_p0_hi %p10, %i, %p0, %m0
   return
@@ -81,6 +86,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @p10_rtz_f16_f32(%p10: reg<amd
 // RUN: emit amdgpu-assembly @p2_rtz_f16_f32 waits=none strategy=source fixed=%p20:physical_register:1:1 fixed=%j:physical_register:2:1 fixed=%p10:physical_register:3:1 fixed=%result:physical_register:0:1
 
 amdgpu.target<gfx1151> @target
+
 low.func.def target<amdgpu.rdna3_5.core>(@target) @p2_rtz_f16_f32(%p20: reg<amdgpu.vgpr>, %j: reg<amdgpu.vgpr>, %p10: reg<amdgpu.vgpr>, %m0: reg<amdgpu.m0>) asm {
   %result = v_interp_p2_rtz_f16_f32_p20_hi_result_hi %p20, %j, %p10, %m0
   return

@@ -360,10 +360,10 @@ func.def @preserves_distinct_return_blocks(%cond: i1, %a: i32, %b: i32) -> (i32)
 
 test.target<low_core> @test_target
 
-low.kernel.def target<test.low.core>(@test_target) @duplicates_low_return_after_br() {
+low.kernel.def target<test.low.core>(@test_target) @duplicates_low_return_after_br() asm {
   low.br ^return
 ^return:
-  low.return
+  return
 }
 
 // ----

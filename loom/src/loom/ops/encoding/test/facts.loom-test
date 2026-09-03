@@ -185,7 +185,7 @@ func.def @strided_layout_summary(%stride: index) -> (i64, i64) {
   %stride2 = index.assume %stride [range(%stride, 8, 16), mul(%stride, 8)] : index
   %layout = encoding.layout.strided [%stride2, 1] : encoding<layout>
   %kind = test.fact_encoding_layout_kind %layout : encoding<layout> -> i64
-  %stride_hi = test.fact_encoding_layout_stride_hi %layout[0] : encoding<layout> -> i64
+  %stride_hi = test.fact_encoding_layout_stride_hi %layout [0] : encoding<layout> -> i64
   func.return %kind, %stride_hi : i64, i64
 }
 // ----
@@ -216,7 +216,7 @@ func.def @assume_dense_layout_summary(%layout: encoding<layout>) -> (i64) {
 func.def @assume_strided_layout_summary(%layout: encoding<layout>) -> (i64, i64) {
   %strided = encoding.layout.assume.strided %layout {rank = 2} : encoding<layout>
   %kind = test.fact_encoding_layout_kind %strided : encoding<layout> -> i64
-  %stride_hi = test.fact_encoding_layout_stride_hi %strided[0] : encoding<layout> -> i64
+  %stride_hi = test.fact_encoding_layout_stride_hi %strided [0] : encoding<layout> -> i64
   func.return %kind, %stride_hi : i64, i64
 }
 // ----
@@ -248,7 +248,7 @@ func.def @assume_spec_storage_layout_summary(%storage: encoding<storage>) -> (i6
 func.def @assume_spec_static_strided_layout_summary(%layout: encoding<layout>) -> (i64, i64) {
   %layout2 = encoding.assume.spec %layout, #encoding.layout.strided<strides=[64]> : encoding<layout>
   %kind = test.fact_encoding_layout_kind %layout2 : encoding<layout> -> i64
-  %stride_hi = test.fact_encoding_layout_stride_hi %layout2[0] : encoding<layout> -> i64
+  %stride_hi = test.fact_encoding_layout_stride_hi %layout2 [0] : encoding<layout> -> i64
   func.return %kind, %stride_hi : i64, i64
 }
 // ----
@@ -267,9 +267,9 @@ func.def @storage_layout_summary(%stride: index) -> (i64, i64) {
   %stride2 = index.assume %stride [range(%stride, 8, 16), mul(%stride, 8)] : index
   %layout = encoding.layout.strided [%stride2, 1] : encoding<layout>
   %schema = encoding.define #ggml.q4_0 : encoding<schema>
-  %storage = encoding.define #encoding.storage {schema = %schema : encoding<schema>, layout = %layout : encoding<layout>} : encoding<storage>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %kind = test.fact_encoding_layout_kind %storage : encoding<storage> -> i64
-  %stride_hi = test.fact_encoding_layout_stride_hi %storage[0] : encoding<storage> -> i64
+  %stride_hi = test.fact_encoding_layout_stride_hi %storage [0] : encoding<storage> -> i64
   func.return %kind, %stride_hi : i64, i64
 }
 // ----
@@ -300,7 +300,7 @@ func.def @static_storage_layout_summary() -> (i64) {
 func.def @static_strided_storage_layout_summary() -> (i64, i64) {
   %storage = encoding.define #encoding.storage<layout=#encoding.layout.strided<strides=[64]>, schema=#ggml.q4_0> : encoding<storage>
   %kind = test.fact_encoding_layout_kind %storage : encoding<storage> -> i64
-  %stride_hi = test.fact_encoding_layout_stride_hi %storage[0] : encoding<storage> -> i64
+  %stride_hi = test.fact_encoding_layout_stride_hi %storage [0] : encoding<storage> -> i64
   func.return %kind, %stride_hi : i64, i64
 }
 // ----
@@ -316,12 +316,12 @@ func.def @static_strided_storage_layout_summary() -> (i64, i64) {
 // adding fp6/fp4 scalar types.
 func.def @operand_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
   %schema = encoding.define #encoding.operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
-  %format = test.fact_encoding_operand_field %schema["element_format"] : encoding<schema> -> i64
-  %packing = test.fact_encoding_operand_field %schema["payload_packing"] : encoding<schema> -> i64
-  %scale = test.fact_encoding_operand_field %schema["scale_topology"] : encoding<schema> -> i64
-  %group = test.fact_encoding_operand_field %schema["scale_group_elements"] : encoding<schema> -> i64
-  %registers = test.fact_encoding_operand_field %schema["payload_registers"] : encoding<schema> -> i64
-  %fallback = test.fact_encoding_operand_field %schema["zero_scale_fallback"] : encoding<schema> -> i64
+  %format = test.fact_encoding_operand_field %schema ["element_format"] : encoding<schema> -> i64
+  %packing = test.fact_encoding_operand_field %schema ["payload_packing"] : encoding<schema> -> i64
+  %scale = test.fact_encoding_operand_field %schema ["scale_topology"] : encoding<schema> -> i64
+  %group = test.fact_encoding_operand_field %schema ["scale_group_elements"] : encoding<schema> -> i64
+  %registers = test.fact_encoding_operand_field %schema ["payload_registers"] : encoding<schema> -> i64
+  %fallback = test.fact_encoding_operand_field %schema ["zero_scale_fallback"] : encoding<schema> -> i64
   func.return %format, %packing, %scale, %group, %registers, %fallback : i64, i64, i64, i64, i64, i64
 }
 // ----
@@ -343,15 +343,15 @@ func.def @operand_scale_group_shapes() -> (i64, i64, i64, i64, i64, i64, i64, i6
   %square = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=256, payload_packing=separate_scale_payload, scale_format=f8e4m3fn, scale_group_shape=[16, 16], scale_operands=1, scale_topology=block_2d> : encoding<schema>
   %row = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=16, payload_packing=separate_scale_payload, scale_format=f8e4m3fn, scale_group_shape=[1, 16], scale_operands=1, scale_topology=block_2d> : encoding<schema>
   %linear = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=32, payload_packing=separate_scale_payload, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %square_rank = test.fact_encoding_operand_field %square["scale_group_rank"] : encoding<schema> -> i64
-  %square_dim0 = test.fact_encoding_operand_field %square["scale_group_dim0"] : encoding<schema> -> i64
-  %square_dim1 = test.fact_encoding_operand_field %square["scale_group_dim1"] : encoding<schema> -> i64
-  %row_rank = test.fact_encoding_operand_field %row["scale_group_rank"] : encoding<schema> -> i64
-  %row_dim0 = test.fact_encoding_operand_field %row["scale_group_dim0"] : encoding<schema> -> i64
-  %row_dim1 = test.fact_encoding_operand_field %row["scale_group_dim1"] : encoding<schema> -> i64
-  %linear_rank = test.fact_encoding_operand_field %linear["scale_group_rank"] : encoding<schema> -> i64
-  %linear_dim0 = test.fact_encoding_operand_field %linear["scale_group_dim0"] : encoding<schema> -> i64
-  %linear_dim1 = test.fact_encoding_operand_field %linear["scale_group_dim1"] : encoding<schema> -> i64
+  %square_rank = test.fact_encoding_operand_field %square ["scale_group_rank"] : encoding<schema> -> i64
+  %square_dim0 = test.fact_encoding_operand_field %square ["scale_group_dim0"] : encoding<schema> -> i64
+  %square_dim1 = test.fact_encoding_operand_field %square ["scale_group_dim1"] : encoding<schema> -> i64
+  %row_rank = test.fact_encoding_operand_field %row ["scale_group_rank"] : encoding<schema> -> i64
+  %row_dim0 = test.fact_encoding_operand_field %row ["scale_group_dim0"] : encoding<schema> -> i64
+  %row_dim1 = test.fact_encoding_operand_field %row ["scale_group_dim1"] : encoding<schema> -> i64
+  %linear_rank = test.fact_encoding_operand_field %linear ["scale_group_rank"] : encoding<schema> -> i64
+  %linear_dim0 = test.fact_encoding_operand_field %linear ["scale_group_dim0"] : encoding<schema> -> i64
+  %linear_dim1 = test.fact_encoding_operand_field %linear ["scale_group_dim1"] : encoding<schema> -> i64
   func.return %square_rank, %square_dim0, %square_dim1, %row_rank, %row_dim0, %row_dim1, %linear_rank, %linear_dim0, %linear_dim1 : i64, i64, i64, i64, i64, i64, i64, i64, i64
 }
 // ----
@@ -374,9 +374,9 @@ func.def @operand_scale_group_shapes() -> (i64, i64, i64, i64, i64, i64, i64, i6
 // number of physically stored nonzero elements.
 func.def @operand_structured_sparsity_summary() -> (i64, i64, i64) {
   %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %policy = test.fact_encoding_operand_field %schema["sparsity"] : encoding<schema> -> i64
-  %elements = test.fact_encoding_operand_field %schema["sparsity_group_elements"] : encoding<schema> -> i64
-  %nonzero = test.fact_encoding_operand_field %schema["sparsity_group_nonzero_elements"] : encoding<schema> -> i64
+  %policy = test.fact_encoding_operand_field %schema ["sparsity"] : encoding<schema> -> i64
+  %elements = test.fact_encoding_operand_field %schema ["sparsity_group_elements"] : encoding<schema> -> i64
+  %nonzero = test.fact_encoding_operand_field %schema ["sparsity_group_nonzero_elements"] : encoding<schema> -> i64
   func.return %policy, %elements, %nonzero : i64, i64, i64
 }
 // ----
@@ -393,13 +393,13 @@ func.def @operand_structured_sparsity_summary() -> (i64, i64, i64) {
 // with one f16 block scale covering 32 logical elements.
 func.def @ggml_q8_0_schema_summary() -> (i64, i64, i64, i64, i64, i64, i64) {
   %schema = encoding.define #ggml.q8_0 : encoding<schema>
-  %format = test.fact_encoding_operand_field %schema["element_format"] : encoding<schema> -> i64
-  %scale_format = test.fact_encoding_operand_field %schema["scale_format"] : encoding<schema> -> i64
-  %packing = test.fact_encoding_operand_field %schema["payload_packing"] : encoding<schema> -> i64
-  %scale = test.fact_encoding_operand_field %schema["scale_topology"] : encoding<schema> -> i64
-  %affine = test.fact_encoding_operand_field %schema["affine"] : encoding<schema> -> i64
-  %elements = test.fact_encoding_operand_field %schema["payload_elements"] : encoding<schema> -> i64
-  %operands = test.fact_encoding_operand_field %schema["scale_operands"] : encoding<schema> -> i64
+  %format = test.fact_encoding_operand_field %schema ["element_format"] : encoding<schema> -> i64
+  %scale_format = test.fact_encoding_operand_field %schema ["scale_format"] : encoding<schema> -> i64
+  %packing = test.fact_encoding_operand_field %schema ["payload_packing"] : encoding<schema> -> i64
+  %scale = test.fact_encoding_operand_field %schema ["scale_topology"] : encoding<schema> -> i64
+  %affine = test.fact_encoding_operand_field %schema ["affine"] : encoding<schema> -> i64
+  %elements = test.fact_encoding_operand_field %schema ["payload_elements"] : encoding<schema> -> i64
+  %operands = test.fact_encoding_operand_field %schema ["scale_operands"] : encoding<schema> -> i64
   func.return %format, %scale_format, %packing, %scale, %affine, %elements, %operands : i64, i64, i64, i64, i64, i64, i64
 }
 // ----
@@ -425,12 +425,12 @@ func.def @operand_fp8_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
   %finite_fn = encoding.define #encoding.f8e4m3fn<rounding=finite_only> : encoding<schema>
   %fnuz = encoding.define #encoding.f8e4m3fnuz : encoding<schema>
   %e5m2fnuz = encoding.define #encoding.f8e5m2fnuz : encoding<schema>
-  %ieee_e4m3_format = test.fact_encoding_operand_field %ieee_e4m3["element_format"] : encoding<schema> -> i64
-  %ieee_e5m2_format = test.fact_encoding_operand_field %ieee_e5m2["element_format"] : encoding<schema> -> i64
-  %fn_format = test.fact_encoding_operand_field %fn["element_format"] : encoding<schema> -> i64
-  %finite_fn_rounding = test.fact_encoding_operand_field %finite_fn["rounding"] : encoding<schema> -> i64
-  %fnuz_packing = test.fact_encoding_operand_field %fnuz["payload_packing"] : encoding<schema> -> i64
-  %e5m2fnuz_elements = test.fact_encoding_operand_field %e5m2fnuz["payload_elements"] : encoding<schema> -> i64
+  %ieee_e4m3_format = test.fact_encoding_operand_field %ieee_e4m3 ["element_format"] : encoding<schema> -> i64
+  %ieee_e5m2_format = test.fact_encoding_operand_field %ieee_e5m2 ["element_format"] : encoding<schema> -> i64
+  %fn_format = test.fact_encoding_operand_field %fn ["element_format"] : encoding<schema> -> i64
+  %finite_fn_rounding = test.fact_encoding_operand_field %finite_fn ["rounding"] : encoding<schema> -> i64
+  %fnuz_packing = test.fact_encoding_operand_field %fnuz ["payload_packing"] : encoding<schema> -> i64
+  %e5m2fnuz_elements = test.fact_encoding_operand_field %e5m2fnuz ["payload_elements"] : encoding<schema> -> i64
   func.return %ieee_e4m3_format, %ieee_e5m2_format, %fn_format, %finite_fn_rounding, %fnuz_packing, %e5m2fnuz_elements : i64, i64, i64, i64, i64, i64
 }
 // ----
@@ -450,8 +450,8 @@ func.def @operand_fp8_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
 // policy facts with one text symbol.
 func.def @operand_finite_flush_subnormal_summary() -> (i64, i64) {
   %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, rounding=finite_flush_subnormal> : encoding<schema>
-  %format = test.fact_encoding_operand_field %schema["element_format"] : encoding<schema> -> i64
-  %rounding = test.fact_encoding_operand_field %schema["rounding"] : encoding<schema> -> i64
+  %format = test.fact_encoding_operand_field %schema ["element_format"] : encoding<schema> -> i64
+  %rounding = test.fact_encoding_operand_field %schema ["rounding"] : encoding<schema> -> i64
   func.return %format, %rounding : i64, i64
 }
 // ----
@@ -469,10 +469,10 @@ func.def @storage_matrix_schema_summary() -> (i64, i64, i64, i64) {
   %layout = encoding.layout.dense : encoding<layout>
   %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=128, payload_registers=16, scale_format=f8e4m3, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
-  %format = test.fact_encoding_operand_field %storage["element_format"] : encoding<storage> -> i64
-  %scale_format = test.fact_encoding_operand_field %storage["scale_format"] : encoding<storage> -> i64
-  %group = test.fact_encoding_operand_field %storage["scale_group_elements"] : encoding<storage> -> i64
-  %elements = test.fact_encoding_operand_field %storage["payload_elements"] : encoding<storage> -> i64
+  %format = test.fact_encoding_operand_field %storage ["element_format"] : encoding<storage> -> i64
+  %scale_format = test.fact_encoding_operand_field %storage ["scale_format"] : encoding<storage> -> i64
+  %group = test.fact_encoding_operand_field %storage ["scale_group_elements"] : encoding<storage> -> i64
+  %elements = test.fact_encoding_operand_field %storage ["payload_elements"] : encoding<storage> -> i64
   func.return %format, %scale_format, %group, %elements : i64, i64, i64, i64
 }
 // ----
@@ -489,8 +489,8 @@ func.def @storage_matrix_schema_summary() -> (i64, i64, i64, i64) {
 // Static physical-storage specs recurse through their nested schema too.
 func.def @static_storage_matrix_schema_summary() -> (i64, i64) {
   %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=bf6, payload_elements=32, payload_registers=6>> : encoding<storage>
-  %format = test.fact_encoding_operand_field %storage["element_format"] : encoding<storage> -> i64
-  %registers = test.fact_encoding_operand_field %storage["payload_registers"] : encoding<storage> -> i64
+  %format = test.fact_encoding_operand_field %storage ["element_format"] : encoding<storage> -> i64
+  %registers = test.fact_encoding_operand_field %storage ["payload_registers"] : encoding<storage> -> i64
   func.return %format, %registers : i64, i64
 }
 // ----
@@ -506,8 +506,8 @@ func.def @static_storage_matrix_schema_summary() -> (i64, i64) {
 // arguments that cross function or kernel boundaries.
 func.def @assume_spec_matrix_schema_summary(%schema: encoding<schema>) -> (i64, i64) {
   %schema2 = encoding.assume.spec %schema, #encoding.operand<element_format=bf8, payload_elements=32, payload_registers=8, scale_format=f8e5m2, scale_group_elements=32, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %format = test.fact_encoding_operand_field %schema2["element_format"] : encoding<schema> -> i64
-  %scale_format = test.fact_encoding_operand_field %schema2["scale_format"] : encoding<schema> -> i64
+  %format = test.fact_encoding_operand_field %schema2 ["element_format"] : encoding<schema> -> i64
+  %scale_format = test.fact_encoding_operand_field %schema2 ["scale_format"] : encoding<schema> -> i64
   func.return %format, %scale_format : i64, i64
 }
 // ----

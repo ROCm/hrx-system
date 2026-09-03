@@ -2,13 +2,13 @@
 
 amdgpu.target<gfx1100> @target
 
-low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @predicate_operand_form(%position: reg<amdgpu.sgpr>, %step: reg<amdgpu.sgpr>) where [eq(%step, 3)] {
-  %output = low.resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
-  %offset = low.const<amdgpu.v_mov_b32> {imm32 = 0} : reg<amdgpu.vgpr>
-  %result = low.op<amdgpu.s_add_u32>(%position, %step) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
-  %stored = low.op<amdgpu.v_mov_b32_copy>(%result) : (reg<amdgpu.sgpr>) -> reg<amdgpu.vgpr>
-  low.op<amdgpu.global_store_b32_saddr>(%offset, %stored, %output) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>)
-  low.return
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @predicate_operand_form(%position: reg<amdgpu.sgpr>, %step: reg<amdgpu.sgpr>) where [eq(%step, 3)] asm {
+  %output = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %offset = v_mov_b32 0
+  %result = s_add_u32 %position, %step
+  %stored = v_mov_b32_copy %result
+  global_store_b32_saddr %offset, %stored, %output
+  return
 }
 
 // ----
@@ -22,6 +22,6 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 2
   %offset = low.const<amdgpu.v_mov_b32> {imm32 = 0} : reg<amdgpu.vgpr>
   %result = low.op<amdgpu.s_addk_i32>(%position) {imm16 = 3} : (reg<amdgpu.sgpr>) -> %position as reg<amdgpu.sgpr>
   %stored = low.op<amdgpu.v_mov_b32_copy>(%result) : (reg<amdgpu.sgpr>) -> reg<amdgpu.vgpr>
-  low.op<amdgpu.global_store_b32_saddr>(%offset, %stored, %output) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>)
+  low.op<amdgpu.global_store_b32_saddr>(%offset, %stored, %output) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>)
   low.return
 }

@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @scalar_f32_minmax_semantics(%lhs: f32, %rhs: f32) -> (f32, f32, f32, f32) {
   %minnum = scalar.minnumf %lhs, %rhs : f32
   %maxnum = scalar.maxnumf %lhs, %rhs : f32
@@ -21,6 +22,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @scalar_f32_min
 // ====
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @scalar_f16_minmax_semantics(%lhs: f16, %rhs: f16) -> (f16, f16, f16, f16) {
   %minnum = scalar.minnumf %lhs, %rhs : f16
   %maxnum = scalar.maxnumf %lhs, %rhs : f16
@@ -45,6 +47,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @scalar_f16_min
 // ====
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @scalar_f64_minmax_semantics(%lhs: f64, %rhs: f64) -> (f64, f64, f64, f64) {
   %minnum = scalar.minnumf %lhs, %rhs : f64
   %maxnum = scalar.maxnumf %lhs, %rhs : f64
@@ -65,6 +68,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @scalar_f64_min
 // ====
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @packed_f16_minmax_semantics(%lhs: vector<4xf16>, %rhs: vector<4xf16>) -> (vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) {
   %minnum = vector.minnumf %lhs, %rhs : vector<4xf16>
   %maxnum = vector.maxnumf %lhs, %rhs : vector<4xf16>
@@ -97,6 +101,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @packed_f16_min
 // ====
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @scalar_f32_clamp_semantics(%value: f32, %lower: f32, %upper: f32) -> (f32, f32) {
   %number = scalar.clampf<number, nnan|nsz> %value, %lower, %upper : f32
   %ieee = scalar.clampf<ieee> %value, %lower, %upper : f32
@@ -113,6 +118,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @scalar_f32_cla
 // ====
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @scalar_f16_clamp_semantics(%value: f16, %lower: f16, %upper: f16) -> (f16, f16) {
   %number = scalar.clampf<number, nnan|nsz> %value, %lower, %upper : f16
   %ieee = scalar.clampf<ieee> %value, %lower, %upper : f16
@@ -131,6 +137,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @scalar_f16_cla
 // ====
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @vector_f32_clamp_semantics(%value: vector<4xf32>, %lower: vector<4xf32>, %upper: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
   %number = vector.clampf<number, nnan|nsz> %value, %lower, %upper : vector<4xf32>
   %ieee = vector.clampf<ieee> %value, %lower, %upper : vector<4xf32>
@@ -167,6 +174,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @vector_f32_cla
 // ====
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @packed_f16_clamp_semantics(%value: vector<4xf16>, %lower: vector<4xf16>, %upper: vector<4xf16>) -> (vector<4xf16>, vector<4xf16>) {
   %number = vector.clampf<number, nnan|nsz> %value, %lower, %upper : vector<4xf16>
   %ieee = vector.clampf<ieee> %value, %lower, %upper : vector<4xf16>
@@ -197,6 +205,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @packed_f16_cla
 // ====
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @scalar_f32_clamp_ordered(%value: f32, %lower: f32, %upper: f32) -> (f32) {
   %result = scalar.clampf<ordered> %value, %lower, %upper : f32
   func.return %result : f32

@@ -2,9 +2,9 @@
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @identity_slice(%source: reg<test.i32 x2>) -> (reg<test.i32 x2>) {
-  %slice = low.slice %source[0] : reg<test.i32 x2> -> reg<test.i32 x2>
-  low.return %slice : reg<test.i32 x2>
+low.func.def target<test.low.core>(@test_target) @identity_slice(%source: reg<test.i32 x2>) -> (reg<test.i32 x2>) asm {
+  %slice = slice %source[0] : reg<test.i32 x2> -> reg<test.i32 x2>
+  return %slice
 }
 
 // ----
@@ -18,10 +18,10 @@ low.func.def target<test.low.core>(@test_target) @identity_slice(%source: reg<te
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @nested_slice(%source: reg<test.i32 x4>) -> (reg<test.i32>) {
-  %middle = low.slice %source[1] : reg<test.i32 x4> -> reg<test.i32 x2>
-  %lane = low.slice %middle[1] : reg<test.i32 x2> -> reg<test.i32>
-  low.return %lane : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @nested_slice(%source: reg<test.i32 x4>) -> (reg<test.i32>) asm {
+  %middle = slice %source[1] : reg<test.i32 x4> -> reg<test.i32 x2>
+  %lane = slice %middle[1] : reg<test.i32 x2> -> reg<test.i32>
+  return %lane
 }
 
 // ----
@@ -36,11 +36,11 @@ low.func.def target<test.low.core>(@test_target) @nested_slice(%source: reg<test
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @slice_only_concat(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
-  %pair = low.concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
-  %lo = low.slice %pair[0] : reg<test.i32 x2> -> reg<test.i32>
-  %hi = low.slice %pair[1] : reg<test.i32 x2> -> reg<test.i32>
-  low.return %lo, %hi : reg<test.i32>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @slice_only_concat(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %pair = concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %lo = slice %pair[0] : reg<test.i32 x2> -> reg<test.i32>
+  %hi = slice %pair[1] : reg<test.i32 x2> -> reg<test.i32>
+  return %lo, %hi
 }
 
 // ----
@@ -54,10 +54,10 @@ low.func.def target<test.low.core>(@test_target) @slice_only_concat(%lhs: reg<te
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @whole_concat_use_preserves_identity(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32 x2>, reg<test.i32>) {
-  %pair = low.concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
-  %lo = low.slice %pair[0] : reg<test.i32 x2> -> reg<test.i32>
-  low.return %pair, %lo : reg<test.i32 x2>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @whole_concat_use_preserves_identity(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32 x2>, reg<test.i32>) asm {
+  %pair = concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %lo = slice %pair[0] : reg<test.i32 x2> -> reg<test.i32>
+  return %pair, %lo
 }
 
 // ----

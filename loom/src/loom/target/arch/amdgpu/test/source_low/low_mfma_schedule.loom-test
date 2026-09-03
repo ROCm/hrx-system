@@ -1,6 +1,7 @@
 // RUN: emit amdgpu-assembly @gfx950_fp8_materialized_bf16_two_k_block_schedule
 
 amdgpu.target<gfx950> @target
+
 low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_fp8_materialized_bf16_two_k_block_schedule(%workitem_id: reg<amdgpu.vgpr>, %lhs_view: reg<amdgpu.sgpr x2>, %rhs_view: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>, %out_view: reg<amdgpu.sgpr x2>) asm {
   %lane = v_and_b32_src0_inline %workitem_id, 15
   %lhs_byte_offset = v_lshlrev_b32_src0_inline %lane, 6
@@ -84,6 +85,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_fp8_materialized_bf16_tw
 // RUN: emit amdgpu-assembly @gfx942_fp8_materialized_bf16_two_k_block_schedule
 
 amdgpu.target<gfx942> @target
+
 low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_fp8_materialized_bf16_two_k_block_schedule(%workitem_id: reg<amdgpu.vgpr>, %lhs_view: reg<amdgpu.sgpr x2>, %rhs_view: reg<amdgpu.sgpr x2>, %out_view: reg<amdgpu.sgpr x2>) asm {
   %lane = v_and_b32_src0_inline %workitem_id, 15
   %lhs_byte_offset = v_lshlrev_b32_src0_inline %lane, 5
@@ -246,6 +248,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_fp8_materialized_bf16_tw
 // RUN: emit amdgpu-assembly @gfx942_f32_mfma_32_register_result_wait
 
 amdgpu.target<gfx942> @target
+
 low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_f32_mfma_32_register_result_wait(%lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x32>, %out_view: reg<amdgpu.sgpr x2>) asm {
   %acc0 = copy %init : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr x32>
   %partial = v_mfma_f32_32x32x1_2b_f32 %lhs0, %rhs0, %acc0
@@ -274,6 +277,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_f32_mfma_32_register_res
 // RUN: emit amdgpu-assembly @gfx942_bf16_two_k_block_loads_schedule_before_mfma
 
 amdgpu.target<gfx942> @target
+
 low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_bf16_two_k_block_loads_schedule_before_mfma(%workitem_id: reg<amdgpu.vgpr>, %lhs_view: reg<amdgpu.sgpr x2>, %rhs_view: reg<amdgpu.sgpr x2>, %out_view: reg<amdgpu.sgpr x2>) asm {
   %lane = v_and_b32_src0_inline %workitem_id, 15
   %byte_offset = v_lshlrev_b32_src0_inline %lane, 5

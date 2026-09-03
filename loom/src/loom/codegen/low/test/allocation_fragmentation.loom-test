@@ -11,44 +11,21 @@
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @loop_fragmentation(
-    %pointer: reg<test.ptr>,
-    %condition: reg<test.i32>,
-    %rhs0: reg<test.i32 x8>,
-    %rhs1: reg<test.i32 x8>,
-    %acc0: reg<test.i32 x8>,
-    %acc1: reg<test.i32 x8>,
-    %acc2: reg<test.i32 x8>) ->
-    (reg<test.i32 x8>, reg<test.i32 x8>, reg<test.i32 x8>) asm {
+low.func.def target<test.low.core>(@test_target) @loop_fragmentation(%pointer: reg<test.ptr>, %condition: reg<test.i32>, %rhs0: reg<test.i32 x8>, %rhs1: reg<test.i32 x8>, %acc0: reg<test.i32 x8>, %acc1: reg<test.i32 x8>, %acc2: reg<test.i32 x8>) -> (reg<test.i32 x8>, reg<test.i32 x8>, reg<test.i32 x8>) asm {
   low.br ^loop(%acc0: reg<test.i32 x8>, %acc1: reg<test.i32 x8>, %acc2: reg<test.i32 x8>)
 ^loop(%carried0: reg<test.i32 x8>, %carried1: reg<test.i32 x8>, %carried2: reg<test.i32 x8>):
-  %lhs0_low = low.op<test.load.v4i32>(%pointer) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  %lhs0_high = low.op<test.load.v4i32>(%pointer) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  %lhs0 = concat(%lhs0_low, %lhs0_high) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
-  %next0 = low.op<test.accumulate.v8i32>(%lhs0, %rhs0, %carried0) :
-      (reg<test.i32 x8>, reg<test.i32 x8>, reg<test.i32 x8>) ->
-      %carried0 as reg<test.i32 x8>
-  %lhs1_low = low.op<test.load.v4i32>(%pointer) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  %lhs1_high = low.op<test.load.v4i32>(%pointer) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  %lhs1 = concat(%lhs1_low, %lhs1_high) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
-  %next1 = low.op<test.accumulate.v8i32>(%lhs1, %rhs1, %carried1) :
-      (reg<test.i32 x8>, reg<test.i32 x8>, reg<test.i32 x8>) ->
-      %carried1 as reg<test.i32 x8>
-  %lhs2_low = low.op<test.load.v4i32>(%pointer) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  %lhs2_high = low.op<test.load.v4i32>(%pointer) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  %lhs2 = concat(%lhs2_low, %lhs2_high) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
-  %next2 = low.op<test.accumulate.v8i32>(%lhs2, %rhs0, %carried2) :
-      (reg<test.i32 x8>, reg<test.i32 x8>, reg<test.i32 x8>) ->
-      %carried2 as reg<test.i32 x8>
+  %lhs0_low = test.load.v4i32 %pointer
+  %lhs0_high = test.load.v4i32 %pointer
+  %lhs0 = concat(%lhs0_low, %lhs0_high) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
+  %next0 = test.accumulate.v8i32 %lhs0, %rhs0, %carried0
+  %lhs1_low = test.load.v4i32 %pointer
+  %lhs1_high = test.load.v4i32 %pointer
+  %lhs1 = concat(%lhs1_low, %lhs1_high) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
+  %next1 = test.accumulate.v8i32 %lhs1, %rhs1, %carried1
+  %lhs2_low = test.load.v4i32 %pointer
+  %lhs2_high = test.load.v4i32 %pointer
+  %lhs2 = concat(%lhs2_low, %lhs2_high) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
+  %next2 = test.accumulate.v8i32 %lhs2, %rhs0, %carried2
   low.cond_br %condition, ^backedge, ^exit_edge : reg<test.i32>
 ^backedge:
   low.br ^loop(%next0: reg<test.i32 x8>, %next1: reg<test.i32 x8>, %next2: reg<test.i32 x8>)

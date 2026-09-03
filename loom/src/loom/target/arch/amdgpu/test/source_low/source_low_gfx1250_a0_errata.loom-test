@@ -47,7 +47,7 @@ func.def target(@target) @a0_sparse_f32_matrix_selection(%lhs_data: vector<8xi32
   %k = index.constant 128 : index
   %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=32, payload_registers=8, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=64, payload_registers=16> : encoding<schema>
-  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %metadata : vector<2xi32>, schema = %lhs_schema : encoding<schema>} : vector<8xi32>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>, sparsity = %metadata : vector<2xi32>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<16xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
   // ERROR@+1: AMDGPU/047 {function_name="a0_sparse_f32_matrix_selection", descriptor_name="amdgpu.v_swmmac_f32_16x16x128_fp8_fp8", target="gfx1250-a0", constraint_key="amdgpu.swmmac.low_precision_lowering", legalization_key="lower_low_precision_swmmac"}
@@ -61,7 +61,7 @@ func.def target(@target) @a0_sparse_f16_matrix_selection(%lhs_data: vector<8xi32
   %k = index.constant 128 : index
   %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=32, payload_registers=8, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=64, payload_registers=16> : encoding<schema>
-  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %metadata : vector<2xi32>, schema = %lhs_schema : encoding<schema>} : vector<8xi32>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>, sparsity = %metadata : vector<2xi32>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<16xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf16>
   // ERROR@+1: AMDGPU/047 {function_name="a0_sparse_f16_matrix_selection", descriptor_name="amdgpu.v_swmmac_f16_16x16x128_fp8_fp8", target="gfx1250-a0", constraint_key="amdgpu.swmmac.low_precision_lowering", legalization_key="lower_low_precision_swmmac"}
@@ -75,7 +75,7 @@ func.def target(@target) @a0_sparse_k32_matrix_selection(%lhs_data: vector<2xi32
   %k = index.constant 32 : index
   %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=16, payload_registers=4> : encoding<schema>
-  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<2xi32>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>, sparsity = %metadata : vector<1xi32>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
   // ERROR@+1: AMDGPU/047 {function_name="a0_sparse_k32_matrix_selection", descriptor_name="amdgpu.v_swmmac_f32_16x16x32_fp8_bf8", target="gfx1250-a0", constraint_key="amdgpu.swmmac.low_precision_lowering", legalization_key="lower_low_precision_swmmac"}
@@ -95,9 +95,9 @@ func.def target(@target) @b0_sparse_k32_matrix_selection(%fp8_lhs_data: vector<2
   %fp8_rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=16, payload_registers=4> : encoding<schema>
   %bf8_lhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %bf8_rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=16, payload_registers=4> : encoding<schema>
-  %fp8_lhs = vector.fragment<lhs> %fp8_lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %fp8_lhs_schema : encoding<schema>} : vector<2xi32>
+  %fp8_lhs = vector.fragment<lhs> %fp8_lhs_data shape [%m, %k] using {schema = %fp8_lhs_schema : encoding<schema>, sparsity = %metadata : vector<1xi32>} : vector<2xi32>
   %fp8_rhs = vector.fragment<rhs> %fp8_rhs_data shape [%k, %n] using {schema = %fp8_rhs_schema : encoding<schema>} : vector<4xi32>
-  %bf8_lhs = vector.fragment<lhs> %bf8_lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %bf8_lhs_schema : encoding<schema>} : vector<2xi32>
+  %bf8_lhs = vector.fragment<lhs> %bf8_lhs_data shape [%m, %k] using {schema = %bf8_lhs_schema : encoding<schema>, sparsity = %metadata : vector<1xi32>} : vector<2xi32>
   %bf8_rhs = vector.fragment<rhs> %bf8_rhs_data shape [%k, %n] using {schema = %bf8_rhs_schema : encoding<schema>} : vector<4xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
   %fp8_fp8 = vector.mma %fp8_lhs, %fp8_rhs, %init : vector<2xi32>, vector<4xi32>, vector<8xf32>

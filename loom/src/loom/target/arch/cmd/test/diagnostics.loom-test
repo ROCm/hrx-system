@@ -96,6 +96,7 @@ command.program.def public @dynamic_argument(%scale: i32) launch() {
 // RUN: emit command-program @unordered_indirect_dispatch
 
 kernel.entry.decl @write_counts(%counts: view<3xi32>)
+
 kernel.entry.decl @use_counts()
 
 command.program.def public @unordered_indirect_dispatch() launch() {

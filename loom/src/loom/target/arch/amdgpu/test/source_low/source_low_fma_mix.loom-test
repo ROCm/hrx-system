@@ -1,6 +1,7 @@
 // RUN: emit source-low diagnostics=all output=low
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @packed_f16_vector_fma(%a: vector<2xf16>, %b: vector<2xf16>, %c: vector<2xf16>) -> (vector<2xf16>) {
   %result = vector.fmaf %a, %b, %c : vector<2xf16>
   func.return %result : vector<2xf16>
@@ -15,6 +16,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @p
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @packed_f16_vector4_fma(%a: vector<4xf16>, %b: vector<4xf16>, %c: vector<4xf16>) -> (vector<4xf16>) {
   %result = vector.fmaf %a, %b, %c : vector<4xf16>
   func.return %result : vector<4xf16>
@@ -37,6 +39,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @p
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 kernel.def target(@gfx11_target) @packed_f16_affine_epilogue_kernel() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -83,6 +86,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx11_target) workgroup_size(6
 // ====
 
 amdgpu.target<gfx9-4-generic> @gfx9_4_target
+
 func.def target(@gfx9_4_target) @packed_f32_vector_fma(%a: vector<2xf32>, %b: vector<2xf32>, %c: vector<2xf32>) -> (vector<2xf32>) {
   %result = vector.fmaf %a, %b, %c : vector<2xf32>
   func.return %result : vector<2xf32>
@@ -97,6 +101,7 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_target) abi(hal_kernel) 
 // ====
 
 amdgpu.target<gfx9-4-generic> @gfx9_4_target
+
 func.def target(@gfx9_4_target) @packed_f32_vector4_fma(%a: vector<4xf32>, %b: vector<4xf32>, %c: vector<4xf32>) -> (vector<4xf32>) {
   %result = vector.fmaf %a, %b, %c : vector<4xf32>
   func.return %result : vector<4xf32>
@@ -119,6 +124,7 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_target) abi(hal_kernel) 
 // ====
 
 amdgpu.target<gfx9-4-generic> @gfx9_4_target
+
 kernel.def target(@gfx9_4_target) @packed_f32_uniform_vector4_fma() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -183,6 +189,7 @@ low.kernel.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_target) workgroup_size
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @packed_i16_vector_fmai(%a: vector<2xi16>, %b: vector<2xi16>, %c: vector<2xi16>) -> (vector<2xi16>) {
   %result = vector.fmai %a, %b, %c : vector<2xi16>
   func.return %result : vector<2xi16>
@@ -197,6 +204,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @p
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @packed_i16_vector_fmai_nuw(%a: vector<2xi16>, %b: vector<2xi16>, %c: vector<2xi16>) -> (vector<2xi16>) {
   %result = vector.fmai<nuw> %a, %b, %c : vector<2xi16>
   func.return %result : vector<2xi16>
@@ -211,6 +219,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @p
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @packed_i16_vector4_fmai(%a: vector<4xi16>, %b: vector<4xi16>, %c: vector<4xi16>) -> (vector<4xi16>) {
   %result = vector.fmai<nsw> %a, %b, %c : vector<4xi16>
   func.return %result : vector<4xi16>
@@ -233,6 +242,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @p
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @packed_i16_vector3_fmai_diagnostic(%a: vector<3xi16>, %b: vector<3xi16>, %c: vector<3xi16>) -> (vector<3xi16>) {
   // ERROR@+1: TARGET/003 {subject_role="lane-count", subject_name="vector<i16>", constraint_key="amdgpu.arithmetic.vector_i16_packed_even_lanes"}
   %result = vector.fmai %a, %b, %c : vector<3xi16>
@@ -242,6 +252,7 @@ func.def target(@gfx11_target) @packed_i16_vector3_fmai_diagnostic(%a: vector<3x
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @f32_fma_mix_extf_a(%a_half: f16, %b: f32, %c: f32) -> (f32) {
   %a = scalar.extf %a_half : f16 to f32
   %result = scalar.fmaf %a, %b, %c : f32
@@ -257,6 +268,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @f
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @f32_fma_mix_extf_b_c(%a: f32, %b_half: f16, %c_half: f16) -> (f32) {
   %b = scalar.extf %b_half : f16 to f32
   %c = scalar.extf %c_half : f16 to f32
@@ -273,6 +285,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @f
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @f32_fma_mix_extract_high_half(%packed: vector<2xf16>, %b: f32, %c: f32) -> (f32) {
   %a_half = vector.extract %packed[1] : vector<2xf16> -> f16
   %a = scalar.extf %a_half : f16 to f32
@@ -289,6 +302,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @f
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @f32_fma_mix_extract_lane2(%packed: vector<4xf16>, %b: f32, %c: f32) -> (f32) {
   %a_half = vector.extract %packed[2] : vector<4xf16> -> f16
   %a = scalar.extf %a_half : f16 to f32
@@ -306,6 +320,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @f
 // ====
 
 amdgpu.target<gfx9-4-generic> @gfx9_4_target
+
 func.def target(@gfx9_4_target) @f32_mad_mix_extf_a(%a_half: f16, %b: f32, %c: f32) -> (f32) {
   %a = scalar.extf %a_half : f16 to f32
   %result = scalar.fmaf %a, %b, %c : f32
@@ -321,6 +336,7 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_target) abi(hal_kernel) 
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @f16_fma_mixlo_insert_f32(%dest: vector<2xf16>, %a: f32, %b: f32, %c: f32) -> (vector<2xf16>) {
   %fma = scalar.fmaf %a, %b, %c : f32
   %half = scalar.fptrunc %fma : f32 to f16
@@ -339,6 +355,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @f
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @f16_fma_mixhi_insert_extract_source(%dest: vector<2xf16>, %packed: vector<2xf16>, %b: f32, %c: f32) -> (vector<2xf16>) {
   %a_half = vector.extract %packed[1] : vector<2xf16> -> f16
   %a = scalar.extf %a_half : f16 to f32
@@ -358,6 +375,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @f
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @f16_fma_mix_from_elements_f32(%a0: f32, %b0: f32, %c0: f32, %a1: f32, %b1: f32, %c1: f32) -> (vector<2xf16>) {
   %fma0 = scalar.fmaf %a0, %b0, %c0 : f32
   %half0 = scalar.fptrunc %fma0 : f32 to f16
@@ -380,6 +398,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @f
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @f16_fma_mix_from_elements_mulf_src2_lit(%a0: f32, %b0: f32, %a1: f32, %b1: f32) -> (vector<2xf16>) {
   %mul0 = scalar.mulf<nnan|nsz|contract> %a0, %b0 : f32
   %half0 = scalar.fptrunc %mul0 : f32 to f16
@@ -402,6 +421,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @f
 // ====
 
 amdgpu.target<gfx9-4-generic> @gfx9_4_target
+
 func.def target(@gfx9_4_target) @f16_mad_mixlo_insert_f32(%dest: vector<2xf16>, %a: f32, %b: f32, %c: f32) -> (vector<2xf16>) {
   %fma = scalar.fmaf %a, %b, %c : f32
   %half = scalar.fptrunc %fma : f32 to f16
@@ -420,6 +440,7 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_target) abi(hal_kernel) 
 // ====
 
 amdgpu.target<gfx9-4-generic> @gfx9_4_target
+
 func.def target(@gfx9_4_target) @f16_mad_mix_from_elements_f32(%a0: f32, %b0: f32, %c0: f32, %a1: f32, %b1: f32, %c1: f32) -> (vector<2xf16>) {
   %fma0 = scalar.fmaf %a0, %b0, %c0 : f32
   %half0 = scalar.fptrunc %fma0 : f32 to f16
@@ -442,6 +463,7 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_target) abi(hal_kernel) 
 // ====
 
 amdgpu.target<gfx9-4-generic> @gfx9_4_target
+
 func.def target(@gfx9_4_target) @f16_mad_mix_from_elements_mulf_zero_vgpr(%a0: f32, %b0: f32, %a1: f32, %b1: f32) -> (vector<2xf16>) {
   %mul0 = scalar.mulf<nnan|nsz|contract> %a0, %b0 : f32
   %half0 = scalar.fptrunc %mul0 : f32 to f16
@@ -465,6 +487,7 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_target) abi(hal_kernel) 
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @f16_fma_mix_dynamic_insert_rejected(%dest: vector<2xf16>, %a: f32, %b: f32, %c: f32, %lane: index) -> (vector<2xf16>) {
   %fma = scalar.fmaf %a, %b, %c : f32
   %half = scalar.fptrunc %fma : f32 to f16
@@ -496,6 +519,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @f
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @f16_fma_mix_mulf_requires_relaxed_zero_add_rejected(%dest: vector<2xf16>, %a: f32, %b: f32) -> (vector<2xf16>) {
   %product = scalar.mulf %a, %b : f32
   %half = scalar.fptrunc %product : f32 to f16
@@ -517,6 +541,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @f
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @f32_mulf_extf_requires_relaxed_zero_add(%a: f32, %scale_half: f16) -> (f32) {
   %scale = scalar.extf %scale_half : f16 to f32
   %result = scalar.mulf %a, %scale : f32
@@ -533,6 +558,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @f
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @f32_mulf_extf_literal_zero_diagnostics(%a: f32, %scale_half: f16) -> (f32) {
   %scale = scalar.extf %scale_half : f16 to f32
   // REMARK@+1: AMDGPU/027 {descriptor_name="amdgpu.v_fma_mix_f32.f16lo_f32_f32.src2_lit", source_operand_index="2", descriptor_set_name="amdgpu.gfx11.generic.core", constant_form="exact_f32_positive_zero", decision_key="selected", reason_key="literal_descriptor_available"}
@@ -549,6 +575,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @f
 // ====
 
 amdgpu.target<gfx9-4-generic> @gfx9_4_target
+
 func.def target(@gfx9_4_target) @vector_f32_mulf_splat_extf_gfx9_4(%q: vector<2xf32>, %scale_half: f16) -> (vector<2xf32>) {
   %scale = scalar.extf %scale_half : f16 to f32
   %scale_vector = vector.splat %scale : vector<2xf32>
@@ -571,6 +598,7 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_target) abi(hal_kernel) 
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @vector_f32_mulf_from_elements_extf(%q: vector<2xf32>, %scale_half: f16) -> (vector<2xf32>) {
   %scale = scalar.extf %scale_half : f16 to f32
   %scale_vector = vector.from_elements %scale, %scale : vector<2xf32>
@@ -592,6 +620,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @v
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @vector_f32_mulf_fragment_splat_extf(%q: vector<2xf32>, %scale_half: f16) -> (vector<2xf32>) {
   %m = index.constant 1 : index
   %n = index.constant 2 : index
@@ -616,6 +645,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @v
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @vector_f32_mulf_uniform_constant_keeps_mul(%q: vector<2xf32>) -> (vector<2xf32>) {
   %scale_vector = vector.constant 2.0 : vector<2xf32>
   %result = vector.mulf<nnan|nsz|contract> %q, %scale_vector : vector<2xf32>
@@ -635,6 +665,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @v
 // ====
 
 amdgpu.target<gfx11-generic> @gfx11_target
+
 func.def target(@gfx11_target) @vector_f32_mulf_splat_extract_high_half(%q: vector<2xf32>, %packed_scale: vector<2xf16>) -> (vector<2xf32>) {
   %scale_half = vector.extract %packed_scale[1] : vector<2xf16> -> f16
   %scale = scalar.extf %scale_half : f16 to f32

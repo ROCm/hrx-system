@@ -206,6 +206,7 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @gfx11
+
 amdgpu.target<gfx1200> @gfx12
 
 template.decl @demo.target_prune(%codes: vector<4xi32>) -> (vector<4xi8>)

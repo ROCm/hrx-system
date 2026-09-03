@@ -151,7 +151,7 @@ kernel.def @workgroup_atomics_are_observed() {
   %value = scalar.constant 1 : i32
   view.atomic.reduce<addi> %value, %view[%lane] {ordering = relaxed, scope = workgroup} : i32, view<64xi32>
   %old = view.atomic.rmw<addi> %value, %view[%lane] {ordering = release, scope = workgroup} : i32, view<64xi32> -> i32
-  %cmp = view.atomic.cmpxchg %old, %value, %view[%lane] {success_ordering = acq_rel, failure_ordering = acquire, scope = workgroup} : i32, view<64xi32> -> i32
+  %cmp = view.atomic.cmpxchg %old, %value, %view[%lane] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<64xi32> -> i32
   kernel.return
 }
 
@@ -251,19 +251,19 @@ kernel.def @existing_observations_are_preserved() {
 // RUN: with-locations pass sanitizer-insert-race-observations{checks=race}
 
 kernel.def @race_site_payload_locations() {
-  %unit_extent = index.constant 1 : index
-  kernel.launch.config workgroups(%unit_extent, %unit_extent, %unit_extent) workgroup_size(%unit_extent, %unit_extent, %unit_extent) : index
+  %unit_extent = index.constant 1 : index loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":2:3 to 2:42)
+  kernel.launch.config workgroups(%unit_extent, %unit_extent, %unit_extent) workgroup_size(%unit_extent, %unit_extent, %unit_extent) : index loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":3:3 to 3:141)
 } launch() {
-  %base = index.constant 0 : offset
-  %i = index.constant 0 : index
-  %bytes = index.constant 4 : offset
-  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
-  %view = buffer.view %scratch[%base] : buffer -> view<1xi32>
+  %base = index.constant 0 : offset loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":5:3 to 5:36)
+  %i = index.constant 0 : index loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":6:3 to 6:32)
+  %bytes = index.constant 4 : offset loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":7:3 to 7:37)
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":8:3 to 8:63)
+  %view = buffer.view %scratch[%base] : buffer -> view<1xi32> loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":9:3 to 9:62)
   %value = view.load %view[%i] : view<1xi32> -> i32 loc("race.loom":8:1)
   view.store %value, %view[%i] : i32, view<1xi32> loc("race.loom":9:1)
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel) loc("race.loom":10:1)
-  kernel.return
-}
+  kernel.return loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":13:3 to 13:16)
+} loc("loom/src/loom/sanitizer/test/insert_race_observations.loom-test":1:1 to 14:2)
 
 // ----
 kernel.def @race_site_payload_locations() {

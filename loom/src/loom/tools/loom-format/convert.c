@@ -142,14 +142,14 @@ static iree_status_t loom_format_read_module(
 }
 
 static iree_status_t loom_format_write_text_output(
-    const loom_module_t* module,
+    const loom_module_t* module, loom_text_print_flags_t text_print_flags,
     loom_text_low_asm_environment_t low_asm_environment,
     loom_format_output_t* out_output, iree_allocator_t allocator) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(allocator, &builder);
 
   const loom_text_print_options_t print_options = {
-      .flags = LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_PRESERVE_LOW_ASM,
+      .flags = text_print_flags,
       .low_asm_environment = low_asm_environment,
   };
   iree_status_t status = loom_text_print_module_to_builder_with_options(
@@ -215,15 +215,16 @@ static iree_status_t loom_format_write_bytecode_output(
   return status;
 }
 
-static iree_status_t loom_format_write_output(
+static iree_status_t loom_format_write_module(
     const loom_module_t* module, loom_module_format_t output_format,
+    loom_text_print_flags_t text_print_flags,
     iree_arena_block_pool_t* block_pool,
     loom_text_low_asm_environment_t low_asm_environment,
     loom_format_output_t* out_output, iree_allocator_t allocator) {
   switch (output_format) {
     case LOOM_MODULE_FORMAT_TEXT:
-      return loom_format_write_text_output(module, low_asm_environment,
-                                           out_output, allocator);
+      return loom_format_write_text_output(
+          module, text_print_flags, low_asm_environment, out_output, allocator);
     case LOOM_MODULE_FORMAT_BYTECODE:
       return loom_format_write_bytecode_output(
           module, block_pool, low_asm_environment, out_output, allocator);
@@ -239,7 +240,7 @@ static iree_status_t loom_format_write_output(
 // Verifies the complete module after parsing or reading and before any output
 // formatter observes it. Parsing must permit forward references, so unresolved
 // symbols and other cross-operation errors become visible only at this point.
-static iree_status_t loom_format_verify_input_module(
+static iree_status_t loom_format_verify_module(
     iree_const_byte_span_t input, iree_string_view_t filename,
     loom_module_format_t input_format, const loom_module_t* module,
     loom_diagnostic_sink_t diagnostic_sink) {
@@ -295,6 +296,10 @@ iree_status_t loom_format_convert(iree_const_byte_span_t input,
   if (options != NULL) {
     resolved_options = *options;
   }
+  if (resolved_options.text_print_flags == 0) {
+    resolved_options.text_print_flags =
+        LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_PRESERVE_LOW_ASM;
+  }
 
   if (resolved_options.output_format == LOOM_MODULE_FORMAT_AUTO) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -312,13 +317,13 @@ iree_status_t loom_format_convert(iree_const_byte_span_t input,
       resolved_options.diagnostic_sink, resolved_options.low_asm_environment,
       &module, allocator);
   if (iree_status_is_ok(status)) {
-    status =
-        loom_format_verify_input_module(input, filename, input_format, module,
-                                        resolved_options.diagnostic_sink);
+    status = loom_format_verify_module(input, filename, input_format, module,
+                                       resolved_options.diagnostic_sink);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_format_write_output(
-        module, resolved_options.output_format, block_pool,
+    status = loom_format_write_module(
+        module, resolved_options.output_format,
+        resolved_options.text_print_flags, block_pool,
         resolved_options.low_asm_environment, out_output, allocator);
   }
 

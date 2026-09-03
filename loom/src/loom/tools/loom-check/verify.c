@@ -18,7 +18,7 @@
 //===----------------------------------------------------------------------===//
 
 iree_status_t loom_check_execute_verify(
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
@@ -39,7 +39,7 @@ iree_status_t loom_check_execute_verify(
   iree_string_builder_t stripped_input;
   iree_string_builder_initialize(allocator, &stripped_input);
   iree_status_t status =
-      loom_check_strip_comments(test_case->input, &stripped_input);
+      loom_test_file_strip_comments(test_case->input, &stripped_input);
 
   // Parse the stripped input with the collector as the diagnostic sink.
   // Parse errors are emitted as diagnostics (not status failures).

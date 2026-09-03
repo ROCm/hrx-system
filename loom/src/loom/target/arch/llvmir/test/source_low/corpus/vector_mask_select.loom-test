@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/vector_mask_select.loom-test
 // RUN: emit source-low output=low
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32_cmpi_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
   %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<2xi32>
@@ -20,10 +18,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_cmpi
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f32_cmpf_select(%lhs: vector<1xf32>, %rhs: vector<1xf32>, %true_value: vector<1xf32>, %false_value: vector<1xf32>) -> (vector<1xf32>) {
   %mask = vector.cmpf olt, %lhs, %rhs : vector<1xf32> -> vector<1xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<1xf32>
@@ -39,10 +35,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_cmpf
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @scalar_cmpf_rhs_zero_inline(%value: f32) -> (i1) {
   %comparison_rhs = scalar.constant 0.0 : f32
   %mask = scalar.cmpf one, %value, %comparison_rhs : f32
@@ -58,10 +52,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_c
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @scalar_cmpf_lhs_one_inline(%value: f32) -> (i1) {
   %comparison_lhs = scalar.constant 1.0 : f32
   %mask = scalar.cmpf olt, %comparison_lhs, %value : f32
@@ -77,10 +69,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_c
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @vector_cmpf_rhs_zero_inline(%value: vector<2xf32>) -> (vector<2xi1>) {
   %comparison_rhs_element = scalar.constant 0.0 : f32
   %comparison_rhs = vector.splat %comparison_rhs_element : vector<2xf32>
@@ -97,10 +87,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @vector_c
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32_cmpi_select_zero_inline(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
   %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
   %true_element = scalar.constant 0 : i32
@@ -119,10 +107,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_cmpi
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32_cmpi_select_small_inline(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
   %small = scalar.constant 3 : i32
   %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
@@ -141,10 +127,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_cmpi
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32_cmpi_select_noninline_constant(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
   %constant = scalar.constant 65 : i32
   %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
@@ -163,10 +147,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_cmpi
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xi64>, %false_value: vector<2xi64>) -> (vector<2xi64>) {
   %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<2xi64>
@@ -182,10 +164,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i64_vect
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xf64>, %false_value: vector<2xf64>) -> (vector<2xf64>) {
   %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<2xf64>
@@ -201,10 +181,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f64_vect
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i8_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>) -> (vector<4xi8>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.splat %condition : vector<4xi1>
@@ -222,10 +200,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i8_scala
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i8_repeated_element_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>) -> (vector<4xi8>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.from_elements %condition, %condition, %condition, %condition : vector<4xi1>
@@ -243,10 +219,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i8_repea
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i16_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<2xi16>, %false_value: vector<2xi16>) -> (vector<2xi16>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.splat %condition : vector<2xi1>
@@ -264,10 +238,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i16_scal
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @bf16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true_value: vector<4xbf16>, %false_value: vector<4xbf16>) -> (vector<4xbf16>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.splat %condition : vector<4xi1>
@@ -285,10 +257,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @bf16_sca
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @bf16_scalar_mask_select_v16(%lhs: i32, %rhs: i32, %true_value: vector<16xbf16>, %false_value: vector<16xbf16>) -> (vector<16xbf16>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.splat %condition : vector<16xi1>
@@ -306,10 +276,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @bf16_sca
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true_value: vector<4xf16>, %false_value: vector<4xf16>) -> (vector<4xf16>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.splat %condition : vector<4xi1>
@@ -327,10 +295,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f16_scal
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i64_splat(%value: i64) -> (vector<2xi64>) {
   %splat = vector.splat %value : vector<2xi64>
   func.return %splat : vector<2xi64>
@@ -344,10 +310,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i64_spla
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f64_splat(%value: f64) -> (vector<2xf64>) {
   %splat = vector.splat %value : vector<2xf64>
   func.return %splat : vector<2xf64>

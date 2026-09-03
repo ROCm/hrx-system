@@ -489,7 +489,7 @@ func.def @access_after_memory_scalarization_checks_per_lane_vector_memory(%input
 func.def @access_only_instruments_vector_atomic_memory(%view: view<16xi32>, %origin: index, %offsets: vector<2xindex>, %value: vector<2xi32>, %expected: vector<2xi32>, %replacement: vector<2xi32>) -> (vector<2xi32>, vector<2xi32>) {
   vector.atomic.reduce<addi> %value, %view[%origin][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xi32>, view<16xi32>, vector<2xindex>
   %old = vector.atomic.rmw<addi> %value, %view[%origin][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xi32>, view<16xi32>, vector<2xindex>
-  %cmp = vector.atomic.cmpxchg %expected, %replacement, %view[%origin][%offsets] {success_ordering = acq_rel, failure_ordering = acquire, scope = workgroup} : vector<2xi32>, view<16xi32>, vector<2xindex> -> vector<2xi32>
+  %cmp = vector.atomic.cmpxchg %expected, %replacement, %view[%origin][%offsets] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<2xi32>, view<16xi32>, vector<2xindex> -> vector<2xi32>
   func.return %old, %cmp : vector<2xi32>, vector<2xi32>
 }
 

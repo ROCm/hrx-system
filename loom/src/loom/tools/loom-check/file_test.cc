@@ -225,7 +225,7 @@ TEST_F(FileTest, UpdateSynchronizesOnceAndThenIsByteStable) {
       "\n"
       "// ====\n"
       "\n"
-      "func.def @beta() {\n"
+      "func.def @beta(){\n"
       "}\n";
   const std::string target_source =
       "// TEMPLATE: " + RootRelativeName(template_path.path()) + "\n" +
@@ -241,7 +241,8 @@ TEST_F(FileTest, UpdateSynchronizesOnceAndThenIsByteStable) {
                          &first_counts));
   const std::string synchronized_source = ReadFile(target_path.path());
   EXPECT_NE(synchronized_source, target_source);
-  EXPECT_THAT(synchronized_source, HasSubstr("func.def @beta()"));
+  EXPECT_THAT(synchronized_source, HasSubstr("func.def @beta() {"));
+  EXPECT_EQ(synchronized_source.find("func.def @beta(){"), std::string::npos);
   EXPECT_EQ(first_counts.pass_count, 2u);
   EXPECT_EQ(first_counts.fail_count, 0u);
   EXPECT_EQ(first_counts.skip_count, 0u);

@@ -481,6 +481,7 @@ func.def public @entry(%arg: i32) -> (i32) {
 // RUN: pass select-templates,inline-callables
 
 test.target<low_core> @low_core
+
 test.target<quirky> @quirky
 
 template.decl @demo.targeted(%value: i32) -> (i32)
@@ -520,6 +521,7 @@ func.def public target(@low_core) @entry(%arg: i32) -> (i32) {
 // RUN: pass select-templates,inline-callables
 
 test.target<low_core> @low_core
+
 test.target<quirky> @quirky
 
 template.decl @demo.target_fallback(%value: i32) -> (i32)
@@ -554,6 +556,7 @@ func.def public target(@low_core) @entry(%arg: i32) -> (i32) {
 // RUN: pass select-templates,inline-callables
 
 test.target<low_core> @low_core
+
 test.target<quirky> @quirky
 
 template.decl @demo.ukernel_target(%value: i32) -> (i32)

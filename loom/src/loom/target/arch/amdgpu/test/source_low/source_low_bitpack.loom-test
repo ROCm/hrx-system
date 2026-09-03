@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32x4_to_i8x4_bitpack(%codes: vector<4xi32>) -> (vector<4xi8>) {
   %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
   func.return %packed : vector<4xi8>
@@ -22,6 +23,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x4_t
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32x8_to_i4x8_bitpack(%codes: vector<8xi32>) -> (vector<4xi8>) {
   %packed = vector.bitpack<4> %codes : vector<8xi32> -> vector<4xi8>
   func.return %packed : vector<4xi8>
@@ -58,6 +60,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x8_t
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32x16_to_i2x16_bitpack(%codes: vector<16xi32>) -> (vector<4xi8>) {
   %packed = vector.bitpack<2> %codes : vector<16xi32> -> vector<4xi8>
   func.return %packed : vector<4xi8>
@@ -118,6 +121,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x16_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32x32_to_i1x32_bitpack(%mask: vector<32xi32>) -> (vector<4xi8>) {
   %packed = vector.bitpack<1> %mask : vector<32xi32> -> vector<4xi8>
   func.return %packed : vector<4xi8>
@@ -226,6 +230,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x32_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @uniform_global_i32x4_to_i8x4_bitpack_store() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index

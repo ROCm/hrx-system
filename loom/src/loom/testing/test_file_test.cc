@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/tools/loom-check/check.h"
+#include "loom/testing/test_file.h"
 
 #include <cstring>
 
@@ -14,7 +14,7 @@
 
 namespace {
 
-class CheckParseTest : public ::testing::Test {
+class TestFileParseTest : public ::testing::Test {
  protected:
   void SetUp() override {
     allocator_ = iree_allocator_system();
@@ -32,7 +32,7 @@ class CheckParseTest : public ::testing::Test {
     iree_arena_reset(&arena_);
     file_ = {};
     source_ = iree_make_cstring_view(source);
-    return loom_check_parse(source_, &arena_, &file_);
+    return loom_test_file_parse(source_, &arena_, &file_);
   }
 
   iree_host_size_t OffsetOf(const char* fragment) {
@@ -41,19 +41,19 @@ class CheckParseTest : public ::testing::Test {
     return found ? (iree_host_size_t)(found - source_.data) : 0;
   }
 
-  void ExpectRange(loom_check_source_range_t source_range,
+  void ExpectRange(loom_test_source_range_t source_range,
                    iree_host_size_t start_byte, iree_host_size_t end_byte) {
     EXPECT_EQ(source_range.start_byte, start_byte);
     EXPECT_EQ(source_range.end_byte, end_byte);
   }
 
-  void ExpectRangeForFragment(loom_check_source_range_t source_range,
+  void ExpectRangeForFragment(loom_test_source_range_t source_range,
                               const char* fragment) {
     iree_host_size_t start_byte = OffsetOf(fragment);
     ExpectRange(source_range, start_byte, start_byte + strlen(fragment));
   }
 
-  void ExpectRequirementName(const loom_check_case_t& test_case,
+  void ExpectRequirementName(const loom_test_case_t& test_case,
                              iree_host_size_t requirement_index,
                              const char* expected_name) {
     ASSERT_LT(requirement_index, test_case.requirement_count);
@@ -66,125 +66,125 @@ class CheckParseTest : public ::testing::Test {
   iree_arena_block_pool_t block_pool_ = {};
   iree_arena_allocator_t arena_ = {};
   iree_string_view_t source_;
-  loom_check_file_t file_ = {};
+  loom_test_file_t file_ = {};
 };
 
 // ===----------------------------------------------------------------------===
 // Directive parsing
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, NoDirectiveDefaultsToRoundtrip) {
+TEST_F(TestFileParseTest, NoDirectiveDefaultsToRoundtrip) {
   IREE_ASSERT_OK(Parse("func.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_ROUNDTRIP);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_ROUNDTRIP);
 }
 
-TEST_F(CheckParseTest, ExplicitRoundtrip) {
+TEST_F(TestFileParseTest, ExplicitRoundtrip) {
   IREE_ASSERT_OK(Parse("// RUN: roundtrip\nfunc.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_ROUNDTRIP);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_ROUNDTRIP);
 }
 
-TEST_F(CheckParseTest, RoundtripWithLocations) {
+TEST_F(TestFileParseTest, RoundtripWithLocations) {
   IREE_ASSERT_OK(Parse("// RUN: with-locations roundtrip\nfunc.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_ROUNDTRIP);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_ROUNDTRIP);
   EXPECT_TRUE(iree_all_bits_set(file_.cases[0].output_flags,
-                                LOOM_CHECK_OUTPUT_LOCATIONS));
+                                LOOM_TEST_OUTPUT_LOCATIONS));
 }
 
-TEST_F(CheckParseTest, VerifyMode) {
+TEST_F(TestFileParseTest, VerifyMode) {
   IREE_ASSERT_OK(Parse("// RUN: verify\nfunc.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_VERIFY);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_VERIFY);
 }
 
-TEST_F(CheckParseTest, PassMode) {
+TEST_F(TestFileParseTest, PassMode) {
   IREE_ASSERT_OK(Parse("// RUN: pass dce,cse\nfunc.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_PASS);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_PASS);
   EXPECT_TRUE(iree_string_view_equal(file_.cases[0].pipeline,
                                      iree_make_cstring_view("dce,cse")));
 }
 
-TEST_F(CheckParseTest, PassWithLocations) {
+TEST_F(TestFileParseTest, PassWithLocations) {
   IREE_ASSERT_OK(
       Parse("// RUN: with-locations pass dce,cse\nfunc.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_PASS);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_PASS);
   EXPECT_TRUE(iree_all_bits_set(file_.cases[0].output_flags,
-                                LOOM_CHECK_OUTPUT_LOCATIONS));
+                                LOOM_TEST_OUTPUT_LOCATIONS));
   EXPECT_TRUE(iree_string_view_equal(file_.cases[0].pipeline,
                                      iree_make_cstring_view("dce,cse")));
 }
 
-TEST_F(CheckParseTest, PassReportMode) {
+TEST_F(TestFileParseTest, PassReportMode) {
   IREE_ASSERT_OK(Parse("// RUN: pass-report dce,cse\nfunc.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_PASS_REPORT);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_PASS_REPORT);
   EXPECT_TRUE(iree_string_view_equal(file_.cases[0].pipeline,
                                      iree_make_cstring_view("dce,cse")));
 }
 
-TEST_F(CheckParseTest, CompileReportMode) {
+TEST_F(TestFileParseTest, CompileReportMode) {
   IREE_ASSERT_OK(Parse("// RUN: compile-report dce,cse\nfunc.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_COMPILE_REPORT);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_COMPILE_REPORT);
   EXPECT_TRUE(iree_string_view_equal(file_.cases[0].pipeline,
                                      iree_make_cstring_view("dce,cse")));
 }
 
-TEST_F(CheckParseTest, DuplicateRunModifierRejected) {
+TEST_F(TestFileParseTest, DuplicateRunModifierRejected) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       Parse("// RUN: with-locations with-locations roundtrip\n"
             "func.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, RunModifierRequiresSupportedMode) {
+TEST_F(TestFileParseTest, RunModifierRequiresSupportedMode) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: with-locations verify\n"
                               "func.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, FormatMode) {
+TEST_F(TestFileParseTest, FormatMode) {
   IREE_ASSERT_OK(Parse("// RUN: format bytecode\nfunc.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_FORMAT);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_FORMAT);
   EXPECT_TRUE(iree_string_view_equal(file_.cases[0].format_target,
                                      iree_make_cstring_view("bytecode")));
 }
 
-TEST_F(CheckParseTest, EmitMode) {
+TEST_F(TestFileParseTest, EmitMode) {
   IREE_ASSERT_OK(Parse("// RUN: emit target-form @entry\nfunc.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_EMIT);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_EMIT);
   EXPECT_TRUE(
       iree_string_view_equal(file_.cases[0].emit_target,
                              iree_make_cstring_view("target-form @entry")));
 }
 
-TEST_F(CheckParseTest, EmitBitcodeMode) {
+TEST_F(TestFileParseTest, EmitBitcodeMode) {
   IREE_ASSERT_OK(
       Parse("// RUN: emit target-bitcode target-key-a\nfunc.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_EMIT);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_EMIT);
   EXPECT_TRUE(iree_string_view_equal(
       file_.cases[0].emit_target,
       iree_make_cstring_view("target-bitcode target-key-a")));
 }
 
-TEST_F(CheckParseTest, EmitObjectMode) {
+TEST_F(TestFileParseTest, EmitObjectMode) {
   IREE_ASSERT_OK(
       Parse("// RUN: emit target-object target-key-a\nfunc.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_EMIT);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_EMIT);
   EXPECT_TRUE(iree_string_view_equal(
       file_.cases[0].emit_target,
       iree_make_cstring_view("target-object target-key-a")));
 }
 
-TEST_F(CheckParseTest, XfailDirective) {
+TEST_F(TestFileParseTest, XfailDirective) {
   IREE_ASSERT_OK(
       Parse("// XFAIL: parser does not support this yet\n"
             "func.def @f() {}\n"));
@@ -195,17 +195,17 @@ TEST_F(CheckParseTest, XfailDirective) {
       iree_make_cstring_view("parser does not support this yet")));
 }
 
-TEST_F(CheckParseTest, RunAndXfail) {
+TEST_F(TestFileParseTest, RunAndXfail) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// XFAIL: known verifier gap\n"
             "func.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_VERIFY);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_VERIFY);
   EXPECT_TRUE(file_.cases[0].xfail);
 }
 
-TEST_F(CheckParseTest, RequiresDirective) {
+TEST_F(TestFileParseTest, RequiresDirective) {
   IREE_ASSERT_OK(
       Parse("// RUN: emit target-bitcode\n"
             "// REQUIRES: tool-dis, tool-backend\n"
@@ -217,7 +217,7 @@ TEST_F(CheckParseTest, RequiresDirective) {
   ExpectRequirementName(file_.cases[0], 1, "tool-backend");
 }
 
-TEST_F(CheckParseTest, RequiresDirectiveAllowsWhitespaceSeparatedNames) {
+TEST_F(TestFileParseTest, RequiresDirectiveAllowsWhitespaceSeparatedNames) {
   IREE_ASSERT_OK(
       Parse("// REQUIRES: tool-dis tool tool-backend\n"
             "func.def @f() {}\n"));
@@ -228,7 +228,7 @@ TEST_F(CheckParseTest, RequiresDirectiveAllowsWhitespaceSeparatedNames) {
   ExpectRequirementName(file_.cases[0], 2, "tool-backend");
 }
 
-TEST_F(CheckParseTest, TemplateDirectiveInPreamble) {
+TEST_F(TestFileParseTest, TemplateDirectiveInPreamble) {
   IREE_ASSERT_OK(Parse(
       "// TEMPLATE: loom/src/loom/test/corpus/vector/arithmetic.loom-test\n"
       "// RUN: verify\n"
@@ -243,22 +243,22 @@ TEST_F(CheckParseTest, TemplateDirectiveInPreamble) {
   ExpectRangeForFragment(
       file_.template_directive_range,
       "// TEMPLATE: loom/src/loom/test/corpus/vector/arithmetic.loom-test");
-  EXPECT_EQ(file_.default_mode, LOOM_CHECK_MODE_VERIFY);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_VERIFY);
-  EXPECT_TRUE(loom_check_source_range_is_empty(file_.cases[0].separator_range));
+  EXPECT_EQ(file_.default_mode, LOOM_TEST_MODE_VERIFY);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_VERIFY);
+  EXPECT_TRUE(loom_test_source_range_is_empty(file_.cases[0].separator_range));
 }
 
-TEST_F(CheckParseTest, TemplateDirectiveOnlyPreambleHasNoCases) {
+TEST_F(TestFileParseTest, TemplateDirectiveOnlyPreambleHasNoCases) {
   IREE_ASSERT_OK(Parse(
       "// TEMPLATE: loom/src/loom/test/corpus/vector/arithmetic.loom-test\n"
       "// RUN: verify\n"
       "\n"));
   EXPECT_TRUE(file_.has_template_directive);
-  EXPECT_EQ(file_.default_mode, LOOM_CHECK_MODE_VERIFY);
+  EXPECT_EQ(file_.default_mode, LOOM_TEST_MODE_VERIFY);
   EXPECT_EQ(file_.case_count, 0);
 }
 
-TEST_F(CheckParseTest, TemplateDirectiveRequiresPurePreamble) {
+TEST_F(TestFileParseTest, TemplateDirectiveRequiresPurePreamble) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       Parse("func.def @f() {}\n"
@@ -267,7 +267,7 @@ TEST_F(CheckParseTest, TemplateDirectiveRequiresPurePreamble) {
             "func.def @g() {}\n"));
 }
 
-TEST_F(CheckParseTest, TemplateDirectiveDoesNotRequireCaseSeparator) {
+TEST_F(TestFileParseTest, TemplateDirectiveDoesNotRequireCaseSeparator) {
   IREE_ASSERT_OK(
       Parse("// TEMPLATE: "
             "loom/src/loom/test/corpus/vector/arithmetic.loom-test\n"
@@ -276,7 +276,7 @@ TEST_F(CheckParseTest, TemplateDirectiveDoesNotRequireCaseSeparator) {
   EXPECT_TRUE(file_.has_template_directive);
 }
 
-TEST_F(CheckParseTest, TemplateDirectiveRejectsSeparatorBeforeFirstCase) {
+TEST_F(TestFileParseTest, TemplateDirectiveRejectsSeparatorBeforeFirstCase) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       Parse("// TEMPLATE: "
@@ -286,7 +286,7 @@ TEST_F(CheckParseTest, TemplateDirectiveRejectsSeparatorBeforeFirstCase) {
             "func.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, TemplateDirectiveInCaseErrors) {
+TEST_F(TestFileParseTest, TemplateDirectiveInCaseErrors) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       Parse("func.def @first() {}\n"
@@ -298,25 +298,25 @@ TEST_F(CheckParseTest, TemplateDirectiveInCaseErrors) {
             "func.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, TemplateDirectiveEmptyPathErrors) {
+TEST_F(TestFileParseTest, TemplateDirectiveEmptyPathErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// TEMPLATE: \n"
                               "func.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, TemplateDirectiveAbsolutePathErrors) {
+TEST_F(TestFileParseTest, TemplateDirectiveAbsolutePathErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// TEMPLATE: /tmp/corpus.loom-test\n"
                               "func.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, TemplateDirectiveParentSegmentErrors) {
+TEST_F(TestFileParseTest, TemplateDirectiveParentSegmentErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// TEMPLATE: runtime/src/../corpus.loom-test\n"
                               "func.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, MultipleTemplateDirectivesError) {
+TEST_F(TestFileParseTest, MultipleTemplateDirectivesError) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       Parse("// TEMPLATE: "
@@ -326,25 +326,25 @@ TEST_F(CheckParseTest, MultipleTemplateDirectivesError) {
             "func.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, CaseDirectiveErrors) {
+TEST_F(TestFileParseTest, CaseDirectiveErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// CASE: f32_add\n"
                               "func.def @f32_add() {}\n"));
 }
 
-TEST_F(CheckParseTest, UnknownModeErrors) {
+TEST_F(TestFileParseTest, UnknownModeErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: foobar\nfunc.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, MultipleRunDirectivesError) {
+TEST_F(TestFileParseTest, MultipleRunDirectivesError) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: roundtrip\n"
                               "// RUN: verify\n"
                               "func.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, DirectiveAfterIRIsStrayError) {
+TEST_F(TestFileParseTest, DirectiveAfterIRIsStrayError) {
   // A "// RUN:" line after IR is a stray directive, not a comment.
   // This catches the silent misconfiguration where a comment or blank
   // line pushes a directive into the body.
@@ -353,25 +353,25 @@ TEST_F(CheckParseTest, DirectiveAfterIRIsStrayError) {
                               "// RUN: verify\n"));
 }
 
-TEST_F(CheckParseTest, PassWithoutPipelineErrors) {
+TEST_F(TestFileParseTest, PassWithoutPipelineErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse("// RUN: pass \n"));
 }
 
-TEST_F(CheckParseTest, FormatWithoutTargetErrors) {
+TEST_F(TestFileParseTest, FormatWithoutTargetErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: format \n"));
 }
 
-TEST_F(CheckParseTest, EmitWithoutTargetErrors) {
+TEST_F(TestFileParseTest, EmitWithoutTargetErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse("// RUN: emit \n"));
 }
 
-TEST_F(CheckParseTest, RunModeIsUnsupported) {
+TEST_F(TestFileParseTest, RunModeIsUnsupported) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: run --function=main\n"));
 }
 
-TEST_F(CheckParseTest, RunDirectiveWithoutSpaceAfterColonErrors) {
+TEST_F(TestFileParseTest, RunDirectiveWithoutSpaceAfterColonErrors) {
   // "// RUN:roundtrip" is malformed — the required space after the
   // colon is missing. This must error, not silently fall through as
   // a comment. Previously this was treated as a comment, which meant
@@ -380,39 +380,39 @@ TEST_F(CheckParseTest, RunDirectiveWithoutSpaceAfterColonErrors) {
                         Parse("// RUN:roundtrip\nfunc.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, XfailDirectiveWithoutSpaceAfterColonErrors) {
+TEST_F(TestFileParseTest, XfailDirectiveWithoutSpaceAfterColonErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// XFAIL:reason\nfunc.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, RequiresDirectiveWithoutSpaceAfterColonErrors) {
+TEST_F(TestFileParseTest, RequiresDirectiveWithoutSpaceAfterColonErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// REQUIRES:tool-dis\nfunc.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, RequiresDirectiveTrailingCommaErrors) {
+TEST_F(TestFileParseTest, RequiresDirectiveTrailingCommaErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// REQUIRES: tool-dis,\nfunc.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, RequiresDirectiveEmptyNameErrors) {
+TEST_F(TestFileParseTest, RequiresDirectiveEmptyNameErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// REQUIRES: tool-dis,,tool\n"
                               "func.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, RequiresDirectiveInvalidNameErrors) {
+TEST_F(TestFileParseTest, RequiresDirectiveInvalidNameErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// REQUIRES: tool/dis\nfunc.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, RequiresDirectiveDuplicateNameErrors) {
+TEST_F(TestFileParseTest, RequiresDirectiveDuplicateNameErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// REQUIRES: tool-dis, tool-dis\n"
                               "func.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, RunDirectiveWithoutSpaceAfterSlashesErrors) {
+TEST_F(TestFileParseTest, RunDirectiveWithoutSpaceAfterSlashesErrors) {
   // "//RUN: verify" is a natural typo. Without detection, this would
   // be silently consumed as a header comment and the test would default
   // to roundtrip mode — a false pass waiting to happen.
@@ -420,12 +420,12 @@ TEST_F(CheckParseTest, RunDirectiveWithoutSpaceAfterSlashesErrors) {
                         Parse("//RUN: verify\nfunc.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, XfailDirectiveWithoutSpaceAfterSlashesErrors) {
+TEST_F(TestFileParseTest, XfailDirectiveWithoutSpaceAfterSlashesErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("//XFAIL: reason\nfunc.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, RequiresDirectiveWithoutSpaceAfterSlashesErrors) {
+TEST_F(TestFileParseTest, RequiresDirectiveWithoutSpaceAfterSlashesErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("//REQUIRES: tool-dis\nfunc.def @f() {}\n"));
 }
@@ -434,7 +434,7 @@ TEST_F(CheckParseTest, RequiresDirectiveWithoutSpaceAfterSlashesErrors) {
 // Stray directive detection
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, StrayRunAfterAnnotationErrors) {
+TEST_F(TestFileParseTest, StrayRunAfterAnnotationErrors) {
   // A RUN directive after an annotation line has started the body.
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// ERROR@+1: TYPE/001\n"
@@ -442,19 +442,19 @@ TEST_F(CheckParseTest, StrayRunAfterAnnotationErrors) {
                               "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, StrayXfailAfterIRErrors) {
+TEST_F(TestFileParseTest, StrayXfailAfterIRErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("func.def @f() {}\n"
                               "// XFAIL: late reason\n"));
 }
 
-TEST_F(CheckParseTest, StrayRequiresAfterIRErrors) {
+TEST_F(TestFileParseTest, StrayRequiresAfterIRErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("func.def @f() {}\n"
                               "// REQUIRES: tool-dis\n"));
 }
 
-TEST_F(CheckParseTest, StrayRunInSecondCaseErrors) {
+TEST_F(TestFileParseTest, StrayRunInSecondCaseErrors) {
   // Stray detection applies per-case.
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: roundtrip\n"
@@ -468,7 +468,7 @@ TEST_F(CheckParseTest, StrayRunInSecondCaseErrors) {
 // Header comment consumption
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, CommentsBeforeDirectivesConsumed) {
+TEST_F(TestFileParseTest, CommentsBeforeDirectivesConsumed) {
   // Non-annotation comments before and between directives are
   // consumed as part of the header, not included in the input.
   IREE_ASSERT_OK(
@@ -476,27 +476,27 @@ TEST_F(CheckParseTest, CommentsBeforeDirectivesConsumed) {
             "// RUN: pass dce\n"
             "func.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_PASS);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_PASS);
   EXPECT_TRUE(iree_string_view_find(file_.cases[0].input,
                                     iree_make_cstring_view("edge case"),
                                     0) == IREE_STRING_VIEW_NPOS);
 }
 
-TEST_F(CheckParseTest, CommentsBetweenDirectivesConsumed) {
+TEST_F(TestFileParseTest, CommentsBetweenDirectivesConsumed) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// This is a descriptive comment.\n"
             "// XFAIL: reason\n"
             "func.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_VERIFY);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_VERIFY);
   EXPECT_TRUE(file_.cases[0].xfail);
   EXPECT_TRUE(iree_string_view_find(file_.cases[0].input,
                                     iree_make_cstring_view("descriptive"),
                                     0) == IREE_STRING_VIEW_NPOS);
 }
 
-TEST_F(CheckParseTest, AnnotationLineStartsBody) {
+TEST_F(TestFileParseTest, AnnotationLineStartsBody) {
   // A standalone annotation line starts the body even though it looks
   // like a comment. It must not be consumed by the header.
   IREE_ASSERT_OK(
@@ -511,7 +511,7 @@ TEST_F(CheckParseTest, AnnotationLineStartsBody) {
 // Section splitting
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, NoSeparatorInputEqualsExpected) {
+TEST_F(TestFileParseTest, NoSeparatorInputEqualsExpected) {
   IREE_ASSERT_OK(Parse("func.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
   EXPECT_FALSE(file_.cases[0].has_expected_section);
@@ -519,7 +519,7 @@ TEST_F(CheckParseTest, NoSeparatorInputEqualsExpected) {
       iree_string_view_equal(file_.cases[0].input, file_.cases[0].expected));
 }
 
-TEST_F(CheckParseTest, ExpectedSeparatorSplitsContent) {
+TEST_F(TestFileParseTest, ExpectedSeparatorSplitsContent) {
   IREE_ASSERT_OK(
       Parse("func.def @f() {\n"
             "  %x = test.constant 42 : i32\n"
@@ -537,7 +537,7 @@ TEST_F(CheckParseTest, ExpectedSeparatorSplitsContent) {
                                     0) == IREE_STRING_VIEW_NPOS);
 }
 
-TEST_F(CheckParseTest, MultipleCases) {
+TEST_F(TestFileParseTest, MultipleCases) {
   IREE_ASSERT_OK(
       Parse("func.def @first() {}\n"
             "// ====\n"
@@ -547,7 +547,7 @@ TEST_F(CheckParseTest, MultipleCases) {
   ASSERT_EQ(file_.case_count, 3);
 }
 
-TEST_F(CheckParseTest, CaseSeparator) {
+TEST_F(TestFileParseTest, CaseSeparator) {
   IREE_ASSERT_OK(
       Parse("func.def @a() {}\n"
             "// ====\n"
@@ -555,7 +555,7 @@ TEST_F(CheckParseTest, CaseSeparator) {
   ASSERT_EQ(file_.case_count, 2);
 }
 
-TEST_F(CheckParseTest, DirectivesNotInInput) {
+TEST_F(TestFileParseTest, DirectivesNotInInput) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "func.def @f() {}\n"));
@@ -568,7 +568,7 @@ TEST_F(CheckParseTest, DirectivesNotInInput) {
                                     0) != IREE_STRING_VIEW_NPOS);
 }
 
-TEST_F(CheckParseTest, EmptyExpectedSection) {
+TEST_F(TestFileParseTest, EmptyExpectedSection) {
   IREE_ASSERT_OK(
       Parse("func.def @f() {\n"
             "  %x = test.constant 42 : i32\n"
@@ -579,7 +579,7 @@ TEST_F(CheckParseTest, EmptyExpectedSection) {
   EXPECT_TRUE(iree_string_view_is_empty(file_.cases[0].expected));
 }
 
-TEST_F(CheckParseTest, BothSeparatorsInOneFile) {
+TEST_F(TestFileParseTest, BothSeparatorsInOneFile) {
   IREE_ASSERT_OK(
       Parse("// RUN: pass dce\n"
             "func.def @a() {\n"
@@ -593,9 +593,9 @@ TEST_F(CheckParseTest, BothSeparatorsInOneFile) {
             "// RUN: roundtrip\n"
             "func.def @b() {}\n"));
   ASSERT_EQ(file_.case_count, 2);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_PASS);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_PASS);
   EXPECT_TRUE(file_.cases[0].has_expected_section);
-  EXPECT_EQ(file_.cases[1].mode, LOOM_CHECK_MODE_ROUNDTRIP);
+  EXPECT_EQ(file_.cases[1].mode, LOOM_TEST_MODE_ROUNDTRIP);
   EXPECT_FALSE(file_.cases[1].has_expected_section);
 }
 
@@ -603,7 +603,7 @@ TEST_F(CheckParseTest, BothSeparatorsInOneFile) {
 // Annotation parsing
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, AnnotationWithDomainAndCode) {
+TEST_F(TestFileParseTest, AnnotationWithDomainAndCode) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "func.def @f() {\n"
@@ -619,7 +619,7 @@ TEST_F(CheckParseTest, AnnotationWithDomainAndCode) {
   EXPECT_EQ(ann.target_line, 3);  // Line 2 targets line 3 (+1).
 }
 
-TEST_F(CheckParseTest, AnnotationWithSubstring) {
+TEST_F(TestFileParseTest, AnnotationWithSubstring) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// ERROR@+1: TYPE/001 \"does not match\"\n"
@@ -631,7 +631,7 @@ TEST_F(CheckParseTest, AnnotationWithSubstring) {
                                      iree_make_cstring_view("does not match")));
 }
 
-TEST_F(CheckParseTest, AnnotationWithMultipleSubstrings) {
+TEST_F(TestFileParseTest, AnnotationWithMultipleSubstrings) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// ERROR@+1: STRUCTURE/013 \"operand 3\" \"result 0\"\n"
@@ -647,7 +647,7 @@ TEST_F(CheckParseTest, AnnotationWithMultipleSubstrings) {
                                      iree_make_cstring_view("result 0")));
 }
 
-TEST_F(CheckParseTest, AnnotationWithParamMatchers) {
+TEST_F(TestFileParseTest, AnnotationWithParamMatchers) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// ERROR@+1: DOMINANCE/011 {op_name=\"test.add.i32\", "
@@ -669,7 +669,7 @@ TEST_F(CheckParseTest, AnnotationWithParamMatchers) {
   EXPECT_EQ(ann.message_substring_count, 0);
 }
 
-TEST_F(CheckParseTest, AnnotationMultipleSubstringsNoDomain) {
+TEST_F(TestFileParseTest, AnnotationMultipleSubstringsNoDomain) {
   // Substring-only annotations also accept multiple quoted matchers.
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
@@ -687,8 +687,8 @@ TEST_F(CheckParseTest, AnnotationMultipleSubstringsNoDomain) {
                                      iree_make_cstring_view("third")));
 }
 
-TEST_F(CheckParseTest, AnnotationTooManySubstringsRejected) {
-  // Five substrings exceeds LOOM_CHECK_MAX_ANNOTATION_SUBSTRINGS (4).
+TEST_F(TestFileParseTest, AnnotationTooManySubstringsRejected) {
+  // Five substrings exceeds LOOM_TEST_MAX_ANNOTATION_SUBSTRINGS (4).
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       Parse("// RUN: verify\n"
@@ -696,7 +696,7 @@ TEST_F(CheckParseTest, AnnotationTooManySubstringsRejected) {
             "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationSubstringOnly) {
+TEST_F(TestFileParseTest, AnnotationSubstringOnly) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// ERROR@+1: \"something went wrong\"\n"
@@ -711,7 +711,7 @@ TEST_F(CheckParseTest, AnnotationSubstringOnly) {
                              iree_make_cstring_view("something went wrong")));
 }
 
-TEST_F(CheckParseTest, AnnotationWarning) {
+TEST_F(TestFileParseTest, AnnotationWarning) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// WARNING@+1: FOLD/003\n"
@@ -720,7 +720,7 @@ TEST_F(CheckParseTest, AnnotationWarning) {
   EXPECT_EQ(file_.cases[0].annotations[0].severity, LOOM_DIAGNOSTIC_WARNING);
 }
 
-TEST_F(CheckParseTest, AnnotationRemark) {
+TEST_F(TestFileParseTest, AnnotationRemark) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// REMARK@+1: \"optimized\"\n"
@@ -729,7 +729,7 @@ TEST_F(CheckParseTest, AnnotationRemark) {
   EXPECT_EQ(file_.cases[0].annotations[0].severity, LOOM_DIAGNOSTIC_REMARK);
 }
 
-TEST_F(CheckParseTest, AnnotationPositiveOffset) {
+TEST_F(TestFileParseTest, AnnotationPositiveOffset) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// ERROR@+1: TYPE/001\n"
@@ -739,7 +739,7 @@ TEST_F(CheckParseTest, AnnotationPositiveOffset) {
   EXPECT_EQ(file_.cases[0].annotations[0].target_line, 2);
 }
 
-TEST_F(CheckParseTest, AnnotationNegativeOffset) {
+TEST_F(TestFileParseTest, AnnotationNegativeOffset) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "  %x = test.bad : i32\n"
@@ -749,7 +749,7 @@ TEST_F(CheckParseTest, AnnotationNegativeOffset) {
   EXPECT_EQ(file_.cases[0].annotations[0].target_line, 1);
 }
 
-TEST_F(CheckParseTest, MultipleAnnotations) {
+TEST_F(TestFileParseTest, MultipleAnnotations) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// ERROR@+1: TYPE/001\n"
@@ -761,7 +761,7 @@ TEST_F(CheckParseTest, MultipleAnnotations) {
   EXPECT_EQ(file_.cases[0].annotations[1].severity, LOOM_DIAGNOSTIC_WARNING);
 }
 
-TEST_F(CheckParseTest, MultipleAnnotationsTargetingSameLine) {
+TEST_F(TestFileParseTest, MultipleAnnotationsTargetingSameLine) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// ERROR@+2: TYPE/001\n"
@@ -773,7 +773,7 @@ TEST_F(CheckParseTest, MultipleAnnotationsTargetingSameLine) {
   EXPECT_EQ(file_.cases[0].annotations[1].target_line, 3);
 }
 
-TEST_F(CheckParseTest, StandaloneAnnotation) {
+TEST_F(TestFileParseTest, StandaloneAnnotation) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// ERROR@+1: PARSE/006\n"
@@ -784,7 +784,7 @@ TEST_F(CheckParseTest, StandaloneAnnotation) {
   EXPECT_EQ(file_.cases[0].annotations[0].code, 6);
 }
 
-TEST_F(CheckParseTest, AnnotationDomainWithoutCode) {
+TEST_F(TestFileParseTest, AnnotationDomainWithoutCode) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// ERROR@+1: TYPE\n"
@@ -794,7 +794,7 @@ TEST_F(CheckParseTest, AnnotationDomainWithoutCode) {
   EXPECT_EQ(file_.cases[0].annotations[0].code, 0);
 }
 
-TEST_F(CheckParseTest, LowercaseAnnotationIsNotRecognized) {
+TEST_F(TestFileParseTest, LowercaseAnnotationIsNotRecognized) {
   // Annotations use uppercase severity keywords. Lowercase "error:"
   // is an ordinary comment, not an annotation. This is the key
   // distinction that makes preamble comment consumption safe.
@@ -805,7 +805,7 @@ TEST_F(CheckParseTest, LowercaseAnnotationIsNotRecognized) {
   EXPECT_EQ(file_.cases[0].annotation_count, 0);
 }
 
-TEST_F(CheckParseTest, LowercaseWarningIsNotRecognized) {
+TEST_F(TestFileParseTest, LowercaseWarningIsNotRecognized) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// warning: FOLD/003\n"
@@ -817,10 +817,10 @@ TEST_F(CheckParseTest, LowercaseWarningIsNotRecognized) {
 // Comment stripping
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, StripCommentsRemovesStandaloneComments) {
+TEST_F(TestFileParseTest, StripCommentsRemovesStandaloneComments) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(allocator_, &builder);
-  IREE_ASSERT_OK(loom_check_strip_comments(
+  IREE_ASSERT_OK(loom_test_file_strip_comments(
       iree_make_cstring_view("// This is a comment\n"
                              "  %x = test.addi %a, %b : i32\n"),
       &builder));
@@ -832,10 +832,10 @@ TEST_F(CheckParseTest, StripCommentsRemovesStandaloneComments) {
   iree_string_builder_deinitialize(&builder);
 }
 
-TEST_F(CheckParseTest, StripCommentsPreservesBlankLines) {
+TEST_F(TestFileParseTest, StripCommentsPreservesBlankLines) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(allocator_, &builder);
-  IREE_ASSERT_OK(loom_check_strip_comments(
+  IREE_ASSERT_OK(loom_test_file_strip_comments(
       iree_make_cstring_view("  %x = test.addi %a, %b : i32\n"
                              "\n"
                              "  %y = test.muli %x, %x : i32\n"),
@@ -846,12 +846,12 @@ TEST_F(CheckParseTest, StripCommentsPreservesBlankLines) {
   iree_string_builder_deinitialize(&builder);
 }
 
-TEST_F(CheckParseTest, StripCommentsPreservesTrailingComment) {
+TEST_F(TestFileParseTest, StripCommentsPreservesTrailingComment) {
   // Trailing comments on IR lines are preserved as-is. Only standalone
   // comment lines (where the trimmed line starts with "//") are stripped.
   iree_string_builder_t builder;
   iree_string_builder_initialize(allocator_, &builder);
-  IREE_ASSERT_OK(loom_check_strip_comments(
+  IREE_ASSERT_OK(loom_test_file_strip_comments(
       iree_make_cstring_view("  %r = test.addi %x, %y : i32  // add them\n"),
       &builder));
   iree_string_view_t result = iree_string_builder_view(&builder);
@@ -862,12 +862,12 @@ TEST_F(CheckParseTest, StripCommentsPreservesTrailingComment) {
   iree_string_builder_deinitialize(&builder);
 }
 
-TEST_F(CheckParseTest, StripCommentsPreservesIndentation) {
+TEST_F(TestFileParseTest, StripCommentsPreservesIndentation) {
   // IR lines must preserve their original indentation. Standalone
   // comment lines become blank lines without affecting adjacent lines.
   iree_string_builder_t builder;
   iree_string_builder_initialize(allocator_, &builder);
-  IREE_ASSERT_OK(loom_check_strip_comments(
+  IREE_ASSERT_OK(loom_test_file_strip_comments(
       iree_make_cstring_view("  // standalone comment\n"
                              "    %x = test.addi %a, %b : i32\n"),
       &builder));
@@ -878,24 +878,39 @@ TEST_F(CheckParseTest, StripCommentsPreservesIndentation) {
   iree_string_builder_deinitialize(&builder);
 }
 
+TEST_F(TestFileParseTest, RemoveCommentsOmitsPlaceholderLines) {
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(allocator_, &builder);
+  IREE_ASSERT_OK(loom_test_file_remove_comments(
+      iree_make_cstring_view("first\n"
+                             "\n"
+                             "// attached to second\n"
+                             "second\n"),
+      &builder));
+  EXPECT_EQ(std::string(iree_string_builder_buffer(&builder),
+                        iree_string_builder_size(&builder)),
+            "first\n\nsecond\n");
+  iree_string_builder_deinitialize(&builder);
+}
+
 // ===----------------------------------------------------------------------===
 // Edge cases
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, EmptySource) {
+TEST_F(TestFileParseTest, EmptySource) {
   IREE_ASSERT_OK(Parse(""));
   ASSERT_EQ(file_.case_count, 1);
   EXPECT_TRUE(iree_string_view_is_empty(file_.cases[0].input));
 }
 
-TEST_F(CheckParseTest, OnlyDirectives) {
+TEST_F(TestFileParseTest, OnlyDirectives) {
   IREE_ASSERT_OK(Parse("// RUN: verify\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_VERIFY);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_VERIFY);
   EXPECT_TRUE(iree_string_view_is_empty(file_.cases[0].input));
 }
 
-TEST_F(CheckParseTest, PerCaseDirectives) {
+TEST_F(TestFileParseTest, PerCaseDirectives) {
   IREE_ASSERT_OK(
       Parse("// RUN: roundtrip\n"
             "func.def @a() {}\n"
@@ -904,24 +919,24 @@ TEST_F(CheckParseTest, PerCaseDirectives) {
             "// RUN: verify\n"
             "func.def @b() {}\n"));
   ASSERT_EQ(file_.case_count, 2);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_ROUNDTRIP);
-  EXPECT_EQ(file_.cases[1].mode, LOOM_CHECK_MODE_VERIFY);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_ROUNDTRIP);
+  EXPECT_EQ(file_.cases[1].mode, LOOM_TEST_MODE_VERIFY);
 }
 
-TEST_F(CheckParseTest, CaseSeparatorAsFirstLineErrors) {
+TEST_F(TestFileParseTest, CaseSeparatorAsFirstLineErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// ====\n"
                               "func.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, CaseSeparatorAfterEmptyDirectivePreambleErrors) {
+TEST_F(TestFileParseTest, CaseSeparatorAfterEmptyDirectivePreambleErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
                               "// ====\n"
                               "func.def @f() {}\n"));
 }
 
-TEST_F(CheckParseTest, CaseSeparatorAsLastLine) {
+TEST_F(TestFileParseTest, CaseSeparatorAsLastLine) {
   IREE_ASSERT_OK(
       Parse("func.def @f() {}\n"
             "// ====\n"));
@@ -932,7 +947,7 @@ TEST_F(CheckParseTest, CaseSeparatorAsLastLine) {
   EXPECT_TRUE(iree_string_view_is_empty(file_.cases[1].input));
 }
 
-TEST_F(CheckParseTest, ExpectedSeparatorWithLeadingWhitespace) {
+TEST_F(TestFileParseTest, ExpectedSeparatorWithLeadingWhitespace) {
   IREE_ASSERT_OK(
       Parse("func.def @f() {\n"
             "}\n"
@@ -942,7 +957,7 @@ TEST_F(CheckParseTest, ExpectedSeparatorWithLeadingWhitespace) {
   EXPECT_TRUE(file_.cases[0].has_expected_section);
 }
 
-TEST_F(CheckParseTest, ExpectedSeparatorWithTrailingTextIsNot) {
+TEST_F(TestFileParseTest, ExpectedSeparatorWithTrailingTextIsNot) {
   IREE_ASSERT_OK(
       Parse("func.def @f() {}\n"
             "// ----extra\n"
@@ -954,7 +969,7 @@ TEST_F(CheckParseTest, ExpectedSeparatorWithTrailingTextIsNot) {
                                     0) != IREE_STRING_VIEW_NPOS);
 }
 
-TEST_F(CheckParseTest, OnlyFirstExpectedSeparatorSplits) {
+TEST_F(TestFileParseTest, OnlyFirstExpectedSeparatorSplits) {
   IREE_ASSERT_OK(
       Parse("input line\n"
             "// ----\n"
@@ -968,7 +983,7 @@ TEST_F(CheckParseTest, OnlyFirstExpectedSeparatorSplits) {
                                     0) != IREE_STRING_VIEW_NPOS);
 }
 
-TEST_F(CheckParseTest, CaseSeparatorWithExtraEquals) {
+TEST_F(TestFileParseTest, CaseSeparatorWithExtraEquals) {
   // Extra equals signs beyond the minimum four are allowed.
   IREE_ASSERT_OK(
       Parse("func.def @a() {}\n"
@@ -977,7 +992,7 @@ TEST_F(CheckParseTest, CaseSeparatorWithExtraEquals) {
   ASSERT_EQ(file_.case_count, 2);
 }
 
-TEST_F(CheckParseTest, NoTrailingNewline) {
+TEST_F(TestFileParseTest, NoTrailingNewline) {
   IREE_ASSERT_OK(Parse("func.def @f() {}"));
   ASSERT_EQ(file_.case_count, 1);
   EXPECT_TRUE(iree_string_view_find(file_.cases[0].input,
@@ -985,20 +1000,20 @@ TEST_F(CheckParseTest, NoTrailingNewline) {
                                     0) != IREE_STRING_VIEW_NPOS);
 }
 
-TEST_F(CheckParseTest, OnlyWhitespace) {
+TEST_F(TestFileParseTest, OnlyWhitespace) {
   IREE_ASSERT_OK(Parse("  \n\n  \n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_ROUNDTRIP);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_ROUNDTRIP);
 }
 
-TEST_F(CheckParseTest, BlankLinesBetweenDirectives) {
+TEST_F(TestFileParseTest, BlankLinesBetweenDirectives) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "\n"
             "// XFAIL: reason\n"
             "func.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_VERIFY);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_VERIFY);
   EXPECT_TRUE(file_.cases[0].xfail);
   EXPECT_TRUE(iree_string_view_find(file_.cases[0].input,
                                     iree_make_cstring_view("// RUN:"),
@@ -1012,7 +1027,7 @@ TEST_F(CheckParseTest, BlankLinesBetweenDirectives) {
 // Source ranges
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, SourceRangesForSingleCaseSections) {
+TEST_F(TestFileParseTest, SourceRangesForSingleCaseSections) {
   const char* source =
       "// RUN: pass dce\n"
       "// XFAIL: nope\n"
@@ -1022,9 +1037,9 @@ TEST_F(CheckParseTest, SourceRangesForSingleCaseSections) {
   IREE_ASSERT_OK(Parse(source));
   ASSERT_EQ(file_.case_count, 1);
 
-  const loom_check_case_t& test_case = file_.cases[0];
+  const loom_test_case_t& test_case = file_.cases[0];
   ExpectRange(test_case.source_range, 0, strlen(source));
-  EXPECT_TRUE(loom_check_source_range_is_empty(test_case.separator_range));
+  EXPECT_TRUE(loom_test_source_range_is_empty(test_case.separator_range));
   ExpectRangeForFragment(test_case.run_directive_range, "// RUN: pass dce");
   ExpectRangeForFragment(test_case.xfail_directive_range, "// XFAIL: nope");
   ExpectRange(test_case.input_range, OffsetOf("func.def @f()"),
@@ -1034,7 +1049,7 @@ TEST_F(CheckParseTest, SourceRangesForSingleCaseSections) {
               strlen(source));
 }
 
-TEST_F(CheckParseTest, SourceRangesForSeparatorsAndAnnotations) {
+TEST_F(TestFileParseTest, SourceRangesForSeparatorsAndAnnotations) {
   const char* source =
       "// RUN: verify\n"
       "func.def @first() {}\n"
@@ -1045,9 +1060,9 @@ TEST_F(CheckParseTest, SourceRangesForSeparatorsAndAnnotations) {
   ASSERT_EQ(file_.case_count, 2);
   ASSERT_EQ(file_.cases[1].annotation_count, 1);
 
-  const loom_check_case_t& test_case = file_.cases[1];
+  const loom_test_case_t& test_case = file_.cases[1];
   ExpectRangeForFragment(test_case.separator_range, "// ====");
-  EXPECT_TRUE(loom_check_source_range_is_empty(test_case.run_directive_range));
+  EXPECT_TRUE(loom_test_source_range_is_empty(test_case.run_directive_range));
   ExpectRange(test_case.source_range, OffsetOf("  // ERROR"), strlen(source));
   ExpectRange(test_case.input_range, OffsetOf("  // ERROR"), strlen(source));
   ExpectRangeForFragment(test_case.annotations[0].source_range,
@@ -1058,20 +1073,20 @@ TEST_F(CheckParseTest, SourceRangesForSeparatorsAndAnnotations) {
 // CRLF handling
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, CRLFLineEndingsParseIdentically) {
+TEST_F(TestFileParseTest, CRLFLineEndingsParseIdentically) {
   // Windows-style CRLF should produce the same results as LF.
   IREE_ASSERT_OK(
       Parse("// RUN: verify\r\n"
             "// ERROR@+1: TYPE/001\r\n"
             "  %x = test.bad : i32\r\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_VERIFY);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_VERIFY);
   ASSERT_EQ(file_.cases[0].annotation_count, 1);
   EXPECT_EQ(file_.cases[0].annotations[0].severity, LOOM_DIAGNOSTIC_ERROR);
   EXPECT_EQ(file_.cases[0].annotations[0].code, 1);
 }
 
-TEST_F(CheckParseTest, CRLFSeparators) {
+TEST_F(TestFileParseTest, CRLFSeparators) {
   IREE_ASSERT_OK(
       Parse("func.def @a() {}\r\n"
             "// ====\r\n"
@@ -1082,28 +1097,28 @@ TEST_F(CheckParseTest, CRLFSeparators) {
   EXPECT_TRUE(file_.cases[1].has_expected_section);
 }
 
-TEST_F(CheckParseTest, CRLFDirective) {
+TEST_F(TestFileParseTest, CRLFDirective) {
   // "// RUN: roundtrip\r\n" — the \r must be stripped before mode
   // parsing, otherwise "roundtrip\r" != "roundtrip".
   IREE_ASSERT_OK(Parse("// RUN: roundtrip\r\nfunc.def @f() {}\r\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_ROUNDTRIP);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_ROUNDTRIP);
 }
 
 // ===----------------------------------------------------------------------===
 // Directive parsing — error paths and boundary cases
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, PassWithoutSpaceIsUnknownMode) {
+TEST_F(TestFileParseTest, PassWithoutSpaceIsUnknownMode) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse("// RUN: pass\n"));
 }
 
-TEST_F(CheckParseTest, VerifyWithTrailingTextIsUnknownMode) {
+TEST_F(TestFileParseTest, VerifyWithTrailingTextIsUnknownMode) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify extra\n"));
 }
 
-TEST_F(CheckParseTest, ModeIsCaseSensitive) {
+TEST_F(TestFileParseTest, ModeIsCaseSensitive) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: Roundtrip\n"));
 }
@@ -1118,28 +1133,28 @@ TEST_F(CheckParseTest, ModeIsCaseSensitive) {
 // Annotation parsing — error paths
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, AnnotationOffsetMissingColon) {
+TEST_F(TestFileParseTest, AnnotationOffsetMissingColon) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
                               "// ERROR@+1 TYPE/001\n"
                               "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationOffsetNonNumeric) {
+TEST_F(TestFileParseTest, AnnotationOffsetNonNumeric) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
                               "// ERROR@+abc: TYPE/001\n"
                               "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationNegativeOffsetUnderflow) {
+TEST_F(TestFileParseTest, AnnotationNegativeOffsetUnderflow) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
                               "  %x = test.bad : i32\n"
                               "// ERROR@-5: TYPE/001\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationNegativeOffsetValue) {
+TEST_F(TestFileParseTest, AnnotationNegativeOffsetValue) {
   // A negative number after @ (e.g. @+-1) is rejected because the
   // atoi will return a negative value which we explicitly disallow.
   // The @-N syntax uses a sign character, not a negative number.
@@ -1149,35 +1164,35 @@ TEST_F(CheckParseTest, AnnotationNegativeOffsetValue) {
                               "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationUnterminatedLeadingQuote) {
+TEST_F(TestFileParseTest, AnnotationUnterminatedLeadingQuote) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
                               "// ERROR: \"unterminated\n"
                               "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationUnterminatedTrailingQuote) {
+TEST_F(TestFileParseTest, AnnotationUnterminatedTrailingQuote) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
                               "// ERROR: TYPE/001 \"unterminated\n"
                               "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationUnquotedTrailingText) {
+TEST_F(TestFileParseTest, AnnotationUnquotedTrailingText) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
                               "// ERROR: TYPE/001 extra\n"
                               "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationParamMatcherRequiresQuotedValue) {
+TEST_F(TestFileParseTest, AnnotationParamMatcherRequiresQuotedValue) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
                               "// ERROR: DOMINANCE/011 {op_name=test.add.i32}\n"
                               "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationNonNumericCodeErrors) {
+TEST_F(TestFileParseTest, AnnotationNonNumericCodeErrors) {
   // "TYPE/abc" — non-numeric code after '/' must be rejected.
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
@@ -1185,7 +1200,7 @@ TEST_F(CheckParseTest, AnnotationNonNumericCodeErrors) {
                               "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationEmptyCodeAfterSlashErrors) {
+TEST_F(TestFileParseTest, AnnotationEmptyCodeAfterSlashErrors) {
   // "TYPE/" — empty code after '/' must be rejected.
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
@@ -1193,7 +1208,7 @@ TEST_F(CheckParseTest, AnnotationEmptyCodeAfterSlashErrors) {
                               "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationUnknownDomainErrors) {
+TEST_F(TestFileParseTest, AnnotationUnknownDomainErrors) {
   // "BOGUS/001" — domain name not in the known set must be rejected.
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
@@ -1201,7 +1216,7 @@ TEST_F(CheckParseTest, AnnotationUnknownDomainErrors) {
                               "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationUnknownDomainWithoutCodeErrors) {
+TEST_F(TestFileParseTest, AnnotationUnknownDomainWithoutCodeErrors) {
   // Bare "BOGUS" (no code) is also rejected.
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
@@ -1209,7 +1224,7 @@ TEST_F(CheckParseTest, AnnotationUnknownDomainWithoutCodeErrors) {
                               "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationWithEmptyMatcher) {
+TEST_F(TestFileParseTest, AnnotationWithEmptyMatcher) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// ERROR:\n"
@@ -1222,7 +1237,7 @@ TEST_F(CheckParseTest, AnnotationWithEmptyMatcher) {
   EXPECT_EQ(ann.message_substring_count, 0);
 }
 
-TEST_F(CheckParseTest, SeverityWordInNormalTextNotAnnotation) {
+TEST_F(TestFileParseTest, SeverityWordInNormalTextNotAnnotation) {
   // "this ERROR is expected" has "ERROR" but no colon immediately
   // after the keyword + optional offset, so it's not an annotation.
   IREE_ASSERT_OK(
@@ -1232,7 +1247,7 @@ TEST_F(CheckParseTest, SeverityWordInNormalTextNotAnnotation) {
   EXPECT_EQ(file_.cases[0].annotation_count, 0);
 }
 
-TEST_F(CheckParseTest, AnnotationNotMatchedInStringLiteral) {
+TEST_F(TestFileParseTest, AnnotationNotMatchedInStringLiteral) {
   // "// ERROR:" inside a string literal is on a non-comment line and
   // should not be recognized as an annotation. extract_comment_text
   // only examines standalone comment lines.
@@ -1242,7 +1257,7 @@ TEST_F(CheckParseTest, AnnotationNotMatchedInStringLiteral) {
   EXPECT_EQ(file_.cases[0].annotation_count, 0);
 }
 
-TEST_F(CheckParseTest, AnnotationOffsetWithoutSign) {
+TEST_F(TestFileParseTest, AnnotationOffsetWithoutSign) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// ERROR@1: TYPE/001\n"
@@ -1251,7 +1266,7 @@ TEST_F(CheckParseTest, AnnotationOffsetWithoutSign) {
   EXPECT_EQ(file_.cases[0].annotations[0].target_line, 2);
 }
 
-TEST_F(CheckParseTest, AnnotationOffsetZero) {
+TEST_F(TestFileParseTest, AnnotationOffsetZero) {
   // @+0 targets the annotation's own line.
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
@@ -1261,7 +1276,7 @@ TEST_F(CheckParseTest, AnnotationOffsetZero) {
   EXPECT_EQ(file_.cases[0].annotations[0].target_line, 1);
 }
 
-TEST_F(CheckParseTest, AnnotationCodeExplicitZero) {
+TEST_F(TestFileParseTest, AnnotationCodeExplicitZero) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// ERROR@+1: TYPE/000\n"
@@ -1270,7 +1285,7 @@ TEST_F(CheckParseTest, AnnotationCodeExplicitZero) {
   EXPECT_EQ(file_.cases[0].annotations[0].code, 0);
 }
 
-TEST_F(CheckParseTest, AnnotationWithExtraWhitespace) {
+TEST_F(TestFileParseTest, AnnotationWithExtraWhitespace) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// ERROR:   TYPE/001   \"msg\"  \n"
@@ -1284,7 +1299,7 @@ TEST_F(CheckParseTest, AnnotationWithExtraWhitespace) {
                                      iree_make_cstring_view("msg")));
 }
 
-TEST_F(CheckParseTest, AnnotationOnLastLineNoNewline) {
+TEST_F(TestFileParseTest, AnnotationOnLastLineNoNewline) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// ERROR@+1: TYPE/001\n"
@@ -1293,7 +1308,7 @@ TEST_F(CheckParseTest, AnnotationOnLastLineNoNewline) {
   EXPECT_EQ(file_.cases[0].annotations[0].code, 1);
 }
 
-TEST_F(CheckParseTest, SingleAnnotationPerComment) {
+TEST_F(TestFileParseTest, SingleAnnotationPerComment) {
   // Only one annotation per comment line. A comment like
   // "// ERROR: A // WARNING: B" finds "ERROR: A // WARNING: B" as the
   // comment text — the second "//" is just part of the text, not a
@@ -1309,18 +1324,19 @@ TEST_F(CheckParseTest, SingleAnnotationPerComment) {
 // Comment stripping — boundary cases
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, StripCommentsEmptyInput) {
+TEST_F(TestFileParseTest, StripCommentsEmptyInput) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(allocator_, &builder);
-  IREE_ASSERT_OK(loom_check_strip_comments(iree_string_view_empty(), &builder));
+  IREE_ASSERT_OK(
+      loom_test_file_strip_comments(iree_string_view_empty(), &builder));
   EXPECT_EQ(iree_string_builder_size(&builder), 0);
   iree_string_builder_deinitialize(&builder);
 }
 
-TEST_F(CheckParseTest, StripCommentsBareDoubleSlash) {
+TEST_F(TestFileParseTest, StripCommentsBareDoubleSlash) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(allocator_, &builder);
-  IREE_ASSERT_OK(loom_check_strip_comments(
+  IREE_ASSERT_OK(loom_test_file_strip_comments(
       iree_make_cstring_view("//\n"
                              "  %x = test.addi %a, %b : i32\n"),
       &builder));
@@ -1332,10 +1348,10 @@ TEST_F(CheckParseTest, StripCommentsBareDoubleSlash) {
   iree_string_builder_deinitialize(&builder);
 }
 
-TEST_F(CheckParseTest, StripCommentsNoTrailingNewline) {
+TEST_F(TestFileParseTest, StripCommentsNoTrailingNewline) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(allocator_, &builder);
-  IREE_ASSERT_OK(loom_check_strip_comments(
+  IREE_ASSERT_OK(loom_test_file_strip_comments(
       iree_make_cstring_view("  %x = test.addi %a, %b : i32"), &builder));
   iree_string_view_t result = iree_string_builder_view(&builder);
   EXPECT_TRUE(iree_string_view_find(result, iree_make_cstring_view("test.addi"),
@@ -1347,7 +1363,7 @@ TEST_F(CheckParseTest, StripCommentsNoTrailingNewline) {
 // Structural integrity
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, InputAndExpectedPointIntoSource) {
+TEST_F(TestFileParseTest, InputAndExpectedPointIntoSource) {
   const char* source =
       "func.def @f() {\n"
       "}\n"
@@ -1363,7 +1379,7 @@ TEST_F(CheckParseTest, InputAndExpectedPointIntoSource) {
             source + strlen(source));
 }
 
-TEST_F(CheckParseTest, AnnotationLineNumbersAccountForDirectives) {
+TEST_F(TestFileParseTest, AnnotationLineNumbersAccountForDirectives) {
   // Line numbers are relative to the input section, not the file.
   // The "// RUN: verify" directive is consumed and not counted.
   IREE_ASSERT_OK(
@@ -1378,7 +1394,7 @@ TEST_F(CheckParseTest, AnnotationLineNumbersAccountForDirectives) {
   EXPECT_EQ(file_.cases[0].annotations[1].target_line, 5);
 }
 
-TEST_F(CheckParseTest, DirectivesPreservedAcrossParsing) {
+TEST_F(TestFileParseTest, DirectivesPreservedAcrossParsing) {
   IREE_ASSERT_OK(
       Parse("// RUN: roundtrip\n"
             "func.def @a() {}\n"
@@ -1391,12 +1407,12 @@ TEST_F(CheckParseTest, DirectivesPreservedAcrossParsing) {
             "// RUN: pass dce\n"
             "func.def @c() {}\n"));
   ASSERT_EQ(file_.case_count, 3);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_ROUNDTRIP);
-  EXPECT_EQ(file_.cases[1].mode, LOOM_CHECK_MODE_VERIFY);
-  EXPECT_EQ(file_.cases[2].mode, LOOM_CHECK_MODE_PASS);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_ROUNDTRIP);
+  EXPECT_EQ(file_.cases[1].mode, LOOM_TEST_MODE_VERIFY);
+  EXPECT_EQ(file_.cases[2].mode, LOOM_TEST_MODE_PASS);
 }
 
-TEST_F(CheckParseTest, ManyCasesExercisesArenaBulkAllocation) {
+TEST_F(TestFileParseTest, ManyCasesExercisesArenaBulkAllocation) {
   // 65 separators = 66 cases. Exercises the arena's ability to handle
   // many small allocations (one cases array + 66 annotation arrays).
   iree_string_builder_t builder;
@@ -1410,7 +1426,7 @@ TEST_F(CheckParseTest, ManyCasesExercisesArenaBulkAllocation) {
     IREE_ASSERT_OK(iree_string_builder_append_cstring(&builder, body));
   }
   iree_string_view_t source = iree_string_builder_view(&builder);
-  IREE_ASSERT_OK(loom_check_parse(source, &arena_, &file_));
+  IREE_ASSERT_OK(loom_test_file_parse(source, &arena_, &file_));
   ASSERT_EQ(file_.case_count, 66);
   iree_string_builder_deinitialize(&builder);
 }
@@ -1419,14 +1435,14 @@ TEST_F(CheckParseTest, ManyCasesExercisesArenaBulkAllocation) {
 // Annotation parsing — trailing garbage after quotes
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, AnnotationTrailingGarbageAfterSubstringErrors) {
+TEST_F(TestFileParseTest, AnnotationTrailingGarbageAfterSubstringErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
                               "// ERROR: \"msg\" garbage\n"
                               "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationTrailingGarbageAfterDomainSubstringErrors) {
+TEST_F(TestFileParseTest, AnnotationTrailingGarbageAfterDomainSubstringErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
                               "// ERROR: TYPE/001 \"msg\" extra\n"
@@ -1437,7 +1453,7 @@ TEST_F(CheckParseTest, AnnotationTrailingGarbageAfterDomainSubstringErrors) {
 // Annotation code boundary values
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, AnnotationCodeAtUint16Max) {
+TEST_F(TestFileParseTest, AnnotationCodeAtUint16Max) {
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
             "// ERROR@+1: TYPE/65535\n"
@@ -1446,14 +1462,14 @@ TEST_F(CheckParseTest, AnnotationCodeAtUint16Max) {
   EXPECT_EQ(file_.cases[0].annotations[0].code, 65535);
 }
 
-TEST_F(CheckParseTest, AnnotationCodeAboveUint16MaxErrors) {
+TEST_F(TestFileParseTest, AnnotationCodeAboveUint16MaxErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
                               "// ERROR: TYPE/65536\n"
                               "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationCodeNegativeErrors) {
+TEST_F(TestFileParseTest, AnnotationCodeNegativeErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
                               "// ERROR: TYPE/-1\n"
@@ -1464,7 +1480,7 @@ TEST_F(CheckParseTest, AnnotationCodeNegativeErrors) {
 // Annotations in expected section
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, AnnotationInExpectedSectionErrors) {
+TEST_F(TestFileParseTest, AnnotationInExpectedSectionErrors) {
   // Annotations below the // ---- separator are always a mistake.
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\n"
@@ -1474,7 +1490,7 @@ TEST_F(CheckParseTest, AnnotationInExpectedSectionErrors) {
                               "  %x = test.bad : i32\n"));
 }
 
-TEST_F(CheckParseTest, AnnotationInExpectedSectionCRLFErrors) {
+TEST_F(TestFileParseTest, AnnotationInExpectedSectionCRLFErrors) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: verify\r\n"
                               "  %x = test.bad : i32\r\n"
@@ -1483,7 +1499,7 @@ TEST_F(CheckParseTest, AnnotationInExpectedSectionCRLFErrors) {
                               "  %x = test.bad : i32\r\n"));
 }
 
-TEST_F(CheckParseTest, NonAnnotationCommentInExpectedSectionOk) {
+TEST_F(TestFileParseTest, NonAnnotationCommentInExpectedSectionOk) {
   // Regular comments in the expected section are fine.
   IREE_ASSERT_OK(
       Parse("func.def @f() {}\n"
@@ -1498,10 +1514,10 @@ TEST_F(CheckParseTest, NonAnnotationCommentInExpectedSectionOk) {
 // Comment stripping — CRLF
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, StripCommentsCRLF) {
+TEST_F(TestFileParseTest, StripCommentsCRLF) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(allocator_, &builder);
-  IREE_ASSERT_OK(loom_check_strip_comments(
+  IREE_ASSERT_OK(loom_test_file_strip_comments(
       iree_make_cstring_view("// standalone\r\n"
                              "  %x = test.addi %a, %b : i32\r\n"),
       &builder));
@@ -1517,12 +1533,12 @@ TEST_F(CheckParseTest, StripCommentsCRLF) {
 // NULL-backed empty views
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, NullBackedEmptyViewParses) {
+TEST_F(TestFileParseTest, NullBackedEmptyViewParses) {
   // iree_string_view_empty() has data == NULL, size == 0. The parser
   // must handle this without undefined behavior (NULL + 0 is UB).
   iree_string_view_t empty = iree_string_view_empty();
   file_ = {};
-  IREE_ASSERT_OK(loom_check_parse(empty, &arena_, &file_));
+  IREE_ASSERT_OK(loom_test_file_parse(empty, &arena_, &file_));
   ASSERT_EQ(file_.case_count, 1);
   EXPECT_TRUE(iree_string_view_is_empty(file_.cases[0].input));
 }
@@ -1531,7 +1547,7 @@ TEST_F(CheckParseTest, NullBackedEmptyViewParses) {
 // Annotation without space after // (consistency)
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, AnnotationWithoutSpaceAfterSlashesRecognized) {
+TEST_F(TestFileParseTest, AnnotationWithoutSpaceAfterSlashesRecognized) {
   // "//ERROR@+1: TYPE/001" (no space after //) must be recognized as
   // an annotation, not consumed as a header comment. This ensures
   // is_annotation_line and extract_comment_text agree.
@@ -1549,7 +1565,7 @@ TEST_F(CheckParseTest, AnnotationWithoutSpaceAfterSlashesRecognized) {
 // Expected separator not consumed as header comment
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, ExpectedSeparatorNotConsumedByHeader) {
+TEST_F(TestFileParseTest, ExpectedSeparatorNotConsumedByHeader) {
   // A case with directives followed immediately by // ---- must not
   // have the separator consumed as a header comment. The expected
   // section should be recognized even when there is no IR before it.
@@ -1568,7 +1584,7 @@ TEST_F(CheckParseTest, ExpectedSeparatorNotConsumedByHeader) {
 // RUN inheritance
 // ===----------------------------------------------------------------------===
 
-TEST_F(CheckParseTest, FirstCaseRunInherited) {
+TEST_F(TestFileParseTest, FirstCaseRunInherited) {
   // The first case's // RUN: directive sets the file default. Cases without
   // their own // RUN: inherit from it.
   IREE_ASSERT_OK(
@@ -1578,14 +1594,14 @@ TEST_F(CheckParseTest, FirstCaseRunInherited) {
             "// ====\n"
             "func.def @clean() {}\n"));
   ASSERT_EQ(file_.case_count, 2);
-  EXPECT_EQ(file_.default_mode, LOOM_CHECK_MODE_VERIFY);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_VERIFY);
+  EXPECT_EQ(file_.default_mode, LOOM_TEST_MODE_VERIFY);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_VERIFY);
   EXPECT_TRUE(file_.cases[0].has_run_directive);
-  EXPECT_EQ(file_.cases[1].mode, LOOM_CHECK_MODE_VERIFY);
+  EXPECT_EQ(file_.cases[1].mode, LOOM_TEST_MODE_VERIFY);
   EXPECT_FALSE(file_.cases[1].has_run_directive);
 }
 
-TEST_F(CheckParseTest, FirstCaseRunOverriddenByCase) {
+TEST_F(TestFileParseTest, FirstCaseRunOverriddenByCase) {
   // A case with its own // RUN: overrides the file default.
   IREE_ASSERT_OK(
       Parse("// RUN: verify\n"
@@ -1596,14 +1612,14 @@ TEST_F(CheckParseTest, FirstCaseRunOverriddenByCase) {
             "// RUN: roundtrip\n"
             "func.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 2);
-  EXPECT_EQ(file_.default_mode, LOOM_CHECK_MODE_VERIFY);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_VERIFY);
+  EXPECT_EQ(file_.default_mode, LOOM_TEST_MODE_VERIFY);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_VERIFY);
   EXPECT_TRUE(file_.cases[0].has_run_directive);
-  EXPECT_EQ(file_.cases[1].mode, LOOM_CHECK_MODE_ROUNDTRIP);
+  EXPECT_EQ(file_.cases[1].mode, LOOM_TEST_MODE_ROUNDTRIP);
   EXPECT_TRUE(file_.cases[1].has_run_directive);
 }
 
-TEST_F(CheckParseTest, FirstCasePassModeInherited) {
+TEST_F(TestFileParseTest, FirstCasePassModeInherited) {
   // File default can be pass mode with a pipeline.
   IREE_ASSERT_OK(
       Parse("// RUN: pass dce\n"
@@ -1611,18 +1627,18 @@ TEST_F(CheckParseTest, FirstCasePassModeInherited) {
             "// ====\n"
             "func.def @b() {}\n"));
   ASSERT_EQ(file_.case_count, 2);
-  EXPECT_EQ(file_.default_mode, LOOM_CHECK_MODE_PASS);
+  EXPECT_EQ(file_.default_mode, LOOM_TEST_MODE_PASS);
   EXPECT_TRUE(iree_string_view_equal(file_.default_pipeline,
                                      iree_make_cstring_view("dce")));
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_PASS);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_PASS);
   EXPECT_TRUE(iree_string_view_equal(file_.cases[0].pipeline,
                                      iree_make_cstring_view("dce")));
-  EXPECT_EQ(file_.cases[1].mode, LOOM_CHECK_MODE_PASS);
+  EXPECT_EQ(file_.cases[1].mode, LOOM_TEST_MODE_PASS);
   EXPECT_TRUE(iree_string_view_equal(file_.cases[1].pipeline,
                                      iree_make_cstring_view("dce")));
 }
 
-TEST_F(CheckParseTest, FirstCaseOutputFlagsInherited) {
+TEST_F(TestFileParseTest, FirstCaseOutputFlagsInherited) {
   IREE_ASSERT_OK(
       Parse("// RUN: with-locations pass dce\n"
             "func.def @a() {}\n"
@@ -1630,34 +1646,34 @@ TEST_F(CheckParseTest, FirstCaseOutputFlagsInherited) {
             "func.def @b() {}\n"));
   ASSERT_EQ(file_.case_count, 2);
   EXPECT_TRUE(iree_all_bits_set(file_.default_output_flags,
-                                LOOM_CHECK_OUTPUT_LOCATIONS));
+                                LOOM_TEST_OUTPUT_LOCATIONS));
   EXPECT_TRUE(iree_all_bits_set(file_.cases[0].output_flags,
-                                LOOM_CHECK_OUTPUT_LOCATIONS));
+                                LOOM_TEST_OUTPUT_LOCATIONS));
   EXPECT_TRUE(iree_all_bits_set(file_.cases[1].output_flags,
-                                LOOM_CHECK_OUTPUT_LOCATIONS));
+                                LOOM_TEST_OUTPUT_LOCATIONS));
 }
 
-TEST_F(CheckParseTest, FirstCaseEmitModeInherited) {
+TEST_F(TestFileParseTest, FirstCaseEmitModeInherited) {
   IREE_ASSERT_OK(
       Parse("// RUN: emit target-form @entry\n"
             "func.def @a() {}\n"
             "// ====\n"
             "func.def @b() {}\n"));
   ASSERT_EQ(file_.case_count, 2);
-  EXPECT_EQ(file_.default_mode, LOOM_CHECK_MODE_EMIT);
+  EXPECT_EQ(file_.default_mode, LOOM_TEST_MODE_EMIT);
   EXPECT_TRUE(iree_string_view_equal(
       file_.default_emit_target, iree_make_cstring_view("target-form @entry")));
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_EMIT);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_EMIT);
   EXPECT_TRUE(
       iree_string_view_equal(file_.cases[0].emit_target,
                              iree_make_cstring_view("target-form @entry")));
-  EXPECT_EQ(file_.cases[1].mode, LOOM_CHECK_MODE_EMIT);
+  EXPECT_EQ(file_.cases[1].mode, LOOM_TEST_MODE_EMIT);
   EXPECT_TRUE(
       iree_string_view_equal(file_.cases[1].emit_target,
                              iree_make_cstring_view("target-form @entry")));
 }
 
-TEST_F(CheckParseTest, FirstCaseRequiresInheritedAndCombined) {
+TEST_F(TestFileParseTest, FirstCaseRequiresInheritedAndCombined) {
   IREE_ASSERT_OK(
       Parse("// REQUIRES: tool-dis\n"
             "func.def @a() {}\n"
@@ -1678,7 +1694,7 @@ TEST_F(CheckParseTest, FirstCaseRequiresInheritedAndCombined) {
   ExpectRequirementName(file_.cases[1], 1, "tool-backend");
 }
 
-TEST_F(CheckParseTest, NoPreambleDefaultIsRoundtrip) {
+TEST_F(TestFileParseTest, NoPreambleDefaultIsRoundtrip) {
   // No preamble (file does not start with // ====), no RUN in any
   // case. All cases default to roundtrip.
   IREE_ASSERT_OK(
@@ -1686,12 +1702,12 @@ TEST_F(CheckParseTest, NoPreambleDefaultIsRoundtrip) {
             "// ====\n"
             "func.def @b() {}\n"));
   ASSERT_EQ(file_.case_count, 2);
-  EXPECT_EQ(file_.default_mode, LOOM_CHECK_MODE_ROUNDTRIP);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_ROUNDTRIP);
-  EXPECT_EQ(file_.cases[1].mode, LOOM_CHECK_MODE_ROUNDTRIP);
+  EXPECT_EQ(file_.default_mode, LOOM_TEST_MODE_ROUNDTRIP);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_ROUNDTRIP);
+  EXPECT_EQ(file_.cases[1].mode, LOOM_TEST_MODE_ROUNDTRIP);
 }
 
-TEST_F(CheckParseTest, FirstCaseRunBecomesDefault) {
+TEST_F(TestFileParseTest, FirstCaseRunBecomesDefault) {
   // When the file does not start with // ==== the first case's RUN
   // directive serves as both its own mode and the file default.
   IREE_ASSERT_OK(
@@ -1702,14 +1718,14 @@ TEST_F(CheckParseTest, FirstCaseRunBecomesDefault) {
             "// ERROR@+1: PARSE/006\n"
             "bogus.nonexistent\n"));
   ASSERT_EQ(file_.case_count, 2);
-  EXPECT_EQ(file_.default_mode, LOOM_CHECK_MODE_VERIFY);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_VERIFY);
+  EXPECT_EQ(file_.default_mode, LOOM_TEST_MODE_VERIFY);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_VERIFY);
   EXPECT_TRUE(file_.cases[0].has_run_directive);
-  EXPECT_EQ(file_.cases[1].mode, LOOM_CHECK_MODE_VERIFY);
+  EXPECT_EQ(file_.cases[1].mode, LOOM_TEST_MODE_VERIFY);
   EXPECT_FALSE(file_.cases[1].has_run_directive);
 }
 
-TEST_F(CheckParseTest, FirstCaseRequiresBecomesDefault) {
+TEST_F(TestFileParseTest, FirstCaseRequiresBecomesDefault) {
   IREE_ASSERT_OK(
       Parse("// REQUIRES: tool-dis\n"
             "func.def @a() {}\n"
@@ -1724,7 +1740,7 @@ TEST_F(CheckParseTest, FirstCaseRequiresBecomesDefault) {
   ExpectRequirementName(file_.cases[1], 0, "tool-dis");
 }
 
-TEST_F(CheckParseTest, HasRunDirectiveFlag) {
+TEST_F(TestFileParseTest, HasRunDirectiveFlag) {
   IREE_ASSERT_OK(
       Parse("// RUN: roundtrip\n"
             "func.def @a() {}\n"
@@ -1735,12 +1751,12 @@ TEST_F(CheckParseTest, HasRunDirectiveFlag) {
   EXPECT_FALSE(file_.cases[1].has_run_directive);
 }
 
-TEST_F(CheckParseTest, SingleCaseNoRunDefaultsToRoundtrip) {
+TEST_F(TestFileParseTest, SingleCaseNoRunDefaultsToRoundtrip) {
   IREE_ASSERT_OK(Parse("func.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
-  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_ROUNDTRIP);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_ROUNDTRIP);
   EXPECT_FALSE(file_.cases[0].has_run_directive);
-  EXPECT_EQ(file_.default_mode, LOOM_CHECK_MODE_ROUNDTRIP);
+  EXPECT_EQ(file_.default_mode, LOOM_TEST_MODE_ROUNDTRIP);
 }
 
 }  // namespace

@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @async_gather_dword() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -34,6 +35,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(1, 1, 1) workgr
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @async_gather_b128() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -66,6 +68,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(1, 1, 1) workgr
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @async_gather_two_stage() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -106,6 +109,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(1, 1, 1) workgr
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @async_gather_multi_packet_newer_group() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -150,6 +154,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(1, 1, 1) workgr
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @async_gather_second_lds_slot() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index

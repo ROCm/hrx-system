@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @tensor_load_to_lds_d4() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -57,6 +58,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @tensor_load_to_lds_d2() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -103,6 +105,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @tensor_load_two_stage_wait_depth() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index

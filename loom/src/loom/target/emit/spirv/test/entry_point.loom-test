@@ -3,9 +3,9 @@
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @empty_entry() {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @empty_entry() asm {
   low.schedule.fence
-  low.return
+  return
 }
 
 // ----

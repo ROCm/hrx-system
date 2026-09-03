@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 wasm.target<simd128> @target
+
 func.def target(@target) @i32x4_memory_wasm32_address_boundary(%input: buffer, %i: index) -> (vector<4xi32>) {
   %bounded_i = index.assume %i [range(%i, 0, 1073741820)] : index
   %input_base = index.constant 0 : offset

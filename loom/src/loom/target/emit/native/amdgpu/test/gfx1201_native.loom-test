@@ -3,20 +3,13 @@
 // RUN: emit amdgpu-assembly @gfx1201_native_canary strategy=source fixed=%kernarg:physical_register:0:2 fixed=%soffset:physical_register:2:1 fixed=%adjusted:physical_register:3:1 fixed=%base:physical_register:4:2 fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%a1:physical_register:2:1 fixed=%b1:physical_register:3:1 fixed=%product:physical_register:4:1 fixed=%sum:physical_register:5:1 fixed=%addr:physical_register:6:1
 
 amdgpu.target<gfx1201> @target
-low.func.def target<amdgpu.rdna4.core>(@target) @gfx1201_native_canary(
-    %kernarg: reg<amdgpu.sgpr x2>,
-    %soffset: reg<amdgpu.sgpr>,
-    %a0: reg<amdgpu.vgpr>,
-    %b0: reg<amdgpu.vgpr>,
-    %a1: reg<amdgpu.vgpr>,
-    %b1: reg<amdgpu.vgpr>,
-    %addr: reg<amdgpu.vgpr>)
-    asm {
+
+low.func.def target<amdgpu.rdna4.core>(@target) @gfx1201_native_canary(%kernarg: reg<amdgpu.sgpr x2>, %soffset: reg<amdgpu.sgpr>, %a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>) asm {
   %adjusted = s_add_u32_rhs_inline %soffset, 4
   %base = s_load_dwordx2 %kernarg, %adjusted
   %product = v_mul_f32 %a0, %b0
   %sum = v_add_f32 %a1, %b1
-  global_store_b32_saddr %addr, %sum, %base {offset = 0}
+  global_store_b32_saddr %addr, %sum, %base
   return
 }
 
@@ -35,20 +28,13 @@ low.func.def target<amdgpu.rdna4.core>(@target) @gfx1201_native_canary(
 // RUN: emit amdgpu-native @gfx1201_native_encoding strategy=source fixed=%kernarg:physical_register:0:2 fixed=%soffset:physical_register:2:1 fixed=%adjusted:physical_register:3:1 fixed=%base:physical_register:4:2 fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%a1:physical_register:2:1 fixed=%b1:physical_register:3:1 fixed=%product:physical_register:4:1 fixed=%sum:physical_register:5:1 fixed=%addr:physical_register:6:1
 
 amdgpu.target<gfx1201> @target
-low.func.def target<amdgpu.rdna4.core>(@target) @gfx1201_native_encoding(
-    %kernarg: reg<amdgpu.sgpr x2>,
-    %soffset: reg<amdgpu.sgpr>,
-    %a0: reg<amdgpu.vgpr>,
-    %b0: reg<amdgpu.vgpr>,
-    %a1: reg<amdgpu.vgpr>,
-    %b1: reg<amdgpu.vgpr>,
-    %addr: reg<amdgpu.vgpr>)
-    asm {
+
+low.func.def target<amdgpu.rdna4.core>(@target) @gfx1201_native_encoding(%kernarg: reg<amdgpu.sgpr x2>, %soffset: reg<amdgpu.sgpr>, %a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>) asm {
   %adjusted = s_add_u32_rhs_inline %soffset, 4
   %base = s_load_dwordx2 %kernarg, %adjusted
   %product = v_mul_f32 %a0, %b0
   %sum = v_add_f32 %a1, %b1
-  global_store_b32_saddr %addr, %sum, %base {offset = 0}
+  global_store_b32_saddr %addr, %sum, %base
   return
 }
 

@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @wave64_workgroup_memory_workitem_x_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -33,6 +34,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @wave64_workgroup_memory_workitem_x_b32_static_offset() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -67,6 +69,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @cross_wave64_workgroup_memory_workitem_x_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 128 : index
@@ -99,6 +102,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(128, 1, 1) work
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @multidim_workgroup_memory_workitem_xy_b32() {
   %unit = index.constant 1 : index
   %tile = index.constant 8 : index

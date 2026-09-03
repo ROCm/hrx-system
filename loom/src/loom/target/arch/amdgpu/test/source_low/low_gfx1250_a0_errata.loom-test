@@ -1,13 +1,14 @@
 // RUN: verify
 
 amdgpu.target<gfx1250-a0> @a0
+
 amdgpu.target<gfx1250> @b0
 
 low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@a0) @a0_ds_errata(%address: reg<amdgpu.vgpr>, %data0: reg<amdgpu.vgpr>, %data1: reg<amdgpu.vgpr>, %m0: reg<amdgpu.m0>) asm {
   // ERROR@+1: AMDGPU/047 {function_name="a0_ds_errata", descriptor_name="amdgpu.ds_read2_b32", descriptor_set_name="amdgpu.rdna4.gfx1250_a0.core", target="gfx1250-a0", constraint_kind="operand_encoding", constraint_key="amdgpu.ds.paired_address_alignment", legalization_key="split_ds2_to_single_address"}
-  %pair = ds_read2_b32 %address {offset0 = 0, offset1 = 1}
+  %pair = ds_read2_b32 %address {offset1 = 1}
   // ERROR@+1: AMDGPU/047 {function_name="a0_ds_errata", descriptor_name="amdgpu.ds_write2_b32", descriptor_set_name="amdgpu.rdna4.gfx1250_a0.core", target="gfx1250-a0", constraint_key="amdgpu.ds.paired_address_alignment", legalization_key="split_ds2_to_single_address"}
-  ds_write2_b32 %address, %data0, %data1 {offset0 = 0, offset1 = 1}
+  ds_write2_b32 %address, %data0, %data1 {offset1 = 1}
   // ERROR@+1: AMDGPU/047 {function_name="a0_ds_errata", descriptor_name="amdgpu.ds_read_addtid_b32", descriptor_set_name="amdgpu.rdna4.gfx1250_a0.core", target="gfx1250-a0", constraint_key="amdgpu.ds.addtid_address_materialization", legalization_key="materialize_addtid_address"}
   %value = ds_read_addtid_b32 %m0
   // ERROR@+1: AMDGPU/047 {function_name="a0_ds_errata", descriptor_name="amdgpu.ds_write_addtid_b32", descriptor_set_name="amdgpu.rdna4.gfx1250_a0.core", target="gfx1250-a0", constraint_key="amdgpu.ds.addtid_address_materialization", legalization_key="materialize_addtid_address"}
@@ -27,7 +28,7 @@ low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@a0) @a0_matrix_errata(%wide_l
   // ERROR@+1: AMDGPU/047 {function_name="a0_matrix_errata", descriptor_name="amdgpu.v_wmma_f16_16x16x128_bf8_bf8", descriptor_set_name="amdgpu.rdna4.gfx1250_a0.core", target="gfx1250-a0", constraint_kind="instruction_form", constraint_key="amdgpu.wmma.fp8_bf8_k128_split", legalization_key="split_wmma_k128_to_regular_scale_k64"}
   %k128 = v_wmma_f16_16x16x128_bf8_bf8 %wide_lhs, %wide_rhs, %acc4
   // ERROR@+1: AMDGPU/047 {function_name="a0_matrix_errata", descriptor_name="amdgpu.v_wmma_scale_f32_16x16x128_f8f6f4_f8_f8", descriptor_set_name="amdgpu.rdna4.gfx1250_a0.core", target="gfx1250-a0", constraint_key="amdgpu.wmma.scale_encoding", legalization_key="legalize_scaled_wmma"}
-  %scaled = v_wmma_scale_f32_16x16x128_f8f6f4_f8_f8 %wide_lhs, %wide_rhs, %scaled_acc, %scale_a, %scale_b {matrix_a_fmt = 1, matrix_b_fmt = 1, matrix_a_scale = 0, matrix_b_scale = 0, matrix_a_scale_fmt = 2, matrix_b_scale_fmt = 2, matrix_a_reuse = 0, matrix_b_reuse = 0}
+  %scaled = v_wmma_scale_f32_16x16x128_f8f6f4_f8_f8 %wide_lhs, %wide_rhs, %scaled_acc, %scale_a, %scale_b {matrix_a_fmt = 1, matrix_b_fmt = 1, matrix_a_scale_fmt = 2, matrix_b_scale_fmt = 2}
   // ERROR@+1: AMDGPU/047 {function_name="a0_matrix_errata", descriptor_name="amdgpu.v_wmma_f32_32x16x128_f4", descriptor_set_name="amdgpu.rdna4.gfx1250_a0.core", target="gfx1250-a0", constraint_key="amdgpu.wmma.f4_32x16_split", legalization_key="split_wmma_32x16_to_16x16"}
   %wide = v_wmma_f32_32x16x128_f4 %wide_lhs, %half_rhs, %wide_acc
   // ERROR@+1: AMDGPU/047 {function_name="a0_matrix_errata", descriptor_name="amdgpu.v_swmmac_i32_16x16x128_iu8", descriptor_set_name="amdgpu.rdna4.gfx1250_a0.core", target="gfx1250-a0", constraint_kind="coexecution_hazard", constraint_key="amdgpu.matrix.integer_coexecution_spacing", legalization_key="enforce_integer_matrix_spacing"}
@@ -115,8 +116,8 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@b0) @b0_accepts_sparse_k32_packe
 }
 
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@b0) @b0_accepts_native_packets(%address: reg<amdgpu.vgpr>, %data0: reg<amdgpu.vgpr>, %data1: reg<amdgpu.vgpr>, %m0: reg<amdgpu.m0>, %lhs: reg<amdgpu.vgpr x16>, %rhs: reg<amdgpu.vgpr x16>, %acc: reg<amdgpu.vgpr x4>) asm {
-  %pair = ds_read2_b32 %address {offset0 = 0, offset1 = 1}
-  ds_write2_b32 %address, %data0, %data1 {offset0 = 0, offset1 = 1}
+  %pair = ds_read2_b32 %address {offset1 = 1}
+  ds_write2_b32 %address, %data0, %data1 {offset1 = 1}
   %value = ds_read_addtid_b32 %m0
   ds_write_addtid_b32 %value, %m0
   %matrix = v_wmma_f16_16x16x128_bf8_bf8 %lhs, %rhs, %acc

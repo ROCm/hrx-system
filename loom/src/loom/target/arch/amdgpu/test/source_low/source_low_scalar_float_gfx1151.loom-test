@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx1151> @target
+
 func.def target(@target) @scalar_float_uniform(%lhs_i32: i32, %rhs_i32: i32) -> (f32, f32, f32, f32, i32, i32) {
   %lhs = scalar.sitofp %lhs_i32 : i32 to f32
   %rhs = scalar.uitofp %rhs_i32 : i32 to f32
@@ -51,6 +52,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_float_
 // ====
 
 amdgpu.target<gfx1151> @target
+
 func.def target(@target) @scalar_float_lane_values(%lhs: f32, %rhs: f32) -> (f32) {
   %condition = scalar.cmpf olt, %lhs, %rhs : f32
   %result = scf.select %condition, %lhs, %rhs : f32

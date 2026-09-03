@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_reduce.loom-test
 // RUN: emit source-low output=low
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32_reduce_add(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32>
@@ -32,10 +30,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_redu
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f32_reduce_add(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
@@ -65,10 +61,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_redu
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f32_reduce_add_fastmath(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
@@ -96,10 +90,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_redu
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f32x64_reduce_add_fastmath(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32>
@@ -247,10 +239,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x64_r
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 config.def @runtime.vector_width = 4 : index
 
 kernel.def target(@target) @f32_configured_width_square_reduce() {
@@ -296,10 +286,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32_reduce_minui_select_sentinel(%values: vector<4xi32>) -> (i32) {
   %empty_value = scalar.constant 0 : i32
   %zeros = vector.splat %empty_value : vector<4xi32>

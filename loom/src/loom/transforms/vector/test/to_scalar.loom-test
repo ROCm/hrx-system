@@ -197,7 +197,7 @@ func.def @scalarizes_block_scaled_f8_mma(%lhs_data: vector<4xf8E4M3>, %rhs_data:
   %m = index.constant 2 : index
   %n = index.constant 2 : index
   %k = index.constant 2 : index
-  %schema = encoding.define #encoding.f8e4m3<payload_elements=4, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d, affine=scale_only> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3<affine=scale_only, payload_elements=4, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {scale = %lhs_scale : vector<2xf32>, schema = %schema : encoding<schema>} : vector<4xf8E4M3>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {scale = %rhs_scale : vector<2xf32>, schema = %schema : encoding<schema>} : vector<4xf8E4M3>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
@@ -293,7 +293,7 @@ func.def @scalarizes_block_scaled_f8_mma(%lhs_data: vector<4xf8E4M3>, %rhs_data:
 // ====
 
 func.def @scalarizes_block_scaled_f8_decode(%payload: vector<4xf8E4M3>, %scale: vector<2xf32>) -> (vector<4xf32>) {
-  %schema = encoding.define #encoding.f8e4m3<payload_elements=4, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d, affine=scale_only> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3<affine=scale_only, payload_elements=4, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<2xf32>} : vector<4xf8E4M3>, encoding<schema> -> vector<4xf32>
   func.return %decoded : vector<4xf32>
 }
@@ -341,7 +341,7 @@ func.def @scalarizes_content_policy_f8_decode(%payload: vector<2xf8E4M3>) -> (ve
 // ====
 
 func.def @scalarizes_row_scaled_f8_decode(%payload: vector<2x2xf8E4M3>, %scale: vector<2xf32>) -> (vector<2x2xf32>) {
-  %schema = encoding.define #encoding.f8e4m3<payload_elements=4, scale_format=f32, scale_group_elements=1, scale_operands=1, scale_topology=row, affine=scale_only> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3<affine=scale_only, payload_elements=4, scale_format=f32, scale_group_elements=1, scale_operands=1, scale_topology=row> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<2xf32>} : vector<2x2xf8E4M3>, encoding<schema> -> vector<2x2xf32>
   func.return %decoded : vector<2x2xf32>
 }
@@ -404,7 +404,7 @@ func.def @leaves_nonmatching_f8_encode_for_exact_lowering(%source: vector<2xf32>
 // ====
 
 func.def @scalarizes_block_scaled_bias_f8_encode(%source: vector<2xf32>, %scale: vector<1xf32>, %bias: vector<1xf32>) -> (vector<2xf8E4M3>) {
-  %schema = encoding.define #encoding.f8e4m3fn<payload_elements=2, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d, affine=scale_plus_bias> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_plus_bias, payload_elements=2, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %encoded = vector.encode %source using %schema {bias = %bias : vector<1xf32>, scale = %scale : vector<1xf32>} : vector<2xf32>, encoding<schema> -> vector<2xf8E4M3>
   func.return %encoded : vector<2xf8E4M3>
 }
@@ -430,7 +430,7 @@ func.def @scalarizes_block_scaled_bias_f8_encode(%source: vector<2xf32>, %scale:
 // ====
 
 func.def @scalarizes_row_scaled_f8_encode(%source: vector<2x2xf32>, %scale: vector<2xf32>) -> (vector<2x2xf8E4M3>) {
-  %schema = encoding.define #encoding.f8e4m3fn<payload_elements=4, scale_format=f32, scale_group_elements=1, scale_operands=1, scale_topology=row, affine=scale_only> : encoding<schema>
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=4, scale_format=f32, scale_group_elements=1, scale_operands=1, scale_topology=row> : encoding<schema>
   %encoded = vector.encode %source using %schema {scale = %scale : vector<2xf32>} : vector<2x2xf32>, encoding<schema> -> vector<2x2xf8E4M3>
   func.return %encoded : vector<2x2xf8E4M3>
 }
@@ -478,9 +478,9 @@ func.def @scalarizes_quant_i8_zero_point_mma(%lhs_data: vector<4xi8>, %rhs_data:
   %m = index.constant 2 : index
   %n = index.constant 2 : index
   %k = index.constant 2 : index
-  %schema = encoding.define #encoding.operand<element_format=quant_i8, payload_packing=dense_lanes, payload_elements=4, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d, affine=scale_plus_zero_point> : encoding<schema>
-  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {scale = %lhs_scale : vector<2xf32>, zero_point = %lhs_zero_point : vector<2xi8>, schema = %schema : encoding<schema>} : vector<4xi8>
-  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {scale = %rhs_scale : vector<2xf32>, zero_point = %rhs_zero_point : vector<2xi8>, schema = %schema : encoding<schema>} : vector<4xi8>
+  %schema = encoding.define #encoding.operand<affine=scale_plus_zero_point, element_format=quant_i8, payload_elements=4, payload_packing=dense_lanes, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {scale = %lhs_scale : vector<2xf32>, schema = %schema : encoding<schema>, zero_point = %lhs_zero_point : vector<2xi8>} : vector<4xi8>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {scale = %rhs_scale : vector<2xf32>, schema = %schema : encoding<schema>, zero_point = %rhs_zero_point : vector<2xi8>} : vector<4xi8>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<4xi8>, vector<4xi8>, vector<4xf32>
   func.return %result : vector<4xf32>
@@ -625,7 +625,7 @@ func.def @scalarizes_codebook_mma(%lhs_codes: vector<4xi8>, %rhs_codes: vector<4
   %m = index.constant 2 : index
   %n = index.constant 2 : index
   %k = index.constant 2 : index
-  %schema = encoding.define #encoding.operand<element_format=codebook_index, payload_packing=dense_lanes, payload_elements=4, codebook=dynamic_table_operand> : encoding<schema>
+  %schema = encoding.define #encoding.operand<codebook=dynamic_table_operand, element_format=codebook_index, payload_elements=4, payload_packing=dense_lanes> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_codes shape [%m, %k] using {codebook = %lhs_codebook : vector<16xf32>, schema = %schema : encoding<schema>} : vector<4xi8>
   %rhs = vector.fragment<rhs> %rhs_codes shape [%k, %n] using {codebook = %rhs_codebook : vector<16xf32>, schema = %schema : encoding<schema>} : vector<4xi8>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>

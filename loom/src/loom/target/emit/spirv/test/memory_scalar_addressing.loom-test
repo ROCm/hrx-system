@@ -3,6 +3,7 @@
 // REQUIRES: spirv-dis, spirv-val
 
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_static_rank2_i32(%input: buffer, %output: buffer) -> (i32) {
   %input_base = index.constant 8 : offset
   %output_base = index.constant 12 : offset
@@ -77,6 +78,7 @@ func.def target(@target) @scalar_static_rank2_i32(%input: buffer, %output: buffe
 // ====
 
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_dynamic_view_base_i32(%input: buffer, %output: buffer, %base: offset) -> (i32) {
   %base_aligned = index.assume %base [range(%base, 0, 4092), mul(%base, 4)] : offset
   %output_base = index.constant 0 : offset
@@ -158,6 +160,7 @@ func.def target(@target) @scalar_dynamic_view_base_i32(%input: buffer, %output: 
 // ====
 
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_materialized_view_base_suffix_i32(%input: buffer, %output: buffer, %base: offset) -> (i32) {
   %base_aligned = index.assume %base [range(%base, 0, 4056), mul(%base, 4)] : offset
   %bias = index.constant 4 : offset
@@ -245,6 +248,7 @@ func.def target(@target) @scalar_materialized_view_base_suffix_i32(%input: buffe
 // ====
 
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_dynamic_index_i32(%input: buffer, %output: buffer, %element: index) -> (i32) {
   %buffer_base = index.constant 0 : offset
   %element_bounded = index.assume %element [range(%element, 0, 7)] : index
@@ -328,6 +332,7 @@ func.def target(@target) @scalar_dynamic_index_i32(%input: buffer, %output: buff
 // ====
 
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_mixed_rank2_i32(%input: buffer, %output: buffer, %base: offset, %row: index, %column: index) -> (i32) {
   %base_aligned = index.assume %base [range(%base, 0, 4092), mul(%base, 4)] : offset
   %row_bounded = index.assume %row [range(%row, 0, 3)] : index
@@ -430,6 +435,7 @@ func.def target(@target) @scalar_mixed_rank2_i32(%input: buffer, %output: buffer
 // ====
 
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_dynamic_stride_i32(%input: buffer, %output: buffer, %columns: index, %row: index, %column: index) -> (i32) {
   %buffer_base = index.constant 0 : offset
   %columns_bounded = index.assume %columns [range(%columns, 1, 8)] : index
@@ -534,6 +540,7 @@ func.def target(@target) @scalar_dynamic_stride_i32(%input: buffer, %output: buf
 // ====
 
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_subview_dynamic_index_i32(%input: buffer, %output: buffer, %base: offset, %element: index) -> (i32) {
   %base_aligned = index.assume %base [range(%base, 0, 4064), mul(%base, 4)] : offset
   %element_bounded = index.assume %element [range(%element, 0, 3)] : index

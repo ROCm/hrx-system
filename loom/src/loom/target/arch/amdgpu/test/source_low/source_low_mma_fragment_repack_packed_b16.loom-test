@@ -2,16 +2,14 @@
 
 amdgpu.target<gfx1100> @target
 
-func.def target(@target) @f16_result_to_rhs_packed_b16(
-    %values: vector<16xf16>) -> (vector<16xf16>) {
+func.def target(@target) @f16_result_to_rhs_packed_b16(%values: vector<16xf16>) -> (vector<16xf16>) {
   %c16 = index.constant 16 : index
   %result = vector.fragment<result> %values shape [%c16, %c16] : vector<16xf16>
   %rhs = vector.fragment.repack<rhs> %result shape [%c16, %c16] : vector<16xf16> -> vector<16xf16>
   func.return %rhs : vector<16xf16>
 }
 
-func.def target(@target) @bf16_result_to_rhs_packed_b16(
-    %values: vector<16xbf16>) -> (vector<16xbf16>) {
+func.def target(@target) @bf16_result_to_rhs_packed_b16(%values: vector<16xbf16>) -> (vector<16xbf16>) {
   %c16 = index.constant 16 : index
   %result = vector.fragment<result> %values shape [%c16, %c16] : vector<16xbf16>
   %rhs = vector.fragment.repack<rhs> %result shape [%c16, %c16] : vector<16xbf16> -> vector<16xbf16>
@@ -89,8 +87,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @bf16_result_to_
 
 amdgpu.target<gfx1100> @target
 
-func.def target(@target) @report_result_to_rhs_packed_b16(
-    %values: vector<16xf16>) -> (vector<16xf16>) {
+func.def target(@target) @report_result_to_rhs_packed_b16(%values: vector<16xf16>) -> (vector<16xf16>) {
   %c16 = index.constant 16 : index
   %result = vector.fragment<result> %values shape [%c16, %c16] : vector<16xf16>
   %rhs = vector.fragment.repack<rhs> %result shape [%c16, %c16] : vector<16xf16> -> vector<16xf16>

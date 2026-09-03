@@ -495,7 +495,6 @@ kernel.def @workgroup_barrier_accepts_uniform_branch() {
   %is_first_workgroup = index.cmp eq, %workgroup, %first_workgroup : index
   scf.if %is_first_workgroup {
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-    scf.yield
   }
   kernel.return
 }
@@ -568,7 +567,6 @@ kernel.def @workgroup_barrier_accepts_kernel_argument_control(%enabled: i1) {
 } launch(%enabled: i1) {
   scf.if %enabled {
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-    scf.yield
   }
   kernel.return
 }
@@ -606,7 +604,6 @@ kernel.def target(@test_target) @workgroup_barrier_accepts_exact_single_subgroup
   %is_first_subgroup = index.cmp eq, %subgroup, %first_subgroup : index
   scf.if %is_first_subgroup {
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-    scf.yield
   }
   kernel.return
 }

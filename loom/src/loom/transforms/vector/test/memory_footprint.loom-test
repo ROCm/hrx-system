@@ -623,9 +623,7 @@ func.def @guarded_loaded_i32_precast_index_proves_unit_axis(%ids: buffer, %paylo
     %payload_view = buffer.view %payload[%base] : buffer -> view<[%row_count_idx]x4xf32, %layout>
     %loaded = vector.load %payload_view[%row_idx, 0] : view<[%row_count_idx]x4xf32, %layout> -> vector<4xf32>
     test.use %loaded : vector<4xf32>
-    scf.yield
   } else {
-    scf.yield
   }
   func.return
 }
@@ -665,9 +663,7 @@ func.def @guarded_i64_precast_index_proves_store_unit_axis(%payload: buffer, %ba
   scf.if %guard {
     %payload_view = buffer.view %payload[%base] : buffer -> view<[%row_count_idx]x4xf32, %layout>
     vector.store %value, %payload_view[%row_idx, 0] : vector<4xf32>, view<[%row_count_idx]x4xf32, %layout>
-    scf.yield
   } else {
-    scf.yield
   }
   func.return
 }

@@ -18,7 +18,6 @@ package(
 
 loom_target_contract_table_cc_libraries(
     name = "core",
-    testonly = True,
     args = ["--contract-fragment=test_low_core"],
     contract_deps = ["//loom/src/loom/target:contract"],
     generator = "//loom/py/loom/gen/target/contracts:test_low_contract_table_family",
@@ -34,7 +33,6 @@ loom_target_contract_table_cc_libraries(
 
 loom_cc_library(
     name = "contracts",
-    testonly = True,
     hdrs = [
         "core.h",
         "core_lower_rules.h",

@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low control-flow=structured-low
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+
 func.def target(@target) @index_constants() -> (index, index, offset) {
   %minimum = index.constant -2147483648 : index
   %maximum = index.constant 2147483647 : index
@@ -20,6 +21,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_
 // ====
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+
 func.def target(@target) @index_assume_ordinals(%coordinate0: index, %byte_offset0: offset) -> (index, offset) {
   %coordinate, %byte_offset = index.assume %coordinate0, %byte_offset0 [range(%coordinate0, 0, 1024), range(%byte_offset0, 0, 4096)] : index, offset
   func.return %coordinate, %byte_offset : index, offset
@@ -33,6 +35,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_
 // ====
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+
 func.def target(@target) @boolean_address_cast_family(%flag: i1, %coordinate: index, %byte_offset: offset) -> (index, offset, i1, i1) {
   %flag_index = index.cast %flag : i1 to index
   %flag_offset = index.cast %flag : i1 to offset
@@ -61,6 +64,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @boolea
 // ====
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+
 func.def target(@target) @index_payload_cast_family(%i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %coordinate: index) -> (index, index, index, index, i8, i16, i32, i64) {
   %i64 = scalar.assume %i64_raw [range(%i64_raw, -2147483648, 2147483647)] : i64
   %from_i8 = index.cast %i8 : i8 to index
@@ -90,6 +94,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_
 // ====
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+
 func.def target(@target) @offset_payload_cast_family(%i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %byte_offset: offset) -> (offset, offset, offset, offset, i8, i16, i32, i64) {
   %i64 = scalar.assume %i64_raw [range(%i64_raw, 0, 9223372036854775807)] : i64
   %from_i8 = index.cast %i8 : i8 to offset
@@ -125,6 +130,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @offset
 // ====
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+
 func.def target(@target) @address_domain_cast_family(%coordinate0: index, %byte_offset0: offset) -> (offset, index) {
   %coordinate, %byte_offset = index.assume %coordinate0, %byte_offset0 [range(%coordinate0, 0, 2147483647), range(%byte_offset0, 0, 2147483647)] : index, offset
   %as_offset = index.cast %coordinate : index to offset

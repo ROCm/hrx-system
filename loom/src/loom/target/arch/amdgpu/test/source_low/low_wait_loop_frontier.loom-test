@@ -247,7 +247,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @trailing_reset_satisfies_loop_c
 ^loop(%carried: reg<amdgpu.vgpr>):
   %used = v_add_u32 %carried, %rhs
   %next = ds_read_b32 %address {offset = 4}
-  s_waitcnt {lgkmcnt = 0, vmcnt = 63}
+  s_waitcnt {lgkmcnt = 0}
   low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
 ^backedge:
   low.br ^loop(%next: reg<amdgpu.vgpr>)
@@ -272,7 +272,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @trailing_reset_satisfies_loop_c
 ^loop(%carried: reg<amdgpu.vgpr>):
   %used = v_add_u32 %carried, %rhs
   %next = ds_read_b32 %address {offset = 4}
-  s_waitcnt {lgkmcnt = 0, vmcnt = 63}
+  s_waitcnt {lgkmcnt = 0}
   low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
 ^backedge:
   low.br ^loop(%next: reg<amdgpu.vgpr>)

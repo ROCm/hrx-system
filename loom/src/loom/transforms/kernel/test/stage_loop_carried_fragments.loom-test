@@ -16,7 +16,7 @@ kernel.def target(@target) @stage_dense_accumulator_fragments() {
   %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
   %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
   %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
-  %result0, %result1, %result2, %result3 = scf.for %tile = [%loop_begin to %tile_count step %loop_step](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  %result0, %result1, %result2, %result3 = scf.for %tile = [%loop_begin to %tile_count step %loop_step](%acc0 = %init : vector<8xf32>, %acc1 = %init : vector<8xf32>, %acc2 = %init : vector<8xf32>, %acc3 = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
     %next0 = vector.mma %lhs, %rhs, %acc0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next1 = vector.mma %lhs, %rhs, %acc1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next2 = vector.mma %lhs, %rhs, %acc2 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
@@ -210,7 +210,7 @@ kernel.def target(@target) @report_dense_accumulator_fragment_staging() {
   %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
   %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
   %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
-  %result0, %result1, %result2, %result3 = scf.for %tile = [%loop_begin to %tile_count step %loop_step](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  %result0, %result1, %result2, %result3 = scf.for %tile = [%loop_begin to %tile_count step %loop_step](%acc0 = %init : vector<8xf32>, %acc1 = %init : vector<8xf32>, %acc2 = %init : vector<8xf32>, %acc3 = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
     %next0 = vector.mma %lhs, %rhs, %acc0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next1 = vector.mma %lhs, %rhs, %acc1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next2 = vector.mma %lhs, %rhs, %acc2 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
@@ -250,7 +250,7 @@ kernel.def target(@target) @stage_after_sinking_single_use_fragment_read() {
   %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
   %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
   %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
-  %result0, %result1, %result2, %result3 = scf.for %tile = [%loop_begin to %tile_count step %loop_step](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  %result0, %result1, %result2, %result3 = scf.for %tile = [%loop_begin to %tile_count step %loop_step](%acc0 = %init : vector<8xf32>, %acc1 = %init : vector<8xf32>, %acc2 = %init : vector<8xf32>, %acc3 = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
     %loaded_rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16, %layout> -> vector<16xbf16>
     %noise = vector.mulf %accumulator, %accumulator : vector<8xf32>
     %next0 = vector.mma %lhs, %loaded_rhs, %acc0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
@@ -291,7 +291,7 @@ kernel.def target(@target) @stage_multi_subgroup_accumulator_fragments() {
   %input = vector.fragment<init> %payload shape [%m, %n] : vector<8xf32>
   %lhs = vector.fragment<lhs> %payload shape [%m, %k] : vector<8xf32>
   %rhs = vector.fragment<rhs> %payload shape [%k, %n] : vector<8xf32>
-  %result0, %result1, %result2, %result3 = scf.for %tile = [%origin to %tile_count step %loop_step](%acc0 = %input, %acc1 = %input, %acc2 = %input, %acc3 = %input : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  %result0, %result1, %result2, %result3 = scf.for %tile = [%origin to %tile_count step %loop_step](%acc0 = %input : vector<8xf32>, %acc1 = %input : vector<8xf32>, %acc2 = %input : vector<8xf32>, %acc3 = %input : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
     %next0 = vector.mma %lhs, %rhs, %acc0 : vector<8xf32>, vector<8xf32>, vector<8xf32>
     %next1 = vector.mma %lhs, %rhs, %acc1 : vector<8xf32>, vector<8xf32>, vector<8xf32>
     %next2 = vector.mma %lhs, %rhs, %acc2 : vector<8xf32>, vector<8xf32>, vector<8xf32>
@@ -452,7 +452,6 @@ kernel.def target(@target) @decline_subgroup_dependent_branch() {
       scf.yield %next : vector<8xf32>
     }
     test.use %result : vector<8xf32>
-    scf.yield
   }
   kernel.return
 }
@@ -507,7 +506,6 @@ kernel.def target(@target) @stage_exact_single_subgroup_control() {
       scf.yield %next : vector<8xf32>
     }
     test.use %result : vector<8xf32>
-    scf.yield
   }
   kernel.return
 }

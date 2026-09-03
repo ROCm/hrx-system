@@ -4,7 +4,6 @@ test.target<low_core> @test_target
 
 func.def target(@test_target) @structured_if_without_results(%cond: i1) {
   scf.if %cond {
-    scf.yield
   }
   func.return
 }

@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @scalar_ieee_minimum_rejected(%lhs: f32, %rhs: f32) -> (f32) {
   // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="amdgpu.v_minimum_f32", constraint_key="descriptor_available"}
   %min = scalar.minimumf %lhs, %rhs : f32

@@ -1,5 +1,6 @@
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_fmac_pair
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_fmac_pair(%acc0: reg<amdgpu.vgpr>, %lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %acc1: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm {
   %next0 = v_fmac_f32 %acc0, %lhs0, %rhs0
   %next1 = v_fmac_f32 %acc1, %lhs1, %rhs1
@@ -13,6 +14,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_fmac_pair
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_dot2_pairs strategy=source fixed=%lhs0:physical_register:0:1 fixed=%rhs0:physical_register:1:1 fixed=%lhs1:physical_register:2:1 fixed=%rhs1:physical_register:3:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_dot2_pairs(%lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>, %acc_f16_0: reg<amdgpu.vgpr>, %acc_f16_1: reg<amdgpu.vgpr>, %acc_bf16_0: reg<amdgpu.vgpr>, %acc_bf16_1: reg<amdgpu.vgpr>) asm {
   %dot_f16_0 = v_dot2_f32_f16 %lhs0, %rhs0, %acc_f16_0
   %dot_f16_1 = v_dot2_f32_f16 %lhs1, %rhs1, %acc_f16_1
@@ -28,6 +30,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_dot2_pair
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_mixed_dot2_pair strategy=source fixed=%lhs0:physical_register:0:1 fixed=%rhs0:physical_register:1:1 fixed=%lhs1:physical_register:2:1 fixed=%rhs1:physical_register:3:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_mixed_dot2_pair(%lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>, %acc_f16: reg<amdgpu.vgpr>, %acc_bf16: reg<amdgpu.vgpr>) asm {
   %dot_f16 = v_dot2_f32_f16 %lhs0, %rhs0, %acc_f16
   %dot_bf16 = v_dot2_f32_bf16 %lhs1, %rhs1, %acc_bf16
@@ -41,6 +44,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_mixed_dot
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_binary_f32_pairs fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%a1:physical_register:2:1 fixed=%b1:physical_register:3:1 fixed=%mul0:physical_register:4:1 fixed=%mul1:physical_register:5:1 fixed=%add0:physical_register:6:1 fixed=%add1:physical_register:7:1 fixed=%sub0:physical_register:8:1 fixed=%sub1:physical_register:9:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_binary_f32_pairs(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>) asm {
   %mul0 = v_mul_f32 %a0, %b0
   %mul1 = v_mul_f32 %a1, %b1
@@ -58,6 +62,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_binary_f3
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_delay_alu_binary_pairs strategy=source fixed=%sum0:physical_register:4:1 fixed=%sum1:physical_register:5:1 fixed=%product0:physical_register:4:1 fixed=%product1:physical_register:5:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_delay_alu_binary_pairs(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>) asm {
   %sum0 = v_add_f32 %a0, %b0
   %sum1 = v_add_f32 %a1, %b1
@@ -73,6 +78,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_delay_alu
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_trans_result_window fixed=%input0:physical_register:0:1 fixed=%input1:physical_register:1:1 fixed=%input2:physical_register:2:1 fixed=%bias0:physical_register:3:1 fixed=%bias1:physical_register:4:1 fixed=%rcp:physical_register:7:1 fixed=%product0:physical_register:5:1 fixed=%product1:physical_register:6:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_trans_result_window(%input0: reg<amdgpu.vgpr>, %input1: reg<amdgpu.vgpr>, %input2: reg<amdgpu.vgpr>, %bias0: reg<amdgpu.vgpr>, %bias1: reg<amdgpu.vgpr>) asm {
   %rcp = v_rcp_f32 %input0
   %product0 = v_mul_f32 %input1, %bias0
@@ -87,6 +93,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_trans_res
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_minmax_f32_pairs fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%a1:physical_register:2:1 fixed=%b1:physical_register:3:1 fixed=%min0:physical_register:4:1 fixed=%min1:physical_register:5:1 fixed=%max0:physical_register:6:1 fixed=%max1:physical_register:7:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_minmax_f32_pairs(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>) asm {
   %min0 = v_min_f32 %a0, %b0
   %min1 = v_min_f32 %a1, %b1
@@ -102,6 +109,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_minmax_f3
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_subrev_f32_pairs fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%a1:physical_register:2:1 fixed=%b1:physical_register:3:1 fixed=%diff0:physical_register:4:1 fixed=%diff1:physical_register:5:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_subrev_f32_pairs(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>) asm {
   %diff0 = v_subrev_f32 %a0, %b0
   %diff1 = v_subrev_f32 %a1, %b1
@@ -115,6 +123,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_subrev_f3
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_mixed_binary_f32_pair fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%a1:physical_register:2:1 fixed=%b1:physical_register:3:1 fixed=%product:physical_register:4:1 fixed=%sum:physical_register:5:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_mixed_binary_f32_pair(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>) asm {
   %product = v_mul_f32 %a0, %b0
   %sum = v_add_f32 %a1, %b1
@@ -128,6 +137,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_mixed_bin
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_y_only_integer_pairs strategy=source fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%i0:physical_register:2:1 fixed=%i1:physical_register:3:1 fixed=%product:physical_register:4:1 fixed=%sum:physical_register:5:1 fixed=%scale:physical_register:6:1 fixed=%shifted:physical_register:7:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_y_only_integer_pairs(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %i0: reg<amdgpu.vgpr>, %i1: reg<amdgpu.vgpr>) asm {
   %product = v_mul_f32 %a0, %b0
   %sum = v_add_u32 %i0, %i1
@@ -143,6 +153,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_y_only_in
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_and_b32_y_only_pair strategy=source fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%mask0:physical_register:2:1 fixed=%mask1:physical_register:3:1 fixed=%product:physical_register:4:1 fixed=%masked:physical_register:5:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_and_b32_y_only_pair(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %mask0: reg<amdgpu.vgpr>, %mask1: reg<amdgpu.vgpr>) asm {
   %product = v_mul_f32 %a0, %b0
   %masked = v_and_b32 %mask0, %mask1
@@ -156,6 +167,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_and_b32_y
 
 // RUN: emit amdgpu-vopd-plan-json @gfx1250_vopd_plan_and_b32_not_y_component strategy=source fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%mask0:physical_register:2:1 fixed=%mask1:physical_register:3:1 fixed=%product:physical_register:4:1 fixed=%masked:physical_register:5:1
 amdgpu.target<gfx1250> @gfx1250_target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_vopd_plan_and_b32_not_y_component(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %mask0: reg<amdgpu.vgpr>, %mask1: reg<amdgpu.vgpr>) asm {
   %product = v_mul_f32 %a0, %b0
   %masked = v_and_b32 %mask0, %mask1
@@ -169,6 +181,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_vopd_pl
 
 // RUN: emit amdgpu-vopd-plan-json @gfx1250_vopd_plan_y_only_integer_pairs strategy=source fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%i0:physical_register:2:1 fixed=%i1:physical_register:3:1 fixed=%scale0:physical_register:4:1 fixed=%max_value:physical_register:5:1 fixed=%scale1:physical_register:6:1 fixed=%min_value:physical_register:7:1 fixed=%scale2:physical_register:8:1 fixed=%difference:physical_register:9:1 fixed=%scale3:physical_register:10:1 fixed=%logical_shift:physical_register:11:1 fixed=%scale4:physical_register:12:1 fixed=%arithmetic_shift:physical_register:13:1
 amdgpu.target<gfx1250> @gfx1250_target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_vopd_plan_y_only_integer_pairs(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %i0: reg<amdgpu.vgpr>, %i1: reg<amdgpu.vgpr>) asm {
   %scale0 = v_add_f32 %a0, %b0
   %max_value = v_max_i32 %i0, %i1
@@ -190,6 +203,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_vopd_pl
 
 // RUN: emit amdgpu-vopd-plan-json @gfx12_vopd_plan_gfx1250_integer_not_y_component strategy=source fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%i0:physical_register:2:1 fixed=%i1:physical_register:3:1 fixed=%scale:physical_register:4:1 fixed=%max_value:physical_register:5:1
 amdgpu.target<gfx1200> @gfx12_target
+
 low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_vopd_plan_gfx1250_integer_not_y_component(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %i0: reg<amdgpu.vgpr>, %i1: reg<amdgpu.vgpr>) asm {
   %scale = v_add_f32 %a0, %b0
   %max_value = v_max_i32 %i0, %i1
@@ -203,6 +217,7 @@ low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_vopd_plan_gfx1250_i
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_mov_pair fixed=%zero:physical_register:0:1 fixed=%answer:physical_register:1:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_mov_pair(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
   %zero = v_mov_b32 0
   %answer = v_mov_b32 42
@@ -218,6 +233,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_mov_pair(
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_wave64_vopd_plan_mov_pair fixed=%zero:physical_register:0:1 fixed=%answer:physical_register:1:1
 amdgpu.target<gfx1100> @gfx11_wave64_target {subgroup_size = 64}
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_wave64_target) @gfx11_wave64_vopd_plan_mov_pair(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
   %zero = v_mov_b32 0
   %answer = v_mov_b32 42
@@ -233,6 +249,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_wave64_target) @gfx11_wave64_vopd_
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_fmamk_pair
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_fmamk_pair(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs0: reg<amdgpu.vgpr>, %addend0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %addend1: reg<amdgpu.vgpr>) asm {
   %next0 = v_fmamk_f32 %lhs0, %addend0, 1065353216
   %next1 = v_fmamk_f32 %lhs1, %addend1, 1065353216
@@ -252,6 +269,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_fmamk_pai
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_fmamk_literal_mismatch
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_fmamk_literal_mismatch(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs0: reg<amdgpu.vgpr>, %addend0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %addend1: reg<amdgpu.vgpr>) asm {
   %next0 = v_fmamk_f32 %lhs0, %addend0, 1065353216
   %next1 = v_fmamk_f32 %lhs1, %addend1, 1073741824
@@ -271,6 +289,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_fmamk_lit
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_mixed_literal_allocator_guidance
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_mixed_literal_allocator_guidance(%acc: reg<amdgpu.vgpr>, %lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm {
   %next0 = v_fmac_f32 %acc, %lhs0, %rhs0
   %next1 = v_fmaak_f32 %lhs1, %rhs1, 1065353216
@@ -284,6 +303,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_mixed_lit
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_fmac_dependent_chain
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_fmac_dependent_chain(%acc: reg<amdgpu.vgpr>, %lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm {
   %next0 = v_fmac_f32 %acc, %lhs0, %rhs0
   %next1 = v_fmac_f32 %next0, %lhs1, %rhs1
@@ -297,6 +317,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_fmac_depe
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_fmac_register_constraints fixed=%acc0:physical_register:0:1 fixed=%lhs0:physical_register:1:1 fixed=%rhs0:physical_register:2:1 fixed=%acc1:physical_register:4:1 fixed=%lhs1:physical_register:5:1 fixed=%rhs1:physical_register:6:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_fmac_register_constraints(%acc0: reg<amdgpu.vgpr>, %lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %acc1: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm {
   %next0 = v_fmac_f32 %acc0, %lhs0, %rhs0
   %next1 = v_fmac_f32 %acc1, %lhs1, %rhs1
@@ -311,6 +332,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_fmac_regi
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_y_destination_aliases_x_sources
 
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_y_destination_aliases_x_sources(%acc0: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm {
   %next0 = v_fmac_f32 %acc0, %shared, %shared
   %next1 = v_fmac_f32 %shared, %lhs1, %rhs1
@@ -325,6 +347,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_y_destina
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_x_destination_aliases_y_sources
 
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_x_destination_aliases_y_sources(%lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %acc1: reg<amdgpu.vgpr>) asm {
   %next0 = v_add_f32 %lhs0, %rhs0
   %copied = copy %next0 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
@@ -339,6 +362,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_x_destina
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_commutes_binary_sources fixed=%lhs0:physical_register:0:1 fixed=%lhs1:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%product0:physical_register:4:1 fixed=%product1:physical_register:5:1 fixed=%sum0:physical_register:6:1 fixed=%sum1:physical_register:7:1 fixed=%minimum0:physical_register:8:1 fixed=%minimum1:physical_register:9:1 fixed=%maximum0:physical_register:10:1 fixed=%maximum1:physical_register:11:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_commutes_binary_sources(%lhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>) asm {
   %product0 = v_mul_f32 %lhs0, %shared
   %product1 = v_mul_f32 %lhs1, %shared
@@ -358,6 +382,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_commutes_
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_keeps_ordered_binary_sources fixed=%lhs0:physical_register:0:1 fixed=%lhs1:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%difference0:physical_register:4:1 fixed=%difference1:physical_register:5:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_keeps_ordered_binary_sources(%lhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>) asm {
   %difference0 = v_sub_f32 %lhs0, %shared
   %difference1 = v_sub_f32 %lhs1, %shared
@@ -371,6 +396,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_keeps_ord
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_commutes_accumulate_sources fixed=%lhs0:physical_register:0:1 fixed=%lhs1:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%acc0:physical_register:4:1 fixed=%acc1:physical_register:5:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_commutes_accumulate_sources(%lhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>, %acc0: reg<amdgpu.vgpr>, %acc1: reg<amdgpu.vgpr>) asm {
   %next0 = v_fmac_f32 %acc0, %lhs0, %shared
   %next1 = v_fmac_f32 %acc1, %lhs1, %shared
@@ -384,6 +410,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_commutes_
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_commutes_literal_product_sources fixed=%lhs0:physical_register:0:1 fixed=%lhs1:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%next0:physical_register:4:1 fixed=%next1:physical_register:5:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_commutes_literal_product_sources(%lhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>) asm {
   %next0 = v_fmaak_f32 %lhs0, %shared, 1065353216
   %next1 = v_fmaak_f32 %lhs1, %shared, 1065353216
@@ -397,6 +424,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_commutes_
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_commutes_dot_sources fixed=%lhs0:physical_register:0:1 fixed=%lhs1:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%acc0:physical_register:4:1 fixed=%acc1:physical_register:5:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_commutes_dot_sources(%lhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>, %acc0: reg<amdgpu.vgpr>, %acc1: reg<amdgpu.vgpr>) asm {
   %next0 = v_dot2_f32_f16 %lhs0, %shared, %acc0
   %next1 = v_dot2_f32_f16 %lhs1, %shared, %acc1
@@ -410,6 +438,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_commutes_
 
 // RUN: emit amdgpu-vopd-plan-json @gfx1250_vopd_plan_commutes_y_integer_sources strategy=source fixed=%lhs:physical_register:0:1 fixed=%integer_lhs:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%difference0:physical_register:4:1 fixed=%sum:physical_register:5:1 fixed=%difference1:physical_register:6:1 fixed=%maximum:physical_register:7:1 fixed=%difference2:physical_register:8:1 fixed=%minimum:physical_register:9:1
 amdgpu.target<gfx1250> @gfx1250_target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_vopd_plan_commutes_y_integer_sources(%lhs: reg<amdgpu.vgpr>, %integer_lhs: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>) asm {
   %difference0 = v_sub_f32 %lhs, %shared
   %sum = v_add_u32 %integer_lhs, %shared
@@ -427,6 +456,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_vopd_pl
 
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_commutes_y_bitwise_sources fixed=%lhs:physical_register:0:1 fixed=%integer_lhs:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%difference:physical_register:4:1 fixed=%masked:physical_register:5:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_commutes_y_bitwise_sources(%lhs: reg<amdgpu.vgpr>, %integer_lhs: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>) asm {
   %difference = v_sub_f32 %lhs, %shared
   %masked = v_and_b32 %integer_lhs, %shared
@@ -440,6 +470,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_plan_commutes_
 
 // RUN: emit amdgpu-vopd-plan-json @gfx12_vopd_plan_commutes_binary_sources fixed=%lhs0:physical_register:0:1 fixed=%lhs1:physical_register:1:1 fixed=%shared:physical_register:2:1 fixed=%product0:physical_register:4:1 fixed=%product1:physical_register:5:1
 amdgpu.target<gfx1200> @gfx12_target
+
 low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_vopd_plan_commutes_binary_sources(%lhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>) asm {
   %product0 = v_mul_f32 %lhs0, %shared
   %product1 = v_mul_f32 %lhs1, %shared
@@ -453,6 +484,7 @@ low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_vopd_plan_commutes_
 
 // RUN: emit amdgpu-vopd-plan-json @gfx1250_vopd_plan_address_state_insertion strategy=source fixed=%high_source:physical_register:258:1 fixed=%integer_lhs:physical_register:2:1 fixed=%integer_rhs:physical_register:3:1 fixed=%low_copy:physical_register:6:1 fixed=%inline_value:physical_register:4:1 fixed=%maximum:physical_register:5:1
 amdgpu.target<gfx1250> @gfx1250_target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_vopd_plan_address_state_insertion(%high_source: reg<amdgpu.vgpr>, %integer_lhs: reg<amdgpu.vgpr>, %integer_rhs: reg<amdgpu.vgpr>) asm {
   %low_copy = v_mov_b32_copy %high_source
   %inline_value = v_mov_b32 0

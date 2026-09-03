@@ -1,6 +1,7 @@
 // RUN: emit amdgpu-wait-counter-plan-json @lds_d16_storage_continuation
 
 amdgpu.target<gfx1100> @target
+
 low.func.def target<amdgpu.rdna3.core>(@target) @lds_d16_storage_continuation(%addr: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %low = ds_load_u16_d16 %addr
   %full = ds_load_u16_d16_hi %low, %addr
@@ -19,6 +20,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @lds_d16_storage_continuation(%a
 // RUN: emit amdgpu-assembly @lds_d16_storage_continuation_assembly
 
 amdgpu.target<gfx1100> @target
+
 low.func.def target<amdgpu.rdna3.core>(@target) @lds_d16_storage_continuation_assembly(%addr: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %low = ds_load_u16_d16 %addr
   %full = ds_load_u16_d16_hi %low, %addr
@@ -43,6 +45,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @lds_d16_storage_continuation_as
 // RUN: emit amdgpu-wait-counter-plan-json @vmem_d16_storage_continuation
 
 amdgpu.target<gfx1100> @target
+
 low.func.def target<amdgpu.rdna3.core>(@target) @vmem_d16_storage_continuation(%addr: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %low = global_load_d16_b16_saddr %addr, %input
   %full = global_load_d16_hi_b16_saddr %low, %addr, %input

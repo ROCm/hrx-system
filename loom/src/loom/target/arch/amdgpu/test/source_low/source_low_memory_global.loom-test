@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @global_saddr_fallback(%input: buffer, %output: buffer) {
   %base = index.constant 4 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<4xi32>
@@ -24,6 +25,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @global_f32x7_roundtrip(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<7xf32>
@@ -48,6 +50,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @global_f32x64_roundtrip(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32>
@@ -100,6 +103,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @global_f32x64_add_roundtrip(%lhs: buffer, %rhs: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs[%buffer_base] : buffer -> view<64xf32>
@@ -380,6 +384,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @global_bf16x14_roundtrip(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<14xbf16>
@@ -404,6 +409,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @global_bf16x64_roundtrip(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xbf16>
@@ -440,6 +446,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @global_f16x7_roundtrip(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<7xf16>
@@ -464,6 +471,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @global_bf16x7_roundtrip(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<7xbf16>
@@ -488,6 +496,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @global_saddr_dynamic_offset_argument(%input: buffer, %byte_offset: offset) -> (i32) {
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %input_view = buffer.view %input_global[%byte_offset] : buffer -> view<1xi32>
@@ -513,6 +522,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @global_store_i32_constant_saddr(%output: buffer) {
   %buffer_base = index.constant 0 : offset
   %output_global = buffer.assume.memory_space<global> %output : buffer
@@ -534,6 +544,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @global_store_i8_saddr(%output: buffer, %value: i8) {
   %base = index.constant 0 : offset
   %output_global = buffer.assume.memory_space<global> %output : buffer
@@ -553,6 +564,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @global_load_i16_saddr(%input: buffer) -> (i16) {
   %buffer_base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
@@ -572,6 +584,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @global_store_i16_saddr(%output: buffer, %value: i16) {
   %buffer_base = index.constant 0 : offset
   %output_global = buffer.assume.memory_space<global> %output : buffer
@@ -591,6 +604,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8x2_buffer_load(%input: buffer) -> (vector<2xi8>) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<2xi8>
@@ -609,6 +623,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x2_bu
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @global_load_i8x2_saddr(%input: buffer) -> (vector<2xi8>) {
   %buffer_base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
@@ -628,6 +643,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @global_store_i8x2_saddr(%output: buffer, %value: vector<2xi8>) {
   %buffer_base = index.constant 0 : offset
   %output_global = buffer.assume.memory_space<global> %output : buffer
@@ -647,6 +663,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @descriptor_load_i16(%input: buffer) -> (i16) {
   %buffer_base = index.constant 0 : offset
   %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
@@ -673,6 +690,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @descriptor_store_i16(%output: buffer, %value: i16) {
   %buffer_base = index.constant 0 : offset
   %output_descriptor = buffer.assume.memory_space<descriptor> %output : buffer
@@ -701,6 +719,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @descriptor_load_i8x2(%input: buffer) -> (vector<2xi8>) {
   %buffer_base = index.constant 0 : offset
   %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
@@ -727,6 +746,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @descriptor_store_i8x2(%output: buffer, %value: vector<2xi8>) {
   %buffer_base = index.constant 0 : offset
   %output_descriptor = buffer.assume.memory_space<descriptor> %output : buffer
@@ -755,6 +775,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @descriptor_b128_off_zero(%input: buffer) -> (vector<4xi32>) {
   %buffer_base = index.constant 0 : offset
   %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
@@ -781,6 +802,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @descriptor_dynamic_base_static_extent_load_i32(%input: buffer, %base_i32: i32) -> (i32) {
   %base0 = index.cast %base_i32 : i32 to offset
   %base = index.assume %base0 [range(%base0, 0, 4092), mul(%base0, 4)] : offset
@@ -810,6 +832,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @descriptor_dynamic_projected_base_static_extent_load_i32(%input: buffer, %base_i32: i32) -> (i32) {
   %base0 = index.cast %base_i32 : i32 to offset
   %base = index.assume %base0 [range(%base0, 0, 4092), mul(%base0, 4)] : offset
@@ -841,6 +864,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @descriptor_dynamic_extent_load_f32(%input: buffer, %element_count_i32: i32, %element_i32: i32) -> (f32) {
   %base = index.constant 0 : offset
   %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
@@ -873,6 +897,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @descriptor_static_extent_overflow_fallback_load_i32(%input: buffer, %element_i32: i32) -> (i32) {
   %base = index.constant 0 : offset
   %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
@@ -903,6 +928,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @descriptor_dynamic_extent_overflow_fallback_load_f32(%input: buffer, %element_count_i32: i32, %element_i32: i32) -> (f32) {
   %base = index.constant 0 : offset
   %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
@@ -935,6 +961,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @descriptor_dynamic_base_extent_load_f32(%input: buffer, %base_i32: i32, %element_count_i32: i32, %element_i32: i32) -> (f32) {
   %base0 = index.cast %base_i32 : i32 to offset
   %base = index.assume %base0 [range(%base0, 0, 4096), mul(%base0, 4)] : offset
@@ -970,6 +997,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @descriptor_dynamic_extent_store_f32x4(%output: buffer, %value: vector<4xf32>, %row_count_i32: i32, %row_i32: i32) {
   %base = index.constant 0 : offset
   %first_column = index.constant 0 : index
@@ -1003,6 +1031,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @descriptor_dynamic_base_extent_store_f32x4(%output: buffer, %value: vector<4xf32>, %base_i32: i32, %row_count_i32: i32, %row_i32: i32) {
   %base0 = index.cast %base_i32 : i32 to offset
   %base = index.assume %base0 [range(%base0, 0, 8192), mul(%base0, 16)] : offset
@@ -1679,6 +1708,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_b128() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1725,6 +1755,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @f32x8_split_b128() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1777,6 +1808,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_scalar_2d_store() {
   %unit = index.constant 1 : index
   %columns = index.constant 8 : index
@@ -1811,6 +1843,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(8, 4, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_view_scalar_2d_store() {
   %unit = index.constant 1 : index
   %columns = index.constant 8 : index
@@ -1845,6 +1878,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(8, 4, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_dynamic_constant_index() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1874,6 +1908,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_scalar_arg_index() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -1914,6 +1949,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_dynamic_view_base() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -1947,6 +1983,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_dynamic_view_base_loaded() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -1977,6 +2014,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32x4_dynamic_view_base_b128() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -2010,6 +2048,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @f32x4_dynamic_view_base_large_static_offset() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
@@ -2055,6 +2094,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(256, 1,
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @f16_view_scalar() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -2100,6 +2140,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @bf16_view_scalar() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -2145,6 +2186,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @f16x2_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2173,6 +2215,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @f16x4_b64() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2201,6 +2244,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @bf16x2_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2229,6 +2273,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @bf16x4_b64() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2257,6 +2302,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @bf16_strided_gather_dot2(%latent: vector<2xbf16>, %weights: buffer, %origin: index, %accumulator: vector<1xf32>) -> (vector<1xf32>) {
   %base = index.constant 0 : offset
   %start = index.constant 0 : index
@@ -2297,6 +2343,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16_st
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_dynamic_flat_store() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -2338,6 +2385,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @loaded_i32_row_stride_store() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -2375,6 +2423,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @loaded_i64_row_stride_store() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -2413,6 +2462,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @loaded_i64_row_stride_load() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -2455,6 +2505,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @loaded_i32_row_shift_store() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -2489,6 +2540,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @loaded_i32_row_shift_load() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -2527,6 +2579,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @selected_i32_row_shift_store() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -2567,6 +2620,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @selected_workgroup_load() {
   %unit = index.constant 1 : index
   %workgroup_count = index.constant 64 : index
@@ -2609,6 +2663,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @loaded_i32_row_stride_f32_to_f16_store() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -2649,6 +2704,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @loaded_i32_row_stride_f32_to_f16_bits_store() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -2690,6 +2746,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @loaded_i32_row_stride_f32_to_bf16_bits_store() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -2734,6 +2791,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @loaded_i32_row_stride_f16_to_f32_load() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -2777,6 +2835,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @wide_intermediate_narrowed_f16_index_madd_load() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2821,6 +2880,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @rank2_vector_tile_transpose() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 16 : index

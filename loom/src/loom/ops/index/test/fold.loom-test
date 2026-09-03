@@ -1499,7 +1499,9 @@ func.def @select_identities(%x: index, %y: index) -> (index, index) {
 // Target-scoped canonicalization uses the effective index width for bit
 // counts, rotates, power-of-two scales, and shift reassociation.
 test.target<quirky> @target32
+
 test.target<low_core> @target64
+
 func.def target(@target32) @target_width_32(%x: index) -> (index, index, index, index) {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -1511,6 +1513,7 @@ func.def target(@target32) @target_width_32(%x: index) -> (index, index, index, 
   %outer_shift = index.shli %inner_shift, %c2 : index
   func.return %count, %rotate, %multiply, %outer_shift : index, index, index, index
 }
+
 func.def target(@target64) @target_width_64(%x: index) -> (index, index, index, index) {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -1558,7 +1561,9 @@ func.def target(@target64) @target_width_64(%x: index) -> (index, index, index, 
 // selected carrier. Unsigned comparison and division retain the full-U32 view;
 // the same mathematical facts fit every signed operation on a 64-bit target.
 test.target<quirky> @target32
+
 test.target<low_core> @target64
+
 func.def target(@target32) @target_carrier_range_proofs_32(%x: index, %y: index) -> (i1, i1, index, index, index, i64, i64) {
   %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index
   %low = index.assume %y [range(%y, 0, 15)] : index
@@ -1573,6 +1578,7 @@ func.def target(@target32) @target_carrier_range_proofs_32(%x: index, %y: index)
   %minimum_hi = test.fact_range_hi %minimum : index -> i64
   func.return %comparison, %unsigned_comparison, %minimum, %quotient, %shifted, %minimum_lo, %minimum_hi : i1, i1, index, index, index, i64, i64
 }
+
 func.def target(@target64) @target_carrier_range_proofs_64(%x: index, %y: index) -> (i1, i1, index, index, index, i64, i64) {
   %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index
   %low = index.assume %y [range(%y, 0, 15)] : index
@@ -1629,19 +1635,23 @@ func.def target(@target64) @target_carrier_range_proofs_64(%x: index, %y: index)
 // relations likewise remain target-width constrained when direct interval
 // facts are inconclusive.
 test.target<quirky> @target32
+
 test.target<low_core> @target64
+
 func.def target(@target32) @target_carrier_equality_32() -> (i1) {
   %cn1 = index.constant -1 : index
   %unsigned_max = index.constant 4294967295 : index
   %comparison = index.cmp eq, %cn1, %unsigned_max : index
   func.return %comparison : i1
 }
+
 func.def target(@target64) @target_carrier_equality_64() -> (i1) {
   %cn1 = index.constant -1 : index
   %unsigned_max = index.constant 4294967295 : index
   %comparison = index.cmp eq, %cn1, %unsigned_max : index
   func.return %comparison : i1
 }
+
 func.def target(@target32) @target_carrier_symbolic_compare_32(%x: index) -> (i1) {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -1650,6 +1660,7 @@ func.def target(@target32) @target_carrier_symbolic_compare_32(%x: index) -> (i1
   %comparison = index.cmp slt, %lhs, %rhs : index
   func.return %comparison : i1
 }
+
 func.def target(@target64) @target_carrier_symbolic_compare_64(%x: index) -> (i1) {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index

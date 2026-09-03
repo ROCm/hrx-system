@@ -29,9 +29,9 @@ low.func.def target<test.low.core>(@test_target) @packet_structural_storage(%val
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @structural_storage_location() {
-  %storage = low.storage.reserve {byte_alignment = 16, byte_length = 64} : low.storage<private>
-  low.return
+low.func.def target<test.low.core>(@test_target) @structural_storage_location() asm {
+  %storage = storage {byte_alignment = 16, byte_length = 64} : low.storage<private>
+  return
 }
 
 // ----

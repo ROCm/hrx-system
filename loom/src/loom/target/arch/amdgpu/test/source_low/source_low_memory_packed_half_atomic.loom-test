@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx9-4-generic> @target
+
 kernel.def target(@target) @lds_packed_f16_atomic_add() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -29,6 +30,7 @@ low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(1, 1, 
 // ====
 
 amdgpu.target<gfx9-4-generic> @target
+
 kernel.def target(@target) @lds_packed_f16_atomic_add_from_elements_offsets() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -57,6 +59,7 @@ low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(1, 1, 
 // ====
 
 amdgpu.target<gfx9-4-generic> @target
+
 kernel.def target(@target) @lds_packed_bf16_atomic_add() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -85,6 +88,7 @@ low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(1, 1, 
 // ====
 
 amdgpu.target<gfx12-generic> @target
+
 kernel.def target(@target) @global_packed_f16_atomic_add() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -113,6 +117,7 @@ low.kernel.def target<amdgpu.gfx12.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx12-generic> @target
+
 func.def target(@target) @generic_packed_f16_atomic_add(%input: buffer, %value: vector<2xf16>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -143,6 +148,7 @@ low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @generic
 // ====
 
 amdgpu.target<gfx9-4-generic> @target
+
 kernel.def target(@target) @lds_half4_atomic_rejected() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -162,6 +168,7 @@ kernel.def target(@target) @lds_half4_atomic_rejected() {
 // ====
 
 amdgpu.target<gfx9-4-generic> @target
+
 kernel.def target(@target) @lds_packed_f16_atomic_non_adjacent_rejected() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -181,6 +188,7 @@ kernel.def target(@target) @lds_packed_f16_atomic_non_adjacent_rejected() {
 // ====
 
 amdgpu.target<gfx9-4-generic> @target
+
 kernel.def target(@target) @lds_packed_f16_atomic_misaligned_rejected() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -200,6 +208,7 @@ kernel.def target(@target) @lds_packed_f16_atomic_misaligned_rejected() {
 // ====
 
 amdgpu.target<gfx9-4-generic> @target
+
 kernel.def target(@target) @lds_packed_f16_atomic_device_scope_rejected() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -219,6 +228,7 @@ kernel.def target(@target) @lds_packed_f16_atomic_device_scope_rejected() {
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @lds_packed_f16_atomic_unsupported_target_rejected() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index

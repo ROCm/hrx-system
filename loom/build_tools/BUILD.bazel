@@ -19,6 +19,7 @@ py_test(
         "presubmit_test.py",
     ],
     data = [
+        "//loom/build_tools/bazel/test:roundtrip.loom-test",
         "//loom/src/loom/test/corpus/authoring/linking:checks.loom",
     ],
     tags = ["manual"],

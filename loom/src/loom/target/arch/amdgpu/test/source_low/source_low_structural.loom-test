@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32x4_concat_pair(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (vector<8xf32>) {
   %wide = vector.concat<0> %lhs, %rhs : vector<4xf32>, vector<4xf32> -> vector<8xf32>
   func.return %wide : vector<8xf32>
@@ -23,6 +24,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x4_c
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32x8_deinterleave_pair(%interleaved: vector<8xf32>) -> (vector<4xf32>, vector<4xf32>) {
   %even, %odd = vector.deinterleave<0> %interleaved : vector<8xf32> -> vector<4xf32>, vector<4xf32>
   func.return %even, %odd : vector<4xf32>, vector<4xf32>
@@ -46,6 +48,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x8_d
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32x4_interleave_pair(%even: vector<4xf32>, %odd: vector<4xf32>) -> (vector<8xf32>) {
   %interleaved = vector.interleave<0> %even, %odd : vector<4xf32>, vector<4xf32> -> vector<8xf32>
   func.return %interleaved : vector<8xf32>
@@ -68,6 +71,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x4_i
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f16x8_deinterleave_pair(%interleaved: vector<8xf16>) -> (vector<4xf16>, vector<4xf16>) {
   %even, %odd = vector.deinterleave<0> %interleaved : vector<8xf16> -> vector<4xf16>, vector<4xf16>
   func.return %even, %odd : vector<4xf16>, vector<4xf16>
@@ -91,6 +95,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f16x8_d
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @bf16x8_deinterleave_pair(%interleaved: vector<8xbf16>) -> (vector<4xbf16>, vector<4xbf16>) {
   %even, %odd = vector.deinterleave<0> %interleaved : vector<8xbf16> -> vector<4xbf16>, vector<4xbf16>
   func.return %even, %odd : vector<4xbf16>, vector<4xbf16>
@@ -114,6 +119,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16x8_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @bf16x6_deinterleave_pair(%interleaved: vector<6xbf16>) -> (vector<3xbf16>, vector<3xbf16>) {
   %even, %odd = vector.deinterleave<0> %interleaved : vector<6xbf16> -> vector<3xbf16>, vector<3xbf16>
   func.return %even, %odd : vector<3xbf16>, vector<3xbf16>
@@ -136,6 +142,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16x6_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f16x4_interleave_pair(%even: vector<4xf16>, %odd: vector<4xf16>) -> (vector<8xf16>) {
   %interleaved = vector.interleave<0> %even, %odd : vector<4xf16>, vector<4xf16> -> vector<8xf16>
   func.return %interleaved : vector<8xf16>
@@ -158,6 +165,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f16x4_i
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @bf16x3_interleave_pair(%even: vector<3xbf16>, %odd: vector<3xbf16>) -> (vector<6xbf16>) {
   %interleaved = vector.interleave<0> %even, %odd : vector<3xbf16>, vector<3xbf16> -> vector<6xbf16>
   func.return %interleaved : vector<6xbf16>
@@ -179,6 +187,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16x3_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32x4_shuffle_reverse(%values: vector<4xf32>) -> (vector<4xf32>) {
   %shuffled = vector.shuffle<[3, 2, 1, 0]> %values : vector<4xf32>
   func.return %shuffled : vector<4xf32>
@@ -197,6 +206,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x4_s
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32x4_shuffle_duplicate(%values: vector<4xi32>) -> (vector<4xi32>) {
   %shuffled = vector.shuffle<[0, 0, 2, 2]> %values : vector<4xi32>
   func.return %shuffled : vector<4xi32>
@@ -213,6 +223,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x4_s
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32x2x4_transpose(%values: vector<2x4xf32>) -> (vector<4x2xf32>) {
   %transposed = vector.transpose<[1, 0]> %values : vector<2x4xf32> -> vector<4x2xf32>
   func.return %transposed : vector<4x2xf32>
@@ -235,6 +246,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x2x4
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32x3x2_transpose(%values: vector<3x2xi32>) -> (vector<2x3xi32>) {
   %transposed = vector.transpose<[1, 0]> %values : vector<3x2xi32> -> vector<2x3xi32>
   func.return %transposed : vector<2x3xi32>
@@ -255,6 +267,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x3x2
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32x4x4_extract_row(%values: vector<4x4xf32>) -> (vector<4xf32>) {
   %row = vector.extract %values[2] : vector<4x4xf32> -> vector<4xf32>
   func.return %row : vector<4xf32>
@@ -273,6 +286,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x4x4
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32x4x4_extract_scalar(%values: vector<4x4xf32>) -> (f32) {
   %lane = vector.extract %values[3, 1] : vector<4x4xf32> -> f32
   func.return %lane : f32
@@ -287,6 +301,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x4x4
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i64x4_extract_scalar(%values: vector<4xi64>) -> (i64) {
   %lane = vector.extract %values[2] : vector<4xi64> -> i64
   func.return %lane : i64
@@ -303,6 +318,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i64x4_e
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i64x4x2_extract_tail(%values: vector<4x2xi64>) -> (vector<2xi64>) {
   %tail = vector.extract %values[1] : vector<4x2xi64> -> vector<2xi64>
   func.return %tail : vector<2xi64>
@@ -321,6 +337,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i64x4x2
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f64x2_extract_scalar(%values: vector<2xf64>) -> (f64) {
   %lane = vector.extract %values[1] : vector<2xf64> -> f64
   func.return %lane : f64
@@ -337,6 +354,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f64x2_e
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @bf16x3_extract_scalar(%values: vector<3xbf16>) -> (bf16) {
   %lane = vector.extract %values[2] : vector<3xbf16> -> bf16
   func.return %lane : bf16
@@ -351,6 +369,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16x3_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i64x2_dynamic_extract_scalar(%values: vector<2xi64>, %index: index) -> (i64) {
   %lane = vector.extract %values[%index] : vector<2xi64> -> i64
   func.return %lane : i64

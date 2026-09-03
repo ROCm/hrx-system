@@ -1,6 +1,7 @@
 // RUN: emit amdgpu-assembly @gfx942_legacy_dpp_controls
 
 amdgpu.target<gfx942> @target
+
 low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_legacy_dpp_controls(%offset: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %wave_shl = v_mov_b32_dpp %value {dpp_ctrl = 304}
   %wave_rol = v_mov_b32_dpp %wave_shl {dpp_ctrl = 308}

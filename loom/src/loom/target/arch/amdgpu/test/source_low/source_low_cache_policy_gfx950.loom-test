@@ -2,6 +2,7 @@
 // RUN: emit source-low diagnostics=memory output=low
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @cache_device_non_temporal_load_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index

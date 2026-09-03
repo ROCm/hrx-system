@@ -14,15 +14,11 @@ low.func.def target<test.low.core>(@test_target) @schedule(%value: reg<test.i32>
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @move_source_order_boundary(
-    %lhs: reg<test.i32>, %rhs: reg<test.i32>) ->
-    (reg<test.i32>, reg<test.i32>) {
-  %before = low.op<test.mul.i32>(%lhs, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %moved = low.move %lhs : reg<test.i32> -> reg<test.i32>
-  %after = low.op<test.add.i32>(%moved, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %before, %after : reg<test.i32>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @move_source_order_boundary(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %before = test.mul.i32 %lhs, %rhs
+  %moved = move %lhs : reg<test.i32> -> reg<test.i32>
+  %after = test.add.i32 %moved, %rhs
+  return %before, %after
 }
 
 // ----
@@ -33,19 +29,11 @@ low.func.def target<test.low.core>(@test_target) @move_source_order_boundary(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @mixed_early_clobber_pressure(
-    %early_src: reg<test.i32 x4>, %normal_src: reg<test.i32 x4>,
-    %lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>) ->
-    (reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) {
-  %early, %normal =
-      low.op<test.mixed_early_clobber.v4i32>(%early_src, %normal_src) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) ->
-      reg<test.i32 x4>, reg<test.i32 x4>
+low.func.def target<test.low.core>(@test_target) @mixed_early_clobber_pressure(%early_src: reg<test.i32 x4>, %normal_src: reg<test.i32 x4>, %lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>) -> (reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) asm {
+  %early, %normal = test.mixed_early_clobber.v4i32 %early_src, %normal_src
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="test.add.v4i32", rejected_packet="test.mixed_early_clobber.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="0"}
-  %sum = low.op<test.add.v4i32>(%lhs, %rhs) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %early, %normal, %sum :
-      reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>
+  %sum = test.add.v4i32 %lhs, %rhs
+  return %early, %normal, %sum
 }
 
 // ====
@@ -53,15 +41,11 @@ low.func.def target<test.low.core>(@test_target) @mixed_early_clobber_pressure(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @early_tied_pressure_reuses_storage(
-    %src: reg<test.i32 x4>, %lhs: reg<test.i32 x4>,
-    %rhs: reg<test.i32 x4>) -> (reg<test.i32 x4>, reg<test.i32 x4>) {
-  %tied = low.op<test.early_tied.v4i32>(%src) :
-      (reg<test.i32 x4>) -> %src as reg<test.i32 x4>
+low.func.def target<test.low.core>(@test_target) @early_tied_pressure_reuses_storage(%src: reg<test.i32 x4>, %lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>) -> (reg<test.i32 x4>, reg<test.i32 x4>) asm {
+  %tied = test.early_tied.v4i32 %src
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="test.add.v4i32", rejected_packet="test.early_tied.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="0"}
-  %sum = low.op<test.add.v4i32>(%lhs, %rhs) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %tied, %sum : reg<test.i32 x4>, reg<test.i32 x4>
+  %sum = test.add.v4i32 %lhs, %rhs
+  return %tied, %sum
 }
 
 // ====
@@ -69,19 +53,17 @@ low.func.def target<test.low.core>(@test_target) @early_tied_pressure_reuses_sto
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @branch_edge_storage_antidependency(
-    %condition: reg<test.i32>, %seed: reg<test.i32>,
-    %rhs0: reg<test.i32>, %rhs1: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @branch_edge_storage_antidependency(%condition: reg<test.i32>, %seed: reg<test.i32>, %rhs0: reg<test.i32>, %rhs1: reg<test.i32>) -> (reg<test.i32>) asm {
   low.br ^loop(%seed: reg<test.i32>)
 ^loop(%state: reg<test.i32>):
   low.cond_br %condition, ^body, ^exit : reg<test.i32>
 ^body:
-  %read0 = low.op<test.add.i32>(%state, %rhs0) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %read1 = low.op<test.mul.i32>(%state, %rhs1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %next = low.op<test.add.i32>(%state, %rhs1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %read0 = test.add.i32 %state, %rhs0
+  %read1 = test.mul.i32 %state, %rhs1
+  %next = test.add.i32 %state, %rhs1
   low.br ^loop(%next: reg<test.i32>)
 ^exit:
-  low.return %state : reg<test.i32>
+  return %state
 }
 
 // ----
@@ -92,19 +74,17 @@ low.func.def target<test.low.core>(@test_target) @branch_edge_storage_antidepend
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @branch_edge_wide_storage_antidependency(
-    %condition: reg<test.i32>, %seed: reg<test.i32 x4>,
-    %rhs0: reg<test.i32 x4>, %rhs1: reg<test.i32 x4>) -> (reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @branch_edge_wide_storage_antidependency(%condition: reg<test.i32>, %seed: reg<test.i32 x4>, %rhs0: reg<test.i32 x4>, %rhs1: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
   low.br ^loop(%seed: reg<test.i32 x4>)
 ^loop(%state: reg<test.i32 x4>):
   low.cond_br %condition, ^body, ^exit : reg<test.i32>
 ^body:
-  %read0 = low.op<test.add.v4i32>(%state, %rhs0) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  %read1 = low.op<test.add.v4i32>(%state, %rhs1) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  %next = low.op<test.add.v4i32>(%state, %rhs1) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  %read0 = test.add.v4i32 %state, %rhs0
+  %read1 = test.add.v4i32 %state, %rhs1
+  %next = test.add.v4i32 %state, %rhs1
   low.br ^loop(%next: reg<test.i32 x4>)
 ^exit:
-  low.return %state : reg<test.i32 x4>
+  return %state
 }
 
 // ----
@@ -115,22 +95,20 @@ low.func.def target<test.low.core>(@test_target) @branch_edge_wide_storage_antid
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @branch_edge_composed_storage_antidependency(
-    %condition: reg<test.i32>, %seed: reg<test.i32 x4>,
-    %rhs0: reg<test.i32 x4>, %rhs1: reg<test.i32 x4>) -> (reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @branch_edge_composed_storage_antidependency(%condition: reg<test.i32>, %seed: reg<test.i32 x4>, %rhs0: reg<test.i32 x4>, %rhs1: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
   low.br ^loop(%seed: reg<test.i32 x4>)
 ^loop(%state: reg<test.i32 x4>):
   low.cond_br %condition, ^body, ^exit : reg<test.i32>
 ^body:
-  %read = low.op<test.add.v4i32>(%state, %rhs0) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  %next_low = low.op<test.add.v4i32>(%rhs0, %rhs1) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  %next_high = low.op<test.add.v4i32>(%rhs1, %rhs0) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  %wide = low.concat(%next_low, %next_high) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
-  %next_slice = low.slice %wide[0] : reg<test.i32 x8> -> reg<test.i32 x4>
-  %next = low.copy %next_slice : reg<test.i32 x4> -> reg<test.i32 x4>
+  %read = test.add.v4i32 %state, %rhs0
+  %next_low = test.add.v4i32 %rhs0, %rhs1
+  %next_high = test.add.v4i32 %rhs1, %rhs0
+  %wide = concat(%next_low, %next_high) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
+  %next_slice = slice %wide[0] : reg<test.i32 x8> -> reg<test.i32 x4>
+  %next = copy %next_slice : reg<test.i32 x4> -> reg<test.i32 x4>
   low.br ^loop(%next: reg<test.i32 x4>)
 ^exit:
-  low.return %state : reg<test.i32 x4>
+  return %state
 }
 
 // ----
@@ -141,9 +119,7 @@ low.func.def target<test.low.core>(@test_target) @branch_edge_composed_storage_a
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @candidate_decision_diagnostics(
-    %lhs0: reg<test.i32>, %rhs0: reg<test.i32>,
-    %lhs1: reg<test.i32>, %rhs1: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @candidate_decision_diagnostics(%lhs0: reg<test.i32>, %rhs0: reg<test.i32>, %lhs1: reg<test.i32>, %rhs1: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
   // REMARK@+1: BACKEND/015 {chosen_data_ready_stall_cycles="0", chosen_resource_stall_cycles="0", chosen_hazard_stall_cycles="0", chosen_effective_stall_cycles="0", rejected_data_ready_stall_cycles="0", rejected_resource_stall_cycles="0", rejected_hazard_stall_cycles="0", rejected_effective_stall_cycles="0"}
   %sum0 = test.add.i32 %lhs0, %rhs0
   %sum1 = test.mul.i32 %lhs1, %rhs1
@@ -158,16 +134,12 @@ test.target<low_core> @test_target
 // The target models result readiness after one cycle and completion after four.
 // The read/write effect edge must therefore make the store more expensive than
 // the ready SSA consumer.
-low.func.def target<test.low.core>(@test_target) @resource_stall_prices_counter_completion_for_effect_edge(
-    %address: reg<test.ptr>, %payload: reg<test.i32 x4>) -> (reg<test.i32 x4>) {
-  %loaded = low.op<test.counter_load.v4i32>(%address) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  low.op<test.store.v4i32>(%address, %payload) :
-      (reg<test.ptr>, reg<test.i32 x4>)
+low.func.def target<test.low.core>(@test_target) @resource_stall_prices_counter_completion_for_effect_edge(%address: reg<test.ptr>, %payload: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  %loaded = test.counter_load.v4i32 %address
+  test.store.v4i32 %address, %payload
   // REMARK@+1: BACKEND/015 {chosen_packet="test.add.v4i32", rejected_packet="test.store.v4i32", chosen_data_ready_stall_cycles="0", chosen_completion_wait_cycles="0", chosen_effective_stall_cycles="0", rejected_data_ready_stall_cycles="3", rejected_completion_wait_cycles="1", rejected_effective_stall_cycles="3"}
-  %used = low.op<test.add.v4i32>(%loaded, %loaded) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %used : reg<test.i32 x4>
+  %used = test.add.v4i32 %loaded, %loaded
+  return %used
 }
 
 // ====
@@ -177,16 +149,12 @@ test.target<low_core> @test_target
 
 // Coalescing SSA and effect edges for the same producer/consumer pair must not
 // lose the stronger completion requirement carried by the effect edge.
-low.func.def target<test.low.core>(@test_target) @resource_stall_prices_mixed_ssa_effect_completion(
-    %address: reg<test.ptr>) -> (reg<test.i32 x4>) {
-  %loaded = low.op<test.counter_load.v4i32>(%address) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  low.op<test.store.v4i32>(%address, %loaded) :
-      (reg<test.ptr>, reg<test.i32 x4>)
+low.func.def target<test.low.core>(@test_target) @resource_stall_prices_mixed_ssa_effect_completion(%address: reg<test.ptr>) -> (reg<test.i32 x4>) asm {
+  %loaded = test.counter_load.v4i32 %address
+  test.store.v4i32 %address, %loaded
   // REMARK@+1: BACKEND/015 {chosen_packet="test.add.v4i32", rejected_packet="test.store.v4i32", chosen_data_ready_stall_cycles="0", chosen_completion_wait_cycles="0", chosen_effective_stall_cycles="0", rejected_data_ready_stall_cycles="3", rejected_completion_wait_cycles="1", rejected_effective_stall_cycles="3"}
-  %used = low.op<test.add.v4i32>(%loaded, %loaded) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %used : reg<test.i32 x4>
+  %used = test.add.v4i32 %loaded, %loaded
+  return %used
 }
 
 // ====
@@ -194,14 +162,13 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_prices_mixed_ss
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_hides_load_latency(
-    %ptr: reg<test.ptr>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_hides_load_latency(%ptr: reg<test.ptr>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.add.i32", chosen_latency_cycles="4", rejected_latency_cycles="1", chosen_data_ready_stall_cycles="0", rejected_data_ready_stall_cycles="0"}
-  %load = low.op<test.load.v4i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32 x4>
-  %use = low.op<test.add.v4i32>(%load, %load) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  %load = test.load.v4i32 %ptr
+  %use = test.add.v4i32 %load, %load
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.i32", rejected_packet="test.add.v4i32", chosen_data_ready_stall_cycles="0", rejected_data_ready_stall_cycles="3", rejected_effective_stall_cycles="3", rejected_dependency_latency_cycles="4"}
-  %independent = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %independent, %use : reg<test.i32>, reg<test.i32 x4>
+  %independent = test.add.i32 %lhs, %rhs
+  return %independent, %use
 }
 
 // ====
@@ -209,23 +176,15 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_hides_load_late
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_prefers_live_value_compaction_over_storage_progress(
-    %lhs0: reg<test.i32 x4>, %rhs0: reg<test.i32 x4>,
-    %lhs1: reg<test.i32 x4>, %rhs1: reg<test.i32 x4>,
-    %lhs: reg<test.i32>, %rhs: reg<test.i32>) ->
-    (reg<test.i32 x8>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_prefers_live_value_compaction_over_storage_progress(%lhs0: reg<test.i32 x4>, %rhs0: reg<test.i32 x4>, %lhs1: reg<test.i32 x4>, %rhs1: reg<test.i32 x4>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32 x8>, reg<test.i32>) asm {
   // REMARK@+1: BACKEND/015
-  %part0 = low.op<test.add.v4i32>(%lhs0, %rhs0) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  %part0 = test.add.v4i32 %lhs0, %rhs0
   // REMARK@+1: BACKEND/015
-  %part1 = low.op<test.add.v4i32>(%lhs1, %rhs1) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  %packed = low.concat(%part0, %part1) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
+  %part1 = test.add.v4i32 %lhs1, %rhs1
+  %packed = concat(%part0, %part1) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.mul.i32", rejected_packet="low.concat", chosen_data_ready_stall_cycles="0"}
-  %independent = low.op<test.mul.i32>(%lhs, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %packed, %independent : reg<test.i32 x8>, reg<test.i32>
+  %independent = test.mul.i32 %lhs, %rhs
+  return %packed, %independent
 }
 
 // ====
@@ -233,20 +192,14 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_prefers_live_va
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_completes_started_storage_setup(
-    %lhs0: reg<test.i32>, %rhs0: reg<test.i32>,
-    %lhs1: reg<test.i32>, %rhs1: reg<test.i32>) ->
-    (reg<test.i32>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_completes_started_storage_setup(%lhs0: reg<test.i32>, %rhs0: reg<test.i32>, %lhs1: reg<test.i32>, %rhs1: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.i32", rejected_packet="low.copy"}
-  %unrelated = low.op<test.add.i32>(%lhs0, %rhs0) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %unrelated = test.add.i32 %lhs0, %rhs0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.mul.i32", rejected_packet="test.add.i32"}
-  %producer = low.op<test.mul.i32>(%lhs1, %rhs1) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %copy = low.copy %producer : reg<test.i32> -> reg<test.i32>
-  %use = low.op<test.add.i32>(%copy, %copy) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %unrelated, %use : reg<test.i32>, reg<test.i32>
+  %producer = test.mul.i32 %lhs1, %rhs1
+  %copy = copy %producer : reg<test.i32> -> reg<test.i32>
+  %use = test.add.i32 %copy, %copy
+  return %unrelated, %use
 }
 
 // ====
@@ -254,20 +207,15 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_completes_start
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_forwards_storage_setup_readiness(
-    %ptr: reg<test.ptr>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) ->
-    (reg<test.i32 x4>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_forwards_storage_setup_readiness(%ptr: reg<test.ptr>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32 x4>, reg<test.i32>) asm {
   // REMARK@+1: BACKEND/015
-  %load = low.op<test.load.v4i32>(%ptr) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
+  %load = test.load.v4i32 %ptr
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="low.copy", rejected_packet="test.mul.i32", chosen_data_ready_stall_cycles="0"}
-  %copy = low.copy %load : reg<test.i32 x4> -> reg<test.i32 x4>
-  %use = low.op<test.add.v4i32>(%copy, %copy) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  %copy = copy %load : reg<test.i32 x4> -> reg<test.i32 x4>
+  %use = test.add.v4i32 %copy, %copy
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.mul.i32", rejected_packet="test.add.v4i32", rejected_data_ready_stall_cycles="2"}
-  %independent = low.op<test.mul.i32>(%lhs, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %use, %independent : reg<test.i32 x4>, reg<test.i32>
+  %independent = test.mul.i32 %lhs, %rhs
+  return %use, %independent
 }
 
 // ====
@@ -275,8 +223,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_forwards_storag
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @barrier_schedule_fence(
-    %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @barrier_schedule_fence(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
   %before = test.add.i32 %lhs, %rhs
   test.barrier
   %after = test.mul.i32 %lhs, %rhs
@@ -291,15 +238,11 @@ low.func.def target<test.low.core>(@test_target) @barrier_schedule_fence(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @hint_schedule_fence(
-    %lhs: reg<test.i32>, %rhs: reg<test.i32>) ->
-    (reg<test.i32>, reg<test.i32>) {
-  %before = low.op<test.add.i32>(%lhs, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @hint_schedule_fence(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %before = test.add.i32 %lhs, %rhs
   low.schedule.fence
-  %after = low.op<test.mul.i32>(%lhs, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %before, %after : reg<test.i32>, reg<test.i32>
+  %after = test.mul.i32 %lhs, %rhs
+  return %before, %after
 }
 
 // ----
@@ -310,10 +253,7 @@ low.func.def target<test.low.core>(@test_target) @hint_schedule_fence(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_extends_ready_latency_window(
-    %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %index: reg<test.i32>,
-    %lhs: reg<test.i32>, %rhs: reg<test.i32>) ->
-    (reg<test.i32>, reg<test.i32 x4>, reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @resource_stall_extends_ready_latency_window(%ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %index: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32 x4>, reg<test.i32>) asm {
   %load0 = test.load.v4i32 %ptr0
   low.schedule.fence
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", ready_candidate_count="18", scored_candidate_count="16", chosen_packet="test.add.i32", rejected_packet="test.extract_lane.i32", rejected_effective_stall_cycles="2"}
@@ -373,10 +313,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_extends_ready_l
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_advances_non_growing_latency_window(
-    %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %index: reg<test.i32>,
-    %address_parts: reg<test.i32 x4>) ->
-    (reg<test.i32>, reg<test.i32 x4>) asm {
+low.func.def target<test.low.core>(@test_target) @resource_stall_advances_non_growing_latency_window(%ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %index: reg<test.i32>, %address_parts: reg<test.i32 x4>) -> (reg<test.i32>, reg<test.i32 x4>) asm {
   %load0 = test.load.v4i32 %ptr0
   low.schedule.fence
   // REMARK@+1: BACKEND/015
@@ -428,64 +365,43 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_advances_non_gr
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_rejects_pressure_debt_from_recovery_window(
-    %pad: reg<test.i32 x65>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>) ->
-    (reg<test.i32 x65>, reg<test.i32>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_rejects_pressure_debt_from_recovery_window(%pad: reg<test.i32 x65>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>) -> (reg<test.i32 x65>, reg<test.i32>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load0 = low.op<test.load.v4i32>(%ptr0) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
+  %load0 = test.load.v4i32 %ptr0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", scored_candidate_count="17", chosen_packet="test.extract_lane.i32", chosen_pressure_cliff_penalty="0"}
-  %lane0 = low.op<test.extract_lane.i32>(%load0) {lane = 0} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane0 = test.extract_lane.i32 %load0, 0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.extract_lane.i32"}
-  %lane1 = low.op<test.extract_lane.i32>(%load0) {lane = 1} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane1 = test.extract_lane.i32 %load0, 1
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="test.extract_lane.i32"}
-  %lane2 = low.op<test.extract_lane.i32>(%load0) {lane = 2} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane2 = test.extract_lane.i32 %load0, 2
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", chosen_packet="test.extract_lane.i32"}
-  %lane3 = low.op<test.extract_lane.i32>(%load0) {lane = 3} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane3 = test.extract_lane.i32 %load0, 3
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", chosen_packet="test.extract_lane.i32"}
-  %lane4 = low.op<test.extract_lane.i32>(%load0) {lane = 0} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane4 = test.extract_lane.i32 %load0, 0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="6", chosen_packet="test.extract_lane.i32"}
-  %lane5 = low.op<test.extract_lane.i32>(%load0) {lane = 1} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane5 = test.extract_lane.i32 %load0, 1
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="7", chosen_packet="test.extract_lane.i32"}
-  %lane6 = low.op<test.extract_lane.i32>(%load0) {lane = 2} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane6 = test.extract_lane.i32 %load0, 2
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="8", chosen_packet="test.extract_lane.i32"}
-  %lane7 = low.op<test.extract_lane.i32>(%load0) {lane = 3} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane7 = test.extract_lane.i32 %load0, 3
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="9", chosen_packet="test.extract_lane.i32"}
-  %lane8 = low.op<test.extract_lane.i32>(%load0) {lane = 0} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane8 = test.extract_lane.i32 %load0, 0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="10", chosen_packet="test.extract_lane.i32"}
-  %lane9 = low.op<test.extract_lane.i32>(%load0) {lane = 1} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane9 = test.extract_lane.i32 %load0, 1
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="11", chosen_packet="test.extract_lane.i32"}
-  %lane10 = low.op<test.extract_lane.i32>(%load0) {lane = 2} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane10 = test.extract_lane.i32 %load0, 2
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="12", chosen_packet="test.extract_lane.i32"}
-  %lane11 = low.op<test.extract_lane.i32>(%load0) {lane = 3} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane11 = test.extract_lane.i32 %load0, 3
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="13", chosen_packet="test.extract_lane.i32"}
-  %lane12 = low.op<test.extract_lane.i32>(%load0) {lane = 0} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane12 = test.extract_lane.i32 %load0, 0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="14", chosen_packet="test.extract_lane.i32"}
-  %lane13 = low.op<test.extract_lane.i32>(%load0) {lane = 1} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane13 = test.extract_lane.i32 %load0, 1
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="15", chosen_packet="test.extract_lane.i32"}
-  %lane14 = low.op<test.extract_lane.i32>(%load0) {lane = 2} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane14 = test.extract_lane.i32 %load0, 2
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="16", chosen_packet="test.extract_lane.i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="5"}
-  %lane15 = low.op<test.extract_lane.i32>(%load0) {lane = 3} :
-      (reg<test.i32 x4>) -> reg<test.i32>
-  %load1 = low.op<test.load.v4i32>(%ptr1) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  low.return %pad, %lane15, %load1 : reg<test.i32 x65>, reg<test.i32>,
-      reg<test.i32 x4>
+  %lane15 = test.extract_lane.i32 %load0, 3
+  %load1 = test.load.v4i32 %ptr1
+  return %pad, %lane15, %load1
 }
 
 // ====
@@ -493,19 +409,17 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_rejects_pressur
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_opens_long_ready_path(
-    %short_lhs: reg<test.i32>, %short_rhs: reg<test.i32>,
-    %long_lhs: reg<test.i32>, %long_rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_opens_long_ready_path(%short_lhs: reg<test.i32>, %short_rhs: reg<test.i32>, %long_lhs: reg<test.i32>, %long_rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", scored_candidate_count="2", chosen_packet="test.mul.i32", rejected_packet="test.add.i32"}
-  %short = low.op<test.mul.i32>(%short_lhs, %short_rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %short = test.mul.i32 %short_lhs, %short_rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="test.add.i32", rejected_packet="test.mul.i32"}
-  %long0 = low.op<test.add.i32>(%long_lhs, %long_rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %long0 = test.add.i32 %long_lhs, %long_rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", scored_candidate_count="2", chosen_packet="test.add.i32", rejected_packet="test.mul.i32"}
-  %long1 = low.op<test.add.i32>(%long0, %long_rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %long1 = test.add.i32 %long0, %long_rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", scored_candidate_count="2", chosen_packet="test.add.i32", rejected_packet="test.mul.i32"}
-  %long2 = low.op<test.add.i32>(%long1, %long_rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %long3 = low.op<test.add.i32>(%long2, %long_rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %short, %long3 : reg<test.i32>, reg<test.i32>
+  %long2 = test.add.i32 %long1, %long_rhs
+  %long3 = test.add.i32 %long2, %long_rhs
+  return %short, %long3
 }
 
 // ====
@@ -513,23 +427,22 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_opens_long_read
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_shortens_live_range_before_opening_load(
-    %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %index: reg<test.i32>) -> (reg<test.i32>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_shortens_live_range_before_opening_load(%ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %index: reg<test.i32>) -> (reg<test.i32>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.load.v4i32", rejected_packet="test.add.i32"}
-  %load0 = low.op<test.load.v4i32>(%ptr0) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load0 = test.load.v4i32 %ptr0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.i32", rejected_packet="test.extract_lane.i32", rejected_data_ready_stall_cycles="3"}
-  %gap0 = low.op<test.add.i32>(%index, %index) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %gap0 = test.add.i32 %index, %index
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.add.i32", rejected_packet="test.extract_lane.i32", rejected_data_ready_stall_cycles="2"}
-  %gap1 = low.op<test.add.i32>(%gap0, %index) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %gap1 = test.add.i32 %gap0, %index
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="test.add.i32", rejected_packet="test.extract_lane.i32", rejected_data_ready_stall_cycles="1"}
-  %gap2 = low.op<test.add.i32>(%gap1, %index) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %gap2 = test.add.i32 %gap1, %index
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", chosen_packet="test.extract_lane.i32", rejected_packet="test.load.index.v4i32", chosen_data_ready_stall_cycles="0", rejected_data_ready_stall_cycles="0", chosen_projected_live_units="4", rejected_projected_live_units="9"}
-  %lane = low.op<test.extract_lane.i32>(%load0) {lane = 0} : (reg<test.i32 x4>) -> reg<test.i32>
-  %lane1 = low.op<test.add.i32>(%lane, %index) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %lane2 = low.op<test.add.i32>(%lane1, %index) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %lane = test.extract_lane.i32 %load0, 0
+  %lane1 = test.add.i32 %lane, %index
+  %lane2 = test.add.i32 %lane1, %index
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", chosen_packet="test.load.index.v4i32", rejected_packet="test.add.i32", rejected_data_ready_stall_cycles="1"}
-  %load1 = low.op<test.load.index.v4i32>(%ptr1, %gap2) : (reg<test.ptr>, reg<test.i32>) -> reg<test.i32 x4>
-  low.return %lane2, %load1 : reg<test.i32>, reg<test.i32 x4>
+  %load1 = test.load.index.v4i32 %ptr1, %gap2
+  return %lane2, %load1
 }
 
 // ====
@@ -537,16 +450,14 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_shortens_live_r
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_avoids_pressure_cliff(
-    %pad: reg<test.i32 x58>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>,
-    %lhs: reg<test.i32 x4>) -> (reg<test.i32 x58>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_avoids_pressure_cliff(%pad: reg<test.i32 x58>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %lhs: reg<test.i32 x4>) -> (reg<test.i32 x58>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load0 = low.op<test.load.v4i32>(%ptr0) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load0 = test.load.v4i32 %ptr0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", scored_candidate_count="2", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", chosen_data_ready_stall_cycles="3", rejected_data_ready_stall_cycles="0", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1"}
-  %use0 = low.op<test.add.v4i32>(%load0, %lhs) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  %load1 = low.op<test.load.v4i32>(%ptr1) : (reg<test.ptr>) -> reg<test.i32 x4>
-  %use1 = low.op<test.add.v4i32>(%load1, %use0) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %pad, %use1 : reg<test.i32 x58>, reg<test.i32 x4>
+  %use0 = test.add.v4i32 %load0, %lhs
+  %load1 = test.load.v4i32 %ptr1
+  %use1 = test.add.v4i32 %load1, %use0
+  return %pad, %use1
 }
 
 // ====
@@ -554,16 +465,14 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_avoids_pressure
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_stays_below_near_pressure_cliff(
-    %pad: reg<test.i32 x60>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>,
-    %lhs: reg<test.i32 x4>) -> (reg<test.i32 x60>, reg<test.i32 x4>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_stays_below_near_pressure_cliff(%pad: reg<test.i32 x60>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %lhs: reg<test.i32 x4>) -> (reg<test.i32 x60>, reg<test.i32 x4>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load0 = low.op<test.load.v4i32>(%ptr0) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load0 = test.load.v4i32 %ptr0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", chosen_data_ready_stall_cycles="3", rejected_data_ready_stall_cycles="0", chosen_units_until_pressure_cliff="5", rejected_units_until_pressure_cliff="1"}
-  %use0 = low.op<test.add.v4i32>(%load0, %lhs) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  %load1 = low.op<test.load.v4i32>(%ptr1) : (reg<test.ptr>) -> reg<test.i32 x4>
-  %use1 = low.op<test.add.v4i32>(%load1, %use0) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %pad, %lhs, %use1 : reg<test.i32 x60>, reg<test.i32 x4>, reg<test.i32 x4>
+  %use0 = test.add.v4i32 %load0, %lhs
+  %load1 = test.load.v4i32 %ptr1
+  %use1 = test.add.v4i32 %load1, %use0
+  return %pad, %lhs, %use1
 }
 
 // ====
@@ -571,24 +480,18 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_stays_below_nea
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_cfg_live_through_pressure(
-    %pad: reg<test.i32 x8>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>,
-    %lhs: reg<test.i32 x4>) -> (reg<test.i32 x8>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_cfg_live_through_pressure(%pad: reg<test.i32 x8>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %lhs: reg<test.i32 x4>) -> (reg<test.i32 x8>, reg<test.i32 x4>) asm {
   low.br ^schedule
 ^schedule:
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load0 = low.op<test.load.v4i32>(%ptr0) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  %use0 = low.op<test.add.v4i32>(%load0, %lhs) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  %load0 = test.load.v4i32 %ptr0
+  %use0 = test.add.v4i32 %load0, %lhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.load.v4i32", rejected_packet="test.add.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="0"}
-  %load1 = low.op<test.load.v4i32>(%ptr1) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  %use1 = low.op<test.add.v4i32>(%load1, %use0) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  %load1 = test.load.v4i32 %ptr1
+  %use1 = test.add.v4i32 %load1, %use0
   low.br ^exit
 ^exit:
-  low.return %pad, %use1 : reg<test.i32 x8>, reg<test.i32 x4>
+  return %pad, %use1
 }
 
 // ====
@@ -596,23 +499,15 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_cf
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_ends_cfg_block_arguments_at_definition(
-    %seed: reg<test.i32 x8>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>) ->
-    (reg<test.i32 x8>, reg<test.i32>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_ends_cfg_block_arguments_at_definition(%seed: reg<test.i32 x8>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>) -> (reg<test.i32 x8>, reg<test.i32>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load0 = low.op<test.load.v4i32>(%ptr0) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
+  %load0 = test.load.v4i32 %ptr0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.extract_lane.i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", rejected_pressure_cliff_units="14"}
-  %lane = low.op<test.extract_lane.i32>(%load0) {lane = 0} :
-      (reg<test.i32 x4>) -> reg<test.i32>
-  %load1 = low.op<test.load.v4i32>(%ptr1) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  low.br ^exit(%seed: reg<test.i32 x8>, %lane: reg<test.i32>,
-      %load1: reg<test.i32 x4>)
-^exit(%state: reg<test.i32 x8>, %result_lane: reg<test.i32>,
-      %result_load: reg<test.i32 x4>):
-  low.return %state, %result_lane, %result_load : reg<test.i32 x8>,
-      reg<test.i32>, reg<test.i32 x4>
+  %lane = test.extract_lane.i32 %load0, 0
+  %load1 = test.load.v4i32 %ptr1
+  low.br ^exit(%seed: reg<test.i32 x8>, %lane: reg<test.i32>, %load1: reg<test.i32 x4>)
+^exit(%state: reg<test.i32 x8>, %result_lane: reg<test.i32>, %result_load: reg<test.i32 x4>):
+  return %state, %result_lane, %result_load
 }
 
 // ====
@@ -620,19 +515,11 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_ends_cfg_block_
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_shared_alias_capacity(
-    %wide0: reg<test.pressure.alias64>,
-    %wide1: reg<test.pressure.alias64>,
-    %narrow: reg<test.pressure.alias32 x7>,
-    %independent: reg<test.i32 x7>) ->
-    (reg<test.pressure.alias64>, reg<test.pressure.alias64>) {
-  %discarded_independent = low.slice %independent[0] : reg<test.i32 x7> ->
-      reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_shared_alias_capacity(%wide0: reg<test.pressure.alias64>, %wide1: reg<test.pressure.alias64>, %narrow: reg<test.pressure.alias32 x7>, %independent: reg<test.i32 x7>) -> (reg<test.pressure.alias64>, reg<test.pressure.alias64>) asm {
+  %discarded_independent = slice %independent[0] : reg<test.i32 x7> -> reg<test.i32>
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="low.copy", rejected_packet="low.slice", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="2", rejected_pressure_cliff_units="8"}
-  %discarded_alias = low.copy %narrow : reg<test.pressure.alias32 x7> ->
-      reg<test.pressure.alias32 x7>
-  low.return %wide0, %wide1 : reg<test.pressure.alias64>,
-      reg<test.pressure.alias64>
+  %discarded_alias = copy %narrow : reg<test.pressure.alias32 x7> -> reg<test.pressure.alias32 x7>
+  return %wide0, %wide1
 }
 
 // ====
@@ -640,21 +527,11 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_sh
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_avoids_creating_shared_alias_debt(
-    %wide0: reg<test.pressure.alias64>,
-    %wide1: reg<test.pressure.alias64>,
-    %narrow: reg<test.pressure.alias32 x5>,
-    %independent: reg<test.i32>) ->
-    (reg<test.pressure.alias64>, reg<test.pressure.alias64>,
-     reg<test.pressure.alias32>, reg<test.i32 x5>) {
-  %new_alias = low.op<test.move.to.pressure.alias32>(%independent) :
-      (reg<test.i32>) -> reg<test.pressure.alias32>
+low.func.def target<test.low.core>(@test_target) @resource_stall_avoids_creating_shared_alias_debt(%wide0: reg<test.pressure.alias64>, %wide1: reg<test.pressure.alias64>, %narrow: reg<test.pressure.alias32 x5>, %independent: reg<test.i32>) -> (reg<test.pressure.alias64>, reg<test.pressure.alias64>, reg<test.pressure.alias32>, reg<test.i32 x5>) asm {
+  %new_alias = test.move.to.pressure.alias32 %independent
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.move.from.pressure.alias32.x5", rejected_packet="test.move.to.pressure.alias32", chosen_projected_live_units="8", rejected_projected_live_units="8", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", rejected_pressure_cliff_units="8"}
-  %retired_alias = low.op<test.move.from.pressure.alias32.x5>(%narrow) :
-      (reg<test.pressure.alias32 x5>) -> reg<test.i32 x5>
-  low.return %wide0, %wide1, %new_alias, %retired_alias :
-      reg<test.pressure.alias64>, reg<test.pressure.alias64>,
-      reg<test.pressure.alias32>, reg<test.i32 x5>
+  %retired_alias = test.move.from.pressure.alias32.x5 %narrow
+  return %wide0, %wide1, %new_alias, %retired_alias
 }
 
 // ====
@@ -662,16 +539,14 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_avoids_creating
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_avoids_allocation_budget(
-    %pad: reg<test.i32 x60>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>,
-    %lhs: reg<test.i32 x4>) -> (reg<test.i32 x60>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_avoids_allocation_budget(%pad: reg<test.i32 x60>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %lhs: reg<test.i32 x4>) -> (reg<test.i32 x60>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load0 = low.op<test.load.v4i32>(%ptr0) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load0 = test.load.v4i32 %ptr0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", rejected_projected_live_units="72", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="8", chosen_units_until_pressure_cliff="5", rejected_pressure_cliff_units="72"}
-  %use0 = low.op<test.add.v4i32>(%load0, %lhs) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  %load1 = low.op<test.load.v4i32>(%ptr1) : (reg<test.ptr>) -> reg<test.i32 x4>
-  %use1 = low.op<test.add.v4i32>(%load1, %use0) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %pad, %use1 : reg<test.i32 x60>, reg<test.i32 x4>
+  %use0 = test.add.v4i32 %load0, %lhs
+  %load1 = test.load.v4i32 %ptr1
+  %use1 = test.add.v4i32 %load1, %use0
+  return %pad, %use1
 }
 
 // ====
@@ -679,20 +554,14 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_avoids_allocati
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_reserves_aligned_value_packing(
-    %pad: reg<test.i32 x57>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>,
-    %lhs: reg<test.i32 x4>) -> (reg<test.i32 x57>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_reserves_aligned_value_packing(%pad: reg<test.i32 x57>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %lhs: reg<test.i32 x4>) -> (reg<test.i32 x57>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1"}
-  %load0 = low.op<test.load.v4i32>(%ptr0) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
+  %load0 = test.load.v4i32 %ptr0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", rejected_projected_live_units="69", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="5", rejected_pressure_cliff_units="72"}
-  %use0 = low.op<test.add.v4i32>(%load0, %lhs) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  %load1 = low.op<test.load.v4i32>(%ptr1) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  %use1 = low.op<test.add.v4i32>(%load1, %use0) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %pad, %use1 : reg<test.i32 x57>, reg<test.i32 x4>
+  %use0 = test.add.v4i32 %load0, %lhs
+  %load1 = test.load.v4i32 %ptr1
+  %use1 = test.add.v4i32 %load1, %use0
+  return %pad, %use1
 }
 
 // ====
@@ -700,26 +569,17 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_reserves_aligne
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_scopes_packing_reserve_to_block(
-    %wide: reg<test.i32 x8>, %pad: reg<test.i32 x57>,
-    %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>,
-    %lhs: reg<test.i32 x4>) ->
-    (reg<test.i32>, reg<test.i32 x57>, reg<test.i32 x4>) {
-  %lane = low.slice %wide[0] : reg<test.i32 x8> -> reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @resource_stall_scopes_packing_reserve_to_block(%wide: reg<test.i32 x8>, %pad: reg<test.i32 x57>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %lhs: reg<test.i32 x4>) -> (reg<test.i32>, reg<test.i32 x57>, reg<test.i32 x4>) asm {
+  %lane = slice %wide[0] : reg<test.i32 x8> -> reg<test.i32>
   low.br ^body(%lane: reg<test.i32>)
 ^body(%block_lane: reg<test.i32>):
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="2"}
-  %load0 = low.op<test.load.v4i32>(%ptr0) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
+  %load0 = test.load.v4i32 %ptr0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32"}
-  %use0 = low.op<test.add.v4i32>(%load0, %lhs) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  %load1 = low.op<test.load.v4i32>(%ptr1) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  %use1 = low.op<test.add.v4i32>(%load1, %use0) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %block_lane, %pad, %use1 : reg<test.i32>, reg<test.i32 x57>,
-      reg<test.i32 x4>
+  %use0 = test.add.v4i32 %load0, %lhs
+  %load1 = test.load.v4i32 %ptr1
+  %use1 = test.add.v4i32 %load1, %use0
+  return %block_lane, %pad, %use1
 }
 
 // ====
@@ -727,15 +587,11 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_scopes_packing_
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_early_clobber_pressure(
-    %pad: reg<test.i32 x66>, %source: reg<test.i32 x4>) ->
-    (reg<test.i32 x66>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_early_clobber_pressure(%pad: reg<test.i32 x66>, %source: reg<test.i32 x4>) -> (reg<test.i32 x66>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.early_clobber.v4i32", rejected_packet="low.storage.reserve", chosen_pressure_cliff_penalty="4", chosen_projected_live_units="70"}
-  %result = low.op<test.early_clobber.v4i32>(%source) :
-      (reg<test.i32 x4>) -> reg<test.i32 x4>
-  %scratch = low.storage.reserve {byte_alignment = 4, byte_length = 4} :
-      low.storage<private>
-  low.return %pad, %result : reg<test.i32 x66>, reg<test.i32 x4>
+  %result = test.early_clobber.v4i32 %source
+  %scratch = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  return %pad, %result
 }
 
 // ====
@@ -743,19 +599,14 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_ea
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_does_not_persist_speculative_reserve(
-    %pad: reg<test.i32 x65>, %ptr: reg<test.ptr>, %rhs: reg<test.i32>) ->
-    (reg<test.i32 x65>, reg<test.i32>) {
-  %source = low.op<test.load.v4i32>(%ptr) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  %scratch = low.storage.reserve {byte_alignment = 4, byte_length = 4} :
-      low.storage<private>
+low.func.def target<test.low.core>(@test_target) @resource_stall_does_not_persist_speculative_reserve(%pad: reg<test.i32 x65>, %ptr: reg<test.ptr>, %rhs: reg<test.i32>) -> (reg<test.i32 x65>, reg<test.i32>) asm {
+  %source = test.load.v4i32 %ptr
+  %scratch = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="low.slice", rejected_packet="low.storage.reserve", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="3"}
-  %lane = low.slice %source[0] : reg<test.i32 x4> -> reg<test.i32>
+  %lane = slice %source[0] : reg<test.i32 x4> -> reg<test.i32>
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.add.i32", rejected_packet="low.storage.reserve", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="0"}
-  %sum = low.op<test.add.i32>(%lane, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %pad, %sum : reg<test.i32 x65>, reg<test.i32>
+  %sum = test.add.i32 %lane, %rhs
+  return %pad, %sum
 }
 
 // ====
@@ -763,13 +614,11 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_does_not_persis
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_ignores_authored_cliff_and_protects_next(
-    %pad: reg<test.i32 x66>, %lhs: reg<test.i32 x4>,
-    %ptr: reg<test.ptr>) -> (reg<test.i32 x66>, reg<test.i32>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_ignores_authored_cliff_and_protects_next(%pad: reg<test.i32 x66>, %lhs: reg<test.i32 x4>, %ptr: reg<test.ptr>) -> (reg<test.i32 x66>, reg<test.i32>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.extract_lane.i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", chosen_projected_live_units="68", rejected_projected_live_units="74", rejected_pressure_cliff_units="72"}
-  %lane = low.op<test.extract_lane.i32>(%lhs) {lane = 0} : (reg<test.i32 x4>) -> reg<test.i32>
-  %load = low.op<test.load.v4i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32 x4>
-  low.return %pad, %lane, %load : reg<test.i32 x66>, reg<test.i32>, reg<test.i32 x4>
+  %lane = test.extract_lane.i32 %lhs, 0
+  %load = test.load.v4i32 %ptr
+  return %pad, %lane, %load
 }
 
 // ====
@@ -777,17 +626,13 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_ignores_authore
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_hides_latency_above_authored_pressure_cliff(
-    %pad: reg<test.i32 x70>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>) ->
-    (reg<test.i32 x70>, reg<test.i32>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_hides_latency_above_authored_pressure_cliff(%pad: reg<test.i32 x70>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>) -> (reg<test.i32 x70>, reg<test.i32>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %source = low.op<test.load.v4i32>(%ptr0) : (reg<test.ptr>) -> reg<test.i32 x4>
-  %lane = low.op<test.extract_lane.i32>(%source) {lane = 0} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %source = test.load.v4i32 %ptr0
+  %lane = test.extract_lane.i32 %source, 0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", scored_candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.extract_lane.i32", chosen_data_ready_stall_cycles="0", rejected_data_ready_stall_cycles="3", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="0"}
-  %independent = low.op<test.load.v4i32>(%ptr1) : (reg<test.ptr>) -> reg<test.i32 x4>
-  low.return %pad, %lane, %independent : reg<test.i32 x70>, reg<test.i32>,
-      reg<test.i32 x4>
+  %independent = test.load.v4i32 %ptr1
+  return %pad, %lane, %independent
 }
 
 // ====
@@ -795,29 +640,17 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_hides_latency_a
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_collective_descriptor_frontier(
-    %pad: reg<test.i32 x8>, %ptr: reg<test.ptr>,
-    %scale: reg<test.i32 x4>, %lhs: reg<test.i32 x4>,
-    %rhs: reg<test.i32 x4>, %tail0: reg<test.i32 x4>,
-    %tail1: reg<test.i32 x4>) -> (reg<test.i32 x8>, reg<test.i32 x4>,
-    reg<test.i32 x4>, reg<test.i32 x4>) {
-  %load = low.op<test.load.v4i32>(%ptr) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  %load1 = low.op<test.add.v4i32>(%load, %scale) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  %load2 = low.op<test.add.v4i32>(%load1, %scale) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_collective_descriptor_frontier(%pad: reg<test.i32 x8>, %ptr: reg<test.ptr>, %scale: reg<test.i32 x4>, %lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>, %tail0: reg<test.i32 x4>, %tail1: reg<test.i32 x4>) -> (reg<test.i32 x8>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) asm {
+  %load = test.load.v4i32 %ptr
+  %load1 = test.add.v4i32 %load, %scale
+  %load2 = test.add.v4i32 %load1, %scale
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="3", rejected_pressure_cliff_penalty="11", chosen_projected_live_units="25", rejected_projected_live_units="32"}
-  %shared = low.op<test.add.v4i32>(%lhs, %rhs) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  %shared = test.add.v4i32 %lhs, %rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", scored_candidate_count="3", chosen_packet="test.add.v4i32", rejected_packet="test.add.v4i32", chosen_projected_live_units="25", chosen_killed_live_units="4", chosen_produced_live_units="4"}
-  %result0 = low.op<test.add.v4i32>(%shared, %tail0) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  %result0 = test.add.v4i32 %shared, %tail0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", scored_candidate_count="2", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", chosen_projected_live_units="21", chosen_killed_live_units="8", chosen_produced_live_units="4"}
-  %result1 = low.op<test.add.v4i32>(%shared, %tail1) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %pad, %load2, %result0, %result1 : reg<test.i32 x8>,
-      reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>
+  %result1 = test.add.v4i32 %shared, %tail1
+  return %pad, %load2, %result0, %result1
 }
 
 // ====
@@ -825,13 +658,11 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_co
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_scores_pressure_limit_debt_for_neutral_work(
-    %pad: reg<test.i32 x66>, %source: reg<test.i32 x4>) ->
-    (reg<test.i32 x66>, reg<test.i32>) {
-  %scratch = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
+low.func.def target<test.low.core>(@test_target) @resource_stall_scores_pressure_limit_debt_for_neutral_work(%pad: reg<test.i32 x66>, %source: reg<test.i32 x4>) -> (reg<test.i32 x66>, reg<test.i32>) asm {
+  %scratch = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="low.slice", rejected_packet="low.storage.reserve", chosen_pressure_cliff_penalty="2", rejected_pressure_cliff_penalty="5"}
-  %lane = low.slice %source[0] : reg<test.i32 x4> -> reg<test.i32>
-  low.return %pad, %lane : reg<test.i32 x66>, reg<test.i32>
+  %lane = slice %source[0] : reg<test.i32 x4> -> reg<test.i32>
+  return %pad, %lane
 }
 
 // ====
@@ -839,17 +670,13 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_scores_pressure
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_counts_live_slice_as_alias(
-    %pad: reg<test.i32 x66>, %source: reg<test.i32 x4>,
-    %ptr: reg<test.ptr>, %rhs: reg<test.i32>) -> (reg<test.i32 x66>,
-    reg<test.i32 x4>, reg<test.i32>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_counts_live_slice_as_alias(%pad: reg<test.i32 x66>, %source: reg<test.i32 x4>, %ptr: reg<test.ptr>, %rhs: reg<test.i32>) -> (reg<test.i32 x66>, reg<test.i32 x4>, reg<test.i32>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="low.slice", rejected_packet="test.load.v4i32", chosen_projected_live_units="72", chosen_produced_live_units="0", rejected_projected_live_units="75", rejected_produced_live_units="4"}
-  %lane = low.slice %source[0] : reg<test.i32 x4> -> reg<test.i32>
-  %load = low.op<test.load.v4i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %lane = slice %source[0] : reg<test.i32 x4> -> reg<test.i32>
+  %load = test.load.v4i32 %ptr
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", scored_candidate_count="2", chosen_packet="test.add.i32", rejected_packet="test.load.v4i32", chosen_projected_live_units="72", chosen_killed_live_units="1", chosen_produced_live_units="1", rejected_projected_live_units="75"}
-  %sum = low.op<test.add.i32>(%lane, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %pad, %source, %sum, %load : reg<test.i32 x66>,
-      reg<test.i32 x4>, reg<test.i32>, reg<test.i32 x4>
+  %sum = test.add.i32 %lane, %rhs
+  return %pad, %source, %sum, %load
 }
 
 // ====
@@ -857,15 +684,11 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_counts_live_sli
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_caps_repeated_source_alias_units(
-    %pad: reg<test.i32 x66>, %source: reg<test.i32>,
-    %ptr: reg<test.ptr>) -> (reg<test.i32 x66>, reg<test.i32>,
-    reg<test.i32 x2>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_caps_repeated_source_alias_units(%pad: reg<test.i32 x66>, %source: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32 x66>, reg<test.i32>, reg<test.i32 x2>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="low.concat", rejected_packet="test.load.v4i32", chosen_projected_live_units="69", chosen_produced_live_units="1", rejected_projected_live_units="71", rejected_produced_live_units="4"}
-  %pair = low.concat(%source, %source) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
-  %load = low.op<test.load.v4i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32 x4>
-  low.return %pad, %source, %pair, %load : reg<test.i32 x66>,
-      reg<test.i32>, reg<test.i32 x2>, reg<test.i32 x4>
+  %pair = concat(%source, %source) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %load = test.load.v4i32 %ptr
+  return %pad, %source, %pair, %load
 }
 
 // ====
@@ -873,22 +696,15 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_caps_repeated_s
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff_after_authored_copy(
-    %pad: reg<test.i32 x60>, %source: reg<test.i32 x4>,
-    %ptr: reg<test.ptr>) -> (reg<test.i32 x60>, reg<test.i32>,
-    reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff_after_authored_copy(%pad: reg<test.i32 x60>, %source: reg<test.i32 x4>, %ptr: reg<test.ptr>) -> (reg<test.i32 x60>, reg<test.i32>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="low.copy", rejected_packet="test.load.v4i32", chosen_produced_live_units="0", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", rejected_pressure_cliff_units="67"}
-  %copy = low.copy %source : reg<test.i32 x4> -> reg<test.i32 x4>
+  %copy = copy %source : reg<test.i32 x4> -> reg<test.i32 x4>
   // REMARK@+1: BACKEND/015
-  %discarded = low.op<test.add.v4i32>(%source, %copy) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  %discarded = test.add.v4i32 %source, %copy
   // REMARK@+1: BACKEND/015
-  %lane = low.op<test.extract_lane.i32>(%copy) {lane = 0} :
-      (reg<test.i32 x4>) -> reg<test.i32>
-  %load = low.op<test.load.v4i32>(%ptr) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  low.return %pad, %lane, %load : reg<test.i32 x60>, reg<test.i32>,
-      reg<test.i32 x4>
+  %lane = test.extract_lane.i32 %copy, 0
+  %load = test.load.v4i32 %ptr
+  return %pad, %lane, %load
 }
 
 // ====
@@ -896,22 +712,15 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff_after_authored_slice(
-    %pad: reg<test.i32 x60>, %source: reg<test.i32 x4>,
-    %ptr: reg<test.ptr>) -> (reg<test.i32 x60>, reg<test.i32>,
-    reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff_after_authored_slice(%pad: reg<test.i32 x60>, %source: reg<test.i32 x4>, %ptr: reg<test.ptr>) -> (reg<test.i32 x60>, reg<test.i32>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="low.slice", rejected_packet="test.load.v4i32", chosen_produced_live_units="0", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", rejected_pressure_cliff_units="67"}
-  %slice = low.slice %source[0] : reg<test.i32 x4> -> reg<test.i32 x4>
+  %slice = slice %source[0] : reg<test.i32 x4> -> reg<test.i32 x4>
   // REMARK@+1: BACKEND/015
-  %discarded = low.op<test.add.v4i32>(%source, %slice) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  %discarded = test.add.v4i32 %source, %slice
   // REMARK@+1: BACKEND/015
-  %lane = low.op<test.extract_lane.i32>(%slice) {lane = 0} :
-      (reg<test.i32 x4>) -> reg<test.i32>
-  %load = low.op<test.load.v4i32>(%ptr) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  low.return %pad, %lane, %load : reg<test.i32 x60>, reg<test.i32>,
-      reg<test.i32 x4>
+  %lane = test.extract_lane.i32 %slice, 0
+  %load = test.load.v4i32 %ptr
+  return %pad, %lane, %load
 }
 
 // ====
@@ -919,64 +728,45 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff_after_authored_concat(
-    %pad: reg<test.i32 x60>, %source0: reg<test.i32>,
-    %source1: reg<test.i32>, %source2: reg<test.i32>,
-    %source3: reg<test.i32>, %source4: reg<test.i32>,
-    %source5: reg<test.i32>, %source6: reg<test.i32>,
-    %source7: reg<test.i32>, %ptr: reg<test.ptr>) ->
-    (reg<test.i32 x60>, reg<test.i32>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff_after_authored_concat(%pad: reg<test.i32 x60>, %source0: reg<test.i32>, %source1: reg<test.i32>, %source2: reg<test.i32>, %source3: reg<test.i32>, %source4: reg<test.i32>, %source5: reg<test.i32>, %source6: reg<test.i32>, %source7: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32 x60>, reg<test.i32>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="low.concat", rejected_packet="test.load.v4i32", chosen_produced_live_units="0", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", rejected_pressure_cliff_units="70"}
-  %packed = low.concat(%source0, %source1, %source2, %source3, %source4,
-      %source5, %source6, %source7) : (reg<test.i32>, reg<test.i32>,
-      reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>,
-      reg<test.i32>, reg<test.i32>) -> reg<test.i32 x8>
+  %packed = concat(%source0, %source1, %source2, %source3, %source4, %source5, %source6, %source7) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x8>
   // REMARK@+1: BACKEND/015
-  %lane0 = low.slice %packed[0] : reg<test.i32 x8> -> reg<test.i32>
+  %lane0 = slice %packed[0] : reg<test.i32 x8> -> reg<test.i32>
   // REMARK@+1: BACKEND/015
-  %discarded0 = low.op<test.add.i32>(%source0, %lane0) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %discarded0 = test.add.i32 %source0, %lane0
   // REMARK@+1: BACKEND/015
-  %lane1 = low.slice %packed[1] : reg<test.i32 x8> -> reg<test.i32>
+  %lane1 = slice %packed[1] : reg<test.i32 x8> -> reg<test.i32>
   // REMARK@+1: BACKEND/015
-  %discarded1 = low.op<test.add.i32>(%source1, %lane1) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %discarded1 = test.add.i32 %source1, %lane1
   // REMARK@+1: BACKEND/015
-  %lane2 = low.slice %packed[2] : reg<test.i32 x8> -> reg<test.i32>
+  %lane2 = slice %packed[2] : reg<test.i32 x8> -> reg<test.i32>
   // REMARK@+1: BACKEND/015
-  %discarded2 = low.op<test.add.i32>(%source2, %lane2) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %discarded2 = test.add.i32 %source2, %lane2
   // REMARK@+1: BACKEND/015
-  %lane3 = low.slice %packed[3] : reg<test.i32 x8> -> reg<test.i32>
+  %lane3 = slice %packed[3] : reg<test.i32 x8> -> reg<test.i32>
   // REMARK@+1: BACKEND/015
-  %discarded3 = low.op<test.add.i32>(%source3, %lane3) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %discarded3 = test.add.i32 %source3, %lane3
   // REMARK@+1: BACKEND/015
-  %lane4 = low.slice %packed[4] : reg<test.i32 x8> -> reg<test.i32>
+  %lane4 = slice %packed[4] : reg<test.i32 x8> -> reg<test.i32>
   // REMARK@+1: BACKEND/015
-  %discarded4 = low.op<test.add.i32>(%source4, %lane4) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %discarded4 = test.add.i32 %source4, %lane4
   // REMARK@+1: BACKEND/015
-  %lane5 = low.slice %packed[5] : reg<test.i32 x8> -> reg<test.i32>
+  %lane5 = slice %packed[5] : reg<test.i32 x8> -> reg<test.i32>
   // REMARK@+1: BACKEND/015
-  %discarded5 = low.op<test.add.i32>(%source5, %lane5) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %discarded5 = test.add.i32 %source5, %lane5
   // REMARK@+1: BACKEND/015
-  %lane6 = low.slice %packed[6] : reg<test.i32 x8> -> reg<test.i32>
+  %lane6 = slice %packed[6] : reg<test.i32 x8> -> reg<test.i32>
   // REMARK@+1: BACKEND/015
-  %discarded6 = low.op<test.add.i32>(%source6, %lane6) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %discarded6 = test.add.i32 %source6, %lane6
   // REMARK@+1: BACKEND/015
-  %lane7 = low.slice %packed[7] : reg<test.i32 x8> -> reg<test.i32>
+  %lane7 = slice %packed[7] : reg<test.i32 x8> -> reg<test.i32>
   // REMARK@+1: BACKEND/015
-  %discarded7 = low.op<test.add.i32>(%source7, %lane7) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %discarded7 = test.add.i32 %source7, %lane7
   // REMARK@+1: BACKEND/015
-  %result_lane = low.slice %packed[0] : reg<test.i32 x8> -> reg<test.i32>
-  %load = low.op<test.load.v4i32>(%ptr) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  low.return %pad, %result_lane, %load : reg<test.i32 x60>, reg<test.i32>,
-      reg<test.i32 x4>
+  %result_lane = slice %packed[0] : reg<test.i32 x8> -> reg<test.i32>
+  %load = test.load.v4i32 %ptr
+  return %pad, %result_lane, %load
 }
 
 // ====
@@ -984,18 +774,13 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff_after_authored_tied_result(
-    %pad: reg<test.i32 x65>, %source: reg<test.i32>,
-    %ptr: reg<test.ptr>) -> (reg<test.i32 x65>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff_after_authored_tied_result(%pad: reg<test.i32 x65>, %source: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32 x65>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.tied.any", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", rejected_pressure_cliff_units="70"}
-  %next = low.op<test.tied.any>(%source) :
-      (reg<test.i32>) -> %source as reg<test.i32>
+  %next = test.tied.any %source
   // REMARK@+1: BACKEND/015
-  %discarded = low.op<test.add.i32>(%next, %next) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %load = low.op<test.load.v4i32>(%ptr) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  low.return %pad, %load : reg<test.i32 x65>, reg<test.i32 x4>
+  %discarded = test.add.i32 %next, %next
+  %load = test.load.v4i32 %ptr
+  return %pad, %load
 }
 
 // ====
@@ -1003,20 +788,14 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_reuses_released_alias_capacity(
-    %pad: reg<test.i32 x66>, %source: reg<test.i32 x4>,
-    %ptr: reg<test.ptr>) -> (reg<test.i32 x66>, reg<test.i32 x4>,
-    reg<test.i32 x4>, reg<test.i32 x4>) {
-  %first = low.copy %source : reg<test.i32 x4> -> reg<test.i32 x4>
-  %discarded = low.op<test.add.v4i32>(%first, %source) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.op<test.barrier>() : ()
+low.func.def target<test.low.core>(@test_target) @resource_stall_reuses_released_alias_capacity(%pad: reg<test.i32 x66>, %source: reg<test.i32 x4>, %ptr: reg<test.ptr>) -> (reg<test.i32 x66>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) asm {
+  %first = copy %source : reg<test.i32 x4> -> reg<test.i32 x4>
+  %discarded = test.add.v4i32 %first, %source
+  test.barrier
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="low.copy", rejected_packet="test.load.v4i32", chosen_produced_live_units="0", rejected_produced_live_units="4"}
-  %second = low.copy %source : reg<test.i32 x4> -> reg<test.i32 x4>
-  %load = low.op<test.load.v4i32>(%ptr) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  low.return %pad, %source, %second, %load : reg<test.i32 x66>,
-      reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>
+  %second = copy %source : reg<test.i32 x4> -> reg<test.i32 x4>
+  %load = test.load.v4i32 %ptr
+  return %pad, %source, %second, %load
 }
 
 // ====
@@ -1024,28 +803,19 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_reuses_released
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_resets_aliases_at_cfg_handoffs(
-    %pad: reg<test.i32 x60>, %source: reg<test.i32 x4>,
-    %ptr: reg<test.ptr>) -> (reg<test.i32 x60>, reg<test.i32>,
-    reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_resets_aliases_at_cfg_handoffs(%pad: reg<test.i32 x60>, %source: reg<test.i32 x4>, %ptr: reg<test.ptr>) -> (reg<test.i32 x60>, reg<test.i32>, reg<test.i32 x4>) asm {
   low.br ^body(%pad: reg<test.i32 x60>, %source: reg<test.i32 x4>)
 ^body(%block_pad: reg<test.i32 x60>, %block_source: reg<test.i32 x4>):
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="low.copy", rejected_packet="test.load.v4i32", chosen_produced_live_units="0", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", rejected_pressure_cliff_units="67"}
-  %copy = low.copy %block_source : reg<test.i32 x4> -> reg<test.i32 x4>
+  %copy = copy %block_source : reg<test.i32 x4> -> reg<test.i32 x4>
   // REMARK@+1: BACKEND/015
-  %discarded = low.op<test.add.v4i32>(%block_source, %copy) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  %discarded = test.add.v4i32 %block_source, %copy
   // REMARK@+1: BACKEND/015
-  %lane = low.op<test.extract_lane.i32>(%copy) {lane = 0} :
-      (reg<test.i32 x4>) -> reg<test.i32>
-  %load = low.op<test.load.v4i32>(%ptr) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  low.br ^exit(%block_pad: reg<test.i32 x60>, %lane: reg<test.i32>,
-      %load: reg<test.i32 x4>)
-^exit(%result_pad: reg<test.i32 x60>, %result_lane: reg<test.i32>,
-      %result_load: reg<test.i32 x4>):
-  low.return %result_pad, %result_lane, %result_load : reg<test.i32 x60>,
-      reg<test.i32>, reg<test.i32 x4>
+  %lane = test.extract_lane.i32 %copy, 0
+  %load = test.load.v4i32 %ptr
+  low.br ^exit(%block_pad: reg<test.i32 x60>, %lane: reg<test.i32>, %load: reg<test.i32 x4>)
+^exit(%result_pad: reg<test.i32 x60>, %result_lane: reg<test.i32>, %result_load: reg<test.i32 x4>):
+  return %result_pad, %result_lane, %result_load
 }
 
 // ====
@@ -1053,36 +823,27 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_resets_aliases_
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_compacts_ready_concat_before_scalar_work(
-    %rhs: reg<test.i32>,
-    %lhs0: reg<test.i32>, %lhs1: reg<test.i32>,
-    %lhs2: reg<test.i32>, %lhs3: reg<test.i32>,
-    %lhs4: reg<test.i32>, %lhs5: reg<test.i32>,
-    %lhs6: reg<test.i32>, %lhs7: reg<test.i32>) -> (reg<test.i32 x8>,
-    reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_compacts_ready_concat_before_scalar_work(%rhs: reg<test.i32>, %lhs0: reg<test.i32>, %lhs1: reg<test.i32>, %lhs2: reg<test.i32>, %lhs3: reg<test.i32>, %lhs4: reg<test.i32>, %lhs5: reg<test.i32>, %lhs6: reg<test.i32>, %lhs7: reg<test.i32>) -> (reg<test.i32 x8>, reg<test.i32>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.add.i32", rejected_packet="test.add.i32"}
-  %lane0 = low.op<test.add.i32>(%lhs0, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %lane0 = test.add.i32 %lhs0, %rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.i32", rejected_packet="test.add.i32"}
-  %lane1 = low.op<test.add.i32>(%lhs1, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %lane1 = test.add.i32 %lhs1, %rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.add.i32", rejected_packet="test.add.i32"}
-  %lane2 = low.op<test.add.i32>(%lhs2, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %lane2 = test.add.i32 %lhs2, %rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="test.add.i32", rejected_packet="test.add.i32"}
-  %lane3 = low.op<test.add.i32>(%lhs3, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %lane3 = test.add.i32 %lhs3, %rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", chosen_packet="test.add.i32", rejected_packet="test.add.i32"}
-  %lane4 = low.op<test.add.i32>(%lhs4, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %lane4 = test.add.i32 %lhs4, %rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", chosen_packet="test.add.i32", rejected_packet="test.add.i32"}
-  %lane5 = low.op<test.add.i32>(%lhs5, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %lane5 = test.add.i32 %lhs5, %rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="6", chosen_packet="test.add.i32", rejected_packet="test.add.i32"}
-  %lane6 = low.op<test.add.i32>(%lhs6, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %lane6 = test.add.i32 %lhs6, %rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="7", chosen_packet="test.add.i32", rejected_packet="test.mul.i32"}
-  %lane7 = low.op<test.add.i32>(%lhs7, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %scalar = low.op<test.mul.i32>(%rhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %lane7 = test.add.i32 %lhs7, %rhs
+  %scalar = test.mul.i32 %rhs, %rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="8", chosen_packet="low.concat", rejected_packet="test.mul.i32", chosen_killed_live_units="8", chosen_produced_live_units="8", rejected_killed_live_units="1", rejected_produced_live_units="1"}
-  %packed = low.concat(%lane0, %lane1, %lane2, %lane3, %lane4, %lane5,
-      %lane6, %lane7) : (reg<test.i32>, reg<test.i32>, reg<test.i32>,
-      reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>,
-      reg<test.i32>) -> reg<test.i32 x8>
-  low.return %packed, %scalar : reg<test.i32 x8>, reg<test.i32>
+  %packed = concat(%lane0, %lane1, %lane2, %lane3, %lane4, %lane5, %lane6, %lane7) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x8>
+  return %packed, %scalar
 }
 
 // ====
@@ -1090,45 +851,25 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_compacts_ready_
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_opens_pressure_releasing_frontier(
-    %payload_lhs: reg<test.i32 x4>, %payload_rhs: reg<test.i32 x4>,
-    %frontier_lhs: reg<test.i32 x4>, %frontier_rhs: reg<test.i32 x4>,
-    %independent_lhs: reg<test.i32 x4>, %independent_rhs: reg<test.i32 x4>) ->
-    (reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>,
-    reg<test.i32 x4>, reg<test.i32>, reg<test.i32>, reg<test.i32>,
-    reg<test.i32>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_opens_pressure_releasing_frontier(%payload_lhs: reg<test.i32 x4>, %payload_rhs: reg<test.i32 x4>, %frontier_lhs: reg<test.i32 x4>, %frontier_rhs: reg<test.i32 x4>, %independent_lhs: reg<test.i32 x4>, %independent_rhs: reg<test.i32 x4>) -> (reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.add.v4i32", rejected_packet="test.add.v4i32"}
-  %payload = low.op<test.add.v4i32>(%payload_lhs, %payload_rhs) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  %payload = test.add.v4i32 %payload_lhs, %payload_rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.v4i32", rejected_packet="test.add.v4i32", chosen_pressure_cliff_penalty="4", rejected_pressure_cliff_penalty="4"}
-  %frontier = low.op<test.add.v4i32>(%frontier_lhs, %frontier_rhs) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  %frontier = test.add.v4i32 %frontier_lhs, %frontier_rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.add.v4i32", rejected_packet="test.add.v4i32"}
-  %combined = low.op<test.add.v4i32>(%payload, %frontier) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  %combined = test.add.v4i32 %payload, %frontier
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="test.extract_lane.i32", rejected_packet="test.extract_lane.i32"}
-  %lane0 = low.op<test.extract_lane.i32>(%combined) {lane = 0} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane0 = test.extract_lane.i32 %combined, 0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", chosen_packet="test.extract_lane.i32", rejected_packet="test.extract_lane.i32"}
-  %lane1 = low.op<test.extract_lane.i32>(%combined) {lane = 1} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane1 = test.extract_lane.i32 %combined, 1
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", chosen_packet="test.extract_lane.i32", rejected_packet="test.extract_lane.i32"}
-  %lane2 = low.op<test.extract_lane.i32>(%combined) {lane = 2} :
-      (reg<test.i32 x4>) -> reg<test.i32>
+  %lane2 = test.extract_lane.i32 %combined, 2
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="6", chosen_packet="test.extract_lane.i32", rejected_packet="test.add.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="7"}
-  %lane3 = low.op<test.extract_lane.i32>(%combined) {lane = 3} :
-      (reg<test.i32 x4>) -> reg<test.i32>
-  %independent = low.op<test.add.v4i32>(%independent_lhs, %independent_rhs) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  %independent1 = low.op<test.add.v4i32>(%independent, %independent_rhs) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  %independent2 = low.op<test.add.v4i32>(%independent1, %independent_rhs) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %frontier_lhs, %frontier_rhs, %independent_lhs,
-      %independent_rhs, %lane0, %lane1, %lane2, %lane3, %independent2 :
-      reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>,
-      reg<test.i32 x4>, reg<test.i32>, reg<test.i32>, reg<test.i32>,
-      reg<test.i32>, reg<test.i32 x4>
+  %lane3 = test.extract_lane.i32 %combined, 3
+  %independent = test.add.v4i32 %independent_lhs, %independent_rhs
+  %independent1 = test.add.v4i32 %independent, %independent_rhs
+  %independent2 = test.add.v4i32 %independent1, %independent_rhs
+  return %frontier_lhs, %frontier_rhs, %independent_lhs, %independent_rhs, %lane0, %lane1, %lane2, %lane3, %independent2
 }
 
 // ====
@@ -1136,61 +877,43 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_opens_pressure_
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_recovers_pressure_beyond_source_nominees(
-    %pad: reg<test.i32 x58>,
-    %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %ptr2: reg<test.ptr>,
-    %ptr3: reg<test.ptr>, %ptr4: reg<test.ptr>, %ptr5: reg<test.ptr>,
-    %ptr6: reg<test.ptr>, %ptr7: reg<test.ptr>, %ptr8: reg<test.ptr>,
-    %ptr9: reg<test.ptr>, %ptr10: reg<test.ptr>, %ptr11: reg<test.ptr>,
-    %ptr12: reg<test.ptr>, %ptr13: reg<test.ptr>, %ptr14: reg<test.ptr>,
-    %ptr15: reg<test.ptr>, %ptr16: reg<test.ptr>,
-    %lhs: reg<test.i32 x4>) -> (reg<test.i32 x58>, reg<test.i32 x4>,
-    reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>,
-    reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>,
-    reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>,
-    reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @resource_stall_recovers_pressure_beyond_source_nominees(%pad: reg<test.i32 x58>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %ptr2: reg<test.ptr>, %ptr3: reg<test.ptr>, %ptr4: reg<test.ptr>, %ptr5: reg<test.ptr>, %ptr6: reg<test.ptr>, %ptr7: reg<test.ptr>, %ptr8: reg<test.ptr>, %ptr9: reg<test.ptr>, %ptr10: reg<test.ptr>, %ptr11: reg<test.ptr>, %ptr12: reg<test.ptr>, %ptr13: reg<test.ptr>, %ptr14: reg<test.ptr>, %ptr15: reg<test.ptr>, %ptr16: reg<test.ptr>, %lhs: reg<test.i32 x4>) -> (reg<test.i32 x58>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", ready_candidate_count="17", scored_candidate_count="16", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load0 = low.op<test.load.v4i32>(%ptr0) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load0 = test.load.v4i32 %ptr0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", ready_candidate_count="16", scored_candidate_count="16", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load1 = low.op<test.load.v4i32>(%ptr1) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load1 = test.load.v4i32 %ptr1
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", ready_candidate_count="15", scored_candidate_count="15", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load2 = low.op<test.load.v4i32>(%ptr2) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load2 = test.load.v4i32 %ptr2
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", ready_candidate_count="14", scored_candidate_count="14", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load3 = low.op<test.load.v4i32>(%ptr3) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load3 = test.load.v4i32 %ptr3
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", ready_candidate_count="13", scored_candidate_count="13", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load4 = low.op<test.load.v4i32>(%ptr4) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load4 = test.load.v4i32 %ptr4
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="6", ready_candidate_count="12", scored_candidate_count="12", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load5 = low.op<test.load.v4i32>(%ptr5) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load5 = test.load.v4i32 %ptr5
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="7", ready_candidate_count="11", scored_candidate_count="11", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load6 = low.op<test.load.v4i32>(%ptr6) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load6 = test.load.v4i32 %ptr6
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="8", ready_candidate_count="10", scored_candidate_count="10", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load7 = low.op<test.load.v4i32>(%ptr7) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load7 = test.load.v4i32 %ptr7
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="9", ready_candidate_count="9", scored_candidate_count="9", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load8 = low.op<test.load.v4i32>(%ptr8) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load8 = test.load.v4i32 %ptr8
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="10", ready_candidate_count="8", scored_candidate_count="8", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load9 = low.op<test.load.v4i32>(%ptr9) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load9 = test.load.v4i32 %ptr9
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="11", ready_candidate_count="7", scored_candidate_count="7", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load10 = low.op<test.load.v4i32>(%ptr10) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load10 = test.load.v4i32 %ptr10
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="12", ready_candidate_count="6", scored_candidate_count="6", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load11 = low.op<test.load.v4i32>(%ptr11) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load11 = test.load.v4i32 %ptr11
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="13", ready_candidate_count="5", scored_candidate_count="5", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load12 = low.op<test.load.v4i32>(%ptr12) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load12 = test.load.v4i32 %ptr12
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="14", ready_candidate_count="4", scored_candidate_count="4", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load13 = low.op<test.load.v4i32>(%ptr13) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load13 = test.load.v4i32 %ptr13
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="15", ready_candidate_count="3", scored_candidate_count="3", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load14 = low.op<test.load.v4i32>(%ptr14) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load14 = test.load.v4i32 %ptr14
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="16", ready_candidate_count="2", scored_candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
-  %load15 = low.op<test.load.v4i32>(%ptr15) : (reg<test.ptr>) -> reg<test.i32 x4>
-  %load16 = low.op<test.load.v4i32>(%ptr16) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load15 = test.load.v4i32 %ptr15
+  %load16 = test.load.v4i32 %ptr16
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", ready_candidate_count="17", scored_candidate_count="17", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="9"}
-  %use0 = low.op<test.add.v4i32>(%load0, %lhs) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %pad, %use0, %load1, %load2, %load3, %load4, %load5, %load6,
-      %load7, %load8, %load9, %load10, %load11, %load12, %load13, %load14,
-      %load15, %load16 : reg<test.i32 x58>, reg<test.i32 x4>,
-      reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>,
-      reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>,
-      reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>,
-      reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>
+  %use0 = test.add.v4i32 %load0, %lhs
+  return %pad, %use0, %load1, %load2, %load3, %load4, %load5, %load6, %load7, %load8, %load9, %load10, %load11, %load12, %load13, %load14, %load15, %load16
 }
 
 // ====
@@ -1198,10 +921,10 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_recovers_pressu
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @tied_storage_antidependency(%state: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
-  %sum = low.op<test.add.i32>(%state, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %next = low.op<test.tied.any>(%state) : (reg<test.i32>) -> %state as reg<test.i32>
-  low.return %sum, %next : reg<test.i32>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @tied_storage_antidependency(%state: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %sum = test.add.i32 %state, %rhs
+  %next = test.tied.any %state
+  return %sum, %next
 }
 
 // ----
@@ -1212,10 +935,10 @@ low.func.def target<test.low.core>(@test_target) @tied_storage_antidependency(%s
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @tied_storage_disjoint_subregister_read(%state: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) {
-  %low_read = low.op<test.read.low16.i32>(%state) : (reg<test.i32>) -> reg<test.i32>
-  %next = low.op<test.write.high16.i32>(%state, %ptr) : (reg<test.i32>, reg<test.ptr>) -> %state as reg<test.i32>
-  low.return %low_read, %next : reg<test.i32>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @tied_storage_disjoint_subregister_read(%state: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %low_read = test.read.low16.i32 %state
+  %next = test.write.high16.i32 %state, %ptr
+  return %low_read, %next
 }
 
 // ----
@@ -1226,10 +949,10 @@ low.func.def target<test.low.core>(@test_target) @tied_storage_disjoint_subregis
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @tied_storage_overlapping_subregister_read(%state: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) {
-  %high_read = low.op<test.read.high16.i32>(%state) : (reg<test.i32>) -> reg<test.i32>
-  %next = low.op<test.write.high16.i32>(%state, %ptr) : (reg<test.i32>, reg<test.ptr>) -> %state as reg<test.i32>
-  low.return %high_read, %next : reg<test.i32>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @tied_storage_overlapping_subregister_read(%state: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %high_read = test.read.high16.i32 %state
+  %next = test.write.high16.i32 %state, %ptr
+  return %high_read, %next
 }
 
 // ----
@@ -1240,10 +963,10 @@ low.func.def target<test.low.core>(@test_target) @tied_storage_overlapping_subre
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @tied_storage_disjoint_high_read_low_write(%state: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) {
-  %high_read = low.op<test.read.high16.i32>(%state) : (reg<test.i32>) -> reg<test.i32>
-  %next = low.op<test.write.low16.tied.i32>(%state, %ptr) : (reg<test.i32>, reg<test.ptr>) -> %state as reg<test.i32>
-  low.return %high_read, %next : reg<test.i32>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @tied_storage_disjoint_high_read_low_write(%state: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %high_read = test.read.high16.i32 %state
+  %next = test.write.low16.tied.i32 %state, %ptr
+  return %high_read, %next
 }
 
 // ----
@@ -1254,10 +977,10 @@ low.func.def target<test.low.core>(@test_target) @tied_storage_disjoint_high_rea
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @tied_storage_overlapping_low_read_low_write(%state: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) {
-  %low_read = low.op<test.read.low16.i32>(%state) : (reg<test.i32>) -> reg<test.i32>
-  %next = low.op<test.write.low16.tied.i32>(%state, %ptr) : (reg<test.i32>, reg<test.ptr>) -> %state as reg<test.i32>
-  low.return %low_read, %next : reg<test.i32>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @tied_storage_overlapping_low_read_low_write(%state: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %low_read = test.read.low16.i32 %state
+  %next = test.write.low16.tied.i32 %state, %ptr
+  return %low_read, %next
 }
 
 // ----
@@ -1268,10 +991,10 @@ low.func.def target<test.low.core>(@test_target) @tied_storage_overlapping_low_r
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @tied_storage_full_read_overlaps_subregister_write(%state: reg<test.i32>, %rhs: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) {
-  %sum = low.op<test.add.i32>(%state, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %next = low.op<test.write.high16.i32>(%state, %ptr) : (reg<test.i32>, reg<test.ptr>) -> %state as reg<test.i32>
-  low.return %sum, %next : reg<test.i32>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @tied_storage_full_read_overlaps_subregister_write(%state: reg<test.i32>, %rhs: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %sum = test.add.i32 %state, %rhs
+  %next = test.write.high16.i32 %state, %ptr
+  return %sum, %next
 }
 
 // ----
@@ -1282,10 +1005,10 @@ low.func.def target<test.low.core>(@test_target) @tied_storage_full_read_overlap
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @tied_storage_subregister_read_overlaps_full_write(%state: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
-  %low_read = low.op<test.read.low16.i32>(%state) : (reg<test.i32>) -> reg<test.i32>
-  %next = low.op<test.tied.any>(%state) : (reg<test.i32>) -> %state as reg<test.i32>
-  low.return %low_read, %next : reg<test.i32>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @tied_storage_subregister_read_overlaps_full_write(%state: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %low_read = test.read.low16.i32 %state
+  %next = test.tied.any %state
+  return %low_read, %next
 }
 
 // ----
@@ -1296,13 +1019,12 @@ low.func.def target<test.low.core>(@test_target) @tied_storage_subregister_read_
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @explicit_state_snapshot_precedes_first_clobber(
-    %state_lhs: reg<test.schedule_state>, %state_rhs: reg<test.schedule_state>) {
-  %snapshot = low.op<test.add.schedule_state>(%state_lhs, %state_rhs) : (reg<test.schedule_state>, reg<test.schedule_state>) -> reg<test.schedule_state>
-  %first_clobber = low.op<test.state.add.schedule_state>(%state_lhs, %state_rhs) : (reg<test.schedule_state>, reg<test.schedule_state>) -> reg<test.schedule_state>
-  %second_clobber = low.op<test.state.add.schedule_state>(%state_lhs, %state_rhs) : (reg<test.schedule_state>, reg<test.schedule_state>) -> reg<test.schedule_state>
-  %read = low.op<test.explicit.state.add.schedule_state>(%state_lhs, %snapshot) : (reg<test.schedule_state>, reg<test.schedule_state>) -> reg<test.schedule_state>
-  low.return
+low.func.def target<test.low.core>(@test_target) @explicit_state_snapshot_precedes_first_clobber(%state_lhs: reg<test.schedule_state>, %state_rhs: reg<test.schedule_state>) asm {
+  %snapshot = test.add.schedule_state %state_lhs, %state_rhs
+  %first_clobber = test.state.add.schedule_state %state_lhs, %state_rhs
+  %second_clobber = test.state.add.schedule_state %state_lhs, %state_rhs
+  %read = test.explicit.state.add.schedule_state %state_lhs, %snapshot
+  return
 }
 
 // ----
@@ -1313,12 +1035,11 @@ low.func.def target<test.low.core>(@test_target) @explicit_state_snapshot_preced
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @explicit_live_in_state_precedes_first_clobber(
-    %state: reg<test.schedule_state>, %rhs: reg<test.schedule_state>) {
-  %first_clobber = low.op<test.state.add.schedule_state>(%state, %rhs) : (reg<test.schedule_state>, reg<test.schedule_state>) -> reg<test.schedule_state>
-  %second_clobber = low.op<test.state.add.schedule_state>(%state, %rhs) : (reg<test.schedule_state>, reg<test.schedule_state>) -> reg<test.schedule_state>
-  %read = low.op<test.explicit.state.add.schedule_state>(%rhs, %state) : (reg<test.schedule_state>, reg<test.schedule_state>) -> reg<test.schedule_state>
-  low.return
+low.func.def target<test.low.core>(@test_target) @explicit_live_in_state_precedes_first_clobber(%state: reg<test.schedule_state>, %rhs: reg<test.schedule_state>) asm {
+  %first_clobber = test.state.add.schedule_state %state, %rhs
+  %second_clobber = test.state.add.schedule_state %state, %rhs
+  %read = test.explicit.state.add.schedule_state %rhs, %state
+  return
 }
 
 // ----
@@ -1329,13 +1050,12 @@ low.func.def target<test.low.core>(@test_target) @explicit_live_in_state_precede
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @dependency_cycle_diagnostics(
-    %lhs: reg<test.schedule_state>, %rhs: reg<test.schedule_state>) {
-  %old = low.op<test.add.schedule_state>(%lhs, %rhs) : (reg<test.schedule_state>, reg<test.schedule_state>) -> reg<test.schedule_state>
+low.func.def target<test.low.core>(@test_target) @dependency_cycle_diagnostics(%lhs: reg<test.schedule_state>, %rhs: reg<test.schedule_state>) asm {
+  %old = test.add.schedule_state %lhs, %rhs
   // ERROR@+1: BACKEND/044 {scheduled_node_count="1", block_node_count="4", producer_node="2", consumer_node="1", dependency_kind="state", operand_index="1", cycle_path_truncated="false", witness_edge_only="false"}
-  %writer = low.op<test.state.add.schedule_state>(%lhs, %rhs) : (reg<test.schedule_state>, reg<test.schedule_state>) -> reg<test.schedule_state>
-  %cycle = low.op<test.explicit.state.add.schedule_state>(%writer, %old) : (reg<test.schedule_state>, reg<test.schedule_state>) -> reg<test.schedule_state>
-  low.return
+  %writer = test.state.add.schedule_state %lhs, %rhs
+  %cycle = test.explicit.state.add.schedule_state %writer, %old
+  return
 }
 
 // ====
@@ -1343,13 +1063,11 @@ low.func.def target<test.low.core>(@test_target) @dependency_cycle_diagnostics(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @convergent_explicit_state_fanout(
-    %state_lhs: reg<test.schedule_state>, %state_rhs: reg<test.schedule_state>,
-    %value0: reg<test.i32>, %value1: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
-  %state = low.op<test.state.add.schedule_state>(%state_lhs, %state_rhs) : (reg<test.schedule_state>, reg<test.schedule_state>) -> reg<test.schedule_state>
-  %read0 = low.op<test.convergent.explicit.state.read.i32>(%value0, %state) : (reg<test.i32>, reg<test.schedule_state>) -> reg<test.i32>
-  %read1 = low.op<test.convergent.explicit.state.read.i32>(%value1, %state) : (reg<test.i32>, reg<test.schedule_state>) -> reg<test.i32>
-  low.return %read0, %read1 : reg<test.i32>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @convergent_explicit_state_fanout(%state_lhs: reg<test.schedule_state>, %state_rhs: reg<test.schedule_state>, %value0: reg<test.i32>, %value1: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %state = test.state.add.schedule_state %state_lhs, %state_rhs
+  %read0 = test.convergent.explicit.state.read.i32 %value0, %state
+  %read1 = test.convergent.explicit.state.read.i32 %value1, %state
+  return %read0, %read1
 }
 
 // ----
@@ -1360,13 +1078,12 @@ low.func.def target<test.low.core>(@test_target) @convergent_explicit_state_fano
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @dependency_cycle_json(
-    %lhs: reg<test.schedule_state>, %rhs: reg<test.schedule_state>) {
-  %old = low.op<test.add.schedule_state>(%lhs, %rhs) : (reg<test.schedule_state>, reg<test.schedule_state>) -> reg<test.schedule_state>
+low.func.def target<test.low.core>(@test_target) @dependency_cycle_json(%lhs: reg<test.schedule_state>, %rhs: reg<test.schedule_state>) asm {
+  %old = test.add.schedule_state %lhs, %rhs
   // ERROR@+1: BACKEND/044 {scheduled_node_count="1", block_node_count="4", producer_node="2", consumer_node="1", dependency_kind="state", operand_index="1", cycle_path_truncated="false", witness_edge_only="false"}
-  %writer = low.op<test.state.add.schedule_state>(%lhs, %rhs) : (reg<test.schedule_state>, reg<test.schedule_state>) -> reg<test.schedule_state>
-  %cycle = low.op<test.explicit.state.add.schedule_state>(%writer, %old) : (reg<test.schedule_state>, reg<test.schedule_state>) -> reg<test.schedule_state>
-  low.return
+  %writer = test.state.add.schedule_state %lhs, %rhs
+  %cycle = test.explicit.state.add.schedule_state %writer, %old
+  return
 }
 
 // ----
@@ -1377,17 +1094,11 @@ low.func.def target<test.low.core>(@test_target) @dependency_cycle_json(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @source_range_state_cycle(
-    %lhs: reg<test.schedule_state>, %rhs: reg<test.schedule_state>) ->
-    (reg<test.schedule_state>) {
-  %condition = low.op<test.add.schedule_state>(%lhs, %rhs) :
-      (reg<test.schedule_state>, reg<test.schedule_state>) ->
-      reg<test.schedule_state>
+low.func.def target<test.low.core>(@test_target) @source_range_state_cycle(%lhs: reg<test.schedule_state>, %rhs: reg<test.schedule_state>) -> (reg<test.schedule_state>) asm {
+  %condition = test.add.schedule_state %lhs, %rhs
   // ERROR@+1: BACKEND/044 {scheduled_node_count="1", block_node_count="3", producer_node="2", consumer_node="1", dependency_kind="state", operand_index="0", cycle_path_truncated="false", witness_edge_only="true"}
-  %clobber = low.op<test.state.add.schedule_state>(%lhs, %rhs) :
-      (reg<test.schedule_state>, reg<test.schedule_state>) ->
-      reg<test.schedule_state>
-  low.return %condition : reg<test.schedule_state>
+  %clobber = test.state.add.schedule_state %lhs, %rhs
+  return %condition
 }
 
 // ====
@@ -1395,11 +1106,11 @@ low.func.def target<test.low.core>(@test_target) @source_range_state_cycle(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @tied_storage_retains_disjoint_read_for_later_write(%state: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) {
-  %low_read = low.op<test.read.low16.i32>(%state) : (reg<test.i32>) -> reg<test.i32>
-  %high_next = low.op<test.write.high16.i32>(%state, %ptr) : (reg<test.i32>, reg<test.ptr>) -> %state as reg<test.i32>
-  %full_next = low.op<test.tied.any>(%high_next) : (reg<test.i32>) -> %high_next as reg<test.i32>
-  low.return %low_read, %full_next : reg<test.i32>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @tied_storage_retains_disjoint_read_for_later_write(%state: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %low_read = test.read.low16.i32 %state
+  %high_next = test.write.high16.i32 %state, %ptr
+  %full_next = test.tied.any %high_next
+  return %low_read, %full_next
 }
 
 // ----
@@ -1410,8 +1121,7 @@ low.func.def target<test.low.core>(@test_target) @tied_storage_retains_disjoint_
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @repeated_barrier_schedule_segments(
-    %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @repeated_barrier_schedule_segments(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
   %before = test.add.i32 %lhs, %rhs
   test.barrier
   %middle = test.mul.i32 %lhs, %rhs
@@ -1428,8 +1138,7 @@ low.func.def target<test.low.core>(@test_target) @repeated_barrier_schedule_segm
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @live_in_source_preamble(
-    %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @live_in_source_preamble(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
   %resource = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
   %live0 = live_in<test.arg0> : reg<test.i32>
   %live1 = live_in<test.arg0> : reg<test.i32>

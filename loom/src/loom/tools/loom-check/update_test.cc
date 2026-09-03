@@ -11,7 +11,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/tools/loom-check/check.h"
+#include "loom/testing/test_file.h"
 
 namespace {
 
@@ -31,15 +31,15 @@ class UpdateTest : public ::testing::Test {
   }
 
   // Parses |source| and returns the file structure. Arena-allocated.
-  loom_check_file_t Parse(const char* source) {
+  loom_test_file_t Parse(const char* source) {
     source_ = iree_make_cstring_view(source);
-    loom_check_file_t file = {0};
-    IREE_EXPECT_OK(loom_check_parse(source_, &arena_, &file));
+    loom_test_file_t file = {0};
+    IREE_EXPECT_OK(loom_test_file_parse(source_, &arena_, &file));
     return file;
   }
 
   // Applies updates and returns the reconstructed source as a string.
-  std::string Apply(const loom_check_file_t& file,
+  std::string Apply(const loom_test_file_t& file,
                     const loom_check_case_update_t* updates,
                     iree_host_size_t* out_update_count) {
     IREE_EXPECT_OK(loom_check_apply_updates(source_, &file, updates,
@@ -49,7 +49,7 @@ class UpdateTest : public ::testing::Test {
   }
 
   // Builds one machine-readable update edit and returns its replacement text.
-  std::string BuildUpdateEdit(const loom_check_case_t& test_case,
+  std::string BuildUpdateEdit(const loom_test_case_t& test_case,
                               iree_string_view_t actual_output,
                               loom_check_update_edit_t* out_edit) {
     IREE_EXPECT_OK(loom_check_build_update_edit(

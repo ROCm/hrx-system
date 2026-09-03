@@ -1,6 +1,7 @@
 // RUN: emit amdgpu-assembly @vop3_lshl_add_shift_src2_literal
 
 amdgpu.target<gfx1100> @target
+
 low.func.def target<amdgpu.rdna3.core>(@target) @vop3_lshl_add_shift_src2_literal(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %result = v_lshl_add_u32_shift_imm_src2_lit %value {shift = 4, imm32 = 1006648320}
   global_store_b32_saddr %addr, %result, %output
@@ -20,6 +21,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @vop3_lshl_add_shift_src2_litera
 // RUN: emit amdgpu-native-words @vop3_lshl_add_shift_src2_literal_native waits=none strategy=source fixed=%value:physical_register:11:1 fixed=%result:physical_register:13:1
 
 amdgpu.target<gfx1100> @target
+
 low.func.def target<amdgpu.rdna3.core>(@target) @vop3_lshl_add_shift_src2_literal_native(%value: reg<amdgpu.vgpr>) asm {
   %result = v_lshl_add_u32_shift_imm_src2_lit %value {shift = 4, imm32 = 15360}
   return
@@ -36,6 +38,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @vop3_lshl_add_shift_src2_litera
 // RUN: emit amdgpu-assembly @cdna3_med3_numeric fixed=%a:physical_register:0:1 fixed=%b:physical_register:1:1 fixed=%c:physical_register:2:1 fixed=%result:physical_register:3:1 fixed=%addr:physical_register:4:1 fixed=%output:physical_register:0:2
 
 amdgpu.target<gfx942> @cdna3_target
+
 low.func.def target<amdgpu.cdna3.core>(@cdna3_target) @cdna3_med3_numeric(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %result = v_med3_f32 %a, %b, %c
   %m0 = s_mov_b32_m0_imm 0
@@ -55,6 +58,7 @@ low.func.def target<amdgpu.cdna3.core>(@cdna3_target) @cdna3_med3_numeric(%a: re
 // RUN: emit amdgpu-assembly @rdna3_med3_numeric fixed=%a:physical_register:0:1 fixed=%b:physical_register:1:1 fixed=%c:physical_register:2:1 fixed=%result:physical_register:3:1 fixed=%addr:physical_register:4:1 fixed=%output:physical_register:0:2
 
 amdgpu.target<gfx1100> @rdna3_target
+
 low.func.def target<amdgpu.rdna3.core>(@rdna3_target) @rdna3_med3_numeric(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %result = v_med3_f32 %a, %b, %c
   global_store_b32_saddr %addr, %result, %output
@@ -72,6 +76,7 @@ low.func.def target<amdgpu.rdna3.core>(@rdna3_target) @rdna3_med3_numeric(%a: re
 // RUN: emit amdgpu-assembly @rdna4_med3_numeric fixed=%a:physical_register:0:1 fixed=%b:physical_register:1:1 fixed=%c:physical_register:2:1 fixed=%result:physical_register:3:1 fixed=%addr:physical_register:4:1 fixed=%output:physical_register:0:2
 
 amdgpu.target<gfx1200> @rdna4_target
+
 low.func.def target<amdgpu.rdna4.core>(@rdna4_target) @rdna4_med3_numeric(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %result = v_med3_num_f32 %a, %b, %c
   global_store_b32_saddr %addr, %result, %output

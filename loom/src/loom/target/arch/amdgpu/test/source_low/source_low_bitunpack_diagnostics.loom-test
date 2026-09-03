@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @q3_width_rejected(%packed: vector<3xi8>) -> (vector<8xi32>) {
   // ERROR@+1: TARGET/003 {subject_role="packed-integer-storage", subject_name="vector.bitunpack", constraint_key="amdgpu.packed_integer.lanes_from_payload"}
   %unpacked = vector.bitunpacks<3> %packed : vector<3xi8> -> vector<8xi32>

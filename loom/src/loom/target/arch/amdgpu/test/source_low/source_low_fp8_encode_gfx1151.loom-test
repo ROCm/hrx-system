@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx1151> @target
+
 func.def target(@target) @vector_fptrunc_f16x3_to_bf8(%input: vector<3xf16>) -> (vector<3xf8E5M2>) {
   %converted = vector.fptrunc %input : vector<3xf16> to vector<3xf8E5M2>
   func.return %converted : vector<3xf8E5M2>
@@ -44,6 +45,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @vector_fptrun
 // ====
 
 amdgpu.target<gfx1151> @target
+
 func.def target(@target) @vector_fptrunc_bf16x5_to_fp8(%input: vector<5xbf16>) -> (vector<5xf8E4M3>) {
   %converted = vector.fptrunc %input : vector<5xbf16> to vector<5xf8E4M3>
   func.return %converted : vector<5xf8E4M3>

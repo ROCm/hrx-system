@@ -1,9 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/lookup_table.loom-test
 // RUN: emit source-low output=low
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @f32_table_lookup_i8_codes() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 2 : index
@@ -29,10 +28,8 @@ kernel.def target(@target) @f32_table_lookup_i8_codes() {
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f32_table_lookup_i32_codes(%codes: vector<2xi32>) -> (vector<2xf32>) {
   %g0 = scalar.constant 2.0 : f32
   %g1 = scalar.constant -3.0 : f32
@@ -46,9 +43,8 @@ func.def target(@target) @f32_table_lookup_i32_codes(%codes: vector<2xi32>) -> (
 // ====
 
 // XFAIL: LLVMIR does not provide vector.table.lookup lowering.
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 func.def target(@target) @f32_table_lookup_dynamic_grid(%grid: vector<3xf32>, %codes: vector<2xi32>) -> (vector<2xf32>) {
   %decoded = vector.table.lookup %grid[%codes] : vector<3xf32>, vector<2xi32> -> vector<2xf32>
   func.return %decoded : vector<2xf32>
@@ -57,9 +53,8 @@ func.def target(@target) @f32_table_lookup_dynamic_grid(%grid: vector<3xf32>, %c
 // ====
 
 // XFAIL: LLVMIR does not provide vector.table.lookup lowering.
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 func.def target(@target) @i8_table_lookup_fact_known_codes(%grid: vector<4xi8>) -> (vector<4xi8>) {
   %c0 = scalar.constant 0 : i8
   %c1 = scalar.constant 1 : i8
@@ -73,9 +68,8 @@ func.def target(@target) @i8_table_lookup_fact_known_codes(%grid: vector<4xi8>) 
 // ====
 
 // XFAIL: LLVMIR does not provide vector.table.lookup lowering.
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 func.def target(@target) @i8_table_lookup_constant_table() -> (vector<4xi8>) {
   %g0 = scalar.constant -4 : i8
   %g1 = scalar.constant -1 : i8
@@ -94,9 +88,8 @@ func.def target(@target) @i8_table_lookup_constant_table() -> (vector<4xi8>) {
 // ====
 
 // XFAIL: LLVMIR does not provide vector.table.lookup lowering.
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 func.def target(@target) @i8_table_lookup_u4_dynamic_table(%grid: vector<16xi8>, %packed: vector<2xi8>) -> (vector<4xi8>) {
   %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
   %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
@@ -106,9 +99,8 @@ func.def target(@target) @i8_table_lookup_u4_dynamic_table(%grid: vector<16xi8>,
 // ====
 
 // XFAIL: LLVMIR does not provide vector.table.lookup lowering.
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 func.def target(@target) @i8_table_lookup_u4_constant_table(%packed: vector<2xi8>) -> (vector<4xi8>) {
   %g0 = scalar.constant 0 : i8
   %g1 = scalar.constant -1 : i8

@@ -1,3 +1,4 @@
 // RUN: roundtrip
 // REQUIRES: loom-check-test-unavailable
+// ERROR@+1: PARSE/006 "this.is.invalid.ir"
 this.is.invalid.ir

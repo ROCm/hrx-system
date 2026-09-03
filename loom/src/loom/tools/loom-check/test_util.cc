@@ -6,7 +6,7 @@
 
 #include "loom/tools/loom-check/test_util.h"
 
-#include "loom/tools/loom-check/check.h"
+#include "loom/testing/test_file.h"
 #include "loom/tools/loom-check/report.h"
 
 namespace loom::testing {
@@ -72,8 +72,8 @@ iree_status_t LoomCheckHarness::ExecuteFirst(iree_string_view_t source,
 
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
-  loom_check_file_t file = {};
-  iree_status_t status = loom_check_parse(source, &arena, &file);
+  loom_test_file_t file = {};
+  iree_status_t status = loom_test_file_parse(source, &arena, &file);
 
   loom_check_file_report_t report = {};
   if (iree_status_is_ok(status)) {

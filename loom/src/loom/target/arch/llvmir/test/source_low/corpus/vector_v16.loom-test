@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/vector_v16.loom-test
 // RUN: emit source-low output=low
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32x16_arith(%lhs: vector<16xi32>, %rhs: vector<16xi32>) -> (vector<16xi32>) {
   %sum = vector.addi %lhs, %rhs : vector<16xi32>
   %diff = vector.subi %sum, %rhs : vector<16xi32>
@@ -20,10 +18,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_a
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32x16_minmax_logic(%lhs: vector<16xi32>, %rhs: vector<16xi32>) -> (vector<16xi32>) {
   %min_s = vector.minsi %lhs, %rhs : vector<16xi32>
   %max_s = vector.maxsi %lhs, %rhs : vector<16xi32>
@@ -53,10 +49,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_m
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32x16_variable_shift(%value: vector<16xi32>, %amount: vector<16xi32>) -> (vector<16xi32>) {
   %left = vector.shli %value, %amount : vector<16xi32>
   %signed = vector.shrsi %left, %amount : vector<16xi32>
@@ -74,10 +68,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_v
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32x16_splat_add(%value: i32, %rhs: vector<16xi32>) -> (vector<16xi32>) {
   %splat = vector.splat %value : vector<16xi32>
   %sum = vector.addi %splat, %rhs : vector<16xi32>
@@ -93,10 +85,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_s
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32x16_compare_select(%lhs: vector<16xi32>, %rhs: vector<16xi32>, %fallback: vector<16xi32>) -> (vector<16xi32>) {
   %signed = vector.cmpi sgt, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
   %unsigned = vector.cmpi ugt, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
@@ -116,10 +106,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_c
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32x16_mask_and_select(%lhs: vector<16xi32>, %rhs: vector<16xi32>, %fallback: vector<16xi32>) -> (vector<16xi32>) {
   %greater = vector.cmpi sgt, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
   %less = vector.cmpi slt, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
@@ -143,10 +131,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_m
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f32x16_arith(%lhs: vector<16xf32>, %rhs: vector<16xf32>) -> (vector<16xf32>) {
   %sum = vector.addf %lhs, %rhs : vector<16xf32>
   %difference = vector.subf %sum, %lhs : vector<16xf32>
@@ -166,10 +152,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_a
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f32x16_splat_add(%value: f32, %rhs: vector<16xf32>) -> (vector<16xf32>) {
   %splat = vector.splat %value : vector<16xf32>
   %sum = vector.addf %splat, %rhs : vector<16xf32>
@@ -185,10 +169,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_s
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f32x16_reduce_add(%v: vector<16xf32>, %init: f32) -> (f32) {
   %sum = vector.reduce<addf> %v, %init : vector<16xf32>, f32
   func.return %sum : f32
@@ -233,10 +215,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_r
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f32x16_compare_select(%lhs: vector<16xf32>, %rhs: vector<16xf32>, %fallback: vector<16xf32>) -> (vector<16xf32>) {
   %ordered_lt = vector.cmpf olt, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
   %unordered_ne = vector.cmpf une, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
@@ -256,10 +236,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_c
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f32x16_static_memory(%input: buffer, %output: buffer) {
   %input_base = index.constant 16 : offset
   %output_base = index.constant 32 : offset
@@ -279,10 +257,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_s
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f32x16_dynamic_memory(%input: buffer, %output: buffer, %i: index) {
   %input_base = index.constant 16 : offset
   %output_base = index.constant 32 : offset
@@ -303,10 +279,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_d
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f32x16_index_add_memory(%input: buffer, %output: buffer, %i: index, %j: index) {
   %buffer_base = index.constant 0 : offset
   %sum = index.add %i, %j : index
@@ -330,10 +304,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_i
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @f32x16_index_madd_memory(%input: buffer, %output: buffer, %row: index, %stride: index, %col: index) {
   %buffer_base = index.constant 0 : offset
   %linear = index.madd %row, %stride, %col : index

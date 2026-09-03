@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test
 // RUN: emit source-low output=low
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: i32) -> (i32) {
   %add = scalar.addi %lhs, %rhs : i32
   %sub = scalar.subi %add, %rhs : i32
@@ -33,10 +31,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_i
 // ====
 
 // XFAIL: LLVMIR scalar bitfield extraction is unsupported
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @scalar_i32_bitfield_sgpr(%word: i32) -> (i32, i32, i32, i32) {
   %unsigned_byte = scalar.bitfield.extractu %word {offset = 8, width = 8} : i32 -> i32
   %signed_byte = scalar.bitfield.extracts %word {offset = 16, width = 8} : i32 -> i32
@@ -47,10 +43,8 @@ func.def target(@target) @scalar_i32_bitfield_sgpr(%word: i32) -> (i32, i32, i32
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @scalar_i32_compare_scc(%lhs: i32, %rhs: i32) -> (i1) {
   %cmp = scalar.cmpi slt, %lhs, %rhs : i32
   func.return %cmp : i1
@@ -65,10 +59,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_i
 // ====
 
 // XFAIL: LLVMIR i1 scalar constants are unsupported
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @scalar_i1_constants_scc() -> (i1, i1) {
   %true = scalar.constant true : i1
   %false = scalar.constant false : i1
@@ -77,10 +69,8 @@ func.def target(@target) @scalar_i1_constants_scc() -> (i1, i1) {
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
   %inactive_condition = scalar.constant 0 : i32
   %lhs_nonzero = scalar.cmpi ne, %lhs, %inactive_condition : i32

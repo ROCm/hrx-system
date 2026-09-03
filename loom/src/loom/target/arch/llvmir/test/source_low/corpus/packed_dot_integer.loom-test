@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/packed_dot_integer.loom-test
 // RUN: emit source-low output=low
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @dot4i_s8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -41,10 +39,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4i_s8
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @dot4i_u8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot4i<u8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -81,10 +77,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4i_u8
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @dot8i4_u4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<u4u4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -151,10 +145,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot8i4_u
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @dot4i_u8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -191,10 +183,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4i_u8
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @dot4i_s8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot4i<s8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -231,10 +221,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4i_s8
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @dot8i4_s4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<s4s4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -333,10 +321,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot8i4_s
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @dot8i4_u4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<u4s4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -419,10 +405,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot8i4_u
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @dot8i4_s4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<s4u4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -505,10 +489,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot8i4_s
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @dot8i4_s4u4_q4_offset_binary(%rows: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %offset_to_signed_mask = vector.constant -2004318072 : vector<1xi32>
   %signed_rows = vector.xori %rows, %offset_to_signed_mask : vector<1xi32>
@@ -596,10 +578,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot8i4_s
 // ====
 
 // XFAIL: LLVMIR narrow integer vector arithmetic is unsupported
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @dot4i_s8s8_q6_offset_binary(%codes: vector<1xi32>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %offset_to_signed_bias = vector.constant -32 : vector<4xi8>
   %bytes = vector.bitcast %codes : vector<1xi32> to vector<4xi8>

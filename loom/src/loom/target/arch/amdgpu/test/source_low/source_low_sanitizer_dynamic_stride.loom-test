@@ -2,8 +2,7 @@
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @sanitizer_bounded_dynamic_stride_write(
-    %output: buffer, %row_count_i32: i32, %row_size_i32: i32, %row_i32: i32) {
+func.def target(@target) @sanitizer_bounded_dynamic_stride_write(%output: buffer, %row_count_i32: i32, %row_size_i32: i32, %row_i32: i32) {
   %base = index.constant 0 : offset
   %column = index.constant 0 : index
   %row_count0 = index.cast %row_count_i32 : i32 to index
@@ -114,8 +113,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @sanitiz
 
 amdgpu.target<gfx11-generic> @target
 
-kernel.def target(@target) @sanitizer_bounded_lane_dynamic_stride_write(
-    %row_size_i32: i32) {
+kernel.def target(@target) @sanitizer_bounded_lane_dynamic_stride_write(%row_size_i32: i32) {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -221,8 +219,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @sanitizer_wide_dynamic_stride_write_rejected(
-    %output: buffer, %row_size_i32: i32, %row_i32: i32) {
+func.def target(@target) @sanitizer_wide_dynamic_stride_write_rejected(%output: buffer, %row_size_i32: i32, %row_i32: i32) {
   %base = index.constant 0 : offset
   %column = index.constant 0 : index
   %row_size0 = index.cast %row_size_i32 : i32 to index

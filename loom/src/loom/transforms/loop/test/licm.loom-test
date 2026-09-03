@@ -9,7 +9,6 @@ func.def @hoists_speculatable_invariant_chain(%n: index, %a: i32, %b: i32) {
     %less = test.cmp lt, %a, %b : i32
     %selected = scf.select %less, %a, %b : i32
     test.use %selected : i32
-    scf.yield
   }
   func.return
 }
@@ -106,7 +105,6 @@ func.def @keeps_unknown_effects_inside_loop(%n: index, %value: i32) {
   %loop_step = index.constant 1 : index
   scf.for %iv = [%loop_begin to %n step %loop_step] {
     test.use %value : i32
-    scf.yield
   }
   func.return
 }
@@ -136,7 +134,6 @@ func.def @keeps_non_speculatable_region_op(%cond: i1, %n: index, %a: i32, %b: i3
       scf.yield %b : i32
     }
     test.use %selected : i32
-    scf.yield
   }
   func.return
 }
@@ -168,11 +165,8 @@ func.def @hoists_from_nested_region(%cond: i1, %n: index, %a: i32, %b: i32) {
     scf.if %cond {
       %less = test.cmp lt, %a, %b : i32
       test.use %less : i1
-      scf.yield
     } else {
-      scf.yield
     }
-    scf.yield
   }
   func.return
 }
@@ -202,7 +196,6 @@ func.def @keeps_type_ref_to_loop_local_layout(%buffer: buffer, %offset: offset, 
     %layout = encoding.layout.strided [%iv] : encoding<layout>
     %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
     test.use %view : view<1xf32, %layout>
-    scf.yield
   }
   func.return
 }

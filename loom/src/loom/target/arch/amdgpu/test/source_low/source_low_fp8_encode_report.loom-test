@@ -1,6 +1,7 @@
 // RUN: compile-report source-to-low,low-dce
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @report_f32_to_fp8_saturating_native(%input: vector<4xf32>) -> (vector<4xf8E4M3>) {
   %converted = vector.fptrunc %input : vector<4xf32> to vector<4xf8E4M3>
   func.return %converted : vector<4xf8E4M3>
@@ -14,6 +15,7 @@ COMPILE-REPORT: source_low[0] function=report_f32_to_fp8_saturating_native sourc
 // ====
 
 amdgpu.target<gfx1250> @target
+
 func.def target(@target) @report_f16_to_bf8_direct_native(%input: vector<4xf16>) -> (vector<4xf8E5M2>) {
   %converted = vector.fptrunc %input : vector<4xf16> to vector<4xf8E5M2>
   func.return %converted : vector<4xf8E5M2>
@@ -27,6 +29,7 @@ COMPILE-REPORT: source_low[0] function=report_f16_to_bf8_direct_native source_op
 // ====
 
 amdgpu.target<gfx1201> @target
+
 func.def target(@target) @report_f16_to_bf8_via_f32_native(%input: vector<4xf16>) -> (vector<4xf8E5M2>) {
   %converted = vector.fptrunc %input : vector<4xf16> to vector<4xf8E5M2>
   func.return %converted : vector<4xf8E5M2>
@@ -40,6 +43,7 @@ COMPILE-REPORT: source_low[0] function=report_f16_to_bf8_via_f32_native source_o
 // ====
 
 amdgpu.target<gfx1200> @target
+
 func.def target(@target) @report_f32_to_fp8_saturating_native(%input: vector<4xf32>) -> (vector<4xf8E4M3>) {
   %converted = vector.fptrunc %input : vector<4xf32> to vector<4xf8E4M3>
   func.return %converted : vector<4xf8E4M3>
@@ -53,6 +57,7 @@ COMPILE-REPORT: source_low[0] function=report_f32_to_fp8_saturating_native sourc
 // ====
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @report_bf16_to_bf8_via_f32_native(%input: vector<4xbf16>) -> (vector<4xf8E5M2>) {
   %converted = vector.fptrunc %input : vector<4xbf16> to vector<4xf8E5M2>
   func.return %converted : vector<4xf8E5M2>
@@ -66,6 +71,7 @@ COMPILE-REPORT: source_low[0] function=report_bf16_to_bf8_via_f32_native source_
 // ====
 
 amdgpu.target<gfx1100> @target
+
 func.def target(@target) @report_f32_to_fp8_software(%input: vector<4xf32>) -> (vector<4xf8E4M3>) {
   %converted = vector.fptrunc %input : vector<4xf32> to vector<4xf8E4M3>
   func.return %converted : vector<4xf8E4M3>
@@ -79,6 +85,7 @@ COMPILE-REPORT: source_low[0] function=report_f32_to_fp8_software source_op=vect
 // ====
 
 amdgpu.target<gfx1100> @target
+
 func.def target(@target) @report_f16_to_fp8_software(%input: vector<4xf16>) -> (vector<4xf8E4M3>) {
   %converted = vector.fptrunc %input : vector<4xf16> to vector<4xf8E4M3>
   func.return %converted : vector<4xf8E4M3>
@@ -92,6 +99,7 @@ COMPILE-REPORT: source_low[0] function=report_f16_to_fp8_software source_op=vect
 // ====
 
 amdgpu.target<gfx1151> @target
+
 func.def target(@target) @report_f16_to_bf8_software(%input: vector<4xf16>) -> (vector<4xf8E5M2>) {
   %converted = vector.fptrunc %input : vector<4xf16> to vector<4xf8E5M2>
   func.return %converted : vector<4xf8E5M2>
@@ -105,6 +113,7 @@ COMPILE-REPORT: source_low[0] function=report_f16_to_bf8_software source_op=vect
 // ====
 
 amdgpu.target<gfx942> @target
+
 func.def target(@target) @report_f32_to_fp8_fnuz_bridge(%input: vector<4xf32>) -> (vector<4xf8E4M3>) {
   %converted = vector.fptrunc %input : vector<4xf32> to vector<4xf8E4M3>
   func.return %converted : vector<4xf8E4M3>
@@ -120,6 +129,7 @@ COMPILE-REPORT: source_low[0] function=report_f32_to_fp8_fnuz_bridge source_op=v
 // Schema-driven encoding reuses the exact plan selected for the equivalent
 // scalar-format conversion instead of scalarizing the logical lanes.
 amdgpu.target<gfx1100> @target
+
 func.def target(@target) @report_schema_f32_to_fp8_software(%input: vector<4xf32>) -> (vector<4xf8E4M3>) {
   %schema = encoding.define #encoding.f8e4m3fn<payload_elements=4, rounding=finite_only> : encoding<schema>
   %encoded = vector.encode %input using %schema : vector<4xf32>, encoding<schema> -> vector<4xf8E4M3>
@@ -134,6 +144,7 @@ COMPILE-REPORT: source_low[0] function=report_schema_f32_to_fp8_software source_
 // ====
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @report_schema_f32_to_fp8_native(%input: vector<4xf32>) -> (vector<4xf8E4M3>) {
   %schema = encoding.define #encoding.f8e4m3fn<payload_elements=4> : encoding<schema>
   %encoded = vector.encode %input using %schema : vector<4xf32>, encoding<schema> -> vector<4xf8E4M3>
@@ -148,6 +159,7 @@ COMPILE-REPORT: source_low[0] function=report_schema_f32_to_fp8_native source_op
 // ====
 
 amdgpu.target<gfx1151> @target
+
 func.def target(@target) @report_schema_f16_to_bf8_software(%input: vector<4xf16>) -> (vector<4xf8E5M2>) {
   %schema = encoding.define #encoding.f8e5m2<payload_elements=4> : encoding<schema>
   %encoded = vector.encode %input using %schema : vector<4xf16>, encoding<schema> -> vector<4xf8E5M2>

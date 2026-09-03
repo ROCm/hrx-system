@@ -779,13 +779,13 @@ static iree_status_t loom_check_emit_finish_status_failure(
 }
 
 static iree_status_t loom_check_emit_compare_output(
-    const loom_check_case_t* test_case, iree_allocator_t allocator,
+    const loom_test_case_t* test_case, iree_allocator_t allocator,
     loom_check_result_t* result) {
   iree_string_builder_t stripped_expected;
   iree_string_builder_initialize(allocator, &stripped_expected);
 
   iree_status_t status =
-      loom_check_strip_comments(test_case->expected, &stripped_expected);
+      loom_test_file_remove_comments(test_case->expected, &stripped_expected);
   if (iree_status_is_ok(status)) {
     iree_string_view_t actual_trimmed =
         iree_string_view_trim(iree_string_builder_view(&result->actual_output));
@@ -806,7 +806,7 @@ static iree_status_t loom_check_emit_compare_output(
 
 static iree_status_t loom_check_emit_finish_diagnostics_and_compare_output(
     loom_check_diagnostic_collector_t* collector,
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_allocator_t allocator,
     loom_check_result_t* result) {
   IREE_RETURN_IF_ERROR(loom_check_diagnostic_collector_finish(
@@ -819,7 +819,7 @@ static iree_status_t loom_check_emit_finish_diagnostics_and_compare_output(
 
 static iree_status_t loom_check_emit_symbol_not_found(
     loom_check_diagnostic_collector_t* diagnostic_collector,
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     iree_string_view_t symbol_name) {
   loom_diagnostic_param_t params[] = {
       loom_param_string(symbol_name),
@@ -870,7 +870,7 @@ static bool loom_check_diagnostic_collector_has_error(
 
 static iree_status_t loom_check_emit_find_func_like(
     const loom_module_t* module, iree_string_view_t symbol_name,
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     loom_check_diagnostic_collector_t* diagnostic_collector,
     iree_diagnostic_emitter_t emitter, loom_func_like_t* out_function) {
   *out_function = (loom_func_like_t){0};
@@ -896,7 +896,7 @@ static iree_status_t loom_check_emit_find_func_like(
 
 static iree_status_t loom_check_emit_write_liveness_json(
     loom_module_t* module, iree_string_view_t symbol_name,
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     loom_check_diagnostic_collector_t* diagnostic_collector,
     iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* analysis_arena,
     loom_check_result_t* result) {
@@ -1007,7 +1007,7 @@ static iree_status_t loom_check_emit_index_pressure_cliffs(
 static iree_status_t loom_check_emit_write_low_schedule_json(
     loom_module_t* module, iree_string_view_t symbol_name,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     loom_check_diagnostic_collector_t* diagnostic_collector,
     const loom_check_emit_pressure_cliff_spec_t* pressure_cliff_specs,
     iree_host_size_t pressure_cliff_spec_count,
@@ -1165,7 +1165,7 @@ static void loom_check_emit_low_allocation_summary_record_assignment(
 static iree_status_t loom_check_emit_build_low_allocation_table(
     loom_module_t* module, iree_string_view_t symbol_name,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     loom_check_diagnostic_collector_t* diagnostic_collector,
     const loom_low_allocation_budget_t* budgets, iree_host_size_t budget_count,
     const loom_check_low_emit_fixed_value_spec_t* fixed_specs,
@@ -1216,7 +1216,7 @@ static iree_status_t loom_check_emit_build_low_allocation_table(
 static iree_status_t loom_check_emit_write_low_allocation_json(
     loom_module_t* module, iree_string_view_t symbol_name,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     loom_check_diagnostic_collector_t* diagnostic_collector,
     const loom_low_allocation_budget_t* budgets, iree_host_size_t budget_count,
     const loom_check_low_emit_fixed_value_spec_t* fixed_specs,
@@ -1240,7 +1240,7 @@ static iree_status_t loom_check_emit_write_low_allocation_json(
 static iree_status_t loom_check_emit_write_low_allocation_summary(
     loom_module_t* module, iree_string_view_t symbol_name,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     loom_check_diagnostic_collector_t* diagnostic_collector,
     const loom_low_allocation_budget_t* budgets, iree_host_size_t budget_count,
     const loom_check_low_emit_fixed_value_spec_t* fixed_specs,
@@ -1333,7 +1333,7 @@ static iree_status_t loom_check_emit_write_low_allocation_summary(
 static iree_status_t loom_check_emit_write_low_packet_json(
     loom_module_t* module, iree_string_view_t symbol_name,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     loom_check_diagnostic_collector_t* diagnostic_collector,
     loom_low_schedule_strategy_t strategy,
     const loom_low_allocation_budget_t* budgets, iree_host_size_t budget_count,
@@ -1738,7 +1738,7 @@ static iree_status_t loom_check_emit_verify_provider_module(
 }
 
 iree_status_t loom_check_execute_emit(
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
@@ -1811,7 +1811,7 @@ iree_status_t loom_check_execute_emit(
 
   iree_string_builder_t stripped_input;
   iree_string_builder_initialize(allocator, &stripped_input);
-  status = loom_check_strip_comments(test_case->input, &stripped_input);
+  status = loom_test_file_strip_comments(test_case->input, &stripped_input);
   if (!iree_status_is_ok(status)) {
     iree_string_builder_deinitialize(&stripped_input);
     iree_arena_deinitialize(&diagnostic_arena);

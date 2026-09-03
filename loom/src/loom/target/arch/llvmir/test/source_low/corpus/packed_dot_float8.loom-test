@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/packed_dot_float8.loom-test
 // RUN: emit source-low output=low
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @dot4f8_fp8bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
   %dot = vector.dot4f8<fp8bf8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
   func.return %dot : vector<1xf32>
@@ -320,10 +318,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4f8_f
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @dot4f8_bf8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
   %dot = vector.dot4f8<bf8fp8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
   func.return %dot : vector<1xf32>
@@ -639,10 +635,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4f8_b
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @dot4f8_fp8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
   %dot = vector.dot4f8<fp8fp8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
   func.return %dot : vector<1xf32>
@@ -964,10 +958,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4f8_f
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @dot4f8_bf8bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
   %dot = vector.dot4f8<bf8bf8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
   func.return %dot : vector<1xf32>

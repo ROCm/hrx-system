@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @async_empty_group_wait() {
   %group = kernel.async.group -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group

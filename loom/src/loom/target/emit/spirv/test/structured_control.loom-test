@@ -4,17 +4,17 @@
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_i32_structured_if_else(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %a: reg<spirv.id : i32>, %b: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) {
-  %less = low.op<spirv.op_s_less_than.i32>(%lhs, %rhs) : (reg<spirv.id : i32>, reg<spirv.id : i32>) -> reg<spirv.id : i1>
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_i32_structured_if_else(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %a: reg<spirv.id : i32>, %b: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %less = OpSLessThan %lhs, %rhs
   %selected = low.scf.if %less -> (reg<spirv.id : i32>) {
-    %sum = low.op<spirv.op_iadd.i32>(%a, %b) : (reg<spirv.id : i32>, reg<spirv.id : i32>) -> reg<spirv.id : i32>
+    %sum = OpIAdd %a, %b
     low.scf.yield %sum : reg<spirv.id : i32>
   } else {
-    %difference = low.op<spirv.op_isub.i32>(%a, %b) : (reg<spirv.id : i32>, reg<spirv.id : i32>) -> reg<spirv.id : i32>
+    %difference = OpISub %a, %b
     low.scf.yield %difference : reg<spirv.id : i32>
   }
   %bounded_selected = low.assume %selected [range(%selected, -2147483648, 2147483647)] : reg<spirv.id : i32>
-  low.return %bounded_selected : reg<spirv.id : i32>
+  return %bounded_selected
 }
 
 // ----
@@ -96,12 +96,12 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_i32_structured_counted_loop(%start: reg<spirv.id : i32>, %limit: reg<spirv.id : i32>, %step: reg<spirv.id : i32>, %seed: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_i32_structured_counted_loop(%start: reg<spirv.id : i32>, %limit: reg<spirv.id : i32>, %step: reg<spirv.id : i32>, %seed: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %result = low.scf.for [%start to %limit step %step] iter_args(%seed: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) unroll do(%i: reg<spirv.id : i32>, %acc: reg<spirv.id : i32>) {
-    %next_acc = low.op<spirv.op_iadd.i32>(%acc, %i) : (reg<spirv.id : i32>, reg<spirv.id : i32>) -> reg<spirv.id : i32>
+    %next_acc = OpIAdd %acc, %i
     low.scf.yield %next_acc : reg<spirv.id : i32>
   }
-  low.return %result : reg<spirv.id : i32>
+  return %result
 }
 
 // ----
@@ -187,15 +187,15 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_i32_structured_nested_loop_result(%start: reg<spirv.id : i32>, %limit: reg<spirv.id : i32>, %step: reg<spirv.id : i32>, %seed: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_i32_structured_nested_loop_result(%start: reg<spirv.id : i32>, %limit: reg<spirv.id : i32>, %step: reg<spirv.id : i32>, %seed: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %result = low.scf.for [%start to %limit step %step] iter_args(%seed: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) do(%i: reg<spirv.id : i32>, %acc: reg<spirv.id : i32>) {
     %inner = low.scf.for [%start to %limit step %step] iter_args(%acc: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) do(%j: reg<spirv.id : i32>, %inner_acc: reg<spirv.id : i32>) {
-      %next_inner = low.op<spirv.op_iadd.i32>(%inner_acc, %j) : (reg<spirv.id : i32>, reg<spirv.id : i32>) -> reg<spirv.id : i32>
+      %next_inner = OpIAdd %inner_acc, %j
       low.scf.yield %next_inner : reg<spirv.id : i32>
     }
     low.scf.yield %inner : reg<spirv.id : i32>
   }
-  low.return %result : reg<spirv.id : i32>
+  return %result
 }
 
 // ----

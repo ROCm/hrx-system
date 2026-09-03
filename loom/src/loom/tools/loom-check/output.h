@@ -6,8 +6,8 @@
 
 // Terminal output helpers for loom-check.
 
-#ifndef LOOM_TOOLS_LOOM_CHECK_OUTPUT_H_
-#define LOOM_TOOLS_LOOM_CHECK_OUTPUT_H_
+#ifndef LOOM_TOOLS_LOOM_TEST_OUTPUT_H_
+#define LOOM_TOOLS_LOOM_TEST_OUTPUT_H_
 
 #include "iree/base/api.h"
 #include "loom/tools/loom-check/execute.h"
@@ -19,7 +19,7 @@ extern "C" {
 // Prints the case header: filename :: case N [mode] OUTCOME.
 void loom_check_print_case_header(iree_string_view_t filename,
                                   iree_host_size_t case_index,
-                                  const loom_check_case_t* test_case,
+                                  const loom_test_case_t* test_case,
                                   const loom_check_result_t* result);
 
 // Prints the terminal summary for all processed cases.
@@ -31,4 +31,4 @@ void loom_check_print_summary(iree_host_size_t pass_count,
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TOOLS_LOOM_CHECK_OUTPUT_H_
+#endif  // LOOM_TOOLS_LOOM_TEST_OUTPUT_H_

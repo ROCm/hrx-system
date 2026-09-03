@@ -9,7 +9,7 @@
 #include <string.h>
 
 iree_status_t loom_check_file_report_initialize(
-    const loom_check_file_t* file, iree_arena_allocator_t* arena,
+    const loom_test_file_t* file, iree_arena_allocator_t* arena,
     loom_check_file_report_t* out_report) {
   memset(out_report, 0, sizeof(*out_report));
 

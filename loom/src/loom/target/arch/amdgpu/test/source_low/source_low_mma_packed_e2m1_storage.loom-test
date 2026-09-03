@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @f16_lhs_packed_e2m1_rhs_grouped_scale_wmma() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index

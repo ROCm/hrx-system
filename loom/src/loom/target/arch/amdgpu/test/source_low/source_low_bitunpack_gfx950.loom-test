@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @i32_to_u8x4_bitunpack(%packed: vector<1xi32>) -> (vector<4xi32>) {
   %unpacked = vector.bitunpacku<8> %packed : vector<1xi32> -> vector<4xi32>
   func.return %unpacked : vector<4xi32>
@@ -19,6 +20,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @i32_to_u8x4_bit
 // ====
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @i32_to_s8x4_bitunpack(%packed: vector<1xi32>) -> (vector<4xi32>) {
   %unpacked = vector.bitunpacks<8> %packed : vector<1xi32> -> vector<4xi32>
   func.return %unpacked : vector<4xi32>
@@ -37,6 +39,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @i32_to_s8x4_bit
 // ====
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @i32_to_u16x2_bitunpack(%packed: vector<1xi32>) -> (vector<2xi32>) {
   %unpacked = vector.bitunpacku<16> %packed : vector<1xi32> -> vector<2xi32>
   func.return %unpacked : vector<2xi32>

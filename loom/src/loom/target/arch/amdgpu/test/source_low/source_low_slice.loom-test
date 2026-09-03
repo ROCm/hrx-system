@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32x4_slice_middle(%values: vector<4xi32>) -> (vector<2xi32>) {
   %middle = vector.slice %values[1] : vector<4xi32> -> vector<2xi32>
   func.return %middle : vector<2xi32>
@@ -18,6 +19,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x4_s
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8x4_slice_low_half(%bytes: vector<4xi8>) -> (vector<2xi8>) {
   %low = vector.slice %bytes[0] : vector<4xi8> -> vector<2xi8>
   func.return %low : vector<2xi8>
@@ -31,6 +33,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_sl
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8x4_slice_high_half(%bytes: vector<4xi8>) -> (vector<2xi8>) {
   %high = vector.slice %bytes[2] : vector<4xi8> -> vector<2xi8>
   func.return %high : vector<2xi8>
@@ -45,6 +48,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_sl
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f16x4_slice_low_half(%values: vector<4xf16>) -> (vector<2xf16>) {
   %low = vector.slice %values[0] : vector<4xf16> -> vector<2xf16>
   func.return %low : vector<2xf16>
@@ -59,6 +63,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f16x4_s
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f16x4_slice_high_half(%values: vector<4xf16>) -> (vector<2xf16>) {
   %high = vector.slice %values[2] : vector<4xf16> -> vector<2xf16>
   func.return %high : vector<2xf16>
@@ -73,6 +78,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f16x4_s
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @bf16x4_slice_high_half(%values: vector<4xbf16>) -> (vector<2xbf16>) {
   %high = vector.slice %values[2] : vector<4xbf16> -> vector<2xbf16>
   func.return %high : vector<2xbf16>
@@ -87,6 +93,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16x4_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32x4_insert_static(%values: vector<4xf32>, %value: f32) -> (vector<4xf32>) {
   %updated = vector.insert %value into %values[2] : f32, vector<4xf32>
   func.return %updated : vector<4xf32>
@@ -104,6 +111,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x4_i
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f16x4_insert_static(%values: vector<4xf16>, %value: f16) -> (vector<4xf16>) {
   %updated = vector.insert %value into %values[1] : f16, vector<4xf16>
   func.return %updated : vector<4xf16>
@@ -124,6 +132,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f16x4_i
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @bf16x8_insert_static_constant(%values: vector<8xbf16>) -> (vector<8xbf16>) {
   %replacement = scalar.constant 0.0 : bf16
   %updated = vector.insert %replacement into %values[5] : bf16, vector<8xbf16>
@@ -148,6 +157,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16x8_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32x1_insert_dynamic(%values: vector<1xf32>, %value: f32, %lane: index) -> (vector<1xf32>) {
   %updated = vector.insert %value into %values[%lane] : f32, vector<1xf32>
   func.return %updated : vector<1xf32>
@@ -161,6 +171,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x1_i
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32x4_insert_dynamic(%values: vector<4xf32>, %value: f32, %lane: index) -> (vector<4xf32>) {
   %updated = vector.insert %value into %values[%lane] : f32, vector<4xf32>
   func.return %updated : vector<4xf32>
@@ -192,6 +203,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x4_i
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32x4_insert_dynamic(%values: vector<4xi32>, %value: i32, %lane: index) -> (vector<4xi32>) {
   %updated = vector.insert %value into %values[%lane] : i32, vector<4xi32>
   func.return %updated : vector<4xi32>
@@ -224,6 +236,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x4_i
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @bf16x4_insert_dynamic(%values: vector<4xbf16>, %value: bf16, %lane: index) -> (vector<4xbf16>) {
   %updated = vector.insert %value into %values[%lane] : bf16, vector<4xbf16>
   func.return %updated : vector<4xbf16>

@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @vector_fptrunc_bf16x3(%input: vector<3xf32>) -> (vector<3xbf16>) {
   %converted = vector.fptrunc %input : vector<3xf32> to vector<3xbf16>
   func.return %converted : vector<3xbf16>
@@ -21,6 +22,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @vector_fptrunc_
 // ====
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @vector_uitofp_i8x4(%input: vector<4xi8>) -> (vector<4xf32>) {
   %converted = vector.uitofp %input : vector<4xi8> to vector<4xf32>
   func.return %converted : vector<4xf32>
@@ -39,6 +41,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @vector_uitofp_i
 // ====
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @vector_fptosi_i8x8(%input: vector<8xf32>) -> (vector<8xi8>) {
   %converted = vector.fptosi %input : vector<8xf32> to vector<8xi8>
   func.return %converted : vector<8xi8>
@@ -77,6 +80,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @vector_fptosi_i
 // ====
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @vector_fptoui_i8x8(%input: vector<8xf32>) -> (vector<8xi8>) {
   %converted = vector.fptoui %input : vector<8xf32> to vector<8xi8>
   func.return %converted : vector<8xi8>

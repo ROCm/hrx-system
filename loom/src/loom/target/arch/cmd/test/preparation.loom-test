@@ -376,6 +376,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 // RUN: emit command-program @q4_q4,@q4_q6,@q6_q4,@q6_q6
 
 config.def @quant.q4 = #ggml.q4_0 : encoding<schema>
+
 config.def @quant.q6 = #ggml.q6_k : encoding<schema>
 
 kernel.def @gate_q4() {
@@ -522,6 +523,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 // RUN: emit command-program @bodyless_dispatch
 
 kernel.entry.decl @configured_a(%scale: i8, %fp8e4: f8E4M3, %fp8e5: f8E5M2, %gain: f16, %offset: bf16, %bias: f32, %threshold: f64, %slice: view<4xi32>, %output: buffer)
+
 kernel.entry.decl @configured_b(%output: buffer)
 
 command.program.def public @bodyless_dispatch() launch(%output: buffer) {
@@ -534,7 +536,7 @@ command.program.def public @bodyless_dispatch() launch(%output: buffer) {
   %gain = scalar.constant -2.0 : f16
   %offset = scalar.constant 1.0 : bf16
   %bias = scalar.constant 1.5 : f32
-  %threshold = scalar.constant 0x1.0000000000001p0 : f64
+  %threshold = scalar.constant 1.0000000000000002 : f64
   %slice = buffer.view %output[%c0] : buffer -> view<4xi32>
   command.concurrent {
     kernel.dispatch @configured_a[%count_x, %count_y](%scale, %fp8e4, %fp8e5, %gain, %offset, %bias, %threshold, %slice, %output) : [index, index](i8, f8E4M3, f8E5M2, f16, bf16, f32, f64, view<4xi32>, buffer)
@@ -664,6 +666,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 // RUN: emit command-program @dynamic_indirect_dispatch
 
 kernel.entry.decl @produce_counts(%counts: view<3xi32>)
+
 kernel.entry.decl @consume_counts(%output: buffer, %scratch: view<4xi32>)
 
 command.program.def public @dynamic_indirect_dispatch() launch(%output: buffer) {

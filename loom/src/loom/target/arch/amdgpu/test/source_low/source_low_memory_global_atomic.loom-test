@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @global_atomic_add_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -39,6 +40,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @global_atomic_add_i64() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -68,6 +70,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @global_atomic_dynamic_add_i64() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -96,6 +99,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @global_atomic_add_f32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -177,6 +181,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @global_atomic_minnum_maxnum_f32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -219,6 +224,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @global_atomic_dynamic_minnum_f32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -255,6 +261,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @global_atomic_bitwise_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -302,6 +309,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @global_atomic_sub_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -339,6 +347,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @global_atomic_exchange_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -373,6 +382,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @global_atomic_exchange_i64() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -399,6 +409,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @global_atomic_cmpxchg_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -436,6 +447,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @global_atomic_cmpxchg_i64() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -466,6 +478,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @global_atomic_minmax_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index

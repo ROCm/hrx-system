@@ -1,5 +1,6 @@
 // RUN: emit amdgpu-packet-json @gfx11_packet_json_lds_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_packet_json_lds_wait(%addr0: reg<amdgpu.vgpr>, %addr1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %loaded0 = ds_read_b32 %addr0
   %loaded1 = ds_read_b32 %addr1 {offset = 4}

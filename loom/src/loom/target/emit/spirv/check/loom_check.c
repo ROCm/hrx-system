@@ -35,7 +35,7 @@ typedef struct loom_spirv_loom_check_emit_request_t {
 } loom_spirv_loom_check_emit_request_t;
 
 static bool loom_spirv_loom_check_case_has_requirement(
-    const loom_check_case_t* test_case, iree_string_view_t requirement) {
+    const loom_test_case_t* test_case, iree_string_view_t requirement) {
   for (iree_host_size_t i = 0; i < test_case->requirement_count; ++i) {
     if (iree_string_view_equal(test_case->requirements[i], requirement)) {
       return true;
@@ -58,7 +58,7 @@ static iree_status_t loom_spirv_loom_check_fail_missing_requirement(
 }
 
 static iree_status_t loom_spirv_loom_check_require_declared_requirement(
-    const loom_check_case_t* test_case, iree_string_view_t requirement,
+    const loom_test_case_t* test_case, iree_string_view_t requirement,
     loom_check_result_t* result, bool* out_continue_execution) {
   if (loom_spirv_loom_check_case_has_requirement(test_case, requirement)) {
     return iree_ok_status();
@@ -181,7 +181,7 @@ static iree_status_t loom_spirv_loom_check_parse_emit_request(
 
 static iree_status_t loom_spirv_loom_check_emit_provider_check_requirements(
     const loom_check_emit_provider_t* provider,
-    const loom_check_case_t* test_case, loom_check_result_t* result,
+    const loom_test_case_t* test_case, loom_check_result_t* result,
     bool* out_continue_execution) {
   iree_string_view_t emit_target =
       iree_string_view_trim(test_case->emit_target);

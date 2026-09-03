@@ -4,12 +4,12 @@ spirv.target<vulkan1_3> @target
 
 low.func.decl target<spirv.logical.core>(@target) @matrix_helper(%lhs: reg<spirv.id : spirv.cooperative_matrix<16x32xu8, subgroup, matrix_a>>, %rhs: reg<spirv.id : spirv.cooperative_matrix<32x16xu8, subgroup, matrix_b>>, %acc: reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>) -> (reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>)
 
-low.func.def target<spirv.logical.core>(@target) @structural_value_types_bytecode(%condition: reg<spirv.id : i1>, %scalar: reg<spirv.id : i32>, %vector: reg<spirv.id : vector<4xi32>>, %lhs: reg<spirv.id : spirv.cooperative_matrix<16x32xu8, subgroup, matrix_a>>, %rhs: reg<spirv.id : spirv.cooperative_matrix<32x16xu8, subgroup, matrix_b>>, %acc: reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>) -> (reg<spirv.id : i32>, reg<spirv.id : vector<4xi32>>, reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>) {
+low.func.def target<spirv.logical.core>(@target) @structural_value_types_bytecode(%condition: reg<spirv.id : i1>, %scalar: reg<spirv.id : i32>, %vector: reg<spirv.id : vector<4xi32>>, %lhs: reg<spirv.id : spirv.cooperative_matrix<16x32xu8, subgroup, matrix_a>>, %rhs: reg<spirv.id : spirv.cooperative_matrix<32x16xu8, subgroup, matrix_b>>, %acc: reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>) -> (reg<spirv.id : i32>, reg<spirv.id : vector<4xi32>>, reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>) asm {
   %called = low.func.call @matrix_helper(%lhs, %rhs, %acc) : (reg<spirv.id : spirv.cooperative_matrix<16x32xu8, subgroup, matrix_a>>, reg<spirv.id : spirv.cooperative_matrix<32x16xu8, subgroup, matrix_b>>, reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>) -> (reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>)
   %selected = low.scf.if %condition -> (reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>) {
     low.scf.yield %called : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
   } else {
     low.scf.yield %acc : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
   }
-  low.return %scalar, %vector, %selected : reg<spirv.id : i32>, reg<spirv.id : vector<4xi32>>, reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  return %scalar, %vector, %selected
 }

@@ -2,14 +2,7 @@
 
 amdgpu.target<gfx1100> @target {subgroup_size = 32}
 
-low.func.def target<amdgpu.rdna3.core>(@target) @counter_tracked_effect_braid(
-    %address: reg<amdgpu.vgpr>,
-    %rhs0: reg<amdgpu.vgpr x8>,
-    %rhs1: reg<amdgpu.vgpr x8>,
-    %acc0: reg<amdgpu.vgpr x8>,
-    %acc1: reg<amdgpu.vgpr x8>,
-    %next_payload: reg<amdgpu.vgpr x4>) ->
-    (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm {
+low.func.def target<amdgpu.rdna3.core>(@target) @counter_tracked_effect_braid(%address: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %acc0: reg<amdgpu.vgpr x8>, %acc1: reg<amdgpu.vgpr x8>, %next_payload: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm {
   %lhs0_low = ds_read_b128 %address
   %lhs0_high = ds_read_b128 %address {offset = 16}
   %lhs0 = concat(%lhs0_low, %lhs0_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>

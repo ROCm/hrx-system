@@ -18,7 +18,9 @@
 #include "iree/base/internal/arena.h"
 #include "loom/error/diagnostic.h"
 #include "loom/format/text/low_asm.h"
+#include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
+#include "loom/ir/module.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,6 +48,10 @@ typedef struct loom_format_convert_options_t {
 
   // Optional environment used to parse and print target-low register types.
   loom_text_low_asm_environment_t low_asm_environment;
+
+  // Flags controlling text output. Zero preserves authored Low asm use for
+  // compatibility with representation-conversion tests.
+  loom_text_print_flags_t text_print_flags;
 } loom_format_convert_options_t;
 
 // Allocator-owned output bytes from a conversion.

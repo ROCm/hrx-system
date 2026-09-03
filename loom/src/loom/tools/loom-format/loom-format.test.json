@@ -117,6 +117,69 @@
       ]
     },
     {
+      "name": "formats loom test inputs and preserves container sections",
+      "steps": [
+        {
+          "name": "write-test-container",
+          "write": {
+            "path": "{tmp}/source.loom-test",
+            "text": "// RUN: verify\n\nfunc.def @identity(%value:index)->(index){\nfunc.return %value:index\n}\n\n// Input commentary remains attached to the container.\n\n// ----\npurposefully  noncanonical expected output\n"
+          }
+        },
+        {
+          "name": "format",
+          "run": {
+            "tool": "loom-format",
+            "args": ["--in-place", "{tmp}/source.loom-test"]
+          },
+          "stdout": {
+            "contains": ["loom-format: 1 formatted, 0 unchanged, 0 failed"]
+          },
+          "stderr": {
+            "empty": true
+          }
+        },
+        {
+          "name": "check",
+          "run": {
+            "tool": "loom-format",
+            "args": ["--check", "{tmp}/source.loom-test"]
+          },
+          "stdout": {
+            "empty": true
+          },
+          "stderr": {
+            "empty": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "checks synthetic target loom test inputs",
+      "steps": [
+        {
+          "name": "write-test-container",
+          "write": {
+            "path": "{tmp}/target.loom-test",
+            "text": "// RUN: verify\n\ntest.target<low_core> @test_target\n\nlow.func.def target<test.low.core>(@test_target) @add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {\n  %sum = test.add.i32 %lhs, %rhs\n  return %sum\n}\n"
+          }
+        },
+        {
+          "name": "check",
+          "run": {
+            "tool": "loom-format",
+            "args": ["--check", "{tmp}/target.loom-test"]
+          },
+          "stdout": {
+            "empty": true
+          },
+          "stderr": {
+            "empty": true
+          }
+        }
+      ]
+    },
+    {
       "name": "reports every batch check failure",
       "steps": [
         {

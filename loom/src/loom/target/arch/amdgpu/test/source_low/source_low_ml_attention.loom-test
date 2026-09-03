@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @online_softmax_update(%old_max: f32, %old_sum: f32, %old_acc: vector<4xf32>, %score: f32, %value: vector<4xf32>) -> (f32, f32, vector<4xf32>) {
   %new_max = scalar.maxnumf %old_max, %score : f32
   %old_delta = scalar.subf %old_max, %new_max : f32
@@ -49,6 +50,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @online_
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @attention_probability_value_mma_repack() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -191,6 +193,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @attention_loop_carried_accumulator_barrier() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -254,6 +257,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @attention_tail_peel_accumulator_merge() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -338,6 +342,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @tail_masked_score_block(%scores: vector<4xf32>, %valid_count: i32) -> (f32, f32) {
   %start = scalar.constant 0 : i32
   %step = scalar.constant 1 : i32
@@ -387,6 +392,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @tail_ma
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @paged_kv_cache_block_load(%page_table: buffer, %page_pool: buffer, %sequence0: index, %block0: index, %lane0: index) -> (i32, vector<4xbf16>) {
   %sequence = index.assume %sequence0 [range(%sequence0, 0, 63)] : index
   %block = index.assume %block0 [range(%block0, 0, 127)] : index
@@ -437,6 +443,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @paged_k
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @rope_pair_rotate(%even: f32, %odd: f32, %angle: f32) -> (f32, f32) {
   %sine = scalar.sinf<afn> %angle : f32
   %cosine = scalar.cosf<afn> %angle : f32
@@ -466,6 +473,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @rope_pa
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @routing_top2_update(%score: f32, %expert: i32, %best_score: f32, %best_expert: i32, %second_score: f32, %second_expert: i32) -> (f32, i32, f32, i32) {
   %beats_best = scalar.cmpf olt, %best_score, %score : f32
   %beats_second = scalar.cmpf olt, %second_score, %score : f32

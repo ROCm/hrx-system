@@ -49,6 +49,7 @@ kernel.def @inlines_into_required_ancestor() {
 // RUN: pass inline-callables,canonicalize
 
 target.generic<reference> @wave32 {subgroup_size = 32}
+
 target.generic<reference> @wave64 {subgroup_size = 64}
 
 func.def inline @current_subgroup_size() -> (index) {
@@ -352,6 +353,7 @@ func.def public @block_quant_entry(%packed: i32, %scale: i32) -> (i32) {
 // RUN: pass inline-callables
 
 func.decl inline @extern_a(%value: i32) -> (i32)
+
 func.decl inline @extern_b(%value: i32) -> (i32)
 
 func.def public @entry(%arg: i32) -> (i32, i32) {
@@ -386,13 +388,13 @@ func.def inline @cycle_b(%value: i32) -> (i32) {
 // policy remains authoritative when no target emission policy overrides it.
 test.target<low_core> @target
 
-low.func.def noinline target<test.low.core>(@target) @kept_low_helper(%value: reg<test.i32>) -> (reg<test.i32>) {
-  low.return %value : reg<test.i32>
+low.func.def noinline target<test.low.core>(@target) @kept_low_helper(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
 }
 
-low.func.def public target<test.low.core>(@target) @kept_low_caller(%value: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def public target<test.low.core>(@target) @kept_low_caller(%value: reg<test.i32>) -> (reg<test.i32>) asm {
   %result = low.func.call @kept_low_helper(%value) : (reg<test.i32>) -> (reg<test.i32>)
-  low.return %result : reg<test.i32>
+  return %result
 }
 
 // ----
@@ -460,21 +462,21 @@ func.def public @cfg_entry(%arg: i32) -> (i32) {
 // boundary so the reusable inliner does not learn target or dialect details.
 test.target<low_core> @target
 
-low.func.def inline target<test.low.core>(@target) @low_choose_path(%condition: reg<test.i32>, %value: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def inline target<test.low.core>(@target) @low_choose_path(%condition: reg<test.i32>, %value: reg<test.i32>) -> (reg<test.i32>) asm {
   low.cond_br %condition, ^identity, ^forward : reg<test.i32>
 ^identity:
-  low.return %value : reg<test.i32>
+  return %value
 ^forward:
   low.br ^join(%value: reg<test.i32>)
 ^join(%forwarded: reg<test.i32>):
-  low.return %forwarded : reg<test.i32>
+  return %forwarded
 }
 
-low.func.def public target<test.low.core>(@target) @low_cfg_entry(%condition: reg<test.i32>, %arg: reg<test.i32>) -> (reg<test.i32>) {
-  %prefix = low.copy %arg : reg<test.i32> -> reg<test.i32>
+low.func.def public target<test.low.core>(@target) @low_cfg_entry(%condition: reg<test.i32>, %arg: reg<test.i32>) -> (reg<test.i32>) asm {
+  %prefix = copy %arg : reg<test.i32> -> reg<test.i32>
   %selected = low.func.call @low_choose_path(%condition, %prefix) : (reg<test.i32>, reg<test.i32>) -> (reg<test.i32>)
-  %suffix = low.copy %selected : reg<test.i32> -> reg<test.i32>
-  low.return %suffix : reg<test.i32>
+  %suffix = copy %selected : reg<test.i32> -> reg<test.i32>
+  return %suffix
 }
 
 // ----
@@ -527,20 +529,20 @@ func.def public @nested_cfg_caller(%input: tile<4xf32>) -> (tile<4xf32>) {
 // fences, and the retained helper no longer carries a redundant lock marker.
 test.target<low_core> @target
 
-low.func.def schedule(locked) target<test.low.core>(@target) @shared_locked(%value: reg<test.i32>) -> (reg<test.i32>) {
-  %first = low.copy %value : reg<test.i32> -> reg<test.i32>
-  %second = low.copy %first : reg<test.i32> -> reg<test.i32>
-  low.return %second : reg<test.i32>
+low.func.def schedule(locked) target<test.low.core>(@target) @shared_locked(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %first = copy %value : reg<test.i32> -> reg<test.i32>
+  %second = copy %first : reg<test.i32> -> reg<test.i32>
+  return %second
 }
 
-low.func.def public target<test.low.core>(@target) @inline_locked(%value: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def public target<test.low.core>(@target) @inline_locked(%value: reg<test.i32>) -> (reg<test.i32>) asm {
   %result = low.func.call inline @shared_locked(%value) : (reg<test.i32>) -> (reg<test.i32>)
-  low.return %result : reg<test.i32>
+  return %result
 }
 
-low.func.def public target<test.low.core>(@target) @retain_locked(%value: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def public target<test.low.core>(@target) @retain_locked(%value: reg<test.i32>) -> (reg<test.i32>) asm {
   %result = low.func.call noinline @shared_locked(%value) : (reg<test.i32>) -> (reg<test.i32>)
-  low.return %result : reg<test.i32>
+  return %result
 }
 
 // ----

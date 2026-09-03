@@ -298,7 +298,6 @@ func.def @nested_region_bank_escape_is_rejected(%initial: vector<2x2x4xf32>, %co
       // ERROR@+1: LOWERING/047 {op_name="vector.extract", phase_name="sroa-vector-banks", slot="0", reason="an aggregate state has a non-prefix or nested-region use"}
       %nested = vector.extract %bank[0, 1] : vector<2x2x4xf32> -> vector<4xf32>
       test.use %nested : vector<4xf32>
-      scf.yield
     }
     %updated = vector.insert %top_level into %bank[0, 0] : vector<4xf32>, vector<2x2x4xf32>
     scf.yield %updated : vector<2x2x4xf32>

@@ -65,8 +65,8 @@ func.def target(@test_target) @lowered_source(%value: i32) -> (i32) {
 
 low.func.decl import(native, "callback") target<test.low.core>(@test_target) abi(object_function) @callback(%value: reg<test.i32>) -> (reg<test.i32>)
 
-low.func.def public target<test.low.core>(@test_target) abi(object_function) @preserved_low(%value: reg<test.i32>) -> (reg<test.i32>) {
-  low.return %value : reg<test.i32>
+low.func.def public target<test.low.core>(@test_target) abi(object_function) @preserved_low(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
 }
 
 // ----

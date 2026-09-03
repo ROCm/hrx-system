@@ -102,13 +102,13 @@ func.def @rounds_each_instruction() -> (f32, f64) {
 // narrow input is exactly halfway between 1.0 and the next representable value
 // and therefore rounds to the even 1.0 encoding.
 func.def @hexadecimal_constants_round_to_declared_type() -> (i16, i16, i32, i64) {
-  %f16 = scalar.constant 0x1.002p0 : f16
+  %f16 = scalar.constant 1.00048828125 : f16
   %f16_bits = scalar.bitcast %f16 : f16 to i16
-  %bf16 = scalar.constant 0x1.01p0 : bf16
+  %bf16 = scalar.constant 1.00390625 : bf16
   %bf16_bits = scalar.bitcast %bf16 : bf16 to i16
-  %f32 = scalar.constant 0x1.000001p0 : f32
+  %f32 = scalar.constant 1.0000000596046448 : f32
   %f32_bits = scalar.bitcast %f32 : f32 to i32
-  %f64 = scalar.constant 0x1.0000000000001p0 : f64
+  %f64 = scalar.constant 1.0000000000000002 : f64
   %f64_bits = scalar.bitcast %f64 : f64 to i64
   func.return %f16_bits, %bf16_bits, %f32_bits, %f64_bits : i16, i16, i32, i64
 }

@@ -12,10 +12,10 @@ func.def @q4_0_reference_chunk() -> (i1) {
   %schema = encoding.define #ggml.q4_0 : encoding<schema>
   test.use %schema : encoding<schema>
 
-  %b0 = scalar.constant 0x10 : i8
-  %b1 = scalar.constant 0x32 : i8
-  %b2 = scalar.constant 0x54 : i8
-  %b3 = scalar.constant 0x76 : i8
+  %b0 = scalar.constant 16 : i8
+  %b1 = scalar.constant 50 : i8
+  %b2 = scalar.constant 84 : i8
+  %b3 = scalar.constant 118 : i8
   %qs = vector.from_elements %b0, %b1, %b2, %b3 : vector<4xi8>
 
   %lo = vector.bitfield.extractu %qs {offset = 0, width = 4} : vector<4xi8> -> vector<4xi8>
@@ -121,14 +121,14 @@ func.def @q6_k_reference_chunk() -> (i1) {
   %schema = encoding.define #ggml.q6_k : encoding<schema>
   test.use %schema : encoding<schema>
 
-  %l0 = scalar.constant 0x10 : i8
-  %l1 = scalar.constant 0x32 : i8
-  %l2 = scalar.constant 0x54 : i8
-  %l3 = scalar.constant 0x76 : i8
+  %l0 = scalar.constant 16 : i8
+  %l1 = scalar.constant 50 : i8
+  %l2 = scalar.constant 84 : i8
+  %l3 = scalar.constant 118 : i8
   %low_packed = vector.from_elements %l0, %l1, %l2, %l3 : vector<4xi8>
 
-  %h0 = scalar.constant 0x24 : i8
-  %h1 = scalar.constant 0x1B : i8
+  %h0 = scalar.constant 36 : i8
+  %h1 = scalar.constant 27 : i8
   %high_packed = vector.from_elements %h0, %h1 : vector<2xi8>
 
   %lo4 = vector.bitfield.extractu %low_packed {offset = 0, width = 4} : vector<4xi8> -> vector<4xi8>
@@ -168,8 +168,8 @@ func.def @iq_grid_reference_chunk() -> (i1) {
   %schema = encoding.define #encoding.u4<codebook=dynamic_table_operand, payload_elements=4, payload_packing=codebook_indices> : encoding<schema>
   test.use %schema : encoding<schema>
 
-  %p0 = scalar.constant 0x10 : i8
-  %p1 = scalar.constant 0x32 : i8
+  %p0 = scalar.constant 16 : i8
+  %p1 = scalar.constant 50 : i8
   %packed = vector.from_elements %p0, %p1 : vector<2xi8>
   %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
 
@@ -261,8 +261,8 @@ func.def @fp4_table_reference_chunk() -> (i1) {
   %schema = encoding.define #encoding.f4e2m1<codebook=dynamic_table_operand, payload_elements=4, payload_packing=codebook_indices> : encoding<schema>
   test.use %schema : encoding<schema>
 
-  %p0 = scalar.constant 0x20 : i8
-  %p1 = scalar.constant 0x31 : i8
+  %p0 = scalar.constant 32 : i8
+  %p1 = scalar.constant 49 : i8
   %packed = vector.from_elements %p0, %p1 : vector<2xi8>
   %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
 

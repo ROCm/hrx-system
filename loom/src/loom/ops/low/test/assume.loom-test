@@ -2,9 +2,9 @@
 
 test.target<low_core> @target
 
-low.kernel.def target<test.low.core>(@target) @assume_roundtrip(%position: reg<test.i32>, %step: reg<test.i32>) {
+low.kernel.def target<test.low.core>(@target) @assume_roundtrip(%position: reg<test.i32>, %step: reg<test.i32>) asm {
   %bounded_position, %fixed_step = low.assume %position, %step [range(%position, 0, 1024), eq(%step, 3), lt(%position, %step)] : reg<test.i32>, reg<test.i32>
-  low.return
+  return
 }
 
 // ====
@@ -13,9 +13,9 @@ low.kernel.def target<test.low.core>(@target) @assume_roundtrip(%position: reg<t
 
 test.target<low_core> @target
 
-low.kernel.def target<test.low.core>(@target) @assume_bytecode(%position: reg<test.i32>, %step: reg<test.i32>) {
+low.kernel.def target<test.low.core>(@target) @assume_bytecode(%position: reg<test.i32>, %step: reg<test.i32>) asm {
   %bounded_position, %fixed_step = low.assume %position, %step [range(%position, 0, 1024), eq(%step, 3), lt(%position, %step)] : reg<test.i32>, reg<test.i32>
-  low.return
+  return
 }
 
 // ====

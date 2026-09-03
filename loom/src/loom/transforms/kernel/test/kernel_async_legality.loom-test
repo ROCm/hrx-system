@@ -159,9 +159,7 @@ func.def @rejects_region_wait_without_parent_wait(%cond: i1) {
   %group = kernel.async.group -> kernel.async.group
   scf.if %cond {
     kernel.async.wait %group {newer_groups = 0} : kernel.async.group
-    scf.yield
   } else {
-    scf.yield
   }
   func.return
 }

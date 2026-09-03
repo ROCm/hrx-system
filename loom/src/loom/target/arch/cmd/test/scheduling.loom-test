@@ -144,6 +144,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 // RUN: emit command-program @kernel_schedule
 
 kernel.entry.decl @left(%storage: buffer)
+
 kernel.entry.decl @right(%storage: buffer)
 
 command.program.def public @kernel_schedule() launch(%count_storage: buffer, %storage: buffer) {

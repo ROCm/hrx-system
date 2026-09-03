@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @unknown_atomic_is_not_flat(%input: buffer) {
   %input_base = index.constant 0 : offset
   %view = buffer.view %input[%input_base] : buffer -> view<1xi32>

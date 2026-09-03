@@ -2,6 +2,7 @@
 // RUN: emit source-low diagnostics=memory output=low
 
 amdgpu.target<gfx1200> @target
+
 func.def target(@target) @prefetch_static(%input: buffer) {
   %base = index.constant 16 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<64xi32>
@@ -29,6 +30,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @prefetch_static
 // ====
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @prefetch_workgroup_id() {
   %unit = index.constant 1 : index
   %workgroups = index.constant 1025 : index
@@ -62,6 +64,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(1, 1, 1) workgr
 // ====
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @prefetch_fixed_query_offset() {
   %c1 = index.constant 1 : index
   %c8 = index.constant 8 : index
@@ -101,6 +104,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(8, 4, 1) workgr
 // ====
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @prefetch_workitem_dropped() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index

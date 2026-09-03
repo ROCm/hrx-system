@@ -1,9 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_workgroup_b128.loom-test
 // RUN: emit source-low output=low
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @lds_b128_roundtrip() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -39,9 +38,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @lds_b128_single_lane_extract() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -79,9 +77,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @lds_b128_xor_swizzle_roundtrip() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -127,9 +124,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @lds_b128_large_static_offset_roundtrip() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -166,9 +162,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @lds_b128_split_second_alloca_roundtrip() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index

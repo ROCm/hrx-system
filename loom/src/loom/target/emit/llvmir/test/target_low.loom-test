@@ -1,14 +1,10 @@
 // RUN: emit llvmir-body
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
 
 low.func.def target<llvmir.generic.core>(@target) abi(object_function) @first(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %sum = add.i32 %lhs, %rhs
-  %bounded_sum = low.assume %sum [range(%sum, -2147483648, 2147483647)] :
-      reg<llvmir.i32>
+  %bounded_sum = low.assume %sum [range(%sum, -2147483648, 2147483647)] : reg<llvmir.i32>
   return %bounded_sum
 }
 
@@ -367,9 +363,7 @@ entry:
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
 
 low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) @dispatch() asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
@@ -450,10 +444,7 @@ attributes #0 = { alwaysinline "amdgpu-flat-work-group-size"="1,1024" "uniform-w
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa",
-  subgroup_size = 64
-}
+llvmir.target<object> @target {subgroup_size = 64, triple = "amdgcn-amd-amdhsa"}
 
 low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(8, 4, 1) @subgroup_queries() asm {
   %output = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>

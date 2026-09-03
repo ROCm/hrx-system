@@ -243,7 +243,7 @@ func.def @fmai_preserves_overflow_flags(%a: i32, %b: i32, %c: i32) -> (i32, i32,
   %c1 = scalar.constant 1 : i32
   %to_mul = scalar.fmai<nuw> %a, %b, %c0 : i32
   %lhs_one = scalar.fmai<nsw> %c1, %b, %c : i32
-  %rhs_one = scalar.fmai<nuw|nsw> %a, %c1, %c : i32
+  %rhs_one = scalar.fmai<nsw|nuw> %a, %c1, %c : i32
   func.return %to_mul, %lhs_one, %rhs_one : i32, i32, i32
 }
 

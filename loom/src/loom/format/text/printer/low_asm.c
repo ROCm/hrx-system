@@ -1063,9 +1063,22 @@ iree_status_t loom_print_low_asm_optional_region(
   loom_text_low_repr_context_t low_repr = {0};
   loom_print_low_asm_preflight_failure_t failure = {0};
   bool available = false;
-  IREE_RETURN_IF_ERROR(loom_print_low_asm_prepare_region(
+  iree_status_t status = loom_print_low_asm_prepare_region(
       ctx, region, region_descriptor, entry_args_declared_by_parent, &low_repr,
-      &failure, &available));
+      &failure, &available);
+  if (!iree_status_is_ok(status)) {
+    // A preferred spelling is opportunistic. Descriptor-backed description
+    // rejects malformed canonical packet shapes with a user-input status; the
+    // generic printer can still represent those operations losslessly for
+    // diagnostic fixtures. Explicit or required asm keeps the strict failure.
+    if (!loom_print_low_asm_is_required(ctx, region) &&
+        (iree_status_is_invalid_argument(status) ||
+         iree_status_is_out_of_range(status))) {
+      iree_status_free(status);
+      return iree_ok_status();
+    }
+    return status;
+  }
   if (!available) {
     if (loom_print_low_asm_is_required(ctx, region)) {
       return loom_print_low_asm_make_unavailable_status(low_repr.contract_key,

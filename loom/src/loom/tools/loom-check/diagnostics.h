@@ -16,7 +16,8 @@
 #include "loom/error/emitter.h"
 #include "loom/error/error_defs.h"
 #include "loom/ir/module.h"
-#include "loom/tools/loom-check/check.h"
+#include "loom/testing/test_diagnostic.h"
+#include "loom/testing/test_file.h"
 #include "loom/tools/loom-check/execute.h"
 #include "loom/tools/loom-check/report.h"
 #include "loom/verify/verify.h"
@@ -25,38 +26,8 @@
 extern "C" {
 #endif
 
-// One collected diagnostic from a parser, verifier, or pass pipeline.
-typedef struct loom_check_collected_diagnostic_t {
-  // Diagnostic severity to match against ERROR/WARNING/REMARK annotations.
-  loom_diagnostic_severity_t severity;
-
-  // Structured error domain to match against DOMAIN/CODE annotations.
-  loom_error_domain_t domain;
-
-  // Structured error code to match against DOMAIN/CODE annotations.
-  uint16_t code;
-
-  // Generated error definition carrying parameter names.
-  const loom_error_def_t* error;
-
-  // One-based source line where the diagnostic was emitted, or 0 if unknown.
-  uint32_t origin_line;
-
-  // Rendered diagnostic message text, arena-allocated.
-  iree_string_view_t message;
-
-  // Rendered parameter values in the error schema's order, arena-allocated.
-  iree_string_view_t* param_values;
-
-  // Number of populated entries in param_values.
-  iree_host_size_t param_value_count;
-
-  // Full source-rendered diagnostic text, arena-allocated.
-  iree_string_view_t formatted_diagnostic;
-
-  // True once this diagnostic has matched one expected annotation.
-  bool matched;
-} loom_check_collected_diagnostic_t;
+// A diagnostic collected by loom-check for matching and reporting.
+typedef loom_test_diagnostic_t loom_check_collected_diagnostic_t;
 
 // Accumulates diagnostics emitted while executing one loom-check case.
 typedef struct loom_check_diagnostic_collector_t {
@@ -124,7 +95,7 @@ iree_status_t loom_check_diagnostic_emitter_capture_emit(
 // cannot be attached to an existing operation.
 iree_status_t loom_check_diagnostic_collector_emit_case_source(
     loom_check_diagnostic_collector_t* collector,
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     loom_emitter_t emitter, const loom_error_def_t* error,
     const loom_diagnostic_param_t* params, iree_host_size_t param_count);
 
@@ -132,7 +103,7 @@ iree_status_t loom_check_diagnostic_collector_emit_case_source(
 // and builds failure detail/update edits when annotations do not match.
 iree_status_t loom_check_diagnostic_collector_finish(
     loom_check_diagnostic_collector_t* collector,
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_allocator_t allocator,
     loom_check_result_t* result);
 

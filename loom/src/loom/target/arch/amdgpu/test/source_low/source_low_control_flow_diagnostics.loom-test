@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @divergent_then_return_rejected(%values: vector<2xi32>, %limit: i32) -> (i32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %cond = scalar.cmpi slt, %lane, %limit : i32

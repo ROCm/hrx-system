@@ -424,7 +424,6 @@ kernel.def target(@hal_target) @spirv_hal_resource_storage_buffer_i32_guard() {
     %incremented = scalar.addi %loaded, %loaded : i32
     %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
     view.store %incremented, %output_view[0] : i32, view<1xi32>
-    scf.yield
   }
   kernel.return
 }

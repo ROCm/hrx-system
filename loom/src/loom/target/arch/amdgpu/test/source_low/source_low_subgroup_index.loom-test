@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @subgroup_id_x_wave32() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -93,6 +94,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(8, 4, 2
 // ====
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @subgroup_lane_id_xyz_wave32_gfx12() {
   %c1 = index.constant 1 : index
   %c8 = index.constant 8 : index
@@ -131,6 +133,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(8, 4, 2) workgr
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @subgroup_id_x_wave64() {
   %c1 = index.constant 1 : index
   %c128 = index.constant 128 : index
@@ -159,6 +162,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(128, 1, 1) work
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @subgroup_lane_id_x_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index

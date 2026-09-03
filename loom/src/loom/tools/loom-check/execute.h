@@ -38,8 +38,8 @@
 #include "loom/target/low_packet_diagnostics.h"
 #include "loom/target/math_policy.h"
 #include "loom/target/pipeline.h"
+#include "loom/testing/test_file.h"
 #include "loom/tooling/compile/pipeline.h"
-#include "loom/tools/loom-check/check.h"
 #include "loom/tools/loom-check/report.h"
 #include "loom/tools/loom-check/update.h"
 #include "loom/util/json.h"
@@ -200,7 +200,7 @@ typedef struct loom_check_emit_provider_request_t {
   // Source filename reported in diagnostics and emitted target modules.
   iree_string_view_t filename;
   // Parsed test case being executed.
-  const loom_check_case_t* test_case;
+  const loom_test_case_t* test_case;
   // Runner environment that selected this provider.
   const loom_check_environment_t* environment;
   // Parsed module after comment stripping.
@@ -245,7 +245,7 @@ typedef bool (*loom_check_emit_provider_match_fn_t)(
 // Checks provider-specific REQUIRES declarations before execution.
 typedef iree_status_t (*loom_check_emit_provider_check_requirements_fn_t)(
     const loom_check_emit_provider_t* provider,
-    const loom_check_case_t* test_case, loom_check_result_t* result,
+    const loom_test_case_t* test_case, loom_check_result_t* result,
     bool* out_continue_execution);
 
 // Emits the provider-owned comparable output for |request|.
@@ -388,7 +388,7 @@ iree_status_t loom_check_result_record_diff(iree_string_view_t expected,
 // Appends an annotation edit while the referenced source text is live.
 iree_status_t loom_check_result_append_annotation_edit(
     loom_check_result_t* result, loom_check_update_edit_kind_t kind,
-    loom_check_source_range_t range, iree_host_size_t target_line,
+    loom_test_source_range_t range, iree_host_size_t target_line,
     iree_string_view_t text);
 
 // Initializes source-to-low preparation options with the normal user-facing
@@ -445,7 +445,7 @@ iree_status_t loom_check_environment_initialize_math_policy_registry(
 // non-ok status. Test failures (mismatch, unmatched annotations) set
 // raw_outcome = FAIL and return iree_ok_status().
 iree_status_t loom_check_execute_case(
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
@@ -455,7 +455,7 @@ iree_status_t loom_check_execute_case(
 // expected section. On mismatch, appends a unified diff to result->detail
 // and copies the printed output to result->actual_output for --update.
 iree_status_t loom_check_execute_roundtrip(
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result);
@@ -465,7 +465,7 @@ iree_status_t loom_check_execute_roundtrip(
 // the case's annotations. Unmatched annotations and unexpected diagnostics
 // are reported in result->detail.
 iree_status_t loom_check_execute_verify(
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
@@ -476,7 +476,7 @@ iree_status_t loom_check_execute_verify(
 // and compares against the expected section. Same diff/update behavior as
 // roundtrip.
 iree_status_t loom_check_execute_pass(
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
@@ -486,7 +486,7 @@ iree_status_t loom_check_execute_pass(
 // test_case->pipeline, prints its stable pass execution report, and compares
 // against the expected section. Same diff/update behavior as roundtrip.
 iree_status_t loom_check_execute_pass_report(
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
@@ -497,7 +497,7 @@ iree_status_t loom_check_execute_pass_report(
 // compile report, and compares against the expected section. Same diff/update
 // behavior as roundtrip.
 iree_status_t loom_check_execute_compile_report(
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
@@ -508,7 +508,7 @@ iree_status_t loom_check_execute_compile_report(
 // and compares against the expected section. Same diff/update behavior
 // as roundtrip.
 iree_status_t loom_check_execute_format(
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result);
@@ -517,7 +517,7 @@ iree_status_t loom_check_execute_format(
 // test_case->emit_target, writes a comparable target output form, and compares
 // against the expected section. Same diff/update behavior as roundtrip.
 iree_status_t loom_check_execute_emit(
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,

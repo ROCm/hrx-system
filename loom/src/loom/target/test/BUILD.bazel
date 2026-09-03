@@ -36,7 +36,6 @@ _TEST_LOW_REGISTRY_VISIBILITY = [
 
 loom_low_descriptor_cc_library(
     name = "descriptors",
-    testonly = True,
     args = ["--descriptor-set=test_low_core"],
     generator = "//loom/py/loom/gen/target/low:test_low_descriptor_shard",
     deps = ["//loom/src/loom/codegen/low:descriptors"],
@@ -62,11 +61,11 @@ loom_cc_library(
 
 loom_cc_library(
     name = "provider",
-    testonly = True,
     srcs = ["provider.c"],
     hdrs = ["provider.h"],
     visibility = [
         "//loom/src/loom/tools/loom-check:__pkg__",
+        "//loom/src/loom/tools/loom-format:__pkg__",
     ],
     deps = [
         ":lower",
@@ -80,7 +79,6 @@ loom_cc_library(
 
 loom_cc_library(
     name = "low_registry",
-    testonly = True,
     srcs = ["low_registry.c"],
     hdrs = ["low_registry.h"],
     visibility = _TEST_LOW_REGISTRY_VISIBILITY,
@@ -95,7 +93,6 @@ loom_cc_library(
 
 loom_cc_library(
     name = "lower",
-    testonly = True,
     srcs = ["lower/registry.c"],
     hdrs = ["lower.h"],
     visibility = _TEST_LOW_LOWER_VISIBILITY,

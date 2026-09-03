@@ -1,6 +1,7 @@
 // RUN: emit amdgpu-assembly @gfx11_q8_native strategy=source
 
 amdgpu.target<gfx1100> @target
+
 low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_q8_native(%lane: reg<amdgpu.vgpr>, %weights_view: reg<amdgpu.sgpr x2>, %rhs_view: reg<amdgpu.sgpr x2>, %output_view: reg<amdgpu.sgpr x2>) asm {
   %scale_index = v_lshrrev_b32_lit %lane, 3
   %q_byte_offset = v_lshlrev_b32_src0_inline %lane, 2

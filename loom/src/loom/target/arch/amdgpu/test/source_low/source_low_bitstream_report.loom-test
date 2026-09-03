@@ -1,6 +1,7 @@
 // RUN: compile-report target-legalize{mode=final,policy=reference-only},dce,canonicalize
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @report_i32_to_u4x8_bitunpack(%packed: vector<1xi32>) -> (vector<8xi32>) {
   %unpacked = vector.bitunpacku<4> %packed : vector<1xi32> -> vector<8xi32>
   func.return %unpacked : vector<8xi32>
@@ -14,6 +15,7 @@ COMPILE-REPORT: target_legalization[0] function=report_i32_to_u4x8_bitunpack sou
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @report_i32x3_to_i8x3_bitpack_reference_fallback(%codes: vector<3xi32>) -> (vector<3xi8>) {
   %packed = vector.bitpack<8> %codes : vector<3xi32> -> vector<3xi8>
   func.return %packed : vector<3xi8>
@@ -27,6 +29,7 @@ COMPILE-REPORT: target_legalization[0] function=report_i32x3_to_i8x3_bitpack_ref
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @report_i8x3_to_u3x8_bitunpack_reference_fallback(%packed: vector<3xi8>) -> (vector<8xi32>) {
   %unpacked = vector.bitunpacku<3> %packed : vector<3xi8> -> vector<8xi32>
   func.return %unpacked : vector<8xi32>
@@ -40,6 +43,7 @@ COMPILE-REPORT: target_legalization[0] function=report_i8x3_to_u3x8_bitunpack_re
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @report_i8x3_to_s3x8_bitunpack_reference_fallback(%packed: vector<3xi8>) -> (vector<8xi32>) {
   %unpacked = vector.bitunpacks<3> %packed : vector<3xi8> -> vector<8xi32>
   func.return %unpacked : vector<8xi32>

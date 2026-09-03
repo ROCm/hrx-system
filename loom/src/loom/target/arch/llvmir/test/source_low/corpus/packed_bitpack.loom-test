@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/packed_bitpack.loom-test
 // RUN: emit source-low output=low
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32x4_to_i8x4_bitpack(%codes: vector<4xi32>) -> (vector<4xi8>) {
   %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
   func.return %packed : vector<4xi8>
@@ -31,10 +29,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x4_to
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32x8_to_i4x8_bitpack(%codes: vector<8xi32>) -> (vector<4xi8>) {
   %packed = vector.bitpack<4> %codes : vector<8xi32> -> vector<4xi8>
   func.return %packed : vector<4xi8>
@@ -78,10 +74,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x8_to
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32x16_to_i2x16_bitpack(%codes: vector<16xi32>) -> (vector<4xi8>) {
   %packed = vector.bitpack<2> %codes : vector<16xi32> -> vector<4xi8>
   func.return %packed : vector<4xi8>
@@ -159,10 +153,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_t
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32x32_to_i1x32_bitpack(%mask: vector<32xi32>) -> (vector<4xi8>) {
   %packed = vector.bitpack<1> %mask : vector<32xi32> -> vector<4xi8>
   func.return %packed : vector<4xi8>
@@ -307,10 +299,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x32_t
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 kernel.def target(@target) @uniform_global_i32x4_to_i8x4_bitpack_store() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index

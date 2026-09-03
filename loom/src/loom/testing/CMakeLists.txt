@@ -11,6 +11,102 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    test_file
+  HDRS
+    "test_file.h"
+  SRCS
+    "test_file.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::error::error_defs
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    test_file_test
+  SRCS
+    "test_file_test.cc"
+  DEPS
+    ::test_file
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
+    test_diagnostic
+  HDRS
+    "test_diagnostic.h"
+  SRCS
+    "test_diagnostic.c"
+  DEPS
+    ::test_file
+    iree::base
+    iree::base::internal::arena
+    loom::error::diagnostic
+    loom::error::renderer
+    loom::format::text::printer
+    loom::ir
+    loom::util::stream
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    test_diagnostic_test
+  SRCS
+    "test_diagnostic_test.cc"
+  DEPS
+    ::test_diagnostic
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::error::error_defs
+)
+
+loom_cc_library(
+  NAME
+    test_file_format
+  HDRS
+    "test_file_format.h"
+  SRCS
+    "test_file_format.c"
+  DEPS
+    ::test_diagnostic
+    ::test_file
+    iree::base
+    iree::base::internal::arena
+    loom::format::text::low_asm
+    loom::format::text::parser
+    loom::format::text::printer
+    loom::ir
+    loom::verify
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    test_file_format_test
+  SRCS
+    "test_file_format_test.cc"
+  DEPS
+    ::context
+    ::test_file_format
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::text_asm
+    loom::target::test::descriptors
+)
+
+loom_cc_library(
+  NAME
     byte_sequence
   HDRS
     "byte_sequence.h"

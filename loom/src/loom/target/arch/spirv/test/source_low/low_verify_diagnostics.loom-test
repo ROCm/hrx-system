@@ -157,10 +157,10 @@ low.func.def target<spirv.logical.core>(@target) @packet_vector_operand_value_ty
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) @return_value_type_mismatch(%value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) {
-  %unsigned = low.op<spirv.op_bitcast.i32.u32>(%value) : (reg<spirv.id : i32>) -> reg<spirv.id : i32>
+low.func.def target<spirv.logical.core>(@target) @return_value_type_mismatch(%value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %unsigned = OpBitcast.i32.u32 %value : reg<spirv.id : i32>
   // ERROR@+1: SPIRV/014 {function_name="return_value_type_mismatch", result_index="0", value_name="unsigned", expected_value_type="s32", actual_value_type="u32"}
-  low.return %unsigned : reg<spirv.id : i32>
+  return %unsigned
 }
 
 // ====
@@ -209,11 +209,11 @@ low.func.def target<spirv.logical.core>(@target) @cfg_branch_requires_low_scf() 
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) @scf_if_condition_type_mismatch(%value: reg<spirv.id : i32>) {
+low.func.def target<spirv.logical.core>(@target) @scf_if_condition_type_mismatch(%value: reg<spirv.id : i32>) asm {
   // ERROR@+1: SPIRV/019 {function_name="scf_if_condition_type_mismatch", value_name="value", actual_value_type="s32"}
   low.scf.if %value {
   }
-  low.return
+  return
 }
 
 // ====
@@ -222,14 +222,14 @@ low.func.def target<spirv.logical.core>(@target) @scf_if_condition_type_mismatch
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) @scf_while_condition_type_mismatch(%value: reg<spirv.id : i32>) {
+low.func.def target<spirv.logical.core>(@target) @scf_while_condition_type_mismatch(%value: reg<spirv.id : i32>) asm {
   low.scf.while {
     // ERROR@+1: SPIRV/019 {function_name="scf_while_condition_type_mismatch", value_name="value", actual_value_type="s32"}
     low.scf.condition %value : reg<spirv.id : i32>
   } do {
     low.scf.yield
   }
-  low.return
+  return
 }
 
 // ====
@@ -238,15 +238,15 @@ low.func.def target<spirv.logical.core>(@target) @scf_while_condition_type_misma
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) @scf_if_yield_type_mismatch(%condition: reg<spirv.id : i1>, %lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) {
-  %rhs_unsigned = low.op<spirv.op_bitcast.i32.u32>(%rhs) : (reg<spirv.id : i32>) -> reg<spirv.id : i32>
+low.func.def target<spirv.logical.core>(@target) @scf_if_yield_type_mismatch(%condition: reg<spirv.id : i1>, %lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %rhs_unsigned = OpBitcast.i32.u32 %rhs : reg<spirv.id : i32>
   %selected = low.scf.if %condition -> (reg<spirv.id : i32>) {
     low.scf.yield %lhs : reg<spirv.id : i32>
   } else {
     // ERROR@+1: SPIRV/020 {function_name="scf_if_yield_type_mismatch", source_value_name="rhs_unsigned", target_value_name="selected", expected_value_type="s32", actual_value_type="u32"}
     low.scf.yield %rhs_unsigned : reg<spirv.id : i32>
   }
-  low.return %selected : reg<spirv.id : i32>
+  return %selected
 }
 
 // ====
@@ -255,13 +255,13 @@ low.func.def target<spirv.logical.core>(@target) @scf_if_yield_type_mismatch(%co
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) @scf_for_yield_type_mismatch(%start: reg<spirv.id : i32>, %limit: reg<spirv.id : i32>, %step: reg<spirv.id : i32>, %initial: reg<spirv.id : i32>, %wrong: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) {
-  %wrong_unsigned = low.op<spirv.op_bitcast.i32.u32>(%wrong) : (reg<spirv.id : i32>) -> reg<spirv.id : i32>
+low.func.def target<spirv.logical.core>(@target) @scf_for_yield_type_mismatch(%start: reg<spirv.id : i32>, %limit: reg<spirv.id : i32>, %step: reg<spirv.id : i32>, %initial: reg<spirv.id : i32>, %wrong: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %wrong_unsigned = OpBitcast.i32.u32 %wrong : reg<spirv.id : i32>
   %result = low.scf.for [%start to %limit step %step] iter_args(%initial: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) do(%i: reg<spirv.id : i32>, %carried: reg<spirv.id : i32>) {
     // ERROR@+1: SPIRV/020 {function_name="scf_for_yield_type_mismatch", source_value_name="wrong_unsigned", target_value_name="carried", expected_value_type="s32", actual_value_type="u32"}
     low.scf.yield %wrong_unsigned : reg<spirv.id : i32>
   }
-  low.return %result : reg<spirv.id : i32>
+  return %result
 }
 
 // ====
@@ -270,13 +270,13 @@ low.func.def target<spirv.logical.core>(@target) @scf_for_yield_type_mismatch(%s
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) @scf_for_body_packet_type_mismatch(%start: reg<spirv.id : i32>, %limit: reg<spirv.id : i32>, %step: reg<spirv.id : i32>, %initial: reg<spirv.id : i32>, %wrong: reg<spirv.id : f32>) {
+low.func.def target<spirv.logical.core>(@target) @scf_for_body_packet_type_mismatch(%start: reg<spirv.id : i32>, %limit: reg<spirv.id : i32>, %step: reg<spirv.id : i32>, %initial: reg<spirv.id : i32>, %wrong: reg<spirv.id : f32>) asm {
   %result = low.scf.for [%start to %limit step %step] iter_args(%initial: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) do(%i: reg<spirv.id : i32>, %carried: reg<spirv.id : i32>) {
     // ERROR@+1: SPIRV/013 {function_name="scf_for_body_packet_type_mismatch", descriptor_key="spirv.op_iadd.i32", field_kind="operand", field_index="0", value_name="wrong", expected_value_type="s32", actual_value_type="f32"}
-    %next = low.op<spirv.op_iadd.i32>(%wrong, %i) : (reg<spirv.id : f32>, reg<spirv.id : i32>) -> reg<spirv.id : i32>
+    %next = OpIAdd %wrong, %i
     low.scf.yield %next : reg<spirv.id : i32>
   }
-  low.return
+  return
 }
 
 // ====
@@ -319,6 +319,7 @@ low.func.def target<spirv.logical.core>(@target) @multiblock_requires_low_scf() 
 // RUN: verify
 
 spirv.target<vulkan1_3> @target
+
 spirv.target<vulkan1_3> @target_scalar_payloads {contract_feature_bits = 37374}
 
 low.func.def target<spirv.logical.core>(@target) @first_module_contract() asm {
