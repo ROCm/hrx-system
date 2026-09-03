@@ -69,11 +69,20 @@ iree_executable_test(
     src = ":link_modules",
 )
 
+iree_cmake_extra_content(
+    content = """
+if(IREE_TARGET_HAS_THREADS)
+""",
+    inline = True,
+)
+
 loom_cc_binary(
     name = "product_frontier",
     srcs = ["product_frontier.c"],
     deps = [
         "//loom/binding/c:loomc",
+        "//loom/binding/c:task_pool",
+        "//loom/binding/c:task_queue",
         "//loom/binding/c/target/cmd",
     ],
 )
@@ -81,13 +90,6 @@ loom_cc_binary(
 iree_executable_test(
     name = "product_frontier_test",
     src = ":product_frontier",
-)
-
-iree_cmake_extra_content(
-    content = """
-if(IREE_TARGET_HAS_THREADS)
-""",
-    inline = True,
 )
 
 loom_cc_binary(

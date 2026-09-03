@@ -43,6 +43,8 @@ iree_native_test(
     ::link_modules
 )
 
+if(IREE_TARGET_HAS_THREADS)
+
 loom_cc_binary(
   NAME
     product_frontier
@@ -51,6 +53,8 @@ loom_cc_binary(
   DEPS
     loom::binding::c::loomc
     loom::binding::c::target::cmd
+    loom::binding::c::task_pool
+    loom::binding::c::task_queue
 )
 
 iree_native_test(
@@ -59,8 +63,6 @@ iree_native_test(
   SRC
     ::product_frontier
 )
-
-if(IREE_TARGET_HAS_THREADS)
 
 loom_cc_binary(
   NAME

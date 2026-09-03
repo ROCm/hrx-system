@@ -128,12 +128,13 @@ TEST(ArtifactTest, CreateSourceRetainsContiguousBytesAndInfersFormat) {
   EXPECT_EQ(loomc_source_contents(source_ptr.get()).data, artifact_span.data);
 }
 
-TEST(ArtifactTest, WriteToOpenFile) {
+TEST(ArtifactTest, WriteToTextModeFilePreservesArtifactBytes) {
   loomc_byte_sequence_t* contents = nullptr;
   loomc_artifact_t artifact = MakeTextModuleArtifact(&contents);
   HandlePtr<loomc_byte_sequence_t, loomc_byte_sequence_release> contents_owner(
       contents);
-  FILE* file = tmpfile();
+  iree::testing::TempFilePath path("loomc_artifact_text_stream", ".loom");
+  FILE* file = fopen(path.path().c_str(), "w+");
   ASSERT_NE(file, nullptr);
 
   loomc_status_t status = loomc_artifact_write_to_file(&artifact, file);
@@ -143,6 +144,7 @@ TEST(ArtifactTest, WriteToOpenFile) {
             std::vector<uint8_t>(expected.begin(), expected.end()));
 
   EXPECT_EQ(fclose(file), 0);
+  EXPECT_TRUE(path.Remove());
 }
 
 TEST(ArtifactTest, WriteToPath) {

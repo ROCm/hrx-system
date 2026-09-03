@@ -41,10 +41,11 @@ created them only after the application loads or copies them.
 - [Compose modules in memory](module-composition.md) shows both declaration-only
   and logical-provider composition over caller-owned source bytes and one
   reusable frozen link index.
-- [Embed command and kernel product frontiers](product-frontier.md) shows how a
-  portable command product publishes independently compilable kernel requests
-  while preserving external executable requirements.
-- [Schedule concurrent JIT work](jit-task-pool.md) shows how generic tasks,
+- [Parallelize kernel JIT compilation](product-frontier.md) shows how a
+  portable command program discovers live kernels, checks cached products, and
+  schedules independent compilation while preserving external executable
+  requirements.
+- [Use the JIT task pool](jit-task-pool.md) shows how generic tasks,
   cache-before-submit policy, worker-local workspaces, and independent queues
   on one optional shared pool compose without making scheduling part of the
   compiler API.

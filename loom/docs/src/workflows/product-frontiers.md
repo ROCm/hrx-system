@@ -1,14 +1,18 @@
-# Compose recursive product frontiers
+# Split command and kernel compilation
 
-A product frontier closes one parent artifact while leaving each child
-implementation as an explicit requirement. This lets one command program become
-portable command bytes without embedding every kernel body, and it lets each
-required kernel compile or resolve from a cache independently.
+A command program can be compiled into portable orchestration bytes without
+embedding every device kernel it references. Loom records each executable entry
+as a requirement and can export each source-backed kernel implementation as an
+independent `.loombc` request. The application may compile those requests in
+parallel, satisfy them from a cache, or bind requirements to externally
+provided executables.
 
-The frontier is a normal selective-link boundary. It does not introduce a fact
-sidecar, generated source format, or graph-specific package. Child requests
-carry ordinary Loom bytecode plus exact roots, so the same formatter, linker,
-compiler, diagnostics, and cache keys apply at every level.
+The compiler API calls the boundary between one completed product and its
+unresolved requirements a **product frontier**. The workflow is ordinary
+selective linking: it introduces no fact sidecar, generated source format, or
+graph-specific package. Child requests carry ordinary Loom bytecode plus exact
+roots, so the same formatter, linker, compiler, diagnostics, and cache keys
+apply at every level.
 
 ## Start from requester ownership
 

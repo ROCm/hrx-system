@@ -354,8 +354,8 @@ schedule remain runtime responsibilities.
 [Source modules and canonical text](source-modules.md) explains declaration
 and library ownership. [Facts and specialization](facts-and-specialization.md)
 shows how configuration, assumptions, and target facts constrain the values
-used here. [Compose recursive product
-frontiers](../workflows/product-frontiers.md) follows local, linked, classified,
+used here. [Split command and kernel
+compilation](../workflows/product-frontiers.md) follows local, linked, classified,
 and external kernels through one checked product. [Compile
 artifacts](../workflows/compile-artifacts.md#emit-portable-command-programs)
 covers the public command-line artifact workflow.

@@ -117,6 +117,8 @@ LOOMC_API_EXPORT loomc_status_t loomc_artifact_create_source(
 ///
 /// @ownership
 /// The caller retains ownership of `file`; this function does not close it.
+/// On Windows the underlying file descriptor is switched to binary mode and
+/// remains in that mode so artifact bytes are not newline-translated.
 LOOMC_API_EXPORT loomc_status_t
 loomc_artifact_write_to_file(const loomc_artifact_t* artifact, FILE* file);
 
