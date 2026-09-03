@@ -212,6 +212,7 @@ class ArrayFamily:
     column_shift: int
     row_shift: int
     address_generation_granularity_bits: int
+    controller_ids: tuple[int, ...]
     tiles: tuple[TileFacts, ...]
     events: tuple[EventModuleFacts, ...]
     stream_ports: tuple[StreamPortRange, ...]
@@ -432,6 +433,15 @@ def validate_array_family(family: ArrayFamily) -> None:
         raise ValueError(f"{family.key}: invalid tile address shifts")
     if family.address_generation_granularity_bits <= 0:
         raise ValueError(f"{family.key}: invalid address-generation granularity")
+    if (
+        len(family.controller_ids) != family.row_count
+        or len(set(family.controller_ids)) != family.row_count
+        or any(
+            controller_id < 0 or controller_id > 31
+            for controller_id in family.controller_ids
+        )
+    ):
+        raise ValueError(f"{family.key}: invalid tile controller identities")
     tile_kinds = [tile.kind for tile in family.tiles]
     if len(tile_kinds) != len(set(tile_kinds)):
         raise ValueError(f"{family.key}: duplicate tile-kind facts")

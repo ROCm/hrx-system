@@ -33,6 +33,7 @@ def test_npu2_topology_and_resource_domains_are_complete() -> None:
     assert family.key == "amd.xdna.npu2"
     assert (family.column_count, family.row_count) == (8, 6)
     assert (family.column_shift, family.row_shift) == (25, 20)
+    assert family.controller_ids == (15, 26, 27, 29, 30, 31)
     assert tuple(
         (tile.kind, tile.first_row, tile.row_count) for tile in family.tiles
     ) == (

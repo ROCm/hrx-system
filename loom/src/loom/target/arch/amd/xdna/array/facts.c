@@ -12,6 +12,24 @@ const loom_xdna_array_family_t* loom_xdna_npu2_array_family(void) {
   return &kLoomXdnaNpu2ArrayFamily;
 }
 
+iree_status_t loom_xdna_array_controller_id(
+    const loom_xdna_array_family_t* family,
+    loom_xdna_tile_coordinate_t coordinate, uint8_t* out_controller_id) {
+  IREE_ASSERT_ARGUMENT(family);
+  IREE_ASSERT_ARGUMENT(out_controller_id);
+  *out_controller_id = 0;
+  if (coordinate.column >= family->column_count ||
+      coordinate.row >= family->row_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "XDNA tile coordinate (%u, %u) is outside %ux%u family %s",
+        coordinate.column, coordinate.row, family->column_count,
+        family->row_count, family->key);
+  }
+  *out_controller_id = family->controller_ids[coordinate.row];
+  return iree_ok_status();
+}
+
 iree_status_t loom_xdna_array_tile_facts(
     const loom_xdna_array_family_t* family,
     loom_xdna_tile_coordinate_t coordinate,

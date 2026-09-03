@@ -232,6 +232,8 @@ typedef struct loom_xdna_array_family_t {
   uint8_t address_generation_granularity_bits;
   // Independent sources supporting the family.
   loom_xdna_provenance_bits_t provenance_bits;
+  // Column-wise tile controller packet identities indexed by physical row.
+  const uint8_t* controller_ids;
   // Flattened load-aperture rows.
   const loom_xdna_address_window_t* address_windows;
   // Number of load-aperture rows.
@@ -270,6 +272,11 @@ typedef struct loom_xdna_memory_placement_t {
 
 // Returns the complete immutable NPU2 physical-array family.
 const loom_xdna_array_family_t* loom_xdna_npu2_array_family(void);
+
+// Resolves the controller packet identity used by one physical tile.
+iree_status_t loom_xdna_array_controller_id(
+    const loom_xdna_array_family_t* family,
+    loom_xdna_tile_coordinate_t coordinate, uint8_t* out_controller_id);
 
 // Resolves the tile facts at one physical coordinate.
 iree_status_t loom_xdna_array_tile_facts(

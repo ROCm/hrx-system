@@ -20,6 +20,12 @@ TEST(XdnaArrayFactsTest, ExposesCompleteNpu2Topology) {
   EXPECT_EQ(family->column_shift, 25u);
   EXPECT_EQ(family->row_shift, 20u);
 
+  uint8_t controller_id = 0;
+  IREE_ASSERT_OK(loom_xdna_array_controller_id(family, {7, 0}, &controller_id));
+  EXPECT_EQ(controller_id, 15u);
+  IREE_ASSERT_OK(loom_xdna_array_controller_id(family, {3, 5}, &controller_id));
+  EXPECT_EQ(controller_id, 31u);
+
   const loom_xdna_tile_facts_t* tile = nullptr;
   IREE_ASSERT_OK(loom_xdna_array_tile_facts(family, {0, 0}, &tile));
   EXPECT_EQ(tile->kind, LOOM_XDNA_TILE_KIND_SHIM_NOC);
