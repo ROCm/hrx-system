@@ -34,6 +34,26 @@ enum iree_vm_execution_outcome_e {
 };
 typedef uint32_t iree_vm_execution_outcome_t;
 
+// Sticky cancellation reasons visible to an active provider operation.
+enum iree_vm_cancel_reason_e {
+  IREE_VM_CANCEL_REASON_NONE = 0u,
+  IREE_VM_CANCEL_REASON_CANCELLED = 1u,
+  IREE_VM_CANCEL_REASON_DEADLINE_EXCEEDED = 2u,
+};
+typedef uint32_t iree_vm_cancel_reason_t;
+
+// No-fail level-triggered host wake callback.
+typedef void(IREE_API_PTR* iree_vm_invocation_wake_fn_t)(void* user_data);
+
+// Host wake callback copied for one active invocation operation. The caller
+// keeps |user_data| live until the operation and every cancel caller retire.
+typedef struct iree_vm_invocation_wake_callback_t {
+  // Optional callback that makes the owning host request runnable.
+  iree_vm_invocation_wake_fn_t fn;
+  // Opaque caller-owned value passed to |fn|.
+  void* user_data;
+} iree_vm_invocation_wake_callback_t;
+
 // Transient execution view supplied to one module callback. The process state
 // pointer is stable across suspension and null exactly for zero-sized state.
 typedef struct iree_vm_module_execution_t {
@@ -229,12 +249,90 @@ typedef iree_status_t(IREE_API_PTR* iree_vm_module_function_resume_fn_t)(
     const iree_vm_module_function_resume_params_t* params,
     iree_vm_execution_outcome_t* out_outcome);
 
-// Fails if a module whose functions cannot yield is incorrectly resumed.
-// Reaching this callback is a trusted module/core ABI violation.
+// Fails if a leaf-only module that never preserves frames is resumed. Reaching
+// this callback is a trusted module/core ABI violation.
 IREE_API_EXPORT iree_status_t iree_vm_module_function_resume_unreachable(
     iree_vm_module_t* module,
     const iree_vm_module_function_resume_params_t* params,
     iree_vm_execution_outcome_t* out_outcome);
+
+//===----------------------------------------------------------------------===//
+// Module Execution Helpers
+//===----------------------------------------------------------------------===//
+
+// Returns the active operation's level-triggered host wake callback.
+IREE_API_EXPORT iree_vm_invocation_wake_callback_t
+iree_vm_invocation_wake_callback(iree_vm_invocation_t* invocation);
+
+// Returns the sticky cancellation reason or NONE while uncancelled/idle.
+IREE_API_EXPORT iree_vm_cancel_reason_t
+iree_vm_invocation_cancel_reason(const iree_vm_invocation_t* invocation);
+
+// Requests one trusted function in the current linked module. The target is
+// entered later by the iterative driver and never recursively by this call.
+IREE_API_EXPORT iree_status_t
+iree_vm_invocation_call_local(const iree_vm_module_execution_t* execution,
+                              iree_vm_module_local_function_t local_function,
+                              const iree_vm_call_packet_t* call,
+                              iree_vm_execution_outcome_t* out_outcome);
+
+// Requests one target from the current module's resolved import table. An
+// unresolved optional import returns NOT_FOUND without publishing a request.
+IREE_API_EXPORT iree_status_t iree_vm_invocation_call_import(
+    const iree_vm_module_execution_t* execution, uint16_t import_ordinal,
+    const iree_vm_call_packet_t* call,
+    iree_vm_execution_outcome_t* out_outcome);
+
+// Requests one dynamic program-bound function after checking it against the
+// expected module-local callable type. Canonical null fails with
+// FAILED_PRECONDITION without publishing a request.
+IREE_API_EXPORT iree_status_t iree_vm_invocation_call_function_ref(
+    const iree_vm_module_execution_t* execution,
+    iree_vm_function_ref_t function_ref,
+    uint16_t expected_callable_type_ordinal, const iree_vm_call_packet_t* call,
+    iree_vm_execution_outcome_t* out_outcome);
+
+// Materializes one trusted module-local function as a borrowed program-bound
+// value. Failure leaves |out_function_ref| untouched.
+IREE_API_EXPORT iree_status_t iree_vm_function_ref_from_local_function(
+    const iree_vm_module_execution_t* execution,
+    iree_vm_module_local_function_t local_function,
+    iree_vm_function_ref_t* out_function_ref);
+
+// Materializes one resolved import as a borrowed program-bound value. An
+// unresolved optional import succeeds with canonical null.
+IREE_API_EXPORT iree_status_t iree_vm_function_ref_from_import(
+    const iree_vm_module_execution_t* execution, uint16_t import_ordinal,
+    iree_vm_function_ref_t* out_function_ref);
+
+// Module-owned durable frame payload layout.
+typedef struct iree_vm_frame_layout_t {
+  // Requested module payload size in bytes.
+  iree_host_size_t storage_size;
+  // Requested power-of-two payload alignment.
+  iree_host_size_t storage_alignment;
+} iree_vm_frame_layout_t;
+
+// No-fail payload cleanup invoked once before its frame is removed.
+typedef void(IREE_API_PTR* iree_vm_frame_cleanup_fn_t)(iree_vm_frame_t* frame);
+
+// Pushes one durable frame failure-atomically for the active start callback.
+// RESOURCE_EXHAUSTED means the fixed invocation capacity is insufficient.
+IREE_API_EXPORT iree_status_t iree_vm_invocation_push_frame(
+    const iree_vm_module_function_start_params_t* start_params,
+    iree_vm_frame_layout_t layout, iree_vm_frame_cleanup_fn_t cleanup,
+    iree_vm_frame_t** out_frame);
+
+// Pops the exact running top frame, invokes cleanup, and rewinds storage.
+IREE_API_EXPORT void iree_vm_invocation_pop_frame(
+    iree_vm_invocation_t* invocation, iree_vm_frame_t* frame);
+
+// Returns the aligned module-owned payload of |frame|.
+IREE_API_EXPORT void* iree_vm_frame_storage(iree_vm_frame_t* frame);
+
+// Returns the module-local function ordinal represented by |frame|.
+IREE_API_EXPORT uint16_t
+iree_vm_frame_function_ordinal(const iree_vm_frame_t* frame);
 
 #ifdef __cplusplus
 }  // extern "C"

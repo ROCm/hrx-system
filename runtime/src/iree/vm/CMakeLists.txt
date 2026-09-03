@@ -17,7 +17,9 @@ iree_cc_library(
     "environment.h"
     "execution.h"
     "function.h"
+    "invocation.h"
     "module.h"
+    "process.h"
     "program.h"
     "ref.h"
     "reflection.h"
@@ -27,7 +29,11 @@ iree_cc_library(
     "buffer.c"
     "environment.c"
     "execution.c"
+    "invocation.c"
+    "invocation_storage.h"
     "module.c"
+    "process.c"
+    "process_storage.h"
     "program.c"
     "program_storage.h"
     "ref.c"
@@ -36,6 +42,7 @@ iree_cc_library(
   DEPS
     iree::base
     iree::base::internal
+    iree::base::internal::fpu_state
     iree::base::internal::unicode
     iree::base::threading
   PUBLIC
@@ -48,6 +55,19 @@ iree_cc_library(
     "module_test_provider.h"
   SRCS
     "module_test_provider.c"
+  DEPS
+    ::vm
+  TESTONLY
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    invocation_test_module
+  HDRS
+    "invocation_test_module.h"
+  SRCS
+    "invocation_test_module.c"
   DEPS
     ::vm
   TESTONLY
@@ -89,6 +109,28 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    invocation_test
+  SRCS
+    "invocation_test.cc"
+  DEPS
+    ::invocation_test_module
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_fuzz(
+  NAME
+    invocation_fuzz
+  SRCS
+    "invocation_fuzz.cc"
+  DEPS
+    ::invocation_test_module
+    ::vm
+)
+
+iree_cc_test(
+  NAME
     module_test
   SRCS
     "module_test.cc"
@@ -116,6 +158,17 @@ iree_cc_test(
   SRCS
     "program_storage.h"
     "program_test.cc"
+  DEPS
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    process_test
+  SRCS
+    "process_test.cc"
   DEPS
     ::vm
     iree::testing::gtest

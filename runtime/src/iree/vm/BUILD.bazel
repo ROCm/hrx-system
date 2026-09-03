@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
@@ -19,7 +20,11 @@ iree_runtime_cc_library(
         "buffer.c",
         "environment.c",
         "execution.c",
+        "invocation.c",
+        "invocation_storage.h",
         "module.c",
+        "process.c",
+        "process_storage.h",
         "program.c",
         "program_storage.h",
         "ref.c",
@@ -31,7 +36,9 @@ iree_runtime_cc_library(
         "environment.h",
         "execution.h",
         "function.h",
+        "invocation.h",
         "module.h",
+        "process.h",
         "program.h",
         "ref.h",
         "reflection.h",
@@ -41,6 +48,7 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:fpu_state",
         "//runtime/src/iree/base/internal:unicode",
         "//runtime/src/iree/base/threading",
     ],
@@ -51,6 +59,14 @@ iree_runtime_cc_library(
     testonly = True,
     srcs = ["module_test_provider.c"],
     hdrs = ["module_test_provider.h"],
+    deps = [":vm"],
+)
+
+iree_runtime_cc_library(
+    name = "invocation_test_module",
+    testonly = True,
+    srcs = ["invocation_test_module.c"],
+    hdrs = ["invocation_test_module.h"],
     deps = [":vm"],
 )
 
@@ -85,6 +101,26 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "invocation_test",
+    srcs = ["invocation_test.cc"],
+    deps = [
+        ":invocation_test_module",
+        ":vm",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_fuzz(
+    name = "invocation_fuzz",
+    srcs = ["invocation_fuzz.cc"],
+    deps = [
+        ":invocation_test_module",
+        ":vm",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "module_test",
     srcs = ["module_test.cc"],
     deps = [
@@ -111,6 +147,16 @@ iree_runtime_cc_test(
         "program_storage.h",
         "program_test.cc",
     ],
+    deps = [
+        ":vm",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "process_test",
+    srcs = ["process_test.cc"],
     deps = [
         ":vm",
         "//runtime/src/iree/testing:gtest",
