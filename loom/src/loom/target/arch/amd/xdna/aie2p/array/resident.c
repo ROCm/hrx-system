@@ -101,7 +101,7 @@ static const loom_aie2p_array_lock_plan_t* loom_aie2p_array_resident_find_lock(
   const loom_aie2p_array_lock_plan_t* result = NULL;
   for (iree_host_size_t i = 0; i < plan->lock_count; ++i) {
     const loom_aie2p_array_lock_plan_t* lock = &plan->locks[i];
-    if (lock->channel_index == port->channel_index && !lock->shim_peer &&
+    if (lock->channel_index == port->channel_index &&
         lock->consumer_ready == (role == LOOM_AIE2P_ARRAY_LOCK_ROLE_READY)) {
       IREE_ASSERT(result == NULL &&
                   "channel role must have exactly one canonical ring lock");
