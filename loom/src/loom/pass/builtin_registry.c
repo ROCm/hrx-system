@@ -57,6 +57,20 @@ static const loom_pass_option_schema_t kCanonicalizeOptionSchema[] = {
     },
 };
 
+static const loom_pass_option_enum_value_t kInlineCallablesPolicyValues[] = {
+    {.value = IREE_SVL("authored")},
+    {.value = IREE_SVL("target")},
+};
+
+static const loom_pass_option_schema_t kInlineCallablesOptionSchema[] = {
+    {
+        .name = IREE_SVL("policy"),
+        .kind = LOOM_PASS_OPTION_SCHEMA_ENUM,
+        .enum_values = kInlineCallablesPolicyValues,
+        .enum_value_count = IREE_ARRAYSIZE(kInlineCallablesPolicyValues),
+    },
+};
+
 static const loom_pass_option_enum_value_t
     kLowMaterializeAllocationDiagnosticsValues[] = {
         {.value = IREE_SVL("none")},
@@ -353,6 +367,9 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .key = IREE_SVL("inline-callables"),
         .info = loom_inline_callables_pass_info,
         .module_run = loom_inline_callables_run,
+        .create = loom_inline_callables_create,
+        .option_schema = kInlineCallablesOptionSchema,
+        .option_schema_count = IREE_ARRAYSIZE(kInlineCallablesOptionSchema),
     },
     {
         .key = IREE_SVL("kernel-async-legality"),

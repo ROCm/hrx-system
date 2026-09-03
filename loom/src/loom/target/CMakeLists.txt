@@ -126,6 +126,7 @@ loom_cc_library(
     ::function_contract
     ::function_version
     ::pass_environment
+    ::provider
     iree::base
     iree::base::internal::arena
     loom::analysis::symbol_facts

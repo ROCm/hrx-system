@@ -432,6 +432,23 @@ const loom_target_provider_t* loom_target_environment_lookup_family_provider(
   return NULL;
 }
 
+const loom_target_provider_t* loom_target_environment_lookup_fact_provider(
+    const loom_target_environment_t* environment,
+    const loom_target_fact_type_t* fact_type) {
+  IREE_ASSERT_ARGUMENT(environment);
+  IREE_ASSERT_ARGUMENT(fact_type);
+  for (iree_host_size_t i = 0; i < environment->provider_set->provider_count;
+       ++i) {
+    const loom_target_provider_t* provider =
+        environment->provider_set->providers[i];
+    if (provider->profile_type != NULL &&
+        provider->profile_type->fact_type == fact_type) {
+      return provider;
+    }
+  }
+  return NULL;
+}
+
 iree_status_t loom_target_environment_contribute_pipeline(
     const loom_target_environment_t* environment,
     loom_target_pipeline_phase_t phase,

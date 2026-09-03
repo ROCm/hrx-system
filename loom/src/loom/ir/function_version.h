@@ -83,6 +83,13 @@ iree_status_t loom_function_version_owner_reserve(
 iree_status_t loom_function_version_owner_append(
     loom_function_version_owner_t* owner, loom_function_version_t* version);
 
+// Removes |version| from |owner| while preserving the order of other versions.
+//
+// Returns true when the version was present. The version object retains arena
+// lifetime but no longer participates in compilation observation boundaries.
+bool loom_function_version_owner_remove(loom_function_version_owner_t* owner,
+                                        loom_function_version_t* version);
+
 // Returns the stable borrowed list view owned by |owner|.
 static inline const loom_function_version_list_t*
 loom_function_version_owner_list(const loom_function_version_owner_t* owner) {

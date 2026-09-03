@@ -13,10 +13,10 @@
 #include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/lower/contract_query.h"
 #include "loom/codegen/low/lower/function_boundary.h"
-#include "loom/codegen/low/lower/low_invoke.h"
 #include "loom/codegen/low/lower/report.h"
 #include "loom/codegen/low/lower/rule_emit.h"
 #include "loom/codegen/low/lower/rule_source_memory.h"
+#include "loom/codegen/low/lower/source_call.h"
 #include "loom/codegen/low/lower/source_plan.h"
 #include "loom/codegen/low/lower/source_query.h"
 #include "loom/codegen/low/source_memory_plan.h"
@@ -557,12 +557,16 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_lower_structural_op(
 
       loom_low_func_call_build_flags_t build_flags = 0;
       uint8_t purity = loom_func_call_purity(source_op);
+      uint8_t inline_policy = loom_func_call_inline_policy(source_op);
       if (purity != 0) {
         build_flags |= LOOM_LOW_FUNC_CALL_BUILD_FLAG_HAS_PURITY;
       }
+      if (inline_policy != 0) {
+        build_flags |= LOOM_LOW_FUNC_CALL_BUILD_FLAG_HAS_INLINE_POLICY;
+      }
       loom_op_t* low_call_op = NULL;
       IREE_RETURN_IF_ERROR(loom_low_func_call_build(
-          &context->builder, build_flags, purity,
+          &context->builder, build_flags, purity, inline_policy,
           loom_func_call_callee(source_op), low_operands, operands.count,
           result_types, source_op->result_count,
           /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
@@ -576,7 +580,7 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_lower_structural_op(
       return iree_ok_status();
     }
     case LOOM_OP_LOW_INVOKE:
-      return loom_low_lower_invoke(context, source_op);
+      return loom_low_lower_source_invoke(context, source_op);
     case LOOM_OP_KERNEL_RETURN: {
       loom_op_t* low_return_op = NULL;
       return loom_low_return_build(&context->builder, NULL, 0,

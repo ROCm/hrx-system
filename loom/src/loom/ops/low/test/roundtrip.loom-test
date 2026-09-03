@@ -19,6 +19,26 @@ low.func.def target<test.low.core>(@test_target) @schedule_fence() {
 
 test.target<low_core> @test_target
 
+low.func.decl inline target<test.low.core>(@test_target) @inline_decl(%value: reg<test.i32>) -> (reg<test.i32>)
+
+low.func.def noinline target<test.low.core>(@test_target) @noinline_helper(%value: reg<test.i32>) -> (reg<test.i32>) {
+  low.return %value : reg<test.i32>
+}
+
+low.func.def target<test.low.core>(@test_target) @inline_call_policy(%value: reg<test.i32>) -> (reg<test.i32>) {
+  %result = low.func.call inline @inline_decl(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  low.return %result : reg<test.i32>
+}
+
+func.def @invoke_call_policy(%value: i32) -> (i32) {
+  %result = low.invoke noinline @noinline_helper(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 low.func.decl retain target<test.low.core>(@test_target) @retained_decl(%value: reg<test.i32>) -> (reg<test.i32>)
 
 low.func.def retain target<test.low.core>(@test_target) @retained_func(%value: reg<test.i32>) -> (reg<test.i32>) {

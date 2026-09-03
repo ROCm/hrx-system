@@ -82,6 +82,7 @@ loom_cc_test(
     loom::codegen::low::lower
     loom::codegen::low::lower::source_selection
     loom::codegen::low::pipeline::pass_environment
+    loom::codegen::low::text_asm
     loom::codegen::low::transforms::allocation
     loom::codegen::low::transforms::dce
     loom::error::error_defs
@@ -100,6 +101,7 @@ loom_cc_test(
     loom::target::facts_builder
     loom::target::function_contract
     loom::target::function_version
+    loom::target::provider
     loom::target::test::contracts::core_lower_rules
     loom::target::test::low_registry
     loom::target::test::lower

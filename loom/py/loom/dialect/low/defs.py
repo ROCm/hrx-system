@@ -50,7 +50,13 @@ from loom.assembly import (
     TypesOf,
     kw,
 )
-from loom.dialect.func.defs import CallingConv, Purity, Retain, Visibility
+from loom.dialect.func.defs import (
+    CallingConv,
+    InlinePolicyAttr,
+    Purity,
+    Retain,
+    Visibility,
+)
 from loom.dialect.target.defs import ExportAbiKind, ExportLinkage
 from loom.dsl import (
     ANY,
@@ -234,6 +240,7 @@ _FUNC_COMMON_ATTRS = [
     AttrDef("visibility", "enum", enum_def=Visibility, optional=True),
     AttrDef("cc", "enum", enum_def=CallingConv, optional=True),
     AttrDef("purity", "enum", enum_def=Purity, optional=True),
+    AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     AttrDef("allocation", "enum", enum_def=LowAllocationMode, optional=True),
     AttrDef("schedule", "enum", enum_def=LowScheduleMode, optional=True),
     AttrDef("predicates", "predicate_list", optional=True),
@@ -281,6 +288,7 @@ _FUNC_MODIFIER_FORMAT: list[FormatElement] = [
     OptionalGroup([Attr("retain")], anchor="retain"),
     OptionalGroup([Attr("cc")], anchor="cc"),
     OptionalGroup([Attr("purity")], anchor="purity"),
+    OptionalGroup([Attr("inline_policy")], anchor="inline_policy"),
     OptionalGroup(
         [kw("allocation"), GLUE, LPAREN, Attr("allocation"), GLUE, RPAREN],
         anchor="allocation",
@@ -471,6 +479,7 @@ _FUNC_LIKE_COMMON: dict[str, Any] = dict(
     visibility="visibility",
     cc="cc",
     purity="purity",
+    inline_policy="inline_policy",
     predicates="predicates",
 )
 
@@ -653,6 +662,7 @@ low_func_call = Op(
             symbol_ref=SymbolReference("function", ["callable"]),
         ),
         AttrDef("purity", "enum", enum_def=Purity, optional=True),
+        AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     ],
     results=[Result("results", REGISTER, variadic=True)],
     traits=[UNKNOWN_EFFECTS],
@@ -662,6 +672,7 @@ low_func_call = Op(
             operands="operands",
             results="results",
             purity="purity",
+            inline_policy="inline_policy",
             kind=CallLikeKind.LOW_INTERNAL,
         ),
     ],
@@ -669,6 +680,7 @@ low_func_call = Op(
     verify="loom_low_func_call_verify",
     format=[
         OptionalGroup([Attr("purity")], anchor="purity"),
+        OptionalGroup([Attr("inline_policy")], anchor="inline_policy"),
         SymbolRef("callee"),
         GLUE,
         LPAREN,
@@ -1555,17 +1567,12 @@ low_invoke = Op(
     group=low_ops,
     phase=OpPhase.EXECUTABLE,
     doc=(
-        "Required-inline edge from source IR to an explicitly selected "
-        "target-Low function. The call site retains source value types; "
-        "source-to-Low lowering maps them to the helper register signature, "
-        "proves directional target and representation compatibility, and "
-        "clones the helper body into the caller. The helper must be a "
-        "module-local low.func.def with virtual register allocation and one "
-        "outer body block. Function-entry resources and nested calls cannot "
-        "cross the boundary. Caller facts must prove every authored helper "
-        "argument predicate before lowering reifies those predicates as "
-        "low.assume identities at the inline site. schedule(locked) helpers "
-        "must be straight-line and preserve their authored instruction order."
+        "Source-typed call edge to an explicitly selected target-Low function. "
+        "Source-to-Low lowering maps the source operands and results to the "
+        "helper register signature, proves the helper argument predicates, and "
+        "normalizes the edge to low.func.call. Authored inline policy has the "
+        "same meaning as on low.func.call; targets without a Low call ABI may "
+        "require the normalized edge to inline before emission."
     ),
     operands=[Operand("operands", ANY, variadic=True)],
     attrs=[
@@ -1575,6 +1582,7 @@ low_invoke = Op(
             symbol_ref=SymbolReference("function", ["callable"]),
         ),
         AttrDef("purity", "enum", enum_def=Purity, optional=True),
+        AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     ],
     results=[Result("results", ANY, variadic=True)],
     traits=[
@@ -1588,6 +1596,7 @@ low_invoke = Op(
             operands="operands",
             results="results",
             purity="purity",
+            inline_policy="inline_policy",
             kind=CallLikeKind.LOW_INVOKE,
         ),
     ],
@@ -1595,6 +1604,7 @@ low_invoke = Op(
     verify="loom_low_invoke_verify",
     format=[
         OptionalGroup([Attr("purity")], anchor="purity"),
+        OptionalGroup([Attr("inline_policy")], anchor="inline_policy"),
         SymbolRef("callee"),
         GLUE,
         LPAREN,

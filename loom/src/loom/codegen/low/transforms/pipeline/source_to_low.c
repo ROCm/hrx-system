@@ -10,8 +10,10 @@
 
 #include "loom/codegen/low/launch_config_program.h"
 #include "loom/codegen/low/lower/function_boundary.h"
+#include "loom/codegen/low/lower/representation_projection.h"
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
+#include "loom/ops/low/ops.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
 #include "loom/pass/value_facts.h"
@@ -318,6 +320,7 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
   iree_arena_initialize(module->arena.block_pool, &selection_arena);
   loom_low_lower_module_state_t* module_state = NULL;
   loom_low_source_selection_list_t selection_list = {0};
+  loom_low_source_selection_list_t target_function_list = {0};
   const loom_low_source_selection_options_t selection_options = {
       .policy_registry = policy_registry,
       .diagnostic_emitter = pass->diagnostic_emitter,
@@ -328,16 +331,43 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
   };
   iree_status_t status = loom_low_select_source_symbols(
       module, &selection_options, &selection_arena, &selection_list);
+  if (iree_status_is_ok(status)) {
+    status = loom_low_select_target_bound_funcs(
+        module, &selection_options, &selection_arena, &target_function_list);
+  }
+  bool emitted_error_diagnostics = false;
   for (iree_host_size_t i = 0;
-       i < selection_list.count && iree_status_is_ok(status); ++i) {
+       i < target_function_list.count && iree_status_is_ok(status) &&
+       !emitted_error_diagnostics;
+       ++i) {
+    const loom_low_source_selection_t* selection =
+        &target_function_list.values[i];
+    if (!loom_low_func_def_isa(selection->func.op)) continue;
+    bool projection_valid = false;
+    bool projection_changed = false;
+    status = loom_low_project_function_representation(
+        module, selection->func, selection->target_facts, descriptor_registry,
+        pass->diagnostic_emitter, &selection_arena, &projection_valid,
+        &projection_changed);
+    if (iree_status_is_ok(status) && !projection_valid) {
+      ++statistics->errors;
+      emitted_error_diagnostics = true;
+    }
+    if (projection_changed) {
+      loom_pass_mark_changed(pass);
+    }
+  }
+  for (iree_host_size_t i = 0;
+       i < selection_list.count && iree_status_is_ok(status) &&
+       !emitted_error_diagnostics;
+       ++i) {
     status = loom_low_source_to_low_record_target_specialization(
         compile_report, &selection_list.values[i]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !emitted_error_diagnostics) {
     status =
         loom_low_lower_module_state_create(&selection_arena, &module_state);
   }
-  bool emitted_error_diagnostics = false;
   uint32_t declaration_count = 0;
   for (iree_host_size_t i = 0;
        i < selection_list.count && iree_status_is_ok(status) &&

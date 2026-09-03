@@ -112,6 +112,7 @@ loom_cc_library(
         ":function_contract",
         ":function_version",
         ":pass_environment",
+        ":provider",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/error:error_defs",

@@ -138,7 +138,7 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_low_func_def_build(
         &module_builder, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET,
         /*visibility=*/0, /*retain=*/0, /*cc=*/0,
-        /*purity=*/0,
+        /*purity=*/0, /*inline_policy=*/0,
         /*allocation=*/0, /*schedule=*/0,
         /*descriptor_set=*/representation_contract, target_ref, /*abi=*/0,
         loom_named_attr_slice_t{}, loom_named_attr_slice_t{},

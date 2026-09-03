@@ -100,7 +100,7 @@ class AmdgpuSignalTest : public ::testing::Test {
     IREE_CHECK_OK(loom_low_func_def_build(
         &builder_, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET,
         /*visibility=*/0, /*retain=*/0, /*cc=*/0,
-        /*purity=*/0, /*allocation=*/0, /*schedule=*/0,
+        /*purity=*/0, /*inline_policy=*/0, /*allocation=*/0, /*schedule=*/0,
         /*descriptor_set=*/representation_contract, target, /*abi=*/0,
         loom_make_named_attr_slice(NULL, 0),
         loom_make_named_attr_slice(NULL, 0),

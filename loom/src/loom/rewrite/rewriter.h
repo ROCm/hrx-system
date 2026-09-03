@@ -310,6 +310,17 @@ iree_status_t loom_rewriter_erase(loom_rewriter_t* rewriter, loom_op_t* op);
 iree_status_t loom_rewriter_move_before(loom_rewriter_t* rewriter,
                                         loom_op_t* op, loom_op_t* before_op);
 
+// Moves |op| to the end of |target_block| while preserving its subtree.
+//
+// The target block must belong to the same module. |target_parent_op| is the
+// operation that owns the target block's region and becomes the moved op's
+// parent. Moving an op already at the target block end with the same parent is
+// a no-op.
+iree_status_t loom_rewriter_move_to_block_end(loom_rewriter_t* rewriter,
+                                              loom_op_t* op,
+                                              loom_block_t* target_block,
+                                              loom_op_t* target_parent_op);
+
 // Replaces one operand of an op. Adds the op to the worklist.
 iree_status_t loom_rewriter_set_operand(loom_rewriter_t* rewriter,
                                         loom_op_t* op, uint16_t operand_index,

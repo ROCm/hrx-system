@@ -174,6 +174,7 @@ loom_cc_library(
     iree::base
     loom::analysis::availability
     loom::ir
+    loom::ops::cfg
     loom::ops::func
     loom::ops::op_defs
   PUBLIC

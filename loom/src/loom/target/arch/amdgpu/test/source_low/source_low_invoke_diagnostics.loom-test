@@ -8,7 +8,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@helper_target) @exact_helper(%value: r
 }
 
 func.def target(@caller_target) @generic_caller(%value: vector<1xi32>) -> (vector<1xi32>) {
-  // ERROR@+1: TARGET/076 {callee_name="exact_helper", callee_target="gfx1151", caller_target="gfx11-generic"}
+  // ERROR@+1: TARGET/052 {function_name="exact_helper", authored_target_name="helper_target", specialization_target_name="gfx11-generic"}
   %result = low.invoke @exact_helper(%value) : (vector<1xi32>) -> (vector<1xi32>)
   func.return %result : vector<1xi32>
 }
@@ -86,11 +86,71 @@ func.def target(@target) @proven_relational_precondition(%lower: index, %upper: 
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) @ordered_pair(%lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) where [le(%lower, %upper)] asm {
-  return %lower, %upper
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @proven_relational_precondition(%lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) where [lt(%lower, %upper)] asm {
+  %14, %15 = low.assume %lower, %upper [le(%lower, %upper)] : reg<amdgpu.sgpr>, reg<amdgpu.sgpr>
+  return %14, %15
 }
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @proven_relational_precondition(%lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) where [lt(%lower, %upper)] asm {
-  %result_lower, %result_upper = low.assume %lower, %upper [le(%lower, %upper)] : reg<amdgpu.sgpr>, reg<amdgpu.sgpr>
-  return %result_lower, %result_upper
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @unary_result(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+  low.return %value : reg<amdgpu.vgpr>
+}
+
+func.def target(@target) @wrong_result_count(%value: vector<1xi32>) -> (vector<1xi32>) {
+  // ERROR@+1: TARGET/073 {callee_name="unary_result", value_kind="result", actual_count="0", expected_count="1"}
+  low.invoke @unary_result(%value) : (vector<1xi32>)
+  func.return %value : vector<1xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @wide_result(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) {
+  %wide = low.concat(%value, %value) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.return %wide : reg<amdgpu.vgpr x2>
+}
+
+func.def target(@target) @wrong_result_type(%value: vector<1xi32>) -> (vector<1xi32>) {
+  // ERROR@+1: TARGET/074 {callee_name="wide_result", value_kind="result", actual_type="reg<amdgpu.vgpr>", expected_type="reg<amdgpu.vgpr x2>"}
+  %result = low.invoke @wide_result(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @must_inline(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+  low.return %value : reg<amdgpu.vgpr>
+}
+
+func.def target(@target) @noinline_conflicts_with_amdgpu(%value: vector<1xi32>) -> (vector<1xi32>) {
+  // ERROR@+1: LOWERING/044 {op_name="low.func.call", phase_name="inline-callables", callee_name="must_inline", failure_code="target_requires_inline"}
+  %result = low.invoke noinline @must_inline(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @cycle_a(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+  // ERROR@+1: LOWERING/044 {op_name="low.func.call", phase_name="inline-callables", callee_name="cycle_b", failure_code="required_cycle"}
+  %result = low.func.call @cycle_b(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  low.return %result : reg<amdgpu.vgpr>
+}
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @cycle_b(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+  // ERROR@+1: LOWERING/044 {op_name="low.func.call", phase_name="inline-callables", callee_name="cycle_a", failure_code="required_cycle"}
+  %result = low.func.call @cycle_a(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  low.return %result : reg<amdgpu.vgpr>
+}
+
+func.def target(@target) @recursive_closure_caller(%value: vector<1xi32>) -> (vector<1xi32>) {
+  %result = low.invoke @cycle_a(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
 }

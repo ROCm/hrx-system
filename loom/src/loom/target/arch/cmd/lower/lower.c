@@ -703,8 +703,8 @@ static iree_status_t loom_cmd_lower_create_function(
       state->module, &state->plan->abi_layout, &abi_layout_attr));
   IREE_RETURN_IF_ERROR(loom_low_func_def_build(
       &state->builder, build_flags, visibility, retain,
-      /*cc=*/0, /*purity=*/0, /*allocation=*/0, /*schedule=*/0,
-      descriptor_set_key, loom_symbol_ref_null(),
+      /*cc=*/0, /*purity=*/0, /*inline_policy=*/0, /*allocation=*/0,
+      /*schedule=*/0, descriptor_set_key, loom_symbol_ref_null(),
       LOOM_TARGET_ABI_COMMAND_PROGRAM, loom_named_attr_slice_empty(),
       loom_attr_as_dict(abi_layout_attr), LOOM_STRING_ID_INVALID,
       loom_named_attr_slice_empty(), callee,

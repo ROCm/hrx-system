@@ -362,6 +362,8 @@ static iree_status_t loom_low_lower_create_func_op(
   uint8_t visibility = loom_func_like_visibility(context->source_function);
   uint8_t cc = loom_func_like_cc(context->source_function);
   uint8_t purity = loom_func_like_purity(context->source_function);
+  uint8_t inline_policy =
+      loom_func_like_inline_policy(context->source_function);
   loom_target_abi_kind_t abi = loom_low_lower_function_abi(context);
   loom_named_attr_slice_t abi_attrs =
       loom_func_like_abi_attrs(context->source_function);
@@ -381,6 +383,9 @@ static iree_status_t loom_low_lower_create_func_op(
   }
   if (purity != 0) {
     build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_PURITY;
+  }
+  if (inline_policy != 0) {
+    build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY;
   }
   if (abi != 0) {
     build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI;
@@ -418,7 +423,7 @@ static iree_status_t loom_low_lower_create_func_op(
       loom_low_lower_intern_descriptor_set_key(context, &descriptor_set_key));
   IREE_RETURN_IF_ERROR(loom_low_func_def_build(
       &context->builder, build_flags, visibility, retain, cc, purity,
-      /*allocation=*/0, /*schedule=*/0, descriptor_set_key,
+      inline_policy, /*allocation=*/0, /*schedule=*/0, descriptor_set_key,
       context->options->target_ref, abi, abi_attrs, abi_layout, export_symbol,
       export_attrs, low_func_ref, arg_types, arg_count, result_types,
       result_count,
@@ -761,6 +766,8 @@ iree_status_t loom_low_lower_import_declaration(
     const uint8_t visibility = loom_func_like_visibility(source_declaration);
     const uint8_t cc = loom_func_like_cc(source_declaration);
     const uint8_t purity = loom_func_like_purity(source_declaration);
+    const uint8_t inline_policy =
+        loom_func_like_inline_policy(source_declaration);
     const bool has_abi = loom_low_lower_function_attr_present(
         source_declaration, source_declaration.vtable->abi_attr_index);
     const loom_target_abi_kind_t abi =
@@ -783,6 +790,9 @@ iree_status_t loom_low_lower_import_declaration(
     }
     if (purity != 0) {
       build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_PURITY;
+    }
+    if (inline_policy != 0) {
+      build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_INLINE_POLICY;
     }
     if (has_abi) {
       build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI;
@@ -822,7 +832,7 @@ iree_status_t loom_low_lower_import_declaration(
       if (iree_status_is_ok(status)) {
         status = loom_low_func_decl_build(
             &context.builder, build_flags, visibility, retain, cc, purity,
-            /*allocation=*/0, /*schedule=*/0,
+            inline_policy, /*allocation=*/0, /*schedule=*/0,
             (uint8_t)options->policy->import_decl_kind, code_symbol,
             descriptor_set_key, options->target_ref, abi, abi_attrs, abi_layout,
             export_symbol, export_attrs, low_func_ref, arg_types, arg_count,

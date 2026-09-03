@@ -472,6 +472,9 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
       builder, context, LOOM_TARGET_PIPELINE_PHASE_SOURCE_TO_LOW));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_source_to_low(builder, context->options));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run_with_string_option(
+      builder, IREE_SV("inline-callables"), IREE_SV("policy"),
+      IREE_SV("target")));
   if (context->source_low_artifact_preparation) {
     IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
         builder, loom_target_pipeline_build_low_cleanup_body, user_data,
@@ -497,6 +500,9 @@ loom_target_pipeline_build_source_low_diagnostic_artifacts_body(
   }
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_source_to_low(builder, context->options));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run_with_string_option(
+      builder, IREE_SV("inline-callables"), IREE_SV("policy"),
+      IREE_SV("target")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
       builder, loom_target_pipeline_build_source_low_artifact_preparation,
       user_data, &for_op));
@@ -508,9 +514,9 @@ static iree_status_t loom_target_pipeline_build_prepared_low_body(
     loom_builder_t* builder, void* user_data) {
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_source_low_body(builder, user_data));
-  // Required-inline boundaries such as low.invoke disappear during
-  // source-to-Low lowering. Prune their now-unreachable private definitions
-  // before target-Low function passes can mistake them for artifact entries.
+  // Prune private definitions made unreachable by authored and target-required
+  // Low call inlining before target-Low function passes can mistake them for
+  // artifact entries.
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_run(builder, IREE_SV("symbol-dce")));
   loom_op_t* for_op = NULL;

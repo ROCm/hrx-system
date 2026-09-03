@@ -85,6 +85,7 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
     }
   }
   source-to-low
+  inline-callables(policy = "target")
   for func {
     where target {
       cfg-simplify
@@ -189,6 +190,7 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
     }
   }
   source-to-low
+  inline-callables(policy = "target")
   for func {
     where target {
       cfg-simplify
@@ -331,6 +333,7 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
     }
   }
   source-to-low
+  inline-callables(policy = "target")
   for func {
     where target {
       cfg-simplify

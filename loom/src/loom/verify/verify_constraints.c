@@ -1512,19 +1512,49 @@ static void loom_verify_relation_condition_forward_match(
   }
 }
 
-// YIELD_COUNT: a region's terminator (yield) operand count matches
-// the element count of a variadic value field. Args: (region field,
+static bool loom_verify_region_block_yield(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_op_vtable_t* vtable, uint8_t region_index, uint16_t block_index,
+    uint16_t* out_yield_count, const loom_value_id_t** out_yield_operands) {
+  *out_yield_count = 0;
+  if (out_yield_operands != NULL) *out_yield_operands = NULL;
+  if (region_index >= op->region_count) return false;
+  const loom_region_descriptor_t* region_descriptor =
+      loom_op_vtable_region_descriptor(vtable, region_index);
+  loom_region_t* region = loom_op_regions(op)[region_index];
+  if (region_descriptor == NULL || region == NULL ||
+      block_index >= region->block_count) {
+    return false;
+  }
+  const loom_block_t* block = loom_region_const_block(region, block_index);
+  const loom_op_t* terminator = block->last_op;
+  if (terminator == NULL) return false;
+  const loom_op_vtable_t* terminator_vtable =
+      loom_verify_lookup_vtable(state, terminator->kind);
+  if (terminator_vtable == NULL ||
+      !iree_any_bit_set(terminator_vtable->traits, LOOM_TRAIT_TERMINATOR) ||
+      (region_descriptor->terminator != LOOM_OP_KIND_UNKNOWN &&
+       terminator->kind != region_descriptor->terminator)) {
+    return false;
+  }
+  *out_yield_count = terminator->operand_count;
+  if (out_yield_operands != NULL) {
+    *out_yield_operands = loom_op_const_operands(terminator);
+  }
+  return true;
+}
+
+// YIELD_COUNT: every return terminator in a region has an operand count that
+// matches the element count of a variadic value field. Args: (region field,
 // variadic value field).
 static void loom_verify_relation_yield_count(
     loom_verify_state_t* state, const loom_op_t* op,
     const loom_op_vtable_t* vtable, const loom_constraint_t* constraint) {
   if (constraint->arg_count < 2) return;
-  uint16_t yield_count = 0;
-  if (!loom_verify_region_entry_yield(state, op, vtable,
-                                      LOOM_FIELD_REF_INDEX(constraint->args[0]),
-                                      &yield_count, NULL)) {
-    return;
-  }
+  const uint8_t region_index = LOOM_FIELD_REF_INDEX(constraint->args[0]);
+  if (region_index >= op->region_count) return;
+  loom_region_t* region = loom_op_regions(op)[region_index];
+  if (region == NULL) return;
   uint16_t result_count =
       loom_verify_variadic_count(op, vtable, constraint->args[1]);
   // A non-variadic result counts as a single element for the purposes
@@ -1533,15 +1563,24 @@ static void loom_verify_relation_yield_count(
       LOOM_FIELD_REF_INDEX(constraint->args[1]) < vtable->fixed_result_count) {
     result_count = 1;
   }
-  if (yield_count == result_count) return;
-  const loom_error_def_t* error =
-      loom_verify_constraint_error_or(constraint, LOOM_ERR_STRUCTURE_008);
-  loom_diagnostic_param_t params[] = {
-      loom_param_u32(yield_count),
-      loom_param_u32(result_count),
-  };
-  loom_verify_emit_structured(state, op, error, params,
-                              error->param_count < 2 ? error->param_count : 2);
+  for (uint16_t block_index = 0; block_index < region->block_count;
+       ++block_index) {
+    uint16_t yield_count = 0;
+    if (!loom_verify_region_block_yield(state, op, vtable, region_index,
+                                        block_index, &yield_count, NULL) ||
+        yield_count == result_count) {
+      continue;
+    }
+    const loom_error_def_t* error =
+        loom_verify_constraint_error_or(constraint, LOOM_ERR_STRUCTURE_008);
+    loom_diagnostic_param_t params[] = {
+        loom_param_u32(yield_count),
+        loom_param_u32(result_count),
+    };
+    loom_verify_emit_structured(
+        state, op, error, params,
+        error->param_count < 2 ? error->param_count : 2);
+  }
 }
 
 // YIELD_MATCH: each region terminator (yield) operand's property
@@ -1556,49 +1595,56 @@ static void loom_verify_relation_yield_match(
   if (LOOM_FIELD_REF_CATEGORY(constraint->args[1]) != LOOM_FIELD_RESULT) {
     return;
   }
-  uint16_t yield_count = 0;
-  const loom_value_id_t* yield_operands = NULL;
-  if (!loom_verify_region_entry_yield(state, op, vtable,
-                                      LOOM_FIELD_REF_INDEX(constraint->args[0]),
-                                      &yield_count, &yield_operands)) {
-    return;
-  }
+  const uint8_t region_index = LOOM_FIELD_REF_INDEX(constraint->args[0]);
+  if (region_index >= op->region_count) return;
+  loom_region_t* region = loom_op_regions(op)[region_index];
+  if (region == NULL) return;
   uint16_t result_count = 0;
   const loom_value_id_t* result_values = loom_verify_resolve_variadic_field(
       op, vtable, constraint->args[1], &result_count);
   if (!result_values) return;
-  uint16_t check_count =
-      yield_count < result_count ? yield_count : result_count;
-  loom_type_value_remap_t yield_remap = {
-      .source_values = result_values,
-      .target_values = yield_operands,
-      .count = check_count,
-  };
-  for (uint16_t i = 0; i < check_count; ++i) {
-    loom_type_t yield_type = loom_verify_value_type(state, yield_operands[i]);
-    loom_type_t result_type = loom_verify_value_type(state, result_values[i]);
-    bool matched =
-        constraint->property == LOOM_PROPERTY_TYPE
-            ? loom_type_equal_after_value_remap(state->module, result_type,
-                                                yield_type, &yield_remap)
-            : loom_constraint_property_equals(yield_type, result_type,
-                                              constraint->property);
-    if (matched) {
+  for (uint16_t block_index = 0; block_index < region->block_count;
+       ++block_index) {
+    uint16_t yield_count = 0;
+    const loom_value_id_t* yield_operands = NULL;
+    if (!loom_verify_region_block_yield(state, op, vtable, region_index,
+                                        block_index, &yield_count,
+                                        &yield_operands)) {
       continue;
     }
-    const loom_error_def_t* error =
-        loom_verify_constraint_error_or(constraint, LOOM_ERR_TYPE_009);
-    loom_type_t expected_type =
-        constraint->property == LOOM_PROPERTY_TYPE
-            ? result_type
-            : loom_type_scalar(loom_type_element_type(result_type));
-    loom_diagnostic_param_t params[] = {
-        loom_param_type(yield_type),
-        loom_param_type(expected_type),
+    const uint16_t check_count =
+        yield_count < result_count ? yield_count : result_count;
+    const loom_type_value_remap_t yield_remap = {
+        .source_values = result_values,
+        .target_values = yield_operands,
+        .count = check_count,
     };
-    loom_verify_emit_structured(
-        state, op, error, params,
-        error->param_count < 2 ? error->param_count : 2);
+    for (uint16_t i = 0; i < check_count; ++i) {
+      const loom_type_t yield_type =
+          loom_verify_value_type(state, yield_operands[i]);
+      const loom_type_t result_type =
+          loom_verify_value_type(state, result_values[i]);
+      const bool matched =
+          constraint->property == LOOM_PROPERTY_TYPE
+              ? loom_type_equal_after_value_remap(state->module, result_type,
+                                                  yield_type, &yield_remap)
+              : loom_constraint_property_equals(yield_type, result_type,
+                                                constraint->property);
+      if (matched) continue;
+      const loom_error_def_t* error =
+          loom_verify_constraint_error_or(constraint, LOOM_ERR_TYPE_009);
+      const loom_type_t expected_type =
+          constraint->property == LOOM_PROPERTY_TYPE
+              ? result_type
+              : loom_type_scalar(loom_type_element_type(result_type));
+      loom_diagnostic_param_t params[] = {
+          loom_param_type(yield_type),
+          loom_param_type(expected_type),
+      };
+      loom_verify_emit_structured(
+          state, op, error, params,
+          error->param_count < 2 ? error->param_count : 2);
+    }
   }
 }
 

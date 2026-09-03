@@ -760,6 +760,52 @@ iree_status_t loom_rewriter_move_before(loom_rewriter_t* rewriter,
   return iree_ok_status();
 }
 
+iree_status_t loom_rewriter_move_to_block_end(loom_rewriter_t* rewriter,
+                                              loom_op_t* op,
+                                              loom_block_t* target_block,
+                                              loom_op_t* target_parent_op) {
+  if (!op || !target_block) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "move requires live op and target block");
+  }
+  if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD) || !op->parent_block ||
+      !target_block->parent_region) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "cannot move dead or unlinked operation");
+  }
+  if (op->parent_block == target_block && op->next_op == NULL &&
+      op->parent_op == target_parent_op) {
+    return iree_ok_status();
+  }
+
+  loom_module_t* module = rewriter->module;
+  loom_block_t* original_block = op->parent_block;
+  loom_op_t* original_next_op = op->next_op;
+  loom_op_t* original_parent_op = op->parent_op;
+
+  loom_block_unlink_op(module, op);
+  op->parent_block = NULL;
+  op->parent_op = target_parent_op;
+  iree_status_t status = loom_block_append_op(module, target_block, op);
+  if (!iree_status_is_ok(status)) {
+    op->parent_block = NULL;
+    op->parent_op = original_parent_op;
+    iree_status_t restore_status = loom_block_insert_before_op(
+        module, original_block, original_next_op, op);
+    if (iree_status_is_ok(restore_status)) {
+      loom_rewriter_record_subtree_summaries(module, op);
+    }
+    return iree_status_join(status, restore_status);
+  }
+  loom_rewriter_record_subtree_summaries(module, op);
+
+  IREE_RETURN_IF_ERROR(loom_rewriter_add_to_worklist(rewriter, op));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_add_parent_summary_ops_to_worklist(rewriter, op));
+  rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
+  return iree_ok_status();
+}
+
 iree_status_t loom_rewriter_set_operand(loom_rewriter_t* rewriter,
                                         loom_op_t* op, uint16_t operand_index,
                                         loom_value_id_t new_value) {

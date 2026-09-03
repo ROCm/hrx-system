@@ -66,10 +66,10 @@ class CallableContractTest : public ::testing::Test {
     loom_op_t* function_op = nullptr;
     IREE_CHECK_OK(loom_low_func_def_build(
         &module_builder_, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0,
-        /*cc=*/0, /*purity=*/0, /*allocation=*/0, /*schedule=*/0, contract_id,
-        loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
-        loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
-        loom_named_attr_slice_empty(), function_ref,
+        /*cc=*/0, /*purity=*/0, /*inline_policy=*/0, /*allocation=*/0,
+        /*schedule=*/0, contract_id, loom_symbol_ref_null(), /*abi=*/0,
+        loom_named_attr_slice_empty(), loom_named_attr_slice_empty(),
+        LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), function_ref,
         /*arg_types=*/nullptr, /*arg_types_count=*/0,
         /*result_types=*/nullptr, /*result_count=*/0, /*tied_results=*/nullptr,
         /*tied_result_count=*/0, /*predicates=*/nullptr,

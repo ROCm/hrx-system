@@ -16,6 +16,10 @@ extern "C" {
 // Returns the callable inliner pass metadata.
 const loom_pass_info_t* loom_inline_callables_pass_info(void);
 
+// Creates an inline-callables pass instance.
+iree_status_t loom_inline_callables_create(loom_pass_t* pass,
+                                           iree_string_view_t options);
+
 // Runs module-level required callable inlining.
 iree_status_t loom_inline_callables_run(loom_pass_t* pass,
                                         loom_module_t* module);

@@ -279,11 +279,15 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
 }
 
 TEST_F(TargetProviderTest, LooksUpProfileProvider) {
+  static const loom_target_fact_type_t kOwnedFactType = {};
+  static const loom_target_fact_type_t kUnownedFactType = {};
   static const loom_target_profile_type_t kOwnedProfileType = {
       /*.name=*/IREE_SVL("owned"),
+      /*.fact_type=*/&kOwnedFactType,
   };
   static const loom_target_profile_type_t kUnownedProfileType = {
       /*.name=*/IREE_SVL("unowned"),
+      /*.fact_type=*/&kUnownedFactType,
   };
   static const loom_target_provider_t provider = {
       /*.profile_type=*/&kOwnedProfileType,
@@ -302,6 +306,12 @@ TEST_F(TargetProviderTest, LooksUpProfileProvider) {
             &provider);
   EXPECT_EQ(loom_target_environment_lookup_profile_provider(
                 &environment, &kUnownedProfileType),
+            nullptr);
+  EXPECT_EQ(loom_target_environment_lookup_fact_provider(&environment,
+                                                         &kOwnedFactType),
+            &provider);
+  EXPECT_EQ(loom_target_environment_lookup_fact_provider(&environment,
+                                                         &kUnownedFactType),
             nullptr);
 
   loom_target_environment_deinitialize(&environment);

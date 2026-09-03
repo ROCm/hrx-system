@@ -377,3 +377,121 @@ func.def inline @cycle_b(%value: i32) -> (i32) {
   %result = func.call @cycle_a(%value) : (i32) -> (i32)
   func.return %result : i32
 }
+
+// ====
+
+// RUN: pass inline-callables
+
+// Low call boundaries are retained by default, and an explicit noinline
+// policy remains authoritative when no target emission policy overrides it.
+test.target<low_core> @target
+
+low.func.def noinline target<test.low.core>(@target) @kept_low_helper(%value: reg<test.i32>) -> (reg<test.i32>) {
+  low.return %value : reg<test.i32>
+}
+
+low.func.def public target<test.low.core>(@target) @kept_low_caller(%value: reg<test.i32>) -> (reg<test.i32>) {
+  %result = low.func.call @kept_low_helper(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  low.return %result : reg<test.i32>
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def noinline target<test.low.core>(@target) @kept_low_helper(%value: reg<test.i32>) -> (reg<test.i32>) {
+  low.return %value : reg<test.i32>
+}
+
+low.func.def public target<test.low.core>(@target) @kept_low_caller(%value: reg<test.i32>) -> (reg<test.i32>) {
+  %result = low.func.call @kept_low_helper(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+// Multi-block callable inlining preserves block arguments, remaps successor
+// edges, and joins every return through one continuation block.
+func.def inline @choose_path(%value: i32) -> (i32) {
+  %condition = scalar.constant 1 : i1
+  cfg.cond_br %condition, ^double, ^identity
+^double:
+  %doubled = test.addi %value, %value : i32
+  cfg.br ^join(%doubled: i32)
+^identity:
+  func.return %value : i32
+^join(%forwarded: i32):
+  func.return %forwarded : i32
+}
+
+func.def public @cfg_entry(%arg: i32) -> (i32) {
+  %prefix = test.addi %arg, %arg : i32
+  %selected = func.call @choose_path(%prefix) : (i32) -> (i32)
+  %suffix = test.addi %selected, %arg : i32
+  func.return %suffix : i32
+}
+
+// ----
+func.def public @cfg_entry(%arg: i32) -> (i32) {
+  %prefix = test.addi %arg, %arg : i32
+  cfg.br ^_bb1(%prefix: i32)
+^_bb1(%value: i32):
+  %condition = scalar.constant 1 : i1
+  cfg.cond_br %condition, ^_bb2, ^_bb3
+^_bb2:
+  %doubled = test.addi %value, %value : i32
+  cfg.br ^_bb4(%doubled: i32)
+^_bb3:
+  cfg.br ^_bb5(%value: i32)
+^_bb4(%forwarded: i32):
+  cfg.br ^_bb5(%forwarded: i32)
+^_bb5(%selected: i32):
+  %suffix = test.addi %selected, %arg : i32
+  func.return %suffix : i32
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+// Low functions use the same authored inline policy and shared CFG splice as
+// semantic functions. Low-specific branch construction stays at this policy
+// boundary so the reusable inliner does not learn target or dialect details.
+test.target<low_core> @target
+
+low.func.def inline target<test.low.core>(@target) @low_choose_path(%condition: reg<test.i32>, %value: reg<test.i32>) -> (reg<test.i32>) {
+  low.cond_br %condition, ^identity, ^forward : reg<test.i32>
+^identity:
+  low.return %value : reg<test.i32>
+^forward:
+  low.br ^join(%value: reg<test.i32>)
+^join(%forwarded: reg<test.i32>):
+  low.return %forwarded : reg<test.i32>
+}
+
+low.func.def public target<test.low.core>(@target) @low_cfg_entry(%condition: reg<test.i32>, %arg: reg<test.i32>) -> (reg<test.i32>) {
+  %prefix = low.copy %arg : reg<test.i32> -> reg<test.i32>
+  %selected = low.func.call @low_choose_path(%condition, %prefix) : (reg<test.i32>, reg<test.i32>) -> (reg<test.i32>)
+  %suffix = low.copy %selected : reg<test.i32> -> reg<test.i32>
+  low.return %suffix : reg<test.i32>
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def public target<test.low.core>(@target) @low_cfg_entry(%condition$4: reg<test.i32>, %arg: reg<test.i32>) -> (reg<test.i32>) {
+  %prefix = low.copy %arg : reg<test.i32> -> reg<test.i32>
+  low.br ^_bb1(%condition$4: reg<test.i32>, %prefix: reg<test.i32>)
+^_bb1(%condition$10: reg<test.i32>, %value: reg<test.i32>):
+  low.cond_br %condition$10, ^_bb2, ^_bb3 : reg<test.i32>
+^_bb2:
+  low.br ^_bb5(%value: reg<test.i32>)
+^_bb3:
+  low.br ^_bb4(%value: reg<test.i32>)
+^_bb4(%forwarded: reg<test.i32>):
+  low.br ^_bb5(%forwarded: reg<test.i32>)
+^_bb5(%selected: reg<test.i32>):
+  %suffix = low.copy %selected : reg<test.i32> -> reg<test.i32>
+  low.return %suffix : reg<test.i32>
+}
