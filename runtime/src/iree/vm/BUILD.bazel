@@ -16,10 +16,14 @@ package(
 iree_runtime_cc_library(
     name = "vm",
     srcs = [
+        "buffer.c",
+        "environment.c",
         "ref.c",
         "variant.c",
     ],
     hdrs = [
+        "buffer.h",
+        "environment.h",
         "function.h",
         "ref.h",
         "scalar.h",
@@ -28,6 +32,27 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "buffer_test",
+    srcs = ["buffer_test.cc"],
+    deps = [
+        ":vm",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "environment_test",
+    srcs = ["environment_test.cc"],
+    deps = [
+        ":vm",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
