@@ -232,10 +232,6 @@ typedef struct loom_inline_plan_entry_t {
   loom_inline_plan_action_t action;
   // Stable blocker code for ACTION_ERROR.
   loom_inline_blocker_t blocker;
-  // Erase the private callee after clone inlining the final live reference.
-  bool erase_callee_after_clone;
-  // Execution order ordinal assigned after SCC ordering.
-  uint32_t execution_ordinal;
 } loom_inline_plan_entry_t;
 
 typedef struct loom_inline_component_entries_t {
@@ -600,7 +596,6 @@ static iree_status_t loom_inline_build_plan(loom_inline_state_t* state) {
     entry->callee_temperature = loom_func_like_temperature(entry->callee);
     entry->effective_temperature = loom_inline_effective_temperature(
         entry->callee_temperature, entry->call_temperature);
-    entry->execution_ordinal = UINT32_MAX;
 
     loom_inline_resolve_entry_policy(state, entry);
     loom_inline_add_required_graph_edge(state, entry_index);
@@ -1021,23 +1016,6 @@ static iree_status_t loom_inline_emit_blockers(loom_inline_state_t* state) {
 // Execution planning
 //===----------------------------------------------------------------------===//
 
-static void loom_inline_assign_execution_order(loom_inline_state_t* state) {
-  uint32_t execution_ordinal = 0;
-  for (iree_host_size_t component_index = 0;
-       component_index < state->sccs.count; ++component_index) {
-    for (uint32_t entry_index =
-             state->component_entries[component_index].first_entry;
-         entry_index != LOOM_INLINE_PLAN_ENTRY_INVALID;
-         entry_index = state->entries[entry_index].next_required_in_component) {
-      loom_inline_plan_entry_t* entry = &state->entries[entry_index];
-      if (entry->action != LOOM_INLINE_PLAN_ACTION_REQUIRED) {
-        continue;
-      }
-      entry->execution_ordinal = execution_ordinal++;
-    }
-  }
-}
-
 static bool loom_inline_symbol_can_transfer(const loom_inline_state_t* state,
                                             loom_symbol_id_t symbol_id) {
   if (symbol_id >= state->module->symbols.count) {
@@ -1069,8 +1047,7 @@ static bool loom_inline_symbol_can_transfer(const loom_inline_state_t* state,
 }
 
 static iree_status_t loom_inline_select_transfer_actions(
-    loom_inline_state_t* state, uint32_t* out_transfer_count) {
-  *out_transfer_count = 0;
+    loom_inline_state_t* state) {
   uint32_t* final_entry_by_symbol = NULL;
   if (state->module->symbols.count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -1081,20 +1058,17 @@ static iree_status_t loom_inline_select_transfer_actions(
     }
   }
 
-  for (uint32_t entry_index = 0; entry_index < state->entry_count;
-       ++entry_index) {
-    loom_inline_plan_entry_t* entry = &state->entries[entry_index];
-    if (entry->action != LOOM_INLINE_PLAN_ACTION_REQUIRED) {
-      continue;
-    }
-    if (!loom_inline_symbol_can_transfer(state, entry->target_symbol_id)) {
-      continue;
-    }
-    uint32_t previous_index = final_entry_by_symbol[entry->target_symbol_id];
-    if (previous_index == LOOM_INLINE_PLAN_ENTRY_INVALID ||
-        state->entries[previous_index].execution_ordinal <
-            entry->execution_ordinal) {
-      final_entry_by_symbol[entry->target_symbol_id] = entry_index;
+  for (iree_host_size_t component_index = 0;
+       component_index < state->sccs.count; ++component_index) {
+    for (uint32_t entry_index =
+             state->component_entries[component_index].first_entry;
+         entry_index != LOOM_INLINE_PLAN_ENTRY_INVALID;
+         entry_index = state->entries[entry_index].next_required_in_component) {
+      loom_inline_plan_entry_t* entry = &state->entries[entry_index];
+      if (entry->action == LOOM_INLINE_PLAN_ACTION_REQUIRED &&
+          loom_inline_symbol_can_transfer(state, entry->target_symbol_id)) {
+        final_entry_by_symbol[entry->target_symbol_id] = entry_index;
+      }
     }
   }
 
@@ -1105,13 +1079,7 @@ static iree_status_t loom_inline_select_transfer_actions(
       continue;
     }
     if (final_entry_by_symbol[entry->target_symbol_id] == entry_index) {
-      if (state->symbols[entry->target_symbol_id].body_will_be_linear) {
-        entry->action = LOOM_INLINE_PLAN_ACTION_TRANSFER;
-        ++*out_transfer_count;
-      } else {
-        entry->action = LOOM_INLINE_PLAN_ACTION_CLONE;
-        entry->erase_callee_after_clone = true;
-      }
+      entry->action = LOOM_INLINE_PLAN_ACTION_TRANSFER;
     } else {
       entry->action = LOOM_INLINE_PLAN_ACTION_CLONE;
     }
@@ -1122,42 +1090,44 @@ static iree_status_t loom_inline_select_transfer_actions(
 static iree_status_t loom_inline_execute_entry(
     loom_inline_state_t* state, loom_rewriter_t* rewriter,
     const loom_availability_analysis_t* transfer_availability,
-    loom_inline_plan_entry_t* entry) {
+    loom_inline_plan_entry_t* entry, bool* out_changed_cfg_topology) {
+  *out_changed_cfg_topology = false;
   switch (entry->action) {
     case LOOM_INLINE_PLAN_ACTION_CLONE: {
+      const bool body_is_linear =
+          loom_callable_body_is_linear(state->module, entry->callee);
       const loom_callable_build_branch_fn_t build_branch =
           loom_call_like_kind(entry->call) == LOOM_CALL_LIKE_KIND_LOW_INTERNAL
               ? loom_low_br_build
               : loom_cfg_br_build;
       IREE_RETURN_IF_ERROR(loom_callable_inline_call_with_branch(
           rewriter, entry->call_op, entry->callee, build_branch));
-      if (entry->erase_callee_after_clone) {
-        loom_function_version_t* version =
-            loom_target_function_version_snapshot_handle_at(
-                &state->target_versions, entry->target_symbol_id);
-        IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, entry->callee.op));
-        if (version != NULL) {
-          ++state->erased_version_count;
-        }
-        ++state->statistics->symbols_transferred;
-      }
       loom_pass_mark_changed(state->pass);
       ++state->statistics->calls_cloned;
+      *out_changed_cfg_topology = !body_is_linear;
       return iree_ok_status();
     }
     case LOOM_INLINE_PLAN_ACTION_TRANSFER: {
-      IREE_ASSERT(transfer_availability);
+      const bool body_is_linear =
+          loom_callable_body_is_linear(state->module, entry->callee);
+      const bool use_linear_move = body_is_linear && transfer_availability;
       loom_function_version_t* version =
           loom_target_function_version_snapshot_handle_at(
               &state->target_versions, entry->target_symbol_id);
-      IREE_RETURN_IF_ERROR(loom_callable_inline_consuming_call(
-          rewriter, transfer_availability, entry->call_op, entry->callee));
+      const loom_callable_build_branch_fn_t build_branch =
+          loom_call_like_kind(entry->call) == LOOM_CALL_LIKE_KIND_LOW_INTERNAL
+              ? loom_low_br_build
+              : loom_cfg_br_build;
+      IREE_RETURN_IF_ERROR(loom_callable_inline_consuming_call_with_branch(
+          rewriter, transfer_availability, entry->call_op, entry->callee,
+          build_branch));
       if (version != NULL) {
         ++state->erased_version_count;
       }
       loom_pass_mark_changed(state->pass);
       ++state->statistics->calls_transferred;
       ++state->statistics->symbols_transferred;
+      *out_changed_cfg_topology = !use_linear_move;
       return iree_ok_status();
     }
     default:
@@ -1199,27 +1169,16 @@ static iree_host_size_t loom_inline_prune_erased_function_versions(
 // semantics.
 static iree_status_t loom_inline_materialize_locked_low_schedules(
     loom_inline_state_t* state, loom_rewriter_t* rewriter) {
-  uint8_t* normalized_symbols = NULL;
-  if (state->module->symbols.count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->pass->arena, state->module->symbols.count,
-        sizeof(*normalized_symbols), (void**)&normalized_symbols));
-    memset(normalized_symbols, 0,
-           state->module->symbols.count * sizeof(*normalized_symbols));
-  }
-
   for (uint32_t entry_index = 0; entry_index < state->entry_count;
        ++entry_index) {
     const loom_inline_plan_entry_t* entry = &state->entries[entry_index];
     if ((entry->action != LOOM_INLINE_PLAN_ACTION_CLONE &&
          entry->action != LOOM_INLINE_PLAN_ACTION_TRANSFER) ||
         loom_call_like_kind(entry->call) != LOOM_CALL_LIKE_KIND_LOW_INTERNAL ||
-        normalized_symbols[entry->target_symbol_id] != 0 ||
         loom_low_func_def_schedule(entry->callee.op) !=
             LOOM_LOW_SCHEDULE_LOCKED) {
       continue;
     }
-    normalized_symbols[entry->target_symbol_id] = 1;
 
     loom_region_t* body = loom_func_like_body(entry->callee);
     for (uint16_t block_index = 0; block_index < body->block_count;
@@ -1248,33 +1207,201 @@ static iree_status_t loom_inline_materialize_locked_low_schedules(
   return iree_ok_status();
 }
 
-static iree_status_t loom_inline_execute_plan(loom_inline_state_t* state,
-                                              uint32_t transfer_count) {
+static bool loom_inline_action_executes(loom_inline_plan_action_t action) {
+  return action == LOOM_INLINE_PLAN_ACTION_CLONE ||
+         action == LOOM_INLINE_PLAN_ACTION_TRANSFER;
+}
+
+typedef struct loom_inline_execution_symbol_t {
+  // Executing call edges whose original caller is this symbol.
+  uint32_t remaining_outgoing_count;
+  // Clone uses that must observe this symbol before its consuming use.
+  uint32_t remaining_clone_count;
+  // Head of the clone-use list targeting this symbol.
+  uint32_t first_clone_entry;
+  // Unique consuming use targeting this symbol, when present.
+  uint32_t transfer_entry;
+} loom_inline_execution_symbol_t;
+
+typedef struct loom_inline_execution_entry_t {
+  // Next clone use targeting the same symbol.
+  uint32_t next_clone_entry;
+  // Topology-preserving entry stored in this ready-stack slot.
+  uint32_t linear_ready_entry;
+  // CFG-mutating entry stored in this ready-stack slot.
+  uint32_t cfg_ready_entry;
+} loom_inline_execution_entry_t;
+
+static void loom_inline_enqueue_ready_entry(
+    const loom_inline_state_t* state,
+    loom_inline_execution_entry_t* execution_entries, uint32_t entry_index,
+    uint32_t* inout_linear_ready_count, uint32_t* inout_cfg_ready_count) {
+  const loom_inline_plan_entry_t* entry = &state->entries[entry_index];
+  if (loom_callable_body_is_linear(state->module, entry->callee)) {
+    execution_entries[(*inout_linear_ready_count)++].linear_ready_entry =
+        entry_index;
+  } else {
+    execution_entries[(*inout_cfg_ready_count)++].cfg_ready_entry = entry_index;
+  }
+}
+
+// Executes required edges without repeatedly cloning a growing callee closure.
+// A clone waits for the target's outgoing edges so it observes the complete
+// flattened body. The target's unique transfer waits for all clone uses, but
+// otherwise may move a single-use wrapper outward before flattening calls now
+// carried by that wrapper. Linear ready edges run before CFG edges so their
+// topology-preserving move can share one availability analysis and so a CFG
+// parent carries its linear producers when it moves.
+static iree_status_t loom_inline_execute_plan(loom_inline_state_t* state) {
+  uint32_t execution_count = 0;
+  for (uint32_t entry_index = 0; entry_index < state->entry_count;
+       ++entry_index) {
+    if (loom_inline_action_executes(state->entries[entry_index].action)) {
+      ++execution_count;
+    }
+  }
+  if (execution_count == 0) return iree_ok_status();
+
   loom_rewriter_t rewriter = {0};
   IREE_RETURN_IF_ERROR(
       loom_rewriter_initialize(&rewriter, state->module, state->pass->arena));
 
-  loom_availability_analysis_t transfer_availability = {0};
   iree_status_t status =
       loom_inline_materialize_locked_low_schedules(state, &rewriter);
-  if (iree_status_is_ok(status) && transfer_count != 0) {
-    status = loom_availability_analysis_initialize(
-        state->module, state->pass->arena, &transfer_availability);
+  const iree_host_size_t symbol_count = state->module->symbols.count;
+  loom_inline_execution_symbol_t* execution_symbols = NULL;
+  loom_inline_execution_entry_t* execution_entries = NULL;
+  if (iree_status_is_ok(status) && symbol_count > 0) {
+    status = iree_arena_allocate_array(state->pass->arena, symbol_count,
+                                       sizeof(*execution_symbols),
+                                       (void**)&execution_symbols);
   }
-  const loom_availability_analysis_t* transfer_availability_ptr =
-      transfer_count > 0 ? &transfer_availability : NULL;
+  if (iree_status_is_ok(status) && state->entry_count > 0) {
+    status = iree_arena_allocate_array(state->pass->arena, state->entry_count,
+                                       sizeof(*execution_entries),
+                                       (void**)&execution_entries);
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < symbol_count; ++i) {
+      execution_symbols[i] = (loom_inline_execution_symbol_t){
+          .first_clone_entry = LOOM_INLINE_PLAN_ENTRY_INVALID,
+          .transfer_entry = LOOM_INLINE_PLAN_ENTRY_INVALID,
+      };
+    }
+    for (uint32_t i = 0; i < state->entry_count; ++i) {
+      execution_entries[i].next_clone_entry = LOOM_INLINE_PLAN_ENTRY_INVALID;
+    }
+  }
+
+  for (uint32_t entry_index = 0;
+       iree_status_is_ok(status) && entry_index < state->entry_count;
+       ++entry_index) {
+    loom_inline_plan_entry_t* entry = &state->entries[entry_index];
+    if (!loom_inline_action_executes(entry->action)) continue;
+    IREE_ASSERT_LT(entry->source_symbol_id, symbol_count);
+    IREE_ASSERT_LT(entry->target_symbol_id, symbol_count);
+    ++execution_symbols[entry->source_symbol_id].remaining_outgoing_count;
+    if (entry->action == LOOM_INLINE_PLAN_ACTION_CLONE) {
+      loom_inline_execution_symbol_t* target =
+          &execution_symbols[entry->target_symbol_id];
+      ++target->remaining_clone_count;
+      execution_entries[entry_index].next_clone_entry =
+          target->first_clone_entry;
+      target->first_clone_entry = entry_index;
+    } else {
+      loom_inline_execution_symbol_t* target =
+          &execution_symbols[entry->target_symbol_id];
+      IREE_ASSERT_EQ(target->transfer_entry, LOOM_INLINE_PLAN_ENTRY_INVALID);
+      target->transfer_entry = entry_index;
+    }
+  }
+
+  uint32_t linear_ready_count = 0;
+  uint32_t cfg_ready_count = 0;
   for (iree_host_size_t component_index = 0;
        iree_status_is_ok(status) && component_index < state->sccs.count;
        ++component_index) {
     for (uint32_t entry_index =
              state->component_entries[component_index].first_entry;
-         iree_status_is_ok(status) &&
          entry_index != LOOM_INLINE_PLAN_ENTRY_INVALID;
          entry_index = state->entries[entry_index].next_required_in_component) {
-      loom_inline_plan_entry_t* entry = &state->entries[entry_index];
-      status = loom_inline_execute_entry(state, &rewriter,
-                                         transfer_availability_ptr, entry);
+      const loom_inline_plan_entry_t* entry = &state->entries[entry_index];
+      if (!loom_inline_action_executes(entry->action)) continue;
+      const loom_inline_execution_symbol_t* target =
+          &execution_symbols[entry->target_symbol_id];
+      const bool ready = entry->action == LOOM_INLINE_PLAN_ACTION_CLONE
+                             ? target->remaining_outgoing_count == 0
+                             : target->remaining_clone_count == 0;
+      if (ready) {
+        loom_inline_enqueue_ready_entry(state, execution_entries, entry_index,
+                                        &linear_ready_count, &cfg_ready_count);
+      }
     }
+  }
+
+  loom_availability_analysis_t transfer_availability = {0};
+  bool transfer_availability_valid = false;
+  bool cfg_topology_changed = false;
+  uint32_t executed_count = 0;
+  while (iree_status_is_ok(status) &&
+         (linear_ready_count > 0 || cfg_ready_count > 0)) {
+    const uint32_t entry_index =
+        linear_ready_count > 0
+            ? execution_entries[--linear_ready_count].linear_ready_entry
+            : execution_entries[--cfg_ready_count].cfg_ready_entry;
+    loom_inline_plan_entry_t* entry = &state->entries[entry_index];
+    const bool body_is_linear =
+        entry->action == LOOM_INLINE_PLAN_ACTION_TRANSFER &&
+        loom_callable_body_is_linear(state->module, entry->callee);
+    if (body_is_linear && !transfer_availability_valid &&
+        !cfg_topology_changed) {
+      status = loom_availability_analysis_initialize(
+          state->module, state->pass->arena, &transfer_availability);
+      if (!iree_status_is_ok(status)) break;
+      transfer_availability_valid = true;
+    }
+    bool changed_cfg_topology = false;
+    const loom_availability_analysis_t* availability =
+        body_is_linear && transfer_availability_valid ? &transfer_availability
+                                                      : NULL;
+    status = loom_inline_execute_entry(state, &rewriter, availability, entry,
+                                       &changed_cfg_topology);
+    if (!iree_status_is_ok(status)) break;
+    ++executed_count;
+    if (changed_cfg_topology) {
+      transfer_availability_valid = false;
+      cfg_topology_changed = true;
+    }
+
+    loom_inline_execution_symbol_t* source =
+        &execution_symbols[entry->source_symbol_id];
+    IREE_ASSERT_GT(source->remaining_outgoing_count, 0u);
+    if (--source->remaining_outgoing_count == 0) {
+      for (uint32_t clone_index = source->first_clone_entry;
+           clone_index != LOOM_INLINE_PLAN_ENTRY_INVALID;
+           clone_index = execution_entries[clone_index].next_clone_entry) {
+        loom_inline_enqueue_ready_entry(state, execution_entries, clone_index,
+                                        &linear_ready_count, &cfg_ready_count);
+      }
+    }
+    if (entry->action == LOOM_INLINE_PLAN_ACTION_CLONE) {
+      loom_inline_execution_symbol_t* target =
+          &execution_symbols[entry->target_symbol_id];
+      IREE_ASSERT_GT(target->remaining_clone_count, 0u);
+      if (--target->remaining_clone_count == 0) {
+        if (target->transfer_entry != LOOM_INLINE_PLAN_ENTRY_INVALID) {
+          loom_inline_enqueue_ready_entry(
+              state, execution_entries, target->transfer_entry,
+              &linear_ready_count, &cfg_ready_count);
+        }
+      }
+    }
+  }
+  if (iree_status_is_ok(status) && executed_count != execution_count) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "inline execution dependencies stalled after %u of %u calls",
+        (unsigned)executed_count, (unsigned)execution_count);
   }
 
   const iree_host_size_t removed_version_count =
@@ -1326,11 +1453,8 @@ iree_status_t loom_inline_callables_run(loom_pass_t* pass,
     return iree_ok_status();
   }
 
-  loom_inline_assign_execution_order(&state);
-  uint32_t transfer_count = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_inline_select_transfer_actions(&state, &transfer_count));
-  IREE_RETURN_IF_ERROR(loom_inline_execute_plan(&state, transfer_count));
+  IREE_RETURN_IF_ERROR(loom_inline_select_transfer_actions(&state));
+  IREE_RETURN_IF_ERROR(loom_inline_execute_plan(&state));
   if (!pass->changed) {
     return iree_ok_status();
   }

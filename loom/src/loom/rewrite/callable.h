@@ -82,11 +82,17 @@ iree_status_t loom_callable_inline_direct_call(loom_rewriter_t* rewriter,
 // reference plan proving that the callee is private and that the selected call
 // will be the final live reference outside of the callee's own defining
 // attribute. This helper does not rediscover that global ownership by scanning
-// the module. |availability| must cover the caller region and remain valid
-// across the topology-preserving body move. The callee body must satisfy the
-// same single-block terminator shape as clone inlining. On success body ops are
-// moved before the call, call results are replaced by remapped terminator
-// operands, the call is erased, and the consumed callee op is erased.
+// the module. A linear body moves its operations through |availability| when
+// it is non-NULL. A CFG body, or a linear body with no current availability
+// analysis, moves its blocks through the same entry/continuation splice used by
+// clone inlining and requires |build_branch|. On success the call and consumed
+// callee definition are erased.
+iree_status_t loom_callable_inline_consuming_call_with_branch(
+    loom_rewriter_t* rewriter, const loom_availability_analysis_t* availability,
+    loom_op_t* call_op, loom_func_like_t callee,
+    loom_callable_build_branch_fn_t build_branch);
+
+// Consuming inline using cfg.br for CFG bodies.
 iree_status_t loom_callable_inline_consuming_call(
     loom_rewriter_t* rewriter, const loom_availability_analysis_t* availability,
     loom_op_t* call_op, loom_func_like_t callee);

@@ -72,7 +72,7 @@ std::string BuildSingleUseCfgChainSource(uint32_t helper_count) {
 class InlineCallablesBenchmarkFixture {
  public:
   explicit InlineCallablesBenchmarkFixture(uint32_t helper_count)
-      : expected_output_block_count_(helper_count * 2u + 2u) {
+      : expected_output_block_count_(4) {
     iree_arena_block_pool_initialize(64 * 1024, iree_allocator_system(),
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
@@ -150,7 +150,7 @@ class InlineCallablesBenchmarkFixture {
   }
 
  private:
-  // Number of live blocks and operations expected after complete inlining.
+  // Live blocks/ops after all single-use wrappers collapse into the CFG leaf.
   uint32_t expected_output_block_count_;
   // Shared arena block pool used by source and per-iteration module arenas.
   iree_arena_block_pool_t block_pool_ = {};

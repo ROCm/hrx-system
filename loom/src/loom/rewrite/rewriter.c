@@ -693,7 +693,7 @@ static bool loom_rewriter_op_is_ancestor_of(const loom_op_t* ancestor,
 
 static bool loom_rewriter_op_belongs_to_module(const loom_module_t* module,
                                                const loom_op_t* op) {
-  if (!module || !op) return false;
+  if (!op) return false;
   const loom_op_t* root_op = op;
   while (root_op->parent_op != NULL) root_op = root_op->parent_op;
   return root_op->parent_block != NULL &&
@@ -703,7 +703,7 @@ static bool loom_rewriter_op_belongs_to_module(const loom_module_t* module,
 static bool loom_rewriter_parent_owns_block(const loom_module_t* module,
                                             const loom_op_t* parent_op,
                                             const loom_block_t* block) {
-  if (!module || !block || !block->parent_region) return false;
+  if (!block || !block->parent_region) return false;
   uint16_t block_index = 0;
   if (!loom_region_try_block_index(block->parent_region, block, &block_index)) {
     return false;
@@ -733,6 +733,223 @@ static void loom_rewriter_record_subtree_summaries(loom_module_t* module,
       }
     }
   }
+}
+
+iree_status_t loom_rewriter_move_region_blocks(
+    loom_rewriter_t* rewriter, loom_region_t* source_region,
+    loom_op_t* source_parent_op, loom_region_t* target_region,
+    uint16_t target_block_index, loom_op_t* target_parent_op,
+    loom_block_t** out_moved_entry_block) {
+  *out_moved_entry_block = NULL;
+  if (source_region == target_region) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "source and target regions must be distinct");
+  }
+  if (source_region->block_count == 0 || target_region->block_count == 0 ||
+      source_region->blocks[0] != &source_region->entry_block) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "region move requires source and target entry blocks and an embedded "
+        "source entry");
+  }
+  if (target_block_index > target_region->block_count ||
+      (target_region->block_count > 0 && target_block_index == 0)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "target block insertion index %u is outside the movable range for %u "
+        "blocks",
+        (unsigned)target_block_index, (unsigned)target_region->block_count);
+  }
+
+  iree_host_size_t final_block_count = 0;
+  if (!iree_host_size_checked_add(target_region->block_count,
+                                  source_region->block_count,
+                                  &final_block_count) ||
+      final_block_count > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "moved region block count exceeds UINT16_MAX");
+  }
+  if (!loom_rewriter_parent_owns_block(rewriter->module, source_parent_op,
+                                       source_region->blocks[0]) ||
+      !loom_rewriter_parent_owns_block(rewriter->module, target_parent_op,
+                                       target_region->blocks[0])) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "source and target regions must belong to their declared parents");
+  }
+  if (source_parent_op != target_parent_op &&
+      loom_rewriter_op_is_ancestor_of(source_parent_op, target_parent_op)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "cannot move a region into one of its owning op's descendants");
+  }
+  for (uint16_t block_index = 0; block_index < source_region->block_count;
+       ++block_index) {
+    loom_block_t* block = source_region->blocks[block_index];
+    if (!block || block->parent_region != source_region ||
+        block->region_index != block_index) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "source region block ownership is malformed");
+    }
+    for (uint16_t arg_index = 0; arg_index < block->arg_count; ++arg_index) {
+      const loom_value_id_t value_id = loom_block_arg_id(block, arg_index);
+      if (value_id >= rewriter->module->values.count) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "source block argument is out of range");
+      }
+      const loom_value_t* value = loom_module_value(rewriter->module, value_id);
+      if (!loom_value_is_block_arg(value) ||
+          loom_value_def_block(value) != block) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "source block argument definition does not match its block");
+      }
+    }
+    loom_op_t* op = NULL;
+    loom_block_for_each_op(block, op) {
+      if (op->parent_block != block || op->parent_op != source_parent_op ||
+          iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "source block operation ownership is malformed");
+      }
+    }
+  }
+
+  loom_block_t* moved_entry_block = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_module_allocate_block(rewriter->module, &moved_entry_block));
+  iree_host_size_t entry_comment_count = 0;
+  const iree_string_view_t* entry_comments = loom_module_block_comments(
+      rewriter->module, &source_region->entry_block, &entry_comment_count);
+  if (entry_comment_count > 0) {
+    IREE_RETURN_IF_ERROR(
+        loom_module_attach_block_comments(rewriter->module, moved_entry_block,
+                                          entry_comments, entry_comment_count));
+  }
+
+  const bool use_source_storage =
+      source_region->block_capacity > target_region->block_capacity;
+  loom_region_t* storage_region =
+      use_source_storage ? source_region : target_region;
+  IREE_RETURN_IF_ERROR(loom_region_reserve_block_capacity(
+      rewriter->module, storage_region, final_block_count));
+
+  for (uint16_t block_index = 0; block_index < source_region->block_count;
+       ++block_index) {
+    loom_op_t* op = NULL;
+    loom_block_for_each_op(source_region->blocks[block_index], op) {
+      IREE_RETURN_IF_ERROR(loom_rewriter_add_to_worklist(rewriter, op));
+    }
+  }
+  if (source_parent_op != NULL) {
+    IREE_RETURN_IF_ERROR(
+        loom_rewriter_add_to_worklist(rewriter, source_parent_op));
+  }
+  if (target_parent_op != NULL && target_parent_op != source_parent_op) {
+    IREE_RETURN_IF_ERROR(
+        loom_rewriter_add_to_worklist(rewriter, target_parent_op));
+  }
+  IREE_RETURN_IF_ERROR(loom_rewriter_add_parent_summary_ops_to_worklist(
+      rewriter, source_parent_op));
+  IREE_RETURN_IF_ERROR(loom_rewriter_add_parent_summary_ops_to_worklist(
+      rewriter, target_parent_op));
+
+  const uint16_t source_block_count = source_region->block_count;
+  const uint16_t target_block_count = target_region->block_count;
+  const loom_region_instance_flags_t source_flags = source_region->flags;
+  loom_block_t* old_entry_block = &source_region->entry_block;
+  *moved_entry_block = *old_entry_block;
+  moved_entry_block->label_id = LOOM_STRING_ID_INVALID;
+  source_region->blocks[0] = moved_entry_block;
+
+  for (uint16_t block_index = 0; block_index < source_block_count;
+       ++block_index) {
+    loom_block_t* block = source_region->blocks[block_index];
+    loom_op_t* op = NULL;
+    loom_block_for_each_op(block, op) {
+      loom_module_drop_op_summaries(rewriter->module, op);
+    }
+  }
+
+  loom_block_t** moved_blocks = source_region->blocks;
+  loom_block_t** target_blocks = target_region->blocks;
+  loom_block_t** combined_blocks = storage_region->blocks;
+  const uint16_t combined_capacity = storage_region->block_capacity;
+  if (storage_region == source_region) {
+    memmove(combined_blocks + target_block_index, moved_blocks,
+            (iree_host_size_t)source_block_count * sizeof(*combined_blocks));
+    if (target_block_index > 0) {
+      memcpy(combined_blocks, target_blocks,
+             (iree_host_size_t)target_block_index * sizeof(*combined_blocks));
+    }
+    const uint16_t target_tail_count = target_block_count - target_block_index;
+    if (target_tail_count > 0) {
+      memcpy(combined_blocks + target_block_index + source_block_count,
+             target_blocks + target_block_index,
+             (iree_host_size_t)target_tail_count * sizeof(*combined_blocks));
+    }
+  } else {
+    const uint16_t target_tail_count = target_block_count - target_block_index;
+    if (target_tail_count > 0) {
+      memmove(combined_blocks + target_block_index + source_block_count,
+              combined_blocks + target_block_index,
+              (iree_host_size_t)target_tail_count * sizeof(*combined_blocks));
+    }
+    memcpy(combined_blocks + target_block_index, moved_blocks,
+           (iree_host_size_t)source_block_count * sizeof(*combined_blocks));
+  }
+
+  memset(old_entry_block, 0, sizeof(*old_entry_block));
+  old_entry_block->label_id = LOOM_STRING_ID_INVALID;
+  old_entry_block->region_index = 0;
+  old_entry_block->parent_region = source_region;
+  source_region->block_count = 1;
+  source_region->block_capacity = 1;
+  source_region->flags = 0;
+  source_region->blocks = source_region->inline_blocks;
+  source_region->inline_blocks[0] = old_entry_block;
+
+  target_region->block_count = (uint16_t)final_block_count;
+  target_region->block_capacity = combined_capacity;
+  target_region->blocks = combined_blocks;
+  target_region->flags |= source_flags;
+  for (uint16_t block_index = target_block_index;
+       block_index < target_region->block_count; ++block_index) {
+    loom_block_t* block = target_region->blocks[block_index];
+    block->parent_region = target_region;
+    block->region_index = block_index;
+  }
+  for (uint16_t block_index = target_block_index;
+       block_index < target_block_index + source_block_count; ++block_index) {
+    loom_block_t* block = target_region->blocks[block_index];
+    block->label_id = LOOM_STRING_ID_INVALID;
+    for (uint16_t arg_index = 0; arg_index < block->arg_count; ++arg_index) {
+      loom_value_t* value = loom_module_value(
+          rewriter->module, loom_block_arg_id(block, arg_index));
+      value->def = loom_value_def_make_block(block, arg_index);
+    }
+    loom_op_t* op = NULL;
+    loom_block_for_each_op(block, op) {
+      op->parent_block = block;
+      op->parent_op = target_parent_op;
+      loom_block_t** successors = loom_op_successors(op);
+      for (uint8_t successor_index = 0; successor_index < op->successor_count;
+           ++successor_index) {
+        if (successors[successor_index] == old_entry_block) {
+          successors[successor_index] = moved_entry_block;
+        }
+      }
+      loom_rewriter_record_subtree_summaries(rewriter->module, op);
+    }
+  }
+
+  IREE_ASSERT_EQ(source_region->read_effect_count, 0u);
+  IREE_ASSERT_EQ(source_region->write_effect_count, 0u);
+  IREE_ASSERT_EQ(source_region->convergent_effect_count, 0u);
+  rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
+  *out_moved_entry_block = moved_entry_block;
+  return iree_ok_status();
 }
 
 iree_status_t loom_rewriter_move_before(loom_rewriter_t* rewriter,
