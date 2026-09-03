@@ -91,8 +91,6 @@ typedef struct loom_aie2p_array_plan_builder_t {
   uint8_t* downward_link_next_channel;
   uint8_t* westward_link_next_channel;
   uint8_t* eastward_link_next_channel;
-  uint8_t* shim_ingress_next_channel;
-  uint8_t* shim_egress_next_channel;
 } loom_aie2p_array_plan_builder_t;
 
 static iree_status_t loom_aie2p_array_allocate_array(
@@ -931,8 +929,7 @@ static iree_status_t loom_aie2p_array_allocate_tile_storage(
 
 static iree_status_t loom_aie2p_array_allocate_lock_pair(
     loom_aie2p_array_plan_builder_t* builder, uint32_t channel_index,
-    loom_xdna_tile_coordinate_t coordinate, int8_t credit_count,
-    bool shim_peer) {
+    loom_xdna_tile_coordinate_t coordinate, int8_t credit_count) {
   loom_aie2p_array_tile_state_t* state =
       loom_aie2p_array_tile_state(builder, coordinate);
   if ((uint32_t)state->next_lock + 2u > state->facts->lock_count ||
@@ -949,7 +946,6 @@ static iree_status_t loom_aie2p_array_allocate_lock_pair(
       .lock_id = credit_lock,
       .initial_value = credit_count,
       .consumer_ready = 0,
-      .shim_peer = shim_peer ? 1 : 0,
   };
   builder->locks[builder->lock_cursor++] = (loom_aie2p_array_lock_plan_t){
       .channel_index = channel_index,
@@ -957,7 +953,6 @@ static iree_status_t loom_aie2p_array_allocate_lock_pair(
       .lock_id = ready_lock,
       .initial_value = 0,
       .consumer_ready = 1,
-      .shim_peer = shim_peer ? 1 : 0,
   };
   return iree_ok_status();
 }
@@ -1125,6 +1120,30 @@ static iree_status_t loom_aie2p_array_append_route(
   return iree_ok_status();
 }
 
+static iree_status_t loom_aie2p_array_dma_stream_channel(
+    const loom_aie2p_array_plan_builder_t* builder,
+    loom_xdna_tile_coordinate_t coordinate,
+    loom_aie2p_array_dma_direction_t direction, uint8_t dma_channel,
+    uint8_t* out_stream_channel) {
+  const loom_xdna_tile_facts_t* tile_facts = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_xdna_array_tile_facts(builder->family, coordinate, &tile_facts));
+  if (dma_channel >= tile_facts->dma.channel_count_per_direction) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AIE2P DMA channel exceeds the tile engine");
+  }
+  const uint8_t base =
+      direction == LOOM_AIE2P_ARRAY_DMA_DIRECTION_MEMORY_TO_STREAM
+          ? tile_facts->dma.memory_to_stream_port_base
+          : tile_facts->dma.stream_to_memory_port_base;
+  const uint8_t stride =
+      direction == LOOM_AIE2P_ARRAY_DMA_DIRECTION_MEMORY_TO_STREAM
+          ? tile_facts->dma.memory_to_stream_port_stride
+          : tile_facts->dma.stream_to_memory_port_stride;
+  *out_stream_channel = base + dma_channel * stride;
+  return iree_ok_status();
+}
+
 static iree_host_size_t loom_aie2p_array_vertical_link_index(
     const loom_aie2p_array_plan_builder_t* builder, uint16_t column,
     uint16_t lower_row) {
@@ -1142,13 +1161,9 @@ static iree_status_t loom_aie2p_array_plan_ingress_route(
     loom_xdna_tile_coordinate_t shim_coordinate, uint8_t shim_dma_channel,
     loom_xdna_tile_coordinate_t worker_coordinate, uint8_t worker_dma_channel) {
   uint8_t current_channel = 0;
-  uint8_t shim_south_capacity = 0;
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_port_capacity(
-      builder, shim_coordinate, LOOM_XDNA_STREAM_DIRECTION_SLAVE,
-      LOOM_XDNA_STREAM_PORT_SOUTH, &shim_south_capacity));
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_link_channel(
-      &builder->shim_ingress_next_channel[shim_coordinate.column],
-      shim_south_capacity, &current_channel));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_dma_stream_channel(
+      builder, shim_coordinate, LOOM_AIE2P_ARRAY_DMA_DIRECTION_MEMORY_TO_STREAM,
+      shim_dma_channel, &current_channel));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_append_route(
       builder, channel_index, shim_coordinate,
       LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX, LOOM_XDNA_STREAM_PORT_DMA,
@@ -1275,13 +1290,9 @@ static iree_status_t loom_aie2p_array_plan_egress_route(
   }
 
   uint8_t shim_link_channel = 0;
-  uint8_t shim_south_capacity = 0;
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_port_capacity(
-      builder, shim_coordinate, LOOM_XDNA_STREAM_DIRECTION_MASTER,
-      LOOM_XDNA_STREAM_PORT_SOUTH, &shim_south_capacity));
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_link_channel(
-      &builder->shim_egress_next_channel[shim_coordinate.column],
-      shim_south_capacity, &shim_link_channel));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_dma_stream_channel(
+      builder, shim_coordinate, LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY,
+      shim_dma_channel, &shim_link_channel));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_append_route(
       builder, channel_index, shim_coordinate,
       LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH, incoming_port,
@@ -1527,17 +1538,14 @@ static iree_status_t loom_aie2p_array_plan_external_channel(
   uint8_t shim_dma_channel = 0;
   IREE_RETURN_IF_ERROR(loom_aie2p_array_select_shim_dma(
       builder, channel_index, worker->coordinate.column, shim_direction,
-      channel->capacity, &shim_coordinate, &shim_dma_channel));
+      /*descriptor_count=*/1, &shim_coordinate, &shim_dma_channel));
 
   if (channel->capacity > INT8_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "AIE2P channel capacity exceeds lock range");
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_lock_pair(
-      builder, channel_index, worker->coordinate, (int8_t)channel->capacity,
-      /*shim_peer=*/false));
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_lock_pair(
-      builder, channel_index, shim_coordinate, 0, /*shim_peer=*/true));
+      builder, channel_index, worker->coordinate, (int8_t)channel->capacity));
 
   if (ingress) {
     IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_ingress_route(
@@ -1576,8 +1584,7 @@ static iree_status_t loom_aie2p_array_plan_neighbor_channel(
                             "AIE2P channel capacity exceeds lock range");
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_lock_pair(
-      builder, channel_index, owner, (int8_t)channel->capacity,
-      /*shim_peer=*/false));
+      builder, channel_index, owner, (int8_t)channel->capacity));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_append_worker_port(
       builder, sender, channel_index, first_slot));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_append_worker_port(
@@ -1649,7 +1656,7 @@ static iree_status_t loom_aie2p_array_initialize_tile_states(
   }
 
   uint8_t* next_channels = NULL;
-  const iree_host_size_t next_channel_count = tile_count * 6u;
+  const iree_host_size_t next_channel_count = tile_count * 4u;
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
       builder->arena, next_channel_count, sizeof(*next_channels),
       (void**)&next_channels));
@@ -1658,8 +1665,6 @@ static iree_status_t loom_aie2p_array_initialize_tile_states(
   builder->downward_link_next_channel = next_channels + tile_count;
   builder->westward_link_next_channel = next_channels + tile_count * 2u;
   builder->eastward_link_next_channel = next_channels + tile_count * 3u;
-  builder->shim_ingress_next_channel = next_channels + tile_count * 4u;
-  builder->shim_egress_next_channel = next_channels + tile_count * 5u;
   return iree_ok_status();
 }
 
@@ -1699,12 +1704,11 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
     }
   }
   uint64_t lock_count = 0;
-  uint64_t neighbor_lock_count = 0;
   uint64_t dma_channel_count = 0;
   uint64_t route_count = 0;
-  if (!iree_checked_mul_u64(external_channel_count, 4u, &lock_count) ||
-      !iree_checked_mul_u64(neighbor_channel_count, 2u, &neighbor_lock_count) ||
-      !iree_checked_add_u64(lock_count, neighbor_lock_count, &lock_count) ||
+  if (!iree_checked_add_u64(external_channel_count, neighbor_channel_count,
+                            &lock_count) ||
+      !iree_checked_mul_u64(lock_count, 2u, &lock_count) ||
       !iree_checked_mul_u64(external_channel_count, 2u, &dma_channel_count) ||
       !iree_checked_mul_u64(
           external_channel_count,

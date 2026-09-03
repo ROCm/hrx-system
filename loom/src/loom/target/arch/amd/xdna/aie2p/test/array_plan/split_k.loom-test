@@ -135,7 +135,7 @@ func.def target(@core_target) @reduce_bias_relu_i32(
 }
 
 // ----
-array @split_k_array family=amd.xdna.npu2 groups=2 workers=3 bindings=4 channels=8 slots=16 locks=28 dma=12 routes=34
+array @split_k_array family=amd.xdna.npu2 groups=2 workers=3 bindings=4 channels=8 slots=16 locks=16 dma=12 routes=34
 binding index=0 ordinal=0 access=read
 binding index=1 ordinal=1 access=read
 binding index=2 ordinal=2 access=read
@@ -177,70 +177,58 @@ slot channel=6 index=0 owner=(0,2) offset=0x00040 bytes=256 sender=0x70040 recei
 slot channel=6 index=1 owner=(0,2) offset=0x04040 bytes=256 sender=0x74040 receiver=0x44040
 slot channel=7 index=0 owner=(0,4) offset=0x00040 bytes=256 sender=0x70040 receiver=0x60040
 slot channel=7 index=1 owner=(0,4) offset=0x04040 bytes=256 sender=0x74040 receiver=0x64040
-lock channel=0 tile=(0,2) id=0 role=credit side=ring initial=2
-lock channel=0 tile=(0,2) id=1 role=ready side=ring initial=0
-lock channel=0 tile=(0,0) id=0 role=credit side=shim initial=0
-lock channel=0 tile=(0,0) id=1 role=ready side=shim initial=0
-lock channel=1 tile=(0,2) id=2 role=credit side=ring initial=2
-lock channel=1 tile=(0,2) id=3 role=ready side=ring initial=0
-lock channel=1 tile=(0,0) id=2 role=credit side=shim initial=0
-lock channel=1 tile=(0,0) id=3 role=ready side=shim initial=0
-lock channel=2 tile=(0,4) id=0 role=credit side=ring initial=2
-lock channel=2 tile=(0,4) id=1 role=ready side=ring initial=0
-lock channel=2 tile=(1,0) id=0 role=credit side=shim initial=0
-lock channel=2 tile=(1,0) id=1 role=ready side=shim initial=0
-lock channel=3 tile=(0,4) id=2 role=credit side=ring initial=2
-lock channel=3 tile=(0,4) id=3 role=ready side=ring initial=0
-lock channel=3 tile=(1,0) id=2 role=credit side=shim initial=0
-lock channel=3 tile=(1,0) id=3 role=ready side=shim initial=0
-lock channel=4 tile=(0,3) id=0 role=credit side=ring initial=2
-lock channel=4 tile=(0,3) id=1 role=ready side=ring initial=0
-lock channel=4 tile=(2,0) id=0 role=credit side=shim initial=0
-lock channel=4 tile=(2,0) id=1 role=ready side=shim initial=0
-lock channel=5 tile=(0,3) id=2 role=credit side=ring initial=2
-lock channel=5 tile=(0,3) id=3 role=ready side=ring initial=0
-lock channel=5 tile=(0,0) id=4 role=credit side=shim initial=0
-lock channel=5 tile=(0,0) id=5 role=ready side=shim initial=0
-lock channel=6 tile=(0,2) id=4 role=credit side=ring initial=2
-lock channel=6 tile=(0,2) id=5 role=ready side=ring initial=0
-lock channel=7 tile=(0,4) id=4 role=credit side=ring initial=2
-lock channel=7 tile=(0,4) id=5 role=ready side=ring initial=0
+lock channel=0 tile=(0,2) id=0 role=credit initial=2
+lock channel=0 tile=(0,2) id=1 role=ready initial=0
+lock channel=1 tile=(0,2) id=2 role=credit initial=2
+lock channel=1 tile=(0,2) id=3 role=ready initial=0
+lock channel=2 tile=(0,4) id=0 role=credit initial=2
+lock channel=2 tile=(0,4) id=1 role=ready initial=0
+lock channel=3 tile=(0,4) id=2 role=credit initial=2
+lock channel=3 tile=(0,4) id=3 role=ready initial=0
+lock channel=4 tile=(0,3) id=0 role=credit initial=2
+lock channel=4 tile=(0,3) id=1 role=ready initial=0
+lock channel=5 tile=(0,3) id=2 role=credit initial=2
+lock channel=5 tile=(0,3) id=3 role=ready initial=0
+lock channel=6 tile=(0,2) id=4 role=credit initial=2
+lock channel=6 tile=(0,2) id=5 role=ready initial=0
+lock channel=7 tile=(0,4) id=4 role=credit initial=2
+lock channel=7 tile=(0,4) id=5 role=ready initial=0
 dma channel=0 tile=(0,2) side=compute direction=stream-to-memory engine-channel=0 bd-start=0 bd-count=2
-dma channel=0 tile=(0,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=2
+dma channel=0 tile=(0,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=1
 dma channel=1 tile=(0,2) side=compute direction=stream-to-memory engine-channel=1 bd-start=2 bd-count=2
-dma channel=1 tile=(0,0) side=shim direction=memory-to-stream engine-channel=1 bd-start=2 bd-count=2
+dma channel=1 tile=(0,0) side=shim direction=memory-to-stream engine-channel=1 bd-start=1 bd-count=1
 dma channel=2 tile=(0,4) side=compute direction=stream-to-memory engine-channel=0 bd-start=0 bd-count=2
-dma channel=2 tile=(1,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=2
+dma channel=2 tile=(1,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=1
 dma channel=3 tile=(0,4) side=compute direction=stream-to-memory engine-channel=1 bd-start=2 bd-count=2
-dma channel=3 tile=(1,0) side=shim direction=memory-to-stream engine-channel=1 bd-start=2 bd-count=2
+dma channel=3 tile=(1,0) side=shim direction=memory-to-stream engine-channel=1 bd-start=1 bd-count=1
 dma channel=4 tile=(0,3) side=compute direction=stream-to-memory engine-channel=0 bd-start=0 bd-count=2
-dma channel=4 tile=(2,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=2
+dma channel=4 tile=(2,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=1
 dma channel=5 tile=(0,3) side=compute direction=memory-to-stream engine-channel=0 bd-start=2 bd-count=2
-dma channel=5 tile=(0,0) side=shim direction=stream-to-memory engine-channel=0 bd-start=4 bd-count=2
-route channel=0 tile=(0,0) kind=shim-mux source=dma[0] destination=north[0]
-route channel=0 tile=(0,0) kind=switch source=south[0] destination=north[0]
+dma channel=5 tile=(0,0) side=shim direction=stream-to-memory engine-channel=0 bd-start=2 bd-count=1
+route channel=0 tile=(0,0) kind=shim-mux source=dma[0] destination=north[3]
+route channel=0 tile=(0,0) kind=switch source=south[3] destination=north[0]
 route channel=0 tile=(0,1) kind=switch source=south[0] destination=north[0]
 route channel=0 tile=(0,2) kind=switch source=south[0] destination=dma[0]
-route channel=1 tile=(0,0) kind=shim-mux source=dma[1] destination=north[1]
-route channel=1 tile=(0,0) kind=switch source=south[1] destination=north[1]
+route channel=1 tile=(0,0) kind=shim-mux source=dma[1] destination=north[7]
+route channel=1 tile=(0,0) kind=switch source=south[7] destination=north[1]
 route channel=1 tile=(0,1) kind=switch source=south[1] destination=north[1]
 route channel=1 tile=(0,2) kind=switch source=south[1] destination=dma[1]
-route channel=2 tile=(1,0) kind=shim-mux source=dma[0] destination=north[0]
-route channel=2 tile=(1,0) kind=switch source=south[0] destination=west[0]
+route channel=2 tile=(1,0) kind=shim-mux source=dma[0] destination=north[3]
+route channel=2 tile=(1,0) kind=switch source=south[3] destination=west[0]
 route channel=2 tile=(0,0) kind=switch source=east[0] destination=north[2]
 route channel=2 tile=(0,1) kind=switch source=south[2] destination=north[2]
 route channel=2 tile=(0,2) kind=switch source=south[2] destination=north[0]
 route channel=2 tile=(0,3) kind=switch source=south[0] destination=north[0]
 route channel=2 tile=(0,4) kind=switch source=south[0] destination=dma[0]
-route channel=3 tile=(1,0) kind=shim-mux source=dma[1] destination=north[1]
-route channel=3 tile=(1,0) kind=switch source=south[1] destination=west[1]
+route channel=3 tile=(1,0) kind=shim-mux source=dma[1] destination=north[7]
+route channel=3 tile=(1,0) kind=switch source=south[7] destination=west[1]
 route channel=3 tile=(0,0) kind=switch source=east[1] destination=north[3]
 route channel=3 tile=(0,1) kind=switch source=south[3] destination=north[3]
 route channel=3 tile=(0,2) kind=switch source=south[3] destination=north[1]
 route channel=3 tile=(0,3) kind=switch source=south[1] destination=north[1]
 route channel=3 tile=(0,4) kind=switch source=south[1] destination=dma[1]
-route channel=4 tile=(2,0) kind=shim-mux source=dma[0] destination=north[0]
-route channel=4 tile=(2,0) kind=switch source=south[0] destination=west[0]
+route channel=4 tile=(2,0) kind=shim-mux source=dma[0] destination=north[3]
+route channel=4 tile=(2,0) kind=switch source=south[3] destination=west[0]
 route channel=4 tile=(1,0) kind=switch source=east[0] destination=west[2]
 route channel=4 tile=(0,0) kind=switch source=east[2] destination=north[4]
 route channel=4 tile=(0,1) kind=switch source=south[4] destination=north[4]
@@ -249,8 +237,8 @@ route channel=4 tile=(0,3) kind=switch source=south[2] destination=dma[0]
 route channel=5 tile=(0,3) kind=switch source=dma[0] destination=south[0]
 route channel=5 tile=(0,2) kind=switch source=north[0] destination=south[0]
 route channel=5 tile=(0,1) kind=switch source=north[0] destination=south[0]
-route channel=5 tile=(0,0) kind=switch source=north[0] destination=south[0]
-route channel=5 tile=(0,0) kind=shim-mux source=north[0] destination=dma[0]
+route channel=5 tile=(0,0) kind=switch source=north[0] destination=south[2]
+route channel=5 tile=(0,0) kind=shim-mux source=north[2] destination=dma[0]
 binding-patch ordinal=0 channel=0 shim=(0,0) direction=memory-to-stream dma-channel=0 partition=0/2
 binding-patch ordinal=1 channel=1 shim=(0,0) direction=memory-to-stream dma-channel=1 partition=0/2
 binding-patch ordinal=0 channel=2 shim=(1,0) direction=memory-to-stream dma-channel=0 partition=1/2

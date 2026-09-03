@@ -315,12 +315,10 @@ static iree_status_t loom_aie2p_array_plan_check_format(
     const loom_aie2p_array_lock_plan_t* lock = &plan->locks[i];
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
-        "lock channel=%" PRIu32
-        " tile=(%u,%u) id=%u role=%s side=%s"
-        " initial=%d\n",
+        "lock channel=%" PRIu32 " tile=(%u,%u) id=%u role=%s initial=%d\n",
         lock->channel_index, lock->coordinate.column, lock->coordinate.row,
         lock->lock_id, lock->consumer_ready ? "ready" : "credit",
-        lock->shim_peer ? "shim" : "ring", lock->initial_value));
+        lock->initial_value));
   }
   for (iree_host_size_t i = 0; i < plan->dma_channel_count; ++i) {
     const loom_aie2p_array_dma_plan_t* dma = &plan->dma_channels[i];

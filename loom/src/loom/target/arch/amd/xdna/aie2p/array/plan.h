@@ -204,8 +204,6 @@ typedef struct loom_aie2p_array_lock_plan_t {
   int8_t initial_value;
   // Zero for the producer-credit lock and one for the consumer-ready lock.
   uint8_t consumer_ready;
-  // Zero for the canonical ring owner and one for its shim peer.
-  uint8_t shim_peer;
 } loom_aie2p_array_lock_plan_t;
 
 // One physical DMA channel and its contiguous buffer-descriptor range.
