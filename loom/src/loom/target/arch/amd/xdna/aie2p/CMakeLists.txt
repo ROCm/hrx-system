@@ -161,6 +161,29 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    array_resident
+  HDRS
+    "array/resident.h"
+  SRCS
+    "array/resident.c"
+  DEPS
+    ::array_plan
+    ::core_descriptors
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::builder
+    loom::codegen::low::function
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::rewrite::materialize
+    loom::rewrite::remap
+    loom::target::arch::amd::xdna::array_facts
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     target_records
   HDRS
     "records/target_records.h"
@@ -229,10 +252,13 @@ loom_cc_library(
     "check/provider.c"
   DEPS
     ::array_plan
+    ::array_resident
     ::leaf_compile
     ::provider
     iree::base
     loom::codegen::low::diagnostics
+    loom::codegen::low::text_asm
+    loom::format::text::printer
     loom::ir
     loom::ops::low
     loom::ops::op_defs

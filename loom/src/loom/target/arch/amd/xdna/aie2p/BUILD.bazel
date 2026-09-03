@@ -146,6 +146,26 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "array_resident",
+    srcs = ["array/resident.c"],
+    hdrs = ["array/resident.h"],
+    deps = [
+        ":array_plan",
+        ":core_descriptors",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/rewrite:materialize",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/target/arch/amd/xdna:array_facts",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "target_records",
     srcs = ["records/target_records.c"],
     hdrs = ["records/target_records.h"],
@@ -214,9 +234,12 @@ loom_cc_library(
     ],
     deps = [
         ":array_plan",
+        ":array_resident",
         ":leaf_compile",
         ":provider",
         "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",

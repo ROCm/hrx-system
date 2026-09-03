@@ -1302,6 +1302,41 @@ static iree_status_t loom_aie2p_array_validate_worker_leaf(
   }
   const loom_aie2p_leaf_realization_t* realization = &contribution->realization;
   const loom_aie2p_array_worker_t* worker = &builder->workers[worker_index];
+  IREE_ASSERT_EQ(worker->entry.module_id, 0u);
+  IREE_ASSERT_LT(worker->entry.symbol_id, builder->module->symbols.count);
+  const loom_symbol_t* worker_symbol =
+      &builder->module->symbols.entries[worker->entry.symbol_id];
+  if (worker_symbol->defining_op == NULL ||
+      !loom_low_func_def_isa(worker_symbol->defining_op)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AIE2P worker entry must name one core Low function definition");
+  }
+  const loom_func_like_t worker_function =
+      loom_func_like_const_cast(builder->module, worker_symbol->defining_op);
+  uint16_t argument_count = 0;
+  loom_func_like_arg_ids(worker_function, &argument_count);
+  if (argument_count != 0 ||
+      loom_low_func_def_results(worker_symbol->defining_op).count != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AIE2P worker entry must have no register arguments or results");
+  }
+  const loom_region_t* worker_body =
+      loom_low_func_def_body(worker_symbol->defining_op);
+  iree_host_size_t return_count = 0;
+  const loom_block_t* worker_block = NULL;
+  loom_region_for_each_block(worker_body, worker_block) {
+    const loom_op_t* worker_op = NULL;
+    loom_block_for_each_op(worker_block, worker_op) {
+      if (loom_low_return_isa(worker_op)) ++return_count;
+    }
+  }
+  if (return_count == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AIE2P worker entry must return after one channel firing");
+  }
   const loom_aie2p_array_tile_state_t* tile_state = loom_aie2p_array_tile_state(
       (loom_aie2p_array_plan_builder_t*)builder, worker->coordinate);
   if (realization->code.byte_length >
@@ -1310,13 +1345,11 @@ static iree_status_t loom_aie2p_array_validate_worker_leaf(
                             "AIE2P worker code exceeds tile program memory");
   }
 
-  iree_host_size_t worker_endpoint_count = 0;
   for (iree_host_size_t i = 0; i < builder->plan->endpoint_count; ++i) {
     const loom_aie2p_array_endpoint_t* endpoint = &builder->endpoints[i];
     if (endpoint->partition_source_endpoint_index == UINT32_MAX &&
         endpoint->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
         endpoint->owner_index == worker_index) {
-      ++worker_endpoint_count;
       iree_host_size_t import_match_count = 0;
       for (iree_host_size_t j = 0; j < realization->resource_import_count;
            ++j) {
@@ -1331,10 +1364,24 @@ static iree_status_t loom_aie2p_array_validate_worker_leaf(
       }
     }
   }
-  if (worker_endpoint_count != realization->resource_import_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AIE2P worker topology must bind every leaf resource import");
+  for (iree_host_size_t i = 0; i < realization->resource_import_count; ++i) {
+    const loom_aie2p_leaf_resource_import_t* resource =
+        &realization->resource_imports[i];
+    iree_host_size_t endpoint_match_count = 0;
+    for (iree_host_size_t j = 0; j < builder->plan->endpoint_count; ++j) {
+      const loom_aie2p_array_endpoint_t* endpoint = &builder->endpoints[j];
+      if (endpoint->partition_source_endpoint_index == UINT32_MAX &&
+          endpoint->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
+          endpoint->owner_index == worker_index &&
+          endpoint->port == resource->index) {
+        ++endpoint_match_count;
+      }
+    }
+    if (endpoint_match_count != 1) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AIE2P worker resource must be bound by exactly one topology port");
+    }
   }
   return iree_ok_status();
 }

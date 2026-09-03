@@ -257,3 +257,206 @@ binding-patch ordinal=0 channel=2 shim=(1,0) direction=memory-to-stream dma-chan
 binding-patch ordinal=1 channel=3 shim=(1,0) direction=memory-to-stream dma-channel=1 partition=1/2
 binding-patch ordinal=2 channel=4 shim=(2,0) direction=memory-to-stream dma-channel=0 partition=0/1
 binding-patch ordinal=3 channel=5 shim=(0,0) direction=stream-to-memory dma-channel=0 partition=0/1
+
+resident-program workers=3
+resident worker=0 entry=@split_k_array$worker$0 tile=(0,2) phases=2 code-bytes=278 resources=0 fixups=1
+resident worker=1 entry=@split_k_array$worker$1 tile=(0,4) phases=2 code-bytes=278 resources=0 fixups=1
+resident worker=2 entry=@split_k_array$worker$2 tile=(0,3) phases=2 code-bytes=540 resources=0 fixups=1
+
+low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$worker$0() asm {
+  %acquire_delta = mov.short -1
+  %release_delta = mov.short 1
+  low.br ^_bb1
+^_bb1:
+  %lhs_view$158 = mov.local-address 458752
+  %rhs_view$159 = mov.local-address 491520
+  %partial_view$160 = mov.local-address 458816
+  acq %acquire_delta, 49
+  acq %acquire_delta, 51
+  acq %acquire_delta, 52
+  %lhs_fragment$150 = vlda.512.i8x64 %lhs_view$158, 0
+  %rhs_fragment$151 = vlda.512.i8x64 %rhs_view$159, 0
+  %152 = mov.short 8
+  %product$153 = mmul.s8s8.m8n8k8 %lhs_fragment$150, %rhs_fragment$151, %152
+  %154 = slice %product$153[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %154, %partial_view$160, 0
+  %155 = slice %product$153[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %155, %partial_view$160, 64
+  %156 = slice %product$153[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %156, %partial_view$160, 128
+  %157 = slice %product$153[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %157, %partial_view$160, 192
+  rel %release_delta, 53
+  rel %release_delta, 48
+  rel %release_delta, 50
+  low.br ^_bb2
+^_bb2:
+  %lhs_view$172 = mov.local-address 475136
+  %rhs_view$173 = mov.local-address 507904
+  %partial_view$174 = mov.local-address 475200
+  acq %acquire_delta, 49
+  acq %acquire_delta, 51
+  acq %acquire_delta, 52
+  %lhs_fragment$164 = vlda.512.i8x64 %lhs_view$172, 0
+  %rhs_fragment$165 = vlda.512.i8x64 %rhs_view$173, 0
+  %166 = mov.short 8
+  %product$167 = mmul.s8s8.m8n8k8 %lhs_fragment$164, %rhs_fragment$165, %166
+  %168 = slice %product$167[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %168, %partial_view$174, 0
+  %169 = slice %product$167[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %169, %partial_view$174, 64
+  %170 = slice %product$167[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %170, %partial_view$174, 128
+  %171 = slice %product$167[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %171, %partial_view$174, 192
+  rel %release_delta, 53
+  rel %release_delta, 48
+  rel %release_delta, 50
+  low.br ^_bb1
+}
+
+low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$worker$1() asm {
+  %acquire_delta = mov.short -1
+  %release_delta = mov.short 1
+  low.br ^_bb1
+^_bb1:
+  %lhs_view$188 = mov.local-address 458752
+  %rhs_view$189 = mov.local-address 491520
+  %partial_view$190 = mov.local-address 458816
+  acq %acquire_delta, 49
+  acq %acquire_delta, 51
+  acq %acquire_delta, 52
+  %lhs_fragment$180 = vlda.512.i8x64 %lhs_view$188, 0
+  %rhs_fragment$181 = vlda.512.i8x64 %rhs_view$189, 0
+  %182 = mov.short 8
+  %product$183 = mmul.s8s8.m8n8k8 %lhs_fragment$180, %rhs_fragment$181, %182
+  %184 = slice %product$183[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %184, %partial_view$190, 0
+  %185 = slice %product$183[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %185, %partial_view$190, 64
+  %186 = slice %product$183[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %186, %partial_view$190, 128
+  %187 = slice %product$183[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %187, %partial_view$190, 192
+  rel %release_delta, 53
+  rel %release_delta, 48
+  rel %release_delta, 50
+  low.br ^_bb2
+^_bb2:
+  %lhs_view$202 = mov.local-address 475136
+  %rhs_view$203 = mov.local-address 507904
+  %partial_view$204 = mov.local-address 475200
+  acq %acquire_delta, 49
+  acq %acquire_delta, 51
+  acq %acquire_delta, 52
+  %lhs_fragment$194 = vlda.512.i8x64 %lhs_view$202, 0
+  %rhs_fragment$195 = vlda.512.i8x64 %rhs_view$203, 0
+  %196 = mov.short 8
+  %product$197 = mmul.s8s8.m8n8k8 %lhs_fragment$194, %rhs_fragment$195, %196
+  %198 = slice %product$197[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %198, %partial_view$204, 0
+  %199 = slice %product$197[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %199, %partial_view$204, 64
+  %200 = slice %product$197[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %200, %partial_view$204, 128
+  %201 = slice %product$197[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.i32x16 %201, %partial_view$204, 192
+  rel %release_delta, 53
+  rel %release_delta, 48
+  rel %release_delta, 50
+  low.br ^_bb1
+}
+
+low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$worker$2() asm {
+  %acquire_delta = mov.short -1
+  %release_delta = mov.short 1
+  low.br ^_bb1
+^_bb1:
+  %partial0_view$237 = mov.local-address 262208
+  %partial1_view$238 = mov.local-address 393280
+  %bias_view$239 = mov.local-address 458752
+  %output_view$240 = mov.local-address 491520
+  acq %acquire_delta, 49
+  acq %acquire_delta, 5
+  acq %acquire_delta, 37
+  acq %acquire_delta, 50
+  %211 = mov.short 0
+  %relu_floor$212 = vbcst.32 %211
+  %partial00$213 = vlda.512.i32x16 %partial0_view$237, 0
+  %partial10$214 = vlda.512.i32x16 %partial1_view$238, 0
+  %bias0$215 = vlda.512.i32x16 %bias_view$239, 0
+  %sum0$216 = vadd.32 %partial00$213, %partial10$214
+  %biased0$217 = vadd.32 %sum0$216, %bias0$215
+  %activated0$218 = max.s32x16 %biased0$217, %relu_floor$212
+  vst.512.i32x16 %activated0$218, %output_view$240, 0
+  %partial01$219 = vlda.512.i32x16 %partial0_view$237, 64
+  %partial11$220 = vlda.512.i32x16 %partial1_view$238, 64
+  %bias1$221 = vlda.512.i32x16 %bias_view$239, 64
+  %sum1$222 = vadd.32 %partial01$219, %partial11$220
+  %biased1$223 = vadd.32 %sum1$222, %bias1$221
+  %activated1$224 = max.s32x16 %biased1$223, %relu_floor$212
+  vst.512.i32x16 %activated1$224, %output_view$240, 64
+  %partial02$225 = vlda.512.i32x16 %partial0_view$237, 128
+  %partial12$226 = vlda.512.i32x16 %partial1_view$238, 128
+  %bias2$227 = vlda.512.i32x16 %bias_view$239, 128
+  %sum2$228 = vadd.32 %partial02$225, %partial12$226
+  %biased2$229 = vadd.32 %sum2$228, %bias2$227
+  %activated2$230 = max.s32x16 %biased2$229, %relu_floor$212
+  vst.512.i32x16 %activated2$230, %output_view$240, 128
+  %partial03$231 = vlda.512.i32x16 %partial0_view$237, 192
+  %partial13$232 = vlda.512.i32x16 %partial1_view$238, 192
+  %bias3$233 = vlda.512.i32x16 %bias_view$239, 192
+  %sum3$234 = vadd.32 %partial03$231, %partial13$232
+  %biased3$235 = vadd.32 %sum3$234, %bias3$233
+  %activated3$236 = max.s32x16 %biased3$235, %relu_floor$212
+  vst.512.i32x16 %activated3$236, %output_view$240, 192
+  rel %release_delta, 51
+  rel %release_delta, 48
+  rel %release_delta, 4
+  rel %release_delta, 36
+  low.br ^_bb2
+^_bb2:
+  %partial0_view$271 = mov.local-address 278592
+  %partial1_view$272 = mov.local-address 409664
+  %bias_view$273 = mov.local-address 475136
+  %output_view$274 = mov.local-address 507904
+  acq %acquire_delta, 49
+  acq %acquire_delta, 5
+  acq %acquire_delta, 37
+  acq %acquire_delta, 50
+  %245 = mov.short 0
+  %relu_floor$246 = vbcst.32 %245
+  %partial00$247 = vlda.512.i32x16 %partial0_view$271, 0
+  %partial10$248 = vlda.512.i32x16 %partial1_view$272, 0
+  %bias0$249 = vlda.512.i32x16 %bias_view$273, 0
+  %sum0$250 = vadd.32 %partial00$247, %partial10$248
+  %biased0$251 = vadd.32 %sum0$250, %bias0$249
+  %activated0$252 = max.s32x16 %biased0$251, %relu_floor$246
+  vst.512.i32x16 %activated0$252, %output_view$274, 0
+  %partial01$253 = vlda.512.i32x16 %partial0_view$271, 64
+  %partial11$254 = vlda.512.i32x16 %partial1_view$272, 64
+  %bias1$255 = vlda.512.i32x16 %bias_view$273, 64
+  %sum1$256 = vadd.32 %partial01$253, %partial11$254
+  %biased1$257 = vadd.32 %sum1$256, %bias1$255
+  %activated1$258 = max.s32x16 %biased1$257, %relu_floor$246
+  vst.512.i32x16 %activated1$258, %output_view$274, 64
+  %partial02$259 = vlda.512.i32x16 %partial0_view$271, 128
+  %partial12$260 = vlda.512.i32x16 %partial1_view$272, 128
+  %bias2$261 = vlda.512.i32x16 %bias_view$273, 128
+  %sum2$262 = vadd.32 %partial02$259, %partial12$260
+  %biased2$263 = vadd.32 %sum2$262, %bias2$261
+  %activated2$264 = max.s32x16 %biased2$263, %relu_floor$246
+  vst.512.i32x16 %activated2$264, %output_view$274, 128
+  %partial03$265 = vlda.512.i32x16 %partial0_view$271, 192
+  %partial13$266 = vlda.512.i32x16 %partial1_view$272, 192
+  %bias3$267 = vlda.512.i32x16 %bias_view$273, 192
+  %sum3$268 = vadd.32 %partial03$265, %partial13$266
+  %biased3$269 = vadd.32 %sum3$268, %bias3$267
+  %activated3$270 = max.s32x16 %biased3$269, %relu_floor$246
+  vst.512.i32x16 %activated3$270, %output_view$274, 192
+  rel %release_delta, 51
+  rel %release_delta, 48
+  rel %release_delta, 4
+  rel %release_delta, 36
+  low.br ^_bb1
+}

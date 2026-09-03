@@ -9,10 +9,13 @@
 #include <inttypes.h>
 
 #include "loom/codegen/low/diagnostics.h"
+#include "loom/codegen/low/text_asm.h"
+#include "loom/format/text/printer/printer.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/plan.h"
+#include "loom/target/arch/amd/xdna/aie2p/array/resident.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_compile.h"
 #include "loom/tools/loom-check/diagnostics.h"
 #include "loom/tools/loom-check/low_emit.h"
@@ -362,6 +365,64 @@ static iree_status_t loom_aie2p_array_plan_check_format(
   return iree_ok_status();
 }
 
+static iree_status_t loom_aie2p_array_plan_check_resident_program(
+    const loom_check_emit_provider_request_t* request,
+    const loom_aie2p_array_plan_t* plan,
+    iree_diagnostic_emitter_t diagnostic_emitter) {
+  loom_aie2p_array_resident_program_t program = {0};
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_materialize_resident_program(
+      request->module, plan, request->case_arena, &program));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      &request->result->actual_output,
+      "\nresident-program workers=%" PRIhsz "\n", program.worker_count));
+
+  const loom_aie2p_leaf_compile_options_t compile_options = {
+      .descriptor_registry = &request->low_registry->registry,
+      .diagnostic_emitter = diagnostic_emitter,
+  };
+  for (iree_host_size_t i = 0; i < program.worker_count; ++i) {
+    const loom_aie2p_array_resident_worker_t* resident = &program.workers[i];
+    loom_aie2p_leaf_contribution_t contribution = {0};
+    IREE_RETURN_IF_ERROR(loom_aie2p_leaf_compile(
+        request->module, resident->function_op, &compile_options,
+        request->case_arena, &contribution));
+    if (contribution.realization.resource_import_count != 0) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "materialized AIE2P resident worker retains resource imports");
+    }
+    const loom_xdna_tile_coordinate_t coordinate =
+        plan->worker_plans[resident->worker_index].coordinate;
+    const iree_string_view_t entry_name =
+        loom_low_diagnostic_symbol_name(request->module, resident->entry);
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        &request->result->actual_output,
+        "resident worker=%" PRIu32 " entry=@%.*s tile=(%u,%u) phases=%" PRIu32
+        " code-bytes=%" PRIu64 " resources=%" PRIhsz " fixups=%" PRIhsz "\n",
+        resident->worker_index, (int)entry_name.size, entry_name.data,
+        coordinate.column, coordinate.row, resident->phase_count,
+        contribution.realization.code.byte_length,
+        contribution.realization.resource_import_count,
+        contribution.object.fixup_count));
+  }
+
+  loom_text_low_asm_environment_t low_asm_environment = {0};
+  loom_low_descriptor_text_asm_environment_initialize(
+      &request->low_registry->registry, &low_asm_environment);
+  const loom_text_print_options_t print_options = {
+      .flags = LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM,
+      .low_asm_environment = low_asm_environment,
+  };
+  for (iree_host_size_t i = 0; i < program.worker_count; ++i) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+        &request->result->actual_output, "\n"));
+    IREE_RETURN_IF_ERROR(loom_text_print_operation_to_builder_with_options(
+        request->module, program.workers[i].function_op,
+        &request->result->actual_output, &print_options));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_aie2p_array_plan_check_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request) {
@@ -407,8 +468,10 @@ static iree_status_t loom_aie2p_array_plan_check_execute(
   IREE_RETURN_IF_ERROR(
       loom_aie2p_array_plan_build(request->module, array_function, leaves,
                                   leaf_count, request->case_arena, &plan));
-  return loom_aie2p_array_plan_check_format(request->module, &plan,
-                                            &request->result->actual_output);
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_check_format(
+      request->module, &plan, &request->result->actual_output));
+  return loom_aie2p_array_plan_check_resident_program(request, &plan,
+                                                      diagnostic_emitter);
 }
 
 static iree_status_t loom_aie2p_array_plan_check_append_names(
