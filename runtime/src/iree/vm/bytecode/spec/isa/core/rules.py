@@ -72,17 +72,29 @@ class FieldRule:
     REGISTER_FUNCTION = RuleKind(
         "register_function", U8, summary="Must name an in-range function register."
     )
-    GLOBAL_ORDINAL = RuleKind("global_ordinal", U16, value_count=1)
+    GLOBAL_ORDINAL = RuleKind(
+        "global_ordinal",
+        U16,
+        value_count=1,
+        summary="Must name an in-range global in the encoded storage partition.",
+    )
     CONSTRAINT_MEMBER = RuleKind(
         "constraint_member",
         summary="Validated by the instruction's cross-field rule.",
     )
     LOCAL_BYTES_RANGE_BASE = RuleKind("local_bytes_range_base", U16, field_count=1)
-    ABI_SLOT = RuleKind("abi_slot", U16, value_count=1)
+    ABI_SLOT = RuleKind(
+        "abi_slot",
+        U16,
+        value_count=1,
+        summary="Must name an in-range overflow slot in the encoded packet region.",
+    )
     LOCAL_BYTES_FIXED_BASE = RuleKind("local_bytes_fixed_base", U16, value_count=2)
     LOCAL_BYTES_RANGE_LENGTH = RuleKind("local_bytes_range_length", U16)
     PACKED_SELECTORS = RuleKind("packed_selectors", value_count=1, data_type=tuple)
-    REF_SLOT = RuleKind("ref_slot", U16)
+    REF_SLOT = RuleKind(
+        "ref_slot", U16, summary="Must name an in-range function-local ref slot."
+    )
     CONTROL_TARGET_S16 = RuleKind(
         "control_target_s16",
         I16,

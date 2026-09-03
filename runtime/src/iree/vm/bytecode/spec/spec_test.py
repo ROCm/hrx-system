@@ -108,6 +108,9 @@ class SpecificationTest(unittest.TestCase):
             ("control.branch.if.s32", 0x07, 8, (1, 2, 4)),
             ("control.switch", 0x0A, 8, (1, 2, 4)),
             ("control.call", 0x0B, 8, (1, 2, 4, 6)),
+            ("global.ref.immutable.load.borrow", 0x34, 4, (1, 2)),
+            ("value.abi.argument.load", 0xC0, 4, (1, 2)),
+            ("ref.move", 0xCC, 4, (1, 2, 3)),
         )
         for mnemonic, opcode, byte_length, field_offsets in cases:
             with self.subTest(mnemonic=mnemonic):
@@ -148,7 +151,7 @@ class SpecificationTest(unittest.TestCase):
                 len(NUMERIC_TABLES),
                 sum(len(table.values) for table in NUMERIC_TABLES),
             ),
-            (5, 35, 2, 20, tuple(range(1, 14)), 58, 9, 30),
+            (8, 65, 2, 20, tuple(range(1, 14)), 58, 9, 30),
         )
 
     def test_layout_rejects_implicit_alignment_padding(self) -> None:

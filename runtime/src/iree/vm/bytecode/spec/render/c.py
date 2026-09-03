@@ -307,16 +307,25 @@ def _append_parameter_words(parameters: list[int], values: Iterable[int]) -> int
     return base
 
 
+def _value_parameters(values, parameters) -> tuple[int, int]:
+    if len(values) == 1:
+        return values[0], 0
+    if values:
+        return _append_parameter_words(parameters, values), len(values)
+    return 0, 0
+
+
+def _field_offsets(fields, offsets) -> dict[str, int]:
+    return {
+        item.field.name: offset for item, offset in zip(fields, offsets, strict=True)
+    }
+
+
 def _instruction_rules(
     instruction: isa.Instruction, parameters, selector_parameters
 ) -> list[_VerificationRule]:
     rules = []
-    offsets_by_name = {
-        item.field.name: offset
-        for item, offset in zip(
-            instruction.fields, instruction.field_offsets, strict=True
-        )
-    }
+    offsets_by_name = _field_offsets(instruction.fields, instruction.field_offsets)
     for instruction_field, offset in zip(
         instruction.fields, instruction.field_offsets, strict=True
     ):
@@ -329,7 +338,7 @@ def _instruction_rules(
         parameter, auxiliary = (
             selector_parameters[rule.data]
             if rule.kind == core_rules.FieldRule.SELECTOR
-            else (0, 0)
+            else _value_parameters(rule.values, parameters)
         )
         rules.append(
             _VerificationRule(
@@ -364,10 +373,7 @@ def _module_rules(
     parameters: list[int],
 ) -> list[_VerificationRule]:
     rules = []
-    offsets_by_name = {
-        item.field.name: offset
-        for item, offset in zip(record.fields, record.field_offsets, strict=True)
-    }
+    offsets_by_name = _field_offsets(record.fields, record.field_offsets)
     for wire_field, offset in zip(record.fields, record.field_offsets, strict=True):
         rule = wire_field.rule
         label = f"{record.name}.{wire_field.field.name}"
@@ -377,7 +383,7 @@ def _module_rules(
         verification_kind = rule_kind.name.upper()
         field_offset = offset
         field_length = wire_field.field.byte_length
-        auxiliary = parameter = 0
+        parameter, auxiliary = _value_parameters(rule.values, parameters)
         if rule_kind in _MODULE_VERSION_RULE:
             version_component = _MODULE_VERSION_RULE[rule_kind]
             parameter = getattr(specification.version, version_component)
@@ -392,19 +398,12 @@ def _module_rules(
             field_length = len(expected)
             auxiliary = len(padded) // 4
             parameter = _append_parameter_words(parameters, words)
-        elif rule_kind == module_rules.FieldRule.ALLOWED_RANGE:
-            verification_kind = "ALLOWED_RANGE"
-            auxiliary = 2
-            parameter = _append_parameter_words(parameters, rule.values)
         elif isinstance(rule.data, module_rules.OrdinalDomain):
             auxiliary = int(rule.data)
-            parameter = rule.values[0] if rule.values else 0
         elif rule_kind == module_rules.FieldRule.SIGNATURE_DESCRIPTOR:
             field_offset = offsets_by_name[rule.fields[0]]
             field_length = 2
             auxiliary = offset
-        elif rule.values:
-            parameter = rule.values[0]
         elif rule.fields or rule.data is not None:
             raise ValueError(f"{label}: unsupported module field rule")
         rules.append(
@@ -420,23 +419,16 @@ def _module_rules(
     return rules
 
 
-class _InstructionVerificationDescriptor(NamedTuple):
-    rule_base: int
-    control_flow: isa.ControlFlow
-    rule_count: int
-    byte_length: int
-
-
 def _instruction_descriptor(
     instruction: isa.Instruction, rule_base: int, rule_count: int
-) -> _InstructionVerificationDescriptor:
+) -> str:
     if rule_base > 0xFFFF or rule_count > 0xF or instruction.byte_length > 0xFF:
         raise ValueError(f"{instruction.mnemonic}: verification descriptor overflow")
-    return _InstructionVerificationDescriptor(
-        rule_base,
-        instruction.control_flow,
-        rule_count,
-        instruction.byte_length,
+    return (
+        "    IREE_VM_BYTECODE_PACK_INSTRUCTION_VERIFICATION"
+        f"({rule_base}u, IREE_VM_BYTECODE_CONTROL_FLOW_"
+        f"{instruction.control_flow.name}, {rule_count}u, "
+        f"{instruction.byte_length}u),"
     )
 
 
@@ -451,9 +443,7 @@ def _pack_record_descriptor(
 def render_verification_data(specification: Specification) -> str:
     """Renders pointer-free runtime verification tables."""
 
-    instruction_descriptors: list[_InstructionVerificationDescriptor | None] = [
-        None
-    ] * 256
+    instruction_descriptors = ["    UINT32_C(0),"] * 256
     rules: list[_VerificationRule] = []
     parameters: list[int] = []
     selector_parameters = {}
@@ -502,19 +492,7 @@ def render_verification_data(specification: Specification) -> str:
         "",
         "const uint32_t iree_vm_bytecode_instruction_verification[256] = {",
     ]
-    for descriptor in instruction_descriptors:
-        if descriptor is None:
-            lines.append("    UINT32_C(0),")
-        else:
-            lines.append(
-                "    IREE_VM_BYTECODE_PACK_INSTRUCTION_VERIFICATION(%du, %s, %du, %du),"
-                % (
-                    descriptor.rule_base,
-                    f"IREE_VM_BYTECODE_CONTROL_FLOW_{descriptor.control_flow.name}",
-                    descriptor.rule_count,
-                    descriptor.byte_length,
-                )
-            )
+    lines.extend(instruction_descriptors)
     lines.extend(
         [
             "};",

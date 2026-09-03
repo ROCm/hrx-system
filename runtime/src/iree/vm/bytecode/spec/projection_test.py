@@ -49,6 +49,9 @@ class ProjectionTest(unittest.TestCase):
             "IREE_VM_BYTECODE_CONTROL_STATUS_INVALID_ARGUMENT = 0x03",
             "IREE_VM_BYTECODE_CONTROL_STATUS_INCOMPATIBLE = 0x12",
             "typedef struct iree_vm_bytecode_func_address_t",
+            "typedef struct iree_vm_bytecode_global_ref_mutable_store_move_t",
+            "typedef struct iree_vm_bytecode_value_abi_argument_load_t",
+            "typedef struct iree_vm_bytecode_ref_move_t",
         )
         self.assertNotIn("static_assert", module_header)
         self.assertNotIn("static_assert", core_header)
@@ -70,10 +73,16 @@ class ProjectionTest(unittest.TestCase):
             "IREE_VM_BYTECODE_VERIFICATION_RULE_ORDINAL_OR_NULL",
             "IREE_VM_BYTECODE_VERIFICATION_RULE_CALL_INDIRECT",
             "IREE_VM_BYTECODE_VERIFICATION_RULE_SELECTOR",
+            "IREE_VM_BYTECODE_VERIFICATION_RULE_ABI_SLOT",
+            "IREE_VM_BYTECODE_VERIFICATION_RULE_GLOBAL_ORDINAL",
+            "IREE_VM_BYTECODE_VERIFICATION_RULE_REF_SLOT",
+            "IREE_VM_BYTECODE_VERIFICATION_RULE_FIELDS_DISTINCT",
             "IREE_VM_BYTECODE_CONTROL_FLOW_CONDITIONAL_BRANCH",
             "UINT32_C(0x00000007)",
             "UINT32_C(0x0005FFFE)",
             "VERIFICATION_RULE_SELECTOR, 1u, 1u, 1u},  // control.fail.status_u8",
+            "UINT32_C(0x000D0008), IREE_VM_BYTECODE_VERIFICATION_RULE_GLOBAL_ORDINAL",
+            "UINT32_C(0x0000000E), IREE_VM_BYTECODE_VERIFICATION_RULE_ABI_SLOT",
         )
         self.assertNotIn("switch (", source)
         self.assertNotIn("iree_status_t", source)
@@ -99,6 +108,9 @@ class ProjectionTest(unittest.TestCase):
             "## Core selector domains",
             "#### `control.call.indirect`",
             "#### `func.import.resolved`",
+            "#### `global.ref.immutable.store.move`",
+            "#### `ref.abi.result.store.move`",
+            "#### `ref.move`",
             "#### Preconditions",
             "#### Failures",
             "#### Ownership",
