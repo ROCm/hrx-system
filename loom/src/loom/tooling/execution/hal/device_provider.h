@@ -17,6 +17,7 @@
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "loom/target/profile.h"
+#include "loom/target/profile_selection.h"
 #include "loom/tooling/compile/artifact.h"
 
 #ifdef __cplusplus
@@ -32,6 +33,8 @@ typedef struct loom_device_target_t {
   const iree_hal_executable_target_t* executable_target;
   // Offline artifact target projected from the device.
   loom_artifact_target_t artifact_target;
+  // Optional family-provider selection retaining |artifact_target| storage.
+  loom_target_profile_selection_t profile_selection;
 } loom_device_target_t;
 
 // Returns the target-neutral bundle projected by |target|, or NULL.

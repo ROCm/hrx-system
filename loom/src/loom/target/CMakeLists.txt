@@ -641,8 +641,10 @@ loom_cc_library(
   NAME
     provider
   HDRS
+    "profile_selection.h"
     "provider.h"
   SRCS
+    "profile_selection.c"
     "provider.c"
   DEPS
     ::legalization
@@ -752,6 +754,17 @@ loom_cc_test(
     loom::ops::pass
     loom::pass::builder
     loom::testing::module_ptr
+)
+
+loom_cc_test(
+  NAME
+    profile_selection_test
+  SRCS
+    "profile_selection_test.cc"
+  DEPS
+    ::provider
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(

@@ -28,10 +28,12 @@ loom_generated_cc_library(
     srcs = [
         "fact_projection.c",
         "registry.c",
+        "target.c",
     ],
     hdrs = [
         "ops.h",
         "registry.h",
+        "target.h",
         "types.h",
     ],
     args = ["--dialect=spirv"],
@@ -53,6 +55,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:resolved_target",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/spirv:facts",
         "//loom/src/loom/target/arch/spirv:isa",

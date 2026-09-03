@@ -6,7 +6,6 @@
 
 #include "loom/tooling/target/amdgpu/artifact_provider.h"
 
-#include "loom/target/arch/amdgpu/artifact_key.h"
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/runtime_requirements.h"
 #include "loom/target/emit/native/amdgpu/hal_kernel_library.h"
@@ -16,69 +15,6 @@ typedef struct loom_amdgpu_compile_artifact_storage_t {
   // Target-native HSACO artifact storage.
   loom_amdgpu_hal_kernel_library_t kernel_library;
 } loom_amdgpu_compile_artifact_storage_t;
-
-typedef struct loom_amdgpu_compile_artifact_target_storage_t {
-  // Structured AMDGPU target profile. This remains first so the owning storage
-  // can be recovered from its target-neutral base pointer.
-  loom_amdgpu_target_profile_t profile;
-  // NUL-terminated storage for the canonical provider-facing target key.
-  char target_key_storage[128];
-  // Canonical provider-facing target key borrowing |target_key_storage|.
-  iree_string_view_t target_key;
-} loom_amdgpu_compile_artifact_target_storage_t;
-
-static iree_status_t loom_amdgpu_artifact_provider_select_target(
-    const loom_artifact_provider_t* provider, iree_string_view_t target_key,
-    iree_allocator_t allocator, loom_artifact_target_t* out_target) {
-  (void)provider;
-  IREE_ASSERT_ARGUMENT(out_target);
-  *out_target = (loom_artifact_target_t){0};
-
-  loom_amdgpu_target_profile_t profile = {0};
-  loom_amdgpu_target_identity_t identity = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_key_parse(target_key, &identity));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_target_profile_initialize(&identity, &profile));
-  if (!loom_amdgpu_target_properties_support_hsaco(&profile.properties) ||
-      profile.identity.target == NULL) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "AMDGPU target '%.*s' cannot be emitted as HSACO "
-                            "by Loom",
-                            (int)target_key.size, target_key.data);
-  }
-
-  loom_amdgpu_compile_artifact_target_storage_t* storage = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(allocator, sizeof(*storage), (void**)&storage));
-  *storage = (loom_amdgpu_compile_artifact_target_storage_t){
-      .profile = profile,
-  };
-  iree_status_t status = loom_amdgpu_artifact_key_format(
-      &storage->profile.identity, sizeof(storage->target_key_storage),
-      storage->target_key_storage, &storage->target_key);
-  if (iree_status_is_ok(status)) {
-    *out_target = (loom_artifact_target_t){
-        .target_profile = &storage->profile.base,
-        .target_key = storage->target_key,
-    };
-  } else {
-    iree_allocator_free(allocator, storage);
-  }
-  return status;
-}
-
-static void loom_amdgpu_artifact_provider_deinitialize_target(
-    const loom_artifact_provider_t* provider, loom_artifact_target_t* target,
-    iree_allocator_t allocator) {
-  (void)provider;
-  if (target == NULL) {
-    return;
-  }
-  iree_allocator_free(
-      allocator,
-      (loom_amdgpu_compile_artifact_target_storage_t*)target->target_profile);
-  *target = (loom_artifact_target_t){0};
-}
 
 static loom_amdgpu_runtime_global_flags_t
 loom_amdgpu_artifact_provider_runtime_globals(
@@ -188,9 +124,8 @@ const loom_artifact_provider_t loom_amdgpu_artifact_provider = {
     .name = IREE_SVL("amdgpu-hal"),
     .target_family_name = IREE_SVL("AMDGPU"),
     .artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_EXECUTABLE,
-    .select_target = loom_amdgpu_artifact_provider_select_target,
-    .deinitialize_target = loom_amdgpu_artifact_provider_deinitialize_target,
     .emit_artifact = loom_amdgpu_artifact_provider_emit_artifact,
     .deinitialize_artifact =
         loom_amdgpu_artifact_provider_deinitialize_artifact,
+    .target_profile_type = &loom_amdgpu_target_profile_type,
 };

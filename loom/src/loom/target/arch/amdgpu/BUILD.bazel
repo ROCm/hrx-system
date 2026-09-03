@@ -237,6 +237,7 @@ loom_cc_library(
     visibility = (
         _AMDGPU_BINDING_VISIBILITY +
         _AMDGPU_NATIVE_VISIBILITY +
+        _AMDGPU_PROVIDER_VISIBILITY +
         _AMDGPU_TOOLING_VISIBILITY + [
             "//loom/src/loom/tools/loom-link:__pkg__",
         ]
@@ -453,6 +454,7 @@ loom_cc_library(
     hdrs = ["provider.h"],
     visibility = _AMDGPU_PROVIDER_VISIBILITY,
     deps = [
+        ":artifact_key",
         ":legalization",
         ":low_asm_diagnostics",
         ":low_verify",
@@ -474,6 +476,7 @@ loom_cc_test(
     name = "provider_test",
     srcs = ["provider_test.cc"],
     deps = [
+        ":artifact_key",
         ":profile",
         ":provider",
         "//loom/src/loom/analysis:symbol_facts",

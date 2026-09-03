@@ -9,6 +9,7 @@
 #include "loom/target/arch/amdgpu/artifact_key.h"
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/profile.h"
+#include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/tooling/execution/hal/runtime.h"
 #include "loom/tooling/target/amdgpu/artifact_provider.h"
@@ -123,10 +124,14 @@ static iree_status_t loom_amdgpu_device_provider_try_select_target(
         "AMDGPU HAL device spec reports ambiguous executable targets");
   }
 
-  IREE_RETURN_IF_ERROR(loom_artifact_provider_select_target(
-      &loom_amdgpu_artifact_provider, result.target->target_key, allocator,
-      &out_target->artifact_target));
+  IREE_RETURN_IF_ERROR(loom_target_provider_select_profile(
+      &loom_amdgpu_target_provider, result.target->target_key, allocator,
+      &out_target->profile_selection));
   out_target->executable_target = result.target;
+  out_target->artifact_target = (loom_artifact_target_t){
+      .target_profile = out_target->profile_selection.profile,
+      .target_key = out_target->profile_selection.selector,
+  };
   *out_selected = true;
   return iree_ok_status();
 }
@@ -214,13 +219,12 @@ loom_amdgpu_device_provider_select_compatible_target_from_facts(
 static void loom_amdgpu_device_provider_deinitialize_target(
     const loom_device_provider_t* provider, loom_device_target_t* target,
     iree_allocator_t allocator) {
+  (void)provider;
+  (void)allocator;
   if (target == NULL) {
     return;
   }
-  if (provider->artifact_provider->deinitialize_target != NULL) {
-    provider->artifact_provider->deinitialize_target(
-        provider->artifact_provider, &target->artifact_target, allocator);
-  }
+  loom_target_profile_selection_deinitialize(&target->profile_selection);
   *target = (loom_device_target_t){0};
 }
 

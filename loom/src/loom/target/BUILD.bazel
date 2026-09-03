@@ -574,8 +574,14 @@ loom_cc_library(
 
 loom_cc_library(
     name = "provider",
-    srcs = ["provider.c"],
-    hdrs = ["provider.h"],
+    srcs = [
+        "profile_selection.c",
+        "provider.c",
+    ],
+    hdrs = [
+        "profile_selection.h",
+        "provider.h",
+    ],
     deps = [
         ":legalization",
         ":low_asm_diagnostics",
@@ -671,6 +677,16 @@ loom_cc_test(
         "//loom/src/loom/pass:builder",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "profile_selection_test",
+    srcs = ["profile_selection_test.cc"],
+    deps = [
+        ":provider",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

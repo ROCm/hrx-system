@@ -20,10 +20,8 @@ loom_cc_library(
   DEPS
     iree::base
     loom::ir
-    loom::target::arch::amdgpu::artifact_key
     loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::runtime_requirements
-    loom::target::arch::amdgpu::target_info
     loom::target::emit::native::amdgpu::hal_kernel_library
     loom::target::emit::native::amdgpu::runtime_globals
     loom::tooling::compile::artifact
@@ -46,6 +44,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::artifact_key
     loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::profile
+    loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::target_info
     loom::tooling::execution::hal::device_provider
     loom::tooling::execution::hal::runtime
@@ -106,7 +105,6 @@ loom_cc_test(
     loom::ir
     loom::ops::op_registry
     loom::sanitizer::options
-    loom::target::arch::amdgpu::artifact_key
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::profile

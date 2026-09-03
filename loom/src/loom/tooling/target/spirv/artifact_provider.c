@@ -8,6 +8,7 @@
 
 #include "loom/target/arch/spirv/descriptors/low_registry.h"
 #include "loom/target/arch/spirv/low_verify.h"
+#include "loom/target/arch/spirv/profile.h"
 #include "loom/target/emit/spirv/module_builder.h"
 #include "loom/target/emit/spirv/module_emitter.h"
 #include "loom/target/entry_selection.h"
@@ -261,4 +262,5 @@ const loom_artifact_provider_t loom_spirv_vulkan_artifact_provider = {
         },
     .emit_artifact = loom_spirv_artifact_provider_emit_artifact,
     .deinitialize_artifact = loom_spirv_artifact_provider_deinitialize_artifact,
+    .target_profile_type = &loom_spirv_target_profile_type,
 };

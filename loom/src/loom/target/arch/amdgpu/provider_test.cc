@@ -30,6 +30,7 @@
 #include "loom/pass/registry.h"
 #include "loom/pass/testing/registry_verify.h"
 #include "loom/pass/tooling.h"
+#include "loom/target/arch/amdgpu/artifact_key.h"
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/profile.h"
@@ -444,6 +445,65 @@ TEST_F(AmdgpuProviderTest, ProvidesSortedPassRegistry) {
   ASSERT_NE(descriptor, nullptr);
   ASSERT_NE(descriptor->info, nullptr);
   EXPECT_EQ(descriptor->info()->kind, LOOM_PASS_FUNCTION);
+}
+
+TEST_F(AmdgpuProviderTest, SelectsCanonicalFamilyProfile) {
+  loom_target_profile_selection_t selection = {};
+  IREE_ASSERT_OK(loom_target_environment_select_profile(
+      &target_environment_, IREE_SV("amdgpu:gfx942:sramecc+:xnack-"),
+      iree_allocator_system(), &selection));
+
+  EXPECT_EQ(selection.provider, &loom_amdgpu_target_provider);
+  EXPECT_TRUE(iree_string_view_equal(selection.selector,
+                                     IREE_SV("gfx942:sramecc+:xnack-")));
+  const loom_amdgpu_target_profile_t* profile =
+      loom_amdgpu_target_profile_cast(selection.profile);
+  ASSERT_NE(profile, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(profile->identity.target->name,
+                                     IREE_SV("gfx942")));
+  EXPECT_EQ(profile->identity.amdhsa_features.sramecc,
+            LOOM_AMDGPU_TARGET_FEATURE_ON);
+  EXPECT_EQ(profile->identity.amdhsa_features.xnack,
+            LOOM_AMDGPU_TARGET_FEATURE_OFF);
+
+  loom_target_profile_selection_deinitialize(&selection);
+}
+
+TEST_F(AmdgpuProviderTest, RejectsUnknownFamilySelector) {
+  loom_target_profile_selection_t selection = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_target_environment_select_profile(
+                            &target_environment_, IREE_SV("amdgpu:gfx9999"),
+                            iree_allocator_system(), &selection));
+}
+
+TEST_F(AmdgpuProviderTest, SelectsEveryCanonicalTargetProfile) {
+  const iree_host_size_t target_count = loom_amdgpu_target_info_target_count();
+  ASSERT_GT(target_count, 0u);
+  for (iree_host_size_t i = 0; i < target_count; ++i) {
+    const loom_amdgpu_target_info_t* target_info =
+        loom_amdgpu_target_info_target_at(i);
+    ASSERT_NE(target_info, nullptr);
+
+    loom_amdgpu_target_identity_t identity = {};
+    loom_amdgpu_target_identity_initialize(target_info, &identity);
+    char selector_storage[128] = {};
+    iree_string_view_t selector = iree_string_view_empty();
+    IREE_ASSERT_OK(loom_amdgpu_artifact_key_format(
+        &identity, sizeof(selector_storage), selector_storage, &selector));
+
+    loom_target_profile_selection_t selection = {};
+    IREE_ASSERT_OK(loom_target_provider_select_profile(
+        &loom_amdgpu_target_provider, selector, iree_allocator_system(),
+        &selection));
+    const loom_amdgpu_target_profile_t* selected_profile =
+        loom_amdgpu_target_profile_cast(selection.profile);
+    ASSERT_NE(selected_profile, nullptr);
+    EXPECT_TRUE(iree_string_view_equal(selection.selector, selector));
+    EXPECT_TRUE(loom_amdgpu_target_identity_equal(&selected_profile->identity,
+                                                  &identity));
+    loom_target_profile_selection_deinitialize(&selection);
+  }
 }
 
 TEST_F(AmdgpuProviderTest, ContributesHalKernelAbiMaterialization) {

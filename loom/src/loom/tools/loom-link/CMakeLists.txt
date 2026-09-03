@@ -9,22 +9,11 @@
 
 iree_add_all_subdirs()
 
-set(_loom_link_platform_copts "")
-if(LOOM_TARGET_ARCH_AMDGPU)
-  list(APPEND _loom_link_platform_copts "-DLOOM_LINK_HAVE_AMDGPU=1")
-endif()
-set(_loom_link_platform_deps "")
-if(LOOM_TARGET_ARCH_AMDGPU)
-  list(APPEND _loom_link_platform_deps loom::target::arch::amdgpu::artifact_key)
-  list(APPEND _loom_link_platform_deps loom::target::arch::amdgpu::profile)
-endif()
 loom_cc_binary(
   NAME
     loom-link
   SRCS
     "loom-link.c"
-  COPTS
-    ${_loom_link_platform_copts}
   DEPS
     iree::base
     iree::base::internal::arena
@@ -54,7 +43,6 @@ loom_cc_binary(
     loom::tools::loom-format::convert
     loom::util::stream
     loom::verify
-    ${_loom_link_platform_deps}
 )
 
 iree_execution_test_suite(
