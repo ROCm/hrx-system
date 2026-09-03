@@ -94,48 +94,55 @@ _SHORT_MIN = -1024
 _SHORT_MAX = 1023
 
 
-def _plain_vector_multiply_control(
+def _vector_data_path_control(
     *,
-    lhs_signed: bool,
-    rhs_signed: bool,
-    lhs_mode: int,
-    rhs_mode: int,
-    variant: int,
+    sign_x: bool,
+    sign_y: bool,
+    accumulator_mode: int,
+    multiplication_mode: int,
+    compute_mode: int,
 ) -> int:
-    """Encodes the AIE2P control word for a non-accumulating vector multiply."""
+    """Encodes the common AIE2P vector data-path control word."""
 
-    if lhs_mode < 0 or lhs_mode > 0b11:
-        raise ValueError("AIE2P multiply lhs mode must fit two bits")
-    if rhs_mode < 0 or rhs_mode > 0b11:
-        raise ValueError("AIE2P multiply rhs mode must fit two bits")
-    if variant < 0 or variant > 0b111:
-        raise ValueError("AIE2P multiply variant must fit three bits")
+    if accumulator_mode < 0 or accumulator_mode > 0b11:
+        raise ValueError("AIE2P accumulator mode must fit two bits")
+    if multiplication_mode < 0 or multiplication_mode > 0b11:
+        raise ValueError("AIE2P multiplication mode must fit two bits")
+    if compute_mode < 0 or compute_mode > 0b111:
+        raise ValueError("AIE2P compute mode must fit three bits")
     return (
-        int(lhs_signed) << 9
-        | int(rhs_signed) << 8
-        | lhs_mode << 1
-        | rhs_mode << 3
-        | variant << 5
+        int(sign_x) << 9
+        | int(sign_y) << 8
+        | accumulator_mode << 1
+        | multiplication_mode << 3
+        | compute_mode << 5
     )
 
 
-_I16_ELEMENTWISE_MULTIPLY_CONTROL = _plain_vector_multiply_control(
-    lhs_signed=True,
-    rhs_signed=True,
-    lhs_mode=1,
-    rhs_mode=3,
-    variant=2,
+_I16_ELEMENTWISE_MULTIPLY_CONTROL = _vector_data_path_control(
+    sign_x=True,
+    sign_y=True,
+    accumulator_mode=1,
+    multiplication_mode=3,
+    compute_mode=2,
 )
-_BF16_ELEMENTWISE_MULTIPLY_CONTROL = _plain_vector_multiply_control(
-    lhs_signed=False,
-    rhs_signed=False,
-    lhs_mode=2,
-    rhs_mode=3,
-    variant=1,
+_BF16_ELEMENTWISE_MULTIPLY_CONTROL = _vector_data_path_control(
+    sign_x=False,
+    sign_y=False,
+    accumulator_mode=2,
+    multiplication_mode=3,
+    compute_mode=1,
 )
 _BF16_CONVERSION_ROUNDING = 12
 _BF16_OUTER_PRODUCT_SHUFFLE_CONTROLS = (52, 53)
 _BF16_OUTER_PRODUCT_MULTIPLY_CONTROL = _BF16_ELEMENTWISE_MULTIPLY_CONTROL
+_F32_ACCUMULATOR_ADD_CONTROL = _vector_data_path_control(
+    sign_x=False,
+    sign_y=False,
+    accumulator_mode=2,
+    multiplication_mode=3,
+    compute_mode=1,
+)
 
 
 def _descriptor(key: str) -> Descriptor:
@@ -622,7 +629,7 @@ def _vector_multiply_bf16x32_rule() -> DescriptorRule:
             EmitRegisterSlice(
                 source=ValueRef.temporary("wide_product"),
                 result=ValueRef.temporary("product"),
-                result_type=_F32X32_ACCUMULATOR,
+                unit_count=2,
             ),
             EmitDescriptorOp(
                 descriptor=set_rounding,
@@ -1129,6 +1136,33 @@ def _float_matrix_accumulator_zero_rule() -> DescriptorRule:
         emit=(
             _op_emit(
                 descriptor,
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _float_matrix_accumulator_add_rule() -> DescriptorRule:
+    config_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
+    add = _descriptor("amd.xdna.aie2p.add.f32x64.configured")
+    return DescriptorRule(
+        source_op=vector.vector_addf,
+        descriptor=add,
+        guards=_typed_guards(("lhs", "rhs", "result"), _F32X64_MATRIX_ACCUMULATOR),
+        emit=(
+            _const_emit(
+                config_constant,
+                ValueRef.temporary("add_control"),
+                _F32_ACCUMULATOR_ADD_CONTROL,
+                result_type=DescriptorResultType(),
+            ),
+            _op_emit(
+                add,
+                operands={
+                    "acc1": ValueRef.operand("lhs"),
+                    "acc2": ValueRef.operand("rhs"),
+                    "acc": ValueRef.temporary("add_control"),
+                },
                 results={"dst": ValueRef.result("result")},
             ),
         ),
@@ -2333,6 +2367,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
         _vector_multiply_bf16x32_rule(),
         _matrix_accumulator_zero_rule(),
         _float_matrix_accumulator_zero_rule(),
+        _float_matrix_accumulator_add_rule(),
         *(
             _vector_binary_rule(source_op, type_pattern, descriptor_key)
             for source_op, type_pattern, descriptor_key in (

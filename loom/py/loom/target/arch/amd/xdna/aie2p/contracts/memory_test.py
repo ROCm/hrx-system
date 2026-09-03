@@ -12,6 +12,9 @@ from loom.dialect.vector import defs as vector
 from loom.dialect.view import defs as view
 from loom.target.arch.amd.xdna.aie2p.contracts.memory import AIE2P_MEMORY_RULES
 from loom.target.contracts import (
+    EmitDescriptorOp,
+    EmitRegisterConcat,
+    EmitRegisterSlice,
     GuardKind,
     SourceMemoryAddressLayout,
     SourceMemoryOperation,
@@ -36,12 +39,26 @@ _MEMORY_ROOTS = (
 )
 
 
-def _rules_for(root_kind, *source_ops, volatile: bool = False):
+def _source_memory_emit(rule) -> EmitDescriptorOp:
+    return next(
+        emit
+        for emit in reversed(rule.emit)
+        if isinstance(emit, EmitDescriptorOp) and emit.source_memory is not None
+    )
+
+
+def _rules_for(
+    root_kind,
+    *source_ops,
+    accumulator: bool = False,
+    volatile: bool = False,
+):
     return [
         rule
         for rule in AIE2P_MEMORY_RULES
         if rule.source_op in source_ops
-        and rule.emit[-1].source_memory.root_kind is root_kind
+        and (".accumulator." in rule.descriptor.key) is accumulator
+        and _source_memory_emit(rule).source_memory.root_kind is root_kind
         and rule.descriptor.key.endswith(".volatile") is volatile
     ]
 
@@ -55,11 +72,11 @@ def _assert_address_forms(
     assert [len(rule.emit) for rule in rules] == [1, 3, 2, 3, 4]
     assert [
         (
-            rule.emit[-1].source_memory.static_byte_offset_minimum,
-            rule.emit[-1].source_memory.static_byte_offset_maximum,
-            rule.emit[-1].source_memory.dynamic_term_count,
-            rule.emit[-1].source_memory.dynamic_term_count_minimum,
-            rule.emit[-1].source_memory.allow_dynamic_stride_values,
+            _source_memory_emit(rule).source_memory.static_byte_offset_minimum,
+            _source_memory_emit(rule).source_memory.static_byte_offset_maximum,
+            _source_memory_emit(rule).source_memory.dynamic_term_count,
+            _source_memory_emit(rule).source_memory.dynamic_term_count_minimum,
+            _source_memory_emit(rule).source_memory.allow_dynamic_stride_values,
         )
         for rule in rules
     ] == [
@@ -96,7 +113,7 @@ def test_scalar_memory_rules_cover_every_address_form() -> None:
                 immediate_maximum=28,
             )
         for rule in rules:
-            memory_emit = rule.emit[-1]
+            memory_emit = _source_memory_emit(rule)
             constraint = memory_emit.source_memory
             assert constraint is not None
             assert constraint.root_kind is root_kind
@@ -112,12 +129,18 @@ def test_scalar_memory_rules_cover_every_address_form() -> None:
 
 def test_volatile_memory_rules_mirror_every_ordinary_rule() -> None:
     for root_kind, _ in _MEMORY_ROOTS:
-        for source_ops in (
-            (view.view_load, view.view_store),
-            (vector.vector_load, vector.vector_store),
+        for source_ops, accumulator in (
+            ((view.view_load, view.view_store), False),
+            ((vector.vector_load, vector.vector_store), False),
+            ((vector.vector_load, vector.vector_store), True),
         ):
-            ordinary_rules = _rules_for(root_kind, *source_ops)
-            volatile_rules = _rules_for(root_kind, *source_ops, volatile=True)
+            ordinary_rules = _rules_for(root_kind, *source_ops, accumulator=accumulator)
+            volatile_rules = _rules_for(
+                root_kind,
+                *source_ops,
+                accumulator=accumulator,
+                volatile=True,
+            )
             assert len(volatile_rules) == len(ordinary_rules)
             for volatile_rule, ordinary_rule in zip(
                 volatile_rules, ordinary_rules, strict=True
@@ -132,11 +155,15 @@ def test_volatile_memory_rules_mirror_every_ordinary_rule() -> None:
                 assert volatile_rule.guards[0].enum_keyword == "volatile"
                 assert volatile_rule.guards[1:] == ordinary_rule.guards
                 assert len(volatile_rule.emit) == len(ordinary_rule.emit)
-                for emit_index, (volatile_emit, ordinary_emit) in enumerate(
-                    zip(volatile_rule.emit, ordinary_rule.emit, strict=True)
+                for volatile_emit, ordinary_emit in zip(
+                    volatile_rule.emit, ordinary_rule.emit, strict=True
                 ):
+                    assert type(volatile_emit) is type(ordinary_emit)
+                    if not isinstance(ordinary_emit, EmitDescriptorOp):
+                        assert volatile_emit == ordinary_emit
+                        continue
                     expected_descriptor = ordinary_emit.descriptor
-                    if emit_index == len(ordinary_rule.emit) - 1:
+                    if ordinary_emit.descriptor == ordinary_rule.descriptor:
                         assert volatile_emit.descriptor.key == (
                             f"{ordinary_emit.descriptor.key}.volatile"
                         )
@@ -217,7 +244,7 @@ def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None
                 immediate_maximum=width_bits - width_bits // 8,
             )
             for rule in operation_rules:
-                memory_emit = rule.emit[-1]
+                memory_emit = _source_memory_emit(rule)
                 constraint = memory_emit.source_memory
                 assert constraint is not None
                 assert constraint.operation is operation
@@ -231,3 +258,126 @@ def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None
                 assert constraint.vector_lane_count == vector_lane_count
                 assert constraint.vector_lane_byte_stride == element_byte_count
                 assert constraint.minimum_alignment == width_bits // 8
+
+
+def test_f32_accumulator_memory_rules_decompose_into_native_chunks() -> None:
+    expected_chunk_offsets = (0, 64, 128, 192)
+    expected_project_kinds = (
+        SourceMemoryProjectKind.STATIC_BYTE_OFFSET,
+        SourceMemoryProjectKind.STATIC_BYTE_OFFSET_PLUS_LITERAL,
+        SourceMemoryProjectKind.STATIC_BYTE_OFFSET_PLUS_LITERAL,
+        SourceMemoryProjectKind.STATIC_BYTE_OFFSET_PLUS_LITERAL,
+    )
+    expected_static_ranges = (
+        (-512, 256, 0, 0, False),
+        (_I32_MIN, _I32_MAX - 192, 0, 0, False),
+        (0, 0, None, 1, True),
+        (-64, 63, None, 1, True),
+        (_I32_MIN, _I32_MAX - 192, None, 1, True),
+    )
+
+    for root_kind, memory_spaces in _MEMORY_ROOTS:
+        rules = _rules_for(
+            root_kind,
+            vector.vector_load,
+            vector.vector_store,
+            accumulator=True,
+        )
+        assert [rule.descriptor.key for rule in rules] == [
+            "amd.xdna.aie2p.load.accumulator.f32x16.indexed.immediate",
+            *("amd.xdna.aie2p.load.accumulator.f32x16.indexed.register",) * 4,
+            "amd.xdna.aie2p.store.accumulator.f32x16.indexed.immediate",
+            *("amd.xdna.aie2p.store.accumulator.f32x16.indexed.register",) * 4,
+        ]
+
+        for operation_index, operation in enumerate(
+            (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
+        ):
+            operation_rules = rules[operation_index * 5 : operation_index * 5 + 5]
+            for address_index, rule in enumerate(operation_rules):
+                constraint = _source_memory_emit(rule).source_memory
+                assert constraint is not None
+                assert constraint.operation is operation
+                assert constraint.root_kind is root_kind
+                assert (
+                    constraint.address_layout
+                    is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
+                )
+                assert constraint.memory_spaces == memory_spaces
+                assert constraint.element_byte_count == 4
+                assert constraint.vector_lane_count == 64
+                assert constraint.vector_lane_byte_stride == 4
+                assert constraint.minimum_alignment == 64
+                assert (
+                    constraint.static_byte_offset_minimum,
+                    constraint.static_byte_offset_maximum,
+                    constraint.dynamic_term_count,
+                    constraint.dynamic_term_count_minimum,
+                    constraint.allow_dynamic_stride_values,
+                ) == expected_static_ranges[address_index]
+
+                memory_emits = [
+                    emit
+                    for emit in rule.emit
+                    if isinstance(emit, EmitDescriptorOp)
+                    and emit.descriptor == rule.descriptor
+                ]
+                assert len(memory_emits) == 4
+
+                if operation is SourceMemoryOperation.LOAD:
+                    assert not any(
+                        isinstance(emit, EmitRegisterSlice) for emit in rule.emit
+                    )
+                    concat = rule.emit[-1]
+                    assert isinstance(concat, EmitRegisterConcat)
+                    assert [source.field for source in concat.sources] == [
+                        "chunk_0",
+                        "chunk_1",
+                        "chunk_2",
+                        "chunk_3",
+                    ]
+                    assert concat.result.field == "result"
+                else:
+                    slices = [
+                        emit
+                        for emit in rule.emit
+                        if isinstance(emit, EmitRegisterSlice)
+                    ]
+                    assert [emit.unit_offset for emit in slices] == [0, 1, 2, 3]
+                    assert [emit.unit_count for emit in slices] == [1, 1, 1, 1]
+                    assert all(emit.result_type is None for emit in slices)
+
+            immediate_projects = [
+                emit.immediates["imm"]
+                for emit in operation_rules[0].emit
+                if isinstance(emit, EmitDescriptorOp)
+            ]
+            assert all(
+                isinstance(project, SourceMemoryProject)
+                for project in immediate_projects
+            )
+            assert tuple(project.kind for project in immediate_projects) == (
+                expected_project_kinds
+            )
+            assert tuple(project.literal_i64 for project in immediate_projects) == (
+                expected_chunk_offsets
+            )
+
+            for address_index, expected_offsets in (
+                (1, expected_chunk_offsets),
+                (2, expected_chunk_offsets[1:]),
+                (3, expected_chunk_offsets),
+                (4, expected_chunk_offsets),
+            ):
+                static_projects = [
+                    project
+                    for emit in operation_rules[address_index].emit
+                    if isinstance(emit, EmitDescriptorOp)
+                    if isinstance(emit.immediates, dict)
+                    for project in emit.immediates.values()
+                    if isinstance(project, SourceMemoryProject)
+                ]
+                assert (
+                    tuple(project.literal_i64 for project in static_projects)
+                    == expected_offsets
+                )
