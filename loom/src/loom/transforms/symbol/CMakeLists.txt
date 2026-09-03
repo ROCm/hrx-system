@@ -217,6 +217,26 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_benchmark(
+  NAME
+    inline_callables_benchmark
+  SRCS
+    "inline_callables_benchmark.cc"
+  DEPS
+    ::inline_callables
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::op_defs
+    loom::pass::types
+    loom::rewrite::module_projection
+    loom::testing::module_ptr
+    loom::tooling::context
+    loom::verify
+  TESTONLY
+)
+
 loom_cc_library(
   NAME
     refine_boundaries
