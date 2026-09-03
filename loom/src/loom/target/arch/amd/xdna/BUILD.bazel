@@ -46,6 +46,7 @@ loom_cc_library(
     srcs = ["array/registers.c"],
     hdrs = ["array/registers.h"],
     textual_hdrs = [":array/register_tables.inl"],
+    visibility = ["//visibility:public"],
     deps = [
         ":array_facts",
         "//runtime/src/iree/base",
