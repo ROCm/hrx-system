@@ -256,6 +256,7 @@ loom_cc_test(
 
 loom_check_test_suite(
     name = "loom_check_file_test",
+    size = "medium",
     srcs = [
         "test/atomic.loom-test",
         "test/atomic_diagnostics.loom-test",
