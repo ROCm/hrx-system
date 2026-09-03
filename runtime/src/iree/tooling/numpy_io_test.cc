@@ -140,19 +140,19 @@ static void AssertBufferViewContents(iree_hal_buffer_view_t* buffer_view,
 
 template <typename T>
 static void LoadArrayAndAssertContents(iree_io_stream_t* stream,
-                                       iree_hal_device_t* device,
                                        iree_hal_allocator_t* device_allocator,
                                        std::vector<iree_hal_dim_t> shape,
                                        iree_hal_element_type_t element_type,
                                        iree_hal_encoding_type_t encoding_type,
                                        std::vector<T> contents) {
   iree_hal_buffer_params_t buffer_params = {};
-  buffer_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  buffer_params.usage =
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
   buffer_params.access = IREE_HAL_MEMORY_ACCESS_READ;
   buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   iree_hal_buffer_view_t* buffer_view = NULL;
   IREE_ASSERT_OK(iree_numpy_npy_load_ndarray(
-      stream, IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT, buffer_params, device,
+      stream, IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT, buffer_params,
       device_allocator, &buffer_view));
   AssertBufferViewContents<T>(buffer_view, shape, element_type, encoding_type,
                               contents);
@@ -168,13 +168,14 @@ TEST_F(NumpyIOTest, LoadEmptyFile) {
 
   // Try (and fail) to parse something from the empty file.
   iree_hal_buffer_params_t buffer_params = {};
-  buffer_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  buffer_params.usage =
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
   buffer_params.access = IREE_HAL_MEMORY_ACCESS_READ;
   buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   iree_hal_buffer_view_t* buffer_view = NULL;
   EXPECT_THAT(Status(iree_numpy_npy_load_ndarray(
                   stream.get(), IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT,
-                  buffer_params, device_, device_allocator_, &buffer_view)),
+                  buffer_params, device_allocator_, &buffer_view)),
               StatusIs(StatusCode::kOutOfRange));
 
   // Should still be at EOF.
@@ -186,10 +187,9 @@ TEST_F(NumpyIOTest, LoadSingleArray) {
   auto stream = OpenInputFile("single.npy");
 
   // np.array([1.1, 2.2, 3.3], dtype=np.float32)
-  LoadArrayAndAssertContents<float>(stream.get(), device_, device_allocator_,
-                                    {3}, IREE_HAL_ELEMENT_TYPE_FLOAT_32,
-                                    IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                    {1.1f, 2.2f, 3.3f});
+  LoadArrayAndAssertContents<float>(
+      stream.get(), device_allocator_, {3}, IREE_HAL_ELEMENT_TYPE_FLOAT_32,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {1.1f, 2.2f, 3.3f});
 
   // Should have hit EOF.
   ASSERT_TRUE(iree_io_stream_is_eos(stream.get()));
@@ -200,10 +200,9 @@ TEST_F(NumpyIOTest, LoadHeaderWithoutTrailingDictComma) {
       "{'descr': '|i1', 'fortran_order': False, 'shape': (3,)}", {1, 2, 3});
   auto stream = OpenInputBytes(file);
 
-  LoadArrayAndAssertContents<int8_t>(stream.get(), device_, device_allocator_,
-                                     {3}, IREE_HAL_ELEMENT_TYPE_SINT_8,
-                                     IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                     {1, 2, 3});
+  LoadArrayAndAssertContents<int8_t>(
+      stream.get(), device_allocator_, {3}, IREE_HAL_ELEMENT_TYPE_SINT_8,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {1, 2, 3});
 
   ASSERT_TRUE(iree_io_stream_is_eos(stream.get()));
 }
@@ -214,13 +213,14 @@ TEST_F(NumpyIOTest, RejectMalformedHeaderWithoutDictSeparator) {
   auto stream = OpenInputBytes(file);
 
   iree_hal_buffer_params_t buffer_params = {};
-  buffer_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  buffer_params.usage =
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
   buffer_params.access = IREE_HAL_MEMORY_ACCESS_READ;
   buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   iree_hal_buffer_view_t* buffer_view = NULL;
   EXPECT_THAT(Status(iree_numpy_npy_load_ndarray(
                   stream.get(), IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT,
-                  buffer_params, device_, device_allocator_, &buffer_view)),
+                  buffer_params, device_allocator_, &buffer_view)),
               StatusIs(StatusCode::kInvalidArgument));
 }
 
@@ -229,22 +229,19 @@ TEST_F(NumpyIOTest, LoadMultipleArrays) {
   auto stream = OpenInputFile("multiple.npy");
 
   // np.array([1.1, 2.2, 3.3], dtype=np.float32)
-  LoadArrayAndAssertContents<float>(stream.get(), device_, device_allocator_,
-                                    {3}, IREE_HAL_ELEMENT_TYPE_FLOAT_32,
-                                    IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                    {1.1f, 2.2f, 3.3f});
+  LoadArrayAndAssertContents<float>(
+      stream.get(), device_allocator_, {3}, IREE_HAL_ELEMENT_TYPE_FLOAT_32,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {1.1f, 2.2f, 3.3f});
 
   // np.array([[0, 1], [2, 3]], dtype=np.int32)
-  LoadArrayAndAssertContents<int32_t>(stream.get(), device_, device_allocator_,
-                                      {2, 2}, IREE_HAL_ELEMENT_TYPE_SINT_32,
-                                      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                      {0, 1, 2, 3});
+  LoadArrayAndAssertContents<int32_t>(
+      stream.get(), device_allocator_, {2, 2}, IREE_HAL_ELEMENT_TYPE_SINT_32,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {0, 1, 2, 3});
 
   // np.array(42, dtype=np.int32)
-  LoadArrayAndAssertContents<int32_t>(stream.get(), device_, device_allocator_,
-                                      {}, IREE_HAL_ELEMENT_TYPE_SINT_32,
-                                      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                      {42});
+  LoadArrayAndAssertContents<int32_t>(
+      stream.get(), device_allocator_, {}, IREE_HAL_ELEMENT_TYPE_SINT_32,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {42});
 
   // Should have hit EOF.
   ASSERT_TRUE(iree_io_stream_is_eos(stream.get()));
@@ -255,45 +252,39 @@ TEST_F(NumpyIOTest, ArrayShapes) {
   auto stream = OpenInputFile("array_shapes.npy");
 
   // np.array(1, dtype=np.int8)
-  LoadArrayAndAssertContents<int8_t>(stream.get(), device_, device_allocator_,
-                                     {}, IREE_HAL_ELEMENT_TYPE_SINT_8,
-                                     IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                     {1});
+  LoadArrayAndAssertContents<int8_t>(
+      stream.get(), device_allocator_, {}, IREE_HAL_ELEMENT_TYPE_SINT_8,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {1});
 
   // np.array([], dtype=np.int8)
   LoadArrayAndAssertContents<int8_t>(
-      stream.get(), device_, device_allocator_, {0},
-      IREE_HAL_ELEMENT_TYPE_SINT_8, IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {});
+      stream.get(), device_allocator_, {0}, IREE_HAL_ELEMENT_TYPE_SINT_8,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {});
 
   // np.array([1], dtype=np.int8)
-  LoadArrayAndAssertContents<int8_t>(stream.get(), device_, device_allocator_,
-                                     {1}, IREE_HAL_ELEMENT_TYPE_SINT_8,
-                                     IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                     {1});
+  LoadArrayAndAssertContents<int8_t>(
+      stream.get(), device_allocator_, {1}, IREE_HAL_ELEMENT_TYPE_SINT_8,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {1});
 
   // np.array([[1], [2]], dtype=np.int8)
-  LoadArrayAndAssertContents<int8_t>(stream.get(), device_, device_allocator_,
-                                     {2, 1}, IREE_HAL_ELEMENT_TYPE_SINT_8,
-                                     IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                     {1, 2});
+  LoadArrayAndAssertContents<int8_t>(
+      stream.get(), device_allocator_, {2, 1}, IREE_HAL_ELEMENT_TYPE_SINT_8,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {1, 2});
 
   // np.array([[0], [1], [2], [3], [4], [5], [6], [7]], dtype=np.int8)
-  LoadArrayAndAssertContents<int8_t>(stream.get(), device_, device_allocator_,
-                                     {8, 1}, IREE_HAL_ELEMENT_TYPE_SINT_8,
-                                     IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                     {0, 1, 2, 3, 4, 5, 6, 7});
+  LoadArrayAndAssertContents<int8_t>(
+      stream.get(), device_allocator_, {8, 1}, IREE_HAL_ELEMENT_TYPE_SINT_8,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {0, 1, 2, 3, 4, 5, 6, 7});
 
   // np.array([[1, 2], [3, 4]], dtype=np.int8)
-  LoadArrayAndAssertContents<int8_t>(stream.get(), device_, device_allocator_,
-                                     {2, 2}, IREE_HAL_ELEMENT_TYPE_SINT_8,
-                                     IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                     {1, 2, 3, 4});
+  LoadArrayAndAssertContents<int8_t>(
+      stream.get(), device_allocator_, {2, 2}, IREE_HAL_ELEMENT_TYPE_SINT_8,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {1, 2, 3, 4});
 
   // np.array([[[1], [2]], [[3], [4]]], dtype=np.int8)
-  LoadArrayAndAssertContents<int8_t>(stream.get(), device_, device_allocator_,
-                                     {2, 2, 1}, IREE_HAL_ELEMENT_TYPE_SINT_8,
-                                     IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                     {1, 2, 3, 4});
+  LoadArrayAndAssertContents<int8_t>(
+      stream.get(), device_allocator_, {2, 2, 1}, IREE_HAL_ELEMENT_TYPE_SINT_8,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {1, 2, 3, 4});
 
   // Should have hit EOF.
   ASSERT_TRUE(iree_io_stream_is_eos(stream.get()));
@@ -304,88 +295,76 @@ TEST_F(NumpyIOTest, ArrayTypes) {
   auto stream = OpenInputFile("array_types.npy");
 
   // np.array([True, False], dtype=np.bool_)
-  LoadArrayAndAssertContents<int8_t>(stream.get(), device_, device_allocator_,
-                                     {2}, IREE_HAL_ELEMENT_TYPE_BOOL_8,
-                                     IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                     {1, 0});
+  LoadArrayAndAssertContents<int8_t>(
+      stream.get(), device_allocator_, {2}, IREE_HAL_ELEMENT_TYPE_BOOL_8,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {1, 0});
 
   // np.array([-1, 1], dtype=np.int8)
-  LoadArrayAndAssertContents<int8_t>(stream.get(), device_, device_allocator_,
-                                     {2}, IREE_HAL_ELEMENT_TYPE_SINT_8,
-                                     IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                     {-1, 1});
+  LoadArrayAndAssertContents<int8_t>(
+      stream.get(), device_allocator_, {2}, IREE_HAL_ELEMENT_TYPE_SINT_8,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {-1, 1});
 
   // np.array([-20000, 20000], dtype=np.int16)
-  LoadArrayAndAssertContents<int16_t>(stream.get(), device_, device_allocator_,
-                                      {2}, IREE_HAL_ELEMENT_TYPE_SINT_16,
-                                      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                      {-20000, 20000});
+  LoadArrayAndAssertContents<int16_t>(
+      stream.get(), device_allocator_, {2}, IREE_HAL_ELEMENT_TYPE_SINT_16,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {-20000, 20000});
 
   // np.array([-2000000, 2000000], dtype=np.int32)
-  LoadArrayAndAssertContents<int32_t>(stream.get(), device_, device_allocator_,
-                                      {2}, IREE_HAL_ELEMENT_TYPE_SINT_32,
-                                      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                      {-2000000, 2000000});
+  LoadArrayAndAssertContents<int32_t>(
+      stream.get(), device_allocator_, {2}, IREE_HAL_ELEMENT_TYPE_SINT_32,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {-2000000, 2000000});
 
   // np.array([-20000000000, 20000000000], dtype=np.int64)
-  LoadArrayAndAssertContents<int64_t>(stream.get(), device_, device_allocator_,
-                                      {2}, IREE_HAL_ELEMENT_TYPE_SINT_64,
-                                      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                      {-20000000000, 20000000000});
+  LoadArrayAndAssertContents<int64_t>(
+      stream.get(), device_allocator_, {2}, IREE_HAL_ELEMENT_TYPE_SINT_64,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {-20000000000, 20000000000});
 
   // np.array([1, 255], dtype=np.uint8)
-  LoadArrayAndAssertContents<uint8_t>(stream.get(), device_, device_allocator_,
-                                      {2}, IREE_HAL_ELEMENT_TYPE_UINT_8,
-                                      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                      {1, 255});
+  LoadArrayAndAssertContents<uint8_t>(
+      stream.get(), device_allocator_, {2}, IREE_HAL_ELEMENT_TYPE_UINT_8,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {1, 255});
 
   // np.array([1, 65535], dtype=np.uint16)
-  LoadArrayAndAssertContents<uint16_t>(stream.get(), device_, device_allocator_,
-                                       {2}, IREE_HAL_ELEMENT_TYPE_UINT_16,
-                                       IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                       {1, 65535});
+  LoadArrayAndAssertContents<uint16_t>(
+      stream.get(), device_allocator_, {2}, IREE_HAL_ELEMENT_TYPE_UINT_16,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {1, 65535});
 
   // np.array([1, 4294967295], dtype=np.uint32)
-  LoadArrayAndAssertContents<uint32_t>(stream.get(), device_, device_allocator_,
-                                       {2}, IREE_HAL_ELEMENT_TYPE_UINT_32,
-                                       IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                       {1, 4294967295u});
+  LoadArrayAndAssertContents<uint32_t>(
+      stream.get(), device_allocator_, {2}, IREE_HAL_ELEMENT_TYPE_UINT_32,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {1, 4294967295u});
 
   // np.array([1, 18446744073709551615], dtype=np.uint64)
-  LoadArrayAndAssertContents<uint64_t>(stream.get(), device_, device_allocator_,
-                                       {2}, IREE_HAL_ELEMENT_TYPE_UINT_64,
-                                       IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                       {1, 18446744073709551615ull});
+  LoadArrayAndAssertContents<uint64_t>(
+      stream.get(), device_allocator_, {2}, IREE_HAL_ELEMENT_TYPE_UINT_64,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {1, 18446744073709551615ull});
 
   // np.array([-1.1, 1.1], dtype=np.float16)
-  LoadArrayAndAssertContents<uint16_t>(stream.get(), device_, device_allocator_,
-                                       {2}, IREE_HAL_ELEMENT_TYPE_FLOAT_16,
-                                       IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                       {0xBC66, 0x3C66});
+  LoadArrayAndAssertContents<uint16_t>(
+      stream.get(), device_allocator_, {2}, IREE_HAL_ELEMENT_TYPE_FLOAT_16,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {0xBC66, 0x3C66});
 
   // np.array([-1.1, 1.1], dtype=np.float32)
-  LoadArrayAndAssertContents<float>(stream.get(), device_, device_allocator_,
-                                    {2}, IREE_HAL_ELEMENT_TYPE_FLOAT_32,
-                                    IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                    {-1.1f, 1.1f});
+  LoadArrayAndAssertContents<float>(
+      stream.get(), device_allocator_, {2}, IREE_HAL_ELEMENT_TYPE_FLOAT_32,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {-1.1f, 1.1f});
 
   // np.array([-1.1, 1.1], dtype=np.float64)
-  LoadArrayAndAssertContents<double>(stream.get(), device_, device_allocator_,
-                                     {2}, IREE_HAL_ELEMENT_TYPE_FLOAT_64,
-                                     IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-                                     {-1.1, 1.1});
+  LoadArrayAndAssertContents<double>(
+      stream.get(), device_allocator_, {2}, IREE_HAL_ELEMENT_TYPE_FLOAT_64,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {-1.1, 1.1});
 
   // np.array([1 + 5j, 2 + 6j], dtype=np.complex64)
-  LoadArrayAndAssertContents<float>(stream.get(), device_, device_allocator_,
-                                    {2}, IREE_HAL_ELEMENT_TYPE_COMPLEX_FLOAT_64,
+  LoadArrayAndAssertContents<float>(stream.get(), device_allocator_, {2},
+                                    IREE_HAL_ELEMENT_TYPE_COMPLEX_FLOAT_64,
                                     IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
                                     {1.0f, 5.0f, 2.0f, 6.0f});
 
   // np.array([-1.1, 1.1], dtype=np.float64)
-  LoadArrayAndAssertContents<double>(
-      stream.get(), device_, device_allocator_, {2},
-      IREE_HAL_ELEMENT_TYPE_COMPLEX_FLOAT_128,
-      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, {1.0, 5.0, 2.0, 6.0});
+  LoadArrayAndAssertContents<double>(stream.get(), device_allocator_, {2},
+                                     IREE_HAL_ELEMENT_TYPE_COMPLEX_FLOAT_128,
+                                     IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
+                                     {1.0, 5.0, 2.0, 6.0});
 
   // Should have hit EOF.
   ASSERT_TRUE(iree_io_stream_is_eos(stream.get()));
@@ -393,17 +372,17 @@ TEST_F(NumpyIOTest, ArrayTypes) {
 
 static void RoundTripArrays(iree_io_stream_t* source_stream,
                             iree_io_stream_t* target_stream,
-                            iree_hal_device_t* device,
                             iree_hal_allocator_t* device_allocator) {
   while (!iree_io_stream_is_eos(source_stream)) {
     iree_hal_buffer_params_t buffer_params = {};
-    buffer_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+    buffer_params.usage =
+        IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
     buffer_params.access = IREE_HAL_MEMORY_ACCESS_READ;
     buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
     iree_hal_buffer_view_t* buffer_view = NULL;
     IREE_ASSERT_OK(iree_numpy_npy_load_ndarray(
         source_stream, IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT, buffer_params,
-        device, device_allocator, &buffer_view));
+        device_allocator, &buffer_view));
     IREE_ASSERT_OK(iree_numpy_npy_save_ndarray(
         target_stream, IREE_NUMPY_NPY_SAVE_OPTION_DEFAULT, buffer_view,
         iree_hal_allocator_host_allocator(device_allocator)));
@@ -441,8 +420,7 @@ static void CompareStreams(iree_io_stream_t* source_stream,
 TEST_F(NumpyIOTest, RoundTripSingleArray) {
   auto source_stream = OpenInputFile("single.npy");
   auto target_stream = OpenOutputFile("single_out.npy");
-  RoundTripArrays(source_stream.get(), target_stream.get(), device_,
-                  device_allocator_);
+  RoundTripArrays(source_stream.get(), target_stream.get(), device_allocator_);
   CompareStreams(source_stream.get(), target_stream.get());
 }
 
@@ -450,8 +428,7 @@ TEST_F(NumpyIOTest, RoundTripSingleArray) {
 TEST_F(NumpyIOTest, RoundTripMultipleArrays) {
   auto source_stream = OpenInputFile("multiple.npy");
   auto target_stream = OpenOutputFile("multiple_out.npy");
-  RoundTripArrays(source_stream.get(), target_stream.get(), device_,
-                  device_allocator_);
+  RoundTripArrays(source_stream.get(), target_stream.get(), device_allocator_);
   CompareStreams(source_stream.get(), target_stream.get());
 }
 
@@ -459,8 +436,7 @@ TEST_F(NumpyIOTest, RoundTripMultipleArrays) {
 TEST_F(NumpyIOTest, RoundTripArrayShapes) {
   auto source_stream = OpenInputFile("array_shapes.npy");
   auto target_stream = OpenOutputFile("array_shapes_out.npy");
-  RoundTripArrays(source_stream.get(), target_stream.get(), device_,
-                  device_allocator_);
+  RoundTripArrays(source_stream.get(), target_stream.get(), device_allocator_);
   CompareStreams(source_stream.get(), target_stream.get());
 }
 
@@ -468,8 +444,7 @@ TEST_F(NumpyIOTest, RoundTripArrayShapes) {
 TEST_F(NumpyIOTest, RoundTripArrayTypes) {
   auto source_stream = OpenInputFile("array_types.npy");
   auto target_stream = OpenOutputFile("array_types_out.npy");
-  RoundTripArrays(source_stream.get(), target_stream.get(), device_,
-                  device_allocator_);
+  RoundTripArrays(source_stream.get(), target_stream.get(), device_allocator_);
   CompareStreams(source_stream.get(), target_stream.get());
 }
 

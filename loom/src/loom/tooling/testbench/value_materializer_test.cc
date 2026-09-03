@@ -519,7 +519,7 @@ check.case @file_io {
   buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   IREE_ASSERT_OK(iree_numpy_npy_load_ndarray(
       written_stream_, IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT, buffer_params,
-      /*device=*/nullptr, device_allocator_, &written_buffer_view));
+      device_allocator_, &written_buffer_view));
   ExpectBufferViewContents<float>(written_buffer_view, {3},
                                   IREE_HAL_ELEMENT_TYPE_FLOAT_32,
                                   {1.1f, 2.2f, 3.3f});

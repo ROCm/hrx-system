@@ -18,8 +18,6 @@ extern "C" {
 #endif
 
 typedef struct loom_testbench_reference_matmul_oracle_options_t {
-  // Optional HAL device used for result-buffer generation transfers.
-  iree_hal_device_t* device;
   // HAL allocator used to allocate the result buffer view.
   iree_hal_allocator_t* device_allocator;
   // Buffer placement used for the result buffer view.

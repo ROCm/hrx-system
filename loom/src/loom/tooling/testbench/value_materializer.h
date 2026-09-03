@@ -88,16 +88,12 @@ typedef struct loom_testbench_file_open_callback_t {
   void* user_data;
 } loom_testbench_file_open_callback_t;
 
-// Runtime dependencies used while materializing values.
+// Runtime resources used while materializing values.
 typedef struct loom_testbench_value_materializer_options_t {
-  // Optional HAL device used when generated contents require a host-to-device
-  // transfer. Heap allocators can materialize host-visible values with NULL.
-  iree_hal_device_t* device;
   // HAL allocator used for shaped generated and file-backed values.
   iree_hal_allocator_t* device_allocator;
   // Optional buffer placement for generated and file-backed shaped values. When
-  // zero-initialized, generated values use the materializer's default
-  // device-local placement.
+  // zero-initialized, generated values use host-local placement.
   iree_hal_buffer_params_t buffer_params;
   // Callback used to open check.file.read.* paths.
   loom_testbench_file_open_callback_t open_read_file;

@@ -710,9 +710,10 @@ iree_status_t loom_run_hal_invocation_execute(
   return status;
 }
 
-iree_status_t loom_run_hal_transfer_bindings_to_host(
+static iree_status_t loom_run_hal_transfer_bindings(
     const loom_run_hal_runtime_t* runtime,
     const iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_buffer_params_t target_buffer_params,
     loom_run_hal_binding_list_t* binding_list) {
   if (runtime->device == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -740,20 +741,19 @@ iree_status_t loom_run_hal_transfer_bindings_to_host(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "HAL binding %" PRIhsz " has no buffer", i);
     }
+    if (binding_list->values[i].buffer_view != NULL &&
+        binding_list->values[i].byte_length !=
+            iree_hal_buffer_view_byte_length(
+                binding_list->values[i].buffer_view)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "HAL binding %" PRIhsz " length %" PRIu64
+                              " does not match its buffer view length %" PRIu64,
+                              i, (uint64_t)binding_list->values[i].byte_length,
+                              (uint64_t)iree_hal_buffer_view_byte_length(
+                                  binding_list->values[i].buffer_view));
+    }
   }
 
-  const iree_hal_queue_family_ordinal_t transfer_family_ordinal =
-      iree_hal_queue_family_ordinal(
-          iree_hal_queue_family(runtime->transfer_queue));
-  const iree_hal_buffer_params_t host_params = {
-      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
-      .access = IREE_HAL_MEMORY_ACCESS_ALL,
-      .type =
-          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      .queue_family_affinity =
-          iree_hal_make_queue_family_affinity(transfer_family_ordinal),
-      .min_alignment = 0,
-  };
   iree_hal_allocator_t* device_allocator =
       iree_hal_device_allocator(runtime->device);
   iree_tooling_buffer_binding_t
@@ -766,20 +766,22 @@ iree_status_t loom_run_hal_transfer_bindings_to_host(
     const iree_tooling_buffer_binding_t* source = &binding_list->values[i];
     iree_tooling_buffer_binding_t* target = &staged_bindings[i];
     target->kind = source->kind;
-    status = iree_hal_allocator_allocate_buffer(
-        device_allocator, host_params, source->byte_length, &target->buffer);
-    if (iree_status_is_ok(status) && source->buffer_view != NULL) {
-      status = iree_hal_buffer_view_create_like(
-          target->buffer, source->buffer_view,
-          iree_hal_allocator_host_allocator(device_allocator),
+    if (source->buffer_view != NULL) {
+      status = iree_hal_buffer_view_allocate_like(
+          device_allocator, target_buffer_params, source->buffer_view,
           &target->buffer_view);
+      if (iree_status_is_ok(status)) {
+        target->buffer = iree_hal_buffer_view_buffer(target->buffer_view);
+        iree_hal_buffer_retain(target->buffer);
+      }
+    } else {
+      status = iree_hal_allocator_allocate_buffer(
+          device_allocator, target_buffer_params, source->byte_length,
+          &target->buffer);
     }
     if (iree_status_is_ok(status)) {
       target->byte_offset = 0;
-      target->byte_length =
-          target->buffer_view != NULL
-              ? iree_hal_buffer_view_byte_length(target->buffer_view)
-              : iree_hal_buffer_byte_length(target->buffer);
+      target->byte_length = source->byte_length;
       transfer_operations[i] = (iree_hal_transfer_operation_t){
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
           .copy =
@@ -797,8 +799,12 @@ iree_status_t loom_run_hal_transfer_bindings_to_host(
 
   iree_hal_semaphore_t* completion_semaphore = NULL;
   if (iree_status_is_ok(status)) {
+    const iree_hal_queue_family_ordinal_t transfer_family_ordinal =
+        iree_hal_queue_family_ordinal(
+            iree_hal_queue_family(runtime->transfer_queue));
     status = iree_hal_semaphore_create(
-        runtime->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+        runtime->device,
+        iree_hal_make_queue_family_affinity(transfer_family_ordinal),
         /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
         &completion_semaphore);
   }
@@ -832,6 +838,34 @@ iree_status_t loom_run_hal_transfer_bindings_to_host(
   return status;
 }
 
+iree_status_t loom_run_hal_transfer_bindings_to_host(
+    const loom_run_hal_runtime_t* runtime,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    loom_run_hal_binding_list_t* binding_list) {
+  if (binding_list->count == 0) {
+    return loom_run_hal_transfer_bindings(runtime, wait_semaphore_list,
+                                          (iree_hal_buffer_params_t){0},
+                                          binding_list);
+  }
+  if (runtime->transfer_queue == NULL) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "HAL device has no provisioned transfer queue");
+  }
+  const iree_hal_queue_family_ordinal_t transfer_family_ordinal =
+      iree_hal_queue_family_ordinal(
+          iree_hal_queue_family(runtime->transfer_queue));
+  const iree_hal_buffer_params_t host_buffer_params = {
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .queue_family_affinity =
+          iree_hal_make_queue_family_affinity(transfer_family_ordinal),
+  };
+  return loom_run_hal_transfer_bindings(runtime, wait_semaphore_list,
+                                        host_buffer_params, binding_list);
+}
+
 static iree_status_t loom_run_hal_binding_specs_validate(
     const loom_run_hal_binding_specs_t* specs,
     iree_string_view_t binding_list_name) {
@@ -850,21 +884,21 @@ static iree_status_t loom_run_hal_binding_specs_validate(
 }
 
 static iree_status_t loom_run_hal_parse_binding_specs(
-    const loom_run_hal_runtime_t* runtime,
     const loom_run_hal_binding_specs_t* specs,
-    iree_hal_allocator_t* device_allocator, iree_allocator_t allocator,
+    iree_hal_buffer_params_t buffer_params,
+    iree_hal_allocator_t* device_allocator, iree_allocator_t host_allocator,
     loom_run_hal_binding_list_t* out_list) {
   IREE_RETURN_IF_ERROR(
       loom_run_hal_binding_specs_validate(specs, IREE_SV("HAL")));
   IREE_RETURN_IF_ERROR(loom_run_hal_binding_list_initialize_count(
-      specs->count, allocator, out_list));
+      specs->count, host_allocator, out_list));
   iree_tooling_value_io_context_t* context = NULL;
   iree_status_t status =
-      iree_tooling_value_io_context_allocate(allocator, &context);
+      iree_tooling_value_io_context_allocate(host_allocator, &context);
   for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < specs->count;
        ++i) {
     status = iree_tooling_buffer_binding_spec_parse(
-        context, specs->values[i], runtime->device, device_allocator,
+        context, specs->values[i], buffer_params, device_allocator,
         &out_list->values[i]);
   }
   iree_tooling_value_io_context_free(context);
@@ -1538,18 +1572,54 @@ iree_status_t loom_run_hal_invocation_plan_prepare_from_specs(
                             "HAL runtime is not initialized");
   }
 
+  iree_hal_buffer_params_t input_staging_params = {0};
+  if (bindings->count != 0) {
+    if (runtime->transfer_queue == NULL) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "HAL device has no provisioned transfer queue");
+    }
+    const iree_hal_queue_family_ordinal_t transfer_family_ordinal =
+        iree_hal_queue_family_ordinal(
+            iree_hal_queue_family(runtime->transfer_queue));
+    input_staging_params = (iree_hal_buffer_params_t){
+        .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+        .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+        .queue_family_affinity =
+            iree_hal_make_queue_family_affinity(transfer_family_ordinal),
+    };
+  }
   iree_status_t status = loom_run_hal_parse_binding_specs(
-      runtime, bindings, iree_hal_device_allocator(runtime->device), allocator,
+      bindings, input_staging_params,
+      iree_hal_device_allocator(runtime->device), allocator,
       &out_plan->bindings);
+  if (iree_status_is_ok(status) && bindings->count != 0) {
+    const iree_hal_buffer_params_t device_buffer_params = {
+        .usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
+        .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+        .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+    };
+    status = loom_run_hal_transfer_bindings(
+        runtime, iree_hal_semaphore_list_empty(), device_buffer_params,
+        &out_plan->bindings);
+  }
   if (iree_status_is_ok(status) && expected_bindings->count != 0) {
     status =
         iree_hal_allocator_create_heap(IREE_SV("heap"), allocator, allocator,
                                        &out_plan->expected_binding_allocator);
   }
   if (iree_status_is_ok(status) && expected_bindings->count != 0) {
+    const iree_hal_buffer_params_t expected_buffer_params = {
+        .usage = IREE_HAL_BUFFER_USAGE_MAPPING,
+        .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+    };
     status = loom_run_hal_parse_binding_specs(
-        runtime, expected_bindings, out_plan->expected_binding_allocator,
-        allocator, &out_plan->expected_bindings);
+        expected_bindings, expected_buffer_params,
+        out_plan->expected_binding_allocator, allocator,
+        &out_plan->expected_bindings);
   }
   if (iree_status_is_ok(status)) {
     out_plan->options = *options;

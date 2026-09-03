@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstring>
 #include <numeric>
+#include <string>
 #include <vector>
 
 #include "iree/hal/cts/util/profile_test_util.h"
@@ -25,6 +26,17 @@ namespace iree::hal::cts {
 
 using ::testing::ContainerEq;
 using ::testing::Each;
+
+static iree_status_t GenerateI32Contents(void* user_data,
+                                         iree_byte_span_t contents) {
+  const int32_t* values = static_cast<const int32_t*>(user_data);
+  if (contents.data_length != 4 * sizeof(*values)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unexpected generated buffer view length");
+  }
+  memcpy(contents.data, values, contents.data_length);
+  return iree_ok_status();
+}
 
 class QueueTransferTest : public CtsTestBase<> {
  protected:
@@ -155,6 +167,63 @@ TEST_P(QueueTransferTest, TransferExecutesMixedBatch) {
   EXPECT_THAT(ReadBufferBytes(upload_target, 0, kBufferSize),
               ContainerEq(upload_source_data));
   EXPECT_THAT(download_target, ContainerEq(copy_source_data));
+}
+
+TEST_P(QueueTransferTest, BufferViewStagingRoundTrip) {
+  const iree_hal_queue_family_ordinal_t transfer_family_ordinal =
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(transfer_queue_));
+  const iree_hal_queue_family_affinity_t transfer_family_affinity =
+      iree_hal_make_queue_family_affinity(transfer_family_ordinal);
+  const iree_hal_dim_t shape[] = {2, 2};
+  int32_t source_values[] = {1, 2, 3, 4};
+
+  const iree_hal_buffer_params_t staging_params = {
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .queue_family_affinity = transfer_family_affinity,
+  };
+  Ref<iree_hal_buffer_view_t> staging_view;
+  IREE_ASSERT_OK(iree_hal_buffer_view_generate(
+      device_allocator_, staging_params, IREE_ARRAYSIZE(shape), shape,
+      IREE_HAL_ELEMENT_TYPE_INT_32, IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
+      GenerateI32Contents, source_values, staging_view.out()));
+
+  const iree_hal_buffer_params_t device_params = {
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .queue_family_affinity = transfer_family_affinity,
+  };
+  Ref<iree_hal_buffer_view_t> device_view;
+  IREE_ASSERT_OK(iree_hal_buffer_view_allocate_like(
+      device_allocator_, device_params, staging_view, device_view.out()));
+
+  SemaphoreList empty_wait;
+  SemaphoreList copy_signal(device_, {0}, {1});
+  IREE_ASSERT_OK(iree_hal_queue_copy(
+      transfer_queue_, empty_wait, copy_signal,
+      iree_hal_buffer_view_buffer(staging_view),
+      /*source_offset=*/0, iree_hal_buffer_view_buffer(device_view),
+      /*target_offset=*/0, sizeof(source_values), IREE_HAL_COPY_FLAG_NONE));
+
+  int32_t downloaded_values[IREE_ARRAYSIZE(source_values)] = {0};
+  SemaphoreList download_signal(device_, {0}, {1});
+  IREE_ASSERT_OK(iree_hal_queue_download(
+      transfer_queue_, copy_signal, download_signal,
+      iree_hal_buffer_view_buffer(device_view), /*source_offset=*/0,
+      downloaded_values, sizeof(downloaded_values)));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+      download_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+
+  char formatted[128] = {0};
+  iree_host_size_t formatted_length = 0;
+  IREE_ASSERT_OK(iree_hal_buffer_view_format_contents(
+      device_view,
+      iree_make_const_byte_span(downloaded_values, sizeof(downloaded_values)),
+      IREE_HOST_SIZE_MAX, sizeof(formatted), formatted, &formatted_length));
+  EXPECT_EQ("2x2xi32=[1 2][3 4]", std::string(formatted, formatted_length));
 }
 
 TEST_P(QueueTransferTest, UploadReadsSourceAfterWaitResolves) {

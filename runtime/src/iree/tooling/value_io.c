@@ -534,18 +534,16 @@ IREE_API_EXPORT void iree_tooling_value_io_context_free(
 }
 
 static iree_status_t iree_tooling_buffer_view_file_read_callback(
-    iree_hal_buffer_mapping_t* mapping, void* user_data) {
+    void* user_data, iree_byte_span_t contents) {
   iree_io_stream_t* stream = (iree_io_stream_t*)user_data;
-  return iree_io_stream_read(stream, mapping->contents.data_length,
-                             mapping->contents.data,
+  return iree_io_stream_read(stream, contents.data_length, contents.data,
                              /*out_buffer_length=*/NULL);
 }
 
 static iree_status_t iree_tooling_buffer_view_parse_binary_file(
     iree_tooling_value_io_context_t* context, iree_string_view_t metadata,
-    iree_string_view_t contents, iree_hal_device_t* device,
-    iree_hal_allocator_t* device_allocator,
-    iree_hal_buffer_view_t** out_buffer_view) {
+    iree_string_view_t contents, iree_hal_buffer_params_t buffer_params,
+    iree_hal_allocator_t* allocator, iree_hal_buffer_view_t** out_buffer_view) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, contents.data, contents.size);
 
@@ -566,15 +564,9 @@ static iree_status_t iree_tooling_buffer_view_parse_binary_file(
       z0, iree_tooling_value_io_stream_list_open(context->input_streams, path,
                                                  is_append, &stream));
 
-  iree_hal_buffer_params_t buffer_params = {
-      .usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
-      .access = IREE_HAL_MEMORY_ACCESS_ALL,
-      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-  };
-  iree_status_t status = iree_hal_buffer_view_generate_buffer(
-      device, device_allocator, shape_rank, shape, element_type, encoding_type,
-      buffer_params, iree_tooling_buffer_view_file_read_callback, stream,
-      out_buffer_view);
+  iree_status_t status = iree_hal_buffer_view_generate(
+      allocator, buffer_params, shape_rank, shape, element_type, encoding_type,
+      iree_tooling_buffer_view_file_read_callback, stream, out_buffer_view);
 
   iree_io_stream_release(stream);
   IREE_TRACE_ZONE_END(z0);
@@ -583,7 +575,7 @@ static iree_status_t iree_tooling_buffer_view_parse_binary_file(
 
 static iree_status_t iree_tooling_buffer_view_parse_numpy_file(
     iree_tooling_value_io_context_t* context, iree_string_view_t spec,
-    iree_hal_device_t* device, iree_hal_allocator_t* device_allocator,
+    iree_hal_buffer_params_t buffer_params, iree_hal_allocator_t* allocator,
     iree_hal_buffer_view_t** out_buffer_view) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, spec.data, spec.size);
@@ -603,14 +595,9 @@ static iree_status_t iree_tooling_buffer_view_parse_numpy_file(
       z0, iree_tooling_value_io_stream_list_open(context->input_streams, path,
                                                  is_append, &stream));
 
-  iree_hal_buffer_params_t buffer_params = {
-      .usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
-      .access = IREE_HAL_MEMORY_ACCESS_READ,
-      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-  };
-  iree_status_t status = iree_numpy_npy_load_ndarray(
-      stream, IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT, buffer_params, device,
-      device_allocator, out_buffer_view);
+  iree_status_t status =
+      iree_numpy_npy_load_ndarray(stream, IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT,
+                                  buffer_params, allocator, out_buffer_view);
 
   iree_io_stream_release(stream);
   IREE_TRACE_ZONE_END(z0);
@@ -619,7 +606,7 @@ static iree_status_t iree_tooling_buffer_view_parse_numpy_file(
 
 IREE_API_EXPORT iree_status_t iree_tooling_buffer_view_spec_parse(
     iree_tooling_value_io_context_t* context, iree_string_view_t spec,
-    iree_hal_device_t* device, iree_hal_allocator_t* device_allocator,
+    iree_hal_buffer_params_t buffer_params, iree_hal_allocator_t* allocator,
     iree_hal_buffer_view_t** out_buffer_view) {
   IREE_ASSERT_ARGUMENT(out_buffer_view);
   *out_buffer_view = NULL;
@@ -638,7 +625,7 @@ IREE_API_EXPORT iree_status_t iree_tooling_buffer_view_spec_parse(
   if (iree_string_view_starts_with_char(spec, '@') ||
       iree_string_view_starts_with_char(spec, '+')) {
     return iree_tooling_buffer_view_parse_numpy_file(
-        context, spec, device, device_allocator, out_buffer_view);
+        context, spec, buffer_params, allocator, out_buffer_view);
   }
 
   iree_string_view_t metadata = iree_string_view_empty();
@@ -647,20 +634,20 @@ IREE_API_EXPORT iree_status_t iree_tooling_buffer_view_spec_parse(
       (iree_string_view_starts_with_char(contents, '@') ||
        iree_string_view_starts_with_char(contents, '+'))) {
     return iree_tooling_buffer_view_parse_binary_file(
-        context, metadata, contents, device, device_allocator, out_buffer_view);
+        context, metadata, contents, buffer_params, allocator, out_buffer_view);
   }
 
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, spec.data, spec.size);
   iree_status_t status = iree_hal_buffer_view_parse(
-      spec, device, device_allocator, out_buffer_view);
+      spec, allocator, buffer_params, out_buffer_view);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
 IREE_API_EXPORT iree_status_t iree_tooling_storage_buffer_spec_parse(
     iree_tooling_value_io_context_t* context, iree_string_view_t spec,
-    iree_hal_device_t* device, iree_hal_allocator_t* device_allocator,
+    iree_hal_buffer_params_t buffer_params, iree_hal_allocator_t* allocator,
     iree_hal_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(out_buffer);
   *out_buffer = NULL;
@@ -671,7 +658,7 @@ IREE_API_EXPORT iree_status_t iree_tooling_storage_buffer_spec_parse(
 
   iree_hal_buffer_view_t* buffer_view = NULL;
   IREE_RETURN_IF_ERROR(iree_tooling_buffer_view_spec_parse(
-      context, spec, device, device_allocator, &buffer_view));
+      context, spec, buffer_params, allocator, &buffer_view));
   iree_hal_buffer_t* buffer = iree_hal_buffer_view_buffer(buffer_view);
   iree_hal_buffer_retain(buffer);
   iree_hal_buffer_view_release(buffer_view);
@@ -689,7 +676,7 @@ IREE_API_EXPORT void iree_tooling_buffer_binding_deinitialize(
 
 IREE_API_EXPORT iree_status_t iree_tooling_buffer_binding_spec_parse(
     iree_tooling_value_io_context_t* context, iree_string_view_t spec,
-    iree_hal_device_t* device, iree_hal_allocator_t* device_allocator,
+    iree_hal_buffer_params_t buffer_params, iree_hal_allocator_t* allocator,
     iree_tooling_buffer_binding_t* out_binding) {
   IREE_ASSERT_ARGUMENT(out_binding);
   memset(out_binding, 0, sizeof(*out_binding));
@@ -698,7 +685,7 @@ IREE_API_EXPORT iree_status_t iree_tooling_buffer_binding_spec_parse(
     iree_string_view_consume_prefix_char(&storage_spec, '&');
     iree_hal_buffer_view_t* buffer_view = NULL;
     IREE_RETURN_IF_ERROR(iree_tooling_buffer_view_spec_parse(
-        context, storage_spec, device, device_allocator, &buffer_view));
+        context, storage_spec, buffer_params, allocator, &buffer_view));
     iree_hal_buffer_t* buffer = iree_hal_buffer_view_buffer(buffer_view);
     iree_hal_buffer_retain(buffer);
     out_binding->kind = IREE_TOOLING_BUFFER_BINDING_KIND_STORAGE_BUFFER;
@@ -711,7 +698,7 @@ IREE_API_EXPORT iree_status_t iree_tooling_buffer_binding_spec_parse(
 
   iree_hal_buffer_view_t* buffer_view = NULL;
   IREE_RETURN_IF_ERROR(iree_tooling_buffer_view_spec_parse(
-      context, spec, device, device_allocator, &buffer_view));
+      context, spec, buffer_params, allocator, &buffer_view));
   iree_hal_buffer_t* buffer = iree_hal_buffer_view_buffer(buffer_view);
   iree_hal_buffer_retain(buffer);
   out_binding->kind = IREE_TOOLING_BUFFER_BINDING_KIND_BUFFER_VIEW;

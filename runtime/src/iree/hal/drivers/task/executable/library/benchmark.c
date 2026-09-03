@@ -209,10 +209,16 @@ static iree_status_t iree_hal_executable_library_run(
   iree_hal_buffer_view_t* buffer_views[IREE_HAL_EXECUTABLE_MAX_BINDING_COUNT];
   void* binding_ptrs[IREE_HAL_EXECUTABLE_MAX_BINDING_COUNT];
   size_t binding_lengths[IREE_HAL_EXECUTABLE_MAX_BINDING_COUNT];
+  const iree_hal_buffer_params_t buffer_params = {
+      .usage = IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT |
+               IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM,
+      .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+  };
   for (iree_host_size_t i = 0; i < dispatch_params.binding_count; ++i) {
     IREE_RETURN_IF_ERROR(
-        iree_hal_buffer_view_parse(dispatch_params.bindings[i], /*device=*/NULL,
-                                   heap_allocator, &buffer_views[i]));
+        iree_hal_buffer_view_parse(dispatch_params.bindings[i], heap_allocator,
+                                   buffer_params, &buffer_views[i]));
     iree_hal_buffer_t* buffer = iree_hal_buffer_view_buffer(buffer_views[i]);
     iree_device_size_t buffer_length =
         iree_hal_buffer_view_byte_length(buffer_views[i]);

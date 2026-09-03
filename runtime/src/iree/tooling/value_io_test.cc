@@ -24,6 +24,14 @@ using ::testing::ElementsAreArray;
 
 class ValueIOTest : public ::testing::Test {
  protected:
+  static iree_hal_buffer_params_t HostBufferParams() {
+    return {
+        .usage = IREE_HAL_BUFFER_USAGE_MAPPING,
+        .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+    };
+  }
+
   void SetUp() override {
     host_allocator_ = iree_allocator_system();
     IREE_ASSERT_OK(
@@ -165,8 +173,8 @@ TEST_F(ValueIOTest, WritesAbiWords) {
 TEST_F(ValueIOTest, ParsesInlineBufferView) {
   iree_hal_buffer_view_t* buffer_view = nullptr;
   IREE_ASSERT_OK(iree_tooling_buffer_view_spec_parse(
-      context_, IREE_SV("2x2xi32=[42 43][44 45]"),
-      /*device=*/NULL, device_allocator_, &buffer_view));
+      context_, IREE_SV("2x2xi32=[42 43][44 45]"), HostBufferParams(),
+      device_allocator_, &buffer_view));
   AssertBufferViewContents<int32_t>(
       buffer_view, {2, 2}, IREE_HAL_ELEMENT_TYPE_INT_32, {42, 43, 44, 45});
   iree_hal_buffer_view_release(buffer_view);
@@ -175,7 +183,7 @@ TEST_F(ValueIOTest, ParsesInlineBufferView) {
 TEST_F(ValueIOTest, ParsesStorageBuffer) {
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_tooling_storage_buffer_spec_parse(
-      context_, IREE_SV("&2xi32=[7 8]"), /*device=*/NULL, device_allocator_,
+      context_, IREE_SV("&2xi32=[7 8]"), HostBufferParams(), device_allocator_,
       &buffer));
   AssertBufferContents<int32_t>(buffer, {7, 8});
   iree_hal_buffer_release(buffer);
@@ -191,21 +199,21 @@ TEST_F(ValueIOTest, ParsesBinaryFileBufferViewsSequentially) {
   iree_hal_buffer_view_t* first_view = nullptr;
   IREE_ASSERT_OK(iree_tooling_buffer_view_spec_parse(
       context_, iree_make_string_view(first_spec.data(), first_spec.size()),
-      /*device=*/NULL, device_allocator_, &first_view));
+      HostBufferParams(), device_allocator_, &first_view));
   AssertBufferViewContents<int32_t>(first_view, {2},
                                     IREE_HAL_ELEMENT_TYPE_INT_32, {1, 2});
 
   iree_hal_buffer_view_t* next_view = nullptr;
   IREE_ASSERT_OK(iree_tooling_buffer_view_spec_parse(
       context_, iree_make_string_view(next_spec.data(), next_spec.size()),
-      /*device=*/NULL, device_allocator_, &next_view));
+      HostBufferParams(), device_allocator_, &next_view));
   AssertBufferViewContents<int32_t>(next_view, {2},
                                     IREE_HAL_ELEMENT_TYPE_INT_32, {3, 4});
 
   iree_hal_buffer_view_t* reset_view = nullptr;
   IREE_ASSERT_OK(iree_tooling_buffer_view_spec_parse(
       context_, iree_make_string_view(first_spec.data(), first_spec.size()),
-      /*device=*/NULL, device_allocator_, &reset_view));
+      HostBufferParams(), device_allocator_, &reset_view));
   AssertBufferViewContents<int32_t>(reset_view, {2},
                                     IREE_HAL_ELEMENT_TYPE_INT_32, {1, 2});
 
@@ -217,7 +225,7 @@ TEST_F(ValueIOTest, ParsesBinaryFileBufferViewsSequentially) {
 TEST_F(ValueIOTest, ParsesBindingKinds) {
   iree_tooling_buffer_binding_t view_binding = {};
   IREE_ASSERT_OK(iree_tooling_buffer_binding_spec_parse(
-      context_, IREE_SV("2xi32=[10 11]"), /*device=*/NULL, device_allocator_,
+      context_, IREE_SV("2xi32=[10 11]"), HostBufferParams(), device_allocator_,
       &view_binding));
   EXPECT_EQ(view_binding.kind, IREE_TOOLING_BUFFER_BINDING_KIND_BUFFER_VIEW);
   EXPECT_NE(view_binding.buffer, nullptr);
@@ -230,8 +238,8 @@ TEST_F(ValueIOTest, ParsesBindingKinds) {
 
   iree_tooling_buffer_binding_t storage_binding = {};
   IREE_ASSERT_OK(iree_tooling_buffer_binding_spec_parse(
-      context_, IREE_SV("&2xi32=[12 13]"), /*device=*/NULL, device_allocator_,
-      &storage_binding));
+      context_, IREE_SV("&2xi32=[12 13]"), HostBufferParams(),
+      device_allocator_, &storage_binding));
   EXPECT_EQ(storage_binding.kind,
             IREE_TOOLING_BUFFER_BINDING_KIND_STORAGE_BUFFER);
   EXPECT_NE(storage_binding.buffer, nullptr);
