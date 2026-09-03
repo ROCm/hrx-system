@@ -530,6 +530,29 @@ class EmitDescriptorOp:
                             f"'{immediate_name}' needs a source-memory emit"
                         )
                     binding.validate(source_op, self.descriptor, immediate_name)
+                    if (
+                        binding.kind
+                        == SourceMemoryProjectKind.STATIC_BYTE_OFFSET_PLUS_LITERAL
+                    ):
+                        projected_minimum = (
+                            self.source_memory.static_byte_offset_minimum
+                            + binding.literal_i64
+                        )
+                        projected_maximum = (
+                            self.source_memory.static_byte_offset_maximum
+                            + binding.literal_i64
+                        )
+                        if not (
+                            -(2**63)
+                            <= projected_minimum
+                            <= projected_maximum
+                            <= (2**63) - 1
+                        ):
+                            raise ValueError(
+                                f"{source_op.name}: source-memory immediate "
+                                f"'{immediate_name}' static byte offset range plus "
+                                f"{binding.literal_i64} must fit in signed i64"
+                            )
                     if binding.kind == SourceMemoryProjectKind.DYNAMIC_BYTE_STRIDE and (
                         self.source_memory.dynamic_term_count is None
                         or binding.dynamic_term_index

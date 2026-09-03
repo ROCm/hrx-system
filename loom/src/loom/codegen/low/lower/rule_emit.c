@@ -685,6 +685,11 @@ static iree_status_t loom_low_lower_rule_build_attrs(
         attrs[i].value =
             loom_attr_i64(source_memory_access->static_byte_offset);
         break;
+      case LOOM_LOW_LOWER_ATTR_COPY_SOURCE_MEMORY_STATIC_BYTE_OFFSET_PLUS_LITERAL: {
+        attrs[i].value = loom_attr_i64(
+            source_memory_access->static_byte_offset + attr_copy->literal_i64);
+        break;
+      }
       case LOOM_LOW_LOWER_ATTR_COPY_SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT:
         IREE_ASSERT_GT(attr_copy->literal_i64, 0);
         attrs[i].value = loom_attr_i64(

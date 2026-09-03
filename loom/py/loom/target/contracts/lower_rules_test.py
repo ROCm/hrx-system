@@ -1134,6 +1134,7 @@ def test_compile_lower_rule_set_compiles_source_memory_static_offset_projects() 
         TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
         key="test.load.index.v4i32.offsets",
         immediates=(
+            Immediate("offset_plus", ImmediateKind.SIGNED, bit_width=32),
             Immediate("offset_quotient", ImmediateKind.SIGNED, bit_width=32),
             Immediate("offset_remainder", ImmediateKind.SIGNED, bit_width=32),
         ),
@@ -1162,6 +1163,9 @@ def test_compile_lower_rule_set_compiles_source_memory_static_offset_projects() 
                         },
                         results={"dst": ValueRef.result("result")},
                         immediates={
+                            "offset_plus": SourceMemoryProject.static_byte_offset_plus(
+                                64
+                            ),
                             "offset_quotient": (
                                 SourceMemoryProject.static_byte_offset_quotient(4)
                             ),
@@ -1191,12 +1195,33 @@ def test_compile_lower_rule_set_compiles_source_memory_static_offset_projects() 
     compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
 
     assert tuple(attr_copy.kind for attr_copy in compiled.attr_copies) == (
+        LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_PLUS_LITERAL,
         LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT,
         LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER,
     )
     assert tuple(attr_copy.literal_i64 for attr_copy in compiled.attr_copies) == (
+        64,
         4,
         4,
+    )
+
+    source_emit = table.cases[0].emit[0]
+    assert isinstance(source_emit, EmitDescriptorOp)
+    assert source_emit.source_memory is not None
+    overflowing_emit = replace(
+        source_emit,
+        source_memory=replace(
+            source_emit.source_memory,
+            static_byte_offset_minimum=-(2**63),
+            static_byte_offset_maximum=(2**63) - 1,
+        ),
+    )
+    _expect_value_error(
+        lambda: replace(
+            table,
+            cases=(replace(table.cases[0], emit=(overflowing_emit,)),),
+        ),
+        "static byte offset range plus 64 must fit in signed i64",
     )
 
 

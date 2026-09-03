@@ -18,6 +18,9 @@ from loom.target.contracts.descriptors import _require_immediate
 from loom.target.contracts.source import _require_attr, _require_value
 from loom.target.low_descriptors import Descriptor, ImmediateKind
 
+_I64_MIN = -(2**63)
+_I64_MAX = 2**63 - 1
+
 
 @unique
 class AttrProjectKind(Enum):
@@ -59,6 +62,7 @@ class SourceMemoryProjectKind(Enum):
     """Projection from a selected source-memory access to descriptor immediates."""
 
     STATIC_BYTE_OFFSET = "static_byte_offset"
+    STATIC_BYTE_OFFSET_PLUS_LITERAL = "static_byte_offset_plus_literal"
     STATIC_BYTE_OFFSET_QUOTIENT = "static_byte_offset_quotient"
     STATIC_BYTE_OFFSET_REMAINDER = "static_byte_offset_remainder"
     DYNAMIC_BYTE_STRIDE = "dynamic_byte_stride"
@@ -615,10 +619,18 @@ class SourceMemoryProject:
     kind: SourceMemoryProjectKind
     dynamic_term_index: int = 0
     divisor: int = 1
+    literal_i64: int = 0
 
     @classmethod
     def static_byte_offset(cls) -> Self:
         return cls(kind=SourceMemoryProjectKind.STATIC_BYTE_OFFSET)
+
+    @classmethod
+    def static_byte_offset_plus(cls, literal: int) -> Self:
+        return cls(
+            kind=SourceMemoryProjectKind.STATIC_BYTE_OFFSET_PLUS_LITERAL,
+            literal_i64=literal,
+        )
 
     @classmethod
     def static_byte_offset_quotient(cls, divisor: int) -> Self:
@@ -650,6 +662,7 @@ class SourceMemoryProject:
             self.kind
             in (
                 SourceMemoryProjectKind.STATIC_BYTE_OFFSET,
+                SourceMemoryProjectKind.STATIC_BYTE_OFFSET_PLUS_LITERAL,
                 SourceMemoryProjectKind.STATIC_BYTE_OFFSET_QUOTIENT,
                 SourceMemoryProjectKind.STATIC_BYTE_OFFSET_REMAINDER,
             )
@@ -667,6 +680,13 @@ class SourceMemoryProject:
             and self.divisor != 1
         ):
             raise ValueError(f"{self.kind.value} projection must not set divisor")
+        if not _I64_MIN <= self.literal_i64 <= _I64_MAX:
+            raise ValueError(f"{self.kind.value} literal must fit in signed i64")
+        if (
+            self.kind != SourceMemoryProjectKind.STATIC_BYTE_OFFSET_PLUS_LITERAL
+            and self.literal_i64 != 0
+        ):
+            raise ValueError(f"{self.kind.value} projection must not set a literal")
 
     def validate(
         self,

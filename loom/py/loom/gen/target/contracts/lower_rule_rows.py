@@ -696,6 +696,7 @@ def attr_copy_row(
         LowerAttrCopyKind.I64_LITERAL_MINUS_ATTR,
         LowerAttrCopyKind.I64_LITERAL_MINUS_ATTRS,
         LowerAttrCopyKind.I64_ATTR_MINUS_LITERAL,
+        LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_PLUS_LITERAL,
         LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT,
         LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER,
     ):
