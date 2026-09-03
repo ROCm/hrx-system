@@ -20,7 +20,7 @@
             "\"artifact_format\":\"elf\"",
             "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"entries\":{\"count\":3",
-            "\"plan_key\":\"matrix.mmul.s8s8.m8n8k8\"",
+            "\"plan_key\":\"bf16bf16_m8n8k1\"",
             "\"spill_count\":0"
           ]
         }

@@ -12,80 +12,53 @@ pipeline.def<kernel> public retain target(@array_target) @split_k_array() launch
   %products = group.create %product_lanes : index -> group
   %reducers = group.create %reducer_lanes : index -> group
 
-  %lhs_view = buffer.view %lhs[%base] : buffer -> view<[%product_lanes]x[%tile_extent]x[%tile_extent]xi8>
-  %rhs_view = buffer.view %rhs[%base] : buffer -> view<[%product_lanes]x[%tile_extent]x[%tile_extent]xi8>
-  %bias_view = buffer.view %bias[%base] : buffer -> view<[%tile_extent]x[%tile_extent]xi32>
-  %output_view = buffer.view %output[%base] : buffer -> view<[%tile_extent]x[%tile_extent]xi32>
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<[%product_lanes]x[%tile_extent]xbf16>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<[%product_lanes]x[%tile_extent]xbf16>
+  %bias_view = buffer.view %bias[%base] : buffer -> view<[%tile_extent]x[%tile_extent]xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%tile_extent]x[%tile_extent]xf32>
 
-  %lhs_tiles = pipeline.scatter %lhs_view across %products : view<[%product_lanes]x[%tile_extent]x[%tile_extent]xi8>, group -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi8>>
-  %rhs_tiles = pipeline.scatter %rhs_view across %products : view<[%product_lanes]x[%tile_extent]x[%tile_extent]xi8>, group -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi8>>
-  %bias_tile = pipeline.read %bias_view on %reducers : view<[%tile_extent]x[%tile_extent]xi32>, group -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>
-  %partials = pipeline.stage @product_branch_i8 on %products(%lhs_tiles, %rhs_tiles) : (group, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi8>>, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi8>>) -> (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>)
-  %buffered_partials = pipeline.buffer %partials capacity %ring_capacity : (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>, index) -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>
-  %result = pipeline.reduce @reduce_bias_relu_i32 from %products(%buffered_partials) to %reducers(%bias_tile) : (group, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>) to (group, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>) -> (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>)
-  pipeline.write %result to %output_view : pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>, view<[%tile_extent]x[%tile_extent]xi32>
+  %lhs_tiles = pipeline.scatter %lhs_view across %products : view<[%product_lanes]x[%tile_extent]xbf16>, group -> pipeline.flow<tile<[%tile_extent]xbf16>>
+  %rhs_tiles = pipeline.scatter %rhs_view across %products : view<[%product_lanes]x[%tile_extent]xbf16>, group -> pipeline.flow<tile<[%tile_extent]xbf16>>
+  %bias_tile = pipeline.read %bias_view on %reducers : view<[%tile_extent]x[%tile_extent]xf32>, group -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>
+  %partials = pipeline.stage @product_branch_bf16 on %products(%lhs_tiles, %rhs_tiles) : (group, pipeline.flow<tile<[%tile_extent]xbf16>>, pipeline.flow<tile<[%tile_extent]xbf16>>) -> (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>)
+  %buffered_partials = pipeline.buffer %partials capacity %ring_capacity : (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>, index) -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>
+  %result = pipeline.reduce @reduce_bias_f32 from %products(%buffered_partials) to %reducers(%bias_tile) : (group, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>) to (group, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>) -> (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>)
+  pipeline.write %result to %output_view : pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>, view<[%tile_extent]x[%tile_extent]xf32>
   pipeline.return
 }
 
-func.def target(@core_target) @product_branch_i8(%lhs: buffer, %rhs: buffer, %partial: buffer) {
+func.def target(@core_target) @product_branch_bf16(%lhs: buffer, %rhs: buffer, %partial: buffer) {
   %lhs_aligned, %rhs_aligned, %partial_aligned = buffer.assume.alignment %lhs, %rhs, %partial {minimum_alignment = 64} : buffer, buffer, buffer
   %base = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xi8>
-  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<64xi8>
-  %partial_view = buffer.view %partial_aligned[%base] : buffer -> view<8x8xi32>
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<8xbf16>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<8xbf16>
+  %partial_view = buffer.view %partial_aligned[%base] : buffer -> view<64xf32>
   %m = index.constant 8 : index
   %n = index.constant 8 : index
-  %k = index.constant 8 : index
-  %lhs_value = vector.load %lhs_view[0] : view<64xi8> -> vector<64xi8>
-  %rhs_value = vector.load %rhs_view[0] : view<64xi8> -> vector<64xi8>
-  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] : vector<64xi8>
-  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<64xi8>
-  %accumulator_init = vector.constant 0 : vector<64xi32>
-  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
-  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
-  vector.fragment.store<result> %product, %partial_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
+  %k = index.constant 1 : index
+  %lhs_value = vector.load %lhs_view[0] : view<8xbf16> -> vector<8xbf16>
+  %rhs_value = vector.load %rhs_view[0] : view<8xbf16> -> vector<8xbf16>
+  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] : vector<8xbf16>
+  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<8xbf16>
+  %accumulator_init = vector.constant 0.0 : vector<64xf32>
+  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xf32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<8xbf16>, vector<8xbf16>, vector<64xf32>
+  vector.store %product, %partial_view[0] : vector<64xf32>, view<64xf32>
   func.return
 }
 
-func.def target(@core_target) @reduce_bias_relu_i32(%partial0: buffer, %partial1: buffer, %bias: buffer, %output: buffer) {
+func.def target(@core_target) @reduce_bias_f32(%partial0: buffer, %partial1: buffer, %bias: buffer, %output: buffer) {
   %partial0_aligned, %partial1_aligned, %bias_aligned, %output_aligned = buffer.assume.alignment %partial0, %partial1, %bias, %output {minimum_alignment = 64} : buffer, buffer, buffer, buffer
   %base = index.constant 0 : offset
-  %partial0_view = buffer.view %partial0_aligned[%base] : buffer -> view<64xi32>
-  %partial1_view = buffer.view %partial1_aligned[%base] : buffer -> view<64xi32>
-  %bias_view = buffer.view %bias_aligned[%base] : buffer -> view<64xi32>
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<64xi32>
-  %relu_floor = vector.constant 0 : vector<16xi32>
-
-  %partial00 = vector.load %partial0_view[0] : view<64xi32> -> vector<16xi32>
-  %partial10 = vector.load %partial1_view[0] : view<64xi32> -> vector<16xi32>
-  %bias0 = vector.load %bias_view[0] : view<64xi32> -> vector<16xi32>
-  %sum0 = vector.addi %partial00, %partial10 : vector<16xi32>
-  %biased0 = vector.addi %sum0, %bias0 : vector<16xi32>
-  %activated0 = vector.maxsi %biased0, %relu_floor : vector<16xi32>
-  vector.store %activated0, %output_view[0] : vector<16xi32>, view<64xi32>
-
-  %partial01 = vector.load %partial0_view[16] : view<64xi32> -> vector<16xi32>
-  %partial11 = vector.load %partial1_view[16] : view<64xi32> -> vector<16xi32>
-  %bias1 = vector.load %bias_view[16] : view<64xi32> -> vector<16xi32>
-  %sum1 = vector.addi %partial01, %partial11 : vector<16xi32>
-  %biased1 = vector.addi %sum1, %bias1 : vector<16xi32>
-  %activated1 = vector.maxsi %biased1, %relu_floor : vector<16xi32>
-  vector.store %activated1, %output_view[16] : vector<16xi32>, view<64xi32>
-
-  %partial02 = vector.load %partial0_view[32] : view<64xi32> -> vector<16xi32>
-  %partial12 = vector.load %partial1_view[32] : view<64xi32> -> vector<16xi32>
-  %bias2 = vector.load %bias_view[32] : view<64xi32> -> vector<16xi32>
-  %sum2 = vector.addi %partial02, %partial12 : vector<16xi32>
-  %biased2 = vector.addi %sum2, %bias2 : vector<16xi32>
-  %activated2 = vector.maxsi %biased2, %relu_floor : vector<16xi32>
-  vector.store %activated2, %output_view[32] : vector<16xi32>, view<64xi32>
-
-  %partial03 = vector.load %partial0_view[48] : view<64xi32> -> vector<16xi32>
-  %partial13 = vector.load %partial1_view[48] : view<64xi32> -> vector<16xi32>
-  %bias3 = vector.load %bias_view[48] : view<64xi32> -> vector<16xi32>
-  %sum3 = vector.addi %partial03, %partial13 : vector<16xi32>
-  %biased3 = vector.addi %sum3, %bias3 : vector<16xi32>
-  %activated3 = vector.maxsi %biased3, %relu_floor : vector<16xi32>
-  vector.store %activated3, %output_view[48] : vector<16xi32>, view<64xi32>
+  %partial0_view = buffer.view %partial0_aligned[%base] : buffer -> view<64xf32>
+  %partial1_view = buffer.view %partial1_aligned[%base] : buffer -> view<64xf32>
+  %bias_view = buffer.view %bias_aligned[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<64xf32>
+  %partial0_value = vector.load %partial0_view[0] : view<64xf32> -> vector<64xf32>
+  %partial1_value = vector.load %partial1_view[0] : view<64xf32> -> vector<64xf32>
+  %bias_value = vector.load %bias_view[0] : view<64xf32> -> vector<64xf32>
+  %sum = vector.addf %partial0_value, %partial1_value : vector<64xf32>
+  %biased = vector.addf %sum, %bias_value : vector<64xf32>
+  vector.store %biased, %output_view[0] : vector<64xf32>, view<64xf32>
   func.return
 }
