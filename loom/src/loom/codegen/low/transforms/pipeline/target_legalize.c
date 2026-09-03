@@ -1480,8 +1480,10 @@ static iree_status_t loom_low_target_legalize_verify_final(
       .max_errors = pass_state->max_errors,
   };
   state->use_final_rejections = true;
-  iree_status_t status = loom_target_low_verify_function_legality(
-      module, state->selection->func, &legality_options, &result);
+  iree_status_t status = loom_target_low_verify_program_legality(
+      module, state->selection->func,
+      loom_low_lower_source_query_scope_program(state->query_scope),
+      &legality_options, &result);
   state->use_final_rejections = false;
   *out_error_count = result.error_count;
   return status;

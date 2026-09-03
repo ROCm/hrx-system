@@ -37,6 +37,7 @@ typedef struct loom_target_low_legality_context_t
 typedef struct loom_target_low_legality_provider_t
     loom_target_low_legality_provider_t;
 typedef struct loom_local_value_domain_t loom_local_value_domain_t;
+typedef struct loom_source_program_t loom_source_program_t;
 typedef struct loom_view_region_table_t loom_view_region_table_t;
 
 typedef enum loom_target_low_legality_diagnostic_flag_bits_e {
@@ -176,15 +177,17 @@ typedef struct loom_target_low_legality_result_t {
   const loom_low_descriptor_set_t* descriptor_set;
 } loom_target_low_legality_result_t;
 
-// Verifies that |function| is legal as source IR for target-low lowering under
-// |options|.
+// Verifies that |source_program| is legal as source IR for target-low lowering
+// under |options|. The program must index |function|'s complete body and remain
+// valid for the duration of the call.
 //
 // User IR legality failures are counted in |out_result| and emitted through
 // options.emitter. The function still returns OK unless an infrastructure error
 // such as malformed options, invalid provider tables, or registry lookup
 // failure occurs.
-iree_status_t loom_target_low_verify_function_legality(
+iree_status_t loom_target_low_verify_program_legality(
     const loom_module_t* module, loom_func_like_t function,
+    const loom_source_program_t* source_program,
     const loom_target_low_legality_options_t* options,
     loom_target_low_legality_result_t* out_result);
 

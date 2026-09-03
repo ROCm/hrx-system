@@ -25,6 +25,7 @@ extern "C" {
 
 typedef struct loom_low_lower_source_query_scope_t
     loom_low_lower_source_query_scope_t;
+typedef struct loom_source_program_t loom_source_program_t;
 
 // Populates a target contract query environment from |context|.
 //
@@ -64,6 +65,11 @@ loom_low_lower_source_query_scope_callback(
 // Returns the function-local value domain owned by |scope|, or NULL when the
 // source function has no body.
 const loom_local_value_domain_t* loom_low_lower_source_query_scope_value_domain(
+    const loom_low_lower_source_query_scope_t* scope);
+
+// Returns the immutable source-program index owned by |scope|, or NULL when
+// the source function has no body.
+const loom_source_program_t* loom_low_lower_source_query_scope_program(
     const loom_low_lower_source_query_scope_t* scope);
 
 // Returns the lazily analyzed source view regions owned by |scope|.

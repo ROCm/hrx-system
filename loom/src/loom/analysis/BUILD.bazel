@@ -68,6 +68,34 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "source_program",
+    srcs = ["source_program.c"],
+    hdrs = ["source_program.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "source_program_test",
+    srcs = ["source_program_test.cc"],
+    deps = [
+        ":source_program",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_test(
     name = "symbol_value_constraints_test",
     srcs = ["symbol_value_constraints_test.cc"],

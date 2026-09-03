@@ -69,14 +69,18 @@ static void loom_low_lower_assert_options(
   IREE_ASSERT(options->policy != NULL);
 }
 
-static iree_status_t loom_low_lowering_frame_initialize_value_ordinals(
+static iree_status_t loom_low_lowering_frame_initialize_source_program(
     loom_low_lower_context_t* context, loom_region_t* source_body) {
   // Target-legalization query scopes can inspect source ops before CFG
   // conversion, so nested source-region values must be ordinal-addressable even
   // when the final source-to-low boundary expects CFG.
-  return loom_local_value_domain_acquire_for_region_tree(
+  IREE_RETURN_IF_ERROR(loom_local_value_domain_acquire_for_region_tree(
       context->module, source_body, &context->function_arena,
-      &context->lowering.value_domain);
+      &context->lowering.value_domain));
+  return loom_source_program_build(context->module, context->source_function.op,
+                                   source_body, &context->lowering.value_domain,
+                                   &context->function_arena,
+                                   &context->lowering.source_program);
 }
 
 static void loom_low_lowering_frame_deinitialize(
@@ -1267,7 +1271,7 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
                                   &context.lowering.condition_query);
 
   iree_status_t status =
-      loom_low_lowering_frame_initialize_value_ordinals(&context, source_body);
+      loom_low_lowering_frame_initialize_source_program(&context, source_body);
   if (iree_status_is_ok(status)) {
     status = loom_low_lower_record_static_launch_config(&context);
   }
@@ -1346,8 +1350,9 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
         .emitter = options->emitter,
         .max_errors = options->max_errors,
     };
-    status = loom_target_low_verify_function_legality(
-        module, source_function, &legality_options, &legality_result);
+    status = loom_target_low_verify_program_legality(
+        module, source_function, &context.lowering.source_program,
+        &legality_options, &legality_result);
   }
   if (iree_status_is_ok(status)) {
     out_result->error_count = legality_result.error_count;
@@ -1381,7 +1386,7 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
   }
   if (iree_status_is_ok(status) &&
       !loom_low_lower_context_should_stop(&context)) {
-    status = loom_low_lower_source_plan_build(&context, source_body);
+    status = loom_low_lower_source_plan_build(&context);
   }
   if (iree_status_is_ok(status) && context.result->error_count == 0) {
     loom_symbol_ref_t low_func_ref = loom_func_like_callee(source_function);

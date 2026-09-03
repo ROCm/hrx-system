@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/source_program.h"
 #include "loom/analysis/view_regions.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
@@ -24,7 +25,6 @@
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/type_registry.h"
 #include "loom/target/registers.h"
-#include "loom/util/walk.h"
 
 typedef uint8_t loom_target_low_legality_t;
 
@@ -51,6 +51,8 @@ struct loom_target_low_legality_context_t {
   const loom_module_t* module;
   // Source function being checked.
   loom_func_like_t function;
+  // Immutable source-program structure being checked.
+  const loom_source_program_t* source_program;
   // Caller-owned verification options.
   const loom_target_low_legality_options_t* options;
   // Descriptor set selected by options.target_facts.
@@ -63,7 +65,7 @@ struct loom_target_low_legality_context_t {
   iree_host_size_t target_state_record_capacity;
   // Result object receiving counters and selected descriptor set.
   loom_target_low_legality_result_t* result;
-  // Scratch arena for the IR walker.
+  // Scratch arena for legality queries and target provider state.
   iree_arena_allocator_t arena;
 };
 
@@ -709,6 +711,7 @@ static iree_status_t loom_target_low_legality_try_contract_query_op(
       .descriptor_set = context->descriptor_set,
       .fact_table = loom_target_low_legality_fact_table(context),
       .value_domain = loom_target_low_legality_value_domain(context),
+      .source_program = context->source_program,
       .view_regions = loom_target_low_legality_view_regions(context),
       .arena = &context->arena,
       .target_state_allocator =
@@ -930,23 +933,6 @@ static bool loom_target_low_legality_skip_children_after_rejection(
   }
 }
 
-static iree_status_t loom_target_low_legality_walk_op(
-    void* user_data, loom_op_t* op, const loom_walk_context_t* walk_context,
-    loom_walk_result_t* out_result) {
-  loom_target_low_legality_context_t* context =
-      (loom_target_low_legality_context_t*)user_data;
-  *out_result = LOOM_WALK_CONTINUE;
-  uint32_t previous_error_count = context->result->error_count;
-  IREE_RETURN_IF_ERROR(loom_target_low_legality_verify_op(context, op));
-  if (loom_target_low_legality_should_stop(context)) {
-    *out_result = LOOM_WALK_ABORT;
-  } else if (context->result->error_count != previous_error_count &&
-             loom_target_low_legality_skip_children_after_rejection(op->kind)) {
-    *out_result = LOOM_WALK_SKIP;
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_target_low_legality_verify_function_signature(
     loom_target_low_legality_context_t* context) {
   uint16_t argument_count = 0;
@@ -965,10 +951,14 @@ static iree_status_t loom_target_low_legality_verify_function_signature(
   return iree_ok_status();
 }
 
-iree_status_t loom_target_low_verify_function_legality(
+iree_status_t loom_target_low_verify_program_legality(
     const loom_module_t* module, loom_func_like_t function,
+    const loom_source_program_t* source_program,
     const loom_target_low_legality_options_t* options,
     loom_target_low_legality_result_t* out_result) {
+  IREE_ASSERT(source_program != NULL);
+  IREE_ASSERT(source_program->module == module);
+  IREE_ASSERT(source_program->root_region == loom_func_like_body(function));
   *out_result = (loom_target_low_legality_result_t){0};
   const loom_low_descriptor_set_t* descriptor_set = NULL;
   IREE_RETURN_IF_ERROR(
@@ -978,6 +968,7 @@ iree_status_t loom_target_low_verify_function_legality(
   loom_target_low_legality_context_t context = {
       .module = module,
       .function = function,
+      .source_program = source_program,
       .options = options,
       .descriptor_set = descriptor_set,
       .result = out_result,
@@ -988,13 +979,22 @@ iree_status_t loom_target_low_verify_function_legality(
   if (iree_status_is_ok(status)) {
     status = loom_target_low_legality_verify_function_signature(&context);
   }
-  loom_region_t* body = loom_func_like_body(function);
-  if (iree_status_is_ok(status) && body) {
-    loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
-    status = loom_walk_region(
-        module, body, LOOM_WALK_PRE_ORDER,
-        (loom_walk_callback_t){loom_target_low_legality_walk_op, &context},
-        &context.arena, &walk_result);
+  for (loom_source_program_node_ordinal_t i = 0;
+       i < source_program->node_count && iree_status_is_ok(status);) {
+    const loom_source_program_node_t* node = &source_program->nodes[i++];
+    if (node->kind != LOOM_SOURCE_PROGRAM_NODE_OPERATION) {
+      continue;
+    }
+    const loom_op_t* op = loom_source_program_node_operation(node);
+    const uint32_t previous_error_count = context.result->error_count;
+    status = loom_target_low_legality_verify_op(&context, op);
+    if (loom_target_low_legality_should_stop(&context)) {
+      break;
+    }
+    if (context.result->error_count != previous_error_count &&
+        loom_target_low_legality_skip_children_after_rejection(op->kind)) {
+      i = node->subtree_limit;
+    }
   }
 
   iree_arena_deinitialize(&context.arena);

@@ -108,7 +108,7 @@ typedef struct loom_low_lower_source_plan_t {
 // function boundary. The function owns its planning scratch arena lifetime and
 // retains plan data in the lowering context's function arena.
 iree_status_t loom_low_lower_source_plan_build(
-    loom_low_lower_context_t* context, loom_region_t* source_body);
+    loom_low_lower_context_t* context);
 
 // Returns true when structured Low control flow is selected.
 bool loom_low_lower_source_plan_uses_structured_control_flow(

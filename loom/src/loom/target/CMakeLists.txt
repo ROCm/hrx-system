@@ -619,6 +619,7 @@ loom_cc_library(
     ::types
     iree::base
     iree::base::internal::arena
+    loom::analysis::source_program
     loom::analysis::view_regions
     loom::error::emitter
     loom::error::error_defs
@@ -632,7 +633,6 @@ loom_cc_library(
     loom::ops::scf
     loom::ops::type_registry
     loom::util::fact_table
-    loom::util::walk
   PUBLIC
 )
 

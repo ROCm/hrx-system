@@ -40,6 +40,7 @@ typedef struct loom_view_region_table_t loom_view_region_table_t;
 typedef struct loom_matrix_fragment_layout_t loom_matrix_fragment_layout_t;
 typedef struct loom_native_contraction_facts_t loom_native_contraction_facts_t;
 typedef struct loom_local_value_domain_t loom_local_value_domain_t;
+typedef struct loom_source_program_t loom_source_program_t;
 
 typedef enum loom_target_contract_query_outcome_e {
   // No linked contract fragment or provider has an opinion about the op.
@@ -339,6 +340,8 @@ typedef struct loom_target_contract_query_environment_t {
   const loom_value_fact_table_t* fact_table;
   // Optional active function-local value domain for ordinal-keyed analyses.
   const loom_local_value_domain_t* value_domain;
+  // Optional immutable source-program structure for function-wide analyses.
+  const loom_source_program_t* source_program;
   // Optional function-local view-region analysis visible to the query.
   const loom_view_region_table_t* view_regions;
   // Scoped arena available for rare query-side auxiliary records.

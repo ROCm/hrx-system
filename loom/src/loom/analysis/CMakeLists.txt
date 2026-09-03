@@ -75,6 +75,38 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    source_program
+  HDRS
+    "source_program.h"
+  SRCS
+    "source_program.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    source_program_test
+  SRCS
+    "source_program_test.cc"
+  DEPS
+    ::source_program
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func
+    loom::ops::scalar
+    loom::ops::scf
+    loom::testing::module_ptr
+)
+
 loom_cc_test(
   NAME
     symbol_value_constraints_test

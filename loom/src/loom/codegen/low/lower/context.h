@@ -16,6 +16,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/source_program.h"
 #include "loom/analysis/symbolic_expr.h"
 #include "loom/analysis/view_regions.h"
 #include "loom/codegen/low/builder.h"
@@ -73,6 +74,8 @@ typedef struct loom_low_lower_function_analysis_t {
 typedef struct loom_low_lowering_frame_t {
   // Active source-function value domain for dense per-value lowering state.
   loom_local_value_domain_t value_domain;
+  // Immutable source-function structure shared by lowering analyses.
+  loom_source_program_t source_program;
   // Borrowed source value facts computed before planning.
   loom_value_fact_table_t* fact_table;
   // Reusable traversal state for condition-fact queries.

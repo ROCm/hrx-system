@@ -619,32 +619,28 @@ static void loom_low_lower_mark_selected_plan_storage_demands(
   }
 }
 
-static void loom_low_lower_mark_region_structural_storage_demands(
-    loom_low_lower_context_t* context, loom_region_t* source_region) {
-  for (uint16_t block_index = 0; block_index < source_region->block_count;
-       ++block_index) {
-    loom_block_t* block = loom_region_block(source_region, block_index);
-    loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      if (loom_low_lower_op_is_structural(context->module, op)) {
-        loom_low_lower_mark_structural_storage_demands(context, op);
-      }
-      if (loom_low_lower_supported_structured_source_op(context, op)) {
-        loom_region_t* const* regions = loom_op_regions(op);
-        for (uint8_t i = 0; i < op->region_count; ++i) {
-          if (regions[i] != NULL) {
-            loom_low_lower_mark_region_structural_storage_demands(context,
-                                                                  regions[i]);
-          }
-        }
-      }
+static void loom_low_lower_mark_program_structural_storage_demands(
+    loom_low_lower_context_t* context) {
+  const loom_source_program_t* program = &context->lowering.source_program;
+  for (loom_source_program_node_ordinal_t i = 0; i < program->node_count;) {
+    const loom_source_program_node_t* node = &program->nodes[i++];
+    if (node->kind != LOOM_SOURCE_PROGRAM_NODE_OPERATION) {
+      continue;
+    }
+    const loom_op_t* op = loom_source_program_node_operation(node);
+    if (loom_low_lower_op_is_structural(context->module, op)) {
+      loom_low_lower_mark_structural_storage_demands(context, op);
+    }
+    if (op->region_count != 0 &&
+        !loom_low_lower_supported_structured_source_op(context, op)) {
+      i = node->subtree_limit;
     }
   }
 }
 
 static void loom_low_lower_analyze_storage_demands(
-    loom_low_lower_context_t* context, loom_region_t* source_body) {
-  loom_low_lower_mark_region_structural_storage_demands(context, source_body);
+    loom_low_lower_context_t* context) {
+  loom_low_lower_mark_program_structural_storage_demands(context);
   for (iree_host_size_t i = context->lowering.source_plan.selected_plan_count;
        i > 0; --i) {
     loom_low_lower_selected_plan_t* selected_plan =
@@ -666,35 +662,23 @@ static void loom_low_lower_analyze_storage_demands(
   }
 }
 
-static void loom_low_lower_count_region_plan_ops(
-    loom_low_lower_context_t* context, loom_region_t* source_region,
-    iree_host_size_t* inout_plan_capacity) {
-  for (uint16_t block_index = 0; block_index < source_region->block_count;
-       ++block_index) {
-    loom_block_t* block = loom_region_block(source_region, block_index);
-    loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      if (loom_low_lower_supported_structured_source_op(context, op)) {
-        loom_region_t* const* regions = loom_op_regions(op);
-        for (uint8_t i = 0; i < op->region_count; ++i) {
-          if (regions[i] != NULL) {
-            loom_low_lower_count_region_plan_ops(context, regions[i],
-                                                 inout_plan_capacity);
-          }
-        }
-        continue;
-      }
-      if (loom_low_lower_op_uses_policy(context->module, op)) {
-        ++(*inout_plan_capacity);
-      }
+static iree_status_t loom_low_lower_prepare_plan(
+    loom_low_lower_context_t* context) {
+  iree_host_size_t plan_capacity = 0;
+  const loom_source_program_t* program = &context->lowering.source_program;
+  for (loom_source_program_node_ordinal_t i = 0; i < program->node_count;) {
+    const loom_source_program_node_t* node = &program->nodes[i++];
+    if (node->kind != LOOM_SOURCE_PROGRAM_NODE_OPERATION) {
+      continue;
+    }
+    const loom_op_t* op = loom_source_program_node_operation(node);
+    if (op->region_count != 0 &&
+        !loom_low_lower_supported_structured_source_op(context, op)) {
+      i = node->subtree_limit;
+    } else if (loom_low_lower_op_uses_policy(context->module, op)) {
+      ++plan_capacity;
     }
   }
-}
-
-static iree_status_t loom_low_lower_prepare_plan(
-    loom_low_lower_context_t* context, loom_region_t* source_body) {
-  iree_host_size_t plan_capacity = 0;
-  loom_low_lower_count_region_plan_ops(context, source_body, &plan_capacity);
   context->lowering.source_plan.selected_plan_capacity = plan_capacity;
   context->lowering.source_plan.selected_plan_count = 0;
   context->lowering.source_plan.selected_plan_emit_index = 0;
@@ -1041,53 +1025,45 @@ static void loom_low_lower_planning_scope_end(
   iree_arena_reset(&context->planning_arena);
 }
 
-static iree_status_t loom_low_lower_plan_region(
-    loom_low_lower_context_t* context, loom_region_t* source_region,
-    const loom_op_t* block_arg_context_op, bool skip_entry_block_args) {
-  for (uint16_t block_index = 0; block_index < source_region->block_count;
-       ++block_index) {
-    loom_block_t* block = loom_region_block(source_region, block_index);
-    if (!(skip_entry_block_args && block_index == 0)) {
+static iree_status_t loom_low_lower_plan_program(
+    loom_low_lower_context_t* context) {
+  const loom_source_program_t* program = &context->lowering.source_program;
+  for (loom_source_program_node_ordinal_t i = 0; i < program->node_count;) {
+    const loom_source_program_node_t* node = &program->nodes[i++];
+    if (node->kind == LOOM_SOURCE_PROGRAM_NODE_BLOCK) {
+      const loom_block_t* block = loom_source_program_node_block(node);
+      if (iree_any_bit_set(node->flags,
+                           LOOM_SOURCE_PROGRAM_NODE_ROOT_ENTRY_BLOCK)) {
+        continue;
+      }
       for (uint16_t i = 0; i < block->arg_count; ++i) {
         loom_type_t low_type = loom_type_none();
         IREE_RETURN_IF_ERROR(loom_low_lower_source_plan_check_mapped_value(
-            context, block_arg_context_op, block->arg_ids[i], &low_type));
+            context, node->context_op, block->arg_ids[i], &low_type));
         if (loom_low_lower_context_should_stop(context)) {
           return iree_ok_status();
         }
       }
+      continue;
     }
-    loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      loom_low_lower_planning_scope_begin(context);
-      iree_status_t status = loom_low_lower_plan_op(context, op);
-      loom_low_lower_planning_scope_end(context);
-      IREE_RETURN_IF_ERROR(status);
-      if (loom_low_lower_context_should_stop(context)) {
-        return iree_ok_status();
-      }
-      if (!loom_low_lower_supported_structured_source_op(context, op)) {
-        continue;
-      }
-      loom_region_t* const* regions = loom_op_regions(op);
-      for (uint8_t i = 0; i < op->region_count; ++i) {
-        if (regions[i] == NULL) {
-          continue;
-        }
-        IREE_RETURN_IF_ERROR(
-            loom_low_lower_plan_region(context, regions[i], op,
-                                       /*skip_entry_block_args=*/false));
-        if (loom_low_lower_context_should_stop(context)) {
-          return iree_ok_status();
-        }
-      }
+    const loom_op_t* op = loom_source_program_node_operation(node);
+    loom_low_lower_planning_scope_begin(context);
+    iree_status_t status = loom_low_lower_plan_op(context, op);
+    loom_low_lower_planning_scope_end(context);
+    IREE_RETURN_IF_ERROR(status);
+    if (loom_low_lower_context_should_stop(context)) {
+      return iree_ok_status();
+    }
+    if (op->region_count != 0 &&
+        !loom_low_lower_supported_structured_source_op(context, op)) {
+      i = node->subtree_limit;
     }
   }
   return iree_ok_status();
 }
 
 iree_status_t loom_low_lower_source_plan_build(
-    loom_low_lower_context_t* context, loom_region_t* source_body) {
+    loom_low_lower_context_t* context) {
   loom_low_lower_source_plan_t* source_plan = &context->lowering.source_plan;
   *source_plan = (loom_low_lower_source_plan_t){0};
   const loom_value_ordinal_t value_count =
@@ -1102,14 +1078,12 @@ iree_status_t loom_low_lower_source_plan_build(
 
   iree_arena_initialize(context->module->arena.block_pool,
                         &context->planning_arena);
-  iree_status_t status = loom_low_lower_prepare_plan(context, source_body);
+  iree_status_t status = loom_low_lower_prepare_plan(context);
   if (iree_status_is_ok(status)) {
-    status = loom_low_lower_plan_region(context, source_body,
-                                        context->source_function.op,
-                                        /*skip_entry_block_args=*/true);
+    status = loom_low_lower_plan_program(context);
   }
   if (iree_status_is_ok(status)) {
-    loom_low_lower_analyze_storage_demands(context, source_body);
+    loom_low_lower_analyze_storage_demands(context);
   }
   iree_arena_deinitialize(&context->planning_arena);
   return status;

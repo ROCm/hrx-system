@@ -43,6 +43,7 @@ iree_status_t loom_low_lower_source_query_environment_initialize(
       .descriptor_set = descriptor_set,
       .fact_table = context->lowering.fact_table,
       .value_domain = &context->lowering.value_domain,
+      .source_program = &context->lowering.source_program,
       .view_regions = view_regions,
       .arena = &context->function_arena,
       .target_state_allocator =
@@ -113,6 +114,9 @@ static iree_status_t loom_low_lower_source_query_contract(
   if (query_environment.value_domain == NULL) {
     query_environment.value_domain =
         loom_low_lower_context_value_domain(context);
+  }
+  if (query_environment.source_program == NULL) {
+    query_environment.source_program = &context->lowering.source_program;
   }
   if (query_environment.arena == NULL) {
     query_environment.arena = &context->function_arena;
@@ -226,6 +230,12 @@ iree_status_t loom_low_lower_source_query_scope_create(
         &scope->context.lowering.value_domain);
     scope->value_domain_initialized = iree_status_is_ok(status);
   }
+  if (iree_status_is_ok(status) && source_body != NULL) {
+    status = loom_source_program_build(module, source_function.op, source_body,
+                                       &scope->context.lowering.value_domain,
+                                       &scope->context.function_arena,
+                                       &scope->context.lowering.source_program);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_target_contract_index_compose(
         scope->context.policy->contract_bindings,
@@ -265,6 +275,13 @@ const loom_local_value_domain_t* loom_low_lower_source_query_scope_value_domain(
     const loom_low_lower_source_query_scope_t* scope) {
   return scope->value_domain_initialized ? &scope->context.lowering.value_domain
                                          : NULL;
+}
+
+const loom_source_program_t* loom_low_lower_source_query_scope_program(
+    const loom_low_lower_source_query_scope_t* scope) {
+  return scope->value_domain_initialized
+             ? &scope->context.lowering.source_program
+             : NULL;
 }
 
 iree_status_t loom_low_lower_source_query_scope_view_regions(
