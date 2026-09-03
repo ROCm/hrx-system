@@ -11,12 +11,13 @@
 #include "loom/target/arch/amdgpu/target_info.h"
 
 // clang-format off
-#define LOOM_AMDGPU_LOW_SNAPSHOT(symbol, snapshot_name, wavefront_size,      \
-                                  workgroup_storage_byte_limit)             \
+#define LOOM_AMDGPU_LOW_SNAPSHOT(symbol, snapshot_name, codegen_format_value, \
+                                 artifact_format_value, wavefront_size,       \
+                                 workgroup_storage_byte_limit)                \
   static const loom_target_snapshot_t symbol = {                             \
       .name = IREE_SVL(snapshot_name),                                       \
-      .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,               \
-      .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,                    \
+      .codegen_format = codegen_format_value,                                \
+      .artifact_format = artifact_format_value,                              \
       .default_pointer_bitwidth = 64,                                        \
       .index_bitwidth = 32,                                                  \
       .offset_bitwidth = 64,                                                 \
@@ -42,7 +43,14 @@
     symbol_suffix, bundle_name, snapshot_name, key, descriptor_set_flags,   \
     wavefront_size, workgroup_storage_byte_limit)                           \
   LOOM_AMDGPU_LOW_SNAPSHOT(kAmdgpu##symbol_suffix##Snapshot, snapshot_name, \
-                           wavefront_size, workgroup_storage_byte_limit);
+                           LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,            \
+                           LOOM_TARGET_ARTIFACT_FORMAT_ELF, wavefront_size,  \
+                           workgroup_storage_byte_limit);                    \
+  LOOM_AMDGPU_LOW_SNAPSHOT(                                                  \
+      kAmdgpu##symbol_suffix##ProfileSnapshot, snapshot_name,               \
+      LOOM_TARGET_CODEGEN_FORMAT_UNKNOWN,                                   \
+      LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN, wavefront_size,                  \
+      workgroup_storage_byte_limit);
 #include "loom/target/arch/amdgpu/target_records_tables.inl"
 #undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET
 
@@ -57,6 +65,12 @@ static const loom_target_export_plan_t kAmdgpuHalExportPlan = {
   },
 };
 
+static const loom_target_export_plan_t kAmdgpuProfileExportPlan = {
+  .name = IREE_SVL("amdgpu-profile"),
+  .abi_kind = LOOM_TARGET_ABI_UNKNOWN,
+  .linkage = LOOM_TARGET_LINKAGE_DEFAULT,
+};
+
 #define LOOM_AMDGPU_LOW_CONFIG(symbol, key) \
   static const loom_target_config_t symbol = { \
       .name = IREE_SVL(key), \
@@ -67,6 +81,19 @@ static const loom_target_export_plan_t kAmdgpuHalExportPlan = {
     symbol_suffix, bundle_name, snapshot_name, key, descriptor_set_flags,   \
     wavefront_size, workgroup_storage_byte_limit)                           \
   LOOM_AMDGPU_LOW_CONFIG(kAmdgpu##symbol_suffix##Config, key);
+#include "loom/target/arch/amdgpu/target_records_tables.inl"
+#undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET
+
+#define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(                                  \
+    symbol_suffix, bundle_name, snapshot_name, key, descriptor_set_flags,   \
+    wavefront_size, workgroup_storage_byte_limit)                           \
+  static const loom_target_bundle_t                                         \
+      kAmdgpuTargetProfileBundle##symbol_suffix##Core = {                   \
+          .name = IREE_SVL(bundle_name),                                    \
+          .snapshot = &kAmdgpu##symbol_suffix##ProfileSnapshot,             \
+          .export_plan = &kAmdgpuProfileExportPlan,                         \
+          .config = &kAmdgpu##symbol_suffix##Config,                        \
+      };
 #include "loom/target/arch/amdgpu/target_records_tables.inl"
 #undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET
 
@@ -92,6 +119,7 @@ static const loom_target_export_plan_t kAmdgpuHalExportPlan = {
           .target_name = IREE_SVL(target_name_literal), \
           .descriptor_set_ordinal = descriptor_set_ordinal_value, \
           .bundle = &kAmdgpuLowTargetBundle##bundle_suffix##Core, \
+          .profile_bundle = &kAmdgpuTargetProfileBundle##bundle_suffix##Core, \
       };
 #include "loom/target/arch/amdgpu/target_records_tables.inl"
 #undef LOOM_AMDGPU_TARGET_RECORD_INFO
@@ -171,4 +199,13 @@ const loom_target_bundle_t* loom_amdgpu_target_bundle_for_descriptor_set(
       loom_amdgpu_target_record_default_info_for_descriptor_set(
           descriptor_set_ordinal);
   return info != NULL ? info->bundle : NULL;
+}
+
+const loom_target_bundle_t*
+loom_amdgpu_target_profile_bundle_for_descriptor_set(
+    uint16_t descriptor_set_ordinal) {
+  const loom_amdgpu_target_record_info_t* info =
+      loom_amdgpu_target_record_default_info_for_descriptor_set(
+          descriptor_set_ordinal);
+  return info != NULL ? info->profile_bundle : NULL;
 }

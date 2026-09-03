@@ -202,6 +202,7 @@ const loom_artifact_provider_t kFakeArtifactProvider = {
     /*.emit_artifact=*/FakeHalEmitArtifact,
     /*.deinitialize_artifact=*/FakeHalDeinitializeArtifact,
     /*.target_profile_type=*/&kFakeTargetProfileType,
+    /*.product_contract=*/nullptr,
 };
 
 const loom_device_provider_t kFakeDeviceProvider = {

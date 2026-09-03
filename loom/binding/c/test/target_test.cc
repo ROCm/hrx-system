@@ -142,6 +142,7 @@ static const loom_target_emitter_t kFakeElfEmitter = {
     /*.public_artifact_format=*/{"fake-elf", 8},
     /*.default_identifier=*/{"fake.bin", 8},
     /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+    /*.product_contract=*/nullptr,
     /*.emit=*/EmitFakeArtifact,
 };
 
@@ -150,6 +151,7 @@ static const loom_target_emitter_t kFakeWasmEmitter = {
     /*.public_artifact_format=*/{"fake-wasm", 9},
     /*.default_identifier=*/{"fake.wasm", 9},
     /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_WASM_BINARY,
+    /*.product_contract=*/nullptr,
     /*.emit=*/EmitFakeArtifact,
 };
 

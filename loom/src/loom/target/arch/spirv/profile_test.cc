@@ -66,8 +66,9 @@ TEST(SpirvTargetProfileTest, ProjectsOwnedCooperativePropertyFacts) {
       /*.vector_shape_span_count=*/1,
   };
   loom_spirv_target_profile_t profile = {};
-  loom_spirv_target_profile_initialize(&loom_spirv_low_target_bundle_vulkan1_3,
-                                       &cooperative_properties, &profile);
+  loom_spirv_target_profile_initialize(
+      &loom_spirv_target_profile_bundle_vulkan1_3, &cooperative_properties,
+      &profile);
 
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);

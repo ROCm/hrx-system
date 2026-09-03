@@ -39,6 +39,7 @@ loom_cc_library(
     iree::base
     loom::ir
     loom::target::pipeline_options
+    loom::target::product_contract
     loom::target::profile
     loom::target::provider
     loom::target::reporting::report

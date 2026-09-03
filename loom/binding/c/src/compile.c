@@ -233,7 +233,8 @@ static loomc_status_t loomc_compile_specialize_functions(
   loom_target_specialization_request_list_t requests = {0};
   loom_target_declaration_binding_list_t bindings = {0};
   LOOMC_RETURN_IF_ERROR(loomc_target_specialization_options_make_lists(
-      options, arena, &requests, &bindings));
+      options, LOOMC_TARGET_SPECIALIZATION_LIST_FLAG_APPLY_PRODUCT_CONTRACT,
+      arena, &requests, &bindings));
 
   loomc_compile_diagnostic_capture_t capture = {
       .result = result,

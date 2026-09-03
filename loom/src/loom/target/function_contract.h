@@ -93,6 +93,21 @@ iree_status_t loom_target_function_contract_refine_facts(
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
     bool* out_valid, const loom_target_facts_t** out_facts);
 
+// Applies a target-only function contract to |base_facts| and returns immutable
+// function target facts allocated from |arena|.
+//
+// Target-only specialization carries machine identity across an IR boundary
+// before a compiler product has been selected. It therefore has no default
+// artifact ABI or linkage. Explicitly authored target and function ABI/export
+// facts remain constraints and survive projection. |target_name| is used only
+// for diagnostics. Returns status only for infrastructure failures; invalid
+// user IR emits diagnostics and sets |out_valid| false.
+iree_status_t loom_target_function_contract_refine_target_facts(
+    const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
+    iree_string_view_t target_name, const loom_target_facts_t* base_facts,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    bool* out_valid, const loom_target_facts_t** out_facts);
+
 // Applies a module-internal callable's function-local contract to |base_facts|
 // and returns immutable function target facts allocated from
 // |arena|.

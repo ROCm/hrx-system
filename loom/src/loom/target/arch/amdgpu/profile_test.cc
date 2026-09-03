@@ -45,7 +45,7 @@ TEST(AmdgpuTargetProfileTest, PreservesStructuredTargetFacts) {
   EXPECT_EQ(profile.identity.amdhsa_features.xnack,
             LOOM_AMDGPU_TARGET_FEATURE_OFF);
   EXPECT_EQ(loom_target_profile_bundle(&profile.base),
-            loom_amdgpu_target_bundle_for_descriptor_set(
+            loom_amdgpu_target_profile_bundle_for_descriptor_set(
                 target->descriptor_set_ordinal));
   EXPECT_EQ(profile.properties.target, target);
   EXPECT_EQ(profile.properties.processor, &processor->properties);
@@ -85,7 +85,10 @@ TEST(AmdgpuTargetProfileTest, ProjectsCompilerOwnedTypedFacts) {
   EXPECT_EQ(facts->properties.common, &facts->base.storage.bundle);
   EXPECT_NE(facts->properties.common, profile.base.target_bundle);
   EXPECT_EQ(facts->base.storage.snapshot.codegen_format,
-            profile.base.target_bundle->snapshot->codegen_format);
+            LOOM_TARGET_CODEGEN_FORMAT_UNKNOWN);
+  EXPECT_EQ(facts->base.storage.snapshot.artifact_format,
+            LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN);
+  EXPECT_EQ(facts->base.storage.export_plan.abi_kind, LOOM_TARGET_ABI_UNKNOWN);
   EXPECT_FALSE(facts->subgroup_size_explicit);
   EXPECT_FALSE(facts->contract_set_key_explicit);
 

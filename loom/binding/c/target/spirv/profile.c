@@ -793,10 +793,10 @@ static void loomc_spirv_profile_initialize_vulkan_bda_bundle(
     const loomc_spirv_numeric_fact_state_t* limit_states,
     loom_target_bundle_storage_t* out_storage) {
   *out_storage = (loom_target_bundle_storage_t){
-      .snapshot = *loom_spirv_low_target_bundle_vulkan1_3.snapshot,
-      .export_plan = *loom_spirv_low_target_bundle_vulkan1_3.export_plan,
-      .config = *loom_spirv_low_target_bundle_vulkan1_3.config,
-      .bundle = loom_spirv_low_target_bundle_vulkan1_3,
+      .snapshot = *loom_spirv_target_profile_bundle_vulkan1_3.snapshot,
+      .export_plan = *loom_spirv_target_profile_bundle_vulkan1_3.export_plan,
+      .config = *loom_spirv_target_profile_bundle_vulkan1_3.config,
+      .bundle = loom_spirv_target_profile_bundle_vulkan1_3,
   };
   loom_target_bundle_storage_rebind(out_storage);
   out_storage->bundle.name = IREE_SV("spirv-vulkan1.3-bda-profile");

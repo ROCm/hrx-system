@@ -47,6 +47,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/spirv:provider",
         "//loom/src/loom/target/arch/spirv/records:target_records",
         "//loom/src/loom/target/emit/spirv:module_emitter",
+        "//loom/src/loom/target/emit/spirv:product_contract",
         "//runtime/src/iree/base",
     ],
     alwayslink = True,

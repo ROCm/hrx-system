@@ -173,6 +173,7 @@ static const loom_artifact_provider_t kFakeArtifactProvider = {
     /*.emit_artifact=*/{},
     /*.deinitialize_artifact=*/{},
     /*.target_profile_type=*/&kFakeTargetProfileType,
+    /*.product_contract=*/nullptr,
 };
 
 static const loom_device_provider_t kFakeDeviceProvider = {

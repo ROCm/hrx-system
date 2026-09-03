@@ -40,6 +40,7 @@ loom_cc_library(
         ":options",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:pipeline_options",
+        "//loom/src/loom/target:product_contract",
         "//loom/src/loom/target:profile",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:types",

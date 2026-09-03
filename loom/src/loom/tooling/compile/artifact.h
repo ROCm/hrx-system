@@ -19,6 +19,7 @@
 #include "iree/base/byte_sequence.h"
 #include "loom/ir/module.h"
 #include "loom/target/pipeline_options.h"
+#include "loom/target/product_contract.h"
 #include "loom/target/profile.h"
 #include "loom/target/provider.h"
 #include "loom/target/reporting/report.h"
@@ -102,6 +103,9 @@ struct loom_artifact_provider_t {
   // Target profile representation accepted for explicit specialization, or
   // NULL when this provider only consumes authored module targets.
   const loom_target_profile_type_t* target_profile_type;
+  // Product-owned lowering contract applied to an explicit target profile, or
+  // NULL when the provider does not consume target-specialized functions.
+  const loom_target_product_contract_t* product_contract;
 };
 
 // A registry of artifact providers linked into a compiler binary.

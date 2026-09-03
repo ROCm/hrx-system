@@ -1130,6 +1130,7 @@ static iree_status_t loom_compile_select_explicit_artifact_target(
 static iree_status_t loom_compile_specialize_explicit_artifact_target(
     const loom_run_execution_environment_t* environment,
     loom_run_session_t* session, loom_run_module_t* run_module,
+    const loom_artifact_provider_t* artifact_provider,
     const loom_artifact_target_t* target,
     loom_compile_report_capture_t* compile_report_capture,
     iree_allocator_t allocator) {
@@ -1156,7 +1157,8 @@ static iree_status_t loom_compile_specialize_explicit_artifact_target(
   uint32_t error_count = 0;
   IREE_RETURN_IF_ERROR(loom_target_specialize_module_kernel_entries(
       loom_run_execution_environment_target_environment(environment),
-      target->target_profile, loom_target_entry_emitter(&diagnostic_emitter),
+      target->target_profile, artifact_provider->product_contract,
+      loom_target_entry_emitter(&diagnostic_emitter),
       loom_run_session_block_pool(session), allocator, &run_module->module,
       &error_count));
   if (error_count != 0) {
@@ -1421,8 +1423,8 @@ int main(int argc, char** argv) {
   }
   if (iree_status_is_ok(status) && explicit_artifact_target_selected) {
     status = loom_compile_specialize_explicit_artifact_target(
-        &environment, &session, &run_module, &explicit_artifact_target,
-        &compile_report_capture, allocator);
+        &environment, &session, &run_module, artifact_provider,
+        &explicit_artifact_target, &compile_report_capture, allocator);
   }
   if (iree_status_is_ok(status)) {
     status = loom_compile_select_roots(&session, &run_module, artifact_provider,

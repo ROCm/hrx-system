@@ -9,6 +9,7 @@
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/runtime_requirements.h"
 #include "loom/target/emit/native/amdgpu/hal_kernel_library.h"
+#include "loom/target/emit/native/amdgpu/product_contract.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
 
 typedef struct loom_amdgpu_compile_artifact_storage_t {
@@ -128,4 +129,5 @@ const loom_artifact_provider_t loom_amdgpu_artifact_provider = {
     .deinitialize_artifact =
         loom_amdgpu_artifact_provider_deinitialize_artifact,
     .target_profile_type = &loom_amdgpu_target_profile_type,
+    .product_contract = &loom_amdgpu_hsaco_kernel_product_contract,
 };

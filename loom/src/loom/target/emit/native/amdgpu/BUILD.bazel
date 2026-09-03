@@ -479,6 +479,14 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "product_contract",
+    srcs = ["product_contract.c"],
+    hdrs = ["product_contract.h"],
+    visibility = _AMDGPU_TOOLING_VISIBILITY,
+    deps = ["//loom/src/loom/target:product_contract"],
+)
+
+loom_cc_library(
     name = "hal_kernel_library",
     srcs = ["hal_kernel_library.c"],
     hdrs = ["hal_kernel_library.h"],
@@ -531,6 +539,7 @@ loom_cc_test(
     srcs = ["hal_kernel_library_test.cc"],
     deps = [
         ":hal_kernel_library",
+        ":product_contract",
         ":runtime_globals",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/codegen/low:text_asm",
@@ -636,6 +645,7 @@ loom_cc_test(
     ],
     deps = [
         ":kernel_hsaco",
+        ":product_contract",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:function",

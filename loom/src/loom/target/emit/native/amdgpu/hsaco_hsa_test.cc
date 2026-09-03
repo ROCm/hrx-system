@@ -42,6 +42,7 @@
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/kernel_hsaco.h"
+#include "loom/target/emit/native/amdgpu/product_contract.h"
 #include "loom/target/function_version.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/specialization.h"
@@ -731,6 +732,7 @@ class LowKernelEmitter {
     const loom_target_specialization_request_t specialization_request = {
         /*.function_name=*/IREE_SV("loom_kernel"),
         /*.target_profile=*/&target_profile->base,
+        /*.product_contract=*/&loom_amdgpu_hsaco_kernel_product_contract,
     };
     loom_target_specialization_result_t specialization_result = {};
     IREE_RETURN_IF_ERROR(loom_target_specialize_functions(

@@ -23,6 +23,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::runtime_requirements
     loom::target::emit::native::amdgpu::hal_kernel_library
+    loom::target::emit::native::amdgpu::product_contract
     loom::target::emit::native::amdgpu::runtime_globals
     loom::tooling::compile::artifact
   PUBLIC

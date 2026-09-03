@@ -38,9 +38,9 @@ static iree_status_t loom_spirv_target_provider_select_profile(
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(allocator, sizeof(*storage), (void**)&storage));
   *storage = (loom_spirv_profile_selection_storage_t){0};
-  loom_spirv_target_profile_initialize(&loom_spirv_low_target_bundle_vulkan1_3,
-                                       /*cooperative_properties=*/NULL,
-                                       &storage->profile);
+  loom_spirv_target_profile_initialize(
+      &loom_spirv_target_profile_bundle_vulkan1_3,
+      /*cooperative_properties=*/NULL, &storage->profile);
   *out_selection = (loom_target_profile_selection_t){
       .profile = &storage->profile.base,
       .selector = IREE_SV("vulkan1.3+bda"),

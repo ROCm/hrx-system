@@ -6,6 +6,7 @@
 
 #include "loom/target/arch/spirv/provider.h"
 #include "loom/target/emit/spirv/module_emitter.h"
+#include "loom/target/emit/spirv/product_contract.h"
 #include "loomc/target/spirv/base.h"
 #include "target.h"
 
@@ -47,6 +48,7 @@ static const loom_target_emitter_t loomc_spirv_emitter = {
                                sizeof(LOOMC_ARTIFACT_FORMAT_SPIRV) - 1},
     .default_identifier = {"module.spv", 10},
     .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
+    .product_contract = &loom_spirv_binary_kernel_product_contract,
     .emit = loomc_spirv_emit_module_artifact,
 };
 

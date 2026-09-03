@@ -26,6 +26,8 @@ typedef struct loom_amdgpu_target_record_info_t {
   uint16_t descriptor_set_ordinal;
   // Target bundle selected by the target record.
   const loom_target_bundle_t* bundle;
+  // Product-neutral target bundle selected by the target profile.
+  const loom_target_bundle_t* profile_bundle;
 } loom_amdgpu_target_record_info_t;
 
 extern const loom_target_bundle_table_t loom_amdgpu_target_bundles;
@@ -46,6 +48,13 @@ loom_amdgpu_target_record_default_info_for_descriptor_set(
 // Returns the target bundle selected by an AMDGPU descriptor-set ordinal, or
 // NULL when no target record is supported for that descriptor set.
 const loom_target_bundle_t* loom_amdgpu_target_bundle_for_descriptor_set(
+    uint16_t descriptor_set_ordinal);
+
+// Returns the product-neutral profile bundle selected by an AMDGPU
+// descriptor-set ordinal, or NULL when no target profile is supported for that
+// descriptor set.
+const loom_target_bundle_t*
+loom_amdgpu_target_profile_bundle_for_descriptor_set(
     uint16_t descriptor_set_ordinal);
 
 #ifdef __cplusplus

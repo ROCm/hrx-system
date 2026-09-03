@@ -31,6 +31,7 @@
 #include "loom/target/low_legality.h"
 #include "loom/target/low_packet_diagnostics.h"
 #include "loom/target/math_policy.h"
+#include "loom/target/product_contract.h"
 #include "loom/target/profile.h"
 #include "loom/target/profile_selection.h"
 #include "loom/target/reporting/artifact_manifest.h"
@@ -192,6 +193,10 @@ typedef struct loom_target_emitter_t {
 
   // Target-neutral artifact format produced by this emitter.
   loom_target_artifact_format_t target_artifact_format;
+
+  // Product-owned lowering contract required by this emitter, or NULL when
+  // emission does not consume target-specialized function facts.
+  const loom_target_product_contract_t* product_contract;
 
   // Emission callback.
   loom_target_emit_fn_t emit;

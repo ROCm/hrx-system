@@ -164,8 +164,15 @@ static void ExpectTargetFactsEqual(const loom_amdgpu_target_facts_t& expected,
   const loom_target_snapshot_t& expected_snapshot =
       expected.base.storage.snapshot;
   const loom_target_snapshot_t& actual_snapshot = actual.base.storage.snapshot;
-  EXPECT_EQ(actual_snapshot.codegen_format, expected_snapshot.codegen_format);
-  EXPECT_EQ(actual_snapshot.artifact_format, expected_snapshot.artifact_format);
+  if (loom_target_facts_field_is_explicit(
+          &expected.base, LOOM_TARGET_FACT_FIELD_CODEGEN_FORMAT)) {
+    EXPECT_EQ(actual_snapshot.codegen_format, expected_snapshot.codegen_format);
+  }
+  if (loom_target_facts_field_is_explicit(
+          &expected.base, LOOM_TARGET_FACT_FIELD_ARTIFACT_FORMAT)) {
+    EXPECT_EQ(actual_snapshot.artifact_format,
+              expected_snapshot.artifact_format);
+  }
   EXPECT_EQ(actual_snapshot.default_pointer_bitwidth,
             expected_snapshot.default_pointer_bitwidth);
   EXPECT_EQ(actual_snapshot.index_bitwidth, expected_snapshot.index_bitwidth);
@@ -211,8 +218,14 @@ static void ExpectTargetFactsEqual(const loom_amdgpu_target_facts_t& expected,
       expected.base.storage.export_plan;
   const loom_target_export_plan_t& actual_export =
       actual.base.storage.export_plan;
-  EXPECT_EQ(actual_export.abi_kind, expected_export.abi_kind);
-  EXPECT_EQ(actual_export.linkage, expected_export.linkage);
+  if (loom_target_facts_field_is_explicit(&expected.base,
+                                          LOOM_TARGET_FACT_FIELD_ABI)) {
+    EXPECT_EQ(actual_export.abi_kind, expected_export.abi_kind);
+  }
+  if (loom_target_facts_field_is_explicit(&expected.base,
+                                          LOOM_TARGET_FACT_FIELD_LINKAGE)) {
+    EXPECT_EQ(actual_export.linkage, expected_export.linkage);
+  }
   EXPECT_TRUE(iree_string_view_equal(actual_export.export_symbol,
                                      expected_export.export_symbol));
   EXPECT_EQ(actual_export.hal_kernel.required_workgroup_size.x,

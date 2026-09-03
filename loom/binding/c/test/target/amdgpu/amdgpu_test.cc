@@ -1471,11 +1471,15 @@ kernel.def @wave64_root() {
   const std::string module_text = ToString(text_artifact->contents);
   EXPECT_NE(
       module_text.find("amdgpu.target<gfx1151> @__loom_target_context_0_0 "
-                       "{subgroup_size = 32}"),
+                       "{abi = hal_kernel, artifact_format = elf, "
+                       "codegen_format = low_native, linkage = default, "
+                       "subgroup_size = 32}"),
       std::string::npos)
       << module_text;
   EXPECT_NE(module_text.find("amdgpu.target<gfx942> @__loom_target_context_0_1 "
-                             "{features = [sramecc, -xnack]}"),
+                             "{abi = hal_kernel, artifact_format = elf, "
+                             "codegen_format = low_native, features = "
+                             "[sramecc, -xnack], linkage = default}"),
             std::string::npos)
       << module_text;
   const size_t wave32_root = module_text.find(
@@ -1552,12 +1556,15 @@ kernel.def @wave64_root() {
   EXPECT_EQ(text_archive_text, bytecode_archive_text);
   EXPECT_NE(text_archive_text.find(
                 "amdgpu.target<gfx1151> @__loom_target_context_0_0 "
-                "{subgroup_size = 32}"),
+                "{abi = hal_kernel, artifact_format = elf, codegen_format = "
+                "low_native, linkage = default, subgroup_size = 32}"),
             std::string::npos)
       << text_archive_text;
   EXPECT_NE(
       text_archive_text.find("amdgpu.target<gfx942> @__loom_target_context_0_1 "
-                             "{features = [sramecc, -xnack]}"),
+                             "{abi = hal_kernel, artifact_format = elf, "
+                             "codegen_format = low_native, features = "
+                             "[sramecc, -xnack], linkage = default}"),
       std::string::npos)
       << text_archive_text;
   EXPECT_NE(text_archive_text.find(
@@ -1583,7 +1590,8 @@ kernel.def @wave64_root() {
                  bytecode_link_index.get(), &wave32_root_symbol, 1);
   static constexpr const char kWave32Target[] =
       "amdgpu.target<gfx1151> @__loom_target_context_0_0 "
-      "{subgroup_size = 32}";
+      "{abi = hal_kernel, artifact_format = elf, codegen_format = "
+      "low_native, linkage = default, subgroup_size = 32}";
   static constexpr const char kWave32Contract[] =
       "target<amdgpu.rdna3_5.core>(@__loom_target_context_0_0)";
   ExpectSelectivelyLinkedTarget(text_wave32.get(), kWave32Target,
@@ -1605,7 +1613,8 @@ kernel.def @wave64_root() {
                  bytecode_link_index.get(), &wave64_root_symbol, 1);
   static constexpr const char kWave64Target[] =
       "amdgpu.target<gfx942> @__loom_target_context_0_1 "
-      "{features = [sramecc, -xnack]}";
+      "{abi = hal_kernel, artifact_format = elf, codegen_format = low_native, "
+      "features = [sramecc, -xnack], linkage = default}";
   static constexpr const char kWave64Contract[] =
       "target<amdgpu.cdna3.core>(@__loom_target_context_0_1)";
   ExpectSelectivelyLinkedTarget(text_wave64.get(), kWave64Target,

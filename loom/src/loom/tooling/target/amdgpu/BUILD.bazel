@@ -30,6 +30,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu:profile",
         "//loom/src/loom/target/arch/amdgpu:runtime_requirements",
         "//loom/src/loom/target/emit/native/amdgpu:hal_kernel_library",
+        "//loom/src/loom/target/emit/native/amdgpu:product_contract",
         "//loom/src/loom/target/emit/native/amdgpu:runtime_globals",
         "//loom/src/loom/tooling/compile:artifact",
         "//runtime/src/iree/base",

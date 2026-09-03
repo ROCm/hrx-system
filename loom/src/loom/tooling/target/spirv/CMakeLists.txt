@@ -24,8 +24,8 @@ loom_cc_library(
     loom::target::arch::spirv::profile
     loom::target::emit::spirv::module_builder
     loom::target::emit::spirv::module_emitter
+    loom::target::emit::spirv::product_contract
     loom::target::entry_selection
-    loom::target::function_contract
     loom::target::low_descriptor_registry
     loom::target::reporting::artifact_manifest_collect
     loom::target::reporting::report
@@ -189,6 +189,7 @@ loom_cc_test(
     loom::target::facts_builder
     loom::target::function_contract
     loom::target::function_version
+    loom::target::product_contract
     loom::target::profile
     loom::target::types
     loom::testing::module_ptr

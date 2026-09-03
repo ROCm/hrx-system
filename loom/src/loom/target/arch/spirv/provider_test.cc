@@ -137,10 +137,10 @@ TEST_F(SpirvProviderTest, ProjectedProfileSatisfiesStructuredRequirements) {
                     "spirv.target<vulkan1_3> @float64 "
                     "{contract_feature_bits = 16}\n"));
   loom_target_bundle_storage_t live_storage = {
-      /*.snapshot=*/*loom_spirv_low_target_bundle_vulkan1_3.snapshot,
-      /*.export_plan=*/*loom_spirv_low_target_bundle_vulkan1_3.export_plan,
-      /*.config=*/*loom_spirv_low_target_bundle_vulkan1_3.config,
-      /*.bundle=*/loom_spirv_low_target_bundle_vulkan1_3,
+      /*.snapshot=*/*loom_spirv_target_profile_bundle_vulkan1_3.snapshot,
+      /*.export_plan=*/*loom_spirv_target_profile_bundle_vulkan1_3.export_plan,
+      /*.config=*/*loom_spirv_target_profile_bundle_vulkan1_3.config,
+      /*.bundle=*/loom_spirv_target_profile_bundle_vulkan1_3,
   };
   loom_target_bundle_storage_rebind(&live_storage);
   live_storage.bundle.name = IREE_SV("live-vulkan-device");
@@ -156,7 +156,6 @@ TEST_F(SpirvProviderTest, ProjectedProfileSatisfiesStructuredRequirements) {
       /*.y=*/65535,
       /*.z=*/65535,
   };
-  live_storage.export_plan.abi_kind = LOOM_TARGET_ABI_HAL_KERNEL;
   live_storage.config.contract_feature_bits |= LOOM_SPIRV_FEATURE_FLOAT16;
 
   loom_spirv_target_profile_t profile = {};
@@ -166,8 +165,7 @@ TEST_F(SpirvProviderTest, ProjectedProfileSatisfiesStructuredRequirements) {
   IREE_ASSERT_OK(loom_target_profile_project_facts(
       &profile.base, &analysis_arena_, &effective));
   ASSERT_NE(effective, nullptr);
-  EXPECT_EQ(effective->storage.export_plan.abi_kind,
-            LOOM_TARGET_ABI_HAL_KERNEL);
+  EXPECT_EQ(effective->storage.export_plan.abi_kind, LOOM_TARGET_ABI_UNKNOWN);
 
   const loom_target_symbol_facts_t* baseline_a =
       Requirement(requirements.get(), IREE_SV("baseline_a"));

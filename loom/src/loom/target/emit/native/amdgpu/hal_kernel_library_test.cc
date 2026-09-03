@@ -33,6 +33,7 @@
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
+#include "loom/target/emit/native/amdgpu/product_contract.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
 #include "loom/target/emit/native/elf.h"
 #include "loom/target/facts_builder.h"
@@ -755,6 +756,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   loom_target_facts_t* exact_facts = nullptr;
   IREE_ASSERT_OK(loom_target_profile_project_facts(
       &target_profile.base, &version_arena, &exact_facts));
+  IREE_ASSERT_OK(loom_target_product_contract_apply(
+      &loom_amdgpu_hsaco_kernel_product_contract, exact_facts));
   ASSERT_TRUE(loom_target_facts_satisfy_specialization_requirement(
       exact_facts, authored_target->projection));
   loom_target_facts_builder_apply_requirement(authored_target->projection,

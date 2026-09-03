@@ -84,8 +84,9 @@ static iree_status_t loomc_link_materialization_prepare_module(
   iree_arena_initialize(block_pool, &arena);
   loom_target_specialization_request_list_t requests = {0};
   loom_target_declaration_binding_list_t bindings = {0};
-  status = loomc_target_specialization_options_make_lists(target, &arena,
-                                                          &requests, &bindings);
+  status = loomc_target_specialization_options_make_lists(
+      target, LOOMC_TARGET_SPECIALIZATION_LIST_FLAG_NONE, &arena, &requests,
+      &bindings);
   uint32_t error_count = 0;
   if (loomc_status_is_ok(status)) {
     status = loomc_status_from_iree(loom_target_specialize_module(

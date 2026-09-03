@@ -355,8 +355,8 @@ static iree_status_t loom_link_cli_prepare_linked_module(
   uint32_t error_count = 0;
   IREE_RETURN_IF_ERROR(loom_target_specialize_module_kernel_entries(
       state->target_environment, state->target_profile,
-      loom_target_entry_emitter(&diagnostic_emitter), block_pool, allocator,
-      inout_module, &error_count));
+      /*product_contract=*/NULL, loom_target_entry_emitter(&diagnostic_emitter),
+      block_pool, allocator, inout_module, &error_count));
   if (error_count != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,

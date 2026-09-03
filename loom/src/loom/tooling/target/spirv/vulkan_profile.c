@@ -573,14 +573,14 @@ iree_status_t loom_spirv_vulkan_hal_profile_initialize_target_bundle(
               "SPIR-V")));
 
   *out_storage = (loom_target_bundle_storage_t){
-      .snapshot = *loom_spirv_low_target_bundle_vulkan1_3.snapshot,
-      .export_plan = *loom_spirv_low_target_bundle_vulkan1_3.export_plan,
-      .config = *loom_spirv_low_target_bundle_vulkan1_3.config,
-      .bundle = loom_spirv_low_target_bundle_vulkan1_3,
+      .snapshot = *loom_spirv_target_profile_bundle_vulkan1_3.snapshot,
+      .export_plan = *loom_spirv_target_profile_bundle_vulkan1_3.export_plan,
+      .config = *loom_spirv_target_profile_bundle_vulkan1_3.config,
+      .bundle = loom_spirv_target_profile_bundle_vulkan1_3,
   };
   loom_target_bundle_storage_rebind(out_storage);
 
-  out_storage->bundle.name = IREE_SV("spirv-vulkan1.3-bda-hal");
+  out_storage->bundle.name = IREE_SV("spirv-vulkan1.3-bda-profile");
   out_storage->snapshot.name = IREE_SV("spirv-vulkan1.3-bda");
   out_storage->snapshot.max_workgroup_size = facts->max_compute_workgroup_size;
   out_storage->snapshot.max_flat_workgroup_size =
@@ -588,8 +588,6 @@ iree_status_t loom_spirv_vulkan_hal_profile_initialize_target_bundle(
   out_storage->snapshot.subgroup_size = facts->subgroup_size;
   out_storage->snapshot.max_workgroup_count =
       facts->max_compute_workgroup_count;
-  out_storage->export_plan.name = IREE_SV("spirv-hal-kernel");
-  out_storage->export_plan.abi_kind = LOOM_TARGET_ABI_HAL_KERNEL;
   out_storage->config.name = IREE_SV("spirv.logical.core.vulkan1.3.bda");
   out_storage->config.contract_feature_bits =
       loom_spirv_vulkan_hal_profile_feature_bits(facts);

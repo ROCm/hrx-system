@@ -94,7 +94,7 @@ iree_status_t loom_amdgpu_target_profile_initialize(
       identity->amdhsa_features.xnack,
       &normalized_identity.amdhsa_features.xnack));
   const loom_target_bundle_t* target_bundle =
-      loom_amdgpu_target_bundle_for_descriptor_set(
+      loom_amdgpu_target_profile_bundle_for_descriptor_set(
           identity->target->descriptor_set_ordinal);
   if (target_bundle == NULL) {
     return iree_make_status(
