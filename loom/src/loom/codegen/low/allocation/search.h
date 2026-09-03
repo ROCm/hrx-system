@@ -30,6 +30,15 @@ extern "C" {
 
 struct loom_target_residency_model_t;
 
+// Concrete-location ordering used for one whole-function assignment attempt.
+typedef enum loom_low_allocation_search_strategy_e {
+  // Searches legal locations from low to high.
+  LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FIRST_FIT = 0,
+  // Separates overlapping scalar and wide intervals across the feasible
+  // liveness-pressure frontier to repair first-fit fragmentation.
+  LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR = 1,
+} loom_low_allocation_search_strategy_t;
+
 // Borrowed allocator facts used when probing physical storage.
 typedef struct loom_low_allocation_search_context_t {
   // Module containing the allocated low function.
@@ -60,6 +69,8 @@ typedef struct loom_low_allocation_search_context_t {
   // Borrowed bitmap indexed by module value ID. Set values require register
   // storage throughout allocation.
   iree_bitmap_t required_register_values;
+  // Concrete-location ordering for the current assignment attempt.
+  loom_low_allocation_search_strategy_t strategy;
 } loom_low_allocation_search_context_t;
 
 // Active assignment set selected for spilling before an interval is assigned.
@@ -96,7 +107,8 @@ bool loom_low_allocation_search_location_conflicts(
     uint16_t ignored_storage_lease_value_count,
     loom_low_allocation_storage_release_policy_t release_policy);
 
-// Finds the first concrete location for |interval| under |capacity|.
+// Finds a concrete location for |interval| under |capacity| using the context's
+// search strategy. Placement preferences and hard conflicts remain primary.
 bool loom_low_allocation_search_find_free_location(
     loom_low_allocation_search_context_t* context,
     const loom_liveness_interval_t* interval,

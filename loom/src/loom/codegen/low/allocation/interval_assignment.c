@@ -90,6 +90,7 @@ loom_low_allocation_interval_assignment_search_context(
       .storage_leases = state->context->storage_leases,
       .required_register_values = state->context->required_register_values,
       .spill_traffic_by_value_ordinal = state->spill_traffic_by_value_ordinal,
+      .strategy = state->context->search_strategy,
   };
 }
 
