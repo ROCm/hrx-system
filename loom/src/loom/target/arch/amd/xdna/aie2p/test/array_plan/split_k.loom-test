@@ -113,8 +113,8 @@ binding index=0 ordinal=0 access=read
 binding index=1 ordinal=1 access=read
 binding index=2 ordinal=2 access=read
 binding index=3 ordinal=3 access=write
-worker index=0 group=0 lane=0 entry=@product_branch_bf16 tile=(0,2) code-bytes=104 resources=3 storage-domains=0
-worker index=1 group=0 lane=1 entry=@product_branch_bf16 tile=(0,4) code-bytes=104 resources=3 storage-domains=0
+worker index=0 group=0 lane=0 entry=@product_branch_bf16 tile=(0,2) code-bytes=112 resources=3 storage-domains=0
+worker index=1 group=0 lane=1 entry=@product_branch_bf16 tile=(0,4) code-bytes=112 resources=3 storage-domains=0
 worker index=2 group=1 lane=0 entry=@reduce_bias_f32 tile=(0,3) code-bytes=112 resources=4 storage-domains=0
 channel index=0 transport=external-dma record-bytes=16 capacity=2 sender=binding[0]:0 partition=0/2 receiver=worker[0]:0
 channel index=1 transport=external-dma record-bytes=16 capacity=2 sender=binding[1]:0 partition=0/2 receiver=worker[0]:1
@@ -258,8 +258,8 @@ control-relocation index=4 record=8 word=1 payload-offset=300 binding=2 addend=0
 control-relocation index=5 record=10 word=1 payload-offset=364 binding=3 addend=0 width=8 alignment=4
 
 resident-program workers=3
-resident worker=0 entry=@split_k_array$worker$0 tile=(0,2) phases=2 code-bytes=376 resources=0 fixups=1
-resident worker=1 entry=@split_k_array$worker$1 tile=(0,4) phases=2 code-bytes=376 resources=0 fixups=1
+resident worker=0 entry=@split_k_array$worker$0 tile=(0,2) phases=2 code-bytes=384 resources=0 fixups=1
+resident worker=1 entry=@split_k_array$worker$1 tile=(0,4) phases=2 code-bytes=384 resources=0 fixups=1
 resident worker=2 entry=@split_k_array$worker$2 tile=(0,3) phases=2 code-bytes=442 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$worker$0() asm {

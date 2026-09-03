@@ -7,20 +7,21 @@ pipeline.def<kernel> public retain target(@array_target) @split_k_array() launch
   %reducer_lanes = index.constant 1 : index
   %ring_capacity = index.constant 2 : index
   %tile_extent = index.constant 8 : index
+  %branch_k_extent = index.constant 8 : index
   %base = index.constant 0 : offset
 
   %products = group.create %product_lanes : index -> group
   %reducers = group.create %reducer_lanes : index -> group
 
-  %lhs_view = buffer.view %lhs[%base] : buffer -> view<[%product_lanes]x[%tile_extent]xbf16>
-  %rhs_view = buffer.view %rhs[%base] : buffer -> view<[%product_lanes]x[%tile_extent]xbf16>
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<[%product_lanes]x[%branch_k_extent]x[%tile_extent]xbf16>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<[%product_lanes]x[%branch_k_extent]x[%tile_extent]xbf16>
   %bias_view = buffer.view %bias[%base] : buffer -> view<[%tile_extent]x[%tile_extent]xf32>
   %output_view = buffer.view %output[%base] : buffer -> view<[%tile_extent]x[%tile_extent]xf32>
 
-  %lhs_tiles = pipeline.scatter %lhs_view across %products : view<[%product_lanes]x[%tile_extent]xbf16>, group -> pipeline.flow<tile<[%tile_extent]xbf16>>
-  %rhs_tiles = pipeline.scatter %rhs_view across %products : view<[%product_lanes]x[%tile_extent]xbf16>, group -> pipeline.flow<tile<[%tile_extent]xbf16>>
+  %lhs_tiles = pipeline.scatter %lhs_view across %products : view<[%product_lanes]x[%branch_k_extent]x[%tile_extent]xbf16>, group -> pipeline.flow<tile<[%branch_k_extent]x[%tile_extent]xbf16>>
+  %rhs_tiles = pipeline.scatter %rhs_view across %products : view<[%product_lanes]x[%branch_k_extent]x[%tile_extent]xbf16>, group -> pipeline.flow<tile<[%branch_k_extent]x[%tile_extent]xbf16>>
   %bias_tile = pipeline.read %bias_view on %reducers : view<[%tile_extent]x[%tile_extent]xf32>, group -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>
-  %partials = pipeline.stage @product_branch_bf16 on %products(%lhs_tiles, %rhs_tiles) : (group, pipeline.flow<tile<[%tile_extent]xbf16>>, pipeline.flow<tile<[%tile_extent]xbf16>>) -> (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>)
+  %partials = pipeline.stage @product_branch_bf16 on %products(%lhs_tiles, %rhs_tiles) : (group, pipeline.flow<tile<[%branch_k_extent]x[%tile_extent]xbf16>>, pipeline.flow<tile<[%branch_k_extent]x[%tile_extent]xbf16>>) -> (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>)
   %buffered_partials = pipeline.buffer %partials capacity %ring_capacity : (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>, index) -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>
   %result = pipeline.reduce @reduce_bias_f32 from %products(%buffered_partials) to %reducers(%bias_tile) : (group, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>) to (group, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>) -> (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>)
   pipeline.write %result to %output_view : pipeline.flow<tile<[%tile_extent]x[%tile_extent]xf32>>, view<[%tile_extent]x[%tile_extent]xf32>
@@ -30,19 +31,26 @@ pipeline.def<kernel> public retain target(@array_target) @split_k_array() launch
 func.def target(@core_target) @product_branch_bf16(%lhs: buffer, %rhs: buffer, %partial: buffer) {
   %lhs_aligned, %rhs_aligned, %partial_aligned = buffer.assume.alignment %lhs, %rhs, %partial {minimum_alignment = 64} : buffer, buffer, buffer
   %base = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<8xbf16>
-  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<8xbf16>
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xbf16>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<64xbf16>
   %partial_view = buffer.view %partial_aligned[%base] : buffer -> view<64xf32>
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 8 : index
+  %loop_step = index.constant 1 : index
   %m = index.constant 8 : index
   %n = index.constant 8 : index
   %k = index.constant 1 : index
-  %lhs_value = vector.load %lhs_view[0] : view<8xbf16> -> vector<8xbf16>
-  %rhs_value = vector.load %rhs_view[0] : view<8xbf16> -> vector<8xbf16>
-  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] : vector<8xbf16>
-  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<8xbf16>
   %accumulator_init = vector.constant 0.0 : vector<64xf32>
   %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xf32>
-  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<8xbf16>, vector<8xbf16>, vector<64xf32>
+  %product = scf.for %k_index = [%loop_begin to %loop_end step %loop_step](%accumulator = %accumulator_fragment : vector<64xf32>) -> (vector<64xf32>) unroll {
+    %row_base = index.mul %k_index, %m : index
+    %lhs_value = vector.load %lhs_view[%row_base] : view<64xbf16> -> vector<8xbf16>
+    %rhs_value = vector.load %rhs_view[%row_base] : view<64xbf16> -> vector<8xbf16>
+    %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] : vector<8xbf16>
+    %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<8xbf16>
+    %next = vector.mma %lhs_fragment, %rhs_fragment, %accumulator : vector<8xbf16>, vector<8xbf16>, vector<64xf32>
+    scf.yield %next : vector<64xf32>
+  }
   vector.store %product, %partial_view[0] : vector<64xf32>, view<64xf32>
   func.return
 }
