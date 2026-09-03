@@ -356,6 +356,43 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "pipeline_plan",
+    srcs = ["pipeline_plan.c"],
+    hdrs = ["pipeline_plan.h"],
+    deps = [
+        ":type_refinement",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/group",
+        "//loom/src/loom/ops/pipeline",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "pipeline_plan_test",
+    srcs = ["pipeline_plan_test.cc"],
+    deps = [
+        ":pipeline_plan",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/pipeline",
+        "//loom/src/loom/testing:context",
+        "//loom/src/loom/testing:module_ptr",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "vector_memory_footprint",
     srcs = [
         "memory_root_bounds.c",
