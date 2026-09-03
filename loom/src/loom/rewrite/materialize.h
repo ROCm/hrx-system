@@ -71,10 +71,10 @@ iree_status_t loom_ir_clone_region(loom_builder_t* builder,
 
 // Clones all blocks from |source_region| into the existing |target_region|.
 //
-// New blocks are inserted beginning at |target_block_index|. Every source
-// block and block argument is mapped through |remap| before any operation is
-// cloned, so arbitrary successor edges within the source region are preserved.
-// The builder's current parent op is retained as the parent of cloned ops.
+// New blocks are inserted beginning at |target_block_index| with one block
+// table shift. Block arguments are mapped through |remap| before any operation
+// is cloned, and successor edges are projected by source block ordinal. The
+// builder's current parent op is retained as the parent of cloned ops.
 // Block labels are intentionally omitted: labels are region-local presentation
 // names and retaining them while splicing into an existing region can create
 // duplicate names. Block comments, flags, value names, locations, and all

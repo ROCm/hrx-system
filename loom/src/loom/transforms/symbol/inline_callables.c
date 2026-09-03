@@ -274,6 +274,8 @@ typedef struct loom_inline_state_t {
   iree_host_size_t* component_by_symbol;
   // Required-inline entries indexed by their source SCC component.
   loom_inline_component_entries_t* component_entries;
+  // Function versions whose definitions were erased during execution.
+  iree_host_size_t erased_version_count;
 } loom_inline_state_t;
 
 static bool loom_inline_target_requires_low_call_inline(
@@ -1135,9 +1137,7 @@ static iree_status_t loom_inline_execute_entry(
                 &state->target_versions, entry->target_symbol_id);
         IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, entry->callee.op));
         if (version != NULL) {
-          const bool removed =
-              loom_function_version_owner_remove(state->version_owner, version);
-          IREE_ASSERT_TRUE(removed);
+          ++state->erased_version_count;
         }
         ++state->statistics->symbols_transferred;
       }
@@ -1153,9 +1153,7 @@ static iree_status_t loom_inline_execute_entry(
       IREE_RETURN_IF_ERROR(loom_callable_inline_consuming_call(
           rewriter, transfer_availability, entry->call_op, entry->callee));
       if (version != NULL) {
-        const bool removed =
-            loom_function_version_owner_remove(state->version_owner, version);
-        IREE_ASSERT_TRUE(removed);
+        ++state->erased_version_count;
       }
       loom_pass_mark_changed(state->pass);
       ++state->statistics->calls_transferred;
@@ -1165,6 +1163,31 @@ static iree_status_t loom_inline_execute_entry(
     default:
       return iree_ok_status();
   }
+}
+
+// Reconciles the mutable owner once after the rewrite batch. Stable compaction
+// keeps version observation order while avoiding a linear search and tail move
+// for every erased helper.
+static iree_host_size_t loom_inline_prune_erased_function_versions(
+    loom_function_version_owner_t* owner) {
+  if (owner == NULL) return 0;
+  iree_host_size_t write_index = 0;
+  iree_host_size_t removed_count = 0;
+  for (iree_host_size_t read_index = 0; read_index < owner->list.count;
+       ++read_index) {
+    loom_function_version_t* version = owner->storage[read_index];
+    if (version->function.op != NULL &&
+        iree_any_bit_set(version->function.op->flags, LOOM_OP_FLAG_DEAD)) {
+      ++removed_count;
+      continue;
+    }
+    owner->storage[write_index++] = version;
+  }
+  for (iree_host_size_t i = write_index; i < owner->list.count; ++i) {
+    owner->storage[i] = NULL;
+  }
+  owner->list.count = write_index;
+  return removed_count;
 }
 
 // Makes a locked Low function's per-block source order explicit before its
@@ -1254,6 +1277,11 @@ static iree_status_t loom_inline_execute_plan(loom_inline_state_t* state,
     }
   }
 
+  const iree_host_size_t removed_version_count =
+      state->erased_version_count > 0
+          ? loom_inline_prune_erased_function_versions(state->version_owner)
+          : 0;
+  IREE_ASSERT_EQ(removed_version_count, state->erased_version_count);
   loom_rewriter_deinitialize(&rewriter);
   return status;
 }
