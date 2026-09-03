@@ -38,10 +38,12 @@ from loom.target.contracts import (
     ContractCase,
     ContractFragment,
     DescriptorEmitForm,
+    DescriptorMatrixRule,
     DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
     Guard,
+    RecipeRule,
     ResultTypeBinding,
     Scalar,
     TypePattern,
@@ -62,6 +64,7 @@ _OFFSET = Scalar("offset")
 _I8_VECTOR = Vector("i8", minimum_lanes=1, maximum_lanes=64)
 _I16_VECTOR = Vector("i16", minimum_lanes=1, maximum_lanes=32)
 _I32_VECTOR = Vector("i32", minimum_lanes=1, maximum_lanes=16)
+_I32_MATRIX_ACCUMULATOR = Vector("i32", lanes=64)
 _I1_VECTOR = Vector("i1", minimum_lanes=1, maximum_lanes=64)
 _INTEGER_VECTOR_TYPES = (_I8_VECTOR, _I16_VECTOR, _I32_VECTOR)
 
@@ -914,6 +917,41 @@ def _vector_constant_rule(
     )
 
 
+def _matrix_accumulator_zero_rule() -> DescriptorRule:
+    descriptor = _descriptor("amd.xdna.aie2p.accumulator.clear.i32x64")
+    return DescriptorRule(
+        source_op=vector.vector_constant,
+        descriptor=descriptor,
+        guards=(
+            Guard.attr_kind("value", "i64"),
+            Guard.value_type("result", _I32_MATRIX_ACCUMULATOR),
+            Guard.i64_range("value", 0, 0),
+        ),
+        emit=(
+            _op_emit(
+                descriptor,
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _matrix_fragment_store_rule() -> RecipeRule:
+    return RecipeRule(
+        source_op=vector.vector_fragment_store,
+        guards=(
+            Guard.enum_attr_equals("role", "result"),
+            Guard.value_type("value", _I32_MATRIX_ACCUMULATOR),
+            Guard.value_type("view", TypePattern.view("i32", dims=(8, 8))),
+            Guard.operand_segment_count("indices", 0),
+            Guard.i64_array_count("static_indices", 2),
+            Guard.i64_array_elements_range("static_indices", 0, 0),
+            Guard.value_i64_range("rows", 8, 8),
+            Guard.value_i64_range("columns", 8, 8),
+        ),
+    )
+
+
 def _vector_broadcast_alias_rules() -> tuple[ValueAliasRule, ...]:
     return tuple(
         ValueAliasRule(
@@ -1641,6 +1679,11 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             source=ValueRef.operand("source"),
             result=ValueRef.result("result"),
         ),
+        DescriptorMatrixRule(
+            source_op=vector.vector_mma,
+            source="vector_mma",
+        ),
+        _matrix_fragment_store_rule(),
         *AIE2P_MEMORY_RULES,
         *(
             _address_constant_rule(
@@ -2087,6 +2130,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             )
         ),
         _vector_multiply_i16_rule(),
+        _matrix_accumulator_zero_rule(),
         *(
             _vector_binary_rule(source_op, type_pattern, descriptor_key)
             for source_op, type_pattern, descriptor_key in (

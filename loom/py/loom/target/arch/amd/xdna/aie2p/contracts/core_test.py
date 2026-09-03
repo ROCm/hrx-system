@@ -172,8 +172,9 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         "amd.xdna.aie2p.splat.i16x32",
         "amd.xdna.aie2p.splat.i32x16",
         "amd.xdna.aie2p.splat.i32x16",
+        "amd.xdna.aie2p.accumulator.clear.i32x64",
     ]
-    assert all(len(rule.emit) == 2 for rule in vector_constant_rules)
+    assert [len(rule.emit) for rule in vector_constant_rules] == [2, 2, 2, 2, 2, 1]
 
     vector_broadcast_rules = [
         rule for rule in rules if rule.source_op is vector.vector_broadcast

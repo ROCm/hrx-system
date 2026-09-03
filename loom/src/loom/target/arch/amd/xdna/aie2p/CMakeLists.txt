@@ -132,6 +132,30 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::op_defs
+    loom::target::projection
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    array_plan
+  HDRS
+    "array/plan.h"
+  SRCS
+    "array/plan.c"
+  DEPS
+    ::array_descriptors
+    ::leaf_object
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::packet
+    loom::codegen::low::target_binding
+    loom::ir
+    loom::ir::facts
+    loom::ops::low
+    loom::ops::op_defs
+    loom::target::arch::amd::xdna::array_facts
+    loom::util::fact_table
   PUBLIC
 )
 
@@ -153,19 +177,23 @@ loom_cc_library(
     lower
   HDRS
     "lower/lower.h"
+    "lower/matrix.h"
     "lower/storage.h"
   SRCS
+    "lower/matrix.c"
     "lower/registry.c"
     "lower/storage.c"
   DEPS
     ::core_descriptors
     iree::base
+    loom::analysis::contract_vector
     loom::codegen::low::lower
     loom::error::error_defs
     loom::ir
     loom::ir::facts
     loom::ops::buffer
     loom::ops::low
+    loom::ops::vector
     loom::target::arch::amd::xdna::aie2p::contracts::core
     loom::target::arch::amd::xdna::aie2p::contracts::core_lower_rules
     loom::util::fact_table
@@ -194,12 +222,21 @@ loom_cc_library(
   NAME
     check_provider
   HDRS
+    "check/array_plan.h"
     "check/provider.h"
   SRCS
+    "check/array_plan.c"
     "check/provider.c"
   DEPS
+    ::array_plan
+    ::leaf_compile
     ::provider
     iree::base
+    loom::codegen::low::diagnostics
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::tools::loom-check::execute
     loom::tools::loom-check::provider
   TESTONLY
   PUBLIC
@@ -222,9 +259,11 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "test/array_plan/split_k.loom-test"
     "test/module_contracts.loom-test"
     "test/source_low/function_storage.loom-test"
     "test/source_low/index_conversion.loom-test"
+    "test/source_low/matrix_multiply.loom-test"
     "test/source_low/memory_scalar_addressing.loom-test"
     "test/source_low/numeric_index.loom-test"
     "test/source_low/numeric_scalar_i32.loom-test"
@@ -236,6 +275,7 @@ loom_check_test_suite(
   RUNNER
     ::loom-check
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/matrix_multiply.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_scalar_addressing.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_index.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test"
@@ -333,6 +373,28 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    leaf_compile
+  HDRS
+    "emit/leaf_compile.h"
+  SRCS
+    "emit/leaf_compile.c"
+  DEPS
+    ::bundle_plan
+    ::leaf_object
+    ::low_registry
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::symbol_facts
+    loom::codegen::low::descriptors
+    loom::codegen::low::frame
+    loom::ir
+    loom::target::reporting::low
+    loom::target::reporting::report
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     tile_image
   HDRS
     "emit/tile_image.h"
@@ -357,9 +419,8 @@ loom_cc_library(
   SRCS
     "emit/artifact_emitter.c"
   DEPS
-    ::bundle_plan
     ::core_descriptors
-    ::leaf_object
+    ::leaf_compile
     ::low_registry
     ::tile_image
     iree::base

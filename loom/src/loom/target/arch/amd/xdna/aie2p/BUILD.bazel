@@ -120,7 +120,28 @@ loom_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/target:projection",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "array_plan",
+    srcs = ["array/plan.c"],
+    hdrs = ["array/plan.h"],
+    deps = [
+        ":array_descriptors",
+        ":leaf_object",
+        "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/amd/xdna:array_facts",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -138,21 +159,25 @@ loom_cc_library(
 loom_cc_library(
     name = "lower",
     srcs = [
+        "lower/matrix.c",
         "lower/registry.c",
         "lower/storage.c",
     ],
     hdrs = [
         "lower/lower.h",
+        "lower/matrix.h",
         "lower/storage.h",
     ],
     deps = [
         ":core_descriptors",
+        "//loom/src/loom/analysis:contract_vector",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/vector",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/contracts:core",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/contracts:core_lower_rules",
         "//loom/src/loom/util:fact_table",
@@ -179,10 +204,23 @@ loom_cc_library(
 loom_cc_library(
     name = "check_provider",
     testonly = True,
-    srcs = ["check/provider.c"],
-    hdrs = ["check/provider.h"],
+    srcs = [
+        "check/array_plan.c",
+        "check/provider.c",
+    ],
+    hdrs = [
+        "check/array_plan.h",
+        "check/provider.h",
+    ],
     deps = [
+        ":array_plan",
+        ":leaf_compile",
         ":provider",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/tools/loom-check:execute",
         "//loom/src/loom/tools/loom-check:provider",
         "//runtime/src/iree/base",
     ],
@@ -203,9 +241,11 @@ loom_cc_binary(
 loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
+        "test/array_plan/split_k.loom-test",
         "test/module_contracts.loom-test",
         "test/source_low/function_storage.loom-test",
         "test/source_low/index_conversion.loom-test",
+        "test/source_low/matrix_multiply.loom-test",
         "test/source_low/memory_scalar_addressing.loom-test",
         "test/source_low/numeric_index.loom-test",
         "test/source_low/numeric_scalar_i32.loom-test",
@@ -216,6 +256,7 @@ loom_check_test_suite(
         "test/source_low/vector_predicate.loom-test",
     ],
     data = [
+        "//loom/src/loom/test/corpus/source_low:matrix_multiply.loom-test",
         "//loom/src/loom/test/corpus/source_low:memory_scalar_addressing.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_index.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_scalar_i32.loom-test",
@@ -303,6 +344,25 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "leaf_compile",
+    srcs = ["emit/leaf_compile.c"],
+    hdrs = ["emit/leaf_compile.h"],
+    deps = [
+        ":bundle_plan",
+        ":leaf_object",
+        ":low_registry",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target/reporting:low",
+        "//loom/src/loom/target/reporting:report",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "tile_image",
     srcs = ["emit/tile_image.c"],
     hdrs = ["emit/tile_image.h"],
@@ -322,9 +382,8 @@ loom_cc_library(
     srcs = ["emit/artifact_emitter.c"],
     hdrs = ["emit/artifact_emitter.h"],
     deps = [
-        ":bundle_plan",
         ":core_descriptors",
-        ":leaf_object",
+        ":leaf_compile",
         ":low_registry",
         ":tile_image",
         "//loom/src/loom/codegen/low:descriptors",

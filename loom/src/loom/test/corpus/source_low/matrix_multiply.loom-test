@@ -1,0 +1,21 @@
+// RUN: roundtrip
+
+func.def @matrix_multiply_s8s8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xi8>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<64xi8>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<8x8xi32>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 8 : index
+  %lhs_value = vector.load %lhs_view[0] : view<64xi8> -> vector<64xi8>
+  %rhs_value = vector.load %rhs_view[0] : view<64xi8> -> vector<64xi8>
+  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] : vector<64xi8>
+  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<64xi8>
+  %accumulator_init = vector.constant 0 : vector<64xi32>
+  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
+  vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
+  func.return
+}

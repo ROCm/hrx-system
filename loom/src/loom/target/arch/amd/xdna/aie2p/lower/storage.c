@@ -27,6 +27,10 @@ typedef struct loom_aie2p_storage_alloca_plan_t {
   int64_t byte_alignment;
 } loom_aie2p_storage_alloca_plan_t;
 
+bool loom_aie2p_storage_plan_isa(loom_low_lower_plan_t plan) {
+  return plan.id == LOOM_AIE2P_STORAGE_PLAN_ALLOCA;
+}
+
 static iree_status_t loom_aie2p_select_storage_alloca(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t* out_plan) {

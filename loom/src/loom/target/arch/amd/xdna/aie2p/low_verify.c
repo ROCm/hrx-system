@@ -12,6 +12,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/array_descriptors.h"
+#include "loom/target/projection.h"
 
 typedef struct loom_aie2p_low_verify_state_t {
   // Module containing the current array program.
@@ -68,11 +69,39 @@ static const loom_named_attr_t* loom_aie2p_low_find_packet_attr(
 
 static iree_string_view_t loom_aie2p_low_function_contract_name(
     const loom_module_t* module, loom_func_like_t function) {
-  const loom_string_id_t contract_id = loom_func_like_repr_contract(function);
-  if (contract_id >= module->strings.count) {
+  if (!loom_func_like_isa(function)) {
     return IREE_SV("<not-a-function>");
   }
-  return module->strings.entries[contract_id];
+  const loom_string_id_t contract_id = loom_func_like_repr_contract(function);
+  if (contract_id < module->strings.count) {
+    return module->strings.entries[contract_id];
+  }
+
+  // A resident worker may name a source function in the same mixed-level
+  // module. Before source-to-low conversion the function has no representation
+  // contract, but its target record already promises the contract that lowering
+  // must produce. Resolve that promise so pre-lowering verification and the
+  // concrete post-lowering check enforce the same worker-entry requirement.
+  const loom_symbol_ref_t target_ref = loom_func_like_target(function);
+  if (!loom_symbol_ref_is_valid(target_ref) || target_ref.module_id != 0 ||
+      target_ref.symbol_id >= module->symbols.count) {
+    return IREE_SV("<unbound>");
+  }
+  const loom_symbol_t* target_symbol =
+      &module->symbols.entries[target_ref.symbol_id];
+  const loom_target_like_t target =
+      loom_target_like_cast(module, target_symbol->defining_op);
+  const loom_target_like_descriptor_t* descriptor =
+      loom_target_like_descriptor(target);
+  if (descriptor == NULL) {
+    return IREE_SV("<unresolved-target>");
+  }
+  const uint32_t selector =
+      (uint32_t)loom_attr_as_enum(loom_target_like_selector(target));
+  const loom_target_bundle_t* bundle =
+      loom_target_bundle_table_lookup(descriptor->bundle_table, selector);
+  return bundle ? bundle->config->contract_set_key
+                : IREE_SV("<unresolved-target>");
 }
 
 static iree_status_t loom_aie2p_low_verify_worker(

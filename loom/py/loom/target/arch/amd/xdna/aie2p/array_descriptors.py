@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Stable logical-array Low contract for AMD XDNA AIE2P programs."""
+"""Stable resident-array Low contract for AMD XDNA AIE2P programs."""
 
 from __future__ import annotations
 
@@ -13,23 +13,19 @@ from pathlib import Path
 from loom.target.low_descriptors import (
     AsmForm,
     AsmImmediate,
-    AsmOperandSegment,
-    AsmOperandSegmentDelimiter,
     Descriptor,
     DescriptorFlag,
+    DescriptorOpKind,
     DescriptorSet,
     Effect,
-    EffectFlag,
     EffectKind,
     EnumDomain,
     EnumValue,
     Immediate,
     ImmediateFlag,
     ImmediateKind,
-    InstructionClass,
     IssueUse,
     LatencyKind,
-    MemorySpace,
     ModelQuality,
     Operand,
     OperandFlag,
@@ -40,27 +36,22 @@ from loom.target.low_descriptors import (
     Resource,
     ResourceKind,
     ScheduleClass,
-    ScheduleClassFlag,
     SpillSlotSpace,
 )
 
 _TARGET_KEY = "amd.xdna.aie2p"
 _DESCRIPTOR_SET_KEY = f"{_TARGET_KEY}.array"
 
+_REG_SCALAR = "aie2p.array.scalar"
 _REG_BINDING = "aie2p.array.binding"
+_REG_GROUP = "aie2p.array.group"
 _REG_WORKER = "aie2p.array.worker"
-_REG_BUFFER = "aie2p.array.buffer"
-_REG_FLOW = "aie2p.array.flow"
-_REG_TOKEN = "aie2p.array.token"
+_REG_SENDER = "aie2p.array.sender"
+_REG_RECEIVER = "aie2p.array.receiver"
+_REG_CHANNEL = "aie2p.array.channel"
 
 _RESOURCE_GRAPH = "aie2p.array.graph"
-_RESOURCE_ASYNC = "aie2p.array.async"
-_RESOURCE_SYNC = "aie2p.array.sync"
-
 _SCHEDULE_GRAPH = "aie2p.array.schedule.graph"
-_SCHEDULE_ASYNC = "aie2p.array.schedule.async"
-_SCHEDULE_SYNC = "aie2p.array.schedule.sync"
-
 _BINDING_ACCESS_DOMAIN = "aie2p.array.binding_access"
 
 _REFERENCE_BANK = 1
@@ -114,15 +105,6 @@ def _u32(field_name: str) -> Immediate:
     )
 
 
-def _u64(field_name: str) -> Immediate:
-    return Immediate(
-        field_name,
-        ImmediateKind.UNSIGNED,
-        bit_width=64,
-        unsigned_max=(2**64) - 1,
-    )
-
-
 def _asm(
     mnemonic: str,
     *,
@@ -140,18 +122,27 @@ def _asm(
     )
 
 
-_ORDERED_ASYNC_EFFECT = Effect(
-    EffectKind.CALL,
-    flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
-)
-
-_SYNC_EFFECT = Effect(
-    EffectKind.BARRIER,
-    memory_space=MemorySpace.GENERIC,
-    flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
-)
+# Array declarations materialize persistent device resources outside the tile
+# instruction stream. CALL is the existing conservative Low effect for such
+# target-owned state until the graph is consumed by the array planner.
+_TOPOLOGY_EFFECT = Effect(EffectKind.CALL)
 
 _DESCRIPTORS = (
+    Descriptor(
+        key=f"{_DESCRIPTOR_SET_KEY}.constant.u32",
+        mnemonic="constant.u32",
+        semantic_tag="array.constant.u32",
+        operands=(_result(_REG_SCALAR),),
+        op_kind=DescriptorOpKind.CONST,
+        immediates=(_u32("value"),),
+        asm_forms=_asm(
+            "constant.u32",
+            results=("result",),
+            immediates=("value",),
+        ),
+        schedule_class=_SCHEDULE_GRAPH,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
     Descriptor(
         key=f"{_DESCRIPTOR_SET_KEY}.binding",
         mnemonic="binding",
@@ -174,12 +165,31 @@ _DESCRIPTORS = (
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     Descriptor(
+        key=f"{_DESCRIPTOR_SET_KEY}.group",
+        mnemonic="group",
+        semantic_tag="array.worker_group",
+        operands=(
+            _result(_REG_GROUP),
+            _operand(_REG_SCALAR, "lanes"),
+        ),
+        asm_forms=_asm(
+            "group",
+            results=("result",),
+            operands=("lanes",),
+        ),
+        schedule_class=_SCHEDULE_GRAPH,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
+    Descriptor(
         key=f"{_DESCRIPTOR_SET_KEY}.worker",
         mnemonic="worker",
-        semantic_tag="array.worker",
-        operands=(_result(_REG_WORKER),),
+        semantic_tag="array.resident_worker",
+        operands=(
+            _result(_REG_WORKER),
+            _operand(_REG_GROUP, "group"),
+            _operand(_REG_SCALAR, "lane"),
+        ),
         immediates=(
-            _u32("ordinal"),
             Immediate(
                 "entry",
                 ImmediateKind.ORDINAL,
@@ -191,134 +201,100 @@ _DESCRIPTORS = (
         asm_forms=_asm(
             "worker",
             results=("result",),
-            immediates=("ordinal", "entry"),
+            operands=("group", "lane"),
+            immediates=("entry",),
         ),
+        effects=(_TOPOLOGY_EFFECT,),
         schedule_class=_SCHEDULE_GRAPH,
-        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
     ),
     Descriptor(
-        key=f"{_DESCRIPTOR_SET_KEY}.buffer",
-        mnemonic="buffer",
-        semantic_tag="array.logical_buffer",
+        key=f"{_DESCRIPTOR_SET_KEY}.sender",
+        mnemonic="sender",
+        semantic_tag="array.sender",
         operands=(
-            _result(_REG_BUFFER),
-            _operand(_REG_WORKER, "owner"),
+            _result(_REG_SENDER),
+            _operand((_REG_BINDING, _REG_WORKER), "owner"),
         ),
-        immediates=(
-            _u32("ordinal"),
-            _u64("byte_length"),
-            _u32("byte_alignment"),
-        ),
+        immediates=(_u32("port"),),
         asm_forms=_asm(
-            "buffer",
+            "sender",
             results=("result",),
             operands=("owner",),
-            immediates=("ordinal", "byte_length", "byte_alignment"),
+            immediates=("port",),
         ),
         schedule_class=_SCHEDULE_GRAPH,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     Descriptor(
-        key=f"{_DESCRIPTOR_SET_KEY}.flow",
-        mnemonic="flow",
-        semantic_tag="array.flow",
+        key=f"{_DESCRIPTOR_SET_KEY}.receiver",
+        mnemonic="receiver",
+        semantic_tag="array.receiver",
         operands=(
-            _result(_REG_FLOW),
-            _operand((_REG_BINDING, _REG_BUFFER), "source"),
-            _operand((_REG_BINDING, _REG_BUFFER), "target"),
+            _result(_REG_RECEIVER),
+            _operand((_REG_BINDING, _REG_WORKER), "owner"),
         ),
+        immediates=(_u32("port"),),
         asm_forms=_asm(
-            "flow",
+            "receiver",
             results=("result",),
-            operands=("source", "target"),
+            operands=("owner",),
+            immediates=("port",),
         ),
         schedule_class=_SCHEDULE_GRAPH,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     Descriptor(
-        key=f"{_DESCRIPTOR_SET_KEY}.transfer",
-        mnemonic="transfer",
-        semantic_tag="array.async_transfer",
+        key=f"{_DESCRIPTOR_SET_KEY}.partition",
+        mnemonic="partition",
+        semantic_tag="array.partition",
         operands=(
-            _result(_REG_TOKEN),
-            _operand(_REG_FLOW, "flow"),
+            _result(_REG_SENDER),
+            _operand(_REG_SENDER, "source"),
+            _operand(_REG_SCALAR, "lane"),
+            _operand(_REG_SCALAR, "lanes"),
         ),
         asm_forms=_asm(
-            "transfer",
+            "partition",
             results=("result",),
-            operands=("flow",),
+            operands=("source", "lane", "lanes"),
         ),
-        effects=(_ORDERED_ASYNC_EFFECT,),
-        schedule_class=_SCHEDULE_ASYNC,
-        flags=(DescriptorFlag.SIDE_EFFECTING,),
-        instruction_classes=(InstructionClass.GENERIC_MEMORY,),
+        schedule_class=_SCHEDULE_GRAPH,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     Descriptor(
-        key=f"{_DESCRIPTOR_SET_KEY}.invoke",
-        mnemonic="invoke",
-        semantic_tag="array.worker_invoke",
+        key=f"{_DESCRIPTOR_SET_KEY}.channel",
+        mnemonic="channel",
+        semantic_tag="array.channel",
         operands=(
-            _result(_REG_TOKEN),
-            _operand(_REG_WORKER, "worker"),
-            _operand(_REG_BUFFER, "arguments", variadic=True),
+            _result(_REG_CHANNEL),
+            _operand(_REG_SENDER, "sender"),
+            _operand(_REG_RECEIVER, "receiver"),
+            _operand(_REG_SCALAR, "capacity"),
         ),
-        asm_forms=(
-            AsmForm(
-                mnemonic="invoke",
-                results=("result",),
-                operand_segments=(
-                    AsmOperandSegment(
-                        AsmOperandSegmentDelimiter.ANGLE,
-                        ("worker",),
-                    ),
-                    AsmOperandSegment(
-                        AsmOperandSegmentDelimiter.PAREN,
-                        ("arguments",),
-                    ),
-                ),
-            ),
+        asm_forms=_asm(
+            "channel",
+            results=("result",),
+            operands=("sender", "receiver", "capacity"),
         ),
-        effects=(_ORDERED_ASYNC_EFFECT,),
-        schedule_class=_SCHEDULE_ASYNC,
+        effects=(_TOPOLOGY_EFFECT,),
+        schedule_class=_SCHEDULE_GRAPH,
         flags=(DescriptorFlag.SIDE_EFFECTING,),
-        instruction_classes=(InstructionClass.CONTROL,),
-    ),
-    Descriptor(
-        key=f"{_DESCRIPTOR_SET_KEY}.await",
-        mnemonic="await",
-        semantic_tag="array.await",
-        operands=(
-            _operand(_REG_TOKEN, "token"),
-            _operand(_REG_TOKEN, "additional_tokens", variadic=True),
-        ),
-        asm_forms=(
-            AsmForm(
-                mnemonic="await",
-                operand_segments=(
-                    AsmOperandSegment(
-                        AsmOperandSegmentDelimiter.PAREN,
-                        ("token", "additional_tokens"),
-                    ),
-                ),
-            ),
-        ),
-        effects=(_SYNC_EFFECT,),
-        schedule_class=_SCHEDULE_SYNC,
-        flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.BARRIER),
-        instruction_classes=(InstructionClass.BARRIER,),
     ),
     Descriptor(
         key=f"{_DESCRIPTOR_SET_KEY}.constrain.location",
         mnemonic="constrain.location",
         semantic_tag="array.constraint.location",
-        operands=(_operand(_REG_WORKER, "worker"),),
-        immediates=(_u32("column"), _u32("row")),
+        operands=(
+            _operand(_REG_WORKER, "worker"),
+            _operand(_REG_SCALAR, "column"),
+            _operand(_REG_SCALAR, "row"),
+        ),
         asm_forms=_asm(
             "constrain.location",
-            operands=("worker",),
-            immediates=("column", "row"),
+            operands=("worker", "column", "row"),
         ),
-        effects=(_ORDERED_ASYNC_EFFECT,),
+        effects=(_TOPOLOGY_EFFECT,),
         schedule_class=_SCHEDULE_GRAPH,
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     ),
@@ -328,7 +304,7 @@ _DESCRIPTORS = (
 AIE2P_ARRAY_DESCRIPTOR_SET = DescriptorSet(
     key=_DESCRIPTOR_SET_KEY,
     target_key=_TARGET_KEY,
-    feature_key=f"{_DESCRIPTOR_SET_KEY}.v1",
+    feature_key=f"{_DESCRIPTOR_SET_KEY}.v2",
     c_header_path=Path(
         "loom/src/loom/target/arch/amd/xdna/aie2p/descriptors/array_descriptors.h"
     ),
@@ -340,27 +316,19 @@ AIE2P_ARRAY_DESCRIPTOR_SET = DescriptorSet(
     function_name="loom_aie2p_array_descriptor_set",
     c_table_prefix="Aie2pArray",
     c_enum_prefix="AIE2P_ARRAY",
-    generator_version=1,
+    generator_version=2,
     reg_classes=(
+        _reference_reg_class(_REG_SCALAR),
         _reference_reg_class(_REG_BINDING),
+        _reference_reg_class(_REG_GROUP),
         _reference_reg_class(_REG_WORKER),
-        _reference_reg_class(_REG_BUFFER),
-        _reference_reg_class(_REG_FLOW),
-        _reference_reg_class(_REG_TOKEN),
+        _reference_reg_class(_REG_SENDER),
+        _reference_reg_class(_REG_RECEIVER),
+        _reference_reg_class(_REG_CHANNEL),
     ),
     resources=(
         Resource(
             _RESOURCE_GRAPH,
-            capacity_per_cycle=1,
-            kind=ResourceKind.CONTROL,
-        ),
-        Resource(
-            _RESOURCE_ASYNC,
-            capacity_per_cycle=1,
-            kind=ResourceKind.LOAD,
-        ),
-        Resource(
-            _RESOURCE_SYNC,
             capacity_per_cycle=1,
             kind=ResourceKind.CONTROL,
         ),
@@ -372,22 +340,6 @@ AIE2P_ARRAY_DESCRIPTOR_SET = DescriptorSet(
             latency_cycles=1,
             issue_uses=(IssueUse(_RESOURCE_GRAPH, cycles=1, units=1),),
             model_quality=ModelQuality.EXACT,
-        ),
-        ScheduleClass(
-            _SCHEDULE_ASYNC,
-            latency_kind=LatencyKind.VARIABLE,
-            latency_cycles=1,
-            issue_uses=(IssueUse(_RESOURCE_ASYNC, cycles=1, units=1),),
-            flags=(ScheduleClassFlag.MAY_CALL,),
-            model_quality=ModelQuality.FALLBACK,
-        ),
-        ScheduleClass(
-            _SCHEDULE_SYNC,
-            latency_kind=LatencyKind.VARIABLE,
-            latency_cycles=1,
-            issue_uses=(IssueUse(_RESOURCE_SYNC, cycles=1, units=1),),
-            flags=(ScheduleClassFlag.CONTROL,),
-            model_quality=ModelQuality.FALLBACK,
         ),
     ),
     enum_domains=(
