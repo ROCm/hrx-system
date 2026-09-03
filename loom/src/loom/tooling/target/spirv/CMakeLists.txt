@@ -47,6 +47,7 @@ loom_cc_library(
     ::artifact_provider
     iree::base
     loom::product::kernel
+    loom::product::registry
     loom::target::arch::spirv::profile
     loom::target::emit::spirv::product_contract
     loom::tooling::compile::artifact_product

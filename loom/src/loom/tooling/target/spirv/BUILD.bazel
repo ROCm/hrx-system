@@ -64,6 +64,7 @@ loom_cc_library(
     deps = [
         ":artifact_provider",
         "//loom/src/loom/product:kernel",
+        "//loom/src/loom/product:registry",
         "//loom/src/loom/target/arch/spirv:profile",
         "//loom/src/loom/target/emit/spirv:product_contract",
         "//loom/src/loom/tooling/compile:artifact_product",

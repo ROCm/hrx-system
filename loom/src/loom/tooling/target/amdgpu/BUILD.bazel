@@ -44,6 +44,7 @@ loom_cc_library(
     deps = [
         ":artifact_provider",
         "//loom/src/loom/product:kernel",
+        "//loom/src/loom/product:registry",
         "//loom/src/loom/target/arch/amdgpu:profile",
         "//loom/src/loom/target/emit/native/amdgpu:product_contract",
         "//loom/src/loom/tooling/compile:artifact_product",

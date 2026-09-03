@@ -42,6 +42,7 @@ loom_cc_library(
     ::artifact_provider
     iree::base
     loom::product::kernel
+    loom::product::registry
     loom::target::arch::amdgpu::profile
     loom::target::emit::native::amdgpu::product_contract
     loom::tooling::compile::artifact_product
