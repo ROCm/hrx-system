@@ -171,7 +171,7 @@ class ContractVectorTest : public ::testing::Test {
             /*.result_lane_count=*/{},
             /*.subgroup_size=*/64,
         },
-        /*.capability_class=*/LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX,
+        /*.capability_class=*/LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX,
         /*.policy=*/LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
     };
   }
@@ -331,8 +331,7 @@ func.def @dense_mma(%lhs_data: vector<8xf16>, %rhs_data: vector<8xf16>, %init_da
           LOOM_CONTRACT_CAPABILITY_ACCUMULATOR_MODIFIER));
   EXPECT_EQ(loom_contract_request_required_capability_flags(&request), 0u);
   EXPECT_EQ(request.arithmetic, LOOM_CONTRACT_ARITHMETIC_MIXED_DOT);
-  EXPECT_EQ(request.capability_class,
-            LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX);
+  EXPECT_EQ(request.capability_class, LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX);
   EXPECT_EQ(request.fragment.atom_bits, LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE);
   EXPECT_EQ(request.fragment.subgroup_size, 64);
   loom_pass_value_fact_owner_deinitialize(&value_facts);

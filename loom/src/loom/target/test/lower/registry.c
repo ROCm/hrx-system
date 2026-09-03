@@ -224,7 +224,7 @@ static iree_status_t loom_test_low_matrix_options(
               .atom_bits = LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE,
               .subgroup_size = 2,
           },
-      .capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX,
+      .capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX,
       .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
   };
   return iree_ok_status();

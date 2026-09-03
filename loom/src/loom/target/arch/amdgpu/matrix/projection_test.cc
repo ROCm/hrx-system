@@ -100,7 +100,7 @@ loom_contract_request_t MatrixRequest(
       /*.result_lane_count=*/{},
       /*.subgroup_size=*/64,
   };
-  request.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX;
+  request.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX;
   request.policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED;
   return request;
 }

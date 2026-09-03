@@ -229,7 +229,7 @@ bool loom_amdgpu_matrix_contract_match_request_from_contract(
                                             out_diagnostic);
   }
   if (contract_request->capability_class !=
-      LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX) {
+      LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX) {
     return loom_amdgpu_matrix_contract_fail(LOOM_CONTRACT_REJECTION_CAPABILITY,
                                             out_diagnostic);
   }

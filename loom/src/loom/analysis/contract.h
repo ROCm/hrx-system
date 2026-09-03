@@ -109,8 +109,8 @@ typedef enum loom_contract_capability_class_e {
   LOOM_CONTRACT_CAPABILITY_CLASS_UNKNOWN = 0,
   // CPU packed-dot/vector-dot target primitive class.
   LOOM_CONTRACT_CAPABILITY_CLASS_CPU_PACKED_DOT = 1,
-  // GPU matrix contract target primitive class.
-  LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX = 2,
+  // Matrix contract target primitive class.
+  LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX = 2,
   // Target tensor-memory movement class.
   LOOM_CONTRACT_CAPABILITY_CLASS_TENSOR_MOVEMENT = 3,
   // Target or runtime ukernel contract class.
