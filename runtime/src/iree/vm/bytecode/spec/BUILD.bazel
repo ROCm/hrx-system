@@ -1,0 +1,58 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],
+)
+
+iree_py_library(
+    name = "spec",
+    srcs = [
+        "__init__.py",
+        "isa/__init__.py",
+        "isa/core/__init__.py",
+        "isa/core/control.py",
+        "isa/core/integer.py",
+        "isa/validation.py",
+        "module/__init__.py",
+        "module/records.py",
+        "module/validation.py",
+        "schema.py",
+        "specification.py",
+        "version.py",
+    ],
+    imports = ["../../../.."],
+)
+
+iree_py_test(
+    name = "spec_test",
+    size = "small",
+    srcs = ["spec_test.py"],
+    deps = [":spec"],
+)
+
+test_suite(
+    name = "tests",
+    tests = [":spec_test"],
+)
+
+iree_cmake_extra_content(
+    content = """
+iree_local_py_test(
+  NAME
+    spec_test
+  SRC
+    "spec_test.py"
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/runtime/src"
+)
+""",
+    inline = True,
+)
