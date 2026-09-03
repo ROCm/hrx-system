@@ -366,3 +366,29 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @outer_pr
   %product = mma.bf16bf16.m8n8k1 %accumulator_fragment, %29, %32, %33
   return %product
 }
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @copy_bf16x8_exact_ssa_index(
+    %source: buffer,
+    %output: buffer
+) {
+  %source_aligned, %output_aligned = buffer.assume.alignment %source, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %element = index.constant 8 : index
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<16xbf16>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16xbf16>
+  %value = vector.load %source_view[%element] : view<16xbf16> -> vector<8xbf16>
+  vector.store %value, %output_view[%element] : vector<8xbf16>, view<16xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_bf16x8_exact_ssa_index() asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %value = vlda.128.bf16x8 %source_view, 16
+  vst.128.bf16x8 %value, %output_view, 16
+  return
+}

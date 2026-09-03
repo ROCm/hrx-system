@@ -328,15 +328,6 @@ def _memory_rule(
                 if volatile
                 else ()
             ),
-            *(
-                (Guard.operand_segment_count("indices", 0),)
-                if address_form
-                in (
-                    _MemoryAddressForm.IMMEDIATE,
-                    _MemoryAddressForm.MATERIALIZED_STATIC,
-                )
-                else ()
-            ),
             Guard.value_type("result" if is_load else "value", value_type),
         ),
         emit=tuple(emits),
@@ -450,15 +441,6 @@ def _accumulator_memory_rule(
             *(
                 (Guard.instance_flags_has_all("memory_flags", "volatile"),)
                 if volatile
-                else ()
-            ),
-            *(
-                (Guard.operand_segment_count("indices", 0),)
-                if address_form
-                in (
-                    _MemoryAddressForm.IMMEDIATE,
-                    _MemoryAddressForm.MATERIALIZED_STATIC,
-                )
                 else ()
             ),
             Guard.value_type("result" if is_load else "value", _F32X64_ACCUMULATOR),
