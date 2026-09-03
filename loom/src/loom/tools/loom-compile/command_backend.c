@@ -10,12 +10,10 @@
 #include "loom/codegen/low/repr.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/format/low_repr.h"
-#include "loom/link/module_index.h"
-#include "loom/pass/builtin_registry.h"
-#include "loom/target/arch/cmd/artifact_builder.h"
-#include "loom/target/arch/cmd/artifact_set.h"
-#include "loom/target/entry_selection.h"
+#include "loom/target/arch/cmd/product.h"
+#include "loom/tooling/compile/product.h"
 #include "loom/tooling/io/file.h"
+#include "loom/tooling/target/cmd/product_provider.h"
 #include "loom/tools/loom-compile/command_manifest.h"
 #include "loom/transforms/kernel/kernel_request_producer.h"
 #include "loom/util/stream.h"
@@ -35,48 +33,6 @@ static iree_status_t loom_compile_command_backend_require_directory(
                             "artifact path '%.*s' is not a directory",
                             (int)path.size, path.data);
   }
-  return iree_ok_status();
-}
-
-// Selects command roots from source roles retained by the module index. The
-// compact indexed-symbol scan replaces source-IR walks and allocates the result
-// once at its maximum possible size.
-static iree_status_t loom_compile_command_backend_collect_roots(
-    const loom_link_module_index_t* index,
-    const loom_link_module_index_module_t* indexed_module,
-    iree_arena_allocator_t* scratch_arena,
-    iree_host_size_t** out_root_symbol_ordinals,
-    iree_host_size_t* out_root_count) {
-  *out_root_symbol_ordinals = NULL;
-  *out_root_count = 0;
-  if (indexed_module->symbol_count == 0) {
-    return iree_ok_status();
-  }
-
-  iree_host_size_t* root_symbol_ordinals = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, indexed_module->symbol_count,
-      sizeof(*root_symbol_ordinals), (void**)&root_symbol_ordinals));
-
-  iree_host_size_t root_count = 0;
-  for (iree_host_size_t i = 0; i < indexed_module->symbol_count; ++i) {
-    const iree_host_size_t symbol_ordinal =
-        indexed_module->symbol_start_ordinal + i;
-    const loom_link_module_index_symbol_t* symbol =
-        loom_link_module_index_symbol_at(index, symbol_ordinal);
-    IREE_ASSERT(symbol != NULL);
-    if (!iree_any_bit_set(symbol->facets.schema.interfaces,
-                          LOOM_SYMBOL_INTERFACE_COMMAND_PROGRAM) ||
-        !iree_any_bit_set(symbol->flags,
-                          LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION) ||
-        !iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_PUBLIC |
-                                             LOOM_LINK_SYMBOL_FLAG_RETAIN)) {
-      continue;
-    }
-    root_symbol_ordinals[root_count++] = symbol_ordinal;
-  }
-  *out_root_symbol_ordinals = root_symbol_ordinals;
-  *out_root_count = root_count;
   return iree_ok_status();
 }
 
@@ -244,126 +200,72 @@ iree_status_t loom_compile_command_backend_emit(
         "kernel request artifacts require a filesystem directory");
   }
 
-  iree_arena_allocator_t scratch_arena;
-  iree_arena_initialize(loom_run_session_block_pool(session), &scratch_arena);
-  loom_link_module_index_t* index = NULL;
-  iree_status_t status = loom_link_module_index_allocate(
-      run_module->module->context, loom_run_session_block_pool(session),
-      host_allocator, &index);
-  iree_host_size_t provider_ordinal = 0;
-  if (iree_status_is_ok(status)) {
-    status = loom_link_module_index_add_materialized(
-        index, run_module->module,
-        &(loom_link_module_index_add_options_t){
-            .provider_name = IREE_SV("loom-compile-command"),
-        },
-        &provider_ordinal);
-  }
-
-  const loom_link_module_index_module_t* indexed_module = NULL;
-  if (iree_status_is_ok(status)) {
-    const loom_link_module_index_provider_t* provider =
-        loom_link_module_index_provider_at(index, provider_ordinal);
-    IREE_ASSERT(provider != NULL);
-    IREE_ASSERT_EQ(provider->module_count, 1u);
-    indexed_module =
-        loom_link_module_index_module_at(index, provider->module_start_ordinal);
-    IREE_ASSERT(indexed_module != NULL);
-  }
-
-  iree_host_size_t* root_symbol_ordinals = NULL;
-  iree_host_size_t root_count = 0;
-  if (iree_status_is_ok(status)) {
-    status = loom_compile_command_backend_collect_roots(
-        index, indexed_module, &scratch_arena, &root_symbol_ordinals,
-        &root_count);
-  }
-  if (iree_status_is_ok(status) && root_count == 0) {
-    status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "command backend requires at least one retained command program root");
-  }
+  iree_status_t status = iree_ok_status();
   if (iree_status_is_ok(status) &&
       !iree_string_view_is_empty(options->kernel_request_directory)) {
     status = loom_compile_command_backend_require_directory(
         options->kernel_request_directory, host_allocator);
   }
 
-  const loom_target_entry_options_t diagnostic_options = {
+  const loom_compile_options_t compile_options = {
       .diagnostic_sink = options->diagnostic_sink,
       .source_resolver = options->source_resolver,
       .max_errors = options->max_errors,
   };
-  loom_target_entry_diagnostic_emitter_t diagnostic_emitter = {0};
-  loom_target_entry_diagnostic_emitter_initialize(
-      run_module->module, &diagnostic_options, LOOM_EMITTER_PASS,
-      &diagnostic_emitter);
-  bool plan_valid = false;
   loom_low_repr_environment_t low_repr_environment = {0};
   loom_low_repr_environment_initialize(
       &loom_run_session_low_descriptor_registry(session)->registry,
       &low_repr_environment);
-  const loom_link_plan_materialization_environment_t
-      materialization_environment = {
-          .context = run_module->module->context,
-          .block_pool = loom_run_session_block_pool(session),
-          .low_repr_environment = low_repr_environment,
-          .allocator = host_allocator,
-      };
   loom_compile_kernel_request_writer_t kernel_request_writer = {
       .directory = options->kernel_request_directory,
       .low_repr_environment = low_repr_environment,
       .block_pool = loom_run_session_block_pool(session),
       .host_allocator = host_allocator,
   };
-  loom_cmd_program_plan_index_options_t plan_options;
-  loom_cmd_program_plan_index_options_initialize(&plan_options);
+  loom_cmd_product_build_options_t product_options;
+  loom_cmd_product_build_options_initialize(&product_options);
   if (!iree_string_view_is_empty(options->kernel_request_directory)) {
-    plan_options.kernel_request_sink = (loom_cmd_program_kernel_request_sink_t){
-        .publish = loom_compile_command_backend_write_kernel_request,
-        .user_data = &kernel_request_writer,
-    };
-  }
-  loom_cmd_program_artifact_set_t artifact_set = {0};
-  if (iree_status_is_ok(status)) {
-    status = loom_cmd_program_artifact_set_build_from_index(
-        index, root_symbol_ordinals, root_count,
-        &(loom_cmd_program_artifact_builder_options_t){
-            .plan_options = plan_options.kernel_request_sink.publish != NULL
-                                ? &plan_options
-                                : NULL,
-            .pass_registry = loom_pass_builtin_registry(),
-            .diagnostic_emitter =
-                loom_target_entry_emitter(&diagnostic_emitter),
-            .materialization_environment = &materialization_environment,
-        },
-        &scratch_arena, &plan_valid, &artifact_set, host_allocator);
-  }
-  if (iree_status_is_ok(status) && !plan_valid &&
-      diagnostic_emitter.error_count == 0) {
-    status = iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "command program preparation failed without a diagnostic");
+    product_options.kernel_request_sink =
+        (loom_cmd_program_kernel_request_sink_t){
+            .publish = loom_compile_command_backend_write_kernel_request,
+            .user_data = &kernel_request_writer,
+        };
   }
 
-  if (iree_status_is_ok(status) && plan_valid) {
-    status = loom_compile_command_backend_write_programs(
-        &artifact_set, options->artifact_directory, host_allocator);
+  loom_product_t* product = NULL;
+  if (iree_status_is_ok(status)) {
+    status = loom_product_format_provider_build(
+        &loom_cmd_product_provider,
+        &(loom_product_build_request_t){
+            .low_descriptor_registry =
+                loom_run_session_low_descriptor_registry(session),
+            .module = run_module->module,
+            .compile_options = &compile_options,
+            .block_pool = loom_run_session_block_pool(session),
+            .option_chain = &product_options,
+            .allocator = host_allocator,
+        },
+        &product);
   }
-  if (iree_status_is_ok(status) && plan_valid) {
+
+  const loom_cmd_program_artifact_set_t* artifact_set =
+      loom_cmd_product_artifact_set(product);
+  if (iree_status_is_ok(status) && artifact_set != NULL) {
+    status = loom_compile_command_backend_write_programs(
+        artifact_set, options->artifact_directory, host_allocator);
+  }
+  if (iree_status_is_ok(status) && artifact_set != NULL) {
     status = loom_compile_command_backend_write_manifest(
-        &artifact_set, kernel_request_writer.source_requirements.values,
+        artifact_set, kernel_request_writer.source_requirements.values,
         kernel_request_writer.source_requirements.count, options->manifest_path,
         host_allocator);
   }
-  if (iree_status_is_ok(status) && plan_valid) {
+  if (iree_status_is_ok(status) && artifact_set != NULL) {
     *out_emitted = true;
   }
 
-  loom_cmd_program_artifact_set_deinitialize(&artifact_set);
+  loom_product_release(product);
   iree_allocator_free(host_allocator,
                       kernel_request_writer.source_requirements.values);
-  loom_link_module_index_free(index);
-  iree_arena_deinitialize(&scratch_arena);
   return status;
 }

@@ -50,6 +50,18 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "artifact_product",
+    srcs = ["artifact_product.c"],
+    hdrs = ["artifact_product.h"],
+    deps = [
+        ":artifact",
+        ":product",
+        "//loom/src/loom/product:kernel",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "report_capture",
     srcs = ["report_capture.c"],
     hdrs = ["report_capture.h"],
@@ -106,6 +118,31 @@ loom_cc_library(
         "//loom/src/loom/verify",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "product",
+    srcs = ["product.c"],
+    hdrs = ["product.h"],
+    deps = [
+        ":options",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/product:registry",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:provider",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "product_test",
+    srcs = ["product_test.cc"],
+    deps = [
+        ":product",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

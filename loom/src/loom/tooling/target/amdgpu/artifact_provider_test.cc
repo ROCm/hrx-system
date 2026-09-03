@@ -17,6 +17,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_registry.h"
+#include "loom/product/kernel.h"
 #include "loom/sanitizer/options.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/ops/registry.h"
@@ -25,6 +26,8 @@
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
 #include "loom/testing/byte_sequence.h"
 #include "loom/testing/module_ptr.h"
+#include "loom/tooling/compile/product.h"
+#include "loom/tooling/target/amdgpu/product_provider.h"
 
 namespace loom {
 namespace {
@@ -284,6 +287,50 @@ TEST_F(AmdgpuArtifactProviderTest, EmitsEveryAuthoredModuleTarget) {
     ASSERT_NE(target_info, nullptr) << "target index " << i;
     ExpectEmitsModuleTarget(target_info->name);
   }
+}
+
+TEST_F(AmdgpuArtifactProviderTest, BuildsImmutableKernelProduct) {
+  ModulePtr module;
+  IREE_ASSERT_OK(ParsePreparedArithmeticModule(IREE_SV("gfx1100"), &module));
+  ASSERT_NE(module.get(), nullptr);
+
+  loom_compile_options_t options = {};
+  loom_compile_options_initialize(&options);
+  const loom_product_build_request_t request = {
+      /*.target_environment=*/nullptr,
+      /*.low_descriptor_registry=*/&low_registry_,
+      /*.module=*/module.get(),
+      /*.target_profile=*/nullptr,
+      /*.target_key=*/{},
+      /*.artifact_identifier=*/IREE_SV("kernel.hsaco"),
+      /*.export_count=*/1,
+      /*.compile_options=*/&options,
+      /*.block_pool=*/&block_pool_,
+      /*.option_chain=*/nullptr,
+      /*.allocator=*/iree_allocator_system(),
+  };
+  loom_product_t* product = nullptr;
+  IREE_ASSERT_OK(loom_product_format_provider_build(
+      &loom_amdgpu_hsaco_product_provider, &request, &product));
+  ASSERT_NE(product, nullptr);
+  ASSERT_TRUE(loom_product_isa(product, &loom_kernel_product_descriptor));
+  EXPECT_EQ(loom_product_export_count(product), 1u);
+  EXPECT_FALSE(
+      iree_string_view_is_empty(loom_kernel_product_target_key(product)));
+
+  const loom_product_artifact_t* artifact =
+      loom_kernel_product_loadable_artifact(product);
+  ASSERT_NE(artifact, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(
+      artifact->role, IREE_SV(LOOM_PRODUCT_ARTIFACT_ROLE_KERNEL)));
+  EXPECT_TRUE(iree_string_view_equal(
+      artifact->format, IREE_SV(LOOM_AMDGPU_PRODUCT_FORMAT_HSACO)));
+  EXPECT_TRUE(
+      iree_string_view_equal(artifact->identifier, IREE_SV("kernel.hsaco")));
+  ASSERT_NE(artifact->contents, nullptr);
+  EXPECT_GT(iree_byte_sequence_length(artifact->contents), 0u);
+
+  loom_product_release(product);
 }
 
 }  // namespace

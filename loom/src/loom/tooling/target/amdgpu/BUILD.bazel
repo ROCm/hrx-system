@@ -38,6 +38,20 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "product_provider",
+    srcs = ["product_provider.c"],
+    hdrs = ["product_provider.h"],
+    deps = [
+        ":artifact_provider",
+        "//loom/src/loom/product:kernel",
+        "//loom/src/loom/target/arch/amdgpu:profile",
+        "//loom/src/loom/target/emit/native/amdgpu:product_contract",
+        "//loom/src/loom/tooling/compile:artifact_product",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "device_provider",
     srcs = ["device_provider.c"],
     hdrs = ["device_provider.h"],
@@ -88,10 +102,12 @@ loom_cc_test(
     srcs = ["artifact_provider_test.cc"],
     deps = [
         ":artifact_provider",
+        ":product_provider",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/product:kernel",
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target/arch/amdgpu:profile",
         "//loom/src/loom/target/arch/amdgpu:target_info",
@@ -101,6 +117,7 @@ loom_cc_test(
         "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/testing:byte_sequence",
         "//loom/src/loom/testing:module_ptr",
+        "//loom/src/loom/tooling/compile:product",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",

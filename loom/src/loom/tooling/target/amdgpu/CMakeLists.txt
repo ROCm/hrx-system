@@ -30,6 +30,25 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_library(
+  NAME
+    product_provider
+  HDRS
+    "product_provider.h"
+  SRCS
+    "product_provider.c"
+  DEPS
+    ::artifact_provider
+    iree::base
+    loom::product::kernel
+    loom::target::arch::amdgpu::profile
+    loom::target::emit::native::amdgpu::product_contract
+    loom::tooling::compile::artifact_product
+  PUBLIC
+)
+endif()
+
 if(LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_cc_library(
   NAME
@@ -97,6 +116,7 @@ loom_cc_test(
     "artifact_provider_test.cc"
   DEPS
     ::artifact_provider
+    ::product_provider
     iree::base
     iree::base::internal::arena
     iree::testing::gtest
@@ -105,6 +125,7 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::op_registry
+    loom::product::kernel
     loom::sanitizer::options
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::ops
@@ -114,6 +135,7 @@ loom_cc_test(
     loom::target::reporting::report
     loom::testing::byte_sequence
     loom::testing::module_ptr
+    loom::tooling::compile::product
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"

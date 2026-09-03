@@ -41,6 +41,9 @@ extern "C" {
 // Target-owned human-readable listing.
 #define LOOM_PRODUCT_ARTIFACT_ROLE_LISTING "listing"
 
+// UTF-8 JSON document.
+#define LOOM_PRODUCT_ARTIFACT_FORMAT_JSON "json"
+
 // Borrowed immutable artifact owned by a compiler product or result.
 //
 // Roles and formats are open names. A role identifies how the artifact

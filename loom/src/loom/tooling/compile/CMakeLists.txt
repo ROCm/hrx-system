@@ -49,6 +49,21 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    artifact_product
+  HDRS
+    "artifact_product.h"
+  SRCS
+    "artifact_product.c"
+  DEPS
+    ::artifact
+    ::product
+    iree::base
+    loom::product::kernel
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     report_capture
   HDRS
     "report_capture.h"
@@ -99,6 +114,35 @@ loom_cc_library(
     loom::target::types
     loom::verify
   PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    product
+  HDRS
+    "product.h"
+  SRCS
+    "product.c"
+  DEPS
+    ::options
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::product::registry
+    loom::target::low_descriptor_registry
+    loom::target::provider
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    product_test
+  SRCS
+    "product_test.cc"
+  DEPS
+    ::product
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(

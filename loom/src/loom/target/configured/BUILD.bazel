@@ -46,6 +46,12 @@ _CONFIGURED_TARGET_COPTS = (
             "-DLOOM_CONFIG_TARGET_HAVE_X86=1",
         ],
         "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target:llvmir_artifacts": [
+            "-DLOOM_CONFIG_TARGET_HAVE_LLVMIR_ARTIFACTS=1",
+        ],
+        "//conditions:default": [],
     })
 )
 
@@ -79,6 +85,12 @@ _CONFIGURED_TARGET_DEPS = (
             "//loom/src/loom/target/arch/x86:provider",
         ],
         "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target:llvmir_artifacts": [
+            "//loom/src/loom/target/emit/llvmir:artifact_emitter",
+        ],
+        "//conditions:default": [],
     })
 )
 
@@ -90,6 +102,7 @@ loom_cc_library(
     visibility = ["//loom/src/loom/tools:__subpackages__"],
     deps = [
         "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/cmd:provider",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
     ] + _CONFIGURED_TARGET_DEPS,
