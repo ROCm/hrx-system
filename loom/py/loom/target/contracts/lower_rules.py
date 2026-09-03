@@ -1562,7 +1562,10 @@ class _LowerRuleSetCompiler:
             )
             result_type_pattern_start = self._append_type_pattern(type_binding)
             result_ref_start = result_bind_ref_start
-            flags |= LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN
+            flags |= (
+                LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS
+                | LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN
+            )
         elif isinstance(type_binding, DescriptorResultType):
             raise ValueError(
                 f"{source_op.name}: structural emits have no descriptor result type"
