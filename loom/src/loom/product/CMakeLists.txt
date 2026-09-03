@@ -33,6 +33,22 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    registry
+  HDRS
+    "registry.h"
+  SRCS
+    "registry.c"
+  DEPS
+    ::product
+    iree::base
+    loom::target::pipeline_options
+    loom::target::product_contract
+    loom::target::profile
+  PUBLIC
+)
+
 loom_cc_test(
   NAME
     product_test
@@ -40,6 +56,17 @@ loom_cc_test(
     "product_test.cc"
   DEPS
     ::product
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    registry_test
+  SRCS
+    "registry_test.cc"
+  DEPS
+    ::registry
     iree::testing::gtest
     iree::testing::gtest_main
 )

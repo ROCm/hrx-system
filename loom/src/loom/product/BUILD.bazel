@@ -33,11 +33,34 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "registry",
+    srcs = ["registry.c"],
+    hdrs = ["registry.h"],
+    deps = [
+        ":product",
+        "//loom/src/loom/target:pipeline_options",
+        "//loom/src/loom/target:product_contract",
+        "//loom/src/loom/target:profile",
+        "//runtime/src/iree/base",
+    ],
+)
+
 loom_cc_test(
     name = "product_test",
     srcs = ["product_test.cc"],
     deps = [
         ":product",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "registry_test",
+    srcs = ["registry_test.cc"],
+    deps = [
+        ":registry",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
