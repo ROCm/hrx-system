@@ -18,6 +18,7 @@ iree_cc_library(
     "execution.h"
     "function.h"
     "module.h"
+    "program.h"
     "ref.h"
     "reflection.h"
     "scalar.h"
@@ -27,6 +28,8 @@ iree_cc_library(
     "environment.c"
     "execution.c"
     "module.c"
+    "program.c"
+    "program_storage.h"
     "ref.c"
     "reflection.c"
     "variant.c"
@@ -101,6 +104,18 @@ iree_cc_test(
     module_validation_test
   SRCS
     "module_validation_test.cc"
+  DEPS
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    program_test
+  SRCS
+    "program_storage.h"
+    "program_test.cc"
   DEPS
     ::vm
     iree::testing::gtest
