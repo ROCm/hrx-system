@@ -563,6 +563,7 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
         GuardKind.VALUE_U32_DIVISOR_MAGIC_IS_ADD,
         GuardKind.VALUE_FLOAT_EQUALS,
         GuardKind.INSTANCE_FLAGS_HAS_ALL,
+        GuardKind.SOURCE_REPRESENTATION_GROUP,
     ):
         u64_payload = lower_rule_spelling.u64_c_literal(row.u64)
     elif row.kind == GuardKind.VALUE_STORAGE_ELEMENT_FORMAT:

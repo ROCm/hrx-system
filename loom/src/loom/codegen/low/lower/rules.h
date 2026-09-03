@@ -563,6 +563,9 @@ typedef enum loom_low_lower_guard_kind_e {
   LOOM_LOW_LOWER_GUARD_VALUE_STATIC_ELEMENT_COUNT_EQ = 31,
   // Source buffer/view reference facts must name a space present in u64.
   LOOM_LOW_LOWER_GUARD_VALUE_MEMORY_SPACE = 32,
+  // The retained native source-representation plan must select the group whose
+  // stable key is u64. Legality queries preceding the plan ignore this guard.
+  LOOM_LOW_LOWER_GUARD_SOURCE_REPRESENTATION_GROUP = 33,
   // Maximum guard kind value plus one.
   LOOM_LOW_LOWER_GUARD_COUNT_,
 } loom_low_lower_guard_kind_t;

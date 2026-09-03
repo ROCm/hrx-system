@@ -24,6 +24,7 @@ from loom.error.target import (
     ERR_TARGET_008,
 )
 from loom.errors import ErrorDef
+from loom.stable_id import stable_id_from_string
 from loom.target.contracts.diagnostics import (
     DiagnosticParam,
     DiagnosticParamKind,
@@ -898,6 +899,26 @@ class _LowerRuleSetCompiler:
                         ),
                     ),
                     u64=enum_value,
+                )
+            )
+            return
+
+        if guard.kind == GuardKind.SOURCE_REPRESENTATION_GROUP:
+            self._guards.append(
+                LowerGuard(
+                    kind=guard.kind,
+                    diagnostic_index=self._append_diagnostic_ref(
+                        source_op,
+                        _guard_diagnostic(
+                            guard,
+                            _named_constraint_diagnostic(
+                                "operation",
+                                source_op.name,
+                                guard.field,
+                            ),
+                        ),
+                    ),
+                    u64=stable_id_from_string(guard.field),
                 )
             )
             return

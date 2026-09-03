@@ -112,6 +112,9 @@ typedef struct loom_target_contract_query_state_allocator_t {
   void* user_data;
 } loom_target_contract_query_state_allocator_t;
 
+typedef struct loom_low_source_representation_plan_t
+    loom_low_source_representation_plan_t;
+
 typedef uint8_t loom_target_contract_system_t;
 
 enum loom_target_contract_system_e {
@@ -345,6 +348,9 @@ typedef struct loom_target_contract_query_environment_t {
   const loom_source_program_t* source_program;
   // Optional retained target-declared physical source-value facts.
   const loom_source_dataflow_result_t* source_dataflow;
+  // Optional retained native source-representation choices. This is absent
+  // during target-legality queries that precede representation planning.
+  const loom_low_source_representation_plan_t* source_representation_plan;
   // Optional function-local view-region analysis visible to the query.
   const loom_view_region_table_t* view_regions;
   // Scoped arena available for rare query-side auxiliary records.

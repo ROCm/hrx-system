@@ -99,6 +99,9 @@ struct loom_low_lower_rule_match_context_t {
   const loom_source_program_t* source_program;
   // Optional retained target-declared physical source-value facts.
   const loom_source_dataflow_result_t* source_dataflow;
+  // Optional retained native source-representation choices. Generated rule
+  // guards may bind final lowering to one selected representation group.
+  const loom_low_source_representation_plan_t* source_representation_plan;
   // Optional precomputed view summaries used by source-memory guard rows.
   const loom_view_region_table_t* view_regions;
   // Caller-owned state retaining the canonical source-memory plan for the

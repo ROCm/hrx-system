@@ -413,6 +413,7 @@ iree_status_t loom_low_lower_query_target_contract(
       .value_domain = environment->value_domain,
       .source_program = environment->source_program,
       .source_dataflow = environment->source_dataflow,
+      .source_representation_plan = environment->source_representation_plan,
       .view_regions = environment->view_regions,
       .source_memory_state = &source_memory_state,
       .symbolic_expr_context = expression_context_ptr,

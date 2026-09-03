@@ -1064,6 +1064,19 @@ static iree_status_t loom_low_lower_rule_guard_matches(
       *out_matches =
           iree_all_bits_set(source_op->instance_flags, guard->payload.u64);
       return iree_ok_status();
+    case LOOM_LOW_LOWER_GUARD_SOURCE_REPRESENTATION_GROUP: {
+      if (iree_any_bit_set(match_context->flags,
+                           LOOM_LOW_LOWER_RULE_MATCH_FLAG_CONTRACT_ONLY)) {
+        *out_matches = true;
+        return iree_ok_status();
+      }
+      loom_low_source_representation_candidate_view_t candidate = {0};
+      *out_matches = loom_low_source_representation_plan_find_candidate(
+                         match_context->source_representation_plan, source_op,
+                         guard->payload.u64, &candidate) &&
+                     candidate.selected;
+      return iree_ok_status();
+    }
     default:
       IREE_ASSERT_UNREACHABLE("unknown generated lower guard kind");
       IREE_BUILTIN_UNREACHABLE();
@@ -1357,6 +1370,8 @@ void loom_low_lower_rule_match_context_initialize_from_lowering(
       .value_domain = loom_low_lower_context_value_domain(context),
       .source_program = &context->lowering.source_program,
       .source_dataflow = loom_low_lower_context_source_dataflow(context),
+      .source_representation_plan =
+          loom_low_lower_context_source_representation_plan(context),
       .view_regions = view_regions,
       .source_memory_state = source_memory_state,
       .symbolic_expr_context =

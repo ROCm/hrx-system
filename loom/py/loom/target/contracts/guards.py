@@ -76,6 +76,7 @@ class GuardKind(Enum):
     VECTOR_EXTRACT_SHAPE = "vector_extract_shape"
     VALUE_STATIC_ELEMENT_COUNT_EQ = "value_static_element_count_eq"
     VALUE_MEMORY_SPACE = "value_memory_space"
+    SOURCE_REPRESENTATION_GROUP = "source_representation_group"
 
 
 _LOW_VALUE_GUARD_KINDS = (
@@ -607,6 +608,21 @@ class Guard:
             kind=GuardKind.INSTANCE_FLAGS_HAS_ALL,
             field=field,
             enum_keyword=keyword,
+            diagnostic=diagnostic,
+        )
+
+    @classmethod
+    def source_representation_group(
+        cls,
+        group_key: str,
+        *,
+        diagnostic: GuardDiagnostic | None = None,
+    ) -> Self:
+        if not group_key:
+            raise ValueError("source representation group key must be non-empty")
+        return cls(
+            kind=GuardKind.SOURCE_REPRESENTATION_GROUP,
+            field=group_key,
             diagnostic=diagnostic,
         )
 

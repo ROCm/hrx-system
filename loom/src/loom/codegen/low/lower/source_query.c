@@ -44,6 +44,8 @@ iree_status_t loom_low_lower_source_query_environment_initialize(
       .value_domain = &context->lowering.value_domain,
       .source_program = &context->lowering.source_program,
       .source_dataflow = loom_low_lower_context_source_dataflow(context),
+      .source_representation_plan =
+          loom_low_lower_context_source_representation_plan(context),
       .view_regions = view_regions,
       .arena = &context->function_arena,
       .target_state_allocator =
@@ -116,7 +118,10 @@ static iree_status_t loom_low_lower_source_query_contract(
       (environment->source_program != NULL &&
        environment->source_program != source_program) ||
       (environment->source_dataflow != NULL &&
-       environment->source_dataflow != source_dataflow)) {
+       environment->source_dataflow != source_dataflow) ||
+      (environment->source_representation_plan != NULL &&
+       environment->source_representation_plan !=
+           loom_low_lower_context_source_representation_plan(context))) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "source contract query inputs differ from the retained query scope");
@@ -137,6 +142,10 @@ static iree_status_t loom_low_lower_source_query_contract(
   }
   if (query_environment.source_dataflow == NULL) {
     query_environment.source_dataflow = source_dataflow;
+  }
+  if (query_environment.source_representation_plan == NULL) {
+    query_environment.source_representation_plan =
+        loom_low_lower_context_source_representation_plan(context);
   }
   if (query_environment.arena == NULL) {
     query_environment.arena = &context->function_arena;
