@@ -18,6 +18,9 @@
 namespace loom {
 namespace {
 
+using ::iree::testing::status::StatusIs;
+using ::testing::HasSubstr;
+
 static const loom_low_descriptor_set_provider_t kLowDescriptorSetProviders[] = {
     loom_test_low_core_descriptor_set,
 };
@@ -207,12 +210,9 @@ TEST_F(LoomTestFileFormatTest, RejectsUnmatchedParserFailure) {
       "  // ERROR@+1: PARSE/001\n"
       "  bogus.nonexistent\n"
       "}\n");
-  iree_status_t status = TryFormat(source);
-  EXPECT_FALSE(iree_status_is_ok(status));
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
-  EXPECT_THAT(iree::Status::ToString(status),
-              ::testing::HasSubstr("while formatting case 1"));
-  iree_status_free(status);
+  iree::Status status(TryFormat(source));
+  EXPECT_THAT(status, StatusIs(iree::StatusCode::kInvalidArgument));
+  EXPECT_THAT(status.ToString(), HasSubstr("while formatting case 1"));
 }
 
 TEST_F(LoomTestFileFormatTest, XfailAloneDoesNotExemptInvalidInput) {
@@ -223,10 +223,8 @@ TEST_F(LoomTestFileFormatTest, XfailAloneDoesNotExemptInvalidInput) {
       "func.def @unknown_op() {\n"
       "  bogus.nonexistent\n"
       "}\n");
-  iree_status_t status = TryFormat(source);
-  EXPECT_FALSE(iree_status_is_ok(status));
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
-  iree_status_free(status);
+  iree::Status status(TryFormat(source));
+  EXPECT_THAT(status, StatusIs(iree::StatusCode::kInvalidArgument));
 }
 
 }  // namespace
