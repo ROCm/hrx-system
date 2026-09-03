@@ -18,13 +18,32 @@ enum loom_low_source_representation_match_e {
 };
 typedef uint8_t loom_low_source_representation_match_t;
 
+typedef struct loom_low_source_representation_runtime_match_t {
+  // Candidate fallback rank returned by the target matcher.
+  uint32_t fallback_rank;
+  // Opaque target-local realization returned by the target matcher.
+  uint32_t target_variant;
+  // Target-defined candidate rejection reasons.
+  uint32_t rejection_bits;
+  // Target-defined rejection specificity rank.
+  uint8_t rejection_rank;
+  // Candidate eligibility after static and target-specific matching.
+  loom_low_source_representation_match_t state;
+  // Reserved for structure layout; must be zero.
+  uint8_t reserved[2];
+} loom_low_source_representation_runtime_match_t;
+
 typedef struct loom_low_source_representation_domain_state_t {
   // Sorted provider-local representation indices in the current intersection.
   uint16_t* representation_indices;
   // Number of entries in representation_indices.
   uint16_t representation_count;
-  // Unique canonical representation in every intersected constraint.
+  // Deterministic canonical fallback for the current intersection.
   uint16_t canonical_representation_index;
+  // Surviving local canonical preferences from intersected constraints.
+  uint16_t* canonical_representation_indices;
+  // Number of entries in canonical_representation_indices.
+  uint16_t canonical_representation_count;
   // Final selected representation, or NONE before selection.
   uint16_t selected_representation_index;
   // True after the first finite-domain constraint is applied.
@@ -38,7 +57,7 @@ typedef struct loom_low_source_representation_runtime_group_t {
   loom_source_program_node_ordinal_t source_node;
   // Provider-local candidate group index.
   uint16_t group_index;
-  // First candidate eligibility byte in the runtime match pool.
+  // First candidate match in the runtime match pool.
   uint32_t candidate_match_start;
   // First group-local component value ordinal in the runtime value pool.
   uint32_t component_value_start;
@@ -68,7 +87,7 @@ typedef struct loom_low_source_representation_state_t {
   iree_host_size_t runtime_group_capacity;
   uint32_t planned_operation_count;
 
-  loom_low_source_representation_match_t* candidate_matches;
+  loom_low_source_representation_runtime_match_t* candidate_matches;
   uint32_t candidate_match_count;
   iree_host_size_t candidate_match_capacity;
 
@@ -155,7 +174,7 @@ static iree_status_t loom_low_source_representation_append_runtime_group(
 
 static iree_status_t loom_low_source_representation_append_candidate_match(
     loom_low_source_representation_state_t* state,
-    loom_low_source_representation_match_t match) {
+    loom_low_source_representation_runtime_match_t match) {
   if (state->candidate_match_count == UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "source representation candidate count overflows");
@@ -216,21 +235,57 @@ static void loom_low_source_representation_set_problem(
 static iree_status_t loom_low_source_representation_candidate_matches(
     loom_low_source_representation_state_t* state, const loom_op_t* source_op,
     const loom_low_source_representation_candidate_t* candidate,
-    uint8_t* predicate_states, bool* out_matches) {
-  *out_matches = true;
-  if (candidate->predicate_index_plus_one == 0) return iree_ok_status();
-  const uint8_t predicate_index = candidate->predicate_index_plus_one - 1;
-  uint8_t* predicate_state = &predicate_states[predicate_index];
-  if (*predicate_state == 0) {
-    bool matches = false;
-    const loom_low_source_representation_predicate_t predicate =
-        state->provider->predicates[predicate_index];
-    IREE_RETURN_IF_ERROR(predicate.fn(predicate.user_data, state->environment,
-                                      source_op, &matches));
-    *predicate_state = matches ? 2 : 1;
-    ++state->plan->statistics.predicate_invocation_count;
+    const void* operation_data, uint8_t* predicate_states,
+    loom_low_source_representation_runtime_match_t* out_match) {
+  *out_match = (loom_low_source_representation_runtime_match_t){
+      .state = LOOM_LOW_SOURCE_REPRESENTATION_MATCH_ELIGIBLE,
+  };
+  if (candidate->predicate_index_plus_one != 0) {
+    const uint8_t predicate_index = candidate->predicate_index_plus_one - 1;
+    uint8_t* predicate_state = &predicate_states[predicate_index];
+    if (*predicate_state == 0) {
+      bool matches = false;
+      const loom_low_source_representation_predicate_t predicate =
+          state->provider->predicates[predicate_index];
+      IREE_RETURN_IF_ERROR(predicate.fn(predicate.user_data, state->environment,
+                                        source_op, &matches));
+      *predicate_state = matches ? 2 : 1;
+      ++state->plan->statistics.predicate_invocation_count;
+    }
+    if (*predicate_state != 2) {
+      out_match->state = LOOM_LOW_SOURCE_REPRESENTATION_MATCH_REJECTED;
+      return iree_ok_status();
+    }
   }
-  *out_matches = *predicate_state == 2;
+
+  const loom_low_source_representation_candidate_matcher_t* matcher =
+      &state->provider->candidate_matcher;
+  if (matcher->match_candidate == NULL) return iree_ok_status();
+  const void* candidate_target_data = NULL;
+  if (candidate->target_data_ordinal !=
+      LOOM_LOW_SOURCE_REPRESENTATION_TARGET_DATA_ORDINAL_NONE) {
+    candidate_target_data = state->provider->target_data +
+                            (iree_host_size_t)candidate->target_data_ordinal *
+                                state->provider->target_data_stride;
+  }
+  loom_low_source_representation_candidate_match_t match = {0};
+  IREE_RETURN_IF_ERROR(matcher->match_candidate(
+      matcher->user_data, state->environment, source_op, operation_data,
+      candidate_target_data, &match));
+  ++state->plan->statistics.candidate_match_invocation_count;
+  if ((match.matches &&
+       (match.rejection_rank != 0 || match.rejection_bits != 0)) ||
+      ((match.rejection_rank == 0) != (match.rejection_bits == 0))) {
+    return loom_low_source_representation_invalid_provider(
+        state->provider, "returned inconsistent candidate rejection evidence");
+  }
+  out_match->fallback_rank = match.fallback_rank;
+  out_match->target_variant = match.target_variant;
+  out_match->rejection_bits = match.rejection_bits;
+  out_match->rejection_rank = match.rejection_rank;
+  out_match->state = match.matches
+                         ? LOOM_LOW_SOURCE_REPRESENTATION_MATCH_ELIGIBLE
+                         : LOOM_LOW_SOURCE_REPRESENTATION_MATCH_REJECTED;
   return iree_ok_status();
 }
 
@@ -294,7 +349,7 @@ static iree_status_t loom_low_source_representation_resolve_port(
 static iree_status_t loom_low_source_representation_build_group(
     loom_low_source_representation_state_t* state, const loom_op_t* source_op,
     loom_source_program_node_ordinal_t source_node, uint16_t group_index,
-    uint8_t* predicate_states) {
+    const void* operation_data, uint8_t* predicate_states) {
   const loom_low_source_representation_group_t* group =
       &state->provider->groups[group_index];
   const uint32_t candidate_match_start = state->candidate_match_count;
@@ -302,13 +357,13 @@ static iree_status_t loom_low_source_representation_build_group(
   for (uint8_t i = 0; i < group->candidate_count; ++i) {
     const loom_low_source_representation_candidate_t* candidate =
         &state->provider->candidates[group->candidate_start + i];
-    bool matches = false;
+    loom_low_source_representation_runtime_match_t match = {0};
     IREE_RETURN_IF_ERROR(loom_low_source_representation_candidate_matches(
-        state, source_op, candidate, predicate_states, &matches));
-    IREE_RETURN_IF_ERROR(loom_low_source_representation_append_candidate_match(
-        state, matches ? LOOM_LOW_SOURCE_REPRESENTATION_MATCH_ELIGIBLE
-                       : LOOM_LOW_SOURCE_REPRESENTATION_MATCH_REJECTED));
-    eligible_count += matches;
+        state, source_op, candidate, operation_data, predicate_states, &match));
+    IREE_RETURN_IF_ERROR(
+        loom_low_source_representation_append_candidate_match(state, match));
+    eligible_count +=
+        match.state == LOOM_LOW_SOURCE_REPRESENTATION_MATCH_ELIGIBLE;
   }
 
   const uint32_t component_value_start = state->component_value_count;
@@ -378,10 +433,22 @@ static iree_status_t loom_low_source_representation_build_groups(
     if (operation == NULL) continue;
     const uint32_t group_start = state->runtime_group_count;
     uint8_t predicate_states[UINT8_MAX + 1] = {0};
+    const void* operation_data = NULL;
+    const loom_low_source_representation_candidate_matcher_t* matcher =
+        &state->provider->candidate_matcher;
+    if (matcher->prepare_operation != NULL) {
+      IREE_RETURN_IF_ERROR(
+          matcher->prepare_operation(matcher->user_data, state->environment,
+                                     source_op, state->arena, &operation_data));
+      ++state->plan->statistics.operation_preparation_count;
+    }
+    if (state->plan->node_operation_data != NULL) {
+      state->plan->node_operation_data[node_index] = operation_data;
+    }
     for (uint8_t i = 0; i < operation->group_count; ++i) {
       IREE_RETURN_IF_ERROR(loom_low_source_representation_build_group(
           state, source_op, node_index, (uint16_t)(operation->group_start + i),
-          predicate_states));
+          operation_data, predicate_states));
       if (state->plan->problem.kind !=
           LOOM_LOW_SOURCE_REPRESENTATION_PROBLEM_NONE) {
         break;
@@ -415,6 +482,29 @@ static void loom_low_source_representation_sort_indices(uint16_t* values,
     }
     values[j] = value;
   }
+}
+
+static bool loom_low_source_representation_indices_contain(
+    const uint16_t* values, uint16_t count, uint16_t value) {
+  for (uint16_t i = 0; i < count; ++i) {
+    if (values[i] == value) return true;
+  }
+  return false;
+}
+
+static uint16_t loom_low_source_representation_stable_minimum(
+    const loom_low_source_representation_state_t* state,
+    const uint16_t* representation_indices, uint16_t representation_count) {
+  IREE_ASSERT_NE(representation_count, 0);
+  uint16_t selected = representation_indices[0];
+  for (uint16_t i = 1; i < representation_count; ++i) {
+    const uint16_t candidate = representation_indices[i];
+    if (state->provider->representations[candidate].stable_key <
+        state->provider->representations[selected].stable_key) {
+      selected = candidate;
+    }
+  }
+  return selected;
 }
 
 static iree_status_t loom_low_source_representation_apply_domain(
@@ -457,26 +547,27 @@ static iree_status_t loom_low_source_representation_apply_domain(
       &state->component_domains[component_root];
   if (!domain->constrained) {
     uint16_t* retained_indices = NULL;
+    uint16_t* retained_canonical_indices = NULL;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, representation_count, sizeof(*retained_indices),
         (void**)&retained_indices));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, representation_count, sizeof(*retained_canonical_indices),
+        (void**)&retained_canonical_indices));
     memcpy(retained_indices, representation_indices,
            representation_count * sizeof(*retained_indices));
+    retained_canonical_indices[0] = canonical_representation_index;
     *domain = (loom_low_source_representation_domain_state_t){
         .representation_indices = retained_indices,
         .representation_count = representation_count,
         .canonical_representation_index = canonical_representation_index,
+        .canonical_representation_indices = retained_canonical_indices,
+        .canonical_representation_count = 1,
         .selected_representation_index =
             LOOM_LOW_SOURCE_REPRESENTATION_INDEX_NONE,
         .constrained = true,
     };
     return iree_ok_status();
-  }
-  if (domain->canonical_representation_index !=
-      canonical_representation_index) {
-    return loom_low_source_representation_invalid_provider(
-        state->provider,
-        "declares inconsistent canonical representations for one component");
   }
 
   uint16_t left = 0;
@@ -497,9 +588,44 @@ static iree_status_t loom_low_source_representation_apply_domain(
   }
   domain->representation_count = result_count;
   if (result_count == 0) {
+    domain->canonical_representation_index =
+        LOOM_LOW_SOURCE_REPRESENTATION_INDEX_NONE;
+    domain->canonical_representation_count = 0;
     loom_low_source_representation_set_problem(
         state, LOOM_LOW_SOURCE_REPRESENTATION_PROBLEM_EMPTY_DOMAIN, source_op,
         component_root, group_index);
+    return iree_ok_status();
+  }
+
+  uint16_t retained_canonical_count = 0;
+  for (uint16_t i = 0; i < domain->canonical_representation_count; ++i) {
+    const uint16_t prior_canonical =
+        domain->canonical_representation_indices[i];
+    if (loom_low_source_representation_indices_contain(
+            domain->representation_indices, result_count, prior_canonical)) {
+      domain->canonical_representation_indices[retained_canonical_count++] =
+          prior_canonical;
+    }
+  }
+  if (loom_low_source_representation_indices_contain(
+          domain->representation_indices, result_count,
+          canonical_representation_index) &&
+      !loom_low_source_representation_indices_contain(
+          domain->canonical_representation_indices, retained_canonical_count,
+          canonical_representation_index)) {
+    domain->canonical_representation_indices[retained_canonical_count++] =
+        canonical_representation_index;
+  }
+  domain->canonical_representation_count = retained_canonical_count;
+  if (retained_canonical_count != 0) {
+    domain->canonical_representation_index =
+        loom_low_source_representation_stable_minimum(
+            state, domain->canonical_representation_indices,
+            retained_canonical_count);
+  } else {
+    domain->canonical_representation_index =
+        loom_low_source_representation_stable_minimum(
+            state, domain->representation_indices, result_count);
   }
   return iree_ok_status();
 }
@@ -574,7 +700,7 @@ static iree_status_t loom_low_source_representation_analyze_group(
   if (runtime_group->skipped) return iree_ok_status();
   const loom_low_source_representation_group_t* group =
       &state->provider->groups[runtime_group->group_index];
-  loom_low_source_representation_match_t* candidate_matches =
+  loom_low_source_representation_runtime_match_t* candidate_matches =
       &state->candidate_matches[runtime_group->candidate_match_start];
   loom_value_ordinal_t* component_values =
       &state->component_values[runtime_group->component_value_start];
@@ -586,9 +712,17 @@ static iree_status_t loom_low_source_representation_analyze_group(
   }
 
   uint8_t eligible_count = 0;
+  uint16_t fallback_candidate_ordinal = UINT16_MAX;
+  const bool uses_ranked_fallback = iree_any_bit_set(
+      group->flags, LOOM_LOW_SOURCE_REPRESENTATION_GROUP_RANKED_FALLBACK);
+  if (uses_ranked_fallback &&
+      state->provider->candidate_matcher.match_candidate == NULL) {
+    return loom_low_source_representation_invalid_provider(
+        state->provider, "has a ranked group without a candidate matcher");
+  }
   for (uint8_t candidate_ordinal = 0;
        candidate_ordinal < group->candidate_count; ++candidate_ordinal) {
-    if (candidate_matches[candidate_ordinal] !=
+    if (candidate_matches[candidate_ordinal].state !=
         LOOM_LOW_SOURCE_REPRESENTATION_MATCH_ELIGIBLE) {
       continue;
     }
@@ -613,18 +747,43 @@ static iree_status_t loom_low_source_representation_analyze_group(
       }
     }
     if (!compatible) {
-      candidate_matches[candidate_ordinal] =
+      candidate_matches[candidate_ordinal].state =
           LOOM_LOW_SOURCE_REPRESENTATION_MATCH_REJECTED;
       continue;
     }
     for (uint8_t prior = 0; prior < candidate_ordinal; ++prior) {
-      if (candidate_matches[prior] ==
+      if (candidate_matches[prior].state ==
               LOOM_LOW_SOURCE_REPRESENTATION_MATCH_ELIGIBLE &&
           loom_low_source_representation_candidate_bindings_match(
               state, runtime_group, prior, candidate_ordinal)) {
-        return loom_low_source_representation_invalid_provider(
-            state->provider,
-            "produces duplicate eligible representation tuples");
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "source representation provider '%.*s' group %u produces "
+            "duplicate eligible representation tuples from candidates %u "
+            "and %u",
+            (int)state->provider->name.size, state->provider->name.data,
+            runtime_group->group_index, prior, candidate_ordinal);
+      }
+    }
+    if (uses_ranked_fallback) {
+      const uint16_t candidate_index =
+          (uint16_t)(group->candidate_start + candidate_ordinal);
+      if (fallback_candidate_ordinal == UINT16_MAX) {
+        fallback_candidate_ordinal = candidate_ordinal;
+      } else {
+        const uint16_t fallback_candidate_index =
+            (uint16_t)(group->candidate_start + fallback_candidate_ordinal);
+        const uint32_t candidate_rank =
+            candidate_matches[candidate_ordinal].fallback_rank;
+        const uint32_t fallback_rank =
+            candidate_matches[fallback_candidate_ordinal].fallback_rank;
+        if (candidate_rank < fallback_rank ||
+            (candidate_rank == fallback_rank &&
+             state->provider->candidates[candidate_index].stable_key <
+                 state->provider->candidates[fallback_candidate_index]
+                     .stable_key)) {
+          fallback_candidate_ordinal = candidate_ordinal;
+        }
       }
     }
     ++eligible_count;
@@ -662,7 +821,7 @@ static iree_status_t loom_low_source_representation_analyze_group(
     uint8_t representation_count = 0;
     for (uint8_t candidate_ordinal = 0;
          candidate_ordinal < group->candidate_count; ++candidate_ordinal) {
-      if (candidate_matches[candidate_ordinal] !=
+      if (candidate_matches[candidate_ordinal].state !=
           LOOM_LOW_SOURCE_REPRESENTATION_MATCH_ELIGIBLE) {
         continue;
       }
@@ -673,8 +832,20 @@ static iree_status_t loom_low_source_representation_analyze_group(
         if (component_roots[slot] != component_root) continue;
         const loom_low_source_representation_binding_t binding =
             state->provider->bindings[candidate->binding_start + slot];
-        const bool is_canonical = iree_any_bit_set(
-            binding.flags, LOOM_LOW_SOURCE_REPRESENTATION_BINDING_CANONICAL);
+        if (uses_ranked_fallback &&
+            iree_any_bit_set(
+                binding.flags,
+                LOOM_LOW_SOURCE_REPRESENTATION_BINDING_CANONICAL)) {
+          return loom_low_source_representation_invalid_provider(
+              state->provider,
+              "mixes ranked fallback with static canonical bindings");
+        }
+        const bool is_canonical =
+            uses_ranked_fallback
+                ? candidate_ordinal == fallback_candidate_ordinal
+                : iree_any_bit_set(
+                      binding.flags,
+                      LOOM_LOW_SOURCE_REPRESENTATION_BINDING_CANONICAL);
         uint8_t representation_ordinal = 0;
         for (; representation_ordinal < representation_count;
              ++representation_ordinal) {
@@ -773,13 +944,13 @@ static uint16_t loom_low_source_representation_group_candidate_for(
     loom_value_ordinal_t component_root, uint16_t representation_index) {
   const loom_low_source_representation_group_t* group =
       &state->provider->groups[runtime_group->group_index];
-  const loom_low_source_representation_match_t* candidate_matches =
+  const loom_low_source_representation_runtime_match_t* candidate_matches =
       &state->candidate_matches[runtime_group->candidate_match_start];
   const loom_value_ordinal_t* component_values =
       &state->component_values[runtime_group->component_value_start];
   for (uint8_t candidate_ordinal = 0;
        candidate_ordinal < group->candidate_count; ++candidate_ordinal) {
-    if (candidate_matches[candidate_ordinal] !=
+    if (candidate_matches[candidate_ordinal].state !=
         LOOM_LOW_SOURCE_REPRESENTATION_MATCH_ELIGIBLE) {
       continue;
     }
@@ -958,27 +1129,61 @@ static iree_status_t loom_low_source_representation_select_groups(
   if (state->runtime_group_count != 0) {
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate_array(state->arena, state->runtime_group_count,
-                                  sizeof(*state->plan->selected_groups),
-                                  (void**)&state->plan->selected_groups));
+                                  sizeof(*state->plan->group_selections),
+                                  (void**)&state->plan->group_selections));
   }
-  state->plan->selected_group_count = state->runtime_group_count;
+  state->plan->group_selection_count = state->runtime_group_count;
   for (uint32_t i = 0; i < state->runtime_group_count; ++i) {
     const loom_low_source_representation_runtime_group_t* runtime_group =
         &state->runtime_groups[i];
     loom_low_source_representation_group_selection_t* selection =
-        &state->plan->selected_groups[i];
+        &state->plan->group_selections[i];
     *selection = (loom_low_source_representation_group_selection_t){
         .group_index = runtime_group->group_index,
         .candidate_index = LOOM_LOW_SOURCE_REPRESENTATION_CANDIDATE_INDEX_NONE,
     };
-    if (runtime_group->skipped) continue;
     const loom_low_source_representation_group_t* group =
         &state->provider->groups[runtime_group->group_index];
-    const loom_low_source_representation_match_t* candidate_matches =
+    const loom_low_source_representation_runtime_match_t* candidate_matches =
         &state->candidate_matches[runtime_group->candidate_match_start];
+    if (runtime_group->skipped) {
+      for (uint8_t candidate_ordinal = 0;
+           candidate_ordinal < group->candidate_count; ++candidate_ordinal) {
+        const loom_low_source_representation_runtime_match_t* match =
+            &candidate_matches[candidate_ordinal];
+        if (match->state != LOOM_LOW_SOURCE_REPRESENTATION_MATCH_REJECTED ||
+            match->rejection_rank == 0) {
+          continue;
+        }
+        const uint16_t candidate_index =
+            (uint16_t)(group->candidate_start + candidate_ordinal);
+        const loom_low_source_representation_candidate_t* candidate =
+            &state->provider->candidates[candidate_index];
+        const bool more_specific =
+            match->rejection_rank > selection->rejection_rank;
+        const bool representative_is_preferred =
+            match->rejection_rank == selection->rejection_rank &&
+            (selection->candidate_index ==
+                 LOOM_LOW_SOURCE_REPRESENTATION_CANDIDATE_INDEX_NONE ||
+             candidate->stable_key <
+                 state->provider->candidates[selection->candidate_index]
+                     .stable_key);
+        if (more_specific) {
+          selection->rejection_rank = match->rejection_rank;
+          selection->rejection_bits = match->rejection_bits;
+        } else if (match->rejection_rank == selection->rejection_rank) {
+          selection->rejection_bits |= match->rejection_bits;
+        }
+        if (more_specific || representative_is_preferred) {
+          selection->candidate_index = candidate_index;
+          selection->target_variant = match->target_variant;
+        }
+      }
+      continue;
+    }
     for (uint8_t candidate_ordinal = 0;
          candidate_ordinal < group->candidate_count; ++candidate_ordinal) {
-      if (candidate_matches[candidate_ordinal] !=
+      if (candidate_matches[candidate_ordinal].state !=
           LOOM_LOW_SOURCE_REPRESENTATION_MATCH_ELIGIBLE) {
         continue;
       }
@@ -997,6 +1202,9 @@ static iree_status_t loom_low_source_representation_select_groups(
             "selects multiple realizations for one representation tuple");
       }
       selection->candidate_index = candidate_index;
+      selection->target_variant =
+          candidate_matches[candidate_ordinal].target_variant;
+      selection->selected = true;
     }
     if (selection->candidate_index ==
         LOOM_LOW_SOURCE_REPRESENTATION_CANDIDATE_INDEX_NONE) {
@@ -1078,6 +1286,11 @@ iree_status_t loom_low_source_representation_plan(
         IREE_STATUS_INVALID_ARGUMENT,
         "source representation planning requires complete inputs");
   }
+  if ((provider->candidate_matcher.prepare_operation == NULL) !=
+      (provider->candidate_matcher.match_candidate == NULL)) {
+    return loom_low_source_representation_invalid_provider(
+        provider, "has an incomplete candidate matcher");
+  }
   *out_plan = (loom_low_source_representation_plan_t){
       .provider = provider,
       .program = program,
@@ -1146,6 +1359,13 @@ iree_status_t loom_low_source_representation_plan(
         (void**)&out_plan->node_selections));
     memset(out_plan->node_selections, 0,
            program->node_count * sizeof(*out_plan->node_selections));
+    if (provider->candidate_matcher.prepare_operation != NULL) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          arena, program->node_count, sizeof(*out_plan->node_operation_data),
+          (void**)&out_plan->node_operation_data));
+      memset(out_plan->node_operation_data, 0,
+             program->node_count * sizeof(*out_plan->node_operation_data));
+    }
   }
 
   const loom_source_program_value_flow_kinds_t preserving_flow_kinds =
@@ -1262,6 +1482,17 @@ loom_low_source_representation_plan_find_operation_node(
   return LOOM_SOURCE_PROGRAM_NODE_ORDINAL_INVALID;
 }
 
+const void* loom_low_source_representation_plan_lookup_operation_data(
+    const loom_low_source_representation_plan_t* plan,
+    const loom_op_t* source_op) {
+  if (plan == NULL || plan->node_operation_data == NULL) return NULL;
+  const loom_source_program_node_ordinal_t node_index =
+      loom_low_source_representation_plan_find_operation_node(plan, source_op);
+  return node_index == LOOM_SOURCE_PROGRAM_NODE_ORDINAL_INVALID
+             ? NULL
+             : plan->node_operation_data[node_index];
+}
+
 iree_host_size_t loom_low_source_representation_plan_candidate_count(
     const loom_low_source_representation_plan_t* plan,
     const loom_op_t* source_op) {
@@ -1284,7 +1515,7 @@ loom_low_source_representation_plan_candidate_view(
       plan->node_selections[node_index];
   if (group_ordinal >= node_selection.group_count) return view;
   const loom_low_source_representation_group_selection_t selection =
-      plan->selected_groups[node_selection.group_start + group_ordinal];
+      plan->group_selections[node_selection.group_start + group_ordinal];
   const loom_low_source_representation_group_t* group =
       &plan->provider->groups[selection.group_index];
   view.group = group;
@@ -1296,10 +1527,13 @@ loom_low_source_representation_plan_candidate_view(
   }
   const loom_low_source_representation_candidate_t* candidate =
       &plan->provider->candidates[selection.candidate_index];
-  view.selected = true;
+  view.selected = selection.selected;
   view.candidate = candidate;
   view.candidate_name = loom_low_source_representation_name(
       plan->provider, candidate->name_string_offset);
+  view.target_variant = selection.target_variant;
+  view.rejection_bits = selection.rejection_bits;
+  view.rejection_rank = selection.rejection_rank;
   if (candidate->target_data_ordinal !=
       LOOM_LOW_SOURCE_REPRESENTATION_TARGET_DATA_ORDINAL_NONE) {
     view.target_data = plan->provider->target_data +

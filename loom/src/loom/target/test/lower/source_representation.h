@@ -45,9 +45,19 @@ typedef enum loom_test_low_source_representation_realization_e {
   LOOM_TEST_LOW_SOURCE_REPRESENTATION_REALIZATION_CAST_ALTERNATE = 3,
 } loom_test_low_source_representation_realization_t;
 
+typedef uint8_t loom_test_low_source_representation_operation_t;
+enum loom_test_low_source_representation_operation_e {
+  LOOM_TEST_LOW_SOURCE_REPRESENTATION_OPERATION_ADDI = 0,
+  LOOM_TEST_LOW_SOURCE_REPRESENTATION_OPERATION_CAST = 1,
+};
+
 typedef struct loom_test_low_source_representation_target_data_t {
   // Synthetic target realization retained by the common planner.
   loom_test_low_source_representation_realization_t realization;
+  // Synthetic fallback rank consumed by ranked candidate groups.
+  uint32_t fallback_rank;
+  // Normalized source operation class accepted by this candidate row.
+  loom_test_low_source_representation_operation_t operation;
 } loom_test_low_source_representation_target_data_t;
 
 extern const loom_low_source_representation_provider_t

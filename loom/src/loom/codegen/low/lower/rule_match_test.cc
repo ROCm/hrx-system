@@ -198,15 +198,15 @@ TEST_F(LowLowerRuleMatchTest, SourceRepresentationGuardsBindOnlyFinalLowering) {
           .candidate_index =
               LOOM_LOW_SOURCE_REPRESENTATION_CANDIDATE_INDEX_NONE,
       },
-      {.group_index = 1, .candidate_index = 0},
+      {.group_index = 1, .candidate_index = 0, .selected = true},
   };
   uint32_t operation_lookup_slot = 0;
   const loom_low_source_representation_plan_t representation_plan = {
       .provider = &provider,
       .program = &program,
       .node_selections = &node_selection,
-      .selected_groups = selections,
-      .selected_group_count = IREE_ARRAYSIZE(selections),
+      .group_selections = selections,
+      .group_selection_count = IREE_ARRAYSIZE(selections),
       .operation_lookup_slots = &operation_lookup_slot,
       .operation_lookup_slot_count = 1,
   };

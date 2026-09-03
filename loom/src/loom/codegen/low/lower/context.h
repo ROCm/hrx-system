@@ -179,8 +179,13 @@ iree_status_t loom_low_lower_context_initialize_source_dataflow(
     const loom_view_region_table_t* view_regions);
 
 // Selects and retains the policy's optional source representations exactly
-// once before source value type mapping begins.
+// once after source dataflow and before target legality begins.
 iree_status_t loom_low_lower_context_initialize_source_representation_plan(
+    loom_low_lower_context_t* context);
+
+// Reports a retained source-representation planning problem. Callers defer
+// this until earlier source and target legality diagnostics have succeeded.
+iree_status_t loom_low_lower_context_report_source_representation_problem(
     loom_low_lower_context_t* context);
 
 // Emits a TARGET-domain diagnostic with the standard target-low source

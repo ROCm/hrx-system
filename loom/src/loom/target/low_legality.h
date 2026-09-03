@@ -39,6 +39,8 @@ typedef struct loom_target_low_legality_provider_t
 typedef struct loom_local_value_domain_t loom_local_value_domain_t;
 typedef struct loom_source_program_t loom_source_program_t;
 typedef struct loom_source_dataflow_result_t loom_source_dataflow_result_t;
+typedef struct loom_low_source_representation_plan_t
+    loom_low_source_representation_plan_t;
 typedef struct loom_view_region_table_t loom_view_region_table_t;
 
 typedef enum loom_target_low_legality_diagnostic_flag_bits_e {
@@ -157,6 +159,8 @@ typedef struct loom_target_low_legality_options_t {
   const loom_view_region_table_t* view_regions;
   // Optional retained target-declared physical source-value facts.
   const loom_source_dataflow_result_t* source_dataflow;
+  // Optional retained physical source-representation choices.
+  const loom_low_source_representation_plan_t* source_representation_plan;
   // Structural source forms permitted by the caller's current phase.
   loom_target_low_structural_legality_flags_t structural_legality_flags;
   // Optional target-specific feedback diagnostics to emit during source
@@ -231,6 +235,12 @@ const loom_source_program_t* loom_target_low_legality_source_program(
 // Returns retained target-declared physical source-value facts, or NULL when
 // the active lowering policy has no provider.
 const loom_source_dataflow_result_t* loom_target_low_legality_source_dataflow(
+    const loom_target_low_legality_context_t* context);
+
+// Returns the retained physical source-representation plan, or NULL when the
+// active target has no representation provider.
+const loom_low_source_representation_plan_t*
+loom_target_low_legality_source_representation_plan(
     const loom_target_low_legality_context_t* context);
 
 // Returns the shared analyzed view-region table.

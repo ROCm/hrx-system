@@ -1210,6 +1210,7 @@ static void loom_low_target_legalize_deinitialize_query_scope(
   state->legalization_context.value_domain = NULL;
   state->legalization_context.source_program = NULL;
   state->legalization_context.source_dataflow = NULL;
+  state->legalization_context.source_representation_plan = NULL;
   state->legalization_context.view_regions = NULL;
   loom_low_lower_source_query_scope_deinitialize(state->query_scope);
   state->query_scope = NULL;
@@ -1229,6 +1230,8 @@ static iree_status_t loom_low_target_legalize_refresh_query_scope(
       loom_low_lower_source_query_scope_program(state->query_scope);
   state->legalization_context.source_dataflow =
       loom_low_lower_source_query_scope_dataflow(state->query_scope);
+  state->legalization_context.source_representation_plan =
+      loom_low_lower_source_query_scope_representation_plan(state->query_scope);
   IREE_RETURN_IF_ERROR(loom_low_lower_source_query_scope_view_regions(
       state->query_scope, &state->legalization_context.view_regions));
   return iree_ok_status();
@@ -1482,6 +1485,9 @@ static iree_status_t loom_low_target_legalize_verify_final(
       .view_regions = state->legalization_context.view_regions,
       .source_dataflow =
           loom_low_lower_source_query_scope_dataflow(state->query_scope),
+      .source_representation_plan =
+          loom_low_lower_source_query_scope_representation_plan(
+              state->query_scope),
       .structural_legality_flags =
           LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF,
       .emitter = state->pass->diagnostic_emitter,

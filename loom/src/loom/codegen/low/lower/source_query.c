@@ -278,6 +278,10 @@ iree_status_t loom_low_lower_source_query_scope_create(
     status = loom_low_lower_context_initialize_source_dataflow(&scope->context,
                                                                view_regions);
   }
+  if (iree_status_is_ok(status)) {
+    status = loom_low_lower_context_initialize_source_representation_plan(
+        &scope->context);
+  }
   if (!iree_status_is_ok(status)) {
     loom_low_lower_source_query_scope_deinitialize(scope);
     return status;
@@ -329,6 +333,12 @@ loom_low_lower_source_query_scope_descriptor_set(
 const loom_source_dataflow_result_t* loom_low_lower_source_query_scope_dataflow(
     const loom_low_lower_source_query_scope_t* scope) {
   return loom_low_lower_context_source_dataflow(&scope->context);
+}
+
+const loom_low_source_representation_plan_t*
+loom_low_lower_source_query_scope_representation_plan(
+    const loom_low_lower_source_query_scope_t* scope) {
+  return loom_low_lower_context_source_representation_plan(&scope->context);
 }
 
 iree_status_t loom_low_lower_source_query_scope_view_regions(

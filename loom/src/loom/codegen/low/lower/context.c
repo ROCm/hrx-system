@@ -125,10 +125,16 @@ iree_status_t loom_low_lower_context_initialize_source_representation_plan(
       .target_facts = context->options->target_facts,
       .configuration = context->policy->source_representation_configuration,
   };
-  IREE_RETURN_IF_ERROR(loom_low_source_representation_plan(
+  return loom_low_source_representation_plan(
       provider, &context->lowering.source_program, &environment,
-      &context->function_arena, &context->lowering.source_representation_plan));
+      &context->function_arena, &context->lowering.source_representation_plan);
+}
 
+iree_status_t loom_low_lower_context_report_source_representation_problem(
+    loom_low_lower_context_t* context) {
+  const loom_low_source_representation_provider_t* provider =
+      context->lowering.source_representation_plan.provider;
+  if (provider == NULL) return iree_ok_status();
   const loom_low_source_representation_problem_t problem =
       context->lowering.source_representation_plan.problem;
   if (problem.kind == LOOM_LOW_SOURCE_REPRESENTATION_PROBLEM_NONE) {

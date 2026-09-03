@@ -1342,6 +1342,10 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
     status = loom_low_lower_context_initialize_source_dataflow(
         &context, legality_view_regions);
   }
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_low_lower_context_initialize_source_representation_plan(&context);
+  }
   loom_target_low_legality_result_t legality_result = {};
   if (iree_status_is_ok(status)) {
     loom_target_low_legality_options_t legality_options = {
@@ -1353,6 +1357,8 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
         .type_supported = context.policy->source_type_supported,
         .view_regions = legality_view_regions,
         .source_dataflow = loom_low_lower_context_source_dataflow(&context),
+        .source_representation_plan =
+            loom_low_lower_context_source_representation_plan(&context),
         .structural_legality_flags =
             loom_low_lower_source_plan_uses_structured_control_flow(&context)
                 ? LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF
@@ -1377,7 +1383,7 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
 
   if (iree_status_is_ok(status)) {
     status =
-        loom_low_lower_context_initialize_source_representation_plan(&context);
+        loom_low_lower_context_report_source_representation_problem(&context);
   }
   if (iree_status_is_ok(status) && out_result->error_count != 0) {
     loom_low_lowering_frame_deinitialize(&context);

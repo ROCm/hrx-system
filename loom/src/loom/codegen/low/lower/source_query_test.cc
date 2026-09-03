@@ -17,6 +17,7 @@
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/test/low_registry.h"
 #include "loom/target/test/lower.h"
+#include "loom/target/test/lower/source_representation.h"
 #include "loom/target/test/target_records.h"
 #include "loom/util/fact_table.h"
 
@@ -183,6 +184,16 @@ TEST_F(LowLowerSourceQueryTest, RetainsTestTargetSourceDataflow) {
   EXPECT_EQ(dataflow->statistics.value_seed_invocation_count,
             dataflow->state_count);
   EXPECT_EQ(dataflow->statistics.predicate_invocation_count, 0u);
+}
+
+TEST_F(LowLowerSourceQueryTest, RetainsTestTargetSourceRepresentations) {
+  CreateQueryScope();
+  const loom_low_source_representation_plan_t* representation_plan =
+      loom_low_lower_source_query_scope_representation_plan(query_scope_);
+  ASSERT_NE(representation_plan, nullptr);
+  EXPECT_EQ(representation_plan->provider,
+            &loom_test_low_source_representation_provider);
+  EXPECT_GT(representation_plan->statistics.candidate_group_count, 0u);
 }
 
 TEST_F(LowLowerSourceQueryTest, SelectsGeneratedTargetContract) {

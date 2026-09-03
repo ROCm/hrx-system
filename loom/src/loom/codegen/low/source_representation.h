@@ -171,12 +171,15 @@ enum loom_low_source_representation_group_flag_bits_e {
   // The group imposes no constraint when target predicates reject every
   // candidate. Without this flag an unavailable group is a planning problem.
   LOOM_LOW_SOURCE_REPRESENTATION_GROUP_OPTIONAL = (uint8_t)1u << 0,
+  // Candidate match ranks provide the canonical fallback instead of static
+  // binding flags. Descriptor recipe costs remain the primary selector.
+  LOOM_LOW_SOURCE_REPRESENTATION_GROUP_RANKED_FALLBACK = (uint8_t)1u << 1,
 };
 typedef uint8_t loom_low_source_representation_group_flags_t;
 
-#define LOOM_LOW_SOURCE_REPRESENTATION_GROUP_FLAG_MASK \
-  ((loom_low_source_representation_group_flags_t)      \
-       LOOM_LOW_SOURCE_REPRESENTATION_GROUP_OPTIONAL)
+#define LOOM_LOW_SOURCE_REPRESENTATION_GROUP_FLAG_MASK                                            \
+  ((loom_low_source_representation_group_flags_t)(LOOM_LOW_SOURCE_REPRESENTATION_GROUP_OPTIONAL | \
+                                                  LOOM_LOW_SOURCE_REPRESENTATION_GROUP_RANKED_FALLBACK))
 
 // One operation-local set of representation alternatives.
 typedef struct loom_low_source_representation_group_t {
@@ -276,6 +279,52 @@ typedef struct loom_low_source_representation_predicate_t {
   void* user_data;
 } loom_low_source_representation_predicate_t;
 
+// Candidate-specific operation match produced from one prepared operation.
+typedef struct loom_low_source_representation_candidate_match_t {
+  // Lower ranks are preferred when descriptor recipes compare equal.
+  uint32_t fallback_rank;
+  // Opaque target-local realization selected for this candidate. Variants
+  // share the candidate's representation bindings and descriptor recipe.
+  uint32_t target_variant;
+  // Target-defined reasons why this candidate was rejected. Zero means that
+  // no diagnostic evidence is available.
+  uint32_t rejection_bits;
+  // Target-defined specificity rank for rejection_bits. Higher ranks identify
+  // candidates that progressed further through target matching. Zero requires
+  // rejection_bits to also be zero.
+  uint8_t rejection_rank;
+  // True when the candidate is legal for the prepared operation.
+  bool matches;
+  // Reserved for structure layout; must be zero.
+  uint8_t reserved[2];
+} loom_low_source_representation_candidate_match_t;
+
+typedef iree_status_t (*loom_low_source_representation_prepare_operation_fn_t)(
+    void* user_data,
+    const loom_low_source_representation_environment_t* environment,
+    const loom_op_t* op, iree_arena_allocator_t* arena,
+    const void** out_operation_data);
+
+typedef iree_status_t (*loom_low_source_representation_match_candidate_fn_t)(
+    void* user_data,
+    const loom_low_source_representation_environment_t* environment,
+    const loom_op_t* op, const void* operation_data,
+    const void* candidate_target_data,
+    loom_low_source_representation_candidate_match_t* out_match);
+
+// Paired callbacks for candidate-specific operation matching. Preparation runs
+// exactly once for each handled operation. Matching then consumes only the
+// prepared operation summary and one compact target-data row; neither callback
+// may walk source definitions, users, blocks, or regions.
+typedef struct loom_low_source_representation_candidate_matcher_t {
+  // Builds an immutable arena-owned operation summary.
+  loom_low_source_representation_prepare_operation_fn_t prepare_operation;
+  // Matches one candidate against the prepared operation summary.
+  loom_low_source_representation_match_candidate_fn_t match_candidate;
+  // Provider-owned payload passed to both callbacks.
+  void* user_data;
+} loom_low_source_representation_candidate_matcher_t;
+
 // Static finite-domain representation provider.
 typedef struct loom_low_source_representation_provider_t {
   // Stable provider name used in malformed-table diagnostics.
@@ -330,6 +379,8 @@ typedef struct loom_low_source_representation_provider_t {
   uint8_t reserved;
   // Candidate predicates indexed by one-based candidate references.
   const loom_low_source_representation_predicate_t* predicates;
+  // Optional paired candidate-specific operation matcher.
+  loom_low_source_representation_candidate_matcher_t candidate_matcher;
   // Byte stride of one target-data row, or zero when no rows exist.
   uint32_t target_data_stride;
   // Number of target-data rows.
@@ -367,6 +418,10 @@ typedef struct loom_low_source_representation_statistics_t {
   uint64_t value_seed_invocation_count;
   // Number of candidate predicate callback invocations.
   uint64_t predicate_invocation_count;
+  // Number of operation-summary preparation callback invocations.
+  uint64_t operation_preparation_count;
+  // Number of candidate-specific match callback invocations.
+  uint64_t candidate_match_invocation_count;
   // Number of source-program preserving edges unioned.
   uint64_t preserving_flow_count;
   // Number of operation-local candidate groups instantiated.
@@ -375,8 +430,8 @@ typedef struct loom_low_source_representation_statistics_t {
   uint64_t selected_component_count;
 } loom_low_source_representation_statistics_t;
 
-// Dense per-node span into selected_groups. Block and unhandled operation nodes
-// have empty spans.
+// Dense per-node span into group_selections. Block and unhandled operation
+// nodes have empty spans.
 typedef struct loom_low_source_representation_node_selection_t {
   // First selected group row.
   uint32_t group_start;
@@ -390,9 +445,21 @@ typedef struct loom_low_source_representation_node_selection_t {
 typedef struct loom_low_source_representation_group_selection_t {
   // Provider-local candidate group index.
   uint16_t group_index;
-  // Selected provider-local candidate index, or NONE for a skipped optional
-  // group.
+  // Selected or representative rejected provider-local candidate index. NONE
+  // when a skipped optional group retained no rejection evidence.
   uint16_t candidate_index;
+  // Opaque target-local realization for candidate_index.
+  uint32_t target_variant;
+  // Target-defined rejection reasons retained for an unavailable optional
+  // group. Zero for a selected group or when no evidence was provided.
+  uint32_t rejection_bits;
+  // Specificity rank of rejection_bits. Zero when rejection_bits is zero.
+  uint8_t rejection_rank;
+  // True when candidate_index names the selected realization. False means it
+  // names a representative rejected realization, if one is present.
+  bool selected;
+  // Reserved for structure layout; must be zero.
+  uint8_t reserved[2];
 } loom_low_source_representation_group_selection_t;
 
 // Retained common representation plan for one source value domain.
@@ -411,10 +478,12 @@ typedef struct loom_low_source_representation_plan_t {
   const loom_low_descriptor_cost_t** component_costs;
   // Per-source-program-node selected group spans.
   loom_low_source_representation_node_selection_t* node_selections;
-  // Selected candidate rows grouped by source operation node.
-  loom_low_source_representation_group_selection_t* selected_groups;
-  // Number of rows in selected_groups.
-  uint32_t selected_group_count;
+  // Provider-prepared immutable operation data indexed by source-program node.
+  const void** node_operation_data;
+  // Candidate group outcomes grouped by source operation node.
+  loom_low_source_representation_group_selection_t* group_selections;
+  // Number of rows in group_selections.
+  uint32_t group_selection_count;
   // Open-addressed source-op pointer to source-program-node lookup slots.
   uint32_t* operation_lookup_slots;
   // Power-of-two number of entries in operation_lookup_slots.
@@ -447,12 +516,19 @@ typedef struct loom_low_source_representation_candidate_view_t {
   const loom_low_source_representation_group_t* group;
   // Human-readable stable group key.
   iree_string_view_t group_name;
-  // Provider candidate row, or NULL for a skipped optional group.
+  // Selected or representative rejected provider candidate row. NULL when a
+  // skipped optional group retained no rejection evidence.
   const loom_low_source_representation_candidate_t* candidate;
   // Human-readable stable candidate key, or an empty view.
   iree_string_view_t candidate_name;
   // Target-owned retained data row, or NULL when the candidate has none.
   const void* target_data;
+  // Opaque target-local realization retained from candidate matching.
+  uint32_t target_variant;
+  // Target-defined reasons retained when no candidate was selected.
+  uint32_t rejection_bits;
+  // Specificity rank of rejection_bits. Zero when rejection_bits is zero.
+  uint8_t rejection_rank;
 } loom_low_source_representation_candidate_view_t;
 
 // Plans physical source representations over |program|.
@@ -476,6 +552,12 @@ loom_low_source_representation_value_view_t
 loom_low_source_representation_plan_lookup_value(
     const loom_low_source_representation_plan_t* plan,
     loom_value_id_t value_id);
+
+// Returns the retained provider-prepared data for |source_op|, or NULL when
+// the operation is not handled or the provider has no operation preparer.
+const void* loom_low_source_representation_plan_lookup_operation_data(
+    const loom_low_source_representation_plan_t* plan,
+    const loom_op_t* source_op);
 
 // Returns the number of retained candidate groups for |source_op|.
 iree_host_size_t loom_low_source_representation_plan_candidate_count(

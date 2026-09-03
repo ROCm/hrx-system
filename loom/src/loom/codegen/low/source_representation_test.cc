@@ -187,6 +187,31 @@ TEST_F(LowSourceRepresentationTest,
 }
 
 TEST_F(LowSourceRepresentationTest,
+       VerifierRejectsAnIncompleteCandidateMatcher) {
+  loom_low_source_representation_provider_t provider =
+      loom_test_low_source_representation_provider;
+  provider.candidate_matcher.match_candidate = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_source_representation_provider_verify(
+                            &provider, descriptor_set_, &arena_));
+}
+
+TEST_F(LowSourceRepresentationTest,
+       VerifierRejectsStaticCanonicalInRankedGroup) {
+  std::vector<loom_low_source_representation_group_t> groups(
+      loom_test_low_source_representation_provider.groups,
+      loom_test_low_source_representation_provider.groups +
+          loom_test_low_source_representation_provider.group_count);
+  groups[0].flags = LOOM_LOW_SOURCE_REPRESENTATION_GROUP_RANKED_FALLBACK;
+  loom_low_source_representation_provider_t provider =
+      loom_test_low_source_representation_provider;
+  provider.groups = groups.data();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_source_representation_provider_verify(
+                            &provider, descriptor_set_, &arena_));
+}
+
+TEST_F(LowSourceRepresentationTest,
        SelectsCheaperRepresentationAcrossCfgAndRetainsRealization) {
   loom_module_t* module = ParseModule(R"(
 func.def @cfg(%condition: i1, %lhs: i32, %rhs: i32) -> (i32) {
@@ -227,11 +252,15 @@ func.def @cfg(%condition: i1, %lhs: i32, %rhs: i32) -> (i32) {
   const auto candidate =
       loom_low_source_representation_plan_candidate_view(&plan_, addi, 0);
   ASSERT_TRUE(candidate.selected);
+  EXPECT_EQ(candidate.rejection_rank, 0u);
+  EXPECT_EQ(candidate.rejection_bits, 0u);
   EXPECT_TRUE(
       iree_string_view_equal(candidate.group_name, IREE_SV("test.addi.frame")));
   EXPECT_TRUE(iree_string_view_equal(candidate.candidate_name,
                                      IREE_SV("test.addi.alternate")));
   ASSERT_NE(candidate.target_data, nullptr);
+  EXPECT_EQ(candidate.target_variant,
+            LOOM_TEST_LOW_SOURCE_REPRESENTATION_REALIZATION_ADDI_ALTERNATE);
   EXPECT_EQ(
       static_cast<const loom_test_low_source_representation_target_data_t*>(
           candidate.target_data)
@@ -248,6 +277,8 @@ func.def @cfg(%condition: i1, %lhs: i32, %rhs: i32) -> (i32) {
             predicate_invocation_count);
   EXPECT_EQ(plan_.statistics.value_seed_invocation_count,
             value_domain_.value_count);
+  EXPECT_EQ(plan_.statistics.operation_preparation_count, 1u);
+  EXPECT_EQ(plan_.statistics.candidate_match_invocation_count, 2u);
   EXPECT_GE(plan_.statistics.preserving_flow_count, 2u);
 }
 
@@ -272,6 +303,44 @@ func.def @canonical(%lhs: i32, %rhs: i32) -> (i32) {
   EXPECT_TRUE(iree_string_view_equal(candidate.candidate_name,
                                      IREE_SV("test.addi.canonical")));
   EXPECT_EQ(plan_.statistics.predicate_invocation_count, 1u);
+  EXPECT_EQ(plan_.statistics.operation_preparation_count, 1u);
+  EXPECT_EQ(plan_.statistics.candidate_match_invocation_count, 1u);
+  EXPECT_NE(loom_low_source_representation_plan_lookup_operation_data(
+                &plan_, FindOperation(LOOM_OP_TEST_ADDI)),
+            nullptr);
+}
+
+TEST_F(LowSourceRepresentationTest,
+       CandidateMatcherConsumesPreparedOperationAndTargetData) {
+  loom_module_t* module = ParseModule(R"(
+func.def @target_data(%lhs: i32, %rhs: i32) -> (i32) {
+  %sum = test.addi %lhs, %rhs : i32
+  func.return %sum : i32
+}
+)");
+  BuildProgram(module, FindFunction(module, IREE_SV("target_data")));
+  configuration_.flags = LOOM_TEST_LOW_SOURCE_REPRESENTATION_ENABLE_ALTERNATE;
+  const auto* original_target_data = reinterpret_cast<
+      const loom_test_low_source_representation_target_data_t*>(
+      loom_test_low_source_representation_provider.target_data);
+  std::vector<loom_test_low_source_representation_target_data_t> target_data(
+      original_target_data,
+      original_target_data +
+          loom_test_low_source_representation_provider.target_data_count);
+  target_data[1].operation = LOOM_TEST_LOW_SOURCE_REPRESENTATION_OPERATION_CAST;
+  loom_low_source_representation_provider_t provider =
+      loom_test_low_source_representation_provider;
+  provider.target_data = reinterpret_cast<const uint8_t*>(target_data.data());
+  IREE_ASSERT_OK(Plan(&provider));
+  const auto sum = Value(FindValue(module, IREE_SV("sum")));
+  ASSERT_TRUE(sum.selected);
+  EXPECT_EQ(sum.representation->stable_key,
+            LOOM_TEST_LOW_SOURCE_REPRESENTATION_CANONICAL_KEY);
+  EXPECT_EQ(plan_.statistics.operation_preparation_count, 1u);
+  EXPECT_EQ(plan_.statistics.candidate_match_invocation_count, 2u);
+  EXPECT_NE(loom_low_source_representation_plan_lookup_operation_data(
+                &plan_, FindOperation(LOOM_OP_TEST_ADDI)),
+            nullptr);
 }
 
 TEST_F(LowSourceRepresentationTest,
@@ -376,6 +445,74 @@ func.def @tie(%lhs: i32, %rhs: i32) -> (i32) {
             LOOM_TEST_LOW_SOURCE_REPRESENTATION_CANONICAL_KEY);
 }
 
+TEST_F(LowSourceRepresentationTest, RankedFallbackBreaksEqualDescriptorCost) {
+  loom_module_t* module = ParseModule(R"(
+func.def @ranked(%lhs: i32, %rhs: i32) -> (i32) {
+  %sum = test.addi %lhs, %rhs : i32
+  func.return %sum : i32
+}
+)");
+  BuildProgram(module, FindFunction(module, IREE_SV("ranked")));
+  configuration_.flags = LOOM_TEST_LOW_SOURCE_REPRESENTATION_ENABLE_ALTERNATE;
+  std::vector<loom_low_source_representation_group_t> groups(
+      loom_test_low_source_representation_provider.groups,
+      loom_test_low_source_representation_provider.groups +
+          loom_test_low_source_representation_provider.group_count);
+  groups[0].flags = LOOM_LOW_SOURCE_REPRESENTATION_GROUP_RANKED_FALLBACK;
+  std::vector<loom_low_source_representation_binding_t> bindings(
+      loom_test_low_source_representation_provider.bindings,
+      loom_test_low_source_representation_provider.bindings +
+          loom_test_low_source_representation_provider.binding_count);
+  bindings[0].flags = 0;
+  std::vector<loom_low_source_representation_candidate_t> candidates(
+      loom_test_low_source_representation_provider.candidates,
+      loom_test_low_source_representation_provider.candidates +
+          loom_test_low_source_representation_provider.candidate_count);
+  candidates[1].recipe_entry_start = candidates[0].recipe_entry_start;
+  loom_low_source_representation_provider_t provider =
+      loom_test_low_source_representation_provider;
+  provider.groups = groups.data();
+  provider.bindings = bindings.data();
+  provider.candidates = candidates.data();
+  provider.seed_value = {};
+  IREE_ASSERT_OK(loom_low_source_representation_provider_verify(
+      &provider, descriptor_set_, &arena_));
+  IREE_ASSERT_OK(Plan(&provider));
+  const auto sum = Value(FindValue(module, IREE_SV("sum")));
+  ASSERT_TRUE(sum.selected);
+  EXPECT_EQ(sum.representation->stable_key,
+            LOOM_TEST_LOW_SOURCE_REPRESENTATION_ALTERNATE_KEY);
+}
+
+TEST_F(LowSourceRepresentationTest,
+       IntersectsDifferentCanonicalFallbacksByLegality) {
+  loom_module_t* module = ParseModule(R"(
+func.def @intersection(%lhs: i32, %rhs: i32) -> (i32) {
+  %sum = test.addi %lhs, %rhs : i32
+  func.return %sum : i32
+}
+)");
+  BuildProgram(module, FindFunction(module, IREE_SV("intersection")));
+  configuration_.flags = LOOM_TEST_LOW_SOURCE_REPRESENTATION_ENABLE_ALTERNATE;
+  std::vector<loom_low_source_representation_group_t> groups(
+      loom_test_low_source_representation_provider.groups,
+      loom_test_low_source_representation_provider.groups +
+          loom_test_low_source_representation_provider.group_count);
+  groups[0].candidate_start = 1;
+  groups[0].candidate_count = 1;
+  groups[0].flags = LOOM_LOW_SOURCE_REPRESENTATION_GROUP_RANKED_FALLBACK;
+  loom_low_source_representation_provider_t provider =
+      loom_test_low_source_representation_provider;
+  provider.groups = groups.data();
+  IREE_ASSERT_OK(loom_low_source_representation_provider_verify(
+      &provider, descriptor_set_, &arena_));
+  IREE_ASSERT_OK(Plan(&provider));
+  const auto sum = Value(FindValue(module, IREE_SV("sum")));
+  ASSERT_TRUE(sum.selected);
+  EXPECT_EQ(sum.representation->stable_key,
+            LOOM_TEST_LOW_SOURCE_REPRESENTATION_ALTERNATE_KEY);
+}
+
 TEST_F(LowSourceRepresentationTest, UnknownCostsSelectCanonical) {
   loom_module_t* module = ParseModule(R"(
 func.def @unknown(%lhs: i32, %rhs: i32) -> (i32) {
@@ -447,6 +584,59 @@ func.def @unavailable(%lhs: i32, %rhs: i32) -> (i32) {
       &plan_, FindOperation(LOOM_OP_TEST_ADDI), 0);
   EXPECT_FALSE(candidate.selected);
   EXPECT_NE(candidate.group, nullptr);
+  EXPECT_EQ(candidate.candidate, nullptr);
+  EXPECT_EQ(candidate.rejection_rank, 0u);
+  EXPECT_EQ(candidate.rejection_bits, 0u);
+}
+
+TEST_F(LowSourceRepresentationTest,
+       OptionalGroupRetainsMostSpecificCandidateRejections) {
+  loom_module_t* module = ParseModule(R"(
+func.def @unavailable(%lhs: i32, %rhs: i32) -> (i32) {
+  %sum = test.addi %lhs, %rhs : i32
+  func.return %sum : i32
+}
+)");
+  BuildProgram(module, FindFunction(module, IREE_SV("unavailable")));
+  std::vector<loom_low_source_representation_group_t> groups(
+      loom_test_low_source_representation_provider.groups,
+      loom_test_low_source_representation_provider.groups +
+          loom_test_low_source_representation_provider.group_count);
+  groups[0].flags = LOOM_LOW_SOURCE_REPRESENTATION_GROUP_OPTIONAL;
+  std::vector<loom_test_low_source_representation_target_data_t> target_data(
+      reinterpret_cast<
+          const loom_test_low_source_representation_target_data_t*>(
+          loom_test_low_source_representation_provider.target_data),
+      reinterpret_cast<
+          const loom_test_low_source_representation_target_data_t*>(
+          loom_test_low_source_representation_provider.target_data) +
+          loom_test_low_source_representation_provider.target_data_count);
+  target_data[0].operation = LOOM_TEST_LOW_SOURCE_REPRESENTATION_OPERATION_CAST;
+  target_data[1].operation = LOOM_TEST_LOW_SOURCE_REPRESENTATION_OPERATION_CAST;
+  loom_low_source_representation_provider_t provider =
+      loom_test_low_source_representation_provider;
+  provider.groups = groups.data();
+  provider.target_data = reinterpret_cast<const uint8_t*>(target_data.data());
+  IREE_ASSERT_OK(Plan(&provider));
+  auto candidate = loom_low_source_representation_plan_candidate_view(
+      &plan_, FindOperation(LOOM_OP_TEST_ADDI), 0);
+  EXPECT_FALSE(candidate.selected);
+  ASSERT_NE(candidate.candidate, nullptr);
+  EXPECT_EQ(candidate.candidate->stable_key, UINT64_C(0x073f328929d07320));
+  EXPECT_EQ(candidate.target_variant,
+            LOOM_TEST_LOW_SOURCE_REPRESENTATION_REALIZATION_ADDI_CANONICAL);
+  EXPECT_EQ(candidate.rejection_rank, 2u);
+  EXPECT_EQ(candidate.rejection_bits, 1u);
+
+  target_data[1].fallback_rank = target_data[0].fallback_rank;
+  IREE_ASSERT_OK(Plan(&provider));
+  candidate = loom_low_source_representation_plan_candidate_view(
+      &plan_, FindOperation(LOOM_OP_TEST_ADDI), 0);
+  EXPECT_FALSE(candidate.selected);
+  ASSERT_NE(candidate.candidate, nullptr);
+  EXPECT_EQ(candidate.candidate->stable_key, UINT64_C(0x073f328929d07320));
+  EXPECT_EQ(candidate.rejection_rank, 2u);
+  EXPECT_EQ(candidate.rejection_bits, 3u);
 }
 
 TEST_F(LowSourceRepresentationTest, RejectsNonseparableCandidateGroup) {

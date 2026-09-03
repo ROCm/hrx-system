@@ -122,6 +122,16 @@ iree_status_t loom_low_source_representation_provider_verify(
     return loom_low_source_representation_invalid_provider(
         provider, "has invalid provider metadata");
   }
+  const bool has_operation_preparation =
+      provider->candidate_matcher.prepare_operation != NULL;
+  const bool has_candidate_matching =
+      provider->candidate_matcher.match_candidate != NULL;
+  if (has_operation_preparation != has_candidate_matching ||
+      (!has_operation_preparation &&
+       provider->candidate_matcher.user_data != NULL)) {
+    return loom_low_source_representation_invalid_provider(
+        provider, "has an incomplete candidate matcher");
+  }
   if ((provider->target_data_count != 0) != (provider->target_data != NULL) ||
       (provider->target_data_count != 0) !=
           (provider->target_data_stride != 0) ||
@@ -310,7 +320,8 @@ iree_status_t loom_low_source_representation_provider_verify(
       for (uint8_t prior = 0; prior < candidate_ordinal; ++prior) {
         const loom_low_source_representation_candidate_t* prior_candidate =
             &provider->candidates[group->candidate_start + prior];
-        if (candidate->predicate_index_plus_one ==
+        if (!has_candidate_matching &&
+            candidate->predicate_index_plus_one ==
                 prior_candidate->predicate_index_plus_one &&
             loom_low_source_representation_bindings_equal(provider, candidate,
                                                           prior_candidate)) {
@@ -319,6 +330,33 @@ iree_status_t loom_low_source_representation_provider_verify(
               "has duplicate simultaneously eligible representation tuples");
         }
       }
+    }
+
+    const bool uses_ranked_fallback = iree_any_bit_set(
+        group->flags, LOOM_LOW_SOURCE_REPRESENTATION_GROUP_RANKED_FALLBACK);
+    if (uses_ranked_fallback && !has_candidate_matching) {
+      return loom_low_source_representation_invalid_provider(
+          provider, "has a ranked group without a candidate matcher");
+    }
+    if (uses_ranked_fallback) {
+      for (uint8_t candidate_ordinal = 0;
+           candidate_ordinal < group->candidate_count; ++candidate_ordinal) {
+        const loom_low_source_representation_candidate_t* candidate =
+            &provider->candidates[group->candidate_start + candidate_ordinal];
+        for (uint8_t component = 0; component < group->component_count;
+             ++component) {
+          const loom_low_source_representation_binding_t binding =
+              provider->bindings[candidate->binding_start + component];
+          if (iree_any_bit_set(
+                  binding.flags,
+                  LOOM_LOW_SOURCE_REPRESENTATION_BINDING_CANONICAL)) {
+            return loom_low_source_representation_invalid_provider(
+                provider,
+                "mixes ranked fallback with static canonical bindings");
+          }
+        }
+      }
+      continue;
     }
 
     for (uint8_t component = 0; component < group->component_count;

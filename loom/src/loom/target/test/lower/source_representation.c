@@ -127,6 +127,74 @@ static const loom_low_source_representation_predicate_t kPredicates[] = {
     {.fn = loom_test_low_source_representation_alternate_enabled},
 };
 
+typedef struct loom_test_low_source_representation_operation_data_t {
+  // Normalized operation class captured once for all candidate matches.
+  loom_test_low_source_representation_operation_t operation;
+} loom_test_low_source_representation_operation_data_t;
+
+static iree_status_t loom_test_low_source_representation_prepare_operation(
+    void* user_data,
+    const loom_low_source_representation_environment_t* environment,
+    const loom_op_t* source_op, iree_arena_allocator_t* arena,
+    const void** out_operation_data) {
+  (void)user_data;
+  (void)environment;
+  loom_test_low_source_representation_operation_data_t* operation_data = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, sizeof(*operation_data),
+                                           (void**)&operation_data));
+  switch (source_op->kind) {
+    case LOOM_OP_TEST_ADDI:
+    case LOOM_OP_SCALAR_ADDI:
+      operation_data->operation =
+          LOOM_TEST_LOW_SOURCE_REPRESENTATION_OPERATION_ADDI;
+      break;
+    case LOOM_OP_TEST_CAST:
+      operation_data->operation =
+          LOOM_TEST_LOW_SOURCE_REPRESENTATION_OPERATION_CAST;
+      break;
+    default:
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "test source representation provider received operation kind %u",
+          source_op->kind);
+  }
+  *out_operation_data = operation_data;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_test_low_source_representation_match_candidate(
+    void* user_data,
+    const loom_low_source_representation_environment_t* environment,
+    const loom_op_t* source_op, const void* opaque_operation_data,
+    const void* opaque_target_data,
+    loom_low_source_representation_candidate_match_t* out_match) {
+  (void)user_data;
+  (void)environment;
+  (void)source_op;
+  const loom_test_low_source_representation_operation_data_t* operation_data =
+      (const loom_test_low_source_representation_operation_data_t*)
+          opaque_operation_data;
+  const loom_test_low_source_representation_target_data_t* target_data =
+      (const loom_test_low_source_representation_target_data_t*)
+          opaque_target_data;
+  if (operation_data == NULL || target_data == NULL) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "test source representation matching requires prepared operation and "
+        "target data");
+  }
+  const bool matches = operation_data->operation == target_data->operation;
+  *out_match = (loom_low_source_representation_candidate_match_t){
+      .fallback_rank = target_data->fallback_rank,
+      .target_variant = target_data->realization,
+      .rejection_bits = matches ? 0u : (uint32_t)1u << target_data->realization,
+      .rejection_rank =
+          matches ? 0u : (uint8_t)(target_data->fallback_rank + 1),
+      .matches = matches,
+  };
+  return iree_ok_status();
+}
+
 static const loom_low_source_representation_candidate_t kCandidates[] = {
     {
         .stable_key = UINT64_C(0x073f328929d07320),
@@ -209,10 +277,30 @@ static const loom_low_source_representation_operation_t kOperations[] = {
 };
 
 static const loom_test_low_source_representation_target_data_t kTargetData[] = {
-    {LOOM_TEST_LOW_SOURCE_REPRESENTATION_REALIZATION_ADDI_CANONICAL},
-    {LOOM_TEST_LOW_SOURCE_REPRESENTATION_REALIZATION_ADDI_ALTERNATE},
-    {LOOM_TEST_LOW_SOURCE_REPRESENTATION_REALIZATION_CAST_CANONICAL},
-    {LOOM_TEST_LOW_SOURCE_REPRESENTATION_REALIZATION_CAST_ALTERNATE},
+    {
+        .realization =
+            LOOM_TEST_LOW_SOURCE_REPRESENTATION_REALIZATION_ADDI_CANONICAL,
+        .fallback_rank = 1,
+        .operation = LOOM_TEST_LOW_SOURCE_REPRESENTATION_OPERATION_ADDI,
+    },
+    {
+        .realization =
+            LOOM_TEST_LOW_SOURCE_REPRESENTATION_REALIZATION_ADDI_ALTERNATE,
+        .fallback_rank = 0,
+        .operation = LOOM_TEST_LOW_SOURCE_REPRESENTATION_OPERATION_ADDI,
+    },
+    {
+        .realization =
+            LOOM_TEST_LOW_SOURCE_REPRESENTATION_REALIZATION_CAST_CANONICAL,
+        .fallback_rank = 1,
+        .operation = LOOM_TEST_LOW_SOURCE_REPRESENTATION_OPERATION_CAST,
+    },
+    {
+        .realization =
+            LOOM_TEST_LOW_SOURCE_REPRESENTATION_REALIZATION_CAST_ALTERNATE,
+        .fallback_rank = 0,
+        .operation = LOOM_TEST_LOW_SOURCE_REPRESENTATION_OPERATION_CAST,
+    },
 };
 
 static iree_status_t loom_test_low_source_representation_seed_value(
@@ -279,6 +367,13 @@ const loom_low_source_representation_provider_t
         .recipe_entries = kRecipeEntries,
         .predicate_count = IREE_ARRAYSIZE(kPredicates),
         .predicates = kPredicates,
+        .candidate_matcher =
+            {
+                .prepare_operation =
+                    loom_test_low_source_representation_prepare_operation,
+                .match_candidate =
+                    loom_test_low_source_representation_match_candidate,
+            },
         .target_data_stride = sizeof(kTargetData[0]),
         .target_data_count = IREE_ARRAYSIZE(kTargetData),
         .target_data = (const uint8_t*)kTargetData,

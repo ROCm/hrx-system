@@ -373,6 +373,12 @@ const loom_source_dataflow_result_t* loom_target_low_legality_source_dataflow(
   return context->options->source_dataflow;
 }
 
+const loom_low_source_representation_plan_t*
+loom_target_low_legality_source_representation_plan(
+    const loom_target_low_legality_context_t* context) {
+  return context->options->source_representation_plan;
+}
+
 const loom_view_region_table_t* loom_target_low_legality_view_regions(
     const loom_target_low_legality_context_t* context) {
   return context->options->view_regions;

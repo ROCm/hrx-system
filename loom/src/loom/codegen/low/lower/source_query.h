@@ -25,6 +25,8 @@ extern "C" {
 
 typedef struct loom_low_lower_source_query_scope_t
     loom_low_lower_source_query_scope_t;
+typedef struct loom_low_source_representation_plan_t
+    loom_low_source_representation_plan_t;
 typedef struct loom_source_program_t loom_source_program_t;
 
 // Populates a target contract query environment from |context|.
@@ -82,6 +84,12 @@ loom_low_lower_source_query_scope_descriptor_set(
 // Returns the retained physical source-value dataflow result, or NULL when the
 // active policy has no provider.
 const loom_source_dataflow_result_t* loom_low_lower_source_query_scope_dataflow(
+    const loom_low_lower_source_query_scope_t* scope);
+
+// Returns the retained physical source-representation plan, or NULL when the
+// active policy has no provider.
+const loom_low_source_representation_plan_t*
+loom_low_lower_source_query_scope_representation_plan(
     const loom_low_lower_source_query_scope_t* scope);
 
 // Returns the lazily analyzed source view regions owned by |scope|.
