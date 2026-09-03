@@ -552,6 +552,9 @@ NPU2_ARRAY_FAMILY = ArrayFamily(
     column_shift=25,
     row_shift=20,
     address_generation_granularity_bits=32,
+    # MLIR-AIE's column-wise control/TCT routing uses this deadlock-free packet
+    # identity set for every column; the shim identity fits the 4-bit TCT actor.
+    controller_ids=(15, 26, 27, 29, 30, 31),
     tiles=(
         TileFacts(
             kind=TileKind.SHIM_NOC,
