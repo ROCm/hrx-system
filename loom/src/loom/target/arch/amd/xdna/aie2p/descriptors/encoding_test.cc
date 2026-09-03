@@ -271,6 +271,58 @@ TEST(DescriptorEncodingTest, DirectBranchesMatchOracleInstructionEncodings) {
   }
 }
 
+TEST(DescriptorEncodingTest, LocksMatchOracleInstructionEncodings) {
+  struct TestCase {
+    std::string_view descriptor_key;
+    std::vector<std::string_view> registers;
+    std::vector<int64_t> immediates;
+    std::array<uint8_t, 4> expected;
+  };
+  const TestCase test_cases[] = {
+      {"amd.xdna.aie2p.lock.acquire.register",
+       {"r1", "r27"},
+       {},
+       {0x18, 0xB8, 0x53, 0x10}},
+      {"amd.xdna.aie2p.lock.acquire.immediate",
+       {"r26"},
+       {4},
+       {0x18, 0xA8, 0x83, 0x10}},
+      {"amd.xdna.aie2p.lock.release.register",
+       {"r2", "r3"},
+       {},
+       {0x18, 0x38, 0x90, 0x10}},
+      {"amd.xdna.aie2p.lock.release.immediate",
+       {"r26"},
+       {63},
+       {0x18, 0xA8, 0xE1, 0x17}},
+      {"amd.xdna.aie2p.lock.acquire.conditional.register",
+       {"r2", "r27"},
+       {},
+       {0x18, 0xB8, 0x97, 0x10}},
+      {"amd.xdna.aie2p.lock.acquire.conditional.immediate",
+       {"r2"},
+       {0},
+       {0x18, 0x28, 0x06, 0x10}},
+      {"amd.xdna.aie2p.lock.release.conditional.register",
+       {"r2", "r6"},
+       {},
+       {0x18, 0x68, 0x94, 0x10}},
+      {"amd.xdna.aie2p.lock.release.conditional.immediate",
+       {"r5"},
+       {12},
+       {0x18, 0x58, 0x84, 0x11}},
+  };
+
+  for (const TestCase& test_case : test_cases) {
+    std::vector<uint8_t> program;
+    IREE_ASSERT_OK(
+        EncodeSingleDescriptor(test_case.descriptor_key, test_case.registers,
+                               test_case.immediates, "I32_ALU", &program));
+    EXPECT_EQ(program, std::vector<uint8_t>(test_case.expected.begin(),
+                                            test_case.expected.end()));
+  }
+}
+
 TEST(DescriptorEncodingTest, I16MultiplyMatchesOracleInstructionEncodings) {
   const loom_low_descriptor_set_t* descriptor_set =
       loom_aie2p_core_descriptor_set();

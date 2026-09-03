@@ -34,12 +34,14 @@ from loom.target.arch.amd.xdna.aie2p.core_schedule_data import CORE_SCHEDULE_TAB
 from loom.target.low_descriptors import (
     ConstraintKind,
     DescriptorFlag,
+    Effect,
     EffectFlag,
     EffectKind,
     ImmediateFlag,
     ImmediateKind,
     InstructionClass,
     IssueUseKind,
+    MemorySpace,
     OperandFlag,
     OperandRole,
     RegClassAltFlag,
@@ -209,6 +211,56 @@ def test_direct_branch_forms_retain_exact_control_contracts() -> None:
         assert schedule_class.flags == (ScheduleClassFlag.CONTROL,)
         assert schedule_class.instruction_classes == (InstructionClass.CONTROL,)
         assert _INSTRUCTION_ENCODINGS[form_name].delay_slot_count == 5
+
+
+def test_lock_forms_retain_counting_semaphore_contracts() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+    expected = {
+        "amd.xdna.aie2p.lock.acquire.immediate": ("acq", 1, 1),
+        "amd.xdna.aie2p.lock.acquire.register": ("acq.reg", 2, 0),
+        "amd.xdna.aie2p.lock.acquire.conditional.immediate": (
+            "acq.cond",
+            2,
+            1,
+        ),
+        "amd.xdna.aie2p.lock.acquire.conditional.register": (
+            "acq.cond.reg",
+            3,
+            0,
+        ),
+        "amd.xdna.aie2p.lock.release.immediate": ("rel", 1, 1),
+        "amd.xdna.aie2p.lock.release.register": ("rel.reg", 2, 0),
+        "amd.xdna.aie2p.lock.release.conditional.immediate": (
+            "rel.cond",
+            2,
+            1,
+        ),
+        "amd.xdna.aie2p.lock.release.conditional.register": (
+            "rel.cond.reg",
+            3,
+            0,
+        ),
+    }
+    for key, (mnemonic, operand_count, immediate_count) in expected.items():
+        descriptor = descriptors[key]
+        assert descriptor.asm_forms[0].mnemonic == mnemonic
+        assert len(descriptor.operands) == operand_count
+        assert len(descriptor.immediates) == immediate_count
+        assert descriptor.effects == (
+            Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),
+        )
+        assert DescriptorFlag.SIDE_EFFECTING in descriptor.flags
+        assert DescriptorFlag.DEAD_REMOVABLE not in descriptor.flags
+        if immediate_count:
+            lock_id = descriptor.immediates[0]
+            assert lock_id.field_name == "id"
+            assert lock_id.kind is ImmediateKind.UNSIGNED
+            assert lock_id.bit_width == 6
+            assert lock_id.signed_min == 0
+            assert lock_id.unsigned_max == 63
 
 
 def test_bundle_resources_exactly_model_every_extendable_physical_slot_set() -> None:
