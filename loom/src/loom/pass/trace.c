@@ -15,8 +15,9 @@ void loom_pass_trace_options_initialize(
     loom_pass_trace_options_t* out_options) {
   *out_options = (loom_pass_trace_options_t){
       .format = LOOM_PASS_TRACE_FORMAT_TEXT,
-      .print_options = {.flags = LOOM_TEXT_PRINT_DEFAULT},
   };
+  out_options->print_options.flags =
+      LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_PREFER_LOW_ASM;
 }
 
 iree_status_t loom_pass_trace_parse_format(

@@ -267,6 +267,13 @@ class PassTraceTest : public ::testing::Test {
   loom_context_t context_ = {};
 };
 
+TEST(PassTraceOptionsTest, PrefersTargetLowAssembly) {
+  loom_pass_trace_options_t options = {};
+  loom_pass_trace_options_initialize(&options);
+  EXPECT_TRUE(iree_any_bit_set(options.print_options.flags,
+                               LOOM_TEXT_PRINT_PREFER_LOW_ASM));
+}
+
 TEST_F(PassTraceTest, ProjectsMatchedSnapshotAndReleasesIt) {
   ModulePtr source_module = BuildSourceModule(1);
   ASSERT_NE(source_module, nullptr);
