@@ -906,33 +906,53 @@ TEST(ReplayDumpTest, EmitsQueueTransferRanges) {
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
-  iree_hal_replay_device_queue_update_payload_t payload = {};
-  payload.target_ref.buffer_id = 7;
-  payload.target_ref.length = 4;
-  payload.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
-  payload.source_offset = 3;
-  payload.data_length = 4;
+  iree_hal_replay_provisioned_queue_object_payload_t queue_payload = {};
+  queue_payload.family_ordinal = 2;
+  queue_payload.queue_ordinal = 1;
+  iree_const_byte_span_t queue_iovec =
+      iree_make_const_byte_span(&queue_payload, sizeof(queue_payload));
+  iree_hal_replay_file_record_metadata_t metadata = {};
+  metadata.sequence_ordinal = 0;
+  metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT;
+  metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT;
+  metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE;
+  metadata.device_id = 4;
+  metadata.object_id = 9;
+  IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
+      writer, &metadata, 1, &queue_iovec, nullptr));
+
+  iree_hal_replay_queue_transfer_payload_t payload = {};
   payload.wait_semaphore_count = 1;
   payload.signal_semaphore_count = 1;
+  payload.operation_count = 1;
+  payload.data_length = 4;
   iree_hal_replay_semaphore_timepoint_payload_t wait = {};
   wait.semaphore_id = 42;
   wait.value = 1;
   iree_hal_replay_semaphore_timepoint_payload_t signal = {};
   signal.semaphore_id = 43;
   signal.value = 2;
+  iree_hal_replay_queue_transfer_operation_payload_t operation = {};
+  operation.type = IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPDATE;
+  operation.target_ref.buffer_id = 7;
+  operation.target_ref.length = 4;
+  operation.data_length = 4;
   const uint8_t data[] = {0x10, 0x11, 0x12, 0x13};
-  iree_const_byte_span_t iovecs[4] = {
+  iree_const_byte_span_t iovecs[5] = {
       iree_make_const_byte_span(&payload, sizeof(payload)),
       iree_make_const_byte_span(&wait, sizeof(wait)),
       iree_make_const_byte_span(&signal, sizeof(signal)),
+      iree_make_const_byte_span(&operation, sizeof(operation)),
       iree_make_const_byte_span(data, sizeof(data)),
   };
-  iree_hal_replay_file_record_metadata_t metadata = {};
-  metadata.sequence_ordinal = 0;
+  metadata = {};
+  metadata.sequence_ordinal = 1;
   metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
-  metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_UPDATE;
-  metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE;
-  metadata.operation_code = IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_UPDATE;
+  metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER;
+  metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE;
+  metadata.device_id = 4;
+  metadata.object_id = 9;
+  metadata.operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TRANSFER;
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
       writer, &metadata, IREE_ARRAYSIZE(iovecs), iovecs, nullptr));
   IREE_ASSERT_OK(iree_hal_replay_file_writer_close(writer));
@@ -943,10 +963,14 @@ TEST(ReplayDumpTest, EmitsQueueTransferRanges) {
   std::string text_output;
   IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
                                     &text_options, &text_output));
-  EXPECT_THAT(text_output, HasSubstr("payload=device_queue_update"));
+  EXPECT_THAT(text_output, HasSubstr("payload=provisioned_queue_object"));
+  EXPECT_THAT(text_output, HasSubstr("family_ordinal=2 queue_ordinal=1"));
+  EXPECT_THAT(text_output, HasSubstr("payload=queue_transfer"));
   EXPECT_THAT(text_output, HasSubstr("wait_range="));
   EXPECT_THAT(text_output, HasSubstr("signal_range="));
+  EXPECT_THAT(text_output, HasSubstr("operations_range="));
   EXPECT_THAT(text_output, HasSubstr("data_range="));
+  EXPECT_THAT(text_output, HasSubstr("type=update(2)"));
 
   iree_hal_replay_dump_options_t json_options =
       iree_hal_replay_dump_options_default();
@@ -955,10 +979,15 @@ TEST(ReplayDumpTest, EmitsQueueTransferRanges) {
   IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
                                     &json_options, &json_output));
   EXPECT_THAT(json_output,
-              HasSubstr("\"payload_type\":\"device_queue_update\""));
+              HasSubstr("\"payload_type\":\"provisioned_queue_object\""));
+  EXPECT_THAT(json_output, HasSubstr("\"family_ordinal\":2"));
+  EXPECT_THAT(json_output, HasSubstr("\"queue_ordinal\":1"));
+  EXPECT_THAT(json_output, HasSubstr("\"payload_type\":\"queue_transfer\""));
   EXPECT_THAT(json_output, HasSubstr("\"wait_semaphores_range\""));
   EXPECT_THAT(json_output, HasSubstr("\"signal_semaphores_range\""));
+  EXPECT_THAT(json_output, HasSubstr("\"operations_range\""));
   EXPECT_THAT(json_output, HasSubstr("\"data_range\""));
+  EXPECT_THAT(json_output, HasSubstr("\"type_name\":\"update\""));
 }
 
 TEST(ReplayDumpTest, EmitsCommandBufferTransferRanges) {

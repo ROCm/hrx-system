@@ -72,6 +72,11 @@ iree_status_t iree_hal_replay_recorder_register_semaphore(
     iree_hal_replay_pending_record_t* pending_record,
     iree_hal_semaphore_t* semaphore, iree_hal_replay_object_id_t semaphore_id);
 
+// Returns the captured object id for |semaphore|, or NONE when the semaphore
+// was not created through |recorder|.
+iree_hal_replay_object_id_t iree_hal_replay_recorder_semaphore_id_or_none(
+    iree_hal_replay_recorder_t* recorder, iree_hal_semaphore_t* semaphore);
+
 // Marks |pending_record| as a captured operation that cannot be replayed.
 void iree_hal_replay_recorder_mark_unsupported(
     iree_hal_replay_pending_record_t* pending_record);

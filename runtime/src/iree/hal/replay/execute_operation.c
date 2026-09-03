@@ -99,6 +99,163 @@ static iree_status_t iree_hal_replay_executor_make_direct_atomic_buffer_ref(
   return iree_ok_status();
 }
 
+static bool iree_hal_replay_buffer_ref_payload_is_empty(
+    const iree_hal_replay_buffer_ref_payload_t* payload) {
+  return payload->buffer_id == IREE_HAL_REPLAY_OBJECT_ID_NONE &&
+         payload->offset == 0 && payload->length == 0 &&
+         payload->buffer_slot == 0 && payload->reserved0 == 0;
+}
+
+static iree_status_t iree_hal_replay_executor_make_direct_transfer_buffer_ref(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_buffer_ref_payload_t* payload,
+    iree_hal_buffer_ref_t* out_ref) {
+  if (IREE_UNLIKELY(payload->reserved0 != 0)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay transfer buffer reference reserved fields must be zero");
+  }
+  if (IREE_UNLIKELY(payload->buffer_id == IREE_HAL_REPLAY_OBJECT_ID_NONE ||
+                    payload->buffer_slot != 0)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay queue transfer requires a direct buffer reference");
+  }
+  return iree_hal_replay_executor_make_buffer_ref(executor, payload, out_ref);
+}
+
+static iree_status_t iree_hal_replay_executor_transfer_data_span(
+    iree_const_byte_span_t data,
+    const iree_hal_replay_queue_transfer_operation_payload_t* payload,
+    iree_const_byte_span_t* out_span) {
+  *out_span = iree_make_const_byte_span(NULL, 0);
+  if (IREE_UNLIKELY(payload->data_offset > data.data_length ||
+                    payload->data_length >
+                        data.data_length - payload->data_offset)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay queue transfer data range is out of bounds");
+  }
+  *out_span = iree_make_const_byte_span(
+      data.data + (iree_host_size_t)payload->data_offset,
+      (iree_host_size_t)payload->data_length);
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_replay_executor_validate_empty_transfer_operation(
+    const iree_hal_replay_queue_transfer_operation_payload_t* payload) {
+  if (IREE_UNLIKELY(
+          payload->flags != 0 ||
+          !iree_hal_replay_buffer_ref_payload_is_empty(&payload->source_ref) ||
+          !iree_hal_replay_buffer_ref_payload_is_empty(&payload->target_ref) ||
+          payload->data_offset != 0 || payload->data_length != 0)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay zero-length transfer operation has live payload fields");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_replay_executor_validate_transfer_operation(
+    const iree_hal_replay_queue_transfer_operation_payload_t* payload,
+    iree_const_byte_span_t data, iree_host_size_t* inout_download_data_length) {
+  if (IREE_UNLIKELY(payload->reserved0 != 0)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay queue transfer operation reserved fields must be zero");
+  }
+
+  switch (payload->type) {
+    case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_FILL: {
+      if (payload->target_ref.length == 0) {
+        return iree_hal_replay_executor_validate_empty_transfer_operation(
+            payload);
+      }
+      if (IREE_UNLIKELY(!iree_hal_replay_buffer_ref_payload_is_empty(
+                            &payload->source_ref) ||
+                        (payload->data_length != 1 &&
+                         payload->data_length != 2 &&
+                         payload->data_length != 4))) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay fill operation payload is invalid");
+      }
+      iree_const_byte_span_t fill_data;
+      return iree_hal_replay_executor_transfer_data_span(data, payload,
+                                                         &fill_data);
+    }
+    case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPDATE: {
+      if (payload->target_ref.length == 0) {
+        return iree_hal_replay_executor_validate_empty_transfer_operation(
+            payload);
+      }
+      if (IREE_UNLIKELY(!iree_hal_replay_buffer_ref_payload_is_empty(
+                            &payload->source_ref) ||
+                        payload->data_length != payload->target_ref.length)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay update operation payload is invalid");
+      }
+      iree_const_byte_span_t update_data;
+      return iree_hal_replay_executor_transfer_data_span(data, payload,
+                                                         &update_data);
+    }
+    case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_COPY:
+      if (payload->source_ref.length == 0 && payload->target_ref.length == 0) {
+        return iree_hal_replay_executor_validate_empty_transfer_operation(
+            payload);
+      }
+      if (IREE_UNLIKELY(
+              payload->source_ref.length != payload->target_ref.length ||
+              payload->data_offset != 0 || payload->data_length != 0)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay copy operation payload is invalid");
+      }
+      return iree_ok_status();
+    case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPLOAD: {
+      if (payload->target_ref.length == 0) {
+        return iree_hal_replay_executor_validate_empty_transfer_operation(
+            payload);
+      }
+      if (IREE_UNLIKELY(payload->flags != 0 ||
+                        !iree_hal_replay_buffer_ref_payload_is_empty(
+                            &payload->source_ref) ||
+                        payload->data_length != payload->target_ref.length)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay upload operation payload is invalid");
+      }
+      iree_const_byte_span_t upload_data;
+      return iree_hal_replay_executor_transfer_data_span(data, payload,
+                                                         &upload_data);
+    }
+    case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_DOWNLOAD:
+      if (payload->source_ref.length == 0) {
+        return iree_hal_replay_executor_validate_empty_transfer_operation(
+            payload);
+      }
+      if (IREE_UNLIKELY(payload->flags != 0 ||
+                        !iree_hal_replay_buffer_ref_payload_is_empty(
+                            &payload->target_ref) ||
+                        payload->data_offset != 0 ||
+                        payload->data_length != 0 ||
+                        payload->source_ref.length > IREE_HOST_SIZE_MAX ||
+                        !iree_host_size_checked_add(
+                            *inout_download_data_length,
+                            (iree_host_size_t)payload->source_ref.length,
+                            inout_download_data_length))) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay download operation payload is invalid");
+      }
+      return iree_ok_status();
+    case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_NONE:
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "replay queue transfer operation type is none");
+    default:
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "replay queue transfer operation type %u is unsupported",
+          payload->type);
+  }
+}
+
 static iree_status_t iree_hal_replay_executor_scope_event(
     iree_hal_replay_executor_t* executor,
     const iree_hal_replay_file_record_t* record,
@@ -134,6 +291,214 @@ static iree_status_t iree_hal_replay_executor_scope_event(
           (iree_host_size_t)payload.name_length),
   };
   return callback.fn(callback.user_data, &event);
+}
+
+static iree_status_t iree_hal_replay_executor_queue_transfer(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_file_record_t* record) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER,
+      sizeof(iree_hal_replay_queue_transfer_payload_t)));
+  iree_hal_replay_queue_transfer_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+  if (IREE_UNLIKELY(payload.wait_semaphore_count > IREE_HOST_SIZE_MAX ||
+                    payload.signal_semaphore_count > IREE_HOST_SIZE_MAX ||
+                    payload.operation_count > IREE_HOST_SIZE_MAX ||
+                    payload.data_length > IREE_HOST_SIZE_MAX)) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "replay queue transfer count exceeds host size");
+  }
+
+  const iree_host_size_t operation_count =
+      (iree_host_size_t)payload.operation_count;
+  iree_host_size_t operation_payloads_size = 0;
+  iree_host_size_t trailing_payload_size = 0;
+  if (IREE_UNLIKELY(
+          !iree_host_size_checked_mul(
+              operation_count,
+              sizeof(iree_hal_replay_queue_transfer_operation_payload_t),
+              &operation_payloads_size) ||
+          !iree_host_size_checked_add(operation_payloads_size,
+                                      (iree_host_size_t)payload.data_length,
+                                      &trailing_payload_size))) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "replay queue transfer payload size overflow");
+  }
+
+  iree_hal_replay_object_entry_t* queue_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
+      executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      &queue_entry));
+
+  iree_hal_replay_semaphore_list_storage_t wait_storage;
+  iree_hal_replay_semaphore_list_storage_t signal_storage;
+  iree_const_byte_span_t trailing_payload;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_make_queue_semaphore_lists(
+      executor, record, sizeof(payload), payload.wait_semaphore_count,
+      payload.signal_semaphore_count, trailing_payload_size, &wait_storage,
+      &signal_storage, &trailing_payload));
+  const uint8_t* operation_payloads = trailing_payload.data;
+  const iree_const_byte_span_t data =
+      iree_make_const_byte_span(trailing_payload.data + operation_payloads_size,
+                                (iree_host_size_t)payload.data_length);
+
+  iree_status_t status = iree_ok_status();
+  iree_host_size_t download_data_length = 0;
+  for (iree_host_size_t i = 0; i < operation_count && iree_status_is_ok(status);
+       ++i) {
+    iree_hal_replay_queue_transfer_operation_payload_t operation_payload;
+    memcpy(&operation_payload,
+           operation_payloads + i * sizeof(operation_payload),
+           sizeof(operation_payload));
+    status = iree_hal_replay_executor_validate_transfer_operation(
+        &operation_payload, data, &download_data_length);
+    if (!iree_status_is_ok(status)) {
+      status = iree_status_annotate_f(status, "transfer operation %" PRIhsz, i);
+    }
+  }
+
+  iree_hal_transfer_operation_t* operations = NULL;
+  iree_host_size_t operations_size = 0;
+  if (iree_status_is_ok(status) && operation_count != 0 &&
+      IREE_UNLIKELY(!iree_host_size_checked_mul(
+          operation_count, sizeof(*operations), &operations_size))) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "replay transfer operation storage overflow");
+  }
+  if (iree_status_is_ok(status) && operations_size != 0) {
+    status = iree_allocator_malloc(executor->host_allocator, operations_size,
+                                   (void**)&operations);
+    if (iree_status_is_ok(status)) memset(operations, 0, operations_size);
+  }
+  uint8_t* download_data = NULL;
+  if (iree_status_is_ok(status) && download_data_length != 0) {
+    status = iree_allocator_malloc(
+        executor->host_allocator, download_data_length, (void**)&download_data);
+  }
+
+  iree_host_size_t download_data_offset = 0;
+  for (iree_host_size_t i = 0; i < operation_count && iree_status_is_ok(status);
+       ++i) {
+    iree_hal_replay_queue_transfer_operation_payload_t operation_payload;
+    memcpy(&operation_payload,
+           operation_payloads + i * sizeof(operation_payload),
+           sizeof(operation_payload));
+    iree_hal_transfer_operation_t* operation = &operations[i];
+    iree_hal_buffer_ref_t source_ref = {0};
+    iree_hal_buffer_ref_t target_ref = {0};
+    iree_const_byte_span_t operation_data = iree_make_const_byte_span(NULL, 0);
+    switch (operation_payload.type) {
+      case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_FILL:
+        operation->type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+        if (operation_payload.target_ref.length == 0) break;
+        status = iree_hal_replay_executor_make_direct_transfer_buffer_ref(
+            executor, &operation_payload.target_ref, &target_ref);
+        if (iree_status_is_ok(status)) {
+          status = iree_hal_replay_executor_transfer_data_span(
+              data, &operation_payload, &operation_data);
+        }
+        if (iree_status_is_ok(status)) {
+          operation->fill.target_buffer = target_ref.buffer;
+          operation->fill.target_offset = target_ref.offset;
+          operation->fill.length = target_ref.length;
+          operation->fill.pattern = operation_data.data;
+          operation->fill.pattern_length = operation_data.data_length;
+          operation->fill.flags = operation_payload.flags;
+        }
+        break;
+      case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPDATE:
+        operation->type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
+        if (operation_payload.target_ref.length == 0) break;
+        status = iree_hal_replay_executor_make_direct_transfer_buffer_ref(
+            executor, &operation_payload.target_ref, &target_ref);
+        if (iree_status_is_ok(status)) {
+          status = iree_hal_replay_executor_transfer_data_span(
+              data, &operation_payload, &operation_data);
+        }
+        if (iree_status_is_ok(status)) {
+          operation->update.source_buffer = operation_data.data;
+          operation->update.target_buffer = target_ref.buffer;
+          operation->update.target_offset = target_ref.offset;
+          operation->update.length = target_ref.length;
+          operation->update.flags = operation_payload.flags;
+        }
+        break;
+      case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_COPY:
+        operation->type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
+        if (operation_payload.source_ref.length == 0) break;
+        status = iree_hal_replay_executor_make_direct_transfer_buffer_ref(
+            executor, &operation_payload.source_ref, &source_ref);
+        if (iree_status_is_ok(status)) {
+          status = iree_hal_replay_executor_make_direct_transfer_buffer_ref(
+              executor, &operation_payload.target_ref, &target_ref);
+        }
+        if (iree_status_is_ok(status)) {
+          operation->copy.source_buffer = source_ref.buffer;
+          operation->copy.source_offset = source_ref.offset;
+          operation->copy.target_buffer = target_ref.buffer;
+          operation->copy.target_offset = target_ref.offset;
+          operation->copy.length = source_ref.length;
+          operation->copy.flags = operation_payload.flags;
+        }
+        break;
+      case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPLOAD:
+        operation->type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+        if (operation_payload.target_ref.length == 0) break;
+        status = iree_hal_replay_executor_make_direct_transfer_buffer_ref(
+            executor, &operation_payload.target_ref, &target_ref);
+        if (iree_status_is_ok(status)) {
+          status = iree_hal_replay_executor_transfer_data_span(
+              data, &operation_payload, &operation_data);
+        }
+        if (iree_status_is_ok(status)) {
+          operation->upload.source = operation_data.data;
+          operation->upload.target_buffer = target_ref.buffer;
+          operation->upload.target_offset = target_ref.offset;
+          operation->upload.length = target_ref.length;
+        }
+        break;
+      case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_DOWNLOAD:
+        operation->type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+        if (operation_payload.source_ref.length == 0) break;
+        status = iree_hal_replay_executor_make_direct_transfer_buffer_ref(
+            executor, &operation_payload.source_ref, &source_ref);
+        if (iree_status_is_ok(status)) {
+          operation->download.source_buffer = source_ref.buffer;
+          operation->download.source_offset = source_ref.offset;
+          operation->download.target = download_data + download_data_offset;
+          operation->download.length = source_ref.length;
+          download_data_offset += (iree_host_size_t)source_ref.length;
+        }
+        break;
+      default:
+        status = iree_make_status(
+            IREE_STATUS_DATA_LOSS,
+            "validated replay queue transfer operation type changed");
+        break;
+    }
+    if (!iree_status_is_ok(status)) {
+      status = iree_status_annotate_f(status, "transfer operation %" PRIhsz, i);
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_transfer(queue_entry->value.queue,
+                                     wait_storage.list, signal_storage.list,
+                                     operation_count, operations);
+  }
+  if (iree_status_is_ok(status) && signal_storage.list.count != 0) {
+    status = iree_hal_semaphore_list_wait(signal_storage.list,
+                                          iree_infinite_timeout(),
+                                          IREE_ASYNC_WAIT_FLAG_NONE);
+  }
+
+  iree_allocator_free(executor->host_allocator, download_data);
+  iree_allocator_free(executor->host_allocator, operations);
+  iree_hal_replay_semaphore_list_storage_deinitialize(&signal_storage,
+                                                      executor->host_allocator);
+  iree_hal_replay_semaphore_list_storage_deinitialize(&wait_storage,
+                                                      executor->host_allocator);
+  return status;
 }
 
 static iree_status_t iree_hal_replay_executor_queue_alloca(
@@ -1271,6 +1636,8 @@ iree_status_t iree_hal_replay_executor_replay_operation(
     case IREE_HAL_REPLAY_OPERATION_CODE_BUFFER_FLUSH_RANGE:
     case IREE_HAL_REPLAY_OPERATION_CODE_BUFFER_UNMAP_RANGE:
       return iree_hal_replay_executor_replay_object_operation(executor, record);
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TRANSFER:
+      return iree_hal_replay_executor_queue_transfer(executor, record);
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ALLOCA:
       return iree_hal_replay_executor_queue_alloca(executor, record);
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_DEALLOCA:

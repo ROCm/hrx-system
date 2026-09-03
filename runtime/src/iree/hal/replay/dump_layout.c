@@ -96,6 +96,26 @@ const char* iree_hal_replay_dump_atomic_rmw_operation_string(
   }
 }
 
+const char* iree_hal_replay_dump_queue_transfer_operation_type_string(
+    iree_hal_replay_queue_transfer_operation_type_t operation_type) {
+  switch (operation_type) {
+    case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_NONE:
+      return "none";
+    case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_FILL:
+      return "fill";
+    case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPDATE:
+      return "update";
+    case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_COPY:
+      return "copy";
+    case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPLOAD:
+      return "upload";
+    case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_DOWNLOAD:
+      return "download";
+    default:
+      return "unknown";
+  }
+}
+
 iree_hal_replay_file_range_t iree_hal_replay_dump_payload_subrange(
     const iree_hal_replay_file_range_t* payload_range,
     iree_host_size_t payload_offset, iree_host_size_t payload_length) {
@@ -360,6 +380,71 @@ iree_status_t iree_hal_replay_dump_queue_payload_layout(
       offset != record->payload.data_length) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "replay queue payload length mismatch");
+  }
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_replay_dump_queue_transfer_layout(
+    const iree_hal_replay_file_record_t* record,
+    const iree_hal_replay_queue_transfer_payload_t* payload,
+    iree_hal_replay_dump_queue_transfer_layout_t* out_layout) {
+  memset(out_layout, 0, sizeof(*out_layout));
+  if (payload->operation_count > IREE_HOST_SIZE_MAX ||
+      payload->data_length > IREE_HOST_SIZE_MAX ||
+      !iree_host_size_checked_mul(
+          (iree_host_size_t)payload->operation_count,
+          sizeof(iree_hal_replay_queue_transfer_operation_payload_t),
+          &out_layout->operation_payloads_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "replay queue transfer payload size overflow");
+  }
+  iree_host_size_t trailing_payload_size = 0;
+  if (!iree_host_size_checked_add(out_layout->operation_payloads_size,
+                                  (iree_host_size_t)payload->data_length,
+                                  &trailing_payload_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "replay queue transfer payload length overflow");
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
+      record, sizeof(*payload), payload->wait_semaphore_count,
+      payload->signal_semaphore_count, trailing_payload_size,
+      &out_layout->queue));
+  out_layout->operation_payloads_offset =
+      out_layout->queue.trailing_payload_offset;
+  out_layout->data_offset = out_layout->operation_payloads_offset +
+                            out_layout->operation_payloads_size;
+  out_layout->data_size = (iree_host_size_t)payload->data_length;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_replay_dump_read_queue_transfer_operation(
+    const iree_hal_replay_file_record_t* record,
+    const iree_hal_replay_dump_queue_transfer_layout_t* layout,
+    iree_host_size_t operation_ordinal,
+    iree_hal_replay_queue_transfer_operation_payload_t* out_operation) {
+  const iree_host_size_t operation_count =
+      layout->operation_payloads_size /
+      sizeof(iree_hal_replay_queue_transfer_operation_payload_t);
+  if (IREE_UNLIKELY(operation_ordinal >= operation_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "replay queue transfer operation ordinal out of "
+                            "range");
+  }
+  memcpy(out_operation,
+         record->payload.data + layout->operation_payloads_offset +
+             operation_ordinal * sizeof(*out_operation),
+         sizeof(*out_operation));
+  if (IREE_UNLIKELY(out_operation->reserved0 != 0)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay queue transfer operation reserved fields must be zero");
+  }
+  if (IREE_UNLIKELY(out_operation->data_offset > layout->data_size ||
+                    out_operation->data_length >
+                        layout->data_size - out_operation->data_offset)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay queue transfer data range is out of bounds");
   }
   return iree_ok_status();
 }

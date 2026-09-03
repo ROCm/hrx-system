@@ -72,6 +72,7 @@ enum iree_hal_replay_object_type_e {
   IREE_HAL_REPLAY_OBJECT_TYPE_FILE = 8u,
   IREE_HAL_REPLAY_OBJECT_TYPE_CHANNEL = 10u,
   IREE_HAL_REPLAY_OBJECT_TYPE_HOST_CALL = 11u,
+  IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE = 12u,
 };
 
 // High-level HAL API operation kind.
@@ -148,6 +149,8 @@ enum iree_hal_replay_operation_code_e {
   IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_INFO = 501u,
   IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_PARAMETERS = 502u,
   IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_LOOKUP_FUNCTION_BY_NAME = 503u,
+
+  IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TRANSFER = 600u,
 };
 
 // Producer-defined payload schema stored in record headers.
@@ -183,6 +186,19 @@ enum iree_hal_replay_payload_type_e {
   IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT = 30u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE = 31u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW = 32u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT = 33u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER = 34u,
+};
+
+// Type of one operation in a captured exact-queue transfer transaction.
+typedef uint32_t iree_hal_replay_queue_transfer_operation_type_t;
+enum iree_hal_replay_queue_transfer_operation_type_e {
+  IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_NONE = 0u,
+  IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_FILL = 1u,
+  IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPDATE = 2u,
+  IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_COPY = 3u,
+  IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPLOAD = 4u,
+  IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_DOWNLOAD = 5u,
 };
 
 // Bitfield specifying properties of one replay scope marker.
@@ -413,6 +429,18 @@ typedef struct iree_hal_replay_semaphore_object_payload_t {
   uint64_t reserved0;
 } iree_hal_replay_semaphore_object_payload_t;
 
+// Payload describing a provisioned hardware queue exposed by a device.
+typedef struct iree_hal_replay_provisioned_queue_object_payload_t {
+  // Canonical queue family ordinal within the parent device.
+  uint32_t family_ordinal;
+  // Provisioned queue ordinal within the canonical queue family.
+  uint32_t queue_ordinal;
+  // Reserved for future provisioned queue metadata; must be zero.
+  uint64_t reserved0;
+} iree_hal_replay_provisioned_queue_object_payload_t;
+static_assert(sizeof(iree_hal_replay_provisioned_queue_object_payload_t) == 16,
+              "provisioned queue replay payload must be 16 bytes");
+
 // Payload describing a captured file object followed by file reference bytes.
 typedef struct iree_hal_replay_file_object_payload_t {
   // Queue family compatibility domain requested at import.
@@ -480,6 +508,41 @@ typedef struct iree_hal_replay_buffer_ref_payload_t {
   // Reserved for future buffer reference metadata; must be zero.
   uint32_t reserved0;
 } iree_hal_replay_buffer_ref_payload_t;
+
+// Header for an exact-queue transfer transaction followed by semaphore
+// timepoints, operation descriptors, and captured data bytes.
+typedef struct iree_hal_replay_queue_transfer_payload_t {
+  // Number of wait semaphore timepoints following this header.
+  uint64_t wait_semaphore_count;
+  // Number of signal semaphore timepoints following the wait timepoints.
+  uint64_t signal_semaphore_count;
+  // Number of transfer operation descriptors following the timepoints.
+  uint64_t operation_count;
+  // Total byte length of captured operation data following the descriptors.
+  uint64_t data_length;
+} iree_hal_replay_queue_transfer_payload_t;
+static_assert(sizeof(iree_hal_replay_queue_transfer_payload_t) == 32,
+              "queue transfer replay header must be 32 bytes");
+
+// One operation in a captured exact-queue transfer transaction.
+typedef struct iree_hal_replay_queue_transfer_operation_payload_t {
+  // iree_hal_replay_queue_transfer_operation_type_t value.
+  uint32_t type;
+  // Reserved for future operation metadata; must be zero.
+  uint32_t reserved0;
+  // Operation-specific HAL flag bits, or zero when the operation has no flags.
+  uint64_t flags;
+  // Source buffer range, or zero when the operation has no device source.
+  iree_hal_replay_buffer_ref_payload_t source_ref;
+  // Target buffer range, or zero when the operation has no device target.
+  iree_hal_replay_buffer_ref_payload_t target_ref;
+  // Byte offset into the transaction captured-data segment.
+  uint64_t data_offset;
+  // Byte length within the transaction captured-data segment.
+  uint64_t data_length;
+} iree_hal_replay_queue_transfer_operation_payload_t;
+static_assert(sizeof(iree_hal_replay_queue_transfer_operation_payload_t) == 96,
+              "queue transfer replay operation must be 96 bytes");
 
 // Serialized parameters for an atomic wait operation.
 typedef struct iree_hal_replay_atomic_wait_params_payload_t {

@@ -27,6 +27,11 @@ void iree_hal_replay_recorder_buffer_ref_make_payload(
 iree_hal_replay_object_id_t iree_hal_replay_recorder_buffer_id_or_none(
     iree_hal_buffer_t* buffer);
 
+// Returns the captured object id for |buffer| when it belongs to |recorder|,
+// or NONE for buffers outside that recording session.
+iree_hal_replay_object_id_t iree_hal_replay_recorder_find_buffer_id(
+    iree_hal_replay_recorder_t* recorder, iree_hal_buffer_t* buffer);
+
 iree_status_t iree_hal_replay_recorder_buffer_create_proxy(
     iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,
     iree_hal_replay_object_id_t buffer_id, iree_hal_device_t* placement_device,

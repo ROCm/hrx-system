@@ -128,6 +128,42 @@ static iree_status_t iree_hal_replay_dump_append_text_queue_atomic_header(
       layout->signal_payloads_size);
 }
 
+static iree_status_t iree_hal_replay_dump_append_text_queue_transfer_operations(
+    iree_string_builder_t* builder, const iree_hal_replay_file_record_t* record,
+    const iree_hal_replay_file_range_t* payload_range,
+    const iree_hal_replay_queue_transfer_payload_t* payload,
+    const iree_hal_replay_dump_queue_transfer_layout_t* layout) {
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, " operations=["));
+  for (iree_host_size_t i = 0; i < payload->operation_count; ++i) {
+    if (i > 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    iree_hal_replay_queue_transfer_operation_payload_t operation;
+    IREE_RETURN_IF_ERROR(iree_hal_replay_dump_read_queue_transfer_operation(
+        record, layout, i, &operation));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_format(
+            builder,
+            "{type=%s(%" PRIu32 ") flags=0x%016" PRIx64
+            " source={buffer_id=%" PRIu64 " offset=%" PRIu64 " length=%" PRIu64
+            " slot=%" PRIu32 "}"
+            " target={buffer_id=%" PRIu64 " offset=%" PRIu64 " length=%" PRIu64
+            " slot=%" PRIu32 "}"
+            " data_range=[%" PRIu64 ", +%" PRIu64 "]}",
+            iree_hal_replay_dump_queue_transfer_operation_type_string(
+                operation.type),
+            operation.type, operation.flags, operation.source_ref.buffer_id,
+            operation.source_ref.offset, operation.source_ref.length,
+            operation.source_ref.buffer_slot, operation.target_ref.buffer_id,
+            operation.target_ref.offset, operation.target_ref.length,
+            operation.target_ref.buffer_slot,
+            payload_range->offset + layout->data_offset + operation.data_offset,
+            operation.data_length));
+  }
+  return iree_string_builder_append_cstring(builder, "]");
+}
+
 static iree_status_t iree_hal_replay_dump_append_text_payload(
     iree_string_builder_t* builder, const iree_hal_replay_file_record_t* record,
     const iree_hal_replay_file_range_t* payload_range) {
@@ -309,6 +345,20 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           " flags=0x%016" PRIx64,
           payload.queue_family_affinity, payload.initial_value, payload.flags);
     }
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT: {
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_payload_length_check(
+          record, sizeof(iree_hal_replay_provisioned_queue_object_payload_t)));
+      iree_hal_replay_provisioned_queue_object_payload_t payload;
+      memcpy(&payload, record->payload.data, sizeof(payload));
+      if (IREE_UNLIKELY(payload.reserved0 != 0)) {
+        return iree_make_status(
+            IREE_STATUS_DATA_LOSS,
+            "replay provisioned queue reserved fields must be zero");
+      }
+      return iree_string_builder_append_format(
+          builder, " family_ordinal=%" PRIu32 " queue_ordinal=%" PRIu32,
+          payload.family_ordinal, payload.queue_ordinal);
+    }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_FILE_OBJECT: {
       if (record->payload.data_length <
           sizeof(iree_hal_replay_file_object_payload_t)) {
@@ -430,6 +480,40 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
       return iree_hal_replay_dump_append_text_buffer_refs(
           builder, "bindings", binding_payloads,
           (iree_host_size_t)payload.binding_count);
+    }
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER: {
+      if (record->payload.data_length <
+          sizeof(iree_hal_replay_queue_transfer_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay queue transfer payload is short");
+      }
+      iree_hal_replay_queue_transfer_payload_t payload;
+      memcpy(&payload, record->payload.data, sizeof(payload));
+      iree_hal_replay_dump_queue_transfer_layout_t layout;
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_transfer_layout(
+          record, &payload, &layout));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          " wait_count=%" PRIu64 " signal_count=%" PRIu64
+          " operation_count=%" PRIu64 " data_length=%" PRIu64
+          " wait_range=[%" PRIu64 ", +%" PRIhsz "] signal_range=[%" PRIu64
+          ", +%" PRIhsz "] operations_range=[%" PRIu64 ", +%" PRIhsz
+          "] data_range=[%" PRIu64 ", +%" PRIhsz "]",
+          payload.wait_semaphore_count, payload.signal_semaphore_count,
+          payload.operation_count, payload.data_length,
+          payload_range->offset + layout.queue.wait_payloads_offset,
+          layout.queue.wait_payloads_size,
+          payload_range->offset + layout.queue.signal_payloads_offset,
+          layout.queue.signal_payloads_size,
+          payload_range->offset + layout.operation_payloads_offset,
+          layout.operation_payloads_size,
+          payload_range->offset + layout.data_offset, layout.data_size));
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_queue_semaphores(
+          builder, record, &layout.queue,
+          (iree_host_size_t)payload.wait_semaphore_count,
+          (iree_host_size_t)payload.signal_semaphore_count));
+      return iree_hal_replay_dump_append_text_queue_transfer_operations(
+          builder, record, payload_range, &payload, &layout);
     }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ALLOCA: {
       if (record->payload.data_length <

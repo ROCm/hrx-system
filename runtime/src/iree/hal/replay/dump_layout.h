@@ -46,6 +46,20 @@ typedef struct iree_hal_replay_dump_queue_payload_layout_t {
   iree_host_size_t trailing_payload_size;
 } iree_hal_replay_dump_queue_payload_layout_t;
 
+// Byte ranges within a validated exact-queue transfer payload.
+typedef struct iree_hal_replay_dump_queue_transfer_layout_t {
+  // Common semaphore and trailing payload ranges.
+  iree_hal_replay_dump_queue_payload_layout_t queue;
+  // Byte offset of the transfer operation descriptors.
+  iree_host_size_t operation_payloads_offset;
+  // Byte length of the transfer operation descriptors.
+  iree_host_size_t operation_payloads_size;
+  // Byte offset of the captured operation data.
+  iree_host_size_t data_offset;
+  // Byte length of the captured operation data.
+  iree_host_size_t data_size;
+} iree_hal_replay_dump_queue_transfer_layout_t;
+
 iree_status_t iree_hal_replay_dump_payload_length_check(
     const iree_hal_replay_file_record_t* record,
     iree_host_size_t expected_payload_length);
@@ -65,6 +79,9 @@ const char* iree_hal_replay_dump_atomic_wait_condition_string(
 
 const char* iree_hal_replay_dump_atomic_rmw_operation_string(
     iree_hal_atomic_rmw_operation_t operation);
+
+const char* iree_hal_replay_dump_queue_transfer_operation_type_string(
+    iree_hal_replay_queue_transfer_operation_type_t operation_type);
 
 iree_hal_replay_file_range_t iree_hal_replay_dump_payload_subrange(
     const iree_hal_replay_file_range_t* payload_range,
@@ -108,6 +125,18 @@ iree_status_t iree_hal_replay_dump_queue_payload_layout(
     uint64_t wait_semaphore_count, uint64_t signal_semaphore_count,
     uint64_t trailing_payload_length,
     iree_hal_replay_dump_queue_payload_layout_t* out_layout);
+
+iree_status_t iree_hal_replay_dump_queue_transfer_layout(
+    const iree_hal_replay_file_record_t* record,
+    const iree_hal_replay_queue_transfer_payload_t* payload,
+    iree_hal_replay_dump_queue_transfer_layout_t* out_layout);
+
+// Reads and validates descriptor |operation_ordinal| from |record|.
+iree_status_t iree_hal_replay_dump_read_queue_transfer_operation(
+    const iree_hal_replay_file_record_t* record,
+    const iree_hal_replay_dump_queue_transfer_layout_t* layout,
+    iree_host_size_t operation_ordinal,
+    iree_hal_replay_queue_transfer_operation_payload_t* out_operation);
 
 iree_status_t iree_hal_replay_dump_execution_barrier_layout(
     const iree_hal_replay_file_record_t* record,

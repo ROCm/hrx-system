@@ -36,6 +36,9 @@ static void iree_hal_replay_executor_release_entry(
     case IREE_HAL_REPLAY_OBJECT_TYPE_FILE:
       iree_hal_file_release(entry->value.file);
       break;
+    case IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE:
+      iree_hal_queue_release(entry->value.queue);
+      break;
     default:
       break;
   }

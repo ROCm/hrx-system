@@ -54,6 +54,48 @@ static iree_status_t iree_hal_replay_executor_store_allocator(
                                         entry);
 }
 
+static iree_status_t iree_hal_replay_executor_store_provisioned_queue(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_file_record_t* record) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT,
+      sizeof(iree_hal_replay_provisioned_queue_object_payload_t)));
+  if (IREE_UNLIKELY(
+          record->payload.data_length !=
+          sizeof(iree_hal_replay_provisioned_queue_object_payload_t))) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay provisioned queue object payload length mismatch");
+  }
+  iree_hal_replay_provisioned_queue_object_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+  if (IREE_UNLIKELY(payload.reserved0 != 0)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay provisioned queue object reserved fields must be zero");
+  }
+
+  iree_hal_replay_object_entry_t* device_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
+      executor, record->header.device_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+      &device_entry));
+  iree_hal_queue_t* queue = iree_hal_device_queue(
+      device_entry->value.device,
+      (iree_hal_queue_family_ordinal_t)payload.family_ordinal,
+      (iree_hal_queue_ordinal_t)payload.queue_ordinal);
+  if (IREE_UNLIKELY(!queue)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "replay device does not expose provisioned queue %u:%u",
+        payload.family_ordinal, payload.queue_ordinal);
+  }
+  iree_hal_queue_retain(queue);
+  iree_hal_replay_object_entry_t entry = {.value.queue = queue};
+  return iree_hal_replay_executor_store(executor, record->header.object_id,
+                                        IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+                                        entry);
+}
+
 iree_status_t iree_hal_replay_executor_replay_object(
     iree_hal_replay_executor_t* executor,
     const iree_hal_replay_file_record_t* record) {
@@ -62,6 +104,8 @@ iree_status_t iree_hal_replay_executor_replay_object(
       return iree_hal_replay_executor_store_device(executor, record);
     case IREE_HAL_REPLAY_OBJECT_TYPE_ALLOCATOR:
       return iree_hal_replay_executor_store_allocator(executor, record);
+    case IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE:
+      return iree_hal_replay_executor_store_provisioned_queue(executor, record);
     default:
       return iree_ok_status();
   }

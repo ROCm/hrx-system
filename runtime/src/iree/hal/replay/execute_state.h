@@ -48,6 +48,8 @@ typedef struct iree_hal_replay_object_entry_t {
     iree_hal_semaphore_t* semaphore;
     // Retained HAL file.
     iree_hal_file_t* file;
+    // Retained exact HAL queue.
+    iree_hal_queue_t* queue;
   } value;
 } iree_hal_replay_object_entry_t;
 

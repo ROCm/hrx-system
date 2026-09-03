@@ -51,6 +51,8 @@ IREE_API_EXPORT const char* iree_hal_replay_object_type_string(
       return "channel";
     case IREE_HAL_REPLAY_OBJECT_TYPE_HOST_CALL:
       return "host_call";
+    case IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE:
+      return "queue";
     default:
       return "unknown";
   }
@@ -189,6 +191,8 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "executable.function_parameters";
     case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_LOOKUP_FUNCTION_BY_NAME:
       return "executable.lookup_function_by_name";
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TRANSFER:
+      return "queue.transfer";
     default:
       return "unknown";
   }
@@ -257,6 +261,10 @@ IREE_API_EXPORT const char* iree_hal_replay_payload_type_string(
       return "device_queue_atomic_store";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW:
       return "device_queue_atomic_rmw";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT:
+      return "provisioned_queue_object";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER:
+      return "queue_transfer";
     default:
       return "unknown";
   }

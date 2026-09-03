@@ -1661,10 +1661,7 @@ static iree_status_t iree_hal_replay_wrap_device(
             i, j);
         break;
       }
-      iree_hal_replay_recorder_queue_initialize(
-          &queue_family->base, base_queue,
-          &device->queues[flat_queue_ordinal++]);
-      ++device->initialized_queue_count;
+      ++flat_queue_ordinal;
     }
   }
 
@@ -1673,6 +1670,37 @@ static iree_status_t iree_hal_replay_wrap_device(
         recorder, IREE_HAL_REPLAY_OBJECT_ID_NONE,
         IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE, IREE_HAL_REPLAY_PAYLOAD_TYPE_NONE,
         0, NULL, &device->device_id);
+  }
+  flat_queue_ordinal = 0;
+  for (iree_host_size_t i = 0;
+       i < queue_family_count && iree_status_is_ok(status); ++i) {
+    const iree_hal_queue_family_ordinal_t family_ordinal =
+        (iree_hal_queue_family_ordinal_t)i;
+    iree_hal_replay_queue_family_t* queue_family = &device->queue_families[i];
+    for (uint32_t j = 0;
+         j < queue_family->queue_count && iree_status_is_ok(status); ++j) {
+      const iree_hal_queue_ordinal_t queue_ordinal =
+          (iree_hal_queue_ordinal_t)j;
+      const iree_hal_replay_provisioned_queue_object_payload_t payload = {
+          .family_ordinal = family_ordinal,
+          .queue_ordinal = queue_ordinal,
+      };
+      const iree_const_byte_span_t payload_iovec =
+          iree_make_const_byte_span(&payload, sizeof(payload));
+      iree_hal_replay_object_id_t queue_id = IREE_HAL_REPLAY_OBJECT_ID_NONE;
+      status = iree_hal_replay_recorder_record_object(
+          recorder, device->device_id, IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+          IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT, 1,
+          &payload_iovec, &queue_id);
+      if (iree_status_is_ok(status)) {
+        iree_hal_queue_t* base_queue =
+            iree_hal_device_queue(base_device, family_ordinal, queue_ordinal);
+        iree_hal_replay_recorder_queue_initialize(
+            &queue_family->base, recorder, device->device_id, queue_id,
+            base_queue, host_allocator, &device->queues[flat_queue_ordinal++]);
+        ++device->initialized_queue_count;
+      }
+    }
   }
   iree_hal_allocator_t* base_allocator =
       iree_status_is_ok(status) ? iree_hal_device_allocator(device->base_device)

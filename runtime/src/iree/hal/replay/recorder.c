@@ -224,7 +224,7 @@ iree_status_t iree_hal_replay_recorder_register_semaphore(
   return iree_ok_status();
 }
 
-static iree_hal_replay_object_id_t iree_hal_replay_recorder_lookup_semaphore_id(
+iree_hal_replay_object_id_t iree_hal_replay_recorder_semaphore_id_or_none(
     iree_hal_replay_recorder_t* recorder, iree_hal_semaphore_t* semaphore) {
   if (!semaphore) return IREE_HAL_REPLAY_OBJECT_ID_NONE;
 
@@ -254,7 +254,7 @@ static iree_status_t iree_hal_replay_recorder_encode_semaphore_list(
   }
   for (iree_host_size_t i = 0; i < semaphore_list.count; ++i) {
     iree_hal_replay_object_id_t semaphore_id =
-        iree_hal_replay_recorder_lookup_semaphore_id(
+        iree_hal_replay_recorder_semaphore_id_or_none(
             recorder, semaphore_list.semaphores[i]);
     if (IREE_UNLIKELY(semaphore_id == IREE_HAL_REPLAY_OBJECT_ID_NONE)) {
       return iree_make_status(

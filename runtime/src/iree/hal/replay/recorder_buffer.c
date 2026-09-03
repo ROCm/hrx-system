@@ -92,6 +92,20 @@ iree_hal_replay_object_id_t iree_hal_replay_recorder_buffer_id_or_none(
   return IREE_HAL_REPLAY_OBJECT_ID_NONE;
 }
 
+iree_hal_replay_object_id_t iree_hal_replay_recorder_find_buffer_id(
+    iree_hal_replay_recorder_t* recorder, iree_hal_buffer_t* buffer) {
+  if (!buffer) return IREE_HAL_REPLAY_OBJECT_ID_NONE;
+  iree_hal_buffer_t* allocated_buffer =
+      iree_hal_buffer_allocated_buffer(buffer);
+  if (!iree_hal_replay_recorder_buffer_isa(allocated_buffer)) {
+    return IREE_HAL_REPLAY_OBJECT_ID_NONE;
+  }
+  iree_hal_replay_recorder_buffer_t* replay_buffer =
+      iree_hal_replay_recorder_buffer_cast(allocated_buffer);
+  return replay_buffer->recorder == recorder ? replay_buffer->buffer_id
+                                             : IREE_HAL_REPLAY_OBJECT_ID_NONE;
+}
+
 void iree_hal_replay_recorder_buffer_ref_make_payload(
     iree_hal_buffer_ref_t buffer_ref,
     iree_hal_replay_buffer_ref_payload_t* out_payload) {

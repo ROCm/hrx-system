@@ -1529,7 +1529,7 @@ TEST(ReplayExecuteTest, SkipsFailedUnsupportedImportedBufferRecord) {
   iree_hal_replay_recorder_release(recorder);
 }
 
-TEST(ReplayExecuteTest, ExecutesRecordedQueueTransfersAndDealloca) {
+TEST(ReplayExecuteTest, ExecutesRecordedExactQueueTransfer) {
   std::vector<uint8_t> storage(65536, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
@@ -1540,88 +1540,79 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueTransfersAndDealloca) {
 
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
+  iree_hal_queue_t* queue = iree_hal_device_queue(
+      wrapped_device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+  ASSERT_NE(nullptr, queue);
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(wrapped_device);
   ASSERT_NE(nullptr, allocator);
 
-  iree_hal_buffer_params_t params = {0};
-  params.type =
-      IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-                 IREE_HAL_BUFFER_USAGE_MAPPING | IREE_HAL_BUFFER_USAGE_STORAGE;
-
+  const iree_hal_buffer_params_t buffer_params = {
+      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER |
+          IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
+      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+  };
   iree_hal_buffer_t* source_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(allocator, params, 32,
-                                                    &source_buffer));
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      allocator, buffer_params, /*allocation_size=*/8, &source_buffer));
   iree_hal_buffer_t* target_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(allocator, params, 32,
-                                                    &target_buffer));
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      allocator, buffer_params, /*allocation_size=*/16, &target_buffer));
+
+  const uint8_t source_data[] = {0x10, 0x11, 0x12, 0x13,
+                                 0x14, 0x15, 0x16, 0x17};
+  IREE_ASSERT_OK(iree_hal_buffer_map_write(source_buffer, /*target_offset=*/0,
+                                           source_data, sizeof(source_data)));
 
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
-      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
-  iree_hal_semaphore_t* semaphores[] = {semaphore};
-
+      wrapped_device, iree_hal_make_queue_family_affinity(0),
+      /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
   uint64_t signal_value = 1;
-  iree_hal_semaphore_list_t signal_list = {
-      IREE_ARRAYSIZE(semaphores),
-      semaphores,
-      &signal_value,
+  const iree_hal_semaphore_list_t signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&semaphore,
+      /*.payload_values=*/&signal_value,
   };
-  const uint8_t update_data[12] = {
-      0xF0, 0xF1, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0xF2, 0xF3,
-  };
-  IREE_ASSERT_OK(iree_hal_device_queue_update(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal_list, update_data,
-      /*source_offset=*/2, source_buffer, /*target_offset=*/0, /*length=*/8,
-      IREE_HAL_UPDATE_FLAG_NONE));
+  const uint8_t fill_pattern = 0xA5;
+  const uint8_t update_data[] = {0xE0, 0x21, 0x22, 0x23, 0x24, 0xE5};
+  const uint8_t upload_data[] = {0x31, 0x32, 0x33, 0x34};
+  uint8_t download_data[4] = {};
+  iree_hal_transfer_operation_t operations[5] = {};
+  operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+  operations[0].fill.target_buffer = target_buffer;
+  operations[0].fill.length = 4;
+  operations[0].fill.pattern = &fill_pattern;
+  operations[0].fill.pattern_length = sizeof(fill_pattern);
+  operations[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
+  operations[1].update.source_buffer = update_data;
+  operations[1].update.source_offset = 1;
+  operations[1].update.target_buffer = target_buffer;
+  operations[1].update.target_offset = 4;
+  operations[1].update.length = 4;
+  operations[2].type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
+  operations[2].copy.source_buffer = source_buffer;
+  operations[2].copy.target_buffer = target_buffer;
+  operations[2].copy.target_offset = 8;
+  operations[2].copy.length = 4;
+  operations[3].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+  operations[3].upload.source = upload_data;
+  operations[3].upload.target_buffer = target_buffer;
+  operations[3].upload.target_offset = 12;
+  operations[3].upload.length = 4;
+  operations[4].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+  operations[4].download.source_buffer = source_buffer;
+  operations[4].download.source_offset = 4;
+  operations[4].download.target = download_data;
+  operations[4].download.length = sizeof(download_data);
+  IREE_ASSERT_OK(iree_hal_queue_transfer(
+      queue, iree_hal_semaphore_list_empty(), signal_list,
+      IREE_ARRAYSIZE(operations), operations));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  EXPECT_EQ(0, memcmp(source_data + 4, download_data, sizeof(download_data)));
 
-  uint32_t fill_pattern = 0xA5A5A5A5u;
-  signal_value = 2;
-  IREE_ASSERT_OK(iree_hal_device_queue_fill(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal_list, target_buffer,
-      /*target_offset=*/0, /*length=*/16, &fill_pattern, sizeof(fill_pattern),
-      IREE_HAL_FILL_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
-      signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-
-  signal_value = 3;
-  IREE_ASSERT_OK(iree_hal_device_queue_copy(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal_list, source_buffer,
-      /*source_offset=*/0, target_buffer, /*target_offset=*/8, /*length=*/8,
-      IREE_HAL_COPY_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
-      signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-
-  iree_hal_buffer_t* transient_buffer = nullptr;
-  signal_value = 4;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal_list, /*pool=*/nullptr, params,
-      16, IREE_HAL_ALLOCA_FLAG_NONE, &transient_buffer));
-  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
-      signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-
-  uint64_t wait_value = 4;
-  iree_hal_semaphore_list_t wait_list = {
-      IREE_ARRAYSIZE(semaphores),
-      semaphores,
-      &wait_value,
-  };
-  signal_value = 5;
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list, signal_list,
-      transient_buffer, IREE_HAL_DEALLOCA_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
-      signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-
-  iree_hal_buffer_release(transient_buffer);
   iree_hal_semaphore_release(semaphore);
   iree_hal_buffer_release(target_buffer);
   iree_hal_buffer_release(source_buffer);
