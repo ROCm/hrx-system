@@ -88,16 +88,17 @@ class SourceProgramTest : public ::testing::Test {
     return LOOM_VALUE_ID_INVALID;
   }
 
-  bool HasRelation(const loom_source_program_t& program,
-                   loom_value_id_t lhs_value_id, loom_value_id_t rhs_value_id) {
-    loom_value_ordinal_t lhs =
-        loom_local_value_domain_ordinal(program.value_domain, lhs_value_id);
-    loom_value_ordinal_t rhs =
-        loom_local_value_domain_ordinal(program.value_domain, rhs_value_id);
-    if (lhs > rhs) std::swap(lhs, rhs);
-    for (uint32_t i = 0; i < program.value_relation_count; ++i) {
-      if (program.value_relations[i].lhs == lhs &&
-          program.value_relations[i].rhs == rhs) {
+  bool HasFlow(const loom_source_program_t& program,
+               loom_value_id_t source_value_id, loom_value_id_t target_value_id,
+               loom_source_program_value_flow_kinds_t kinds) {
+    const loom_value_ordinal_t source =
+        loom_local_value_domain_ordinal(program.value_domain, source_value_id);
+    const loom_value_ordinal_t target =
+        loom_local_value_domain_ordinal(program.value_domain, target_value_id);
+    for (uint32_t i = 0; i < program.value_flow_count; ++i) {
+      if (program.value_flows[i].source == source &&
+          program.value_flows[i].target == target &&
+          iree_all_bits_set(program.value_flows[i].kinds, kinds)) {
         return true;
       }
     }
@@ -219,11 +220,87 @@ func.def @cfg(%condition: i1, %lhs: i32, %rhs: i32) -> (i32) {
       FindValue(module.get(), value_domain, IREE_SV("rhs"));
   const loom_value_id_t joined =
       FindValue(module.get(), value_domain, IREE_SV("joined"));
+  const loom_value_id_t condition =
+      FindValue(module.get(), value_domain, IREE_SV("condition"));
   ASSERT_NE(lhs, LOOM_VALUE_ID_INVALID);
   ASSERT_NE(rhs, LOOM_VALUE_ID_INVALID);
   ASSERT_NE(joined, LOOM_VALUE_ID_INVALID);
-  EXPECT_TRUE(HasRelation(program, lhs, joined));
-  EXPECT_TRUE(HasRelation(program, rhs, joined));
+  ASSERT_NE(condition, LOOM_VALUE_ID_INVALID);
+  EXPECT_TRUE(HasFlow(program, lhs, joined,
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_CFG_PAYLOAD));
+  EXPECT_TRUE(HasFlow(program, rhs, joined,
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_CFG_PAYLOAD));
+  EXPECT_TRUE(HasFlow(program, condition, joined,
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_CONTROL_MERGE));
+  EXPECT_TRUE(HasFlow(program, condition, lhs,
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_CONTROL_MERGE));
+  EXPECT_TRUE(HasFlow(program, condition, rhs,
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_CONTROL_MERGE));
+  const loom_source_program_value_t* joined_record =
+      loom_source_program_try_value(&program, joined);
+  ASSERT_NE(joined_record, nullptr);
+  EXPECT_TRUE(iree_all_bits_set(
+      joined_record->flags, LOOM_SOURCE_PROGRAM_VALUE_BLOCK_ARGUMENT |
+                                LOOM_SOURCE_PROGRAM_VALUE_HAS_CFG_PREDECESSOR));
+  const loom_source_program_value_t* condition_record =
+      loom_source_program_try_value(&program, condition);
+  ASSERT_NE(condition_record, nullptr);
+  EXPECT_TRUE(iree_all_bits_set(
+      condition_record->flags,
+      LOOM_SOURCE_PROGRAM_VALUE_BLOCK_ARGUMENT |
+          LOOM_SOURCE_PROGRAM_VALUE_ROOT_ENTRY_ARGUMENT |
+          LOOM_SOURCE_PROGRAM_VALUE_HAS_CONTROL_CONDITION_USE));
+  ASSERT_EQ(condition_record->use_count, 1u);
+  const loom_source_program_use_t* condition_uses =
+      loom_source_program_value_uses(&program, condition_record);
+  ASSERT_NE(condition_uses, nullptr);
+  EXPECT_EQ(condition_uses[0].operand_role,
+            LOOM_OPERAND_ROLE_CONTROL_CONDITION);
+
+  loom_local_value_domain_release(&value_domain);
+}
+
+TEST_F(SourceProgramTest, IndexesCrossBlockUsesAndConditionOrder) {
+  ModulePtr module = ParseModule(R"(
+func.def @ordered(%x: i32, %y: i32, %zero: i32, %two: i32,
+                  %lhs: i32, %middle: i32, %rhs: i32) -> (i32) {
+  %cross_block = scalar.addi %lhs, %middle : i32
+  %outer = scalar.cmpi eq, %x, %zero : i32
+  %inner = scalar.cmpi eq, %y, %two : i32
+  %middle_or_rhs = scf.select %inner, %rhs, %middle : i32
+  %selected = scf.select %outer, %cross_block, %middle_or_rhs : i32
+  cfg.br ^return
+^return:
+  func.return %selected : i32
+}
+)");
+  loom_func_like_t function = FindFunction(module.get(), IREE_SV("ordered"));
+  loom_local_value_domain_t value_domain = {};
+  loom_source_program_t program = {};
+  BuildProgram(module.get(), function, &value_domain, &program);
+
+  const loom_value_id_t outer =
+      FindValue(module.get(), value_domain, IREE_SV("outer"));
+  const loom_value_id_t inner =
+      FindValue(module.get(), value_domain, IREE_SV("inner"));
+  const loom_value_id_t selected =
+      FindValue(module.get(), value_domain, IREE_SV("selected"));
+  ASSERT_NE(outer, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(inner, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(selected, LOOM_VALUE_ID_INVALID);
+  EXPECT_TRUE(HasFlow(program, inner, outer,
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_CONDITION_ORDER));
+
+  const loom_source_program_value_t* selected_record =
+      loom_source_program_try_value(&program, selected);
+  ASSERT_NE(selected_record, nullptr);
+  EXPECT_TRUE(iree_any_bit_set(selected_record->flags,
+                               LOOM_SOURCE_PROGRAM_VALUE_HAS_CROSS_BLOCK_USE));
+  const loom_source_program_value_t* outer_record =
+      loom_source_program_try_value(&program, outer);
+  ASSERT_NE(outer_record, nullptr);
+  EXPECT_TRUE(iree_any_bit_set(
+      outer_record->flags, LOOM_SOURCE_PROGRAM_VALUE_HAS_SELECT_CONDITION_USE));
 
   loom_local_value_domain_release(&value_domain);
 }
@@ -263,10 +340,16 @@ func.def @local(%seed: i32, %data: vector<4xi32>, %rows: index,
   ASSERT_NE(data, LOOM_VALUE_ID_INVALID);
   ASSERT_NE(fragment, LOOM_VALUE_ID_INVALID);
   ASSERT_NE(repacked, LOOM_VALUE_ID_INVALID);
-  EXPECT_TRUE(HasRelation(program, seed, assumed));
-  EXPECT_TRUE(HasRelation(program, assumed, called));
-  EXPECT_TRUE(HasRelation(program, data, fragment));
-  EXPECT_FALSE(HasRelation(program, fragment, repacked));
+  EXPECT_TRUE(HasFlow(program, seed, assumed,
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_FACT_IDENTITY));
+  EXPECT_TRUE(HasFlow(program, assumed, called,
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_TIED_RESULT));
+  EXPECT_TRUE(HasFlow(program, data, fragment,
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_VALUE_ALIAS));
+  EXPECT_FALSE(HasFlow(program, fragment, repacked,
+                       LOOM_SOURCE_PROGRAM_VALUE_FLOW_FACT_IDENTITY |
+                           LOOM_SOURCE_PROGRAM_VALUE_FLOW_VALUE_ALIAS |
+                           LOOM_SOURCE_PROGRAM_VALUE_FLOW_TIED_RESULT));
 
   loom_local_value_domain_release(&value_domain);
 }
@@ -318,22 +401,27 @@ func.def @structured(%condition: i1, %seed: i32, %lower: index,
   ASSERT_NE(before, LOOM_VALUE_ID_INVALID);
   ASSERT_NE(body, LOOM_VALUE_ID_INVALID);
   ASSERT_NE(conditional, LOOM_VALUE_ID_INVALID);
-  EXPECT_TRUE(HasRelation(program, seed, selected));
-  EXPECT_TRUE(HasRelation(program, selected, carried));
-  EXPECT_TRUE(HasRelation(program, selected, counted));
-  EXPECT_TRUE(HasRelation(program, counted, before));
-  EXPECT_TRUE(HasRelation(program, counted, body));
-  EXPECT_TRUE(HasRelation(program, counted, conditional));
+  EXPECT_TRUE(HasFlow(program, seed, selected,
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_REGION_YIELD));
+  EXPECT_TRUE(HasFlow(program, selected, carried,
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_LOOP_CARRY));
+  EXPECT_TRUE(HasFlow(program, selected, counted,
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_LOOP_CARRY));
+  EXPECT_TRUE(HasFlow(program, counted, before,
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_LOOP_CARRY));
+  EXPECT_TRUE(HasFlow(program, counted, body,
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_LOOP_CARRY));
+  EXPECT_TRUE(HasFlow(program, counted, conditional,
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_LOOP_CARRY));
 
-  for (uint32_t i = 0; i < program.value_relation_count; ++i) {
-    EXPECT_LT(program.value_relations[i].lhs, program.value_relations[i].rhs);
+  for (uint32_t i = 0; i < program.value_flow_count; ++i) {
     if (i == 0) continue;
-    const loom_source_program_value_relation_t previous =
-        program.value_relations[i - 1];
-    const loom_source_program_value_relation_t current =
-        program.value_relations[i];
-    EXPECT_TRUE(previous.lhs < current.lhs ||
-                (previous.lhs == current.lhs && previous.rhs < current.rhs));
+    const loom_source_program_value_flow_t previous =
+        program.value_flows[i - 1];
+    const loom_source_program_value_flow_t current = program.value_flows[i];
+    EXPECT_TRUE(previous.source < current.source ||
+                (previous.source == current.source &&
+                 previous.target < current.target));
   }
 
   loom_local_value_domain_release(&value_domain);

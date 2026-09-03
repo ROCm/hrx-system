@@ -143,17 +143,42 @@ static const loom_source_dataflow_predicate_t kPredicates[] = {
     {.fn = loom_test_low_source_dataflow_result_is_i32},
 };
 
+static const loom_source_dataflow_bits_t kPhaseBits[] = {
+    LOOM_TEST_LOW_SOURCE_DATAFLOW_ENTRY_DERIVED |
+        LOOM_TEST_LOW_SOURCE_DATAFLOW_ALL_ENTRY_DERIVED |
+        LOOM_TEST_LOW_SOURCE_DATAFLOW_SCALAR_CANDIDATE_REJECTED |
+        LOOM_TEST_LOW_SOURCE_DATAFLOW_BOUNDARY_REQUIRED,
+};
+
+static const loom_source_dataflow_flow_rule_t kFlowRules[] = {
+    {
+        .source_bits = LOOM_TEST_LOW_SOURCE_DATAFLOW_ENTRY_DERIVED |
+                       LOOM_TEST_LOW_SOURCE_DATAFLOW_ALL_ENTRY_DERIVED |
+                       LOOM_TEST_LOW_SOURCE_DATAFLOW_SCALAR_CANDIDATE_REJECTED |
+                       LOOM_TEST_LOW_SOURCE_DATAFLOW_BOUNDARY_REQUIRED,
+        .target_bits = LOOM_TEST_LOW_SOURCE_DATAFLOW_ENTRY_DERIVED |
+                       LOOM_TEST_LOW_SOURCE_DATAFLOW_ALL_ENTRY_DERIVED |
+                       LOOM_TEST_LOW_SOURCE_DATAFLOW_SCALAR_CANDIDATE_REJECTED |
+                       LOOM_TEST_LOW_SOURCE_DATAFLOW_BOUNDARY_REQUIRED,
+        .flow_kinds = LOOM_SOURCE_PROGRAM_VALUE_FLOW_CFG_PAYLOAD |
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_TIED_RESULT |
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_FACT_IDENTITY |
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_VALUE_ALIAS |
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_LOOP_CARRY |
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_REGION_YIELD,
+        .directions = LOOM_SOURCE_DATAFLOW_FLOW_FORWARD |
+                      LOOM_SOURCE_DATAFLOW_FLOW_REVERSE,
+        .kind = LOOM_SOURCE_DATAFLOW_RULE_COPY,
+    },
+};
+
 const loom_source_dataflow_provider_t loom_test_low_source_dataflow = {
     .name = IREE_SVL("test-low-source-dataflow"),
     .valid_bits = LOOM_TEST_LOW_SOURCE_DATAFLOW_ENTRY_DERIVED |
                   LOOM_TEST_LOW_SOURCE_DATAFLOW_ALL_ENTRY_DERIVED |
                   LOOM_TEST_LOW_SOURCE_DATAFLOW_SCALAR_CANDIDATE_REJECTED |
                   LOOM_TEST_LOW_SOURCE_DATAFLOW_BOUNDARY_REQUIRED,
-    .structural_copy_bits =
-        LOOM_TEST_LOW_SOURCE_DATAFLOW_ENTRY_DERIVED |
-        LOOM_TEST_LOW_SOURCE_DATAFLOW_ALL_ENTRY_DERIVED |
-        LOOM_TEST_LOW_SOURCE_DATAFLOW_SCALAR_CANDIDATE_REJECTED |
-        LOOM_TEST_LOW_SOURCE_DATAFLOW_BOUNDARY_REQUIRED,
+    .phase_count = IREE_ARRAYSIZE(kPhaseBits),
     .dialect_base_id = LOOM_DIALECT_TEST,
     .dialect_count = IREE_ARRAYSIZE(kDialectTables),
     .operation_count = IREE_ARRAYSIZE(kOperations),
@@ -164,6 +189,9 @@ const loom_source_dataflow_provider_t loom_test_low_source_dataflow = {
     .rule_count = IREE_ARRAYSIZE(kRules),
     .rules = kRules,
     .predicate_count = IREE_ARRAYSIZE(kPredicates),
+    .phase_bits = kPhaseBits,
     .predicates = kPredicates,
+    .flow_rule_count = IREE_ARRAYSIZE(kFlowRules),
+    .flow_rules = kFlowRules,
     .seed_value = {.fn = loom_test_low_source_dataflow_seed_value},
 };

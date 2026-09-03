@@ -31,6 +31,7 @@ enum TestEvidenceBits : loom_source_dataflow_bits_t {
   kRejectedCandidate = (loom_source_dataflow_bits_t)1u << 2,
   kRequiredByUse = (loom_source_dataflow_bits_t)1u << 3,
   kStructural = (loom_source_dataflow_bits_t)1u << 4,
+  kAcceptedCandidate = (loom_source_dataflow_bits_t)1u << 5,
 };
 
 struct SeedConfiguration {
@@ -180,11 +181,41 @@ constexpr loom_source_dataflow_predicate_t kPredicates[] = {
     {.fn = ResultIsI32},
 };
 
+constexpr loom_source_dataflow_bits_t kPhaseBits[] = {
+    kReachedByAny | kReachedByAll | kRejectedCandidate | kRequiredByUse |
+        kStructural,
+    kAcceptedCandidate,
+};
+
+constexpr loom_source_dataflow_flow_rule_t kFlowRules[] = {
+    {
+        .source_bits = kStructural,
+        .target_bits = kStructural,
+        .flow_kinds = LOOM_SOURCE_PROGRAM_VALUE_FLOW_CFG_PAYLOAD |
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_TIED_RESULT |
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_FACT_IDENTITY |
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_VALUE_ALIAS |
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_LOOP_CARRY |
+                      LOOM_SOURCE_PROGRAM_VALUE_FLOW_REGION_YIELD,
+        .directions = LOOM_SOURCE_DATAFLOW_FLOW_FORWARD |
+                      LOOM_SOURCE_DATAFLOW_FLOW_REVERSE,
+        .kind = LOOM_SOURCE_DATAFLOW_RULE_COPY,
+    },
+};
+
+constexpr loom_source_dataflow_projection_t kProjections[] = {
+    {
+        .forbidden_bits = kRejectedCandidate,
+        .target_bits = kAcceptedCandidate,
+        .phase = 1,
+    },
+};
+
 constexpr loom_source_dataflow_provider_t kProvider = {
     .name = IREE_SVL("source-dataflow-test"),
     .valid_bits = kReachedByAny | kReachedByAll | kRejectedCandidate |
-                  kRequiredByUse | kStructural,
-    .structural_copy_bits = kStructural,
+                  kRequiredByUse | kStructural | kAcceptedCandidate,
+    .phase_count = IREE_ARRAYSIZE(kPhaseBits),
     .dialect_base_id = LOOM_DIALECT_SCALAR,
     .dialect_count = 1,
     .operation_count = IREE_ARRAYSIZE(kOperations),
@@ -195,7 +226,12 @@ constexpr loom_source_dataflow_provider_t kProvider = {
     .rule_count = IREE_ARRAYSIZE(kRules),
     .rules = kRules,
     .predicate_count = IREE_ARRAYSIZE(kPredicates),
+    .phase_bits = kPhaseBits,
     .predicates = kPredicates,
+    .flow_rule_count = IREE_ARRAYSIZE(kFlowRules),
+    .flow_rules = kFlowRules,
+    .projection_count = IREE_ARRAYSIZE(kProjections),
+    .projections = kProjections,
     .seed_value = {.fn = SeedValue},
 };
 
@@ -327,12 +363,16 @@ func.def @flow(%a: i32, %b: i32) -> (i32) {
       loom_source_dataflow_result_has_all(&result, left, kReachedByAll));
   EXPECT_TRUE(loom_source_dataflow_result_has_all(
       &result, right, kReachedByAny | kReachedByAll | kRequiredByUse));
+  EXPECT_TRUE(
+      loom_source_dataflow_result_has_all(&result, right, kAcceptedCandidate));
   EXPECT_FALSE(
       loom_source_dataflow_result_has_all(&result, right, kRejectedCandidate));
   EXPECT_TRUE(loom_source_dataflow_result_has_all(
       &result, join, kReachedByAny | kRejectedCandidate | kRequiredByUse));
   EXPECT_FALSE(
       loom_source_dataflow_result_has_all(&result, join, kReachedByAll));
+  EXPECT_FALSE(
+      loom_source_dataflow_result_has_all(&result, join, kAcceptedCandidate));
   EXPECT_TRUE(
       loom_source_dataflow_result_has_all(&result, terminal, kRequiredByUse));
   EXPECT_TRUE(loom_source_dataflow_result_has_all(
@@ -341,6 +381,8 @@ func.def @flow(%a: i32, %b: i32) -> (i32) {
             value_domain.value_count);
   EXPECT_EQ(result.statistics.predicate_invocation_count, 1u);
   EXPECT_GT(result.statistics.rule_evaluation_count, 0u);
+  EXPECT_EQ(result.statistics.projection_evaluation_count,
+            value_domain.value_count);
   EXPECT_LT(result.statistics.rule_evaluation_count, 128u);
   EXPECT_EQ(loom_source_dataflow_result_lookup(&result, LOOM_VALUE_ID_INVALID),
             0u);
@@ -406,7 +448,7 @@ func.def @structured(%condition: i1, %seed: i32, %lower: index,
   const loom_value_id_t carried =
       loom_block_arg_id(loom_region_const_entry_block(loop_body), 1);
 
-  EXPECT_GT(program.value_relation_count, 0u);
+  EXPECT_GT(program.value_flow_count, 0u);
   EXPECT_TRUE(
       loom_source_dataflow_result_has_all(&result, selected, kStructural));
   EXPECT_TRUE(
@@ -422,7 +464,10 @@ func.def @structured(%condition: i1, %seed: i32, %lower: index,
 TEST_F(SourceDataflowTest, BuildTimeVerifierRejectsMalformedProvider) {
   IREE_EXPECT_OK(loom_source_dataflow_provider_verify(&kProvider));
   loom_source_dataflow_provider_t malformed = kProvider;
-  malformed.structural_copy_bits = (loom_source_dataflow_bits_t)1u << 63;
+  loom_source_dataflow_bits_t malformed_phase_bits[IREE_ARRAYSIZE(kPhaseBits)];
+  std::memcpy(malformed_phase_bits, kPhaseBits, sizeof(malformed_phase_bits));
+  malformed.phase_bits = malformed_phase_bits;
+  malformed_phase_bits[1] |= kStructural;
   iree_status_t status = loom_source_dataflow_provider_verify(&malformed);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, status);
 

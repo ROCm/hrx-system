@@ -27,9 +27,24 @@ iree_status_t loom_source_dataflow_provider_verify(
     return loom_source_dataflow_invalid_provider(provider,
                                                  "has no valid evidence bits");
   }
-  if ((provider->structural_copy_bits & ~provider->valid_bits) != 0) {
+  if (provider->phase_count == 0 ||
+      provider->phase_count > LOOM_SOURCE_DATAFLOW_MAX_PHASE_COUNT ||
+      provider->phase_bits == NULL || provider->reserved != 0) {
     return loom_source_dataflow_invalid_provider(
-        provider, "copies unknown bits across structural relations");
+        provider, "has an invalid monotone phase declaration");
+  }
+  loom_source_dataflow_bits_t declared_phase_bits = 0;
+  for (uint8_t i = 0; i < provider->phase_count; ++i) {
+    if (provider->phase_bits[i] == 0 ||
+        (provider->phase_bits[i] & declared_phase_bits) != 0) {
+      return loom_source_dataflow_invalid_provider(
+          provider, "has empty or overlapping monotone phase bits");
+    }
+    declared_phase_bits |= provider->phase_bits[i];
+  }
+  if (declared_phase_bits != provider->valid_bits) {
+    return loom_source_dataflow_invalid_provider(
+        provider, "phase bits do not partition all valid evidence");
   }
   if ((provider->dialect_count != 0) != (provider->dialects != NULL)) {
     return loom_source_dataflow_invalid_provider(
@@ -42,7 +57,9 @@ iree_status_t loom_source_dataflow_provider_verify(
   if ((provider->operation_count != 0) != (provider->operations != NULL) ||
       (provider->port_count != 0) != (provider->ports != NULL) ||
       (provider->rule_count != 0) != (provider->rules != NULL) ||
-      (provider->predicate_count != 0) != (provider->predicates != NULL)) {
+      (provider->predicate_count != 0) != (provider->predicates != NULL) ||
+      (provider->flow_rule_count != 0) != (provider->flow_rules != NULL) ||
+      (provider->projection_count != 0) != (provider->projections != NULL)) {
     return loom_source_dataflow_invalid_provider(
         provider, "has inconsistent generated pool storage");
   }
@@ -83,12 +100,22 @@ iree_status_t loom_source_dataflow_provider_verify(
   }
   for (uint16_t i = 0; i < provider->rule_count; ++i) {
     const loom_source_dataflow_rule_t* rule = &provider->rules[i];
-    if (rule->reserved != 0 || rule->kind > LOOM_SOURCE_DATAFLOW_RULE_ALL ||
+    if (rule->reserved != 0 || rule->phase >= provider->phase_count ||
+        rule->kind > LOOM_SOURCE_DATAFLOW_RULE_ALL ||
         (rule->source_bits & ~provider->valid_bits) != 0 ||
         (rule->target_bits & ~provider->valid_bits) != 0 ||
         rule->predicate_index_plus_one > provider->predicate_count) {
       return loom_source_dataflow_invalid_provider(provider,
                                                    "has an invalid rule row");
+    }
+    loom_source_dataflow_bits_t available_bits = 0;
+    for (uint8_t phase = 0; phase <= rule->phase; ++phase) {
+      available_bits |= provider->phase_bits[phase];
+    }
+    if ((rule->source_bits & ~available_bits) != 0 ||
+        (rule->target_bits & ~provider->phase_bits[rule->phase]) != 0) {
+      return loom_source_dataflow_invalid_provider(
+          provider, "has a rule crossing monotone phase strata");
     }
     if (rule->kind == LOOM_SOURCE_DATAFLOW_RULE_SEED) {
       if (rule->source_bits != 0 || rule->source_port_mask != 0 ||
@@ -107,6 +134,59 @@ iree_status_t loom_source_dataflow_provider_verify(
         return loom_source_dataflow_invalid_provider(
             provider, "has a copy rule that remaps evidence bits");
       }
+    }
+  }
+  for (uint16_t i = 0; i < provider->flow_rule_count; ++i) {
+    const loom_source_dataflow_flow_rule_t* rule = &provider->flow_rules[i];
+    if (rule->reserved[0] != 0 || rule->reserved[1] != 0 ||
+        rule->reserved[2] != 0 || rule->phase >= provider->phase_count ||
+        rule->kind == LOOM_SOURCE_DATAFLOW_RULE_SEED ||
+        rule->kind > LOOM_SOURCE_DATAFLOW_RULE_ALL || rule->flow_kinds == 0 ||
+        (rule->flow_kinds & ~LOOM_SOURCE_PROGRAM_VALUE_FLOW_KIND_MASK) != 0 ||
+        rule->directions == 0 ||
+        (rule->directions & ~LOOM_SOURCE_DATAFLOW_FLOW_DIRECTION_MASK) != 0 ||
+        rule->source_bits == 0 || rule->target_bits == 0) {
+      return loom_source_dataflow_invalid_provider(
+          provider, "has an invalid source-program flow rule");
+    }
+    loom_source_dataflow_bits_t available_bits = 0;
+    for (uint8_t phase = 0; phase <= rule->phase; ++phase) {
+      available_bits |= provider->phase_bits[phase];
+    }
+    if ((rule->source_bits & ~available_bits) != 0 ||
+        (rule->target_bits & ~provider->phase_bits[rule->phase]) != 0 ||
+        (rule->kind == LOOM_SOURCE_DATAFLOW_RULE_COPY &&
+         rule->source_bits != rule->target_bits)) {
+      return loom_source_dataflow_invalid_provider(
+          provider, "has a source-program flow rule crossing phase strata");
+    }
+  }
+  for (uint16_t i = 0; i < provider->projection_count; ++i) {
+    const loom_source_dataflow_projection_t* projection =
+        &provider->projections[i];
+    if (projection->reserved[0] != 0 || projection->reserved[1] != 0 ||
+        projection->reserved[2] != 0 || projection->phase == 0 ||
+        projection->phase >= provider->phase_count ||
+        projection->target_bits == 0 ||
+        (projection->required_bits & projection->forbidden_bits) != 0 ||
+        (projection->required_value_flags &
+         projection->forbidden_value_flags) != 0 ||
+        ((projection->required_value_flags |
+          projection->forbidden_value_flags) &
+         ~LOOM_SOURCE_PROGRAM_VALUE_FLAG_MASK) != 0) {
+      return loom_source_dataflow_invalid_provider(
+          provider, "has an invalid phase-boundary projection");
+    }
+    loom_source_dataflow_bits_t prior_bits = 0;
+    for (uint8_t phase = 0; phase < projection->phase; ++phase) {
+      prior_bits |= provider->phase_bits[phase];
+    }
+    if (((projection->required_bits | projection->forbidden_bits) &
+         ~prior_bits) != 0 ||
+        (projection->target_bits & ~provider->phase_bits[projection->phase]) !=
+            0) {
+      return loom_source_dataflow_invalid_provider(
+          provider, "has a projection crossing monotone phase strata");
     }
   }
   for (uint16_t i = 0; i < provider->operation_count; ++i) {

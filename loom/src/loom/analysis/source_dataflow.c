@@ -25,8 +25,10 @@ typedef struct loom_source_dataflow_runtime_rule_t {
   loom_source_dataflow_bits_t source_bits;
   // Fixed evidence added to targets for ANY and ALL rules.
   loom_source_dataflow_bits_t target_bits;
-  // Normalized transfer kind; seeds are applied during graph construction.
+  // Normalized transfer kind.
   loom_source_dataflow_rule_kind_t kind;
+  // Monotone phase owning this equation's target bits.
+  uint8_t phase;
 } loom_source_dataflow_runtime_rule_t;
 
 typedef struct loom_source_dataflow_build_state_t {
@@ -199,16 +201,6 @@ static iree_status_t loom_source_dataflow_resolve_ports(
   return iree_ok_status();
 }
 
-static iree_status_t loom_source_dataflow_apply_seed(
-    loom_source_dataflow_build_state_t* state, uint32_t target_start,
-    loom_source_dataflow_bits_t bits) {
-  for (uint32_t i = target_start; i < state->target_count; ++i) {
-    state->result->states[state->targets[i]] |= bits;
-  }
-  state->target_count = target_start;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_source_dataflow_build_rule(
     loom_source_dataflow_build_state_t* state, const loom_op_t* op,
     const loom_op_vtable_t* vtable,
@@ -230,10 +222,6 @@ static iree_status_t loom_source_dataflow_build_rule(
     state->target_count = target_start;
     return iree_ok_status();
   }
-  if (rule->kind == LOOM_SOURCE_DATAFLOW_RULE_SEED) {
-    return loom_source_dataflow_apply_seed(state, target_start,
-                                           rule->target_bits);
-  }
   if (rule->kind == LOOM_SOURCE_DATAFLOW_RULE_COPY) {
     if (source_count != target_count) {
       return loom_source_dataflow_invalid_provider(
@@ -249,6 +237,7 @@ static iree_status_t loom_source_dataflow_build_rule(
                      .source_bits = rule->source_bits,
                      .target_bits = rule->target_bits,
                      .kind = rule->kind,
+                     .phase = rule->phase,
                  }));
     }
     return iree_ok_status();
@@ -262,6 +251,7 @@ static iree_status_t loom_source_dataflow_build_rule(
                                               .source_bits = rule->source_bits,
                                               .target_bits = rule->target_bits,
                                               .kind = rule->kind,
+                                              .phase = rule->phase,
                                           });
 }
 
@@ -323,9 +313,10 @@ static iree_status_t loom_source_dataflow_build_operation(
   return iree_ok_status();
 }
 
-static iree_status_t loom_source_dataflow_build_structural_copy(
+static iree_status_t loom_source_dataflow_build_flow_rule(
     loom_source_dataflow_build_state_t* state, loom_value_ordinal_t source,
-    loom_value_ordinal_t target) {
+    loom_value_ordinal_t target,
+    const loom_source_dataflow_flow_rule_t* flow_rule) {
   const uint32_t source_start = state->source_count;
   const uint32_t target_start = state->target_count;
   IREE_RETURN_IF_ERROR(
@@ -338,9 +329,10 @@ static iree_status_t loom_source_dataflow_build_structural_copy(
                  .target_start = target_start,
                  .source_count = 1,
                  .target_count = 1,
-                 .source_bits = state->provider->structural_copy_bits,
-                 .target_bits = state->provider->structural_copy_bits,
-                 .kind = LOOM_SOURCE_DATAFLOW_RULE_COPY,
+                 .source_bits = flow_rule->source_bits,
+                 .target_bits = flow_rule->target_bits,
+                 .kind = flow_rule->kind,
+                 .phase = flow_rule->phase,
              });
 }
 
@@ -363,14 +355,23 @@ static iree_status_t loom_source_dataflow_build_graph(
     }
   }
 
-  if (state->provider->structural_copy_bits != 0) {
-    for (uint32_t i = 0; i < program->value_relation_count; ++i) {
-      const loom_source_program_value_relation_t relation =
-          program->value_relations[i];
-      IREE_RETURN_IF_ERROR(loom_source_dataflow_build_structural_copy(
-          state, relation.lhs, relation.rhs));
-      IREE_RETURN_IF_ERROR(loom_source_dataflow_build_structural_copy(
-          state, relation.rhs, relation.lhs));
+  for (uint32_t i = 0; i < program->value_flow_count; ++i) {
+    const loom_source_program_value_flow_t flow = program->value_flows[i];
+    for (uint16_t rule_index = 0; rule_index < state->provider->flow_rule_count;
+         ++rule_index) {
+      const loom_source_dataflow_flow_rule_t* flow_rule =
+          &state->provider->flow_rules[rule_index];
+      if (!iree_any_bit_set(flow.kinds, flow_rule->flow_kinds)) continue;
+      if (iree_any_bit_set(flow_rule->directions,
+                           LOOM_SOURCE_DATAFLOW_FLOW_FORWARD)) {
+        IREE_RETURN_IF_ERROR(loom_source_dataflow_build_flow_rule(
+            state, flow.source, flow.target, flow_rule));
+      }
+      if (iree_any_bit_set(flow_rule->directions,
+                           LOOM_SOURCE_DATAFLOW_FLOW_REVERSE)) {
+        IREE_RETURN_IF_ERROR(loom_source_dataflow_build_flow_rule(
+            state, flow.target, flow.source, flow_rule));
+      }
     }
   }
 
@@ -426,6 +427,9 @@ static bool loom_source_dataflow_rule_matches(
     const loom_source_dataflow_build_state_t* state,
     const loom_source_dataflow_runtime_rule_t* rule) {
   const loom_source_dataflow_bits_t* states = state->result->states;
+  if (rule->kind == LOOM_SOURCE_DATAFLOW_RULE_SEED) {
+    return true;
+  }
   if (rule->kind == LOOM_SOURCE_DATAFLOW_RULE_COPY) {
     return true;
   }
@@ -451,7 +455,7 @@ static bool loom_source_dataflow_rule_matches(
 static void loom_source_dataflow_evaluate_rule(
     const loom_source_dataflow_build_state_t* state,
     const loom_source_dataflow_runtime_rule_t* rule,
-    const uint32_t* watch_offsets, const uint32_t* watch_rules,
+    const uint32_t* watch_offsets, const uint32_t* watch_rules, uint8_t phase,
     loom_source_dataflow_worklist_t* worklist) {
   if (!loom_source_dataflow_rule_matches(state, rule)) return;
   loom_source_dataflow_bits_t bits = rule->target_bits;
@@ -468,14 +472,51 @@ static void loom_source_dataflow_evaluate_rule(
     *target_state |= added_bits;
     for (uint32_t watch_index = watch_offsets[target];
          watch_index < watch_offsets[target + 1]; ++watch_index) {
-      loom_source_dataflow_worklist_push(worklist, watch_rules[watch_index]);
+      const uint32_t watch_rule = watch_rules[watch_index];
+      if (state->rules[watch_rule].phase == phase) {
+        loom_source_dataflow_worklist_push(worklist, watch_rule);
+      }
     }
   }
 }
 
+static iree_status_t loom_source_dataflow_apply_projections(
+    loom_source_dataflow_build_state_t* state, uint8_t phase) {
+  const loom_source_program_t* program = state->environment->program;
+  for (uint16_t projection_index = 0;
+       projection_index < state->provider->projection_count;
+       ++projection_index) {
+    const loom_source_dataflow_projection_t* projection =
+        &state->provider->projections[projection_index];
+    if (projection->phase != phase) continue;
+    for (loom_value_ordinal_t value = 0; value < state->result->state_count;
+         ++value) {
+      ++state->result->statistics.projection_evaluation_count;
+      const loom_source_dataflow_bits_t bits = state->result->states[value];
+      const loom_source_program_value_flags_t flags =
+          program->values[value].flags;
+      if ((bits & projection->required_bits) != projection->required_bits ||
+          (bits & projection->forbidden_bits) != 0 ||
+          (flags & projection->required_value_flags) !=
+              projection->required_value_flags ||
+          (flags & projection->forbidden_value_flags) != 0) {
+        continue;
+      }
+      state->result->states[value] |= projection->target_bits;
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_source_dataflow_run(
     loom_source_dataflow_build_state_t* state) {
-  if (state->rule_count == 0) return iree_ok_status();
+  if (state->rule_count == 0) {
+    for (uint8_t phase = 1; phase < state->provider->phase_count; ++phase) {
+      IREE_RETURN_IF_ERROR(
+          loom_source_dataflow_apply_projections(state, phase));
+    }
+    return iree_ok_status();
+  }
   const loom_value_ordinal_t value_count = state->result->state_count;
   uint32_t* watch_offsets = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -529,14 +570,23 @@ static iree_status_t loom_source_dataflow_run(
       state->arena, worklist.capacity, sizeof(*worklist.pending),
       (void**)&worklist.pending));
   memset(worklist.pending, 0, worklist.capacity * sizeof(*worklist.pending));
-  for (uint32_t i = 0; i < state->rule_count; ++i) {
-    loom_source_dataflow_worklist_push(&worklist, i);
-  }
-  while (worklist.count != 0) {
-    const uint32_t rule_index = loom_source_dataflow_worklist_pop(&worklist);
-    ++state->result->statistics.rule_evaluation_count;
-    loom_source_dataflow_evaluate_rule(state, &state->rules[rule_index],
-                                       watch_offsets, watch_rules, &worklist);
+  for (uint8_t phase = 0; phase < state->provider->phase_count; ++phase) {
+    if (phase != 0) {
+      IREE_RETURN_IF_ERROR(
+          loom_source_dataflow_apply_projections(state, phase));
+    }
+    for (uint32_t i = 0; i < state->rule_count; ++i) {
+      if (state->rules[i].phase == phase) {
+        loom_source_dataflow_worklist_push(&worklist, i);
+      }
+    }
+    while (worklist.count != 0) {
+      const uint32_t rule_index = loom_source_dataflow_worklist_pop(&worklist);
+      ++state->result->statistics.rule_evaluation_count;
+      loom_source_dataflow_evaluate_rule(state, &state->rules[rule_index],
+                                         watch_offsets, watch_rules, phase,
+                                         &worklist);
+    }
   }
   return iree_ok_status();
 }

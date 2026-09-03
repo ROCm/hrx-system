@@ -29,6 +29,9 @@ typedef struct loom_value_fact_table_t loom_value_fact_table_t;
 // Provider-defined monotone evidence attached to one source value.
 typedef uint64_t loom_source_dataflow_bits_t;
 
+// Maximum number of monotone strata in one provider.
+#define LOOM_SOURCE_DATAFLOW_MAX_PHASE_COUNT 8
+
 // Sentinel used by dense dialect tables for operation kinds with no transfer.
 // Populated entries are one-based indices into the provider operation pool so
 // zero-initialized generated tables are empty by construction.
@@ -82,8 +85,10 @@ typedef struct loom_source_dataflow_rule_t {
   loom_source_dataflow_rule_kind_t kind;
   // One-based provider predicate index, or zero when unconditional.
   uint8_t predicate_index_plus_one;
+  // Monotone phase that owns target_bits.
+  uint8_t phase;
   // Reserved for generated rule flags; must be zero.
-  uint16_t reserved;
+  uint8_t reserved;
 } loom_source_dataflow_rule_t;
 
 static_assert(sizeof(loom_source_dataflow_rule_t) == 32,
@@ -146,14 +151,68 @@ typedef struct loom_source_dataflow_predicate_t {
   void* user_data;
 } loom_source_dataflow_predicate_t;
 
+enum loom_source_dataflow_flow_direction_bits_e {
+  // Transfer from the source-program flow source to its target.
+  LOOM_SOURCE_DATAFLOW_FLOW_FORWARD = (uint8_t)1u << 0,
+  // Transfer from the source-program flow target to its source.
+  LOOM_SOURCE_DATAFLOW_FLOW_REVERSE = (uint8_t)1u << 1,
+};
+typedef uint8_t loom_source_dataflow_flow_directions_t;
+
+#define LOOM_SOURCE_DATAFLOW_FLOW_DIRECTION_MASK                                \
+  ((loom_source_dataflow_flow_directions_t)(LOOM_SOURCE_DATAFLOW_FLOW_FORWARD | \
+                                            LOOM_SOURCE_DATAFLOW_FLOW_REVERSE))
+
+// One transfer equation instantiated for matching source-program flows.
+typedef struct loom_source_dataflow_flow_rule_t {
+  // Evidence required or copied from the selected flow source.
+  loom_source_dataflow_bits_t source_bits;
+  // Evidence added to the selected flow target.
+  loom_source_dataflow_bits_t target_bits;
+  // Source-program flow kinds that instantiate this equation.
+  loom_source_program_value_flow_kinds_t flow_kinds;
+  // Natural flow directions in which to instantiate this equation.
+  loom_source_dataflow_flow_directions_t directions;
+  // COPY, ANY, or ALL transfer equation kind.
+  loom_source_dataflow_rule_kind_t kind;
+  // Monotone phase that owns target_bits.
+  uint8_t phase;
+  // Reserved for generated flow flags; must be zero.
+  uint8_t reserved[3];
+} loom_source_dataflow_flow_rule_t;
+
+static_assert(sizeof(loom_source_dataflow_flow_rule_t) == 24,
+              "loom_source_dataflow_flow_rule_t must be 24 bytes");
+
+// One phase-boundary projection over solved evidence and indexed structure.
+typedef struct loom_source_dataflow_projection_t {
+  // Evidence that must all be present before the destination phase.
+  loom_source_dataflow_bits_t required_bits;
+  // Evidence that must all be absent before the destination phase.
+  loom_source_dataflow_bits_t forbidden_bits;
+  // Evidence added when the projection matches.
+  loom_source_dataflow_bits_t target_bits;
+  // Source-program value flags that must all be present.
+  loom_source_program_value_flags_t required_value_flags;
+  // Source-program value flags that must all be absent.
+  loom_source_program_value_flags_t forbidden_value_flags;
+  // Destination phase owning target_bits. Phase zero is invalid.
+  uint8_t phase;
+  // Reserved for generated projection flags; must be zero.
+  uint8_t reserved[3];
+} loom_source_dataflow_projection_t;
+
+static_assert(sizeof(loom_source_dataflow_projection_t) == 32,
+              "loom_source_dataflow_projection_t must be 32 bytes");
+
 // Static finite-domain transfer provider.
 typedef struct loom_source_dataflow_provider_t {
   // Stable provider name used in malformed-table diagnostics.
   iree_string_view_t name;
   // Complete set of bits the provider may produce or transfer.
   loom_source_dataflow_bits_t valid_bits;
-  // Bits copied bidirectionally across common structural value relations.
-  loom_source_dataflow_bits_t structural_copy_bits;
+  // Number of monotone phases in phase_bits.
+  uint8_t phase_count;
   // First dialect ID covered by dialects.
   uint8_t dialect_base_id;
   // Number of dense dialect slots.
@@ -174,8 +233,20 @@ typedef struct loom_source_dataflow_provider_t {
   const loom_source_dataflow_rule_t* rules;
   // Number of registered operation predicates.
   uint8_t predicate_count;
+  // Reserved for provider flags; must be zero.
+  uint8_t reserved;
+  // Disjoint evidence sets introduced by each monotone phase.
+  const loom_source_dataflow_bits_t* phase_bits;
   // Registered operation predicates indexed by one-based rule references.
   const loom_source_dataflow_predicate_t* predicates;
+  // Number of source-program flow transfer rows.
+  uint16_t flow_rule_count;
+  // Source-program flow transfer rows.
+  const loom_source_dataflow_flow_rule_t* flow_rules;
+  // Number of phase-boundary projection rows.
+  uint16_t projection_count;
+  // Phase-boundary projection rows.
+  const loom_source_dataflow_projection_t* projections;
   // Optional direct value seed callback.
   loom_source_dataflow_seed_value_callback_t seed_value;
 } loom_source_dataflow_provider_t;
@@ -188,6 +259,8 @@ typedef struct loom_source_dataflow_statistics_t {
   uint64_t predicate_invocation_count;
   // Number of normalized transfer equations evaluated.
   uint64_t rule_evaluation_count;
+  // Number of value/projection pairs evaluated at phase boundaries.
+  uint64_t projection_evaluation_count;
 } loom_source_dataflow_statistics_t;
 
 // Retained dense result for one provider and source value domain.
