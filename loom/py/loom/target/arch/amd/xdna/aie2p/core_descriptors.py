@@ -107,6 +107,7 @@ class _DescriptorSpec:
     schedule_alternatives: tuple[str, ...] = ()
     memory_width_bits: int | None = None
     ordered_memory: bool = False
+    effects: tuple[Effect, ...] = ()
 
 
 _VECTOR_MEMORY_FORM_FAMILIES = (
@@ -288,6 +289,70 @@ _BASE_DESCRIPTOR_SPECS = (
         f"{_TARGET_KEY}.nop",
         "control.nop",
         "NoItinerary",
+    ),
+    _DescriptorSpec(
+        "ACQ_mLockId_imm",
+        f"{_TARGET_KEY}.lock.acquire.immediate",
+        "synchronization.lock.acquire",
+        "II_ACQ_mLockId_imm",
+        asm_mnemonic="acq",
+        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
+    ),
+    _DescriptorSpec(
+        "ACQ_mLockId_reg",
+        f"{_TARGET_KEY}.lock.acquire.register",
+        "synchronization.lock.acquire",
+        "II_ACQ_mLockId_reg",
+        asm_mnemonic="acq.reg",
+        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
+    ),
+    _DescriptorSpec(
+        "ACQ_COND_mLockId_imm",
+        f"{_TARGET_KEY}.lock.acquire.conditional.immediate",
+        "synchronization.lock.acquire.conditional",
+        "II_ACQ_COND_mLockId_imm",
+        asm_mnemonic="acq.cond",
+        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
+    ),
+    _DescriptorSpec(
+        "ACQ_COND_mLockId_reg",
+        f"{_TARGET_KEY}.lock.acquire.conditional.register",
+        "synchronization.lock.acquire.conditional",
+        "II_ACQ_COND_mLockId_reg",
+        asm_mnemonic="acq.cond.reg",
+        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
+    ),
+    _DescriptorSpec(
+        "REL_mLockId_imm",
+        f"{_TARGET_KEY}.lock.release.immediate",
+        "synchronization.lock.release",
+        "II_REL_mLockId_imm",
+        asm_mnemonic="rel",
+        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
+    ),
+    _DescriptorSpec(
+        "REL_mLockId_reg",
+        f"{_TARGET_KEY}.lock.release.register",
+        "synchronization.lock.release",
+        "II_REL_mLockId_reg",
+        asm_mnemonic="rel.reg",
+        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
+    ),
+    _DescriptorSpec(
+        "REL_COND_mLockId_imm",
+        f"{_TARGET_KEY}.lock.release.conditional.immediate",
+        "synchronization.lock.release.conditional",
+        "II_REL_COND_mLockId_imm",
+        asm_mnemonic="rel.cond",
+        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
+    ),
+    _DescriptorSpec(
+        "REL_COND_mLockId_reg",
+        f"{_TARGET_KEY}.lock.release.conditional.register",
+        "synchronization.lock.release.conditional",
+        "II_REL_COND_mLockId_reg",
+        asm_mnemonic="rel.cond.reg",
+        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
     ),
     _DescriptorSpec(
         "J_lng",
@@ -1894,6 +1959,7 @@ def _effects(spec: _DescriptorSpec, form: MachineForm) -> tuple[Effect, ...]:
         )
     if form.control_flow_kind is not None:
         result.append(Effect(EffectKind.CONTROL))
+    result.extend(spec.effects)
     return tuple(result)
 
 
@@ -1903,12 +1969,13 @@ def _descriptor_flags(
     owns_implicit_state: bool,
 ) -> tuple[DescriptorFlag, ...]:
     result = []
-    if (
+    side_effecting = (
         has_property(form, "hasSideEffects")
         or has_property(form, "mayStore")
         or form.control_flow_kind is not None
         or owns_implicit_state
-    ):
+    )
+    if side_effecting:
         result.append(DescriptorFlag.SIDE_EFFECTING)
     if (
         form.control_flow_kind == "return"
@@ -1917,7 +1984,8 @@ def _descriptor_flags(
     ):
         result.append(DescriptorFlag.TERMINATOR)
     if (
-        not has_property(form, "mayLoad")
+        not side_effecting
+        and not has_property(form, "mayLoad")
         and not has_property(form, "mayStore")
         and form.control_flow_kind is None
         and form.name != "RET"
