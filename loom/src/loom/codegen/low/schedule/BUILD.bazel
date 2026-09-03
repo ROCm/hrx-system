@@ -95,6 +95,7 @@ loom_cc_library(
         ":ready_frontier",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/analysis:liveness_json",
+        "//loom/src/loom/codegen/low:descriptor_cost",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:function",

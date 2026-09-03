@@ -504,7 +504,7 @@ iree_status_t loom_low_schedule_emit_model_diagnostics(
 
 static iree_status_t loom_low_schedule_emit_resource_bottleneck(
     loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_resource_summary_t* summary) {
+    const loom_low_descriptor_resource_cost_t* summary) {
   loom_diagnostic_param_t params[] = {
       loom_param_string(loom_low_diagnostic_target_key(&state->target)),
       loom_param_string(loom_low_diagnostic_export_name(&state->target)),
@@ -527,7 +527,7 @@ iree_status_t loom_low_schedule_emit_resource_diagnostics(
     loom_low_schedule_build_state_t* state) {
   uint64_t maximum_estimated_min_cycles = 0;
   for (iree_host_size_t i = 0; i < state->resource_summary_count; ++i) {
-    const loom_low_schedule_resource_summary_t* summary =
+    const loom_low_descriptor_resource_cost_t* summary =
         &state->resource_summaries[i];
     if (summary->estimated_min_cycles > maximum_estimated_min_cycles) {
       maximum_estimated_min_cycles = summary->estimated_min_cycles;
@@ -537,7 +537,7 @@ iree_status_t loom_low_schedule_emit_resource_diagnostics(
     return iree_ok_status();
   }
   for (iree_host_size_t i = 0; i < state->resource_summary_count; ++i) {
-    const loom_low_schedule_resource_summary_t* summary =
+    const loom_low_descriptor_resource_cost_t* summary =
         &state->resource_summaries[i];
     if (summary->estimated_min_cycles != maximum_estimated_min_cycles) {
       continue;

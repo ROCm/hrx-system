@@ -888,7 +888,7 @@ iree_status_t loom_low_schedule_format_json(
     IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &resource_summaries));
     for (iree_host_size_t i = 0; i < table->resource_summary_count; ++i) {
       IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&resource_summaries));
-      const loom_low_schedule_resource_summary_t* summary =
+      const loom_low_descriptor_resource_cost_t* summary =
           &table->resource_summaries[i];
       loom_json_object_writer_t summary_object;
       IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &summary_object));

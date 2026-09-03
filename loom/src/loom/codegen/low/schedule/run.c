@@ -604,18 +604,8 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
     memset(state->resource_summaries, 0,
            resource_count * sizeof(*state->resource_summaries));
     for (iree_host_size_t i = 0; i < resource_count; ++i) {
-      const loom_low_resource_t* resource = &descriptor_set->resources[i];
-      IREE_ASSERT(resource->capacity_per_cycle != 0);
-      iree_string_view_t resource_name = loom_low_descriptor_set_string(
-          descriptor_set, resource->name_string_offset);
-      state->resource_summaries[i] = (loom_low_schedule_resource_summary_t){
-          .resource_id = (uint16_t)i,
-          .resource_name = resource_name,
-          .resource_kind = resource->kind,
-          .resource_flags = resource->flags,
-          .capacity_per_cycle = resource->capacity_per_cycle,
-          .contention_group_id = resource->contention_group_id,
-      };
+      loom_low_descriptor_resource_cost_initialize(
+          descriptor_set, (uint16_t)i, &state->resource_summaries[i]);
     }
   }
   if (resource_count != 0 &&

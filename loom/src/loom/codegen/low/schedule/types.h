@@ -20,6 +20,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/liveness.h"
+#include "loom/codegen/low/descriptor_cost.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/codegen/low/placement.h"
@@ -551,33 +552,6 @@ typedef struct loom_low_schedule_model_summary_t {
   uint32_t use_count;
 } loom_low_schedule_model_summary_t;
 
-// Aggregate descriptor resource pressure for one target resource. Summaries are
-// emitted in resource-id order and only include resources used by the schedule.
-typedef struct loom_low_schedule_resource_summary_t {
-  // Target resource table identifier summarized by this record.
-  uint16_t resource_id;
-  // Borrowed stable resource name.
-  iree_string_view_t resource_name;
-  // Abstract resource kind used by generic diagnostics.
-  loom_low_resource_kind_t resource_kind;
-  // Generic resource flags from the descriptor table.
-  loom_low_resource_flags_t resource_flags;
-  // Resource units available per cycle in the descriptor model.
-  uint16_t capacity_per_cycle;
-  // Contention group identifier shared by related resources.
-  uint16_t contention_group_id;
-  // Number of issue-use rows accumulated for this resource.
-  uint32_t use_count;
-  // Sum of occupied cycles across all issue-use rows.
-  uint64_t total_occupied_cycles;
-  // Sum of cycles * units across all issue-use rows.
-  uint64_t total_unit_cycles;
-  // Ceiling of total_unit_cycles / capacity_per_cycle.
-  uint64_t estimated_min_cycles;
-  // Largest single issue-use units value observed for this resource.
-  uint16_t peak_units_per_cycle;
-} loom_low_schedule_resource_summary_t;
-
 // Schedule metadata for one low function block.
 typedef struct loom_low_schedule_block_t {
   // Region block represented by this record.
@@ -707,7 +681,7 @@ typedef struct loom_low_schedule_table_t {
   // Number of schedule-class model-quality summaries.
   iree_host_size_t model_summary_count;
   // Per-resource aggregate schedule pressure in resource-id order.
-  const loom_low_schedule_resource_summary_t* resource_summaries;
+  const loom_low_descriptor_resource_cost_t* resource_summaries;
   // Number of resource summary records.
   iree_host_size_t resource_summary_count;
 } loom_low_schedule_table_t;

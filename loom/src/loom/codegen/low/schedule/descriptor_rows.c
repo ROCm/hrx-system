@@ -16,28 +16,10 @@ static iree_status_t loom_low_schedule_note_resource_use(
   IREE_ASSERT(state->resource_summaries != NULL);
   IREE_ASSERT(issue_use->resource_id <
               state->target.descriptor_set->resource_count);
-  loom_low_schedule_resource_summary_t* summary =
+  loom_low_descriptor_resource_cost_t* summary =
       &state->resource_summaries[issue_use->resource_id];
-  if (summary->use_count == UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "low schedule resource-use count overflows");
-  }
-  const uint64_t occupied_cycles = issue_use->cycles;
-  const uint64_t unit_cycles =
-      (uint64_t)issue_use->cycles * (uint64_t)issue_use->units;
-  if (summary->total_occupied_cycles > UINT64_MAX - occupied_cycles ||
-      summary->total_unit_cycles > UINT64_MAX - unit_cycles) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "low schedule resource summary counters overflow");
-  }
-  ++summary->use_count;
-  summary->total_occupied_cycles += occupied_cycles;
-  summary->total_unit_cycles += unit_cycles;
-  summary->estimated_min_cycles =
-      1 + (summary->total_unit_cycles - 1) / summary->capacity_per_cycle;
-  if (issue_use->units > summary->peak_units_per_cycle) {
-    summary->peak_units_per_cycle = issue_use->units;
-  }
+  IREE_RETURN_IF_ERROR(loom_low_descriptor_resource_cost_accumulate(
+      issue_use, /*occurrence_count=*/1, summary));
   if (state->resource_ready_issue_cycles != NULL) {
     const uint32_t use_start = iree_math_saturating_add_u32(
         state->current_issue_cycle, issue_use->stage);
@@ -206,7 +188,7 @@ void loom_low_schedule_compact_resource_summaries(
     if (state->resource_summaries[read_index].use_count == 0) {
       continue;
     }
-    const loom_low_schedule_resource_summary_t* summary =
+    const loom_low_descriptor_resource_cost_t* summary =
         &state->resource_summaries[read_index];
     if (iree_any_bit_set(summary->resource_flags,
                          LOOM_LOW_RESOURCE_FLAG_MATRIX_COEXECUTION_SOURCE)) {

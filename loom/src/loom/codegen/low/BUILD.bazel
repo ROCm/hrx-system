@@ -70,6 +70,29 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "descriptor_cost",
+    srcs = ["descriptor_cost.c"],
+    hdrs = ["descriptor_cost.h"],
+    deps = [
+        ":descriptors",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "descriptor_cost_test",
+    srcs = ["descriptor_cost_test.cc"],
+    deps = [
+        ":descriptor_cost",
+        "//loom/src/loom/target/test:descriptors",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_test(
     name = "descriptor_traits_test",
     srcs = ["descriptor_traits_test.cc"],

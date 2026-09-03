@@ -40,6 +40,33 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    descriptor_cost
+  HDRS
+    "descriptor_cost.h"
+  SRCS
+    "descriptor_cost.c"
+  DEPS
+    ::descriptors
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    descriptor_cost_test
+  SRCS
+    "descriptor_cost_test.cc"
+  DEPS
+    ::descriptor_cost
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::test::descriptors
+)
+
 loom_cc_test(
   NAME
     descriptor_traits_test

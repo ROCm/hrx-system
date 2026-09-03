@@ -105,6 +105,7 @@ loom_cc_library(
     loom::analysis::liveness_json
     loom::codegen::low::allocation::storage
     loom::codegen::low::allocation::target_constraints
+    loom::codegen::low::descriptor_cost
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
     loom::codegen::low::function

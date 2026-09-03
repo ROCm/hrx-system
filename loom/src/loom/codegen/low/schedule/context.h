@@ -314,7 +314,7 @@ typedef struct loom_low_schedule_build_state_t {
   const loom_low_memory_access_record_t* memory_access_records;
   // Per-resource aggregate resource pressure, dense by descriptor resource id
   // until compacted after scheduling.
-  loom_low_schedule_resource_summary_t* resource_summaries;
+  loom_low_descriptor_resource_cost_t* resource_summaries;
   // Issue uses that establish matrix/vector coexecution retention state.
   iree_host_size_t matrix_coexecution_source_use_count;
   // Number of populated scheduled_node_indices entries.
