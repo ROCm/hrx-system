@@ -229,8 +229,47 @@ loom_cc_library(
         ":low_registry",
         ":low_verify",
         ":lower",
+        ":pipeline_pass",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/pass:builder",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/ops",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "pipeline_lower",
+    srcs = ["pipeline/lower.c"],
+    hdrs = ["pipeline/lower.h"],
+    deps = [
+        ":array_descriptors",
+        ":array_plan",
+        "//loom/src/loom/analysis:pipeline_plan",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/pipeline",
+        "//loom/src/loom/target/arch/amd/xdna:array_facts",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "pipeline_pass",
+    srcs = ["pipeline/pass.c"],
+    hdrs = ["pipeline/pass.h"],
+    deps = [
+        ":pipeline_lower",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/pipeline",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/target:function_version",
         "//runtime/src/iree/base",
     ],
 )

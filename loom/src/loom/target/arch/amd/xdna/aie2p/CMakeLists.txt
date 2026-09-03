@@ -252,9 +252,54 @@ loom_cc_library(
     ::low_registry
     ::low_verify
     ::lower
+    ::pipeline_pass
     iree::base
+    loom::ir
+    loom::pass::builder
     loom::target::arch::amd::xdna::aie2p::ops
     loom::target::provider
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    pipeline_lower
+  HDRS
+    "pipeline/lower.h"
+  SRCS
+    "pipeline/lower.c"
+  DEPS
+    ::array_descriptors
+    ::array_plan
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::pipeline_plan
+    loom::codegen::low::builder
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::ops::pipeline
+    loom::target::arch::amd::xdna::array_facts
+    loom::util::fact_table
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    pipeline_pass
+  HDRS
+    "pipeline/pass.h"
+  SRCS
+    "pipeline/pass.c"
+  DEPS
+    ::pipeline_lower
+    iree::base
+    loom::ir
+    loom::ops::pipeline
+    loom::pass::registry
+    loom::pass::types
+    loom::pass::value_facts
+    loom::target::function_version
   PUBLIC
 )
 

@@ -2,64 +2,29 @@ aie2p.target<array> @array_target
 
 aie2p.target<core> @core_target
 
-low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @split_k_array() asm {
-  %product_lanes = constant.u32 2 : reg<aie2p.array.scalar : index>
-  %reducer_lanes = constant.u32 1 : reg<aie2p.array.scalar : index>
-  %product0_lane = constant.u32 0 : reg<aie2p.array.scalar : index>
-  %product1_lane = constant.u32 1 : reg<aie2p.array.scalar : index>
-  %reducer_lane = constant.u32 0 : reg<aie2p.array.scalar : index>
-  %partition_lanes = constant.u32 2 : reg<aie2p.array.scalar : index>
-  %ring_capacity = constant.u32 2 : reg<aie2p.array.scalar : index>
-  %array_column = constant.u32 0 : reg<aie2p.array.scalar : index>
-  %product0_row = constant.u32 2 : reg<aie2p.array.scalar : index>
-  %reducer_row = constant.u32 3 : reg<aie2p.array.scalar : index>
-  %product1_row = constant.u32 4 : reg<aie2p.array.scalar : index>
+pipeline.def<kernel> public retain target(@array_target) @split_k_array() launch(%lhs: buffer, %rhs: buffer, %bias: buffer, %output: buffer) {
+  %product_lanes = index.constant 2 : index
+  %reducer_lanes = index.constant 1 : index
+  %ring_capacity = index.constant 2 : index
+  %tile_extent = index.constant 8 : index
+  %base = index.constant 0 : offset
 
-  %products = group %product_lanes
-  %reducers = group %reducer_lanes
-  %product0 = worker %products, %product0_lane, @product_branch_i8
-  %product1 = worker %products, %product1_lane, @product_branch_i8
-  %reducer = worker %reducers, %reducer_lane, @reduce_bias_relu_i32
+  %products = group.create %product_lanes : index -> group
+  %reducers = group.create %reducer_lanes : index -> group
 
-  %lhs = binding 0, "read"
-  %rhs = binding 1, "read"
-  %bias = binding 2, "read"
-  %output = binding 3, "write"
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<[%product_lanes]x[%tile_extent]x[%tile_extent]xi8>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<[%product_lanes]x[%tile_extent]x[%tile_extent]xi8>
+  %bias_view = buffer.view %bias[%base] : buffer -> view<[%tile_extent]x[%tile_extent]xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%tile_extent]x[%tile_extent]xi32>
 
-  %lhs_tiles = sender %lhs, 0 : reg<aie2p.array.sender : tile<2x8x8xi8>>
-  %rhs_tiles = sender %rhs, 0 : reg<aie2p.array.sender : tile<2x8x8xi8>>
-  %bias_sender = sender %bias, 0 : reg<aie2p.array.sender : tile<8x8xi32>>
-  %output_receiver = receiver %output, 0 : reg<aie2p.array.receiver : tile<8x8xi32>>
-
-  %lhs0 = partition %lhs_tiles, %product0_lane, %partition_lanes : reg<aie2p.array.sender : tile<8x8xi8>>
-  %lhs1 = partition %lhs_tiles, %product1_lane, %partition_lanes : reg<aie2p.array.sender : tile<8x8xi8>>
-  %rhs0 = partition %rhs_tiles, %product0_lane, %partition_lanes : reg<aie2p.array.sender : tile<8x8xi8>>
-  %rhs1 = partition %rhs_tiles, %product1_lane, %partition_lanes : reg<aie2p.array.sender : tile<8x8xi8>>
-
-  %product0_lhs = receiver %product0, 0 : reg<aie2p.array.receiver : tile<8x8xi8>>
-  %product0_rhs = receiver %product0, 1 : reg<aie2p.array.receiver : tile<8x8xi8>>
-  %partial0 = sender %product0, 2 : reg<aie2p.array.sender : tile<8x8xi32>>
-  %product1_lhs = receiver %product1, 0 : reg<aie2p.array.receiver : tile<8x8xi8>>
-  %product1_rhs = receiver %product1, 1 : reg<aie2p.array.receiver : tile<8x8xi8>>
-  %partial1 = sender %product1, 2 : reg<aie2p.array.sender : tile<8x8xi32>>
-  %reduce_partial0 = receiver %reducer, 0 : reg<aie2p.array.receiver : tile<8x8xi32>>
-  %reduce_partial1 = receiver %reducer, 1 : reg<aie2p.array.receiver : tile<8x8xi32>>
-  %reduce_bias = receiver %reducer, 2 : reg<aie2p.array.receiver : tile<8x8xi32>>
-  %reduce_output = sender %reducer, 3 : reg<aie2p.array.sender : tile<8x8xi32>>
-
-  %lhs0_channel = channel %lhs0, %product0_lhs, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi8>>
-  %rhs0_channel = channel %rhs0, %product0_rhs, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi8>>
-  %lhs1_channel = channel %lhs1, %product1_lhs, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi8>>
-  %rhs1_channel = channel %rhs1, %product1_rhs, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi8>>
-  %bias_channel = channel %bias_sender, %reduce_bias, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi32>>
-  %output_channel = channel %reduce_output, %output_receiver, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi32>>
-  %partial0_channel = channel %partial0, %reduce_partial0, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi32>>
-  %partial1_channel = channel %partial1, %reduce_partial1, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi32>>
-
-  constrain.location %product0, %array_column, %product0_row
-  constrain.location %reducer, %array_column, %reducer_row
-  constrain.location %product1, %array_column, %product1_row
-  return
+  %lhs_tiles = pipeline.scatter %lhs_view across %products : view<[%product_lanes]x[%tile_extent]x[%tile_extent]xi8>, group -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi8>>
+  %rhs_tiles = pipeline.scatter %rhs_view across %products : view<[%product_lanes]x[%tile_extent]x[%tile_extent]xi8>, group -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi8>>
+  %bias_tile = pipeline.read %bias_view on %reducers : view<[%tile_extent]x[%tile_extent]xi32>, group -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>
+  %partials = pipeline.stage @product_branch_i8 on %products(%lhs_tiles, %rhs_tiles) : (group, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi8>>, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi8>>) -> (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>)
+  %buffered_partials = pipeline.buffer %partials capacity %ring_capacity : (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>, index) -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>
+  %result = pipeline.reduce @reduce_bias_relu_i32 from %products(%buffered_partials) to %reducers(%bias_tile) : (group, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>) to (group, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>) -> (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>)
+  pipeline.write %result to %output_view : pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>, view<[%tile_extent]x[%tile_extent]xi32>
+  pipeline.return
 }
 
 func.def target(@core_target) @product_branch_i8(%lhs: buffer, %rhs: buffer, %partial: buffer) {
