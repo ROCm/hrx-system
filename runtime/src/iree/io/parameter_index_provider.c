@@ -465,11 +465,11 @@ static iree_status_t iree_io_parameter_op_batch_advance_timeline(
   const bool is_first_timeline_use = timeline_semaphore == NULL;
   if (!timeline_semaphore) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_hal_semaphore_create(batch->device, IREE_HAL_QUEUE_AFFINITY_ANY,
-                                  batch->timeline_values[timeline_index],
-                                  IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
-                                  &batch->timeline_semaphores[timeline_index]));
+        z0, iree_hal_semaphore_create(
+                batch->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+                batch->timeline_values[timeline_index],
+                IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+                &batch->timeline_semaphores[timeline_index]));
     timeline_semaphore = batch->timeline_semaphores[timeline_index];
   }
   const uint64_t previous_timeline_value =
@@ -842,7 +842,7 @@ static iree_status_t iree_io_parameter_transfer_batch_begin_group(
   }
 
   IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
-      batch->device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      batch->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &group->start_semaphore));
   group->start_value = 1;
   iree_hal_semaphore_list_t start_signal_list = {
@@ -892,11 +892,11 @@ static iree_status_t iree_io_parameter_transfer_batch_advance_timeline(
       batch->timeline_semaphores[timeline_index];
   if (!timeline_semaphore) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_hal_semaphore_create(batch->device, IREE_HAL_QUEUE_AFFINITY_ANY,
-                                  batch->timeline_values[timeline_index],
-                                  IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
-                                  &batch->timeline_semaphores[timeline_index]));
+        z0, iree_hal_semaphore_create(
+                batch->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+                batch->timeline_values[timeline_index],
+                IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+                &batch->timeline_semaphores[timeline_index]));
     timeline_semaphore = batch->timeline_semaphores[timeline_index];
   }
 

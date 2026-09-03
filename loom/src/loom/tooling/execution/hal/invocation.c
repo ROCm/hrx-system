@@ -606,7 +606,7 @@ static iree_status_t loom_run_hal_queue_dispatch_prepare_options(
 
   iree_hal_semaphore_t* semaphore = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
 
   out_dispatch->executable = executable;
@@ -798,8 +798,9 @@ iree_status_t loom_run_hal_transfer_bindings_to_host(
   iree_hal_semaphore_t* completion_semaphore = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_create(
-        runtime->device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &completion_semaphore);
+        runtime->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+        /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+        &completion_semaphore);
   }
   uint64_t completion_value = 1;
   if (iree_status_is_ok(status)) {
@@ -1189,8 +1190,9 @@ iree_status_t loom_run_hal_dispatch_batch_prepare_from_binding_ring(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_create(
-        runtime->device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &out_batch->semaphore);
+        runtime->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+        /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+        &out_batch->semaphore);
   }
   if (iree_status_is_ok(status)) {
     out_batch->next_signal_value = 1;
@@ -1323,8 +1325,9 @@ iree_status_t loom_run_hal_dispatch_sequence_batch_prepare_from_plan_ring(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_create(
-        runtime->device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &out_batch->semaphore);
+        runtime->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+        /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+        &out_batch->semaphore);
   }
   if (iree_status_is_ok(status)) {
     out_batch->next_signal_value = 1;
@@ -1389,8 +1392,9 @@ iree_status_t loom_run_hal_dispatch_sequence_prepare(
       &out_sequence->command_buffer);
   if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_create(
-        runtime->device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &out_sequence->semaphore);
+        runtime->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+        /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+        &out_sequence->semaphore);
   }
   if (iree_status_is_ok(status)) {
     out_sequence->next_signal_value = 1;

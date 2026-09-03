@@ -371,9 +371,9 @@ iree_status_t hrx_graph_exec_instantiate_locked(
     iree_hal_device_t* hal_device = exec->device->hal_device;
     for (uint32_t i = 0; i < exec->semaphore_count; i++) {
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_hal_semaphore_create(hal_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-                                        0ull, IREE_HAL_SEMAPHORE_FLAG_NONE,
-                                        &exec->semaphores[i]));
+          z0, iree_hal_semaphore_create(
+                  hal_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0ull,
+                  IREE_HAL_SEMAPHORE_FLAG_NONE, &exec->semaphores[i]));
       exec->semaphore_base_values[i] = 0;
     }
 

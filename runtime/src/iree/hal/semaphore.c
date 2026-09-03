@@ -6,6 +6,7 @@
 
 #include "iree/hal/semaphore.h"
 
+#include <inttypes.h>
 #include <stddef.h>
 
 #include "iree/hal/detail.h"
@@ -79,8 +80,42 @@ IREE_API_EXPORT void iree_hal_semaphore_release(
   }
 }
 
+static iree_status_t iree_hal_semaphore_validate_queue_family_affinity(
+    iree_hal_device_t* device,
+    iree_hal_queue_family_affinity_t queue_family_affinity) {
+  if (iree_hal_queue_family_affinity_is_any(queue_family_affinity)) {
+    return iree_ok_status();
+  }
+
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  if (IREE_UNLIKELY(queue_spec->family_count > IREE_HAL_MAX_QUEUE_FAMILIES)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "device queue family count %" PRIhsz
+                            " exceeds semaphore affinity capacity %" PRIhsz,
+                            queue_spec->family_count,
+                            (iree_host_size_t)IREE_HAL_MAX_QUEUE_FAMILIES);
+  }
+  const iree_hal_queue_family_affinity_t supported_affinity =
+      queue_spec->family_count == IREE_HAL_MAX_QUEUE_FAMILIES
+          ? IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY
+          : (((iree_hal_queue_family_affinity_t)1 << queue_spec->family_count) -
+             1);
+  if (IREE_UNLIKELY(
+          iree_hal_queue_family_affinity_is_empty(queue_family_affinity) ||
+          !iree_all_bits_set(supported_affinity, queue_family_affinity))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "semaphore queue family affinity 0x%016" PRIx64
+        " is not a non-empty subset of device affinity 0x%016" PRIx64,
+        queue_family_affinity, supported_affinity);
+  }
+  return iree_ok_status();
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_semaphore_create(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     uint64_t initial_value, iree_hal_semaphore_flags_t flags,
     iree_hal_semaphore_t** out_semaphore) {
   IREE_ASSERT_ARGUMENT(device);
@@ -88,9 +123,12 @@ IREE_API_EXPORT iree_status_t iree_hal_semaphore_create(
   *out_semaphore = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, initial_value);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_semaphore_validate_queue_family_affinity(
+              device, queue_family_affinity));
   iree_status_t status =
       IREE_HAL_VTABLE_DISPATCH(device, iree_hal_device, create_semaphore)(
-          device, queue_affinity, initial_value, flags, out_semaphore);
+          device, queue_family_affinity, initial_value, flags, out_semaphore);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

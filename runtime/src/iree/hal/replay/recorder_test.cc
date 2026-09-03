@@ -537,7 +537,7 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsHostCallAsUnsupported) {
       iree_hal_make_host_call(CountHostCall, &call_count);
   iree_hal_semaphore_t* signal_semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      wrapped_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
   uint64_t signal_value = 1;
   const iree_hal_semaphore_list_t signal_semaphore_list = {
@@ -832,11 +832,11 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsQueueExecuteSemaphores) {
 
   iree_hal_semaphore_t* wait_semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      wrapped_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &wait_semaphore));
   iree_hal_semaphore_t* signal_semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      wrapped_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
 
   iree_hal_semaphore_t* wait_semaphores[] = {wait_semaphore};
@@ -1060,12 +1060,14 @@ TEST(ReplayRecorderTest, RecordsDeviceQueueAtomicOperations) {
 
   iree_hal_semaphore_t* wait_semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, /*queue_affinity=*/1, /*initial_value=*/7,
-      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &wait_semaphore));
+      wrapped_device,
+      /*queue_family_affinity=*/iree_hal_make_queue_family_affinity(0),
+      /*initial_value=*/7, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &wait_semaphore));
   iree_hal_semaphore_t* signal_semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, /*queue_affinity=*/1, /*initial_value=*/0,
-      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
+      wrapped_device,
+      /*queue_family_affinity=*/iree_hal_make_queue_family_affinity(0),
+      /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
   iree_hal_semaphore_t* wait_semaphores[] = {wait_semaphore};
   uint64_t wait_values[] = {7};
   const iree_hal_semaphore_list_t wait_list = {

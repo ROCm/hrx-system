@@ -31,9 +31,8 @@ enum iree_hal_semaphore_flag_bits_t {
 
   // Semaphore is only ever used on the same HAL device it was created on.
   // Attempting to use the semaphore on another device even if provided by the
-  // same HAL driver will result in undefined behavior. If a specific queue
-  // affinity was provided during creation the semaphore may only be used on
-  // those queues.
+  // same HAL driver will result in undefined behavior. Queue family
+  // compatibility is specified independently at semaphore creation time.
   IREE_HAL_SEMAPHORE_FLAG_DEVICE_LOCAL = 1ull << 0,
 
   // Semaphore will be used as part of a blocking host wait operation and should
@@ -321,16 +320,18 @@ typedef struct iree_hal_external_timepoint_t {
 // https://www.youtube.com/watch?v=SpE--Rf516Y
 // https://www.khronos.org/assets/uploads/developers/library/2018-xdc/Vulkan-Timeline-Semaphores-Part-1_Sep18.pdf
 // https://docs.microsoft.com/en-us/windows/win32/direct3d12/user-mode-heap-synchronization
-// Creates a semaphore that can be used with command queues owned by this
-// device. To use the semaphores with other devices or instances they must
-// first be exported.
+// Creates a semaphore that can be used with queues in
+// |queue_family_affinity| owned by this device. A concrete affinity is a hard
+// compatibility domain: the semaphore may only be used in queue operations on
+// the selected families. IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY includes all
+// provisioned and dynamically acquired queues in every family.
 //
-// By default the |queue_affinity| is a hint to the implementation of which
-// queues on the |device| will signal or wait on the semaphore. If
-// IREE_HAL_SEMAPHORE_FLAG_DEVICE_LOCAL is specified the |queue_affinity| will
-// indicate the semaphore is _only_ signaled or waited on those specific queues.
+// Queue family affinity does not constrain host-side signal, query, or wait
+// operations. To use the semaphore with another device or instance it must
+// first be exported and imported.
 IREE_API_EXPORT iree_status_t iree_hal_semaphore_create(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     uint64_t initial_value, iree_hal_semaphore_flags_t flags,
     iree_hal_semaphore_t** out_semaphore);
 

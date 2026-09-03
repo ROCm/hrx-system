@@ -202,7 +202,7 @@ static iree_status_t iree_benchmark_executable_run(
   iree_hal_semaphore_t* fence_semaphore = NULL;
   uint64_t fence_value = 0ull;
   status = iree_hal_semaphore_create(
-      args->device, IREE_HAL_QUEUE_AFFINITY_ANY, fence_value,
+      args->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, fence_value,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &fence_semaphore);
   iree_hal_semaphore_list_t wait_semaphore_list =
       iree_hal_semaphore_list_empty();

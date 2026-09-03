@@ -403,8 +403,8 @@ typedef struct iree_hal_replay_executable_parameter_metadata_t {
 
 // Payload describing a captured semaphore object.
 typedef struct iree_hal_replay_semaphore_object_payload_t {
-  // Queue affinity requested at creation.
-  uint64_t queue_affinity;
+  // Queue family compatibility domain requested at creation.
+  uint64_t queue_family_affinity;
   // Initial timeline payload value requested at creation.
   uint64_t initial_value;
   // Semaphore flag bits requested at creation.

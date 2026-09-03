@@ -291,7 +291,7 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
     }
     if (iree_status_is_ok(status)) {
       status = iree_hal_semaphore_create(
-          out_bundle->device, IREE_HAL_QUEUE_AFFINITY_ANY, 0ull,
+          out_bundle->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0ull,
           IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &out_bundle->completion_semaphore);
     }
     if (!iree_status_is_ok(status)) {

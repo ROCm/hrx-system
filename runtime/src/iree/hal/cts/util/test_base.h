@@ -127,7 +127,7 @@ struct SemaphoreList {
     for (size_t i = 0; i < initial_values.size(); ++i) {
       iree_hal_semaphore_t* semaphore = NULL;
       IREE_EXPECT_OK(iree_hal_semaphore_create(
-          device, IREE_HAL_QUEUE_AFFINITY_ANY, initial_values[i],
+          device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, initial_values[i],
           IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
       semaphores.push_back(semaphore);
     }
@@ -737,7 +737,7 @@ class CtsTestBase : public BaseType {
 
     iree_hal_semaphore_t* signal_semaphore = nullptr;
     IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0ull,
+        device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0ull,
         IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
     uint64_t target_payload_value = 1ull;
     iree_hal_semaphore_list_t signal_semaphores = {
@@ -779,9 +779,9 @@ class CtsTestBase : public BaseType {
 
   iree_hal_semaphore_t* CreateSemaphore() {
     iree_hal_semaphore_t* semaphore = nullptr;
-    IREE_EXPECT_OK(
-        iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0ull,
-                                  IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+    IREE_EXPECT_OK(iree_hal_semaphore_create(
+        device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0ull,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
     return semaphore;
   }
 

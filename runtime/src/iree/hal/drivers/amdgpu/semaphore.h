@@ -113,9 +113,9 @@ static inline bool iree_hal_amdgpu_last_signal_load(
 // |device| is stored as a back-pointer for type discrimination (checking
 // whether a semaphore belongs to a specific logical device). Not retained.
 //
-// |queue_affinity| hints which queues will signal/wait on the semaphore. If
-// IREE_HAL_SEMAPHORE_FLAG_DEVICE_LOCAL is set, the semaphore is only used on
-// those queues and the implementation may optimize accordingly.
+// |queue_family_affinity| is the complete set of queue families that may use
+// the semaphore. The implementation may optimize synchronization scope when
+// all selected families belong to one physical device.
 //
 // |flags| controls semaphore behavior:
 //   DEVICE_LOCAL: only signaled/waited by queues within this device. Enables
@@ -127,9 +127,9 @@ static inline bool iree_hal_amdgpu_last_signal_load(
 //     causal frontier for the latest payload value.
 iree_status_t iree_hal_amdgpu_semaphore_create(
     iree_hal_amdgpu_logical_device_t* device, iree_async_proactor_t* proactor,
-    iree_hal_queue_affinity_t queue_affinity, uint64_t initial_value,
-    iree_hal_semaphore_flags_t flags, iree_allocator_t host_allocator,
-    iree_hal_semaphore_t** out_semaphore);
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    uint64_t initial_value, iree_hal_semaphore_flags_t flags,
+    iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore);
 
 // Returns true if |semaphore| is an AMDGPU semaphore.
 bool iree_hal_amdgpu_semaphore_isa(iree_hal_semaphore_t* semaphore);
@@ -148,9 +148,10 @@ bool iree_hal_amdgpu_semaphore_is_local(
 iree_hal_semaphore_flags_t iree_hal_amdgpu_semaphore_flags(
     iree_hal_semaphore_t* semaphore);
 
-// Returns the AMDGPU semaphore creation queue affinity. Caller must verify
-// iree_hal_amdgpu_semaphore_isa() first.
-iree_hal_queue_affinity_t iree_hal_amdgpu_semaphore_queue_affinity(
+// Returns the AMDGPU semaphore queue family compatibility domain. Caller must
+// verify iree_hal_amdgpu_semaphore_isa() first.
+iree_hal_queue_family_affinity_t
+iree_hal_amdgpu_semaphore_queue_family_affinity(
     iree_hal_semaphore_t* semaphore);
 
 // Returns true if |semaphore| has the strict private-stream contract used by

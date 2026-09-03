@@ -589,7 +589,7 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
 
   iree_hal_semaphore_t* transfer_semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      device.get(), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &transfer_semaphore));
   HalSemaphorePtr transfer_semaphore_ptr(transfer_semaphore);
 

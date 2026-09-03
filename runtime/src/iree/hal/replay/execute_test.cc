@@ -767,7 +767,7 @@ static void CaptureFdBackedQueueRead(
 
   iree_hal_semaphore_t* signal_semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      wrapped_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
   iree_hal_semaphore_t* signal_semaphores[] = {signal_semaphore};
   uint64_t signal_value = 1;
@@ -892,7 +892,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedHostAllocationFileRead) {
 
   iree_hal_semaphore_t* signal_semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      wrapped_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
   iree_hal_semaphore_t* signal_semaphores[] = {signal_semaphore};
   uint64_t signal_value = 1;
@@ -973,7 +973,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedFdBackedQueueRead) {
 
   iree_hal_semaphore_t* signal_semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      wrapped_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
   iree_hal_semaphore_t* signal_semaphores[] = {signal_semaphore};
   uint64_t signal_value = 1;
@@ -1126,7 +1126,7 @@ TEST(ReplayExecuteTest, ExecutesRemappedFdBackedQueueRead) {
 
   iree_hal_semaphore_t* signal_semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      wrapped_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
   iree_hal_semaphore_t* signal_semaphores[] = {signal_semaphore};
   uint64_t signal_value = 1;
@@ -1309,7 +1309,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueAlloca) {
 
   iree_hal_semaphore_t* signal_semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      wrapped_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
   iree_hal_semaphore_t* signal_semaphores[] = {signal_semaphore};
   uint64_t signal_values[] = {1};
@@ -1419,7 +1419,7 @@ TEST(ReplayExecuteTest, ExecutesHostAllocationImportedBufferRecord) {
 
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      wrapped_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
   iree_hal_semaphore_t* semaphores[] = {semaphore};
   uint64_t signal_value = 1;
@@ -1555,7 +1555,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueTransfersAndDealloca) {
 
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      wrapped_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
   iree_hal_semaphore_t* semaphores[] = {semaphore};
 
@@ -1650,7 +1650,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueBarrier) {
 
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      wrapped_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
   iree_hal_semaphore_t* semaphores[] = {semaphore};
 
@@ -1738,7 +1738,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedCommandBufferTransfers) {
 
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      wrapped_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
   iree_hal_semaphore_t* semaphores[] = {semaphore};
   uint64_t signal_value = 1;
@@ -1815,7 +1815,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedIndirectCommandBufferBindings) {
 
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      wrapped_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
   iree_hal_semaphore_t* semaphores[] = {semaphore};
   uint64_t signal_value = 1;

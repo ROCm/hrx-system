@@ -374,7 +374,8 @@ static iree_status_t iree_hal_replay_device_import_file(
 }
 
 static iree_status_t iree_hal_replay_device_create_semaphore(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     uint64_t initial_value, iree_hal_semaphore_flags_t flags,
     iree_hal_semaphore_t** out_semaphore) {
   iree_hal_replay_device_t* device = iree_hal_replay_device_cast(base_device);
@@ -385,7 +386,7 @@ static iree_status_t iree_hal_replay_device_create_semaphore(
       device->recorder, &semaphore_id));
 
   iree_hal_replay_semaphore_object_payload_t payload = {
-      .queue_affinity = queue_affinity,
+      .queue_family_affinity = queue_family_affinity,
       .initial_value = initial_value,
       .flags = flags,
   };
@@ -400,8 +401,9 @@ static iree_status_t iree_hal_replay_device_create_semaphore(
       IREE_HAL_REPLAY_PAYLOAD_TYPE_SEMAPHORE_OBJECT, &pending_record));
 
   iree_hal_semaphore_t* semaphore = NULL;
-  iree_status_t status = iree_hal_semaphore_create(
-      device->base_device, queue_affinity, initial_value, flags, &semaphore);
+  iree_status_t status =
+      iree_hal_semaphore_create(device->base_device, queue_family_affinity,
+                                initial_value, flags, &semaphore);
   if (iree_status_is_ok(status)) {
     status = iree_hal_replay_recorder_register_semaphore(
         &pending_record, semaphore, semaphore_id);

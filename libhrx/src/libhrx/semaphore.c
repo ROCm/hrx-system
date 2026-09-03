@@ -21,7 +21,7 @@ hrx_status_t hrx_semaphore_create(hrx_device_t device, uint64_t initial_value,
   }
 
   iree_status_t status = iree_hal_semaphore_create(
-      device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, initial_value,
+      device->hal_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, initial_value,
       IREE_HAL_SEMAPHORE_FLAG_NONE, &sem->hal_semaphore);
   if (!iree_status_is_ok(status)) {
     free(sem);

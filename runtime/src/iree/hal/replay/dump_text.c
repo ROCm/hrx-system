@@ -305,9 +305,9 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
       memcpy(&payload, record->payload.data, sizeof(payload));
       return iree_string_builder_append_format(
           builder,
-          " queue_affinity=%" PRIu64 " initial_value=%" PRIu64
+          " queue_family_affinity=%" PRIu64 " initial_value=%" PRIu64
           " flags=0x%016" PRIx64,
-          payload.queue_affinity, payload.initial_value, payload.flags);
+          payload.queue_family_affinity, payload.initial_value, payload.flags);
     }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_FILE_OBJECT: {
       if (record->payload.data_length <

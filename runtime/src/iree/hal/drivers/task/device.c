@@ -681,13 +681,14 @@ static iree_status_t iree_hal_task_device_import_file(
 }
 
 static iree_status_t iree_hal_task_device_create_semaphore(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     uint64_t initial_value, iree_hal_semaphore_flags_t flags,
     iree_hal_semaphore_t** out_semaphore) {
+  (void)queue_family_affinity;
+  (void)flags;
   iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  iree_async_proactor_t* proactor =
-      iree_hal_task_device_proactor_for_affinity(device, queue_affinity);
-  return iree_hal_task_semaphore_create(proactor, initial_value,
+  return iree_hal_task_semaphore_create(device->proactor, initial_value,
                                         device->host_allocator, out_semaphore);
 }
 

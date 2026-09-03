@@ -69,9 +69,6 @@ typedef struct iree_hal_vulkan_semaphore_t {
   // Native Vulkan timeline semaphore handle.
   VkSemaphore handle;
 
-  // Queue affinity provided at creation.
-  iree_hal_queue_affinity_t queue_affinity;
-
   // Creation flags controlling synchronization behavior.
   iree_hal_semaphore_flags_t flags;
 
@@ -103,9 +100,9 @@ static iree_status_code_t iree_hal_vulkan_semaphore_failure_code(
 iree_status_t iree_hal_vulkan_semaphore_create(
     iree_hal_vulkan_logical_device_t* device,
     const iree_hal_vulkan_device_syms_t* syms, VkDevice logical_device,
-    iree_async_proactor_t* proactor, iree_hal_queue_affinity_t queue_affinity,
-    uint64_t initial_value, iree_hal_semaphore_flags_t flags,
-    iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore) {
+    iree_async_proactor_t* proactor, uint64_t initial_value,
+    iree_hal_semaphore_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_semaphore_t** out_semaphore) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(syms);
   IREE_ASSERT_ARGUMENT(proactor);
@@ -156,7 +153,6 @@ iree_status_t iree_hal_vulkan_semaphore_create(
     semaphore->device = device;
     semaphore->logical_device = logical_device;
     semaphore->handle = handle;
-    semaphore->queue_affinity = queue_affinity;
     semaphore->flags = flags;
     memset(&semaphore->last_signal, 0, sizeof(semaphore->last_signal));
     *out_semaphore = iree_hal_semaphore_cast(&semaphore->async);
@@ -201,11 +197,6 @@ bool iree_hal_vulkan_semaphore_is_local(
 iree_hal_semaphore_flags_t iree_hal_vulkan_semaphore_flags(
     iree_hal_semaphore_t* semaphore) {
   return ((const iree_hal_vulkan_semaphore_t*)semaphore)->flags;
-}
-
-iree_hal_queue_affinity_t iree_hal_vulkan_semaphore_queue_affinity(
-    iree_hal_semaphore_t* semaphore) {
-  return ((const iree_hal_vulkan_semaphore_t*)semaphore)->queue_affinity;
 }
 
 iree_status_t iree_hal_vulkan_semaphore_handle(

@@ -100,7 +100,7 @@ TEST_P(TaskQueueShutdownTest, ReleasesDeviceGroupWithAcceptedExecuteInFlight) {
 
     iree_hal_semaphore_t* signal_semaphore = nullptr;
     IREE_ASSERT_OK(iree_hal_semaphore_create(
-        device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+        device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
         IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
     iree_hal_semaphore_t* signal_semaphores[] = {signal_semaphore};
     uint64_t signal_values[] = {1};

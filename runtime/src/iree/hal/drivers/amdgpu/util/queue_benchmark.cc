@@ -2138,7 +2138,7 @@ class QueueBenchmark : public benchmark::Fixture {
                              iree_hal_semaphore_t** out_semaphore) {
     return HandleStatus(state,
                         iree_hal_semaphore_create(
-                            device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+                            device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
                             /*initial_value=*/0,
                             IREE_HAL_SEMAPHORE_FLAG_DEFAULT, out_semaphore),
                         "failed to create semaphore");
@@ -2146,14 +2146,14 @@ class QueueBenchmark : public benchmark::Fixture {
 
   bool CreatePrivateStreamSemaphore(benchmark::State& state,
                                     iree_hal_semaphore_t** out_semaphore) {
-    return HandleStatus(
-        state,
-        iree_hal_semaphore_create(device_, kQueue0 | kQueue1,
-                                  /*initial_value=*/0,
-                                  IREE_HAL_SEMAPHORE_FLAG_DEVICE_LOCAL |
-                                      IREE_HAL_SEMAPHORE_FLAG_SINGLE_PRODUCER,
-                                  out_semaphore),
-        "failed to create private stream semaphore");
+    return HandleStatus(state,
+                        iree_hal_semaphore_create(
+                            device_, iree_hal_make_queue_family_affinity(0),
+                            /*initial_value=*/0,
+                            IREE_HAL_SEMAPHORE_FLAG_DEVICE_LOCAL |
+                                IREE_HAL_SEMAPHORE_FLAG_SINGLE_PRODUCER,
+                            out_semaphore),
+                        "failed to create private stream semaphore");
   }
 
   static bool initialized_;

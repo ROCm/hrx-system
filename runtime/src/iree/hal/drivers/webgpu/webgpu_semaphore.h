@@ -32,9 +32,9 @@ extern "C" {
 // timeline tracking, frontier merge, and timepoint dispatch — the WebGPU
 // semaphore adds only the wait implementation.
 iree_status_t iree_hal_webgpu_semaphore_create(
-    iree_async_proactor_t* proactor, iree_hal_queue_affinity_t queue_affinity,
-    uint64_t initial_value, iree_hal_semaphore_flags_t flags,
-    iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore);
+    iree_async_proactor_t* proactor, uint64_t initial_value,
+    iree_hal_semaphore_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_semaphore_t** out_semaphore);
 
 // Returns true if the semaphore has a pending submitted signal from |axis|
 // that will reach at least |minimum_value|. Used by queue ops to determine

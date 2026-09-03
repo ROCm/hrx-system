@@ -335,11 +335,15 @@ class ReplayAtomicExecutionTest : public ::testing::Test {
         iree_hal_device_allocator(task_device_), buffer_params, 64,
         &target_buffer_));
     IREE_ASSERT_OK(iree_hal_semaphore_create(
-        task_device_, /*queue_affinity=*/1, /*initial_value=*/7,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &wait_semaphore_));
+        task_device_,
+        /*queue_family_affinity=*/iree_hal_make_queue_family_affinity(0),
+        /*initial_value=*/7, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+        &wait_semaphore_));
     IREE_ASSERT_OK(iree_hal_semaphore_create(
-        task_device_, /*queue_affinity=*/1, /*initial_value=*/0,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore_));
+        task_device_,
+        /*queue_family_affinity=*/iree_hal_make_queue_family_affinity(0),
+        /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+        &signal_semaphore_));
 
     const iree_host_size_t validation_state_size =
         iree_hal_command_buffer_validation_state_size(

@@ -1250,17 +1250,16 @@ static iree_status_t iree_hal_vulkan_logical_device_import_file(
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_create_semaphore(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     uint64_t initial_value, iree_hal_semaphore_flags_t flags,
     iree_hal_semaphore_t** out_semaphore) {
+  (void)queue_family_affinity;
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_affinity_normalize(
-      device->queues.affinity_mask, queue_affinity, &queue_affinity));
   return iree_hal_vulkan_semaphore_create(
       device, &device->syms, device->logical_device, device->proactor,
-      queue_affinity, initial_value, flags, device->host_allocator,
-      out_semaphore);
+      initial_value, flags, device->host_allocator, out_semaphore);
 }
 
 static iree_hal_semaphore_compatibility_t

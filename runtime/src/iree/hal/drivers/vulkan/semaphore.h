@@ -70,9 +70,9 @@ bool iree_hal_vulkan_last_signal_load(
 iree_status_t iree_hal_vulkan_semaphore_create(
     iree_hal_vulkan_logical_device_t* device,
     const iree_hal_vulkan_device_syms_t* syms, VkDevice logical_device,
-    iree_async_proactor_t* proactor, iree_hal_queue_affinity_t queue_affinity,
-    uint64_t initial_value, iree_hal_semaphore_flags_t flags,
-    iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore);
+    iree_async_proactor_t* proactor, uint64_t initial_value,
+    iree_hal_semaphore_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_semaphore_t** out_semaphore);
 
 // Returns true if |semaphore| is a Vulkan timeline semaphore.
 bool iree_hal_vulkan_semaphore_isa(iree_hal_semaphore_t* semaphore);
@@ -84,10 +84,6 @@ bool iree_hal_vulkan_semaphore_is_local(
 
 // Returns the Vulkan semaphore creation flags.
 iree_hal_semaphore_flags_t iree_hal_vulkan_semaphore_flags(
-    iree_hal_semaphore_t* semaphore);
-
-// Returns the Vulkan semaphore creation queue affinity.
-iree_hal_queue_affinity_t iree_hal_vulkan_semaphore_queue_affinity(
     iree_hal_semaphore_t* semaphore);
 
 // Returns the native Vulkan timeline semaphore handle.

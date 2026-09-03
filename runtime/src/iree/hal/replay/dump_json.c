@@ -421,9 +421,9 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
       memcpy(&payload, record->payload.data, sizeof(payload));
       return iree_string_builder_append_format(
           builder,
-          ",\"payload\":{\"queue_affinity\":%" PRIu64
+          ",\"payload\":{\"queue_family_affinity\":%" PRIu64
           ",\"initial_value\":%" PRIu64 ",\"flags\":%" PRIu64 "}",
-          payload.queue_affinity, payload.initial_value, payload.flags);
+          payload.queue_family_affinity, payload.initial_value, payload.flags);
     }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_FILE_OBJECT: {
       if (record->payload.data_length <

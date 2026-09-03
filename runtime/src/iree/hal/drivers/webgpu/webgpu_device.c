@@ -462,13 +462,15 @@ static iree_status_t iree_hal_webgpu_device_import_file(
 }
 
 static iree_status_t iree_hal_webgpu_device_create_semaphore(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     uint64_t initial_value, iree_hal_semaphore_flags_t flags,
     iree_hal_semaphore_t** out_semaphore) {
+  (void)queue_family_affinity;
   iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
-  return iree_hal_webgpu_semaphore_create(
-      device->queue.proactor, queue_affinity, initial_value, flags,
-      device->host_allocator, out_semaphore);
+  return iree_hal_webgpu_semaphore_create(device->queue.proactor, initial_value,
+                                          flags, device->host_allocator,
+                                          out_semaphore);
 }
 
 static iree_hal_semaphore_compatibility_t

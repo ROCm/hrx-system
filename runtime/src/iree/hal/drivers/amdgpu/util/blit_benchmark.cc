@@ -378,7 +378,7 @@ class BlitBenchmark : public benchmark::Fixture {
 
     if (!HandleStatus(state,
                       iree_hal_semaphore_create(
-                          device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+                          device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
                           /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
                           &completion_semaphore_),
                       "failed to create completion semaphore")) {

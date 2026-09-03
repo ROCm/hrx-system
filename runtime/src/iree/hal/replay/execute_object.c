@@ -567,8 +567,8 @@ static iree_status_t iree_hal_replay_executor_create_semaphore(
       &device_entry));
   iree_hal_semaphore_t* semaphore = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
-      device_entry->value.device, payload.queue_affinity, payload.initial_value,
-      payload.flags, &semaphore));
+      device_entry->value.device, payload.queue_family_affinity,
+      payload.initial_value, payload.flags, &semaphore));
   iree_hal_replay_object_entry_t entry = {.value.semaphore = semaphore};
   return iree_hal_replay_executor_store(
       executor, record->header.related_object_id,

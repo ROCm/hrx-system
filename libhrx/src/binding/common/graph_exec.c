@@ -1754,7 +1754,7 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
          i++) {
       iree_hal_semaphore_t* semaphore = NULL;
       status = iree_hal_semaphore_create(
-          exec->context->device, exec->context->queue_affinity, 0ull,
+          exec->context->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0ull,
           IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore);
       if (iree_status_is_ok(status)) {
         status =

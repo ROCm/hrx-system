@@ -228,11 +228,11 @@ TEST_F(ParameterIndexProviderTest, GatherBatchPreservesGroupSignals) {
 
   Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> first_signal;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, first_signal.out()));
   Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> second_signal;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, second_signal.out()));
 
   ParameterRequest first_request = {
@@ -338,7 +338,7 @@ TEST_F(ParameterIndexProviderTest, GatherBatchReadsAdjacentFileSpans) {
 
   Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> signal;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, signal.out()));
 
   ParameterRequest requests[3] = {
@@ -424,19 +424,19 @@ TEST_F(ParameterIndexProviderTest, ScatterBatchPreservesGroupSemaphores) {
 
   Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> first_wait;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, first_wait.out()));
   Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> second_wait;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, second_wait.out()));
   Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> first_signal;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, first_signal.out()));
   Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> second_signal;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, second_signal.out()));
 
   ParameterRequest first_request = {
@@ -578,7 +578,7 @@ TEST_F(ParameterIndexProviderTest, ScatterBatchWritesAdjacentFileSpans) {
 
   Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> signal;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, signal.out()));
 
   ParameterRequest requests[3] = {

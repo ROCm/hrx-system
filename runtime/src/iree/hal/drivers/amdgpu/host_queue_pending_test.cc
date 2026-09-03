@@ -149,7 +149,7 @@ static iree_status_t CreateHostVisibleTransferBuffer(
 static iree_status_t CreateSemaphore(iree_hal_device_t* device,
                                      iree_hal_semaphore_t** out_semaphore) {
   return iree_hal_semaphore_create(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, out_semaphore);
 }
 

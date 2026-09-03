@@ -331,7 +331,7 @@ iree_status_t iree_hal_streaming_stream_create(
 
   // Create timeline semaphore for synchronization.
   iree_status_t status = iree_hal_semaphore_create(
-      context->device, IREE_HAL_QUEUE_AFFINITY_ANY, 0ULL,
+      context->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0ULL,
       IREE_HAL_SEMAPHORE_FLAG_NONE, &stream->timeline_semaphore);
 
   // Register stream with context.
