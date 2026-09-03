@@ -53,6 +53,12 @@ guard the tail. A value needed only for launch arithmetic does not consume a
 device argument; a buffer needed only by the device does not become a workload
 argument.
 
+`index` and `offset` are logical source types, not fixed-width device ABI
+types. A target may select a 32- or 64-bit representation for a launch argument
+from the facts proven about that value. Loom's execution tools pack arguments
+from the loaded executable's parameter reflection; a direct HAL host must use
+the same reflection instead of assuming a width from the source spelling.
+
 ## Launch configuration is pure executable logic
 
 The launch-configuration region is a pure function of its workload arguments

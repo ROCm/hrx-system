@@ -171,6 +171,12 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   loom_device_target_t compile_device_target;
   // Prepared executable retained for correctness and benchmark dispatches.
   loom_run_hal_prepared_candidate_t prepared_candidate;
+  // Allocator-owned reflected logical parameter layout for the prepared
+  // executable function. Parameter string views borrow executable storage.
+  iree_hal_executable_function_parameter_t* function_parameters;
+  // Number of entries in |function_parameters|. Zero means the backend did
+  // not publish logical parameter reflection.
+  iree_host_size_t function_parameter_count;
   // Dispatch options derived from the compiled source entry.
   loom_run_hal_invocation_options_t invocation_options;
   // Most recently resolved source launch configuration. This is refreshed
@@ -308,11 +314,12 @@ loom_run_hal_testbench_actual_sequence_provider(
 
 // Appends borrowed testbench input values to HAL bindings/constants.
 //
-// Scalar constants are packed according to the corresponding Loom source input
-// type, not only the scalar carrier type. This matters for index/offset values,
-// which have target ABI widths independent of the materialized scalar storage.
+// When |input_parameters| is provided, scalar widths and HAL table offsets are
+// taken from the loaded executable's reflected ABI. A NULL parameter list uses
+// the source-type defaults required by backends without parameter reflection.
 iree_status_t loom_run_hal_testbench_invocation_inputs_from_values(
     const loom_testbench_value_t* inputs, const loom_type_t* input_types,
+    const iree_hal_executable_function_parameter_t* input_parameters,
     iree_host_size_t input_count, loom_run_hal_invocation_options_t* options,
     iree_allocator_t allocator, loom_run_hal_binding_list_t* out_bindings);
 

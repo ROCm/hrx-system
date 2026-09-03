@@ -66,6 +66,7 @@ nav:
   - Programming guide:
       - Guide map: guide/index.md
       - Acquiring Loom: getting-started/acquiring-loom.md
+      - Run your first kernel: getting-started/first-kernel.md
       - From source to artifacts: getting-started/source-to-artifacts.md
       - Source modules and canonical text: guide/source-modules.md
       - Values, types, and shapes: guide/values-types-shapes.md

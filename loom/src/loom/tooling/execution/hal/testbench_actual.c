@@ -330,6 +330,8 @@ void loom_run_hal_testbench_actual_provider_deinitialize(
   if (provider->context != NULL) {
     iree_allocator_free(provider->context->host_allocator,
                         provider->workload_arguments);
+    iree_allocator_free(provider->context->host_allocator,
+                        provider->function_parameters);
   }
   *provider = (loom_run_hal_testbench_actual_provider_t){0};
 }
@@ -585,6 +587,54 @@ static iree_status_t loom_run_hal_testbench_resolve_target_requirement(
   return iree_ok_status();
 }
 
+static iree_status_t loom_run_hal_testbench_reflect_function_parameters(
+    loom_run_hal_testbench_actual_provider_t* provider) {
+  iree_hal_executable_t* executable = provider->prepared_candidate.executable;
+  iree_string_view_t function_name =
+      iree_string_view_trim(provider->invocation_options.function_name);
+  if (iree_string_view_starts_with_char(function_name, '@')) {
+    function_name = iree_string_view_remove_prefix(function_name, 1);
+  }
+
+  iree_hal_executable_function_t function =
+      iree_hal_executable_function_invalid();
+  IREE_RETURN_IF_ERROR(iree_hal_executable_lookup_function_by_name(
+      executable, function_name, &function));
+  iree_hal_executable_function_info_t function_info = {0};
+  IREE_RETURN_IF_ERROR(
+      iree_hal_executable_function_info(executable, function, &function_info));
+
+  // Some backends only reflect aggregate constant and binding counts and
+  // therefore require source-type packing. A nonzero count is a complete ABI
+  // contract and must match the source.
+  if (function_info.parameter_count == 0) {
+    return iree_ok_status();
+  }
+  if (function_info.parameter_count != provider->kernel_launch->input_count) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "loaded HAL function '%.*s' reflects %u parameters for %" PRIhsz
+        " source inputs",
+        (int)function_name.size, function_name.data,
+        (unsigned)function_info.parameter_count,
+        provider->kernel_launch->input_count);
+  }
+
+  iree_hal_executable_function_parameter_t* parameters = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      provider->context->host_allocator, function_info.parameter_count,
+      sizeof(*parameters), (void**)&parameters));
+  iree_status_t status = iree_hal_executable_function_parameters(
+      executable, function, function_info.parameter_count, parameters);
+  if (iree_status_is_ok(status)) {
+    provider->function_parameters = parameters;
+    provider->function_parameter_count = function_info.parameter_count;
+  } else {
+    iree_allocator_free(provider->context->host_allocator, parameters);
+  }
+  return status;
+}
+
 iree_status_t loom_run_hal_testbench_actual_provider_compile(
     loom_run_hal_testbench_actual_provider_t* provider) {
   if (provider->prepared_candidate_initialized || provider->compile_rejected) {
@@ -733,15 +783,23 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
         provider->context->device_provider->artifact_provider->name.data);
   }
 
-  IREE_RETURN_IF_ERROR(loom_run_hal_prepared_candidate_prepare(
+  status = loom_run_hal_prepared_candidate_prepare(
       &provider->context->runtime, &provider->candidate.device_artifact,
-      provider->context->host_allocator, &provider->prepared_candidate));
-  provider->prepared_candidate_initialized = true;
-  return iree_ok_status();
+      provider->context->host_allocator, &provider->prepared_candidate);
+  if (iree_status_is_ok(status)) {
+    provider->prepared_candidate_initialized = true;
+    status = loom_run_hal_testbench_reflect_function_parameters(provider);
+  }
+  if (!iree_status_is_ok(status) && provider->prepared_candidate_initialized) {
+    loom_run_hal_prepared_candidate_deinitialize(&provider->prepared_candidate);
+    provider->prepared_candidate_initialized = false;
+  }
+  return status;
 }
 
 static iree_status_t loom_run_hal_testbench_invocation_options_push_constant(
     const loom_testbench_value_t* value, loom_type_t source_type,
+    const iree_hal_executable_function_parameter_t* parameter,
     loom_run_hal_invocation_options_t* options) {
   if (!loom_testbench_value_is_scalar(value)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -755,31 +813,55 @@ static iree_status_t loom_run_hal_testbench_invocation_options_push_constant(
   }
   const loom_scalar_type_t source_scalar_type =
       loom_type_element_type(source_type);
-  if (source_scalar_type == LOOM_SCALAR_TYPE_INDEX) {
+  iree_host_size_t abi_word_count = 0;
+  if (parameter != NULL) {
+    if (parameter->type !=
+        IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "HAL executable parameter for scalar input is not a constant");
+    }
+    if (parameter->size == 0 ||
+        (parameter->size % sizeof(options->constants[0])) != 0) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "HAL executable constant parameter has invalid byte length %u",
+          (unsigned)parameter->size);
+    }
+    const iree_host_size_t expected_offset =
+        options->constant_count * sizeof(options->constants[0]);
+    if (parameter->offset != expected_offset) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "HAL executable constant parameter offset %u does not match next "
+          "packed offset %" PRIhsz,
+          (unsigned)parameter->offset, expected_offset);
+    }
+    abi_word_count = parameter->size / sizeof(options->constants[0]);
+  }
+  if (source_scalar_type == LOOM_SCALAR_TYPE_INDEX ||
+      source_scalar_type == LOOM_SCALAR_TYPE_OFFSET) {
     int64_t integer_value = 0;
     IREE_RETURN_IF_ERROR(loom_testbench_value_as_i64(value, &integer_value));
-    if (integer_value < INT32_MIN || integer_value > INT32_MAX) {
+    if (abi_word_count == 0) {
+      abi_word_count = source_scalar_type == LOOM_SCALAR_TYPE_INDEX ? 1 : 2;
+    }
+    if (abi_word_count != 1 && abi_word_count != 2) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "HAL dispatch %s constant has unsupported ABI word count %" PRIhsz,
+          loom_scalar_type_name(source_scalar_type), abi_word_count);
+    }
+    if (abi_word_count == 1 &&
+        (integer_value < INT32_MIN || integer_value > UINT32_MAX)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "HAL dispatch %s constant value %" PRId64
                               " does not fit the 32-bit direct-constant ABI",
                               loom_scalar_type_name(source_scalar_type),
                               integer_value);
     }
-    if (options->constant_count + 1 > LOOM_RUN_HAL_MAX_CONSTANT_COUNT) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "HAL dispatch constant count exceeds capacity "
-          "%" PRIhsz,
-          (iree_host_size_t)LOOM_RUN_HAL_MAX_CONSTANT_COUNT);
-    }
-    options->constants[options->constant_count++] =
-        (uint32_t)(int32_t)integer_value;
-    return iree_ok_status();
-  }
-  if (source_scalar_type == LOOM_SCALAR_TYPE_OFFSET) {
-    int64_t integer_value = 0;
-    IREE_RETURN_IF_ERROR(loom_testbench_value_as_i64(value, &integer_value));
-    if (options->constant_count + 2 > LOOM_RUN_HAL_MAX_CONSTANT_COUNT) {
+    if (options->constant_count + abi_word_count >
+        LOOM_RUN_HAL_MAX_CONSTANT_COUNT) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
           "HAL dispatch constant count exceeds capacity "
@@ -788,7 +870,10 @@ static iree_status_t loom_run_hal_testbench_invocation_options_push_constant(
     }
     const uint64_t raw_value = (uint64_t)integer_value;
     options->constants[options->constant_count++] = (uint32_t)raw_value;
-    options->constants[options->constant_count++] = (uint32_t)(raw_value >> 32);
+    if (abi_word_count == 2) {
+      options->constants[options->constant_count++] =
+          (uint32_t)(raw_value >> 32);
+    }
     return iree_ok_status();
   }
 
@@ -796,6 +881,13 @@ static iree_status_t loom_run_hal_testbench_invocation_options_push_constant(
   iree_host_size_t word_count = 0;
   IREE_RETURN_IF_ERROR(iree_tooling_value_write_abi_words(
       &value->scalar, IREE_ARRAYSIZE(words), words, &word_count));
+  if (abi_word_count != 0 && word_count != abi_word_count) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "HAL dispatch %s constant requires %" PRIhsz
+                            " reflected ABI words but materializes %" PRIhsz,
+                            loom_scalar_type_name(source_scalar_type),
+                            abi_word_count, word_count);
+  }
   if (options->constant_count + word_count > LOOM_RUN_HAL_MAX_CONSTANT_COUNT) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "HAL dispatch constant count exceeds capacity "
@@ -808,8 +900,29 @@ static iree_status_t loom_run_hal_testbench_invocation_options_push_constant(
   return iree_ok_status();
 }
 
+static iree_status_t loom_run_hal_testbench_validate_buffer_parameter(
+    const iree_hal_executable_function_parameter_t* parameter,
+    iree_host_size_t binding_ordinal) {
+  if (parameter == NULL) {
+    return iree_ok_status();
+  }
+  if (parameter->type != IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "HAL executable parameter for buffer input is not a binding");
+  }
+  if (parameter->offset != binding_ordinal) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "HAL executable binding ordinal %u does not match "
+                            "next binding %" PRIhsz,
+                            (unsigned)parameter->offset, binding_ordinal);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_run_hal_testbench_append_buffer_binding(
     const loom_testbench_value_t* input,
+    const iree_hal_executable_function_parameter_t* parameter,
     loom_run_hal_binding_list_t* bindings) {
   if (!loom_testbench_value_is_buffer(input) ||
       input->buffer.kind == IREE_TOOLING_BUFFER_BINDING_KIND_NONE ||
@@ -823,6 +936,8 @@ static iree_status_t loom_run_hal_testbench_append_buffer_binding(
                             "%" PRIhsz,
                             bindings->capacity);
   }
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_validate_buffer_parameter(
+      parameter, bindings->count));
   iree_tooling_buffer_binding_t* binding = &bindings->values[bindings->count];
   *binding = input->buffer;
   iree_hal_buffer_retain(binding->buffer);
@@ -833,13 +948,16 @@ static iree_status_t loom_run_hal_testbench_append_buffer_binding(
 
 static iree_status_t loom_run_hal_testbench_input_append(
     loom_run_hal_binding_list_t* bindings, const loom_testbench_value_t* input,
-    loom_type_t input_type, loom_run_hal_invocation_options_t* options) {
+    loom_type_t input_type,
+    const iree_hal_executable_function_parameter_t* parameter,
+    loom_run_hal_invocation_options_t* options) {
   if (loom_testbench_value_is_buffer(input)) {
-    return loom_run_hal_testbench_append_buffer_binding(input, bindings);
+    return loom_run_hal_testbench_append_buffer_binding(input, parameter,
+                                                        bindings);
   }
   if (loom_testbench_value_is_scalar(input)) {
     return loom_run_hal_testbench_invocation_options_push_constant(
-        input, input_type, options);
+        input, input_type, parameter, options);
   }
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "HAL invocation input must be a buffer binding or "
@@ -848,6 +966,7 @@ static iree_status_t loom_run_hal_testbench_input_append(
 
 iree_status_t loom_run_hal_testbench_invocation_inputs_from_values(
     const loom_testbench_value_t* inputs, const loom_type_t* input_types,
+    const iree_hal_executable_function_parameter_t* input_parameters,
     iree_host_size_t input_count, loom_run_hal_invocation_options_t* options,
     iree_allocator_t allocator, loom_run_hal_binding_list_t* out_bindings) {
   if (input_count != 0 && (inputs == NULL || input_types == NULL)) {
@@ -861,8 +980,10 @@ iree_status_t loom_run_hal_testbench_invocation_inputs_from_values(
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < input_count;
        ++i) {
-    status = loom_run_hal_testbench_input_append(out_bindings, &inputs[i],
-                                                 input_types[i], options);
+    const iree_hal_executable_function_parameter_t* parameter =
+        input_parameters != NULL ? &input_parameters[i] : NULL;
+    status = loom_run_hal_testbench_input_append(
+        out_bindings, &inputs[i], input_types[i], parameter, options);
   }
   if (!iree_status_is_ok(status)) {
     loom_run_hal_binding_list_deinitialize(out_bindings);
@@ -952,8 +1073,12 @@ iree_status_t loom_run_hal_testbench_actual_invoke(
         provider->kernel_launch->input_value_ids[i];
     const loom_type_t input_type =
         loom_module_value_type(provider->run_module->module, input_value_id);
+    const iree_hal_executable_function_parameter_t* parameter =
+        provider->function_parameter_count != 0
+            ? &provider->function_parameters[i]
+            : NULL;
     status = loom_run_hal_testbench_input_append(
-        &bindings, &inputs[i], input_type, &invocation_options);
+        &bindings, &inputs[i], input_type, parameter, &invocation_options);
     if (!iree_status_is_ok(status)) {
       status = iree_status_annotate_f(
           status, "preparing HAL actual input %" PRIhsz " for value ID %u", i,
@@ -1339,11 +1464,16 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_prepare_sample(
     }
     IREE_RETURN_IF_ERROR(loom_run_hal_testbench_evaluate_launch_config(
         provider, invocation->workload_count, &step->options));
+    iree_host_size_t invocation_binding_ordinal = 0;
     for (iree_host_size_t input_index = 0;
          input_index < invocation->input_count; ++input_index) {
       const loom_testbench_value_t* input = span->input_values[input_offset++];
       const loom_type_t input_type = loom_module_value_type(
           invocation->module, invocation->input_value_ids[input_index]);
+      const iree_hal_executable_function_parameter_t* parameter =
+          provider->function_parameter_count != 0
+              ? &provider->function_parameters[input_index]
+              : NULL;
       if (loom_type_is_shaped(input_type)) {
         if (!loom_testbench_value_is_buffer(input) ||
             input->buffer.buffer == NULL) {
@@ -1351,11 +1481,14 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_prepare_sample(
               IREE_STATUS_INVALID_ARGUMENT,
               "HAL kernel launch shaped input is not a buffer");
         }
+        IREE_RETURN_IF_ERROR(loom_run_hal_testbench_validate_buffer_parameter(
+            parameter, invocation_binding_ordinal));
         span->binding_lengths[binding_offset++] = input->buffer.byte_length;
+        ++invocation_binding_ordinal;
       } else {
         IREE_RETURN_IF_ERROR(
             loom_run_hal_testbench_invocation_options_push_constant(
-                input, input_type, &step->options));
+                input, input_type, parameter, &step->options));
       }
     }
   }
@@ -1601,8 +1734,12 @@ iree_status_t loom_run_hal_testbench_materialize_invocation_from_table(
     if (iree_status_is_ok(status)) {
       const loom_type_t input_type =
           loom_module_value_type(table->module, invocation->input_value_ids[i]);
-      status = loom_run_hal_testbench_input_append(out_bindings, &value,
-                                                   input_type, out_options);
+      const iree_hal_executable_function_parameter_t* parameter =
+          provider->function_parameter_count != 0
+              ? &provider->function_parameters[i]
+              : NULL;
+      status = loom_run_hal_testbench_input_append(
+          out_bindings, &value, input_type, parameter, out_options);
     }
     loom_testbench_value_deinitialize(&value);
   }

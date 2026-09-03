@@ -111,6 +111,14 @@ static loom_testbench_value_t I64Value(int64_t value) {
   return result;
 }
 
+static loom_testbench_value_t F32Value(float value) {
+  loom_testbench_value_t result = {};
+  result.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR;
+  result.scalar.kind = IREE_TOOLING_VALUE_KIND_F32;
+  result.scalar.storage.f32 = value;
+  return result;
+}
+
 static loom_testbench_value_t F64Value(double value) {
   loom_testbench_value_t result = {};
   result.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR;
@@ -220,8 +228,8 @@ TEST_F(HalTestbenchActualTest, ScalarInputsPackDispatchConstantWords) {
   loom_run_hal_binding_list_t bindings = {};
 
   IREE_ASSERT_OK(loom_run_hal_testbench_invocation_inputs_from_values(
-      inputs, input_types, IREE_ARRAYSIZE(inputs), &options,
-      iree_allocator_system(), &bindings));
+      inputs, input_types, /*input_parameters=*/nullptr, IREE_ARRAYSIZE(inputs),
+      &options, iree_allocator_system(), &bindings));
 
   EXPECT_EQ(bindings.count, 0u);
   EXPECT_EQ(options.constant_count, 3u);
@@ -244,8 +252,8 @@ TEST_F(HalTestbenchActualTest, F64InputsPackDispatchConstantWords) {
   loom_run_hal_binding_list_t bindings = {};
 
   IREE_ASSERT_OK(loom_run_hal_testbench_invocation_inputs_from_values(
-      inputs, input_types, IREE_ARRAYSIZE(inputs), &options,
-      iree_allocator_system(), &bindings));
+      inputs, input_types, /*input_parameters=*/nullptr, IREE_ARRAYSIZE(inputs),
+      &options, iree_allocator_system(), &bindings));
 
   EXPECT_EQ(bindings.count, 0u);
   EXPECT_EQ(options.constant_count, 2u);
@@ -267,12 +275,52 @@ TEST_F(HalTestbenchActualTest, IndexInputPacksAsOneDispatchConstantWord) {
   loom_run_hal_binding_list_t bindings = {};
 
   IREE_ASSERT_OK(loom_run_hal_testbench_invocation_inputs_from_values(
-      inputs, input_types, IREE_ARRAYSIZE(inputs), &options,
-      iree_allocator_system(), &bindings));
+      inputs, input_types, /*input_parameters=*/nullptr, IREE_ARRAYSIZE(inputs),
+      &options, iree_allocator_system(), &bindings));
 
   EXPECT_EQ(bindings.count, 0u);
   EXPECT_EQ(options.constant_count, 1u);
   EXPECT_EQ(options.constants[0], 3584u);
+
+  loom_run_hal_binding_list_deinitialize(&bindings);
+}
+
+TEST_F(HalTestbenchActualTest, MixedInputsUseReflectedWidthsAndOffsets) {
+  loom_testbench_value_t inputs[] = {
+      I64Value(3584),
+      F32Value(4.0f),
+  };
+  loom_type_t input_types[] = {
+      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+      loom_type_scalar(LOOM_SCALAR_TYPE_F32),
+  };
+  iree_hal_executable_function_parameter_t input_parameters[] = {
+      {
+          /*.type=*/IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
+          /*.flags=*/{},
+          /*.size=*/8,
+          /*.offset=*/0,
+      },
+      {
+          /*.type=*/IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
+          /*.flags=*/{},
+          /*.size=*/4,
+          /*.offset=*/8,
+      },
+  };
+  loom_run_hal_invocation_options_t options = {};
+  loom_run_hal_invocation_options_initialize(&options);
+  loom_run_hal_binding_list_t bindings = {};
+
+  IREE_ASSERT_OK(loom_run_hal_testbench_invocation_inputs_from_values(
+      inputs, input_types, input_parameters, IREE_ARRAYSIZE(inputs), &options,
+      iree_allocator_system(), &bindings));
+
+  EXPECT_EQ(bindings.count, 0u);
+  EXPECT_EQ(options.constant_count, 3u);
+  EXPECT_EQ(options.constants[0], 3584u);
+  EXPECT_EQ(options.constants[1], 0u);
+  EXPECT_EQ(options.constants[2], 0x40800000u);
 
   loom_run_hal_binding_list_deinitialize(&bindings);
 }
@@ -289,13 +337,41 @@ TEST_F(HalTestbenchActualTest, OffsetInputPacksAsTwoDispatchConstantWords) {
   loom_run_hal_binding_list_t bindings = {};
 
   IREE_ASSERT_OK(loom_run_hal_testbench_invocation_inputs_from_values(
-      inputs, input_types, IREE_ARRAYSIZE(inputs), &options,
-      iree_allocator_system(), &bindings));
+      inputs, input_types, /*input_parameters=*/nullptr, IREE_ARRAYSIZE(inputs),
+      &options, iree_allocator_system(), &bindings));
 
   EXPECT_EQ(bindings.count, 0u);
   EXPECT_EQ(options.constant_count, 2u);
   EXPECT_EQ(options.constants[0], 0x55667788u);
   EXPECT_EQ(options.constants[1], 0x11223344u);
+
+  loom_run_hal_binding_list_deinitialize(&bindings);
+}
+
+TEST_F(HalTestbenchActualTest, OffsetInputUsesReflectedFourByteWidth) {
+  loom_testbench_value_t inputs[] = {
+      I64Value(3584),
+  };
+  loom_type_t input_types[] = {
+      loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+  };
+  iree_hal_executable_function_parameter_t input_parameters[] = {{
+      /*.type=*/IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
+      /*.flags=*/{},
+      /*.size=*/4,
+      /*.offset=*/0,
+  }};
+  loom_run_hal_invocation_options_t options = {};
+  loom_run_hal_invocation_options_initialize(&options);
+  loom_run_hal_binding_list_t bindings = {};
+
+  IREE_ASSERT_OK(loom_run_hal_testbench_invocation_inputs_from_values(
+      inputs, input_types, input_parameters, IREE_ARRAYSIZE(inputs), &options,
+      iree_allocator_system(), &bindings));
+
+  EXPECT_EQ(bindings.count, 0u);
+  EXPECT_EQ(options.constant_count, 1u);
+  EXPECT_EQ(options.constants[0], 3584u);
 
   loom_run_hal_binding_list_deinitialize(&bindings);
 }
