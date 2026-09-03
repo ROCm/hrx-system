@@ -38,16 +38,13 @@ def test_strix_halo_profile_reproduces_observed_device_identity() -> None:
     assert profile.array_family.column_count == 8
 
 
-def test_strix_halo_profile_pins_protocol_and_qualification_facts() -> None:
+def test_strix_halo_profile_pins_protocol_facts() -> None:
     profile = STRIX_HALO_PROFILE
 
     assert profile.firmware.identity == NPU2_FIRMWARE_ABI_ID
     assert (profile.firmware.minimum_major, profile.firmware.minimum_minor) == (6, 12)
     assert profile.firmware.device_revision == 5
     assert profile.firmware.transaction_device_generation == 4
-    assert profile.qualified_software.driver_version == "32.0.203.314"
-    assert profile.qualified_software.firmware_version == "1.0.21.44"
-    assert profile.qualified_software.xrt_version == "2.19.0"
     assert XDNA_DRIVER_SOURCE_COMMIT == "c8471cb3bbff3621bbe72cf7c9b3278f6fc23dc2"
 
 

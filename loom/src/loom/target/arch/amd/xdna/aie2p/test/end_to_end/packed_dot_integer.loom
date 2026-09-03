@@ -1,9 +1,0 @@
-aie2p.target<core> @target
-
-func.def public target(@target) @packed_dot_integer(%codes: vector<1xi32>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
-  %offset_to_signed_bias = vector.constant -32 : vector<4xi8>
-  %bytes = vector.bitcast %codes : vector<1xi32> to vector<4xi8>
-  %signed_bytes = vector.addi %bytes, %offset_to_signed_bias : vector<4xi8>
-  %dot = vector.dot4i<s8s8> %signed_bytes, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
-  func.return %dot : vector<1xi32>
-}

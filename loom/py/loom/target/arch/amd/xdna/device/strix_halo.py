@@ -15,7 +15,6 @@ from loom.target.arch.amd.xdna.device.model import (
     DeviceProfile,
     FirmwareProtocol,
     PciIdentity,
-    QualifiedSoftware,
     validate_device_profile,
 )
 
@@ -53,12 +52,6 @@ STRIX_HALO_PROFILE = DeviceProfile(
         hardware_context_limit=16,
         context_limit=32,
         temporal_contexts_only=True,
-    ),
-    qualified_software=QualifiedSoftware(
-        driver_version="32.0.203.314",
-        firmware_version="1.0.21.44",
-        xrt_version="2.19.0",
-        xrt_source_commit="77c7088d804602a53c3eb489b9cb37b709bcd751",
     ),
     provenance=(
         Provenance.AIE_RT

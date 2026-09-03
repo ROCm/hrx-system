@@ -4,15 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/arch/amd/xdna/aie2p/emit/tile_image.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/tile_link.h"
 
 #include <array>
 #include <cstring>
-#include <memory>
-#include <string>
 
 #include "iree/base/internal/arena.h"
-#include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/relocation.h"
@@ -21,22 +18,7 @@
 namespace loom {
 namespace {
 
-using StreamPtr =
-    std::unique_ptr<iree_io_stream_t, void (*)(iree_io_stream_t*)>;
-
-uint16_t LoadLeU16(const std::string& bytes, size_t offset) {
-  return (uint16_t)(uint8_t)bytes[offset] |
-         ((uint16_t)(uint8_t)bytes[offset + 1] << 8);
-}
-
-uint32_t LoadLeU32(const std::string& bytes, size_t offset) {
-  return (uint32_t)(uint8_t)bytes[offset] |
-         ((uint32_t)(uint8_t)bytes[offset + 1] << 8) |
-         ((uint32_t)(uint8_t)bytes[offset + 2] << 16) |
-         ((uint32_t)(uint8_t)bytes[offset + 3] << 24);
-}
-
-TEST(Aie2pTileImageTest, WritesExecutableElfFromLeafContribution) {
+TEST(Aie2pTileLinkTest, PlacesExecutableContribution) {
   const uint8_t code[16] = {
       0x7f, 0x20, 0x4a, 0x00, 0x00, 0x00, 0x00, 0x00,
       0x19, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -86,94 +68,34 @@ TEST(Aie2pTileImageTest, WritesExecutableElfFromLeafContribution) {
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool, &arena);
-  iree_io_stream_t* stream = nullptr;
-  IREE_ASSERT_OK(iree_io_vec_stream_create(
-      IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE |
-          IREE_IO_STREAM_MODE_SEEKABLE | IREE_IO_STREAM_MODE_RESIZABLE,
-      1024, iree_allocator_system(), &stream));
-  StreamPtr stream_owner(stream, iree_io_stream_release);
-
-  const loom_aie2p_tile_image_layout_t undersized_layout = {
+  const loom_aie2p_tile_link_layout_t undersized_layout = {
       /*.program_address=*/0,
       /*.program_byte_capacity=*/sizeof(code) - 1u,
   };
+  loom_aie2p_linked_tile_t linked_tile = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        loom_aie2p_tile_image_write(
-                            &contribution, &undersized_layout, stream, &arena));
-  const loom_aie2p_tile_image_layout_t layout = {
+                        loom_aie2p_tile_link(&contribution, &undersized_layout,
+                                             &arena, &linked_tile));
+  const loom_aie2p_tile_link_layout_t layout = {
       /*.program_address=*/0,
       /*.program_byte_capacity=*/16 * 1024,
   };
   IREE_ASSERT_OK(
-      loom_aie2p_tile_image_write(&contribution, &layout, stream, &arena));
-  const iree_io_stream_pos_t length = iree_io_stream_length(stream);
-  ASSERT_GT(length, 0);
-  std::string bytes((size_t)length, '\0');
-  IREE_ASSERT_OK(iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0));
-  IREE_ASSERT_OK(
-      iree_io_stream_read(stream, bytes.size(), bytes.data(), nullptr));
-
-  EXPECT_EQ(bytes.substr(0, 4), std::string("\x7f"
-                                            "ELF",
-                                            4));
-  EXPECT_EQ((uint8_t)bytes[4], 1u);
-  EXPECT_EQ(LoadLeU16(bytes, 16), LOOM_NATIVE_ELF_FILE_TYPE_EXEC);
-  EXPECT_EQ(LoadLeU16(bytes, 18), LOOM_NATIVE_ELF_MACHINE_AIE);
-  EXPECT_EQ(LoadLeU32(bytes, 24), 4u);
-  EXPECT_EQ(LoadLeU32(bytes, 28), 52u);
-  EXPECT_EQ(LoadLeU32(bytes, 36), 3u);
-  EXPECT_EQ(LoadLeU16(bytes, 42), 32u);
-  EXPECT_EQ(LoadLeU16(bytes, 44), 1u);
-
-  constexpr size_t kProgramHeaderOffset = 52;
-  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 0),
-            LOOM_NATIVE_ELF_PROGRAM_TYPE_LOAD);
-  const uint32_t code_offset = LoadLeU32(bytes, kProgramHeaderOffset + 4);
-  EXPECT_EQ(code_offset % 16, 0u);
-  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 8), 0u);
-  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 12), 0u);
-  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 16), sizeof(code));
-  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 20), sizeof(code));
-  EXPECT_EQ(
-      LoadLeU32(bytes, kProgramHeaderOffset + 24),
-      LOOM_NATIVE_ELF_PROGRAM_FLAG_READ | LOOM_NATIVE_ELF_PROGRAM_FLAG_EXECUTE);
-  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 28), 16u);
-  ASSERT_LE((size_t)code_offset + sizeof(code), bytes.size());
-  EXPECT_EQ(0, std::memcmp(bytes.data() + code_offset, code, sizeof(code)));
-
-  const uint32_t section_header_offset = LoadLeU32(bytes, 32);
-  const uint16_t section_header_count = LoadLeU16(bytes, 48);
-  ASSERT_EQ(section_header_count, 5u);
-  constexpr size_t kSectionHeaderSize = 40;
-  const size_t string_table_section = section_header_offset + 2 * 40;
-  const size_t symbol_table_section = section_header_offset + 3 * 40;
-  EXPECT_EQ(LoadLeU32(bytes, string_table_section + 4),
-            LOOM_NATIVE_ELF_SECTION_TYPE_STRTAB);
-  EXPECT_EQ(LoadLeU32(bytes, symbol_table_section + 4),
-            LOOM_NATIVE_ELF_SECTION_TYPE_SYMTAB);
-  EXPECT_EQ(LoadLeU32(bytes, symbol_table_section + 24), 2u);
-  EXPECT_EQ(LoadLeU32(bytes, symbol_table_section + 28), 1u);
-  EXPECT_EQ(LoadLeU32(bytes, symbol_table_section + 36), 16u);
-
-  const uint32_t symbol_table_offset =
-      LoadLeU32(bytes, symbol_table_section + 16);
-  const uint32_t symbol_table_size =
-      LoadLeU32(bytes, symbol_table_section + 20);
-  ASSERT_EQ(symbol_table_size, 32u);
-  ASSERT_LE((size_t)symbol_table_offset + symbol_table_size, bytes.size());
-  const size_t kernel_symbol = symbol_table_offset + 16;
-  EXPECT_EQ(LoadLeU32(bytes, kernel_symbol + 0), 1u);
-  EXPECT_EQ(LoadLeU32(bytes, kernel_symbol + 4), 4u);
-  EXPECT_EQ(LoadLeU32(bytes, kernel_symbol + 8), sizeof(code) - 4);
-  EXPECT_EQ((uint8_t)bytes[kernel_symbol + 12], 0x12u);
-  EXPECT_EQ((uint8_t)bytes[kernel_symbol + 13], 0u);
-  EXPECT_EQ(LoadLeU16(bytes, kernel_symbol + 14), 1u);
+      loom_aie2p_tile_link(&contribution, &layout, &arena, &linked_tile));
+  ASSERT_EQ(linked_tile.assembly.section_count, 1u);
+  EXPECT_EQ(linked_tile.entry_section_index, 0u);
+  EXPECT_EQ(linked_tile.entry_address, 4u);
+  EXPECT_EQ(linked_tile.assembly.sections[0].address, 0u);
+  ASSERT_EQ(linked_tile.assembly.sections[0].contents.data_length,
+            sizeof(code));
+  EXPECT_EQ(0, std::memcmp(linked_tile.assembly.sections[0].contents.data, code,
+                           sizeof(code)));
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
-TEST(Aie2pTileImageTest, AppliesBranchFixupAfterContributionPlacement) {
+TEST(Aie2pTileLinkTest, AppliesBranchFixupAfterContributionPlacement) {
   const std::array<uint8_t, 16> prefix_code = {
       0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a,
       0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a,
@@ -250,38 +172,23 @@ TEST(Aie2pTileImageTest, AppliesBranchFixupAfterContributionPlacement) {
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool, &arena);
-  iree_io_stream_t* stream = nullptr;
-  IREE_ASSERT_OK(iree_io_vec_stream_create(
-      IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE |
-          IREE_IO_STREAM_MODE_SEEKABLE | IREE_IO_STREAM_MODE_RESIZABLE,
-      1024, iree_allocator_system(), &stream));
-  StreamPtr stream_owner(stream, iree_io_stream_release);
-
-  const loom_aie2p_tile_image_layout_t layout = {
+  const loom_aie2p_tile_link_layout_t layout = {
       /*.program_address=*/0,
       /*.program_byte_capacity=*/16 * 1024,
   };
+  loom_aie2p_linked_tile_t linked_tile = {};
   IREE_ASSERT_OK(
-      loom_aie2p_tile_image_write(&contribution, &layout, stream, &arena));
-  const iree_io_stream_pos_t length = iree_io_stream_length(stream);
-  std::string bytes((size_t)length, '\0');
-  IREE_ASSERT_OK(iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0));
-  IREE_ASSERT_OK(
-      iree_io_stream_read(stream, bytes.size(), bytes.data(), nullptr));
-
-  EXPECT_EQ(LoadLeU32(bytes, 24), 16u);
-  constexpr size_t kProgramHeaderOffset = 52;
-  const uint32_t code_offset = LoadLeU32(bytes, kProgramHeaderOffset + 4);
-  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 16), 48u);
-  ASSERT_LE((size_t)code_offset + 48u, bytes.size());
-  EXPECT_EQ(0, std::memcmp(bytes.data() + code_offset, prefix_code.data(),
-                           prefix_code.size()));
+      loom_aie2p_tile_link(&contribution, &layout, &arena, &linked_tile));
+  ASSERT_EQ(linked_tile.assembly.section_count, 1u);
+  ASSERT_EQ(linked_tile.assembly.sections[0].contents.data_length, 48u);
+  const uint8_t* linked_code = linked_tile.assembly.sections[0].contents.data;
+  EXPECT_EQ(0,
+            std::memcmp(linked_code, prefix_code.data(), prefix_code.size()));
   constexpr std::array<uint8_t, 6> kBranchToAddress32 = {
       0x84, 0x00, 0x00, 0x10, 0x00, 0x00,
   };
-  EXPECT_EQ(
-      0, std::memcmp(bytes.data() + code_offset + 16, kBranchToAddress32.data(),
-                     kBranchToAddress32.size()));
+  EXPECT_EQ(0, std::memcmp(linked_code + 16, kBranchToAddress32.data(),
+                           kBranchToAddress32.size()));
   EXPECT_EQ(function_code[0], 0x84u);
   for (size_t i = 1; i < 6; ++i) EXPECT_EQ(function_code[i], 0u);
 
@@ -289,7 +196,7 @@ TEST(Aie2pTileImageTest, AppliesBranchFixupAfterContributionPlacement) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
-TEST(Aie2pTileImageTest, RelocatesMovxmInsideAMultiSlotBundle) {
+TEST(Aie2pTileLinkTest, RelocatesMovxmInsideAMultiSlotBundle) {
   const loom_aie2p_instruction_id_t movxm =
       loom_aie2p_encoding_find_instruction(IREE_SV("MOVXM"));
   const loom_aie2p_instruction_id_t vector_load =
@@ -430,7 +337,7 @@ TEST(Aie2pTileImageTest, RelocatesMovxmInsideAMultiSlotBundle) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
-TEST(Aie2pTileImageTest, PlacesAndRelocatesFunctionLocalStorage) {
+TEST(Aie2pTileLinkTest, PlacesAndRelocatesFunctionLocalStorage) {
   const std::array<uint8_t, 6> code = {
       0x44, 0x00, 0xc0, 0x00, 0x00, 0x00,
   };
@@ -530,7 +437,7 @@ TEST(Aie2pTileImageTest, PlacesAndRelocatesFunctionLocalStorage) {
       /*.storage_space=*/LOOM_STORAGE_SPACE_WORKGROUP,
       /*.load_address=*/0x70000,
   };
-  const loom_aie2p_tile_image_layout_t layout = {
+  const loom_aie2p_tile_link_layout_t layout = {
       /*.program_address=*/0,
       /*.program_byte_capacity=*/16 * 1024,
       /*.storage_placements=*/&storage_placement,
@@ -541,71 +448,30 @@ TEST(Aie2pTileImageTest, PlacesAndRelocatesFunctionLocalStorage) {
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool, &arena);
-  iree_io_stream_t* stream = nullptr;
-  IREE_ASSERT_OK(iree_io_vec_stream_create(
-      IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE |
-          IREE_IO_STREAM_MODE_SEEKABLE | IREE_IO_STREAM_MODE_RESIZABLE,
-      1024, iree_allocator_system(), &stream));
-  StreamPtr stream_owner(stream, iree_io_stream_release);
-
+  loom_aie2p_linked_tile_t linked_tile = {};
   IREE_ASSERT_OK(
-      loom_aie2p_tile_image_write(&contribution, &layout, stream, &arena));
-  const iree_io_stream_pos_t length = iree_io_stream_length(stream);
-  std::string bytes((size_t)length, '\0');
-  IREE_ASSERT_OK(iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0));
-  IREE_ASSERT_OK(
-      iree_io_stream_read(stream, bytes.size(), bytes.data(), nullptr));
-
-  EXPECT_EQ(LoadLeU16(bytes, 44), 2u);
-  constexpr size_t kProgramHeaderOffset = 52;
-  const uint32_t code_offset = LoadLeU32(bytes, kProgramHeaderOffset + 4);
-  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 8), 0u);
-  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 16), code.size());
-  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 20), code.size());
-  EXPECT_EQ(
-      LoadLeU32(bytes, kProgramHeaderOffset + 24),
-      LOOM_NATIVE_ELF_PROGRAM_FLAG_READ | LOOM_NATIVE_ELF_PROGRAM_FLAG_EXECUTE);
-
-  constexpr size_t kStorageProgramHeaderOffset = kProgramHeaderOffset + 32;
-  EXPECT_EQ(LoadLeU32(bytes, kStorageProgramHeaderOffset + 8), 0x70000u);
-  EXPECT_EQ(LoadLeU32(bytes, kStorageProgramHeaderOffset + 12), 0x70000u);
-  EXPECT_EQ(LoadLeU32(bytes, kStorageProgramHeaderOffset + 16), 0u);
-  EXPECT_EQ(LoadLeU32(bytes, kStorageProgramHeaderOffset + 20), 320u);
-  EXPECT_EQ(
-      LoadLeU32(bytes, kStorageProgramHeaderOffset + 24),
-      LOOM_NATIVE_ELF_PROGRAM_FLAG_READ | LOOM_NATIVE_ELF_PROGRAM_FLAG_WRITE);
-  EXPECT_EQ(LoadLeU32(bytes, kStorageProgramHeaderOffset + 28), 64u);
+      loom_aie2p_tile_link(&contribution, &layout, &arena, &linked_tile));
+  ASSERT_EQ(linked_tile.assembly.section_count, 2u);
+  EXPECT_EQ(linked_tile.entry_section_index, 0u);
+  const loom_native_elf_section_t& linked_code =
+      linked_tile.assembly.sections[0];
+  const loom_native_elf_section_t& linked_storage =
+      linked_tile.assembly.sections[1];
+  EXPECT_EQ(linked_code.address, 0u);
+  EXPECT_EQ(linked_storage.address, 0x70000u);
+  EXPECT_EQ(linked_storage.type, LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS);
+  EXPECT_EQ(linked_storage.zero_fill_length, 320u);
+  EXPECT_EQ(linked_storage.alignment, 64u);
 
   constexpr std::array<uint8_t, 6> kMovxmLocalAddress = {
       0x44, 0x20, 0xc1, 0x00, 0x07, 0x00,
   };
-  ASSERT_LE((size_t)code_offset + kMovxmLocalAddress.size(), bytes.size());
-  EXPECT_EQ(0,
-            std::memcmp(bytes.data() + code_offset, kMovxmLocalAddress.data(),
-                        kMovxmLocalAddress.size()));
-
-  const uint32_t section_header_offset = LoadLeU32(bytes, 32);
-  ASSERT_EQ(LoadLeU16(bytes, 48), 6u);
-  constexpr size_t kSectionHeaderSize = 40;
-  const size_t storage_section = section_header_offset + 2 * kSectionHeaderSize;
-  EXPECT_EQ(LoadLeU32(bytes, storage_section + 4),
-            LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS);
-  EXPECT_EQ(LoadLeU32(bytes, storage_section + 12), 0x70000u);
-  EXPECT_EQ(LoadLeU32(bytes, storage_section + 20), 320u);
-  EXPECT_EQ(LoadLeU32(bytes, storage_section + 32), 64u);
-  const size_t symbol_table_section =
-      section_header_offset + 4 * kSectionHeaderSize;
-  EXPECT_EQ(LoadLeU32(bytes, symbol_table_section + 24), 3u);
-  EXPECT_EQ(LoadLeU32(bytes, symbol_table_section + 28), 2u);
-  const uint32_t symbol_table_offset =
-      LoadLeU32(bytes, symbol_table_section + 16);
-  ASSERT_EQ(LoadLeU32(bytes, symbol_table_section + 20), 48u);
-  const size_t storage_symbol = symbol_table_offset + 16;
-  EXPECT_EQ(LoadLeU32(bytes, storage_symbol + 4), 0x70000u);
-  EXPECT_EQ(LoadLeU32(bytes, storage_symbol + 8), 320u);
-  EXPECT_EQ((uint8_t)bytes[storage_symbol + 12], 0x01u);
-  EXPECT_EQ((uint8_t)bytes[storage_symbol + 13], 0x02u);
-  EXPECT_EQ(LoadLeU16(bytes, storage_symbol + 14), 2u);
+  ASSERT_EQ(linked_code.contents.data_length, kMovxmLocalAddress.size());
+  EXPECT_EQ(0, std::memcmp(linked_code.contents.data, kMovxmLocalAddress.data(),
+                           kMovxmLocalAddress.size()));
+  ASSERT_EQ(linked_tile.symbol_layout_count, 2u);
+  EXPECT_EQ(linked_tile.symbol_layouts[1].section_index, 1u);
+  EXPECT_EQ(linked_tile.symbol_layouts[1].section_offset, 0u);
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);

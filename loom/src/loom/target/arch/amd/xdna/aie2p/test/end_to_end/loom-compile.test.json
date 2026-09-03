@@ -2,13 +2,13 @@
   "version": 1,
   "cases": [
     {
-      "name": "compiles address-boundary conversions to an AIE2P tile image",
+      "name": "compiles a resident split-K array to one XDNA product",
       "run": {
         "tool": "loom-compile",
         "args": [
-          "{srcdir}/index_conversion.loom",
-          "--backend=elf-aie2p",
-          "--output={tmp}/index_conversion.elf",
+          "{srcdir}/split_k.loom",
+          "--backend=xdna-strix-halo",
+          "--output={tmp}/split_k.xdna",
           "--compile-report=details"
         ]
       },
@@ -16,305 +16,18 @@
         "contains": {
           "unordered": [
             "\"artifact_kind\":\"target-artifact\"",
-            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
+            "\"backend\":\"amd-xdna-strix-halo\"",
             "\"artifact_format\":\"elf\"",
             "\"status\":{\"code\":0,\"name\":\"OK\"}",
+            "\"entries\":{\"count\":3",
+            "\"plan_key\":\"matrix.mmul.s8s8.m8n8k8\"",
             "\"spill_count\":0"
           ]
         }
       },
       "files": [
         {
-          "path": "{tmp}/index_conversion.elf",
-          "non_empty": true
-        }
-      ]
-    },
-    {
-      "name": "compiles address integer source to an AIE2P tile image",
-      "run": {
-        "tool": "loom-compile",
-        "args": [
-          "{srcdir}/index_integer.loom",
-          "--backend=elf-aie2p",
-          "--output={tmp}/index_integer.elf",
-          "--compile-report=details"
-        ]
-      },
-      "stderr": {
-        "contains": {
-          "unordered": [
-            "\"artifact_kind\":\"target-artifact\"",
-            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
-            "\"artifact_format\":\"elf\"",
-            "\"status\":{\"code\":0,\"name\":\"OK\"}",
-            "\"spill_count\":0"
-          ]
-        }
-      },
-      "files": [
-        {
-          "path": "{tmp}/index_integer.elf",
-          "non_empty": true
-        }
-      ]
-    },
-    {
-      "name": "compiles packed integer dot products to an AIE2P tile image",
-      "run": {
-        "tool": "loom-compile",
-        "args": [
-          "{srcdir}/packed_dot_integer.loom",
-          "--backend=elf-aie2p",
-          "--output={tmp}/packed_dot_integer.elf",
-          "--compile-report=details"
-        ]
-      },
-      "stderr": {
-        "contains": {
-          "unordered": [
-            "\"artifact_kind\":\"target-artifact\"",
-            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
-            "\"artifact_format\":\"elf\"",
-            "\"status\":{\"code\":0,\"name\":\"OK\"}"
-          ]
-        }
-      },
-      "files": [
-        {
-          "path": "{tmp}/packed_dot_integer.elf",
-          "non_empty": true
-        }
-      ]
-    },
-    {
-      "name": "compiles packed integer shifts to an AIE2P tile image",
-      "run": {
-        "tool": "loom-compile",
-        "args": [
-          "{srcdir}/packed_integer.loom",
-          "--backend=elf-aie2p",
-          "--output={tmp}/packed_integer.elf",
-          "--compile-report=details"
-        ]
-      },
-      "stderr": {
-        "contains": {
-          "unordered": [
-            "\"artifact_kind\":\"target-artifact\"",
-            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
-            "\"artifact_format\":\"elf\"",
-            "\"status\":{\"code\":0,\"name\":\"OK\"}"
-          ]
-        }
-      },
-      "files": [
-        {
-          "path": "{tmp}/packed_integer.elf",
-          "non_empty": true
-        }
-      ]
-    },
-    {
-      "name": "compiles resident vector arithmetic to an AIE2P tile image",
-      "run": {
-        "tool": "loom-compile",
-        "args": [
-          "{srcdir}/resident_vector_add.loom",
-          "--backend=elf-aie2p",
-          "--output={tmp}/resident_vector_add.elf",
-          "--compile-report=details"
-        ]
-      },
-      "stderr": {
-        "contains": {
-          "unordered": [
-            "\"artifact_kind\":\"target-artifact\"",
-            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
-            "\"artifact_format\":\"elf\"",
-            "\"status\":{\"code\":0,\"name\":\"OK\"}",
-            "\"spill_count\":0",
-            "\"emission\":{\"instruction_count\":14,\"code_byte_count\":50,\"code_storage_byte_count\":50}",
-            "\"plan_key\":\"function-storage.alloca\"",
-            "\"selected_op_count\":3,\"emitted_low_op_count\":6"
-          ]
-        }
-      },
-      "files": [
-        {
-          "path": "{tmp}/resident_vector_add.elf",
-          "non_empty": true
-        }
-      ]
-    },
-    {
-      "name": "compiles scalar source to an AIE2P tile image",
-      "run": {
-        "tool": "loom-compile",
-        "args": [
-          "{srcdir}/scalar_i32.loom",
-          "--backend=elf-aie2p",
-          "--output={tmp}/scalar_i32.elf",
-          "--compile-report=details"
-        ]
-      },
-      "stderr": {
-        "contains": {
-          "unordered": [
-            "\"artifact_kind\":\"target-artifact\"",
-            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
-            "\"artifact_format\":\"elf\"",
-            "\"status\":{\"code\":0,\"name\":\"OK\"}"
-          ]
-        }
-      },
-      "files": [
-        {
-          "path": "{tmp}/scalar_i32.elf",
-          "non_empty": true
-        }
-      ]
-    },
-    {
-      "name": "compiles indexed scalar memory to an AIE2P tile image",
-      "run": {
-        "tool": "loom-compile",
-        "args": [
-          "{srcdir}/scalar_memory.loom",
-          "--backend=elf-aie2p",
-          "--output={tmp}/scalar_memory.elf",
-          "--compile-report=details"
-        ]
-      },
-      "stderr": {
-        "contains": {
-          "unordered": [
-            "\"artifact_kind\":\"target-artifact\"",
-            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
-            "\"artifact_format\":\"elf\"",
-            "\"status\":{\"code\":0,\"name\":\"OK\"}",
-            "\"spill_count\":0",
-            "\"emission\":{\"instruction_count\":11,\"code_byte_count\":36,\"code_storage_byte_count\":36}"
-          ]
-        }
-      },
-      "files": [
-        {
-          "path": "{tmp}/scalar_memory.elf",
-          "non_empty": true
-        }
-      ]
-    },
-    {
-      "name": "compiles integer vectors to an AIE2P tile image",
-      "run": {
-        "tool": "loom-compile",
-        "args": [
-          "{srcdir}/vector_integer.loom",
-          "--backend=elf-aie2p",
-          "--output={tmp}/vector_integer.elf",
-          "--compile-report=details"
-        ]
-      },
-      "stderr": {
-        "contains": {
-          "unordered": [
-            "\"artifact_kind\":\"target-artifact\"",
-            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
-            "\"artifact_format\":\"elf\"",
-            "\"status\":{\"code\":0,\"name\":\"OK\"}"
-          ]
-        }
-      },
-      "files": [
-        {
-          "path": "{tmp}/vector_integer.elf",
-          "non_empty": true
-        }
-      ]
-    },
-    {
-      "name": "compiles vector predicates to an AIE2P tile image",
-      "run": {
-        "tool": "loom-compile",
-        "args": [
-          "{srcdir}/vector_predicate.loom",
-          "--backend=elf-aie2p",
-          "--output={tmp}/vector_predicate.elf",
-          "--compile-report=details"
-        ]
-      },
-      "stderr": {
-        "contains": {
-          "unordered": [
-            "\"artifact_kind\":\"target-artifact\"",
-            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
-            "\"artifact_format\":\"elf\"",
-            "\"status\":{\"code\":0,\"name\":\"OK\"}"
-          ]
-        }
-      },
-      "files": [
-        {
-          "path": "{tmp}/vector_predicate.elf",
-          "non_empty": true
-        }
-      ]
-    },
-    {
-      "name": "compiles tile-memory vector loads and stores to an AIE2P tile image",
-      "run": {
-        "tool": "loom-compile",
-        "args": [
-          "{srcdir}/vector_memory.loom",
-          "--backend=elf-aie2p",
-          "--output={tmp}/vector_memory.elf",
-          "--compile-report=details"
-        ]
-      },
-      "stderr": {
-        "contains": {
-          "unordered": [
-            "\"artifact_kind\":\"target-artifact\"",
-            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
-            "\"artifact_format\":\"elf\"",
-            "\"status\":{\"code\":0,\"name\":\"OK\"}",
-            "\"spill_count\":0",
-            "\"emission\":{\"instruction_count\":14,\"code_byte_count\":44,\"code_storage_byte_count\":44}"
-          ]
-        }
-      },
-      "files": [
-        {
-          "path": "{tmp}/vector_memory.elf",
-          "non_empty": true
-        }
-      ]
-    },
-    {
-      "name": "compiles structural integer vectors to an AIE2P tile image",
-      "run": {
-        "tool": "loom-compile",
-        "args": [
-          "{srcdir}/vector_structure.loom",
-          "--backend=elf-aie2p",
-          "--output={tmp}/vector_structure.elf",
-          "--compile-report=details"
-        ]
-      },
-      "stderr": {
-        "contains": {
-          "unordered": [
-            "\"artifact_kind\":\"target-artifact\"",
-            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
-            "\"artifact_format\":\"elf\"",
-            "\"status\":{\"code\":0,\"name\":\"OK\"}"
-          ]
-        }
-      },
-      "files": [
-        {
-          "path": "{tmp}/vector_structure.elf",
+          "path": "{tmp}/split_k.xdna",
           "non_empty": true
         }
       ]

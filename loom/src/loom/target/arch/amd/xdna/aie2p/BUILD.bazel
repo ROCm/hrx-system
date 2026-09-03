@@ -309,17 +309,7 @@ loom_check_test_suite(
 iree_execution_test_suite(
     name = "loom_compile_execution_test",
     data = [
-        "test/end_to_end/index_conversion.loom",
-        "test/end_to_end/index_integer.loom",
-        "test/end_to_end/packed_dot_integer.loom",
-        "test/end_to_end/packed_integer.loom",
-        "test/end_to_end/resident_vector_add.loom",
-        "test/end_to_end/scalar_i32.loom",
-        "test/end_to_end/scalar_memory.loom",
-        "test/end_to_end/vector_integer.loom",
-        "test/end_to_end/vector_memory.loom",
-        "test/end_to_end/vector_predicate.loom",
-        "test/end_to_end/vector_structure.loom",
+        "test/end_to_end/split_k.loom",
     ],
     manifests = ["test/end_to_end/loom-compile.test.json"],
     tags = ["hostonly"],
@@ -401,13 +391,27 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "tile_image",
-    srcs = ["emit/tile_image.c"],
-    hdrs = ["emit/tile_image.h"],
+    name = "tile_link",
+    srcs = ["emit/tile_link.c"],
+    hdrs = ["emit/tile_link.h"],
     deps = [
         ":leaf_object",
         ":relocation",
         "//loom/src/loom/target/emit/native:contribution",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "xdna_product",
+    srcs = ["emit/xdna_product.c"],
+    hdrs = ["emit/xdna_product.h"],
+    deps = [
+        ":array_program",
+        ":tile_link",
+        "//loom/src/loom/target/arch/amd/xdna:device_profile",
+        "//loom/src/loom/target/arch/amd/xdna:elf_format",
         "//loom/src/loom/target/emit/native:elf",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -420,19 +424,22 @@ loom_cc_library(
     srcs = ["emit/artifact_emitter.c"],
     hdrs = ["emit/artifact_emitter.h"],
     deps = [
-        ":core_descriptors",
+        ":array_plan",
+        ":array_program",
+        ":array_resident",
         ":leaf_compile",
-        ":low_registry",
-        ":tile_image",
-        "//loom/src/loom/codegen/low:descriptors",
-        "//loom/src/loom/codegen/low:frame",
-        "//loom/src/loom/codegen/low:function",
+        ":tile_link",
+        ":xdna_product",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:provider",
-        "//loom/src/loom/target/arch/amd/xdna:array_facts",
+        "//loom/src/loom/target/arch/amd/xdna:device_profile",
         "//loom/src/loom/target/reporting:low",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",
     ],
 )
@@ -506,36 +513,13 @@ loom_cc_test(
 )
 
 loom_cc_test(
-    name = "tile_image_test",
-    srcs = ["emit/tile_image_test.cc"],
+    name = "tile_link_test",
+    srcs = ["emit/tile_link_test.cc"],
     deps = [
         ":encoding",
         ":relocation",
-        ":tile_image",
+        ":tile_link",
         "//loom/src/loom/target/emit/native:object",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/io:stream",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_test(
-    name = "artifact_emitter_test",
-    srcs = ["emit/artifact_emitter_test.cc"],
-    deps = [
-        ":artifact_emitter",
-        ":low_registry",
-        "//loom/src/loom/codegen/low:text_asm",
-        "//loom/src/loom/codegen/low:verify",
-        "//loom/src/loom/format/text:parser",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/low",
-        "//loom/src/loom/target:provider",
-        "//loom/src/loom/target/arch/amd/xdna/aie2p/ops",
-        "//loom/src/loom/target/emit/native:elf",
-        "//loom/src/loom/target/reporting:report",
-        "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

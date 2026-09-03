@@ -55,7 +55,7 @@ typedef struct loom_aie2p_program_register_block_write32_t {
   iree_host_size_t word_count;
 } loom_aie2p_program_register_block_write32_t;
 
-// One tile image loaded while its destination core remains reset.
+// One resident tile program loaded while its destination core remains reset.
 typedef struct loom_aie2p_program_tile_program_load_t {
   // Index relative to the array payload's first tile program header.
   uint32_t tile_program_index;
@@ -148,9 +148,9 @@ typedef struct loom_aie2p_encoded_array_program_t {
 // Materializes executable AIE2P array and invocation-control operations.
 //
 // The array program resets resident cores, initializes locks and routing,
-// programs circular compute DMA rings, loads each tile image, and activates the
-// cores. The control program patches and queues one finite shim DMA task per
-// external channel and waits for every egress completion token.
+// programs circular compute DMA rings, loads each tile program, and activates
+// the cores. The control program patches and queues one finite shim DMA task
+// per external channel and waits for every egress completion token.
 iree_status_t loom_aie2p_array_program_build(
     const loom_aie2p_array_plan_t* plan, iree_arena_allocator_t* arena,
     loom_aie2p_array_program_t* out_program);

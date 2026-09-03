@@ -1,0 +1,126 @@
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @split_k_array() asm {
+  %product_lanes = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %reducer_lanes = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %product0_lane = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %product1_lane = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %reducer_lane = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %partition_lanes = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %ring_capacity = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %array_column = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %product0_row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %reducer_row = constant.u32 3 : reg<aie2p.array.scalar : index>
+  %product1_row = constant.u32 4 : reg<aie2p.array.scalar : index>
+
+  %products = group %product_lanes
+  %reducers = group %reducer_lanes
+  %product0 = worker %products, %product0_lane, @product_branch_i8
+  %product1 = worker %products, %product1_lane, @product_branch_i8
+  %reducer = worker %reducers, %reducer_lane, @reduce_bias_relu_i32
+
+  %lhs = binding 0, "read"
+  %rhs = binding 1, "read"
+  %bias = binding 2, "read"
+  %output = binding 3, "write"
+
+  %lhs_tiles = sender %lhs, 0 : reg<aie2p.array.sender : tile<2x8x8xi8>>
+  %rhs_tiles = sender %rhs, 0 : reg<aie2p.array.sender : tile<2x8x8xi8>>
+  %bias_sender = sender %bias, 0 : reg<aie2p.array.sender : tile<8x8xi32>>
+  %output_receiver = receiver %output, 0 : reg<aie2p.array.receiver : tile<8x8xi32>>
+
+  %lhs0 = partition %lhs_tiles, %product0_lane, %partition_lanes : reg<aie2p.array.sender : tile<8x8xi8>>
+  %lhs1 = partition %lhs_tiles, %product1_lane, %partition_lanes : reg<aie2p.array.sender : tile<8x8xi8>>
+  %rhs0 = partition %rhs_tiles, %product0_lane, %partition_lanes : reg<aie2p.array.sender : tile<8x8xi8>>
+  %rhs1 = partition %rhs_tiles, %product1_lane, %partition_lanes : reg<aie2p.array.sender : tile<8x8xi8>>
+
+  %product0_lhs = receiver %product0, 0 : reg<aie2p.array.receiver : tile<8x8xi8>>
+  %product0_rhs = receiver %product0, 1 : reg<aie2p.array.receiver : tile<8x8xi8>>
+  %partial0 = sender %product0, 2 : reg<aie2p.array.sender : tile<8x8xi32>>
+  %product1_lhs = receiver %product1, 0 : reg<aie2p.array.receiver : tile<8x8xi8>>
+  %product1_rhs = receiver %product1, 1 : reg<aie2p.array.receiver : tile<8x8xi8>>
+  %partial1 = sender %product1, 2 : reg<aie2p.array.sender : tile<8x8xi32>>
+  %reduce_partial0 = receiver %reducer, 0 : reg<aie2p.array.receiver : tile<8x8xi32>>
+  %reduce_partial1 = receiver %reducer, 1 : reg<aie2p.array.receiver : tile<8x8xi32>>
+  %reduce_bias = receiver %reducer, 2 : reg<aie2p.array.receiver : tile<8x8xi32>>
+  %reduce_output = sender %reducer, 3 : reg<aie2p.array.sender : tile<8x8xi32>>
+
+  %lhs0_channel = channel %lhs0, %product0_lhs, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi8>>
+  %rhs0_channel = channel %rhs0, %product0_rhs, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi8>>
+  %lhs1_channel = channel %lhs1, %product1_lhs, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi8>>
+  %rhs1_channel = channel %rhs1, %product1_rhs, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi8>>
+  %bias_channel = channel %bias_sender, %reduce_bias, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi32>>
+  %output_channel = channel %reduce_output, %output_receiver, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi32>>
+  %partial0_channel = channel %partial0, %reduce_partial0, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi32>>
+  %partial1_channel = channel %partial1, %reduce_partial1, %ring_capacity : reg<aie2p.array.channel : tile<8x8xi32>>
+
+  constrain.location %product0, %array_column, %product0_row
+  constrain.location %reducer, %array_column, %reducer_row
+  constrain.location %product1, %array_column, %product1_row
+  return
+}
+
+func.def target(@core_target) @product_branch_i8(%lhs: buffer, %rhs: buffer, %partial: buffer) {
+  %lhs_aligned, %rhs_aligned, %partial_aligned = buffer.assume.alignment %lhs, %rhs, %partial {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xi8>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<64xi8>
+  %partial_view = buffer.view %partial_aligned[%base] : buffer -> view<8x8xi32>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 8 : index
+  %lhs_value = vector.load %lhs_view[0] : view<64xi8> -> vector<64xi8>
+  %rhs_value = vector.load %rhs_view[0] : view<64xi8> -> vector<64xi8>
+  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] : vector<64xi8>
+  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<64xi8>
+  %accumulator_init = vector.constant 0 : vector<64xi32>
+  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
+  vector.fragment.store<result> %product, %partial_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
+  func.return
+}
+
+func.def target(@core_target) @reduce_bias_relu_i32(%partial0: buffer, %partial1: buffer, %bias: buffer, %output: buffer) {
+  %partial0_aligned, %partial1_aligned, %bias_aligned, %output_aligned = buffer.assume.alignment %partial0, %partial1, %bias, %output {minimum_alignment = 64} : buffer, buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %partial0_view = buffer.view %partial0_aligned[%base] : buffer -> view<64xi32>
+  %partial1_view = buffer.view %partial1_aligned[%base] : buffer -> view<64xi32>
+  %bias_view = buffer.view %bias_aligned[%base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<64xi32>
+  %relu_floor = vector.constant 0 : vector<16xi32>
+
+  %partial00 = vector.load %partial0_view[0] : view<64xi32> -> vector<16xi32>
+  %partial10 = vector.load %partial1_view[0] : view<64xi32> -> vector<16xi32>
+  %bias0 = vector.load %bias_view[0] : view<64xi32> -> vector<16xi32>
+  %sum0 = vector.addi %partial00, %partial10 : vector<16xi32>
+  %biased0 = vector.addi %sum0, %bias0 : vector<16xi32>
+  %activated0 = vector.maxsi %biased0, %relu_floor : vector<16xi32>
+  vector.store %activated0, %output_view[0] : vector<16xi32>, view<64xi32>
+
+  %partial01 = vector.load %partial0_view[16] : view<64xi32> -> vector<16xi32>
+  %partial11 = vector.load %partial1_view[16] : view<64xi32> -> vector<16xi32>
+  %bias1 = vector.load %bias_view[16] : view<64xi32> -> vector<16xi32>
+  %sum1 = vector.addi %partial01, %partial11 : vector<16xi32>
+  %biased1 = vector.addi %sum1, %bias1 : vector<16xi32>
+  %activated1 = vector.maxsi %biased1, %relu_floor : vector<16xi32>
+  vector.store %activated1, %output_view[16] : vector<16xi32>, view<64xi32>
+
+  %partial02 = vector.load %partial0_view[32] : view<64xi32> -> vector<16xi32>
+  %partial12 = vector.load %partial1_view[32] : view<64xi32> -> vector<16xi32>
+  %bias2 = vector.load %bias_view[32] : view<64xi32> -> vector<16xi32>
+  %sum2 = vector.addi %partial02, %partial12 : vector<16xi32>
+  %biased2 = vector.addi %sum2, %bias2 : vector<16xi32>
+  %activated2 = vector.maxsi %biased2, %relu_floor : vector<16xi32>
+  vector.store %activated2, %output_view[32] : vector<16xi32>, view<64xi32>
+
+  %partial03 = vector.load %partial0_view[48] : view<64xi32> -> vector<16xi32>
+  %partial13 = vector.load %partial1_view[48] : view<64xi32> -> vector<16xi32>
+  %bias3 = vector.load %bias_view[48] : view<64xi32> -> vector<16xi32>
+  %sum3 = vector.addi %partial03, %partial13 : vector<16xi32>
+  %biased3 = vector.addi %sum3, %bias3 : vector<16xi32>
+  %activated3 = vector.maxsi %biased3, %relu_floor : vector<16xi32>
+  vector.store %activated3, %output_view[48] : vector<16xi32>, view<64xi32>
+  func.return
+}

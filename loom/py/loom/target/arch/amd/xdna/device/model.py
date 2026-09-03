@@ -38,16 +38,6 @@ class FirmwareProtocol:
 
 
 @dataclass(frozen=True, slots=True)
-class QualifiedSoftware:
-    """Observed stack versions that produced the retained hardware witness."""
-
-    driver_version: str
-    firmware_version: str
-    xrt_version: str
-    xrt_source_commit: str
-
-
-@dataclass(frozen=True, slots=True)
 class DeviceLimits:
     """Driver-visible resource limits outside individual array tiles."""
 
@@ -74,7 +64,6 @@ class DeviceProfile:
     native_elf_abi_major: int
     native_elf_abi_minor: int
     limits: DeviceLimits
-    qualified_software: QualifiedSoftware
     provenance: Provenance
 
 
@@ -133,16 +122,6 @@ def validate_device_profile(profile: DeviceProfile) -> None:
         or limits.context_limit < limits.hardware_context_limit
     ):
         raise ValueError(f"{profile.key}: invalid device limits")
-    software = profile.qualified_software
-    if not all(
-        (
-            software.driver_version,
-            software.firmware_version,
-            software.xrt_version,
-            software.xrt_source_commit,
-        )
-    ):
-        raise ValueError(f"{profile.key}: qualified software is incomplete")
     required_provenance = Provenance.XDNA_DRIVER | Provenance.HARDWARE
     if profile.provenance & required_provenance != required_provenance:
         raise ValueError(f"{profile.key}: profile provenance is incomplete")

@@ -31,10 +31,7 @@ from loom.target.arch.amd.xdna.array.npu2 import (
     REGISTER_DATABASE_VERSION,
 )
 from loom.target.arch.amd.xdna.device.model import validate_device_profile
-from loom.target.arch.amd.xdna.device.strix_halo import (
-    DEVICE_PROFILES,
-    XDNA_DRIVER_SOURCE_COMMIT,
-)
+from loom.target.arch.amd.xdna.device.strix_halo import DEVICE_PROFILES
 
 
 def _header() -> list[str]:
@@ -313,7 +310,6 @@ def emit_device_profiles() -> str:
     profile_lines: list[str] = []
     for profile in DEVICE_PROFILES:
         validate_device_profile(profile)
-        software = profile.qualified_software
         firmware = profile.firmware
         profile_lines.extend(
             [
@@ -343,11 +339,6 @@ def emit_device_profiles() -> str:
                 f"            .context_limit = {profile.limits.context_limit},",
                 f"            .temporal_contexts_only = {str(profile.limits.temporal_contexts_only).lower()},",
                 "        },",
-                f'        .qualified_driver_version = "{software.driver_version}",',
-                f'        .qualified_firmware_version = "{software.firmware_version}",',
-                f'        .qualified_xrt_version = "{software.xrt_version}",',
-                f'        .qualified_xrt_source_commit = "{software.xrt_source_commit}",',
-                f'        .xdna_driver_source_commit = "{XDNA_DRIVER_SOURCE_COMMIT}",',
                 "    },",
             ]
         )
