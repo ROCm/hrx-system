@@ -134,16 +134,12 @@ test.target<low_core> @test_target
 // The target models result readiness after one cycle and completion after four.
 // The read/write effect edge must therefore make the store more expensive than
 // the ready SSA consumer.
-low.func.def target<test.low.core>(@test_target) @resource_stall_prices_counter_completion_for_effect_edge(
-    %address: reg<test.ptr>, %payload: reg<test.i32 x4>) -> (reg<test.i32 x4>) {
-  %loaded = low.op<test.counter_load.v4i32>(%address) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  low.op<test.store.v4i32>(%address, %payload) :
-      (reg<test.ptr>, reg<test.i32 x4>)
+low.func.def target<test.low.core>(@test_target) @resource_stall_prices_counter_completion_for_effect_edge(%address: reg<test.ptr>, %payload: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  %loaded = test.counter_load.v4i32 %address
+  test.store.v4i32 %address, %payload
   // REMARK@+1: BACKEND/015 {chosen_packet="test.add.v4i32", rejected_packet="test.store.v4i32", chosen_data_ready_stall_cycles="0", chosen_completion_wait_cycles="0", chosen_effective_stall_cycles="0", rejected_data_ready_stall_cycles="3", rejected_completion_wait_cycles="1", rejected_effective_stall_cycles="3"}
-  %used = low.op<test.add.v4i32>(%loaded, %loaded) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %used : reg<test.i32 x4>
+  %used = test.add.v4i32 %loaded, %loaded
+  return %used
 }
 
 // ====
@@ -153,16 +149,12 @@ test.target<low_core> @test_target
 
 // Coalescing SSA and effect edges for the same producer/consumer pair must not
 // lose the stronger completion requirement carried by the effect edge.
-low.func.def target<test.low.core>(@test_target) @resource_stall_prices_mixed_ssa_effect_completion(
-    %address: reg<test.ptr>) -> (reg<test.i32 x4>) {
-  %loaded = low.op<test.counter_load.v4i32>(%address) :
-      (reg<test.ptr>) -> reg<test.i32 x4>
-  low.op<test.store.v4i32>(%address, %loaded) :
-      (reg<test.ptr>, reg<test.i32 x4>)
+low.func.def target<test.low.core>(@test_target) @resource_stall_prices_mixed_ssa_effect_completion(%address: reg<test.ptr>) -> (reg<test.i32 x4>) asm {
+  %loaded = test.counter_load.v4i32 %address
+  test.store.v4i32 %address, %loaded
   // REMARK@+1: BACKEND/015 {chosen_packet="test.add.v4i32", rejected_packet="test.store.v4i32", chosen_data_ready_stall_cycles="0", chosen_completion_wait_cycles="0", chosen_effective_stall_cycles="0", rejected_data_ready_stall_cycles="3", rejected_completion_wait_cycles="1", rejected_effective_stall_cycles="3"}
-  %used = low.op<test.add.v4i32>(%loaded, %loaded) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %used : reg<test.i32 x4>
+  %used = test.add.v4i32 %loaded, %loaded
+  return %used
 }
 
 // ====

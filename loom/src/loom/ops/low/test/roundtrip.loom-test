@@ -21,13 +21,13 @@ test.target<low_core> @test_target
 
 low.func.decl inline target<test.low.core>(@test_target) @inline_decl(%value: reg<test.i32>) -> (reg<test.i32>)
 
-low.func.def noinline target<test.low.core>(@test_target) @noinline_helper(%value: reg<test.i32>) -> (reg<test.i32>) {
-  low.return %value : reg<test.i32>
+low.func.def noinline target<test.low.core>(@test_target) @noinline_helper(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
 }
 
-low.func.def target<test.low.core>(@test_target) @inline_call_policy(%value: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @inline_call_policy(%value: reg<test.i32>) -> (reg<test.i32>) asm {
   %result = low.func.call inline @inline_decl(%value) : (reg<test.i32>) -> (reg<test.i32>)
-  low.return %result : reg<test.i32>
+  return %result
 }
 
 func.def @invoke_call_policy(%value: i32) -> (i32) {

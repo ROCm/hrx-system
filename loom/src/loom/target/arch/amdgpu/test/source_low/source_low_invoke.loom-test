@@ -192,12 +192,13 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 // The shared callable inliner splices the schedule-free helper's complete CFG,
 // including its block argument, into the exact-target caller.
 amdgpu.target<gfx11-generic> @helper_target
+
 amdgpu.target<gfx1151> @caller_target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@helper_target) @cfg_identity(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+low.func.def target<amdgpu.gfx11.generic.core>(@helper_target) @cfg_identity(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   low.br ^exit(%value: reg<amdgpu.vgpr>)
 ^exit(%forwarded: reg<amdgpu.vgpr>):
-  low.return %forwarded : reg<amdgpu.vgpr>
+  return %forwarded
 }
 
 func.def target(@caller_target) @cfg_identity_caller(%value: vector<1xi32>) -> (vector<1xi32>) {
@@ -222,14 +223,15 @@ low.func.def target<amdgpu.rdna3_5.core>(@caller_target) abi(hal_kernel) @cfg_id
 // block. The inliner materializes each block's order as fences before the
 // target-neutral splice remaps its block argument and return edge.
 amdgpu.target<gfx11-generic> @helper_target
+
 amdgpu.target<gfx1151> @caller_target
 
-low.func.def schedule(locked) target<amdgpu.gfx11.generic.core>(@helper_target) @locked_cfg_add(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
-  %first = low.op<amdgpu.v_add_u32>(%value, %value) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+low.func.def schedule(locked) target<amdgpu.gfx11.generic.core>(@helper_target) @locked_cfg_add(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %first = v_add_u32 %value, %value
   low.br ^tail(%first: reg<amdgpu.vgpr>)
 ^tail(%forwarded: reg<amdgpu.vgpr>):
-  %second = low.op<amdgpu.v_add_u32>(%forwarded, %value) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  low.return %second : reg<amdgpu.vgpr>
+  %second = v_add_u32 %forwarded, %value
+  return %second
 }
 
 func.def target(@caller_target) @locked_cfg_caller(%value: vector<1xi32>) -> (vector<1xi32>) {
@@ -260,18 +262,19 @@ low.func.def target<amdgpu.rdna3_5.core>(@caller_target) abi(hal_kernel) @locked
 // Both generic helpers are specialized to the exact caller representation,
 // including the nested descriptor operation and the outer CFG block argument.
 amdgpu.target<gfx11-generic> @helper_target
+
 amdgpu.target<gfx1151> @caller_target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@helper_target) @double_value(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
-  %doubled = low.op<amdgpu.v_add_u32>(%value, %value) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  low.return %doubled : reg<amdgpu.vgpr>
+low.func.def target<amdgpu.gfx11.generic.core>(@helper_target) @double_value(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %doubled = v_add_u32 %value, %value
+  return %doubled
 }
 
-low.func.def target<amdgpu.gfx11.generic.core>(@helper_target) @compose_cfg(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+low.func.def target<amdgpu.gfx11.generic.core>(@helper_target) @compose_cfg(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %doubled = low.func.call @double_value(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
   low.br ^exit(%doubled: reg<amdgpu.vgpr>)
 ^exit(%forwarded: reg<amdgpu.vgpr>):
-  low.return %forwarded : reg<amdgpu.vgpr>
+  return %forwarded
 }
 
 func.def target(@caller_target) @composed_cfg_caller(%value: vector<1xi32>) -> (vector<1xi32>) {

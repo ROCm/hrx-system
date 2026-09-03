@@ -96,8 +96,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @proven_
 
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) @unary_result(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
-  low.return %value : reg<amdgpu.vgpr>
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @unary_result(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
 }
 
 func.def target(@target) @wrong_result_count(%value: vector<1xi32>) -> (vector<1xi32>) {
@@ -110,9 +110,9 @@ func.def target(@target) @wrong_result_count(%value: vector<1xi32>) -> (vector<1
 
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) @wide_result(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) {
-  %wide = low.concat(%value, %value) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  low.return %wide : reg<amdgpu.vgpr x2>
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @wide_result(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+  %wide = concat(%value, %value) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %wide
 }
 
 func.def target(@target) @wrong_result_type(%value: vector<1xi32>) -> (vector<1xi32>) {
@@ -125,8 +125,8 @@ func.def target(@target) @wrong_result_type(%value: vector<1xi32>) -> (vector<1x
 
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) @must_inline(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
-  low.return %value : reg<amdgpu.vgpr>
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @must_inline(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
 }
 
 func.def target(@target) @noinline_conflicts_with_amdgpu(%value: vector<1xi32>) -> (vector<1xi32>) {
@@ -139,16 +139,16 @@ func.def target(@target) @noinline_conflicts_with_amdgpu(%value: vector<1xi32>) 
 
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) @cycle_a(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @cycle_a(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   // ERROR@+1: LOWERING/044 {op_name="low.func.call", phase_name="inline-callables", callee_name="cycle_b", failure_code="required_cycle"}
   %result = low.func.call @cycle_b(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
-  low.return %result : reg<amdgpu.vgpr>
+  return %result
 }
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) @cycle_b(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @cycle_b(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   // ERROR@+1: LOWERING/044 {op_name="low.func.call", phase_name="inline-callables", callee_name="cycle_a", failure_code="required_cycle"}
   %result = low.func.call @cycle_a(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
-  low.return %result : reg<amdgpu.vgpr>
+  return %result
 }
 
 func.def target(@target) @recursive_closure_caller(%value: vector<1xi32>) -> (vector<1xi32>) {

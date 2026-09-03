@@ -90,10 +90,10 @@ check.case public @low_invoke_schedule_free_pack_pair_case {
 // The AMDGPU target policy flattens this ordinary Low call before emission.
 // Its branch and block argument exercise CFG composition through the default
 // source-to-Low pipeline without requiring a locked schedule.
-low.func.def target<amdgpu.gfx11.generic.core>(@low_invoke_target) @low_invoke_cfg_identity(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+low.func.def target<amdgpu.gfx11.generic.core>(@low_invoke_target) @low_invoke_cfg_identity(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   low.br ^exit(%value: reg<amdgpu.vgpr>)
 ^exit(%forwarded: reg<amdgpu.vgpr>):
-  low.return %forwarded : reg<amdgpu.vgpr>
+  return %forwarded
 }
 
 kernel.def target(@low_invoke_target) @low_invoke_cfg_identity_kernel() {
