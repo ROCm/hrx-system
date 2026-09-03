@@ -66,6 +66,8 @@ from loom.target.low_descriptors import (
     RegClassAlt,
     RegClassAltFlag,
     RegClassFlag,
+    RegisterPackingResource,
+    RegisterPackingResourceMember,
     RegisterPart,
     Resource,
     ResourceKind,
@@ -1722,6 +1724,31 @@ def _physical_register_views() -> tuple[PhysicalRegisterView, ...]:
     return tuple(views[key] for key in sorted(views))
 
 
+def _register_packing_resources() -> tuple[RegisterPackingResource, ...]:
+    """Describes aggregate X-register capacity shared by W storage classes."""
+
+    x_register_count = len(_MACHINE_CLASSES["mXm"].candidates)
+    if len(_MACHINE_CLASSES["VEC256"].candidates) != x_register_count * 2:
+        raise ValueError(
+            "AIE2P VEC256 does not cover both W halves of every X register"
+        )
+    if len(_MACHINE_CLASSES["eWL"].candidates) != x_register_count:
+        raise ValueError("AIE2P eWL does not cover one W half of every X register")
+    return (
+        RegisterPackingResource(
+            name=f"{_TARGET_KEY}.register.x.pairs",
+            capacity=x_register_count,
+            members=(
+                RegisterPackingResourceMember("aie2p.ewl"),
+                RegisterPackingResourceMember(
+                    "aie2p.vec256",
+                    register_unit_count=2,
+                ),
+            ),
+        ),
+    )
+
+
 _ITINERARIES = {
     NO_ITINERARY.name: NO_ITINERARY,
     **{itinerary.name: itinerary for itinerary in CORE_SCHEDULE_TABLE.itineraries},
@@ -2758,6 +2785,7 @@ AIE2P_CORE_DESCRIPTOR_SET = DescriptorSet(
     register_parts=_REGISTER_PARTS,
     physical_registers=_physical_registers(),
     physical_register_views=_physical_register_views(),
+    register_packing_resources=_register_packing_resources(),
     timing_events=_TIMING_EVENTS,
     event_separations=_EVENT_SEPARATIONS,
     resources=_RESOURCES,

@@ -101,6 +101,31 @@ def test_core_descriptor_closure_is_complete() -> None:
         },
     }
 
+    assert [
+        (
+            resource.name,
+            resource.capacity,
+            tuple(
+                (
+                    member.register_class,
+                    member.register_unit_count,
+                    member.resource_unit_count,
+                )
+                for member in resource.members
+            ),
+        )
+        for resource in descriptor_set.register_packing_resources
+    ] == [
+        (
+            "amd.xdna.aie2p.register.x.pairs",
+            12,
+            (
+                ("aie2p.ewl", 1, 1),
+                ("aie2p.vec256", 2, 1),
+            ),
+        )
+    ]
+
 
 def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
