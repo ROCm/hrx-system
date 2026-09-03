@@ -420,31 +420,24 @@ low.func.def target<amdgpu.rdna3.core>(@target) @loaded_chained_destructive_sgpr
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @d16_tied_concat_loop_edge(
-    %condition: reg<amdgpu.scc>, %address: reg<amdgpu.vgpr>,
-    %seed: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) {
+low.func.def target<amdgpu.rdna3.core>(@target) @d16_tied_concat_loop_edge(%condition: reg<amdgpu.scc>, %address: reg<amdgpu.vgpr>, %seed: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
   low.br ^loop(%seed: reg<amdgpu.vgpr x8>)
 ^loop(%state: reg<amdgpu.vgpr x8>):
   low.cond_br %condition, ^body, ^exit : reg<amdgpu.scc>
 ^body:
-  %low = low.op<amdgpu.ds_load_u16_d16>(%address) {offset = 0} :
-      (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  %high = low.op<amdgpu.ds_load_u16_d16_hi>(%low, %address) {offset = 2} :
-      (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> %low as reg<amdgpu.vgpr>
-  %lane1 = low.const<amdgpu.v_mov_b32> {imm32 = 1} : reg<amdgpu.vgpr>
-  %lane2 = low.const<amdgpu.v_mov_b32> {imm32 = 2} : reg<amdgpu.vgpr>
-  %lane3 = low.const<amdgpu.v_mov_b32> {imm32 = 3} : reg<amdgpu.vgpr>
-  %lane4 = low.const<amdgpu.v_mov_b32> {imm32 = 4} : reg<amdgpu.vgpr>
-  %lane5 = low.const<amdgpu.v_mov_b32> {imm32 = 5} : reg<amdgpu.vgpr>
-  %lane6 = low.const<amdgpu.v_mov_b32> {imm32 = 6} : reg<amdgpu.vgpr>
-  %lane7 = low.const<amdgpu.v_mov_b32> {imm32 = 7} : reg<amdgpu.vgpr>
-  %next = low.concat(%high, %lane1, %lane2, %lane3, %lane4, %lane5, %lane6,
-      %lane7) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>,
-      reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>,
-      reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  %low = ds_load_u16_d16 %address
+  %high = ds_load_u16_d16_hi %low, %address {offset = 2}
+  %lane1 = v_mov_b32 1
+  %lane2 = v_mov_b32 2
+  %lane3 = v_mov_b32 3
+  %lane4 = v_mov_b32 4
+  %lane5 = v_mov_b32 5
+  %lane6 = v_mov_b32 6
+  %lane7 = v_mov_b32 7
+  %next = concat(%high, %lane1, %lane2, %lane3, %lane4, %lane5, %lane6, %lane7) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
   low.br ^loop(%next: reg<amdgpu.vgpr x8>)
 ^exit:
-  low.return %state : reg<amdgpu.vgpr x8>
+  return %state
 }
 
 // ----

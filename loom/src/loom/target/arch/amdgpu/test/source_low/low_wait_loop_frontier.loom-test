@@ -8,11 +8,8 @@
 
 amdgpu.target<gfx1100> @target {subgroup_size = 32}
 
-low.func.def target<amdgpu.rdna3.core>(@target) @loop_carried_lds_fragments_retain_younger_reads(
-    %address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x8>,
-    %initial_acc: reg<amdgpu.vgpr x8>,
-    %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x8>) asm {
-  %seed0_low = ds_read_b128 %address {offset = 0}
+low.func.def target<amdgpu.rdna3.core>(@target) @loop_carried_lds_fragments_retain_younger_reads(%address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x8>, %initial_acc: reg<amdgpu.vgpr x8>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x8>) asm {
+  %seed0_low = ds_read_b128 %address
   %seed0_high = ds_read_b128 %address {offset = 16}
   %seed0 = concat(%seed0_low, %seed0_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
   %seed1_low = ds_read_b128 %address {offset = 32}
@@ -54,11 +51,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @loop_carried_lds_fragments_reta
 
 amdgpu.target<gfx1100> @target {subgroup_size = 32}
 
-low.func.def target<amdgpu.rdna3.core>(@target) @loop_carried_lds_fragments_retain_younger_reads_assembly(
-    %address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x8>,
-    %initial_acc: reg<amdgpu.vgpr x8>,
-    %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x8>) asm {
-  %seed0_low = ds_read_b128 %address {offset = 0}
+low.func.def target<amdgpu.rdna3.core>(@target) @loop_carried_lds_fragments_retain_younger_reads_assembly(%address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x8>, %initial_acc: reg<amdgpu.vgpr x8>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x8>) asm {
+  %seed0_low = ds_read_b128 %address
   %seed0_high = ds_read_b128 %address {offset = 16}
   %seed0 = concat(%seed0_low, %seed0_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
   %seed1_low = ds_read_b128 %address {offset = 32}
@@ -122,10 +116,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @loop_carried_lds_fragments_reta
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @loop_entry_lds_wait_retains_younger_reads(
-    %address: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr>,
-    %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
-  %invariant = ds_read_b32 %address {offset = 0}
+low.func.def target<amdgpu.rdna3.core>(@target) @loop_entry_lds_wait_retains_younger_reads(%address: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %invariant = ds_read_b32 %address
   %younger0 = ds_read_b32 %address {offset = 4}
   %younger1 = ds_read_b32 %address {offset = 8}
   low.br ^loop(%initial: reg<amdgpu.vgpr>)
@@ -151,10 +143,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @loop_entry_lds_wait_retains_you
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @loop_entry_lds_wait_retains_younger_reads_assembly(
-    %address: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr>,
-    %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
-  %invariant = ds_read_b32 %address {offset = 0}
+low.func.def target<amdgpu.rdna3.core>(@target) @loop_entry_lds_wait_retains_younger_reads_assembly(%address: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %invariant = ds_read_b32 %address
   %younger0 = ds_read_b32 %address {offset = 4}
   %younger1 = ds_read_b32 %address {offset = 8}
   low.br ^loop(%initial: reg<amdgpu.vgpr>)
@@ -191,11 +181,9 @@ low.func.def target<amdgpu.rdna3.core>(@target) @loop_entry_lds_wait_retains_you
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @loop_entry_smem_wait_remains_conservative(
-    %base: reg<amdgpu.sgpr x2>, %initial: reg<amdgpu.sgpr>,
-    %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3.core>(@target) @loop_entry_smem_wait_remains_conservative(%base: reg<amdgpu.sgpr x2>, %initial: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %zero = s_mov_b32 0
-  %invariant = s_load_dword %base, %zero {offset = 0}
+  %invariant = s_load_dword %base, %zero
   %younger0 = s_load_dword %base, %zero {offset = 4}
   %younger1 = s_load_dword %base, %zero {offset = 8}
   low.br ^loop(%initial: reg<amdgpu.sgpr>, %zero: reg<amdgpu.sgpr>)
@@ -224,11 +212,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @loop_entry_smem_wait_remains_co
 
 amdgpu.target<gfx1100> @target {subgroup_size = 32}
 
-low.func.def target<amdgpu.rdna3.core>(@target) @multiblock_loop_carried_lds_wait_is_conservative(
-    %address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x8>,
-    %initial_acc: reg<amdgpu.vgpr x8>,
-    %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x8>) asm {
-  %seed_low = ds_read_b128 %address {offset = 0}
+low.func.def target<amdgpu.rdna3.core>(@target) @multiblock_loop_carried_lds_wait_is_conservative(%address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x8>, %initial_acc: reg<amdgpu.vgpr x8>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x8>) asm {
+  %seed_low = ds_read_b128 %address
   %seed_high = ds_read_b128 %address {offset = 16}
   %seed = concat(%seed_low, %seed_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
   low.br ^loop(%seed: reg<amdgpu.vgpr x8>, %initial_acc: reg<amdgpu.vgpr x8>)
@@ -256,10 +241,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @multiblock_loop_carried_lds_wai
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @trailing_reset_satisfies_loop_carried_use(
-    %address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>,
-    %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
-  %seed = ds_read_b32 %address {offset = 0}
+low.func.def target<amdgpu.rdna3.core>(@target) @trailing_reset_satisfies_loop_carried_use(%address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %seed = ds_read_b32 %address
   low.br ^loop(%seed: reg<amdgpu.vgpr>)
 ^loop(%carried: reg<amdgpu.vgpr>):
   %used = v_add_u32 %carried, %rhs
@@ -283,10 +266,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @trailing_reset_satisfies_loop_c
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @trailing_reset_satisfies_loop_carried_use_assembly(
-    %address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>,
-    %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
-  %seed = ds_read_b32 %address {offset = 0}
+low.func.def target<amdgpu.rdna3.core>(@target) @trailing_reset_satisfies_loop_carried_use_assembly(%address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %seed = ds_read_b32 %address
   low.br ^loop(%seed: reg<amdgpu.vgpr>)
 ^loop(%carried: reg<amdgpu.vgpr>):
   %used = v_add_u32 %carried, %rhs
@@ -318,10 +299,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @trailing_reset_satisfies_loop_c
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @uncovered_trailing_producer_is_conservative(
-    %address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>,
-    %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
-  %seed = ds_read_b32 %address {offset = 0}
+low.func.def target<amdgpu.rdna3.core>(@target) @uncovered_trailing_producer_is_conservative(%address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %seed = ds_read_b32 %address
   low.br ^loop(%seed: reg<amdgpu.vgpr>)
 ^loop(%carried: reg<amdgpu.vgpr>):
   %used = v_add_u32 %carried, %rhs
