@@ -129,7 +129,7 @@ TEST_F(LowLowerRuleMatchTest, ContractQueriesMaySelectContractOnlyRules) {
   EXPECT_EQ(selection.rule, &rules[0]);
 }
 
-TEST_F(LowLowerRuleMatchTest, SourceRepresentationGuardBindsOnlyFinalLowering) {
+TEST_F(LowLowerRuleMatchTest, SourceRepresentationGuardsBindOnlyFinalLowering) {
   const loom_op_t* source_op = BuildConstant(5);
   constexpr uint64_t kRejectedGroupKey = UINT64_C(0x10);
   constexpr uint64_t kSelectedGroupKey = UINT64_C(0x20);
@@ -216,6 +216,24 @@ TEST_F(LowLowerRuleMatchTest, SourceRepresentationGuardBindsOnlyFinalLowering) {
       .source_representation_plan = &representation_plan,
   };
   loom_low_lower_rule_selection_t selection = {};
+  IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+      &match_context, &rule_set, source_op, &selection));
+  EXPECT_EQ(selection.rule, &rules[1]);
+
+  match_context.flags = LOOM_LOW_LOWER_RULE_MATCH_FLAG_CONTRACT_ONLY;
+  match_context.source_representation_plan = nullptr;
+  IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+      &match_context, &rule_set, source_op, &selection));
+  EXPECT_EQ(selection.rule, &rules[0]);
+
+  guards[0].kind = LOOM_LOW_LOWER_GUARD_SOURCE_REPRESENTATION_CANDIDATE;
+  guards[0].payload.source_representation.group_key = kSelectedGroupKey;
+  guards[0].payload.source_representation.candidate_key = UINT64_C(2);
+  guards[1].kind = LOOM_LOW_LOWER_GUARD_SOURCE_REPRESENTATION_CANDIDATE;
+  guards[1].payload.source_representation.group_key = kSelectedGroupKey;
+  guards[1].payload.source_representation.candidate_key = candidate.stable_key;
+  match_context.flags = 0;
+  match_context.source_representation_plan = &representation_plan;
   IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
       &match_context, &rule_set, source_op, &selection));
   EXPECT_EQ(selection.rule, &rules[1]);

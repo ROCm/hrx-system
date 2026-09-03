@@ -579,6 +579,13 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
             f"{{.u64 = {u64_payload}}}",
             always=True,
         )
+    if row.kind == GuardKind.SOURCE_REPRESENTATION_CANDIDATE:
+        _append_field(
+            fields,
+            "payload",
+            (f"{{.source_representation = {{.group_key = {lower_rule_spelling.u64_c_literal(row.u64)}, .candidate_key = {lower_rule_spelling.u64_c_literal(row.other_u64)}}}}}"),
+            always=True,
+        )
     if row.kind == GuardKind.DESCRIPTOR_AVAILABLE:
         _append_field(
             fields,

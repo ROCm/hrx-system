@@ -701,6 +701,7 @@ def _validate_c_table_shape(
             "diagnostic",
         )
         _require_u64(row.u64, f"{row_subject} u64 payload")
+        _require_u64(row.other_u64, f"{row_subject} other u64 payload")
         if row.kind == GuardKind.I64_ARRAY_ELEMENT_RANGE:
             _require_u16(row.u64, f"{row_subject} array element index")
         if row.kind in (

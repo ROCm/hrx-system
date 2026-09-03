@@ -566,6 +566,10 @@ typedef enum loom_low_lower_guard_kind_e {
   // The retained native source-representation plan must select the group whose
   // stable key is u64. Legality queries preceding the plan ignore this guard.
   LOOM_LOW_LOWER_GUARD_SOURCE_REPRESENTATION_GROUP = 33,
+  // The retained native source-representation plan must select the candidate
+  // identified by the stable group and candidate keys. Legality queries
+  // preceding the plan ignore this guard.
+  LOOM_LOW_LOWER_GUARD_SOURCE_REPRESENTATION_CANDIDATE = 34,
   // Maximum guard kind value plus one.
   LOOM_LOW_LOWER_GUARD_COUNT_,
 } loom_low_lower_guard_kind_t;
@@ -626,6 +630,13 @@ typedef struct loom_low_lower_guard_t {
       // Reserved storage available to future packed integer guards.
       uint32_t reserved;
     } packed_integer;
+    // Stable operation-local group and realization keys.
+    struct {
+      // Stable source-representation group key.
+      uint64_t group_key;
+      // Stable source-representation candidate key.
+      uint64_t candidate_key;
+    } source_representation;
   } payload;
 } loom_low_lower_guard_t;
 static_assert(sizeof(loom_low_lower_guard_t) == 32,

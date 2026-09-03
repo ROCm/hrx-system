@@ -624,6 +624,19 @@ def test_guard_row_emits_value_memory_space_mask() -> None:
     assert (".payload = {.u64 = LOOM_LOW_LOWER_MEMORY_SPACE_UNKNOWN | LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL | LOOM_LOW_LOWER_MEMORY_SPACE_DESCRIPTOR}") in fields
 
 
+def test_guard_row_emits_source_representation_candidate_keys() -> None:
+    fields = guard_row(
+        {},
+        LowerGuard(
+            kind=GuardKind.SOURCE_REPRESENTATION_CANDIDATE,
+            u64=1,
+            other_u64=2,
+        ),
+    )
+
+    assert (".payload = {.source_representation = {.group_key = UINT64_C(1), .candidate_key = UINT64_C(2)}}") in fields
+
+
 def test_attr_copy_row_emits_portable_signed_i64_literal() -> None:
     fields = attr_copy_row(
         LowerAttrCopy(

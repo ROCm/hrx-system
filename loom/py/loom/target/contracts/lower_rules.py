@@ -212,6 +212,7 @@ class LowerGuard:
     diagnostic_index: int = 0xFFFF
     attr_kind: str | None = None
     u64: int = 0
+    other_u64: int = 0
     u64_c_expression: str | None = None
     memory_spaces: tuple[str, ...] = ()
     descriptor: Descriptor | None = None
@@ -919,6 +920,33 @@ class _LowerRuleSetCompiler:
                         ),
                     ),
                     u64=stable_id_from_string(guard.field),
+                )
+            )
+            return
+
+        if guard.kind == GuardKind.SOURCE_REPRESENTATION_CANDIDATE:
+            candidate_key = guard.other_field
+            if candidate_key is None:
+                raise ValueError(
+                    f"{source_op.name}: source representation candidate guard "
+                    "needs a candidate key"
+                )
+            self._guards.append(
+                LowerGuard(
+                    kind=guard.kind,
+                    diagnostic_index=self._append_diagnostic_ref(
+                        source_op,
+                        _guard_diagnostic(
+                            guard,
+                            _named_constraint_diagnostic(
+                                "operation",
+                                source_op.name,
+                                candidate_key,
+                            ),
+                        ),
+                    ),
+                    u64=stable_id_from_string(guard.field),
+                    other_u64=stable_id_from_string(candidate_key),
                 )
             )
             return

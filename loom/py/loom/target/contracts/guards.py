@@ -77,6 +77,7 @@ class GuardKind(Enum):
     VALUE_STATIC_ELEMENT_COUNT_EQ = "value_static_element_count_eq"
     VALUE_MEMORY_SPACE = "value_memory_space"
     SOURCE_REPRESENTATION_GROUP = "source_representation_group"
+    SOURCE_REPRESENTATION_CANDIDATE = "source_representation_candidate"
 
 
 _LOW_VALUE_GUARD_KINDS = (
@@ -626,6 +627,25 @@ class Guard:
             diagnostic=diagnostic,
         )
 
+    @classmethod
+    def source_representation_candidate(
+        cls,
+        group_key: str,
+        candidate_key: str,
+        *,
+        diagnostic: GuardDiagnostic | None = None,
+    ) -> Self:
+        if not group_key:
+            raise ValueError("source representation group key must be non-empty")
+        if not candidate_key:
+            raise ValueError("source representation candidate key must be non-empty")
+        return cls(
+            kind=GuardKind.SOURCE_REPRESENTATION_CANDIDATE,
+            field=group_key,
+            other_field=candidate_key,
+            diagnostic=diagnostic,
+        )
+
     def __post_init__(self) -> None:
         if not self.field:
             raise ValueError(f"{self.kind.value} guard requires a field")
@@ -802,6 +822,12 @@ class Guard:
                     f"{source_op.name}: {subject} field '{self.field}' "
                     f"has no enum case '{self.enum_keyword}'"
                 )
+            return
+        if self.kind == GuardKind.SOURCE_REPRESENTATION_GROUP:
+            return
+        if self.kind == GuardKind.SOURCE_REPRESENTATION_CANDIDATE:
+            if self.other_field is None:
+                raise ValueError(f"{source_op.name}: {subject} needs a candidate key")
             return
         _validate_i64_array_guard(self, source_op, subject)
 
