@@ -146,6 +146,20 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "array_program",
+    srcs = ["array/program.c"],
+    hdrs = ["array/program.h"],
+    deps = [
+        ":array_plan",
+        "//loom/src/loom/target/arch/amd/xdna:array_facts",
+        "//loom/src/loom/target/arch/amd/xdna:array_registers",
+        "//loom/src/loom/target/arch/amd/xdna:elf_format",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "array_resident",
     srcs = ["array/resident.c"],
     hdrs = ["array/resident.h"],
@@ -234,6 +248,7 @@ loom_cc_library(
     ],
     deps = [
         ":array_plan",
+        ":array_program",
         ":array_resident",
         ":leaf_compile",
         ":provider",
@@ -419,6 +434,17 @@ loom_cc_library(
         "//loom/src/loom/target/reporting:low",
         "//runtime/src/iree/base",
         "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_test(
+    name = "array_program_test",
+    srcs = ["array/program_test.cc"],
+    deps = [
+        ":array_program",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

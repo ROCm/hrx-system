@@ -15,6 +15,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/plan.h"
+#include "loom/target/arch/amd/xdna/aie2p/array/program.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/resident.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_compile.h"
 #include "loom/tools/loom-check/diagnostics.h"
@@ -363,6 +364,163 @@ static iree_status_t loom_aie2p_array_plan_check_format(
   return iree_ok_status();
 }
 
+typedef struct loom_aie2p_array_program_check_record_counts_t {
+  iree_host_size_t writes;
+  iree_host_size_t masked_writes;
+  iree_host_size_t block_writes;
+  iree_host_size_t tile_loads;
+  iree_host_size_t waits;
+} loom_aie2p_array_program_check_record_counts_t;
+
+static iree_status_t loom_aie2p_array_program_check_count_records(
+    const loom_aie2p_program_record_t* records, iree_host_size_t record_count,
+    loom_aie2p_array_program_check_record_counts_t* out_counts) {
+  *out_counts = (loom_aie2p_array_program_check_record_counts_t){0};
+  for (iree_host_size_t i = 0; i < record_count; ++i) {
+    switch (records[i].type) {
+      case LOOM_AIE2P_PROGRAM_RECORD_REGISTER_WRITE32:
+        ++out_counts->writes;
+        break;
+      case LOOM_AIE2P_PROGRAM_RECORD_REGISTER_MASK_WRITE32:
+        ++out_counts->masked_writes;
+        break;
+      case LOOM_AIE2P_PROGRAM_RECORD_REGISTER_BLOCK_WRITE32:
+        ++out_counts->block_writes;
+        break;
+      case LOOM_AIE2P_PROGRAM_RECORD_TILE_PROGRAM_LOAD:
+        ++out_counts->tile_loads;
+        break;
+      case LOOM_AIE2P_PROGRAM_RECORD_DMA_TASK_WAIT:
+        ++out_counts->waits;
+        break;
+      default:
+        return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "unknown AIE2P program record type %u",
+                                (unsigned)records[i].type);
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_array_program_check_append_block(
+    iree_string_view_t program_name, iree_host_size_t record_index,
+    const loom_aie2p_program_register_block_write32_t* block,
+    iree_string_builder_t* builder) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder, "%.*s-block record=%" PRIhsz " address=0x%08" PRIx32 " words=[",
+      (int)program_name.size, program_name.data, record_index, block->address));
+  for (iree_host_size_t i = 0; i < block->word_count; ++i) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "%s0x%08" PRIx32, i == 0 ? "" : ",", block->words[i]));
+  }
+  return iree_string_builder_append_cstring(builder, "]\n");
+}
+
+static iree_status_t loom_aie2p_array_program_check_format(
+    const loom_aie2p_array_program_t* program,
+    const loom_aie2p_encoded_array_program_t* encoded,
+    iree_string_builder_t* builder) {
+  loom_aie2p_array_program_check_record_counts_t array_counts = {0};
+  loom_aie2p_array_program_check_record_counts_t control_counts = {0};
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_program_check_count_records(
+      program->array_records, program->array_record_count, &array_counts));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_program_check_count_records(
+      program->control_records, program->control_record_count,
+      &control_counts));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      "\narray-program records=%" PRIhsz " payload-bytes=%" PRIhsz
+      " writes=%" PRIhsz " masked-writes=%" PRIhsz " block-writes=%" PRIhsz
+      " tile-loads=%" PRIhsz " waits=%" PRIhsz "\n",
+      program->array_record_count, encoded->array_payload.data_length,
+      array_counts.writes, array_counts.masked_writes,
+      array_counts.block_writes, array_counts.tile_loads, array_counts.waits));
+  for (iree_host_size_t i = 0; i < program->array_record_count; ++i) {
+    const loom_aie2p_program_record_t* record = &program->array_records[i];
+    if (record->type == LOOM_AIE2P_PROGRAM_RECORD_REGISTER_BLOCK_WRITE32) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_array_program_check_append_block(
+          IREE_SV("array"), i, &record->value.register_block_write32, builder));
+    } else if (record->type == LOOM_AIE2P_PROGRAM_RECORD_TILE_PROGRAM_LOAD) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "array-tile-load record=%" PRIhsz " tile-program=%" PRIu32 "\n", i,
+          record->value.tile_program_load.tile_program_index));
+    }
+  }
+
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      "control-program records=%" PRIhsz " payload-bytes=%" PRIhsz
+      " writes=%" PRIhsz " masked-writes=%" PRIhsz " block-writes=%" PRIhsz
+      " tile-loads=%" PRIhsz " waits=%" PRIhsz " relocations=%" PRIhsz "\n",
+      program->control_record_count, encoded->control_payload.data_length,
+      control_counts.writes, control_counts.masked_writes,
+      control_counts.block_writes, control_counts.tile_loads,
+      control_counts.waits, program->relocation_count));
+  for (iree_host_size_t i = 0; i < program->control_record_count; ++i) {
+    const loom_aie2p_program_record_t* record = &program->control_records[i];
+    switch (record->type) {
+      case LOOM_AIE2P_PROGRAM_RECORD_REGISTER_WRITE32:
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder,
+            "control-write record=%" PRIhsz " address=0x%08" PRIx32
+            " value=0x%08" PRIx32 "\n",
+            i, record->value.register_write32.address,
+            record->value.register_write32.value));
+        break;
+      case LOOM_AIE2P_PROGRAM_RECORD_REGISTER_MASK_WRITE32:
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder,
+            "control-mask-write record=%" PRIhsz " address=0x%08" PRIx32
+            " mask=0x%08" PRIx32 " value=0x%08" PRIx32 "\n",
+            i, record->value.register_mask_write32.address,
+            record->value.register_mask_write32.mask,
+            record->value.register_mask_write32.value));
+        break;
+      case LOOM_AIE2P_PROGRAM_RECORD_REGISTER_BLOCK_WRITE32:
+        IREE_RETURN_IF_ERROR(loom_aie2p_array_program_check_append_block(
+            IREE_SV("control"), i, &record->value.register_block_write32,
+            builder));
+        break;
+      case LOOM_AIE2P_PROGRAM_RECORD_DMA_TASK_WAIT:
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder,
+            "control-wait record=%" PRIhsz
+            " tile=(%u,%u) direction=%s"
+            " dma-channel=%u columns=%u rows=%u\n",
+            i, record->value.dma_task_wait.coordinate.column,
+            record->value.dma_task_wait.coordinate.row,
+            loom_aie2p_array_plan_check_dma_direction_name(
+                record->value.dma_task_wait.direction),
+            record->value.dma_task_wait.dma_channel,
+            record->value.dma_task_wait.column_count,
+            record->value.dma_task_wait.row_count));
+        break;
+      case LOOM_AIE2P_PROGRAM_RECORD_TILE_PROGRAM_LOAD:
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "AIE2P invocation-control program contains a tile load");
+      default:
+        IREE_ASSERT_UNREACHABLE("counted AIE2P control record type");
+    }
+  }
+  for (iree_host_size_t i = 0; i < program->relocation_count; ++i) {
+    const loom_aie2p_program_relocation_t* source = &program->relocations[i];
+    const loom_xdna_elf_relocation_record_t* resolved =
+        &encoded->relocations[i];
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        "control-relocation index=%" PRIhsz " record=%" PRIu32 " word=%" PRIu32
+        " payload-offset=%" PRIu32 " binding=%" PRIu32 " addend=%" PRId64
+        " width=%u"
+        " alignment=%" PRIu64 "\n",
+        i, source->target_record_index, source->target_word_index,
+        resolved->target_byte_offset, source->binding_ordinal, source->addend,
+        source->field_byte_width, source->required_alignment));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_aie2p_array_plan_check_resident_program(
     const loom_check_emit_provider_request_t* request,
     const loom_aie2p_array_plan_t* plan,
@@ -468,6 +626,16 @@ static iree_status_t loom_aie2p_array_plan_check_execute(
                                   leaf_count, request->case_arena, &plan));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_check_format(
       request->module, &plan, &request->result->actual_output));
+  loom_aie2p_array_program_t array_program = {0};
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_program_build(
+      &plan, request->case_arena, &array_program));
+  loom_aie2p_encoded_array_program_t encoded_program = {0};
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_program_encode(
+      &array_program, /*first_tile_program_header_ordinal=*/0,
+      /*control_program_header_ordinal=*/0, request->case_arena,
+      &encoded_program));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_program_check_format(
+      &array_program, &encoded_program, &request->result->actual_output));
   return loom_aie2p_array_plan_check_resident_program(request, &plan,
                                                       diagnostic_emitter);
 }

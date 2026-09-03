@@ -161,6 +161,23 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    array_program
+  HDRS
+    "array/program.h"
+  SRCS
+    "array/program.c"
+  DEPS
+    ::array_plan
+    iree::base
+    iree::base::internal::arena
+    loom::target::arch::amd::xdna::array_facts
+    loom::target::arch::amd::xdna::array_registers
+    loom::target::arch::amd::xdna::elf_format
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     array_resident
   HDRS
     "array/resident.h"
@@ -252,6 +269,7 @@ loom_cc_library(
     "check/provider.c"
   DEPS
     ::array_plan
+    ::array_program
     ::array_resident
     ::leaf_compile
     ::provider
@@ -460,6 +478,18 @@ loom_cc_library(
     loom::target::provider
     loom::target::reporting::low
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    array_program_test
+  SRCS
+    "array/program_test.cc"
+  DEPS
+    ::array_program
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(

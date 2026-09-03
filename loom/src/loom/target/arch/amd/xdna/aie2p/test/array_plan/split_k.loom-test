@@ -246,6 +246,44 @@ binding-patch ordinal=1 channel=3 shim=(1,0) direction=memory-to-stream dma-chan
 binding-patch ordinal=2 channel=4 shim=(2,0) direction=memory-to-stream dma-channel=0 partition=0/1
 binding-patch ordinal=3 channel=5 shim=(0,0) direction=stream-to-memory dma-channel=0 partition=0/1
 
+array-program records=106 payload-bytes=2056 writes=78 masked-writes=13 block-writes=12 tile-loads=3 waits=0
+array-block record=79 address=0x0021d000 words=[0x00000010,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=80 address=0x0021d020 words=[0x04000010,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=82 address=0x0021d040 words=[0x08000010,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
+array-block record=83 address=0x0021d060 words=[0x0c000010,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
+array-block record=85 address=0x0041d000 words=[0x00000010,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=86 address=0x0041d020 words=[0x04000010,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=88 address=0x0041d040 words=[0x08000010,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
+array-block record=89 address=0x0041d060 words=[0x0c000010,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
+array-block record=91 address=0x0031d000 words=[0x00000040,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=92 address=0x0031d020 words=[0x04000040,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=94 address=0x0031d040 words=[0x08000040,0x00000000,0x00000000,0x00000000,0x00000000,0x1e045fe3]
+array-block record=95 address=0x0031d060 words=[0x0c000040,0x00000000,0x00000000,0x00000000,0x00000000,0x16045fe3]
+array-tile-load record=97 tile-program=0
+array-tile-load record=98 tile-program=1
+array-tile-load record=99 tile-program=2
+control-program records=14 payload-bytes=444 writes=6 masked-writes=1 block-writes=6 tile-loads=0 waits=1 relocations=6
+control-block record=0 address=0x0001d000 words=[0x00000010,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=1 address=0x0001d214 value=0x00000000
+control-block record=2 address=0x0001d020 words=[0x00000010,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=3 address=0x0001d21c value=0x00000001
+control-block record=4 address=0x0201d000 words=[0x00000010,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=5 address=0x0201d214 value=0x00000000
+control-block record=6 address=0x0201d020 words=[0x00000010,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=7 address=0x0201d21c value=0x00000001
+control-block record=8 address=0x0401d000 words=[0x00000040,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=9 address=0x0401d214 value=0x00000000
+control-block record=10 address=0x0001d040 words=[0x00000040,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-mask-write record=11 address=0x0001d200 mask=0x00001f00 value=0x00000f00
+control-write record=12 address=0x0001d204 value=0x80000002
+control-wait record=13 tile=(0,0) direction=stream-to-memory dma-channel=0 columns=1 rows=1
+control-relocation index=0 record=0 word=1 payload-offset=44 binding=0 addend=0 width=8 alignment=4
+control-relocation index=1 record=2 word=1 payload-offset=108 binding=1 addend=0 width=8 alignment=4
+control-relocation index=2 record=4 word=1 payload-offset=172 binding=0 addend=64 width=8 alignment=4
+control-relocation index=3 record=6 word=1 payload-offset=236 binding=1 addend=64 width=8 alignment=4
+control-relocation index=4 record=8 word=1 payload-offset=300 binding=2 addend=0 width=8 alignment=4
+control-relocation index=5 record=10 word=1 payload-offset=364 binding=3 addend=0 width=8 alignment=4
+
 resident-program workers=3
 resident worker=0 entry=@split_k_array$worker$0 tile=(0,2) phases=2 code-bytes=278 resources=0 fixups=1
 resident worker=1 entry=@split_k_array$worker$1 tile=(0,4) phases=2 code-bytes=278 resources=0 fixups=1

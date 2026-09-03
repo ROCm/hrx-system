@@ -46,6 +46,7 @@ loom_cc_library(
     srcs = ["array/registers.c"],
     hdrs = ["array/registers.h"],
     textual_hdrs = [":array/register_tables.inl"],
+    visibility = ["//visibility:public"],
     deps = [
         ":array_facts",
         "//runtime/src/iree/base",
@@ -81,6 +82,7 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
 loom_cc_test(
     name = "array_facts_test",
     srcs = ["array/facts_test.cc"],
