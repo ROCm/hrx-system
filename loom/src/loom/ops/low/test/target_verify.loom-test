@@ -139,6 +139,17 @@ low.func.def target<test.low.core>(@test_target) @typed_structural_identities(%s
 // ====
 
 test.target<low_core> @test_target
+low.func.def target<test.low.core>(@test_target) @physical_register_semantics(%raw: reg<test.phys>, %typed: reg<test.phys : i32>) -> (reg<test.phys>, reg<test.phys : i32>) {
+  %raw_copy = low.copy %raw : reg<test.phys> -> reg<test.phys>
+  %typed_copy = low.copy %typed : reg<test.phys : i32> -> reg<test.phys : i32>
+  low.br ^exit(%raw_copy: reg<test.phys>, %typed_copy: reg<test.phys : i32>)
+^exit(%raw_result: reg<test.phys>, %typed_result: reg<test.phys : i32>):
+  low.return %raw_result, %typed_result : reg<test.phys>, reg<test.phys : i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
 low.func.def target<test.low.core>(@test_target) @typed_copy_rejects_semantic_retyping(%value: reg<test.i32 : i32>) {
   // ERROR@+1: TYPE/017 {op_name="low.copy", source_type="reg<test.i32 : i32>", result_type="reg<test.i32 : f32>"}
   %copy = low.copy %value : reg<test.i32 : i32> -> reg<test.i32 : f32>

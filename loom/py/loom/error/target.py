@@ -1410,30 +1410,6 @@ ERR_TARGET_076 = ErrorDef(
     ),
 )
 
-# ERR_TARGET_077: Physical Low register carries a semantic value type.
-ERR_TARGET_077 = ErrorDef(
-    domain=ErrorDomain.TARGET,
-    code=77,
-    severity=Severity.ERROR,
-    summary="Physical Low register carries a semantic value type.",
-    message=(
-        "low function '@{function_name}' {value_kind} '{value_name}' has "
-        "type {actual_type}, but register class '{register_class}' represents "
-        "target-visible physical storage"
-    ),
-    params=(
-        ErrorParam("function_name", ParamKind.STRING),
-        ErrorParam("value_kind", ParamKind.STRING),
-        ErrorParam("value_name", ParamKind.STRING),
-        ErrorParam("actual_type", ParamKind.TYPE),
-        ErrorParam("register_class", ParamKind.STRING),
-    ),
-    fix_hint=(
-        "Use the canonical carrier-only register type for physical storage; "
-        "retain source semantic constraints as verified predicates and facts"
-    ),
-)
-
 # ERR_TARGET_078: Low invocation helper precondition is not proven.
 ERR_TARGET_078 = ErrorDef(
     domain=ErrorDomain.TARGET,
@@ -1527,6 +1503,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_074,
     ERR_TARGET_075,
     ERR_TARGET_076,
-    ERR_TARGET_077,
     ERR_TARGET_078,
 )

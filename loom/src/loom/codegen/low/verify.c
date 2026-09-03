@@ -1190,42 +1190,6 @@ static iree_status_t loom_low_verify_emit_unresolved_register_class(
                               params, IREE_ARRAYSIZE(params), NULL, 0);
 }
 
-static iree_status_t loom_low_verify_physical_register_value_type(
-    loom_low_function_verify_state_t* function_state, const loom_op_t* op,
-    iree_string_view_t value_kind, iree_string_view_t placeholder,
-    loom_value_id_t value_id) {
-  const loom_module_t* module = function_state->state->module;
-  const loom_type_t type = loom_module_value_type(module, value_id);
-  if (!loom_low_type_is_register(type) ||
-      !loom_type_register_has_value_type(type)) {
-    return iree_ok_status();
-  }
-
-  uint16_t descriptor_register_class_id = LOOM_LOW_REG_CLASS_NONE;
-  const loom_low_reg_class_t* descriptor_register_class = NULL;
-  if (!loom_low_register_type_resolver_try_resolve(
-          &function_state->register_type_resolver, type,
-          &descriptor_register_class_id, &descriptor_register_class) ||
-      !iree_any_bit_set(descriptor_register_class->flags,
-                        LOOM_LOW_REG_CLASS_FLAG_PHYSICAL)) {
-    return iree_ok_status();
-  }
-
-  const iree_string_view_t register_class = loom_low_descriptor_set_string(
-      function_state->target->descriptor_set,
-      descriptor_register_class->name_string_offset);
-  const loom_diagnostic_param_t params[] = {
-      loom_param_string(function_state->function_name),
-      loom_param_string(value_kind),
-      loom_param_string(loom_low_verify_value_name_or_placeholder(
-          module, value_id, placeholder)),
-      loom_param_type(type),
-      loom_param_string(register_class),
-  };
-  return loom_low_verify_emit(function_state->state, op, LOOM_ERR_TARGET_077,
-                              params, IREE_ARRAYSIZE(params), NULL, 0);
-}
-
 static iree_status_t loom_low_verify_register_value_class(
     loom_low_function_verify_state_t* function_state, const loom_op_t* op,
     iree_string_view_t value_kind, iree_string_view_t placeholder,
@@ -1236,14 +1200,13 @@ static iree_status_t loom_low_verify_register_value_class(
     return iree_ok_status();
   }
   uint16_t descriptor_register_class_id = LOOM_LOW_REG_CLASS_NONE;
-  const loom_low_reg_class_t* descriptor_register_class = NULL;
   bool found_descriptor_register_class =
       loom_low_register_type_resolver_try_resolve(
           &function_state->register_type_resolver, type,
-          &descriptor_register_class_id, &descriptor_register_class);
+          &descriptor_register_class_id,
+          /*out_descriptor_register_class=*/NULL);
   if (found_descriptor_register_class) {
-    return loom_low_verify_physical_register_value_type(
-        function_state, op, value_kind, placeholder, value_id);
+    return iree_ok_status();
   }
   return loom_low_verify_emit_unresolved_register_class(
       function_state, op, value_kind,
@@ -1277,37 +1240,6 @@ static iree_status_t loom_low_verify_function_register_values(
       IREE_RETURN_IF_ERROR(loom_low_verify_register_value_class(
           function_state, op, IREE_SV("argument"), IREE_SV("argument"),
           loom_block_arg_id(block, i)));
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_verify_region_register_value_types(
-    loom_low_function_verify_state_t* function_state, const loom_op_t* owner_op,
-    loom_region_t* region, bool verify_block_arguments) {
-  loom_block_t* block = NULL;
-  loom_region_for_each_block(region, block) {
-    if (verify_block_arguments) {
-      for (uint16_t i = 0; i < block->arg_count; ++i) {
-        IREE_RETURN_IF_ERROR(loom_low_verify_physical_register_value_type(
-            function_state, owner_op, IREE_SV("block argument"),
-            IREE_SV("block argument"), loom_block_arg_id(block, i)));
-      }
-    }
-    loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      const loom_value_id_t* results = loom_op_const_results(op);
-      for (uint16_t i = 0; i < op->result_count; ++i) {
-        IREE_RETURN_IF_ERROR(loom_low_verify_physical_register_value_type(
-            function_state, op, IREE_SV("result"), IREE_SV("result"),
-            results[i]));
-      }
-      loom_region_t** regions = loom_op_regions(op);
-      for (uint8_t i = 0; i < op->region_count; ++i) {
-        if (regions[i] == NULL) continue;
-        IREE_RETURN_IF_ERROR(loom_low_verify_region_register_value_types(
-            function_state, op, regions[i], /*verify_block_arguments=*/true));
-      }
     }
   }
   return iree_ok_status();
@@ -2128,11 +2060,6 @@ static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
       loom_low_register_type_resolver_for_descriptor_set(target.descriptor_set);
   IREE_RETURN_IF_ERROR(loom_low_verify_function_register_values(
       &function_state, low_func_op, body));
-  if (body != NULL) {
-    IREE_RETURN_IF_ERROR(loom_low_verify_region_register_value_types(
-        &function_state, low_func_op, body,
-        /*verify_block_arguments=*/false));
-  }
   if (loom_low_verify_should_stop(state)) {
     return iree_ok_status();
   }
