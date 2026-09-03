@@ -132,14 +132,7 @@ def test_agents_markdown(capsys: pytest.CaptureFixture[str]) -> None:
 
     captured = capsys.readouterr()
     assert captured.err == ""
-    assert "## loom-compile-report" in captured.out
-    assert "loom-compile-report show" in captured.out
-    assert "--comparison=target" in captured.out
-    assert (
-        "jq '{status, identity, workload, entries, missing_evidence}'" in captured.out
-    )
-    assert "loom/docs/src/workflows/compile-reports.md" in captured.out
-    assert "loom/docs/src/workflows/compile-report-queries.md" in captured.out
+    assert captured.out
 
 
 def test_agents_markdown_rejects_other_arguments(

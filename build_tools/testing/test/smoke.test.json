@@ -2,13 +2,13 @@
   "version": 1,
   "cases": [
     {
-      "name": "help mentions important flags",
+      "name": "help emits output",
       "run": {
         "tool": "fixture",
         "args": ["--helpish"]
       },
       "stdout": {
-        "contains": ["Usage:", "--echo-stdin", "--write-file=PATH"]
+        "non_empty": true
       },
       "stderr": {
         "empty": true

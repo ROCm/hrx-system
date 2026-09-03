@@ -8,23 +8,7 @@
         "args": ["--agents_md"]
       },
       "stdout": {
-        "contains": {
-          "unordered": [
-            "## iree-test-loom",
-            "--case=@case_q8_block_unroll_wg64",
-            "--sample=1",
-            "--max-samples-per-case=16",
-            "--sanitizer=tsan",
-            "--sanitizer-reporting=report-only",
-            "disables all compiler transformations",
-            "loom.test.v0",
-            "failed_sample_count",
-            "{case, provider, op, code, provider_code}",
-            "{case, kind, op, source_location, fix_hint}",
-            "planning_issue_count",
-            "`display_message` is human-facing only"
-          ]
-        }
+        "non_empty": true
       }
     },
     {

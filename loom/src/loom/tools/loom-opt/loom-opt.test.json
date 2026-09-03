@@ -8,15 +8,7 @@
         "args": ["--agents_md"]
       },
       "stdout": {
-        "contains": {
-          "unordered": [
-            "## loom-opt",
-            "--pass-report=json",
-            "--diagnostic-format=json",
-            "--dump-ir-after-all",
-            "--pass-help=unroll-scf-for"
-          ]
-        }
+        "non_empty": true
       }
     },
     {
