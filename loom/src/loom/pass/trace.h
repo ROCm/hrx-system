@@ -136,8 +136,9 @@ typedef struct loom_pass_trace_t {
   iree_host_size_t next_event_ordinal;
 } loom_pass_trace_t;
 
-// Initializes trace options with human-readable text output and canonical IR
-// printing. The caller must still provide a stream and dump requests.
+// Initializes trace options with human-readable text output. Target Low regions
+// use their compact assembly forms when available and fall back losslessly to
+// canonical IR. The caller must still provide a stream and dump requests.
 void loom_pass_trace_options_initialize(loom_pass_trace_options_t* out_options);
 
 // Parses a trace format name: empty/"text" or "jsonl".
