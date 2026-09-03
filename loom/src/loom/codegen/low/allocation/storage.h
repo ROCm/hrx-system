@@ -47,6 +47,19 @@ bool loom_low_allocation_storage_assignment_unit_physical_register(
     const loom_low_allocation_assignment_t* assignment, uint32_t unit_index,
     uint32_t* out_physical_register_id);
 
+// Finds a location for a |candidate_location_count|-unit assignment whose
+// |candidate_unit_start| subrange aliases the selected |reference| subrange.
+// Explicit physical-register classes search declared register views instead of
+// assuming that physical register IDs or candidate ordinals are linear.
+bool loom_low_allocation_storage_find_subrange_alias_location(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t candidate_reg_class_id,
+    loom_low_allocation_location_kind_t candidate_location_kind,
+    uint32_t candidate_location_count, uint32_t candidate_unit_start,
+    const loom_low_allocation_assignment_t* reference,
+    uint32_t reference_unit_start, uint32_t unit_count,
+    uint32_t* out_candidate_location_base);
+
 // Returns the number of atomic storage units used to index |assignment|.
 // Linear assignments return |location_count|; explicit physical-register
 // views return their arbitrary atomic-unit set size.

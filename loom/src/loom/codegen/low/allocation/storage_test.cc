@@ -296,16 +296,21 @@ TEST(LowAllocationStorageTest, ResolvesExplicitAggregateRegisterViews) {
       descriptor_set, reg_class_id, pair_register_id, /*unit_count=*/2,
       &first_candidate_ordinal, &pressure_extent));
   EXPECT_EQ(first_candidate_ordinal, 0u);
-  EXPECT_EQ(pressure_extent, 2u);
+  EXPECT_EQ(pressure_extent, 3u);
 
   uint32_t unavailable_register_id = UINT32_MAX;
   EXPECT_FALSE(FindExplicitPhysicalRegisterView(
       descriptor_set, reg_class_id, /*unit_count=*/2,
       /*first_candidate_ordinal=*/0, /*maximum_pressure_extent=*/1,
       &unavailable_register_id));
-  EXPECT_FALSE(FindExplicitPhysicalRegisterView(
+  uint32_t other_pair_register_id = UINT32_MAX;
+  EXPECT_TRUE(FindExplicitPhysicalRegisterView(
       descriptor_set, reg_class_id, /*unit_count=*/2,
       /*first_candidate_ordinal=*/1, /*maximum_pressure_extent=*/4,
+      &other_pair_register_id));
+  EXPECT_FALSE(FindExplicitPhysicalRegisterView(
+      descriptor_set, reg_class_id, /*unit_count=*/2,
+      /*first_candidate_ordinal=*/2, /*maximum_pressure_extent=*/4,
       &unavailable_register_id));
   EXPECT_FALSE(FindExplicitPhysicalRegisterView(
       descriptor_set, reg_class_id, /*unit_count=*/3,
@@ -315,9 +320,9 @@ TEST(LowAllocationStorageTest, ResolvesExplicitAggregateRegisterViews) {
   const uint32_t first_register_id =
       loom_low_descriptor_set_physical_register_candidate(descriptor_set,
                                                           reg_class_id, 0);
-  const uint32_t second_register_id =
+  const uint32_t second_pair_register_id =
       loom_low_descriptor_set_physical_register_candidate(descriptor_set,
-                                                          reg_class_id, 1);
+                                                          reg_class_id, 2);
   const loom_low_allocation_assignment_t pair =
       Assignment(reg_class_id, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
                  pair_register_id, /*location_count=*/2);
@@ -326,14 +331,21 @@ TEST(LowAllocationStorageTest, ResolvesExplicitAggregateRegisterViews) {
                  first_register_id, /*location_count=*/1);
   const loom_low_allocation_assignment_t second =
       Assignment(reg_class_id, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-                 second_register_id, /*location_count=*/1);
+                 second_pair_register_id, /*location_count=*/1);
   uint32_t unit_register_id = UINT32_MAX;
   EXPECT_TRUE(loom_low_allocation_storage_assignment_unit_physical_register(
       descriptor_set, &pair, 0, &unit_register_id));
   EXPECT_EQ(unit_register_id, first_register_id);
   EXPECT_TRUE(loom_low_allocation_storage_assignment_unit_physical_register(
       descriptor_set, &pair, 1, &unit_register_id));
-  EXPECT_EQ(unit_register_id, second_register_id);
+  EXPECT_EQ(unit_register_id, second_pair_register_id);
+  uint32_t alias_location_base = UINT32_MAX;
+  EXPECT_TRUE(loom_low_allocation_storage_find_subrange_alias_location(
+      descriptor_set, reg_class_id,
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      /*candidate_location_count=*/1, /*candidate_unit_start=*/0, &pair,
+      /*reference_unit_start=*/1, /*unit_count=*/1, &alias_location_base));
+  EXPECT_EQ(alias_location_base, second_pair_register_id);
   EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_equal(
       descriptor_set, &pair, 0, &first, 0, /*unit_count=*/1));
   EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_equal(
