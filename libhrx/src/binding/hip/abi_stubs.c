@@ -1745,6 +1745,17 @@ HIPAPI hipError_t hipMemcpyFromSymbol_spt(void* dst, const void* symbol,
   return result == hipSuccess ? hipStreamSynchronize(stream) : result;
 }
 
+HIPAPI hipError_t hipMemcpyFromSymbolAsync_spt(void* dst, const void* symbol,
+                                               size_t size_bytes, size_t offset,
+                                               hipMemcpyKind kind,
+                                               hipStream_t stream) {
+  hipStream_t resolved_stream = NULL;
+  hipError_t result = hrx_hip_spt_stream_or_explicit(stream, &resolved_stream);
+  if (result != hipSuccess) return result;
+  return hipMemcpyFromSymbolAsync(dst, symbol, size_bytes, offset, kind,
+                                  resolved_stream);
+}
+
 HIPAPI hipError_t hipMemcpyToSymbol_spt(const void* symbol, const void* src,
                                         size_t size_bytes, size_t offset,
                                         hipMemcpyKind kind) {
