@@ -658,8 +658,10 @@ typedef struct iree_hal_streaming_parameter_info_t {
   uint16_t binding_count;
   // Total number of parameter copy operations to perform during unpacking.
   uint16_t copy_count;
-  // Copy and resolve ops.
-  // Ordered by copies first (copy_count) followed by bindings (binding_count).
+  // Module-owned copy and resolve operations stable for the module lifetime.
+  // Copies occupy the first |copy_count| entries and resolves the following
+  // |binding_count| entries. Each partition is ordered by source ordinal and
+  // the merged source ordinal sequence is strictly increasing.
   iree_hal_streaming_parameter_op_t* ops;
 } iree_hal_streaming_parameter_info_t;
 
@@ -1787,32 +1789,6 @@ bool iree_hal_streaming_stream_has_memory_reuse_dependency(
 //===----------------------------------------------------------------------===//
 // Execution control
 //===----------------------------------------------------------------------===//
-
-// Unpacks a packed kernel parameter buffer into a constant buffer and binding
-// list. Some dispatches may use raw device buffer pointers and others may use
-// bindings that can be resolved to HAL buffers.
-// Callers must ensure sufficient storage in |out_constants| and |out_bindings|
-// based on the symbol constant size and binding count.
-// Synchronization: none (data packing utility).
-iree_status_t iree_hal_streaming_unpack_parameters(
-    iree_hal_streaming_context_t* context,
-    const iree_hal_streaming_parameter_info_t* parameters,
-    const void* parameter_buffer, void* out_constants,
-    iree_hal_buffer_ref_list_t* out_bindings);
-
-// Unpacks parameters from an array of pointers (void**) into a constant
-// buffer and binding list. This variant is used when parameters are passed
-// as an array of pointers to argument values rather than a packed buffer.
-// Each element in |parameter_list| is a pointer to the actual parameter value.
-// For bindings (device pointers), the parameter is a pointer to a pointer.
-// Callers must ensure sufficient storage in |out_constants| and |out_bindings|
-// based on the symbol constant size and binding count.
-// Synchronization: none (data packing utility).
-iree_status_t iree_hal_streaming_unpack_parameter_list(
-    iree_hal_streaming_context_t* context,
-    const iree_hal_streaming_parameter_info_t* parameters,
-    void** parameter_list, void* out_constants,
-    iree_hal_buffer_ref_list_t* out_bindings);
 
 // Synchronization: none (enqueues kernel launch, non-blocking).
 iree_status_t iree_hal_streaming_launch_kernel(

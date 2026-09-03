@@ -65,6 +65,7 @@ hrx_cc_library(
         "kernel_arguments.h",
         "kpack.h",
         "memory.h",
+        "module.h",
         "stream.h",
         "tls.h",
     ],
@@ -159,6 +160,30 @@ hrx_cc_test(
     deps = [
         ":common",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "kernel_arguments_test",
+    srcs = ["kernel_arguments_test.cc"],
+    deps = [
+        ":common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "module_test",
+    srcs = ["module_test.cc"],
+    deps = [
+        ":common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/testing:mock_device",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
