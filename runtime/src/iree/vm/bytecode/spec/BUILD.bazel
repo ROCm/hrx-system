@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
-load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library", "iree_py_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -24,11 +24,27 @@ iree_py_library(
         "module/__init__.py",
         "module/records.py",
         "module/validation.py",
+        "render/__init__.py",
+        "render/c.py",
+        "render/markdown.py",
         "schema.py",
         "specification.py",
         "version.py",
     ],
     imports = ["../../../.."],
+)
+
+iree_py_library(
+    name = "generator",
+    srcs = ["generate.py"],
+    imports = ["../../../.."],
+    deps = [":spec"],
+)
+
+iree_py_binary(
+    name = "generate",
+    main_module = "iree.vm.bytecode.spec.generate",
+    deps = [":generator"],
 )
 
 iree_py_test(
@@ -38,18 +54,80 @@ iree_py_test(
     deps = [":spec"],
 )
 
+iree_py_test(
+    name = "projection_test",
+    size = "small",
+    srcs = ["projection_test.py"],
+    deps = [":generator"],
+)
+
 test_suite(
     name = "tests",
-    tests = [":spec_test"],
+    tests = [
+        ":projection_test",
+        ":spec_test",
+    ],
 )
 
 iree_cmake_extra_content(
     content = """
+iree_py_library(
+  NAME
+    spec
+  SRCS
+    "__init__.py"
+    "isa/__init__.py"
+    "isa/core/__init__.py"
+    "isa/core/control.py"
+    "isa/core/integer.py"
+    "isa/validation.py"
+    "module/__init__.py"
+    "module/records.py"
+    "module/validation.py"
+    "render/__init__.py"
+    "render/c.py"
+    "render/markdown.py"
+    "schema.py"
+    "specification.py"
+    "version.py"
+  IMPORTS
+    "../../../.."
+)
+
+iree_py_library(
+  NAME
+    generator
+  SRCS
+    "generate.py"
+  IMPORTS
+    "../../../.."
+  DEPS
+    ::spec
+)
+
+iree_py_library(
+  NAME
+    generate
+  MAIN_MODULE
+    "iree.vm.bytecode.spec.generate"
+  DEPS
+    ::generator
+)
+
 iree_local_py_test(
   NAME
     spec_test
   SRC
     "spec_test.py"
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/runtime/src"
+)
+
+iree_local_py_test(
+  NAME
+    projection_test
+  SRC
+    "projection_test.py"
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/runtime/src"
 )

@@ -1,0 +1,129 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//build_tools/bazel:generate.bzl", "iree_generated_files")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+iree_generated_files(
+    name = "projections",
+    outs = [
+        "docs/specification.md",
+        "tooling/data.inl",
+        "verification/data.c",
+        "wire/assertions.c",
+        "wire/core.h",
+        "wire/module.h",
+    ],
+    output_args = {
+        "docs/specification.md": "--documentation={path}",
+        "tooling/data.inl": "--tooling-data={path}",
+        "verification/data.c": "--verification-source={path}",
+        "wire/assertions.c": "--wire-assertions-source={path}",
+        "wire/core.h": "--wire-core-header={path}",
+        "wire/module.h": "--wire-module-header={path}",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    tool = "//runtime/src/iree/vm/bytecode/spec:generate",
+)
+
+iree_runtime_cc_library(
+    name = "wire",
+    srcs = ["wire/assertions.c"],
+    hdrs = [
+        "wire/core.h",
+        "wire/module.h",
+    ],
+    deps = ["//runtime/src/iree/base:core_headers"],
+)
+
+iree_runtime_cc_library(
+    name = "verification",
+    srcs = ["verification/data.c"],
+    hdrs = ["verification.h"],
+    deps = [
+        ":wire",
+        "//runtime/src/iree/base:core_headers",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "tooling",
+    srcs = ["tooling.c"],
+    hdrs = ["tooling.h"],
+    textual_hdrs = ["tooling/data.inl"],
+    deps = [
+        ":wire",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "verification_test",
+    srcs = ["verification_test.cc"],
+    deps = [
+        ":verification",
+        ":wire",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "tooling_test",
+    srcs = ["tooling_test.cc"],
+    deps = [
+        ":tooling",
+        ":wire",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+test_suite(
+    name = "tests",
+    tests = [
+        ":tooling_test",
+        ":verification_test",
+    ],
+)
+
+iree_cmake_extra_content(
+    content = """
+iree_py_generated_files(
+  NAME
+    projections
+  GENERATOR
+    iree::vm::bytecode::spec::generate
+  OUTPUTS
+    "docs/specification.md"
+    "tooling/data.inl"
+    "verification/data.c"
+    "wire/assertions.c"
+    "wire/core.h"
+    "wire/module.h"
+  OUTPUT_FLAGS
+    "--documentation"
+    "--tooling-data"
+    "--verification-source"
+    "--wire-assertions-source"
+    "--wire-core-header"
+    "--wire-module-header"
+  COMMENT
+    "Generating VM bytecode specification projections"
+)
+""",
+    inline = True,
+)

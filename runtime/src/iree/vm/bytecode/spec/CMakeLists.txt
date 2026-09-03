@@ -9,11 +9,63 @@
 
 iree_add_all_subdirs()
 
+iree_py_library(
+  NAME
+    spec
+  SRCS
+    "__init__.py"
+    "isa/__init__.py"
+    "isa/core/__init__.py"
+    "isa/core/control.py"
+    "isa/core/integer.py"
+    "isa/validation.py"
+    "module/__init__.py"
+    "module/records.py"
+    "module/validation.py"
+    "render/__init__.py"
+    "render/c.py"
+    "render/markdown.py"
+    "schema.py"
+    "specification.py"
+    "version.py"
+  IMPORTS
+    "../../../.."
+)
+
+iree_py_library(
+  NAME
+    generator
+  SRCS
+    "generate.py"
+  IMPORTS
+    "../../../.."
+  DEPS
+    ::spec
+)
+
+iree_py_library(
+  NAME
+    generate
+  MAIN_MODULE
+    "iree.vm.bytecode.spec.generate"
+  DEPS
+    ::generator
+)
+
 iree_local_py_test(
   NAME
     spec_test
   SRC
     "spec_test.py"
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/runtime/src"
+)
+
+iree_local_py_test(
+  NAME
+    projection_test
+  SRC
+    "projection_test.py"
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/runtime/src"
 )
