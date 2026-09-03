@@ -526,6 +526,14 @@ _BASE_DESCRIPTOR_SPECS = (
         ),
     ),
     _DescriptorSpec(
+        "VMOV_alu_mv_mv_w",
+        f"{_TARGET_KEY}.move.vec256",
+        "register.move.vec256",
+        "II_VMOV_alu_mv_mv_w",
+        storage_overrides=(("dst", "VEC256"), ("src", "VEC256")),
+        asm_mnemonic="vmov.256",
+    ),
+    _DescriptorSpec(
         "VMUL_f_vmul_bf_vmul_bf_core_Y_Y",
         f"{_TARGET_KEY}.matrix.multiply.bf16bf16.m8n8k1.configured",
         "matrix.multiply.bf16bf16.m8n8k1.configured",

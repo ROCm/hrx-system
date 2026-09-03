@@ -661,6 +661,49 @@ TEST_F(Aie2pLeafObjectTest, MaterializesFixedRegisterCopiesAsScalarMoves) {
   ResetLeaf(&leaf);
 }
 
+TEST_F(Aie2pLeafObjectTest, MaterializesVec256ConcatsAsNativeMoves) {
+  CompiledLeaf leaf;
+  IREE_ASSERT_OK(CompileSource(
+      "low.func.def target<amd.xdna.aie2p.core> @expand_bf16(\n"
+      "    %source: reg<aie2p.ewl>) -> (reg<aie2p.vec256 x4>) asm {\n"
+      "  %broadcast = vbroadcast.bf16x8.to.bf16x32 %source, 0\n"
+      "  %low_config = mova.i32 52\n"
+      "  %low = vshuffle.bf16x32 %broadcast, %broadcast, %low_config\n"
+      "  %high_config = mova.i32 53\n"
+      "  %high = vshuffle.bf16x32 %broadcast, %broadcast, %high_config\n"
+      "  %result = concat(%low, %high) : (reg<aie2p.vec256 x2>, "
+      "reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>\n"
+      "  return %result : reg<aie2p.vec256 x4>\n"
+      "}\n",
+      &leaf));
+
+  const loom_aie2p_instruction_id_t vec256_move =
+      loom_aie2p_encoding_find_instruction(IREE_SV("VMOV_alu_mv_mv_w"));
+  ASSERT_NE(vec256_move, LOOM_AIE2P_INSTRUCTION_ID_INVALID);
+
+  iree_host_size_t vec256_move_count = 0;
+  for (iree_host_size_t i = 0; i < leaf.plan.slot_count; ++i) {
+    const loom_aie2p_planned_slot_t* slot = &leaf.plan.slots[i];
+    if (!iree_any_bit_set(slot->flags,
+                          LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_MOVE)) {
+      continue;
+    }
+    std::array<loom_aie2p_instruction_id_t, 16> candidates;
+    const iree_host_size_t candidate_count =
+        loom_aie2p_encoding_query_instruction_candidates(
+            slot->encoded_slot.slot, slot->encoded_slot.value,
+            candidates.size(), candidates.data());
+    ASSERT_LE(candidate_count, candidates.size());
+    if (std::find(candidates.begin(), candidates.begin() + candidate_count,
+                  vec256_move) != candidates.begin() + candidate_count) {
+      ++vec256_move_count;
+    }
+  }
+  EXPECT_GT(vec256_move_count, 0u);
+
+  ResetLeaf(&leaf);
+}
+
 TEST_F(Aie2pLeafObjectTest,
        PlansNeitherFallthroughConditionalAndBackwardBranches) {
   CompiledLeaf leaf;

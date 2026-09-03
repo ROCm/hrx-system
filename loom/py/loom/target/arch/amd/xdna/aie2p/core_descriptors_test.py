@@ -948,6 +948,13 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
     ]
     assert [operand.unit_count for operand in bf16_move.operands] == [2, 2]
 
+    vec256_move = descriptors["amd.xdna.aie2p.move.vec256"]
+    assert [operand.reg_alts[0].reg_class for operand in vec256_move.operands] == [
+        "aie2p.vec256",
+        "aie2p.vec256",
+    ]
+    assert [operand.unit_count for operand in vec256_move.operands] == [1, 1]
+
     accumulator_clear = descriptors["amd.xdna.aie2p.accumulator.clear.i32x64"]
     assert accumulator_clear.operands[0].reg_alts[0].reg_class == "aie2p.mbms"
     assert accumulator_clear.operands[0].unit_count == 4
