@@ -20,9 +20,11 @@ iree_py_library(
         "isa/core/__init__.py",
         "isa/core/control.py",
         "isa/core/integer.py",
+        "isa/core/rules.py",
         "isa/validation.py",
         "module/__init__.py",
         "module/records.py",
+        "module/rules.py",
         "module/validation.py",
         "render/__init__.py",
         "render/c.py",
@@ -80,9 +82,11 @@ iree_py_library(
     "isa/core/__init__.py"
     "isa/core/control.py"
     "isa/core/integer.py"
+    "isa/core/rules.py"
     "isa/validation.py"
     "module/__init__.py"
     "module/records.py"
+    "module/rules.py"
     "module/validation.py"
     "render/__init__.py"
     "render/c.py"

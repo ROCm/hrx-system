@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-from iree.vm.bytecode.spec.isa import IntegerBinarySemantics
+from iree.vm.bytecode.spec.isa.core.integer import IntegerBinarySemantics
 
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.scalar_type import ScalarTypeKind

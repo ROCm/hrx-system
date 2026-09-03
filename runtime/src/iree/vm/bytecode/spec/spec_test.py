@@ -11,25 +11,60 @@ from __future__ import annotations
 import unittest
 
 from iree.vm.bytecode.spec.isa import (
-    BranchCondition,
     ControlFlow,
     FieldRole,
     InstructionField,
+    RecordRule,
+    RuntimeRefPolicy,
+    StateEffect,
     Suspension,
-    SwitchTargetsRule,
 )
 from iree.vm.bytecode.spec.isa import (
-    FieldRule as InstructionFieldRule,
+    FieldRuleUse as InstructionFieldRuleUse,
 )
 from iree.vm.bytecode.spec.isa.core import INTEGER_INSTRUCTIONS
-from iree.vm.bytecode.spec.module import ExactBytesRule, WireField, WireRecord
+from iree.vm.bytecode.spec.isa.core.control import BranchCondition
+from iree.vm.bytecode.spec.isa.core.rules import (
+    FieldRule as InstructionFieldRule,
+)
+from iree.vm.bytecode.spec.isa.core.rules import (
+    RecordRuleKind,
+    RefNullPolicy,
+    RefOwnership,
+    StateAccess,
+    StateResource,
+)
+from iree.vm.bytecode.spec.module import (
+    FieldRuleUse,
+    ModuleFormat,
+    RecordFieldReference,
+    Section,
+    StructuralConstraint,
+    WireField,
+    WireRecord,
+)
 from iree.vm.bytecode.spec.module.records import (
     IMAGE_HEADER,
     SIGNATURE_DESCRIPTOR_ROW,
     SIGNATURE_ROW,
     SIGNATURES_HEADER,
 )
-from iree.vm.bytecode.spec.schema import U8, U16, U64, Field
+from iree.vm.bytecode.spec.module.rules import FieldRule
+from iree.vm.bytecode.spec.module.validation import (
+    project_module_format,
+    validate_module_format,
+)
+from iree.vm.bytecode.spec.schema import (
+    U8,
+    U16,
+    U64,
+    Field,
+    NumericKind,
+    NumericTable,
+    NumericValue,
+    project_numeric_table,
+    validate_numeric_table,
+)
 from iree.vm.bytecode.spec.specification import SPECIFICATION, Specification
 from iree.vm.bytecode.spec.version import CORE_0, Version
 
@@ -39,6 +74,39 @@ def _instruction(mnemonic: str):
         instruction
         for instruction in SPECIFICATION.instructions
         if instruction.mnemonic == mnemonic
+    )
+
+
+def _section(record, section_type: int, since: Version = CORE_0) -> Section:
+    field_name = record.fields[0].field.name
+    constraint = StructuralConstraint(
+        "section_shape",
+        since,
+        (RecordFieldReference(record, field_name),),
+        "The section owns its record and referenced field.",
+    )
+    return Section(
+        "test_section",
+        section_type,
+        0,
+        since,
+        "Synthetic section.",
+        "The section exercises direct record ownership.",
+        (record,),
+        (constraint,),
+    )
+
+
+def _module_format(*sections: Section) -> ModuleFormat:
+    return ModuleFormat(
+        CORE_0,
+        8,
+        8,
+        "Synthetic module format.",
+        "The format exercises section ownership and projection.",
+        (IMAGE_HEADER,),
+        sections,
+        (),
     )
 
 
@@ -77,10 +145,13 @@ class SpecificationTest(unittest.TestCase):
             summary="Synthetic misaligned record.",
             contract="The test record must require explicit padding.",
             fields=(
-                WireField(Field("prefix_u16", U16, "Prefix."), ExactBytesRule(b"xx")),
+                WireField(
+                    Field("prefix_u16", U16, "Prefix."),
+                    FieldRuleUse(FieldRule.EXACT_BYTES, data=b"xx"),
+                ),
                 WireField(
                     Field("payload_u64", U64, "Payload."),
-                    ExactBytesRule(b"yyyyyyyy"),
+                    FieldRuleUse(FieldRule.EXACT_BYTES, data=b"yyyyyyyy"),
                 ),
             ),
         )
@@ -95,14 +166,17 @@ class SpecificationTest(unittest.TestCase):
             summary="Synthetic aligned record.",
             contract="The test record carries explicit alignment padding.",
             fields=(
-                WireField(Field("prefix_u16", U16, "Prefix."), ExactBytesRule(b"xx")),
+                WireField(
+                    Field("prefix_u16", U16, "Prefix."),
+                    FieldRuleUse(FieldRule.EXACT_BYTES, data=b"xx"),
+                ),
                 WireField(
                     Field("zero_padding_u8", U8, "Padding.", 6),
-                    ExactBytesRule(bytes(6)),
+                    FieldRuleUse(FieldRule.EXACT_BYTES, data=bytes(6)),
                 ),
                 WireField(
                     Field("payload_u64", U64, "Payload."),
-                    ExactBytesRule(b"yyyyyyyy"),
+                    FieldRuleUse(FieldRule.EXACT_BYTES, data=b"yyyyyyyy"),
                 ),
             ),
         )
@@ -129,19 +203,24 @@ class SpecificationTest(unittest.TestCase):
             control_flow=ControlFlow.SEQUENTIAL,
             semantics=BranchCondition.ALWAYS,
         )
-        with self.assertRaisesRegex(ValueError, "invalid direct-target count"):
+        with self.assertRaisesRegex(ValueError, "inconsistent control rule"):
             Specification("test", CORE_0, SPECIFICATION.families, (malformed,), ())
 
     def test_yield_is_the_only_always_suspending_control(self) -> None:
         branch = _instruction("control.branch.s16")
         malformed = branch._replace(suspension=Suspension.ALWAYS)
-        with self.assertRaisesRegex(ValueError, "inconsistent suspension"):
+        with self.assertRaisesRegex(ValueError, "inconsistent control rule"):
             Specification("test", CORE_0, SPECIFICATION.families, (malformed,), ())
 
     def test_switch_rule_must_name_encoded_fields(self) -> None:
         switch = _instruction("control.switch")
         malformed = switch._replace(
-            rules=(SwitchTargetsRule("missing_u16", "target_base_u32"),),
+            rules=(
+                RecordRule(
+                    RecordRuleKind.SWITCH_TARGETS,
+                    ("missing_u16", "target_base_u32"),
+                ),
+            ),
         )
         with self.assertRaisesRegex(ValueError, "names missing field"):
             Specification("test", CORE_0, SPECIFICATION.families, (malformed,), ())
@@ -175,6 +254,87 @@ class SpecificationTest(unittest.TestCase):
         self.assertIn(future_record, specification.project(core_1).records)
         with self.assertRaisesRegex(ValueError, "unsupported"):
             SPECIFICATION.project(core_1)
+
+    def test_invalid_specification_version_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid specification version"):
+            Specification("test", Version("Core", 0, 0), (), (), ())
+
+    def test_numeric_tables_reject_aliases_and_project_values(self) -> None:
+        core_1 = Version("core", 0, 1)
+        table = NumericTable(
+            "test.selector",
+            U8,
+            NumericKind.SELECTOR,
+            (
+                NumericValue("zero", 0, CORE_0, "Initial value."),
+                NumericValue("one", 1, core_1, "Added value."),
+            ),
+            CORE_0,
+            "Synthetic selector table.",
+        )
+        validate_numeric_table(table, core_1)
+        self.assertEqual(len(project_numeric_table(table, CORE_0).values), 1)
+        alias = table.values[1]._replace(value=0)
+        with self.assertRaisesRegex(ValueError, "invalid numeric table"):
+            validate_numeric_table(
+                table._replace(values=(table.values[0], alias)), core_1
+            )
+
+    def test_instruction_extension_contracts_reject_malformed_uses(self) -> None:
+        instruction = _instruction("integer.add.i32")
+        result = instruction.fields[0]
+        malformed_rule = result._replace(
+            rule=InstructionFieldRuleUse(
+                InstructionFieldRule.REGISTER_VALUE,
+                values=(0,),
+            )
+        )
+        misplaced_policy = result._replace(
+            ref_policy=RuntimeRefPolicy(
+                "any",
+                RefNullPolicy.NULLABLE,
+                RefOwnership.BORROW,
+            )
+        )
+        malformed_effect = StateEffect(StateAccess.UNKNOWN, StateResource.BUFFER)
+        cases = (
+            instruction._replace(fields=(malformed_rule, *instruction.fields[1:])),
+            instruction._replace(fields=(misplaced_policy, *instruction.fields[1:])),
+            instruction._replace(state_effects=(malformed_effect,)),
+        )
+        for malformed in cases:
+            with self.subTest(malformed=malformed):
+                with self.assertRaises(ValueError):
+                    Specification(
+                        "test", CORE_0, SPECIFICATION.families, (malformed,), ()
+                    )
+
+    def test_module_sections_validate_ownership_and_project_versions(self) -> None:
+        core_1 = Version("core", 0, 1)
+        current = _section(SIGNATURES_HEADER, 4)
+        future_record = SIGNATURES_HEADER._replace(
+            name="future_signatures_header",
+            c_type="iree_vm_bytecode_future_signatures_header_t",
+            since=core_1,
+        )
+        future = _section(future_record, 5, core_1)
+        module_format = _module_format(current, future)
+        validate_module_format(module_format, core_1)
+        projected = project_module_format(module_format, CORE_0)
+        self.assertEqual(projected.sections, (current,))
+        with self.assertRaisesRegex(ValueError, "invalid module section"):
+            validate_module_format(
+                _module_format(_section(SIGNATURES_HEADER, 0)), CORE_0
+            )
+
+    def test_module_related_field_rules_require_their_inputs(self) -> None:
+        fields = list(SIGNATURE_DESCRIPTOR_ROW.fields)
+        fields[-1] = fields[-1]._replace(
+            rule=FieldRuleUse(FieldRule.SIGNATURE_DESCRIPTOR)
+        )
+        malformed = SIGNATURE_DESCRIPTOR_ROW._replace(fields=tuple(fields))
+        with self.assertRaisesRegex(ValueError, "invalid field rule"):
+            Specification("test", CORE_0, (), (), (malformed,))
 
 
 if __name__ == "__main__":

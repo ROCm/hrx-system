@@ -8,33 +8,41 @@
 
 from __future__ import annotations
 
-from iree.vm.bytecode.spec import isa, module
+from iree.vm.bytecode.spec import module
+from iree.vm.bytecode.spec.isa.core import rules as core_rules
+from iree.vm.bytecode.spec.module import rules as module_rules
 from iree.vm.bytecode.spec.specification import Specification
 
 
 def _instruction_rule(rule) -> str:
     return {
-        isa.FieldRule.ANY_BITS: "Any bit pattern.",
-        isa.FieldRule.ZERO: "Must be zero.",
-        isa.FieldRule.VALUE_REGISTER: "Must name an in-range value register.",
-        isa.FieldRule.CONTROL_TARGET_S16: "Must resolve to an in-function `control.block` using widened signed arithmetic.",
-        isa.FieldRule.CONTROL_TARGET_S32: "Must resolve to an in-function `control.block` using widened signed arithmetic.",
+        core_rules.FieldRule.ANY_BITS: "Any bit pattern.",
+        core_rules.FieldRule.ZERO: "Must be zero.",
+        core_rules.FieldRule.REGISTER_VALUE: "Must name an in-range value register.",
+        core_rules.FieldRule.CONTROL_TARGET_S16: "Must resolve to an in-function `control.block` using widened signed arithmetic.",
+        core_rules.FieldRule.CONTROL_TARGET_S32: "Must resolve to an in-function `control.block` using widened signed arithmetic.",
     }[rule]
 
 
 def _module_rule(rule) -> str:
-    if rule == module.FieldRule.ANY_BITS:
+    if isinstance(rule, module.FieldRuleUse):
+        if rule.kind == module_rules.FieldRule.EXACT_BYTES:
+            return f"Must equal `{rule.data!r}` byte-for-byte."
+        if rule.kind == module_rules.FieldRule.ALLOWED_RANGE:
+            return (
+                f"Must be in the inclusive range [{rule.values[0]}, {rule.values[1]}]."
+            )
+        if rule.kind == module_rules.FieldRule.SIGNATURE_DESCRIPTOR:
+            return "Must match the scalar, ref, or function kind in `kind_u16`."
+        raise ValueError(f"unsupported module field rule {rule!r}")
+    if rule == module_rules.FieldRule.ANY_BITS:
         return "Any bit pattern."
-    if rule == module.FieldRule.ZERO:
+    if rule == module_rules.FieldRule.ZERO:
         return "Must be zero."
-    if rule == module.FieldRule.CORE_MAJOR:
+    if rule == module_rules.FieldRule.CORE_MAJOR:
         return "Must equal the loader's Core major version."
-    if rule == module.FieldRule.CORE_REQUIRED_MINOR:
+    if rule == module_rules.FieldRule.CORE_REQUIRED_MINOR:
         return "Must not exceed the loader's supported Core minor version."
-    if isinstance(rule, module.ExactBytesRule):
-        return f"Must equal `{rule.expected!r}` byte-for-byte."
-    if isinstance(rule, module.AllowedRangeRule):
-        return f"Must be in the inclusive range [{rule.minimum}, {rule.maximum}]."
     raise ValueError(f"unsupported module field rule {rule!r}")
 
 
@@ -89,18 +97,6 @@ def render_specification(specification: Specification) -> str:
                 f"| {offset} | {field.byte_length} | `{field.name}` | `{field.encoding.name}` | module field | {_module_rule(wire_field.rule)} {field.summary} |"
             )
         lines.append("")
-        if record.rules:
-            _statements(
-                lines,
-                "Whole-record verification",
-                tuple(
-                    "Scalar kinds require zero type ordinal; ref and function kinds require an in-range ordinal."
-                    if rule == module.RecordRule.SIGNATURE_DESCRIPTOR
-                    else str(rule)
-                    for rule in record.rules
-                ),
-            )
-
     lines.extend(["## Core instruction set", ""])
     for family in specification.families:
         family_instructions = tuple(

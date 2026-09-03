@@ -12,6 +12,8 @@ from collections.abc import Iterable
 from typing import NamedTuple
 
 from iree.vm.bytecode.spec import isa, module
+from iree.vm.bytecode.spec.isa.core import rules as core_rules
+from iree.vm.bytecode.spec.module import rules as module_rules
 from iree.vm.bytecode.spec.specification import Specification
 
 _COPYRIGHT = """\
@@ -212,10 +214,10 @@ class _VerificationRule(NamedTuple):
 
 
 _INSTRUCTION_FIELD_RULE_KIND = {
-    isa.FieldRule.ZERO: "ZERO",
-    isa.FieldRule.VALUE_REGISTER: "VALUE_REGISTER",
-    isa.FieldRule.CONTROL_TARGET_S16: "CONTROL_TARGET_S16",
-    isa.FieldRule.CONTROL_TARGET_S32: "CONTROL_TARGET_S32",
+    core_rules.FieldRule.ZERO: "ZERO",
+    core_rules.FieldRule.REGISTER_VALUE: "VALUE_REGISTER",
+    core_rules.FieldRule.CONTROL_TARGET_S16: "CONTROL_TARGET_S16",
+    core_rules.FieldRule.CONTROL_TARGET_S32: "CONTROL_TARGET_S32",
 }
 
 _CONTROL_FLOW_C_NAME = {
@@ -244,27 +246,30 @@ def _instruction_rules(instruction: isa.Instruction) -> list[_VerificationRule]:
     for instruction_field, offset in zip(
         instruction.fields, instruction.field_offsets, strict=True
     ):
-        if instruction_field.rule == isa.FieldRule.ANY_BITS:
+        rule = instruction_field.rule
+        if rule == core_rules.FieldRule.ANY_BITS:
             continue
+        kind = _INSTRUCTION_FIELD_RULE_KIND[rule]
         rules.append(
             _VerificationRule(
-                _INSTRUCTION_FIELD_RULE_KIND[instruction_field.rule],
+                kind,
                 offset,
                 instruction_field.field.byte_length,
                 label=f"{instruction.mnemonic}.{instruction_field.field.name}",
             )
         )
     for record_rule in instruction.rules:
-        if record_rule == isa.RecordRule.RETURN_SIGNATURE:
+        if record_rule.kind == core_rules.RecordRuleKind.RETURN_SIGNATURE:
             rules.append(
                 _VerificationRule("RETURN_SIGNATURE", label=instruction.mnemonic)
             )
-        elif isinstance(record_rule, isa.SwitchTargetsRule):
+        elif record_rule.kind == core_rules.RecordRuleKind.SWITCH_TARGETS:
+            count_field, base_field = record_rule.fields
             rules.append(
                 _VerificationRule(
                     "SWITCH_TARGETS",
-                    offsets_by_name[record_rule.count_field],
-                    auxiliary=offsets_by_name[record_rule.base_field],
+                    offsets_by_name[count_field],
+                    auxiliary=offsets_by_name[base_field],
                     label=instruction.mnemonic,
                 )
             )
@@ -289,15 +294,15 @@ def _module_rules(
     for wire_field, offset in zip(record.fields, record.field_offsets, strict=True):
         rule = wire_field.rule
         label = f"{record.name}.{wire_field.field.name}"
-        if rule == module.FieldRule.ANY_BITS:
+        if rule == module_rules.FieldRule.ANY_BITS:
             continue
-        if rule == module.FieldRule.ZERO:
+        if rule == module_rules.FieldRule.ZERO:
             rules.append(
                 _VerificationRule(
                     "ZERO", offset, wire_field.field.byte_length, label=label
                 )
             )
-        elif rule == module.FieldRule.CORE_MAJOR:
+        elif rule == module_rules.FieldRule.CORE_MAJOR:
             rules.append(
                 _VerificationRule(
                     "CORE_MAJOR",
@@ -307,7 +312,7 @@ def _module_rules(
                     label=label,
                 )
             )
-        elif rule == module.FieldRule.CORE_REQUIRED_MINOR:
+        elif rule == module_rules.FieldRule.CORE_REQUIRED_MINOR:
             rules.append(
                 _VerificationRule(
                     "CORE_REQUIRED_MINOR",
@@ -317,8 +322,11 @@ def _module_rules(
                     label=label,
                 )
             )
-        elif isinstance(rule, module.ExactBytesRule):
-            expected = rule.expected
+        elif (
+            isinstance(rule, module.FieldRuleUse)
+            and rule.kind == module_rules.FieldRule.EXACT_BYTES
+        ):
+            expected = rule.data
             padded = expected + bytes((-len(expected)) % 4)
             words = (
                 int.from_bytes(padded[index : index + 4], "little")
@@ -335,10 +343,11 @@ def _module_rules(
                     label,
                 )
             )
-        elif isinstance(rule, module.AllowedRangeRule):
-            parameter = _append_parameter_words(
-                parameters, (rule.minimum, rule.maximum)
-            )
+        elif (
+            isinstance(rule, module.FieldRuleUse)
+            and rule.kind == module_rules.FieldRule.ALLOWED_RANGE
+        ):
+            parameter = _append_parameter_words(parameters, rule.values)
             rules.append(
                 _VerificationRule(
                     "ALLOWED_RANGE",
@@ -349,20 +358,21 @@ def _module_rules(
                     label,
                 )
             )
+        elif (
+            isinstance(rule, module.FieldRuleUse)
+            and rule.kind == module_rules.FieldRule.SIGNATURE_DESCRIPTOR
+        ):
+            rules.append(
+                _VerificationRule(
+                    "SIGNATURE_DESCRIPTOR",
+                    offsets_by_name[rule.fields[0]],
+                    2,
+                    offset,
+                    label=label,
+                )
+            )
         else:
             raise ValueError(f"{label}: unsupported module field rule")
-    for record_rule in record.rules:
-        if record_rule != module.RecordRule.SIGNATURE_DESCRIPTOR:
-            raise ValueError(f"{record.name}: unsupported module record rule")
-        rules.append(
-            _VerificationRule(
-                "SIGNATURE_DESCRIPTOR",
-                offsets_by_name["kind_u16"],
-                2,
-                offsets_by_name["type_ordinal_u16"],
-                label=record.name,
-            )
-        )
     return rules
 
 

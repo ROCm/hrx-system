@@ -8,24 +8,34 @@
 
 from __future__ import annotations
 
+import enum
+
 from iree.vm.bytecode.spec.isa import (
-    BranchCondition,
     ControlFlow,
     FailureCase,
     FieldRole,
-    FieldRule,
     Instruction,
     InstructionFamily,
     InstructionField,
     RecordRule,
-    StateAccess,
     StateEffect,
-    StateResource,
     Suspension,
-    SwitchTargetsRule,
+)
+from iree.vm.bytecode.spec.isa.core.rules import (
+    FieldRule,
+    RecordRuleKind,
+    StateAccess,
+    StateResource,
 )
 from iree.vm.bytecode.spec.schema import I16, I32, U8, U16, U32, Field
 from iree.vm.bytecode.spec.version import CORE_0
+
+
+class BranchCondition(enum.Enum):
+    ALWAYS = "always"
+    NONZERO = "nonzero"
+    ZERO = "zero"
+
 
 CONTROL_FAMILY = InstructionFamily(
     name="control",
@@ -49,7 +59,7 @@ def _field(
     encoding,
     summary: str,
     role: FieldRole,
-    rule: FieldRule,
+    rule,
     *,
     element_count: int = 1,
 ) -> InstructionField:
@@ -128,7 +138,7 @@ CONTROL_RETURN = Instruction(
         "release_remaining_frame_owners(frame);\n"
         "pop_frame_and_complete_or_resume_parent();"
     ),
-    rules=(RecordRule.RETURN_SIGNATURE,),
+    rules=(RecordRule(RecordRuleKind.RETURN_SIGNATURE),),
     control_flow=ControlFlow.RETURN,
     state_effects=(
         StateEffect(StateAccess.READ, StateResource.INVOCATION_RESULTS),
@@ -211,7 +221,7 @@ def _branch(
                 U8,
                 "Complete 64-bit branch condition value-register ordinal.",
                 FieldRole.OPERAND,
-                FieldRule.VALUE_REGISTER,
+                FieldRule.REGISTER_VALUE,
             )
         )
         if bit_width == 32:
@@ -265,7 +275,7 @@ CONTROL_SWITCH = Instruction(
             U8,
             "Unsigned complete-cell zero-based table selector.",
             FieldRole.OPERAND,
-            FieldRule.VALUE_REGISTER,
+            FieldRule.REGISTER_VALUE,
         ),
         _field(
             "target_count_u16",
@@ -298,7 +308,12 @@ CONTROL_SWITCH = Instruction(
         "pc = selector < target_count_u16\n"
         "    ? function_target(target_base_u32 + selector) : record_end;"
     ),
-    rules=(SwitchTargetsRule("target_count_u16", "target_base_u32"),),
+    rules=(
+        RecordRule(
+            RecordRuleKind.SWITCH_TARGETS,
+            ("target_count_u16", "target_base_u32"),
+        ),
+    ),
     control_flow=ControlFlow.SWITCH,
 )
 

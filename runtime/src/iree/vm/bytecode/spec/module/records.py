@@ -9,13 +9,11 @@
 from __future__ import annotations
 
 from iree.vm.bytecode.spec.module import (
-    AllowedRangeRule,
-    ExactBytesRule,
-    FieldRule,
-    RecordRule,
+    FieldRuleUse,
     WireField,
     WireRecord,
 )
+from iree.vm.bytecode.spec.module.rules import FieldRule
 from iree.vm.bytecode.spec.schema import U8, U16, U32, Field
 from iree.vm.bytecode.spec.version import CORE_0
 
@@ -40,7 +38,7 @@ IMAGE_HEADER = WireRecord(
             "magic_u8",
             U8,
             "Exact eight-byte IREE VM image magic.",
-            ExactBytesRule(b"IREEVM\x00\x00"),
+            FieldRuleUse(FieldRule.EXACT_BYTES, data=b"IREEVM\x00\x00"),
             element_count=8,
         ),
         _field(
@@ -84,7 +82,7 @@ SIGNATURES_HEADER = WireRecord(
             "signature_count_u32",
             U32,
             "Number of source-ordered logical signatures.",
-            AllowedRangeRule(1, 65536),
+            FieldRuleUse(FieldRule.ALLOWED_RANGE, values=(1, 65536)),
         ),
     ),
 )
@@ -165,10 +163,9 @@ SIGNATURE_DESCRIPTOR_ROW = WireRecord(
             "type_ordinal_u16",
             U16,
             "Exact ref or callable type ordinal, or zero for scalars.",
-            FieldRule.ANY_BITS,
+            FieldRuleUse(FieldRule.SIGNATURE_DESCRIPTOR, fields=("kind_u16",)),
         ),
     ),
-    rules=(RecordRule.SIGNATURE_DESCRIPTOR,),
 )
 
 RECORDS = (

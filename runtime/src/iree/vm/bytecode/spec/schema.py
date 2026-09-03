@@ -6,12 +6,27 @@
 
 """Shared version, scalar, and natural-layout vocabulary."""
 
+import enum
 import re
 from collections.abc import Iterable
 from typing import NamedTuple
 
-_NAME_PATTERN = re.compile(r"[a-z][a-z0-9_]*")
-_C_TYPE_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_ ]*")
+from iree.vm.bytecode.spec.version import Version
+
+_NAME_PATTERN = re.compile(r"[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)*")
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise ValueError(message)
+
+
+def is_name(value: str, *, qualified: bool = False) -> bool:
+    return bool(_NAME_PATTERN.fullmatch(value)) and (qualified or "." not in value)
+
+
+def is_power_of_two(value: int) -> bool:
+    return value > 0 and value & (value - 1) == 0
 
 
 class ScalarEncoding(NamedTuple):
@@ -40,39 +55,96 @@ class Field(NamedTuple):
         return self.encoding.byte_length * self.element_count
 
 
+class NumericKind(enum.Enum):
+    ENUM = "enum"
+    FLAGS = "flags"
+    SELECTOR = "selector"
+
+
+class UnknownNumericPolicy(enum.Enum):
+    REJECT = "reject"
+    PRESERVE_NONZERO = "preserve_nonzero"
+
+
+class NumericValue(NamedTuple):
+    name: str
+    value: int
+    since: Version
+    summary: str
+
+
+class NumericTable(NamedTuple):
+    name: str
+    encoding: ScalarEncoding
+    kind: NumericKind
+    values: tuple[NumericValue, ...]
+    since: Version
+    summary: str
+    unknown_policy: UnknownNumericPolicy = UnknownNumericPolicy.REJECT
+
+
+def validate_numeric_table(table: NumericTable, version: Version) -> None:
+    values = table.values
+    maximum = (1 << (table.encoding.byte_length * 8)) - 1
+    valid = is_name(table.name, qualified=True) and bool(values)
+    valid &= table.since.is_valid() and table.since.is_available_in(version)
+    valid &= (
+        len({value.name for value in values})
+        == len({value.value for value in values})
+        == len(values)
+    )
+    valid &= any(value.since == table.since for value in values)
+    valid &= all(
+        is_name(value.name, qualified=True)
+        and 0 <= value.value <= maximum
+        and value.since.is_valid()
+        and table.since.is_available_in(value.since)
+        and value.since.is_available_in(version)
+        and (
+            table.kind != NumericKind.FLAGS
+            or value.value == 0
+            or is_power_of_two(value.value)
+        )
+        for value in values
+    )
+    require(valid, f"{table.name}: invalid numeric table")
+
+
+def project_numeric_table(table: NumericTable, version: Version) -> NumericTable:
+    return table._replace(values=version.select(table.values))
+
+
+class RuleKind(NamedTuple):
+    name: str
+    encoding: ScalarEncoding | None = None
+    field_count: int = 0
+    value_count: int = 0
+    name_count: int = 0
+    data_type: type | None = None
+
+    def accepts(self, fields, values, names=(), data=None) -> bool:
+        valid = (len(fields), len(names)) == (self.field_count, self.name_count)
+        valid &= self.value_count < 0 or len(values) == self.value_count
+        valid &= isinstance(data, self.data_type or type(None))
+        return valid
+
+
 def place_fields(
     fields: Iterable[Field], *, initial_offset: int = 0
 ) -> tuple[int, ...]:
     """Places explicitly padded fields without introducing hidden bytes."""
-    if initial_offset < 0:
-        raise ValueError("initial field offset must be nonnegative")
+    require(initial_offset >= 0, "initial field offset must be nonnegative")
     offsets = []
     field_names = set()
     offset = initial_offset
     for field in fields:
-        encoding = field.encoding
-        if (
-            not _NAME_PATTERN.fullmatch(encoding.name)
-            or not _C_TYPE_PATTERN.fullmatch(encoding.c_type)
-            or encoding.byte_length <= 0
-            or encoding.byte_length & (encoding.byte_length - 1)
-            or encoding.alignment <= 0
-            or encoding.alignment & (encoding.alignment - 1)
-            or encoding.alignment > encoding.byte_length
-        ):
-            raise ValueError(f"{field.name}: invalid scalar encoding")
-        if not _NAME_PATTERN.fullmatch(field.name):
-            raise ValueError(f"invalid field name {field.name!r}")
-        if field.name in field_names:
-            raise ValueError(f"duplicate field name {field.name!r}")
+        valid = is_name(field.name) and field.name not in field_names
+        require(valid and field.element_count > 0, f"{field.name}: invalid field")
         field_names.add(field.name)
-        if not field.summary.strip() or field.element_count <= 0:
-            raise ValueError(f"{field.name}: incomplete field declaration")
-        if offset % field.encoding.alignment:
-            raise ValueError(
-                f"{field.name}: offset {offset} violates "
-                f"{field.encoding.alignment}-byte alignment; add explicit padding"
-            )
+        require(
+            not offset % field.encoding.alignment,
+            f"{field.name}: offset {offset} violates {field.encoding.alignment}-byte alignment; add explicit padding",
+        )
         offsets.append(offset)
         offset += field.byte_length
     return tuple(offsets)

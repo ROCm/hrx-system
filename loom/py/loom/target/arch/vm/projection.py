@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from iree.vm.bytecode.spec.isa import (
-    Instruction,
+from iree.vm.bytecode.spec.isa import Instruction
+from iree.vm.bytecode.spec.isa.core.integer import (
     IntegerBinaryOperation,
     IntegerBinarySemantics,
 )

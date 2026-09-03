@@ -31,5 +31,8 @@ class Version(NamedTuple):
             and self.minor <= version.minor
         )
 
+    def select(self, items):
+        return tuple(item for item in items if item.since.is_available_in(self))
+
 
 CORE_0 = Version("core", 0, 0)

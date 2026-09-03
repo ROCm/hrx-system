@@ -8,17 +8,30 @@
 
 from __future__ import annotations
 
+import enum
+from typing import NamedTuple
+
 from iree.vm.bytecode.spec.isa import (
     FieldRole,
-    FieldRule,
     Instruction,
     InstructionFamily,
     InstructionField,
-    IntegerBinaryOperation,
-    IntegerBinarySemantics,
 )
+from iree.vm.bytecode.spec.isa.core.rules import FieldRule
 from iree.vm.bytecode.spec.schema import U8, Field
 from iree.vm.bytecode.spec.version import CORE_0
+
+
+class IntegerBinaryOperation(enum.Enum):
+    ADD = "add"
+    SUB = "sub"
+    MUL = "mul"
+
+
+class IntegerBinarySemantics(NamedTuple):
+    operation: IntegerBinaryOperation
+    bit_width: int
+
 
 INTEGER_FAMILY = InstructionFamily(
     name="integer",
@@ -43,7 +56,11 @@ _OPERATION_LANGUAGE = {
 
 
 def _value_field(name: str, role: FieldRole, summary: str) -> InstructionField:
-    return InstructionField(Field(name, U8, summary), role, FieldRule.VALUE_REGISTER)
+    return InstructionField(
+        Field(name, U8, summary),
+        role,
+        FieldRule.REGISTER_VALUE,
+    )
 
 
 def _binary(

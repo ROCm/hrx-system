@@ -4,69 +4,91 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Structural validation for VM module wire-record declarations."""
-
-import re
+"""Structural validation for VM module declarations."""
 
 from iree.vm.bytecode.spec import module
-from iree.vm.bytecode.spec.schema import U16
-
-_RECORD_NAME_PATTERN = re.compile(r"[a-z][a-z0-9_]*")
-_C_TYPE_PATTERN = re.compile(r"iree_vm_bytecode_[a-z0-9_]+_t")
+from iree.vm.bytecode.spec.module import rules
+from iree.vm.bytecode.spec.schema import is_name, is_power_of_two, require
+from iree.vm.bytecode.spec.version import Version
 
 
 def validate_wire_record(record: module.WireRecord) -> None:
-    """Rejects an internally inconsistent module record declaration."""
-
-    if not _RECORD_NAME_PATTERN.fullmatch(record.name):
-        raise ValueError(f"invalid wire record name {record.name!r}")
-    if not _C_TYPE_PATTERN.fullmatch(record.c_type):
-        raise ValueError(f"{record.name}: invalid C type {record.c_type!r}")
-    if not record.summary.strip() or not record.contract.strip():
-        raise ValueError(f"{record.name}: missing normative contract")
-    if not record.fields:
-        raise ValueError(f"{record.name}: empty wire record")
+    valid = is_name(record.name) and bool(record.fields)
+    require(valid, f"{record.name}: invalid wire record")
     _ = record.field_offsets
-    if record.byte_length % record.alignment:
-        raise ValueError(f"{record.name}: length violates natural alignment")
-
-    fields = {field.field.name: field for field in record.fields}
+    require(not record.byte_length % record.alignment, f"{record.name}: invalid length")
+    fields = {item.field.name: item for item in record.fields}
     for wire_field in record.fields:
-        field = wire_field.field
-        rule = wire_field.rule
-        if isinstance(rule, module.ExactBytesRule):
-            if len(rule.expected) != field.byte_length:
-                raise ValueError(
-                    f"{record.name}.{field.name}: exact byte length differs"
-                )
-        elif isinstance(rule, module.AllowedRangeRule):
-            maximum_value = (1 << (field.byte_length * 8)) - 1
-            if (
-                field.element_count != 1
-                or not field.encoding.name.startswith("u")
-                or not 0 <= rule.minimum <= rule.maximum <= maximum_value
-            ):
-                raise ValueError(f"{record.name}.{field.name}: invalid allowed range")
-        elif rule in (
-            module.FieldRule.CORE_MAJOR,
-            module.FieldRule.CORE_REQUIRED_MINOR,
-        ):
-            if field.encoding != U16 or field.element_count != 1:
-                raise ValueError(
-                    f"{record.name}.{field.name}: core version must be u16"
-                )
-        elif not isinstance(rule, module.FieldRule):
-            raise ValueError(f"{record.name}.{field.name}: unknown field rule")
+        field, rule = wire_field
+        if not isinstance(rule, module.FieldRuleUse):
+            rule = module.FieldRuleUse(rule)
+        kind, related_fields, values, data = rule
+        valid = (
+            kind in rules.FIELD_RULES
+            and kind.accepts(related_fields, values, data=data)
+            and all(name in fields for name in related_fields)
+            and (kind.encoding is None or field.encoding == kind.encoding)
+        )
+        valid &= kind != rules.FieldRule.EXACT_BYTES or len(data) == field.byte_length
+        require(valid, f"{record.name}.{field.name}: invalid field rule")
 
-    if len(record.rules) > 1:
-        raise ValueError(f"{record.name}: duplicate record rules")
-    if record.rules:
-        if record.rules[0] != module.RecordRule.SIGNATURE_DESCRIPTOR:
-            raise ValueError(f"{record.name}: unknown record rule")
-        if "kind_u16" not in fields or "type_ordinal_u16" not in fields:
-            raise ValueError(f"{record.name}: signature rule names missing field")
-        if (
-            fields["kind_u16"].field.encoding,
-            fields["type_ordinal_u16"].field.encoding,
-        ) != (U16, U16):
-            raise ValueError(f"{record.name}: signature fields must be u16")
+
+def _validate_constraint(constraint, records, version) -> None:
+    valid = is_name(constraint.name)
+    valid &= constraint.since.is_valid() and constraint.since.is_available_in(version)
+    valid &= all(reference.record in records for reference in constraint.inputs)
+    valid &= all(
+        reference.field_name is None
+        or reference.field_name in (item.field.name for item in reference.record.fields)
+        for reference in constraint.inputs
+    )
+    require(valid, f"{constraint.name}: invalid structural constraint")
+
+
+def validate_module_format(
+    module_format: module.ModuleFormat, version: Version
+) -> None:
+    valid = module_format.since.is_valid() and module_format.since.is_available_in(
+        version
+    )
+    valid &= is_power_of_two(module_format.image_alignment)
+    valid &= is_power_of_two(module_format.minimum_section_alignment)
+    valid &= module_format.image_alignment >= module_format.minimum_section_alignment
+    valid &= bool(module_format.envelope)
+    require(valid, "invalid module format")
+    records = (
+        *module_format.envelope,
+        *(record for section in module_format.sections for record in section.records),
+    )
+    require(len(set(records)) == len(records), "module records have multiple owners")
+    for record in records:
+        validate_wire_record(record)
+        require(record.since.is_available_in(version), f"{record.name}: unavailable")
+    section_types = [section.section_type for section in module_format.sections]
+    require(section_types == sorted(set(section_types)), "sections are not ordered")
+    for section in module_format.sections:
+        valid = is_name(section.name) and 1 <= section.section_type <= 0xFFFF
+        valid &= 0 <= section.required_flags <= 0xFFFF
+        valid &= section.since.authority != "core" or not section.section_type >> 8
+        valid &= section.since.is_valid() and section.since.is_available_in(version)
+        valid &= bool(section.records and section.constraints)
+        require(valid, f"{section.name}: invalid module section")
+        for constraint in section.constraints:
+            _validate_constraint(constraint, section.records, version)
+    for constraint in module_format.constraints:
+        _validate_constraint(constraint, records, version)
+
+
+def project_module_format(module_format, version):
+    sections = tuple(
+        section._replace(
+            records=version.select(section.records),
+            constraints=version.select(section.constraints),
+        )
+        for section in version.select(module_format.sections)
+    )
+    return module_format._replace(
+        envelope=version.select(module_format.envelope),
+        sections=sections,
+        constraints=version.select(module_format.constraints),
+    )
