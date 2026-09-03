@@ -11,7 +11,7 @@ load(
     "loom_test",
 )
 load(
-    "//loom/src/loom/tooling/target/amdgpu:execution_profiles.bzl",
+    "//loom/target/amdgpu:execution_profiles.bzl",
     "AMDGPU_ACCESS_PROFILE",
     "AMDGPU_ASAN_PROFILE",
     "AMDGPU_HARDWARE_PROFILE",

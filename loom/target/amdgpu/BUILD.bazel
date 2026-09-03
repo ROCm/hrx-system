@@ -17,6 +17,8 @@ load(
 
 package(default_visibility = ["//visibility:public"])
 
+exports_files(["execution_profiles.bzl"])
+
 [
     loom_amdgpu_target_profile(
         name = target,
