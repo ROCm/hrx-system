@@ -90,15 +90,29 @@ class FieldRule:
         "constraint_member",
         summary="Validated by the instruction's cross-field rule.",
     )
-    LOCAL_BYTES_RANGE_BASE = RuleKind("local_bytes_range_base", U16, field_count=1)
+    LOCAL_BYTES_RANGE_BASE = RuleKind(
+        "local_bytes_range_base",
+        U16,
+        field_count=1,
+        summary="Must form an in-bounds local-byte range with the related u16 length.",
+    )
     ABI_SLOT = RuleKind(
         "abi_slot",
         U16,
         value_count=1,
         summary="Must name an in-range overflow slot in the encoded packet region.",
     )
-    LOCAL_BYTES_FIXED_BASE = RuleKind("local_bytes_fixed_base", U16, value_count=2)
-    LOCAL_BYTES_RANGE_LENGTH = RuleKind("local_bytes_range_length", U16)
+    LOCAL_BYTES_FIXED_BASE = RuleKind(
+        "local_bytes_fixed_base",
+        U16,
+        value_count=2,
+        summary="Must begin an in-bounds {0}-byte local range aligned to {1} bytes.",
+    )
+    LOCAL_BYTES_RANGE_LENGTH = RuleKind(
+        "local_bytes_range_length",
+        U16,
+        summary="Validated with each local-byte range base that names this length.",
+    )
     PACKED_SELECTORS = RuleKind("packed_selectors", value_count=1, data_type=tuple)
     REF_SLOT = RuleKind(
         "ref_slot", U16, summary="Must name an in-range function-local ref slot."
@@ -114,9 +128,16 @@ class FieldRule:
         summary="Must resolve to an in-function control.block using widened signed arithmetic.",
     )
     LOCAL_BYTES_RANGE_MEMORY_FORMAT = RuleKind(
-        "local_bytes_range_memory_format", U16, field_count=1
+        "local_bytes_range_memory_format",
+        U16,
+        field_count=1,
+        summary="Must contain the complete lane group selected by the related memory format.",
     )
-    RODATA_ORDINAL = RuleKind("rodata_ordinal", U16)
+    RODATA_ORDINAL = RuleKind(
+        "rodata_ordinal",
+        U16,
+        summary="Must name an in-range module rodata block.",
+    )
     CONSTANT_POOL_ORDINAL = RuleKind(
         "constant_pool_ordinal",
         U16,
@@ -128,16 +149,29 @@ class FieldRule:
         summary="Must name an in-range function-local cell.",
     )
     LOCAL_BYTES_REPEATED_BASE = RuleKind(
-        "local_bytes_repeated_base", U16, field_count=1, value_count=2
+        "local_bytes_repeated_base",
+        U16,
+        field_count=1,
+        value_count=2,
+        summary="Must begin an aligned local range of related count * {0} bytes with {1}-byte alignment.",
     )
-    LOCAL_BYTES_REPEATED_COUNT = RuleKind("local_bytes_repeated_count", U16)
+    LOCAL_BYTES_REPEATED_COUNT = RuleKind(
+        "local_bytes_repeated_count",
+        U16,
+        summary="Validated with the repeated local-byte range base that names this count.",
+    )
     IMPORT_ORDINAL_OPTIONAL = RuleKind(
         "import_ordinal_optional",
         U16,
         summary="Must name an optional import declaration.",
     )
     RODATA_OFFSET = RuleKind("rodata_offset", U32, field_count=1)
-    RODATA_STATIC_OFFSET = RuleKind("rodata_static_offset", U32, field_count=2)
+    RODATA_STATIC_OFFSET = RuleKind(
+        "rodata_static_offset",
+        U32,
+        field_count=2,
+        summary="Must form an in-bounds range in the related rodata block with the related length.",
+    )
 
 
 class RecordRuleKind:

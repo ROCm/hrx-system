@@ -26,6 +26,7 @@ iree_py_library(
     "isa/core/integer.py"
     "isa/core/ref.py"
     "isa/core/rules.py"
+    "isa/core/stack.py"
     "isa/core/value.py"
     "isa/validation.py"
     "module/__init__.py"

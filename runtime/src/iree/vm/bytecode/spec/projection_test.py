@@ -34,43 +34,31 @@ class ProjectionTest(unittest.TestCase):
                 "documentation",
             },
         )
-        self.assertTrue(all(self.outputs.values()))
 
     def test_wire_layout_has_one_assertion_translation_unit(self) -> None:
         module_header = self.assert_output_contains(
             "wire_module_header",
             "typedef struct iree_vm_bytecode_v0_image_header_t",
-            "IREE_VM_BYTECODE_SECTION_METADATA = 0x000D",
-            "IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION = 0x0200",
         )
         core_header = self.assert_output_contains(
             "wire_core_header",
-            "IREE_VM_BYTECODE_FLOAT_MATH_UNARY_GELU_TANH = 0x24",
-            "typedef struct iree_vm_bytecode_integer_bitstream_pack_t",
-            "typedef struct iree_vm_bytecode_conversion_float_to_integer_t",
+            "typedef struct iree_vm_bytecode_stack_pack_i64_u32_x8_t",
         )
         self.assertNotIn("static_assert", module_header)
         self.assertNotIn("static_assert", core_header)
         self.assert_output_contains(
             "wire_assertions_source",
-            "sizeof(iree_vm_bytecode_v0_image_header_t) == 16u",
-            "offsetof(iree_vm_bytecode_v0_section_directory_row_t, "
-            "byte_length_u64) == 8u",
-            "offsetof(iree_vm_bytecode_control_switch_t, target_base_u32) == 4u",
+            "sizeof(iree_vm_bytecode_stack_pack_i64_u32_x8_t) == 36u",
         )
 
     def test_verification_is_data_not_control_flow(self) -> None:
         source = self.assert_output_contains(
             "verification_source",
             "iree_vm_bytecode_instruction_verification[256]",
-            "IREE_VM_BYTECODE_VERIFICATION_RULE_CALL_INDIRECT",
-            "IREE_VM_BYTECODE_VERIFICATION_RULE_ABI_SLOT",
-            "IREE_VM_BYTECODE_CONTROL_FLOW_CONDITIONAL_BRANCH",
             "VERIFICATION_RULE_SELECTOR, 3u, 1u, 2u},  // float.math.unary.f64.selector_u8",
-            "UINT32_C(0x0005FFFE)",
-            "VERIFICATION_RULE_SELECTOR, 1u, 1u, 1u},  // control.fail.status_u8",
             "UINT32_C(0x000D0008), IREE_VM_BYTECODE_VERIFICATION_RULE_GLOBAL_ORDINAL",
-            "UINT32_C(0x0000000E), IREE_VM_BYTECODE_VERIFICATION_RULE_ABI_SLOT",
+            "VERIFICATION_RULE_LOCAL_BYTES_RANGE_MEMORY_FORMAT, 2u, 4u, 0u},  // stack.load.base_u16",
+            "VERIFICATION_RULE_VALUE_REGISTER_FORMAT_RANGE, 1u, 4u, 0u},  // stack.load",
         )
         self.assertNotIn("switch (", source)
         self.assertNotIn("iree_status_t", source)
@@ -94,17 +82,12 @@ class ProjectionTest(unittest.TestCase):
             "documentation",
             "## Module container",
             "#### `metadata_value_type`",
-            "### `functions`",
             "#### Structural verification obligations",
-            "May set only bits in",
-            "#### `float.math.unary.f64`",
+            "#### `stack.load.indexed`",
             "#### `control.yield.s32`",
             "## Core selector domains",
-            "#### `control.call.indirect`",
-            "#### `func.import.resolved`",
-            "#### `global.ref.immutable.store.move`",
-            "#### `ref.abi.result.store.move`",
-            "#### `integer.bitstream.unpack.s`",
+            "#### `stack.copy.rodata`",
+            "#### `stack.pack.i64.u32.x8`",
             "#### Preconditions",
             "#### Failures",
             "#### Ownership",

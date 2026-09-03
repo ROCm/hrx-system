@@ -335,18 +335,26 @@ def _instruction_rules(
         if rule.kind in (
             core_rules.FieldRule.ANY_BITS,
             core_rules.FieldRule.CONSTRAINT_MEMBER,
+            core_rules.FieldRule.LOCAL_BYTES_RANGE_LENGTH,
+            core_rules.FieldRule.LOCAL_BYTES_REPEATED_COUNT,
         ):
             continue
-        parameter, auxiliary = (
-            selector_parameters[rule.data]
-            if rule.kind == core_rules.FieldRule.SELECTOR
-            else _value_parameters(rule.values, parameters)
-        )
+        field_length = instruction_field.field.byte_length
+        if rule.kind == core_rules.FieldRule.SELECTOR:
+            parameter, auxiliary = selector_parameters[rule.data]
+        elif rule.fields:
+            related_offsets = tuple(offsets_by_name[name] for name in rule.fields)
+            field_length, auxiliary = (*related_offsets, 0)[:2]
+            parameter = (
+                _intern_parameter_words(parameters, rule.values) if rule.values else 0
+            )
+        else:
+            parameter, auxiliary = _value_parameters(rule.values, parameters)
         rules.append(
             _VerificationRule(
                 _identifier(rule.kind.name),
                 offset,
-                instruction_field.field.byte_length,
+                field_length,
                 auxiliary,
                 parameter,
                 label=f"{instruction.mnemonic}.{instruction_field.field.name}",

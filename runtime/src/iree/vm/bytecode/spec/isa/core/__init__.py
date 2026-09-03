@@ -38,6 +38,11 @@ from iree.vm.bytecode.spec.isa.core.integer import (
     INTEGER_INSTRUCTIONS,
 )
 from iree.vm.bytecode.spec.isa.core.ref import REF_FAMILY, REF_INSTRUCTIONS
+from iree.vm.bytecode.spec.isa.core.stack import (
+    MEMORY_FORMAT_SELECTOR,
+    STACK_FAMILY,
+    STACK_INSTRUCTIONS,
+)
 from iree.vm.bytecode.spec.isa.core.value import VALUE_FAMILY, VALUE_INSTRUCTIONS
 
 FAMILIES = (
@@ -49,6 +54,7 @@ FAMILIES = (
     INTEGER_FAMILY,
     FLOAT_FAMILY,
     CONVERSION_FAMILY,
+    STACK_FAMILY,
     ABI_FAMILY,
     REF_FAMILY,
 )
@@ -58,6 +64,7 @@ SELECTORS = (
     INTEGER_COMPARE_SELECTOR,
     *FLOAT_SELECTORS,
     *CONVERSION_SELECTORS,
+    MEMORY_FORMAT_SELECTOR,
 )
 INSTRUCTIONS = (
     *CONTROL_INSTRUCTIONS,
@@ -68,6 +75,7 @@ INSTRUCTIONS = (
     *INTEGER_INSTRUCTIONS,
     *FLOAT_INSTRUCTIONS,
     *CONVERSION_INSTRUCTIONS,
+    *STACK_INSTRUCTIONS,
     *ABI_INSTRUCTIONS,
     *REF_INSTRUCTIONS,
 )
