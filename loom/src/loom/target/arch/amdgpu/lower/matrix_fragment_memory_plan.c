@@ -32,6 +32,7 @@
 #include "loom/target/arch/amdgpu/lower/legality.h"
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_memory_address.h"
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_memory_packet.h"
+#include "loom/target/arch/amdgpu/lower/matrix_fragment_publication_plan.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/subgroup.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
@@ -72,6 +73,8 @@ typedef struct loom_amdgpu_fragment_memory_environment_t {
   const loom_amdgpu_source_alloca_layout_t* alloca_layout;
   // Matrix feature bits available on the selected processor.
   loom_amdgpu_matrix_feature_bits_t feature_bits;
+  // Optional exact physical layout required by publication-plan evaluation.
+  const loom_amdgpu_matrix_fragment_layout_t* required_layout;
   // Source function owning the fragment movement op.
   loom_func_like_t source_function;
 } loom_amdgpu_fragment_memory_environment_t;
@@ -848,9 +851,9 @@ static bool loom_amdgpu_fragment_memory_target_layout(
       continue;
     }
     const loom_scalar_type_t expected_element_type = role_storage.element_type;
-    const loom_amdgpu_matrix_fragment_layout_t* layout =
+    const loom_amdgpu_matrix_fragment_layout_t* contract_layout =
         loom_amdgpu_matrix_contract_descriptor_fragment_layout(descriptor);
-    if (layout == NULL) {
+    if (contract_layout == NULL) {
       if (loom_amdgpu_matrix_fragment_tile_shape_matches(
               environment->fact_table, descriptor->tile_shape, role, blocks,
               rows, columns) &&
@@ -859,6 +862,14 @@ static bool loom_amdgpu_fragment_memory_target_layout(
         rejected_target_layout = true;
       }
       continue;
+    }
+    const loom_amdgpu_matrix_fragment_layout_t* layout = contract_layout;
+    if (environment->required_layout != NULL) {
+      if (environment->required_layout->canonical_kind !=
+          contract_layout->kind) {
+        continue;
+      }
+      layout = environment->required_layout;
     }
     const loom_matrix_fragment_role_layout_t* role_layout =
         loom_matrix_fragment_role_layout(layout, role);
@@ -1827,7 +1838,7 @@ static bool loom_amdgpu_fragment_memory_analyze(
   return true;
 }
 
-static bool loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
+static bool loom_amdgpu_analyze_vector_fragment_memory_plan_with_layout(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
     const loom_target_bundle_t* bundle,
@@ -1837,6 +1848,7 @@ static bool loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
     const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     const loom_amdgpu_target_facts_t* target_facts,
     loom_func_like_t source_function, const loom_op_t* source_op,
+    const loom_amdgpu_matrix_fragment_layout_t* required_layout,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_amdgpu_fragment_memory_plan_t* out_plan) {
   *out_plan = (loom_amdgpu_fragment_memory_plan_t){0};
@@ -1852,6 +1864,7 @@ static bool loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
           contract_candidates != NULL
               ? contract_candidates->feature_bits
               : loom_amdgpu_matrix_fragment_feature_bits(target_facts),
+      .required_layout = required_layout,
       .source_function = source_function,
   };
   loom_amdgpu_fragment_memory_source_t source = {0};
@@ -1871,6 +1884,59 @@ static bool loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
   }
   return loom_amdgpu_fragment_memory_select_fp8_load_decode_plan(
       fact_table, descriptor_set, source_op, out_plan);
+}
+
+bool loom_amdgpu_analyze_vector_fragment_memory_plan_for_layout(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
+    const loom_target_bundle_t* bundle,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_target_facts_t* target_facts,
+    loom_func_like_t source_function, const loom_op_t* source_op,
+    const loom_amdgpu_matrix_fragment_layout_t* required_layout,
+    loom_low_source_memory_operation_kind_t operation_kind,
+    loom_amdgpu_fragment_memory_plan_t* out_plan) {
+  return loom_amdgpu_analyze_vector_fragment_memory_plan_with_layout(
+      module, fact_table, view_regions, bundle, descriptor_set,
+      /*contract_candidates=*/NULL, loom_amdgpu_source_alloca_layout_empty(),
+      target_facts, source_function, source_op, required_layout, operation_kind,
+      out_plan);
+}
+
+static bool loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
+    const loom_target_bundle_t* bundle,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_matrix_fragment_contract_candidates_t*
+        contract_candidates,
+    const loom_amdgpu_source_alloca_layout_t* alloca_layout,
+    const loom_amdgpu_target_facts_t* target_facts,
+    loom_func_like_t source_function, const loom_op_t* source_op,
+    loom_low_source_memory_operation_kind_t operation_kind,
+    loom_amdgpu_fragment_memory_plan_t* out_plan) {
+  if (!loom_amdgpu_analyze_vector_fragment_memory_plan_with_layout(
+          module, fact_table, view_regions, bundle, descriptor_set,
+          contract_candidates, alloca_layout, target_facts, source_function,
+          source_op, /*required_layout=*/NULL, operation_kind, out_plan)) {
+    return false;
+  }
+  if (!loom_amdgpu_matrix_fragment_role_is_result_like(out_plan->role)) {
+    return true;
+  }
+  const loom_amdgpu_matrix_fragment_layout_t* contract_layout =
+      loom_amdgpu_matrix_fragment_layout_for_kind(out_plan->layout_kind);
+  const loom_amdgpu_matrix_fragment_layout_t* publication_layout =
+      loom_amdgpu_select_matrix_fragment_publication_layout(
+          module, fact_table, view_regions, bundle, descriptor_set,
+          target_facts, source_function, contract_layout);
+  if (publication_layout == contract_layout) {
+    return true;
+  }
+  return loom_amdgpu_analyze_vector_fragment_memory_plan_with_layout(
+      module, fact_table, view_regions, bundle, descriptor_set,
+      contract_candidates, alloca_layout, target_facts, source_function,
+      source_op, publication_layout, operation_kind, out_plan);
 }
 
 bool loom_amdgpu_analyze_vector_fragment_store_plan(

@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from loom.target.arch.amdgpu.matrix_formats import (
     AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS,
 )
@@ -326,6 +328,34 @@ def _rdna3_layout(
             result_axes,
             coordinate_element_stride=result_coordinate_stride,
         ),
+    )
+
+
+def _rdna3_transposed_result_layout(
+    key: str,
+    *,
+    canonical_key: str,
+    source_payload_element_count: int,
+) -> AmdgpuMatrixFragmentLayout:
+    layout = _rdna3_layout(
+        key,
+        wave_size=32,
+        source_payload_element_count=source_payload_element_count,
+        source_element_bit_count=16,
+        result_element_bit_count=32,
+        result_payload_element_count=8,
+        result_coordinate_stride=1,
+    )
+    transposed_result_axes = _axes(
+        row=_axis(thread=16),
+        column=_axis(outer=8, thread=2, stride=16),
+    )
+    return replace(
+        layout,
+        accumulator=replace(layout.accumulator, axes=transposed_result_axes),
+        result=replace(layout.result, axes=transposed_result_axes),
+        canonical_key=canonical_key,
+        instruction_operand_order=("rhs", "lhs"),
     )
 
 
@@ -967,6 +997,11 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
             ("rdna4_swmmac_32bit_16x16x64_packed4_w64", 64, 8, 16, 4, 4, 32, 1),
         )
     ),
+    _rdna3_transposed_result_layout(
+        "rdna3_wmmar3_f32_16x16x16_f16_transposed_result",
+        canonical_key="rdna3_wmmar3_f32_16x16x16_f16",
+        source_payload_element_count=16,
+    ),
 )
 
 
@@ -979,3 +1014,74 @@ if len(AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY) != len(AMDGPU_MATRIX_FRAGMENT_LAYO
 
 for _layout_row in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
     validate_matrix_fragment_layout(_layout_row)
+    if _layout_row.canonical_key is None:
+        continue
+    _canonical_layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY.get(
+        _layout_row.canonical_key
+    )
+    if _canonical_layout is None or _canonical_layout.canonical_key is not None:
+        raise ValueError(
+            f"AMDGPU matrix fragment layout '{_layout_row.key}' names invalid "
+            f"canonical layout '{_layout_row.canonical_key}'"
+        )
+    if _layout_row.tile_shape != _canonical_layout.tile_shape or tuple(
+        (role.payload_element_count, role.element_bit_count)
+        for role in (
+            _layout_row.lhs,
+            _layout_row.rhs,
+            _layout_row.accumulator,
+            _layout_row.result,
+        )
+    ) != tuple(
+        (role.payload_element_count, role.element_bit_count)
+        for role in (
+            _canonical_layout.lhs,
+            _canonical_layout.rhs,
+            _canonical_layout.accumulator,
+            _canonical_layout.result,
+        )
+    ):
+        raise ValueError(
+            f"AMDGPU matrix fragment layout '{_layout_row.key}' is not payload "
+            f"compatible with canonical layout '{_layout_row.canonical_key}'"
+        )
+    if _layout_row.instruction_operand_order == ("rhs", "lhs"):
+        canonical_lhs = _canonical_layout.lhs
+        canonical_rhs = _canonical_layout.rhs
+        # Reinterpreting canonical RHS storage as hardware LHS must encode
+        # transpose(rhs), and the inverse reinterpretation must encode
+        # transpose(lhs). The shared physical axis factorization proves both.
+        canonical_result_axes = _canonical_layout.result.axes
+        transposed_result_axes = (
+            canonical_result_axes[0],
+            canonical_result_axes[2],
+            canonical_result_axes[1],
+            canonical_result_axes[3],
+        )
+        source_roles_are_transpose_symmetric = (
+            canonical_lhs.payload_element_count == canonical_rhs.payload_element_count
+            and canonical_lhs.element_bit_count == canonical_rhs.element_bit_count
+            and canonical_lhs.coordinate_element_stride
+            == canonical_rhs.coordinate_element_stride
+            and canonical_lhs.reduction_group == canonical_rhs.reduction_group
+            and canonical_lhs.axes[0] == canonical_rhs.axes[0]
+            and canonical_lhs.axes[1] == canonical_rhs.axes[2]
+            and canonical_lhs.axes[3] == canonical_rhs.axes[3]
+        )
+        if (
+            _canonical_layout.tile_shape[1] != _canonical_layout.tile_shape[2]
+            or _layout_row.lhs != _canonical_layout.lhs
+            or _layout_row.rhs != _canonical_layout.rhs
+            or _canonical_layout.instruction_operand_order != ("lhs", "rhs")
+            or not source_roles_are_transpose_symmetric
+            or replace(_layout_row.accumulator, axes=_canonical_layout.accumulator.axes)
+            != _canonical_layout.accumulator
+            or replace(_layout_row.result, axes=_canonical_layout.result.axes)
+            != _canonical_layout.result
+            or _layout_row.accumulator.axes != transposed_result_axes
+            or _layout_row.result.axes != transposed_result_axes
+        ):
+            raise ValueError(
+                f"AMDGPU matrix fragment layout '{_layout_row.key}' does not "
+                "pair its reversed inputs with an exact result transpose"
+            )

@@ -11,11 +11,23 @@
 
 #include "loom/analysis/contract_vector.h"
 #include "loom/codegen/low/lower/lower.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/low_legality.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Selects the canonical fragment layout for one source matrix instruction.
+// Returns NULL when the source contract or target descriptor is unavailable.
+// Publication planning uses this exact projection to keep a function's
+// matrix-producing contracts and result-memory layouts in one decision.
+const loom_matrix_fragment_layout_t*
+loom_amdgpu_matrix_select_source_fragment_layout(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_target_bundle_t* bundle,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_target_facts_t* target_facts, const loom_op_t* source_op);
 
 // Supplies AMDGPU options for shared descriptor-matrix source adapters.
 iree_status_t loom_amdgpu_descriptor_matrix_options(

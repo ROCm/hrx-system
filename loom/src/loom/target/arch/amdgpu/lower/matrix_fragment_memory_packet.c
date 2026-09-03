@@ -829,6 +829,112 @@ static bool loom_amdgpu_fragment_memory_can_emit_narrowed_store_pair(
   }
 }
 
+static uint32_t loom_amdgpu_fragment_memory_packed_u16_issue_count(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  return loom_amdgpu_descriptor_set_has_ref(
+             descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_U16_U32)
+             ? 1u
+             : 2u;
+}
+
+static uint32_t loom_amdgpu_fragment_memory_bf16_lane_issue_count(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  return loom_amdgpu_descriptor_set_has_ref(
+             descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD3_U32_SRC2_LIT)
+             ? 4u
+             : 5u;
+}
+
+static uint32_t loom_amdgpu_fragment_memory_scalar_narrowed_store_issue_count(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_fragment_memory_plan_t* plan) {
+  uint32_t issue_count = plan->register_count;
+  if (plan->narrowed_result_round_source == LOOM_VALUE_ID_INVALID) {
+    return issue_count + plan->register_count / 2u;
+  }
+  uint32_t lane_issue_count =
+      plan->narrowed_result_scale_source != LOOM_VALUE_ID_INVALID ? 1u : 0u;
+  switch (plan->payload_form) {
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16:
+      lane_issue_count +=
+          loom_amdgpu_fragment_memory_bf16_lane_issue_count(descriptor_set);
+      break;
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_F16:
+      ++lane_issue_count;
+      break;
+    default:
+      IREE_ASSERT_UNREACHABLE("selected AMDGPU narrowed store payload form");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+  return issue_count + (uint32_t)plan->register_count * lane_issue_count;
+}
+
+static uint32_t
+loom_amdgpu_fragment_memory_crosslane_narrowed_store_issue_count(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_fragment_memory_plan_t* plan,
+    loom_amdgpu_fragment_memory_packet_flags_t crosslane_flags) {
+  const bool uses_dpp = iree_all_bits_set(
+      crosslane_flags,
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE_DPP);
+  uint32_t issue_count = uses_dpp ? 4u : 6u;
+  if (plan->narrowed_result_round_source == LOOM_VALUE_ID_INVALID) {
+    const uint32_t register_issue_count =
+        2u + loom_amdgpu_fragment_memory_packed_u16_issue_count(descriptor_set);
+    return issue_count + (uint32_t)plan->register_count * register_issue_count +
+           plan->register_count / 2u;
+  }
+
+  uint32_t register_issue_count = 2u;
+  switch (plan->payload_form) {
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16:
+      if (loom_amdgpu_descriptor_set_has_ref(
+              descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_BF16_F32)) {
+        register_issue_count += 1u;
+        if (plan->narrowed_result_scale_source != LOOM_VALUE_ID_INVALID) {
+          register_issue_count += 2u;
+        }
+      } else {
+        register_issue_count +=
+            loom_amdgpu_fragment_memory_bf16_lane_issue_count(descriptor_set) +
+            loom_amdgpu_fragment_memory_packed_u16_issue_count(descriptor_set);
+        if (plan->narrowed_result_scale_source != LOOM_VALUE_ID_INVALID) {
+          ++register_issue_count;
+        }
+      }
+      break;
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_F16:
+      register_issue_count += 2u;
+      register_issue_count +=
+          loom_amdgpu_descriptor_set_has_ref(
+              descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_PACK_B32_F16)
+              ? 1u
+              : loom_amdgpu_fragment_memory_packed_u16_issue_count(
+                    descriptor_set);
+      if (plan->narrowed_result_scale_source != LOOM_VALUE_ID_INVALID) {
+        register_issue_count += 2u;
+      }
+      break;
+    default:
+      IREE_ASSERT_UNREACHABLE("selected AMDGPU narrowed store payload form");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+  return issue_count + (uint32_t)plan->register_count * register_issue_count;
+}
+
+static bool loom_amdgpu_fragment_memory_crosslane_store_is_lower_cost(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_fragment_memory_plan_t* plan,
+    loom_amdgpu_fragment_memory_packet_flags_t crosslane_flags) {
+  // Cross-lane and scalar forms publish the same byte intervals with the same
+  // number of memory issues. Compare the target instructions required to form
+  // those packets; descriptor availability determines the conversion cost.
+  return loom_amdgpu_fragment_memory_crosslane_narrowed_store_issue_count(
+             descriptor_set, plan, crosslane_flags) <
+         loom_amdgpu_fragment_memory_scalar_narrowed_store_issue_count(
+             descriptor_set, plan);
+}
+
 static bool loom_amdgpu_fragment_memory_select_narrowed_store_packet(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_matrix_fragment_layout_t* layout,
@@ -838,6 +944,15 @@ static bool loom_amdgpu_fragment_memory_select_narrowed_store_packet(
     loom_amdgpu_fragment_memory_packet_plan_t* out_packet) {
   *out_packet = (loom_amdgpu_fragment_memory_packet_plan_t){0};
   const uint16_t remaining = plan->register_count - register_index;
+  uint16_t scalar_packet_register_count = 0;
+  loom_amdgpu_descriptor_ref_t scalar_descriptor_ref =
+      LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+  const bool has_scalar_packet =
+      remaining != 0 &&
+      loom_amdgpu_fragment_memory_narrowed_store_descriptor_ref(
+          plan->source.memory_space, 1, &scalar_packet_register_count,
+          &scalar_descriptor_ref) &&
+      loom_amdgpu_descriptor_set_has_ref(descriptor_set, scalar_descriptor_ref);
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(kLoomAmdgpuFragmentMemoryNarrowedStoreCandidates);
        ++i) {
@@ -888,15 +1003,7 @@ static bool loom_amdgpu_fragment_memory_select_narrowed_store_packet(
       return true;
     }
   }
-  uint16_t scalar_packet_register_count = 0;
-  loom_amdgpu_descriptor_ref_t scalar_descriptor_ref =
-      LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
-  if (remaining != 0 &&
-      loom_amdgpu_fragment_memory_narrowed_store_descriptor_ref(
-          plan->source.memory_space, 1, &scalar_packet_register_count,
-          &scalar_descriptor_ref) &&
-      loom_amdgpu_descriptor_set_has_ref(descriptor_set,
-                                         scalar_descriptor_ref)) {
+  if (has_scalar_packet) {
     *out_packet = (loom_amdgpu_fragment_memory_packet_plan_t){
         .register_index = register_index,
         .result_register_count = 1,
@@ -969,6 +1076,90 @@ bool loom_amdgpu_fragment_memory_epilogue_strategy_uses_dpp(
          LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DPP_PACKED_B16_STORE;
 }
 
+static uint32_t loom_amdgpu_fragment_memory_natural_narrowed_store_issue_count(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_fragment_memory_plan_t* plan) {
+  uint32_t issue_count = plan->packet_count;
+  uint32_t packed_pair_count = 0;
+  uint32_t scalar_register_count = 0;
+  uint32_t packed_source_shift_count = 0;
+  for (uint16_t packet_index = 0; packet_index < plan->packet_count;
+       ++packet_index) {
+    const loom_amdgpu_fragment_memory_packet_plan_t* packet =
+        &plan->packets[packet_index];
+    if (packet->result_register_count == 1) {
+      ++scalar_register_count;
+      packed_source_shift_count += packet->register_index & 1u;
+    } else {
+      packed_pair_count += packet->packet_register_count;
+    }
+  }
+  if (plan->narrowed_result_round_source == LOOM_VALUE_ID_INVALID) {
+    return issue_count + packed_source_shift_count;
+  }
+  if (plan->narrowed_result_scale_source != LOOM_VALUE_ID_INVALID) {
+    issue_count += plan->register_count;
+  }
+  switch (plan->payload_form) {
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16:
+      if (loom_amdgpu_descriptor_set_has_ref(
+              descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_BF16_F32)) {
+        issue_count += packed_pair_count;
+        issue_count +=
+            scalar_register_count *
+            loom_amdgpu_fragment_memory_bf16_lane_issue_count(descriptor_set);
+      } else {
+        issue_count +=
+            (uint32_t)plan->register_count *
+            loom_amdgpu_fragment_memory_bf16_lane_issue_count(descriptor_set);
+        issue_count +=
+            packed_pair_count *
+            loom_amdgpu_fragment_memory_packed_u16_issue_count(descriptor_set);
+      }
+      break;
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_F16:
+      issue_count += plan->register_count;
+      issue_count +=
+          packed_pair_count *
+          (loom_amdgpu_descriptor_set_has_ref(
+               descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_PACK_B32_F16)
+               ? 1u
+               : loom_amdgpu_fragment_memory_packed_u16_issue_count(
+                     descriptor_set));
+      break;
+    default:
+      IREE_ASSERT_UNREACHABLE("selected AMDGPU narrowed store payload form");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+  return issue_count;
+}
+
+uint32_t loom_amdgpu_fragment_memory_publication_issue_count(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_fragment_memory_plan_t* plan) {
+  switch (plan->epilogue_strategy) {
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_NONE:
+      return 0;
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_SCALAR_B16_STORE:
+      return loom_amdgpu_fragment_memory_scalar_narrowed_store_issue_count(
+          descriptor_set, plan);
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_PACKED_B16_STORE:
+      return loom_amdgpu_fragment_memory_natural_narrowed_store_issue_count(
+          descriptor_set, plan);
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DS_PACKED_B16_STORE:
+      return loom_amdgpu_fragment_memory_crosslane_narrowed_store_issue_count(
+          descriptor_set, plan,
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE);
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DPP_PACKED_B16_STORE:
+      return loom_amdgpu_fragment_memory_crosslane_narrowed_store_issue_count(
+          descriptor_set, plan,
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE |
+              LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE_DPP);
+  }
+  IREE_ASSERT_UNREACHABLE("selected AMDGPU fragment publication strategy");
+  IREE_BUILTIN_UNREACHABLE();
+}
+
 bool loom_amdgpu_fragment_memory_plan_packets(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_matrix_fragment_layout_t* layout,
@@ -1001,12 +1192,27 @@ bool loom_amdgpu_fragment_memory_plan_packets(
               ? loom_amdgpu_fragment_memory_crosslane_packed_b16_store_publication(
                     layout, plan)
               : NULL;
-  const loom_amdgpu_fragment_memory_packet_flags_t
-      crosslane_packed_b16_store_flags =
-          crosslane_packed_b16_store_publication != NULL
-              ? loom_amdgpu_fragment_memory_crosslane_packed_b16_store_flags(
-                    descriptor_set, crosslane_packed_b16_store_publication)
-              : 0;
+  loom_amdgpu_fragment_memory_packet_flags_t crosslane_packed_b16_store_flags =
+      crosslane_packed_b16_store_publication != NULL
+          ? loom_amdgpu_fragment_memory_crosslane_packed_b16_store_flags(
+                descriptor_set, crosslane_packed_b16_store_publication)
+          : 0;
+  uint16_t scalar_packet_register_count = 0;
+  loom_amdgpu_descriptor_ref_t scalar_descriptor_ref =
+      LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+  const bool has_scalar_narrowed_store =
+      store_narrow_f32_to_16bit &&
+      loom_amdgpu_fragment_memory_narrowed_store_descriptor_ref(
+          plan->source.memory_space, 1, &scalar_packet_register_count,
+          &scalar_descriptor_ref) &&
+      loom_amdgpu_descriptor_set_has_ref(descriptor_set, scalar_descriptor_ref);
+  if (plan->payload_form ==
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_F16 &&
+      crosslane_packed_b16_store_flags != 0 && has_scalar_narrowed_store &&
+      !loom_amdgpu_fragment_memory_crosslane_store_is_lower_cost(
+          descriptor_set, plan, crosslane_packed_b16_store_flags)) {
+    crosslane_packed_b16_store_flags = 0;
+  }
   if (crosslane_packed_b16_store_flags != 0) {
     plan->packed_b16_publication = crosslane_packed_b16_store_publication;
   }

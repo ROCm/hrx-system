@@ -848,6 +848,11 @@ static iree_status_t loom_low_lower_record_descriptor_matrix_plan(
   plan_data->attrs = loom_named_attr_slice_empty();
   plan_data->native_contraction_facts =
       query_result->selected_native_contraction_facts;
+  plan_data->instruction_operand_order =
+      query_result->selected_matrix_fragment_layout != NULL
+          ? query_result->selected_matrix_fragment_layout
+                ->instruction_operand_order
+          : LOOM_MATRIX_FRAGMENT_INSTRUCTION_OPERAND_ORDER_LHS_RHS;
   if (plan_data->descriptor.descriptor->immediate_count != 0) {
     if (context->policy->descriptor_matrix.attrs == NULL) {
       IREE_ASSERT_UNREACHABLE("descriptor-matrix policy has no attrs callback");

@@ -221,6 +221,11 @@ _FRAGMENT_LAYOUT_C_NAMES = {
     **{key: layout.c_kind for key, layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY.items()},
 }
 
+_FRAGMENT_INSTRUCTION_OPERAND_ORDER_C_NAMES = {
+    ("lhs", "rhs"): "LOOM_MATRIX_FRAGMENT_INSTRUCTION_OPERAND_ORDER_LHS_RHS",
+    ("rhs", "lhs"): "LOOM_MATRIX_FRAGMENT_INSTRUCTION_OPERAND_ORDER_RHS_LHS",
+}
+
 _MATRIX_WAIT_RESULT_FAMILIES = frozenset(("mfma", "smfmac"))
 _MATRIX_WAIT_RESULT_REGISTER_COUNTS = frozenset((2, 4, 8, 16, 32))
 
@@ -1289,7 +1294,9 @@ def _fragment_layout_initializer(
     lines = [
         f"[{layout.c_kind}] = {{",
         f"    .kind = {layout.c_kind},",
+        f"    .canonical_kind = {_FRAGMENT_LAYOUT_C_NAMES[layout.canonical_key or layout.key]},",
         f'    .name = IREE_SVL("{layout.name}"),',
+        f"    .instruction_operand_order = {_FRAGMENT_INSTRUCTION_OPERAND_ORDER_C_NAMES[layout.instruction_operand_order]},",
         f"    .wave_size = {layout.wave_size},",
         "    .tile_shape = {",
         f"        .block_count = {block_count},",

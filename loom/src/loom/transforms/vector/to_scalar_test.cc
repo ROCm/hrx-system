@@ -152,7 +152,10 @@ static const loom_matrix_fragment_coordinate_projection_plan_t
 
 static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
     /*.kind=*/1,
+    /*.canonical_kind=*/1,
     /*.name=*/IREE_SVL("test.tiny.distributed.mma"),
+    /*.instruction_operand_order=*/
+    LOOM_MATRIX_FRAGMENT_INSTRUCTION_OPERAND_ORDER_LHS_RHS,
     /*.wave_size=*/2,
     /*.tile_shape=*/
     {

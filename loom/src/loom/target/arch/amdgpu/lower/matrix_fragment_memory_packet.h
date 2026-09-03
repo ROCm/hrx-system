@@ -67,6 +67,12 @@ bool loom_amdgpu_fragment_memory_epilogue_strategy_is_crosslane_packed_b16(
 bool loom_amdgpu_fragment_memory_epilogue_strategy_uses_dpp(
     loom_amdgpu_fragment_memory_epilogue_strategy_t strategy);
 
+// Returns the target instruction issues required by the selected narrowed
+// store publication, including conversion, packing, memory, and setup issues.
+uint32_t loom_amdgpu_fragment_memory_publication_issue_count(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_fragment_memory_plan_t* plan);
+
 // Returns the compile-report plan key for a selected fragment memory plan.
 iree_string_view_t loom_amdgpu_fragment_memory_plan_key(
     const loom_amdgpu_fragment_memory_plan_t* plan);

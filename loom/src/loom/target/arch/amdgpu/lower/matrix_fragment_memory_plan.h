@@ -16,6 +16,20 @@
 extern "C" {
 #endif
 
+// Analyzes one fragment-memory operation using exactly |required_layout|.
+// Joint instruction/publication planning uses this to compare alternative
+// physical layouts without admitting the other compatible contract layouts.
+bool loom_amdgpu_analyze_vector_fragment_memory_plan_for_layout(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
+    const loom_target_bundle_t* bundle,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_target_facts_t* target_facts,
+    loom_func_like_t source_function, const loom_op_t* source_op,
+    const loom_amdgpu_matrix_fragment_layout_t* required_layout,
+    loom_low_source_memory_operation_kind_t operation_kind,
+    loom_amdgpu_fragment_memory_plan_t* out_plan);
+
 // Selects the AMDGPU matrix-fragment store plan for a source op without
 // requiring a low-lowering context. |target_facts| supplies the processor
 // matrix capabilities without resolving target IR.

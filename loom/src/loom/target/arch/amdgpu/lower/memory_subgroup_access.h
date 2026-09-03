@@ -34,6 +34,14 @@ typedef struct loom_amdgpu_memory_full_subgroup_proof_t {
   iree_string_view_t unknown_reason;
 } loom_amdgpu_memory_full_subgroup_proof_t;
 
+// Calculates the exact byte-interval geometry for one static subgroup packet.
+// The caller initializes |out_report| and may retain fields populated before
+// this helper adds its geometry fields.
+void loom_amdgpu_memory_calculate_subgroup_geometry(
+    const loom_amdgpu_fragment_memory_address_layout_t* address_layout,
+    uint8_t subgroup_size, uint32_t per_lane_packet_byte_count,
+    loom_low_lower_memory_subgroup_access_report_t* out_report);
+
 // Proves that |source_op| executes with every target subgroup lane active.
 //
 // Status reports only analysis allocation failures. An unproven active set is

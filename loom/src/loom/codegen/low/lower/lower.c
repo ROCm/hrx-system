@@ -938,8 +938,23 @@ static iree_status_t loom_low_lower_emit_descriptor_matrix_vector_mma(
 
   loom_value_id_t* operands = NULL;
   iree_host_size_t operand_count = 0;
+  loom_value_id_t low_instruction_lhs = low_lhs;
+  loom_value_id_t low_instruction_rhs = low_rhs;
+  switch (plan->instruction_operand_order) {
+    case LOOM_MATRIX_FRAGMENT_INSTRUCTION_OPERAND_ORDER_LHS_RHS:
+      break;
+    case LOOM_MATRIX_FRAGMENT_INSTRUCTION_OPERAND_ORDER_RHS_LHS:
+      low_instruction_lhs = low_rhs;
+      low_instruction_rhs = low_lhs;
+      break;
+    default:
+      IREE_ASSERT_UNREACHABLE(
+          "descriptor-matrix plan has invalid instruction operand order");
+      IREE_BUILTIN_UNREACHABLE();
+  }
   IREE_RETURN_IF_ERROR(loom_low_lower_descriptor_matrix_packet_operands(
-      context, plan, low_lhs, low_rhs, low_init, &operands, &operand_count));
+      context, plan, low_instruction_lhs, low_instruction_rhs, low_init,
+      &operands, &operand_count));
   IREE_RETURN_IF_ERROR(
       loom_low_lower_descriptor_matrix_copy_destructive_operands(
           context, source_op, plan, operands));

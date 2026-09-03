@@ -44,6 +44,16 @@ typedef enum loom_matrix_fragment_coordinate_dimension_e {
   LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT = 6,
 } loom_matrix_fragment_coordinate_dimension_t;
 
+// Ordering of semantic matrix inputs at the target instruction boundary.
+// Layout-equivalent instruction forms may exchange the physical A/B inputs
+// when that exchanges the result row/column placement as well.
+typedef enum loom_matrix_fragment_instruction_operand_order_e {
+  // The instruction consumes semantic LHS followed by semantic RHS.
+  LOOM_MATRIX_FRAGMENT_INSTRUCTION_OPERAND_ORDER_LHS_RHS = 0,
+  // The instruction consumes semantic RHS followed by semantic LHS.
+  LOOM_MATRIX_FRAGMENT_INSTRUCTION_OPERAND_ORDER_RHS_LHS = 1,
+} loom_matrix_fragment_instruction_operand_order_t;
+
 // One mixed-radix term in a generated coordinate projection. Evaluation adds
 // `((source / source_divisor) % source_modulus) * destination_multiplier`.
 // A zero source modulus omits the remainder operation.
@@ -140,8 +150,13 @@ typedef struct loom_matrix_fragment_role_layout_t {
 typedef struct loom_matrix_fragment_layout_t {
   // Stable owner-defined layout kind. Zero means unknown or absent.
   uint32_t kind;
+  // Canonical owner-defined layout kind implementing the same semantic
+  // contraction. Alternative physical layouts name the contract layout here.
+  uint32_t canonical_kind;
   // Stable layout name used by diagnostics and tests.
   iree_string_view_t name;
+  // Physical instruction ordering required by this layout.
+  loom_matrix_fragment_instruction_operand_order_t instruction_operand_order;
   // Subgroup or wave size for which lane formulas are defined.
   uint16_t wave_size;
   // Logical tile shape covered by the layout.

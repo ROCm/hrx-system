@@ -433,6 +433,15 @@ static bool loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(
   switch (plan->payload_form) {
     case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16:
     case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_F16:
+      // Scalar publication is already a native fragment-memory plan. Keeping
+      // the fragment store intact lets matrix instruction selection and memory
+      // publication share the same physical layout choice in source-to-Low.
+      if (plan->payload_form ==
+              LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_F16 &&
+          plan->epilogue_strategy ==
+              LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_SCALAR_B16_STORE) {
+        return false;
+      }
       if (plan->epilogue_strategy !=
               LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_SCALAR_B16_STORE &&
           plan->epilogue_strategy !=

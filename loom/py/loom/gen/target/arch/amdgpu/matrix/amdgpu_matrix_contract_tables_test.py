@@ -352,10 +352,31 @@ def test_generation_audits_cdna_dense_mfma_f32_layout_surface() -> None:
 
 def test_generation_validates_every_referenced_fragment_layout() -> None:
     referenced_layouts = {contract.fragment_layout for contract in AMDGPU_MATRIX_CONTRACTS if contract.fragment_layout is not None}
+    canonical_layouts = {layout.key for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY.values() if layout.canonical_key is None}
 
-    assert referenced_layouts == set(AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY)
+    assert referenced_layouts == canonical_layouts
     for contract in AMDGPU_MATRIX_CONTRACTS:
         amdgpu_matrix_contract_tables._validate_contract_fragment_layout(contract)
+
+
+def test_gfx11_f16_transposed_result_layout_is_symmetric() -> None:
+    canonical = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["rdna3_wmmar3_f32_16x16x16_f16"]
+    transposed = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["rdna3_wmmar3_f32_16x16x16_f16_transposed_result"]
+
+    assert transposed.canonical_key == canonical.key
+    assert transposed.instruction_operand_order == ("rhs", "lhs")
+    assert transposed.lhs == canonical.lhs
+    assert transposed.rhs == canonical.rhs
+    assert canonical.lhs.axes[1] == canonical.rhs.axes[2]
+    assert canonical.lhs.axes[3] == canonical.rhs.axes[3]
+    expected_result_axes = (
+        canonical.result.axes[0],
+        canonical.result.axes[2],
+        canonical.result.axes[1],
+        canonical.result.axes[3],
+    )
+    assert transposed.accumulator.axes == expected_result_axes
+    assert transposed.result.axes == expected_result_axes
 
 
 def test_generation_audits_rdna4_float_fragment_layout_surface() -> None:

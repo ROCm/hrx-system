@@ -119,10 +119,13 @@ static void loom_amdgpu_memory_sort_byte_intervals(
   }
 }
 
-static void loom_amdgpu_memory_calculate_subgroup_geometry(
+void loom_amdgpu_memory_calculate_subgroup_geometry(
     const loom_amdgpu_fragment_memory_address_layout_t* address_layout,
     uint8_t subgroup_size, uint32_t per_lane_packet_byte_count,
     loom_low_lower_memory_subgroup_access_report_t* out_report) {
+  IREE_ASSERT_GT(subgroup_size, 0u);
+  IREE_ASSERT_LE(subgroup_size, LOOM_AMDGPU_MEMORY_MAX_SUBGROUP_SIZE);
+  IREE_ASSERT_GT(per_lane_packet_byte_count, 0u);
   uint64_t lane_offsets[LOOM_AMDGPU_MEMORY_MAX_SUBGROUP_SIZE] = {0};
   loom_amdgpu_memory_byte_interval_t
       intervals[LOOM_AMDGPU_MEMORY_MAX_SUBGROUP_SIZE] = {0};

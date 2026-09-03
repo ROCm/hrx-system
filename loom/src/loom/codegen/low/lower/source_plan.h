@@ -16,6 +16,7 @@
 #ifndef LOOM_CODEGEN_LOW_LOWER_SOURCE_PLAN_H_
 #define LOOM_CODEGEN_LOW_LOWER_SOURCE_PLAN_H_
 
+#include "loom/analysis/matrix_fragment_layout.h"
 #include "loom/codegen/low/lower/rules.h"
 
 #ifdef __cplusplus
@@ -85,6 +86,8 @@ typedef struct loom_low_lower_descriptor_matrix_plan_t {
   loom_named_attr_slice_t attrs;
   // Native contraction placement selected by the target query.
   const loom_native_contraction_facts_t* native_contraction_facts;
+  // Physical instruction input ordering selected with the fragment layout.
+  loom_matrix_fragment_instruction_operand_order_t instruction_operand_order;
 } loom_low_lower_descriptor_matrix_plan_t;
 
 // Function-local retained plan and source-value materialization state.

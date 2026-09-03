@@ -380,8 +380,11 @@ typedef enum loom_amdgpu_matrix_fragment_layout_kind_e {
   // RDNA4 wave64 SWMMAC 16x16x64 packed 4-bit input, 32-bit result layout.
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_SWMMAC_32BIT_16X16X64_PACKED4_W64 =
       96,
+  // RDNA3 WMMAR3 wave32 f16 input, transposed f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_F32_16X16X16_F16_TRANSPOSED_RESULT =
+      97,
   // Total number of fragment layout table slots, including UNKNOWN.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT = 97,
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT = 98,
 } loom_amdgpu_matrix_fragment_layout_kind_t;
 
 typedef enum loom_amdgpu_matrix_contract_flag_bits_e {

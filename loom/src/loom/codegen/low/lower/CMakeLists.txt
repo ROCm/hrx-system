@@ -52,6 +52,7 @@ loom_cc_library(
     loom::analysis::condition_facts
     loom::analysis::contract_vector
     loom::analysis::kernel_async_legality
+    loom::analysis::matrix_fragment_layout
     loom::analysis::native_layout
     loom::analysis::symbol_facts
     loom::analysis::symbolic_expr

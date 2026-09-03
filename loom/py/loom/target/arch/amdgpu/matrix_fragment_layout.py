@@ -89,6 +89,8 @@ class AmdgpuMatrixFragmentLayout:
     accumulator: MatrixFragmentRoleLayout
     result: MatrixFragmentRoleLayout
     family: str | None = None
+    canonical_key: str | None = None
+    instruction_operand_order: tuple[str, str] = ("lhs", "rhs")
 
     @property
     def c_kind(self) -> str:
@@ -308,4 +310,9 @@ def validate_matrix_fragment_layout(layout: AmdgpuMatrixFragmentLayout) -> None:
         raise ValueError(
             f"dense matrix fragment layout '{layout.key}' names family "
             f"'{layout.family}'"
+        )
+    if layout.instruction_operand_order not in (("lhs", "rhs"), ("rhs", "lhs")):
+        raise ValueError(
+            f"matrix fragment layout '{layout.key}' has invalid instruction "
+            f"operand order {layout.instruction_operand_order}"
         )
