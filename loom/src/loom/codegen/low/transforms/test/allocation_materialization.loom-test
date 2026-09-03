@@ -2,12 +2,12 @@
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
-  %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %sum = low.op<test.add.i32>(%ab, %bc) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %out = low.op<test.add.i32>(%sum, %a) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %out : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) asm {
+  %ab = test.add.i32 %a, %b
+  %bc = test.add.i32 %b, %c
+  %sum = test.add.i32 %ab, %bc
+  %out = test.add.i32 %sum, %a
+  return %out
 }
 
 // ----
@@ -216,12 +216,12 @@ low.func.def target<test.low.core>(@test_target) @dense_slice_reload_cluster(%bl
 test.target<low_core> @test_target
 
 // WARNING@+1: BACKEND/009 "value 'a'" "produced by '<block-argument>'" "test.i32" "spill_spill_storage_0"
-low.func.def target<test.low.core>(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
-  %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %sum = low.op<test.add.i32>(%ab, %bc) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %out = low.op<test.add.i32>(%sum, %a) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %out : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) asm {
+  %ab = test.add.i32 %a, %b
+  %bc = test.add.i32 %b, %c
+  %sum = test.add.i32 %ab, %bc
+  %out = test.add.i32 %sum, %a
+  return %out
 }
 
 // ----
@@ -233,8 +233,8 @@ low.func.def target<test.low.core>(@test_target) @spill(%a: reg<test.i32>, %b: r
 test.target<low_core> @test_target
 
 // ERROR@+1: BACKEND/019 {function_name="unsupported_stack_spill_space", value_class="test.alias32", spill_slot_space="stack", storage_space="stack"}
-low.func.def target<test.low.core>(@test_target) @unsupported_stack_spill_space(%lhs: reg<test.alias32>, %rhs: reg<test.alias32>) -> (reg<test.alias32>, reg<test.alias32>) {
-  low.return %lhs, %rhs : reg<test.alias32>, reg<test.alias32>
+low.func.def target<test.low.core>(@test_target) @unsupported_stack_spill_space(%lhs: reg<test.alias32>, %rhs: reg<test.alias32>) -> (reg<test.alias32>, reg<test.alias32>) asm {
+  return %lhs, %rhs
 }
 
 // ====
@@ -243,14 +243,14 @@ low.func.def target<test.low.core>(@test_target) @unsupported_stack_spill_space(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @rematerialize_spill_plan(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
-  %literal = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
-  %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %use0 = low.op<test.add.i32>(%ab, %literal) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %use1 = low.op<test.add.i32>(%bc, %literal) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %out = low.op<test.add.i32>(%use0, %use1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %out : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @rematerialize_spill_plan(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) asm {
+  %literal = test.const.i32 7
+  %ab = test.add.i32 %a, %b
+  %bc = test.add.i32 %b, %c
+  %use0 = test.add.i32 %ab, %literal
+  %use1 = test.add.i32 %bc, %literal
+  %out = test.add.i32 %use0, %use1
+  return %out
 }
 
 // ----
@@ -273,14 +273,14 @@ low.func.def target<test.low.core>(@test_target) @rematerialize_spill_plan(%a: r
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @rematerialize_descriptor_op(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
-  %derived = low.op<test.rematerialize.i32>(%c) : (reg<test.i32>) -> reg<test.i32>
-  %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %use0 = low.op<test.add.i32>(%ab, %derived) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %use1 = low.op<test.add.i32>(%bc, %derived) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %out = low.op<test.add.i32>(%use0, %use1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %out : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @rematerialize_descriptor_op(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) asm {
+  %derived = test.rematerialize.i32 %c
+  %ab = test.add.i32 %a, %b
+  %bc = test.add.i32 %b, %c
+  %use0 = test.add.i32 %ab, %derived
+  %use1 = test.add.i32 %bc, %derived
+  %out = test.add.i32 %use0, %use1
+  return %out
 }
 
 // ----
@@ -307,14 +307,14 @@ low.func.def target<test.low.core>(@test_target) @rematerialize_descriptor_op(%a
 test.target<low_core> @test_target
 
 // REMARK@+1: BACKEND/045 {function_name="rematerialize_spill_plan_diagnostics", value_name="literal", value_class="test.i32", trigger_kind="spill-plan", cloned_packet_count="2", rewritten_operand_count="2", reason_key="descriptor-rematerializable"}
-low.func.def target<test.low.core>(@test_target) @rematerialize_spill_plan_diagnostics(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
-  %literal = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
-  %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %use0 = low.op<test.add.i32>(%ab, %literal) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %use1 = low.op<test.add.i32>(%bc, %literal) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %out = low.op<test.add.i32>(%use0, %use1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %out : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @rematerialize_spill_plan_diagnostics(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) asm {
+  %literal = test.const.i32 7
+  %ab = test.add.i32 %a, %b
+  %bc = test.add.i32 %b, %c
+  %use0 = test.add.i32 %ab, %literal
+  %use1 = test.add.i32 %bc, %literal
+  %out = test.add.i32 %use0, %use1
+  return %out
 }
 
 // ----
@@ -325,42 +325,42 @@ low.func.def target<test.low.core>(@test_target) @rematerialize_spill_plan_diagn
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @dense_slice_reloads_per_cfg_block(%condition: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @dense_slice_reloads_per_cfg_block(%condition: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) asm {
   low.cond_br %condition, ^left, ^right : reg<test.i32>
 ^left:
-  %left0 = low.slice %wide[0] : reg<test.i32 x8> -> reg<test.i32>
-  %left1 = low.slice %wide[1] : reg<test.i32 x8> -> reg<test.i32>
-  %left_sum0 = low.op<test.add.i32>(%left0, %left1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %left2 = low.slice %wide[2] : reg<test.i32 x8> -> reg<test.i32>
-  %left_sum1 = low.op<test.add.i32>(%left_sum0, %left2) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %left3 = low.slice %wide[3] : reg<test.i32 x8> -> reg<test.i32>
-  %left_sum2 = low.op<test.add.i32>(%left_sum1, %left3) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %left4 = low.slice %wide[4] : reg<test.i32 x8> -> reg<test.i32>
-  %left_sum3 = low.op<test.add.i32>(%left_sum2, %left4) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %left5 = low.slice %wide[5] : reg<test.i32 x8> -> reg<test.i32>
-  %left_sum4 = low.op<test.add.i32>(%left_sum3, %left5) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %left6 = low.slice %wide[6] : reg<test.i32 x8> -> reg<test.i32>
-  %left_sum5 = low.op<test.add.i32>(%left_sum4, %left6) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %left7 = low.slice %wide[7] : reg<test.i32 x8> -> reg<test.i32>
-  %left_sum6 = low.op<test.add.i32>(%left_sum5, %left7) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %left_sum6 : reg<test.i32>
+  %left0 = slice %wide[0] : reg<test.i32 x8> -> reg<test.i32>
+  %left1 = slice %wide[1] : reg<test.i32 x8> -> reg<test.i32>
+  %left_sum0 = test.add.i32 %left0, %left1
+  %left2 = slice %wide[2] : reg<test.i32 x8> -> reg<test.i32>
+  %left_sum1 = test.add.i32 %left_sum0, %left2
+  %left3 = slice %wide[3] : reg<test.i32 x8> -> reg<test.i32>
+  %left_sum2 = test.add.i32 %left_sum1, %left3
+  %left4 = slice %wide[4] : reg<test.i32 x8> -> reg<test.i32>
+  %left_sum3 = test.add.i32 %left_sum2, %left4
+  %left5 = slice %wide[5] : reg<test.i32 x8> -> reg<test.i32>
+  %left_sum4 = test.add.i32 %left_sum3, %left5
+  %left6 = slice %wide[6] : reg<test.i32 x8> -> reg<test.i32>
+  %left_sum5 = test.add.i32 %left_sum4, %left6
+  %left7 = slice %wide[7] : reg<test.i32 x8> -> reg<test.i32>
+  %left_sum6 = test.add.i32 %left_sum5, %left7
+  return %left_sum6
 ^right:
-  %right0 = low.slice %wide[0] : reg<test.i32 x8> -> reg<test.i32>
-  %right1 = low.slice %wide[1] : reg<test.i32 x8> -> reg<test.i32>
-  %right_sum0 = low.op<test.add.i32>(%right0, %right1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %right2 = low.slice %wide[2] : reg<test.i32 x8> -> reg<test.i32>
-  %right_sum1 = low.op<test.add.i32>(%right_sum0, %right2) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %right3 = low.slice %wide[3] : reg<test.i32 x8> -> reg<test.i32>
-  %right_sum2 = low.op<test.add.i32>(%right_sum1, %right3) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %right4 = low.slice %wide[4] : reg<test.i32 x8> -> reg<test.i32>
-  %right_sum3 = low.op<test.add.i32>(%right_sum2, %right4) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %right5 = low.slice %wide[5] : reg<test.i32 x8> -> reg<test.i32>
-  %right_sum4 = low.op<test.add.i32>(%right_sum3, %right5) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %right6 = low.slice %wide[6] : reg<test.i32 x8> -> reg<test.i32>
-  %right_sum5 = low.op<test.add.i32>(%right_sum4, %right6) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %right7 = low.slice %wide[7] : reg<test.i32 x8> -> reg<test.i32>
-  %right_sum6 = low.op<test.add.i32>(%right_sum5, %right7) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %right_sum6 : reg<test.i32>
+  %right0 = slice %wide[0] : reg<test.i32 x8> -> reg<test.i32>
+  %right1 = slice %wide[1] : reg<test.i32 x8> -> reg<test.i32>
+  %right_sum0 = test.add.i32 %right0, %right1
+  %right2 = slice %wide[2] : reg<test.i32 x8> -> reg<test.i32>
+  %right_sum1 = test.add.i32 %right_sum0, %right2
+  %right3 = slice %wide[3] : reg<test.i32 x8> -> reg<test.i32>
+  %right_sum2 = test.add.i32 %right_sum1, %right3
+  %right4 = slice %wide[4] : reg<test.i32 x8> -> reg<test.i32>
+  %right_sum3 = test.add.i32 %right_sum2, %right4
+  %right5 = slice %wide[5] : reg<test.i32 x8> -> reg<test.i32>
+  %right_sum4 = test.add.i32 %right_sum3, %right5
+  %right6 = slice %wide[6] : reg<test.i32 x8> -> reg<test.i32>
+  %right_sum5 = test.add.i32 %right_sum4, %right6
+  %right7 = slice %wide[7] : reg<test.i32 x8> -> reg<test.i32>
+  %right_sum6 = test.add.i32 %right_sum5, %right7
+  return %right_sum6
 }
 
 // ----

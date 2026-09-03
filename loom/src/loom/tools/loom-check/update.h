@@ -13,7 +13,7 @@
 //
 // The typical call sequence:
 //
-//   1. Parse the file with loom_check_parse().
+//   1. Parse the file with loom_test_file_parse().
 //   2. Execute each case with loom_check_execute_case().
 //   3. Build loom_check_case_update_t entries from the results.
 //   4. Call loom_check_apply_updates() to reconstruct the source.
@@ -23,7 +23,7 @@
 #define LOOM_TOOLS_LOOM_CHECK_UPDATE_H_
 
 #include "iree/base/api.h"
-#include "loom/tools/loom-check/check.h"
+#include "loom/testing/test_file.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -64,7 +64,7 @@ typedef struct loom_check_update_edit_t {
   // Kind of text edit to apply.
   loom_check_update_edit_kind_t kind;
   // Half-open byte range in the original source.
-  loom_check_source_range_t range;
+  loom_test_source_range_t range;
 } loom_check_update_edit_t;
 
 // Returns a stable JSON/text spelling for an update edit kind.
@@ -81,7 +81,7 @@ const char* loom_check_update_edit_kind_name(
 // cases where needs_update is true. Trailing newlines are ensured after each
 // inserted/replaced section.
 iree_status_t loom_check_apply_updates(iree_string_view_t original_source,
-                                       const loom_check_file_t* file,
+                                       const loom_test_file_t* file,
                                        const loom_check_case_update_t* updates,
                                        iree_string_builder_t* new_source,
                                        iree_host_size_t* out_update_count);
@@ -90,7 +90,7 @@ iree_status_t loom_check_apply_updates(iree_string_view_t original_source,
 // would use for one case. The caller owns |new_text| and |out_edit|. The source
 // and parsed case must come from the same buffer.
 iree_status_t loom_check_build_update_edit(iree_string_view_t original_source,
-                                           const loom_check_case_t* test_case,
+                                           const loom_test_case_t* test_case,
                                            iree_string_view_t actual_output,
                                            iree_string_builder_t* new_text,
                                            loom_check_update_edit_t* out_edit);

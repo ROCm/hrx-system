@@ -43,6 +43,7 @@ CMAKE_SOURCE_FORMAT_TARGET_DEFINES = (
     ("amdgpu", "LOOM_TARGET_AMDGPU"),
     ("llvmir", "LOOM_TARGET_LLVMIR"),
     ("spirv", "LOOM_TARGET_SPIRV"),
+    ("wasm", "LOOM_TARGET_WASM"),
     ("x86", "LOOM_TARGET_X86"),
 )
 CI_LOOM_TARGETS = ",".join(
@@ -54,6 +55,7 @@ LOOM_LINT_BAZEL_TARGET = "//loom/py/loom/tools:loom-lint"
 LOOM_LINT_CMAKE_TARGET = "loom::py::loom::tools::loom-lint"
 LOOM_LINT_PYTHON_SOURCE = "loom/py/loom/tools/source_lint.py"
 LOOM_LINT_SUFFIXES = frozenset({".loom", ".loom-test"})
+LOOM_FORMAT_SUFFIXES = frozenset({".loom", ".loom-test"})
 # Syntax-corpus modules retain their exact parser/printer fixture contract rather
 # than the verified canonical-source contract enforced by loom-format.
 LOOM_FORMAT_EXCLUDED_PREFIXES = ("loom/src/loom/test/corpus/text/",)
@@ -190,12 +192,13 @@ def run_generated_artifact_maintenance(
 
 
 def is_format_source_path(path: str) -> bool:
-    # Only standalone .loom modules enter the production formatter. Directive-
-    # bearing .loom-test containers retain their authored-section lint contract.
     source_path = PurePosixPath(path)
     if "\\" in path or source_path.as_posix() != path or ".." in source_path.parts:
         return False
-    if not path.startswith(PROJECT_ROOT) or not path.endswith(".loom"):
+    if (
+        not path.startswith(PROJECT_ROOT)
+        or source_path.suffix not in LOOM_FORMAT_SUFFIXES
+    ):
         return False
     if path in LOOM_FORMAT_EXCLUDED_PATHS:
         return False

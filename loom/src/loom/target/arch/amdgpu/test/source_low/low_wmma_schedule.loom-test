@@ -1,6 +1,7 @@
 // RUN: emit amdgpu-assembly @bf16_two_k_block_loads_schedule_before_wmma
 
 amdgpu.target<gfx11-generic> @target
+
 low.func.def target<amdgpu.gfx11.generic.core>(@target) @bf16_two_k_block_loads_schedule_before_wmma(%workitem_id: reg<amdgpu.vgpr>, %lhs_view: reg<amdgpu.sgpr x2>, %rhs_view: reg<amdgpu.sgpr x2>, %out_view: reg<amdgpu.sgpr x2>) asm {
   %lane = v_and_b32_src0_inline %workitem_id, 15
   %byte_offset = v_lshlrev_b32_src0_inline %lane, 6
@@ -158,6 +159,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_valu_matrix_lat
 // RUN: emit amdgpu-assembly @gfx1250_fp8_materialized_bf16_two_k_block_schedule
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_fp8_materialized_bf16_two_k_block_schedule(%workitem_id: reg<amdgpu.vgpr>, %lhs_view: reg<amdgpu.sgpr x2>, %rhs_view: reg<amdgpu.sgpr x2>, %out_view: reg<amdgpu.sgpr x2>) asm {
   %lane = v_and_b32_src0_inline %workitem_id, 15
   %lhs_byte_offset = v_lshlrev_b32_src0_inline %lane, 7
@@ -367,6 +369,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_fp8_materialize
 // RUN: emit amdgpu-assembly @bf16_four_k_block_loads_schedule_before_wmma
 
 amdgpu.target<gfx11-generic> @target
+
 low.func.def target<amdgpu.gfx11.generic.core>(@target) @bf16_four_k_block_loads_schedule_before_wmma(%workitem_id: reg<amdgpu.vgpr>, %lhs_view: reg<amdgpu.sgpr x2>, %rhs_view: reg<amdgpu.sgpr x2>, %out_view: reg<amdgpu.sgpr x2>) asm {
   %lane = v_and_b32_src0_inline %workitem_id, 15
   %byte_offset = v_lshlrev_b32_src0_inline %lane, 7

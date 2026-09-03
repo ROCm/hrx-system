@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @vector_fptrunc_f32x5_to_fp8(%input: vector<5xf32>) -> (vector<5xf8E4M3>) {
   %converted = vector.fptrunc %input : vector<5xf32> to vector<5xf8E4M3>
   func.return %converted : vector<5xf8E4M3>
@@ -41,6 +42,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @vector_fptrunc_
 // ====
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @vector_fptrunc_f16x3_to_bf8(%input: vector<3xf16>) -> (vector<3xf8E5M2>) {
   %converted = vector.fptrunc %input : vector<3xf16> to vector<3xf8E5M2>
   func.return %converted : vector<3xf8E5M2>
@@ -62,6 +64,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @vector_fptrunc_
 // ====
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @scalar_fptrunc_f32_to_fp8(%input: f32) -> (f8E4M3) {
   %converted = scalar.fptrunc %input : f32 to f8E4M3
   func.return %converted : f8E4M3
@@ -82,6 +85,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @scalar_fptrunc_
 // ====
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @scalar_fptrunc_f16_to_bf8(%input: f16) -> (f8E5M2) {
   %converted = scalar.fptrunc %input : f16 to f8E5M2
   func.return %converted : f8E5M2
@@ -98,6 +102,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @scalar_fptrunc_
 // ====
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @vector_fptrunc_bf16x3_to_fp8(%input: vector<3xbf16>) -> (vector<3xf8E4M3>) {
   %converted = vector.fptrunc %input : vector<3xbf16> to vector<3xf8E4M3>
   func.return %converted : vector<3xf8E4M3>
@@ -129,6 +134,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @vector_fptrunc_
 // ====
 
 amdgpu.target<gfx950> @target
+
 func.def target(@target) @scalar_fptrunc_bf16_to_bf8(%input: bf16) -> (f8E5M2) {
   %converted = scalar.fptrunc %input : bf16 to f8E5M2
   func.return %converted : f8E5M2

@@ -1,9 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_i32_memory.loom-test
 // RUN: emit source-low output=low
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @i32_bitwise() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -40,9 +39,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @i32_shift() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -81,9 +79,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @i32_negative_literal() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -114,9 +111,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @i32_scalarized() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index

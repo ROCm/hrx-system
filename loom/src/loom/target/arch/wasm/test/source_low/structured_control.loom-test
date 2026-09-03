@@ -9,7 +9,6 @@ func.def target(@target) @if_without_results(%control: i32, %limit: i32, %lhs: v
   scf.if %cond {
     %sum = vector.addi %lhs, %rhs : vector<4xi32>
     vector.store %sum, %output_view[0] : vector<4xi32>, view<4xi32>
-    scf.yield
   }
   func.return
 }
@@ -63,7 +62,6 @@ func.def target(@target) @for_without_iter_args(%lo: index, %hi: index, %step: i
   scf.for %iv = [%lo to %hi step %step] {
     %sum = vector.addi %lhs, %rhs : vector<4xi32>
     vector.store %sum, %output_view[0] : vector<4xi32>, view<4xi32>
-    scf.yield
   }
   func.return
 }

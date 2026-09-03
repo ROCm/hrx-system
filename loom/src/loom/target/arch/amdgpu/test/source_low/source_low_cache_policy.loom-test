@@ -2,6 +2,7 @@
 // RUN: emit source-low diagnostics=memory output=low
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @cache_system_bypass_load_device_writeback_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -32,6 +33,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @cache_system_bypass_scalar_load() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index

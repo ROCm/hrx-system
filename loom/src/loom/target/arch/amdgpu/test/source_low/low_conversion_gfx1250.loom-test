@@ -1,6 +1,7 @@
 // RUN: emit amdgpu-assembly @gfx1250_native_packed_float_ops
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_native_packed_float_ops(%low: reg<amdgpu.vgpr>, %high: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>, %packed8: reg<amdgpu.vgpr x2>, %packed4: reg<amdgpu.vgpr>) asm {
   %f16_fp8 = v_cvt_pk_f16_fp8 %low
   %f16_bf8 = v_cvt_pk_f16_bf8 %high
@@ -60,6 +61,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_native_packed_f
 // RUN: emit amdgpu-assembly @gfx1250_packed8_encode waits=none
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_packed8_encode(%f32_a: reg<amdgpu.vgpr>, %f32_b: reg<amdgpu.vgpr>, %f32_c: reg<amdgpu.vgpr>, %f32_d: reg<amdgpu.vgpr>, %packed_f16_a: reg<amdgpu.vgpr>, %packed_f16_b: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %fp8_f32_low = v_cvt_pk_fp8_f32_low %f32_a, %f32_b
   %fp8_f32 = v_cvt_pk_fp8_f32_high %fp8_f32_low, %f32_c, %f32_d

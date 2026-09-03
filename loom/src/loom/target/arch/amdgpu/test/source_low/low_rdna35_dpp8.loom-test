@@ -1,6 +1,7 @@
 // RUN: emit amdgpu-assembly @gfx1151_dpp8_uniform_rhs waits=none
 
 amdgpu.target<gfx1151> @target
+
 low.func.def target<amdgpu.rdna3_5.core>(@target) @gfx1151_dpp8_uniform_rhs(%crosslane: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.sgpr>) asm {
   %add_sgpr = v_add_f32_dpp8_sgpr %crosslane, %rhs {dpp8 = 342391}
   %add_inline = v_add_f32_dpp8_src1_inline %add_sgpr {rhs = 1065353216, dpp8 = 342391}
@@ -33,6 +34,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @gfx1151_dpp8_uniform_rhs(%cro
 // RUN: emit amdgpu-assembly @gfx1170_dpp8_uniform_rhs waits=none
 
 amdgpu.target<gfx1170> @target
+
 low.func.def target<amdgpu.rdna4m.core>(@target) @gfx1170_dpp8_uniform_rhs(%crosslane: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.sgpr>) asm {
   %min_sgpr = v_min_f32_dpp8_sgpr %crosslane, %rhs {dpp8 = 342391}
   %min_inline = v_min_f32_dpp8_src1_inline %min_sgpr {rhs = 3212836864, dpp8 = 342391}

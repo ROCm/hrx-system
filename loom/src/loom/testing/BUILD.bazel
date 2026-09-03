@@ -13,6 +13,89 @@ package(
 )
 
 loom_cc_library(
+    name = "test_file",
+    srcs = ["test_file.c"],
+    hdrs = ["test_file.h"],
+    deps = [
+        "//loom/src/loom/error:error_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "test_file_test",
+    srcs = ["test_file_test.cc"],
+    deps = [
+        ":test_file",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "test_diagnostic",
+    srcs = ["test_diagnostic.c"],
+    hdrs = ["test_diagnostic.h"],
+    deps = [
+        ":test_file",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:renderer",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "test_diagnostic_test",
+    srcs = ["test_diagnostic_test.cc"],
+    deps = [
+        ":test_diagnostic",
+        "//loom/src/loom/error:error_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "test_file_format",
+    srcs = ["test_file_format.c"],
+    hdrs = ["test_file_format.h"],
+    deps = [
+        ":test_diagnostic",
+        ":test_file",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "test_file_format_test",
+    srcs = ["test_file_format_test.cc"],
+    deps = [
+        ":context",
+        ":test_file_format",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/target/test:descriptors",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "byte_sequence",
     testonly = True,
     hdrs = ["byte_sequence.h"],

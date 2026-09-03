@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @f32_arith() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -42,6 +43,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @f32_fma() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -80,6 +82,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @f32_arcp_div() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -130,6 +133,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_scalar_arcp_constant_divisor(%value: f32) -> (f32) {
   %scale = scalar.constant 127.0 : f32
   %result = scalar.divf<nnan|ninf|nsz|arcp> %value, %scale : f32
@@ -145,6 +149,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_sca
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_scalar_arcp_literal_dividend(%value: f32) -> (f32) {
   %scale = scalar.constant 127.0 : f32
   %result = scalar.divf<nnan|ninf|nsz|arcp> %scale, %value : f32
@@ -161,6 +166,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_sca
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_vector_arcp_constant_divisor(%values: vector<4xf32>) -> (vector<4xf32>) {
   %scale = vector.constant 127.0 : vector<4xf32>
   %result = vector.divf<nnan|ninf|nsz|arcp> %values, %scale : vector<4xf32>
@@ -184,6 +190,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_vec
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_vector_arcp_literal_dividend(%values: vector<4xf32>) -> (vector<4xf32>) {
   %scale = vector.constant 127.0 : vector<4xf32>
   %result = vector.divf<nnan|ninf|nsz|arcp> %scale, %values : vector<4xf32>
@@ -211,6 +218,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_vec
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_guarded_arcp_reciprocal_scale(%amax: f32) -> (f32) {
   %fallback_scale = scalar.constant 0.0 : f32
   %reciprocal_numerator = scalar.constant 1.0 : f32
@@ -243,6 +251,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_gua
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @f32_exact_vector_div() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -288,6 +297,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_exact_scalar_div(%lhs_buffer: buffer, %rhs_buffer: buffer) -> (f32) {
   %base = index.constant 0 : offset
   %lhs_global = buffer.assume.memory_space<global> %lhs_buffer : buffer
@@ -328,6 +338,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_exa
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @f32_scalarized() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -390,6 +401,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_uniform_vector_bitops(%input: buffer) -> (vector<4xf32>) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
@@ -434,6 +446,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uni
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_uniform_vector_binary(%lhs_buffer: buffer, %rhs_buffer: buffer) -> (vector<4xf32>) {
   %base = index.constant 0 : offset
   %lhs_global = buffer.assume.memory_space<global> %lhs_buffer : buffer
@@ -512,6 +525,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uni
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_uniform_scalar_binary(%lhs_buffer: buffer, %rhs_buffer: buffer) -> (f32) {
   %base = index.constant 0 : offset
   %lhs_global = buffer.assume.memory_space<global> %lhs_buffer : buffer
@@ -540,6 +554,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uni
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_inline_zero_arithmetic(%scalar: f32, %vector: vector<2xf32>) -> (f32, vector<2xf32>) {
   %zero_factor = scalar.constant 0.0 : f32
   %scalar_result = scalar.mulf %scalar, %zero_factor : f32
@@ -562,6 +577,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_inl
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_uniform_scalar_fma(%a_buffer: buffer, %b_buffer: buffer, %c_buffer: buffer) -> (f32) {
   %base = index.constant 0 : offset
   %a_global = buffer.assume.memory_space<global> %a_buffer : buffer
@@ -595,6 +611,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uni
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_uniform_vector_fma(%a_buffer: buffer, %b_buffer: buffer, %c_buffer: buffer) -> (vector<4xf32>) {
   %base = index.constant 0 : offset
   %a_global = buffer.assume.memory_space<global> %a_buffer : buffer
@@ -647,6 +664,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uni
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @f32_direct_arg_scale() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index

@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32_bitfield_extractu(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
@@ -26,6 +27,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bit
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32_bitfield_extracts(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
@@ -50,6 +52,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bit
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32_bitfield_extractu_full_width_alias(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
@@ -73,6 +76,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bit
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32_bitfield_extracts_top_aligned(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
@@ -97,6 +101,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bit
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32_bitfield_insert(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %field_view = buffer.view %field_buffer[%buffer_base] : buffer -> view<1xi32>
@@ -126,6 +131,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bit
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32_bitfield_insert_offset0(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %field_view = buffer.view %field_buffer[%buffer_base] : buffer -> view<1xi32>
@@ -154,6 +160,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bit
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32_bitfield_insert_full_width_alias(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %field_view = buffer.view %field_buffer[%buffer_base] : buffer -> view<1xi32>
@@ -179,6 +186,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bit
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32_bitfield_b128_shape(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32>

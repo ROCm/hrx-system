@@ -26,7 +26,6 @@ loom_cc_library(
     loom::pass::report
     loom::pass::types
     loom::pass::value_facts
-  TESTONLY
   PUBLIC
 )
 

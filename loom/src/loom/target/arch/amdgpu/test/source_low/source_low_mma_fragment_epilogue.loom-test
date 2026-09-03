@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @bf16_result_fragment_epilogue_two_tiles() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -259,6 +260,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @bf16_result_fragment_epilogue_after_barrier() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -413,6 +415,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @result_fragment
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @result_fragment_repack_to_lhs_bf16_bpermute() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -547,8 +550,7 @@ kernel.def target(@target) @result_fragment_repack_to_lhs_bf16_mma_chain() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
-} launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>,
-    %init_values: vector<8xf32>, %output: buffer) {
+} launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %init_values: vector<8xf32>, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -688,6 +690,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @wave64_target {subgroup_size = 64}
+
 kernel.def target(@wave64_target) @result_fragment_repack_to_lhs_bf16_bpermute_wave64() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1154,6 +1157,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @bf16_wmmar3_dual_result_product_bf16_epilogue() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index

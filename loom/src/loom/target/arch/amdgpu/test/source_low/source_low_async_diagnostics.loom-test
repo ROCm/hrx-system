@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @async_group_argument_rejected(%group: kernel.async.group) {
   // ERROR@+1: LOWERING/029 {op_name="kernel.async.wait", phase_name="source-low"}
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
@@ -56,6 +57,7 @@ kernel.def target(@target) @async_gather_destination_read_before_wait() {
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @async_gather_dynamic_offset_sum_rejected() {
   %c1 = index.constant 1 : index
   %c4 = index.constant 4 : index

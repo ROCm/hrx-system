@@ -3,6 +3,7 @@
 // REQUIRES: spirv-dis, spirv-val
 
 spirv.target<vulkan1_3> @target {abi = hal_kernel}
+
 kernel.def target(@target) @ordinary_vector_structure_i32() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index

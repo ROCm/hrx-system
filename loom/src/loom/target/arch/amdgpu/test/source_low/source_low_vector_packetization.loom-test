@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @vector_fptrunc_f32x66_load_store() {
   %count = index.constant 1 : index
   kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
@@ -73,6 +74,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @vector_extf_f16x34_load_store() {
   %count = index.constant 1 : index
   kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index

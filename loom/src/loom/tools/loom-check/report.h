@@ -12,7 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/bitmap.h"
 #include "iree/base/internal/arena.h"
-#include "loom/tools/loom-check/check.h"
+#include "loom/testing/test_file.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,7 +20,7 @@ extern "C" {
 
 // Per-run reporting state for a parsed loom-check file.
 //
-// loom_check_file_t is the immutable parse product: cases, directives, input
+// loom_test_file_t is the immutable parse product: cases, directives, input
 // sections, expected sections, and parsed annotations. This report table owns
 // execution state that is only meaningful for one run of that parsed file, such
 // as whether each expected diagnostic annotation matched an actual diagnostic.
@@ -42,7 +42,7 @@ typedef struct loom_check_file_report_t {
 // Initializes a file report for |file|. Storage is arena-backed and freed with
 // the arena; no report deinitialize is needed.
 iree_status_t loom_check_file_report_initialize(
-    const loom_check_file_t* file, iree_arena_allocator_t* arena,
+    const loom_test_file_t* file, iree_arena_allocator_t* arena,
     loom_check_file_report_t* out_report);
 
 // Clears all match bits so the report can be reused for another run of the same

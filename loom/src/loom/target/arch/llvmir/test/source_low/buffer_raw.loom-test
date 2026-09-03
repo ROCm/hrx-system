@@ -1,9 +1,6 @@
 // RUN: emit source-low output=low
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
 
 func.def target(@target) @raw_byte_roundtrip(%source: buffer, %source_offset: offset, %target: buffer, %target_offset: offset) -> (i32) {
   %byte = buffer.load.i8.u %source[%source_offset]

@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @adjacent_f16_scalar_loads_pack() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index

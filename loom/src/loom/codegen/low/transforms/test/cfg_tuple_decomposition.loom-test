@@ -2,18 +2,18 @@
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @decomposes_lane_sliced_block_arg(%cond: reg<test.i32>, %init: reg<test.i32 x4>, %a0: reg<test.i32>, %a1: reg<test.i32>, %a2: reg<test.i32>, %a3: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @decomposes_lane_sliced_block_arg(%cond: reg<test.i32>, %init: reg<test.i32 x4>, %a0: reg<test.i32>, %a1: reg<test.i32>, %a2: reg<test.i32>, %a3: reg<test.i32>) -> (reg<test.i32>) asm {
   low.cond_br %cond, ^init_edge, ^concat_edge : reg<test.i32>
 ^init_edge:
   low.br ^join(%init: reg<test.i32 x4>)
 ^concat_edge:
-  %next = low.concat(%a0, %a1, %a2, %a3) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  %next = concat(%a0, %a1, %a2, %a3) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
   low.br ^join(%next: reg<test.i32 x4>)
 ^join(%state: reg<test.i32 x4>):
-  %s0 = low.slice %state[0] : reg<test.i32 x4> -> reg<test.i32>
-  %s1 = low.slice %state[1] : reg<test.i32 x4> -> reg<test.i32>
-  %sum = low.op<test.add.i32>(%s0, %s1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %sum : reg<test.i32>
+  %s0 = slice %state[0] : reg<test.i32 x4> -> reg<test.i32>
+  %s1 = slice %state[1] : reg<test.i32 x4> -> reg<test.i32>
+  %sum = test.add.i32 %s0, %s1
+  return %sum
 }
 
 // ----
@@ -42,13 +42,13 @@ low.func.def target<test.low.core>(@test_target) @decomposes_lane_sliced_block_a
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @preserves_whole_tuple_uses(%init: reg<test.i32 x2>) -> (reg<test.i32 x2>) {
+low.func.def target<test.low.core>(@test_target) @preserves_whole_tuple_uses(%init: reg<test.i32 x2>) -> (reg<test.i32 x2>) asm {
   low.br ^join(%init: reg<test.i32 x2>)
 ^join(%state: reg<test.i32 x2>):
-  %s0 = low.slice %state[0] : reg<test.i32 x2> -> reg<test.i32>
-  %s1 = low.slice %state[1] : reg<test.i32 x2> -> reg<test.i32>
-  %copy = low.copy %state : reg<test.i32 x2> -> reg<test.i32 x2>
-  low.return %copy : reg<test.i32 x2>
+  %s0 = slice %state[0] : reg<test.i32 x2> -> reg<test.i32>
+  %s1 = slice %state[1] : reg<test.i32 x2> -> reg<test.i32>
+  %copy = copy %state : reg<test.i32 x2> -> reg<test.i32 x2>
+  return %copy
 }
 
 // ----
@@ -69,26 +69,25 @@ low.func.def target<test.low.core>(@test_target) @preserves_whole_tuple_uses(%in
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @decomposes_loop_carried_lane_tuple(%cond: reg<test.i32>, %init: reg<test.i32 x4>, %step: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @decomposes_loop_carried_lane_tuple(%cond: reg<test.i32>, %init: reg<test.i32 x4>, %step: reg<test.i32>) -> (reg<test.i32>) asm {
   low.br ^loop(%init: reg<test.i32 x4>)
 ^loop(%state: reg<test.i32 x4>):
-  %s0 = low.slice %state[0] : reg<test.i32 x4> -> reg<test.i32>
-  %s1 = low.slice %state[1] : reg<test.i32 x4> -> reg<test.i32>
-  %s2 = low.slice %state[2] : reg<test.i32 x4> -> reg<test.i32>
-  %s3 = low.slice %state[3] : reg<test.i32 x4> -> reg<test.i32>
-  %n0 = low.op<test.add.i32>(%s0, %step) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %n1 = low.op<test.add.i32>(%s1, %step) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %n2 = low.op<test.add.i32>(%s2, %step) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %n3 = low.op<test.add.i32>(%s3, %step) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %next = low.concat(%n0, %n1, %n2, %n3) : (reg<test.i32>, reg<test.i32>,
-      reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  %s0 = slice %state[0] : reg<test.i32 x4> -> reg<test.i32>
+  %s1 = slice %state[1] : reg<test.i32 x4> -> reg<test.i32>
+  %s2 = slice %state[2] : reg<test.i32 x4> -> reg<test.i32>
+  %s3 = slice %state[3] : reg<test.i32 x4> -> reg<test.i32>
+  %n0 = test.add.i32 %s0, %step
+  %n1 = test.add.i32 %s1, %step
+  %n2 = test.add.i32 %s2, %step
+  %n3 = test.add.i32 %s3, %step
+  %next = concat(%n0, %n1, %n2, %n3) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
   low.cond_br %cond, ^backedge, ^exit_edge : reg<test.i32>
 ^backedge:
   low.br ^loop(%next: reg<test.i32 x4>)
 ^exit_edge:
   low.br ^exit(%s0: reg<test.i32>)
 ^exit(%result: reg<test.i32>):
-  low.return %result : reg<test.i32>
+  return %result
 }
 
 // ----

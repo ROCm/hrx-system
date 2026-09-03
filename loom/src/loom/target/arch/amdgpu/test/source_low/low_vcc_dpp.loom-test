@@ -1,6 +1,7 @@
 // RUN: emit amdgpu-assembly @gfx1250_vcc_dpp_fanout
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_vcc_dpp_fanout(%lane: reg<amdgpu.vgpr>, %false0: reg<amdgpu.vgpr>, %true0: reg<amdgpu.vgpr>, %false1: reg<amdgpu.vgpr>, %true1: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %condition = v_and_b32_src0_inline %lane, 1
   %mask = v_cmp_eq_i32_src0_inline_vcc %condition {lhs = 0}
@@ -70,6 +71,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_vcc_dpp_fanout(
 // RUN: emit amdgpu-assembly @gfx1250_vcc_compact_forms
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_vcc_compact_forms(%lane: reg<amdgpu.vgpr>, %true_value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %mask = v_cmp_eq_i32_src1_inline_vcc %lane {rhs = 0}
   %inline = v_cndmask_b32_src0_inline_vcc %true_value, %mask {false_value = 0}

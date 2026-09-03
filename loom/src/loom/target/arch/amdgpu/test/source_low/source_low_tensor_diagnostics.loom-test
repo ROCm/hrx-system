@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @tensor_memory_requires_gfx125x() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -27,6 +28,7 @@ kernel.def target(@target) @tensor_memory_requires_gfx125x() {
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @tensor_dgroups_must_be_subgroup_uniform() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index

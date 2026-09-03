@@ -97,7 +97,7 @@ test.target<low_core> @test_target
 
 low.func.def target<test.low.core>(@test_target) @storage_view_passes(%value: reg<test.i32>) -> (reg<test.i32>) {
   %storage = low.storage.reserve {byte_alignment = 16, byte_length = 64} : low.storage<scratch>
-  %view = low.storage.view %storage {offset = 16, byte_length = 16} : low.storage<scratch> -> low.storage<scratch>
+  %view = low.storage.view %storage {byte_length = 16, offset = 16} : low.storage<scratch> -> low.storage<scratch>
   low.spill %value, %view : reg<test.i32>, low.storage<scratch>
   %reload = low.reload %view : low.storage<scratch> -> reg<test.i32>
   low.return %reload : reg<test.i32>
@@ -109,9 +109,9 @@ test.target<low_core> @test_target
 
 low.func.def target<test.low.core>(@test_target) @storage_view_chain_passes(%value: reg<test.i32>) -> (reg<test.i32>) {
   %storage = low.storage.reserve {byte_alignment = 16, byte_length = 128} : low.storage<scratch>
-  %outer = low.storage.view %storage {offset = 16, byte_length = 96} : low.storage<scratch> -> low.storage<scratch>
-  %middle = low.storage.view %outer {offset = 24, byte_length = 48} : low.storage<scratch> -> low.storage<scratch>
-  %inner = low.storage.view %middle {offset = 8, byte_length = 16} : low.storage<scratch> -> low.storage<scratch>
+  %outer = low.storage.view %storage {byte_length = 96, offset = 16} : low.storage<scratch> -> low.storage<scratch>
+  %middle = low.storage.view %outer {byte_length = 48, offset = 24} : low.storage<scratch> -> low.storage<scratch>
+  %inner = low.storage.view %middle {byte_length = 16, offset = 8} : low.storage<scratch> -> low.storage<scratch>
   low.spill %value, %inner {offset = 15} : reg<test.i32>, low.storage<scratch>
   %reload = low.reload %inner {offset = 15} : low.storage<scratch> -> reg<test.i32>
   low.return %reload : reg<test.i32>
@@ -157,11 +157,11 @@ low.func.def target<test.low.core>(@test_target) @storage_view_bounds_storage_tr
 test.target<low_core> @test_target
 
 // low.live_in and low.resource form the entry-block preamble.
-low.func.def target<test.low.core>(@test_target) @entry_preamble() -> (reg<test.ptr>) {
-  %state = low.resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
-  %arg0 = low.live_in<test.arg0> : reg<test.ptr>
-  %copy = low.copy %state : reg<test.ptr> -> reg<test.ptr>
-  low.return %copy : reg<test.ptr>
+low.func.def target<test.low.core>(@test_target) @entry_preamble() -> (reg<test.ptr>) asm {
+  %state = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  %arg0 = live_in<test.arg0> : reg<test.ptr>
+  %copy = copy %state : reg<test.ptr> -> reg<test.ptr>
+  return %copy
 }
 
 // ====
@@ -217,8 +217,8 @@ func.def @semantic(%value: i32, %token: i64) -> (i32) {
   func.return %value : i32
 }
 
-low.func.def target<test.low.core>(@test_target) @semantic_low(%value: reg<test.i32>) -> (reg<test.i32>) {
-  low.return %value : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @semantic_low(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
 }
 
 func.def @invoke_explicit_low(%value: i32, %token: i64) -> (i32) {
@@ -230,8 +230,8 @@ func.def @invoke_explicit_low(%value: i32, %token: i64) -> (i32) {
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @semantic_low(%value: reg<test.i32>) -> (reg<test.i32>) {
-  low.return %value : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @semantic_low(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
 }
 
 // low.invoke crosses from source IR to a low entry and therefore does not
@@ -257,9 +257,9 @@ test.target<low_core> @test_target
 
 low.func.decl target<test.low.core>(@test_target) @extern_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)
 
-low.func.def target<test.low.core>(@test_target) @low_call(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @low_call(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
   %sum = low.func.call @extern_add(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> (reg<test.i32>)
-  low.return %sum : reg<test.i32>
+  return %sum
 }
 
 // ====
@@ -329,17 +329,17 @@ test.target<low_core> @test_target
 // Values consumed by tied low results are path-sensitive in CFG regions. A
 // backedge forwarding the fresh tied result redefines the block argument for
 // the next iteration and the exit path observes that fresh block argument.
-low.func.def target<test.low.core>(@test_target) @cfg_tied_loop_carried_value(%condition: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @cfg_tied_loop_carried_value(%condition: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
   low.br ^loop(%seed: reg<test.i32>)
 ^loop(%state: reg<test.i32>):
   low.cond_br %condition, ^body, ^exit : reg<test.i32>
 ^body:
-  %next = low.op<test.tied.any>(%state) : (reg<test.i32>) -> %state as reg<test.i32>
+  %next = test.tied.any %state
   low.br ^loop(%next: reg<test.i32>)
 ^exit:
   low.br ^join(%state: reg<test.i32>)
 ^join(%result: reg<test.i32>):
-  low.return %result : reg<test.i32>
+  return %result
 }
 
 // ====
@@ -349,16 +349,16 @@ test.target<low_core> @test_target
 // A body-local value defined before a tied op is recreated on each dynamic
 // entry to the block. A backedge to the consuming block must not treat the tied
 // operand spelling as a later reuse of the prior iteration's consumed value.
-low.func.def target<test.low.core>(@test_target) @cfg_tied_body_local_value(%condition: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @cfg_tied_body_local_value(%condition: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
   low.br ^loop(%seed: reg<test.i32>)
 ^loop(%state: reg<test.i32>):
   low.cond_br %condition, ^body, ^exit : reg<test.i32>
 ^body:
-  %copy = low.copy %state : reg<test.i32> -> reg<test.i32>
-  %next = low.op<test.tied.any>(%copy) : (reg<test.i32>) -> %copy as reg<test.i32>
+  %copy = copy %state : reg<test.i32> -> reg<test.i32>
+  %next = test.tied.any %copy
   low.br ^loop(%next: reg<test.i32>)
 ^exit:
-  low.return %state : reg<test.i32>
+  return %state
 }
 
 // ====
@@ -440,8 +440,8 @@ test.target<low_core> @test_target
 low.func.def target<test.low.core>(@test_target) @slot_roundtrip(%input: reg<test.i32>) -> (reg<test.i32>) {
   %storage = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<scratch>
   %view = low.storage.view %storage {byte_length = 4} : low.storage<scratch> -> low.storage<scratch>
-  low.spill %input, %view {offset = 0} : reg<test.i32>, low.storage<scratch>
-  %reload = low.reload %view {offset = 0} : low.storage<scratch> -> reg<test.i32>
+  low.spill %input, %view : reg<test.i32>, low.storage<scratch>
+  %reload = low.reload %view : low.storage<scratch> -> reg<test.i32>
   %addr = low.storage.address %view : low.storage<scratch> -> reg<test.ptr>
   low.return %reload : reg<test.i32>
 }
@@ -471,9 +471,9 @@ low.func.def target<test.low.core>(@test_target) @resource_negative_extent() -> 
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_dynamic_extent(%extent: reg<test.i32>) -> (reg<test.ptr>) {
-  %binding = low.resource<native_pointer> extent(%extent) {index = 0, source_type = buffer} : reg<test.ptr>
-  low.return %binding : reg<test.ptr>
+low.func.def target<test.low.core>(@test_target) @resource_dynamic_extent(%extent: reg<test.i32>) -> (reg<test.ptr>) asm {
+  %binding = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  return %binding
 }
 
 // ====
@@ -510,9 +510,9 @@ low.func.def target<test.low.core>(@test_target) abi(object_function) @resource_
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) abi(command_program) @command_resource_correct_export_abi() -> (reg<test.ptr>) {
-  %input = low.resource<command_input> {index = 0, source_type = buffer} : reg<test.ptr>
-  low.return %input : reg<test.ptr>
+low.func.def target<test.low.core>(@test_target) abi(command_program) @command_resource_correct_export_abi() -> (reg<test.ptr>) asm {
+  %input = resource<command_input> {index = 0, source_type = buffer} : reg<test.ptr>
+  return %input
 }
 
 // ====

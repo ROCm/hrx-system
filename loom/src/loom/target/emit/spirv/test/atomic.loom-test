@@ -2,6 +2,7 @@
 // REQUIRES: spirv-dis, spirv-val
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 2147975174}
+
 func.def target(@target) @integer_atomic_probe(%value: i32, %buffer: buffer) {
   %base = index.constant 0 : offset
   %index = index.constant 0 : index
@@ -101,6 +102,7 @@ func.def target(@target) @integer_atomic_probe(%value: i32, %buffer: buffer) {
 // One exact operation forces every alias of a Workgroup allocation onto the
 // integer carrier, even when native floating-point atomics are available.
 spirv.target<vulkan1_3> @workgroup_mixed_alias_target {contract_feature_bits = 2231402502}
+
 func.def target(@workgroup_mixed_alias_target) @workgroup_mixed_alias_atomics(%value: f32) {
   %byte_length = index.constant 4 : offset
   %base = index.constant 0 : offset
@@ -218,6 +220,7 @@ func.def target(@workgroup_mixed_alias_target) @workgroup_mixed_alias_atomics(%v
 // Integer atomics use a same-width Workgroup carrier, including the optional
 // i64 path guarded by shaderSharedInt64Atomics.
 spirv.target<vulkan1_3> @workgroup_i64_target {contract_feature_bits = 2147778566}
+
 func.def target(@workgroup_i64_target) @workgroup_i64_atomics(%value: i64) {
   %byte_length = index.constant 8 : offset
   %base = index.constant 0 : offset
@@ -283,6 +286,7 @@ func.def target(@workgroup_i64_target) @workgroup_i64_atomics(%value: i64) {
 // Native floating-point atomic instructions are optional. Integer CAS gives
 // f32 targets complete exchange, add, min/max, and compare-exchange semantics.
 spirv.target<vulkan1_3> @f32_fallback_target {contract_feature_bits = 2147516422}
+
 func.def target(@f32_fallback_target) @f32_atomic_fallbacks(%value: f32, %buffer: buffer) {
   %base = index.constant 0 : offset
   %index = index.constant 0 : index
@@ -511,6 +515,7 @@ func.def target(@f32_fallback_target) @f32_atomic_fallbacks(%value: f32, %buffer
 // Exchange and add select native float atomics for every Vulkan-supported
 // width when the corresponding storage-buffer features are available.
 spirv.target<vulkan1_3> @native_float_target {contract_feature_bits = 2863169886}
+
 func.def target(@native_float_target) @native_float_atomics(%buffer: buffer) {
   %base = index.constant 0 : offset
   %index = index.constant 0 : index
@@ -620,6 +625,7 @@ func.def target(@native_float_target) @native_float_atomics(%buffer: buffer) {
 // A pure floating-point Workgroup allocation retains its floating-point
 // carrier when every atomic operation has a native instruction.
 spirv.target<vulkan1_3> @workgroup_native_float_target {contract_feature_bits = 2231402502}
+
 func.def target(@workgroup_native_float_target) @workgroup_native_float_atomics(%value: f32) {
   %byte_length = index.constant 4 : offset
   %base = index.constant 0 : offset
@@ -686,6 +692,7 @@ func.def target(@workgroup_native_float_target) @workgroup_native_float_atomics(
 // The integer-CAS fallback extends complete float semantics to f64 when the
 // target has 64-bit storage atomics but lacks native float atomics.
 spirv.target<vulkan1_3> @f64_fallback_target {contract_feature_bits = 2147647510}
+
 func.def target(@f64_fallback_target) @f64_atomic_fallbacks(%buffer: buffer) {
   %base = index.constant 0 : offset
   %index = index.constant 0 : index
@@ -891,6 +898,7 @@ func.def target(@f64_fallback_target) @f64_atomic_fallbacks(%buffer: buffer) {
 // Workgroup-memory CAS uses the same exact float combine while preserving the
 // Workgroup storage class and memory-semantics bit.
 spirv.target<vulkan1_3> @workgroup_float_target {contract_feature_bits = 2147516422}
+
 func.def target(@workgroup_float_target) @workgroup_float_fallback(%value: f32) {
   %byte_length = index.constant 4 : offset
   %base = index.constant 0 : offset
@@ -992,6 +1000,7 @@ func.def target(@workgroup_float_target) @workgroup_float_fallback(%value: f32) 
 // Vector atomics reach the same scalar contracts after the standard
 // vector-to-scalar memory lowering.
 spirv.target<vulkan1_3> @vector_atomic_target {contract_feature_bits = 2147516422}
+
 func.def target(@vector_atomic_target) @vector_atomic_forms(%value: i32, %expected: i32, %replacement: i32, %buffer: buffer) {
   %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
@@ -1007,7 +1016,7 @@ func.def target(@vector_atomic_target) @vector_atomic_forms(%value: i32, %expect
   vector.atomic.reduce.mask<ori> %values, %view[0][%offsets], %mask {ordering = release, scope = workgroup} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex>, vector<2xi1>
   %old = vector.atomic.rmw<xchgi> %values, %view[0][%offsets] {ordering = acquire, scope = workgroup} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex>
   %masked_old = vector.atomic.rmw.mask<xori> %values, %view[0][%offsets], %mask, %old {ordering = acq_rel, scope = workgroup} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex>, vector<2xi1>, vector<2xi32>
-  %prior = vector.atomic.cmpxchg %expected_values, %replacement_values, %view[0][%offsets] {success_ordering = acq_rel, failure_ordering = acquire, scope = workgroup} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex> -> vector<2xi32>
+  %prior = vector.atomic.cmpxchg %expected_values, %replacement_values, %view[0][%offsets] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex> -> vector<2xi32>
   func.return
 }
 

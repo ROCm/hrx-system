@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx12-5-generic> @target
+
 func.def target(@target) @wmma_f8_f6(%lhs_data: vector<16xi32>, %rhs_data: vector<12xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -24,6 +25,7 @@ low.func.def target<amdgpu.gfx12_5.generic.core>(@target) abi(hal_kernel) @wmma_
 // ====
 
 amdgpu.target<gfx12-5-generic> @target
+
 func.def target(@target) @wmma_f8_f4(%lhs_data: vector<16xi32>, %rhs_data: vector<8xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -47,6 +49,7 @@ low.func.def target<amdgpu.gfx12_5.generic.core>(@target) abi(hal_kernel) @wmma_
 // ====
 
 amdgpu.target<gfx12-5-generic> @target
+
 func.def target(@target) @wmma_f6_f8(%lhs_data: vector<12xi32>, %rhs_data: vector<16xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -70,6 +73,7 @@ low.func.def target<amdgpu.gfx12_5.generic.core>(@target) abi(hal_kernel) @wmma_
 // ====
 
 amdgpu.target<gfx12-5-generic> @target
+
 func.def target(@target) @wmma_f6_f4(%lhs_data: vector<12xi32>, %rhs_data: vector<8xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -93,6 +97,7 @@ low.func.def target<amdgpu.gfx12_5.generic.core>(@target) abi(hal_kernel) @wmma_
 // ====
 
 amdgpu.target<gfx12-5-generic> @target
+
 func.def target(@target) @wmma_f4_f8(%lhs_data: vector<8xi32>, %rhs_data: vector<16xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -116,6 +121,7 @@ low.func.def target<amdgpu.gfx12_5.generic.core>(@target) abi(hal_kernel) @wmma_
 // ====
 
 amdgpu.target<gfx12-5-generic> @target
+
 func.def target(@target) @wmma_f4_f6(%lhs_data: vector<8xi32>, %rhs_data: vector<12xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index

@@ -11,16 +11,22 @@
 #include "loom/tools/loom-check/execute.h"
 
 static loom_text_print_flags_t loom_check_roundtrip_print_flags(
-    const loom_check_case_t* test_case) {
+    const loom_test_case_t* test_case) {
   loom_text_print_flags_t flags = LOOM_TEXT_PRINT_DEFAULT;
-  if (iree_all_bits_set(test_case->output_flags, LOOM_CHECK_OUTPUT_LOCATIONS)) {
+  // Cases without an explicit expected section are canonical fixed-point
+  // checks. Explicit input/expected pairs may instead be testing a deliberate
+  // representation conversion, including Low asm expansion.
+  if (!test_case->has_expected_section) {
+    flags |= LOOM_TEXT_PRINT_PREFER_LOW_ASM;
+  }
+  if (iree_all_bits_set(test_case->output_flags, LOOM_TEST_OUTPUT_LOCATIONS)) {
     flags |= LOOM_TEXT_PRINT_LOCATIONS;
   }
   return flags;
 }
 
 iree_status_t loom_check_execute_roundtrip(
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result) {
@@ -29,7 +35,7 @@ iree_status_t loom_check_execute_roundtrip(
   iree_string_builder_t stripped_input;
   iree_string_builder_initialize(allocator, &stripped_input);
   IREE_RETURN_IF_ERROR(
-      loom_check_strip_comments(test_case->input, &stripped_input));
+      loom_test_file_strip_comments(test_case->input, &stripped_input));
 
   // Parse the stripped input.
   loom_module_t* module = NULL;
@@ -81,13 +87,13 @@ iree_status_t loom_check_execute_roundtrip(
   IREE_RETURN_IF_ERROR(print_status);
   result->has_actual_output = true;
 
-  // Strip comments from the expected section for comparison. When no
-  // // ---- separator is present, expected == input and stripping
-  // normalizes both sides identically.
+  // Remove comments from the expected section for comparison. Comment lines
+  // are omitted instead of replaced with blank placeholders: source-line
+  // fidelity matters while parsing, but canonical output owns its spacing.
   iree_string_builder_t stripped_expected;
   iree_string_builder_initialize(allocator, &stripped_expected);
   IREE_RETURN_IF_ERROR(
-      loom_check_strip_comments(test_case->expected, &stripped_expected));
+      loom_test_file_remove_comments(test_case->expected, &stripped_expected));
 
   // Compare printed output against expected (trimmed to ignore trailing
   // whitespace differences).

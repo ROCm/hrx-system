@@ -1,9 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_workgroup_indexed.loom-test
 // RUN: emit source-low output=low
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -35,9 +34,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_i8x4() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -69,9 +67,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @cross_wave_workgroup_memory_workitem_x_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -103,9 +100,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @workgroup_memory_scalar_loop_index_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 8 : index
@@ -151,9 +147,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(8, 1, 1) work
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_b32_static_offset() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -187,9 +182,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @wave_sized_workgroup_memory_second_allocation_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -228,9 +222,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @wave_sized_workgroup_memory_view_base_and_element_offset_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -264,9 +257,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @wave_sized_workgroup_memory_interleaved_addtid_and_vaddr_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -304,9 +296,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @wave_sized_workgroup_memory_roundtrip_lane_cast_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -342,9 +333,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @wave_sized_workgroup_memory_select_same_lane_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -379,9 +369,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @wave_sized_workgroup_memory_select_scaled_lane_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -423,9 +412,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_store_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -471,9 +459,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_load_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index

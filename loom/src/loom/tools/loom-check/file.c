@@ -9,8 +9,10 @@
 #include <stdio.h>
 
 #include "iree/io/file_contents.h"
+#include "loom/codegen/low/text_asm.h"
+#include "loom/testing/test_file.h"
+#include "loom/testing/test_file_format.h"
 #include "loom/tooling/io/file.h"
-#include "loom/tools/loom-check/check.h"
 #include "loom/tools/loom-check/json_output.h"
 #include "loom/tools/loom-check/output.h"
 #include "loom/tools/loom-check/template_sync.h"
@@ -25,7 +27,7 @@ static iree_status_t loom_check_write_source(iree_string_view_t path,
 
 static iree_status_t loom_check_write_updates(
     iree_string_view_t path, iree_string_view_t original_source,
-    const loom_check_file_t* file, const loom_check_case_update_t* updates,
+    const loom_test_file_t* file, const loom_check_case_update_t* updates,
     iree_allocator_t allocator) {
   iree_string_builder_t new_source;
   iree_string_builder_initialize(allocator, &new_source);
@@ -52,8 +54,9 @@ static iree_status_t loom_check_write_updates(
 // parent-relative.
 static iree_status_t loom_check_build_template_source(
     iree_string_view_t path, iree_string_view_t filename,
-    iree_string_view_t source, const loom_check_file_t* file,
+    iree_string_view_t source, const loom_test_file_t* file,
     const loom_check_process_options_t* options, loom_context_t* context,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_arena_allocator_t* arena,
     iree_allocator_t allocator, iree_string_builder_t* new_source,
     bool* out_changed) {
@@ -76,12 +79,33 @@ static iree_status_t loom_check_build_template_source(
           (int)filename.size, filename.data);
     }
   }
+  iree_string_builder_t materialized_source;
+  iree_string_builder_initialize(allocator, &materialized_source);
   if (iree_status_is_ok(status)) {
     status = loom_check_template_sync_build_source(
         source, file, filename,
         loom_tooling_file_contents_string_view(template_contents),
-        file->template_path, context, block_pool, arena, allocator, new_source,
-        out_changed);
+        file->template_path, context, block_pool, arena, allocator,
+        &materialized_source, out_changed);
+  }
+  loom_target_low_descriptor_registry_t low_registry = {0};
+  loom_low_descriptor_text_asm_environment_storage_t low_asm_storage = {0};
+  loom_text_low_asm_environment_t low_asm_environment = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_check_environment_initialize_low_descriptor_registry(
+        environment, &low_registry);
+  }
+  if (iree_status_is_ok(status)) {
+    loom_low_descriptor_text_asm_environment_initialize_with_diagnostics(
+        &low_registry.registry, environment->low_asm_diagnostic_provider_list,
+        &low_asm_storage, &low_asm_environment);
+    status = loom_test_file_format(
+        iree_string_builder_view(&materialized_source), filename, context,
+        block_pool, low_asm_environment, allocator, new_source);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_changed =
+        !iree_string_view_equal(source, iree_string_builder_view(new_source));
   }
   if (iree_status_is_ok(status) && *out_changed && !options->update) {
     const iree_string_view_t update_root =
@@ -100,6 +124,7 @@ static iree_status_t loom_check_build_template_source(
 
   iree_io_file_contents_free(template_contents);
   iree_allocator_free(allocator, resolved_template_path);
+  iree_string_builder_deinitialize(&materialized_source);
   return status;
 }
 
@@ -114,8 +139,8 @@ static iree_status_t loom_check_process_file(
   iree_arena_allocator_t arena;
   iree_arena_initialize(block_pool, &arena);
 
-  loom_check_file_t file = {0};
-  iree_status_t status = loom_check_parse(source, &arena, &file);
+  loom_test_file_t file = {0};
+  iree_status_t status = loom_test_file_parse(source, &arena, &file);
 
   if (iree_status_is_ok(status) && options->update && is_stdin) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -127,14 +152,15 @@ static iree_status_t loom_check_process_file(
   bool template_sync_changed = false;
   if (iree_status_is_ok(status) && file.has_template_directive) {
     status = loom_check_build_template_source(
-        path, filename, source, &file, options, context, block_pool, &arena,
-        allocator, &template_synced_source, &template_sync_changed);
+        path, filename, source, &file, options, context, environment,
+        block_pool, &arena, allocator, &template_synced_source,
+        &template_sync_changed);
     if (iree_status_is_ok(status) && template_sync_changed) {
       iree_arena_deinitialize(&arena);
       iree_arena_initialize(block_pool, &arena);
       source = iree_string_builder_view(&template_synced_source);
-      file = (loom_check_file_t){0};
-      status = loom_check_parse(source, &arena, &file);
+      file = (loom_test_file_t){0};
+      status = loom_test_file_parse(source, &arena, &file);
     }
   }
 
@@ -158,7 +184,7 @@ static iree_status_t loom_check_process_file(
   iree_host_size_t initialized_result_count = 0;
   for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < file.case_count;
        ++i) {
-    const loom_check_case_t* test_case = &file.cases[i];
+    const loom_test_case_t* test_case = &file.cases[i];
 
     loom_check_result_initialize(allocator, &results[i]);
     ++initialized_result_count;

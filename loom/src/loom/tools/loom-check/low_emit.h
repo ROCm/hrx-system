@@ -79,7 +79,7 @@ iree_status_t loom_check_low_emit_parse_allocation_option(
 // Finds a module-local target-low function definition by symbol name.
 iree_status_t loom_check_low_emit_find_low_function_def(
     loom_module_t* module, iree_string_view_t symbol_name,
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     loom_check_diagnostic_collector_t* diagnostic_collector,
     iree_diagnostic_emitter_t emitter, loom_op_t** out_low_function);
 

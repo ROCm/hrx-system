@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_scaled_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -178,6 +179,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_finite_storage_scaled_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -310,6 +312,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_flush_subnormal_storage_scaled_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -470,6 +473,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_finite_flush_subnormal_storage_scaled_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -596,6 +600,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_flush_subnormal_storage_scaled_f8e5m2_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -769,6 +774,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @gfx942_scaled_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -982,6 +988,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @gfx942_scaled_f8e5m2_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1214,6 +1221,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @gfx942_finite_flush_subnormal_storage_scaled_f8e4m3_x8_to_bf16_store_bf16_scale() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1375,6 +1383,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_scalef32_finite_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1503,6 +1512,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_scalef32_identity_finite_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1575,6 +1585,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_scalef32_identity_finite_f8e4m3_x4_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1649,6 +1660,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_scalef32_identity_finite_f8e4m3_x4_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1707,6 +1719,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_scalef32_finite_f8e4m3_x4_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1790,6 +1803,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_scalef32_finite_f8e5m2_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1947,6 +1961,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_scaled_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1997,6 +2012,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_scaled_f8e5m2_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2047,6 +2063,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_direct_decode_scalef32_f8e4m3fn_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2096,6 +2113,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_direct_extf_f8e4m3_x3_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2136,6 +2154,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_direct_extf_f8e4m3_x3_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2176,6 +2195,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_direct_extf_f8e4m3_x3_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2217,6 +2237,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_direct_decode_scalef32_ieee_f8e4m3_x3_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2340,6 +2361,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_direct_decode_scalef32_f8e4m3fn_x3_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2386,6 +2408,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_direct_decode_scalef32_from_elements_f8e4m3fn_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2435,6 +2458,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_direct_decode_scalef32_f8e5m2_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2484,6 +2508,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_direct_decode_scalef32_f8e4m3fn_x8_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2533,6 +2558,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_direct_decode_scalef32_f8e5m2_x8_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2582,6 +2608,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_direct_decode_scalef32_f8e4m3fn_x8_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2643,6 +2670,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_direct_decode_scalef32_ieee_f8e4m3_x3_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2763,6 +2791,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_direct_decode_scalef32_f8e5m2_x8_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2824,6 +2853,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @gfx950_finite_flush_subnormal_storage_scaled_f8e4m3_x8_to_bf16_store_bf16_scale() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2877,6 +2907,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @gfx1200_scaled_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -2976,6 +3007,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @gfx1200_scaled_f8e5m2_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -3075,6 +3107,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @gfx1200_direct_decode_scalef32_ieee_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -3270,6 +3303,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @gfx1200_direct_decode_scalef32_f8e5m2_x4_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -3318,6 +3352,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_scaled_f8e5m2_x16_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -3409,6 +3444,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @gfx1200_finite_flush_subnormal_storage_scaled_f8e4m3_x8_to_bf16_store_bf16_scale() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -3511,6 +3547,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_scaled_f8e4m3_x16_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -3602,6 +3639,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_direct_decode_scalef32_ieee_f8e4m3_x4_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -3712,6 +3750,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_direct_decode_scalef32_f8e5m2_x4_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -3760,6 +3799,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_finite_flush_subnormal_storage_scaled_f8e4m3_x16_to_bf16_store_bf16_scale() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -3832,6 +3872,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_finite_flush_subnormal_storage_scaled_f8e4m3_x8_to_bf16_store_bf16_scale() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -3958,6 +3999,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_finite_flush_subnormal_storage_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -4024,6 +4066,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_finite_flush_subnormal_storage_f8e4m3_middle_pair_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -4066,6 +4109,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_finite_flush_subnormal_storage_f8e4m3_middle_pair_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -4108,6 +4152,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_finite_flush_subnormal_storage_f8e4m3_x8_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -4174,6 +4219,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_finite_only_storage_f8e4m3_x3_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -4230,6 +4276,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_finite_flush_subnormal_storage_f8e4m3_x3_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -4285,6 +4332,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_finite_flush_subnormal_storage_f8e4m3_x3_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -4339,6 +4387,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_finite_flush_subnormal_storage_f8e5m2_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -4405,6 +4454,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_finite_flush_subnormal_storage_f8e5m2_x8_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -4471,6 +4521,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_finite_flush_subnormal_storage_f8e5m2_middle_pair_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -4513,6 +4564,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 func.def target(@target) @gfx1100_nonzero_finite_flush_subnormal_f8e4m3_splat_to_bf16_store(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
@@ -4549,6 +4601,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @gfx1100_nonzero
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_finite_only_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -4619,6 +4672,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_finite_only_f8e5m2_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -4718,6 +4772,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @gfx942_direct_decode_finite_only_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -4797,6 +4852,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @gfx942_direct_decode_finite_only_f8e5m2_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -4908,6 +4964,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1150> @target
+
 kernel.def target(@target) @gfx1150_direct_decode_finite_only_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -4978,6 +5035,7 @@ low.kernel.def target<amdgpu.rdna3_5.core>(@target) workgroup_size(64, 1, 1) wor
 // ====
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @gfx1200_direct_decode_finite_only_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5048,6 +5106,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @gfx1200_direct_decode_finite_only_f8e5m2_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5147,6 +5206,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_finite_only_f8e4m3_x4_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5203,6 +5263,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_finite_only_f8e5m2_x4_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5280,6 +5341,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_finite_flush_subnormal_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5344,6 +5406,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_finite_flush_subnormal_f8e4m3_x4_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5396,6 +5459,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_finite_flush_subnormal_f8e5m2_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5460,6 +5524,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_finite_flush_subnormal_f8e5m2_x4_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5512,6 +5577,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_finite_only_f8e4m3_x8_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5610,6 +5676,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_finite_only_f8e5m2_x8_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5708,6 +5775,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_finite_flush_subnormal_f8e4m3_x8_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5772,6 +5840,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @gfx1100_direct_decode_finite_flush_subnormal_f8e5m2_x8_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5836,6 +5905,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_vector_extf_f8e4m3_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5876,6 +5946,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_vector_extf_f8e5m2_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5916,6 +5987,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_vector_extf_f8e4m3_x8_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5956,6 +6028,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_vector_extf_f8e5m2_x8_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -5996,6 +6069,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_vector_extf_f8e4m3_x8_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -6043,6 +6117,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_vector_extf_f8e5m2_x8_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -6090,6 +6165,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_vector_decode_finite_ieee_f8e4m3_e8m0_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -6135,6 +6211,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_vector_decode_f8e5m2_e8m0_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -6180,6 +6257,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_vector_decode_f8e4m3fn_e8m0_x8_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -6225,6 +6303,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_vector_decode_f8e5m2_e8m0_x8_to_f16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -6270,6 +6349,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_vector_decode_f8e4m3fn_e8m0_x8_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -6322,6 +6402,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_vector_decode_f8e5m2_e8m0_x8_to_f32_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -6374,6 +6455,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_vector_decode_f8e4m3fn_e8m0_x32_groups8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -6452,6 +6534,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @gfx1250_vector_decode_f8e5m2_e8m0_x32_groups8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index

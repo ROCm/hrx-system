@@ -19,7 +19,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/ir/context.h"
-#include "loom/tools/loom-check/check.h"
+#include "loom/testing/test_file.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -35,7 +35,7 @@ extern "C" {
 // target-only cases are omitted. The rebuilt text is written into |new_source|;
 // |*out_changed| reports whether it differs from |target_source|.
 iree_status_t loom_check_template_sync_build_source(
-    iree_string_view_t target_source, const loom_check_file_t* target_file,
+    iree_string_view_t target_source, const loom_test_file_t* target_file,
     iree_string_view_t target_filename, iree_string_view_t template_source,
     iree_string_view_t template_filename, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_arena_allocator_t* arena,

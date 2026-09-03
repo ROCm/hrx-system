@@ -62,7 +62,6 @@ func.def @lowers_if_without_else(%cond: i1, %a: i32, %b: i32) {
   scf.if %cond {
     %then = test.addi %a, %b : i32
     test.use %then : i32
-    scf.yield
   }
   func.return
 }
@@ -145,7 +144,6 @@ func.def @preserves_static_for_iv_facts() {
   %step = index.constant 2 : index
   scf.for %i = [%start to %limit step %step] {
     test.use %i : index
-    scf.yield
   }
   func.return
 }
@@ -179,7 +177,6 @@ kernel.def @preserves_kernel_for_iv_facts() {
   %step = index.constant 2 : index
   scf.for %i = [%start to %limit step %step] {
     test.use %i : index
-    scf.yield
   }
   kernel.return
 }
@@ -314,13 +311,11 @@ func.def @lowers_frontier_across_cfg_blocks(%route: i1, %condition: i1) {
 ^left:
   scf.if %condition {
     test.use %route : i1
-    scf.yield
   }
   cfg.br ^done
 ^right:
   scf.if %condition {
     test.use %condition : i1
-    scf.yield
   }
   cfg.br ^done
 ^done:
@@ -402,7 +397,6 @@ func.def @rejects_unknown_for_step(%n: index, %step: index) {
   %loop_begin = index.constant 0 : index
   // ERROR@+1: STRUCTURE/035 {op_name="scf.for", pass_name="scf-to-cfg"}
   scf.for %i = [%loop_begin to %n step %step] {
-    scf.yield
   }
   func.return
 }

@@ -7,14 +7,18 @@
 // loom-format: converts Loom modules between text and bytecode formats.
 
 #include <stdio.h>
+#include <string.h>
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/tooling/flags.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
+#include "loom/target/arch/cmd/provider.h"
 #include "loom/target/configured/provider.h"
 #include "loom/target/provider.h"
+#include "loom/target/test/provider.h"
+#include "loom/testing/test_file_format.h"
 #include "loom/tooling/cli/help.h"
 #include "loom/tooling/context/context.h"
 #include "loom/tooling/io/file.h"
@@ -26,10 +30,11 @@ IREE_FLAG(string, to, "text", "Output format: text, bc, or bytecode.");
 IREE_FLAG(string, output, "-",
           "Output path. Use '-' or the empty string for stdout.");
 IREE_FLAG(bool, check, false,
-          "Verifies that text input is already in canonical form without "
-          "writing output.");
+          "Checks that .loom modules or .loom-test input sections are already "
+          "in canonical form without writing output.");
 IREE_FLAG(bool, in_place, false,
-          "Formats one or more verified text input files in place.");
+          "Formats one or more .loom modules or .loom-test input sections in "
+          "place.");
 
 typedef enum loom_format_action_e {
   LOOM_FORMAT_ACTION_CONVERT = 0,
@@ -114,7 +119,20 @@ static iree_status_t loom_format_process_input(
                               (int)filename.size, filename.data,
                               loom_module_format_name(resolved_input_format));
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && action != LOOM_FORMAT_ACTION_CONVERT &&
+      iree_string_view_ends_with(filename, IREE_SV(".loom-test"))) {
+    iree_string_builder_t formatted_source;
+    iree_string_builder_initialize(allocator, &formatted_source);
+    status = loom_test_file_format(
+        loom_tooling_file_contents_string_view(contents), filename, context,
+        block_pool, low_asm_environment, allocator, &formatted_source);
+    if (iree_status_is_ok(status)) {
+      output.length = iree_string_builder_size(&formatted_source);
+      output.data =
+          (uint8_t*)iree_string_builder_take_storage(&formatted_source);
+    }
+    iree_string_builder_deinitialize(&formatted_source);
+  } else if (iree_status_is_ok(status)) {
     loom_format_convert_options_t convert_options = {
         .input_format = resolved_input_format,
         .output_format = output_format,
@@ -124,6 +142,8 @@ static iree_status_t loom_format_process_input(
                 .user_data = stderr,
             },
         .low_asm_environment = low_asm_environment,
+        .text_print_flags =
+            LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_PREFER_LOW_ASM,
     };
     status =
         loom_format_convert(contents->const_buffer, filename, context,
@@ -178,6 +198,7 @@ static void loom_format_print_agents_markdown(FILE* stream) {
       "loom-format source.loom --from=text --to=bc --output=source.loombc\n"
       "loom-format source.loombc --from=bc --to=text --output=source.loom\n"
       "loom-format source.loom --check\n"
+      "loom-format source.loom-test --check\n"
       "loom-format --check first.loom second.loom\n"
       "loom-format --in-place first.loom second.loom\n"
       "cat source.loom | loom-format --from=text --to=bc "
@@ -191,9 +212,13 @@ static void loom_format_print_agents_markdown(FILE* stream) {
       "`loom-compile` input. The complete module is verified before either\n"
       "output is written; external calls require a matching `func.decl` or\n"
       "definition. Text conversion resolves target-low syntax using the\n"
-      "configured target descriptors. `--check` verifies canonical text\n"
-      "without writing output. `--in-place` rewrites only noncanonical text\n"
-      "files after each complete module has parsed and verified.\n");
+      "configured target descriptors. For `.loom-test` files, `--check` and\n"
+      "`--in-place` canonicalize module input sections while preserving\n"
+      "expected output and explicitly authored source-conversion fixtures.\n"
+      "Precisely annotated invalid input is also preserved. `--check` writes\n"
+      "no output; `--in-place` rewrites only noncanonical files after their\n"
+      "input modules have parsed. Verify-mode semantic failures require a\n"
+      "matching diagnostic annotation.\n");
 }
 
 int main(int argc, char** argv) {
@@ -213,7 +238,7 @@ int main(int argc, char** argv) {
       "Input defaults to stdin when no file is provided. Output defaults to "
       "stdout.\n"
       "Conversion accepts one input. Check and in-place modes accept multiple "
-      "text inputs.\n"
+      "text inputs, including .loom-test containers.\n"
       "The auto input format detects bytecode by the LOOM file magic and "
       "treats\n"
       "all other input as text. The complete module is verified before output "
@@ -236,7 +261,12 @@ int main(int argc, char** argv) {
 
   loom_context_t context = {0};
   bool context_initialized = false;
+  loom_target_environment_t target_environment = {0};
+  bool target_environment_initialized = false;
+  const loom_target_provider_t** target_providers = NULL;
+  loom_target_provider_set_t target_provider_set = {0};
   loom_target_low_descriptor_registry_t low_descriptor_registry = {0};
+  loom_low_descriptor_text_asm_environment_storage_t low_asm_storage = {0};
   loom_text_low_asm_environment_t low_asm_environment = {0};
 
   loom_module_format_t input_format = LOOM_MODULE_FORMAT_AUTO;
@@ -305,19 +335,47 @@ int main(int argc, char** argv) {
     }
   }
   if (iree_status_is_ok(status)) {
+    const loom_target_provider_set_t* configured_provider_set =
+        loom_configured_target_provider_set();
+    const iree_host_size_t provider_count =
+        configured_provider_set->provider_count + 2;
+    status = iree_allocator_malloc(allocator,
+                                   provider_count * sizeof(*target_providers),
+                                   (void**)&target_providers);
+    if (iree_status_is_ok(status)) {
+      if (configured_provider_set->provider_count > 0) {
+        memcpy(target_providers, configured_provider_set->providers,
+               configured_provider_set->provider_count *
+                   sizeof(*target_providers));
+      }
+      target_providers[configured_provider_set->provider_count] =
+          &loom_cmd_target_provider;
+      target_providers[configured_provider_set->provider_count + 1] =
+          &loom_test_target_provider;
+      target_provider_set =
+          loom_target_provider_set_make(target_providers, provider_count);
+      status = loom_target_environment_initialize(&target_provider_set,
+                                                  &target_environment);
+      target_environment_initialized = iree_status_is_ok(status);
+    }
+  }
+  if (iree_status_is_ok(status)) {
     loom_context_initialize(allocator, &context);
     context_initialized = true;
     status =
         loom_tooling_context_register_tool_dialects_with_target_environment(
-            loom_configured_target_environment(), &context);
+            &target_environment, &context);
   }
   if (iree_status_is_ok(status)) {
     status = loom_target_environment_initialize_low_descriptor_registry(
-        loom_configured_target_environment(), &low_descriptor_registry);
+        &target_environment, &low_descriptor_registry);
   }
   if (iree_status_is_ok(status)) {
-    loom_low_descriptor_text_asm_environment_initialize(
-        &low_descriptor_registry.registry, &low_asm_environment);
+    loom_low_descriptor_text_asm_environment_initialize_with_diagnostics(
+        &low_descriptor_registry.registry,
+        loom_target_environment_low_asm_diagnostic_provider_list(
+            &target_environment),
+        &low_asm_storage, &low_asm_environment);
   }
   if (iree_status_is_ok(status)) {
     status = loom_context_finalize(&context);
@@ -372,6 +430,10 @@ int main(int argc, char** argv) {
   if (context_initialized) {
     loom_context_deinitialize(&context);
   }
+  if (target_environment_initialized) {
+    loom_target_environment_deinitialize(&target_environment);
+  }
+  iree_allocator_free(allocator, target_providers);
   iree_arena_block_pool_deinitialize(&block_pool);
 
   IREE_TRACE_ZONE_END(z0);

@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_independent_dotf_shared_zero_seed(%lhs0: vector<2xf32>, %rhs0: vector<2xf32>, %lhs1: vector<2xf32>, %rhs1: vector<2xf32>) -> (f32, f32) {
   %initial_accumulator = scalar.constant 0.0 : f32
   %dot0 = vector.dotf %lhs0, %rhs0, %initial_accumulator : vector<2xf32>, vector<2xf32>, f32

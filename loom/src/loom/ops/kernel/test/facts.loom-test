@@ -72,9 +72,9 @@ kernel.def @collective_uniform_scope_facts() {
   %broadcast_first = kernel.subgroup.broadcast.first %lane_i32 : i32
   %broadcast_uniform = kernel.subgroup.broadcast %arg from %lane_i32 : i32, i32
   %subgroup_sum = kernel.subgroup.reduce<addi> %lane_i32 : i32
-  %subgroup_prefix = kernel.subgroup.scan<addi> %lane_i32 {mode = inclusive, direction = forward} : i32
+  %subgroup_prefix = kernel.subgroup.scan<addi> %lane_i32 {direction = forward, mode = inclusive} : i32
   %workgroup_sum = kernel.workgroup.reduce<addi> %lane_i32 : i32
-  %workgroup_prefix = kernel.workgroup.scan<addi> %lane_i32 {mode = inclusive, direction = forward} : i32
+  %workgroup_prefix = kernel.workgroup.scan<addi> %lane_i32 {direction = forward, mode = inclusive} : i32
   %workgroup_any = kernel.workgroup.vote.any %predicate : i1
   %subgroup_sum_is_subgroup_uniform = test.fact_subgroup_uniform %subgroup_sum : i32 -> i1
   %subgroup_sum_is_workgroup_uniform = test.fact_workgroup_uniform %subgroup_sum : i32 -> i1

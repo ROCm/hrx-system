@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx942> @target
+
 func.def target(@target) @i32_uniform_vector_reduce(%value0: i32, %value1: i32, %value2: i32, %value3: i32) -> (i32) {
   %values = vector.from_elements %value0, %value1, %value2, %value3 : vector<4xi32>
   %init = scalar.constant 0 : i32

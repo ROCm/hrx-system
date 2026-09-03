@@ -2,9 +2,9 @@
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @dead_sgpr_result_preserves_live_predicate(%predicate: reg<amdgpu.sgpr x2>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) {
-  %dead = low.op<amdgpu.v_cmp_slt_i32>(%lhs, %rhs) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.sgpr x2>
-  low.return %predicate : reg<amdgpu.sgpr x2>
+low.func.def target<amdgpu.rdna3.core>(@target) @dead_sgpr_result_preserves_live_predicate(%predicate: reg<amdgpu.sgpr x2>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+  %dead = v_cmp_lt_i32 %lhs, %rhs
+  return %predicate
 }
 
 // ----
@@ -16,9 +16,9 @@ low.func.def target<amdgpu.rdna3.core>(@target) @dead_sgpr_result_preserves_live
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_structural_vgpr_span_rebased_before_257(%wide: reg<amdgpu.vgpr x12>, %tail: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x13>) {
-  %packed = low.concat(%wide, %tail) : (reg<amdgpu.vgpr x12>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x13>
-  low.return %packed : reg<amdgpu.vgpr x13>
+low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_structural_vgpr_span_rebased_before_257(%wide: reg<amdgpu.vgpr x12>, %tail: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x13>) asm {
+  %packed = concat(%wide, %tail) : (reg<amdgpu.vgpr x12>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x13>
+  return %packed
 }
 
 // ----
@@ -30,12 +30,12 @@ low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_structural_vgpr_span_reba
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @dispatch_ptr_lifetime_releases_sgpr_pair() -> (reg<amdgpu.sgpr>) {
-  %dispatch = low.live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
-  %grid = low.op<amdgpu.s_load_dword_offset_only>(%dispatch) {offset = 12} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr>
-  %late = low.const<amdgpu.s_mov_b32> {imm32 = 7} : reg<amdgpu.sgpr>
-  %sum = low.op<amdgpu.s_add_u32>(%grid, %late) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
-  low.return %sum : reg<amdgpu.sgpr>
+low.func.def target<amdgpu.rdna3.core>(@target) @dispatch_ptr_lifetime_releases_sgpr_pair() -> (reg<amdgpu.sgpr>) asm {
+  %dispatch = live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
+  %grid = s_load_dword_offset_only %dispatch {offset = 12}
+  %late = s_mov_b32 7
+  %sum = s_add_u32 %grid, %late
+  return %sum
 }
 
 // ----
@@ -47,32 +47,32 @@ low.func.def target<amdgpu.rdna3.core>(@target) @dispatch_ptr_lifetime_releases_
 
 amdgpu.target<gfx1100> @target
 
-low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @materialized_pair_descriptor_survives_exec_tail_backedge() {
-  %kernarg = low.live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
-  %blocker = low.live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
-  %lane = low.live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %binding_pair = low.op<amdgpu.s_load_dwordx4_offset_only>(%kernarg) {offset = 0} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x4>
-  %descriptor = low.slice %binding_pair[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr x2>
-  %output = low.slice %binding_pair[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr x2>
-  %mask = low.op<amdgpu.v_cmp_eq_i32.src1_inline>(%lane) {rhs = 0} : (reg<amdgpu.vgpr>) -> reg<amdgpu.sgpr x2>
-  %saved_exec, %has_lanes = low.op<amdgpu.s_and_saveexec_b64>(%mask) : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>, reg<amdgpu.scc>
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @materialized_pair_descriptor_survives_exec_tail_backedge() asm {
+  %kernarg = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %blocker = live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %binding_pair = s_load_dwordx4_offset_only %kernarg
+  %descriptor = slice %binding_pair[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr x2>
+  %output = slice %binding_pair[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr x2>
+  %mask = v_cmp_eq_i32_src1_inline %lane {rhs = 0}
+  %saved_exec, %has_lanes = s_and_saveexec_b64 %mask
   low.cond_br %has_lanes, ^load, ^tail : reg<amdgpu.scc>
 ^load:
-  %address = low.op<amdgpu.v_lshlrev_b32.src0_inline>(%lane) {imm32 = 2} : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  %loaded = low.op<amdgpu.global_load_b32_saddr>(%address, %descriptor) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.vgpr>
+  %address = v_lshlrev_b32_src0_inline %lane, 2
+  %loaded = global_load_b32_saddr %address, %descriptor
   low.br ^join(%loaded: reg<amdgpu.vgpr>)
 ^tail:
-  low.op<amdgpu.s_mov_b64_exec>(%saved_exec) : (reg<amdgpu.sgpr x2>)
-  %tail_mask = low.op<amdgpu.s_and_b64>(%saved_exec, %mask) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
-  %combined_tail_mask = low.op<amdgpu.s_or_b64>(%tail_mask, %blocker) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
-  %remaining = low.op<amdgpu.s_xor_b64_exec>(%combined_tail_mask) : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.scc>
+  s_mov_b64_exec %saved_exec
+  %tail_mask = s_and_b64 %saved_exec, %mask
+  %combined_tail_mask = s_or_b64 %tail_mask, %blocker
+  %remaining = s_xor_b64_exec %combined_tail_mask
   low.cond_br %remaining, ^load, ^exit : reg<amdgpu.scc>
 ^join(%value: reg<amdgpu.vgpr>):
-  %store_address = low.op<amdgpu.v_lshlrev_b32.src0_inline>(%lane) {imm32 = 2} : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  low.op<amdgpu.global_store_b32_saddr>(%store_address, %value, %output) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>)
-  low.return
+  %store_address = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %store_address, %value, %output
+  return
 ^exit:
-  low.return
+  return
 }
 
 // ----
@@ -192,8 +192,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_multi_accumulator_gemv_li
 amdgpu.target<gfx1100> @target
 
 // ERROR@+1: BACKEND/019 {function_name="gfx11_forced_vgpr_spill_reports_missing_scratch_storage", value_class="amdgpu.vgpr", spill_slot_space="scratch", storage_space="scratch"}
-low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_forced_vgpr_spill_reports_missing_scratch_storage(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) {
-  low.return %a, %b, %c : reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>
+low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_forced_vgpr_spill_reports_missing_scratch_storage(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  return %a, %b, %c
 }
 
 // ====
@@ -203,8 +203,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_forced_vgpr_spill_reports
 amdgpu.target<gfx1100> @target
 
 // ERROR@+1: BACKEND/005 {function_name="scc_active_conflict_reports_failure", value_class="amdgpu.scc", budget="1", peak="2", failure_code="unspillable-register-exhausted"}
-low.func.def target<amdgpu.rdna3.core>(@target) @scc_active_conflict_reports_failure(%leader: reg<amdgpu.scc>, %blocked: reg<amdgpu.scc>) -> (reg<amdgpu.scc>, reg<amdgpu.scc>) {
-  low.return %leader, %blocked : reg<amdgpu.scc>, reg<amdgpu.scc>
+low.func.def target<amdgpu.rdna3.core>(@target) @scc_active_conflict_reports_failure(%leader: reg<amdgpu.scc>, %blocked: reg<amdgpu.scc>) -> (reg<amdgpu.scc>, reg<amdgpu.scc>) asm {
+  return %leader, %blocked
 }
 
 // ----
@@ -375,24 +375,24 @@ low.func.def target<amdgpu.rdna3.core>(@target) @integer_valu_rematerializes_spi
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @dense_spilled_slices_share_full_reload(%packed: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
-  %lane0 = low.slice %packed[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum0 = low.op<amdgpu.v_add_f32>(%acc, %lane0) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  %lane1 = low.slice %packed[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum1 = low.op<amdgpu.v_add_f32>(%sum0, %lane1) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  %lane2 = low.slice %packed[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum2 = low.op<amdgpu.v_add_f32>(%sum1, %lane2) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  %lane3 = low.slice %packed[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum3 = low.op<amdgpu.v_add_f32>(%sum2, %lane3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  %lane4 = low.slice %packed[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum4 = low.op<amdgpu.v_add_f32>(%sum3, %lane4) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  %lane5 = low.slice %packed[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum5 = low.op<amdgpu.v_add_f32>(%sum4, %lane5) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  %lane6 = low.slice %packed[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum6 = low.op<amdgpu.v_add_f32>(%sum5, %lane6) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  %lane7 = low.slice %packed[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum7 = low.op<amdgpu.v_add_f32>(%sum6, %lane7) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  low.return %sum7 : reg<amdgpu.vgpr>
+low.func.def target<amdgpu.rdna3.core>(@target) @dense_spilled_slices_share_full_reload(%packed: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %lane0 = slice %packed[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum0 = v_add_f32 %acc, %lane0
+  %lane1 = slice %packed[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum1 = v_add_f32 %sum0, %lane1
+  %lane2 = slice %packed[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum2 = v_add_f32 %sum1, %lane2
+  %lane3 = slice %packed[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum3 = v_add_f32 %sum2, %lane3
+  %lane4 = slice %packed[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum4 = v_add_f32 %sum3, %lane4
+  %lane5 = slice %packed[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum5 = v_add_f32 %sum4, %lane5
+  %lane6 = slice %packed[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum6 = v_add_f32 %sum5, %lane6
+  %lane7 = slice %packed[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum7 = v_add_f32 %sum6, %lane7
+  return %sum7
 }
 
 // ----
@@ -404,14 +404,14 @@ low.func.def target<amdgpu.rdna3.core>(@target) @dense_spilled_slices_share_full
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @loaded_chained_destructive_sgpr_results(%base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) {
-  %position = low.op<amdgpu.s_load_dword_offset_only>(%base) {offset = 0} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr>
+low.func.def target<amdgpu.rdna3.core>(@target) @loaded_chained_destructive_sgpr_results(%base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+  %position = s_load_dword_offset_only %base
   // REMARK@+1: BACKEND/043 {source_value_name="position", result_value_name="active_row_count", value_class="amdgpu.sgpr", placement_cause="tied-result", decision="accepted", reason_key="assigned-locations-match"}
-  %active_row_count = low.op<amdgpu.s_addk_i32>(%position) {imm16 = 1} : (reg<amdgpu.sgpr>) -> %position as reg<amdgpu.sgpr>
+  %active_row_count = s_addk_i32 %position, 1
   // REMARK@+1: BACKEND/043 {source_value_name="active_row_count", result_value_name="padded_active_row_count", value_class="amdgpu.sgpr", placement_cause="tied-result", decision="accepted", reason_key="assigned-locations-match"}
-  %padded_active_row_count = low.op<amdgpu.s_addk_i32>(%active_row_count) {imm16 = 63} : (reg<amdgpu.sgpr>) -> %active_row_count as reg<amdgpu.sgpr>
-  %active_block_count = low.op<amdgpu.s_lshr_b32.rhs_inline>(%padded_active_row_count) {imm32 = 6} : (reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
-  low.return %active_block_count : reg<amdgpu.sgpr>
+  %padded_active_row_count = s_addk_i32 %active_row_count, 63
+  %active_block_count = s_lshr_b32_rhs_inline %padded_active_row_count, 6
+  return %active_block_count
 }
 
 // ====

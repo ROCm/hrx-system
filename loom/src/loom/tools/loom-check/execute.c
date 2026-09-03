@@ -152,7 +152,7 @@ static iree_status_t loom_check_append_diagnostic_json(
 
 iree_status_t loom_check_result_append_annotation_edit(
     loom_check_result_t* result, loom_check_update_edit_kind_t kind,
-    loom_check_source_range_t range, iree_host_size_t target_line,
+    loom_test_source_range_t range, iree_host_size_t target_line,
     iree_string_view_t text) {
   loom_output_stream_t stream;
   IREE_RETURN_IF_ERROR(
@@ -236,7 +236,7 @@ iree_status_t loom_check_environment_initialize_math_policy_registry(
 //===----------------------------------------------------------------------===//
 
 iree_status_t loom_check_execute_case(
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
@@ -249,43 +249,43 @@ iree_status_t loom_check_execute_case(
   }
 
   switch (test_case->mode) {
-    case LOOM_CHECK_MODE_ROUNDTRIP: {
+    case LOOM_TEST_MODE_ROUNDTRIP: {
       IREE_RETURN_IF_ERROR(
           loom_check_execute_roundtrip(test_case, filename, environment,
                                        context, block_pool, allocator, result));
       break;
     }
-    case LOOM_CHECK_MODE_VERIFY: {
+    case LOOM_TEST_MODE_VERIFY: {
       IREE_RETURN_IF_ERROR(loom_check_execute_verify(
           test_case, case_index, report, filename, environment, context,
           block_pool, allocator, result));
       break;
     }
-    case LOOM_CHECK_MODE_PASS: {
+    case LOOM_TEST_MODE_PASS: {
       IREE_RETURN_IF_ERROR(loom_check_execute_pass(
           test_case, case_index, report, filename, environment, context,
           block_pool, allocator, result));
       break;
     }
-    case LOOM_CHECK_MODE_PASS_REPORT: {
+    case LOOM_TEST_MODE_PASS_REPORT: {
       IREE_RETURN_IF_ERROR(loom_check_execute_pass_report(
           test_case, case_index, report, filename, environment, context,
           block_pool, allocator, result));
       break;
     }
-    case LOOM_CHECK_MODE_COMPILE_REPORT: {
+    case LOOM_TEST_MODE_COMPILE_REPORT: {
       IREE_RETURN_IF_ERROR(loom_check_execute_compile_report(
           test_case, case_index, report, filename, environment, context,
           block_pool, allocator, result));
       break;
     }
-    case LOOM_CHECK_MODE_FORMAT: {
+    case LOOM_TEST_MODE_FORMAT: {
       IREE_RETURN_IF_ERROR(
           loom_check_execute_format(test_case, filename, environment, context,
                                     block_pool, allocator, result));
       break;
     }
-    case LOOM_CHECK_MODE_EMIT: {
+    case LOOM_TEST_MODE_EMIT: {
       IREE_RETURN_IF_ERROR(loom_check_execute_emit(
           test_case, case_index, report, filename, environment, context,
           block_pool, allocator, result));
@@ -310,7 +310,7 @@ iree_status_t loom_check_execute_case(
 }
 
 static iree_status_t loom_check_verify_pass_output(
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     const loom_check_environment_t* environment,
     loom_check_diagnostic_collector_t* diagnostic_collector,
     loom_module_t* module, bool* out_failed_verification) {
@@ -366,7 +366,7 @@ static iree_status_t loom_check_verify_pass_output(
 
 static iree_status_t loom_check_finish_diagnostics_if_needed(
     loom_check_diagnostic_collector_t* diagnostic_collector,
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_allocator_t allocator,
     loom_check_result_t* result, bool* out_failed) {
   *out_failed = false;
@@ -380,7 +380,7 @@ static iree_status_t loom_check_finish_diagnostics_if_needed(
 }
 
 static bool loom_check_case_has_expected_output(
-    const loom_check_case_t* test_case) {
+    const loom_test_case_t* test_case) {
   return !iree_string_view_is_empty(iree_string_view_trim(test_case->expected));
 }
 
@@ -408,16 +408,21 @@ typedef enum loom_check_pass_output_kind_e {
 } loom_check_pass_output_kind_t;
 
 static loom_text_print_flags_t loom_check_pass_print_flags(
-    const loom_check_case_t* test_case) {
+    const loom_test_case_t* test_case) {
   loom_text_print_flags_t flags = LOOM_TEXT_PRINT_DEFAULT;
-  if (iree_all_bits_set(test_case->output_flags, LOOM_CHECK_OUTPUT_LOCATIONS)) {
+  // An implicit expected section is a canonical fixed-point check. Explicit
+  // input/expected pairs may deliberately assert generic Low output.
+  if (!test_case->has_expected_section) {
+    flags |= LOOM_TEXT_PRINT_PREFER_LOW_ASM;
+  }
+  if (iree_all_bits_set(test_case->output_flags, LOOM_TEST_OUTPUT_LOCATIONS)) {
     flags |= LOOM_TEXT_PRINT_LOCATIONS;
   }
   return flags;
 }
 
 static iree_status_t loom_check_execute_pass_with_output(
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
@@ -666,11 +671,13 @@ static iree_status_t loom_check_execute_pass_with_output(
     result->has_actual_output = true;
   }
 
-  // Strip comments from the expected section.
+  // Remove comments from the comparable expected output. The output printer
+  // owns canonical blank-line placement.
   iree_string_builder_t stripped_expected;
   iree_string_builder_initialize(allocator, &stripped_expected);
   if (iree_status_is_ok(status)) {
-    status = loom_check_strip_comments(test_case->expected, &stripped_expected);
+    status =
+        loom_test_file_remove_comments(test_case->expected, &stripped_expected);
   }
   if (iree_status_is_ok(status)) {
     iree_string_view_t actual_trimmed =
@@ -693,7 +700,7 @@ static iree_status_t loom_check_execute_pass_with_output(
 }
 
 iree_status_t loom_check_execute_pass(
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
@@ -704,7 +711,7 @@ iree_status_t loom_check_execute_pass(
 }
 
 iree_status_t loom_check_execute_pass_report(
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
@@ -715,7 +722,7 @@ iree_status_t loom_check_execute_pass_report(
 }
 
 iree_status_t loom_check_execute_compile_report(
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
@@ -726,7 +733,7 @@ iree_status_t loom_check_execute_compile_report(
 }
 
 iree_status_t loom_check_execute_format(
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result) {
@@ -737,7 +744,7 @@ iree_status_t loom_check_execute_format(
   iree_string_builder_t stripped_input;
   iree_string_builder_initialize(allocator, &stripped_input);
   iree_status_t status =
-      loom_check_strip_comments(test_case->input, &stripped_input);
+      loom_test_file_strip_comments(test_case->input, &stripped_input);
 
   loom_check_diagnostic_capture_t diagnostic_capture = {
       .detail = &result->detail,
@@ -802,7 +809,8 @@ iree_status_t loom_check_execute_format(
 
   iree_string_builder_t stripped_expected;
   iree_string_builder_initialize(allocator, &stripped_expected);
-  status = loom_check_strip_comments(test_case->expected, &stripped_expected);
+  status =
+      loom_test_file_remove_comments(test_case->expected, &stripped_expected);
 
   if (iree_status_is_ok(status)) {
     iree_string_view_t actual_trimmed =

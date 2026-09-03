@@ -6,6 +6,7 @@
 // the body. schedule(locked) becomes explicit source-order boundaries in the
 // surrounding freely scheduled kernel.
 amdgpu.target<gfx11-generic> @helper_target
+
 amdgpu.target<gfx1151> @caller_target
 
 low.func.def schedule(locked) target<amdgpu.gfx11.generic.core>(@helper_target) @pack_pair(%even: reg<amdgpu.vgpr x2>, %odd: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>) asm {
@@ -13,8 +14,8 @@ low.func.def schedule(locked) target<amdgpu.gfx11.generic.core>(@helper_target) 
   %even1 = slice %even[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %odd0 = slice %odd[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %odd1 = slice %odd[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %selector0 = s_mov_b32 0x05040100
-  %selector1 = s_mov_b32 0x07060302
+  %selector0 = s_mov_b32 84148480
+  %selector1 = s_mov_b32 117834498
   %packed0 = v_perm_b32 %odd0, %even0, %selector0
   %packed1 = v_perm_b32 %odd1, %even1, %selector0
   %packed2 = v_perm_b32 %odd0, %even0, %selector1
@@ -25,8 +26,7 @@ low.func.def schedule(locked) target<amdgpu.gfx11.generic.core>(@helper_target) 
 
 kernel.def target(@caller_target) @caller() {
   %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1)
-      workgroup_size(%c1, %c1, %c1) : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input_buffer: buffer, %output_buffer: buffer) {
   %base = index.constant 0 : offset
   %c0 = index.constant 0 : index
@@ -37,8 +37,7 @@ kernel.def target(@caller_target) @caller() {
   %even = vector.load %input[%c0] : view<8xf16> -> vector<4xf16>
   %c4 = index.constant 4 : index
   %odd = vector.load %input[%c4] : view<8xf16> -> vector<4xf16>
-  %packed = low.invoke @pack_pair(%even, %odd)
-      : (vector<4xf16>, vector<4xf16>) -> (vector<8xf16>)
+  %packed = low.invoke @pack_pair(%even, %odd) : (vector<4xf16>, vector<4xf16>) -> (vector<8xf16>)
   vector.store %packed, %output[%c0] : vector<8xf16>, view<8xf16>
   kernel.return
 }
@@ -83,6 +82,7 @@ low.kernel.def target<amdgpu.rdna3_5.core>(@caller_target) workgroup_size(1, 1, 
 // nontrivial instruction fragment is inlined without synthetic scheduling
 // boundaries so its packets can participate in the caller's schedule.
 amdgpu.target<gfx11-generic> @helper_target
+
 amdgpu.target<gfx1151> @caller_target
 
 low.func.def target<amdgpu.gfx11.generic.core>(@helper_target) @schedule_free_pack_pair(%even: reg<amdgpu.vgpr x2>, %odd: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>) asm {
@@ -90,8 +90,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@helper_target) @schedule_free_pa
   %even1 = slice %even[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %odd0 = slice %odd[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %odd1 = slice %odd[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %selector0 = s_mov_b32 0x05040100
-  %selector1 = s_mov_b32 0x07060302
+  %selector0 = s_mov_b32 84148480
+  %selector1 = s_mov_b32 117834498
   %packed0 = v_perm_b32 %odd0, %even0, %selector0
   %packed1 = v_perm_b32 %odd1, %even1, %selector0
   %packed2 = v_perm_b32 %odd0, %even0, %selector1
@@ -102,8 +102,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@helper_target) @schedule_free_pa
 
 kernel.def target(@caller_target) @schedule_free_caller() {
   %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1)
-      workgroup_size(%c1, %c1, %c1) : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input_buffer: buffer, %output_buffer: buffer) {
   %base = index.constant 0 : offset
   %c0 = index.constant 0 : index
@@ -114,8 +113,7 @@ kernel.def target(@caller_target) @schedule_free_caller() {
   %even = vector.load %input[%c0] : view<8xf16> -> vector<4xf16>
   %c4 = index.constant 4 : index
   %odd = vector.load %input[%c4] : view<8xf16> -> vector<4xf16>
-  %packed = low.invoke @schedule_free_pack_pair(%even, %odd)
-      : (vector<4xf16>, vector<4xf16>) -> (vector<8xf16>)
+  %packed = low.invoke @schedule_free_pack_pair(%even, %odd) : (vector<4xf16>, vector<4xf16>) -> (vector<8xf16>)
   vector.store %packed, %output[%c0] : vector<8xf16>, view<8xf16>
   kernel.return
 }

@@ -3,10 +3,11 @@
 // RUN: emit amdgpu-occupancy-json @rdna3_large_pool_pressure diagnostics=summary fixed=%value:physical_register:96:1
 
 amdgpu.target<gfx1100> @gfx11_target
+
 // REMARK@+2: BACKEND/010 "uses 0 of 800 amdgpu.sgpr" "75%" "limited by 'amdgpu.vgpr'"
 // REMARK@+1: BACKEND/010 "uses 97 of 1536 amdgpu.vgpr" "75%" "limited by 'amdgpu.vgpr'"
-low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @rdna3_large_pool_pressure(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
-  low.return %value : reg<amdgpu.vgpr>
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @rdna3_large_pool_pressure(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
 }
 
 // ----
@@ -17,8 +18,9 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @rdna3_large_pool_pressure
 // RUN: emit amdgpu-occupancy-json @rdna3_small_pool_pressure fixed=%value:physical_register:96:1
 
 amdgpu.target<gfx1102> @gfx1102_target
-low.func.def target<amdgpu.rdna3.core>(@gfx1102_target) @rdna3_small_pool_pressure(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
-  low.return %value : reg<amdgpu.vgpr>
+
+low.func.def target<amdgpu.rdna3.core>(@gfx1102_target) @rdna3_small_pool_pressure(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
 }
 
 // ----
@@ -30,8 +32,9 @@ low.func.def target<amdgpu.rdna3.core>(@gfx1102_target) @rdna3_small_pool_pressu
 
 // gfx1151 is the large-pool exception among the exact RDNA3.5 processors.
 amdgpu.target<gfx1151> @gfx1151_target
-low.func.def target<amdgpu.rdna3_5.core>(@gfx1151_target) @rdna3_5_large_pool_exception_pressure(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
-  low.return %value : reg<amdgpu.vgpr>
+
+low.func.def target<amdgpu.rdna3_5.core>(@gfx1151_target) @rdna3_5_large_pool_exception_pressure(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
 }
 
 // ----
@@ -44,8 +47,9 @@ low.func.def target<amdgpu.rdna3_5.core>(@gfx1151_target) @rdna3_5_large_pool_ex
 // The portable family contract uses a conservative pool and does not assume
 // the larger pool exposed by some compatible exact targets.
 amdgpu.target<gfx11-generic> @gfx11_generic_target
-low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_portable_pool_pressure(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
-  low.return %value : reg<amdgpu.vgpr>
+
+low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_portable_pool_pressure(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
 }
 
 // ----
@@ -56,8 +60,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_por
 // RUN: emit amdgpu-occupancy-json @rdna3_large_pool_wave64_pressure fixed=%value:physical_register:96:1
 
 amdgpu.target<gfx1100> @gfx1100_wave64_target {subgroup_size = 64}
-low.func.def target<amdgpu.rdna3.core>(@gfx1100_wave64_target) @rdna3_large_pool_wave64_pressure(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
-  low.return %value : reg<amdgpu.vgpr>
+
+low.func.def target<amdgpu.rdna3.core>(@gfx1100_wave64_target) @rdna3_large_pool_wave64_pressure(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
 }
 
 // ----
@@ -68,8 +73,9 @@ low.func.def target<amdgpu.rdna3.core>(@gfx1100_wave64_target) @rdna3_large_pool
 // RUN: emit amdgpu-occupancy-json @gfx11_sgpr_does_not_limit fixed=%value:physical_register:0:106
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_sgpr_does_not_limit(%value: reg<amdgpu.sgpr x106>) -> (reg<amdgpu.sgpr x106>) {
-  low.return %value : reg<amdgpu.sgpr x106>
+
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_sgpr_does_not_limit(%value: reg<amdgpu.sgpr x106>) -> (reg<amdgpu.sgpr x106>) asm {
+  return %value
 }
 
 // ----
@@ -80,6 +86,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_sgpr_does_not_limit
 // RUN: emit amdgpu-occupancy-json @gfx11_scc_does_not_contribute
 
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scc_does_not_contribute(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %cond = s_cmp_lt_i32 %lhs, %rhs
   low.cond_br %cond, ^then, ^else : reg<amdgpu.scc>
@@ -97,8 +104,9 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scc_does_not_contri
 // RUN: emit amdgpu-occupancy-json @gfx11_spill amdgpu.vgpr=2
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_spill(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) {
-  low.return %a, %b, %c : reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>
+
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_spill(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  return %a, %b, %c
 }
 
 // ----
@@ -109,6 +117,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_spill(%a: reg<amdgp
 // RUN: emit amdgpu-occupancy-json @gfx11_concat_reuses_releasable_memory_lease strategy=source fixed=%state:physical_register:0:184
 
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_concat_reuses_releasable_memory_lease(%state: reg<amdgpu.vgpr x184>) -> (reg<amdgpu.vgpr x184>, reg<amdgpu.vgpr x8>) asm {
   %address = slice %state[0] : reg<amdgpu.vgpr x184> -> reg<amdgpu.vgpr>
   %dead = ds_read_b128 %address
@@ -126,8 +135,9 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_concat_reuses_relea
 // RUN: emit amdgpu-occupancy-json @gfx1250_pressure fixed=%value:physical_register:204:1
 
 amdgpu.target<gfx1250> @gfx1250_target
-low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_pressure(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
-  low.return %value : reg<amdgpu.vgpr>
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_pressure(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
 }
 
 // ----
@@ -138,12 +148,13 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_pressur
 // RUN: emit amdgpu-occupancy-json @cdna_mixed_vector_pressure diagnostics=summary
 
 amdgpu.target<gfx942> @gfx942_target
+
 // REMARK@+4: BACKEND/010 "uses 0 of 800 amdgpu.sgpr" "12%" "limited by 'amdgpu.vgpr_agpr'"
 // REMARK@+3: BACKEND/010 "uses 256 of 512 amdgpu.vgpr" "12%" "limited by 'amdgpu.vgpr_agpr'"
 // REMARK@+2: BACKEND/010 "uses 128 of 256 amdgpu.agpr" "12%" "limited by 'amdgpu.vgpr_agpr'"
 // REMARK@+1: BACKEND/010 "uses 384 of 512 amdgpu.vgpr_agpr" "12%" "limited by 'amdgpu.vgpr_agpr'"
-low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @cdna_mixed_vector_pressure(%vgpr: reg<amdgpu.vgpr x256>, %agpr: reg<amdgpu.agpr x128>) -> (reg<amdgpu.vgpr x256>, reg<amdgpu.agpr x128>) {
-  low.return %vgpr, %agpr : reg<amdgpu.vgpr x256>, reg<amdgpu.agpr x128>
+low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @cdna_mixed_vector_pressure(%vgpr: reg<amdgpu.vgpr x256>, %agpr: reg<amdgpu.agpr x128>) -> (reg<amdgpu.vgpr x256>, reg<amdgpu.agpr x128>) asm {
+  return %vgpr, %agpr
 }
 
 // ----
@@ -154,6 +165,7 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @cdna_mixed_vector_pressu
 // RUN: emit amdgpu-occupancy-json @cdna_fragment_accumulator_pressure diagnostics=summary
 
 amdgpu.target<gfx942> @gfx942_target
+
 // REMARK@+4: BACKEND/010 "uses 0 of 800 amdgpu.sgpr" "100%" "limited by 'max_waves'"
 // REMARK@+3: BACKEND/010 "uses 32 of 512 amdgpu.vgpr" "100%" "limited by 'max_waves'"
 // REMARK@+2: BACKEND/010 "uses 32 of 256 amdgpu.agpr" "100%" "limited by 'max_waves'"

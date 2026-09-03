@@ -424,7 +424,6 @@ kernel.def target(@target) @uniform_global_load_controls_barrier() {
   %is_zero = scalar.cmpi eq, %control_value, %barrier_control : i32
   scf.if %is_zero {
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-    scf.yield
   }
   kernel.return
 }

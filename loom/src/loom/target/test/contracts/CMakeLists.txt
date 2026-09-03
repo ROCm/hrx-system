@@ -25,7 +25,6 @@ loom_target_contract_table_cc_libraries(
     loom::ops::scalar
     loom::ops::vector
     loom::target::test::descriptors
-  TESTONLY
 )
 
 loom_cc_library(
@@ -37,7 +36,6 @@ loom_cc_library(
   DEPS
     ::core
     ::core_lower_rules
-  TESTONLY
   PUBLIC
 )
 

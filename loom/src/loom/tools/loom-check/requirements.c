@@ -101,9 +101,9 @@ static iree_status_t loom_check_skip_unavailable_requirement(
 
 static iree_status_t loom_check_require_emit_tool_declarations(
     const loom_check_environment_t* environment,
-    const loom_check_case_t* test_case, loom_check_result_t* result,
+    const loom_test_case_t* test_case, loom_check_result_t* result,
     bool* out_continue_execution) {
-  if (test_case->mode != LOOM_CHECK_MODE_EMIT) {
+  if (test_case->mode != LOOM_TEST_MODE_EMIT) {
     return iree_ok_status();
   }
 
@@ -123,7 +123,7 @@ static iree_status_t loom_check_require_emit_tool_declarations(
 }
 
 iree_status_t loom_check_preflight_requirements(
-    const loom_check_case_t* test_case,
+    const loom_test_case_t* test_case,
     const loom_check_environment_t* environment, iree_allocator_t allocator,
     loom_check_result_t* result, bool* out_continue_execution) {
   *out_continue_execution = true;

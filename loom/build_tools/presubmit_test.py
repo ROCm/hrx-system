@@ -39,7 +39,7 @@ class LoomPresubmitTest(unittest.TestCase):
         self.assertEqual(command[:3], ["bazel", "test", "--config=presubmit"])
         self.assertEqual(command[-1], "//loom/...")
         self.assertIn(
-            "--//loom/config/target:enable=amdgpu,llvmir,spirv,x86",
+            "--//loom/config/target:enable=amdgpu,llvmir,spirv,wasm,x86",
             command,
         )
 
@@ -204,8 +204,8 @@ class LoomPresubmitTest(unittest.TestCase):
             )
         )
 
-    def test_loom_test_containers_are_outside_formatter_contract(self):
-        self.assertFalse(
+    def test_loom_test_containers_are_in_formatter_contract(self):
+        self.assertTrue(
             self.presubmit.is_format_source_path(
                 "loom/src/loom/test/corpus/source_low/numeric_i32_memory.loom-test"
             )
@@ -217,13 +217,14 @@ class LoomPresubmitTest(unittest.TestCase):
 
     def test_tracked_format_sources_use_exact_classification(self):
         canonical_path = "loom/src/loom/test/corpus/authoring/linking/checks.loom"
+        test_container_path = "loom/build_tools/bazel/test/roundtrip.loom-test"
         result = subprocess.CompletedProcess(
             args=[],
             returncode=0,
             stdout=(
                 canonical_path
                 + "\0loom/src/loom/test/corpus/text/operations.loom"
-                + "\0loom/src/loom/test/corpus/source_low/numeric.loom-test\0"
+                + f"\0{test_container_path}\0"
             ),
             stderr="",
         )
@@ -231,7 +232,11 @@ class LoomPresubmitTest(unittest.TestCase):
             self.presubmit.subprocess, "run", return_value=result
         ) as run:
             self.assertEqual(
-                self.presubmit.tracked_format_source_paths(), [canonical_path]
+                self.presubmit.tracked_format_source_paths(),
+                [
+                    test_container_path,
+                    canonical_path,
+                ],
             )
 
         run.assert_called_once_with(
@@ -346,9 +351,10 @@ class LoomPresubmitTest(unittest.TestCase):
             )
 
         diagnostic = output.getvalue()
-        self.assertIn("missing: amdgpu, spirv", diagnostic)
+        self.assertIn("missing: amdgpu, spirv, wasm", diagnostic)
         self.assertIn("-DLOOM_TARGET_AMDGPU=ON", diagnostic)
         self.assertIn("-DLOOM_TARGET_SPIRV=ON", diagnostic)
+        self.assertIn("-DLOOM_TARGET_WASM=ON", diagnostic)
         self.assertIn("IREE_CMAKE_BUILD_DIR", diagnostic)
 
     def test_cmake_source_format_accepts_full_target_provider_set(self):
@@ -387,7 +393,7 @@ class LoomPresubmitTest(unittest.TestCase):
             mock.patch.object(
                 self.presubmit,
                 "existing_format_source_paths",
-                return_value=["loom/b.loom"],
+                return_value=["loom/b.loom", "loom/deferred.loom-test"],
             ) as existing_format_source_paths,
             mock.patch.object(
                 self.presubmit.project_presubmit,
@@ -420,7 +426,7 @@ class LoomPresubmitTest(unittest.TestCase):
             cmake_target="loom::tools::loom-format",
             bazel_args=(
                 "--config=locked",
-                "--//loom/config/target:enable=amdgpu,llvmir,spirv,x86",
+                "--//loom/config/target:enable=amdgpu,llvmir,spirv,wasm,x86",
             ),
         )
         run_command.assert_called_once_with(
@@ -429,12 +435,13 @@ class LoomPresubmitTest(unittest.TestCase):
                 "--check",
                 "loom/a.loom",
                 "loom/b.loom",
+                "loom/deferred.loom-test",
             ],
             "Canonical Loom source",
         )
         stage_changed_paths.assert_not_called()
 
-    def test_source_format_fix_does_not_rewrite_loom_test_containers(self):
+    def test_source_format_fix_rewrites_loom_test_inputs(self):
         formatter_path = Path("/tools/loom-format")
         loom_test_path = (
             "loom/src/loom/test/corpus/source_low/numeric_i32_memory.loom-test"
@@ -443,11 +450,16 @@ class LoomPresubmitTest(unittest.TestCase):
             mock.patch.object(
                 self.presubmit,
                 "tracked_format_source_paths",
-                return_value=["loom/a.loom"],
+                return_value=["loom/a.loom", loom_test_path],
             ),
             mock.patch.object(
                 self.presubmit,
                 "selected_files",
+                return_value=[loom_test_path],
+            ),
+            mock.patch.object(
+                self.presubmit,
+                "existing_format_source_paths",
                 return_value=[loom_test_path],
             ),
             mock.patch.object(
@@ -470,11 +482,27 @@ class LoomPresubmitTest(unittest.TestCase):
                 )
             )
 
-        run_command.assert_called_once_with(
-            [str(formatter_path), "--check", "loom/a.loom"],
-            "Canonical Loom source",
+        self.assertEqual(
+            run_command.call_args_list,
+            [
+                mock.call(
+                    [str(formatter_path), "--in-place", loom_test_path],
+                    "Canonicalize selected Loom source",
+                ),
+                mock.call(
+                    [
+                        str(formatter_path),
+                        "--check",
+                        "loom/a.loom",
+                        loom_test_path,
+                    ],
+                    "Canonical Loom source",
+                ),
+            ],
         )
-        stage_changed_paths.assert_not_called()
+        stage_changed_paths.assert_called_once_with(
+            "loom", self.presubmit.REPO_ROOT, [loom_test_path]
+        )
 
     def test_source_format_fix_stages_selection_then_checks_tree(self):
         formatter_path = Path("/tools/loom-format")

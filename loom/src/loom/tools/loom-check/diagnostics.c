@@ -6,7 +6,6 @@
 
 #include "loom/tools/loom-check/diagnostics.h"
 
-#include <inttypes.h>
 #include <string.h>
 
 #include "loom/error/renderer.h"
@@ -49,103 +48,6 @@ static iree_status_t loom_check_format_type(loom_type_t type, void* user_data,
   return loom_text_print_type(type, collector->module, stream);
 }
 
-static iree_status_t loom_check_diagnostic_collector_copy_string(
-    loom_check_diagnostic_collector_t* collector, iree_string_view_t source,
-    iree_string_view_t* out_copy) {
-  *out_copy = iree_string_view_empty();
-  if (iree_string_view_is_empty(source)) return iree_ok_status();
-  char* target = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate(collector->arena, source.size, (void**)&target));
-  memcpy(target, source.data, source.size);
-  *out_copy = iree_make_string_view(target, source.size);
-  return iree_ok_status();
-}
-
-static iree_status_t loom_check_render_string_list_param(
-    loom_diagnostic_string_list_t string_list, loom_output_stream_t* stream) {
-  if (string_list.count > 0 && !string_list.values) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "string list param has count > 0 but values NULL");
-  }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '['));
-  for (iree_host_size_t i = 0; i < string_list.count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ", "));
-    }
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write(stream, string_list.values[i]));
-  }
-  return loom_output_stream_write_char(stream, ']');
-}
-
-static iree_status_t loom_check_render_param_value(
-    const loom_diagnostic_param_t* param, loom_type_formatter_t type_formatter,
-    loom_output_stream_t* stream) {
-  switch (param->kind) {
-    case LOOM_PARAM_STRING:
-      return loom_output_stream_write(stream, param->string);
-    case LOOM_PARAM_I64:
-      return loom_output_stream_write_format(stream, "%" PRId64, param->i64);
-    case LOOM_PARAM_U32:
-      return loom_output_stream_write_format(stream, "%" PRIu32, param->u32);
-    case LOOM_PARAM_U64:
-      return loom_output_stream_write_format(stream, "%" PRIu64, param->u64);
-    case LOOM_PARAM_STRING_LIST:
-      return loom_check_render_string_list_param(param->string_list, stream);
-    case LOOM_PARAM_BOOL:
-      return loom_output_stream_write_cstring(
-          stream, param->boolean ? "true" : "false");
-    case LOOM_PARAM_TYPE:
-      if (type_formatter.fn) {
-        return type_formatter.fn(param->type, type_formatter.user_data, stream);
-      }
-      return loom_output_stream_write_cstring(stream, "<type>");
-    default:
-      return loom_output_stream_write_cstring(stream, "<?>");
-  }
-}
-
-static iree_status_t loom_check_diagnostic_collector_copy_param_values(
-    loom_check_diagnostic_collector_t* collector,
-    const loom_diagnostic_t* diagnostic, loom_type_formatter_t type_formatter,
-    iree_string_view_t** out_values, iree_host_size_t* out_count) {
-  *out_values = NULL;
-  *out_count = 0;
-  if (!diagnostic->params || !diagnostic->error ||
-      diagnostic->error->param_count == 0 || diagnostic->param_count == 0) {
-    return iree_ok_status();
-  }
-
-  const iree_host_size_t param_count =
-      iree_min(diagnostic->param_count, diagnostic->error->param_count);
-  if (param_count == 0) {
-    return iree_ok_status();
-  }
-  iree_string_view_t* values = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      collector->arena, param_count, sizeof(*values), (void**)&values));
-
-  for (iree_host_size_t i = 0; i < param_count; ++i) {
-    iree_string_builder_t value_builder;
-    iree_string_builder_initialize(collector->host_allocator, &value_builder);
-    loom_output_stream_t value_stream;
-    loom_output_stream_for_builder(&value_builder, &value_stream);
-    iree_status_t status = loom_check_render_param_value(
-        &diagnostic->params[i], type_formatter, &value_stream);
-    if (iree_status_is_ok(status)) {
-      status = loom_check_diagnostic_collector_copy_string(
-          collector, iree_string_builder_view(&value_builder), &values[i]);
-    }
-    iree_string_builder_deinitialize(&value_builder);
-    IREE_RETURN_IF_ERROR(status);
-  }
-
-  *out_values = values;
-  *out_count = param_count;
-  return iree_ok_status();
-}
-
 iree_status_t loom_check_diagnostic_collector_sink(
     void* user_data, const loom_diagnostic_t* diagnostic) {
   loom_check_diagnostic_collector_t* collector =
@@ -154,61 +56,16 @@ iree_status_t loom_check_diagnostic_collector_sink(
     IREE_RETURN_IF_ERROR(loom_check_diagnostic_collector_grow(collector));
   }
 
-  iree_string_builder_t message_builder;
-  iree_string_builder_initialize(collector->host_allocator, &message_builder);
-  loom_output_stream_t message_stream;
-  loom_output_stream_for_builder(&message_builder, &message_stream);
-  loom_type_formatter_t type_formatter = {loom_check_format_type, collector};
-  iree_status_t render_status = loom_diagnostic_render_message(
-      diagnostic->error, diagnostic->params, diagnostic->param_count,
-      type_formatter, &message_stream);
-  if (!iree_status_is_ok(render_status)) {
-    iree_string_builder_deinitialize(&message_builder);
-    return render_status;
-  }
-
-  iree_string_view_t message = iree_string_view_empty();
-  iree_status_t copy_status = loom_check_diagnostic_collector_copy_string(
-      collector, iree_string_builder_view(&message_builder), &message);
-  iree_string_builder_deinitialize(&message_builder);
-  IREE_RETURN_IF_ERROR(copy_status);
-
-  iree_string_view_t* param_values = NULL;
-  iree_host_size_t param_value_count = 0;
-  IREE_RETURN_IF_ERROR(loom_check_diagnostic_collector_copy_param_values(
-      collector, diagnostic, type_formatter, &param_values,
-      &param_value_count));
-
-  iree_string_builder_t formatted_builder;
-  iree_string_builder_initialize(collector->host_allocator, &formatted_builder);
-  loom_output_stream_t formatted_stream;
-  loom_output_stream_for_builder(&formatted_builder, &formatted_stream);
-  const loom_diagnostic_format_options_t format_options = {
-      .type_formatter = type_formatter,
+  const loom_test_diagnostic_format_options_t format_options = {
+      .module = collector->module,
+      .text_print_options = collector->type_print_context.options,
   };
-  iree_status_t format_status = loom_diagnostic_format_with_options(
-      diagnostic, &format_options, &formatted_stream);
-  iree_string_view_t formatted_diagnostic = iree_string_view_empty();
-  if (iree_status_is_ok(format_status)) {
-    format_status = loom_check_diagnostic_collector_copy_string(
-        collector, iree_string_builder_view(&formatted_builder),
-        &formatted_diagnostic);
-  }
-  iree_string_builder_deinitialize(&formatted_builder);
-  IREE_RETURN_IF_ERROR(format_status);
+  IREE_RETURN_IF_ERROR(loom_test_diagnostic_materialize(
+      diagnostic, &format_options, collector->arena, collector->host_allocator,
+      &collector->diagnostics[collector->count]));
+  ++collector->count;
 
-  collector->diagnostics[collector->count++] =
-      (loom_check_collected_diagnostic_t){
-          .severity = diagnostic->severity,
-          .domain = loom_error_def_domain(diagnostic->error),
-          .code = loom_error_def_code(diagnostic->error),
-          .error = diagnostic->error,
-          .origin_line = diagnostic->origin.start_line,
-          .message = message,
-          .param_values = param_values,
-          .param_value_count = param_value_count,
-          .formatted_diagnostic = formatted_diagnostic,
-      };
+  loom_type_formatter_t type_formatter = {loom_check_format_type, collector};
   loom_check_diagnostic_capture_t diagnostic_capture = {
       .type_formatter = type_formatter,
       .result = collector->result,
@@ -399,7 +256,7 @@ static loom_source_range_t loom_check_case_source_range(
 
 iree_status_t loom_check_diagnostic_collector_emit_case_source(
     loom_check_diagnostic_collector_t* collector,
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     loom_emitter_t emitter, const loom_error_def_t* error,
     const loom_diagnostic_param_t* params, iree_host_size_t param_count) {
   if (!collector) return iree_ok_status();
@@ -425,93 +282,20 @@ iree_status_t loom_check_diagnostic_collector_emit_case_source(
 // Annotation matching
 //===----------------------------------------------------------------------===//
 
-static int loom_check_diagnostic_find_param_index(
-    const loom_check_collected_diagnostic_t* diagnostic,
-    iree_string_view_t name) {
-  if (!diagnostic->error || diagnostic->error->param_count == 0) {
-    return -1;
-  }
-  for (iree_host_size_t i = 0; i < diagnostic->param_value_count; ++i) {
-    if (i >= diagnostic->error->param_count) {
-      return -1;
-    }
-    if (iree_string_view_equal(
-            name, iree_make_cstring_view(
-                      loom_error_def_param_name(diagnostic->error, i)))) {
-      return (int)i;
-    }
-  }
-  return -1;
-}
-
-static bool loom_check_diagnostic_params_match_annotation(
-    const loom_check_collected_diagnostic_t* diagnostic,
-    const loom_check_annotation_t* annotation) {
-  for (uint8_t i = 0; i < annotation->param_match_count; ++i) {
-    const loom_check_annotation_param_match_t* match =
-        &annotation->param_matches[i];
-    const int param_index =
-        loom_check_diagnostic_find_param_index(diagnostic, match->name);
-    if (param_index < 0) {
-      return false;
-    }
-    if (!iree_string_view_equal(diagnostic->param_values[param_index],
-                                match->value)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-static bool loom_check_diagnostic_matches_annotation(
-    const loom_check_collected_diagnostic_t* diagnostic,
-    const loom_check_annotation_t* annotation) {
-  if (diagnostic->severity != annotation->severity) return false;
-
-  if (annotation->domain != LOOM_ERROR_DOMAIN_COUNT_ &&
-      diagnostic->domain != annotation->domain) {
-    return false;
-  }
-
-  if (annotation->code != 0 && diagnostic->code != annotation->code) {
-    return false;
-  }
-
-  if (diagnostic->origin_line != (uint32_t)annotation->target_line) {
-    return false;
-  }
-
-  for (uint8_t i = 0; i < annotation->message_substring_count; ++i) {
-    if (iree_string_view_find(diagnostic->message,
-                              annotation->message_substrings[i],
-                              0) == IREE_STRING_VIEW_NPOS) {
-      return false;
-    }
-  }
-
-  if (!loom_check_diagnostic_params_match_annotation(diagnostic, annotation)) {
-    return false;
-  }
-
-  return true;
-}
-
 static iree_status_t loom_check_match_annotations(
     loom_check_collected_diagnostic_t* diagnostics,
     iree_host_size_t diagnostic_count,
-    const loom_check_annotation_t* annotations,
+    const loom_test_annotation_t* annotations,
     iree_host_size_t annotation_count, loom_check_file_report_t* report,
-    iree_host_size_t case_index) {
-  for (iree_host_size_t a = 0; a < annotation_count; ++a) {
-    for (iree_host_size_t d = 0; d < diagnostic_count; ++d) {
-      if (diagnostics[d].matched) continue;
-      if (loom_check_diagnostic_matches_annotation(&diagnostics[d],
-                                                   &annotations[a])) {
-        diagnostics[d].matched = true;
-        IREE_RETURN_IF_ERROR(loom_check_file_report_mark_annotation_matched(
-            report, case_index, a));
-        break;
-      }
+    iree_host_size_t case_index, iree_arena_allocator_t* arena) {
+  iree_host_size_t* annotation_to_diagnostic = NULL;
+  IREE_RETURN_IF_ERROR(loom_test_diagnostics_match_annotations(
+      diagnostics, diagnostic_count, annotations, annotation_count, arena,
+      &annotation_to_diagnostic));
+  for (iree_host_size_t i = 0; i < annotation_count; ++i) {
+    if (annotation_to_diagnostic[i] != IREE_HOST_SIZE_MAX) {
+      IREE_RETURN_IF_ERROR(loom_check_file_report_mark_annotation_matched(
+          report, case_index, i));
     }
   }
   return iree_ok_status();
@@ -554,8 +338,8 @@ static iree_status_t loom_check_append_diagnostic_annotation_line(
 }
 
 static bool loom_check_find_input_line_start(
-    const loom_check_case_t* test_case, iree_host_size_t target_line,
-    loom_check_source_range_t* out_range, iree_string_view_t* out_indentation) {
+    const loom_test_case_t* test_case, iree_host_size_t target_line,
+    loom_test_source_range_t* out_range, iree_string_view_t* out_indentation) {
   *out_indentation = iree_string_view_empty();
 
   if (target_line == 0 || !test_case->input.data) return false;
@@ -575,7 +359,7 @@ static bool loom_check_find_input_line_start(
           (iree_host_size_t)(line_start - test_case->input.data);
       iree_host_size_t source_offset =
           test_case->input_range.start_byte + line_offset;
-      *out_range = (loom_check_source_range_t){
+      *out_range = (loom_test_source_range_t){
           .start_byte = source_offset,
           .end_byte = source_offset,
       };
@@ -612,10 +396,10 @@ static bool loom_check_find_input_line_start(
   return false;
 }
 
-static loom_check_source_range_t loom_check_annotation_delete_range(
-    const loom_check_case_t* test_case,
-    const loom_check_annotation_t* annotation) {
-  loom_check_source_range_t range = annotation->source_range;
+static loom_test_source_range_t loom_check_annotation_delete_range(
+    const loom_test_case_t* test_case,
+    const loom_test_annotation_t* annotation) {
+  loom_test_source_range_t range = annotation->source_range;
   if (!test_case->input.data ||
       range.start_byte < test_case->input_range.start_byte ||
       range.end_byte > test_case->input_range.end_byte) {
@@ -638,7 +422,7 @@ static loom_check_source_range_t loom_check_annotation_delete_range(
 }
 
 static iree_status_t loom_check_append_annotation_param_matches(
-    const loom_check_annotation_t* annotation, iree_string_builder_t* builder) {
+    const loom_test_annotation_t* annotation, iree_string_builder_t* builder) {
   if (annotation->param_match_count == 0) {
     return iree_ok_status();
   }
@@ -647,7 +431,7 @@ static iree_status_t loom_check_append_annotation_param_matches(
     if (i > 0) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ", "));
     }
-    const loom_check_annotation_param_match_t* match =
+    const loom_test_annotation_param_match_t* match =
         &annotation->param_matches[i];
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "%.*s=\"%.*s\"", (int)match->name.size, match->name.data,
@@ -682,17 +466,17 @@ static iree_host_size_t loom_check_count_unmatched_diagnostics_on_line(
 static iree_status_t loom_check_build_annotation_edits(
     const loom_check_collected_diagnostic_t* diagnostics,
     iree_host_size_t diagnostic_count,
-    const loom_check_annotation_t* annotations,
+    const loom_test_annotation_t* annotations,
     iree_host_size_t annotation_count, const loom_check_file_report_t* report,
-    iree_host_size_t case_index, const loom_check_case_t* test_case,
+    iree_host_size_t case_index, const loom_test_case_t* test_case,
     iree_allocator_t allocator, loom_check_result_t* result) {
   for (iree_host_size_t a = 0; a < annotation_count; ++a) {
     bool annotation_matched = false;
     IREE_RETURN_IF_ERROR(loom_check_file_report_annotation_matched(
         report, case_index, a, &annotation_matched));
     if (annotation_matched) continue;
-    const loom_check_annotation_t* annotation = &annotations[a];
-    loom_check_source_range_t delete_range =
+    const loom_test_annotation_t* annotation = &annotations[a];
+    loom_test_source_range_t delete_range =
         loom_check_annotation_delete_range(test_case, annotation);
     IREE_RETURN_IF_ERROR(loom_check_result_append_annotation_edit(
         result, LOOM_CHECK_UPDATE_EDIT_DELETE_DIAGNOSTIC_ANNOTATION,
@@ -707,7 +491,7 @@ static iree_status_t loom_check_build_annotation_edits(
       continue;
     }
 
-    loom_check_source_range_t insert_range = loom_check_source_range_empty();
+    loom_test_source_range_t insert_range = loom_test_source_range_empty();
     iree_string_view_t indentation = iree_string_view_empty();
     if (!loom_check_find_input_line_start(test_case, diagnostic->origin_line,
                                           &insert_range, &indentation)) {
@@ -747,7 +531,7 @@ static iree_status_t loom_check_build_annotation_edits(
 static iree_status_t loom_check_assemble_diagnostic_match_detail(
     const loom_check_collected_diagnostic_t* diagnostics,
     iree_host_size_t diagnostic_count,
-    const loom_check_annotation_t* annotations,
+    const loom_test_annotation_t* annotations,
     iree_host_size_t annotation_count, const loom_check_file_report_t* report,
     iree_host_size_t case_index, iree_string_builder_t* detail) {
   for (iree_host_size_t a = 0; a < annotation_count; ++a) {
@@ -755,7 +539,7 @@ static iree_status_t loom_check_assemble_diagnostic_match_detail(
     IREE_RETURN_IF_ERROR(loom_check_file_report_annotation_matched(
         report, case_index, a, &annotation_matched));
     if (annotation_matched) continue;
-    const loom_check_annotation_t* annotation = &annotations[a];
+    const loom_test_annotation_t* annotation = &annotations[a];
     const char* severity_name =
         loom_diagnostic_severity_name(annotation->severity);
     if (annotation->domain != LOOM_ERROR_DOMAIN_COUNT_ &&
@@ -809,12 +593,12 @@ static iree_status_t loom_check_assemble_diagnostic_match_detail(
 
 iree_status_t loom_check_diagnostic_collector_finish(
     loom_check_diagnostic_collector_t* collector,
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_allocator_t allocator,
     loom_check_result_t* result) {
   IREE_RETURN_IF_ERROR(loom_check_match_annotations(
       collector->diagnostics, collector->count, test_case->annotations,
-      test_case->annotation_count, report, case_index));
+      test_case->annotation_count, report, case_index, collector->arena));
 
   bool all_annotations_matched = true;
   for (iree_host_size_t i = 0; i < test_case->annotation_count; ++i) {

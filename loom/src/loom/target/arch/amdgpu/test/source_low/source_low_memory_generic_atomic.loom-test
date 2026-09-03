@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @generic_atomic_i32_static(%input: buffer) {
   %buffer_base = index.constant 0 : offset
   %generic = buffer.assume.memory_space<generic> %input : buffer
@@ -30,6 +31,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @generic
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @generic_atomic_cmpxchg_i32_static(%input: buffer) {
   %buffer_base = index.constant 0 : offset
   %generic = buffer.assume.memory_space<generic> %input : buffer

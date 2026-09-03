@@ -1792,10 +1792,10 @@ static iree_status_t loom_amdgpu_append_waitcnt_packet(
     const loom_native_assembly_packet_context_t* context) {
   int64_t vmcnt = 0;
   int64_t lgkmcnt = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_read_packet_i64_attr(context, IREE_SV("vmcnt"), &vmcnt));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_read_packet_i64_attr(context, IREE_SV("lgkmcnt"), &lgkmcnt));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_read_packet_immediate_by_name_i64(
+      context, IREE_SV("vmcnt"), &vmcnt));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_read_packet_immediate_by_name_i64(
+      context, IREE_SV("lgkmcnt"), &lgkmcnt));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_mnemonic(context));
   return iree_string_builder_append_format(
       context->builder, " vmcnt(%" PRId64 ") lgkmcnt(%" PRId64 ")", vmcnt,

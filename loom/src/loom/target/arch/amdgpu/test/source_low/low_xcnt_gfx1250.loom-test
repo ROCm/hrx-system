@@ -1,8 +1,9 @@
 // RUN: emit amdgpu-assembly @smem_base_reuse_requires_xcnt strategy=source amdgpu.sgpr=16 fixed=%kernarg:physical_register:0:2 fixed=%keep:physical_register:2:6 fixed=%loaded:physical_register:8:8
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @smem_base_reuse_requires_xcnt(%kernarg: reg<amdgpu.sgpr x2>, %keep: reg<amdgpu.sgpr x6>) asm {
-  %loaded = low.op<amdgpu.s_load_dwordx8_offset_only>(%kernarg) {offset = 0} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x8>
+  %loaded = s_load_dwordx8_offset_only %kernarg
   %reuse = s_mov_b32 0
   %loaded0 = slice %loaded[0] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
   %loaded1 = slice %loaded[1] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr>
@@ -60,8 +61,9 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @smem_base_reuse_require
 // RUN: emit amdgpu-assembly @getreg_implicit_drain_precedes_result_write strategy=source amdgpu.sgpr=5 fixed=%kernarg:physical_register:0:2 fixed=%keep:physical_register:2:2 fixed=%loaded:physical_register:4:1
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @getreg_implicit_drain_precedes_result_write(%kernarg: reg<amdgpu.sgpr x2>, %keep: reg<amdgpu.sgpr x2>) asm {
-  %loaded = low.op<amdgpu.s_load_dword_offset_only>(%kernarg) {offset = 0} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr>
+  %loaded = s_load_dword_offset_only %kernarg
   %cluster_id = s_getreg_b32_cluster_workgroup_flat_id
   %keep0 = slice %keep[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %keep1 = slice %keep[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -86,6 +88,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @getreg_implicit_drain_p
 // RUN: emit amdgpu-assembly @vmem_address_reuse_requires_xcnt strategy=source amdgpu.vgpr=3 fixed=%addr:physical_register:0:1 fixed=%keep:physical_register:1:1 fixed=%loaded:physical_register:2:1
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vmem_address_reuse_requires_xcnt(%addr: reg<amdgpu.vgpr>, %keep: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
   %loaded = global_load_b32_saddr %addr, %base
   %reuse = v_mov_b32 7
@@ -108,6 +111,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vmem_address_reuse_requ
 // RUN: emit amdgpu-assembly @vmem_overwrite_uses_implicit_ordering strategy=source amdgpu.vgpr=3 fixed=%addr0:physical_register:0:1 fixed=%addr1:physical_register:1:1 fixed=%loaded0:physical_register:2:1
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vmem_overwrite_uses_implicit_ordering(%addr0: reg<amdgpu.vgpr>, %addr1: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
   %loaded0 = global_load_b32_saddr %addr0, %base
   %loaded1 = global_load_b32_saddr %addr1, %base {offset = 4}
@@ -126,6 +130,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vmem_overwrite_uses_imp
 // RUN: emit amdgpu-assembly @vmem_source_reuse_uses_minimum_xcnt strategy=source amdgpu.vgpr=6 fixed=%addr0:physical_register:0:1 fixed=%addr1:physical_register:1:1 fixed=%addr2:physical_register:2:1 fixed=%loaded0:physical_register:3:1 fixed=%loaded1:physical_register:4:1 fixed=%loaded2:physical_register:5:1
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vmem_source_reuse_uses_minimum_xcnt(%addr0: reg<amdgpu.vgpr>, %addr1: reg<amdgpu.vgpr>, %addr2: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
   %loaded0 = global_load_b32_saddr %addr0, %base
   %loaded1 = global_load_b32_saddr %addr1, %base {offset = 4}
@@ -156,6 +161,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vmem_source_reuse_uses_
 // RUN: emit amdgpu-assembly @cluster_source_reuse_requires_xcnt strategy=source amdgpu.vgpr=3 fixed=%lds:physical_register:0:1 fixed=%addr:physical_register:1:1 fixed=%keep:physical_register:2:1 fixed=%saddr:physical_register:4:2
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cluster_source_reuse_requires_xcnt(%lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %keep: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
   %m0 = s_mov_b32_m0_imm 3
   cluster_load_async_to_lds_b128 %lds, %addr, %saddr, %m0
@@ -179,6 +185,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cluster_source_reuse_re
 // RUN: emit amdgpu-assembly @vmem_exec_reuse_requires_xcnt strategy=source fixed=%addr:physical_register:0:1 fixed=%base:physical_register:0:2 fixed=%saved_exec:physical_register:2:2 fixed=%loaded:physical_register:1:1
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vmem_exec_reuse_requires_xcnt(%addr: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %saved_exec: reg<amdgpu.sgpr x2>) asm {
   %loaded = global_load_b32_saddr %addr, %base
   s_mov_b64_exec %saved_exec
@@ -198,6 +205,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vmem_exec_reuse_require
 // RUN: emit amdgpu-assembly @cross_block_vmem_exec_reuse_requires_xcnt strategy=source fixed=%addr:physical_register:0:1 fixed=%value:physical_register:1:1 fixed=%base:physical_register:0:2 fixed=%saved_exec:physical_register:2:2
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cross_block_vmem_exec_reuse_requires_xcnt(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %saved_exec: reg<amdgpu.sgpr x2>) asm {
   global_store_b32_saddr %addr, %value, %base
   low.br ^restore
@@ -221,8 +229,9 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cross_block_vmem_exec_r
 // RUN: emit amdgpu-assembly @cross_block_smem_result_reuse_requires_kmcnt strategy=source amdgpu.sgpr=13 fixed=%kernarg:physical_register:0:2 fixed=%loaded:physical_register:8:4 fixed=%reuse:physical_register:8:1 fixed=%keep:physical_register:12:1
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cross_block_smem_result_reuse_requires_kmcnt(%kernarg: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>, %keep: reg<amdgpu.sgpr>) asm {
-  %loaded = low.op<amdgpu.s_load_dwordx4_offset_only>(%kernarg) {offset = 0} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x4>
+  %loaded = s_load_dwordx4_offset_only %kernarg
   %loaded0 = slice %loaded[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
   low.cond_br %condition, ^use, ^overwrite : reg<amdgpu.scc>
 ^use:
@@ -257,8 +266,9 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cross_block_smem_result
 // RUN: emit amdgpu-assembly @smem_vmem_group_switch_releases_source strategy=source amdgpu.sgpr=6 fixed=%smem_base:physical_register:0:2 fixed=%smem_value:physical_register:2:1 fixed=%keep:physical_register:3:1 fixed=%global_base:physical_register:4:2 fixed=%addr:physical_register:0:1 fixed=%global_value:physical_register:1:1
 
 amdgpu.target<gfx1250> @target
+
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @smem_vmem_group_switch_releases_source(%smem_base: reg<amdgpu.sgpr x2>, %keep: reg<amdgpu.sgpr>, %global_base: reg<amdgpu.sgpr x2>, %addr: reg<amdgpu.vgpr>) asm {
-  %smem_value = low.op<amdgpu.s_load_dword_offset_only>(%smem_base) {offset = 0} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr>
+  %smem_value = s_load_dword_offset_only %smem_base
   %global_value = global_load_b32_saddr %addr, %global_base
   %reuse = s_mov_b32 7
   %scalar_sum = s_add_u32 %smem_value, %keep

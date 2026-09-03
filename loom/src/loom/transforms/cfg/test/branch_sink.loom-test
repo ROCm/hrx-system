@@ -7,9 +7,7 @@ func.def @sinks_then_only_chain(%cond: i1, %a: i32, %b: i32) {
   %sum = test.addi %doubled, %b : i32
   scf.if %cond {
     test.use %sum : i32
-    scf.yield
   } else {
-    scf.yield
   }
   func.return
 }
@@ -33,10 +31,8 @@ func.def @keeps_cross_branch_use(%cond: i1, %a: i32, %b: i32) {
   %sum = test.addi %a, %b : i32
   scf.if %cond {
     test.use %sum : i32
-    scf.yield
   } else {
     test.use %sum : i32
-    scf.yield
   }
   func.return
 }
@@ -60,9 +56,7 @@ func.def @keeps_external_use(%cond: i1, %a: i32, %b: i32) {
   %sum = test.addi %a, %b : i32
   scf.if %cond {
     test.use %sum : i32
-    scf.yield
   } else {
-    scf.yield
   }
   test.use %sum : i32
   func.return
@@ -89,9 +83,7 @@ func.def @sinks_type_use_only(%cond: i1, %buffer: buffer, %offset: offset, %n: i
     %layout = encoding.layout.dense : encoding<layout>
     %view = buffer.view %buffer[%offset] : buffer -> view<[%extent]xf32, %layout>
     test.use %view : view<[%extent]xf32, %layout>
-    scf.yield
   } else {
-    scf.yield
   }
   func.return
 }
@@ -115,9 +107,7 @@ func.def @sinks_type_use_only(%cond: i1, %buffer: buffer, %offset: offset, %n: i
 func.def @keeps_condition_producer(%a: i32, %b: i32) {
   %cond = test.cmp lt, %a, %b : i32
   scf.if %cond {
-    scf.yield
   } else {
-    scf.yield
   }
   func.return
 }

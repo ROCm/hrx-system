@@ -166,7 +166,7 @@ func.def @fptoui_negative_fraction_is_zero() -> (i16) {
 func.def @fptoui_preserves_high_destination_bit() -> (i8, i64) {
   %byte = scalar.constant 200.75 : f32
   %byte_result = scalar.fptoui %byte : f32 to i8
-  %wide = scalar.constant 9223372036854775808.0 : f64
+  %wide = scalar.constant 9.2233720368547758e+18 : f64
   %wide_result = scalar.fptoui %wide : f64 to i64
   func.return %byte_result, %wide_result : i8, i64
 }

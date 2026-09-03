@@ -32,10 +32,8 @@ func.def @if_false_keeps_selected_store(%buffer: buffer, %offset: offset, %value
   %c0 = scalar.constant 0.0 : f32
   scf.if %cond {
     view.store %c0, %view[0] : f32, view<1xf32, %layout>
-    scf.yield
   } else {
     view.store %value, %view[0] : f32, view<1xf32, %layout>
-    scf.yield
   }
   func.return
 }
@@ -307,9 +305,7 @@ func.def @if_edge_rewrites_vector_type_reference(%x: i32, %n: index, %limit: ind
   scf.if %cond {
     %v = vector.splat %x : vector<[%n]xi32>
     test.use %v : vector<[%n]xi32>
-    scf.yield
   } else {
-    scf.yield
   }
   func.return
 }
@@ -343,9 +339,7 @@ func.def @if_edge_rewrites_precast_index_reference(%buffer: buffer, %offset: off
     %view = buffer.view %buffer[%offset] : buffer -> view<[%n_idx]x4xf32, %layout>
     %loaded = vector.load %view[%row_idx, 0] : view<[%n_idx]x4xf32, %layout> -> vector<4xf32>
     test.use %loaded : vector<4xf32>
-    scf.yield
   } else {
-    scf.yield
   }
   func.return
 }
@@ -387,9 +381,7 @@ func.def @if_edge_rewrites_refinable_result_type_refs(%buffer: buffer, %offset: 
     %refined = view.refine %sub : view<[%n]xi32, %layout> -> view<[%n]xi32, %layout>
     %loaded = vector.load %refined[0] : view<[%n]xi32, %layout> -> vector<[%n]xi32>
     test.use %constant, %iota, %mask, %loaded : vector<[%n]xi32>, vector<[%n]xindex>, vector<[%n]xi1>, vector<[%n]xi32>
-    scf.yield
   } else {
-    scf.yield
   }
   func.return
 }
@@ -428,9 +420,7 @@ func.def @if_edge_leaves_type_constrained_vector_reference(%x: i32, %n: index, %
     %v = vector.splat %x : vector<[%n]xi32>
     %sum = vector.addi %a, %v : vector<[%n]xi32>
     test.use %sum : vector<[%n]xi32>
-    scf.yield
   } else {
-    scf.yield
   }
   func.return
 }
@@ -456,12 +446,10 @@ func.def @if_edge_leaves_type_constrained_vector_reference(%x: i32, %n: index, %
 func.def @switch_default_edge_rewrites_vector_type_reference(%x: i32, %variant: index) {
   scf.switch %variant {
     case 4 {
-      scf.yield
     }
     default {
       %v = vector.splat %x : vector<[%variant]xi32>
       test.use %v : vector<[%variant]xi32>
-      scf.yield
     }
   }
   func.return
@@ -581,9 +569,7 @@ func.def @if_exact_boolean_region_constants_fold_to_condition(%cond: i1) -> (i1)
 // A resultless dynamic conditional with no branch effects is dead.
 func.def @if_resultless_empty_erases(%cond: i1) {
   scf.if %cond {
-    scf.yield
   } else {
-    scf.yield
   }
   func.return
 }
@@ -1046,7 +1032,6 @@ func.def @for_single_trip_resultless_inlines_effect(%buffer: buffer, %offset: of
   scf.for %iv = [%lo to %hi step %step] {
     %addr = index.add %iv, %c0 : index
     view.store %value, %view[%addr] : f32, view<16xf32, %layout>
-    scf.yield
   }
   func.return
 }
@@ -1092,7 +1077,6 @@ func.def @for_single_trip_dynamic_range_inlines(%buffer: buffer, %offset: offset
   %step = index.constant 16 : index
   scf.for %iv = [%lo1 to %hi1 step %step] {
     view.store %value, %view[%iv] : f32, view<32xf32, %layout>
-    scf.yield
   }
   func.return
 }
@@ -1178,7 +1162,6 @@ func.def @for_identity_body_returns_iter_arg(%lo: index, %hi: index, %init: f32)
 func.def @for_void_empty_body(%lo: index, %hi: index) {
   %step = index.constant 1 : index
   scf.for %iv = [%lo to %hi step %step] {
-    scf.yield
   }
   func.return
 }

@@ -29,7 +29,6 @@ kernel.def @exit_body_moves_to_true_path() {
 } launch(%done: i1, %value: i32) {
   kernel.exit %done : i1 {
     test.use %value : i32
-    kernel.return
   }
   kernel.return
 }
@@ -96,7 +95,6 @@ kernel.def @true_exit_inlines_body() {
   %done = scalar.constant true : i1
   kernel.exit %done : i1 {
     test.use %value : i32
-    kernel.return
   }
   test.use %dead : i32
   kernel.return

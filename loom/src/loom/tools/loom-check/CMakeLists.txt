@@ -11,20 +11,6 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
-    check
-  HDRS
-    "check.h"
-  SRCS
-    "check.c"
-  DEPS
-    iree::base
-    iree::base::internal::arena
-    loom::error::error_defs
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
     target_low_registry_manifest
   HDRS
     "target_low_registry_manifest.h"
@@ -56,7 +42,6 @@ loom_cc_library(
     "roundtrip.c"
     "verify.c"
   DEPS
-    ::check
     ::report
     ::target_low_registry_manifest
     ::update
@@ -111,6 +96,8 @@ loom_cc_library(
     loom::target::predicate
     loom::target::reporting::format
     loom::target::types
+    loom::testing::test_diagnostic
+    loom::testing::test_file
     loom::tooling::compile::pipeline
     loom::tools::loom-format::convert
     loom::util::diff
@@ -128,12 +115,12 @@ loom_cc_library(
   SRCS
     "test_util.cc"
   DEPS
-    ::check
     ::execute
     ::report
     iree::base
     iree::base::internal::arena
     loom::ir
+    loom::testing::test_file
   TESTONLY
   PUBLIC
 )
@@ -146,23 +133,10 @@ loom_cc_library(
   SRCS
     "report.c"
   DEPS
-    ::check
     iree::base
     iree::base::internal::arena
+    loom::testing::test_file
   PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    check_test
-  SRCS
-    "check_test.cc"
-  DEPS
-    ::check
-    iree::base
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
 )
 
 loom_cc_test(
@@ -171,7 +145,6 @@ loom_cc_test(
   SRCS
     "execute_test.cc"
   DEPS
-    ::check
     ::execute
     ::report
     iree::base
@@ -185,6 +158,7 @@ loom_cc_test(
     loom::target::provider
     loom::target::test::lower
     loom::testing::context
+    loom::testing::test_file
 )
 
 loom_cc_library(
@@ -195,8 +169,8 @@ loom_cc_library(
   SRCS
     "update.c"
   DEPS
-    ::check
     iree::base
+    loom::testing::test_file
   PUBLIC
 )
 
@@ -208,13 +182,13 @@ loom_cc_library(
   SRCS
     "template_sync.c"
   DEPS
-    ::check
     iree::base
     iree::base::internal::arena
     loom::format::text::parser
     loom::ir
     loom::link::linker
     loom::ops::op_defs
+    loom::testing::test_file
   PUBLIC
 )
 
@@ -224,12 +198,12 @@ loom_cc_test(
   SRCS
     "update_test.cc"
   DEPS
-    ::check
     ::update
     iree::base
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::testing::test_file
 )
 
 loom_cc_test(
@@ -238,7 +212,6 @@ loom_cc_test(
   SRCS
     "template_sync_test.cc"
   DEPS
-    ::check
     ::template_sync
     iree::base
     iree::base::internal::arena
@@ -250,6 +223,7 @@ loom_cc_test(
     loom::ops::index
     loom::ops::kernel
     loom::ops::scalar
+    loom::testing::test_file
 )
 
 loom_cc_library(
@@ -260,11 +234,11 @@ loom_cc_library(
   SRCS
     "json_output.c"
   DEPS
-    ::check
     ::execute
     ::report
     ::update
     iree::base
+    loom::testing::test_file
     loom::util::json
     loom::util::stream
   PUBLIC
@@ -278,10 +252,10 @@ loom_cc_library(
   SRCS
     "output.c"
   DEPS
-    ::check
     ::execute
     iree::base
     iree::base::core_headers
+    loom::testing::test_file
   PUBLIC
 )
 
@@ -293,7 +267,6 @@ loom_cc_library(
   SRCS
     "file.c"
   DEPS
-    ::check
     ::execute
     ::json_output
     ::output
@@ -303,7 +276,10 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     iree::io::file_handle
+    loom::codegen::low::text_asm
     loom::ir
+    loom::testing::test_file
+    loom::testing::test_file_format
     loom::tooling::io::file
     loom::tooling::io::source_path
     loom::util::stream
@@ -419,7 +395,6 @@ loom_cc_test(
   SRCS
     "json_output_test.cc"
   DEPS
-    ::check
     ::execute
     ::json_output
     ::report
@@ -428,6 +403,7 @@ loom_cc_test(
     iree::base::internal::json
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::testing::test_file
     loom::util::stream
 )
 

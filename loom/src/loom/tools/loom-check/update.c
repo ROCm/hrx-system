@@ -55,13 +55,13 @@ static iree_status_t loom_check_append_with_trailing_newline(
   return iree_ok_status();
 }
 
-static bool loom_check_source_range_is_in_bounds(
-    loom_check_source_range_t range, iree_host_size_t source_size) {
+static bool loom_check_source_range_is_in_bounds(loom_test_source_range_t range,
+                                                 iree_host_size_t source_size) {
   return range.start_byte <= range.end_byte && range.end_byte <= source_size;
 }
 
 iree_status_t loom_check_build_update_edit(iree_string_view_t original_source,
-                                           const loom_check_case_t* test_case,
+                                           const loom_test_case_t* test_case,
                                            iree_string_view_t actual_output,
                                            iree_string_builder_t* new_text,
                                            loom_check_update_edit_t* out_edit) {
@@ -69,7 +69,7 @@ iree_status_t loom_check_build_update_edit(iree_string_view_t original_source,
 
   iree_host_size_t cursor_offset = 0;
   if (test_case->has_expected_section) {
-    loom_check_source_range_t update_range = test_case->expected_range;
+    loom_test_source_range_t update_range = test_case->expected_range;
     if (!loom_check_source_range_is_in_bounds(update_range,
                                               original_source.size)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -87,7 +87,7 @@ iree_status_t loom_check_build_update_edit(iree_string_view_t original_source,
                               "input section range out of bounds");
     }
     out_edit->kind = LOOM_CHECK_UPDATE_EDIT_INSERT_EXPECTED_OUTPUT;
-    out_edit->range = (loom_check_source_range_t){
+    out_edit->range = (loom_test_source_range_t){
         .start_byte = test_case->input_range.end_byte,
         .end_byte = test_case->input_range.end_byte,
     };
@@ -111,7 +111,7 @@ iree_status_t loom_check_build_update_edit(iree_string_view_t original_source,
 }
 
 iree_status_t loom_check_apply_updates(iree_string_view_t original_source,
-                                       const loom_check_file_t* file,
+                                       const loom_test_file_t* file,
                                        const loom_check_case_update_t* updates,
                                        iree_string_builder_t* new_source,
                                        iree_host_size_t* out_update_count) {
@@ -122,7 +122,7 @@ iree_status_t loom_check_apply_updates(iree_string_view_t original_source,
     if (!updates[i].needs_update) {
       continue;
     }
-    const loom_check_case_t* test_case = &file->cases[i];
+    const loom_test_case_t* test_case = &file->cases[i];
     ++update_count;
 
     if (test_case->has_expected_section) {

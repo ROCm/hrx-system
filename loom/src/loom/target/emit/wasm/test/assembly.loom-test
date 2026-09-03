@@ -3,16 +3,16 @@
 
 wasm.target<simd128> @target
 
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @double(%value: reg<wasm.v128>) -> (reg<wasm.v128>) {
-  %sum = low.op<wasm.i32x4.add>(%value, %value) : (reg<wasm.v128>, reg<wasm.v128>) -> reg<wasm.v128>
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @double(%value: reg<wasm.v128>) -> (reg<wasm.v128>) asm {
+  %sum = i32x4.add %value, %value
   low.schedule.fence
-  low.return %sum : reg<wasm.v128>
+  return %sum
 }
 
-low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @entry(%value: reg<wasm.v128>) -> (reg<wasm.v128>) {
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @entry(%value: reg<wasm.v128>) -> (reg<wasm.v128>) asm {
   %doubled = low.func.call @double(%value) : (reg<wasm.v128>) -> (reg<wasm.v128>)
   %quad = low.func.call @double(%doubled) : (reg<wasm.v128>) -> (reg<wasm.v128>)
-  low.return %quad : reg<wasm.v128>
+  return %quad
 }
 
 // ----
@@ -77,22 +77,22 @@ Disassembly of section CODE:
 
 wasm.target<simd128> @target
 
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @if_without_results(%cond: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>) {
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @if_without_results(%cond: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>) asm {
   low.scf.if %cond {
-    %sum = low.op<wasm.i32x4.add>(%lhs, %rhs) : (reg<wasm.v128>, reg<wasm.v128>) -> reg<wasm.v128>
+    %sum = i32x4.add %lhs, %rhs
   }
-  low.return
+  return
 }
 
-low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @if_with_results(%cond: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %fallback: reg<wasm.v128>) -> (reg<wasm.v128>) {
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @if_with_results(%cond: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %fallback: reg<wasm.v128>) -> (reg<wasm.v128>) asm {
   %result = low.scf.if %cond -> (reg<wasm.v128>) {
-    %then = low.op<wasm.i32x4.add>(%lhs, %rhs) : (reg<wasm.v128>, reg<wasm.v128>) -> reg<wasm.v128>
+    %then = i32x4.add %lhs, %rhs
     low.scf.yield %then : reg<wasm.v128>
   } else {
-    %else = low.op<wasm.i32x4.sub>(%fallback, %rhs) : (reg<wasm.v128>, reg<wasm.v128>) -> reg<wasm.v128>
+    %else = i32x4.sub %fallback, %rhs
     low.scf.yield %else : reg<wasm.v128>
   }
-  low.return %result : reg<wasm.v128>
+  return %result
 }
 
 // ----
@@ -138,20 +138,20 @@ Disassembly of section CODE:
 
 wasm.target<simd128> @target
 
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @for_without_iter_args(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>) {
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @for_without_iter_args(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>) asm {
   low.scf.for [%lo to %hi step %step] do(%iv: reg<wasm.i32>) {
-    %sum = low.op<wasm.i32x4.add>(%lhs, %rhs) : (reg<wasm.v128>, reg<wasm.v128>) -> reg<wasm.v128>
+    %sum = i32x4.add %lhs, %rhs
   }
-  low.return
+  return
 }
 
-low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @for_with_iter_args(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %seed: reg<wasm.v128>, %bias: reg<wasm.v128>) -> (reg<wasm.v128>) {
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @for_with_iter_args(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %seed: reg<wasm.v128>, %bias: reg<wasm.v128>) -> (reg<wasm.v128>) asm {
   %result = low.scf.for [%lo to %hi step %step] iter_args(%seed: reg<wasm.v128>) -> (reg<wasm.v128>) do(%iv: reg<wasm.i32>, %acc: reg<wasm.v128>) {
-    %next = low.op<wasm.i32x4.add>(%acc, %bias) : (reg<wasm.v128>, reg<wasm.v128>) -> reg<wasm.v128>
+    %next = i32x4.add %acc, %bias
     low.scf.yield %next : reg<wasm.v128>
   }
-  %combined = low.op<wasm.i32x4.add>(%result, %seed) : (reg<wasm.v128>, reg<wasm.v128>) -> reg<wasm.v128>
-  low.return %combined : reg<wasm.v128>
+  %combined = i32x4.add %result, %seed
+  return %combined
 }
 
 // ----
@@ -234,17 +234,17 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @blend_i32x4(
   return %selected
 }
 
-low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @simd_memory_pipeline(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %input_base: reg<wasm.i32>, %bias_base: reg<wasm.i32>, %output_base: reg<wasm.i32>, %control: reg<wasm.i32>) {
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @simd_memory_pipeline(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %input_base: reg<wasm.i32>, %bias_base: reg<wasm.i32>, %output_base: reg<wasm.i32>, %control: reg<wasm.i32>) asm {
   low.scf.for [%lo to %hi step %step] do(%offset: reg<wasm.i32>) {
-    %input_address = low.op<wasm.i32.add>(%input_base, %offset) : (reg<wasm.i32>, reg<wasm.i32>) -> reg<wasm.i32>
-    %bias_address = low.op<wasm.i32.add>(%bias_base, %offset) : (reg<wasm.i32>, reg<wasm.i32>) -> reg<wasm.i32>
-    %output_address = low.op<wasm.i32.add>(%output_base, %offset) : (reg<wasm.i32>, reg<wasm.i32>) -> reg<wasm.i32>
-    %input = low.op<wasm.v128.load>(%input_address) : (reg<wasm.i32>) -> reg<wasm.v128>
-    %bias = low.op<wasm.v128.load>(%bias_address) : (reg<wasm.i32>) -> reg<wasm.v128>
+    %input_address = i32.add %input_base, %offset
+    %bias_address = i32.add %bias_base, %offset
+    %output_address = i32.add %output_base, %offset
+    %input = v128.load %input_address
+    %bias = v128.load %bias_address
     %result = low.func.call @blend_i32x4(%control, %input, %bias, %bias) : (reg<wasm.i32>, reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>) -> (reg<wasm.v128>)
-    low.op<wasm.v128.store>(%output_address, %result) : (reg<wasm.i32>, reg<wasm.v128>)
+    v128.store %output_address, %result
   }
-  low.return
+  return
 }
 
 // ----
@@ -368,13 +368,13 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @float_lane_m
   return %updated
 }
 
-low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @simd_lane_kernel(%lane_value: reg<wasm.i32>, %value: reg<wasm.v128>, %init: reg<wasm.i32>, %limit: reg<wasm.i32>, %float_value: reg<wasm.v128>, %float_bias: reg<wasm.v128>, %scalar: reg<wasm.f32>) -> (reg<wasm.i32>, reg<wasm.v128>) {
-  %splat = low.op<wasm.i32x4.splat>(%lane_value) : (reg<wasm.i32>) -> reg<wasm.v128>
-  %edited = low.op<wasm.i32x4.replace_lane>(%splat, %lane_value) {lane = 2} : (reg<wasm.v128>, reg<wasm.i32>) -> reg<wasm.v128>
-  %combined = low.op<wasm.i32x4.add>(%edited, %value) : (reg<wasm.v128>, reg<wasm.v128>) -> reg<wasm.v128>
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @simd_lane_kernel(%lane_value: reg<wasm.i32>, %value: reg<wasm.v128>, %init: reg<wasm.i32>, %limit: reg<wasm.i32>, %float_value: reg<wasm.v128>, %float_bias: reg<wasm.v128>, %scalar: reg<wasm.f32>) -> (reg<wasm.i32>, reg<wasm.v128>) asm {
+  %splat = i32x4.splat %lane_value
+  %edited = i32x4.replace_lane %splat, %lane_value, 2
+  %combined = i32x4.add %edited, %value
   %total = low.func.call @fold_i32x4(%combined, %init, %limit) : (reg<wasm.v128>, reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
   %mixed = low.func.call @float_lane_mix(%float_value, %float_bias, %scalar) : (reg<wasm.v128>, reg<wasm.v128>, reg<wasm.f32>) -> (reg<wasm.v128>)
-  low.return %total, %mixed : reg<wasm.i32>, reg<wasm.v128>
+  return %total, %mixed
 }
 
 // ----

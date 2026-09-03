@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @decode_fp8(%input: f8E4M3) -> (f32) {
   %result = scalar.extf %input : f8E4M3 to f32
   func.return %result : f32
@@ -15,6 +16,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @decode_fp8(%in
 // ====
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @decode_bf8(%input: f8E5M2) -> (f32) {
   %result = scalar.extf %input : f8E5M2 to f32
   func.return %result : f32
@@ -29,6 +31,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @decode_bf8(%in
 // ====
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @decode_fp8x4(%input: vector<4xf8E4M3>) -> (vector<4xf32>) {
   %result = vector.extf %input : vector<4xf8E4M3> to vector<4xf32>
   func.return %result : vector<4xf32>
@@ -50,6 +53,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @decode_fp8x4(%
 // ====
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @encode_fp8x4(%input: vector<4xf32>) -> (vector<4xf8E4M3>) {
   %result = vector.fptrunc %input : vector<4xf32> to vector<4xf8E4M3>
   func.return %result : vector<4xf8E4M3>
@@ -83,6 +87,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @encode_fp8x4(%
 // ====
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @dot_fp8_bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
   %result = vector.dot4f8<fp8bf8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
   func.return %result : vector<1xf32>
@@ -97,6 +102,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @dot_fp8_bf8(%l
 // ====
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @dot_bf8_fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
   %result = vector.dot4f8<bf8fp8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
   func.return %result : vector<1xf32>
@@ -111,6 +117,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @dot_bf8_fp8(%l
 // ====
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @dot_fp8_fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
   %result = vector.dot4f8<fp8fp8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
   func.return %result : vector<1xf32>
@@ -125,6 +132,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @dot_fp8_fp8(%l
 // ====
 
 amdgpu.target<gfx1170> @target
+
 func.def target(@target) @dot_bf8_bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
   %result = vector.dot4f8<bf8bf8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
   func.return %result : vector<1xf32>

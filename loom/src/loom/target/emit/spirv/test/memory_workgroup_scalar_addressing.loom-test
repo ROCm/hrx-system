@@ -3,6 +3,7 @@
 // REQUIRES: spirv-dis, spirv-val
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+
 func.def target(@target) @workgroup_static_rank2_i32(%value: i32) -> (i32) {
   %byte_length = index.constant 256 : offset
   %base = index.constant 8 : offset
@@ -81,6 +82,7 @@ func.def target(@target) @workgroup_static_rank2_i32(%value: i32) -> (i32) {
 // ====
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+
 func.def target(@target) @workgroup_dynamic_base_and_index_i32(%value: i32, %base_element: index, %element: index) -> (i32) {
   %byte_length = index.constant 128 : offset
   %element_byte_count = index.constant 4 : index
@@ -175,6 +177,7 @@ func.def target(@target) @workgroup_dynamic_base_and_index_i32(%value: i32, %bas
 // ====
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+
 func.def target(@target) @workgroup_dynamic_stride_rank2_i32(%value: i32, %column_count: index, %row: index, %column: index) -> (i32) {
   %byte_length = index.constant 128 : offset
   %scratch_base = index.constant 0 : offset
@@ -276,6 +279,7 @@ func.def target(@target) @workgroup_dynamic_stride_rank2_i32(%value: i32, %colum
 // ====
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+
 func.def target(@target) @workgroup_subview_refine_i32(%value: i32, %element: index) -> (i32) {
   %byte_length = index.constant 64 : offset
   %base = index.constant 4 : offset
@@ -365,6 +369,7 @@ func.def target(@target) @workgroup_subview_refine_i32(%value: i32, %element: in
 // ====
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+
 func.def target(@target) @workgroup_integer_scalar_widths(%value_i8: i8, %value_i16: i16, %value_i32: i32, %value_i64: i64) -> (i8, i16, i32, i64) {
   %byte_length = index.constant 16 : offset
   %scratch_base = index.constant 0 : offset
@@ -541,6 +546,7 @@ func.def target(@target) @workgroup_integer_scalar_widths(%value_i8: i8, %value_
 // ====
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+
 func.def target(@target) @workgroup_float_scalar_widths(%value_f16: f16, %value_bf16: bf16, %value_f32: f32, %value_f64: f64) -> (f16, bf16, f32, f64) {
   %byte_length = index.constant 16 : offset
   %scratch_base = index.constant 0 : offset

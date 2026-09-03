@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i32_uniform_vector_bitcast(%input: buffer) -> (vector<4xf32>) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer

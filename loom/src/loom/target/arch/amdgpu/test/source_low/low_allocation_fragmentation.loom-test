@@ -11,15 +11,7 @@
 
 amdgpu.target<gfx1100> @target {subgroup_size = 32}
 
-low.func.def target<amdgpu.rdna3.core>(@target) @loop_fragmentation(
-    %address: reg<amdgpu.vgpr>,
-    %condition: reg<amdgpu.scc>,
-    %rhs0: reg<amdgpu.vgpr x8>,
-    %rhs1: reg<amdgpu.vgpr x8>,
-    %acc0: reg<amdgpu.vgpr x8>,
-    %acc1: reg<amdgpu.vgpr x8>,
-    %acc2: reg<amdgpu.vgpr x8>) ->
-    (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm {
+low.func.def target<amdgpu.rdna3.core>(@target) @loop_fragmentation(%address: reg<amdgpu.vgpr>, %condition: reg<amdgpu.scc>, %rhs0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %acc0: reg<amdgpu.vgpr x8>, %acc1: reg<amdgpu.vgpr x8>, %acc2: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm {
   low.br ^loop(%acc0: reg<amdgpu.vgpr x8>, %acc1: reg<amdgpu.vgpr x8>, %acc2: reg<amdgpu.vgpr x8>)
 ^loop(%carried0: reg<amdgpu.vgpr x8>, %carried1: reg<amdgpu.vgpr x8>, %carried2: reg<amdgpu.vgpr x8>):
   %lhs0_low = ds_read_b128 %address

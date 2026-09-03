@@ -2,10 +2,7 @@
 
 x86.target<avx512_packed_dot> @target
 
-func.def target(@target) @bf16_blocked_mma_xmm(
-    %lhs_data: vector<8xbf16>,
-    %rhs_data: vector<8xbf16>,
-    %init_data: vector<4xf32>) -> (vector<4xf32>) {
+func.def target(@target) @bf16_blocked_mma_xmm(%lhs_data: vector<8xbf16>, %rhs_data: vector<8xbf16>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
   %blocks = index.constant 4 : index
   %m = index.constant 1 : index
   %n = index.constant 1 : index
@@ -28,10 +25,7 @@ low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @b
 
 x86.target<avx512_packed_dot> @target
 
-func.def target(@target) @bf16_blocked_mma(
-    %lhs_data: vector<16xbf16>,
-    %rhs_data: vector<16xbf16>,
-    %init_data: vector<8xf32>) -> (vector<8xf32>) {
+func.def target(@target) @bf16_blocked_mma(%lhs_data: vector<16xbf16>, %rhs_data: vector<16xbf16>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %blocks = index.constant 8 : index
   %m = index.constant 1 : index
   %n = index.constant 1 : index
@@ -54,10 +48,7 @@ low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @b
 
 x86.target<avx512_packed_dot> @target
 
-func.def target(@target) @bf16_blocked_mma_zmm(
-    %lhs_data: vector<32xbf16>,
-    %rhs_data: vector<32xbf16>,
-    %init_data: vector<16xf32>) -> (vector<16xf32>) {
+func.def target(@target) @bf16_blocked_mma_zmm(%lhs_data: vector<32xbf16>, %rhs_data: vector<32xbf16>, %init_data: vector<16xf32>) -> (vector<16xf32>) {
   %blocks = index.constant 16 : index
   %m = index.constant 1 : index
   %n = index.constant 1 : index
@@ -80,10 +71,7 @@ low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @b
 
 x86.target<avx512_packed_dot> @target
 
-func.def target(@target) @i8_blocked_mma(
-    %lhs_data: vector<32xi8>,
-    %rhs_data: vector<32xi8>,
-    %init_data: vector<8xi32>) -> (vector<8xi32>) {
+func.def target(@target) @i8_blocked_mma(%lhs_data: vector<32xi8>, %rhs_data: vector<32xi8>, %init_data: vector<8xi32>) -> (vector<8xi32>) {
   %blocks = index.constant 8 : index
   %m = index.constant 1 : index
   %n = index.constant 1 : index
@@ -106,10 +94,7 @@ low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @i
 
 x86.target<avx512_packed_dot> @target
 
-func.def target(@target) @encoded_u8s8_blocked_mma(
-    %lhs_data: vector<8xi32>,
-    %rhs_data: vector<8xi32>,
-    %init_data: vector<8xi32>) -> (vector<8xi32>) {
+func.def target(@target) @encoded_u8s8_blocked_mma(%lhs_data: vector<8xi32>, %rhs_data: vector<8xi32>, %init_data: vector<8xi32>) -> (vector<8xi32>) {
   %blocks = index.constant 8 : index
   %m = index.constant 1 : index
   %n = index.constant 1 : index
@@ -134,11 +119,7 @@ low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @e
 
 x86.target<avx512_packed_dot> @target
 
-func.def target(@target) @encoded_i8_blocked_mma(
-    %lhs_buffer: buffer,
-    %rhs_buffer: buffer,
-    %output_buffer: buffer,
-    %origin: index) {
+func.def target(@target) @encoded_i8_blocked_mma(%lhs_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer, %origin: index) {
   %base = index.constant 0 : offset
   %bounded_origin = index.assume %origin [range(%origin, 0, 8)] : index
   %blocks = index.constant 8 : index
@@ -178,8 +159,7 @@ low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @e
 
 x86.target<avx512_packed_dot> @target
 
-func.def target(@target) @packed_byte_bitcast_roundtrip(
-    %bytes: vector<32xi8>) -> (vector<32xi8>) {
+func.def target(@target) @packed_byte_bitcast_roundtrip(%bytes: vector<32xi8>) -> (vector<32xi8>) {
   %words = vector.bitcast %bytes : vector<32xi8> to vector<8xi32>
   %result = vector.bitcast %words : vector<8xi32> to vector<32xi8>
   func.return %result : vector<32xi8>
@@ -194,10 +174,7 @@ low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @p
 
 x86.target<avx512_packed_dot> @target
 
-func.def target(@target) @non_scalar_fragment_mma(
-    %lhs_data: vector<16xbf16>,
-    %rhs_data: vector<16xbf16>,
-    %init_data: vector<8xf32>) -> (vector<8xf32>) {
+func.def target(@target) @non_scalar_fragment_mma(%lhs_data: vector<16xbf16>, %rhs_data: vector<16xbf16>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
   %blocks = index.constant 4 : index
   %m = index.constant 2 : index
   %n = index.constant 1 : index
@@ -216,10 +193,7 @@ func.def target(@target) @non_scalar_fragment_mma(
 
 x86.target<avx512_packed_dot> @target
 
-func.def target(@target) @report_i8_blocked_mma(
-    %lhs_data: vector<32xi8>,
-    %rhs_data: vector<32xi8>,
-    %init_data: vector<8xi32>) -> (vector<8xi32>) {
+func.def target(@target) @report_i8_blocked_mma(%lhs_data: vector<32xi8>, %rhs_data: vector<32xi8>, %init_data: vector<8xi32>) -> (vector<8xi32>) {
   %blocks = index.constant 8 : index
   %m = index.constant 1 : index
   %n = index.constant 1 : index

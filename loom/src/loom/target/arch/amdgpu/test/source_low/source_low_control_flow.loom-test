@@ -593,7 +593,7 @@ func.def target(@target) @divergent_if_else_tail_argmax_pair(%indices: vector<2x
   %lane = vector.extract %indices[0] : vector<2xi32> -> i32
   %score = vector.extract %scores[0] : vector<2xf32> -> f32
   %sentinel = scalar.constant -1 : i32
-  %fallback_score = scalar.constant -3.402823e38 : f32
+  %fallback_score = scalar.constant -3.4028229999999999e+38 : f32
   %in_range = scalar.cmpi slt, %lane, %limit : i32
   cfg.cond_br %in_range, ^then, ^else
 ^then:

@@ -882,7 +882,6 @@ loom_cc_library(
   DEPS
     ::low_descriptor_registry
     loom::target::test::low_registry
-  TESTONLY
   PUBLIC
 )
 

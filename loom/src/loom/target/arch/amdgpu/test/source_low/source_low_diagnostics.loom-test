@@ -1,6 +1,7 @@
 // RUN: emit source-low diagnostics=memory output=low
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @lds_b32_diagnostics() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index

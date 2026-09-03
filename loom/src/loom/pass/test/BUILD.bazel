@@ -19,7 +19,6 @@ package(
 
 loom_cc_library(
     name = "registry",
-    testonly = True,
     srcs = ["registry.c"],
     hdrs = ["registry.h"],
     deps = [

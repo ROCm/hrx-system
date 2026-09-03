@@ -175,17 +175,6 @@ _LOOM_CHECK_PROVIDER_DEPS = (
 )
 
 loom_cc_library(
-    name = "check",
-    srcs = ["check.c"],
-    hdrs = ["check.h"],
-    deps = [
-        "//loom/src/loom/error:error_defs",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
-loom_cc_library(
     name = "target_low_registry_manifest",
     srcs = ["target_low_registry_manifest.c"],
     hdrs = ["target_low_registry_manifest.h"],
@@ -216,7 +205,6 @@ loom_cc_library(
         "requirements.h",
     ],
     deps = [
-        ":check",
         ":report",
         ":target_low_registry_manifest",
         ":update",
@@ -267,6 +255,8 @@ loom_cc_library(
         "//loom/src/loom/target:predicate",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/reporting:format",
+        "//loom/src/loom/testing:test_diagnostic",
+        "//loom/src/loom/testing:test_file",
         "//loom/src/loom/tooling/compile:pipeline",
         "//loom/src/loom/tools/loom-format:convert",
         "//loom/src/loom/util:diff",
@@ -286,10 +276,10 @@ loom_cc_library(
     srcs = ["test_util.cc"],
     hdrs = ["test_util.h"],
     deps = [
-        ":check",
         ":execute",
         ":report",
         "//loom/src/loom/ir",
+        "//loom/src/loom/testing:test_file",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -300,21 +290,9 @@ loom_cc_library(
     srcs = ["report.c"],
     hdrs = ["report.h"],
     deps = [
-        ":check",
+        "//loom/src/loom/testing:test_file",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
-loom_cc_test(
-    name = "check_test",
-    srcs = ["check_test.cc"],
-    deps = [
-        ":check",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -322,7 +300,6 @@ loom_cc_test(
     name = "execute_test",
     srcs = ["execute_test.cc"],
     deps = [
-        ":check",
         ":execute",
         ":report",
         "//loom/src/loom/error:error_defs",
@@ -331,6 +308,7 @@ loom_cc_test(
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/test:lower",
         "//loom/src/loom/testing:context",
+        "//loom/src/loom/testing:test_file",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/base/internal:json",
@@ -344,7 +322,7 @@ loom_cc_library(
     srcs = ["update.c"],
     hdrs = ["update.h"],
     deps = [
-        ":check",
+        "//loom/src/loom/testing:test_file",
         "//runtime/src/iree/base",
     ],
 )
@@ -354,11 +332,11 @@ loom_cc_library(
     srcs = ["template_sync.c"],
     hdrs = ["template_sync.h"],
     deps = [
-        ":check",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/link:linker",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/testing:test_file",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -368,8 +346,8 @@ loom_cc_test(
     name = "update_test",
     srcs = ["update_test.cc"],
     deps = [
-        ":check",
         ":update",
+        "//loom/src/loom/testing:test_file",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
@@ -381,7 +359,6 @@ loom_cc_test(
     name = "template_sync_test",
     srcs = ["template_sync_test.cc"],
     deps = [
-        ":check",
         ":template_sync",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/config",
@@ -389,6 +366,7 @@ loom_cc_test(
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/testing:test_file",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
@@ -401,10 +379,10 @@ loom_cc_library(
     srcs = ["json_output.c"],
     hdrs = ["json_output.h"],
     deps = [
-        ":check",
         ":execute",
         ":report",
         ":update",
+        "//loom/src/loom/testing:test_file",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
@@ -416,8 +394,8 @@ loom_cc_library(
     srcs = ["output.c"],
     hdrs = ["output.h"],
     deps = [
-        ":check",
         ":execute",
+        "//loom/src/loom/testing:test_file",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
     ],
@@ -428,14 +406,16 @@ loom_cc_library(
     srcs = ["file.c"],
     hdrs = ["file.h"],
     deps = [
-        ":check",
         ":execute",
         ":json_output",
         ":output",
         ":report",
         ":template_sync",
         ":update",
+        "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/ir",
+        "//loom/src/loom/testing:test_file",
+        "//loom/src/loom/testing:test_file_format",
         "//loom/src/loom/tooling/io:file",
         "//loom/src/loom/tooling/io:source_path",
         "//loom/src/loom/util:stream",
@@ -523,10 +503,10 @@ loom_cc_test(
     name = "json_output_test",
     srcs = ["json_output_test.cc"],
     deps = [
-        ":check",
         ":execute",
         ":json_output",
         ":report",
+        "//loom/src/loom/testing:test_file",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

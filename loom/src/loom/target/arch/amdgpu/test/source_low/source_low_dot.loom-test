@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_dotf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %acc: f32) -> (f32) {
   %dot = vector.dotf %lhs, %rhs, %acc : vector<4xf32>, vector<4xf32>, f32
   func.return %dot : f32
@@ -27,6 +28,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_dot
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_dotf_zero_seed(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (f32) {
   %initial_accumulator = scalar.constant 0.0 : f32
   %dot = vector.dotf %lhs, %rhs, %initial_accumulator : vector<4xf32>, vector<4xf32>, f32
@@ -54,6 +56,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_dot
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_contract_product_reduce(%lhs: vector<8xf32>, %rhs: vector<8xf32>, %acc: f32) -> (f32) {
   %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<8xf32>
   %dot = vector.reduce<addf, reassoc|nnan|ninf|nsz|contract> %product, %acc : vector<8xf32>, f32
@@ -95,6 +98,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_con
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_exact_product_reduce(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %acc: f32) -> (f32) {
   %product = vector.mulf %lhs, %rhs : vector<4xf32>
   %dot = vector.reduce<addf> %product, %acc : vector<4xf32>, f32
@@ -125,6 +129,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_exa
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f16_dot2f(%lhs: vector<8xf16>, %rhs: vector<8xf16>, %acc: vector<4xf32>) -> (vector<4xf32>) {
   %dot = vector.dot2f %lhs, %rhs, %acc : vector<8xf16>, vector<8xf16>, vector<4xf32>
   func.return %dot : vector<4xf32>
@@ -156,6 +161,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f16_dot
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @bf16_dot2f(%lhs: vector<8xbf16>, %rhs: vector<8xbf16>, %acc: vector<4xf32>) -> (vector<4xf32>) {
   %dot = vector.dot2f %lhs, %rhs, %acc : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
   func.return %dot : vector<4xf32>
@@ -187,6 +193,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16_do
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_uniform_smem_vector_operands(%lhs: vector<4xf32>, %weights: buffer) -> (f32) {
   %base = index.constant 0 : offset
   %weights_global = buffer.assume.memory_space<global> %weights : buffer

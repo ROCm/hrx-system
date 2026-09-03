@@ -232,7 +232,6 @@ func.def @rejects_write_effect_hazard(%n: index, %pool: pool<16>, %tile: tile<4x
   %loop_step = index.constant 1 : index
   scf.for %i = [%loop_begin to %n step %loop_step] {
     test.write_resource %pool, %tile : pool<16>, tile<4xf32>
-    scf.yield
   }
   %sum = scf.for %j = [%loop_begin to %n step %loop_step](%acc = %a : i32) -> (i32) {
     %next = test.addi %acc, %b : i32

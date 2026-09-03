@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8x4_addi_arguments(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (vector<4xi8>) {
   %sum = vector.addi %lhs, %rhs : vector<4xi8>
   func.return %sum : vector<4xi8>
@@ -21,6 +22,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_ad
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8x8_addi_storage_tuple(%lhs: vector<8xi8>, %rhs: vector<8xi8>) -> (vector<8xi8>) {
   %sum = vector.addi %lhs, %rhs : vector<8xi8>
   func.return %sum : vector<8xi8>
@@ -51,6 +53,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x8_ad
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8x4_subi_arguments(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (vector<4xi8>) {
   %diff = vector.subi %lhs, %rhs : vector<4xi8>
   func.return %diff : vector<4xi8>
@@ -71,6 +74,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_su
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8x8_subi_storage_tuple(%lhs: vector<8xi8>, %rhs: vector<8xi8>) -> (vector<8xi8>) {
   %diff = vector.subi %lhs, %rhs : vector<8xi8>
   func.return %diff : vector<8xi8>
@@ -103,6 +107,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x8_su
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8x4_addi_chain(%packed: vector<1xi32>, %bias: vector<4xi8>, %delta: vector<4xi8>) -> (vector<4xi8>) {
   %bytes = vector.bitcast %packed : vector<1xi32> to vector<4xi8>
   %biased = vector.addi %bytes, %bias : vector<4xi8>
@@ -130,6 +135,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_ad
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8x4_select_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.splat %condition : vector<4xi1>
@@ -156,6 +162,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_se
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8x4_select_subi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.splat %condition : vector<4xi1>
@@ -183,6 +190,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_se
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8x4_scf_if_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %selected = scf.if %condition -> (vector<4xi8>) {
@@ -212,6 +220,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_sc
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8x4_cfg_arg_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   cfg.cond_br %condition, ^then, ^else

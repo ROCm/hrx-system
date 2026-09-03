@@ -1,6 +1,7 @@
 // RUN: emit amdgpu-kernel-assembly
 
 amdgpu.target<gfx1250-a0> @a0
+
 low.kernel.def target<amdgpu.rdna4.gfx1250_a0.core>(@a0) workgroup_size(32, 1, 1) @reject_a0_k32_swmmac() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs = concat(%lane, %lane) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>

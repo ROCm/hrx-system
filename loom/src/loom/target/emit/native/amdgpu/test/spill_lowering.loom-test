@@ -40,22 +40,18 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_generic_target) @gfx9_4_
 
 amdgpu.target<gfx1100> @gfx11_target
 
-low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @spill_repair_values_remain_in_registers(
-    %lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>,
-    %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>,
-    %lhs2: reg<amdgpu.vgpr>, %rhs2: reg<amdgpu.vgpr>,
-    %lhs3: reg<amdgpu.vgpr>, %rhs3: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) {
-  %mask0 = low.op<amdgpu.v_cmp_ult_u32>(%lhs0, %rhs0) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.sgpr x2>
-  %mask1 = low.op<amdgpu.v_cmp_ult_u32>(%lhs1, %rhs1) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.sgpr x2>
-  %mask2 = low.op<amdgpu.v_cmp_ult_u32>(%lhs2, %rhs2) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.sgpr x2>
-  %mask3 = low.op<amdgpu.v_cmp_ult_u32>(%lhs3, %rhs3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.sgpr x2>
-  %and01 = low.op<amdgpu.s_and_b64>(%mask0, %mask1) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
-  %and23 = low.op<amdgpu.s_and_b64>(%mask2, %mask3) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
-  %and0123 = low.op<amdgpu.s_and_b64>(%and01, %and23) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
-  %and4 = low.op<amdgpu.s_and_b64>(%and0123, %mask0) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
-  %and5 = low.op<amdgpu.s_and_b64>(%and4, %mask1) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
-  %result = low.op<amdgpu.s_and_b64>(%and5, %mask2) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
-  low.return %result : reg<amdgpu.sgpr x2>
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @spill_repair_values_remain_in_registers(%lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>, %lhs2: reg<amdgpu.vgpr>, %rhs2: reg<amdgpu.vgpr>, %lhs3: reg<amdgpu.vgpr>, %rhs3: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+  %mask0 = v_cmp_lt_u32 %lhs0, %rhs0
+  %mask1 = v_cmp_lt_u32 %lhs1, %rhs1
+  %mask2 = v_cmp_lt_u32 %lhs2, %rhs2
+  %mask3 = v_cmp_lt_u32 %lhs3, %rhs3
+  %and01 = s_and_b64 %mask0, %mask1
+  %and23 = s_and_b64 %mask2, %mask3
+  %and0123 = s_and_b64 %and01, %and23
+  %and4 = s_and_b64 %and0123, %mask0
+  %and5 = s_and_b64 %and4, %mask1
+  %result = s_and_b64 %and5, %mask2
+  return %result
 }
 
 // ----

@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low control-flow=structured-low
 
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_i64_bitwise_sgpr(%lhs: i64, %rhs: i64) -> (i64, i64, i64) {
   %and = scalar.andi %lhs, %rhs : i64
   %or = scalar.ori %and, %lhs : i64
@@ -21,6 +22,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_i64_addi_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>) -> (i64) {
   %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
   %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
@@ -32,6 +34,7 @@ func.def target(@target) @scalar_i64_addi_vgpr(%lhs_values: vector<2xi64>, %rhs_
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_i64_subi_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>) -> (i64) {
   %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
   %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
@@ -43,6 +46,7 @@ func.def target(@target) @scalar_i64_subi_vgpr(%lhs_values: vector<2xi64>, %rhs_
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_i64_shli_vgpr(%value_values: vector<2xi64>, %shift_values: vector<2xi64>) -> (i64) {
   %value = vector.extract %value_values[0] : vector<2xi64> -> i64
   %shift = vector.extract %shift_values[0] : vector<2xi64> -> i64
@@ -54,6 +58,7 @@ func.def target(@target) @scalar_i64_shli_vgpr(%value_values: vector<2xi64>, %sh
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_i64_muli_bitwise_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>, %mask_values: vector<2xi64>) -> (i64) {
   %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
   %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
@@ -66,6 +71,7 @@ func.def target(@target) @scalar_i64_muli_bitwise_vgpr(%lhs_values: vector<2xi64
 // ====
 
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_i64_compare_eq_scc(%lhs: i64, %rhs: i64) -> (i1) {
   %cmp = scalar.cmpi eq, %lhs, %rhs : i64
   func.return %cmp : i1
@@ -80,6 +86,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 // ====
 
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_i64_compare_ne_scc(%lhs: i64, %rhs: i64) -> (i1) {
   %cmp = scalar.cmpi ne, %lhs, %rhs : i64
   func.return %cmp : i1
@@ -94,6 +101,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 // ====
 
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_i64_compare_slt_return(%lhs: i64, %rhs: i64) -> (i1) {
   %cmp = scalar.cmpi slt, %lhs, %rhs : i64
   func.return %cmp : i1
@@ -108,6 +116,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 // ====
 
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_i64_compare_slt_if(%lhs: i64, %rhs: i64, %then_value: i32, %else_value: i32) -> (i32) {
   %cmp = scalar.cmpi slt, %lhs, %rhs : i64
   %result = scf.if %cmp -> (i32) {
@@ -128,6 +137,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 // ====
 
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_i64_compare_constant_select(%lhs: i64, %true_value: f32, %false_value: f32) -> (f32) {
   %limit = scalar.constant 4294967296 : i64
   %cmp = scalar.cmpi ult, %lhs, %limit : i64
@@ -149,6 +159,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @scalar_i64_compare_all_predicates_vgpr_select(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>, %true_value: f32, %false_value: f32) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32, f32) {
   %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
   %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64

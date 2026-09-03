@@ -3,17 +3,7 @@
 amdgpu.target<gfx1100> @gfx11_target
 
 // ERROR@+1: BACKEND/021 {function_name="spill_retry_requires_progress", failure_code="spill-materialization-iteration-limit", iteration_count="8", iteration_limit="8"}
-low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @spill_retry_requires_progress(
-    %addr: reg<amdgpu.vgpr>,
-    %v0: reg<amdgpu.vgpr>, %v1: reg<amdgpu.vgpr>,
-    %v2: reg<amdgpu.vgpr>, %v3: reg<amdgpu.vgpr>,
-    %v4: reg<amdgpu.vgpr>, %v5: reg<amdgpu.vgpr>,
-    %v6: reg<amdgpu.vgpr>, %v7: reg<amdgpu.vgpr>,
-    %v8: reg<amdgpu.vgpr>, %v9: reg<amdgpu.vgpr>,
-    %v10: reg<amdgpu.vgpr>, %v11: reg<amdgpu.vgpr>,
-    %v12: reg<amdgpu.vgpr>, %v13: reg<amdgpu.vgpr>,
-    %v14: reg<amdgpu.vgpr>, %v15: reg<amdgpu.vgpr>,
-    %output: reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @spill_retry_requires_progress(%addr: reg<amdgpu.vgpr>, %v0: reg<amdgpu.vgpr>, %v1: reg<amdgpu.vgpr>, %v2: reg<amdgpu.vgpr>, %v3: reg<amdgpu.vgpr>, %v4: reg<amdgpu.vgpr>, %v5: reg<amdgpu.vgpr>, %v6: reg<amdgpu.vgpr>, %v7: reg<amdgpu.vgpr>, %v8: reg<amdgpu.vgpr>, %v9: reg<amdgpu.vgpr>, %v10: reg<amdgpu.vgpr>, %v11: reg<amdgpu.vgpr>, %v12: reg<amdgpu.vgpr>, %v13: reg<amdgpu.vgpr>, %v14: reg<amdgpu.vgpr>, %v15: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %sum01 = v_add_u32 %v0, %v1
   %sum02 = v_add_u32 %sum01, %v2
   %sum03 = v_add_u32 %sum02, %v3
@@ -37,6 +27,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @spill_retry_requires_prog
 
 // RUN: emit amdgpu-allocation-json @gfx11_allocation_json_fixed_value_split strategy=source amdgpu.vgpr=3 fixed=%fixed:physical_register:1:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_fixed_value_split(%seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %fixed = v_add_u32 %seed0, %seed1
   %guard = v_add_u32 %seed0, %seed0
@@ -55,6 +46,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_fix
 
 // RUN: emit amdgpu-allocation-json @gfx11_allocation_json_non_entry_fixed_value_split strategy=source amdgpu.vgpr=3 fixed=%fixed:physical_register:1:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_non_entry_fixed_value_split(%seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   low.br ^body
 ^body:
@@ -75,6 +67,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_non
 
 // RUN: emit amdgpu-allocation-json @gfx11_allocation_json_block_arg_fixed_value_split strategy=source amdgpu.vgpr=3 fixed=%fixed:physical_register:1:1
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_block_arg_fixed_value_split(%seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   low.br ^body(%seed1: reg<amdgpu.vgpr>)
 ^body(%fixed: reg<amdgpu.vgpr>):
@@ -94,6 +87,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_blo
 
 // RUN: emit amdgpu-allocation-json @gfx11_allocation_json_lds_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_lds_wait(%addr0: reg<amdgpu.vgpr>, %addr1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %loaded0 = ds_read_b32 %addr0
   %loaded1 = ds_read_b32 %addr1 {offset = 4}
@@ -108,6 +102,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_lds
 
 // RUN: emit amdgpu-allocation-json @gfx11_allocation_json_lds_budgeted_dead_result strategy=source amdgpu.vgpr=2
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_lds_budgeted_dead_result(%addr: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %dead = ds_read_b32 %addr
   %reuse = v_mov_b32 7
@@ -124,9 +119,10 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_lds
 // outstanding. The scalar resource retains its separately modeled lease.
 // RUN: emit amdgpu-allocation-json @gfx11_allocation_json_global_store_vgpr_sources_issue_consumed strategy=source
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_global_store_vgpr_sources_issue_consumed(%addr: reg<amdgpu.vgpr>, %view: reg<amdgpu.sgpr x2>) asm {
   %value0 = v_mov_b32 1
-  global_store_b32_saddr %addr, %value0, %view {offset = 0}
+  global_store_b32_saddr %addr, %value0, %view
   %value1 = v_mov_b32 2
   global_store_b32_saddr %addr, %value1, %view {offset = 4}
   return
@@ -139,11 +135,12 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_glo
 
 // RUN: emit amdgpu-allocation-json @gfx11_allocation_json_global_load_saddr_source_reuse strategy=source amdgpu.sgpr=4
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_global_load_saddr_source_reuse(%addr: reg<amdgpu.vgpr>, %load_base: reg<amdgpu.sgpr x2>, %keep: reg<amdgpu.sgpr x2>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
   %loaded = global_load_b32_saddr %addr, %load_base
   %mask = v_cmp_lt_i32 %lhs, %rhs
   %saved_exec, %active = s_and_saveexec_b64 %mask
-  return %loaded, %keep : reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>
+  return %loaded, %keep
 }
 
 // ----
@@ -153,6 +150,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_glo
 
 // RUN: emit amdgpu-allocation-json @gfx11_allocation_json_global_store_saddr_source_reuse strategy=source amdgpu.sgpr=4
 amdgpu.target<gfx1100> @gfx11_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_global_store_saddr_source_reuse(%addr: reg<amdgpu.vgpr>, %store_base: reg<amdgpu.sgpr x2>, %keep: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) asm {
   global_store_b32_saddr %addr, %value, %store_base
   %mask = v_cmp_lt_i32 %lhs, %rhs

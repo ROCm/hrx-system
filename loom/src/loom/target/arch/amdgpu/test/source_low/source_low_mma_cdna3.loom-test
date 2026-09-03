@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx942> @target
+
 func.def target(@target) @bf16_mfma(%lhs_data: vector<4xbf16>, %rhs_data: vector<4xbf16>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -22,6 +23,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bf16_mfma(%lhs:
 // ====
 
 amdgpu.target<gfx942> @target
+
 func.def target(@target) @bf16_mfma_four_loop_carried_accumulators(%lhs_data: vector<4xbf16>, %rhs_data: vector<4xbf16>, %init_data: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
   %k_tile_begin = index.constant 0 : index
   %k_tile_step = index.constant 1 : index
@@ -32,7 +34,7 @@ func.def target(@target) @bf16_mfma_four_loop_carried_accumulators(%lhs_data: ve
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<4xbf16>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<4xbf16>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
-  %result0, %result1, %result2, %result3 = scf.for %k_tile = [%k_tile_begin to %k_tile_end step %k_tile_step](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+  %result0, %result1, %result2, %result3 = scf.for %k_tile = [%k_tile_begin to %k_tile_end step %k_tile_step](%acc0 = %init : vector<4xf32>, %acc1 = %init : vector<4xf32>, %acc2 = %init : vector<4xf32>, %acc3 = %init : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
     %next0 = vector.mma %lhs, %rhs, %acc0 : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
     %next1 = vector.mma %lhs, %rhs, %acc1 : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
     %next2 = vector.mma %lhs, %rhs, %acc2 : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
@@ -69,6 +71,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bf16_mfma_four_
 // ====
 
 amdgpu.target<gfx942> @target
+
 func.def target(@target) @bf16_mfma_preserves_accumulator(%lhs_data: vector<4xbf16>, %rhs_data: vector<4xbf16>, %init_data: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -90,6 +93,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bf16_mfma_prese
 // ====
 
 amdgpu.target<gfx942> @target
+
 func.def target(@target) @f32_mfma(%lhs_data: vector<1xf32>, %rhs_data: vector<1xf32>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -599,6 +603,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @f32_fragment_memory_static_offsets() {
   %unit = index.constant 1 : index
   %threads = index.constant 64 : index
@@ -647,6 +652,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx942> @target
+
 func.def target(@target) @fp8_mfma_fnuz_schema(%lhs_data: vector<2xi32>, %rhs_data: vector<2xi32>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -669,13 +675,14 @@ low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @fp8_mfma_fnuz_s
 // ====
 
 amdgpu.target<gfx942> @target
+
 func.def target(@target) @bf16_smfmac(%lhs_data: vector<2xi32>, %rhs_data: vector<4xi32>, %init_data: vector<4xf32>, %sparsity: vector<1xi32>) -> (vector<4xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
   %lhs_schema = encoding.define #encoding.operand<element_format=bf16, payload_elements=4, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %rhs_schema = encoding.define #encoding.operand<element_format=bf16, payload_elements=8, payload_registers=4> : encoding<schema>
-  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %sparsity : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<2xi32>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>, sparsity = %sparsity : vector<1xi32>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<4xi32>, vector<4xf32>
@@ -692,13 +699,14 @@ low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bf16_smfmac(%lh
 // ====
 
 amdgpu.target<gfx942> @target
+
 func.def target(@target) @fp8_bf8_smfmac(%lhs_data: vector<2xi32>, %rhs_data: vector<4xi32>, %init_data: vector<4xf32>, %sparsity: vector<1xi32>) -> (vector<4xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 64 : index
   %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=16, payload_registers=4> : encoding<schema>
-  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %sparsity : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<2xi32>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>, sparsity = %sparsity : vector<1xi32>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<4xi32>, vector<4xf32>
@@ -715,6 +723,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @fp8_bf8_smfmac(
 // ====
 
 amdgpu.target<gfx942> @target
+
 func.def target(@target) @bf16_mfma_wrong_tile(%lhs_data: vector<4xbf16>, %rhs_data: vector<4xbf16>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
   %m = index.constant 17 : index
   %n = index.constant 16 : index
@@ -856,6 +865,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx942> @target
+
 func.def target(@target) @tf32_mfma_16x16x8(%lhs_data: vector<2xi32>, %rhs_data: vector<2xi32>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -878,6 +888,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @tf32_mfma_16x16
 // ====
 
 amdgpu.target<gfx942> @target
+
 func.def target(@target) @tf32_mfma_32x32x4(%lhs_data: vector<2xi32>, %rhs_data: vector<2xi32>, %init_data: vector<16xf32>) -> (vector<16xf32>) {
   %m = index.constant 32 : index
   %n = index.constant 32 : index

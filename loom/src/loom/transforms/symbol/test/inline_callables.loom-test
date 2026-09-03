@@ -49,6 +49,7 @@ kernel.def @inlines_into_required_ancestor() {
 // RUN: pass inline-callables,canonicalize
 
 target.generic<reference> @wave32 {subgroup_size = 32}
+
 target.generic<reference> @wave64 {subgroup_size = 64}
 
 func.def inline @current_subgroup_size() -> (index) {
@@ -352,6 +353,7 @@ func.def public @block_quant_entry(%packed: i32, %scale: i32) -> (i32) {
 // RUN: pass inline-callables
 
 func.decl inline @extern_a(%value: i32) -> (i32)
+
 func.decl inline @extern_b(%value: i32) -> (i32)
 
 func.def public @entry(%arg: i32) -> (i32, i32) {

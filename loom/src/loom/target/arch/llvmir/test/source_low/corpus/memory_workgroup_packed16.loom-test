@@ -1,9 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_workgroup_packed16.loom-test
 // RUN: emit source-low output=low
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @lds_f16x4_b64_roundtrip() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -39,9 +38,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @lds_f16x8_b128_roundtrip() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -77,9 +75,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @lds_f16x8_b128_extract_scalar_stores() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -142,9 +139,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) work
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @lds_bf16x4_b64_roundtrip() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -180,9 +176,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @lds_bf16x8_b128_roundtrip() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -218,9 +213,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @lds_f16_scalar_roundtrip() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -256,9 +250,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @lds_i8x2_b16_roundtrip() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -291,9 +284,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) work
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @lds_i16_scalar_roundtrip() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -326,9 +318,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) work
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @lds_bf16_scalar_roundtrip() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -364,9 +355,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @lds_f16_strided_scalar_roundtrip() {
   %unit = index.constant 1 : index
   %tile = index.constant 16 : index

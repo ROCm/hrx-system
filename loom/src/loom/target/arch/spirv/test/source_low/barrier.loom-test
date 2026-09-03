@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low control-flow=structured-low
 
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @workgroup_barrier() {
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   func.return
@@ -16,6 +17,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @workgr
 // ====
 
 spirv.target<vulkan1_3> @target
+
 func.def target(@target) @subgroup_shared_memory_barrier() {
   kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
   func.return

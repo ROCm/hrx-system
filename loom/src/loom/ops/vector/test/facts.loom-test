@@ -414,8 +414,8 @@ func.def @transpose_small_static_lanes() -> (i32, i32) {
 // Bitcast facts reinterpret exact same-width lanes without handling wider
 // byte-pack reshapes.
 func.def @bitcast_same_lane_raw_bits() -> (f32, i32) {
-  %lhs_bits = scalar.constant 0x3f800000 : i32
-  %rhs_bits = scalar.constant 0x40000000 : i32
+  %lhs_bits = scalar.constant 1065353216 : i32
+  %rhs_bits = scalar.constant 1073741824 : i32
   %bits = vector.from_elements %lhs_bits, %rhs_bits : vector<2xi32>
   %floats = vector.bitcast %bits : vector<2xi32> to vector<2xf32>
   %lhs_value = scalar.constant 1.0 : f32
@@ -515,8 +515,8 @@ func.def @wave2_bit_count_small_lanes() -> (i32, i32, i32) {
 // Bitfield facts interpret exact lane payloads as raw typed bits, so both
 // unsigned and signed field extraction can fold through scalar extracts.
 func.def @bitfield_extract_small_lanes() -> (i32, i32) {
-  %a0 = scalar.constant 0x1f : i16
-  %a1 = scalar.constant 0xf0 : i16
+  %a0 = scalar.constant 31 : i16
+  %a1 = scalar.constant 240 : i16
   %v = vector.from_elements %a0, %a1 : vector<2xi16>
   %lo = vector.bitfield.extractu %v {offset = 0, width = 4} : vector<2xi16> -> vector<2xi32>
   %hi = vector.bitfield.extracts %v {offset = 4, width = 4} : vector<2xi16> -> vector<2xi32>
@@ -1098,8 +1098,8 @@ func.def @dot8i4_uniform_dynamic_identity(%n: index) -> (i32) {
 // Packed fp8/bf8 dot facts decode little-endian bytes according to the
 // template kind. 0x38 is fp8(E4M3) 1.0, and 0x3c is bf8(E5M2) 1.0.
 func.def @dot4f8_small_static_lanes() -> (f32, f32) {
-  %lhs0 = scalar.constant 0x38383838 : i32
-  %rhs0 = scalar.constant 0x3c3c3c3c : i32
+  %lhs0 = scalar.constant 943208504 : i32
+  %rhs0 = scalar.constant 1010580540 : i32
   %lhs1 = scalar.constant 0 : i32
   %rhs1 = scalar.constant 0 : i32
   %acc0 = scalar.constant 5.0 : f32
@@ -1123,8 +1123,8 @@ func.def @dot4f8_small_static_lanes() -> (f32, f32) {
 
 // All template spellings decode the selected lhs/rhs field formats.
 func.def @dot4f8_all_kind_ones() -> (f32, f32, f32, f32) {
-  %fp8_unit_lane_word = scalar.constant 0x38383838 : i32
-  %bf8_unit_lane_word = scalar.constant 0x3c3c3c3c : i32
+  %fp8_unit_lane_word = scalar.constant 943208504 : i32
+  %bf8_unit_lane_word = scalar.constant 1010580540 : i32
   %c0 = scalar.constant 0.0 : f32
   %fp8 = vector.from_elements %fp8_unit_lane_word : vector<1xi32>
   %bf8 = vector.from_elements %bf8_unit_lane_word : vector<1xi32>
@@ -1152,8 +1152,8 @@ func.def @dot4f8_all_kind_ones() -> (f32, f32, f32, f32) {
 
 // Uniform packed fp8/bf8 facts stay shape-independent on dynamic vectors.
 func.def @dot4f8_uniform_dynamic_extract(%n: index) -> (f32) {
-  %lhs0 = scalar.constant 0x38383838 : i32
-  %rhs0 = scalar.constant 0x3c3c3c3c : i32
+  %lhs0 = scalar.constant 943208504 : i32
+  %rhs0 = scalar.constant 1010580540 : i32
   %c0 = scalar.constant 0.0 : f32
   %lhs = vector.splat %lhs0 : vector<[%n]xi32>
   %rhs = vector.splat %rhs0 : vector<[%n]xi32>

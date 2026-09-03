@@ -4,6 +4,7 @@
 target.generic<reference> @reference
 
 target.generic<reference> @host {subgroup_size = 0}
+
 // External target contract valid before its definition is linked.
 target.decl @external_target
 

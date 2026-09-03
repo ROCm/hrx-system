@@ -1,6 +1,7 @@
 // RUN: emit amdgpu-assembly @gfx950_scalef32_packed8_conversions waits=none
 
 amdgpu.target<gfx950> @target
+
 low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_packed8_conversions(%fp8: reg<amdgpu.vgpr>, %bf8: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm {
   %f16_fp8 = v_cvt_scalef32_pk_f16_fp8 %fp8, %scale
   %f16_bf8 = v_cvt_scalef32_pk_f16_bf8 %bf8, %scale
@@ -24,6 +25,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_packed8_convers
 // RUN: emit amdgpu-assembly @gfx950_scalef32_fp4_conversions waits=none
 
 amdgpu.target<gfx950> @target
+
 low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_fp4_conversions(%fp4: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm {
   %f16 = v_cvt_scalef32_pk_f16_fp4 %fp4, %scale
   %bf16 = v_cvt_scalef32_pk_bf16_fp4 %fp4, %scale
@@ -44,6 +46,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_fp4_conversions
 // RUN: emit amdgpu-native-words @gfx950_scalef32_fp4_conversion_words waits=none strategy=source fixed=%fp4:physical_register:0:1 fixed=%scale:physical_register:1:1 fixed=%f16:physical_register:2:1 fixed=%bf16:physical_register:3:1 fixed=%f32:physical_register:4:2
 
 amdgpu.target<gfx950> @target
+
 low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_fp4_conversion_words(%fp4: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm {
   %f16 = v_cvt_scalef32_pk_f16_fp4 %fp4, %scale
   %bf16 = v_cvt_scalef32_pk_bf16_fp4 %fp4, %scale
@@ -64,6 +67,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_fp4_conversion_
 // RUN: emit amdgpu-assembly @gfx950_scalef32_fp4_byte_conversions waits=none
 
 amdgpu.target<gfx950> @target
+
 low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_fp4_byte_conversions(%fp4: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm {
   %f16_byte0 = v_cvt_scalef32_pk_f16_fp4 %fp4, %scale
   %f16_byte1 = v_cvt_scalef32_pk_f16_fp4_byte1 %fp4, %scale
@@ -102,6 +106,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_fp4_byte_conver
 // RUN: emit amdgpu-native-words @gfx950_scalef32_f16_fp4_byte_words waits=none strategy=source fixed=%fp4:physical_register:0:1 fixed=%scale:physical_register:1:1 fixed=%byte0:physical_register:2:1 fixed=%byte1:physical_register:3:1 fixed=%byte2:physical_register:4:1 fixed=%byte3:physical_register:5:1
 
 amdgpu.target<gfx950> @target
+
 low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_f16_fp4_byte_words(%fp4: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm {
   %byte0 = v_cvt_scalef32_pk_f16_fp4 %fp4, %scale
   %byte1 = v_cvt_scalef32_pk_f16_fp4_byte1 %fp4, %scale
@@ -128,6 +133,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_f16_fp4_byte_wo
 // RUN: emit amdgpu-native-words @gfx950_scalef32_bf16_fp4_byte_words waits=none strategy=source fixed=%fp4:physical_register:0:1 fixed=%scale:physical_register:1:1 fixed=%byte0:physical_register:2:1 fixed=%byte1:physical_register:3:1 fixed=%byte2:physical_register:4:1 fixed=%byte3:physical_register:5:1
 
 amdgpu.target<gfx950> @target
+
 low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_bf16_fp4_byte_words(%fp4: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm {
   %byte0 = v_cvt_scalef32_pk_bf16_fp4 %fp4, %scale
   %byte1 = v_cvt_scalef32_pk_bf16_fp4_byte1 %fp4, %scale
@@ -151,6 +157,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_bf16_fp4_byte_w
 // RUN: emit amdgpu-assembly @gfx950_packed8_encode_f32 waits=none
 
 amdgpu.target<gfx950> @target
+
 low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_packed8_encode_f32(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %d: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %fp8_low = v_cvt_pk_fp8_f32_low %a, %b
   %fp8 = v_cvt_pk_fp8_f32_high %fp8_low, %c, %d

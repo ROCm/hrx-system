@@ -1426,6 +1426,7 @@ func.def @bare_unroll_dynamic_lower_static_trip_count(%slot0: index) {
 // ====
 
 config.def @runtime.sequence_width = 128 : index
+
 config.def @runtime.workgroup_size = 64 : index
 
 func.def @bare_unroll_config_specialized_sequence_width(%lane0: index) {

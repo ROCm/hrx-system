@@ -14,9 +14,7 @@ func.def @prefetch_in_if_survives_dce(%buffer: buffer, %offset: offset, %cond: i
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
   scf.if %cond {
     view.prefetch %view[%row] {intent = read, locality = l1} : view<4xf32, %layout>
-    scf.yield
   } else {
-    scf.yield
   }
   func.return
 }

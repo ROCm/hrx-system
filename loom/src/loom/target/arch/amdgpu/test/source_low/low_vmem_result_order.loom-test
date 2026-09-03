@@ -1,6 +1,7 @@
 // RUN: emit amdgpu-assembly @gfx1100_same_class_vmem_waw_backedge strategy=source
 
 amdgpu.target<gfx1100> @target
+
 low.func.def target<amdgpu.rdna3.core>(@target) @gfx1100_same_class_vmem_waw_backedge(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
   %zero = s_mov_b32 0
   low.br ^loop(%zero: reg<amdgpu.sgpr>)
@@ -36,6 +37,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @gfx1100_same_class_vmem_waw_bac
 // RUN: emit amdgpu-assembly @gfx1100_vmem_to_valu_waw_cross_block strategy=source
 
 amdgpu.target<gfx1100> @target
+
 low.func.def target<amdgpu.rdna3.core>(@target) @gfx1100_vmem_to_valu_waw_cross_block(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
   %unused = global_load_b32_saddr %address, %input
   low.br ^overwrite
@@ -60,6 +62,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @gfx1100_vmem_to_valu_waw_cross_
 // RUN: emit amdgpu-assembly @gfx1100_same_class_vmem_waw_linear strategy=source
 
 amdgpu.target<gfx1100> @target
+
 low.func.def target<amdgpu.rdna3.core>(@target) @gfx1100_same_class_vmem_waw_linear(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>) asm {
   %unused0 = global_load_b32_saddr %address, %input
   %unused1 = global_load_b32_saddr %address, %input {offset = 4}
@@ -78,6 +81,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @gfx1100_same_class_vmem_waw_lin
 // RUN: emit amdgpu-assembly @gfx1200_same_class_vmem_waw_linear strategy=source
 
 amdgpu.target<gfx1200> @target {subgroup_size = 64}
+
 low.func.def target<amdgpu.rdna4.core>(@target) @gfx1200_same_class_vmem_waw_linear(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>) asm {
   %unused0 = global_load_b32_saddr %address, %input
   %unused1 = global_load_b32_saddr %address, %input {offset = 4}
@@ -97,6 +101,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @gfx1200_same_class_vmem_waw_lin
 // RUN: emit amdgpu-assembly @gfx1100_vmem_to_valu_waw strategy=source
 
 amdgpu.target<gfx1100> @target
+
 low.func.def target<amdgpu.rdna3.core>(@target) @gfx1100_vmem_to_valu_waw(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
   %unused = global_load_b32_saddr %address, %input
   %value = v_mov_b32 42
@@ -117,6 +122,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @gfx1100_vmem_to_valu_waw(%addre
 // RUN: emit amdgpu-assembly @gfx1200_explicit_wait_clears_backedge strategy=source
 
 amdgpu.target<gfx1200> @target {subgroup_size = 64}
+
 low.func.def target<amdgpu.rdna4.core>(@target) @gfx1200_explicit_wait_clears_backedge(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
   %zero = s_mov_b32 0
   low.br ^loop(%zero: reg<amdgpu.sgpr>)
@@ -153,6 +159,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @gfx1200_explicit_wait_clears_ba
 // RUN: emit amdgpu-assembly @gfx942_same_class_vmem_waw_backedge strategy=source
 
 amdgpu.target<gfx942> @target {subgroup_size = 64}
+
 low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_same_class_vmem_waw_backedge(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
   %m0 = s_mov_b32_m0_imm 0
   %zero = s_mov_b32 0
@@ -188,6 +195,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_same_class_vmem_waw_back
 // RUN: emit amdgpu-assembly @gfx1200_same_class_vmem_waw_backedge strategy=source
 
 amdgpu.target<gfx1200> @target {subgroup_size = 64}
+
 low.func.def target<amdgpu.rdna4.core>(@target) @gfx1200_same_class_vmem_waw_backedge(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
   %zero = s_mov_b32 0
   low.br ^loop(%zero: reg<amdgpu.sgpr>)

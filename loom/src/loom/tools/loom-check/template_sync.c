@@ -35,7 +35,7 @@ typedef struct loom_check_template_sync_case_t {
   iree_string_view_t definition_op_name;
 
   // Parsed case carrying the input to synchronize.
-  const loom_check_case_t* test_case;
+  const loom_test_case_t* test_case;
 
   // Arena-owned metadata array for every symbol in the case input.
   loom_check_template_sync_symbol_t* symbols;
@@ -46,7 +46,7 @@ typedef struct loom_check_template_sync_case_t {
 
 typedef struct loom_check_template_sync_annotation_anchor_t {
   // Source range of the annotation comment line in the target file.
-  loom_check_source_range_t annotation_range;
+  loom_test_source_range_t annotation_range;
 
   // Target input line that the annotation is expected to match.
   iree_string_view_t target_line;
@@ -106,7 +106,7 @@ static iree_status_t loom_check_template_sync_copy_string(
 }
 
 static bool loom_check_template_sync_input_is_empty(
-    const loom_check_case_t* test_case) {
+    const loom_test_case_t* test_case) {
   return iree_string_view_is_empty(iree_string_view_trim(test_case->input));
 }
 
@@ -304,7 +304,7 @@ loom_check_template_sync_collect_case_overlay(
   loom_check_template_sync_target_overlay_t overlay = {0};
   if (record == NULL) return overlay;
 
-  const loom_check_case_t* test_case = record->test_case;
+  const loom_test_case_t* test_case = record->test_case;
   overlay.source_record = record;
   overlay.symbols = record->symbols;
   overlay.symbol_count = record->symbol_count;
@@ -367,8 +367,8 @@ loom_check_template_sync_collect_target_overlay(
 }
 
 static iree_status_t loom_check_template_sync_source_line_number(
-    iree_string_view_t source, loom_check_source_range_t input_range,
-    loom_check_source_range_t line_range, iree_host_size_t* out_line) {
+    iree_string_view_t source, loom_test_source_range_t input_range,
+    loom_test_source_range_t line_range, iree_host_size_t* out_line) {
   *out_line = 0;
   if (line_range.start_byte < input_range.start_byte ||
       line_range.start_byte > input_range.end_byte ||
@@ -388,7 +388,7 @@ static iree_status_t loom_check_template_sync_source_line_number(
 }
 
 static iree_status_t loom_check_template_sync_extract_case_metadata(
-    const loom_check_case_t* test_case, iree_string_view_t filename,
+    const loom_test_case_t* test_case, iree_string_view_t filename,
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
     iree_arena_allocator_t* arena, iree_allocator_t host_allocator,
     loom_check_template_sync_case_t* out_record) {
@@ -399,7 +399,7 @@ static iree_status_t loom_check_template_sync_extract_case_metadata(
   iree_string_builder_t stripped_input;
   iree_string_builder_initialize(host_allocator, &stripped_input);
   iree_status_t status =
-      loom_check_strip_comments(test_case->input, &stripped_input);
+      loom_test_file_strip_comments(test_case->input, &stripped_input);
 
   loom_module_t* module = NULL;
   if (iree_status_is_ok(status)) {
@@ -473,7 +473,7 @@ static iree_status_t loom_check_template_sync_extract_case_metadata(
 }
 
 static iree_status_t loom_check_template_sync_collect_cases(
-    const loom_check_file_t* file, iree_string_view_t filename,
+    const loom_test_file_t* file, iree_string_view_t filename,
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
     iree_arena_allocator_t* arena, iree_allocator_t host_allocator,
     bool allow_empty_cases, bool reject_case_run_directives,
@@ -490,7 +490,7 @@ static iree_status_t loom_check_template_sync_collect_cases(
       arena, file->case_count, sizeof(*cases), (void**)&cases));
   iree_host_size_t case_count = 0;
   for (iree_host_size_t i = 0; i < file->case_count; ++i) {
-    const loom_check_case_t* test_case = &file->cases[i];
+    const loom_test_case_t* test_case = &file->cases[i];
     if (allow_empty_cases &&
         loom_check_template_sync_input_is_empty(test_case)) {
       continue;
@@ -555,7 +555,7 @@ loom_check_template_sync_collect_default_target_overlay(
 }
 
 static iree_status_t loom_check_template_sync_append_source_range(
-    iree_string_view_t source, loom_check_source_range_t range,
+    iree_string_view_t source, loom_test_source_range_t range,
     iree_string_builder_t* builder) {
   if (range.end_byte < range.start_byte || range.end_byte > source.size) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -567,9 +567,9 @@ static iree_status_t loom_check_template_sync_append_source_range(
 }
 
 static iree_status_t loom_check_template_sync_append_target_directive(
-    iree_string_view_t target_source, loom_check_source_range_t range,
+    iree_string_view_t target_source, loom_test_source_range_t range,
     iree_string_builder_t* builder) {
-  if (loom_check_source_range_is_empty(range)) {
+  if (loom_test_source_range_is_empty(range)) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_check_template_sync_append_source_range(
@@ -578,17 +578,17 @@ static iree_status_t loom_check_template_sync_append_target_directive(
 }
 
 static iree_status_t loom_check_template_sync_append_target_directives(
-    iree_string_view_t target_source, const loom_check_case_t* target_case,
+    iree_string_view_t target_source, const loom_test_case_t* target_case,
     iree_string_builder_t* builder) {
   if (!target_case) {
     return iree_ok_status();
   }
-  loom_check_source_range_t first = target_case->requires_directive_range;
-  loom_check_source_range_t second = target_case->xfail_directive_range;
-  if (!loom_check_source_range_is_empty(first) &&
-      !loom_check_source_range_is_empty(second) &&
+  loom_test_source_range_t first = target_case->requires_directive_range;
+  loom_test_source_range_t second = target_case->xfail_directive_range;
+  if (!loom_test_source_range_is_empty(first) &&
+      !loom_test_source_range_is_empty(second) &&
       second.start_byte < first.start_byte) {
-    loom_check_source_range_t temporary = first;
+    loom_test_source_range_t temporary = first;
     first = second;
     second = temporary;
   }
@@ -723,7 +723,7 @@ static iree_status_t loom_check_template_sync_append_target_overlay_prelude(
 }
 
 static iree_status_t loom_check_template_sync_collect_annotation_anchors(
-    iree_string_view_t target_source, const loom_check_case_t* target_case,
+    iree_string_view_t target_source, const loom_test_case_t* target_case,
     iree_arena_allocator_t* arena,
     loom_check_template_sync_annotation_anchor_t** out_anchors,
     iree_host_size_t* out_anchor_count) {
@@ -737,7 +737,7 @@ static iree_status_t loom_check_template_sync_collect_annotation_anchors(
       iree_arena_allocate_array(arena, target_case->annotation_count,
                                 sizeof(*anchors), (void**)&anchors));
   for (iree_host_size_t i = 0; i < target_case->annotation_count; ++i) {
-    const loom_check_annotation_t* annotation = &target_case->annotations[i];
+    const loom_test_annotation_t* annotation = &target_case->annotations[i];
     iree_string_view_t target_line = iree_string_view_empty();
     if (!loom_check_template_sync_line_at(
             target_case->input, annotation->target_line, &target_line)) {
@@ -776,8 +776,8 @@ static iree_status_t loom_check_template_sync_append_input_with_annotations(
     const loom_check_template_sync_case_t* target_record,
     const loom_check_template_sync_target_overlay_t* default_overlay,
     iree_arena_allocator_t* arena, iree_string_builder_t* builder) {
-  const loom_check_case_t* template_case = template_record->test_case;
-  const loom_check_case_t* target_case =
+  const loom_test_case_t* template_case = template_record->test_case;
+  const loom_test_case_t* target_case =
       target_record ? target_record->test_case : NULL;
   loom_check_template_sync_annotation_anchor_t* anchors = NULL;
   iree_host_size_t anchor_count = 0;
@@ -852,9 +852,9 @@ static iree_status_t loom_check_template_sync_append_case(
 
 static iree_status_t loom_check_template_sync_parse_template(
     iree_string_view_t template_source, iree_arena_allocator_t* arena,
-    loom_check_file_t* out_template_file) {
+    loom_test_file_t* out_template_file) {
   IREE_RETURN_IF_ERROR(
-      loom_check_parse(template_source, arena, out_template_file));
+      loom_test_file_parse(template_source, arena, out_template_file));
   if (out_template_file->has_template_directive) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -870,7 +870,8 @@ static iree_status_t loom_check_template_sync_parse_overlay_module(
   *out_module = NULL;
   iree_string_builder_t stripped_source;
   iree_string_builder_initialize(host_allocator, &stripped_source);
-  iree_status_t status = loom_check_strip_comments(source, &stripped_source);
+  iree_status_t status =
+      loom_test_file_strip_comments(source, &stripped_source);
   if (iree_status_is_ok(status)) {
     status = loom_text_parse(iree_string_builder_view(&stripped_source),
                              filename, context, block_pool, NULL, out_module);
@@ -919,7 +920,7 @@ static iree_status_t loom_check_template_sync_validate_overlay_contracts(
 }
 
 iree_status_t loom_check_template_sync_build_source(
-    iree_string_view_t target_source, const loom_check_file_t* target_file,
+    iree_string_view_t target_source, const loom_test_file_t* target_file,
     iree_string_view_t target_filename, iree_string_view_t template_source,
     iree_string_view_t template_filename, loom_context_t* context,
     iree_arena_block_pool_t* block_pool, iree_arena_allocator_t* arena,
@@ -934,7 +935,7 @@ iree_status_t loom_check_template_sync_build_source(
         "template synchronization requires a TEMPLATE directive");
   }
 
-  loom_check_file_t template_file = {0};
+  loom_test_file_t template_file = {0};
   IREE_RETURN_IF_ERROR(loom_check_template_sync_parse_template(
       template_source, arena, &template_file));
 
@@ -963,13 +964,13 @@ iree_status_t loom_check_template_sync_build_source(
 
   iree_host_size_t preamble_end = target_source.size;
   if (target_file->case_count > 0) {
-    const loom_check_case_t* first_case = &target_file->cases[0];
-    preamble_end = loom_check_source_range_is_empty(first_case->separator_range)
+    const loom_test_case_t* first_case = &target_file->cases[0];
+    preamble_end = loom_test_source_range_is_empty(first_case->separator_range)
                        ? first_case->source_range.start_byte
                        : first_case->separator_range.start_byte;
   }
-  const loom_check_source_range_t preamble_range = {.start_byte = 0,
-                                                    .end_byte = preamble_end};
+  const loom_test_source_range_t preamble_range = {.start_byte = 0,
+                                                   .end_byte = preamble_end};
   IREE_RETURN_IF_ERROR(loom_check_template_sync_append_source_range(
       target_source, preamble_range, new_source));
 

@@ -71,7 +71,7 @@
 #define LOOM_TOOLS_LOOM_CHECK_JSON_OUTPUT_H_
 
 #include "iree/base/api.h"
-#include "loom/tools/loom-check/check.h"
+#include "loom/testing/test_file.h"
 #include "loom/tools/loom-check/execute.h"
 #include "loom/tools/loom-check/report.h"
 #include "loom/util/stream.h"
@@ -101,7 +101,7 @@ typedef enum loom_check_json_output_mode_t {
 // |file| has no cases. The pass/fail/skip counts are provided directly by the
 // caller (rather than recomputed) to stay consistent with the text output path.
 iree_status_t loom_check_json_write_file_result(
-    iree_string_view_t filename, const loom_check_file_t* file,
+    iree_string_view_t filename, const loom_test_file_t* file,
     const loom_check_file_report_t* report, const loom_check_result_t* results,
     iree_host_size_t pass_count, iree_host_size_t fail_count,
     iree_host_size_t skip_count, loom_check_json_output_mode_t output_mode,

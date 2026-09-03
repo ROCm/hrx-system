@@ -747,10 +747,10 @@ low.func.def target<x86.avx512_packed_dot.core>(@x86_target) @x86_fragment(%base
 // RUN: emit x86-asm @x86_avx2_low_subset_rejects_high_xmm strategy=source fixed=%sum:physical_register:16:1
 x86.target<avx512> @x86_target
 
-low.func.def target<x86.avx512.core>(@x86_target) @x86_avx2_low_subset_rejects_high_xmm(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_avx2_low_subset_rejects_high_xmm(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   // ERROR@+1: BACKEND/020 {function_name="x86_avx2_low_subset_rejects_high_xmm", packet_key="x86.avx2.vpaddd.xmm", operand_field="dst", value_name="sum", value_class="x86.xmm", assigned_base="16", address_map_kind="low_subset", addressable_units="16"}
-  %sum = low.op<x86.avx2.vpaddd.xmm>(%lhs, %rhs) : (reg<x86.xmm>, reg<x86.xmm>) -> reg<x86.xmm>
-  low.return %sum : reg<x86.xmm>
+  %sum = vpaddd.xmm %lhs, %rhs
+  return %sum
 }
 
 // ====
@@ -758,12 +758,12 @@ low.func.def target<x86.avx512.core>(@x86_target) @x86_avx2_low_subset_rejects_h
 // RUN: emit x86-asm @x86_avx_vnni_low_subset_rejects_high_ymm strategy=source fixed=%acc_copy:physical_register:16:1 fixed=%dot:physical_register:16:1
 x86.target<avx512_packed_dot> @x86_target
 
-low.func.def target<x86.avx512_packed_dot.core>(@x86_target) @x86_avx_vnni_low_subset_rejects_high_ymm(%acc: reg<x86.ymm>, %lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>) -> (reg<x86.ymm>) {
-  %acc_copy = low.copy %acc : reg<x86.ymm> -> reg<x86.ymm>
+low.func.def target<x86.avx512_packed_dot.core>(@x86_target) @x86_avx_vnni_low_subset_rejects_high_ymm(%acc: reg<x86.ymm>, %lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  %acc_copy = copy %acc : reg<x86.ymm> -> reg<x86.ymm>
   // ERROR@+2: BACKEND/020 {function_name="x86_avx_vnni_low_subset_rejects_high_ymm", packet_key="x86.avx_vnni.vpdpbusd.ymm", operand_field="acc", value_name="acc_copy", value_class="x86.ymm", assigned_base="16", address_map_kind="low_subset", addressable_units="16"}
   // ERROR@+1: BACKEND/020 {function_name="x86_avx_vnni_low_subset_rejects_high_ymm", packet_key="x86.avx_vnni.vpdpbusd.ymm", operand_field="dst", value_name="dot", value_class="x86.ymm", assigned_base="16", address_map_kind="low_subset", addressable_units="16"}
-  %dot = low.op<x86.avx_vnni.vpdpbusd.ymm>(%acc_copy, %lhs, %rhs) : (reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>) -> %acc_copy as reg<x86.ymm>
-  low.return %dot : reg<x86.ymm>
+  %dot = avx_vnni.vpdpbusd.ymm %acc_copy, %lhs, %rhs
+  return %dot
 }
 
 // ====

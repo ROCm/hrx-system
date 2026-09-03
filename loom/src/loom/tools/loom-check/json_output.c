@@ -46,7 +46,7 @@ static bool loom_check_json_should_write_case(
 }
 
 static iree_status_t loom_check_json_write_source_range(
-    loom_check_source_range_t source_range, loom_output_stream_t* stream) {
+    loom_test_source_range_t source_range, loom_output_stream_t* stream) {
   loom_json_object_writer_t object;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
@@ -58,8 +58,8 @@ static iree_status_t loom_check_json_write_source_range(
 
 static iree_status_t loom_check_json_write_optional_source_range_field(
     loom_json_object_writer_t* object, iree_string_view_t name,
-    loom_check_source_range_t source_range) {
-  if (loom_check_source_range_is_empty(source_range)) {
+    loom_test_source_range_t source_range) {
+  if (loom_test_source_range_is_empty(source_range)) {
     return loom_json_object_write_null_field(object, name);
   }
   IREE_RETURN_IF_ERROR(loom_json_object_begin_field(object, name));
@@ -120,7 +120,7 @@ static iree_status_t loom_check_json_write_update_edit_field(
 }
 
 static iree_status_t loom_check_json_write_annotation(
-    const loom_check_annotation_t* annotation, bool matched,
+    const loom_test_annotation_t* annotation, bool matched,
     iree_host_size_t annotation_index, loom_output_stream_t* stream) {
   loom_json_object_writer_t object;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
@@ -171,7 +171,7 @@ static iree_status_t loom_check_json_write_annotation(
 }
 
 static iree_status_t loom_check_json_write_annotations(
-    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    const loom_test_case_t* test_case, iree_host_size_t case_index,
     const loom_check_file_report_t* report,
     loom_json_object_writer_t* case_object) {
   IREE_RETURN_IF_ERROR(
@@ -191,7 +191,7 @@ static iree_status_t loom_check_json_write_annotations(
 }
 
 static iree_status_t loom_check_json_write_case(
-    const loom_check_case_t* test_case, const loom_check_result_t* result,
+    const loom_test_case_t* test_case, const loom_check_result_t* result,
     const loom_check_file_report_t* report, iree_host_size_t case_index,
     loom_output_stream_t* stream) {
   loom_json_object_writer_t object;
@@ -200,7 +200,7 @@ static iree_status_t loom_check_json_write_case(
       &object, IREE_SV("index"), case_index + 1));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("mode"),
-      iree_make_cstring_view(loom_check_mode_name(test_case->mode))));
+      iree_make_cstring_view(loom_test_mode_name(test_case->mode))));
   IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
       &object, IREE_SV("has_run_directive"), test_case->has_run_directive));
   IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
@@ -281,7 +281,7 @@ static iree_status_t loom_check_json_write_case(
 }
 
 iree_status_t loom_check_json_write_file_result(
-    iree_string_view_t filename, const loom_check_file_t* file,
+    iree_string_view_t filename, const loom_test_file_t* file,
     const loom_check_file_report_t* report, const loom_check_result_t* results,
     iree_host_size_t pass_count, iree_host_size_t fail_count,
     iree_host_size_t skip_count, loom_check_json_output_mode_t output_mode,
@@ -297,7 +297,7 @@ iree_status_t loom_check_json_write_file_result(
       loom_json_object_write_string_field(&object, IREE_SV("file"), filename));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("default_mode"),
-      iree_make_cstring_view(loom_check_mode_name(file->default_mode))));
+      iree_make_cstring_view(loom_test_mode_name(file->default_mode))));
   IREE_RETURN_IF_ERROR(loom_check_json_write_optional_string_field(
       &object, IREE_SV("default_pipeline"), file->default_pipeline));
   IREE_RETURN_IF_ERROR(loom_check_json_write_optional_string_field(
@@ -311,7 +311,7 @@ iree_status_t loom_check_json_write_file_result(
   loom_json_array_writer_t cases;
   IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &cases));
   for (iree_host_size_t i = 0; i < file->case_count; ++i) {
-    const loom_check_case_t* test_case = &file->cases[i];
+    const loom_test_case_t* test_case = &file->cases[i];
     const loom_check_result_t* result = &results[i];
     if (loom_check_json_should_write_case(output_mode, result)) {
       IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&cases));

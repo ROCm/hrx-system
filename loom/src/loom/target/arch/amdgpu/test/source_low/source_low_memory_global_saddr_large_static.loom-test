@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32x4_global_saddr_large_static_non_power_two_stride() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 256 : index

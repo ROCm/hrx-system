@@ -18,7 +18,7 @@
 #include "loom/target/provider.h"
 #include "loom/target/test/lower.h"
 #include "loom/testing/context.h"
-#include "loom/tools/loom-check/check.h"
+#include "loom/testing/test_file.h"
 #include "loom/tools/loom-check/diagnostics.h"
 
 namespace loom {
@@ -271,9 +271,9 @@ class ExecuteTest : public ::testing::Test {
       loom_check_result_t* out_result) {
     iree_arena_allocator_t arena;
     iree_arena_initialize(&block_pool_, &arena);
-    loom_check_file_t file = {0};
+    loom_test_file_t file = {0};
     iree_status_t status =
-        loom_check_parse(iree_make_cstring_view(source), &arena, &file);
+        loom_test_file_parse(iree_make_cstring_view(source), &arena, &file);
 
     loom_check_file_report_t report = {};
     if (iree_status_is_ok(status)) {

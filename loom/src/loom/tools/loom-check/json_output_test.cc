@@ -12,7 +12,7 @@
 #include "iree/base/internal/json.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/tools/loom-check/check.h"
+#include "loom/testing/test_file.h"
 #include "loom/tools/loom-check/execute.h"
 #include "loom/tools/loom-check/report.h"
 #include "loom/util/stream.h"
@@ -86,10 +86,10 @@ class JsonOutputTest : public ::testing::Test {
   }
 
   // Parses a check file from source. Arena-allocated.
-  loom_check_file_t Parse(const char* source) {
+  loom_test_file_t Parse(const char* source) {
     iree_string_view_t source_view = iree_make_cstring_view(source);
-    loom_check_file_t file = {0};
-    IREE_EXPECT_OK(loom_check_parse(source_view, &arena_, &file));
+    loom_test_file_t file = {0};
+    IREE_EXPECT_OK(loom_test_file_parse(source_view, &arena_, &file));
     return file;
   }
 
@@ -108,7 +108,7 @@ class JsonOutputTest : public ::testing::Test {
     return result;
   }
 
-  loom_check_file_report_t MakeReport(const loom_check_file_t& file) {
+  loom_check_file_report_t MakeReport(const loom_test_file_t& file) {
     loom_check_file_report_t report = {0};
     IREE_EXPECT_OK(loom_check_file_report_initialize(&file, &arena_, &report));
     return report;
@@ -116,7 +116,7 @@ class JsonOutputTest : public ::testing::Test {
 
   // Writes JSON for the given file and results, returns the output string.
   std::string WriteJson(
-      iree_string_view_t filename, const loom_check_file_t& file,
+      iree_string_view_t filename, const loom_test_file_t& file,
       const loom_check_file_report_t& report,
       const loom_check_result_t* results, iree_host_size_t pass_count,
       iree_host_size_t fail_count, iree_host_size_t skip_count,
@@ -131,7 +131,7 @@ class JsonOutputTest : public ::testing::Test {
   }
 
   std::string WriteJson(
-      iree_string_view_t filename, const loom_check_file_t& file,
+      iree_string_view_t filename, const loom_test_file_t& file,
       const loom_check_result_t* results, iree_host_size_t pass_count,
       iree_host_size_t fail_count, iree_host_size_t skip_count,
       loom_check_json_output_mode_t output_mode = LOOM_CHECK_JSON_OUTPUT_ALL) {
@@ -403,7 +403,7 @@ TEST_F(JsonOutputTest, EmbedsAnnotationEdits) {
   };
   IREE_ASSERT_OK(loom_check_result_append_annotation_edit(
       &results[0], LOOM_CHECK_UPDATE_EDIT_INSERT_DIAGNOSTIC_ANNOTATIONS,
-      (loom_check_source_range_t){/*start_byte=*/15, /*end_byte=*/15},
+      (loom_test_source_range_t){/*start_byte=*/15, /*end_byte=*/15},
       /*target_line=*/1, IREE_SV("// ERROR@+1: PARSE/006\n")));
 
   std::string json = WriteJson(iree_make_cstring_view("annotation.loom-test"),
@@ -772,8 +772,8 @@ TEST_F(JsonOutputTest, FilenameWithSpecialCharacters) {
 
 TEST_F(JsonOutputTest, EmptyCaseArray) {
   // A file with only a preamble and no cases produces zero-count output.
-  loom_check_file_t file = {0};
-  file.default_mode = LOOM_CHECK_MODE_ROUNDTRIP;
+  loom_test_file_t file = {0};
+  file.default_mode = LOOM_TEST_MODE_ROUNDTRIP;
 
   std::string json = WriteJson(iree_make_cstring_view("empty.loom-test"), file,
                                /*results=*/nullptr, 0, 0, 0);

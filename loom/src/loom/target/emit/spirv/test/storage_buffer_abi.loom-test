@@ -382,19 +382,18 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
 
 spirv.target<vulkan1_3> @hal_target {abi = hal_kernel}
 
-low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @spirv_raw_bda_storage_buffer_i32_guard(%byte_offset: reg<spirv.offset64>, %limit: reg<spirv.offset64>) {
-  %input = low.resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %output = low.resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %inside = low.op<spirv.op_u_less_than.offset64>(%byte_offset, %limit) : (reg<spirv.offset64>, reg<spirv.offset64>) -> reg<spirv.id : i1>
+low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @spirv_raw_bda_storage_buffer_i32_guard(%byte_offset: reg<spirv.offset64>, %limit: reg<spirv.offset64>) asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %inside = OpULessThan.offset64 %byte_offset, %limit
   low.scf.if %inside {
-    %input_view = low.op<spirv.op_ptr_access_chain.storage_buffer.i32.byte_offset>(%input, %byte_offset) : (reg<spirv.ptr.storage_buffer>, reg<spirv.offset64>) -> reg<spirv.ptr.storage_buffer>
-    %loaded = low.op<spirv.op_load.storage_buffer.i32>(%input_view) : (reg<spirv.ptr.storage_buffer>) -> reg<spirv.id : i32>
-    %incremented = low.op<spirv.op_iadd.i32>(%loaded, %loaded) : (reg<spirv.id : i32>, reg<spirv.id : i32>) -> reg<spirv.id : i32>
-    %output_view = low.op<spirv.op_ptr_access_chain.storage_buffer.i32.byte_offset>(%output, %byte_offset) : (reg<spirv.ptr.storage_buffer>, reg<spirv.offset64>) -> reg<spirv.ptr.storage_buffer>
-    low.op<spirv.op_store.storage_buffer.i32>(%output_view, %incremented) : (reg<spirv.ptr.storage_buffer>, reg<spirv.id : i32>)
-    low.scf.yield
+    %input_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %byte_offset
+    %loaded = OpLoad.storage_buffer.i32 %input_view
+    %incremented = OpIAdd %loaded, %loaded
+    %output_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %byte_offset
+    OpStore.storage_buffer.i32 %output_view, %incremented
   }
-  low.return
+  return
 }
 
 // ----

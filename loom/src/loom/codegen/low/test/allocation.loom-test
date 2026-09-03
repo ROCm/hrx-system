@@ -25,12 +25,9 @@ classes:
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @ordinary_packet_reuses_dead_input(
-    %lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>) ->
-    (reg<test.i32 x4>) {
-  %sum = low.op<test.add.v4i32>(%lhs, %rhs) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %sum : reg<test.i32 x4>
+low.func.def target<test.low.core>(@test_target) @ordinary_packet_reuses_dead_input(%lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  %sum = test.add.v4i32 %lhs, %rhs
+  return %sum
 }
 
 // ----
@@ -42,11 +39,9 @@ low.func.def target<test.low.core>(@test_target) @ordinary_packet_reuses_dead_in
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @early_clobber_preserves_input(
-    %source: reg<test.i32 x4>) -> (reg<test.i32 x4>) {
-  %result = low.op<test.early_clobber.v4i32>(%source) :
-      (reg<test.i32 x4>) -> reg<test.i32 x4>
-  low.return %result : reg<test.i32 x4>
+low.func.def target<test.low.core>(@test_target) @early_clobber_preserves_input(%source: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  %result = test.early_clobber.v4i32 %source
+  return %result
 }
 
 // ----
@@ -58,11 +53,9 @@ low.func.def target<test.low.core>(@test_target) @early_clobber_preserves_input(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @early_tied_reuses_input(
-    %source: reg<test.i32 x4>) -> (reg<test.i32 x4>) {
-  %result = low.op<test.early_tied.v4i32>(%source) :
-      (reg<test.i32 x4>) -> %source as reg<test.i32 x4>
-  low.return %result : reg<test.i32 x4>
+low.func.def target<test.low.core>(@test_target) @early_tied_reuses_input(%source: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  %result = test.early_tied.v4i32 %source
+  return %result
 }
 
 // ----
@@ -74,11 +67,9 @@ low.func.def target<test.low.core>(@test_target) @early_tied_reuses_input(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @fact_identity_reuses_input(
-    %source: reg<test.i32 x4>) -> (reg<test.i32 x4>) {
-  %assumed = low.assume %source [range(%source, 0, 1024)] :
-      reg<test.i32 x4>
-  low.return %assumed : reg<test.i32 x4>
+low.func.def target<test.low.core>(@test_target) @fact_identity_reuses_input(%source: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  %assumed = low.assume %source [range(%source, 0, 1024)] : reg<test.i32 x4>
+  return %assumed
 }
 
 // ----
@@ -116,24 +107,17 @@ low.func.def target<test.low.core>(@test_target) @branch_concat_destination_layo
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @multiple_edge_concats_remain_distinct(
-    %condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>,
-    %zero: reg<test.i32>) -> (reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @multiple_edge_concats_remain_distinct(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>, %zero: reg<test.i32>) -> (reg<test.i32>) asm {
   low.cond_br %condition, ^build, ^exit : reg<test.i32>
 ^build:
   %first = test.add.i32 %lhs, %zero
-  %first_pair = concat(%first, %zero) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %first_pair = concat(%first, %zero) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
   %second = test.mul.i32 %rhs, %zero
-  %second_pair = concat(%second, %zero) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
-  low.br ^join(%first_pair: reg<test.i32 x2>,
-      %second_pair: reg<test.i32 x2>)
+  %second_pair = concat(%second, %zero) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  low.br ^join(%first_pair: reg<test.i32 x2>, %second_pair: reg<test.i32 x2>)
 ^join(%first_state: reg<test.i32 x2>, %second_state: reg<test.i32 x2>):
-  %first_value = slice %first_state[0] :
-      reg<test.i32 x2> -> reg<test.i32>
-  %second_value = slice %second_state[0] :
-      reg<test.i32 x2> -> reg<test.i32>
+  %first_value = slice %first_state[0] : reg<test.i32 x2> -> reg<test.i32>
+  %second_value = slice %second_state[0] : reg<test.i32 x2> -> reg<test.i32>
   %sum = test.add.i32 %first_value, %second_value
   return %sum
 ^exit:
@@ -149,10 +133,7 @@ low.func.def target<test.low.core>(@test_target) @multiple_edge_concats_remain_d
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @loop_backedge_concat_destination_layout(
-    %condition: reg<test.i32>, %init: reg<test.i32 x4>, %a0: reg<test.i32>,
-    %a1: reg<test.i32>, %a2: reg<test.i32>, %a3: reg<test.i32>)
-    -> (reg<test.i32 x4>) asm {
+low.func.def target<test.low.core>(@test_target) @loop_backedge_concat_destination_layout(%condition: reg<test.i32>, %init: reg<test.i32 x4>, %a0: reg<test.i32>, %a1: reg<test.i32>, %a2: reg<test.i32>, %a3: reg<test.i32>) -> (reg<test.i32 x4>) asm {
   low.br ^loop(%init: reg<test.i32 x4>)
 ^loop(%state: reg<test.i32 x4>):
   low.cond_br %condition, ^body, ^exit : reg<test.i32>
@@ -165,8 +146,7 @@ low.func.def target<test.low.core>(@test_target) @loop_backedge_concat_destinati
   %n1 = test.add.i32 %s1, %a1
   %n2 = test.add.i32 %s2, %a2
   %n3 = test.add.i32 %s3, %a3
-  %next = concat(%n0, %n1, %n2, %n3) : (reg<test.i32>, reg<test.i32>,
-      reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  %next = concat(%n0, %n1, %n2, %n3) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
   low.br ^loop(%next: reg<test.i32 x4>)
 ^exit:
   return %state
@@ -181,9 +161,7 @@ low.func.def target<test.low.core>(@test_target) @loop_backedge_concat_destinati
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @loop_backedge_disjoint_update_precedes_old_read(
-    %condition: reg<test.i32>, %seed: reg<test.i32 x2>,
-    %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+low.func.def target<test.low.core>(@test_target) @loop_backedge_disjoint_update_precedes_old_read(%condition: reg<test.i32>, %seed: reg<test.i32 x2>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32 x2>) asm {
   low.br ^loop(%seed: reg<test.i32 x2>)
 ^loop(%state: reg<test.i32 x2>):
   low.cond_br %condition, ^body, ^exit : reg<test.i32>
@@ -206,9 +184,7 @@ low.func.def target<test.low.core>(@test_target) @loop_backedge_disjoint_update_
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @loop_backedge_update_precedes_old_read(
-    %condition: reg<test.i32>, %seed: reg<test.i32>,
-    %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @loop_backedge_update_precedes_old_read(%condition: reg<test.i32>, %seed: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
   low.br ^loop(%seed: reg<test.i32>)
 ^loop(%state: reg<test.i32>):
   low.cond_br %condition, ^body, ^exit : reg<test.i32>
@@ -229,9 +205,7 @@ low.func.def target<test.low.core>(@test_target) @loop_backedge_update_precedes_
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @loop_body_chain_reuses_exit_live_state(
-    %condition: reg<test.i32>, %seed: reg<test.i32>,
-    %scale: reg<test.i32>, %addend: reg<test.i32>) -> (reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @loop_body_chain_reuses_exit_live_state(%condition: reg<test.i32>, %seed: reg<test.i32>, %scale: reg<test.i32>, %addend: reg<test.i32>) -> (reg<test.i32>) asm {
   low.br ^loop(%seed: reg<test.i32>)
 ^loop(%state: reg<test.i32>):
   low.cond_br %condition, ^body, ^exit : reg<test.i32>
@@ -252,9 +226,7 @@ low.func.def target<test.low.core>(@test_target) @loop_body_chain_reuses_exit_li
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @loop_backedge_concat_preserves_late_old_read(
-    %condition: reg<test.i32>, %seed: reg<test.i32 x2>,
-    %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+low.func.def target<test.low.core>(@test_target) @loop_backedge_concat_preserves_late_old_read(%condition: reg<test.i32>, %seed: reg<test.i32 x2>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32 x2>) asm {
   low.br ^loop(%seed: reg<test.i32 x2>)
 ^loop(%state: reg<test.i32 x2>):
   low.cond_br %condition, ^body, ^exit : reg<test.i32>
@@ -280,7 +252,7 @@ test.target<low_core> @test_target
 low.func.def target<test.low.core>(@test_target) @edge_copy_tail_enters_cycle(%source_b: reg<test.phys>, %source_c: reg<test.phys>) -> (reg<test.phys>, reg<test.phys>, reg<test.phys>) asm {
   low.br ^join(%source_b: reg<test.phys>, %source_c: reg<test.phys>, %source_b: reg<test.phys>)
 ^join(%dst_a: reg<test.phys>, %dst_b: reg<test.phys>, %dst_c: reg<test.phys>):
-  return %dst_a, %dst_b, %dst_c : reg<test.phys>, reg<test.phys>, reg<test.phys>
+  return %dst_a, %dst_b, %dst_c
 }
 
 // ====
@@ -325,14 +297,10 @@ low.func.def target<test.low.core>(@test_target) @wide_concat_source_pressure_cl
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @compact_wide_concat_reserves_fragmented_span(
-    %lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>,
-    %middle_blocker: reg<test.i32 x4>) ->
-    (reg<test.i32 x8>, reg<test.i32 x4>, reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @compact_wide_concat_reserves_fragmented_span(%lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>, %middle_blocker: reg<test.i32 x4>) -> (reg<test.i32 x8>, reg<test.i32 x4>, reg<test.i32>) asm {
   %first = test.add.v4i32 %lhs, %rhs
   %second = test.add.v4i32 %lhs, %rhs
-  %packed = concat(%first, %second) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
+  %packed = concat(%first, %second) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
   %packed0 = slice %packed[0] : reg<test.i32 x8> -> reg<test.i32>
   %consume = test.add.i32 %packed0, %packed0
   return %packed, %middle_blocker, %consume
@@ -347,12 +315,10 @@ low.func.def target<test.low.core>(@test_target) @compact_wide_concat_reserves_f
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @compact_wide_concat_respects_result_alignment(
-    %input: reg<test.i32 x4>) -> (reg<test.i32 x8>, reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @compact_wide_concat_respects_result_alignment(%input: reg<test.i32 x4>) -> (reg<test.i32 x8>, reg<test.i32>) asm {
   %first = test.add.v4i32 %input, %input
   %second = test.add.v4i32 %input, %input
-  %packed = concat(%first, %second) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
+  %packed = concat(%first, %second) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
   %packed0 = slice %packed[0] : reg<test.i32 x8> -> reg<test.i32>
   %consume = test.add.i32 %packed0, %packed0
   return %packed, %consume
@@ -367,18 +333,12 @@ low.func.def target<test.low.core>(@test_target) @compact_wide_concat_respects_r
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @wide_tied_concat_sources_reserve_result_alignment(
-    %lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>,
-    %pressure: reg<test.i32>) ->
-    (reg<test.i32 x8>, reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @wide_tied_concat_sources_reserve_result_alignment(%lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>, %pressure: reg<test.i32>) -> (reg<test.i32 x8>, reg<test.i32>) asm {
   %source0 = test.add.v4i32 %lhs, %rhs
-  %tied0 = low.op<test.early_tied.v4i32>(%source0) :
-      (reg<test.i32 x4>) -> %source0 as reg<test.i32 x4>
+  %tied0 = test.early_tied.v4i32 %source0
   %source1 = test.add.v4i32 %lhs, %rhs
-  %tied1 = low.op<test.early_tied.v4i32>(%source1) :
-      (reg<test.i32 x4>) -> %source1 as reg<test.i32 x4>
-  %packed = concat(%tied0, %tied1) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
+  %tied1 = test.early_tied.v4i32 %source1
+  %packed = concat(%tied0, %tied1) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
   return %packed, %pressure
 }
 
@@ -391,14 +351,11 @@ low.func.def target<test.low.core>(@test_target) @wide_tied_concat_sources_reser
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @packet_local_wide_concat_reserves_span(
-    %lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>) ->
-    (reg<test.i32 x8>, reg<test.i32 x4>) asm {
+low.func.def target<test.low.core>(@test_target) @packet_local_wide_concat_reserves_span(%lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>) -> (reg<test.i32 x8>, reg<test.i32 x4>) asm {
   %first = test.add.v4i32 %lhs, %rhs
   %blocker = test.add.v4i32 %lhs, %rhs
   %second = test.add.v4i32 %lhs, %rhs
-  %packed = concat(%first, %second) :
-      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
+  %packed = concat(%first, %second) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
   return %packed, %blocker
 }
 
@@ -507,7 +464,7 @@ test.target<low_core> @test_target
 
 // ERROR@+1: BACKEND/005 {function_name="unspillable_active_conflict_reports_failure", value_class="test.special", budget="1", peak="2", failure_code="unspillable-register-exhausted"}
 low.func.def target<test.low.core>(@test_target) @unspillable_active_conflict_reports_failure(%leader: reg<test.special>, %blocked: reg<test.special>) -> (reg<test.special>, reg<test.special>) asm {
-  return %leader, %blocked : reg<test.special>, reg<test.special>
+  return %leader, %blocked
 }
 
 // ----
@@ -533,10 +490,10 @@ low.func.def target<test.low.core>(@test_target) @dead_result_clobber_window(%le
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @placement_affinity_accepted(%state: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @placement_affinity_accepted(%state: reg<test.i32>) -> (reg<test.i32>) asm {
   // REMARK@+1: BACKEND/043 {function_name="placement_affinity_accepted", op_name="low.copy", source_value_name="state", result_value_name="copy", value_class="test.i32", placement_cause="low.copy", decision="accepted", reason_key="assigned-locations-match"}
-  %copy = low.copy %state : reg<test.i32> -> reg<test.i32>
-  low.return %copy : reg<test.i32>
+  %copy = copy %state : reg<test.i32> -> reg<test.i32>
+  return %copy
 }
 
 // ====
@@ -545,10 +502,10 @@ low.func.def target<test.low.core>(@test_target) @placement_affinity_accepted(%s
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @placement_affinity_rejected(%state: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @placement_affinity_rejected(%state: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
   // REMARK@+1: BACKEND/043 {function_name="placement_affinity_rejected", op_name="low.copy", source_value_name="state", result_value_name="copy", value_class="test.i32", placement_cause="low.copy", decision="rejected", reason_key="assigned-locations-differ"}
-  %copy = low.copy %state : reg<test.i32> -> reg<test.i32>
-  low.return %copy, %state : reg<test.i32>, reg<test.i32>
+  %copy = copy %state : reg<test.i32> -> reg<test.i32>
+  return %copy, %state
 }
 
 // ====
@@ -613,16 +570,16 @@ low.func.def target<test.low.core>(@test_target) @detached_move_materializes_aft
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @structured_for_storage_affinity(%lo: reg<test.i32>, %hi: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @structured_for_storage_affinity(%lo: reg<test.i32>, %hi: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32>) -> (reg<test.i32>) asm {
   // REMARK@+1: BACKEND/043 {function_name="structured_for_storage_affinity", op_name="low.scf.for", source_value_name="init", result_value_name="acc", value_class="test.i32", placement_cause="low.scf loop entry", decision="accepted", reason_key="assigned-locations-match"}
   %result = low.scf.for [%lo to %hi step %step] iter_args(%init: reg<test.i32>) -> (reg<test.i32>) do(%iv: reg<test.i32>, %acc: reg<test.i32>) {
     // REMARK@+1: BACKEND/043 {function_name="structured_for_storage_affinity", op_name="low.copy", source_value_name="acc", result_value_name="next", value_class="test.i32", placement_cause="low.copy", decision="accepted", reason_key="assigned-locations-match"}
-    %next = low.copy %acc : reg<test.i32> -> reg<test.i32>
+    %next = copy %acc : reg<test.i32> -> reg<test.i32>
     // REMARK@+2: BACKEND/043 {function_name="structured_for_storage_affinity", op_name="low.scf.yield", source_value_name="next", result_value_name="acc", value_class="test.i32", placement_cause="low.scf.yield", decision="accepted", reason_key="assigned-locations-match"}
     // REMARK@+1: BACKEND/043 {function_name="structured_for_storage_affinity", op_name="low.scf.yield", source_value_name="next", result_value_name="result", value_class="test.i32", placement_cause="low.scf.yield", decision="accepted", reason_key="assigned-locations-match"}
     low.scf.yield %next : reg<test.i32>
   }
-  low.return %result : reg<test.i32>
+  return %result
 }
 
 // ====
@@ -631,10 +588,7 @@ low.func.def target<test.low.core>(@test_target) @structured_for_storage_affinit
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @structured_for_concat_backedge_destination_layout(
-    %lo: reg<test.i32>, %hi: reg<test.i32>, %step: reg<test.i32>,
-    %init: reg<test.i32 x4>, %a0: reg<test.i32>, %a1: reg<test.i32>,
-    %a2: reg<test.i32>, %a3: reg<test.i32>) -> (reg<test.i32 x4>) asm {
+low.func.def target<test.low.core>(@test_target) @structured_for_concat_backedge_destination_layout(%lo: reg<test.i32>, %hi: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32 x4>, %a0: reg<test.i32>, %a1: reg<test.i32>, %a2: reg<test.i32>, %a3: reg<test.i32>) -> (reg<test.i32 x4>) asm {
   %result = low.scf.for [%lo to %hi step %step] iter_args(%init: reg<test.i32 x4>) -> (reg<test.i32 x4>) do(%iv: reg<test.i32>, %state: reg<test.i32 x4>) {
     %s0 = slice %state[0] : reg<test.i32 x4> -> reg<test.i32>
     %s1 = slice %state[1] : reg<test.i32 x4> -> reg<test.i32>
@@ -644,8 +598,7 @@ low.func.def target<test.low.core>(@test_target) @structured_for_concat_backedge
     %n1 = test.add.i32 %s1, %a1
     %n2 = test.add.i32 %s2, %a2
     %n3 = test.add.i32 %s3, %a3
-    %next = concat(%n0, %n1, %n2, %n3) : (reg<test.i32>, reg<test.i32>,
-        reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+    %next = concat(%n0, %n1, %n2, %n3) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
     low.scf.yield %next : reg<test.i32 x4>
   }
   return %result
@@ -660,14 +613,14 @@ low.func.def target<test.low.core>(@test_target) @structured_for_concat_backedge
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @tied_source_uses_extended_endpoint() -> (reg<test.i32>) {
-  %future_source0 = low.const<test.const.i32> {i32_value = 0} : reg<test.i32>
-  %future_source1 = low.const<test.const.i32> {i32_value = 1} : reg<test.i32>
-  %source = low.const<test.const.i32> {i32_value = 2} : reg<test.i32>
-  %tied = low.op<test.tied.any>(%source) : (reg<test.i32>) -> %source as reg<test.i32>
-  %future = low.concat(%future_source0, %future_source1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
-  %use = low.op<test.add.i32>(%tied, %tied) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %use : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @tied_source_uses_extended_endpoint() -> (reg<test.i32>) asm {
+  %future_source0 = test.const.i32 0
+  %future_source1 = test.const.i32 1
+  %source = test.const.i32 2
+  %tied = test.tied.any %source
+  %future = concat(%future_source0, %future_source1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %use = test.add.i32 %tied, %tied
+  return %use
 }
 
 // ----
@@ -679,16 +632,16 @@ low.func.def target<test.low.core>(@test_target) @tied_source_uses_extended_endp
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @tied_copy_loop_carried_value(%condition: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @tied_copy_loop_carried_value(%condition: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
   low.br ^loop(%seed: reg<test.i32>)
 ^loop(%state: reg<test.i32>):
   low.cond_br %condition, ^body, ^exit : reg<test.i32>
 ^body:
-  %copy = low.copy %state : reg<test.i32> -> reg<test.i32>
-  %next = low.op<test.tied.any>(%copy) : (reg<test.i32>) -> %copy as reg<test.i32>
+  %copy = copy %state : reg<test.i32> -> reg<test.i32>
+  %next = test.tied.any %copy
   low.br ^loop(%next: reg<test.i32>)
 ^exit:
-  low.return %state : reg<test.i32>
+  return %state
 }
 
 // ----
@@ -700,9 +653,7 @@ low.func.def target<test.low.core>(@test_target) @tied_copy_loop_carried_value(%
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @nested_tied_copy_loop_carried_value(
-    %outer_condition: reg<test.i32>, %inner_condition: reg<test.i32>,
-    %seed: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @nested_tied_copy_loop_carried_value(%outer_condition: reg<test.i32>, %inner_condition: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
   low.br ^outer(%seed: reg<test.i32>)
 ^outer(%outer_state: reg<test.i32>):
   low.cond_br %outer_condition, ^inner_entry, ^exit : reg<test.i32>
@@ -711,14 +662,13 @@ low.func.def target<test.low.core>(@test_target) @nested_tied_copy_loop_carried_
 ^inner(%inner_state: reg<test.i32>):
   low.cond_br %inner_condition, ^body, ^inner_exit : reg<test.i32>
 ^body:
-  %copy = low.copy %inner_state : reg<test.i32> -> reg<test.i32>
-  %next = low.op<test.tied.any>(%copy) :
-      (reg<test.i32>) -> %copy as reg<test.i32>
+  %copy = copy %inner_state : reg<test.i32> -> reg<test.i32>
+  %next = test.tied.any %copy
   low.br ^inner(%next: reg<test.i32>)
 ^inner_exit:
   low.br ^outer(%inner_state: reg<test.i32>)
 ^exit:
-  low.return %outer_state : reg<test.i32>
+  return %outer_state
 }
 
 // ----
@@ -730,18 +680,18 @@ low.func.def target<test.low.core>(@test_target) @nested_tied_copy_loop_carried_
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @tied_copy_chained_loop_carried_value(%condition: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @tied_copy_chained_loop_carried_value(%condition: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
   low.br ^loop(%seed: reg<test.i32>)
 ^loop(%state: reg<test.i32>):
   low.cond_br %condition, ^body, ^exit : reg<test.i32>
 ^body:
-  %copy0 = low.copy %state : reg<test.i32> -> reg<test.i32>
-  %next0 = low.op<test.tied.any>(%copy0) : (reg<test.i32>) -> %copy0 as reg<test.i32>
-  %copy1 = low.copy %next0 : reg<test.i32> -> reg<test.i32>
-  %next1 = low.op<test.tied.any>(%copy1) : (reg<test.i32>) -> %copy1 as reg<test.i32>
+  %copy0 = copy %state : reg<test.i32> -> reg<test.i32>
+  %next0 = test.tied.any %copy0
+  %copy1 = copy %next0 : reg<test.i32> -> reg<test.i32>
+  %next1 = test.tied.any %copy1
   low.br ^loop(%next1: reg<test.i32>)
 ^exit:
-  low.return %state : reg<test.i32>
+  return %state
 }
 
 // ----
@@ -753,12 +703,12 @@ low.func.def target<test.low.core>(@test_target) @tied_copy_chained_loop_carried
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @parallel_tied_copies_use_distinct_storage(%seed: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
-  %copy0 = low.copy %seed : reg<test.i32> -> reg<test.i32>
-  %copy1 = low.copy %seed : reg<test.i32> -> reg<test.i32>
-  %next0 = low.op<test.tied.any>(%copy0) : (reg<test.i32>) -> %copy0 as reg<test.i32>
-  %next1 = low.op<test.tied.any>(%copy1) : (reg<test.i32>) -> %copy1 as reg<test.i32>
-  low.return %next0, %next1 : reg<test.i32>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @parallel_tied_copies_use_distinct_storage(%seed: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %copy0 = copy %seed : reg<test.i32> -> reg<test.i32>
+  %copy1 = copy %seed : reg<test.i32> -> reg<test.i32>
+  %next0 = test.tied.any %copy0
+  %next1 = test.tied.any %copy1
+  return %next0, %next1
 }
 
 // ----
@@ -770,10 +720,10 @@ low.func.def target<test.low.core>(@test_target) @parallel_tied_copies_use_disti
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @tied_copy_preserves_later_source_use(%state: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
-  %copy = low.copy %state : reg<test.i32> -> reg<test.i32>
-  %next = low.op<test.tied.any>(%copy) : (reg<test.i32>) -> %copy as reg<test.i32>
-  low.return %next, %state : reg<test.i32>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @tied_copy_preserves_later_source_use(%state: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %copy = copy %state : reg<test.i32> -> reg<test.i32>
+  %next = test.tied.any %copy
+  return %next, %state
 }
 
 // ----
@@ -786,8 +736,8 @@ low.func.def target<test.low.core>(@test_target) @tied_copy_preserves_later_sour
 test.target<low_core> @test_target
 
 // WARNING@+1: BACKEND/008 {function_name="physical_budget_clamps_to_allocatable_count", value_name="rhs", value_class="test.alias32", spill_cause="register-budget-conflict"}
-low.func.def target<test.low.core>(@test_target) @physical_budget_clamps_to_allocatable_count(%lhs: reg<test.alias32>, %rhs: reg<test.alias32>) -> (reg<test.alias32>, reg<test.alias32>) {
-  low.return %lhs, %rhs : reg<test.alias32>, reg<test.alias32>
+low.func.def target<test.low.core>(@test_target) @physical_budget_clamps_to_allocatable_count(%lhs: reg<test.alias32>, %rhs: reg<test.alias32>) -> (reg<test.alias32>, reg<test.alias32>) asm {
+  return %lhs, %rhs
 }
 
 // ====
@@ -797,8 +747,8 @@ low.func.def target<test.low.core>(@test_target) @physical_budget_clamps_to_allo
 test.target<low_core> @test_target
 
 // WARNING@+1: BACKEND/008 {function_name="physical_alias_classes_share_storage", value_name="narrow", value_class="test.alias32", spill_cause="register-budget-conflict"}
-low.func.def target<test.low.core>(@test_target) @physical_alias_classes_share_storage(%wide: reg<test.alias64>, %narrow: reg<test.alias32>) -> (reg<test.alias64>, reg<test.alias32>) {
-  low.return %wide, %narrow : reg<test.alias64>, reg<test.alias32>
+low.func.def target<test.low.core>(@test_target) @physical_alias_classes_share_storage(%wide: reg<test.alias64>, %narrow: reg<test.alias32>) -> (reg<test.alias64>, reg<test.alias32>) asm {
+  return %wide, %narrow
 }
 
 // ====
@@ -832,12 +782,9 @@ low.func.def target<test.low.core>(@test_target) @multi_victim_spill(%row: reg<t
 test.target<low_core> @test_target
 
 // WARNING@+1: BACKEND/008 {function_name="provisional_spill_skips_packet_move_planning", value_name="wide", value_class="test.i32", spill_cause="register-budget-conflict"}
-low.func.def target<test.low.core>(@test_target) @provisional_spill_skips_packet_move_planning(
-    %lhs: reg<test.i32>, %rhs: reg<test.i32>, %wide: reg<test.i32 x3>) ->
-    (reg<test.i32 x2>, reg<test.i32 x3>) asm {
-  %packed = concat(%lhs, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
-  return %packed, %wide : reg<test.i32 x2>, reg<test.i32 x3>
+low.func.def target<test.low.core>(@test_target) @provisional_spill_skips_packet_move_planning(%lhs: reg<test.i32>, %rhs: reg<test.i32>, %wide: reg<test.i32 x3>) -> (reg<test.i32 x2>, reg<test.i32 x3>) asm {
+  %packed = concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  return %packed, %wide
 }
 
 // ----
@@ -848,14 +795,9 @@ low.func.def target<test.low.core>(@test_target) @provisional_spill_skips_packet
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @active_and_direct_spill_slot_ranges(
-    %wide: reg<test.i32 x4>, %scalar0: reg<test.i32>,
-    %scalar1: reg<test.i32>, %huge: reg<test.i32 x5>)
-    -> (reg<test.i32 x4>, reg<test.i32>, reg<test.i32 x5>)
-    asm {
+low.func.def target<test.low.core>(@test_target) @active_and_direct_spill_slot_ranges(%wide: reg<test.i32 x4>, %scalar0: reg<test.i32>, %scalar1: reg<test.i32>, %huge: reg<test.i32 x5>) -> (reg<test.i32 x4>, reg<test.i32>, reg<test.i32 x5>) asm {
   %use0 = test.add.i32 %scalar0, %scalar1
-  return %wide, %use0, %huge : reg<test.i32 x4>, reg<test.i32>,
-      reg<test.i32 x5>
+  return %wide, %use0, %huge
 }
 
 // ----
@@ -867,10 +809,7 @@ low.func.def target<test.low.core>(@test_target) @active_and_direct_spill_slot_r
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @loop_backedge_layout_recolors_shared_storage(
-    %condition: reg<test.i32>, %seed0: reg<test.i32>,
-    %seed1: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>)
-    -> (reg<test.i32>, reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @loop_backedge_layout_recolors_shared_storage(%condition: reg<test.i32>, %seed0: reg<test.i32>, %seed1: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
   low.br ^loop(%seed0: reg<test.i32>, %seed1: reg<test.i32>)
 ^loop(%state0: reg<test.i32>, %state1: reg<test.i32>):
   low.cond_br %condition, ^body, ^exit : reg<test.i32>
@@ -886,7 +825,7 @@ low.func.def target<test.low.core>(@test_target) @loop_backedge_layout_recolors_
   %sink = test.mul.i32 %helper, %rhs
   low.br ^loop(%next0: reg<test.i32>, %next1: reg<test.i32>)
 ^exit:
-  return %state0, %state1 : reg<test.i32>, reg<test.i32>
+  return %state0, %state1
 }
 
 // ----

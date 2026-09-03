@@ -37,17 +37,13 @@ func.def @fuses_adjacent_result_branches(%cond: i1, %a: i32, %b: i32) -> (i32, i
 func.def @fuses_resultless_effectful_branches(%cond: i1, %pool: pool<16>, %tile: tile<4xf32>, %value: i32) {
   scf.if %cond {
     test.write_resource %pool, %tile : pool<16>, tile<4xf32>
-    scf.yield
   } else {
     test.use %value : i32
-    scf.yield
   }
   scf.if %cond {
     test.use %value : i32
-    scf.yield
   } else {
     test.write_resource %pool, %tile : pool<16>, tile<4xf32>
-    scf.yield
   }
   func.return
 }

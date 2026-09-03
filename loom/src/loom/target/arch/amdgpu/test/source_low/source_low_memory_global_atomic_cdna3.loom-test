@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @global_atomic_add_f32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -30,6 +31,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(1, 1, 1) workgr
 // ====
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @global_atomic_add_i64() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -61,6 +63,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(1, 1, 1) workgr
 // ====
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @global_atomic_dynamic_add_i64() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -90,6 +93,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(1, 1, 1) workgr
 // ====
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @global_atomic_exchange_i64() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -117,6 +121,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(1, 1, 1) workgr
 // ====
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @global_atomic_cmpxchg_i64() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -148,6 +153,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(1, 1, 1) workgr
 // ====
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @intermediate_block_atomic_output_f32() {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index

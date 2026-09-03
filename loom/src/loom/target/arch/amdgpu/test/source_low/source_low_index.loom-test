@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @index_madd_global_b32() {
   %unit = index.constant 1 : index
   %tile = index.constant 4 : index
@@ -37,6 +38,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(4, 4, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @index_madd_u24_global_b32() {
   %unit = index.constant 1 : index
   %columns = index.constant 8 : index
@@ -73,6 +75,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(8, 4, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @index_madd_u24_literal_lhs_global_b32() {
   %unit = index.constant 1 : index
   %columns = index.constant 8 : index
@@ -109,6 +112,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(8, 4, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @index_madd_u24_literal_addend_global_b32() {
   %unit = index.constant 1 : index
   %columns = index.constant 8 : index
@@ -145,6 +149,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(8, 4, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @index_madd_constant_addend_global_b32() {
   %unit = index.constant 1 : index
   %row_count = index.constant 4 : index
@@ -176,6 +181,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(4, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @index_madd_nested_scale_global_b32() {
   %unit = index.constant 1 : index
   %row_count = index.constant 4 : index
@@ -210,6 +216,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(4, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @index_shli_global_b32() {
   %unit = index.constant 1 : index
   %lane_count = index.constant 4 : index
@@ -240,6 +247,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(4, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @index_scale_byte_offset_global_b32() {
   %unit = index.constant 1 : index
   %element_count = index.constant 4 : index
@@ -270,6 +278,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(4, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @index_shli_previous_row_global_b128() {
   %unit = index.constant 1 : index
   %active_lanes = index.constant 31 : index
@@ -303,6 +312,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(31, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @index_edge_loop_dynamic_lower_bound_global_b32() {
   %unit = index.constant 1 : index
   %lane_count = index.constant 1024 : index
@@ -372,6 +382,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1024, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @index_div_rem_power_of_two_global_b32() {
   %unit = index.constant 1 : index
   %lane_count = index.constant 32 : index
@@ -407,6 +418,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @index_div_rem_magic_mul_global_b32() {
   %unit = index.constant 1 : index
   %lane_count = index.constant 25 : index
@@ -445,6 +457,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(25, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @index_div_rem_magic_add_global_b32() {
   %unit = index.constant 1 : index
   %lane_count = index.constant 49 : index
@@ -486,6 +499,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(49, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @workitem_y_lds_uses_explicit_vaddr() {
   %unit = index.constant 1 : index
   %row_count = index.constant 64 : index
@@ -523,6 +537,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 64, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @dispatch_id_xy_global_b32() {
   %unit = index.constant 1 : index
   %workgroups_x = index.constant 4 : index

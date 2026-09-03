@@ -17,6 +17,7 @@ func.def @static_loop_without_unroll_policy() {
 // RUN: pass-report unroll-scf-for
 
 config.def @runtime.sequence_width = 128 : index
+
 config.def @runtime.workgroup_size = 64 : index
 
 func.def @structured_sequence_loop(%lane0: index) {

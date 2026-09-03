@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @smfmac_fp8_compact_lhs_memory() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -74,6 +75,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @smfmac_fp8_compact_lhs_memory() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -150,6 +152,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @swmmac_f16_compact_lhs_memory() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -227,6 +230,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(32, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @swmmac_fp8_compact_lhs_memory() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -302,6 +306,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(32, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @swmmac_fp8_compact_lhs_memory() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -384,6 +389,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(32, 1, 
 // ====
 
 amdgpu.target<gfx942> @target
+
 kernel.def target(@target) @smfmac_i8_compact_lhs_memory() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -457,6 +463,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1200> @target
+
 kernel.def target(@target) @swmmac_u8_compact_lhs_memory() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -532,13 +539,14 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(32, 1, 1) workg
 // ====
 
 amdgpu.target<gfx1200> @target
+
 func.def target(@target) @swmmac_i8_u8_compact_lhs(%lhs_data: vector<2xi32>, %rhs_data: vector<4xi32>, %init_data: vector<8xi32>, %metadata: vector<1xi32>) -> (vector<8xi32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
   %lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %rhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
-  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %metadata : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<2xi32>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>, sparsity = %metadata : vector<1xi32>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xi32>
   %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<4xi32>, vector<8xi32>
@@ -555,13 +563,14 @@ low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @swmmac_i8_u8_co
 // ====
 
 amdgpu.target<gfx1250> @target
+
 func.def target(@target) @swmmac_u8_i8_compact_lhs(%lhs_data: vector<8xi32>, %rhs_data: vector<16xi32>, %init_data: vector<8xi32>, %metadata: vector<2xi32>) -> (vector<8xi32>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 128 : index
   %lhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=32, payload_registers=8, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %rhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=64, payload_registers=16> : encoding<schema>
-  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %metadata : vector<2xi32>, schema = %lhs_schema : encoding<schema>} : vector<8xi32>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>, sparsity = %metadata : vector<2xi32>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<16xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xi32>
   %result = vector.mma %lhs, %rhs, %init : vector<8xi32>, vector<16xi32>, vector<8xi32>
@@ -578,6 +587,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @swmmac_
 // ====
 
 amdgpu.target<gfx1250> @target
+
 kernel.def target(@target) @swmmac_u8_compact_lhs_memory() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index

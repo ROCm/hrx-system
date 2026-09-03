@@ -53,7 +53,7 @@ static const char* loom_check_outcome_label(loom_check_outcome_t outcome,
 
 void loom_check_print_case_header(iree_string_view_t filename,
                                   iree_host_size_t case_index,
-                                  const loom_check_case_t* test_case,
+                                  const loom_test_case_t* test_case,
                                   const loom_check_result_t* result) {
   const char* color = loom_check_color_fail();
   if (result->final_outcome == LOOM_CHECK_PASS) {
@@ -67,16 +67,16 @@ void loom_check_print_case_header(iree_string_view_t filename,
   fprintf(stderr, "%s%s%s ", color, label, loom_check_color_reset());
   fprintf(stderr, "%.*s :: case %zu", (int)filename.size, filename.data,
           case_index + 1);
-  fprintf(stderr, " [%s", loom_check_mode_name(test_case->mode));
-  if (test_case->mode == LOOM_CHECK_MODE_PASS ||
-      test_case->mode == LOOM_CHECK_MODE_PASS_REPORT ||
-      test_case->mode == LOOM_CHECK_MODE_COMPILE_REPORT) {
+  fprintf(stderr, " [%s", loom_test_mode_name(test_case->mode));
+  if (test_case->mode == LOOM_TEST_MODE_PASS ||
+      test_case->mode == LOOM_TEST_MODE_PASS_REPORT ||
+      test_case->mode == LOOM_TEST_MODE_COMPILE_REPORT) {
     fprintf(stderr, " %.*s", (int)test_case->pipeline.size,
             test_case->pipeline.data);
-  } else if (test_case->mode == LOOM_CHECK_MODE_FORMAT) {
+  } else if (test_case->mode == LOOM_TEST_MODE_FORMAT) {
     fprintf(stderr, " %.*s", (int)test_case->format_target.size,
             test_case->format_target.data);
-  } else if (test_case->mode == LOOM_CHECK_MODE_EMIT) {
+  } else if (test_case->mode == LOOM_TEST_MODE_EMIT) {
     fprintf(stderr, " %.*s", (int)test_case->emit_target.size,
             test_case->emit_target.data);
   }

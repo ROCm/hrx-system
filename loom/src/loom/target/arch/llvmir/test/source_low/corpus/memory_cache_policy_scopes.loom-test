@@ -1,9 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_cache_policy_scopes.loom-test
 // RUN: emit source-low output=low
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @cache_system_bypass_load_device_writeback_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -30,9 +29,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @cache_system_bypass_scalar_load() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index

@@ -448,6 +448,28 @@ TEST_F(LowAsmPrinterTest, RequiredOptionalLowAsmRejectsCanonicalFallback) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmPrinterTest,
+       PreferredLowAsmFallsBackWhenPacketDescriptionRejectsOperation) {
+  const char* source =
+      "test.target<low_core> @test_target\n"
+      "\n"
+      "low.func.def target<test.low.core>(@test_target) "
+      "@invalid_tie(%src: reg<test.i32>) -> (reg<test.i64>) {\n"
+      "  %changed = low.op<test.pass.any>(%src) : "
+      "(reg<test.i32>) -> %src as reg<test.i64>\n"
+      "  low.return %changed : reg<test.i64>\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module), source);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      PrintModuleStatus(
+          module, /*configure_environment=*/true,
+          LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM));
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmPrinterTest, RequiredLowAsmUsesFunctionRepresentationContract) {
   const char* source =
       "test.target<low_core> @test_target\n"

@@ -1,5 +1,6 @@
 // RUN: emit low-packet-json @gfx11_lds_crosslane diagnostics=packets output=none
 amdgpu.target<gfx1100> @gfx11_lds_crosslane_target
+
 low.func.def target<amdgpu.rdna3.core>(@gfx11_lds_crosslane_target) @gfx11_lds_crosslane(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   // REMARK@+1: BACKEND/018 "selected lds-crosslane low packet 'amdgpu.ds_swizzle_b32'"
   %swizzled = ds_swizzle_b32 %addr {offset = 32}

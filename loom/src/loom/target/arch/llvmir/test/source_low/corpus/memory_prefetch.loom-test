@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_prefetch.loom-test
 // RUN: emit source-low output=low
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @prefetch_static(%input: buffer) {
   %base = index.constant 16 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<64xi32>
@@ -19,9 +17,8 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @prefetch
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa"
-}
+llvmir.target<object> @target {triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @prefetch_workgroup_id() {
   %unit = index.constant 1 : index
   %workgroups = index.constant 1025 : index
@@ -41,10 +38,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) work
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "amdgcn-amd-amdhsa",
-  subgroup_size = 64
-}
+llvmir.target<object> @target {subgroup_size = 64, triple = "amdgcn-amd-amdhsa"}
+
 kernel.def target(@target) @prefetch_fixed_query_offset() {
   %c1 = index.constant 1 : index
   %c8 = index.constant 8 : index
@@ -71,10 +66,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(8, 4, 1) work
 
 // ====
 
-llvmir.target<object> @target {
-  triple = "loom-direct64-unknown-none",
-  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
-}
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 kernel.def target(@target) @prefetch_workitem_dropped() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index

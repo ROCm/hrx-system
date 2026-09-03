@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @subgroup_broadcast_i32_wave32() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -2757,6 +2758,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @subgroup_match_all_i32_wave32() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -2799,6 +2801,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @subgroup_match_all_i32_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -2846,6 +2849,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @subgroup_match_any_i32_wave32_i64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3552,6 +3556,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @subgroup_active_mask_i64_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3569,6 +3574,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @subgroup_divergent_lane_mask_select_i64_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3613,6 +3619,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @subgroup_active_mask_trunci_i32_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3637,6 +3644,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @subgroup_broadcast_i32_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3674,6 +3682,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @subgroup_reduce_addf_f32_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3732,6 +3741,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx950> @target
+
 kernel.def target(@target) @subgroup_shuffle_xor_i32_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3771,6 +3781,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
 kernel.def target(@target) @subgroup_reduce_addf_f32_wave64_leader_lane() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3823,6 +3834,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
 kernel.def target(@target) @subgroup_reduce_addf_f32_wave64_scalar_workitem_guard_nested() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3918,6 +3930,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
 kernel.def target(@target) @subgroup_reduce_addf_f32_cluster32_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3965,6 +3978,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
 kernel.def target(@target) @subgroup_shuffle_xor_f32_pair_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -3998,6 +4012,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
 kernel.def target(@target) @subgroup_shuffle_xor_v2f32_pair_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4035,6 +4050,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
 kernel.def target(@target) @subgroup_shuffle_xor_i32_quad_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4068,6 +4084,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
 kernel.def target(@target) @subgroup_shuffle_xor_f32_cluster8_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4101,6 +4118,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
 kernel.def target(@target) @subgroup_shuffle_xor_f32_cluster16_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4134,6 +4152,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
 kernel.def target(@target) @subgroup_shuffle_xor_f32_cluster32_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4167,6 +4186,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
 kernel.def target(@target) @subgroup_shuffle_index_i32_cluster8_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4205,6 +4225,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
 kernel.def target(@target) @subgroup_shuffle_down_i32_cluster8_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4243,6 +4264,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
 kernel.def target(@target) @subgroup_shuffle_down_valid_cluster8_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4293,6 +4315,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
 kernel.def target(@target) @subgroup_reduce_addf_f32_cluster8_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -4326,6 +4349,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
 kernel.def target(@target) @subgroup_reduce_maxnumf_f32_cluster8_wave64() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index

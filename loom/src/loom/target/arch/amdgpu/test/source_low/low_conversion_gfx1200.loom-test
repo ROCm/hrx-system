@@ -1,6 +1,7 @@
 // RUN: emit amdgpu-assembly @gfx1200_packed8_encode waits=none
 
 amdgpu.target<gfx1200> @target
+
 low.func.def target<amdgpu.rdna4.core>(@target) @gfx1200_packed8_encode(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %d: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %fp8_low = v_cvt_pk_fp8_f32_low %a, %b
   %fp8 = v_cvt_pk_fp8_f32_high %fp8_low, %c, %d

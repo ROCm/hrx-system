@@ -1,6 +1,7 @@
 // RUN: emit source-low diagnostics=all output=low
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_dotf_zero_seed_fmac_diagnostics(%lhs: vector<2xf32>, %rhs: vector<2xf32>) -> (f32) {
   %initial_accumulator = scalar.constant 0.0 : f32
   // REMARK@+2: AMDGPU/028 {descriptor_name="amdgpu.v_fmac_f32", lane_index="0", descriptor_set_name="amdgpu.gfx11.generic.core", accumulator_kind="dot_local", decision_key="selected", reason_key="dot_local_accumulator"}
@@ -24,6 +25,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_dot
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_dotf_incoming_accumulator_fmac_diagnostics(%lhs: vector<2xf32>, %rhs: vector<2xf32>, %acc: f32) -> (f32) {
   // REMARK@+2: AMDGPU/028 {descriptor_name="amdgpu.v_fma_f32", lane_index="0", descriptor_set_name="amdgpu.gfx11.generic.core", accumulator_kind="incoming", decision_key="rejected", reason_key="incoming_accumulator"}
   // REMARK@+1: AMDGPU/028 {descriptor_name="amdgpu.v_fmac_f32", lane_index="1", descriptor_set_name="amdgpu.gfx11.generic.core", accumulator_kind="dot_local", decision_key="selected", reason_key="dot_local_accumulator"}

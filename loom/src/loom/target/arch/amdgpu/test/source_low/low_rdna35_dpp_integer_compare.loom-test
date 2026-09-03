@@ -1,6 +1,7 @@
 // RUN: emit amdgpu-assembly @gfx1151_dpp_integer_compare waits=none
 
 amdgpu.target<gfx1151> @target
+
 low.func.def target<amdgpu.rdna3_5.core>(@target) @gfx1151_dpp_integer_compare(%crosslane: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.sgpr>, %third: reg<amdgpu.vgpr>, %carry_in: reg<amdgpu.sgpr x2>) asm {
   %add = v_add_u32_dpp8_sgpr %crosslane, %rhs {dpp8 = 342391}
   %sub = v_sub_nc_u32_dpp16_src1_inline %add {rhs = 42, dpp_ctrl = 27}
@@ -25,6 +26,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @gfx1151_dpp_integer_compare(%
 // RUN: emit amdgpu-assembly @gfx1170_dpp_integer_compare waits=none
 
 amdgpu.target<gfx1170> @target
+
 low.func.def target<amdgpu.rdna4m.core>(@target) @gfx1170_dpp_integer_compare(%crosslane: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.sgpr>) asm {
   %minimum = v_min_i32_dpp8_sgpr %crosslane, %rhs {dpp8 = 342391}
   %mask = v_cmp_ge_u32_dpp16_src1_inline %minimum {rhs = 42, dpp_ctrl = 27}

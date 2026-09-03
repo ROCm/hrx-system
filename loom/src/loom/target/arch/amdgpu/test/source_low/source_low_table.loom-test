@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @f32_table_lookup_i8_codes() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 2 : index
@@ -69,6 +70,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(2, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_table_lookup_i32_codes(%codes: vector<2xi32>) -> (vector<2xf32>) {
   %g0 = scalar.constant 2.0 : f32
   %g1 = scalar.constant -3.0 : f32
@@ -98,6 +100,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_tab
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32_table_lookup_dynamic_grid(%grid: vector<3xf32>, %codes: vector<2xi32>) -> (vector<2xf32>) {
   %decoded = vector.table.lookup %grid[%codes] : vector<3xf32>, vector<2xi32> -> vector<2xf32>
   func.return %decoded : vector<2xf32>
@@ -125,6 +128,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_tab
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8_table_lookup_fact_known_codes(%grid: vector<4xi8>) -> (vector<4xi8>) {
   %c0 = scalar.constant 0 : i8
   %c1 = scalar.constant 1 : i8
@@ -145,6 +149,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8_tabl
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8_table_lookup_constant_table() -> (vector<4xi8>) {
   %g0 = scalar.constant -4 : i8
   %g1 = scalar.constant -1 : i8
@@ -171,6 +176,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8_tabl
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8_table_lookup_u4_dynamic_table(%grid: vector<16xi8>, %packed: vector<2xi8>) -> (vector<4xi8>) {
   %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
   %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
@@ -203,6 +209,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8_tabl
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @i8_table_lookup_u4_constant_table(%packed: vector<2xi8>) -> (vector<4xi8>) {
   %g0 = scalar.constant 0 : i8
   %g1 = scalar.constant -1 : i8

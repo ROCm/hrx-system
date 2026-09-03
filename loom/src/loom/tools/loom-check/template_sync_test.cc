@@ -17,7 +17,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/scalar/ops.h"
-#include "loom/tools/loom-check/check.h"
+#include "loom/testing/test_file.h"
 
 namespace loom {
 namespace {
@@ -61,8 +61,8 @@ class TemplateSyncTest : public ::testing::Test {
     iree_arena_allocator_t arena;
     iree_arena_initialize(&block_pool_, &arena);
 
-    loom_check_file_t target_file = {};
-    iree_status_t status = loom_check_parse(
+    loom_test_file_t target_file = {};
+    iree_status_t status = loom_test_file_parse(
         iree_make_cstring_view(target_source), &arena, &target_file);
 
     iree_string_builder_t builder;
