@@ -245,7 +245,7 @@ static bool loom_spirv_cooperative_matrix_query_from_contract(
     return false;
   }
   if (contract_request->capability_class !=
-      LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX) {
+      LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX) {
     out_diagnostic->rejection_bits = LOOM_CONTRACT_REJECTION_CAPABILITY;
     return false;
   }
@@ -327,7 +327,7 @@ iree_status_t loom_spirv_descriptor_matrix_options(
               .atom_bits = LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE,
               .subgroup_size = 0,
           },
-      .capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX,
+      .capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX,
       .policy = LOOM_LOWERING_POLICY_REFERENCE_ALLOWED,
   };
   return iree_ok_status();

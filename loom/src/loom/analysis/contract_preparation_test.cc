@@ -322,7 +322,7 @@ TEST(ContractPreparationTest, SamePayloadsFeedCpuAndGpuPreparationFamilies) {
       /*.result_lane_count=*/{},
       /*.subgroup_size=*/64,
   };
-  gpu_options.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX;
+  gpu_options.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX;
 
   loom_contract_request_t cpu_request = {};
   loom_contract_request_t gpu_request = {};
@@ -338,7 +338,7 @@ TEST(ContractPreparationTest, SamePayloadsFeedCpuAndGpuPreparationFamilies) {
   EXPECT_EQ(cpu_request.capability_class,
             LOOM_CONTRACT_CAPABILITY_CLASS_CPU_PACKED_DOT);
   EXPECT_EQ(gpu_request.capability_class,
-            LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX);
+            LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX);
 
   const loom_value_facts_t rhs_strides[] = {
       loom_value_facts_exact_i64(512),

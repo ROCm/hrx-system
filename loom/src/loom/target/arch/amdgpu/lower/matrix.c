@@ -48,7 +48,7 @@ void loom_amdgpu_matrix_target_configuration_initialize(
                       .atom_bits = LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE,
                       .subgroup_size = wavefront_size,
                   },
-              .capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX,
+              .capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX,
               .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
           },
       .feature_bits = feature_bits,

@@ -234,7 +234,7 @@ TEST(ContractStorageTest, BuildsMatrixRequestFromPayloadFacts) {
       /*.result_lane_count=*/{},
       /*.subgroup_size=*/64,
   };
-  options.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX;
+  options.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX;
   options.policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED;
 
   loom_contract_request_t request = {};
@@ -287,7 +287,7 @@ TEST(ContractStorageTest, BuildsMatrixRequestWithDynamicShapeRefs) {
       /*.result_lane_count=*/{},
       /*.subgroup_size=*/64,
   };
-  options.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX;
+  options.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX;
   options.policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED;
 
   loom_contract_request_t request = {};
@@ -345,7 +345,7 @@ TEST(ContractStorageTest, RejectsUnsupportedPayloadForOptimizedContract) {
   options.result_numeric_type = LOOM_CONTRACT_NUMERIC_I32;
   options.arithmetic = LOOM_CONTRACT_ARITHMETIC_MIXED_DOT;
   options.fragment.atom_bits = LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE;
-  options.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX;
+  options.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX;
   options.policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED;
 
   loom_contract_request_t request = {};
@@ -372,7 +372,7 @@ TEST(ContractStorageTest, RejectsMissingAuxiliaryDataOperands) {
   options.result_numeric_type = LOOM_CONTRACT_NUMERIC_F32;
   options.arithmetic = LOOM_CONTRACT_ARITHMETIC_MIXED_DOT;
   options.fragment.atom_bits = LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE;
-  options.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX;
+  options.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX;
   options.policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED;
 
   loom_contract_request_t request = {};
