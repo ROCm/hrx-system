@@ -139,14 +139,24 @@ _VECTOR_MEMORY_FORM_FAMILIES = (
     ),
 )
 
+# Value types with native register layouts for the bit-preserving vector
+# load/store forms below.
+AIE2P_VECTOR_MEMORY_ELEMENT_TYPES = (
+    ("i8", 8),
+    ("i16", 16),
+    ("bf16", 16),
+    ("i32", 32),
+    ("f32", 32),
+)
+
 
 def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
-    """Selects every exact-width integer vector memory form."""
+    """Selects every exact-width native vector memory form."""
 
     result = []
     for width_bits, load_a, load_b, store in _VECTOR_MEMORY_FORM_FAMILIES:
-        for element_bits in (8, 16, 32):
-            shape = f"i{element_bits}x{width_bits // element_bits}"
+        for element_type, element_bits in AIE2P_VECTOR_MEMORY_ELEMENT_TYPES:
+            shape = f"{element_type}x{width_bits // element_bits}"
             load_a_register_key = f"{_TARGET_KEY}.load.a.{shape}.indexed.register"
             load_a_immediate_key = f"{_TARGET_KEY}.load.a.{shape}.indexed.immediate"
             load_b_register_key = f"{_TARGET_KEY}.load.b.{shape}.indexed.register"

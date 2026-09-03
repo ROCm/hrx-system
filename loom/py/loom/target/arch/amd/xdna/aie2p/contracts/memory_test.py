@@ -152,12 +152,19 @@ def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None
     expected_families = tuple(
         (
             width_bits,
+            element_type,
             element_byte_count,
             width_bits // (element_byte_count * 8),
             operation,
         )
         for width_bits in (128, 256, 512)
-        for element_byte_count in (1, 2, 4)
+        for element_type, element_byte_count in (
+            ("i8", 1),
+            ("i16", 2),
+            ("bf16", 2),
+            ("i32", 4),
+            ("f32", 4),
+        )
         for operation in (
             SourceMemoryOperation.LOAD,
             SourceMemoryOperation.STORE,
@@ -166,8 +173,14 @@ def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None
     for root_kind, memory_spaces in _MEMORY_ROOTS:
         rules = _rules_for(root_kind, vector.vector_load, vector.vector_store)
         expected_descriptor_keys = []
-        for _, element_byte_count, vector_lane_count, operation in expected_families:
-            shape = f"i{element_byte_count * 8}x{vector_lane_count}"
+        for (
+            _,
+            element_type,
+            _,
+            vector_lane_count,
+            operation,
+        ) in expected_families:
+            shape = f"{element_type}x{vector_lane_count}"
             descriptor_prefix = (
                 f"amd.xdna.aie2p.load.a.{shape}.indexed"
                 if operation is SourceMemoryOperation.LOAD
@@ -182,12 +195,13 @@ def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None
         assert [rule.descriptor.key for rule in rules] == expected_descriptor_keys
         for family_index, (
             width_bits,
+            element_type,
             element_byte_count,
             vector_lane_count,
             operation,
         ) in enumerate(expected_families):
             operation_rules = rules[family_index * 5 : family_index * 5 + 5]
-            shape = f"i{element_byte_count * 8}x{vector_lane_count}"
+            shape = f"{element_type}x{vector_lane_count}"
             descriptor_prefix = (
                 f"amd.xdna.aie2p.load.a.{shape}.indexed"
                 if operation is SourceMemoryOperation.LOAD

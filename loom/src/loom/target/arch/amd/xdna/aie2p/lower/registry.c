@@ -58,7 +58,13 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
       case LOOM_SCALAR_TYPE_I16:
         element_bits = 16;
         break;
+      case LOOM_SCALAR_TYPE_BF16:
+        element_bits = 16;
+        break;
       case LOOM_SCALAR_TYPE_I32:
+        element_bits = 32;
+        break;
+      case LOOM_SCALAR_TYPE_F32:
         element_bits = 32;
         break;
       default:
