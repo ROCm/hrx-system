@@ -36,6 +36,7 @@ from loom.target.low_descriptors import (
     PressureDelta,
     RegClass,
     RegClassAltFlag,
+    RegisterPackingResource,
     RegisterPart,
     Resource,
     ScheduleClass,
@@ -50,6 +51,20 @@ class CompiledPhysicalRegisterView:
     reg_class_id: int
     unit_candidate_ordinal_start: int
     unit_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledRegisterPackingResource:
+    source: RegisterPackingResource
+    member_start: int
+    member_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledRegisterPackingResourceMember:
+    reg_class_id: int
+    register_unit_count: int
+    resource_unit_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +109,8 @@ class CompiledDescriptorSet:
     physical_register_atomic_unit_starts: list[int]
     physical_register_views: list[CompiledPhysicalRegisterView]
     physical_register_view_unit_candidate_ordinals: list[int]
+    register_packing_resources: list[CompiledRegisterPackingResource]
+    register_packing_resource_members: list[CompiledRegisterPackingResourceMember]
     register_parts: list[RegisterPart]
     resources: list[Resource]
     schedule_classes: list[ScheduleClass]

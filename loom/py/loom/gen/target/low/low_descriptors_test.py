@@ -60,6 +60,8 @@ from loom.target.low_descriptors import (
     RegClassAlt,
     RegClassAltFlag,
     RegClassFlag,
+    RegisterPackingResource,
+    RegisterPackingResourceMember,
     StorageLease,
     StorageLeaseAttachment,
     StorageLeaseFlag,
@@ -106,12 +108,13 @@ def _explicit_physical_descriptor_set():
         if register_class.name == "test.phys"
         else register_class
         for register_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes
-        if register_class.name != "test.explicit32"
+        if register_class.name not in ("test.explicit32", "test.packed.narrow", "test.packed.wide")
     )
     return replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
         physical_registers=physical_registers,
         physical_register_views=(PhysicalRegisterView("test.pair", "test.phys", ("test.r2", "test.r0")),),
+        register_packing_resources=(),
         reg_classes=register_classes,
         descriptors=(TEST_LOW_ADD_PHYS_DESCRIPTOR,),
     )
@@ -648,6 +651,55 @@ def test_compiler_derives_canonical_ordered_physical_register_views() -> None:
     assert l0_ordinals == [0, 1]
     assert compiled.physical_registers[0].atomic_units == (1,)
     assert compiled.physical_registers[1].atomic_units == (0,)
+
+
+def test_compiler_emits_register_packing_resources() -> None:
+    compiled = compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
+
+    assert len(compiled.register_packing_resources) == 1
+    resource = compiled.register_packing_resources[0]
+    assert resource.source.name == "test.pair_slots"
+    assert resource.source.capacity == 2
+    assert resource.member_start == 0
+    assert resource.member_count == 2
+    assert [compiled.reg_classes[member.reg_class_id].name for member in compiled.register_packing_resource_members] == ["test.packed.narrow", "test.packed.wide"]
+    assert [(member.register_unit_count, member.resource_unit_count) for member in compiled.register_packing_resource_members] == [(1, 1), (2, 1)]
+
+    generated = generate_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
+    assert "kTestLowCoreRegisterPackingResources" in generated.source
+    assert "kTestLowCoreRegisterPackingResourceMembers" in generated.source
+    assert ".register_packing_resource_count = IREE_ARRAYSIZE(" in generated.source
+
+
+def test_compiler_rejects_invalid_register_packing_resources() -> None:
+    resource = TEST_LOW_CORE_DESCRIPTOR_SET.register_packing_resources[0]
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' register packing resource 'test.pair_slots' has zero capacity"),
+    ):
+        compiler.compile_descriptor_set(
+            replace(
+                TEST_LOW_CORE_DESCRIPTOR_SET,
+                register_packing_resources=(replace(resource, capacity=0),),
+            )
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' register packing resource 'test.pair_slots' member 'test.i32' references a non-physical register class"),
+    ):
+        compiler.compile_descriptor_set(
+            replace(
+                TEST_LOW_CORE_DESCRIPTOR_SET,
+                register_packing_resources=(
+                    RegisterPackingResource(
+                        name=resource.name,
+                        capacity=resource.capacity,
+                        members=(RegisterPackingResourceMember("test.i32"),),
+                    ),
+                ),
+            )
+        )
 
 
 def test_compiler_rejects_unknown_explicit_physical_register() -> None:

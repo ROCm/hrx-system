@@ -23,6 +23,8 @@ from loom.gen.target.low.compiled import (
     CompiledOperandForm,
     CompiledOperandFormMatch,
     CompiledPhysicalRegisterView,
+    CompiledRegisterPackingResource,
+    CompiledRegisterPackingResourceMember,
     DescriptorAllowlist,
     append_interned_sequence,
 )
@@ -915,6 +917,11 @@ def compile_descriptor_set(
         tuple(physical_register_inputs.values()),
         spec.physical_register_views,
     )
+    validation.validate_register_packing_resources(
+        spec.key,
+        tuple(reg_class_inputs.values()),
+        spec.register_packing_resources,
+    )
     physical_register_views = validation.derive_canonical_physical_register_views(
         tuple(reg_class_inputs.values()),
         tuple(physical_register_inputs.values()),
@@ -1189,6 +1196,8 @@ def compile_descriptor_set(
             f"physical_register_{physical_register.name}",
             physical_register.name,
         )
+    for resource in spec.register_packing_resources:
+        string_pool.intern(f"register_packing_resource_{resource.name}", resource.name)
     for part in register_parts:
         string_pool.intern(f"register_part_{part.name}", part.name)
     for resource in resources:
@@ -1316,6 +1325,26 @@ def compile_descriptor_set(
         len(physical_register_view_unit_candidate_ordinals),
         f"descriptor set '{spec.key}' physical register view unit count",
     )
+
+    register_packing_resources: list[CompiledRegisterPackingResource] = []
+    register_packing_resource_members: list[CompiledRegisterPackingResourceMember] = []
+    for resource in spec.register_packing_resources:
+        member_start = len(register_packing_resource_members)
+        register_packing_resource_members.extend(
+            CompiledRegisterPackingResourceMember(
+                reg_class_id=reg_class_ids[member.register_class],
+                register_unit_count=member.register_unit_count,
+                resource_unit_count=member.resource_unit_count,
+            )
+            for member in resource.members
+        )
+        register_packing_resources.append(
+            CompiledRegisterPackingResource(
+                source=resource,
+                member_start=member_start,
+                member_count=len(resource.members),
+            )
+        )
 
     for schedule_class in schedule_classes:
         issue_use_start = len(issue_uses)
@@ -1518,6 +1547,8 @@ def compile_descriptor_set(
         physical_register_atomic_unit_starts=physical_register_atomic_unit_starts,
         physical_register_views=physical_register_views,
         physical_register_view_unit_candidate_ordinals=physical_register_view_unit_candidate_ordinals,
+        register_packing_resources=register_packing_resources,
+        register_packing_resource_members=register_packing_resource_members,
         register_parts=register_parts,
         resources=resources,
         schedule_classes=schedule_classes,

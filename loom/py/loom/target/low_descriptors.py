@@ -382,6 +382,30 @@ class RegClass:
 
 
 @dataclass(frozen=True, slots=True)
+class RegisterPackingResourceMember:
+    """Register-class contribution to one shared packing resource.
+
+    Live register units are rounded up to |register_unit_count| groups, then
+    each group consumes |resource_unit_count| units of the resource. Multiple
+    members let a target describe register classes with different allocation
+    granularities that compete for the same physical packing capacity.
+    """
+
+    register_class: str
+    register_unit_count: int = 1
+    resource_unit_count: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class RegisterPackingResource:
+    """Instantaneous shared physical capacity used during Low scheduling."""
+
+    name: str
+    capacity: int
+    members: tuple[RegisterPackingResourceMember, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class PhysicalRegister:
     name: str
     atomic_units: tuple[int, ...]
@@ -704,6 +728,7 @@ class DescriptorSet:
     descriptor_set_ordinal: int | None = None
     physical_registers: tuple[PhysicalRegister, ...] = ()
     physical_register_views: tuple[PhysicalRegisterView, ...] = ()
+    register_packing_resources: tuple[RegisterPackingResource, ...] = ()
     register_parts: tuple[RegisterPart, ...] = ()
     timing_events: tuple[TimingEvent, ...] = ()
     event_separations: tuple[EventSeparation, ...] = ()

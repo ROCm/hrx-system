@@ -37,6 +37,7 @@ from loom.target.low_descriptors import (
     PhysicalRegisterView,
     RegClass,
     RegClassFlag,
+    RegisterPackingResource,
     RegisterPart,
     Resource,
     StorageLeaseAttachment,
@@ -920,6 +921,66 @@ def validate_register_classes(
                 raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} classes '{reference.name}' and '{member.name}' have different allocatable counts")
             if (member.fixed_location_base, member.fixed_location_count) != (reference.fixed_location_base, reference.fixed_location_count):
                 raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} classes '{reference.name}' and '{member.name}' have different fixed-location ranges")
+
+
+def validate_register_packing_resources(
+    descriptor_set_key: str,
+    register_classes: Sequence[RegClass],
+    resources: Sequence[RegisterPackingResource],
+) -> None:
+    """Validates instantaneous shared register-packing capacities."""
+
+    register_classes_by_name = {register_class.name: register_class for register_class in register_classes}
+    resource_names: set[str] = set()
+    total_member_count = 0
+    for resource in resources:
+        description = f"descriptor set '{descriptor_set_key}' register packing resource '{resource.name}'"
+        if resource.name in resource_names:
+            raise ValueError(f"{description} is duplicated")
+        resource_names.add(resource.name)
+        _validate_timing_event_name(resource.name, f"{description} name")
+        validate_u32(resource.capacity, f"{description} capacity")
+        if resource.capacity == 0:
+            raise ValueError(f"{description} has zero capacity")
+        if not resource.members:
+            raise ValueError(f"{description} has no register-class members")
+        validate_u16_table_count(len(resource.members), f"{description} member")
+        total_member_count += len(resource.members)
+
+        member_register_classes: set[str] = set()
+        for member in resource.members:
+            member_description = f"{description} member '{member.register_class}'"
+            if member.register_class in member_register_classes:
+                raise ValueError(f"{member_description} is duplicated")
+            member_register_classes.add(member.register_class)
+            register_class = register_classes_by_name.get(member.register_class)
+            if register_class is None:
+                raise ValueError(f"{member_description} references an unknown register class")
+            if RegClassFlag.PHYSICAL not in register_class.flags:
+                raise ValueError(f"{member_description} references a non-physical register class")
+            validate_u16(
+                member.register_unit_count,
+                f"{member_description} register unit count",
+            )
+            if member.register_unit_count == 0:
+                raise ValueError(f"{member_description} has zero register units per group")
+            validate_u16(
+                member.resource_unit_count,
+                f"{member_description} resource unit count",
+            )
+            if member.resource_unit_count == 0:
+                raise ValueError(f"{member_description} has zero resource units per group")
+            if member.resource_unit_count > resource.capacity:
+                raise ValueError(f"{member_description} consumes {member.resource_unit_count} units from capacity {resource.capacity}")
+
+    validate_u16_table_count(
+        len(resources),
+        f"descriptor set '{descriptor_set_key}' register packing resource",
+    )
+    validate_u16_table_count(
+        total_member_count,
+        f"descriptor set '{descriptor_set_key}' register packing resource member",
+    )
 
 
 def derive_canonical_physical_register_views(

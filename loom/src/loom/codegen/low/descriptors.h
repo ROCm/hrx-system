@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 40u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 41u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -576,6 +576,32 @@ typedef struct loom_low_physical_register_view_t {
   // Reserved for future physical-register-view flags.
   uint16_t reserved;
 } loom_low_physical_register_view_t;
+
+// One instantaneous shared physical-capacity constraint over register classes.
+// Scheduling scores this independently of whole-function residency high-water
+// resources so capacity returns as soon as live values die.
+typedef struct loom_low_register_packing_resource_t {
+  // String-table offset for the stable resource name.
+  loom_bstring_table_offset_t name_string_offset;
+  // Maximum simultaneously occupied resource units.
+  uint32_t capacity;
+  // First row in the descriptor set's packed member table.
+  uint16_t member_start;
+  // Number of register-class contribution rows.
+  uint16_t member_count;
+} loom_low_register_packing_resource_t;
+
+// One register-class contribution to a shared packing resource.
+typedef struct loom_low_register_packing_resource_member_t {
+  // Descriptor-set register class contributing pressure.
+  uint16_t reg_class_id;
+  // Live register units rounded up into one contribution group.
+  uint16_t register_unit_count;
+  // Packing-resource units consumed by one contribution group.
+  uint16_t resource_unit_count;
+  // Reserved; must be zero.
+  uint16_t reserved;
+} loom_low_register_packing_resource_member_t;
 
 // Returns true when the non-empty physical range is wholly contained in the
 // register class's non-allocatable ABI-fixed location window.
@@ -1306,6 +1332,15 @@ typedef struct loom_low_descriptor_set_t {
   const uint16_t* physical_register_view_unit_candidate_ordinals;
   // Number of packed candidate ordinals owned by physical-register views.
   uint32_t physical_register_view_unit_candidate_ordinal_count;
+  // Dense instantaneous shared register-packing resources.
+  const loom_low_register_packing_resource_t* register_packing_resources;
+  // Number of register-packing resources owned by this set.
+  uint32_t register_packing_resource_count;
+  // Packed register-class contribution rows referenced by packing resources.
+  const loom_low_register_packing_resource_member_t*
+      register_packing_resource_members;
+  // Number of register-packing resource member rows owned by this set.
+  uint32_t register_packing_resource_member_count;
   // Dense register parts referenced by descriptor operands.
   const loom_low_register_part_t* register_parts;
   // Number of register parts owned by this set.

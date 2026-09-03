@@ -47,6 +47,8 @@ from loom.target.low_descriptors import (
     RegClass,
     RegClassAlt,
     RegClassFlag,
+    RegisterPackingResource,
+    RegisterPackingResourceMember,
     RegisterPart,
     Resource,
     ResourceKind,
@@ -69,6 +71,8 @@ _REG_ALIAS64 = "test.alias64"
 _REG_PRESSURE_ALIAS32 = "test.pressure.alias32"
 _REG_PRESSURE_ALIAS64 = "test.pressure.alias64"
 _REG_EXPLICIT32 = "test.explicit32"
+_REG_PACKED_NARROW = "test.packed.narrow"
+_REG_PACKED_WIDE = "test.packed.wide"
 
 _REG_PART_I32_LOW16 = "test.i32.low16"
 _REG_PART_I32_HIGH16 = "test.i32.high16"
@@ -116,6 +120,8 @@ _PHYS_ALT = (RegClassAlt(_REG_PHYS),)
 _SPECIAL_ALT = (RegClassAlt(_REG_SPECIAL),)
 _SCHEDULE_STATE_ALT = (RegClassAlt(_REG_SCHEDULE_STATE),)
 _PRESSURE_ALIAS32_ALT = (RegClassAlt(_REG_PRESSURE_ALIAS32),)
+_PACKED_NARROW_ALT = (RegClassAlt(_REG_PACKED_NARROW),)
+_PACKED_WIDE_ALT = (RegClassAlt(_REG_PACKED_WIDE),)
 
 
 def _asm(
@@ -218,6 +224,22 @@ def _phys_result(field_name: str = "dst") -> Operand:
 
 def _phys_operand(field_name: str) -> Operand:
     return Operand(field_name, OperandRole.OPERAND, _PHYS_ALT)
+
+
+def _packed_narrow_result(field_name: str = "dst") -> Operand:
+    return Operand(field_name, OperandRole.RESULT, _PACKED_NARROW_ALT)
+
+
+def _packed_narrow_operand(field_name: str) -> Operand:
+    return Operand(field_name, OperandRole.OPERAND, _PACKED_NARROW_ALT)
+
+
+def _packed_wide_result(field_name: str = "dst") -> Operand:
+    return Operand(field_name, OperandRole.RESULT, _PACKED_WIDE_ALT, unit_count=2)
+
+
+def _packed_wide_operand(field_name: str) -> Operand:
+    return Operand(field_name, OperandRole.OPERAND, _PACKED_WIDE_ALT, unit_count=2)
 
 
 def _schedule_state_result(field_name: str = "dst") -> Operand:
@@ -1057,6 +1079,40 @@ TEST_LOW_ADD_PHYS_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_PACKING_CREATE_DESCRIPTOR = Descriptor(
+    key="test.packing.create",
+    mnemonic="test.packing.create",
+    semantic_tag="test.register.packing.create",
+    operands=(_packed_narrow_result(), _i32_operand("src")),
+    asm_forms=_asm(results=("dst",), operands=("src",)),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_PACKING_EXPAND_DESCRIPTOR = Descriptor(
+    key="test.packing.expand",
+    mnemonic="test.packing.expand",
+    semantic_tag="test.register.packing.expand",
+    operands=(_packed_wide_result(), _packed_narrow_operand("src")),
+    asm_forms=_asm(results=("dst",), operands=("src",)),
+    schedule_class=_SCHEDULE_VECTOR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_PACKING_RETIRE_DESCRIPTOR = Descriptor(
+    key="test.packing.retire",
+    mnemonic="test.packing.retire",
+    semantic_tag="test.register.packing.retire",
+    operands=(
+        _i32_result(),
+        _packed_wide_operand("lhs"),
+        _packed_wide_operand("rhs"),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_VECTOR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
 TEST_LOW_MOVE_TO_PRESSURE_ALIAS32_DESCRIPTOR = Descriptor(
     key="test.move.to.pressure.alias32",
     mnemonic="test.move.to.pressure.alias32",
@@ -1550,8 +1606,35 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             ),
             physical_registers=(
                 "test.r0",
-                "test.r1",
                 "test.r2",
+                "test.r1",
+                "test.r3",
+            ),
+        ),
+        RegClass(
+            _REG_PACKED_NARROW,
+            32,
+            SpillSlotSpace.PRIVATE,
+            flags=(
+                RegClassFlag.PHYSICAL,
+                RegClassFlag.UNSPILLABLE,
+                RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
+            ),
+            physical_registers=("test.r0", "test.r1"),
+        ),
+        RegClass(
+            _REG_PACKED_WIDE,
+            32,
+            SpillSlotSpace.PRIVATE,
+            flags=(
+                RegClassFlag.PHYSICAL,
+                RegClassFlag.UNSPILLABLE,
+                RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
+            ),
+            physical_registers=(
+                "test.r0",
+                "test.r2",
+                "test.r1",
                 "test.r3",
             ),
         ),
@@ -1568,6 +1651,21 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
     physical_register_views=(
         PhysicalRegisterView("test.l0", _REG_EXPLICIT32, ("test.r0", "test.r2")),
         PhysicalRegisterView("test.l1", _REG_EXPLICIT32, ("test.r1", "test.r3")),
+        PhysicalRegisterView("test.l0", _REG_PACKED_WIDE, ("test.r0", "test.r2")),
+        PhysicalRegisterView("test.l1", _REG_PACKED_WIDE, ("test.r1", "test.r3")),
+    ),
+    register_packing_resources=(
+        RegisterPackingResource(
+            name="test.pair_slots",
+            capacity=2,
+            members=(
+                RegisterPackingResourceMember(_REG_PACKED_NARROW),
+                RegisterPackingResourceMember(
+                    _REG_PACKED_WIDE,
+                    register_unit_count=2,
+                ),
+            ),
+        ),
     ),
     register_parts=(
         RegisterPart(_REG_PART_I32_LOW16, _REG_I32, 0x1),
@@ -1851,6 +1949,9 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_EXTRACT_LANE_I32_DESCRIPTOR,
         TEST_LOW_SHUFFLE_BYTES_DESCRIPTOR,
         TEST_LOW_ADD_PHYS_DESCRIPTOR,
+        TEST_LOW_PACKING_CREATE_DESCRIPTOR,
+        TEST_LOW_PACKING_EXPAND_DESCRIPTOR,
+        TEST_LOW_PACKING_RETIRE_DESCRIPTOR,
         TEST_LOW_MOVE_TO_PRESSURE_ALIAS32_DESCRIPTOR,
         TEST_LOW_MOVE_FROM_PRESSURE_ALIAS32_X5_DESCRIPTOR,
         TEST_LOW_ADD_SCHEDULE_STATE_DESCRIPTOR,

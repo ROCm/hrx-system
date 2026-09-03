@@ -263,6 +263,12 @@ typedef struct loom_low_schedule_build_state_t {
   uint32_t* node_pressure_demand_units;
   // Maximum downstream register width needed to advance each node's value.
   uint32_t* node_pressure_activation_units;
+  // Downstream activation footprint indexed by schedule node then
+  // register-packing resource.
+  uint32_t* node_register_packing_activation_units;
+  // Earliest downstream packing-resource exit in source order, indexed by
+  // schedule node then register-packing resource.
+  uint32_t* node_register_packing_completion_sinks;
   // Most recent producer state for each minimum-distance hazard key.
   loom_low_schedule_hazard_state_t* hazard_states;
   // Descriptor register-class state read/write bits, dense by register class.

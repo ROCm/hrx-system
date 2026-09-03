@@ -426,6 +426,36 @@ def emit_source_for_views(
             for i, physical_register in enumerate(compiled.physical_registers)
         ],
     )
+    _emit_array(
+        lines,
+        "loom_low_register_packing_resource_t",
+        spec.c_table_prefix,
+        "RegisterPackingResources",
+        [
+            [
+                ".name_string_offset = " + pool.ref(f"register_packing_resource_{resource.source.name}") + ",",
+                f".capacity = {resource.source.capacity},",
+                f".member_start = {resource.member_start},",
+                f".member_count = {resource.member_count},",
+            ]
+            for resource in compiled.register_packing_resources
+        ],
+    )
+    _emit_array(
+        lines,
+        "loom_low_register_packing_resource_member_t",
+        spec.c_table_prefix,
+        "RegisterPackingResourceMembers",
+        [
+            [
+                f".reg_class_id = {member.reg_class_id},",
+                f".register_unit_count = {member.register_unit_count},",
+                f".resource_unit_count = {member.resource_unit_count},",
+                ".reserved = 0,",
+            ]
+            for member in compiled.register_packing_resource_members
+        ],
+    )
     c_arrays.append_value_array(
         lines,
         "uint16_t",
@@ -971,6 +1001,8 @@ def emit_source_for_views(
         "physical_register_atomic_units": "physical_register_atomic_unit_count",
         "physical_register_views": "physical_register_view_count",
         "physical_register_view_unit_candidate_ordinals": "physical_register_view_unit_candidate_ordinal_count",
+        "register_packing_resources": "register_packing_resource_count",
+        "register_packing_resource_members": "register_packing_resource_member_count",
         "register_parts": "register_part_count",
         "reg_class_alts": "reg_class_alt_count",
         "schedule_classes": "schedule_class_count",
@@ -1081,6 +1113,18 @@ def emit_source_for_views(
             "physical_register_view_unit_candidate_ordinals",
             "PhysicalRegisterViewUnitCandidateOrdinals",
             compiled.physical_register_view_unit_candidate_ordinals,
+            view_lines,
+        )
+        append_optional_table(
+            "register_packing_resources",
+            "RegisterPackingResources",
+            compiled.register_packing_resources,
+            view_lines,
+        )
+        append_optional_table(
+            "register_packing_resource_members",
+            "RegisterPackingResourceMembers",
+            compiled.register_packing_resource_members,
             view_lines,
         )
         append_optional_table("register_parts", "RegisterParts", compiled.register_parts, view_lines)
