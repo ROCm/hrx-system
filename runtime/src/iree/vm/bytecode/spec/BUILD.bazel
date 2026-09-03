@@ -21,6 +21,8 @@ iree_py_library(
         "isa/core/abi.py",
         "isa/core/constant.py",
         "isa/core/control.py",
+        "isa/core/conversion.py",
+        "isa/core/float.py",
         "isa/core/function.py",
         "isa/core/globals.py",
         "isa/core/integer.py",
@@ -91,6 +93,8 @@ iree_py_library(
     "isa/core/abi.py"
     "isa/core/constant.py"
     "isa/core/control.py"
+    "isa/core/conversion.py"
+    "isa/core/float.py"
     "isa/core/function.py"
     "isa/core/globals.py"
     "isa/core/integer.py"

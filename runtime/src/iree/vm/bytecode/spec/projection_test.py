@@ -45,11 +45,9 @@ class ProjectionTest(unittest.TestCase):
         )
         core_header = self.assert_output_contains(
             "wire_core_header",
-            "typedef struct iree_vm_bytecode_control_switch_t",
-            "IREE_VM_BYTECODE_INTEGER_COMPARE_UGE = 0x09",
-            "typedef struct iree_vm_bytecode_func_address_t",
+            "IREE_VM_BYTECODE_FLOAT_MATH_UNARY_GELU_TANH = 0x24",
             "typedef struct iree_vm_bytecode_integer_bitstream_pack_t",
-            "typedef struct iree_vm_bytecode_value_abi_argument_load_t",
+            "typedef struct iree_vm_bytecode_conversion_float_to_integer_t",
         )
         self.assertNotIn("static_assert", module_header)
         self.assertNotIn("static_assert", core_header)
@@ -68,7 +66,7 @@ class ProjectionTest(unittest.TestCase):
             "IREE_VM_BYTECODE_VERIFICATION_RULE_CALL_INDIRECT",
             "IREE_VM_BYTECODE_VERIFICATION_RULE_ABI_SLOT",
             "IREE_VM_BYTECODE_CONTROL_FLOW_CONDITIONAL_BRANCH",
-            "UINT32_C(0x00000007)",
+            "VERIFICATION_RULE_SELECTOR, 3u, 1u, 2u},  // float.math.unary.f64.selector_u8",
             "UINT32_C(0x0005FFFE)",
             "VERIFICATION_RULE_SELECTOR, 1u, 1u, 1u},  // control.fail.status_u8",
             "UINT32_C(0x000D0008), IREE_VM_BYTECODE_VERIFICATION_RULE_GLOBAL_ORDINAL",
@@ -86,7 +84,7 @@ class ProjectionTest(unittest.TestCase):
     def test_tooling_uses_one_byte_length_strings(self) -> None:
         data = self.assert_output_contains(
             "tooling_data",
-            '"\\x0d" "control.block"',
+            '"\\x1b" "conversion.float.to.integer"',
             "uint16_t iree_vm_bytecode_instruction_name_offsets[256]",
         )
         self.assertNotIn("iree_string_view_t", data)
@@ -99,7 +97,7 @@ class ProjectionTest(unittest.TestCase):
             "### `functions`",
             "#### Structural verification obligations",
             "May set only bits in",
-            "#### `integer.add.i32`",
+            "#### `float.math.unary.f64`",
             "#### `control.yield.s32`",
             "## Core selector domains",
             "#### `control.call.indirect`",
