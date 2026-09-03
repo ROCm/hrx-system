@@ -108,18 +108,6 @@ struct loom_artifact_provider_t {
   const loom_target_product_contract_t* product_contract;
 };
 
-// A registry of artifact providers linked into a compiler binary.
-typedef struct loom_artifact_provider_registry_t {
-  // Linked artifact provider table; entries are non-NULL when count is nonzero.
-  const loom_artifact_provider_t* const* providers;
-  // Number of entries in |providers|.
-  iree_host_size_t provider_count;
-} loom_artifact_provider_registry_t;
-
-// Looks up an artifact provider by user-facing provider name.
-const loom_artifact_provider_t* loom_artifact_provider_registry_lookup(
-    const loom_artifact_provider_registry_t* registry, iree_string_view_t name);
-
 // Artifact candidate produced by an offline compiler provider.
 typedef struct loom_artifact_candidate_t {
   // Host allocator used for owned candidate storage.

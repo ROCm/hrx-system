@@ -480,7 +480,8 @@ static loomc_status_t emit_spirv_artifact(emit_spirv_iree_hal_state_t* state) {
       .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
       .structure_size = sizeof(emit_options),
       .next = &option_dict,
-      .artifact_format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
+      .artifact_format =
+          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY),
       .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };
   loomc_status_t status = loomc_emit_module(
@@ -496,7 +497,7 @@ static loomc_status_t summarize_and_maybe_write_artifact(
     emit_spirv_iree_hal_state_t* state) {
   const loomc_artifact_t* artifact = find_result_artifact(
       state->result, loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV));
+      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY));
   if (artifact == NULL) {
     return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
                              "SPIR-V kernel artifact was not produced");

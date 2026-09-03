@@ -91,7 +91,7 @@ typedef struct loomc_artifact_t {
   /// object container, or a loadable image.
   loomc_string_view_t role;
 
-  /// Stable format string, such as `amdgpu-hsaco`, `spirv`,
+  /// Stable format string, such as `amdgpu-hsaco`, `spirv-binary`,
   /// `LOOMC_ARTIFACT_FORMAT_LOOM_TEXT`, or `LOOMC_ARTIFACT_FORMAT_JSON`.
   loomc_string_view_t format;
 

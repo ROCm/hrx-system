@@ -44,8 +44,8 @@ static iree_status_t loomc_spirv_emit_module_artifact(
 
 static const loom_target_emitter_t loomc_spirv_emitter = {
     .name = {"spirv", 5},
-    .public_artifact_format = {LOOMC_ARTIFACT_FORMAT_SPIRV,
-                               sizeof(LOOMC_ARTIFACT_FORMAT_SPIRV) - 1},
+    .public_artifact_format = {LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY,
+                               sizeof(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY) - 1},
     .default_identifier = {"module.spv", 10},
     .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
     .product_contract = &loom_spirv_binary_kernel_product_contract,

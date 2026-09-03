@@ -15,7 +15,8 @@
 ///
 /// Link the SPIR-V target binding package to make the generic
 /// `loomc_emit_module` operation capable of producing
-/// `LOOMC_ARTIFACT_FORMAT_SPIRV` artifacts. This header owns SPIR-V-specific
+/// `LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY` artifacts. This header owns
+/// SPIR-V-specific
 /// emission descriptors that may be attached to `loomc_emit_options_t::next`.
 ///
 /// @par Example
@@ -25,7 +26,8 @@
 /// loomc_emit_options_t emit_options = {
 ///     .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
 ///     .structure_size = sizeof(loomc_emit_options_t),
-///     .artifact_format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
+///     .artifact_format =
+///         loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY),
 ///     .identifier = loomc_make_cstring_view("kernel.spv"),
 /// };
 ///

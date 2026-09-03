@@ -132,7 +132,7 @@ class SpirvScenarioBase : public TargetCompileScenario {
         /*.structure_size=*/sizeof(emit_options),
         /*.next=*/&spirv_options,
         /*.artifact_format=*/
-        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
+        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY),
         /*.identifier=*/identifier,
         /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
     };
@@ -149,12 +149,12 @@ class SpirvScenarioBase : public TargetCompileScenario {
     int64_t artifact_bytes = 0;
     IREE_RETURN_IF_ERROR(ValidateArtifact(
         result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
-        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV), sizeof(uint32_t),
-        "SPIR-V executable", &artifact_bytes));
+        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY),
+        sizeof(uint32_t), "SPIR-V executable", &artifact_bytes));
 
     const loomc_artifact_t* artifact = loomc::bench::FindArtifact(
         result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
-        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV));
+        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY));
     uint32_t magic = 0;
     IREE_RETURN_IF_ERROR(ReadArtifactPrefix(
         artifact, iree_make_byte_span(&magic, sizeof(magic))));
