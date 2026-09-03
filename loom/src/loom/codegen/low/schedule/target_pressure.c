@@ -341,10 +341,297 @@ static void loom_low_schedule_score_candidate_pressure_limits(
   }
 }
 
+uint64_t loom_low_schedule_register_packing_contribution(
+    uint64_t register_units,
+    const loom_low_register_packing_resource_member_t* member) {
+  const uint64_t group_count =
+      register_units / member->register_unit_count +
+      (register_units % member->register_unit_count != 0);
+  return iree_math_saturating_mul_u64(group_count, member->resource_unit_count);
+}
+
+uint64_t loom_low_schedule_node_register_packing_operand_units(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_node_t* node,
+    const loom_low_register_packing_resource_t* resource) {
+  uint64_t resource_units = 0;
+  const loom_value_ordinal_t* operand_ordinals =
+      loom_low_schedule_node_const_operand_ordinals(node);
+  const uint16_t member_end = resource->member_start + resource->member_count;
+  for (uint16_t member_index = resource->member_start;
+       member_index < member_end; ++member_index) {
+    const loom_low_register_packing_resource_member_t* member =
+        &state->target.descriptor_set
+             ->register_packing_resource_members[member_index];
+    uint64_t register_units = 0;
+    for (uint16_t operand_index = 0; operand_index < node->operand_count;
+         ++operand_index) {
+      const loom_value_ordinal_t operand_ordinal =
+          operand_ordinals[operand_index];
+      bool is_duplicate = false;
+      for (uint16_t previous_index = 0; previous_index < operand_index;
+           ++previous_index) {
+        if (operand_ordinals[previous_index] == operand_ordinal) {
+          is_duplicate = true;
+          break;
+        }
+      }
+      const loom_low_schedule_value_record_t* value =
+          &state->values[operand_ordinal];
+      if (!is_duplicate && value->register_class_id == member->reg_class_id) {
+        register_units =
+            iree_math_saturating_add_u64(register_units, value->unit_count);
+      }
+    }
+    resource_units = iree_math_saturating_add_u64(
+        resource_units, loom_low_schedule_register_packing_contribution(
+                            register_units, member));
+  }
+  return resource_units;
+}
+
+uint64_t loom_low_schedule_node_register_packing_result_units(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_node_t* node,
+    const loom_low_register_packing_resource_t* resource) {
+  uint64_t resource_units = 0;
+  const loom_value_ordinal_t* result_ordinals =
+      loom_low_schedule_node_const_result_ordinals(node);
+  const uint16_t member_end = resource->member_start + resource->member_count;
+  for (uint16_t member_index = resource->member_start;
+       member_index < member_end; ++member_index) {
+    const loom_low_register_packing_resource_member_t* member =
+        &state->target.descriptor_set
+             ->register_packing_resource_members[member_index];
+    uint64_t register_units = 0;
+    for (uint16_t result_index = 0; result_index < node->result_count;
+         ++result_index) {
+      const loom_low_schedule_value_record_t* value =
+          &state->values[result_ordinals[result_index]];
+      if (value->register_class_id == member->reg_class_id) {
+        register_units =
+            iree_math_saturating_add_u64(register_units, value->unit_count);
+      }
+    }
+    resource_units = iree_math_saturating_add_u64(
+        resource_units, loom_low_schedule_register_packing_contribution(
+                            register_units, member));
+  }
+  return resource_units;
+}
+
+static uint64_t loom_low_schedule_node_register_packing_working_set(
+    const loom_low_schedule_build_state_t* state, uint32_t node_index,
+    const loom_low_register_packing_resource_t* resource,
+    uint64_t* out_activation_units) {
+  const loom_low_schedule_node_t* node = &state->nodes[node_index];
+  const uint16_t resource_id =
+      (uint16_t)(resource -
+                 state->target.descriptor_set->register_packing_resources);
+  const uint64_t result_units =
+      loom_low_schedule_node_register_packing_result_units(state, node,
+                                                           resource);
+  const uint64_t activation_units =
+      state->node_register_packing_activation_units
+          [(iree_host_size_t)node_index *
+               state->target.descriptor_set->register_packing_resource_count +
+           resource_id];
+  *out_activation_units = activation_units;
+  return iree_math_saturating_add_u64(result_units, activation_units);
+}
+
+static bool loom_low_schedule_candidate_advances_register_packing_completion(
+    const loom_low_schedule_build_state_t* state, uint32_t candidate_node_index,
+    const loom_low_register_packing_resource_t* resource) {
+  if (candidate_node_index == LOOM_LOW_SCHEDULE_NODE_NONE) return false;
+  const uint16_t resource_id =
+      (uint16_t)(resource -
+                 state->target.descriptor_set->register_packing_resources);
+  const uint32_t completion_sink =
+      state->node_register_packing_completion_sinks
+          [(iree_host_size_t)candidate_node_index *
+               state->target.descriptor_set->register_packing_resource_count +
+           resource_id];
+  if (completion_sink != LOOM_LOW_SCHEDULE_NODE_NONE) {
+    const loom_low_schedule_node_t* sink = &state->nodes[completion_sink];
+    const loom_value_ordinal_t* sink_operand_ordinals =
+        loom_low_schedule_node_const_operand_ordinals(sink);
+    const uint16_t member_end = resource->member_start + resource->member_count;
+    for (uint16_t operand_index = 0; operand_index < sink->operand_count;
+         ++operand_index) {
+      const loom_low_schedule_value_record_t* value =
+          &state->values[sink_operand_ordinals[operand_index]];
+      if (!iree_any_bit_set(value->flags, LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE)) {
+        continue;
+      }
+      for (uint16_t member_index = resource->member_start;
+           member_index < member_end; ++member_index) {
+        if (state->target.descriptor_set
+                ->register_packing_resource_members[member_index]
+                .reg_class_id == value->register_class_id) {
+          return true;
+        }
+      }
+    }
+  }
+  uint64_t candidate_activation_units = 0;
+  const uint64_t candidate_working_set =
+      loom_low_schedule_node_register_packing_working_set(
+          state, candidate_node_index, resource, &candidate_activation_units);
+  const loom_low_schedule_node_t* candidate =
+      &state->nodes[candidate_node_index];
+  const loom_value_ordinal_t* operand_ordinals =
+      loom_low_schedule_node_const_operand_ordinals(candidate);
+  for (uint16_t operand_index = 0; operand_index < candidate->operand_count;
+       ++operand_index) {
+    const loom_low_schedule_value_record_t* value =
+        &state->values[operand_ordinals[operand_index]];
+    if (!iree_any_bit_set(value->flags, LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE) ||
+        value->producer_node == LOOM_LOW_SCHEDULE_NODE_NONE ||
+        state->nodes[value->producer_node].block_index !=
+            candidate->block_index) {
+      continue;
+    }
+    bool is_resource_member = false;
+    const uint16_t member_end = resource->member_start + resource->member_count;
+    for (uint16_t member_index = resource->member_start;
+         member_index < member_end; ++member_index) {
+      if (state->target.descriptor_set
+              ->register_packing_resource_members[member_index]
+              .reg_class_id == value->register_class_id) {
+        is_resource_member = true;
+        break;
+      }
+    }
+    if (!is_resource_member) continue;
+    uint64_t producer_activation_units = 0;
+    const uint64_t producer_working_set =
+        loom_low_schedule_node_register_packing_working_set(
+            state, value->producer_node, resource, &producer_activation_units);
+    if (producer_activation_units != 0 &&
+        candidate_working_set <= producer_working_set) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void loom_low_schedule_score_candidate_register_packing_resources(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_pressure_state_t* pressure_state,
+    uint32_t candidate_node_index, loom_low_schedule_candidate_score_t* score) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      state->target.descriptor_set;
+  if (descriptor_set->register_packing_resource_count == 0 ||
+      pressure_state->current_live_units_by_reg_class == NULL ||
+      pressure_state->candidate_register_packing_activation_units == NULL) {
+    return;
+  }
+  for (uint16_t resource_id = 0;
+       resource_id < descriptor_set->register_packing_resource_count;
+       ++resource_id) {
+    const loom_low_register_packing_resource_t* resource =
+        &descriptor_set->register_packing_resources[resource_id];
+    if (loom_low_schedule_candidate_advances_register_packing_completion(
+            state, candidate_node_index, resource)) {
+      score->flags |=
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_PACKING_COMPLETION;
+    }
+    uint64_t current_units = 0;
+    uint64_t persistent_units = 0;
+    uint64_t early_required_units = 0;
+    const uint16_t member_end = resource->member_start + resource->member_count;
+    for (uint16_t member_index = resource->member_start;
+         member_index < member_end; ++member_index) {
+      const loom_low_register_packing_resource_member_t* member =
+          &descriptor_set->register_packing_resource_members[member_index];
+      const uint16_t reg_class_id = member->reg_class_id;
+      const uint64_t current_live_units =
+          pressure_state->current_live_units_by_reg_class[reg_class_id];
+      const int64_t candidate_delta_units =
+          pressure_state->candidate_delta_touched_flags[reg_class_id]
+              ? pressure_state->candidate_delta_units_by_reg_class[reg_class_id]
+              : 0;
+      const uint64_t projected_live_units =
+          loom_low_schedule_project_live_units(current_live_units,
+                                               candidate_delta_units);
+      uint64_t early_live_units = projected_live_units;
+      if (pressure_state->candidate_delta_touched_flags[reg_class_id]) {
+        early_live_units = iree_max(
+            early_live_units,
+            iree_math_saturating_add_u64(
+                current_live_units,
+                pressure_state
+                    ->candidate_early_added_units_by_reg_class[reg_class_id]));
+      }
+
+      const uint64_t persistent_contribution =
+          loom_low_schedule_register_packing_contribution(projected_live_units,
+                                                          member);
+      const uint64_t current_contribution =
+          loom_low_schedule_register_packing_contribution(current_live_units,
+                                                          member);
+      const uint64_t early_required_contribution =
+          loom_low_schedule_register_packing_contribution(early_live_units,
+                                                          member);
+      current_units =
+          iree_math_saturating_add_u64(current_units, current_contribution);
+      persistent_units = iree_math_saturating_add_u64(persistent_units,
+                                                      persistent_contribution);
+      early_required_units = iree_math_saturating_add_u64(
+          early_required_units, early_required_contribution);
+    }
+    const uint64_t activation_units =
+        pressure_state
+            ->candidate_register_packing_activation_units[resource_id];
+    const uint64_t activated_units =
+        iree_math_saturating_add_u64(persistent_units, activation_units);
+    const uint64_t required_units =
+        iree_max(early_required_units, activated_units);
+    if (persistent_units > current_units) {
+      score->flags |= LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_GROWS_PACKING_RESOURCE;
+    }
+
+    if (persistent_units == 0 && required_units == 0 && activation_units == 0) {
+      continue;
+    }
+
+    if (persistent_units > resource->capacity) {
+      const uint64_t debt = persistent_units - resource->capacity;
+      score->persistent_pressure_cliff_penalty = iree_math_saturating_add_u32(
+          score->persistent_pressure_cliff_penalty,
+          debt > UINT32_MAX ? UINT32_MAX : (uint32_t)debt);
+    }
+    if (required_units > resource->capacity) {
+      const uint64_t debt = required_units - resource->capacity;
+      score->pressure_cliff_penalty = iree_math_saturating_add_u32(
+          score->pressure_cliff_penalty,
+          debt > UINT32_MAX ? UINT32_MAX : (uint32_t)debt);
+      loom_low_schedule_record_crossed_pressure_cliff(
+          score, LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_PACKING_RESOURCE,
+          resource_id,
+          resource->capacity == UINT32_MAX ? UINT32_MAX
+                                           : resource->capacity + 1u);
+      continue;
+    }
+
+    const uint64_t units_until_capacity = resource->capacity - required_units;
+    if (activation_units != 0 && units_until_capacity < activation_units) {
+      score->flags |=
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_NEEDS_COMPLETION_RECOVERY;
+    }
+    loom_low_schedule_record_upcoming_pressure_cliff(
+        score, LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_PACKING_RESOURCE,
+        resource_id,
+        units_until_capacity > UINT32_MAX ? UINT32_MAX
+                                          : (uint32_t)units_until_capacity);
+  }
+}
+
 void loom_low_schedule_target_pressure_score_candidate(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state,
-    loom_low_schedule_candidate_score_t* score) {
+    uint32_t candidate_node_index, loom_low_schedule_candidate_score_t* score) {
   loom_low_schedule_score_candidate_pressure_cliffs(state, pressure_state,
                                                     score);
   if (state->pressure_resources != NULL) {
@@ -354,6 +641,8 @@ void loom_low_schedule_target_pressure_score_candidate(
                                                         score);
   }
   score->persistent_pressure_cliff_penalty = score->pressure_cliff_penalty;
+  loom_low_schedule_score_candidate_register_packing_resources(
+      state, pressure_state, candidate_node_index, score);
   loom_low_schedule_score_candidate_pressure_limits(state, pressure_state,
                                                     score);
 }

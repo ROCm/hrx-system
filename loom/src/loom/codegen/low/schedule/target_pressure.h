@@ -52,12 +52,29 @@ struct loom_low_schedule_resource_pressure_record_t {
   uint8_t flags;
 };
 
+// Converts register units into the member's shared packing-resource units.
+uint64_t loom_low_schedule_register_packing_contribution(
+    uint64_t register_units,
+    const loom_low_register_packing_resource_member_t* member);
+
+// Returns the packing-resource units read by unique node operands.
+uint64_t loom_low_schedule_node_register_packing_operand_units(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_node_t* node,
+    const loom_low_register_packing_resource_t* resource);
+
+// Returns the packing-resource units defined by node results.
+uint64_t loom_low_schedule_node_register_packing_result_units(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_node_t* node,
+    const loom_low_register_packing_resource_t* resource);
+
 // Scores all target-authored pressure cliffs, limits, and derived resources
 // against the candidate deltas already present in |pressure_state|.
 void loom_low_schedule_target_pressure_score_candidate(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state,
-    loom_low_schedule_candidate_score_t* score);
+    uint32_t candidate_node_index, loom_low_schedule_candidate_score_t* score);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -76,6 +76,9 @@ struct loom_low_schedule_pressure_state_t {
   int64_t* candidate_delta_units_by_reg_class;
   // Units created during the Early phase by descriptor register-class ID.
   uint64_t* candidate_early_added_units_by_reg_class;
+  // Downstream headroom reserved by the current candidate, indexed by
+  // register-packing resource.
+  uint32_t* candidate_register_packing_activation_units;
   // True when a register class has candidate delta state to reset.
   uint8_t* candidate_delta_touched_flags;
   // Register-class IDs touched in candidate_delta_units_by_reg_class.
@@ -90,6 +93,9 @@ struct loom_low_schedule_pressure_state_t {
     loom_low_schedule_dependency_frontier_t frontier;
     // Pressure summaries indexed by producer node.
     loom_low_schedule_unlock_record_t* records;
+    // Downstream activation footprints indexed by producer node then
+    // register-packing resource.
+    uint32_t* register_packing_activation_units;
     // Descriptor-consumer list heads indexed by producer node.
     uint32_t* descriptor_heads;
     // Next descriptor consumer indexed by consumer node.
@@ -115,6 +121,7 @@ enum loom_low_schedule_pressure_source_kind_e {
   LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_NONE = 0,
   LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS = 1,
   LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_RESOURCE = 2,
+  LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_PACKING_RESOURCE = 3,
 };
 typedef uint8_t loom_low_schedule_pressure_source_kind_t;
 
@@ -129,6 +136,8 @@ typedef enum loom_low_schedule_pressure_progress_kind_e {
   LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_FRONTIER = 3,
   // Candidate advances register work without growing persistent pressure.
   LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NON_GROWING = 4,
+  // Candidate advances a bounded register-packing completion chain.
+  LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_PACKING_COMPLETION = 5,
 } loom_low_schedule_pressure_progress_kind_t;
 
 typedef enum loom_low_schedule_pressure_risk_e {
@@ -218,6 +227,14 @@ enum loom_low_schedule_candidate_flag_bits_e {
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR = 1u << 0,
   // Candidate unlocks a descriptor without growing register pressure.
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_NON_GROWING_DESCRIPTOR = 1u << 1,
+  // Candidate's downstream activation reaches the remaining headroom of a
+  // register-packing resource.
+  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_NEEDS_COMPLETION_RECOVERY = 1u << 2,
+  // Candidate advances from a live packing-resource value without increasing
+  // the bounded working set needed to complete it.
+  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_PACKING_COMPLETION = 1u << 3,
+  // Candidate grows at least one constrained register-packing resource.
+  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_GROWS_PACKING_RESOURCE = 1u << 4,
   // Candidate exposes actionable structural storage setup. Numeric identity
   // with LOOM_LOW_SCHEDULE_NODE_FLAG_DESCRIPTOR_SETUP lets final-producer
   // publication copy the fact without a branch or lookup.
