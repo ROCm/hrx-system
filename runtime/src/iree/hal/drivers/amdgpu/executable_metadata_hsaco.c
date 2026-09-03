@@ -550,6 +550,10 @@ iree_status_t iree_hal_amdgpu_executable_metadata_populate_from_hsaco(
     iree_hal_amdgpu_executable_export_t* export_info = &metadata->exports[i];
     export_info->flags =
         IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_HAS_RESOURCE_METADATA;
+    if (kernel->uniform_workgroup_size) {
+      export_info->flags |=
+          IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_REQUIRES_UNIFORM_WORKGROUPS;
+    }
     export_info->maximum_workgroup_invocations =
         kernel->max_flat_workgroup_size;
     export_info->fixed_workgroup_local_memory_size =

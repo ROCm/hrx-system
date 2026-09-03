@@ -49,6 +49,33 @@ struct Elf64Header {
 
 static_assert(sizeof(Elf64Header) == 64, "ELF64 header must be 64 bytes");
 
+struct Elf64SectionHeader {
+  uint32_t name;               // Section name offset.
+  uint32_t type;               // Section type.
+  uint64_t flags;              // Section flags.
+  uint64_t address;            // Virtual address.
+  uint64_t offset;             // File offset.
+  uint64_t size;               // Section byte length.
+  uint32_t link;               // Linked section index.
+  uint32_t info;               // Section-specific information.
+  uint64_t address_alignment;  // Required address alignment.
+  uint64_t entry_size;         // Fixed entry byte length.
+};
+
+static_assert(sizeof(Elf64SectionHeader) == 64,
+              "ELF64 section header must be 64 bytes");
+
+struct Elf64Symbol {
+  uint32_t name;           // Symbol name offset.
+  uint8_t info;            // Symbol binding and type.
+  uint8_t other;           // Symbol visibility.
+  uint16_t section_index;  // Defining section index.
+  uint64_t value;          // Symbol value.
+  uint64_t size;           // Symbol byte length.
+};
+
+static_assert(sizeof(Elf64Symbol) == 24, "ELF64 symbol must be 24 bytes");
+
 std::vector<uint8_t> MakeMinimalAmdgpuElf(uint32_t machine = 0x041,
                                           uint32_t generic_version = 0,
                                           uint32_t feature_flags = 0) {
@@ -79,6 +106,69 @@ void AppendBytes(std::vector<uint8_t>& buffer, const void* data,
                  size_t length) {
   const auto* bytes = static_cast<const uint8_t*>(data);
   buffer.insert(buffer.end(), bytes, bytes + length);
+}
+
+std::vector<uint8_t> MakeAmdgpuElfWithGlobalSymbols() {
+  std::vector<uint8_t> elf = MakeMinimalAmdgpuElf();
+
+  const size_t string_offset = elf.size();
+  constexpr char kStrings[] =
+      "\0managed_value.managed\0ordinary_global\0ignored_descriptor.kd\0"
+      "local_object\0undefined_object\0function\0";
+  AppendBytes(elf, kStrings, sizeof(kStrings));
+  const uint32_t managed_name = 1;
+  const uint32_t ordinary_name = managed_name + sizeof("managed_value.managed");
+  const uint32_t descriptor_name = ordinary_name + sizeof("ordinary_global");
+  const uint32_t local_name = descriptor_name + sizeof("ignored_descriptor.kd");
+  const uint32_t undefined_name = local_name + sizeof("local_object");
+  const uint32_t function_name = undefined_name + sizeof("undefined_object");
+
+  while (elf.size() % 8 != 0) elf.push_back(0);
+  const size_t symbol_offset = elf.size();
+  const Elf64Symbol symbols[] = {
+      {},
+      {/*.name=*/managed_name, /*.info=*/0x11, /*.other=*/0,
+       /*.section_index=*/1, /*.value=*/0, /*.size=*/64},
+      {/*.name=*/ordinary_name, /*.info=*/0x21, /*.other=*/0,
+       /*.section_index=*/1, /*.value=*/0, /*.size=*/32},
+      {/*.name=*/descriptor_name, /*.info=*/0x11, /*.other=*/0,
+       /*.section_index=*/1, /*.value=*/0, /*.size=*/16},
+      {/*.name=*/local_name, /*.info=*/0x01, /*.other=*/0,
+       /*.section_index=*/1, /*.value=*/0, /*.size=*/8},
+      {/*.name=*/undefined_name, /*.info=*/0x11, /*.other=*/0,
+       /*.section_index=*/0, /*.value=*/0, /*.size=*/8},
+      {/*.name=*/function_name, /*.info=*/0x12, /*.other=*/0,
+       /*.section_index=*/1, /*.value=*/0, /*.size=*/8},
+  };
+  AppendBytes(elf, symbols, sizeof(symbols));
+
+  while (elf.size() % 8 != 0) elf.push_back(0);
+  const size_t section_offset = elf.size();
+  const Elf64SectionHeader sections[] = {
+      {},
+      {/*.name=*/0, /*.type=*/3, /*.flags=*/0, /*.address=*/0,
+       /*.offset=*/string_offset, /*.size=*/sizeof(kStrings), /*.link=*/0,
+       /*.info=*/0, /*.address_alignment=*/1, /*.entry_size=*/0},
+      {/*.name=*/0, /*.type=*/2, /*.flags=*/0, /*.address=*/0,
+       /*.offset=*/symbol_offset, /*.size=*/sizeof(symbols), /*.link=*/1,
+       /*.info=*/0, /*.address_alignment=*/8,
+       /*.entry_size=*/sizeof(Elf64Symbol)},
+  };
+  AppendBytes(elf, sections, sizeof(sections));
+
+  Elf64Header header;
+  memcpy(&header, elf.data(), sizeof(header));
+  header.shoff = section_offset;
+  header.shentsize = sizeof(Elf64SectionHeader);
+  header.shnum = IREE_ARRAYSIZE(sections);
+  memcpy(elf.data(), &header, sizeof(header));
+  return elf;
+}
+
+iree_status_t CollectGlobalName(void* user_data, iree_string_view_t name) {
+  auto* names = static_cast<std::vector<std::string>*>(user_data);
+  names->emplace_back(name.data, name.size);
+  return iree_ok_status();
 }
 
 std::vector<uint8_t> MakeBundle(
@@ -162,6 +252,58 @@ TEST(FatBinaryTest, SelectsExactTargetBeforeGeneric) {
   EXPECT_EQ(extract.matches[0].executable_target, &executable_targets[0]);
   EXPECT_STREQ(extract.matches[0].code_object_target_key, "gfx1100");
   iree_hal_streaming_fat_binary_extract_reset(&extract);
+}
+
+TEST(FatBinaryTest, VisitsDefinedGlobalObjects) {
+  const std::vector<uint8_t> elf = MakeAmdgpuElfWithGlobalSymbols();
+  std::vector<std::string> names;
+  IREE_EXPECT_OK(iree_hal_streaming_fat_binary_visit_elf_global_objects(
+      iree_make_const_byte_span(elf.data(), elf.size()), CollectGlobalName,
+      &names));
+
+  EXPECT_EQ(names, (std::vector<std::string>{"managed_value.managed",
+                                             "ordinary_global"}));
+}
+
+TEST(FatBinaryTest, RejectsTruncatedGlobalSymbolTable) {
+  std::vector<uint8_t> elf = MakeAmdgpuElfWithGlobalSymbols();
+  Elf64Header header;
+  memcpy(&header, elf.data(), sizeof(header));
+  Elf64SectionHeader symbol_section;
+  memcpy(&symbol_section, elf.data() + header.shoff + 2 * header.shentsize,
+         sizeof(symbol_section));
+  symbol_section.size = elf.size();
+  memcpy(elf.data() + header.shoff + 2 * header.shentsize, &symbol_section,
+         sizeof(symbol_section));
+
+  std::vector<std::string> names;
+  EXPECT_THAT(
+      iree::Status(iree_hal_streaming_fat_binary_visit_elf_global_objects(
+          iree_make_const_byte_span(elf.data(), elf.size()), CollectGlobalName,
+          &names)),
+      StatusIs(iree::StatusCode::kOutOfRange));
+}
+
+TEST(FatBinaryTest, RejectsOutOfRangeGlobalName) {
+  std::vector<uint8_t> elf = MakeAmdgpuElfWithGlobalSymbols();
+  Elf64Header header;
+  memcpy(&header, elf.data(), sizeof(header));
+  Elf64SectionHeader symbol_section;
+  memcpy(&symbol_section, elf.data() + header.shoff + 2 * header.shentsize,
+         sizeof(symbol_section));
+  Elf64Symbol symbol;
+  memcpy(&symbol, elf.data() + symbol_section.offset + sizeof(Elf64Symbol),
+         sizeof(symbol));
+  symbol.name = UINT32_MAX;
+  memcpy(elf.data() + symbol_section.offset + sizeof(Elf64Symbol), &symbol,
+         sizeof(symbol));
+
+  std::vector<std::string> names;
+  EXPECT_THAT(
+      iree::Status(iree_hal_streaming_fat_binary_visit_elf_global_objects(
+          iree_make_const_byte_span(elf.data(), elf.size()), CollectGlobalName,
+          &names)),
+      StatusIs(iree::StatusCode::kInvalidArgument));
 }
 
 TEST(FatBinaryTest, FallsBackToGenericTarget) {

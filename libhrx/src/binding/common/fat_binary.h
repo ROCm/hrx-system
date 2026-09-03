@@ -80,6 +80,20 @@ iree_status_t iree_hal_streaming_fat_binary_describe_amdgpu_elf(
     iree_const_byte_span_t elf_data, iree_host_size_t target_key_capacity,
     char* target_key, iree_host_size_t* out_elf_size);
 
+// Callback invoked for each defined global object in an AMDGPU ELF symbol
+// table. The name aliases |elf_data| and is only valid for the duration of the
+// callback.
+typedef iree_status_t(
+    IREE_API_PTR* iree_hal_streaming_fat_binary_global_visitor_t)(
+    void* user_data, iree_string_view_t name);
+
+// Visits defined global and weak object symbols in an AMDGPU ELF. A symbol
+// present in both the static and dynamic symbol tables may be visited more than
+// once. Callers should make processing idempotent when both tables are present.
+iree_status_t iree_hal_streaming_fat_binary_visit_elf_global_objects(
+    iree_const_byte_span_t elf_data,
+    iree_hal_streaming_fat_binary_global_visitor_t visitor, void* user_data);
+
 // Unwraps a fat-binary / offload-bundle / CCOB / raw ELF blob and returns
 // every contained ELF compatible with the best-ranked target candidate. For a
 // raw-ELF input the ELF itself is returned as a single match with an empty
