@@ -29,6 +29,22 @@ typedef uint32_t loom_source_program_node_ordinal_t;
 // Sentinel used when no source-program event ordinal exists.
 #define LOOM_SOURCE_PROGRAM_NODE_ORDINAL_INVALID UINT32_MAX
 
+// One target-independent position-preserving relation between source values.
+//
+// Relations are undirected. Analyses may project selected fact domains across
+// them in both directions, while representation planning may use them as
+// component-union edges. Explicit representation transitions are intentionally
+// absent.
+typedef struct loom_source_program_value_relation_t {
+  // First function-local value ordinal in canonical ascending order.
+  loom_value_ordinal_t lhs;
+  // Second function-local value ordinal in canonical ascending order.
+  loom_value_ordinal_t rhs;
+} loom_source_program_value_relation_t;
+
+static_assert(sizeof(loom_source_program_value_relation_t) == 8,
+              "loom_source_program_value_relation_t must be 8 bytes");
+
 enum loom_source_program_node_kind_e {
   // Marks entry into one source block before any of its operations.
   LOOM_SOURCE_PROGRAM_NODE_BLOCK = 0,
@@ -78,6 +94,12 @@ typedef struct loom_source_program_t {
   loom_source_program_node_ordinal_t node_count;
   // Allocated event capacity in nodes.
   iree_host_size_t node_capacity;
+  // Position-preserving source-value relations.
+  loom_source_program_value_relation_t* value_relations;
+  // Number of populated entries in value_relations.
+  uint32_t value_relation_count;
+  // Allocated relation capacity in value_relations.
+  iree_host_size_t value_relation_capacity;
   // Number of indexed operations.
   uint32_t operation_count;
   // Number of indexed blocks.

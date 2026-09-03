@@ -74,8 +74,54 @@ loom_cc_library(
     hdrs = ["source_program.h"],
     deps = [
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/util:cfg_graph",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "source_dataflow",
+    srcs = ["source_dataflow.c"],
+    hdrs = ["source_dataflow.h"],
+    deps = [
+        ":source_program",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "source_dataflow_verify",
+    testonly = True,
+    srcs = ["source_dataflow_verify.c"],
+    hdrs = ["source_dataflow_verify.h"],
+    deps = [
+        ":source_dataflow",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "source_dataflow_test",
+    srcs = ["source_dataflow_test.cc"],
+    deps = [
+        ":source_dataflow",
+        ":source_dataflow_verify",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -86,9 +132,11 @@ loom_cc_test(
         ":source_program",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",

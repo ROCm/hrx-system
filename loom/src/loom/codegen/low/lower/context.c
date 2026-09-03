@@ -80,6 +80,32 @@ bool loom_low_lower_context_should_stop(
          context->result->error_count >= context->options->max_errors;
 }
 
+iree_status_t loom_low_lower_context_initialize_source_dataflow(
+    loom_low_lower_context_t* context,
+    const loom_view_region_table_t* view_regions) {
+  const loom_source_dataflow_provider_t* provider =
+      context->policy->source_dataflow_provider;
+  if (provider == NULL) return iree_ok_status();
+  if (context->lowering.source_dataflow.provider != NULL) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "source dataflow is already initialized for this lowering frame");
+  }
+  const loom_low_lower_source_dataflow_configuration_t configuration = {
+      .target_facts = context->options->target_facts,
+      .descriptor_set = context->descriptor_set,
+      .view_regions = view_regions,
+  };
+  const loom_source_dataflow_environment_t environment = {
+      .program = &context->lowering.source_program,
+      .fact_table = context->lowering.fact_table,
+      .configuration = &configuration,
+  };
+  return loom_source_dataflow_solve(provider, &environment,
+                                    &context->function_arena,
+                                    &context->lowering.source_dataflow);
+}
+
 static iree_status_t loom_low_lower_emit(loom_low_lower_context_t* context,
                                          const loom_op_t* source_op,
                                          const loom_error_def_t* error,
@@ -288,6 +314,13 @@ const loom_low_descriptor_set_t* loom_low_lower_context_descriptor_set(
 const loom_value_fact_table_t* loom_low_lower_context_fact_table(
     const loom_low_lower_context_t* context) {
   return context->lowering.fact_table;
+}
+
+const loom_source_dataflow_result_t* loom_low_lower_context_source_dataflow(
+    const loom_low_lower_context_t* context) {
+  return context->lowering.source_dataflow.provider != NULL
+             ? &context->lowering.source_dataflow
+             : NULL;
 }
 
 loom_condition_query_t* loom_low_lower_context_condition_query(

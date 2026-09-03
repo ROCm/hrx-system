@@ -86,7 +86,60 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::ir
+    loom::ops::op_defs
+    loom::util::cfg_graph
   PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    source_dataflow
+  HDRS
+    "source_dataflow.h"
+  SRCS
+    "source_dataflow.c"
+  DEPS
+    ::source_program
+    iree::base
+    iree::base::internal
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    source_dataflow_verify
+  HDRS
+    "source_dataflow_verify.h"
+  SRCS
+    "source_dataflow_verify.c"
+  DEPS
+    ::source_dataflow
+    iree::base
+  TESTONLY
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    source_dataflow_test
+  SRCS
+    "source_dataflow_test.cc"
+  DEPS
+    ::source_dataflow
+    ::source_dataflow_verify
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func
+    loom::ops::index
+    loom::ops::scalar
+    loom::ops::scf
+    loom::testing::module_ptr
 )
 
 loom_cc_test(
@@ -101,9 +154,11 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::format::text::parser
     loom::ir
+    loom::ops::cfg
     loom::ops::func
     loom::ops::scalar
     loom::ops::scf
+    loom::ops::vector
     loom::testing::module_ptr
 )
 

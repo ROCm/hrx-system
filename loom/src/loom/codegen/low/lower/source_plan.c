@@ -890,7 +890,7 @@ static iree_status_t loom_low_lower_plan_op_from_contract_index(
       loom_contract_request_t contract_request = {0};
       loom_target_contract_query_environment_t environment = {0};
       IREE_RETURN_IF_ERROR(loom_low_lower_source_query_environment_initialize(
-          context, context->descriptor_set, &environment));
+          context, &environment));
       IREE_RETURN_IF_ERROR(loom_low_lower_query_descriptor_matrix_contract(
           &environment, &context->policy->descriptor_matrix, matrix_rule,
           source_op, &contract_request, &query_result));

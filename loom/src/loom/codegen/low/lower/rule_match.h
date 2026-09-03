@@ -78,6 +78,8 @@ struct loom_low_lower_rule_match_context_t {
   loom_func_like_t function;
   // Target bundle selected for this match.
   const loom_target_bundle_t* bundle;
+  // Typed target facts selected for this match.
+  const loom_target_facts_t* target_facts;
   // Descriptor set selected for the target-low contract.
   const loom_low_descriptor_set_t* descriptor_set;
   // Feature bits selected by the target-low contract.
@@ -91,6 +93,12 @@ struct loom_low_lower_rule_match_context_t {
   loom_low_lower_rule_match_descriptor_ref_callback_t descriptor_ref;
   // Optional dense source value facts used by fact-backed guard rows.
   const loom_value_fact_table_t* fact_table;
+  // Optional active function-local value domain for ordinal-keyed analyses.
+  const loom_local_value_domain_t* value_domain;
+  // Optional immutable source-program structure for function-wide analyses.
+  const loom_source_program_t* source_program;
+  // Optional retained target-declared physical source-value facts.
+  const loom_source_dataflow_result_t* source_dataflow;
   // Optional precomputed view summaries used by source-memory guard rows.
   const loom_view_region_table_t* view_regions;
   // Caller-owned state retaining the canonical source-memory plan for the

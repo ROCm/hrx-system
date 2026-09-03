@@ -31,7 +31,6 @@ static iree_status_t loom_low_lower_source_query_allocate_target_state(
 
 iree_status_t loom_low_lower_source_query_environment_initialize(
     loom_low_lower_context_t* context,
-    const loom_low_descriptor_set_t* descriptor_set,
     loom_target_contract_query_environment_t* out_environment) {
   const loom_view_region_table_t* view_regions = NULL;
   IREE_RETURN_IF_ERROR(
@@ -40,10 +39,11 @@ iree_status_t loom_low_lower_source_query_environment_initialize(
       .module = context->module,
       .function = context->source_function,
       .target_facts = context->options->target_facts,
-      .descriptor_set = descriptor_set,
+      .descriptor_set = context->descriptor_set,
       .fact_table = context->lowering.fact_table,
       .value_domain = &context->lowering.value_domain,
       .source_program = &context->lowering.source_program,
+      .source_dataflow = loom_low_lower_context_source_dataflow(context),
       .view_regions = view_regions,
       .arena = &context->function_arena,
       .target_state_allocator =
@@ -96,27 +96,47 @@ static iree_status_t loom_low_lower_source_query_contract(
     const loom_op_t* source_op,
     loom_target_contract_query_result_t* out_result) {
   loom_low_lower_context_t* context = (loom_low_lower_context_t*)user_data;
-  const loom_low_descriptor_set_t* saved_descriptor_set =
-      context->descriptor_set;
-  loom_value_fact_table_t* saved_fact_table = context->lowering.fact_table;
-  const bool fact_table_changed =
-      saved_fact_table != (loom_value_fact_table_t*)environment->fact_table;
-  context->descriptor_set = environment->descriptor_set;
-  context->lowering.fact_table =
-      (loom_value_fact_table_t*)environment->fact_table;
-  if (fact_table_changed) {
-    context->lowering.function_analysis =
-        (loom_low_lower_function_analysis_t){0};
+  const loom_local_value_domain_t* value_domain =
+      loom_low_lower_context_value_domain(context);
+  const loom_source_program_t* source_program =
+      &context->lowering.source_program;
+  const loom_source_dataflow_result_t* source_dataflow =
+      loom_low_lower_context_source_dataflow(context);
+  if ((environment->module != NULL && environment->module != context->module) ||
+      (loom_func_like_isa(environment->function) &&
+       environment->function.op != context->source_function.op) ||
+      (environment->target_facts != NULL &&
+       environment->target_facts != context->options->target_facts) ||
+      (environment->descriptor_set != NULL &&
+       environment->descriptor_set != context->descriptor_set) ||
+      (environment->fact_table != NULL &&
+       environment->fact_table != context->lowering.fact_table) ||
+      (environment->value_domain != NULL &&
+       environment->value_domain != value_domain) ||
+      (environment->source_program != NULL &&
+       environment->source_program != source_program) ||
+      (environment->source_dataflow != NULL &&
+       environment->source_dataflow != source_dataflow)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "source contract query inputs differ from the retained query scope");
   }
 
   iree_status_t status = iree_ok_status();
   loom_target_contract_query_environment_t query_environment = *environment;
+  query_environment.module = context->module;
+  query_environment.function = context->source_function;
+  query_environment.target_facts = context->options->target_facts;
+  query_environment.descriptor_set = context->descriptor_set;
+  query_environment.fact_table = context->lowering.fact_table;
   if (query_environment.value_domain == NULL) {
-    query_environment.value_domain =
-        loom_low_lower_context_value_domain(context);
+    query_environment.value_domain = value_domain;
   }
   if (query_environment.source_program == NULL) {
-    query_environment.source_program = &context->lowering.source_program;
+    query_environment.source_program = source_program;
+  }
+  if (query_environment.source_dataflow == NULL) {
+    query_environment.source_dataflow = source_dataflow;
   }
   if (query_environment.arena == NULL) {
     query_environment.arena = &context->function_arena;
@@ -162,13 +182,6 @@ static iree_status_t loom_low_lower_source_query_contract(
     status = loom_low_lower_query_target_contract(
         &query_environment, &query_options, source_op, out_result);
   }
-
-  context->descriptor_set = saved_descriptor_set;
-  context->lowering.fact_table = saved_fact_table;
-  if (fact_table_changed) {
-    context->lowering.function_analysis =
-        (loom_low_lower_function_analysis_t){0};
-  }
   return status;
 }
 
@@ -191,7 +204,9 @@ struct loom_low_lower_source_query_scope_t {
 
 iree_status_t loom_low_lower_source_query_scope_create(
     loom_module_t* module, loom_func_like_t source_function,
-    const loom_low_lower_options_t* options, iree_arena_allocator_t* arena,
+    const loom_low_lower_options_t* options,
+    const loom_low_descriptor_set_t* descriptor_set,
+    iree_arena_allocator_t* arena,
     loom_low_lower_source_query_scope_t** out_scope) {
   *out_scope = NULL;
   loom_low_lower_source_query_scope_t* scope = NULL;
@@ -210,6 +225,7 @@ iree_status_t loom_low_lower_source_query_scope_create(
       .source_function = source_function,
       .options = options,
       .policy = options->policy,
+      .descriptor_set = descriptor_set,
       .result = &scope->result,
   };
   scope->context.lowering.fact_table = options->fact_table;
@@ -219,10 +235,10 @@ iree_status_t loom_low_lower_source_query_scope_create(
                                   &scope->context.lowering.condition_query);
 
   iree_status_t status =
-      loom_target_low_descriptor_set_select_for_source_lowering(
-          options->descriptor_registry,
-          loom_target_facts_bundle(options->target_facts),
-          &scope->context.descriptor_set);
+      descriptor_set != NULL
+          ? iree_ok_status()
+          : iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "source query scope requires a descriptor set");
   loom_region_t* source_body = loom_func_like_body(source_function);
   if (iree_status_is_ok(status) && source_body != NULL) {
     status = loom_local_value_domain_acquire_for_region_tree(
@@ -241,6 +257,17 @@ iree_status_t loom_low_lower_source_query_scope_create(
         scope->context.policy->contract_bindings,
         scope->context.policy->contract_binding_count,
         &scope->context.contract_index, &scope->context.function_arena);
+  }
+  const loom_view_region_table_t* view_regions = NULL;
+  if (iree_status_is_ok(status) &&
+      scope->context.policy->source_dataflow_provider != NULL) {
+    status =
+        loom_low_lower_context_view_regions(&scope->context, &view_regions);
+  }
+  if (iree_status_is_ok(status) &&
+      scope->context.policy->source_dataflow_provider != NULL) {
+    status = loom_low_lower_context_initialize_source_dataflow(&scope->context,
+                                                               view_regions);
   }
   if (!iree_status_is_ok(status)) {
     loom_low_lower_source_query_scope_deinitialize(scope);
@@ -282,6 +309,17 @@ const loom_source_program_t* loom_low_lower_source_query_scope_program(
   return scope->value_domain_initialized
              ? &scope->context.lowering.source_program
              : NULL;
+}
+
+const loom_low_descriptor_set_t*
+loom_low_lower_source_query_scope_descriptor_set(
+    const loom_low_lower_source_query_scope_t* scope) {
+  return scope->context.descriptor_set;
+}
+
+const loom_source_dataflow_result_t* loom_low_lower_source_query_scope_dataflow(
+    const loom_low_lower_source_query_scope_t* scope) {
+  return loom_low_lower_context_source_dataflow(&scope->context);
 }
 
 iree_status_t loom_low_lower_source_query_scope_view_regions(

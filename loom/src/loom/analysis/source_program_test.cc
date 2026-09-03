@@ -6,13 +6,17 @@
 
 #include "loom/analysis/source_program.h"
 
+#include <algorithm>
+
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
+#include "loom/ops/cfg/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/ops/vector/ops.h"
 #include "loom/testing/module_ptr.h"
 
 namespace loom {
@@ -30,9 +34,11 @@ class SourceProgramTest : public ::testing::Test {
                                      &block_pool_);
     iree_arena_initialize(&block_pool_, &analysis_arena_);
     loom_context_initialize(iree_allocator_system(), &context_);
+    RegisterDialect(LOOM_DIALECT_CFG, loom_cfg_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_SCALAR, loom_scalar_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_SCF, loom_scf_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_VECTOR, loom_vector_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
 
@@ -67,6 +73,46 @@ class SourceProgramTest : public ::testing::Test {
     IREE_ASSERT_NE(symbol_id, LOOM_SYMBOL_ID_INVALID);
     return loom_func_like_cast(module,
                                module->symbols.entries[symbol_id].defining_op);
+  }
+
+  loom_value_id_t FindValue(const loom_module_t* module,
+                            const loom_local_value_domain_t& value_domain,
+                            iree_string_view_t name) {
+    for (loom_value_ordinal_t i = 0; i < value_domain.value_count; ++i) {
+      const loom_value_id_t value_id = value_domain.value_ids[i];
+      if (iree_string_view_equal(loom_module_value_name(module, value_id),
+                                 name)) {
+        return value_id;
+      }
+    }
+    return LOOM_VALUE_ID_INVALID;
+  }
+
+  bool HasRelation(const loom_source_program_t& program,
+                   loom_value_id_t lhs_value_id, loom_value_id_t rhs_value_id) {
+    loom_value_ordinal_t lhs =
+        loom_local_value_domain_ordinal(program.value_domain, lhs_value_id);
+    loom_value_ordinal_t rhs =
+        loom_local_value_domain_ordinal(program.value_domain, rhs_value_id);
+    if (lhs > rhs) std::swap(lhs, rhs);
+    for (uint32_t i = 0; i < program.value_relation_count; ++i) {
+      if (program.value_relations[i].lhs == lhs &&
+          program.value_relations[i].rhs == rhs) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void BuildProgram(loom_module_t* module, loom_func_like_t function,
+                    loom_local_value_domain_t* out_value_domain,
+                    loom_source_program_t* out_program) {
+    const loom_region_t* body = loom_func_like_body(function);
+    IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region_tree(
+        module, body, &analysis_arena_, out_value_domain));
+    IREE_ASSERT_OK(loom_source_program_build(module, function.op, body,
+                                             out_value_domain, &analysis_arena_,
+                                             out_program));
   }
 
   iree_arena_block_pool_t block_pool_;
@@ -146,6 +192,149 @@ func.def @nested(%condition: i1, %arg: i32) -> (i32) {
             loom_source_program_node_operation(&program.nodes[2]));
   EXPECT_EQ(program.nodes[6].context_op,
             loom_source_program_node_operation(&program.nodes[2]));
+
+  loom_local_value_domain_release(&value_domain);
+}
+
+TEST_F(SourceProgramTest, IndexesCfgPayloadRelations) {
+  ModulePtr module = ParseModule(R"(
+func.def @cfg(%condition: i1, %lhs: i32, %rhs: i32) -> (i32) {
+  cfg.cond_br %condition, ^then, ^else
+^then:
+  cfg.br ^join(%lhs: i32)
+^else:
+  cfg.br ^join(%rhs: i32)
+^join(%joined: i32):
+  func.return %joined : i32
+}
+)");
+  loom_func_like_t function = FindFunction(module.get(), IREE_SV("cfg"));
+  loom_local_value_domain_t value_domain = {};
+  loom_source_program_t program = {};
+  BuildProgram(module.get(), function, &value_domain, &program);
+
+  const loom_value_id_t lhs =
+      FindValue(module.get(), value_domain, IREE_SV("lhs"));
+  const loom_value_id_t rhs =
+      FindValue(module.get(), value_domain, IREE_SV("rhs"));
+  const loom_value_id_t joined =
+      FindValue(module.get(), value_domain, IREE_SV("joined"));
+  ASSERT_NE(lhs, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(rhs, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(joined, LOOM_VALUE_ID_INVALID);
+  EXPECT_TRUE(HasRelation(program, lhs, joined));
+  EXPECT_TRUE(HasRelation(program, rhs, joined));
+
+  loom_local_value_domain_release(&value_domain);
+}
+
+TEST_F(SourceProgramTest, IndexesIdentityAliasAndTiedRelations) {
+  ModulePtr module = ParseModule(R"(
+func.decl @mutate(%input: i32) -> (%input as i32)
+func.def @local(%seed: i32, %data: vector<4xi32>, %rows: index,
+                %columns: index) -> (vector<4xi32>) {
+  %assumed = scalar.assume %seed [range(%seed, 0, 31)] : i32
+  %called = func.call @mutate(%assumed) : (i32) -> (%assumed as i32)
+  %fragment = vector.fragment<result> %data shape [%rows, %columns] : vector<4xi32>
+  %repacked = vector.fragment.repack<lhs> %fragment shape [%rows, %columns] : vector<4xi32> -> vector<4xi32>
+  func.return %repacked : vector<4xi32>
+}
+)");
+  loom_func_like_t function = FindFunction(module.get(), IREE_SV("local"));
+  loom_local_value_domain_t value_domain = {};
+  loom_source_program_t program = {};
+  BuildProgram(module.get(), function, &value_domain, &program);
+
+  const loom_value_id_t seed =
+      FindValue(module.get(), value_domain, IREE_SV("seed"));
+  const loom_value_id_t assumed =
+      FindValue(module.get(), value_domain, IREE_SV("assumed"));
+  const loom_value_id_t called =
+      FindValue(module.get(), value_domain, IREE_SV("called"));
+  const loom_value_id_t data =
+      FindValue(module.get(), value_domain, IREE_SV("data"));
+  const loom_value_id_t fragment =
+      FindValue(module.get(), value_domain, IREE_SV("fragment"));
+  const loom_value_id_t repacked =
+      FindValue(module.get(), value_domain, IREE_SV("repacked"));
+  ASSERT_NE(seed, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(assumed, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(called, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(data, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(fragment, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(repacked, LOOM_VALUE_ID_INVALID);
+  EXPECT_TRUE(HasRelation(program, seed, assumed));
+  EXPECT_TRUE(HasRelation(program, assumed, called));
+  EXPECT_TRUE(HasRelation(program, data, fragment));
+  EXPECT_FALSE(HasRelation(program, fragment, repacked));
+
+  loom_local_value_domain_release(&value_domain);
+}
+
+TEST_F(SourceProgramTest, IndexesRegionBranchAndLoopStateCycles) {
+  ModulePtr module = ParseModule(R"(
+func.def @structured(%condition: i1, %seed: i32, %lower: index,
+                     %upper: index, %step: index) -> (i32, i32) {
+  %selected = scf.if %condition -> (i32) {
+    scf.yield %seed : i32
+  } else {
+    scf.yield %seed : i32
+  }
+  %counted = scf.for %iv = [%lower to %upper step %step]
+      (%carried = %selected : i32) -> (i32) {
+    scf.yield %carried : i32
+  }
+  %conditional = scf.while(%before = %counted : i32) -> (i32) {
+    scf.condition %condition, %before : i1, i32
+  } do(%body: i32) {
+    scf.yield %body : i32
+  }
+  func.return %counted, %conditional : i32, i32
+}
+)");
+  loom_func_like_t function = FindFunction(module.get(), IREE_SV("structured"));
+  loom_local_value_domain_t value_domain = {};
+  loom_source_program_t program = {};
+  BuildProgram(module.get(), function, &value_domain, &program);
+
+  const loom_value_id_t seed =
+      FindValue(module.get(), value_domain, IREE_SV("seed"));
+  const loom_value_id_t selected =
+      FindValue(module.get(), value_domain, IREE_SV("selected"));
+  const loom_value_id_t carried =
+      FindValue(module.get(), value_domain, IREE_SV("carried"));
+  const loom_value_id_t counted =
+      FindValue(module.get(), value_domain, IREE_SV("counted"));
+  const loom_value_id_t before =
+      FindValue(module.get(), value_domain, IREE_SV("before"));
+  const loom_value_id_t body =
+      FindValue(module.get(), value_domain, IREE_SV("body"));
+  const loom_value_id_t conditional =
+      FindValue(module.get(), value_domain, IREE_SV("conditional"));
+  ASSERT_NE(seed, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(selected, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(carried, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(counted, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(before, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(body, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(conditional, LOOM_VALUE_ID_INVALID);
+  EXPECT_TRUE(HasRelation(program, seed, selected));
+  EXPECT_TRUE(HasRelation(program, selected, carried));
+  EXPECT_TRUE(HasRelation(program, selected, counted));
+  EXPECT_TRUE(HasRelation(program, counted, before));
+  EXPECT_TRUE(HasRelation(program, counted, body));
+  EXPECT_TRUE(HasRelation(program, counted, conditional));
+
+  for (uint32_t i = 0; i < program.value_relation_count; ++i) {
+    EXPECT_LT(program.value_relations[i].lhs, program.value_relations[i].rhs);
+    if (i == 0) continue;
+    const loom_source_program_value_relation_t previous =
+        program.value_relations[i - 1];
+    const loom_source_program_value_relation_t current =
+        program.value_relations[i];
+    EXPECT_TRUE(previous.lhs < current.lhs ||
+                (previous.lhs == current.lhs && previous.rhs < current.rhs));
+  }
 
   loom_local_value_domain_release(&value_domain);
 }

@@ -17,6 +17,7 @@
 #include "iree/base/api.h"
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/lower/rule_match.h"
+#include "loom/target/test/lower/source_dataflow.h"
 
 #ifdef __cplusplus
 extern "C" {

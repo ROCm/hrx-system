@@ -30,11 +30,11 @@ typedef struct loom_source_program_t loom_source_program_t;
 // Populates a target contract query environment from |context|.
 //
 // The returned environment borrows the active source function, value domain,
-// view-region analysis, and target state allocator from |context|. Callers may
-// replace individual fields before issuing a query.
+// source program, dataflow result, view-region analysis, and target state
+// allocator from |context|. These retained inputs form one coherent analysis
+// scope and must not be replaced independently.
 iree_status_t loom_low_lower_source_query_environment_initialize(
     loom_low_lower_context_t* context,
-    const loom_low_descriptor_set_t* descriptor_set,
     loom_target_contract_query_environment_t* out_environment);
 
 // Returns a target contract query callback backed by |context|.
@@ -50,7 +50,9 @@ loom_target_contract_query_callback_t loom_low_lower_source_query_callback(
 // |arena|.
 iree_status_t loom_low_lower_source_query_scope_create(
     loom_module_t* module, loom_func_like_t source_function,
-    const loom_low_lower_options_t* options, iree_arena_allocator_t* arena,
+    const loom_low_lower_options_t* options,
+    const loom_low_descriptor_set_t* descriptor_set,
+    iree_arena_allocator_t* arena,
     loom_low_lower_source_query_scope_t** out_scope);
 
 // Releases analyses owned by |scope|. The scope object remains arena-owned.
@@ -70,6 +72,16 @@ const loom_local_value_domain_t* loom_low_lower_source_query_scope_value_domain(
 // Returns the immutable source-program index owned by |scope|, or NULL when
 // the source function has no body.
 const loom_source_program_t* loom_low_lower_source_query_scope_program(
+    const loom_low_lower_source_query_scope_t* scope);
+
+// Returns the descriptor set shared by every analysis in |scope|.
+const loom_low_descriptor_set_t*
+loom_low_lower_source_query_scope_descriptor_set(
+    const loom_low_lower_source_query_scope_t* scope);
+
+// Returns the retained physical source-value dataflow result, or NULL when the
+// active policy has no provider.
+const loom_source_dataflow_result_t* loom_low_lower_source_query_scope_dataflow(
     const loom_low_lower_source_query_scope_t* scope);
 
 // Returns the lazily analyzed source view regions owned by |scope|.

@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/source_dataflow.h"
 #include "loom/analysis/source_program.h"
 #include "loom/analysis/view_regions.h"
 #include "loom/error/error_catalog.h"
@@ -55,7 +56,7 @@ struct loom_target_low_legality_context_t {
   const loom_source_program_t* source_program;
   // Caller-owned verification options.
   const loom_target_low_legality_options_t* options;
-  // Descriptor set selected by options.target_facts.
+  // Descriptor set selected before this legality check.
   const loom_low_descriptor_set_t* descriptor_set;
   // Function-local target state records populated by legality providers.
   loom_target_low_legality_target_state_record_t* target_state_records;
@@ -63,7 +64,7 @@ struct loom_target_low_legality_context_t {
   iree_host_size_t target_state_record_count;
   // Number of allocated target_state_records entries.
   iree_host_size_t target_state_record_capacity;
-  // Result object receiving counters and selected descriptor set.
+  // Result object receiving diagnostic counters.
   loom_target_low_legality_result_t* result;
   // Scratch arena for legality queries and target provider state.
   iree_arena_allocator_t arena;
@@ -362,6 +363,16 @@ const loom_local_value_domain_t* loom_target_low_legality_value_domain(
   return context->options->view_regions->value_domain;
 }
 
+const loom_source_program_t* loom_target_low_legality_source_program(
+    const loom_target_low_legality_context_t* context) {
+  return context->source_program;
+}
+
+const loom_source_dataflow_result_t* loom_target_low_legality_source_dataflow(
+    const loom_target_low_legality_context_t* context) {
+  return context->options->source_dataflow;
+}
+
 const loom_view_region_table_t* loom_target_low_legality_view_regions(
     const loom_target_low_legality_context_t* context) {
   return context->options->view_regions;
@@ -453,12 +464,14 @@ static bool loom_target_low_legality_abi_is_low(
 }
 
 static iree_status_t loom_target_low_legality_validate_options(
-    const loom_target_low_legality_options_t* options,
-    const loom_low_descriptor_set_t** out_descriptor_set) {
-  *out_descriptor_set = NULL;
+    const loom_target_low_legality_options_t* options) {
   if (options->view_regions == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "target-low legality requires function analysis");
+  }
+  if (options->descriptor_set == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "target-low legality requires a descriptor set");
   }
   const loom_target_bundle_t* bundle =
       loom_target_low_legality_options_bundle(options);
@@ -491,8 +504,7 @@ static iree_status_t loom_target_low_legality_validate_options(
                             "flag bits 0x%08x",
                             (unsigned)options->diagnostic_flags);
   }
-  return loom_target_low_descriptor_set_select_for_source_lowering(
-      options->descriptor_registry, bundle, out_descriptor_set);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_target_low_legality_verify_scalar_type(
@@ -712,6 +724,7 @@ static iree_status_t loom_target_low_legality_try_contract_query_op(
       .fact_table = loom_target_low_legality_fact_table(context),
       .value_domain = loom_target_low_legality_value_domain(context),
       .source_program = context->source_program,
+      .source_dataflow = context->options->source_dataflow,
       .view_regions = loom_target_low_legality_view_regions(context),
       .arena = &context->arena,
       .target_state_allocator =
@@ -960,17 +973,20 @@ iree_status_t loom_target_low_verify_program_legality(
   IREE_ASSERT(source_program->module == module);
   IREE_ASSERT(source_program->root_region == loom_func_like_body(function));
   *out_result = (loom_target_low_legality_result_t){0};
-  const loom_low_descriptor_set_t* descriptor_set = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_validate_options(options, &descriptor_set));
-  out_result->descriptor_set = descriptor_set;
+  IREE_RETURN_IF_ERROR(loom_target_low_legality_validate_options(options));
+  if (options->source_dataflow != NULL &&
+      options->source_dataflow->value_domain != source_program->value_domain) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "target-low legality source dataflow covers a different value domain");
+  }
 
   loom_target_low_legality_context_t context = {
       .module = module,
       .function = function,
       .source_program = source_program,
       .options = options,
-      .descriptor_set = descriptor_set,
+      .descriptor_set = options->descriptor_set,
       .result = out_result,
   };
   iree_arena_initialize(module->arena.block_pool, &context.arena);

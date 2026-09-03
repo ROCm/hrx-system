@@ -76,6 +76,8 @@ typedef struct loom_low_lowering_frame_t {
   loom_local_value_domain_t value_domain;
   // Immutable source-function structure shared by lowering analyses.
   loom_source_program_t source_program;
+  // Target-declared physical source-value facts solved over source_program.
+  loom_source_dataflow_result_t source_dataflow;
   // Borrowed source value facts computed before planning.
   loom_value_fact_table_t* fact_table;
   // Reusable traversal state for condition-fact queries.
@@ -166,6 +168,12 @@ iree_string_view_t loom_low_lower_context_function_name(
 // Returns true when the lowering context has reached its diagnostic limit.
 bool loom_low_lower_context_should_stop(
     const loom_low_lower_context_t* context);
+
+// Solves the policy's optional physical source-value dataflow exactly once for
+// the active descriptor set.
+iree_status_t loom_low_lower_context_initialize_source_dataflow(
+    loom_low_lower_context_t* context,
+    const loom_view_region_table_t* view_regions);
 
 // Emits a TARGET-domain diagnostic with the standard target-low source
 // context followed by |extra_params|.

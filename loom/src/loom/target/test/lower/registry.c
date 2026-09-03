@@ -156,7 +156,14 @@ iree_status_t loom_test_low_lower_rule_match_map_value(
   (void)source_op;
   const loom_target_contract_query_environment_t environment = {
       .module = context->module,
+      .function = context->function,
+      .target_facts = context->target_facts,
       .descriptor_set = context->descriptor_set,
+      .fact_table = context->fact_table,
+      .value_domain = context->value_domain,
+      .source_program = context->source_program,
+      .source_dataflow = context->source_dataflow,
+      .view_regions = context->view_regions,
   };
   return loom_test_low_lower_map_contract_value(
       NULL, &environment, source_op, source_value_id, out_mapped_value);
@@ -285,6 +292,7 @@ static const loom_target_contract_binding_t kTestLowContractBindings[] = {
 static const loom_low_lower_policy_t kTestLowLowerPolicy = {
     .name = IREE_SVL("test-low-lower-policy"),
     .error_catalog = &loom_error_catalog_core,
+    .source_dataflow_provider = &loom_test_low_source_dataflow,
     .map_type = {.fn = loom_test_low_lower_map_type, .user_data = NULL},
     .map_contract_value = {.fn = loom_test_low_lower_map_contract_value,
                            .user_data = NULL},

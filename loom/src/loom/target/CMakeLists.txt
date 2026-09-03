@@ -619,6 +619,7 @@ loom_cc_library(
     ::types
     iree::base
     iree::base::internal::arena
+    loom::analysis::source_dataflow
     loom::analysis::source_program
     loom::analysis::view_regions
     loom::error::emitter

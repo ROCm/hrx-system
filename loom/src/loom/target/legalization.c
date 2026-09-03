@@ -282,6 +282,9 @@ iree_status_t loom_target_legalization_query_contract(
       .target_facts = context->target_facts,
       .descriptor_set = context->descriptor_set,
       .fact_table = context->fact_table,
+      .value_domain = context->value_domain,
+      .source_program = context->source_program,
+      .source_dataflow = context->source_dataflow,
       .view_regions = context->view_regions,
       .arena = context->arena,
   };

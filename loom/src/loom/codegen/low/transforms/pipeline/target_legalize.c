@@ -1208,6 +1208,8 @@ static void loom_low_target_legalize_deinitialize_query_scope(
     return;
   }
   state->legalization_context.value_domain = NULL;
+  state->legalization_context.source_program = NULL;
+  state->legalization_context.source_dataflow = NULL;
   state->legalization_context.view_regions = NULL;
   loom_low_lower_source_query_scope_deinitialize(state->query_scope);
   state->query_scope = NULL;
@@ -1220,9 +1222,13 @@ static iree_status_t loom_low_target_legalize_refresh_query_scope(
   state->lower_options.fact_table = (loom_value_fact_table_t*)fact_table;
   IREE_RETURN_IF_ERROR(loom_low_lower_source_query_scope_create(
       state->module, state->selection->func, &state->lower_options,
-      state->query_scope_arena, &state->query_scope));
+      state->descriptor_set, state->query_scope_arena, &state->query_scope));
   state->legalization_context.value_domain =
       loom_low_lower_source_query_scope_value_domain(state->query_scope);
+  state->legalization_context.source_program =
+      loom_low_lower_source_query_scope_program(state->query_scope);
+  state->legalization_context.source_dataflow =
+      loom_low_lower_source_query_scope_dataflow(state->query_scope);
   IREE_RETURN_IF_ERROR(loom_low_lower_source_query_scope_view_regions(
       state->query_scope, &state->legalization_context.view_regions));
   return iree_ok_status();
@@ -1468,12 +1474,14 @@ static iree_status_t loom_low_target_legalize_verify_final(
   loom_target_low_legality_result_t result = {0};
   const loom_target_low_legality_options_t legality_options = {
       .target_facts = state->selection->target_facts,
-      .descriptor_registry = state->lower_options.descriptor_registry,
+      .descriptor_set = state->descriptor_set,
       .error_catalog = state->selection->policy->error_catalog,
       .provider_list = state->legality_provider_list,
       .contract_query = contract_query,
       .type_supported = state->selection->policy->source_type_supported,
       .view_regions = state->legalization_context.view_regions,
+      .source_dataflow =
+          loom_low_lower_source_query_scope_dataflow(state->query_scope),
       .structural_legality_flags =
           LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF,
       .emitter = state->pass->diagnostic_emitter,

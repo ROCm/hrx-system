@@ -553,6 +553,7 @@ loom_cc_library(
         ":low_descriptor_registry",
         ":registers",
         ":types",
+        "//loom/src/loom/analysis:source_dataflow",
         "//loom/src/loom/analysis:source_program",
         "//loom/src/loom/analysis:view_regions",
         "//loom/src/loom/error:emitter",

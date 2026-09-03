@@ -96,14 +96,23 @@ loom_cc_library(
 loom_cc_library(
     name = "lower",
     testonly = True,
-    srcs = ["lower/registry.c"],
-    hdrs = ["lower.h"],
+    srcs = [
+        "lower/registry.c",
+        "lower/source_dataflow.c",
+    ],
+    hdrs = [
+        "lower.h",
+        "lower/source_dataflow.h",
+    ],
     visibility = _TEST_LOW_LOWER_VISIBILITY,
     deps = [
         ":descriptors",
+        "//loom/src/loom/analysis:source_dataflow",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/test",
         "//loom/src/loom/target:registers",
         "//loom/src/loom/target/test/contracts",
         "//runtime/src/iree/base",

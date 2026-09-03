@@ -57,6 +57,7 @@ loom_cc_library(
     loom::analysis::contract_vector
     loom::analysis::kernel_async_legality
     loom::analysis::native_layout
+    loom::analysis::source_dataflow
     loom::analysis::source_program
     loom::analysis::symbol_facts
     loom::analysis::symbolic_expr
@@ -215,6 +216,7 @@ loom_cc_test(
     ::lower
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::source_dataflow_verify
     loom::ir
     loom::ops::scalar
     loom::ops::test

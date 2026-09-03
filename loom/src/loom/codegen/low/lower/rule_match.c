@@ -1334,6 +1334,7 @@ void loom_low_lower_rule_match_context_initialize_from_lowering(
       .module = loom_low_lower_context_module(context),
       .function = loom_low_lower_context_source_function(context),
       .bundle = loom_low_lower_context_bundle(context),
+      .target_facts = loom_low_lower_context_target_facts(context),
       .descriptor_set = loom_low_lower_context_descriptor_set(context),
       .feature_bits =
           loom_low_lower_context_bundle(context)->config->contract_feature_bits,
@@ -1353,6 +1354,9 @@ void loom_low_lower_rule_match_context_initialize_from_lowering(
               .user_data = context,
           },
       .fact_table = loom_low_lower_context_fact_table(context),
+      .value_domain = loom_low_lower_context_value_domain(context),
+      .source_program = &context->lowering.source_program,
+      .source_dataflow = loom_low_lower_context_source_dataflow(context),
       .view_regions = view_regions,
       .source_memory_state = source_memory_state,
       .symbolic_expr_context =

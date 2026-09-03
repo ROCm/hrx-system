@@ -8,6 +8,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/analysis/source_dataflow_verify.h"
 #include "loom/ir/context.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
@@ -111,8 +112,12 @@ class LowLowerSourceQueryTest : public ::testing::Test {
   }
 
   void CreateQueryScope() {
+    IREE_ASSERT_OK(loom_target_low_descriptor_set_select_for_source_lowering(
+        &descriptor_registry_.registry,
+        loom_target_facts_bundle(&target_facts_), &descriptor_set_));
     IREE_ASSERT_OK(loom_low_lower_source_query_scope_create(
-        module_, function_, &options_, &query_scope_arena_, &query_scope_));
+        module_, function_, &options_, descriptor_set_, &query_scope_arena_,
+        &query_scope_));
   }
 
   iree_arena_block_pool_t block_pool_;
@@ -127,6 +132,7 @@ class LowLowerSourceQueryTest : public ::testing::Test {
   loom_value_id_t result_id_ = LOOM_VALUE_ID_INVALID;
   loom_target_low_descriptor_registry_t descriptor_registry_ = {};
   loom_target_facts_t target_facts_ = {};
+  const loom_low_descriptor_set_t* descriptor_set_ = nullptr;
   loom_value_fact_table_t fact_table_ = {};
   loom_low_lower_options_t options_ = {};
   loom_low_lower_source_query_scope_t* query_scope_ = nullptr;
@@ -153,6 +159,30 @@ TEST_F(LowLowerSourceQueryTest, OwnsFunctionAnalysesForScopeLifetime) {
   IREE_ASSERT_OK(loom_low_lower_source_query_scope_view_regions(
       query_scope_, &second_view_regions));
   EXPECT_EQ(second_view_regions, first_view_regions);
+}
+
+TEST_F(LowLowerSourceQueryTest, RetainsTestTargetSourceDataflow) {
+  IREE_ASSERT_OK(
+      loom_source_dataflow_provider_verify(&loom_test_low_source_dataflow));
+  CreateQueryScope();
+  const loom_source_dataflow_result_t* dataflow =
+      loom_low_lower_source_query_scope_dataflow(query_scope_);
+  ASSERT_NE(dataflow, nullptr);
+  EXPECT_EQ(dataflow->provider, &loom_test_low_source_dataflow);
+  EXPECT_TRUE(loom_source_dataflow_result_has_all(
+      dataflow, result_id_,
+      LOOM_TEST_LOW_SOURCE_DATAFLOW_ENTRY_DERIVED |
+          LOOM_TEST_LOW_SOURCE_DATAFLOW_ALL_ENTRY_DERIVED |
+          LOOM_TEST_LOW_SOURCE_DATAFLOW_BOUNDARY_REQUIRED));
+  EXPECT_TRUE(loom_source_dataflow_result_has_all(
+      dataflow, argument_ids_[0],
+      LOOM_TEST_LOW_SOURCE_DATAFLOW_BOUNDARY_REQUIRED));
+  EXPECT_TRUE(loom_source_dataflow_result_has_all(
+      dataflow, argument_ids_[1],
+      LOOM_TEST_LOW_SOURCE_DATAFLOW_BOUNDARY_REQUIRED));
+  EXPECT_EQ(dataflow->statistics.value_seed_invocation_count,
+            dataflow->state_count);
+  EXPECT_EQ(dataflow->statistics.predicate_invocation_count, 0u);
 }
 
 TEST_F(LowLowerSourceQueryTest, SelectsGeneratedTargetContract) {

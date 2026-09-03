@@ -38,6 +38,7 @@ typedef struct loom_target_low_legality_provider_t
     loom_target_low_legality_provider_t;
 typedef struct loom_local_value_domain_t loom_local_value_domain_t;
 typedef struct loom_source_program_t loom_source_program_t;
+typedef struct loom_source_dataflow_result_t loom_source_dataflow_result_t;
 typedef struct loom_view_region_table_t loom_view_region_table_t;
 
 typedef enum loom_target_low_legality_diagnostic_flag_bits_e {
@@ -135,8 +136,8 @@ static inline bool loom_target_low_legality_provider_list_is_empty(
 typedef struct loom_target_low_legality_options_t {
   // Borrowed immutable target facts selected for this legality check.
   const loom_target_facts_t* target_facts;
-  // Low descriptor registry linked into the current compiler binary.
-  const loom_low_descriptor_registry_t* descriptor_registry;
+  // Low descriptor set selected before source analyses and legality begin.
+  const loom_low_descriptor_set_t* descriptor_set;
   // Catalog resolving compact diagnostic refs emitted by target contract
   // queries and target-owned legality providers.
   const loom_error_catalog_t* error_catalog;
@@ -154,6 +155,8 @@ typedef struct loom_target_low_legality_options_t {
   // The table carries the matching value domain and stable symbolic expression
   // context, which owns the current facts.
   const loom_view_region_table_t* view_regions;
+  // Optional retained target-declared physical source-value facts.
+  const loom_source_dataflow_result_t* source_dataflow;
   // Structural source forms permitted by the caller's current phase.
   loom_target_low_structural_legality_flags_t structural_legality_flags;
   // Optional target-specific feedback diagnostics to emit during source
@@ -172,9 +175,6 @@ typedef struct loom_target_low_legality_result_t {
   uint32_t error_count;
   // Number of remark diagnostics emitted.
   uint32_t remark_count;
-  // Descriptor set selected by options.target_facts, or NULL when selection
-  // failed before verification started.
-  const loom_low_descriptor_set_t* descriptor_set;
 } loom_target_low_legality_result_t;
 
 // Verifies that |source_program| is legal as source IR for target-low lowering
@@ -222,6 +222,15 @@ const loom_value_fact_table_t* loom_target_low_legality_fact_table(
 
 // Returns the active value domain owned by the shared function analysis.
 const loom_local_value_domain_t* loom_target_low_legality_value_domain(
+    const loom_target_low_legality_context_t* context);
+
+// Returns the retained source program shared with target contract queries.
+const loom_source_program_t* loom_target_low_legality_source_program(
+    const loom_target_low_legality_context_t* context);
+
+// Returns retained target-declared physical source-value facts, or NULL when
+// the active lowering policy has no provider.
+const loom_source_dataflow_result_t* loom_target_low_legality_source_dataflow(
     const loom_target_low_legality_context_t* context);
 
 // Returns the shared analyzed view-region table.

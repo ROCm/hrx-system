@@ -73,6 +73,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:contract_vector",
         "//loom/src/loom/analysis:kernel_async_legality",
         "//loom/src/loom/analysis:native_layout",
+        "//loom/src/loom/analysis:source_dataflow",
         "//loom/src/loom/analysis:source_program",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/analysis:symbolic_expr",
@@ -226,6 +227,7 @@ loom_cc_test(
     srcs = ["source_query_test.cc"],
     deps = [
         ":lower",
+        "//loom/src/loom/analysis:source_dataflow_verify",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/test",

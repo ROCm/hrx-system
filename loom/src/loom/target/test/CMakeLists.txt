@@ -86,14 +86,19 @@ loom_cc_library(
     lower
   HDRS
     "lower.h"
+    "lower/source_dataflow.h"
   SRCS
     "lower/registry.c"
+    "lower/source_dataflow.c"
   DEPS
     ::descriptors
     iree::base
+    loom::analysis::source_dataflow
     loom::codegen::low::lower
     loom::error::error_defs
     loom::ir
+    loom::ops::scalar
+    loom::ops::test
     loom::target::registers
     loom::target::test::contracts
   TESTONLY

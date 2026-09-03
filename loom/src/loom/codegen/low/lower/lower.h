@@ -20,6 +20,7 @@
 #include "loom/analysis/condition_facts.h"
 #include "loom/analysis/contract_vector.h"
 #include "loom/analysis/native_layout.h"
+#include "loom/analysis/source_dataflow.h"
 #include "loom/analysis/symbolic_expr.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/lower/module_state.h"
@@ -44,6 +45,17 @@ typedef struct loom_low_lower_rule_set_t loom_low_lower_rule_set_t;
 typedef struct loom_low_source_memory_access_plan_t
     loom_low_source_memory_access_plan_t;
 typedef struct loom_view_region_table_t loom_view_region_table_t;
+
+// Standard target configuration supplied to source-dataflow providers during
+// source-to-Low lowering and read-only contract queries.
+typedef struct loom_low_lower_source_dataflow_configuration_t {
+  // Typed target facts selected for this lowering attempt.
+  const loom_target_facts_t* target_facts;
+  // Low descriptor set selected before source analysis begins.
+  const loom_low_descriptor_set_t* descriptor_set;
+  // Source view-region analysis shared with contract queries.
+  const loom_view_region_table_t* view_regions;
+} loom_low_lower_source_dataflow_configuration_t;
 
 typedef struct loom_low_lower_rule_mapped_value_t {
   // True when the source value maps to a target-low register.
@@ -739,6 +751,9 @@ typedef struct loom_low_lower_policy_t {
   // Catalog resolving compact diagnostic refs carried by this policy's
   // generated rules and contract fragments.
   const loom_error_catalog_t* error_catalog;
+  // Optional table-driven physical source-value analysis. The common
+  // source-dataflow engine solves this once before target legality.
+  const loom_source_dataflow_provider_t* source_dataflow_provider;
   // Maps source semantic types to target-low register types.
   loom_low_lower_map_type_callback_t map_type;
   // Optionally reports source types accepted by target-low legality because
@@ -1031,6 +1046,11 @@ const loom_low_descriptor_set_t* loom_low_lower_context_descriptor_set(
 // Returns source value facts computed before planning. The table describes
 // the source function being lowered and remains valid only during callbacks.
 const loom_value_fact_table_t* loom_low_lower_context_fact_table(
+    const loom_low_lower_context_t* context);
+
+// Returns the retained physical source-value dataflow result, or NULL when the
+// active policy has no provider.
+const loom_source_dataflow_result_t* loom_low_lower_context_source_dataflow(
     const loom_low_lower_context_t* context);
 
 // Returns reusable traversal state for condition-fact queries.

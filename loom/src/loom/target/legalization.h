@@ -117,6 +117,10 @@ typedef struct loom_target_legalization_context_t {
   const loom_view_region_table_t* view_regions;
   // Dense function-local value domain valid for the current callback.
   const loom_local_value_domain_t* value_domain;
+  // Immutable source-program structure valid for the current callback.
+  const loom_source_program_t* source_program;
+  // Retained target-declared physical source-value facts.
+  const loom_source_dataflow_result_t* source_dataflow;
   // Active rewriter for mutating the function body.
   loom_rewriter_t* rewriter;
   // Current legalization phase.
