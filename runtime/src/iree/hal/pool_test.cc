@@ -250,6 +250,7 @@ static iree_hal_routing_test_pool_t* CreateRoutingTestPool(
   iree_hal_pool_initialize(&iree_hal_routing_test_pool_vtable, &pool->base);
   pool->capabilities.memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   pool->capabilities.supported_usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  pool->capabilities.queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
   pool->capabilities.min_allocation_size = 0;
   pool->capabilities.max_allocation_size = max_allocation_size;
   return pool;
@@ -320,6 +321,51 @@ TEST(PoolSetTest, SelectsHighestPriorityCompatiblePoolBySize) {
   iree_hal_pool_set_deinitialize(&pool_set);
   iree_hal_pool_release((iree_hal_pool_t*)tlsf_pool);
   iree_hal_pool_release((iree_hal_pool_t*)direct_pool);
+}
+
+TEST(PoolSetTest, SelectsPoolCoveringRequestedQueueFamilies) {
+  iree_hal_pool_set_t pool_set;
+  IREE_ASSERT_OK(iree_hal_pool_set_initialize(
+      /*initial_capacity=*/2, iree_allocator_system(), &pool_set));
+
+  iree_hal_routing_test_pool_t* any_pool = CreateRoutingTestPool(0);
+  iree_hal_routing_test_pool_t* restricted_pool = CreateRoutingTestPool(0);
+  const iree_hal_queue_family_affinity_t family_0 =
+      iree_hal_make_queue_family_affinity(0);
+  const iree_hal_queue_family_affinity_t family_1 =
+      iree_hal_make_queue_family_affinity(1);
+  const iree_hal_queue_family_affinity_t family_2 =
+      iree_hal_make_queue_family_affinity(2);
+  restricted_pool->capabilities.queue_family_affinity = family_0 | family_1;
+  IREE_ASSERT_OK(iree_hal_pool_set_register(&pool_set, /*priority=*/0,
+                                            (iree_hal_pool_t*)any_pool));
+  IREE_ASSERT_OK(iree_hal_pool_set_register(&pool_set, /*priority=*/10,
+                                            (iree_hal_pool_t*)restricted_pool));
+
+  iree_hal_buffer_params_t params = {0};
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+
+  params.queue_family_affinity = family_0;
+  EXPECT_EQ((iree_hal_pool_t*)restricted_pool,
+            iree_hal_pool_set_select(&pool_set, params, 4096));
+
+  params.queue_family_affinity = family_2;
+  EXPECT_EQ((iree_hal_pool_t*)any_pool,
+            iree_hal_pool_set_select(&pool_set, params, 4096));
+
+  params.queue_family_affinity = family_0 | family_2;
+  EXPECT_EQ((iree_hal_pool_t*)any_pool,
+            iree_hal_pool_set_select(&pool_set, params, 4096));
+
+  params.queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
+  EXPECT_EQ((iree_hal_pool_t*)any_pool,
+            iree_hal_pool_set_select(&pool_set, params, 4096));
+
+  iree_hal_pool_set_deinitialize(&pool_set);
+  iree_hal_pool_release((iree_hal_pool_t*)restricted_pool);
+  iree_hal_pool_release((iree_hal_pool_t*)any_pool);
 }
 
 TEST(PoolSetTest, SelectsNoncoherentUnifiedMemory) {

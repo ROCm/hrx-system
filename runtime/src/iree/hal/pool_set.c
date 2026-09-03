@@ -24,6 +24,16 @@ static iree_hal_memory_type_t iree_hal_pool_set_required_memory_type(
   return memory_type & ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
 }
 
+static bool iree_hal_pool_set_supports_queue_families(
+    iree_hal_queue_family_affinity_t supported_affinity,
+    iree_hal_queue_family_affinity_t requested_affinity) {
+  if (iree_hal_queue_family_affinity_is_any(supported_affinity)) {
+    return true;
+  }
+  return !iree_hal_queue_family_affinity_is_any(requested_affinity) &&
+         iree_all_bits_set(supported_affinity, requested_affinity);
+}
+
 static void iree_hal_pool_set_apply_optimal_memory_type(
     const iree_hal_pool_capabilities_t* capabilities,
     iree_hal_buffer_params_t* params) {
@@ -130,6 +140,13 @@ iree_hal_pool_t* iree_hal_pool_set_select(const iree_hal_pool_set_t* pool_set,
 
     // Usage: pool must support at least the required usage bits.
     if ((capabilities->supported_usage & params.usage) != params.usage) {
+      continue;
+    }
+
+    // Queue families: pool visibility must cover every requested family.
+    if (!iree_hal_pool_set_supports_queue_families(
+            capabilities->queue_family_affinity,
+            params.queue_family_affinity)) {
       continue;
     }
 

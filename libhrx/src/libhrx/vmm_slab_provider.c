@@ -373,6 +373,8 @@ static void hrx_vmm_slab_provider_query_properties(
       hrx_vmm_slab_provider_const_cast(base_provider);
   out_properties->memory_type = provider->buffer_params.type;
   out_properties->supported_usage = provider->buffer_params.usage;
+  out_properties->queue_family_affinity =
+      provider->buffer_params.queue_family_affinity;
 }
 
 iree_status_t hrx_vmm_slab_provider_create(

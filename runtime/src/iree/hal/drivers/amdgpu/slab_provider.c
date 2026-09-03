@@ -550,6 +550,8 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
   if (iree_status_is_ok(status)) {
     provider->properties.memory_type = options.memory_type;
     provider->properties.supported_usage = options.supported_usage;
+    provider->properties.queue_family_affinity =
+        IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
     provider->properties.atomic_operations =
         iree_hal_amdgpu_atomic_memory_expand_capabilities(
             provider->atomic_memory_cells);

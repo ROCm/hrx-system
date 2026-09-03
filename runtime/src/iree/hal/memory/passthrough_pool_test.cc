@@ -197,6 +197,7 @@ static void iree_hal_test_opaque_slab_provider_query_properties(
                                     IREE_HAL_BUFFER_USAGE_STORAGE |
                                     IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
                                     IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT;
+  out_properties->queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
   out_properties->atomic_operations.device_scope_32 =
       IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
   out_properties->atomic_operations.system_scope_64 =

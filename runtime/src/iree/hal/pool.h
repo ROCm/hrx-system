@@ -228,6 +228,11 @@ typedef struct iree_hal_pool_capabilities_t {
   // that isn't host-visible can't serve MAPPING usage.
   iree_hal_buffer_usage_t supported_usage;
 
+  // Queue families that may access buffers materialized from this pool.
+  // IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY means every queue family in the
+  // containing logical device.
+  iree_hal_queue_family_affinity_t queue_family_affinity;
+
   // Atomic operations supported by naturally aligned locations materialized
   // from this pool. Queue-family capabilities are required independently.
   iree_hal_atomic_operation_capabilities_t atomic_operations;
