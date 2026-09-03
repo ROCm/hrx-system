@@ -92,8 +92,6 @@ def _render_numeric_table(lines: list[str], table) -> None:
 def _render_exact_bytes(lines: list[str], record: module.WireRecord) -> None:
     for wire_field in record.fields:
         rule = wire_field.rule
-        if not isinstance(rule, module.FieldRuleUse):
-            continue
         if rule.kind != module_rules.FieldRule.EXACT_BYTES:
             continue
         encoded = "".join(f"\\x{value:02X}" for value in rule.data)
@@ -181,6 +179,8 @@ def render_core_header(specification: Specification) -> str:
 
     guard = "IREE_VM_BYTECODE_WIRE_CORE_H_"
     lines = _header_prologue(guard)
+    for table in specification.selectors:
+        _render_numeric_table(lines, table)
     lines.extend(
         [
             "// One-byte physical Core instruction opcode.",
@@ -293,21 +293,9 @@ class _VerificationRule(NamedTuple):
     label: str = ""
 
 
-_INSTRUCTION_FIELD_RULE_KIND = {
-    core_rules.FieldRule.ZERO: "ZERO",
-    core_rules.FieldRule.REGISTER_VALUE: "VALUE_REGISTER",
-    core_rules.FieldRule.CONTROL_TARGET_S16: "CONTROL_TARGET_S16",
-    core_rules.FieldRule.CONTROL_TARGET_S32: "CONTROL_TARGET_S32",
-}
-
 _MODULE_VERSION_RULE = {
     module_rules.FieldRule.CORE_MAJOR: "major",
     module_rules.FieldRule.CORE_REQUIRED_MINOR: "minor",
-}
-
-_CONTROL_FLOW_C_NAME = {
-    control_flow: f"IREE_VM_BYTECODE_CONTROL_FLOW_{control_flow.name}"
-    for control_flow in isa.ControlFlow
 }
 
 
@@ -319,47 +307,54 @@ def _append_parameter_words(parameters: list[int], values: Iterable[int]) -> int
     return base
 
 
-def _instruction_rules(instruction: isa.Instruction) -> list[_VerificationRule]:
+def _instruction_rules(
+    instruction: isa.Instruction, parameters, selector_parameters
+) -> list[_VerificationRule]:
     rules = []
-    offsets_by_name = dict(
-        zip(
-            (item.field.name for item in instruction.fields),
-            instruction.field_offsets,
-            strict=True,
+    offsets_by_name = {
+        item.field.name: offset
+        for item, offset in zip(
+            instruction.fields, instruction.field_offsets, strict=True
         )
-    )
+    }
     for instruction_field, offset in zip(
         instruction.fields, instruction.field_offsets, strict=True
     ):
         rule = instruction_field.rule
-        if rule == core_rules.FieldRule.ANY_BITS:
+        if rule.kind in (
+            core_rules.FieldRule.ANY_BITS,
+            core_rules.FieldRule.CONSTRAINT_MEMBER,
+        ):
             continue
-        kind = _INSTRUCTION_FIELD_RULE_KIND[rule]
+        parameter, auxiliary = (
+            selector_parameters[rule.data]
+            if rule.kind == core_rules.FieldRule.SELECTOR
+            else (0, 0)
+        )
         rules.append(
             _VerificationRule(
-                kind,
+                _identifier(rule.kind.name),
                 offset,
                 instruction_field.field.byte_length,
+                auxiliary,
+                parameter,
                 label=f"{instruction.mnemonic}.{instruction_field.field.name}",
             )
         )
     for record_rule in instruction.rules:
-        if record_rule.kind == core_rules.RecordRuleKind.RETURN_SIGNATURE:
-            rules.append(
-                _VerificationRule("RETURN_SIGNATURE", label=instruction.mnemonic)
+        offsets = tuple(offsets_by_name[name] for name in record_rule.fields)
+        inline_offsets = (*offsets, 0, 0, 0)
+        parameter = (
+            _append_parameter_words(parameters, offsets[3:]) if len(offsets) > 3 else 0
+        )
+        rules.append(
+            _VerificationRule(
+                _identifier(record_rule.kind.name),
+                *inline_offsets[:3],
+                parameter,
+                instruction.mnemonic,
             )
-        elif record_rule.kind == core_rules.RecordRuleKind.SWITCH_TARGETS:
-            count_field, base_field = record_rule.fields
-            rules.append(
-                _VerificationRule(
-                    "SWITCH_TARGETS",
-                    offsets_by_name[count_field],
-                    auxiliary=offsets_by_name[base_field],
-                    label=instruction.mnemonic,
-                )
-            )
-        else:
-            raise ValueError(f"{instruction.mnemonic}: unsupported instruction rule")
+        )
     return rules
 
 
@@ -369,18 +364,13 @@ def _module_rules(
     parameters: list[int],
 ) -> list[_VerificationRule]:
     rules = []
-    offsets_by_name = dict(
-        zip(
-            (item.field.name for item in record.fields),
-            record.field_offsets,
-            strict=True,
-        )
-    )
+    offsets_by_name = {
+        item.field.name: offset
+        for item, offset in zip(record.fields, record.field_offsets, strict=True)
+    }
     for wire_field, offset in zip(record.fields, record.field_offsets, strict=True):
         rule = wire_field.rule
         label = f"{record.name}.{wire_field.field.name}"
-        if not isinstance(rule, module.FieldRuleUse):
-            rule = module.FieldRuleUse(rule)
         rule_kind = rule.kind
         if rule_kind == module_rules.FieldRule.ANY_BITS:
             continue
@@ -466,8 +456,20 @@ def render_verification_data(specification: Specification) -> str:
     ] * 256
     rules: list[_VerificationRule] = []
     parameters: list[int] = []
+    selector_parameters = {}
+    for table in specification.selectors:
+        values = table.values
+        words = [0] * (max(value.value for value in values) // 32 + 1)
+        for value in values:
+            words[value.value // 32] |= 1 << (value.value % 32)
+        selector_parameters[table] = (
+            _append_parameter_words(parameters, words),
+            len(words),
+        )
     for instruction in specification.instructions:
-        instruction_rules = _instruction_rules(instruction)
+        instruction_rules = _instruction_rules(
+            instruction, parameters, selector_parameters
+        )
         instruction_descriptors[instruction.opcode] = _instruction_descriptor(
             instruction, len(rules), len(instruction_rules)
         )
@@ -508,7 +510,7 @@ def render_verification_data(specification: Specification) -> str:
                 "    IREE_VM_BYTECODE_PACK_INSTRUCTION_VERIFICATION(%du, %s, %du, %du),"
                 % (
                     descriptor.rule_base,
-                    _CONTROL_FLOW_C_NAME[descriptor.control_flow],
+                    f"IREE_VM_BYTECODE_CONTROL_FLOW_{descriptor.control_flow.name}",
                     descriptor.rule_count,
                     descriptor.byte_length,
                 )

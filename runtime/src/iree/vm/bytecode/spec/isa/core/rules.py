@@ -58,35 +58,64 @@ class RefOwnership(enum.Enum):
 
 
 class FieldRule:
-    ANY_BITS = RuleKind("any_bits")
-    ZERO = RuleKind("zero")
+    ANY_BITS = RuleKind("any_bits", summary="Any bit pattern.")
+    ZERO = RuleKind("zero", summary="Must be zero.")
     ALLOWED_RANGE = RuleKind("allowed_range", value_count=2)
     ALLOWED_VALUES = RuleKind("allowed_values", value_count=-1)
-    REGISTER_VALUE = RuleKind("register_value", U8)
-    REGISTER_REF = RuleKind("register_ref", U8)
+    REGISTER_VALUE = RuleKind(
+        "register_value", U8, summary="Must name an in-range value register."
+    )
+    REGISTER_REF = RuleKind(
+        "register_ref", U8, summary="Must name an in-range ref register."
+    )
     SELECTOR = RuleKind("selector", data_type=NumericTable)
-    REGISTER_FUNCTION = RuleKind("register_function", U8)
+    REGISTER_FUNCTION = RuleKind(
+        "register_function", U8, summary="Must name an in-range function register."
+    )
     GLOBAL_ORDINAL = RuleKind("global_ordinal", U16, value_count=1)
-    CONSTRAINT_MEMBER = RuleKind("constraint_member")
+    CONSTRAINT_MEMBER = RuleKind(
+        "constraint_member",
+        summary="Validated by the instruction's cross-field rule.",
+    )
     LOCAL_BYTES_RANGE_BASE = RuleKind("local_bytes_range_base", U16, field_count=1)
     ABI_SLOT = RuleKind("abi_slot", U16, value_count=1)
     LOCAL_BYTES_FIXED_BASE = RuleKind("local_bytes_fixed_base", U16, value_count=2)
     LOCAL_BYTES_RANGE_LENGTH = RuleKind("local_bytes_range_length", U16)
     PACKED_SELECTORS = RuleKind("packed_selectors", value_count=1, data_type=tuple)
     REF_SLOT = RuleKind("ref_slot", U16)
-    CONTROL_TARGET_S16 = RuleKind("control_target_s16", I16)
-    CONTROL_TARGET_S32 = RuleKind("control_target_s32", I32)
+    CONTROL_TARGET_S16 = RuleKind(
+        "control_target_s16",
+        I16,
+        summary="Must resolve to an in-function control.block using widened signed arithmetic.",
+    )
+    CONTROL_TARGET_S32 = RuleKind(
+        "control_target_s32",
+        I32,
+        summary="Must resolve to an in-function control.block using widened signed arithmetic.",
+    )
     LOCAL_BYTES_RANGE_MEMORY_FORMAT = RuleKind(
         "local_bytes_range_memory_format", U16, field_count=1
     )
     RODATA_ORDINAL = RuleKind("rodata_ordinal", U16)
-    CONSTANT_POOL_ORDINAL = RuleKind("constant_pool_ordinal", U16)
-    FUNCTION_LOCAL_ORDINAL = RuleKind("function_local_ordinal", U16)
+    CONSTANT_POOL_ORDINAL = RuleKind(
+        "constant_pool_ordinal",
+        U16,
+        summary="Must name an in-range module constant-pool cell.",
+    )
+    FUNCTION_LOCAL_ORDINAL = RuleKind(
+        "function_local_ordinal",
+        U16,
+        summary="Must name an in-range function-local cell.",
+    )
     LOCAL_BYTES_REPEATED_BASE = RuleKind(
         "local_bytes_repeated_base", U16, field_count=1, value_count=2
     )
     LOCAL_BYTES_REPEATED_COUNT = RuleKind("local_bytes_repeated_count", U16)
-    IMPORT_ORDINAL_OPTIONAL = RuleKind("import_ordinal_optional", U16)
+    IMPORT_ORDINAL_OPTIONAL = RuleKind(
+        "import_ordinal_optional",
+        U16,
+        summary="Must name an optional import declaration.",
+    )
     RODATA_OFFSET = RuleKind("rodata_offset", U32, field_count=1)
     RODATA_STATIC_OFFSET = RuleKind("rodata_static_offset", U32, field_count=2)
 

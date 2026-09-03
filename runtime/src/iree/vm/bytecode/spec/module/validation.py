@@ -20,8 +20,6 @@ def validate_wire_record(record: module.WireRecord) -> None:
     fields = {item.field.name: item for item in record.fields}
     for wire_field in record.fields:
         field, rule = wire_field
-        if not isinstance(rule, module.FieldRuleUse):
-            rule = module.FieldRuleUse(rule)
         kind, related_fields, values, data = rule
         valid = (
             kind in rules.FIELD_RULES

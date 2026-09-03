@@ -43,6 +43,7 @@ class RecordRule(NamedTuple):
     fields: tuple[str, ...] = ()
     values: tuple[int, ...] = ()
     names: tuple[str, ...] = ()
+    summary: str = ""
 
 
 class ControlFlow(enum.Enum):
@@ -78,7 +79,7 @@ class RuntimeRefPolicy(NamedTuple):
 class InstructionField(NamedTuple):
     field: Field
     role: FieldRole
-    rule: RuleKind | FieldRuleUse
+    rule: FieldRuleUse
     ref_policy: RuntimeRefPolicy | None = None
 
 

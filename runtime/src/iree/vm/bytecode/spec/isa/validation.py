@@ -11,15 +11,9 @@ from iree.vm.bytecode.spec.isa.core import rules
 from iree.vm.bytecode.spec.schema import NumericTable, require
 
 
-def _field_rule_parts(rule):
-    if isinstance(rule, isa.FieldRuleUse):
-        return rule.kind, rule.fields, rule.values, rule.data
-    return rule, (), (), None
-
-
 def _validate_field(instruction, instruction_field, fields, tables) -> None:
     field = instruction_field.field
-    kind, related_fields, values, data = _field_rule_parts(instruction_field.rule)
+    kind, related_fields, values, data = instruction_field.rule
     table = data if isinstance(data, NumericTable) else None
     policy = instruction_field.ref_policy
     valid = (
@@ -43,7 +37,7 @@ def _validate_field(instruction, instruction_field, fields, tables) -> None:
 
 
 def _validate_record_rule(instruction, rule, fields) -> None:
-    valid = rule.kind in rules.RECORD_RULES
+    valid = rule.kind in rules.RECORD_RULES and bool(rule.summary)
     valid &= rule.kind.accepts(rule.fields, rule.values, rule.names)
     require(valid, f"{instruction.mnemonic}: malformed record rule")
     require(
@@ -64,8 +58,7 @@ def validate_instruction(
         _validate_field(instruction, instruction_field, fields, tables)
 
     target_count = sum(
-        _field_rule_parts(item.rule)[0] in rules.DIRECT_TARGET_RULES
-        for item in instruction.fields
+        item.rule.kind in rules.DIRECT_TARGET_RULES for item in instruction.fields
     )
     for rule in instruction.rules:
         _validate_record_rule(instruction, rule, fields)

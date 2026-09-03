@@ -36,7 +36,7 @@ bool VerifyLocalRules(const uint8_t* record, uint32_t descriptor,
           if (field[j] != 0) return false;
         }
         break;
-      case IREE_VM_BYTECODE_VERIFICATION_RULE_VALUE_REGISTER:
+      case IREE_VM_BYTECODE_VERIFICATION_RULE_REGISTER_VALUE:
         if (field[0] >= context.value_register_count) return false;
         break;
       case IREE_VM_BYTECODE_VERIFICATION_RULE_EXACT_BYTES:

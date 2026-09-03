@@ -13,6 +13,7 @@ from typing import NamedTuple
 
 from iree.vm.bytecode.spec.isa import (
     FieldRole,
+    FieldRuleUse,
     Instruction,
     InstructionFamily,
     InstructionField,
@@ -59,7 +60,7 @@ def _value_field(name: str, role: FieldRole, summary: str) -> InstructionField:
     return InstructionField(
         Field(name, U8, summary),
         role,
-        FieldRule.REGISTER_VALUE,
+        FieldRuleUse(FieldRule.REGISTER_VALUE),
     )
 
 

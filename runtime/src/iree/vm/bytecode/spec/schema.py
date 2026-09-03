@@ -83,10 +83,15 @@ class NumericTable(NamedTuple):
     unknown_policy: UnknownNumericPolicy = UnknownNumericPolicy.REJECT
 
 
-def _valid_numeric_value(table, value, version, maximum) -> bool:
-    return (
+def validate_numeric_table(table: NumericTable, version: Version) -> None:
+    values = table.values
+    valid = is_name(table.name, qualified=True) and bool(values)
+    valid &= len({value.name for value in values}) == len(values)
+    valid &= len({value.value for value in values}) == len(values)
+    valid &= any(value.since == table.since for value in values)
+    valid &= all(
         is_name(value.name, qualified=True)
-        and 0 <= value.value <= maximum
+        and 0 <= value.value < 1 << (table.encoding.byte_length * 8)
         and table.since.is_available_in(value.since)
         and value.since.is_available_in(version)
         and (
@@ -94,19 +99,7 @@ def _valid_numeric_value(table, value, version, maximum) -> bool:
             or value.value == 0
             or is_power_of_two(value.value)
         )
-    )
-
-
-def validate_numeric_table(table: NumericTable, version: Version) -> None:
-    values = table.values
-    valid = is_name(table.name, qualified=True) and bool(values)
-    valid &= table.since.is_available_in(version)
-    valid &= len({value.name for value in values}) == len(values)
-    valid &= len({value.value for value in values}) == len(values)
-    valid &= any(value.since == table.since for value in values)
-    maximum = (1 << (table.encoding.byte_length * 8)) - 1
-    valid &= all(
-        _valid_numeric_value(table, value, version, maximum) for value in values
+        for value in values
     )
     require(valid, f"{table.name}: invalid numeric table")
 
@@ -118,6 +111,7 @@ class RuleKind(NamedTuple):
     value_count: int = 0
     name_count: int = 0
     data_type: type | None = None
+    summary: str = ""
 
     def accepts(self, fields, values, names=(), data=None) -> bool:
         valid = (len(fields), len(names)) == (self.field_count, self.name_count)

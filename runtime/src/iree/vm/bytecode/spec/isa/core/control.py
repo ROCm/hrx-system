@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Block, branch, suspension, and return instructions."""
+"""Block, branch, call, suspension, return, and failure instructions."""
 
 from __future__ import annotations
 
@@ -14,20 +14,34 @@ from iree.vm.bytecode.spec.isa import (
     ControlFlow,
     FailureCase,
     FieldRole,
+    FieldRuleUse,
     Instruction,
     InstructionFamily,
     InstructionField,
     RecordRule,
+    RuntimeRefPolicy,
     StateEffect,
     Suspension,
 )
 from iree.vm.bytecode.spec.isa.core.rules import (
     FieldRule,
     RecordRuleKind,
+    RefNullPolicy,
+    RefOwnership,
     StateAccess,
     StateResource,
 )
-from iree.vm.bytecode.spec.schema import I16, I32, U8, U16, U32, Field
+from iree.vm.bytecode.spec.schema import (
+    I16,
+    I32,
+    U8,
+    U16,
+    U32,
+    Field,
+    NumericKind,
+    NumericTable,
+    NumericValue,
+)
 from iree.vm.bytecode.spec.version import CORE_0
 
 
@@ -37,10 +51,72 @@ class BranchCondition(enum.Enum):
     ZERO = "zero"
 
 
+def _selector(
+    name: str, summary: str, values: tuple[tuple[str, int, str], ...]
+) -> NumericTable:
+    return NumericTable(
+        name,
+        U8,
+        NumericKind.SELECTOR,
+        tuple(
+            NumericValue(value_name, value, CORE_0, meaning)
+            for value_name, value, meaning in values
+        ),
+        CORE_0,
+        summary,
+    )
+
+
+CONTROL_CALL_TARGET_SELECTOR = _selector(
+    "control.call.target",
+    "Selects the ordinal table used by a direct call or function address.",
+    (
+        ("local", 0, "The ordinal names a function in the current module."),
+        (
+            "required_import",
+            1,
+            "The ordinal names an import that must resolve during program creation.",
+        ),
+        (
+            "optional_import",
+            2,
+            "The ordinal names an import whose absence is permitted.",
+        ),
+    ),
+)
+
+CONTROL_STATUS_SELECTOR = _selector(
+    "control.status",
+    "Selects one non-OK architectural status for control.fail.",
+    tuple(
+        (name, value, f"Produces the canonical {name} status code.")
+        for name, value in (
+            ("cancelled", 1),
+            ("unknown", 2),
+            ("invalid_argument", 3),
+            ("deadline_exceeded", 4),
+            ("not_found", 5),
+            ("already_exists", 6),
+            ("permission_denied", 7),
+            ("resource_exhausted", 8),
+            ("failed_precondition", 9),
+            ("aborted", 10),
+            ("out_of_range", 11),
+            ("unimplemented", 12),
+            ("internal", 13),
+            ("unavailable", 14),
+            ("data_loss", 15),
+            ("unauthenticated", 16),
+            ("incompatible", 18),
+        )
+    ),
+)
+
+
 CONTROL_FAMILY = InstructionFamily(
     name="control",
     since=CORE_0,
-    summary="Block, branch, suspension, and return operations.",
+    summary="Block, branch, call, suspension, return, and failure operations.",
     contract=(
         "The first record of every function is control.block. A function never "
         "falls through the end of its bytecode: every sequential continuation "
@@ -48,8 +124,14 @@ CONTROL_FAMILY = InstructionFamily(
         "displacements from the end of their record. Verification computes targets "
         "in widened signed arithmetic, rejects overflow or out-of-function addresses, "
         "and requires an exact decoded control.block target. Execution trusts the "
-        "verified target without repeating those checks. Unreachable structurally "
-        "valid records are permitted."
+        "verified target without repeating those checks. Calls use the target "
+        "signature's value, ref, and function prefixes plus its canonical overflow "
+        "packet. Every call preflights all fallible checks before moving arguments, "
+        "changing packet or frame state, or entering a provider. The parent remains "
+        "parked on the call record until successful return publishes results. Any "
+        "status failure is terminal to the invocation attempt and enters ordinary "
+        "unwind; broader process state after failure is unspecified. Unreachable "
+        "structurally valid records are permitted."
     ),
 )
 
@@ -63,6 +145,8 @@ def _field(
     *,
     element_count: int = 1,
 ) -> InstructionField:
+    if not isinstance(rule, FieldRuleUse):
+        rule = FieldRuleUse(rule)
     return InstructionField(Field(name, encoding, summary, element_count), role, rule)
 
 
@@ -127,9 +211,14 @@ CONTROL_RETURN = Instruction(
     ),
     success=(
         "All result validation completes before caller-visible mutation.",
-        "Direct value cells and function carriers copy exactly; owned refs move and "
-        "escaping borrowed refs are retained before publication.",
-        "The frame releases all remaining owned refs and is popped.",
+        "Direct value cells and function carriers copy exactly. Owned direct refs "
+        "move; borrowed direct refs are retained and moved as owners; their sources "
+        "become null and replaced caller owners are released.",
+        "Overflow results remain in the already validated caller packet.",
+        "Every remaining owned ref in the exact frame extent is released and the "
+        "frame is popped.",
+        "A nested parent advances past its parked call. A root invocation publishes "
+        "its complete public result list and completes with OK.",
     ),
     assembly="control.return",
     pseudocode=(
@@ -138,7 +227,15 @@ CONTROL_RETURN = Instruction(
         "release_remaining_frame_owners(frame);\n"
         "pop_frame_and_complete_or_resume_parent();"
     ),
-    rules=(RecordRule(RecordRuleKind.RETURN_SIGNATURE),),
+    rules=(
+        RecordRule(
+            RecordRuleKind.RETURN_SIGNATURE,
+            summary=(
+                "The function's value, ref, and function extents cover its complete "
+                "signature-derived result packet; this record has no successor."
+            ),
+        ),
+    ),
     control_flow=ControlFlow.RETURN,
     state_effects=(
         StateEffect(StateAccess.READ, StateResource.INVOCATION_RESULTS),
@@ -156,8 +253,8 @@ CONTROL_RETURN = Instruction(
         ),
     ),
     ownership=(
-        "Result publication promotes every escaping borrow to an owner; frame "
-        "cleanup releases all other owned refs.",
+        "Result publication promotes every escaping borrow to an owner. Frame "
+        "cleanup releases all other owned refs; function values own nothing.",
     ),
 )
 
@@ -229,6 +326,7 @@ def _branch(
     fields.append(_target(bit_width))
 
     if condition == BranchCondition.ALWAYS:
+        summary = f"Branches unconditionally through an s{bit_width} displacement."
         behavior = "Unconditionally transfers to the verified direct target."
         success = "The program counter becomes the verified direct target."
         control_flow = ControlFlow.BRANCH
@@ -236,6 +334,7 @@ def _branch(
         assembly = f"{mnemonic} ^bb8"
     else:
         comparison = "nonzero" if condition == BranchCondition.NONZERO else "zero"
+        summary = f"Branches through an s{bit_width} displacement on {comparison}."
         behavior = (
             f"Transfers to the verified target when the complete condition is "
             f"{comparison}; otherwise continues at the following record."
@@ -252,7 +351,7 @@ def _branch(
         mnemonic=mnemonic,
         since=CORE_0,
         family=CONTROL_FAMILY,
-        summary=behavior,
+        summary=summary,
         fields=tuple(fields),
         semantics=condition,
         behavior=behavior,
@@ -282,14 +381,14 @@ CONTROL_SWITCH = Instruction(
             U16,
             "Number of entries in the function-local target-table slice.",
             FieldRole.CONSTRAINT_MEMBER,
-            FieldRule.ANY_BITS,
+            FieldRule.CONSTRAINT_MEMBER,
         ),
         _field(
             "target_base_u32",
             U32,
             "First entry in the function-local target table.",
             FieldRole.CONSTRAINT_MEMBER,
-            FieldRule.ANY_BITS,
+            FieldRule.CONSTRAINT_MEMBER,
         ),
     ),
     semantics=None,
@@ -312,9 +411,344 @@ CONTROL_SWITCH = Instruction(
         RecordRule(
             RecordRuleKind.SWITCH_TARGETS,
             ("target_count_u16", "target_base_u32"),
+            summary=(
+                "The base and count form an in-range function-local target slice, "
+                "every entry names a decoded control.block, and a sequential default "
+                "successor follows this record."
+            ),
         ),
     ),
     control_flow=ControlFlow.SWITCH,
+)
+
+CONTROL_CALL = Instruction(
+    opcode=0x0B,
+    mnemonic="control.call",
+    since=CORE_0,
+    family=CONTROL_FAMILY,
+    summary="Calls a local or linked imported function.",
+    fields=(
+        _field(
+            "target_kind_u8",
+            U8,
+            "Local, required-import, or optional-import target selector.",
+            FieldRole.IMMEDIATE,
+            FieldRuleUse(FieldRule.SELECTOR, data=CONTROL_CALL_TARGET_SELECTOR),
+        ),
+        _field(
+            "target_ordinal_u16",
+            U16,
+            "Direct ordinal in the selected target table.",
+            FieldRole.CONSTRAINT_MEMBER,
+            FieldRule.CONSTRAINT_MEMBER,
+        ),
+        _field(
+            "direct_ref_move_mask_u16",
+            U16,
+            "Ownership-transfer bits for direct ref arguments.",
+            FieldRole.CONSTRAINT_MEMBER,
+            FieldRule.CONSTRAINT_MEMBER,
+        ),
+        _padding(U16),
+    ),
+    semantics=None,
+    behavior=(
+        "Invokes a function in the current linked module or its resolved-import "
+        "table using the target's exact three-bank callable packet."
+    ),
+    success=(
+        "Direct values and function carriers copy into the child prefixes; each "
+        "clear ref-mask bit borrows and each set bit moves the complete ref state.",
+        "The parked parent advances by eight bytes only after successful return "
+        "transactionally publishes results.",
+    ),
+    assembly=(
+        "control.call @function7 {direct_ref_move_mask = 0x0005}\n"
+        "control.call @import3 {direct_ref_move_mask = 0x0000}"
+    ),
+    pseudocode=(
+        "target = preflight_linked_target(target_kind_u8, target_ordinal_u16);\n"
+        "validate_borrow_and_argument_contracts(target);\n"
+        "dispatch_preflighted_call(target, call_packet, direct_ref_move_mask_u16);"
+    ),
+    rules=(
+        RecordRule(
+            RecordRuleKind.CALL,
+            (
+                "target_kind_u8",
+                "target_ordinal_u16",
+                "direct_ref_move_mask_u16",
+            ),
+            summary=(
+                "The selector and ordinal identify a matching local, required-import, "
+                "or optional-import declaration; the move mask fits the direct ref "
+                "arguments; caller registers and the outgoing packet cover the exact "
+                "callable contract; and a sequential success continuation follows."
+            ),
+        ),
+    ),
+    control_flow=ControlFlow.CALL,
+    suspension=Suspension.TARGET_DEPENDENT,
+    state_effects=(StateEffect(StateAccess.UNKNOWN, StateResource.ANY),),
+    preconditions=(
+        "The selected target exists and its implementation can be entered.",
+        "A target that may yield sees no non-null borrowed public invocation ref.",
+        "Every direct and overflow ref or function argument satisfies the target's "
+        "private callable contract.",
+    ),
+    failures=(
+        FailureCase(
+            "failed_precondition",
+            "A yielding target is entered from an invocation with borrowed public refs.",
+            "No argument, packet, frame, or provider state changes.",
+        ),
+        FailureCase(
+            "invalid_argument",
+            "A ref or function argument violates the target contract.",
+            "No argument, packet, frame, or provider state changes.",
+        ),
+        FailureCase(
+            "not_found",
+            "The selected optional import is unresolved.",
+            "No argument, packet, frame, or provider state changes.",
+        ),
+        FailureCase(
+            "resource_exhausted",
+            "A bytecode target's fixed frame does not fit the invocation stack.",
+            "Target construction fails before argument moves or external work.",
+        ),
+        FailureCase(
+            "target's non-OK status",
+            "The entered target returns non-OK.",
+            "The invocation unwinds and public result storage remains untouched.",
+        ),
+    ),
+    ownership=(
+        "Direct ref moves transfer their complete null, borrowed, or owned state. "
+        "Borrows remain dominated by the parked parent; escaping results are promoted "
+        "to owners during result publication.",
+    ),
+)
+
+CONTROL_CALL_INDIRECT = Instruction(
+    opcode=0x0C,
+    mnemonic="control.call.indirect",
+    since=CORE_0,
+    family=CONTROL_FAMILY,
+    summary="Calls a dynamic first-class function value.",
+    fields=(
+        _field(
+            "target_f8",
+            U8,
+            "Dynamic first-class function target.",
+            FieldRole.OPERAND,
+            FieldRule.REGISTER_FUNCTION,
+        ),
+        _field(
+            "callable_type_ordinal_u16",
+            U16,
+            "Exact expected structural callable type.",
+            FieldRole.CONSTRAINT_MEMBER,
+            FieldRule.CONSTRAINT_MEMBER,
+        ),
+        _field(
+            "direct_ref_move_mask_u16",
+            U16,
+            "Ownership-transfer bits for direct ref arguments.",
+            FieldRole.CONSTRAINT_MEMBER,
+            FieldRule.CONSTRAINT_MEMBER,
+        ),
+        _padding(U16),
+    ),
+    semantics=None,
+    behavior=(
+        "Invokes a non-null function carrier in the current program after validating "
+        "it against the encoded structural callable type."
+    ),
+    success=(
+        "Argument transfer, target entry, suspension, and return publication use the "
+        "same absolute-target path as a direct call.",
+        "The parked parent advances by eight bytes only after successful return.",
+    ),
+    assembly=(
+        "control.call.indirect %f4, type @callable3 {direct_ref_move_mask = 0x0002}"
+    ),
+    pseudocode=(
+        "target = preflight_function_value(\n"
+        "    functions[target_f8], callable_type_ordinal_u16);\n"
+        "validate_borrow_and_argument_contracts(target);\n"
+        "dispatch_preflighted_call(target, call_packet, direct_ref_move_mask_u16);"
+    ),
+    rules=(
+        RecordRule(
+            RecordRuleKind.CALL_INDIRECT,
+            (
+                "target_f8",
+                "callable_type_ordinal_u16",
+                "direct_ref_move_mask_u16",
+            ),
+            summary=(
+                "The callable ordinal exists, the move mask fits its direct ref "
+                "arguments, caller registers and the outgoing packet cover the exact "
+                "contract, and a sequential success continuation follows."
+            ),
+        ),
+    ),
+    control_flow=ControlFlow.CALL,
+    suspension=Suspension.TARGET_DEPENDENT,
+    state_effects=(StateEffect(StateAccess.UNKNOWN, StateResource.ANY),),
+    preconditions=(
+        "The function carrier is non-null, belongs to the current program, names an "
+        "in-range target, and carries the expected canonical callable token.",
+        "Its actual suspension behavior is permitted and every ref or function "
+        "argument satisfies the encoded callable contract.",
+    ),
+    failures=(
+        FailureCase(
+            "failed_precondition",
+            "The target is null or a yielding target sees borrowed public refs.",
+            "No argument, packet, frame, or provider state changes.",
+        ),
+        FailureCase(
+            "invalid_argument",
+            "Program identity, target bounds, callable token, suspension permission, "
+            "or an argument contract is invalid.",
+            "No argument, packet, frame, or provider state changes.",
+        ),
+        FailureCase(
+            "resource_exhausted",
+            "A bytecode target's fixed frame does not fit the invocation stack.",
+            "Target construction fails before argument moves or external work.",
+        ),
+        FailureCase(
+            "target's non-OK status",
+            "The entered target returns non-OK.",
+            "The invocation unwinds and public result storage remains untouched.",
+        ),
+    ),
+    ownership=(
+        "Direct ref transfer and result borrow promotion match control.call; function "
+        "values themselves own nothing.",
+    ),
+)
+
+
+def _diagnostic_message() -> InstructionField:
+    return InstructionField(
+        Field(
+            "message_r8_nullable",
+            U8,
+            "Optional best-effort readable vm.buffer diagnostic message.",
+        ),
+        FieldRole.OPERAND,
+        FieldRuleUse(FieldRule.REGISTER_REF),
+        RuntimeRefPolicy(
+            "vm.buffer",
+            RefNullPolicy.NULLABLE,
+            RefOwnership.DIAGNOSTIC_BORROW,
+        ),
+    )
+
+
+CONTROL_ASSERT = Instruction(
+    opcode=0x0D,
+    mnemonic="control.assert",
+    since=CORE_0,
+    family=CONTROL_FAMILY,
+    summary="Continues on true and fails with failed_precondition on false.",
+    fields=(
+        _field(
+            "condition_v8",
+            U8,
+            "Complete 64-bit assertion condition value-register ordinal.",
+            FieldRole.OPERAND,
+            FieldRule.REGISTER_VALUE,
+        ),
+        _diagnostic_message(),
+        _padding(),
+    ),
+    semantics=None,
+    behavior=(
+        "Continues when the complete condition cell is nonzero and otherwise "
+        "terminates the invocation with failed_precondition and optional best-effort "
+        "diagnostic bytes."
+    ),
+    success=(
+        "A nonzero condition advances by four bytes without reading or mapping the "
+        "diagnostic message.",
+    ),
+    assembly="control.assert %v4, %r2",
+    pseudocode=(
+        "if (values[condition_v8] != 0) {\n"
+        "  pc = pc + 4;\n"
+        "} else {\n"
+        "  fail(failed_precondition, optional_message(message_r8_nullable));\n"
+        "}"
+    ),
+    state_effects=(
+        StateEffect(StateAccess.READ, StateResource.BUFFER, ("message_r8_nullable",)),
+    ),
+    failures=(
+        FailureCase(
+            "failed_precondition",
+            "condition_v8 contains the complete 64-bit zero value.",
+            "Diagnostic context is captured before unwind; public results remain "
+            "untouched.",
+        ),
+    ),
+    ownership=(
+        "The optional message is a diagnostic-only borrow and is not retained on the "
+        "successful path. Wrong-type, unreadable, uncopyable, or unformattable "
+        "diagnostic data is omitted without changing the failure status.",
+    ),
+)
+
+CONTROL_FAIL = Instruction(
+    opcode=0x0E,
+    mnemonic="control.fail",
+    since=CORE_0,
+    family=CONTROL_FAMILY,
+    summary="Terminates with one immediate architectural status.",
+    fields=(
+        _field(
+            "status_u8",
+            U8,
+            "Assigned non-OK architectural status selector.",
+            FieldRole.IMMEDIATE,
+            FieldRuleUse(FieldRule.SELECTOR, data=CONTROL_STATUS_SELECTOR),
+        ),
+        _diagnostic_message(),
+        _padding(),
+    ),
+    semantics=None,
+    behavior=(
+        "Unconditionally terminates the invocation with the selected status and "
+        "optional best-effort diagnostic bytes."
+    ),
+    success=(),
+    assembly="control.fail invalid_argument, %r2",
+    pseudocode=(
+        "fail(status_from_architecture_selector(status_u8),\n"
+        "     optional_message(message_r8_nullable));"
+    ),
+    control_flow=ControlFlow.FAIL,
+    state_effects=(
+        StateEffect(StateAccess.READ, StateResource.BUFFER, ("message_r8_nullable",)),
+    ),
+    failures=(
+        FailureCase(
+            "status_u8",
+            "The instruction is executed.",
+            "Diagnostic context is captured before all frames unwind; public results "
+            "remain untouched.",
+        ),
+    ),
+    ownership=(
+        "The optional message is a diagnostic-only borrow. Wrong-type, unreadable, "
+        "uncopyable, or unformattable diagnostic data is omitted without changing "
+        "the selected status; unwind releases all owned refs through their private "
+        "no-status teardown paths.",
+    ),
 )
 
 CONTROL_INSTRUCTIONS = (
@@ -328,4 +762,8 @@ CONTROL_INSTRUCTIONS = (
     _branch(0x08, BranchCondition.ZERO, 16),
     _branch(0x09, BranchCondition.ZERO, 32),
     CONTROL_SWITCH,
+    CONTROL_CALL,
+    CONTROL_CALL_INDIRECT,
+    CONTROL_ASSERT,
+    CONTROL_FAIL,
 )

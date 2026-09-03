@@ -8,44 +8,32 @@
 
 from __future__ import annotations
 
-from iree.vm.bytecode.spec import module
 from iree.vm.bytecode.spec.isa.core import rules as core_rules
 from iree.vm.bytecode.spec.module import rules as module_rules
 from iree.vm.bytecode.spec.schema import NumericKind, UnknownNumericPolicy
 from iree.vm.bytecode.spec.specification import Specification
 
-_MODULE_RULE_TEXT = {
-    module_rules.FieldRule.ANY_BITS: "Any bit pattern.",
-    module_rules.FieldRule.ZERO: "Must be zero.",
-    module_rules.FieldRule.CORE_MAJOR: "Must equal the loader's Core major version.",
-    module_rules.FieldRule.CORE_REQUIRED_MINOR: "Must not exceed the loader's supported Core minor version.",
-    module_rules.FieldRule.NONCORE_PAGE: "Must be an architectural extension page ID in `0xF0..0xFD`.",
-    module_rules.FieldRule.PAGE_MAJOR: "Must exactly match the registered extension page major version.",
-    module_rules.FieldRule.PAGE_REQUIRED_MINOR: "Must not exceed the registered extension page minor version.",
-    module_rules.FieldRule.SECTION_BYTE_LENGTH: "Must produce an in-range payload extent under widened checked arithmetic.",
-    module_rules.FieldRule.SECTION_FLAGS: "Must satisfy the known- or unknown-section flag contract.",
-    module_rules.FieldRule.SECTION_TYPE: "Must name a known section or a valid declared extension authority.",
-    module_rules.FieldRule.STRING_OFFSET: "Must participate in the canonical count-plus-one string offsets.",
-    module_rules.FieldRule.SWITCH_TARGET: "Must name an exact control.block in the owning function.",
-}
 
-
-def _instruction_rule(rule) -> str:
-    return {
-        core_rules.FieldRule.ANY_BITS: "Any bit pattern.",
-        core_rules.FieldRule.ZERO: "Must be zero.",
-        core_rules.FieldRule.REGISTER_VALUE: "Must name an in-range value register.",
-        core_rules.FieldRule.CONTROL_TARGET_S16: "Must resolve to an in-function `control.block` using widened signed arithmetic.",
-        core_rules.FieldRule.CONTROL_TARGET_S32: "Must resolve to an in-function `control.block` using widened signed arithmetic.",
-    }[rule]
+def _instruction_rule(instruction_field) -> str:
+    rule = instruction_field.rule
+    text = rule.kind.summary
+    if rule.kind == core_rules.FieldRule.SELECTOR:
+        text = f"Must be an assigned `{rule.data.name}` selector."
+    if not text:
+        raise ValueError(f"unsupported instruction field rule {rule!r}")
+    policy = instruction_field.ref_policy
+    if policy:
+        text += (
+            f" Ref type `{policy.type_contract}`; null policy "
+            f"`{policy.null_policy.value}`; ownership `{policy.ownership.value}`."
+        )
+    return text
 
 
 def _module_rule(rule) -> str:
-    if not isinstance(rule, module.FieldRuleUse):
-        rule = module.FieldRuleUse(rule)
     kind = rule.kind
-    text = _MODULE_RULE_TEXT.get(kind)
-    if text is not None:
+    text = kind.summary
+    if text:
         return text
     if kind == module_rules.FieldRule.ALLOWED_BITS:
         return f"May set only bits in `0x{rule.values[0]:X}`."
@@ -122,9 +110,9 @@ def _render_constraints(lines: list[str], constraints) -> None:
     lines.append("")
 
 
-def _render_numeric_tables(lines: list[str], specification: Specification) -> None:
-    lines.extend(["### Module numeric domains", ""])
-    for table in specification.module_format.numeric_tables:
+def _render_numeric_tables(lines, heading, tables) -> None:
+    lines.extend([heading, ""])
+    for table in tables:
         unknowns = (
             "preserved when nonzero"
             if table.unknown_policy == UnknownNumericPolicy.PRESERVE_NONZERO
@@ -171,7 +159,7 @@ def render_specification(specification: Specification) -> str:
         f"Core version: **{version.major}.{version.minor}**",
         "",
         "This document is generated from the authoritative Python declaration model.",
-        "The module container is complete; the Core instruction set below is the currently transcribed reconstruction slice.",
+        "It contains the module container and every Core declaration in this versioned view.",
         "All multi-byte scalars are little-endian. Module records use their stated natural alignment; instruction records begin on four-byte boundaries and have four-byte-multiple lengths.",
         "",
         "## Module container",
@@ -183,7 +171,11 @@ def render_specification(specification: Specification) -> str:
         f"The image base and every section payload are aligned to at least {specification.module_format.image_alignment} bytes. A directory row may require a greater power-of-two payload alignment.",
         "",
     ]
-    _render_numeric_tables(lines, specification)
+    _render_numeric_tables(
+        lines,
+        "### Module numeric domains",
+        specification.module_format.numeric_tables,
+    )
     record_ordinals = {
         record: ordinal
         for ordinal, record in enumerate(specification.module_format.records)
@@ -213,6 +205,7 @@ def render_specification(specification: Specification) -> str:
             _render_record(lines, record, record_ordinals[record])
         lines.extend(["#### Structural verification obligations", ""])
         _render_constraints(lines, section.constraints)
+    _render_numeric_tables(lines, "## Core selector domains", specification.selectors)
     lines.extend(["## Core instruction set", ""])
     for family in specification.families:
         family_instructions = tuple(
@@ -258,8 +251,15 @@ def render_specification(specification: Specification) -> str:
             ):
                 field = instruction_field.field
                 lines.append(
-                    f"| {offset} | {field.byte_length} | `{field.name}` | `{field.encoding.name}` | `{instruction_field.role.value}` | {_instruction_rule(instruction_field.rule)} {field.summary} |"
+                    f"| {offset} | {field.byte_length} | `{field.name}` | `{field.encoding.name}` | `{instruction_field.role.value}` | {_instruction_rule(instruction_field)} {field.summary} |"
                 )
+            if instruction.rules:
+                lines.append("")
+            _statements(
+                lines,
+                "Record verification",
+                tuple(rule.summary for rule in instruction.rules),
+            )
             lines.extend(
                 ["", "Assembly:", "", "```loom", instruction.assembly, "```", ""]
             )

@@ -30,6 +30,8 @@ def _field(
     *,
     element_count: int = 1,
 ) -> WireField:
+    if not isinstance(rule, FieldRuleUse):
+        rule = FieldRuleUse(rule)
     return WireField(Field(name, encoding, summary, element_count), rule)
 
 

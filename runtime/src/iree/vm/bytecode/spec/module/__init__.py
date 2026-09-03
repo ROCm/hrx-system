@@ -22,7 +22,7 @@ class FieldRuleUse(NamedTuple):
 
 class WireField(NamedTuple):
     field: Field
-    rule: RuleKind | FieldRuleUse
+    rule: FieldRuleUse
 
 
 class WireRecord(NamedTuple):
