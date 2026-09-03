@@ -23,6 +23,7 @@ def validate_wire_record(record: module.WireRecord) -> None:
         kind, related_fields, values, data = rule
         valid = (
             kind in rules.FIELD_RULES
+            and bool(kind.summary)
             and kind.accepts(related_fields, values, data=data)
             and all(name in fields for name in related_fields)
             and (kind.encoding is None or field.encoding == kind.encoding)

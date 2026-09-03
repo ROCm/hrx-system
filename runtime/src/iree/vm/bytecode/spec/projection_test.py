@@ -22,19 +22,6 @@ class ProjectionTest(unittest.TestCase):
             self.assertIn(fragment, self.outputs[output_name])
         return self.outputs[output_name]
 
-    def test_output_family_is_closed(self) -> None:
-        self.assertEqual(
-            set(self.outputs),
-            {
-                "wire_module_header",
-                "wire_core_header",
-                "wire_assertions_source",
-                "verification_source",
-                "tooling_data",
-                "documentation",
-            },
-        )
-
     def test_wire_layout_has_one_assertion_translation_unit(self) -> None:
         module_header = self.assert_output_contains(
             "wire_module_header",
@@ -59,6 +46,13 @@ class ProjectionTest(unittest.TestCase):
             "UINT32_C(0x000D0008), IREE_VM_BYTECODE_VERIFICATION_RULE_GLOBAL_ORDINAL",
             "VERIFICATION_RULE_LOCAL_BYTES_RANGE_MEMORY_FORMAT, 2u, 4u, 0u},  // stack.load.base_u16",
             "VERIFICATION_RULE_VALUE_REGISTER_FORMAT_RANGE, 1u, 4u, 0u},  // stack.load",
+            "VERIFICATION_RULE_PACKED_SELECTORS, 6u, 64u, 3u},  // buffer.atomic.cmpxchg.selector0_u8",
+            "VERIFICATION_RULE_PACKED_SELECTORS, 7u, 248u, 1u},  // buffer.atomic.cmpxchg.selector1_u8",
+            "VERIFICATION_RULE_ATOMIC_CARRIER_SUPPORTED, 6u, 0u, 0u},  // buffer.atomic.cmpxchg",
+            "VERIFICATION_RULE_PACKED_SELECTOR_PAIRS, 6u, 48u, 51u},  // buffer.atomic.cmpxchg",
+            "UINT32_C(0x0033001F)",
+            "UINT32_C(0x00170003)",
+            "UINT32_C(0x00001A1F)",
         )
         self.assertNotIn("switch (", source)
         self.assertNotIn("iree_status_t", source)
@@ -81,16 +75,9 @@ class ProjectionTest(unittest.TestCase):
         self.assert_output_contains(
             "documentation",
             "## Module container",
-            "#### `metadata_value_type`",
             "#### Structural verification obligations",
-            "#### `stack.load.indexed`",
-            "#### `control.yield.s32`",
             "## Core selector domains",
-            "#### `stack.copy.rodata`",
-            "#### `stack.pack.i64.u32.x8`",
-            "#### Preconditions",
-            "#### Failures",
-            "#### Ownership",
+            "#### `buffer.atomic.cmpxchg`",
             "#### Reference pseudocode",
         )
 

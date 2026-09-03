@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 from iree.vm.bytecode.spec.isa.core import rules as core_rules
-from iree.vm.bytecode.spec.module import rules as module_rules
 from iree.vm.bytecode.spec.schema import NumericKind, UnknownNumericPolicy
 from iree.vm.bytecode.spec.specification import Specification
 
@@ -20,6 +19,13 @@ def _instruction_rule(instruction_field) -> str:
     text = rule.kind.summary.format(*rule.values, values=values)
     if rule.kind == core_rules.FieldRule.SELECTOR:
         text = f"Must be an assigned `{rule.data.name}` selector."
+    elif rule.kind == core_rules.FieldRule.PACKED_SELECTORS:
+        components = ", ".join(
+            f"bits {component.bit_offset + component.bit_length - 1}:"
+            f"{component.bit_offset} select `{component.table.name}`"
+            for component in rule.data
+        )
+        text = f"Bits in mask `0x{rule.values[0]:X}` are zero; {components}."
     if not text:
         raise ValueError(f"unsupported instruction field rule {rule!r}")
     policy = instruction_field.ref_policy
@@ -32,30 +38,12 @@ def _instruction_rule(instruction_field) -> str:
 
 
 def _module_rule(rule) -> str:
-    kind = rule.kind
-    text = kind.summary
-    if text:
-        return text
-    if kind == module_rules.FieldRule.ALLOWED_BITS:
-        return f"May set only bits in `0x{rule.values[0]:X}`."
-    if kind == module_rules.FieldRule.ALLOWED_RANGE:
-        return f"Must be in the inclusive range [{rule.values[0]}, {rule.values[1]}]."
-    if kind == module_rules.FieldRule.EXACT_BYTES:
-        return f"Must equal `{rule.data!r}` byte-for-byte."
-    if kind == module_rules.FieldRule.MULTIPLE:
-        return f"Must be an exact multiple of {rule.values[0]}."
-    if kind == module_rules.FieldRule.BYTE_ALIGNMENT:
-        return f"Must be a power-of-two byte alignment of at least {rule.values[0]}."
-    if kind == module_rules.FieldRule.ORDINAL:
-        return f"Must be an in-range `{rule.data.name.lower()}` ordinal."
-    if kind == module_rules.FieldRule.ORDINAL_OR_NULL:
-        return (
-            f"Must be an in-range `{rule.data.name.lower()}` ordinal or canonical "
-            f"null `0x{rule.values[0]:X}`."
-        )
-    if kind == module_rules.FieldRule.SIGNATURE_DESCRIPTOR:
-        return f"Must match the scalar, ref, or function kind in `{rule.fields[0]}`."
-    raise ValueError(f"unsupported module field rule {rule!r}")
+    data = getattr(rule.data, "name", rule.data)
+    return rule.kind.summary.format(
+        *rule.values,
+        data=data.lower() if isinstance(data, str) else data,
+        field=rule.fields[0] if rule.fields else "",
+    )
 
 
 def _field_table_header() -> list[str]:

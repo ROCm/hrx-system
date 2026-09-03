@@ -17,6 +17,7 @@ iree_py_library(
     "isa/__init__.py"
     "isa/core/__init__.py"
     "isa/core/abi.py"
+    "isa/core/buffer.py"
     "isa/core/constant.py"
     "isa/core/control.py"
     "isa/core/conversion.py"

@@ -221,6 +221,22 @@ def _static_assert(expression: str, message: str) -> str:
     return f'static_assert({expression}, "{message}");'
 
 
+def _render_layout_assertions(
+    lines, c_type, byte_length, alignment, field_offsets
+) -> None:
+    lines.extend(
+        [
+            _static_assert(f"sizeof({c_type}) == {byte_length}u", "wire size"),
+            _static_assert(alignment, "wire alignment"),
+        ]
+    )
+    lines.extend(
+        _static_assert(f"offsetof({c_type}, {name}) == {offset}u", "wire offset")
+        for name, offset in field_offsets
+    )
+    lines.append("")
+
+
 def render_wire_assertions(specification: Specification) -> str:
     """Renders the sole compilation site for all wire-layout assertions."""
 
@@ -237,50 +253,33 @@ def render_wire_assertions(specification: Specification) -> str:
         "",
     ]
     for record in specification.module_format.records:
-        lines.append(
-            _static_assert(
-                f"sizeof({record.c_type}) == {record.byte_length}u", "wire size"
-            )
-        )
-        lines.append(
-            _static_assert(
-                f"iree_alignof({record.c_type}) == {record.alignment}u",
-                "wire alignment",
-            )
-        )
-        for wire_field, offset in zip(record.fields, record.field_offsets, strict=True):
-            lines.append(
-                _static_assert(
-                    f"offsetof({record.c_type}, {wire_field.field.name}) == {offset}u",
-                    "wire offset",
+        _render_layout_assertions(
+            lines,
+            record.c_type,
+            record.byte_length,
+            f"iree_alignof({record.c_type}) == {record.alignment}u",
+            (
+                (wire_field.field.name, offset)
+                for wire_field, offset in zip(
+                    record.fields, record.field_offsets, strict=True
                 )
-            )
-        lines.append("")
+            ),
+        )
     for instruction in sorted(specification.instructions, key=lambda item: item.opcode):
         c_type = _instruction_c_type(instruction)
-        lines.append(
-            _static_assert(
-                f"sizeof({c_type}) == {instruction.byte_length}u", "instruction size"
-            )
-        )
-        lines.append(
-            _static_assert(
-                f"4u % iree_alignof({c_type}) == 0u", "instruction alignment"
-            )
-        )
-        lines.append(
-            _static_assert(f"offsetof({c_type}, opcode) == 0u", "opcode offset")
-        )
-        for instruction_field, offset in zip(
-            instruction.fields, instruction.field_offsets, strict=True
-        ):
-            lines.append(
-                _static_assert(
-                    f"offsetof({c_type}, {instruction_field.field.name}) == {offset}u",
-                    "instruction offset",
+        _render_layout_assertions(
+            lines,
+            c_type,
+            instruction.byte_length,
+            f"4u % iree_alignof({c_type}) == 0u",
+            (("opcode", 0),)
+            + tuple(
+                (instruction_field.field.name, offset)
+                for instruction_field, offset in zip(
+                    instruction.fields, instruction.field_offsets, strict=True
                 )
-            )
-        lines.append("")
+            ),
+        )
     return "\n".join(lines)
 
 
@@ -323,6 +322,18 @@ def _field_offsets(fields, offsets) -> dict[str, int]:
     }
 
 
+def _packed_component_word(component) -> int:
+    values = component.allowed_values or tuple(
+        value.value for value in component.table.values
+    )
+    allowed_mask = sum(1 << value for value in values)
+    return allowed_mask | component.bit_offset << 16 | component.bit_length << 20
+
+
+def _packed_slice(component) -> int:
+    return component.bit_offset | component.bit_length << 4
+
+
 def _instruction_rules(
     instruction: isa.Instruction, parameters, selector_parameters
 ) -> list[_VerificationRule]:
@@ -342,6 +353,12 @@ def _instruction_rules(
         field_length = instruction_field.field.byte_length
         if rule.kind == core_rules.FieldRule.SELECTOR:
             parameter, auxiliary = selector_parameters[rule.data]
+        elif rule.kind == core_rules.FieldRule.PACKED_SELECTORS:
+            parameter = _intern_parameter_words(
+                parameters,
+                (_packed_component_word(component) for component in rule.data),
+            )
+            field_length, auxiliary = rule.values[0], len(rule.data)
         elif rule.fields:
             related_offsets = tuple(offsets_by_name[name] for name in rule.fields)
             field_length, auxiliary = (*related_offsets, 0)[:2]
@@ -363,12 +380,40 @@ def _instruction_rules(
     for record_rule in instruction.rules:
         offsets = tuple(offsets_by_name[name] for name in record_rule.fields)
         inline_offsets = (*offsets, 0, 0, 0)
-        tail = (*offsets[3:], *record_rule.values)
-        parameter = _intern_parameter_words(parameters, tail) if tail else 0
+        field_offset, field_length, auxiliary = inline_offsets[:3]
+        if record_rule.kind in (
+            core_rules.RecordRuleKind.PACKED_SELECTOR_PAIRS,
+            core_rules.RecordRuleKind.ATOMIC_CARRIER_SUPPORTED,
+        ):
+            if record_rule.kind == core_rules.RecordRuleKind.ATOMIC_CARRIER_SUPPORTED:
+                field_length = auxiliary = 0
+                parameter = _packed_component_word(record_rule.data[0])
+            else:
+                first, second = record_rule.data
+                pair_bits = sum(
+                    1 << (first_value | second_value << first.bit_length)
+                    for first_value, second_value in zip(
+                        record_rule.values[::2], record_rule.values[1::2], strict=True
+                    )
+                )
+                pair_mask = (
+                    (pair_bits >> bit_offset) & 0xFFFFFFFF
+                    for bit_offset in range(
+                        0, 1 << (first.bit_length + second.bit_length), 32
+                    )
+                )
+                field_length = _packed_slice(first)
+                auxiliary = _packed_slice(second)
+                parameter = _intern_parameter_words(parameters, pair_mask)
+        else:
+            tail = (*offsets[3:], *record_rule.values)
+            parameter = _intern_parameter_words(parameters, tail) if tail else 0
         rules.append(
             _VerificationRule(
                 _identifier(record_rule.kind.name),
-                *inline_offsets[:3],
+                field_offset,
+                field_length,
+                auxiliary,
                 parameter,
                 instruction.mnemonic,
             )

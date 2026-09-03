@@ -165,7 +165,12 @@ class FieldRule:
         U16,
         summary="Must name an optional import declaration.",
     )
-    RODATA_OFFSET = RuleKind("rodata_offset", U32, field_count=1)
+    RODATA_OFFSET = RuleKind(
+        "rodata_offset",
+        U32,
+        field_count=1,
+        summary="Must not exceed the length of the rodata block named by the related field.",
+    )
     RODATA_STATIC_OFFSET = RuleKind(
         "rodata_static_offset",
         U32,
@@ -185,10 +190,14 @@ class RecordRuleKind:
         "integer_bitstream_shape", field_count=5, value_count=2
     )
     PACKED_SELECTOR_PAIRS = RuleKind(
-        "packed_selector_pairs", field_count=1, value_count=-1, name_count=2
+        "packed_selector_pairs",
+        field_count=1,
+        value_count=-1,
+        data_count=2,
+        data_type=tuple,
     )
-    PACKED_SELECTOR_TARGET = RuleKind(
-        "packed_selector_target", field_count=1, name_count=1
+    ATOMIC_CARRIER_SUPPORTED = RuleKind(
+        "atomic_carrier_supported", field_count=1, data_count=1, data_type=tuple
     )
     VALUE_REGISTER_RANGE = RuleKind("value_register_range", field_count=2)
     VALUE_REGISTER_FORMAT_RANGE = RuleKind(

@@ -6,18 +6,10 @@
 
 """Closed declarations for VM module wire records."""
 
-import enum
 from typing import NamedTuple
 
-from iree.vm.bytecode.spec.schema import Field, NumericTable, RuleKind, place_fields
+from iree.vm.bytecode.spec.schema import Field, FieldRuleUse, NumericTable, place_fields
 from iree.vm.bytecode.spec.version import Version
-
-
-class FieldRuleUse(NamedTuple):
-    kind: RuleKind
-    fields: tuple[str, ...] = ()
-    values: tuple[int, ...] = ()
-    data: bytes | enum.Enum | None = None
 
 
 class WireField(NamedTuple):

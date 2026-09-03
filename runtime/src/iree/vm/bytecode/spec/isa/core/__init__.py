@@ -7,6 +7,11 @@
 """Core VM instruction declarations."""
 
 from iree.vm.bytecode.spec.isa.core.abi import ABI_FAMILY, ABI_INSTRUCTIONS
+from iree.vm.bytecode.spec.isa.core.buffer import (
+    BUFFER_FAMILY,
+    BUFFER_INSTRUCTIONS,
+    BUFFER_SELECTORS,
+)
 from iree.vm.bytecode.spec.isa.core.constant import (
     CONSTANT_FAMILY,
     CONSTANT_INSTRUCTIONS,
@@ -57,6 +62,7 @@ FAMILIES = (
     STACK_FAMILY,
     ABI_FAMILY,
     REF_FAMILY,
+    BUFFER_FAMILY,
 )
 SELECTORS = (
     CONTROL_CALL_TARGET_SELECTOR,
@@ -65,6 +71,7 @@ SELECTORS = (
     *FLOAT_SELECTORS,
     *CONVERSION_SELECTORS,
     MEMORY_FORMAT_SELECTOR,
+    *BUFFER_SELECTORS,
 )
 INSTRUCTIONS = (
     *CONTROL_INSTRUCTIONS,
@@ -78,4 +85,5 @@ INSTRUCTIONS = (
     *STACK_INSTRUCTIONS,
     *ABI_INSTRUCTIONS,
     *REF_INSTRUCTIONS,
+    *BUFFER_INSTRUCTIONS,
 )

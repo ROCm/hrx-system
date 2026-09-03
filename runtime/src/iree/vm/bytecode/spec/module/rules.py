@@ -23,11 +23,25 @@ class OrdinalDomain(enum.IntEnum):
 class FieldRule:
     ANY_BITS = RuleKind("any_bits", summary="Any bit pattern.")
     ZERO = RuleKind("zero", summary="Must be zero.")
-    ALLOWED_BITS = RuleKind("allowed_bits", value_count=1)
-    ALLOWED_RANGE = RuleKind("allowed_range", value_count=2)
-    EXACT_BYTES = RuleKind("exact_bytes", data_type=bytes)
-    MULTIPLE = RuleKind("multiple", value_count=1)
-    BYTE_ALIGNMENT = RuleKind("byte_alignment", value_count=1)
+    ALLOWED_BITS = RuleKind(
+        "allowed_bits", value_count=1, summary="May set only bits in `0x{0:X}`."
+    )
+    ALLOWED_RANGE = RuleKind(
+        "allowed_range",
+        value_count=2,
+        summary="Must be in the inclusive range [{0}, {1}].",
+    )
+    EXACT_BYTES = RuleKind(
+        "exact_bytes", data_type=bytes, summary="Must equal `{data!r}` byte-for-byte."
+    )
+    MULTIPLE = RuleKind(
+        "multiple", value_count=1, summary="Must be an exact multiple of {0}."
+    )
+    BYTE_ALIGNMENT = RuleKind(
+        "byte_alignment",
+        value_count=1,
+        summary="Must be a power-of-two byte alignment of at least {0}.",
+    )
     CORE_MAJOR = RuleKind(
         "core_major", U16, summary="Must equal the loader's Core major version."
     )
@@ -41,9 +55,18 @@ class FieldRule:
         U16,
         summary="Must be an architectural extension page ID in 0xF0..0xFD.",
     )
-    ORDINAL = RuleKind("ordinal", U16, data_type=OrdinalDomain)
+    ORDINAL = RuleKind(
+        "ordinal",
+        U16,
+        data_type=OrdinalDomain,
+        summary="Must be an in-range `{data}` ordinal.",
+    )
     ORDINAL_OR_NULL = RuleKind(
-        "ordinal_or_null", U16, value_count=1, data_type=OrdinalDomain
+        "ordinal_or_null",
+        U16,
+        value_count=1,
+        data_type=OrdinalDomain,
+        summary="Must be an in-range `{data}` ordinal or canonical null `0x{0:X}`.",
     )
     PAGE_MAJOR = RuleKind(
         "page_major",
@@ -70,7 +93,12 @@ class FieldRule:
         U16,
         summary="Must name a known section or a valid declared extension authority.",
     )
-    SIGNATURE_DESCRIPTOR = RuleKind("signature_descriptor", U16, field_count=1)
+    SIGNATURE_DESCRIPTOR = RuleKind(
+        "signature_descriptor",
+        U16,
+        field_count=1,
+        summary="Must match the scalar, ref, or function kind in `{field}`.",
+    )
     STRING_OFFSET = RuleKind(
         "string_offset",
         U32,

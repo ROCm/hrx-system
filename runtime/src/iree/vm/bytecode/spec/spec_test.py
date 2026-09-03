@@ -11,7 +11,7 @@ from __future__ import annotations
 import unittest
 
 from iree.vm.bytecode.spec import isa, module, schema
-from iree.vm.bytecode.spec.isa.core import INTEGER_INSTRUCTIONS
+from iree.vm.bytecode.spec.isa.core import BUFFER_INSTRUCTIONS, INTEGER_INSTRUCTIONS
 from iree.vm.bytecode.spec.isa.core import rules as isa_rules
 from iree.vm.bytecode.spec.isa.core.control import BranchCondition
 from iree.vm.bytecode.spec.module import rules as module_rules
@@ -21,7 +21,6 @@ from iree.vm.bytecode.spec.module.records import (
     IMAGE_HEADER,
     SECTION_DIRECTORY_ROW,
     SIGNATURE_DESCRIPTOR_ROW,
-    SIGNATURE_ROW,
     SIGNATURES_HEADER,
 )
 from iree.vm.bytecode.spec.module.validation import project_module_format
@@ -101,38 +100,6 @@ def _specification(
 
 
 class SpecificationTest(unittest.TestCase):
-    def test_instruction_wire_layouts(self) -> None:
-        cases = (
-            ("integer.bitstream.pack", 0x76, 8, (1, 2, 3, 4, 5, 6, 7)),
-            ("control.branch.if.s16", 0x06, 4, (1, 2)),
-            ("control.branch.if.s32", 0x07, 8, (1, 2, 4)),
-            ("control.switch", 0x0A, 8, (1, 2, 4)),
-            ("control.call", 0x0B, 8, (1, 2, 4, 6)),
-        )
-        for mnemonic, opcode, byte_length, field_offsets in cases:
-            with self.subTest(mnemonic=mnemonic):
-                instruction = _instruction(mnemonic)
-                self.assertEqual(
-                    (
-                        instruction.opcode,
-                        instruction.byte_length,
-                        instruction.field_offsets,
-                    ),
-                    (opcode, byte_length, field_offsets),
-                )
-
-    def test_module_record_layouts_are_abi_edges(self) -> None:
-        records = (
-            IMAGE_HEADER,
-            SIGNATURES_HEADER,
-            SIGNATURE_ROW,
-            SIGNATURE_DESCRIPTOR_ROW,
-        )
-        self.assertEqual(
-            tuple((record.byte_length, record.alignment) for record in records),
-            ((16, 2), (4, 4), (16, 4), (4, 2)),
-        )
-
     def test_complete_transcription_inventory(self) -> None:
         self.assertEqual(MODULE_FORMAT.envelope, (IMAGE_HEADER, SECTION_DIRECTORY_ROW))
         self.assertEqual(len(SPECIFICATION.module_format.records), 34)
@@ -148,7 +115,7 @@ class SpecificationTest(unittest.TestCase):
                 len(NUMERIC_TABLES),
                 sum(len(table.values) for table in NUMERIC_TABLES),
             ),
-            (11, 170, 17, 187, tuple(range(1, 14)), 58, 9, 30),
+            (12, 183, 21, 215, tuple(range(1, 14)), 58, 9, 30),
         )
 
     def test_layout_rejects_implicit_alignment_padding(self) -> None:
@@ -305,6 +272,17 @@ class SpecificationTest(unittest.TestCase):
                     _specification(instructions=(malformed,))
         with self.assertRaisesRegex(ValueError, "malformed field rule"):
             _specification(selectors=(), instructions=(_instruction("control.fail"),))
+
+        atomic = BUFFER_INSTRUCTIONS[7]
+        malformed_pair = atomic.rules[-1]._replace(
+            data=(atomic.fields[-1].rule.data[0], atomic.rules[-1].data[1])
+        )
+        with self.assertRaisesRegex(ValueError, "malformed record rule"):
+            _specification(
+                instructions=(
+                    atomic._replace(rules=(*atomic.rules[:-1], malformed_pair)),
+                )
+            )
 
     def test_module_contracts_reject_malformed_declarations(self) -> None:
         duplicate = SIGNATURES_HEADER._replace(

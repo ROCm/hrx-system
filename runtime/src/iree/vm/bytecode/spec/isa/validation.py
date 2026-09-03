@@ -15,7 +15,6 @@ def _validate_field(instruction, instruction_field, fields, tables) -> None:
     field = instruction_field.field
     kind, related_fields, values, data = instruction_field.rule
     table = data if isinstance(data, NumericTable) else None
-    policy = instruction_field.ref_policy
     valid = (
         kind in rules.FIELD_RULES
         and kind.accepts(related_fields, values, data=data)
@@ -23,40 +22,44 @@ def _validate_field(instruction, instruction_field, fields, tables) -> None:
         and (kind.encoding is None or field.encoding == kind.encoding)
         and (table is None or table in tables and field.encoding == table.encoding)
         and (
+            kind != rules.FieldRule.PACKED_SELECTORS
+            or all(component.table in tables for component in data)
+        )
+        and (
             kind not in rules.DIRECT_TARGET_RULES
             or instruction_field.role == isa.FieldRole.IMMEDIATE
         )
-        and (kind == rules.FieldRule.REGISTER_REF) == (policy is not None)
+        and (kind == rules.FieldRule.REGISTER_REF)
+        == (instruction_field.ref_policy is not None)
     )
     require(valid, f"{instruction.mnemonic}: malformed field rule")
-    is_padding = instruction_field.role == isa.FieldRole.PADDING
     require(
-        is_padding == (kind == rules.FieldRule.ZERO),
+        (instruction_field.role == isa.FieldRole.PADDING)
+        == (kind == rules.FieldRule.ZERO),
         f"{instruction.mnemonic}: padding is not canonical zero",
     )
 
 
 def _validate_record_rule(instruction, rule, fields) -> None:
     valid = rule.kind in rules.RECORD_RULES and bool(rule.summary)
-    valid &= rule.kind.accepts(rule.fields, rule.values, rule.names)
+    valid &= rule.kind.accepts(rule.fields, rule.values, data=rule.data)
+    valid &= all(name in fields for name in rule.fields)
+    if valid and rule.data:
+        components = fields[rule.fields[0]].rule.data
+        valid &= isinstance(components, tuple)
+        valid &= all(component in components for component in rule.data)
     require(valid, f"{instruction.mnemonic}: malformed record rule")
-    require(
-        all(name in fields for name in rule.fields),
-        f"{instruction.mnemonic}: record rule names missing field",
-    )
 
 
 def validate_instruction(
     instruction: isa.Instruction, tables: tuple[NumericTable, ...] = ()
 ) -> None:
-    valid = 1 <= instruction.opcode <= 0xEF
-    valid &= not instruction.byte_length % 4
+    valid = 1 <= instruction.opcode <= 0xEF and not instruction.byte_length % 4
     require(valid, f"{instruction.mnemonic}: invalid instruction identity or layout")
     _ = instruction.field_offsets
     fields = {item.field.name: item for item in instruction.fields}
     for instruction_field in instruction.fields:
         _validate_field(instruction, instruction_field, fields, tables)
-
     target_count = sum(
         item.rule.kind in rules.DIRECT_TARGET_RULES for item in instruction.fields
     )

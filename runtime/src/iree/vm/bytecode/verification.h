@@ -67,6 +67,10 @@ enum iree_vm_bytecode_verification_rule_kind_e {
   IREE_VM_BYTECODE_VERIFICATION_RULE_LOCAL_BYTES_REPEATED_BASE = 45,
   IREE_VM_BYTECODE_VERIFICATION_RULE_RODATA_STATIC_OFFSET = 46,
   IREE_VM_BYTECODE_VERIFICATION_RULE_VALUE_REGISTER_FORMAT_RANGE = 47,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_PACKED_SELECTORS = 48,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_PACKED_SELECTOR_PAIRS = 49,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_ATOMIC_CARRIER_SUPPORTED = 50,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_RODATA_OFFSET = 51,
 };
 typedef uint8_t iree_vm_bytecode_verification_rule_kind_t;
 
@@ -110,6 +114,12 @@ typedef struct iree_vm_bytecode_verification_rule_t {
   // Parameter count or third field offset, as selected by |kind|.
   uint8_t auxiliary;
 } iree_vm_bytecode_verification_rule_t;
+
+// PACKED_SELECTORS parameter words encode an allowed-value mask in bits 15:0,
+// component bit offset in bits 19:16, and component bit length in bits 23:20.
+// PACKED_SELECTOR_PAIRS encodes each component slice as
+// bit_length:4|bit_offset:4 and references a dense pair bitset.
+// ATOMIC_CARRIER_SUPPORTED carries one component word directly.
 
 // Packed instruction validation descriptors indexed directly by u8 opcode.
 // Zero denotes an unknown opcode. Nonzero words encode, from most- to

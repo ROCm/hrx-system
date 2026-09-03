@@ -83,6 +83,13 @@ class NumericTable(NamedTuple):
     unknown_policy: UnknownNumericPolicy = UnknownNumericPolicy.REJECT
 
 
+class FieldRuleUse(NamedTuple):
+    kind: "RuleKind"
+    fields: tuple[str, ...] = ()
+    values: tuple[int, ...] = ()
+    data: object | None = None
+
+
 def validate_numeric_table(table: NumericTable, version: Version) -> None:
     values = table.values
     valid = is_name(table.name, qualified=True) and bool(values)
@@ -109,15 +116,17 @@ class RuleKind(NamedTuple):
     encoding: ScalarEncoding | None = None
     field_count: int = 0
     value_count: int = 0
-    name_count: int = 0
+    data_count: int = 0
     data_type: type | None = None
     summary: str = ""
 
-    def accepts(self, fields, values, names=(), data=None) -> bool:
-        valid = (len(fields), len(names)) == (self.field_count, self.name_count)
-        valid &= self.value_count < 0 or len(values) == self.value_count
-        valid &= isinstance(data, self.data_type or type(None))
-        return valid
+    def accepts(self, fields, values, data=None) -> bool:
+        return (
+            len(fields) == self.field_count
+            and (self.value_count < 0 or len(values) == self.value_count)
+            and isinstance(data, self.data_type or type(None))
+            and (not self.data_count or len(data or ()) == self.data_count)
+        )
 
 
 def place_fields(

@@ -9,16 +9,16 @@
 import enum
 from typing import NamedTuple
 
-from iree.vm.bytecode.spec.schema import Field, NumericTable, RuleKind, place_fields
+from iree.vm.bytecode.spec import schema
 from iree.vm.bytecode.spec.version import Version
+
+FieldRuleUse = schema.FieldRuleUse
 
 
 class FieldRole(enum.Enum):
     RESULT = "result"
     OPERAND = "operand"
     IMMEDIATE = "immediate"
-    RANGE_BASE = "range_base"
-    RANGE_COUNT = "range_count"
     CONSTRAINT_MEMBER = "constraint_member"
     PADDING = "padding"
 
@@ -27,22 +27,15 @@ class PackedSelectorComponent(NamedTuple):
     name: str
     bit_offset: int
     bit_length: int
-    table: NumericTable
+    table: schema.NumericTable
     allowed_values: tuple[int, ...] = ()
 
 
-class FieldRuleUse(NamedTuple):
-    kind: RuleKind
-    fields: tuple[str, ...] = ()
-    values: tuple[int, ...] = ()
-    data: NumericTable | tuple[PackedSelectorComponent, ...] | None = None
-
-
 class RecordRule(NamedTuple):
-    kind: RuleKind
+    kind: schema.RuleKind
     fields: tuple[str, ...] = ()
     values: tuple[int, ...] = ()
-    names: tuple[str, ...] = ()
+    data: tuple[PackedSelectorComponent, ...] | None = None
     summary: str = ""
 
 
@@ -77,9 +70,9 @@ class RuntimeRefPolicy(NamedTuple):
 
 
 class InstructionField(NamedTuple):
-    field: Field
+    field: schema.Field
     role: FieldRole
-    rule: FieldRuleUse
+    rule: schema.FieldRuleUse
     ref_policy: RuntimeRefPolicy | None = None
 
 
@@ -120,7 +113,7 @@ class Instruction(NamedTuple):
 
     @property
     def field_offsets(self) -> tuple[int, ...]:
-        return place_fields(
+        return schema.place_fields(
             (instruction_field.field for instruction_field in self.fields),
             initial_offset=1,
         )
