@@ -57,6 +57,9 @@ enum iree_vm_bytecode_verification_rule_kind_e {
   IREE_VM_BYTECODE_VERIFICATION_RULE_GLOBAL_ORDINAL = 35,
   IREE_VM_BYTECODE_VERIFICATION_RULE_REF_SLOT = 36,
   IREE_VM_BYTECODE_VERIFICATION_RULE_FIELDS_DISTINCT = 37,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_ALLOWED_VALUES = 38,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_INTEGER_BITSTREAM_SHAPE = 39,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_VALUE_REGISTER_RANGE = 40,
 };
 typedef uint8_t iree_vm_bytecode_verification_rule_kind_t;
 
@@ -95,9 +98,9 @@ typedef struct iree_vm_bytecode_verification_rule_t {
   iree_vm_bytecode_verification_rule_kind_t kind;
   // Primary byte offset within the record, when used by |kind|.
   uint8_t field_offset;
-  // Primary field byte length within the record, when used by |kind|.
+  // Primary field byte length or second field offset, as selected by |kind|.
   uint8_t field_length;
-  // Secondary byte offset or parameter count, when used by |kind|.
+  // Parameter count or third field offset, as selected by |kind|.
   uint8_t auxiliary;
 } iree_vm_bytecode_verification_rule_t;
 

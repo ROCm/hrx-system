@@ -22,7 +22,11 @@ from iree.vm.bytecode.spec.isa.core.function import (
     FUNCTION_INSTRUCTIONS,
 )
 from iree.vm.bytecode.spec.isa.core.globals import GLOBAL_FAMILY, GLOBAL_INSTRUCTIONS
-from iree.vm.bytecode.spec.isa.core.integer import INTEGER_FAMILY, INTEGER_INSTRUCTIONS
+from iree.vm.bytecode.spec.isa.core.integer import (
+    INTEGER_COMPARE_SELECTOR,
+    INTEGER_FAMILY,
+    INTEGER_INSTRUCTIONS,
+)
 from iree.vm.bytecode.spec.isa.core.ref import REF_FAMILY, REF_INSTRUCTIONS
 from iree.vm.bytecode.spec.isa.core.value import VALUE_FAMILY, VALUE_INSTRUCTIONS
 
@@ -36,7 +40,11 @@ FAMILIES = (
     ABI_FAMILY,
     REF_FAMILY,
 )
-SELECTORS = (CONTROL_CALL_TARGET_SELECTOR, CONTROL_STATUS_SELECTOR)
+SELECTORS = (
+    CONTROL_CALL_TARGET_SELECTOR,
+    CONTROL_STATUS_SELECTOR,
+    INTEGER_COMPARE_SELECTOR,
+)
 INSTRUCTIONS = (
     *CONTROL_INSTRUCTIONS,
     *VALUE_INSTRUCTIONS,

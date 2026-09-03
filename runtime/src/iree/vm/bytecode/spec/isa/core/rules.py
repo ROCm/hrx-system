@@ -60,8 +60,16 @@ class RefOwnership(enum.Enum):
 class FieldRule:
     ANY_BITS = RuleKind("any_bits", summary="Any bit pattern.")
     ZERO = RuleKind("zero", summary="Must be zero.")
-    ALLOWED_RANGE = RuleKind("allowed_range", value_count=2)
-    ALLOWED_VALUES = RuleKind("allowed_values", value_count=-1)
+    ALLOWED_RANGE = RuleKind(
+        "allowed_range",
+        value_count=2,
+        summary="Must be in the inclusive range [{0}, {1}].",
+    )
+    ALLOWED_VALUES = RuleKind(
+        "allowed_values",
+        value_count=-1,
+        summary="Must equal one of {values}.",
+    )
     REGISTER_VALUE = RuleKind(
         "register_value", U8, summary="Must name an in-range value register."
     )
@@ -139,8 +147,8 @@ class RecordRuleKind:
     SWITCH_TARGETS = RuleKind("switch_targets", field_count=2)
     FIELDS_DISTINCT = RuleKind("fields_distinct", field_count=2)
     FUNCTION_ADDRESS = RuleKind("function_address", field_count=3)
-    INTEGER_BITSTREAM = RuleKind(
-        "integer_bitstream", field_count=5, value_count=1, name_count=1
+    INTEGER_BITSTREAM_SHAPE = RuleKind(
+        "integer_bitstream_shape", field_count=5, value_count=2
     )
     PACKED_SELECTOR_PAIRS = RuleKind(
         "packed_selector_pairs", field_count=1, value_count=-1, name_count=2

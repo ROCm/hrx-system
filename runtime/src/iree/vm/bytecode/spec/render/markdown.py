@@ -16,7 +16,8 @@ from iree.vm.bytecode.spec.specification import Specification
 
 def _instruction_rule(instruction_field) -> str:
     rule = instruction_field.rule
-    text = rule.kind.summary
+    values = ", ".join(map(str, rule.values))
+    text = rule.kind.summary.format(*rule.values, values=values)
     if rule.kind == core_rules.FieldRule.SELECTOR:
         text = f"Must be an assigned `{rule.data.name}` selector."
     if not text:

@@ -299,7 +299,11 @@ _MODULE_VERSION_RULE = {
 }
 
 
-def _append_parameter_words(parameters: list[int], values: Iterable[int]) -> int:
+def _intern_parameter_words(parameters: list[int], values: Iterable[int]) -> int:
+    values = list(values)
+    for base in range(len(parameters) - len(values) + 1):
+        if parameters[base : base + len(values)] == values:
+            return base
     base = len(parameters)
     parameters.extend(values)
     if len(parameters) > 0xFFFFFFFF:
@@ -308,11 +312,9 @@ def _append_parameter_words(parameters: list[int], values: Iterable[int]) -> int
 
 
 def _value_parameters(values, parameters) -> tuple[int, int]:
-    if len(values) == 1:
-        return values[0], 0
-    if values:
-        return _append_parameter_words(parameters, values), len(values)
-    return 0, 0
+    if len(values) > 1:
+        return _intern_parameter_words(parameters, values), len(values)
+    return (values[0], 0) if values else (0, 0)
 
 
 def _field_offsets(fields, offsets) -> dict[str, int]:
@@ -353,9 +355,8 @@ def _instruction_rules(
     for record_rule in instruction.rules:
         offsets = tuple(offsets_by_name[name] for name in record_rule.fields)
         inline_offsets = (*offsets, 0, 0, 0)
-        parameter = (
-            _append_parameter_words(parameters, offsets[3:]) if len(offsets) > 3 else 0
-        )
+        tail = (*offsets[3:], *record_rule.values)
+        parameter = _intern_parameter_words(parameters, tail) if tail else 0
         rules.append(
             _VerificationRule(
                 _identifier(record_rule.kind.name),
@@ -397,7 +398,7 @@ def _module_rules(
             verification_kind = "EXACT_BYTES"
             field_length = len(expected)
             auxiliary = len(padded) // 4
-            parameter = _append_parameter_words(parameters, words)
+            parameter = _intern_parameter_words(parameters, words)
         elif isinstance(rule.data, module_rules.OrdinalDomain):
             auxiliary = int(rule.data)
         elif rule_kind == module_rules.FieldRule.SIGNATURE_DESCRIPTOR:
@@ -453,7 +454,7 @@ def render_verification_data(specification: Specification) -> str:
         for value in values:
             words[value.value // 32] |= 1 << (value.value % 32)
         selector_parameters[table] = (
-            _append_parameter_words(parameters, words),
+            _intern_parameter_words(parameters, words),
             len(words),
         )
     for instruction in specification.instructions:

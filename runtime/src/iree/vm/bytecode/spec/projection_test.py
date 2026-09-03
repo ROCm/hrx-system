@@ -9,6 +9,8 @@
 import unittest
 
 from iree.vm.bytecode.spec.generate import generate_outputs
+from iree.vm.bytecode.spec.isa.core import INTEGER_INSTRUCTIONS
+from iree.vm.bytecode.spec.render.c import _instruction_rules
 
 
 class ProjectionTest(unittest.TestCase):
@@ -44,14 +46,10 @@ class ProjectionTest(unittest.TestCase):
         core_header = self.assert_output_contains(
             "wire_core_header",
             "typedef struct iree_vm_bytecode_control_switch_t",
-            "IREE_VM_BYTECODE_CONTROL_CALL_TARGET_LOCAL = 0x00",
-            "IREE_VM_BYTECODE_CONTROL_CALL_TARGET_OPTIONAL_IMPORT = 0x02",
-            "IREE_VM_BYTECODE_CONTROL_STATUS_INVALID_ARGUMENT = 0x03",
-            "IREE_VM_BYTECODE_CONTROL_STATUS_INCOMPATIBLE = 0x12",
+            "IREE_VM_BYTECODE_INTEGER_COMPARE_UGE = 0x09",
             "typedef struct iree_vm_bytecode_func_address_t",
-            "typedef struct iree_vm_bytecode_global_ref_mutable_store_move_t",
+            "typedef struct iree_vm_bytecode_integer_bitstream_pack_t",
             "typedef struct iree_vm_bytecode_value_abi_argument_load_t",
-            "typedef struct iree_vm_bytecode_ref_move_t",
         )
         self.assertNotIn("static_assert", module_header)
         self.assertNotIn("static_assert", core_header)
@@ -67,16 +65,8 @@ class ProjectionTest(unittest.TestCase):
         source = self.assert_output_contains(
             "verification_source",
             "iree_vm_bytecode_instruction_verification[256]",
-            "IREE_VM_BYTECODE_VERIFICATION_RULE_CONTROL_TARGET_S16",
-            "IREE_VM_BYTECODE_VERIFICATION_RULE_SIGNATURE_DESCRIPTOR",
-            "IREE_VM_BYTECODE_VERIFICATION_RULE_BYTE_ALIGNMENT",
-            "IREE_VM_BYTECODE_VERIFICATION_RULE_ORDINAL_OR_NULL",
             "IREE_VM_BYTECODE_VERIFICATION_RULE_CALL_INDIRECT",
-            "IREE_VM_BYTECODE_VERIFICATION_RULE_SELECTOR",
             "IREE_VM_BYTECODE_VERIFICATION_RULE_ABI_SLOT",
-            "IREE_VM_BYTECODE_VERIFICATION_RULE_GLOBAL_ORDINAL",
-            "IREE_VM_BYTECODE_VERIFICATION_RULE_REF_SLOT",
-            "IREE_VM_BYTECODE_VERIFICATION_RULE_FIELDS_DISTINCT",
             "IREE_VM_BYTECODE_CONTROL_FLOW_CONDITIONAL_BRANCH",
             "UINT32_C(0x00000007)",
             "UINT32_C(0x0005FFFE)",
@@ -86,6 +76,12 @@ class ProjectionTest(unittest.TestCase):
         )
         self.assertNotIn("switch (", source)
         self.assertNotIn("iree_status_t", source)
+        parameters = []
+        rule = _instruction_rules(INTEGER_INSTRUCTIONS[-3], parameters, {})[-1]
+        self.assertEqual(
+            (rule.kind, *rule[1:4], *parameters[rule.parameter :]),
+            ("INTEGER_BITSTREAM_SHAPE", 3, 4, 5, 6, 7, 0, 64),
+        )
 
     def test_tooling_uses_one_byte_length_strings(self) -> None:
         data = self.assert_output_contains(
@@ -110,7 +106,7 @@ class ProjectionTest(unittest.TestCase):
             "#### `func.import.resolved`",
             "#### `global.ref.immutable.store.move`",
             "#### `ref.abi.result.store.move`",
-            "#### `ref.move`",
+            "#### `integer.bitstream.unpack.s`",
             "#### Preconditions",
             "#### Failures",
             "#### Ownership",

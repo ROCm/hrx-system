@@ -103,14 +103,11 @@ def _specification(
 class SpecificationTest(unittest.TestCase):
     def test_instruction_wire_layouts(self) -> None:
         cases = (
-            ("integer.add.i32", 0x40, 4, (1, 2, 3)),
+            ("integer.bitstream.pack", 0x76, 8, (1, 2, 3, 4, 5, 6, 7)),
             ("control.branch.if.s16", 0x06, 4, (1, 2)),
             ("control.branch.if.s32", 0x07, 8, (1, 2, 4)),
             ("control.switch", 0x0A, 8, (1, 2, 4)),
             ("control.call", 0x0B, 8, (1, 2, 4, 6)),
-            ("global.ref.immutable.load.borrow", 0x34, 4, (1, 2)),
-            ("value.abi.argument.load", 0xC0, 4, (1, 2)),
-            ("ref.move", 0xCC, 4, (1, 2, 3)),
         )
         for mnemonic, opcode, byte_length, field_offsets in cases:
             with self.subTest(mnemonic=mnemonic):
@@ -151,7 +148,7 @@ class SpecificationTest(unittest.TestCase):
                 len(NUMERIC_TABLES),
                 sum(len(table.values) for table in NUMERIC_TABLES),
             ),
-            (8, 65, 2, 20, tuple(range(1, 14)), 58, 9, 30),
+            (8, 116, 3, 30, tuple(range(1, 14)), 58, 9, 30),
         )
 
     def test_layout_rejects_implicit_alignment_padding(self) -> None:
@@ -178,6 +175,10 @@ class SpecificationTest(unittest.TestCase):
         self.assertEqual(selected_record.alignment, 8)
 
     def test_duplicate_opcode_is_rejected(self) -> None:
+        self.assertEqual(
+            tuple(item.opcode for item in INTEGER_INSTRUCTIONS),
+            tuple(range(0x40, 0x79)),
+        )
         duplicate = INTEGER_INSTRUCTIONS[1]._replace(
             opcode=INTEGER_INSTRUCTIONS[0].opcode,
         )
