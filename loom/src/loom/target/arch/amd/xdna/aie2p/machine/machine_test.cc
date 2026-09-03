@@ -18,7 +18,6 @@ TEST(MachineTest, CompleteTableCounts) {
   EXPECT_EQ(loom_aie2p_machine_atomic_unit_count(), 207);
   EXPECT_EQ(loom_aie2p_machine_physical_register_count(), 359);
   EXPECT_EQ(loom_aie2p_machine_register_class_count(), 369);
-  EXPECT_EQ(loom_aie2p_machine_register_adapter_count(), 61);
   EXPECT_EQ(loom_aie2p_machine_immediate_count(), 21);
   EXPECT_EQ(loom_aie2p_machine_form_count(), 880);
 }

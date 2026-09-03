@@ -80,11 +80,13 @@ _EL_LOW32_PART = "aie2p.elpredicate.low32"
 _EL_HIGH32_PART = "aie2p.elpredicate.high32"
 _VEC256_LOW128_PART = "aie2p.vec256.low128"
 _VEC256_HIGH128_PART = "aie2p.vec256.high128"
+_EWL_LOW128_PART = "aie2p.ewl.low128"
 _REGISTER_PARTS = (
     RegisterPart(_EL_LOW32_PART, "aie2p.elpredicate", 0x1),
     RegisterPart(_EL_HIGH32_PART, "aie2p.elpredicate", 0x2),
     RegisterPart(_VEC256_LOW128_PART, "aie2p.vec256", 0x1),
     RegisterPart(_VEC256_HIGH128_PART, "aie2p.vec256", 0x2),
+    RegisterPart(_EWL_LOW128_PART, "aie2p.ewl", 0x1),
 )
 _REGISTER_PARTS_BY_NAME = {part.name: part for part in _REGISTER_PARTS}
 
@@ -150,6 +152,35 @@ AIE2P_VECTOR_MEMORY_ELEMENT_TYPES = (
 )
 
 
+def _vector_memory_operand_overrides(
+    width_bits: int,
+    element_type: str,
+    operand_name: str,
+    native_adapter: str | None,
+) -> tuple[
+    tuple[tuple[str, str], ...],
+    tuple[tuple[str, str], ...],
+    tuple[tuple[str, str], ...],
+]:
+    """Returns storage, part, and encoding overrides for one memory operand."""
+
+    if width_bits != 128:
+        return (), (), ()
+    if native_adapter is None:
+        raise ValueError("128-bit vector memory forms need an encoding adapter")
+    if element_type == "bf16":
+        return (
+            ((operand_name, "eWL"),),
+            ((operand_name, _EWL_LOW128_PART),),
+            ((operand_name, f"LOOM_eWL_{native_adapter}"),),
+        )
+    return (
+        (),
+        ((operand_name, _VEC256_LOW128_PART),),
+        ((operand_name, native_adapter),),
+    )
+
+
 def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
     """Selects every exact-width native vector memory form."""
 
@@ -163,29 +194,14 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
             load_b_immediate_key = f"{_TARGET_KEY}.load.b.{shape}.indexed.immediate"
             store_register_key = f"{_TARGET_KEY}.store.{shape}.indexed.register"
             store_immediate_key = f"{_TARGET_KEY}.store.{shape}.indexed.immediate"
-            partial_load_a = (
-                (
-                    (("dst", _VEC256_LOW128_PART),),
-                    (("dst", load_a[2]),),
-                )
-                if width_bits == 128
-                else ((), ())
+            load_a_overrides = _vector_memory_operand_overrides(
+                width_bits, element_type, "dst", load_a[2]
             )
-            partial_load_b = (
-                (
-                    (("dst", _VEC256_LOW128_PART),),
-                    (("dst", load_b[2]),),
-                )
-                if width_bits == 128
-                else ((), ())
+            load_b_overrides = _vector_memory_operand_overrides(
+                width_bits, element_type, "dst", load_b[2]
             )
-            partial_store = (
-                (
-                    (("src", _VEC256_LOW128_PART),),
-                    (("src", store[2]),),
-                )
-                if width_bits == 128
-                else ((), ())
+            store_overrides = _vector_memory_operand_overrides(
+                width_bits, element_type, "src", store[2]
             )
             result.extend(
                 (
@@ -194,9 +210,10 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
                         load_a_immediate_key,
                         f"memory.load.indexed.{shape}",
                         f"II_{load_a[1]}",
+                        storage_overrides=load_a_overrides[0],
                         asm_mnemonic=f"vlda.{width_bits}.{shape}",
-                        operand_register_parts=partial_load_a[0],
-                        encoding_adapter_overrides=partial_load_a[1],
+                        operand_register_parts=load_a_overrides[1],
+                        encoding_adapter_overrides=load_a_overrides[2],
                         schedule_alternatives=(load_b_immediate_key,),
                         memory_width_bits=width_bits,
                     ),
@@ -205,9 +222,10 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
                         load_a_register_key,
                         f"memory.load.indexed.{shape}",
                         f"II_{load_a[0]}",
+                        storage_overrides=load_a_overrides[0],
                         asm_mnemonic=f"vlda.{width_bits}.{shape}.index",
-                        operand_register_parts=partial_load_a[0],
-                        encoding_adapter_overrides=partial_load_a[1],
+                        operand_register_parts=load_a_overrides[1],
+                        encoding_adapter_overrides=load_a_overrides[2],
                         schedule_alternatives=(load_b_register_key,),
                         memory_width_bits=width_bits,
                     ),
@@ -216,9 +234,10 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
                         load_b_immediate_key,
                         f"memory.load.indexed.{shape}",
                         f"II_{load_b[1]}",
+                        storage_overrides=load_b_overrides[0],
                         asm_mnemonic=f"vldb.{width_bits}.{shape}",
-                        operand_register_parts=partial_load_b[0],
-                        encoding_adapter_overrides=partial_load_b[1],
+                        operand_register_parts=load_b_overrides[1],
+                        encoding_adapter_overrides=load_b_overrides[2],
                         memory_width_bits=width_bits,
                     ),
                     _DescriptorSpec(
@@ -226,9 +245,10 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
                         load_b_register_key,
                         f"memory.load.indexed.{shape}",
                         f"II_{load_b[0]}",
+                        storage_overrides=load_b_overrides[0],
                         asm_mnemonic=f"vldb.{width_bits}.{shape}.index",
-                        operand_register_parts=partial_load_b[0],
-                        encoding_adapter_overrides=partial_load_b[1],
+                        operand_register_parts=load_b_overrides[1],
+                        encoding_adapter_overrides=load_b_overrides[2],
                         memory_width_bits=width_bits,
                     ),
                     _DescriptorSpec(
@@ -236,9 +256,10 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
                         store_immediate_key,
                         f"memory.store.indexed.{shape}",
                         f"II_{store[1]}",
+                        storage_overrides=store_overrides[0],
                         asm_mnemonic=f"vst.{width_bits}.{shape}",
-                        operand_register_parts=partial_store[0],
-                        encoding_adapter_overrides=partial_store[1],
+                        operand_register_parts=store_overrides[1],
+                        encoding_adapter_overrides=store_overrides[2],
                         memory_width_bits=width_bits,
                     ),
                     _DescriptorSpec(
@@ -246,9 +267,10 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
                         store_register_key,
                         f"memory.store.indexed.{shape}",
                         f"II_{store[0]}",
+                        storage_overrides=store_overrides[0],
                         asm_mnemonic=f"vst.{width_bits}.{shape}.index",
-                        operand_register_parts=partial_store[0],
-                        encoding_adapter_overrides=partial_store[1],
+                        operand_register_parts=store_overrides[1],
+                        encoding_adapter_overrides=store_overrides[2],
                         memory_width_bits=width_bits,
                     ),
                 )
@@ -470,14 +492,66 @@ _BASE_DESCRIPTOR_SPECS = (
         f"{_TARGET_KEY}.multiply.bf16x32.configured",
         "floating.multiply.bf16x32.configured",
         "II_VMUL_f_vmul_bf_vmul_bf_core_X_X",
-        storage_overrides=(("dst", "mCMs"),),
+        storage_overrides=(("dst", "mBMs"),),
         asm_mnemonic="vmul.bf16x32",
+    ),
+    _DescriptorSpec(
+        "VEXTBCST_128_vec_extract_broadcast_imm",
+        f"{_TARGET_KEY}.broadcast.bf16x8.to.bf16x32",
+        "floating.broadcast.bf16x8.to.bf16x32",
+        "II_VEXTBCST_128_vec_extract_broadcast_imm",
+        storage_overrides=(("s1", "eWL"),),
+        asm_mnemonic="vbroadcast.bf16x8.to.bf16x32",
+        operand_register_parts=(("s1", _EWL_LOW128_PART),),
+        encoding_adapter_overrides=(("s1", "LOOM_eWL_OP_mXm"),),
+    ),
+    _DescriptorSpec(
+        "VSHUFFLE_vec_shuffle_x",
+        f"{_TARGET_KEY}.shuffle.bf16x32.configured",
+        "floating.shuffle.bf16x32.configured",
+        "II_VSHUFFLE_vec_shuffle_x",
+        storage_overrides=(("dst", "VEC256"),),
+        asm_mnemonic="vshuffle.bf16x32",
+    ),
+    _DescriptorSpec(
+        "VMOV_alu_mv_mv_x",
+        f"{_TARGET_KEY}.move.bf16x32",
+        "floating.move.bf16x32",
+        "II_VMOV_alu_mv_mv_x",
+        storage_overrides=(("dst", "VEC256"), ("src", "VEC256")),
+        asm_mnemonic="vmov.bf16x32",
+        encoding_adapter_overrides=(
+            ("dst", "LOOM_mXm_OP_mMvBMXDst"),
+            ("src", "LOOM_mXm_OP_mMvBMXSrc"),
+        ),
+    ),
+    _DescriptorSpec(
+        "VMUL_f_vmul_bf_vmul_bf_core_Y_Y",
+        f"{_TARGET_KEY}.matrix.multiply.bf16bf16.m8n8k1.configured",
+        "matrix.multiply.bf16bf16.m8n8k1.configured",
+        "II_VMUL_f_vmul_bf_vmul_bf_core_Y_Y",
+        storage_overrides=(("dst", "mBMs"), ("s1", "VEC256"), ("s2", "VEC256")),
+        asm_mnemonic="mmul.bf16bf16.m8n8k1",
+    ),
+    _DescriptorSpec(
+        "VMAC_f_vmac_bf_vmul_bf_core_Y_Y",
+        f"{_TARGET_KEY}.matrix.accumulate.bf16bf16.m8n8k1.configured",
+        "matrix.accumulate.bf16bf16.m8n8k1.configured",
+        "II_VMAC_f_vmac_bf_vmul_bf_core_Y_Y",
+        storage_overrides=(
+            ("dst", "mBMs"),
+            ("acc1", "mBMs"),
+            ("s1", "VEC256"),
+            ("s2", "VEC256"),
+        ),
+        asm_mnemonic="mma.bf16bf16.m8n8k1",
     ),
     _DescriptorSpec(
         "VCONV_bf16_fp32_mv_x_srs_bf",
         f"{_TARGET_KEY}.convert.f32x32.to.bf16x32",
         "floating.convert.f32x32.to.bf16x32",
         "II_VCONV_bf16_fp32_mv_x_srs_bf",
+        storage_overrides=(("src", "mBMs"),),
         asm_mnemonic="vconv.bf16.fp32",
     ),
     _DescriptorSpec(
@@ -487,6 +561,14 @@ _BASE_DESCRIPTOR_SPECS = (
         "II_VCLR",
         storage_overrides=(("dst", "mBMs"),),
         asm_mnemonic="acc.clear.i32x64",
+    ),
+    _DescriptorSpec(
+        "VCLR",
+        f"{_TARGET_KEY}.accumulator.clear.f32x64",
+        "matrix.accumulator.clear.f32x64",
+        "II_VCLR",
+        storage_overrides=(("dst", "mBMs"),),
+        asm_mnemonic="acc.clear.f32x64",
     ),
     _DescriptorSpec(
         "VMUL_vmul_cm_core_X_X",
@@ -1135,6 +1217,47 @@ def _operand_machine_class(operand: MachineOperand) -> str:
     raise ValueError(f"{operand.name}: immediate is not a register operand")
 
 
+def _operand_encoding_machine_class(
+    spec: _DescriptorSpec, operand: MachineOperand
+) -> str:
+    """Returns the physical domain encoded by one selected descriptor operand."""
+
+    adapter_overrides = _operand_override_map(
+        spec, spec.encoding_adapter_overrides, "encoding-adapter overrides"
+    )
+    adapter_name = adapter_overrides.get(operand.name)
+    if adapter_name is None:
+        return _operand_machine_class(operand)
+    adapter = _MACHINE_ADAPTERS.get(adapter_name)
+    if adapter is None:
+        raise ValueError(
+            f"{spec.form_name}.{operand.name}: unknown encoding adapter {adapter_name}"
+        )
+    native_class_name = _operand_machine_class(operand)
+    native_encoding_values = (
+        {
+            value
+            for _, value in _MACHINE_ADAPTERS[
+                operand.type_name
+            ].effective_register_encodings
+        }
+        if operand.kind is MachineOperandKind.REGISTER_ADAPTER
+        else {
+            _MACHINE_REGISTERS[register].hardware_encoding
+            for register in _MACHINE_CLASSES[native_class_name].candidates
+        }
+    )
+    override_encoding_values = {
+        value for _, value in adapter.effective_register_encodings
+    }
+    if not override_encoding_values <= native_encoding_values:
+        raise ValueError(
+            f"{spec.form_name}.{operand.name}: adapter {adapter_name} emits values "
+            f"outside the native {operand.type_name} encoding domain"
+        )
+    return adapter.register_class
+
+
 def _storage_unit_count(source: str, target: str) -> int:
     source_bits = _MACHINE_CLASSES[source].layout.register_size_bits
     target_bits = _MACHINE_CLASSES[target].layout.register_size_bits
@@ -1241,7 +1364,7 @@ def _operand_storage_machine_class(
     spec: _DescriptorSpec,
     operand: MachineOperand,
 ) -> str:
-    machine_class = _operand_machine_class(operand)
+    machine_class = _operand_encoding_machine_class(spec, operand)
     storage_overrides = _operand_override_map(
         spec, spec.storage_overrides, "storage overrides"
     )
@@ -1251,10 +1374,10 @@ def _operand_storage_machine_class(
     adapter_overrides = _operand_override_map(
         spec, spec.encoding_adapter_overrides, "encoding-adapter overrides"
     )
-    if set(register_parts) != set(adapter_overrides):
+    if not set(register_parts) <= set(adapter_overrides):
         raise ValueError(
             f"{spec.form_name}: register-part and encoding-adapter overrides "
-            "must specialize the same operands"
+            "must encode every projected operand"
         )
     low_class = storage_overrides.get(
         operand.name,
@@ -1323,32 +1446,19 @@ def _operand_storage_machine_class(
                 f"{spec.form_name}.{operand.name}: adapter {adapter_name} does not "
                 f"exactly encode Low class {low_class}"
             )
-        source_encoding_values = (
-            {
-                value
-                for _, value in _MACHINE_ADAPTERS[
-                    operand.type_name
-                ].effective_register_encodings
-            }
+    else:
+        adapter_name = adapter_overrides.get(
+            operand.name,
+            operand.type_name
             if operand.kind is MachineOperandKind.REGISTER_ADAPTER
-            else {
-                _MACHINE_REGISTERS[register].hardware_encoding
-                for register in source.candidates
-            }
+            else None,
         )
-        projected_encoding_values = {
-            value for _, value in adapter.effective_register_encodings
-        }
-        if not projected_encoding_values <= source_encoding_values:
-            raise ValueError(
-                f"{spec.form_name}.{operand.name}: adapter {adapter_name} emits "
-                f"values outside the native {operand.type_name} encoding domain"
-            )
-    elif operand.kind is MachineOperandKind.REGISTER_ADAPTER:
+        if adapter_name is None:
+            return low_class
         encoded_registers = {
             register
             for register, _ in _MACHINE_ADAPTERS[
-                operand.type_name
+                adapter_name
             ].effective_register_encodings
         }
         required_registers = (
@@ -1356,7 +1466,7 @@ def _operand_storage_machine_class(
         )
         if not required_registers.issubset(encoded_registers):
             raise ValueError(
-                f"{spec.form_name}.{operand.name}: adapter {operand.type_name} "
+                f"{spec.form_name}.{operand.name}: adapter {adapter_name} "
                 f"does not encode the physical domain for {low_class} x{unit_count}"
             )
     return low_class
@@ -1368,7 +1478,7 @@ def _operand_unit_count(spec: _DescriptorSpec, operand: MachineOperand) -> int:
     )
     if operand.name in register_parts:
         return 1
-    machine_class = _operand_machine_class(operand)
+    machine_class = _operand_encoding_machine_class(spec, operand)
     storage_class = _operand_storage_machine_class(spec, operand)
     storage_overrides = _operand_override_map(
         spec, spec.storage_overrides, "storage overrides"
@@ -1480,7 +1590,7 @@ def _reg_classes() -> tuple[RegClass, ...]:
                 ),
                 target_bank_id=target_bank_id,
                 full_register_part_mask=(
-                    0x3 if machine_name in ("eLPredicate", "VEC256") else 0x1
+                    0x3 if machine_name in ("eLPredicate", "eWL", "VEC256") else 0x1
                 ),
                 physical_registers=machine_class.candidates,
             )
@@ -1533,7 +1643,7 @@ def _physical_register_views() -> tuple[PhysicalRegisterView, ...]:
         for operand in (*form.outputs, *form.inputs):
             if operand.kind is MachineOperandKind.IMMEDIATE:
                 continue
-            source_class_name = _operand_machine_class(operand)
+            source_class_name = _operand_encoding_machine_class(spec, operand)
             target_class_name = _operand_storage_machine_class(spec, operand)
             if _operand_unit_count(spec, operand) == 1:
                 continue

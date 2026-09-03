@@ -77,8 +77,27 @@ def test_core_descriptor_closure_is_complete() -> None:
             for index in range(5)
         },
         **{
-            (f"dm{index}", "aie2p.mcms"): (f"cml{index}", f"cmh{index}")
+            (f"cml{index}", "aie2p.mbms"): (
+                f"bmll{index}",
+                f"bmlh{index}",
+            )
             for index in range(5)
+        },
+        **{
+            (f"cmh{index}", "aie2p.mbms"): (
+                f"bmhl{index}",
+                f"bmhh{index}",
+            )
+            for index in range(5)
+        },
+        **{
+            (f"y{index}", "aie2p.vec256"): (
+                f"wl{index * 2}",
+                f"wh{index * 2}",
+                f"wl{index * 2 + 1}",
+                f"wh{index * 2 + 1}",
+            )
+            for index in range(6)
         },
     }
 
@@ -324,6 +343,13 @@ def test_low_register_classes_retain_machine_candidate_order() -> None:
     )
     assert vec256_class.alloc_unit_bits == 256
     assert vec256_class.full_register_part_mask == 0x3
+    ewl_class = next(
+        register_class
+        for register_class in AIE2P_CORE_DESCRIPTOR_SET.reg_classes
+        if register_class.name == "aie2p.ewl"
+    )
+    assert ewl_class.alloc_unit_bits == 256
+    assert ewl_class.full_register_part_mask == 0x3
     assert {
         (part.name, part.reg_class, part.mask)
         for part in AIE2P_CORE_DESCRIPTOR_SET.register_parts
@@ -332,6 +358,7 @@ def test_low_register_classes_retain_machine_candidate_order() -> None:
         ("aie2p.elpredicate.high32", "aie2p.elpredicate", 0x2),
         ("aie2p.vec256.low128", "aie2p.vec256", 0x1),
         ("aie2p.vec256.high128", "aie2p.vec256", 0x2),
+        ("aie2p.ewl.low128", "aie2p.ewl", 0x1),
     }
 
 
@@ -566,6 +593,11 @@ def test_vector_memory_descriptors_cover_each_native_width_and_value_shape() -> 
             ("f32", 32),
         ):
             shape = f"{element_type}x{width_bits // element_bits}"
+            expected_register_class = (
+                "aie2p.ewl"
+                if width_bits == 128 and element_type == "bf16"
+                else "aie2p.vec256"
+            )
             for load_pipe in ("a", "b"):
                 for address_form in ("immediate", "register"):
                     descriptor = descriptors[
@@ -573,7 +605,7 @@ def test_vector_memory_descriptors_cover_each_native_width_and_value_shape() -> 
                         f"{address_form}"
                     ]
                     payload = descriptor.operands[0]
-                    assert payload.reg_alts[0].reg_class == "aie2p.vec256"
+                    assert payload.reg_alts[0].reg_class == expected_register_class
                     assert payload.unit_count == unit_count
                     assert descriptor.effects[0].width_bits == width_bits
                     if address_form == "immediate":
@@ -583,7 +615,7 @@ def test_vector_memory_descriptors_cover_each_native_width_and_value_shape() -> 
                     f"amd.xdna.aie2p.store.{shape}.indexed.{address_form}"
                 ]
                 payload = descriptor.operands[0]
-                assert payload.reg_alts[0].reg_class == "aie2p.vec256"
+                assert payload.reg_alts[0].reg_class == expected_register_class
                 assert payload.unit_count == unit_count
                 assert descriptor.effects[0].width_bits == width_bits
                 if address_form == "immediate":
@@ -592,8 +624,13 @@ def test_vector_memory_descriptors_cover_each_native_width_and_value_shape() -> 
             load = descriptors[f"amd.xdna.aie2p.load.a.{shape}.indexed.immediate"]
             store = descriptors[f"amd.xdna.aie2p.store.{shape}.indexed.immediate"]
             if width_bits == 128:
-                assert load.operands[0].register_part == "aie2p.vec256.low128"
-                assert store.operands[0].register_part == "aie2p.vec256.low128"
+                expected_part = (
+                    "aie2p.ewl.low128"
+                    if element_type == "bf16"
+                    else "aie2p.vec256.low128"
+                )
+                assert load.operands[0].register_part == expected_part
+                assert store.operands[0].register_part == expected_part
             else:
                 assert load.operands[0].register_part is None
                 assert store.operands[0].register_part is None
@@ -627,7 +664,20 @@ def test_float_vector_memory_descriptors_reuse_bit_exact_physical_forms() -> Non
                     assert value_descriptor.encoding_field_values == (
                         storage_descriptor.encoding_field_values
                     )
-                    assert value_descriptor.operands == storage_descriptor.operands
+                    if width_bits == 128 and value_type == "bf16":
+                        assert (
+                            value_descriptor.operands[1:]
+                            == (storage_descriptor.operands[1:])
+                        )
+                        assert (
+                            value_descriptor.operands[0].reg_alts[0].reg_class
+                            == "aie2p.ewl"
+                        )
+                        assert value_descriptor.operands[0].register_part == (
+                            "aie2p.ewl.low128"
+                        )
+                    else:
+                        assert value_descriptor.operands == storage_descriptor.operands
                     assert value_descriptor.immediates == storage_descriptor.immediates
 
 
@@ -798,7 +848,7 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
         "implicit_use_crfpmask",
     ]
     assert [operand.reg_alts[0].reg_class for operand in bf16_multiply.operands] == [
-        "aie2p.mcms",
+        "aie2p.mbms",
         "aie2p.vec256",
         "aie2p.vec256",
         "aie2p.er",
@@ -806,7 +856,7 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
         "aie2p.state.crfpmask",
     ]
     assert [operand.unit_count for operand in bf16_multiply.operands] == [
-        2,
+        4,
         2,
         2,
         1,
@@ -824,12 +874,12 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
     ]
     assert [operand.reg_alts[0].reg_class for operand in bf16_convert.operands] == [
         "aie2p.vec256",
-        "aie2p.mcms",
+        "aie2p.mbms",
         "aie2p.state.srf2fflags",
         "aie2p.state.crf2fmask",
         "aie2p.mcrrnd",
     ]
-    assert [operand.unit_count for operand in bf16_convert.operands] == [2, 1, 1, 1, 1]
+    assert [operand.unit_count for operand in bf16_convert.operands] == [2, 2, 1, 1, 1]
 
     matrix_multiply = descriptors[
         "amd.xdna.aie2p.matrix.multiply.s8s8.m8n8k8.configured"
@@ -848,9 +898,48 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
     ]
     assert [operand.unit_count for operand in matrix_multiply.operands] == [4, 2, 2, 1]
 
+    bf16_outer_product = descriptors[
+        "amd.xdna.aie2p.matrix.accumulate.bf16bf16.m8n8k1.configured"
+    ]
+    assert [
+        operand.reg_alts[0].reg_class for operand in bf16_outer_product.operands[:5]
+    ] == [
+        "aie2p.mbms",
+        "aie2p.mbms",
+        "aie2p.vec256",
+        "aie2p.vec256",
+        "aie2p.er",
+    ]
+    assert [operand.unit_count for operand in bf16_outer_product.operands[:5]] == [
+        4,
+        4,
+        4,
+        4,
+        1,
+    ]
+
+    bf16_broadcast = descriptors["amd.xdna.aie2p.broadcast.bf16x8.to.bf16x32"]
+    assert [operand.reg_alts[0].reg_class for operand in bf16_broadcast.operands] == [
+        "aie2p.vec256",
+        "aie2p.ewl",
+    ]
+    assert [operand.unit_count for operand in bf16_broadcast.operands] == [2, 1]
+    assert bf16_broadcast.operands[1].register_part == "aie2p.ewl.low128"
+
+    bf16_move = descriptors["amd.xdna.aie2p.move.bf16x32"]
+    assert [operand.reg_alts[0].reg_class for operand in bf16_move.operands] == [
+        "aie2p.vec256",
+        "aie2p.vec256",
+    ]
+    assert [operand.unit_count for operand in bf16_move.operands] == [2, 2]
+
     accumulator_clear = descriptors["amd.xdna.aie2p.accumulator.clear.i32x64"]
     assert accumulator_clear.operands[0].reg_alts[0].reg_class == "aie2p.mbms"
     assert accumulator_clear.operands[0].unit_count == 4
+
+    float_accumulator_clear = descriptors["amd.xdna.aie2p.accumulator.clear.f32x64"]
+    assert float_accumulator_clear.operands[0].reg_alts[0].reg_class == ("aie2p.mbms")
+    assert float_accumulator_clear.operands[0].unit_count == 4
 
     accumulator_store = descriptors[
         "amd.xdna.aie2p.store.accumulator.i32x16.indexed.immediate"

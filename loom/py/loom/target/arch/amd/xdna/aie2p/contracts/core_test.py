@@ -18,12 +18,15 @@ from loom.dialect.view import defs as view
 from loom.target.arch.amd.xdna.aie2p.contracts.core import (
     _BF16_CONVERSION_ROUNDING,
     _BF16_ELEMENTWISE_MULTIPLY_CONTROL,
+    _BF16_OUTER_PRODUCT_MULTIPLY_CONTROL,
+    _BF16_OUTER_PRODUCT_SHUFFLE_CONTROLS,
     _I16_ELEMENTWISE_MULTIPLY_CONTROL,
     AIE2P_CORE_CONTRACT_FRAGMENT,
 )
 from loom.target.contracts import (
     DescriptorResultType,
     DescriptorRule,
+    EmitRegisterConcat,
     EmitRegisterSlice,
     ValueAliasRule,
     Vector,
@@ -177,8 +180,9 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         "amd.xdna.aie2p.splat.i32x16",
         "amd.xdna.aie2p.splat.i32x16",
         "amd.xdna.aie2p.accumulator.clear.i32x64",
+        "amd.xdna.aie2p.accumulator.clear.f32x64",
     ]
-    assert [len(rule.emit) for rule in vector_constant_rules] == [2, 2, 2, 2, 2, 1]
+    assert [len(rule.emit) for rule in vector_constant_rules] == [2, 2, 2, 2, 2, 1, 1]
 
     vector_broadcast_rules = [
         rule for rule in rules if rule.source_op is vector.vector_broadcast
@@ -410,6 +414,47 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert bf16_multiply.emit[0].immediates == {"i": _BF16_ELEMENTWISE_MULTIPLY_CONTROL}
     assert _BF16_CONVERSION_ROUNDING == 12
     assert bf16_multiply.emit[3].immediates == {"i": _BF16_CONVERSION_ROUNDING}
+
+    bf16_outer_product_rules = [
+        rule
+        for rule in rules
+        if rule.source_op is vector.vector_mma and rule.report_key == "bf16bf16_m8n8k1"
+    ]
+    assert len(bf16_outer_product_rules) == 1
+    bf16_outer_product = bf16_outer_product_rules[0]
+    assert bf16_outer_product.descriptor.key == (
+        "amd.xdna.aie2p.matrix.accumulate.bf16bf16.m8n8k1.configured"
+    )
+    assert [
+        emit.descriptor.key
+        for emit in bf16_outer_product.emit
+        if not isinstance(emit, EmitRegisterConcat)
+    ] == [
+        "amd.xdna.aie2p.broadcast.bf16x8.to.bf16x32",
+        "amd.xdna.aie2p.constant.i32.mova",
+        "amd.xdna.aie2p.shuffle.bf16x32.configured",
+        "amd.xdna.aie2p.constant.i32.mova",
+        "amd.xdna.aie2p.shuffle.bf16x32.configured",
+        "amd.xdna.aie2p.broadcast.bf16x8.to.bf16x32",
+        "amd.xdna.aie2p.move.bf16x32",
+        "amd.xdna.aie2p.constant.i32.mova",
+        "amd.xdna.aie2p.matrix.accumulate.bf16bf16.m8n8k1.configured",
+    ]
+    lhs_concat = bf16_outer_product.emit[5]
+    rhs_concat = bf16_outer_product.emit[8]
+    assert isinstance(lhs_concat, EmitRegisterConcat)
+    assert isinstance(rhs_concat, EmitRegisterConcat)
+    assert lhs_concat.result_type == Vector("bf16", lanes=64)
+    assert rhs_concat.result_type == Vector("bf16", lanes=64)
+    assert bf16_outer_product.emit[1].immediates == {
+        "i": _BF16_OUTER_PRODUCT_SHUFFLE_CONTROLS[0]
+    }
+    assert bf16_outer_product.emit[3].immediates == {
+        "i": _BF16_OUTER_PRODUCT_SHUFFLE_CONTROLS[1]
+    }
+    assert bf16_outer_product.emit[9].immediates == {
+        "i": _BF16_OUTER_PRODUCT_MULTIPLY_CONTROL
+    }
 
     vector_bitwise_rules = [
         rule

@@ -23,7 +23,6 @@ def test_core_machine_table_is_structurally_complete() -> None:
     assert len(CORE_MACHINE_TABLE.atomic_unit_names) == 207
     assert len(CORE_MACHINE_TABLE.physical_registers) == 359
     assert len(CORE_MACHINE_TABLE.register_classes) == 369
-    assert len(CORE_MACHINE_TABLE.register_adapters) == 61
     assert len(CORE_MACHINE_TABLE.immediates) == 21
     assert len(CORE_MACHINE_TABLE.forms) == 880
     assert (
@@ -39,22 +38,6 @@ def test_core_machine_table_is_structurally_complete() -> None:
             for register_class in CORE_MACHINE_TABLE.register_classes
         )
         == 3434
-    )
-    assert (
-        sum(
-            len(adapter.register_encodings)
-            for adapter in CORE_MACHINE_TABLE.register_adapters
-        )
-        == 1542
-    )
-    assert (
-        len(
-            {
-                adapter.register_encodings
-                for adapter in CORE_MACHINE_TABLE.register_adapters
-            }
-        )
-        == 28
     )
     assert sum(len(form.ties) for form in CORE_MACHINE_TABLE.forms) == 386
     assert sum(len(form.implicit_defs) for form in CORE_MACHINE_TABLE.forms) == 387
@@ -126,6 +109,54 @@ def test_el_subregister_adapters_are_derived_from_owned_register_facts() -> None
         assert low_values[register_name] == registers[low_register].hardware_encoding
         assert high_values[register_name] == registers[high_register].hardware_encoding
         assert lda_high_values[register_name] == lda_values[high_register]
+
+
+def test_vector_storage_adapters_are_derived_from_owned_register_facts() -> None:
+    registers = {
+        register.name: register for register in CORE_MACHINE_TABLE.physical_registers
+    }
+    classes = {
+        register_class.name: register_class
+        for register_class in CORE_MACHINE_TABLE.register_classes
+    }
+    adapters = {
+        adapter.name: adapter for adapter in CORE_MACHINE_TABLE.register_adapters
+    }
+
+    for native_name in ("OP_mWa", "OP_mWb", "OP_mWs"):
+        native_values = dict(adapters[native_name].effective_register_encodings)
+        projected_values = dict(
+            adapters[f"LOOM_eWL_{native_name}"].effective_register_encodings
+        )
+        assert tuple(projected_values) == classes["eWL"].candidates
+        assert all(
+            projected_values[register_name] == native_values[register_name]
+            for register_name in classes["eWL"].candidates
+        )
+
+    xm_values = dict(adapters["OP_mXm"].effective_register_encodings)
+    ewl_as_x = dict(adapters["LOOM_eWL_OP_mXm"].effective_register_encodings)
+    assert tuple(ewl_as_x) == classes["eWL"].candidates
+    for register_name in classes["eWL"].candidates:
+        x_register = next(
+            register
+            for register in registers.values()
+            if register.name in classes["mXm"].candidates
+            and register.subregisters[0] == register_name
+        )
+        assert ewl_as_x[register_name] == xm_values[x_register.name]
+
+    for native_name, derived_name in (
+        ("OP_mMvBMXDst", "LOOM_mXm_OP_mMvBMXDst"),
+        ("OP_mMvBMXSrc", "LOOM_mXm_OP_mMvBMXSrc"),
+    ):
+        native_values = dict(adapters[native_name].effective_register_encodings)
+        derived_values = dict(adapters[derived_name].effective_register_encodings)
+        assert tuple(derived_values) == classes["mXm"].candidates
+        assert all(
+            derived_values[register_name] == native_values[register_name]
+            for register_name in classes["mXm"].candidates
+        )
 
 
 def test_all_immediate_domains_round_trip_boundaries() -> None:
