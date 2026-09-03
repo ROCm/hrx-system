@@ -1,0 +1,57 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// This retains the gfx11 load and destructive-accumulate shape behind the
+// AMDGPU target boundary. The summary tracks the zero-spill contract without
+// pinning an exact coloring.
+// RUN: emit low-allocation @loop_fragmentation amdgpu.vgpr=52
+
+amdgpu.target<gfx1100> @target {subgroup_size = 32}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @loop_fragmentation(
+    %address: reg<amdgpu.vgpr>,
+    %condition: reg<amdgpu.scc>,
+    %rhs0: reg<amdgpu.vgpr x8>,
+    %rhs1: reg<amdgpu.vgpr x8>,
+    %acc0: reg<amdgpu.vgpr x8>,
+    %acc1: reg<amdgpu.vgpr x8>,
+    %acc2: reg<amdgpu.vgpr x8>) ->
+    (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm {
+  low.br ^loop(%acc0: reg<amdgpu.vgpr x8>, %acc1: reg<amdgpu.vgpr x8>, %acc2: reg<amdgpu.vgpr x8>)
+^loop(%carried0: reg<amdgpu.vgpr x8>, %carried1: reg<amdgpu.vgpr x8>, %carried2: reg<amdgpu.vgpr x8>):
+  %lhs0_low = ds_read_b128 %address
+  %lhs0_high = ds_read_b128 %address {offset = 16}
+  %lhs0 = concat(%lhs0_low, %lhs0_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %next0 = v_wmma_f32_16x16x16_f16 %lhs0, %rhs0, %carried0
+  %lhs1_low = ds_read_b128 %address {offset = 32}
+  %lhs1_high = ds_read_b128 %address {offset = 48}
+  %lhs1 = concat(%lhs1_low, %lhs1_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %next1 = v_wmma_f32_16x16x16_f16 %lhs1, %rhs1, %carried1
+  %lhs2_low = ds_read_b128 %address {offset = 64}
+  %lhs2_high = ds_read_b128 %address {offset = 80}
+  %lhs2 = concat(%lhs2_low, %lhs2_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %next2 = v_wmma_f32_16x16x16_f16 %lhs2, %rhs0, %carried2
+  low.cond_br %condition, ^backedge, ^exit_edge : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next0: reg<amdgpu.vgpr x8>, %next1: reg<amdgpu.vgpr x8>, %next2: reg<amdgpu.vgpr x8>)
+^exit_edge:
+  low.br ^exit(%next0: reg<amdgpu.vgpr x8>, %next1: reg<amdgpu.vgpr x8>, %next2: reg<amdgpu.vgpr x8>)
+^exit(%result0: reg<amdgpu.vgpr x8>, %result1: reg<amdgpu.vgpr x8>, %result2: reg<amdgpu.vgpr x8>):
+  return %result0, %result1, %result2
+}
+
+// ----
+low-allocation @loop_fragmentation
+target: target
+descriptor_set: amdgpu.rdna3.core
+mode: virtual
+assignments: 25
+remarks: 0
+spills: 0
+copies: coalesced=0 materialized=0
+classes:
+  amdgpu.vgpr: assignments=24 units=161 target_ids=0 physical=49 spill_slots=0 unassigned=0
+  amdgpu.scc: assignments=1 units=1 target_ids=0 physical=1 spill_slots=0 unassigned=0

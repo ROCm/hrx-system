@@ -1,0 +1,72 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// A single-unit condition stays live while loop-carried eight-unit aggregates
+// and four-unit load pairs compete for one 52-unit register bank. The summary
+// tracks the zero-spill contract without pinning an exact coloring.
+// RUN: emit low-allocation @loop_fragmentation test.i32=52
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @loop_fragmentation(
+    %pointer: reg<test.ptr>,
+    %condition: reg<test.i32>,
+    %rhs0: reg<test.i32 x8>,
+    %rhs1: reg<test.i32 x8>,
+    %acc0: reg<test.i32 x8>,
+    %acc1: reg<test.i32 x8>,
+    %acc2: reg<test.i32 x8>) ->
+    (reg<test.i32 x8>, reg<test.i32 x8>, reg<test.i32 x8>) asm {
+  low.br ^loop(%acc0: reg<test.i32 x8>, %acc1: reg<test.i32 x8>, %acc2: reg<test.i32 x8>)
+^loop(%carried0: reg<test.i32 x8>, %carried1: reg<test.i32 x8>, %carried2: reg<test.i32 x8>):
+  %lhs0_low = low.op<test.load.v4i32>(%pointer) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  %lhs0_high = low.op<test.load.v4i32>(%pointer) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  %lhs0 = concat(%lhs0_low, %lhs0_high) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
+  %next0 = low.op<test.accumulate.v8i32>(%lhs0, %rhs0, %carried0) :
+      (reg<test.i32 x8>, reg<test.i32 x8>, reg<test.i32 x8>) ->
+      %carried0 as reg<test.i32 x8>
+  %lhs1_low = low.op<test.load.v4i32>(%pointer) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  %lhs1_high = low.op<test.load.v4i32>(%pointer) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  %lhs1 = concat(%lhs1_low, %lhs1_high) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
+  %next1 = low.op<test.accumulate.v8i32>(%lhs1, %rhs1, %carried1) :
+      (reg<test.i32 x8>, reg<test.i32 x8>, reg<test.i32 x8>) ->
+      %carried1 as reg<test.i32 x8>
+  %lhs2_low = low.op<test.load.v4i32>(%pointer) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  %lhs2_high = low.op<test.load.v4i32>(%pointer) :
+      (reg<test.ptr>) -> reg<test.i32 x4>
+  %lhs2 = concat(%lhs2_low, %lhs2_high) :
+      (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
+  %next2 = low.op<test.accumulate.v8i32>(%lhs2, %rhs0, %carried2) :
+      (reg<test.i32 x8>, reg<test.i32 x8>, reg<test.i32 x8>) ->
+      %carried2 as reg<test.i32 x8>
+  low.cond_br %condition, ^backedge, ^exit_edge : reg<test.i32>
+^backedge:
+  low.br ^loop(%next0: reg<test.i32 x8>, %next1: reg<test.i32 x8>, %next2: reg<test.i32 x8>)
+^exit_edge:
+  low.br ^exit(%next0: reg<test.i32 x8>, %next1: reg<test.i32 x8>, %next2: reg<test.i32 x8>)
+^exit(%result0: reg<test.i32 x8>, %result1: reg<test.i32 x8>, %result2: reg<test.i32 x8>):
+  return %result0, %result1, %result2
+}
+
+// ----
+low-allocation @loop_fragmentation
+target: test_target
+descriptor_set: test.low.core
+mode: virtual
+assignments: 25
+remarks: 0
+spills: 0
+copies: coalesced=0 materialized=0
+classes:
+  test.i32: assignments=24 units=161 target_ids=49 physical=0 spill_slots=0 unassigned=0
+  test.ptr: assignments=1 units=1 target_ids=1 physical=0 spill_slots=0 unassigned=0

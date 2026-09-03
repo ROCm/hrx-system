@@ -6,6 +6,8 @@
 
 #include "loom/codegen/low/allocation.h"
 
+#include <string.h>
+
 #include "loom/codegen/low/allocation/copy_decision.h"
 #include "loom/codegen/low/allocation/edge_copy.h"
 #include "loom/codegen/low/allocation/interval_assignment.h"
@@ -90,6 +92,99 @@ static iree_status_t loom_low_allocation_validate_synthesis_mode(
       loom_low_allocation_mode_name(allocation_mode));
 }
 
+static loom_low_allocation_interval_assignment_context_t
+loom_low_allocation_make_interval_assignment_context(
+    loom_low_allocation_build_state_t* state,
+    const loom_low_function_model_t* model,
+    loom_low_allocation_search_strategy_t search_strategy,
+    iree_arena_allocator_t* arena,
+    loom_low_allocation_target_constraints_t* target_constraints,
+    loom_low_allocation_storage_lease_state_t* storage_leases) {
+  return (loom_low_allocation_interval_assignment_context_t){
+      .module = state->module,
+      .body = state->body,
+      .function_op = state->function_op,
+      .target = &state->target,
+      .liveness = &state->liveness,
+      .schedule = state->options->schedule,
+      .placement = &state->placement,
+      .target_constraints = target_constraints,
+      .required_register_values = state->options->required_register_values,
+      .unit_liveness = &state->unit_liveness,
+      .residency_model = state->options->residency_model,
+      .storage_leases = storage_leases,
+      .arena = arena,
+      .function_cfg_graph = &model->cfg_graph,
+      .search_strategy = search_strategy,
+  };
+}
+
+// Probes the fragmentation-repair coloring in isolated mutable state. The
+// caller only commits this strategy when the probe proves that it eliminates
+// every spill, leaving the ordinary first-fit result authoritative otherwise.
+static iree_status_t loom_low_allocation_fragmentation_repair_eliminates_spills(
+    loom_low_allocation_build_state_t* state,
+    const loom_low_function_model_t* model,
+    const loom_local_value_domain_t* value_domain,
+    bool* out_eliminates_spills) {
+  *out_eliminates_spills = false;
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(state->arena->block_pool, &scratch_arena);
+
+  loom_low_allocation_target_constraints_t scratch_target_constraints =
+      state->target_constraints;
+  scratch_target_constraints.emitter = (iree_diagnostic_emitter_t){0};
+  scratch_target_constraints.error_count = 0;
+  scratch_target_constraints.max_assigned_location_end_by_reg_class = NULL;
+
+  iree_status_t status = iree_ok_status();
+  const iree_host_size_t reg_class_count =
+      state->target.descriptor_set->reg_class_count;
+  if (reg_class_count != 0) {
+    status = iree_arena_allocate_array(
+        &scratch_arena, reg_class_count,
+        sizeof(
+            *scratch_target_constraints.max_assigned_location_end_by_reg_class),
+        (void**)&scratch_target_constraints
+            .max_assigned_location_end_by_reg_class);
+    if (iree_status_is_ok(status)) {
+      memset(scratch_target_constraints.max_assigned_location_end_by_reg_class,
+             0,
+             reg_class_count *
+                 sizeof(*scratch_target_constraints
+                             .max_assigned_location_end_by_reg_class));
+    }
+  }
+
+  loom_low_allocation_storage_lease_state_t scratch_storage_leases = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_low_allocation_storage_lease_state_initialize(
+        &state->options->storage_leases, state->module, state->function_op,
+        value_domain, &state->liveness, &scratch_arena,
+        &scratch_storage_leases);
+  }
+
+  loom_low_allocation_interval_assignment_result_t scratch_result = {0};
+  if (iree_status_is_ok(status)) {
+    const loom_low_allocation_interval_assignment_context_t scratch_context =
+        loom_low_allocation_make_interval_assignment_context(
+            state, model,
+            LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR,
+            &scratch_arena, &scratch_target_constraints,
+            &scratch_storage_leases);
+    status = loom_low_allocation_interval_assignment_build(&scratch_context,
+                                                           &scratch_result);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_eliminates_spills = scratch_target_constraints.error_count == 0 &&
+                             scratch_result.spill_count == 0 &&
+                             scratch_result.spill_plan_count == 0;
+  }
+
+  iree_arena_deinitialize(&scratch_arena);
+  return status;
+}
+
 iree_status_t loom_low_allocate_function(
     const loom_low_function_model_t* model,
     const loom_low_allocation_options_t* options, iree_arena_allocator_t* arena,
@@ -154,6 +249,8 @@ iree_status_t loom_low_allocate_function(
         &state.unit_liveness, options->fixed_values, options->fixed_value_count,
         arena);
   }
+  const iree_arena_checkpoint_t interval_assignment_checkpoint =
+      iree_arena_checkpoint_save(arena);
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_storage_lease_state_initialize(
         &options->storage_leases, model->module, model->function_op,
@@ -161,24 +258,40 @@ iree_status_t loom_low_allocate_function(
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     const loom_low_allocation_interval_assignment_context_t
-        interval_assignment_context = {
-            .module = state.module,
-            .body = state.body,
-            .function_op = state.function_op,
-            .target = &state.target,
-            .liveness = &state.liveness,
-            .schedule = options->schedule,
-            .placement = &state.placement,
-            .target_constraints = &state.target_constraints,
-            .required_register_values = options->required_register_values,
-            .unit_liveness = &state.unit_liveness,
-            .residency_model = options->residency_model,
-            .storage_leases = &state.storage_leases,
-            .arena = arena,
-            .function_cfg_graph = &model->cfg_graph,
-        };
+        interval_assignment_context =
+            loom_low_allocation_make_interval_assignment_context(
+                &state, model, LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FIRST_FIT,
+                arena, &state.target_constraints, &state.storage_leases);
     status = loom_low_allocation_interval_assignment_build(
         &interval_assignment_context, &state.interval_assignment);
+  }
+  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0 &&
+      state.interval_assignment.spill_count != 0) {
+    bool fragmentation_repair_eliminates_spills = false;
+    status = loom_low_allocation_fragmentation_repair_eliminates_spills(
+        &state, model, value_domain, &fragmentation_repair_eliminates_spills);
+    if (iree_status_is_ok(status) && fragmentation_repair_eliminates_spills) {
+      iree_arena_checkpoint_restore(&interval_assignment_checkpoint);
+      loom_low_allocation_target_constraints_rebuild_assignment_location_ends(
+          &state.target_constraints, /*assignments=*/NULL,
+          /*assignment_count=*/0);
+      state.storage_leases = (loom_low_allocation_storage_lease_state_t){0};
+      state.interval_assignment =
+          (loom_low_allocation_interval_assignment_result_t){0};
+      status = loom_low_allocation_storage_lease_state_initialize(
+          &options->storage_leases, model->module, model->function_op,
+          value_domain, &state.liveness, arena, &state.storage_leases);
+      if (iree_status_is_ok(status)) {
+        const loom_low_allocation_interval_assignment_context_t
+            interval_assignment_context =
+                loom_low_allocation_make_interval_assignment_context(
+                    &state, model,
+                    LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR,
+                    arena, &state.target_constraints, &state.storage_leases);
+        status = loom_low_allocation_interval_assignment_build(
+            &interval_assignment_context, &state.interval_assignment);
+      }
+    }
   }
   // Backedge placement belongs to the final physical assignment. Spill repair
   // rewrites the IR and rebuilds the frame, so relocating a provisional spill

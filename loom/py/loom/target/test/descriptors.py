@@ -180,6 +180,14 @@ def _v4i32_operand(field_name: str) -> Operand:
     return Operand(field_name, OperandRole.OPERAND, _I32_ALT, unit_count=4)
 
 
+def _v8i32_result(field_name: str = "dst") -> Operand:
+    return Operand(field_name, OperandRole.RESULT, _I32_ALT, unit_count=8)
+
+
+def _v8i32_operand(field_name: str) -> Operand:
+    return Operand(field_name, OperandRole.OPERAND, _I32_ALT, unit_count=8)
+
+
 def _phys_result(field_name: str = "dst") -> Operand:
     return Operand(field_name, OperandRole.RESULT, _PHYS_ALT)
 
@@ -589,6 +597,26 @@ TEST_LOW_MMA_I32_2X2X2_DESCRIPTOR = Descriptor(
         Operand("lhs", OperandRole.OPERAND, _I32_ALT, unit_count=4),
         Operand("rhs", OperandRole.OPERAND, _I32_ALT, unit_count=4),
         Operand("acc", OperandRole.OPERAND, _I32_ALT, unit_count=4),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs", "acc")),
+    schedule_class=_SCHEDULE_VECTOR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_ACCUMULATE_V8I32_DESCRIPTOR = Descriptor(
+    key="test.accumulate.v8i32",
+    mnemonic="test.accumulate.v8i32",
+    semantic_tag="vector.accumulate.i32x8",
+    operands=(
+        _v8i32_result(),
+        _v8i32_operand("lhs"),
+        _v8i32_operand("rhs"),
+        _v8i32_operand("acc"),
+    ),
+    constraints=(
+        Constraint(ConstraintKind.TIED, 0, 3),
+        Constraint(ConstraintKind.DESTRUCTIVE, 0, 3),
+        Constraint(ConstraintKind.EARLY_CLOBBER, 0),
     ),
     asm_forms=_asm(results=("dst",), operands=("lhs", "rhs", "acc")),
     schedule_class=_SCHEDULE_VECTOR_ALU,
@@ -1327,6 +1355,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_EARLY_TIED_V4I32_DESCRIPTOR,
         TEST_LOW_DOT4I_S8S8_DESCRIPTOR,
         TEST_LOW_MMA_I32_2X2X2_DESCRIPTOR,
+        TEST_LOW_ACCUMULATE_V8I32_DESCRIPTOR,
         TEST_LOW_SHUFFLE_V4I32_DESCRIPTOR,
         TEST_LOW_FROM_ELEMENTS_V4I32_DESCRIPTOR,
         TEST_LOW_CMP_EQ_V4I32_DESCRIPTOR,

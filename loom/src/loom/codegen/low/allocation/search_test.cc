@@ -457,6 +457,144 @@ TEST_F(LowAllocationSearchTest, PreservesFirstFitWithoutPlacementPreference) {
   loom_module_free(module);
 }
 
+TEST_F(LowAllocationSearchTest,
+       FragmentationRepairPacksScalarBelowWidePressureFrontier) {
+  loom_module_t* module = AllocateModule();
+  const loom_value_id_t scalar_value = DefineValue(module);
+  const loom_value_id_t wide_value = DefineValue(module);
+  const loom_value_id_t unrelated_scalar_value = DefineValue(module);
+  loom_module_value_ordinal_scratch_acquire(module);
+  loom_module_value_ordinal_scratch_set(module, scalar_value, /*ordinal=*/0);
+  loom_module_value_ordinal_scratch_set(module, wide_value, /*ordinal=*/1);
+  loom_module_value_ordinal_scratch_set(module, unrelated_scalar_value,
+                                        /*ordinal=*/2);
+
+  const uint64_t descriptor_set_id = 31;
+  const loom_liveness_value_class_t value_class =
+      RegisterValueClass(descriptor_set_id);
+  const loom_liveness_interval_t intervals[] = {
+      Interval(scalar_value, /*start=*/0, /*end=*/8, value_class,
+               /*unit_count=*/1),
+      Interval(wide_value, /*start=*/1, /*end=*/7, value_class,
+               /*unit_count=*/4),
+      Interval(unrelated_scalar_value, /*start=*/8, /*end=*/10, value_class,
+               /*unit_count=*/1),
+  };
+  const uint32_t interval_indices[] = {0, 1, 2};
+  const loom_value_id_t value_ids[] = {scalar_value, wide_value,
+                                       unrelated_scalar_value};
+  const loom_liveness_pressure_summary_t pressure_summaries[] = {
+      {
+          /*.value_class=*/value_class,
+          /*.peak_live_units=*/5,
+      },
+  };
+  loom_liveness_analysis_t liveness = {};
+  liveness.intervals = intervals;
+  liveness.interval_count = IREE_ARRAYSIZE(intervals);
+  liveness.value_ids = value_ids;
+  liveness.value_count = IREE_ARRAYSIZE(value_ids);
+  liveness.value_interval_indices = interval_indices;
+  liveness.pressure_summaries = pressure_summaries;
+  liveness.pressure_summary_count = IREE_ARRAYSIZE(pressure_summaries);
+
+  uint32_t unit_point_starts[] = {0, 1, 5};
+  uint32_t unit_end_points[] = {8, 7, 7, 7, 7, 10};
+  uint64_t edge_handoff_words[] = {0};
+  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  unit_liveness.point_starts_by_value_ordinal = unit_point_starts;
+  unit_liveness.end_points = unit_end_points;
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.values_with_incomplete_storage_segments = {
+      liveness.value_count,
+      edge_handoff_words,
+  };
+
+  const loom_low_reg_class_t reg_class =
+      RegClass(/*allocatable_count=*/8, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
+  const loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(&reg_class, descriptor_set_id);
+  const loom_low_resolved_target_t target = ResolvedTarget(&descriptor_set);
+  uint32_t max_assigned_location_end_by_reg_class[] = {0};
+  loom_low_allocation_target_constraints_t target_constraints = {};
+  target_constraints.target = &target;
+  target_constraints.max_assigned_location_end_by_reg_class =
+      max_assigned_location_end_by_reg_class;
+
+  const uint32_t assignment_indices_by_value_ordinal[] = {
+      UINT32_MAX,
+      UINT32_MAX,
+      UINT32_MAX,
+  };
+  loom_low_allocation_assignment_t assignments[1] = {};
+  loom_low_allocation_assignment_map_t assignment_map = {};
+  assignment_map.module = module;
+  assignment_map.liveness = &liveness;
+  assignment_map.assignments = assignments;
+  assignment_map.assignment_indices_by_value_ordinal =
+      assignment_indices_by_value_ordinal;
+
+  loom_low_allocation_active_set_t active_set = {};
+  IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
+      &liveness, /*assignment_capacity=*/3, /*unit_capacity=*/6, &arena_,
+      &active_set));
+  loom_low_allocation_storage_lease_state_t storage_leases = {};
+  loom_low_allocation_search_context_t context = {};
+  context.module = module;
+  context.descriptor_set = &descriptor_set;
+  context.liveness = &liveness;
+  context.unit_liveness = &unit_liveness;
+  context.target_constraints = &target_constraints;
+  context.assignment_map = &assignment_map;
+  context.active_set = &active_set;
+  context.storage_leases = &storage_leases;
+
+  // Ordinary first-fit retains the lowest legal location.
+  uint32_t location_base = UINT32_MAX;
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &context, &intervals[0], Capacity(/*max_units=*/8), &location_base));
+  EXPECT_EQ(location_base, 0u);
+
+  context.strategy = LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR;
+  location_base = UINT32_MAX;
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &context, &intervals[0], Capacity(/*max_units=*/8), &location_base));
+  EXPECT_EQ(location_base, 4u);
+
+  // The opposite packing direction is local to scalars whose own live range
+  // overlaps a wide value.
+  location_base = UINT32_MAX;
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &context, &intervals[2], Capacity(/*max_units=*/8), &location_base));
+  EXPECT_EQ(location_base, 0u);
+
+  // A pressure lower bound above the capacity proves that packing direction
+  // cannot make the whole class fit and retains ordinary first-fit behavior.
+  location_base = UINT32_MAX;
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &context, &intervals[0], Capacity(/*max_units=*/4), &location_base));
+  EXPECT_EQ(location_base, 0u);
+
+  loom_low_allocation_resolved_reserved_range_t reserved_range = {
+      /*.descriptor_reg_class_id=*/0,
+      /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      /*.location_base=*/0,
+      /*.location_count=*/5,
+  };
+  target_constraints.reserved_ranges = &reserved_range;
+  target_constraints.reserved_range_count = 1;
+  location_base = UINT32_MAX;
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &context, &intervals[0], Capacity(/*max_units=*/8), &location_base));
+  EXPECT_EQ(location_base, 5u);
+
+  loom_module_value_ordinal_scratch_clear(module, scalar_value);
+  loom_module_value_ordinal_scratch_clear(module, wide_value);
+  loom_module_value_ordinal_scratch_clear(module, unrelated_scalar_value);
+  loom_module_value_ordinal_scratch_release(module);
+  loom_module_free(module);
+}
+
 TEST_F(LowAllocationSearchTest, KeepsReleaseFreeLocationWithoutResidencyModel) {
   loom_module_t* module = AllocateModule();
   EXPECT_EQ(FindFreeLocationWithStorageLease(module, &arena_,

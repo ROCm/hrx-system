@@ -295,7 +295,7 @@ static void loom_low_allocation_search_find_location_for_release_policy(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_assignment_t* candidate_template,
     const loom_low_allocation_search_location_preference_t* preference,
-    uint32_t last_base, uint32_t alignment,
+    uint32_t last_base, uint32_t alignment, uint32_t scalar_packing_frontier,
     loom_low_allocation_storage_release_policy_t release_policy,
     loom_low_allocation_search_location_choice_t* out_choice) {
   *out_choice = (loom_low_allocation_search_location_choice_t){0};
@@ -312,15 +312,23 @@ static void loom_low_allocation_search_find_location_for_release_policy(
               context, preference, &candidate);
       const uint32_t first_base =
           out_choice->found ? out_choice->first_base : base;
+      const bool candidate_is_below_frontier =
+          scalar_packing_frontier != 0 && base < scalar_packing_frontier;
+      const bool choice_is_below_frontier =
+          out_choice->found && scalar_packing_frontier != 0 &&
+          out_choice->base < scalar_packing_frontier;
       if (!out_choice->found ||
-          preference_penalty < out_choice->preference_penalty) {
+          preference_penalty < out_choice->preference_penalty ||
+          (preference_penalty == out_choice->preference_penalty &&
+           candidate_is_below_frontier &&
+           (!choice_is_below_frontier || base > out_choice->base))) {
         *out_choice = (loom_low_allocation_search_location_choice_t){
             .base = base,
             .first_base = first_base,
             .preference_penalty = preference_penalty,
             .found = true,
         };
-        if (preference_penalty == 0) {
+        if (preference_penalty == 0 && scalar_packing_frontier == 0) {
           return;
         }
       }
@@ -330,6 +338,50 @@ static void loom_low_allocation_search_find_location_for_release_policy(
     }
     base += alignment;
   }
+}
+
+static bool loom_low_allocation_search_intervals_overlap(
+    const loom_liveness_interval_t* lhs, const loom_liveness_interval_t* rhs) {
+  return lhs->start_point < rhs->end_point && rhs->start_point < lhs->end_point;
+}
+
+// Returns the exclusive upper frontier where scalar values should pack from
+// high to low. A bounded class only benefits from separating scalars from the
+// interiors of wider values when its liveness lower bound still fits the
+// requested capacity.
+static uint32_t loom_low_allocation_search_scalar_packing_frontier(
+    const loom_low_allocation_search_context_t* context,
+    const loom_liveness_interval_t* interval,
+    const loom_low_allocation_class_capacity_t* capacity) {
+  if (context->strategy !=
+          LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR ||
+      interval->unit_count != 1 || !capacity->is_bounded) {
+    return 0;
+  }
+  uint32_t frontier = 0;
+  for (iree_host_size_t i = 0; i < context->liveness->pressure_summary_count;
+       ++i) {
+    const loom_liveness_pressure_summary_t* summary =
+        &context->liveness->pressure_summaries[i];
+    if (loom_liveness_value_class_equal(summary->value_class,
+                                        interval->value_class)) {
+      frontier = summary->peak_live_units;
+      break;
+    }
+  }
+  if (frontier == 0 || frontier > capacity->max_units) {
+    return 0;
+  }
+  for (iree_host_size_t i = 0; i < context->liveness->interval_count; ++i) {
+    const loom_liveness_interval_t* other = &context->liveness->intervals[i];
+    if (other->unit_count > 1 &&
+        loom_liveness_value_class_equal(other->value_class,
+                                        interval->value_class) &&
+        loom_low_allocation_search_intervals_overlap(interval, other)) {
+      return frontier;
+    }
+  }
+  return 0;
 }
 
 static uint32_t loom_low_allocation_search_location_residency_tier(
@@ -401,14 +453,19 @@ bool loom_low_allocation_search_find_free_location(
   const loom_low_allocation_search_location_preference_t preference =
       loom_low_allocation_search_location_preference(context,
                                                      &candidate_template);
+  const uint32_t scalar_packing_frontier =
+      loom_low_allocation_search_scalar_packing_frontier(context, interval,
+                                                         &capacity);
   loom_low_allocation_search_location_choice_t release_free = {0};
   loom_low_allocation_search_find_location_for_release_policy(
       context, &candidate_template, &preference, last_base, alignment,
-      LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN, &release_free);
+      scalar_packing_frontier, LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN,
+      &release_free);
   loom_low_allocation_search_location_choice_t pressure_release = {0};
   if (loom_low_allocation_search_has_pressure_release_records(context)) {
     loom_low_allocation_search_find_location_for_release_policy(
         context, &candidate_template, &preference, last_base, alignment,
+        scalar_packing_frontier,
         LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE, &pressure_release);
   }
   if (pressure_release.found &&
@@ -428,7 +485,8 @@ bool loom_low_allocation_search_find_free_location(
             context, &candidate_template, &release_free, &release_free_tier)) {
       loom_low_allocation_search_find_location_for_release_policy(
           context, &candidate_template, &preference, last_base, alignment,
-          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED, &release_allowed);
+          scalar_packing_frontier, LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED,
+          &release_allowed);
       searched_release_allowed = true;
       if (release_allowed.found && release_allowed.base < release_free.base &&
           loom_low_allocation_search_location_residency_tier(
@@ -449,7 +507,8 @@ bool loom_low_allocation_search_find_free_location(
   if (!searched_release_allowed) {
     loom_low_allocation_search_find_location_for_release_policy(
         context, &candidate_template, &preference, last_base, alignment,
-        LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED, &release_allowed);
+        scalar_packing_frontier, LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED,
+        &release_allowed);
   }
   if (release_allowed.found) {
     *out_base = release_allowed.base;

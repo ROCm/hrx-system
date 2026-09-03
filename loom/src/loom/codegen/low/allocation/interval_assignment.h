@@ -15,6 +15,7 @@
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/assignment_map.h"
+#include "loom/codegen/low/allocation/search.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/table.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
@@ -61,6 +62,8 @@ typedef struct loom_low_allocation_interval_assignment_context_t {
   // Borrowed bitmap indexed by module value ID. Set values require register
   // storage throughout allocation.
   iree_bitmap_t required_register_values;
+  // Concrete-location ordering for this whole-function assignment attempt.
+  loom_low_allocation_search_strategy_t search_strategy;
 } loom_low_allocation_interval_assignment_context_t;
 
 typedef struct loom_low_allocation_interval_assignment_result_t {
