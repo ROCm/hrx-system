@@ -71,6 +71,7 @@ loom_cc_library(
     deps = [
         ":test_diagnostic",
         ":test_file",
+        "//loom/src/loom/format/text:low_asm",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",

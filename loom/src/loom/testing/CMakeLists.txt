@@ -81,6 +81,7 @@ loom_cc_library(
     ::test_file
     iree::base
     iree::base::internal::arena
+    loom::format::text::low_asm
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
