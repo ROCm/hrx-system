@@ -21,6 +21,20 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    kernel
+  HDRS
+    "kernel.h"
+  SRCS
+    "kernel.c"
+  DEPS
+    ::registry
+    iree::base
+    loom::target::types
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     product
   HDRS
     "product.h"
@@ -47,6 +61,17 @@ loom_cc_library(
     loom::target::product_contract
     loom::target::profile
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    kernel_test
+  SRCS
+    "kernel_test.cc"
+  DEPS
+    ::kernel
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(

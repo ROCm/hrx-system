@@ -23,6 +23,17 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "kernel",
+    srcs = ["kernel.c"],
+    hdrs = ["kernel.h"],
+    deps = [
+        ":registry",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "product",
     srcs = ["product.c"],
     hdrs = ["product.h"],
@@ -43,6 +54,16 @@ loom_cc_library(
         "//loom/src/loom/target:product_contract",
         "//loom/src/loom/target:profile",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "kernel_test",
+    srcs = ["kernel_test.cc"],
+    deps = [
+        ":kernel",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

@@ -86,6 +86,28 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "product",
+    srcs = ["product.c"],
+    hdrs = ["product.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":artifact_set",
+        "//loom/src/loom/product:registry",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "product_test",
+    srcs = ["product_test.cc"],
+    deps = [
+        ":product",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_test(
     name = "program_test",
     srcs = ["program_test.cc"],
