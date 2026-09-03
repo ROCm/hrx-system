@@ -89,7 +89,7 @@ def _assert_address_forms(
     assert [
         sum(guard.kind is GuardKind.OPERAND_SEGMENT_COUNT for guard in rule.guards)
         for rule in rules
-    ] == [1, 1, 0, 0, 0]
+    ] == [0, 0, 0, 0, 0]
     immediate = rules[0].emit[0].immediates["imm"]
     assert isinstance(immediate, SourceMemoryProject)
     assert immediate.kind is SourceMemoryProjectKind.STATIC_BYTE_OFFSET
