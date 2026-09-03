@@ -1,0 +1,322 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// RUN: emit amdgpu-wait-counter-plan-json @loop_carried_lds_fragments_retain_younger_reads strategy=source
+
+amdgpu.target<gfx1100> @target {subgroup_size = 32}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @loop_carried_lds_fragments_retain_younger_reads(%address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x8>, %initial_acc: reg<amdgpu.vgpr x8>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x8>) asm {
+  %seed0_low = ds_read_b128 %address
+  %seed0_high = ds_read_b128 %address {offset = 16}
+  %seed0 = concat(%seed0_low, %seed0_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %seed1_low = ds_read_b128 %address {offset = 32}
+  %seed1_high = ds_read_b128 %address {offset = 48}
+  %seed1 = concat(%seed1_low, %seed1_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %seed2_low = ds_read_b128 %address {offset = 64}
+  %seed2_high = ds_read_b128 %address {offset = 80}
+  %seed2 = concat(%seed2_low, %seed2_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  low.br ^loop(%seed0: reg<amdgpu.vgpr x8>, %seed1: reg<amdgpu.vgpr x8>, %seed2: reg<amdgpu.vgpr x8>, %initial_acc: reg<amdgpu.vgpr x8>)
+^loop(%carried0: reg<amdgpu.vgpr x8>, %carried1: reg<amdgpu.vgpr x8>, %carried2: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>):
+  %used0 = v_wmma_f32_16x16x16_f16 %carried0, %rhs, %acc
+  %used1 = v_wmma_f32_16x16x16_f16 %carried1, %rhs, %used0
+  %used2 = v_wmma_f32_16x16x16_f16 %carried2, %rhs, %used1
+  %next0_low = ds_read_b128 %address {offset = 96}
+  %next0_high = ds_read_b128 %address {offset = 112}
+  %next0 = concat(%next0_low, %next0_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %next1_low = ds_read_b128 %address {offset = 128}
+  %next1_high = ds_read_b128 %address {offset = 144}
+  %next1 = concat(%next1_low, %next1_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %next2_low = ds_read_b128 %address {offset = 160}
+  %next2_high = ds_read_b128 %address {offset = 176}
+  %next2 = concat(%next2_low, %next2_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next0: reg<amdgpu.vgpr x8>, %next1: reg<amdgpu.vgpr x8>, %next2: reg<amdgpu.vgpr x8>, %used2: reg<amdgpu.vgpr x8>)
+^exit:
+  return %used2
+}
+
+// The six trailing reads are the stable incoming LDS epoch on each trip
+// through the loop. Consumers wait for their two-read fragments while
+// retaining the younger fragments at counts four and two.
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"loop_carried_lds_fragments_retain_younger_reads","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":12,"hazard_count":4,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":2,"packet":3,"node":3,"block":0,"scheduled_ordinal":3,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":3,"packet":4,"node":4,"block":0,"scheduled_ordinal":4,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":4,"packet":6,"node":6,"block":0,"scheduled_ordinal":6,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":5,"packet":7,"node":7,"block":0,"scheduled_ordinal":7,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":6,"packet":13,"node":13,"block":1,"scheduled_ordinal":3,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":7,"packet":14,"node":14,"block":1,"scheduled_ordinal":4,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":8,"packet":16,"node":16,"block":1,"scheduled_ordinal":6,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":9,"packet":17,"node":17,"block":1,"scheduled_ordinal":7,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":10,"packet":19,"node":19,"block":1,"scheduled_ordinal":9,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":11,"packet":20,"node":20,"block":1,"scheduled_ordinal":10,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":12,"reason_name":"amdgpu.loop_entry_derived_ssa_use","producer_node":7,"producer_packet":7,"producer_scheduled_ordinal":7,"consumer_node":9,"insertion_packet":9,"block":0,"scheduled_ordinal":9,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":6,"observed":0,"residual":6},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":14,"reason_name":"amdgpu.loop_carried_derived_ssa_use","producer_node":14,"producer_packet":14,"producer_scheduled_ordinal":4,"consumer_node":10,"insertion_packet":10,"block":1,"scheduled_ordinal":0,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":6,"observed":4,"residual":2},{"index":2,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":14,"reason_name":"amdgpu.loop_carried_derived_ssa_use","producer_node":17,"producer_packet":17,"producer_scheduled_ordinal":7,"consumer_node":11,"insertion_packet":11,"block":1,"scheduled_ordinal":1,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":4,"observed":2,"residual":2},{"index":3,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":14,"reason_name":"amdgpu.loop_carried_derived_ssa_use","producer_node":20,"producer_packet":20,"producer_scheduled_ordinal":10,"consumer_node":12,"insertion_packet":12,"block":1,"scheduled_ordinal":2,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":2,"observed":0,"residual":2}]}
+
+// ====
+// RUN: emit amdgpu-assembly @loop_carried_lds_fragments_retain_younger_reads_assembly strategy=source
+
+amdgpu.target<gfx1100> @target {subgroup_size = 32}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @loop_carried_lds_fragments_retain_younger_reads_assembly(%address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x8>, %initial_acc: reg<amdgpu.vgpr x8>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x8>) asm {
+  %seed0_low = ds_read_b128 %address
+  %seed0_high = ds_read_b128 %address {offset = 16}
+  %seed0 = concat(%seed0_low, %seed0_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %seed1_low = ds_read_b128 %address {offset = 32}
+  %seed1_high = ds_read_b128 %address {offset = 48}
+  %seed1 = concat(%seed1_low, %seed1_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %seed2_low = ds_read_b128 %address {offset = 64}
+  %seed2_high = ds_read_b128 %address {offset = 80}
+  %seed2 = concat(%seed2_low, %seed2_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  low.br ^loop(%seed0: reg<amdgpu.vgpr x8>, %seed1: reg<amdgpu.vgpr x8>, %seed2: reg<amdgpu.vgpr x8>, %initial_acc: reg<amdgpu.vgpr x8>)
+^loop(%carried0: reg<amdgpu.vgpr x8>, %carried1: reg<amdgpu.vgpr x8>, %carried2: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>):
+  %used0 = v_wmma_f32_16x16x16_f16 %carried0, %rhs, %acc
+  %used1 = v_wmma_f32_16x16x16_f16 %carried1, %rhs, %used0
+  %used2 = v_wmma_f32_16x16x16_f16 %carried2, %rhs, %used1
+  %next0_low = ds_read_b128 %address {offset = 96}
+  %next0_high = ds_read_b128 %address {offset = 112}
+  %next0 = concat(%next0_low, %next0_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %next1_low = ds_read_b128 %address {offset = 128}
+  %next1_high = ds_read_b128 %address {offset = 144}
+  %next1 = concat(%next1_low, %next1_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %next2_low = ds_read_b128 %address {offset = 160}
+  %next2_high = ds_read_b128 %address {offset = 176}
+  %next2 = concat(%next2_low, %next2_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next0: reg<amdgpu.vgpr x8>, %next1: reg<amdgpu.vgpr x8>, %next2: reg<amdgpu.vgpr x8>, %used2: reg<amdgpu.vgpr x8>)
+^exit:
+  return %used2
+}
+
+// ----
+  ds_read_b128 v[24:27], v8 offset:0
+  ds_read_b128 v[28:31], v8 offset:16
+  ds_read_b128 v[32:35], v8 offset:32
+  ds_read_b128 v[36:39], v8 offset:48
+  ds_read_b128 v[40:43], v8 offset:64
+  ds_read_b128 v[44:47], v8 offset:80
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+.Lbb1:
+  s_waitcnt vmcnt(63) lgkmcnt(4)
+  v_wmma_f32_16x16x16_f16 v[0:7], v[24:31], v[16:23], v[0:7]
+  s_waitcnt vmcnt(63) lgkmcnt(2)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_wmma_f32_16x16x16_f16 v[0:7], v[32:39], v[16:23], v[0:7]
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_wmma_f32_16x16x16_f16 v[0:7], v[40:47], v[16:23], v[0:7]
+  ds_read_b128 v[24:27], v8 offset:96
+  ds_read_b128 v[28:31], v8 offset:112
+  ds_read_b128 v[32:35], v8 offset:128
+  ds_read_b128 v[36:39], v8 offset:144
+  ds_read_b128 v[40:43], v8 offset:160
+  ds_read_b128 v[44:47], v8 offset:176
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  s_branch .Lbb1
+.Lbb3:
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @loop_entry_lds_wait_retains_younger_reads strategy=source
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @loop_entry_lds_wait_retains_younger_reads(%address: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %invariant = ds_read_b32 %address
+  %younger0 = ds_read_b32 %address {offset = 4}
+  %younger1 = ds_read_b32 %address {offset = 8}
+  low.br ^loop(%initial: reg<amdgpu.vgpr>)
+^loop(%acc: reg<amdgpu.vgpr>):
+  %next = v_add_f32 %invariant, %acc
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next: reg<amdgpu.vgpr>)
+^exit:
+  %younger = v_add_f32 %younger0, %younger1
+  %result = v_add_f32 %next, %younger
+  return %result
+}
+
+// The invariant producer is the oldest of three entry reads. Relocation to the
+// preheader must wait only for that producer and retain the two younger reads.
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"loop_entry_lds_wait_retains_younger_reads","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":3,"hazard_count":2,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":2,"packet":2,"node":2,"block":0,"scheduled_ordinal":2,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":12,"reason_name":"amdgpu.loop_entry_derived_ssa_use","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":3,"insertion_packet":3,"block":0,"scheduled_ordinal":3,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":3,"observed":2,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":5,"reason_name":"amdgpu.read_result_reuse","producer_node":2,"producer_packet":2,"producer_scheduled_ordinal":2,"consumer_node":7,"insertion_packet":7,"block":3,"scheduled_ordinal":0,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1}]}
+
+// ====
+// RUN: emit amdgpu-assembly @loop_entry_lds_wait_retains_younger_reads_assembly strategy=source
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @loop_entry_lds_wait_retains_younger_reads_assembly(%address: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %invariant = ds_read_b32 %address
+  %younger0 = ds_read_b32 %address {offset = 4}
+  %younger1 = ds_read_b32 %address {offset = 8}
+  low.br ^loop(%initial: reg<amdgpu.vgpr>)
+^loop(%acc: reg<amdgpu.vgpr>):
+  %next = v_add_f32 %invariant, %acc
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next: reg<amdgpu.vgpr>)
+^exit:
+  %younger = v_add_f32 %younger0, %younger1
+  %result = v_add_f32 %next, %younger
+  return %result
+}
+
+// ----
+  ds_read_b32 v2, v0 offset:0
+  ds_read_b32 v3, v0 offset:4
+  ds_read_b32 v0, v0 offset:8
+  s_waitcnt vmcnt(63) lgkmcnt(2)
+.Lbb1:
+  v_add_f32 v1, v2, v1
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  s_branch .Lbb1
+.Lbb3:
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  v_add_f32 v0, v3, v0
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_f32 v0, v1, v0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @loop_entry_smem_wait_remains_conservative strategy=source
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @loop_entry_smem_wait_remains_conservative(%base: reg<amdgpu.sgpr x2>, %initial: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %zero = s_mov_b32 0
+  %invariant = s_load_dword %base, %zero
+  %younger0 = s_load_dword %base, %zero {offset = 4}
+  %younger1 = s_load_dword %base, %zero {offset = 8}
+  low.br ^loop(%initial: reg<amdgpu.sgpr>, %zero: reg<amdgpu.sgpr>)
+^loop(%acc: reg<amdgpu.sgpr>, %i: reg<amdgpu.sgpr>):
+  %next = s_add_u32 %invariant, %acc
+  %one = s_mov_b32 1
+  %next_i = s_add_u32 %i, %one
+  %again = s_cmp_lt_i32 %next_i, %limit
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next: reg<amdgpu.sgpr>, %next_i: reg<amdgpu.sgpr>)
+^exit:
+  %younger = s_add_u32 %younger0, %younger1
+  %result = s_add_u32 %next, %younger
+  return %result
+}
+
+// SMEM data may complete out of issue order, so the entry dependency must keep
+// an explicit conservative provenance and drain the full scalar-memory epoch.
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"loop_entry_smem_wait_remains_conservative","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":3,"hazard_count":1,"progress":[{"index":0,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":4,"class_name":"amdgpu.smem","action":"advance","units":1},{"index":1,"packet":2,"node":2,"block":0,"scheduled_ordinal":2,"class_id":4,"class_name":"amdgpu.smem","action":"advance","units":1},{"index":2,"packet":3,"node":3,"block":0,"scheduled_ordinal":3,"class_id":4,"class_name":"amdgpu.smem","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":13,"reason_name":"amdgpu.loop_entry_conservative_ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":4,"insertion_packet":4,"block":0,"scheduled_ordinal":4,"progress_class_id":4,"progress_class_name":"amdgpu.smem","required":3,"observed":0,"residual":3}]}
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @multiblock_loop_carried_lds_wait_is_conservative strategy=source
+
+amdgpu.target<gfx1100> @target {subgroup_size = 32}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @multiblock_loop_carried_lds_wait_is_conservative(%address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x8>, %initial_acc: reg<amdgpu.vgpr x8>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x8>) asm {
+  %seed_low = ds_read_b128 %address
+  %seed_high = ds_read_b128 %address {offset = 16}
+  %seed = concat(%seed_low, %seed_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  low.br ^loop(%seed: reg<amdgpu.vgpr x8>, %initial_acc: reg<amdgpu.vgpr x8>)
+^loop(%carried: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>):
+  %used = v_wmma_f32_16x16x16_f16 %carried, %rhs, %acc
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  %next_low = ds_read_b128 %address {offset = 32}
+  %next_high = ds_read_b128 %address {offset = 48}
+  %next = concat(%next_low, %next_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  low.br ^loop(%next: reg<amdgpu.vgpr x8>, %used: reg<amdgpu.vgpr x8>)
+^exit:
+  return %used
+}
+
+// The producer epoch lives in a distinct loop block. The single-block frontier
+// proof must refuse it and retain a conservative full wait with clear
+// provenance.
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"multiblock_loop_carried_lds_wait_is_conservative","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":4,"hazard_count":2,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":2,"packet":6,"node":6,"block":2,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":3,"packet":7,"node":7,"block":2,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":12,"reason_name":"amdgpu.loop_entry_derived_ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":3,"insertion_packet":3,"block":0,"scheduled_ordinal":3,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":2,"observed":0,"residual":2},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":15,"reason_name":"amdgpu.loop_carried_conservative_ssa_use","producer_node":6,"producer_packet":6,"producer_scheduled_ordinal":0,"consumer_node":4,"insertion_packet":4,"block":1,"scheduled_ordinal":0,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1}]}
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @trailing_reset_satisfies_loop_carried_use strategy=source
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @trailing_reset_satisfies_loop_carried_use(%address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %seed = ds_read_b32 %address
+  low.br ^loop(%seed: reg<amdgpu.vgpr>)
+^loop(%carried: reg<amdgpu.vgpr>):
+  %used = v_add_u32 %carried, %rhs
+  %next = ds_read_b32 %address {offset = 4}
+  s_waitcnt {lgkmcnt = 0, vmcnt = 63}
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next: reg<amdgpu.vgpr>)
+^exit:
+  return %used
+}
+
+// The explicit trailing reset closes the loop's counter epoch. The next trip
+// therefore consumes an already-complete value and needs no loop-carried wait.
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"trailing_reset_satisfies_loop_carried_use","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":4,"hazard_count":1,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":1,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":2,"packet":4,"node":4,"block":1,"scheduled_ordinal":2,"class_id":3,"class_name":"amdgpu.lds","action":"reset","units":0},{"index":3,"packet":4,"node":4,"block":1,"scheduled_ordinal":2,"class_id":4,"class_name":"amdgpu.smem","action":"reset","units":0}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":12,"reason_name":"amdgpu.loop_entry_derived_ssa_use","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":1,"insertion_packet":1,"block":0,"scheduled_ordinal":1,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1}]}
+
+// ====
+// RUN: emit amdgpu-assembly @trailing_reset_satisfies_loop_carried_use_assembly strategy=source
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @trailing_reset_satisfies_loop_carried_use_assembly(%address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %seed = ds_read_b32 %address
+  low.br ^loop(%seed: reg<amdgpu.vgpr>)
+^loop(%carried: reg<amdgpu.vgpr>):
+  %used = v_add_u32 %carried, %rhs
+  %next = ds_read_b32 %address {offset = 4}
+  s_waitcnt {lgkmcnt = 0, vmcnt = 63}
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next: reg<amdgpu.vgpr>)
+^exit:
+  return %used
+}
+
+// ----
+  ds_read_b32 v2, v0 offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+.Lbb1:
+  v_add_u32 v2, v2, v1
+  ds_read_b32 v3, v0 offset:4
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  v_mov_b32 v2, v3
+  s_branch .Lbb1
+.Lbb3:
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @uncovered_trailing_producer_is_conservative strategy=source
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @uncovered_trailing_producer_is_conservative(%address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %seed = ds_read_b32 %address
+  low.br ^loop(%seed: reg<amdgpu.vgpr>)
+^loop(%carried: reg<amdgpu.vgpr>):
+  %used = v_add_u32 %carried, %rhs
+  %next = ds_read_b32 %address {offset = 4}
+  %younger = ds_read_b32 %address {offset = 8}
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next: reg<amdgpu.vgpr>)
+^exit:
+  %result = v_add_u32 %used, %younger
+  return %result
+}
+
+// The younger read is neither consumed on the backedge nor reset before it.
+// That epoch has no proven fixed point, so the loop use remains a conservative
+// full drain instead of borrowing a target count from an unstable count.
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"uncovered_trailing_producer_is_conservative","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":3,"hazard_count":4,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":1,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":2,"packet":4,"node":4,"block":1,"scheduled_ordinal":2,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":12,"reason_name":"amdgpu.loop_entry_derived_ssa_use","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":1,"insertion_packet":1,"block":0,"scheduled_ordinal":1,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":15,"reason_name":"amdgpu.loop_carried_conservative_ssa_use","producer_node":3,"producer_packet":3,"producer_scheduled_ordinal":1,"consumer_node":2,"insertion_packet":2,"block":1,"scheduled_ordinal":0,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1},{"index":2,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":3,"producer_packet":3,"producer_scheduled_ordinal":1,"consumer_node":6,"insertion_packet":6,"block":2,"scheduled_ordinal":0,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1},{"index":3,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":4,"producer_packet":4,"producer_scheduled_ordinal":2,"consumer_node":7,"insertion_packet":7,"block":3,"scheduled_ordinal":0,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1}]}

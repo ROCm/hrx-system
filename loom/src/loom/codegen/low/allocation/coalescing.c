@@ -82,6 +82,49 @@ static bool loom_low_allocation_coalescing_unit_ranges_overlap(
   return true;
 }
 
+// Composes source -> intermediate and intermediate -> result placement over
+// the units covered by both relations. The returned relation maps the first
+// source directly into the second result while retaining the second
+// relation's placement semantics.
+static bool loom_low_allocation_coalescing_compose_relations(
+    const loom_low_placement_relation_t* source_to_intermediate,
+    const loom_low_placement_relation_t* intermediate_to_result,
+    loom_low_placement_relation_t* out_relation) {
+  if (source_to_intermediate->result_ordinal !=
+      intermediate_to_result->source_ordinal) {
+    return false;
+  }
+  uint32_t overlap_offset = 0;
+  if (!loom_low_allocation_coalescing_unit_ranges_overlap(
+          source_to_intermediate->result_unit_offset,
+          source_to_intermediate->unit_count,
+          intermediate_to_result->source_unit_offset,
+          intermediate_to_result->unit_count, &overlap_offset)) {
+    return false;
+  }
+  const uint64_t source_to_intermediate_end =
+      (uint64_t)source_to_intermediate->result_unit_offset +
+      source_to_intermediate->unit_count;
+  const uint64_t intermediate_to_result_end =
+      (uint64_t)intermediate_to_result->source_unit_offset +
+      intermediate_to_result->unit_count;
+  const uint32_t overlap_count =
+      (uint32_t)((source_to_intermediate_end < intermediate_to_result_end
+                      ? source_to_intermediate_end
+                      : intermediate_to_result_end) -
+                 overlap_offset);
+  *out_relation = *intermediate_to_result;
+  out_relation->source_ordinal = source_to_intermediate->source_ordinal;
+  out_relation->source_unit_offset =
+      source_to_intermediate->source_unit_offset +
+      (overlap_offset - source_to_intermediate->result_unit_offset);
+  out_relation->result_unit_offset =
+      intermediate_to_result->result_unit_offset +
+      (overlap_offset - intermediate_to_result->source_unit_offset);
+  out_relation->unit_count = overlap_count;
+  return true;
+}
+
 static bool loom_low_allocation_coalescing_compose_tied_concat_source_relation(
     const loom_low_placement_relation_t* tied_relation,
     const loom_low_placement_relation_t* concat_relation,
@@ -96,30 +139,8 @@ static bool loom_low_allocation_coalescing_compose_tied_concat_source_relation(
               LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE)) {
     return false;
   }
-  uint32_t overlap_offset = 0;
-  if (!loom_low_allocation_coalescing_unit_ranges_overlap(
-          tied_relation->result_unit_offset, tied_relation->unit_count,
-          concat_relation->source_unit_offset, concat_relation->unit_count,
-          &overlap_offset)) {
-    return false;
-  }
-  const uint64_t tied_end =
-      (uint64_t)tied_relation->result_unit_offset + tied_relation->unit_count;
-  const uint64_t concat_end = (uint64_t)concat_relation->source_unit_offset +
-                              concat_relation->unit_count;
-  const uint32_t overlap_count =
-      (uint32_t)((tied_end < concat_end ? tied_end : concat_end) -
-                 overlap_offset);
-  *out_relation = *concat_relation;
-  out_relation->source_ordinal = tied_relation->source_ordinal;
-  out_relation->source_unit_offset =
-      tied_relation->source_unit_offset +
-      (overlap_offset - tied_relation->result_unit_offset);
-  out_relation->result_unit_offset =
-      concat_relation->result_unit_offset +
-      (overlap_offset - concat_relation->source_unit_offset);
-  out_relation->unit_count = overlap_count;
-  return true;
+  return loom_low_allocation_coalescing_compose_relations(
+      tied_relation, concat_relation, out_relation);
 }
 
 // Returns true when any unit in |unit_offset, unit_count| retains concrete
@@ -699,8 +720,68 @@ loom_low_allocation_coalescing_collect_tied_storage_aliases(
 }
 
 static iree_status_t
+loom_low_allocation_coalescing_collect_tied_concat_edge_aliases(
+    loom_low_allocation_coalescing_context_t* context,
+    const loom_liveness_interval_t* tied_result_interval,
+    const loom_low_placement_relation_t* tied_to_concat_relation,
+    const loom_low_allocation_assignment_t* tied_operand_assignment,
+    loom_value_id_t* ignored_value_ids, uint16_t ignored_value_capacity,
+    uint16_t* ignored_value_count) {
+  const loom_low_placement_relation_range_t edge_range =
+      loom_low_placement_relation_range_for_source_value_ordinal(
+          context->placement, tied_to_concat_relation->result_ordinal);
+  for (uint32_t i = 0; i < edge_range.count; ++i) {
+    const uint32_t relation_index =
+        context->placement
+            ->relation_indices_by_source_ordinal[edge_range.start + i];
+    const loom_low_placement_relation_t* edge_relation =
+        &context->placement->relations[relation_index];
+    if (!loom_low_placement_cause_is_edge(edge_relation->cause) ||
+        !loom_low_placement_relation_can_alias(edge_relation)) {
+      continue;
+    }
+    loom_low_placement_relation_t tied_to_edge_relation;
+    if (!loom_low_allocation_coalescing_compose_relations(
+            tied_to_concat_relation, edge_relation, &tied_to_edge_relation)) {
+      continue;
+    }
+    // Conflict filtering ignores assignments by value, so the edge proof must
+    // cover every unit of the tied result. A partial relation cannot justify
+    // ignoring overlaps against the destination's remaining units.
+    if (tied_to_edge_relation.source_unit_offset != 0 ||
+        tied_to_edge_relation.unit_count != tied_result_interval->unit_count) {
+      continue;
+    }
+    const loom_low_allocation_assignment_t* edge_assignment =
+        loom_low_allocation_coalescing_current_assignment_for_value_ordinal(
+            context, edge_relation->result_ordinal);
+    if (edge_assignment == NULL ||
+        !loom_low_allocation_storage_placement_relation_satisfied(
+            context->search_context->descriptor_set, &tied_to_edge_relation,
+            edge_assignment, tied_operand_assignment)) {
+      continue;
+    }
+
+    bool can_ignore_edge_assignment = false;
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_coalescing_can_ignore_relation_counterpart_conflict(
+            context, tied_result_interval, edge_relation, edge_assignment,
+            tied_to_edge_relation.result_unit_offset,
+            tied_to_edge_relation.unit_count, &can_ignore_edge_assignment));
+    if (can_ignore_edge_assignment) {
+      IREE_RETURN_IF_ERROR(
+          loom_low_allocation_coalescing_append_unique_value_id(
+              ignored_value_ids, ignored_value_capacity, ignored_value_count,
+              edge_assignment->value_id));
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
 loom_low_allocation_coalescing_collect_tied_concat_reservations(
     loom_low_allocation_coalescing_context_t* context,
+    const loom_liveness_interval_t* tied_result_interval,
     const loom_low_placement_relation_t* tied_relation,
     const loom_low_allocation_assignment_t* tied_operand_assignment,
     loom_value_id_t* ignored_value_ids, uint16_t ignored_value_capacity,
@@ -722,15 +803,20 @@ loom_low_allocation_coalescing_collect_tied_concat_reservations(
     const loom_low_allocation_assignment_t* concat_assignment =
         loom_low_allocation_coalescing_current_assignment_for_value_ordinal(
             context, concat_relation->result_ordinal);
-    if (concat_assignment == NULL ||
-        !loom_low_allocation_storage_placement_relation_satisfied(
+    if (concat_assignment != NULL &&
+        loom_low_allocation_storage_placement_relation_satisfied(
             context->search_context->descriptor_set, &composed_relation,
             concat_assignment, tied_operand_assignment)) {
-      continue;
+      IREE_RETURN_IF_ERROR(
+          loom_low_allocation_coalescing_append_unique_value_id(
+              ignored_value_ids, ignored_value_capacity, ignored_value_count,
+              concat_assignment->value_id));
     }
-    IREE_RETURN_IF_ERROR(loom_low_allocation_coalescing_append_unique_value_id(
-        ignored_value_ids, ignored_value_capacity, ignored_value_count,
-        concat_assignment->value_id));
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_coalescing_collect_tied_concat_edge_aliases(
+            context, tied_result_interval, &composed_relation,
+            tied_operand_assignment, ignored_value_ids, ignored_value_capacity,
+            ignored_value_count));
   }
   return iree_ok_status();
 }
@@ -1981,7 +2067,7 @@ iree_status_t loom_low_allocation_coalescing_assign_tied_interval(
           ignored_value_capacity, &ignored_value_count));
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_coalescing_collect_tied_concat_reservations(
-          context, relation, operand_assignment, ignored_value_ids,
+          context, interval, relation, operand_assignment, ignored_value_ids,
           ignored_value_capacity, &ignored_value_count));
 
   loom_value_id_t inline_storage_lease_ignored_value_ids[16];

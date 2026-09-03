@@ -69,6 +69,16 @@ typedef enum loom_amdgpu_wait_plan_reason_e {
   // A packet writes EXEC while outstanding gfx125x VMEM translations still
   // retain the execution mask used when they were issued.
   LOOM_AMDGPU_WAIT_PLAN_REASON_XCNT_EXEC_REUSE = 11,
+  // A loop-entry SSA dependency uses a target count derived from its producer
+  // position in the preheader counter epoch.
+  LOOM_AMDGPU_WAIT_PLAN_REASON_LOOP_ENTRY_DERIVED_SSA_USE = 12,
+  // A loop-entry SSA dependency requires a conservative full counter drain.
+  LOOM_AMDGPU_WAIT_PLAN_REASON_LOOP_ENTRY_CONSERVATIVE_SSA_USE = 13,
+  // A loop-carried SSA dependency uses a target count derived from the stable
+  // producer frontier of the preceding iteration.
+  LOOM_AMDGPU_WAIT_PLAN_REASON_LOOP_CARRIED_DERIVED_SSA_USE = 14,
+  // A loop-carried SSA dependency requires a conservative full counter drain.
+  LOOM_AMDGPU_WAIT_PLAN_REASON_LOOP_CARRIED_CONSERVATIVE_SSA_USE = 15,
   // Total number of wait-plan reason values.
   LOOM_AMDGPU_WAIT_PLAN_REASON_COUNT,
 } loom_amdgpu_wait_plan_reason_t;

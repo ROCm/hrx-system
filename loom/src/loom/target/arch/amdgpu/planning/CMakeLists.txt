@@ -227,6 +227,7 @@ loom_cc_library(
   SRCS
     "wait_loop.c"
   DEPS
+    ::wait_counters
     iree::base
     iree::base::internal::arena
     loom::codegen::low::schedule

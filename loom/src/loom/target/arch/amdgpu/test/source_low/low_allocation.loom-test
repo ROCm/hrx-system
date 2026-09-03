@@ -413,3 +413,32 @@ low.func.def target<amdgpu.rdna3.core>(@target) @loaded_chained_destructive_sgpr
   %active_block_count = low.op<amdgpu.s_lshr_b32.rhs_inline>(%padded_active_row_count) {imm32 = 6} : (reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
   low.return %active_block_count : reg<amdgpu.sgpr>
 }
+
+// ====
+
+// RUN: emit low-allocation-json @d16_tied_concat_loop_edge
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @d16_tied_concat_loop_edge(%condition: reg<amdgpu.scc>, %address: reg<amdgpu.vgpr>, %seed: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
+  low.br ^loop(%seed: reg<amdgpu.vgpr x8>)
+^loop(%state: reg<amdgpu.vgpr x8>):
+  low.cond_br %condition, ^body, ^exit : reg<amdgpu.scc>
+^body:
+  %low = ds_load_u16_d16 %address
+  %high = ds_load_u16_d16_hi %low, %address {offset = 2}
+  %lane1 = v_mov_b32 1
+  %lane2 = v_mov_b32 2
+  %lane3 = v_mov_b32 3
+  %lane4 = v_mov_b32 4
+  %lane5 = v_mov_b32 5
+  %lane6 = v_mov_b32 6
+  %lane7 = v_mov_b32 7
+  %next = concat(%high, %lane1, %lane2, %lane3, %lane4, %lane5, %lane6, %lane7) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  low.br ^loop(%next: reg<amdgpu.vgpr x8>)
+^exit:
+  return %state
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"d16_tied_concat_loop_edge","target":"target","descriptor_set":"amdgpu.rdna3.core","allocation_mode":"virtual","assignment_count":14,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":2,"name":"seed","type":"reg<amdgpu.vgpr x8>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":0,"end_point":1,"unit_count":8,"location":{"kind":"physical_register","base":0,"count":8}},{"index":1,"value":{"id":0,"name":"condition","type":"reg<amdgpu.scc>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.scc"},"start_point":0,"end_point":16,"unit_count":1,"location":{"kind":"physical_register","base":0,"count":1}},{"index":2,"value":{"id":1,"name":"address","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":0,"end_point":16,"unit_count":1,"location":{"kind":"physical_register","base":8,"count":1}},{"index":3,"value":{"id":4,"name":"state","type":"reg<amdgpu.vgpr x8>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":2,"end_point":17,"unit_count":8,"location":{"kind":"physical_register","base":0,"count":8}},{"index":4,"value":{"id":5,"name":"low","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":5,"end_point":15,"unit_count":1,"location":{"kind":"physical_register","base":0,"count":1}},{"index":5,"value":{"id":6,"name":"high","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":6,"end_point":15,"unit_count":1,"location":{"kind":"physical_register","base":0,"count":1}},{"index":6,"value":{"id":7,"name":"lane1","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":7,"end_point":15,"unit_count":1,"location":{"kind":"physical_register","base":1,"count":1}},{"index":7,"value":{"id":8,"name":"lane2","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":8,"end_point":15,"unit_count":1,"location":{"kind":"physical_register","base":2,"count":1}},{"index":8,"value":{"id":9,"name":"lane3","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":9,"end_point":15,"unit_count":1,"location":{"kind":"physical_register","base":3,"count":1}},{"index":9,"value":{"id":10,"name":"lane4","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":10,"end_point":15,"unit_count":1,"location":{"kind":"physical_register","base":4,"count":1}},{"index":10,"value":{"id":11,"name":"lane5","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":11,"end_point":15,"unit_count":1,"location":{"kind":"physical_register","base":5,"count":1}},{"index":11,"value":{"id":12,"name":"lane6","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":12,"end_point":15,"unit_count":1,"location":{"kind":"physical_register","base":6,"count":1}},{"index":12,"value":{"id":13,"name":"lane7","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":13,"end_point":15,"unit_count":1,"location":{"kind":"physical_register","base":7,"count":1}},{"index":13,"value":{"id":14,"name":"next","type":"reg<amdgpu.vgpr x8>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":14,"end_point":15,"unit_count":8,"location":{"kind":"physical_register","base":16,"count":8}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}

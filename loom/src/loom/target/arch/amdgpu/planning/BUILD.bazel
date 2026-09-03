@@ -200,6 +200,7 @@ loom_cc_library(
     srcs = ["wait_loop.c"],
     hdrs = ["wait_loop.h"],
     deps = [
+        ":wait_counters",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/util:cfg_graph",
