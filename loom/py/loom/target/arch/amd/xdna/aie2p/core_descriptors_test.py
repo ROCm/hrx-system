@@ -546,7 +546,7 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
             )
 
 
-def test_vector_memory_descriptors_cover_each_native_width_and_integer_shape() -> None:
+def test_vector_memory_descriptors_cover_each_native_width_and_value_shape() -> None:
     descriptors = {
         descriptor.key: descriptor
         for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
@@ -554,8 +554,14 @@ def test_vector_memory_descriptors_cover_each_native_width_and_integer_shape() -
     for width_bits in (128, 256, 512):
         unit_count = 2 if width_bits == 512 else 1
         immediate_step = width_bits // 8
-        for element_bits in (8, 16, 32):
-            shape = f"i{element_bits}x{width_bits // element_bits}"
+        for element_type, element_bits in (
+            ("i8", 8),
+            ("i16", 16),
+            ("bf16", 16),
+            ("i32", 32),
+            ("f32", 32),
+        ):
+            shape = f"{element_type}x{width_bits // element_bits}"
             for load_pipe in ("a", "b"):
                 for address_form in ("immediate", "register"):
                     descriptor = descriptors[
@@ -587,6 +593,38 @@ def test_vector_memory_descriptors_cover_each_native_width_and_integer_shape() -
             else:
                 assert load.operands[0].register_part is None
                 assert store.operands[0].register_part is None
+
+
+def test_float_vector_memory_descriptors_reuse_bit_exact_physical_forms() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+    for width_bits in (128, 256, 512):
+        for value_type, storage_type, element_bits in (
+            ("bf16", "i16", 16),
+            ("f32", "i32", 32),
+        ):
+            value_shape = f"{value_type}x{width_bits // element_bits}"
+            storage_shape = f"{storage_type}x{width_bits // element_bits}"
+            for descriptor_family in ("load.a", "load.b", "store"):
+                for address_form in ("immediate", "register"):
+                    value_descriptor = descriptors[
+                        f"amd.xdna.aie2p.{descriptor_family}.{value_shape}.indexed."
+                        f"{address_form}"
+                    ]
+                    storage_descriptor = descriptors[
+                        f"amd.xdna.aie2p.{descriptor_family}.{storage_shape}.indexed."
+                        f"{address_form}"
+                    ]
+                    assert value_descriptor.encoding_id == (
+                        storage_descriptor.encoding_id
+                    )
+                    assert value_descriptor.encoding_field_values == (
+                        storage_descriptor.encoding_field_values
+                    )
+                    assert value_descriptor.operands == storage_descriptor.operands
+                    assert value_descriptor.immediates == storage_descriptor.immediates
 
 
 def test_scalar_address_descriptors_expose_fixed_register_state() -> None:

@@ -15,6 +15,7 @@ from loom.dialect.view import defs as view
 from loom.dsl import Op
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
+    AIE2P_VECTOR_MEMORY_ELEMENT_TYPES,
 )
 from loom.target.contracts import (
     DescriptorEmitForm,
@@ -38,26 +39,16 @@ from loom.target.low_descriptors import Descriptor
 
 _I32 = Scalar("i32")
 _OFFSET = Scalar("offset")
-_I8X16 = Vector("i8", lanes=16)
-_I16X8 = Vector("i16", lanes=8)
-_I32X4 = Vector("i32", lanes=4)
-_I8X32 = Vector("i8", lanes=32)
-_I16X16 = Vector("i16", lanes=16)
-_I32X8 = Vector("i32", lanes=8)
-_I8X64 = Vector("i8", lanes=64)
-_I16X32 = Vector("i16", lanes=32)
-_I32X16 = Vector("i32", lanes=16)
-
-_VECTOR_MEMORY_SHAPES = (
-    (128, 1, 16, _I8X16),
-    (128, 2, 8, _I16X8),
-    (128, 4, 4, _I32X4),
-    (256, 1, 32, _I8X32),
-    (256, 2, 16, _I16X16),
-    (256, 4, 8, _I32X8),
-    (512, 1, 64, _I8X64),
-    (512, 2, 32, _I16X32),
-    (512, 4, 16, _I32X16),
+_VECTOR_MEMORY_SHAPES = tuple(
+    (
+        width_bits,
+        element_type,
+        element_bits // 8,
+        width_bits // element_bits,
+        Vector(element_type, lanes=width_bits // element_bits),
+    )
+    for width_bits in (128, 256, 512)
+    for element_type, element_bits in AIE2P_VECTOR_MEMORY_ELEMENT_TYPES
 )
 
 _I32_MIN = -(2**31)
@@ -389,11 +380,12 @@ def _vector_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
         for root_kind, memory_spaces in _MEMORY_ROOTS
         for (
             width_bits,
+            element_type,
             element_byte_count,
             vector_lane_count,
             vector_type,
         ) in _VECTOR_MEMORY_SHAPES
-        for shape in (f"i{element_byte_count * 8}x{vector_lane_count}",)
+        for shape in (f"{element_type}x{vector_lane_count}",)
         for operation in (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
         for descriptor_family in (
             "load.a" if operation is SourceMemoryOperation.LOAD else "store",

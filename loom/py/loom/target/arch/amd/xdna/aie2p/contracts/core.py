@@ -63,10 +63,19 @@ _INDEX = Scalar("index")
 _OFFSET = Scalar("offset")
 _I8_VECTOR = Vector("i8", minimum_lanes=1, maximum_lanes=64)
 _I16_VECTOR = Vector("i16", minimum_lanes=1, maximum_lanes=32)
+_BF16_VECTOR = Vector("bf16", minimum_lanes=1, maximum_lanes=32)
 _I32_VECTOR = Vector("i32", minimum_lanes=1, maximum_lanes=16)
+_F32_VECTOR = Vector("f32", minimum_lanes=1, maximum_lanes=16)
 _I32_MATRIX_ACCUMULATOR = Vector("i32", lanes=64)
 _I1_VECTOR = Vector("i1", minimum_lanes=1, maximum_lanes=64)
 _INTEGER_VECTOR_TYPES = (_I8_VECTOR, _I16_VECTOR, _I32_VECTOR)
+_BITCAST_VECTOR_TYPES = (
+    _I8_VECTOR,
+    _I16_VECTOR,
+    _BF16_VECTOR,
+    _I32_VECTOR,
+    _F32_VECTOR,
+)
 
 _I8_MIN = -(2**7)
 _I8_MAX = (2**7) - 1
@@ -1212,8 +1221,8 @@ def _vector_bitcast_alias_rules() -> tuple[ValueAliasRule, ...]:
                 Guard.value_type("result", result_type),
             ),
         )
-        for source_type in _INTEGER_VECTOR_TYPES
-        for result_type in _INTEGER_VECTOR_TYPES
+        for source_type in _BITCAST_VECTOR_TYPES
+        for result_type in _BITCAST_VECTOR_TYPES
     )
 
 

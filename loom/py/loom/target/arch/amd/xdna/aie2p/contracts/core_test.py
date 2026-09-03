@@ -23,6 +23,7 @@ from loom.target.contracts import (
     DescriptorResultType,
     DescriptorRule,
     ValueAliasRule,
+    Vector,
 )
 
 
@@ -541,10 +542,24 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert (
         len([rule for rule in alias_rules if rule.source_op is view.view_refine]) == 1
     )
-    assert (
-        len([rule for rule in alias_rules if rule.source_op is vector.vector_bitcast])
-        == 9
+    bitcast_rules = [
+        rule for rule in alias_rules if rule.source_op is vector.vector_bitcast
+    ]
+    bitcast_types = (
+        Vector("i8", minimum_lanes=1, maximum_lanes=64),
+        Vector("i16", minimum_lanes=1, maximum_lanes=32),
+        Vector("bf16", minimum_lanes=1, maximum_lanes=32),
+        Vector("i32", minimum_lanes=1, maximum_lanes=16),
+        Vector("f32", minimum_lanes=1, maximum_lanes=16),
     )
+    assert [
+        (rule.guards[0].type_pattern, rule.guards[1].type_pattern)
+        for rule in bitcast_rules
+    ] == [
+        (source_type, result_type)
+        for source_type in bitcast_types
+        for result_type in bitcast_types
+    ]
     assert (
         len([rule for rule in alias_rules if rule.source_op is vector.vector_broadcast])
         == 3

@@ -108,6 +108,45 @@ func.def target(@target) @copy_i32x16_dynamic_static(
   func.return
 }
 
+func.def target(@target) @copy_float_vectors(%source: buffer, %output: buffer) {
+  %source_aligned, %output_aligned = buffer.assume.alignment %source, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %source_bf16x8_view = buffer.view %source_aligned[%base] : buffer -> view<16xbf16>
+  %output_bf16x8_view = buffer.view %output_aligned[%base] : buffer -> view<16xbf16>
+  %bf16x8 = vector.load %source_bf16x8_view[8] : view<16xbf16> -> vector<8xbf16>
+  vector.store %bf16x8, %output_bf16x8_view[8] : vector<8xbf16>, view<16xbf16>
+  %source_f32x4_view = buffer.view %source_aligned[%base] : buffer -> view<8xf32>
+  %output_f32x4_view = buffer.view %output_aligned[%base] : buffer -> view<8xf32>
+  %f32x4 = vector.load %source_f32x4_view[4] : view<8xf32> -> vector<4xf32>
+  vector.store %f32x4, %output_f32x4_view[4] : vector<4xf32>, view<8xf32>
+  %source_bf16x16_view = buffer.view %source_aligned[%base] : buffer -> view<32xbf16>
+  %output_bf16x16_view = buffer.view %output_aligned[%base] : buffer -> view<32xbf16>
+  %bf16x16 = vector.load %source_bf16x16_view[16] : view<32xbf16> -> vector<16xbf16>
+  vector.store %bf16x16, %output_bf16x16_view[16] : vector<16xbf16>, view<32xbf16>
+  %source_f32x8_view = buffer.view %source_aligned[%base] : buffer -> view<16xf32>
+  %output_f32x8_view = buffer.view %output_aligned[%base] : buffer -> view<16xf32>
+  %f32x8 = vector.load %source_f32x8_view[8] : view<16xf32> -> vector<8xf32>
+  vector.store %f32x8, %output_f32x8_view[8] : vector<8xf32>, view<16xf32>
+  %source_bf16x32_view = buffer.view %source_aligned[%base] : buffer -> view<64xbf16>
+  %output_bf16x32_view = buffer.view %output_aligned[%base] : buffer -> view<64xbf16>
+  %bf16x32 = vector.load %source_bf16x32_view[32] : view<64xbf16> -> vector<32xbf16>
+  vector.store %bf16x32, %output_bf16x32_view[32] : vector<32xbf16>, view<64xbf16>
+  %source_f32x16_view = buffer.view %source_aligned[%base] : buffer -> view<32xf32>
+  %output_f32x16_view = buffer.view %output_aligned[%base] : buffer -> view<32xf32>
+  %f32x16 = vector.load %source_f32x16_view[16] : view<32xf32> -> vector<16xf32>
+  vector.store %f32x16, %output_f32x16_view[16] : vector<16xf32>, view<32xf32>
+  func.return
+}
+
+func.def target(@target) @float_vector_bitcasts(
+    %f32_values: vector<2xf32>,
+    %bf16_values: vector<4xbf16>
+) -> (vector<2xi32>, vector<4xi16>) {
+  %f32_bits = vector.bitcast %f32_values : vector<2xf32> to vector<2xi32>
+  %bf16_bits = vector.bitcast %bf16_values : vector<4xbf16> to vector<4xi16>
+  func.return %f32_bits, %bf16_bits : vector<2xi32>, vector<4xi16>
+}
+
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @volatile_copy_i8x64() asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
@@ -151,35 +190,57 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @add_i32x
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i32x16_materialized_static() asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %98 = mov.static-byte-offset 1024
-  %99 = mov.address-index %98
-  %value = vlda.512.i32x16.index %source_view, %99
-  vst.512.i32x16.index %value, %output_view, %99
+  %127 = mov.static-byte-offset 1024
+  %128 = mov.address-index %127
+  %value = vlda.512.i32x16.index %source_view, %128
+  vst.512.i32x16.index %value, %output_view, %128
   return
 }
 
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i32x16_dynamic(%element: reg<aie2p.er>) asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %106 = mov.i32 2
-  %107 = lshl %element, %106
-  %108 = mov.address-index %107
-  %value = vlda.512.i32x16.index %source_view, %108
-  vst.512.i32x16.index %value, %output_view, %108
+  %135 = mov.i32 2
+  %136 = lshl %element, %135
+  %137 = mov.address-index %136
+  %value = vlda.512.i32x16.index %source_view, %137
+  vst.512.i32x16.index %value, %output_view, %137
   return
 }
 
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i32x16_dynamic_static(%element: reg<aie2p.er>) asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %116 = mov.static-byte-offset 64
-  %117 = mov.i32 2
-  %118 = lshl %element, %117
-  %119 = add.rr %118, %116
-  %120 = mov.address-index %119
-  %value = vlda.512.i32x16.index %source_view, %120
-  %125 = add.rr %118, %116
-  %126 = mov.address-index %125
-  vst.512.i32x16.index %value, %output_view, %126
+  %145 = mov.static-byte-offset 64
+  %146 = mov.i32 2
+  %147 = lshl %element, %146
+  %148 = add.rr %147, %145
+  %149 = mov.address-index %148
+  %value = vlda.512.i32x16.index %source_view, %149
+  %154 = add.rr %147, %145
+  %155 = mov.address-index %154
+  vst.512.i32x16.index %value, %output_view, %155
   return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_float_vectors() asm {
+  %source_f32x16_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_f32x16_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %bf16x8 = vlda.128.bf16x8 %source_f32x16_view, 16
+  vst.128.bf16x8 %bf16x8, %output_f32x16_view, 16
+  %f32x4 = vlda.128.f32x4 %source_f32x16_view, 16
+  vst.128.f32x4 %f32x4, %output_f32x16_view, 16
+  %bf16x16 = vlda.256.bf16x16 %source_f32x16_view, 32
+  vst.256.bf16x16 %bf16x16, %output_f32x16_view, 32
+  %f32x8 = vlda.256.f32x8 %source_f32x16_view, 32
+  vst.256.f32x8 %f32x8, %output_f32x16_view, 32
+  %bf16x32 = vlda.512.bf16x32 %source_f32x16_view, 64
+  vst.512.bf16x32 %bf16x32, %output_f32x16_view, 64
+  %f32x16 = vlda.512.f32x16 %source_f32x16_view, 64
+  vst.512.f32x16 %f32x16, %output_f32x16_view, 64
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @float_vector_bitcasts(%f32_bits: reg<aie2p.vec256 x2>, %bf16_bits: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
+  return %f32_bits, %bf16_bits
 }
