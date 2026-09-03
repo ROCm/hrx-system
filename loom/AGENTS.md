@@ -59,6 +59,55 @@ translates it, and when it is consumed. A general provenance or rewrite
 tracking facility must be justified as reusable compiler infrastructure and
 must remain separate from program semantics.
 
+## Analysis Ownership And Traversal
+
+Every compiler traversal has one named owner and produces one canonical result.
+Information discovered by a structural, use-def, dataflow, or call-graph walk is
+retained in that owner's analysis result or pipeline plan and passed explicitly
+to downstream consumers. Queries, legalizers, emitters, and target callbacks
+consume that result; they never walk an enclosing operation, function, or module
+to rediscover it.
+
+Recursive rescanning from a per-operation query or callback is forbidden. This
+includes scans intended to make independently planned operations converge, to
+infer which producer a consumer belongs to, to recover facts discarded by an
+earlier phase, or to conservatively resolve ambiguity. Such rescanning creates
+competing sources of truth, hidden phase coupling, and superlinear JIT work. A
+recursive walk is valid only as the implementation of the pass or analysis that
+owns that scope and computes its result once.
+
+A decision spanning several operations or values requires a first-class shared
+analysis or planning boundary over the relevant SSA/dataflow component before
+per-operation selection begins. The result has explicit ownership, lifetime,
+invalidation, and lookup rules. Missing downstream information is repaired at
+that boundary instead of through local IR archaeology, repeated contract
+selection, or a target-private shadow analysis.
+
+## Target Packages Are Not Compilers
+
+The shared compiler owns traversal, analysis and dataflow infrastructure,
+planning lifecycles, candidate comparison, plan retention, invalidation,
+diagnostic protocols, and lowering order. A target package contributes
+declarative capability and legality data, target cost facts, compact descriptor
+tables, and emission mechanics. A target never grows its own whole-function
+planner, recursive IR walker, pass pipeline, SSA solver, contract rediscovery
+layer, or other compiler-within-the-compiler machinery.
+
+Target-driven work that changes code outside its target directory must uplift
+the whole compiler. The new representation or interface is target-independent,
+is consumed by every applicable target and shared pipeline stage in the same
+change, and replaces target-private machinery rather than providing a generic
+slot used by one backend. A concept needed by only one target remains inside
+that target package. If it cannot remain there cleanly, implementation stops
+until the shared abstraction and its cross-target consumers are proven.
+
+For matrix fragments and other target-shaped values, the common compiler owns
+the producer/consumer component, realization-selection lifecycle, and retained
+decision. Targets describe the legal realizations and their costs. Every target
+that exposes the shared representation participates in the shared contract;
+opaque target representations stay behind their existing target boundary
+instead of forcing backend-specific semantics into generic compiler types.
+
 ## Operation IR Boundaries
 
 Every operation field carries stable public semantics; compiler caches,
