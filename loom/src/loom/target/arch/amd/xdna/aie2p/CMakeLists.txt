@@ -138,6 +138,19 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    math_policy
+  HDRS
+    "math_policy.h"
+  SRCS
+    "math_policy.c"
+  DEPS
+    iree::base
+    loom::target::math_policy
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     array_plan
   HDRS
     "array/plan.h"
@@ -252,6 +265,7 @@ loom_cc_library(
     ::low_registry
     ::low_verify
     ::lower
+    ::math_policy
     ::pipeline_pass
     iree::base
     loom::ir

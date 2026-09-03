@@ -45,6 +45,10 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
       return loom_low_lower_make_register_type(
           context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMS, 4, out_low_type);
     }
+    if (lane_count == 32 && element_type == LOOM_SCALAR_TYPE_F32) {
+      return loom_low_lower_make_register_type(
+          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MCMS, 1, out_low_type);
+    }
     if (lane_count > 0 && lane_count <= 64 &&
         element_type == LOOM_SCALAR_TYPE_I1) {
       return loom_low_lower_make_register_type(

@@ -16,12 +16,15 @@ from loom.dialect.scf import defs as scf
 from loom.dialect.vector import defs as vector
 from loom.dialect.view import defs as view
 from loom.target.arch.amd.xdna.aie2p.contracts.core import (
+    _BF16_CONVERSION_ROUNDING,
+    _BF16_ELEMENTWISE_MULTIPLY_CONTROL,
     _I16_ELEMENTWISE_MULTIPLY_CONTROL,
     AIE2P_CORE_CONTRACT_FRAGMENT,
 )
 from loom.target.contracts import (
     DescriptorResultType,
     DescriptorRule,
+    EmitRegisterSlice,
     ValueAliasRule,
     Vector,
 )
@@ -380,6 +383,33 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert vector_multiply.emit[3].immediates == {"i": 0}
     assert vector_multiply.emit[4].immediates == {"i": 1}
     assert vector_multiply.emit[5].immediates == {"i": 0}
+
+    bf16_multiply_rules = [
+        rule for rule in rules if rule.source_op is vector.vector_mulf
+    ]
+    assert len(bf16_multiply_rules) == 1
+    bf16_multiply = bf16_multiply_rules[0]
+    assert bf16_multiply.descriptor.key == ("amd.xdna.aie2p.convert.f32x32.to.bf16x32")
+    assert [
+        emit.descriptor.key
+        for emit in bf16_multiply.emit
+        if not isinstance(emit, EmitRegisterSlice)
+    ] == [
+        "amd.xdna.aie2p.constant.i32.mova",
+        "amd.xdna.aie2p.multiply.bf16x32.configured",
+        "amd.xdna.aie2p.state.rounding.immediate",
+        "amd.xdna.aie2p.convert.f32x32.to.bf16x32",
+    ]
+    product_slice = bf16_multiply.emit[2]
+    assert isinstance(product_slice, EmitRegisterSlice)
+    assert product_slice.source.field == "wide_product"
+    assert product_slice.result.field == "product"
+    assert product_slice.unit_offset == 0
+    assert product_slice.result_type == Vector("f32", lanes=32)
+    assert _BF16_ELEMENTWISE_MULTIPLY_CONTROL == 0x3C
+    assert bf16_multiply.emit[0].immediates == {"i": _BF16_ELEMENTWISE_MULTIPLY_CONTROL}
+    assert _BF16_CONVERSION_ROUNDING == 12
+    assert bf16_multiply.emit[3].immediates == {"i": _BF16_CONVERSION_ROUNDING}
 
     vector_bitwise_rules = [
         rule

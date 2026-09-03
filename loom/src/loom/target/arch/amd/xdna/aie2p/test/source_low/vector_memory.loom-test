@@ -244,3 +244,39 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_flo
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @float_vector_bitcasts(%f32_bits: reg<aie2p.vec256 x2>, %bf16_bits: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
   return %f32_bits, %bf16_bits
 }
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @multiply_bf16x32(
+    %lhs: buffer,
+    %rhs: buffer,
+    %output: buffer
+) {
+  %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<32xbf16>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<32xbf16>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<32xbf16>
+  %lhs_value = vector.load %lhs_view[0] : view<32xbf16> -> vector<32xbf16>
+  %rhs_value = vector.load %rhs_view[0] : view<32xbf16> -> vector<32xbf16>
+  %product = vector.mulf %lhs_value, %rhs_value : vector<32xbf16>
+  vector.store %product, %output_view[0] : vector<32xbf16>, view<32xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @multiply_bf16x32() asm {
+  %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %lhs_value = vlda.512.bf16x32 %lhs_view, 0
+  %rhs_value = vlda.512.bf16x32 %rhs_view, 0
+  %18 = mova.i32 60
+  %19 = vmul.bf16x32 %lhs_value, %rhs_value, %18
+  %20 = slice %19[0] : reg<aie2p.mcms x2> -> reg<aie2p.mcms>
+  set.rounding 12
+  %product = vconv.bf16.fp32 %20
+  vst.512.bf16x32 %product, %output_view, 0
+  return
+}

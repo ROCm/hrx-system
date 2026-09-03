@@ -126,6 +126,16 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "math_policy",
+    srcs = ["math_policy.c"],
+    hdrs = ["math_policy.h"],
+    deps = [
+        "//loom/src/loom/target:math_policy",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "array_plan",
     srcs = ["array/plan.c"],
     hdrs = ["array/plan.h"],
@@ -229,6 +239,7 @@ loom_cc_library(
         ":low_registry",
         ":low_verify",
         ":lower",
+        ":math_policy",
         ":pipeline_pass",
         "//loom/src/loom/ir",
         "//loom/src/loom/pass:builder",

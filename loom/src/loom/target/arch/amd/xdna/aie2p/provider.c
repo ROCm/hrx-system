@@ -12,6 +12,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/emit/artifact_emitter.h"
 #include "loom/target/arch/amd/xdna/aie2p/low_verify.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
+#include "loom/target/arch/amd/xdna/aie2p/math_policy.h"
 #include "loom/target/arch/amd/xdna/aie2p/ops/registry.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/pass.h"
 
@@ -78,6 +79,8 @@ const loom_target_provider_t loom_aie2p_target_provider = {
         loom_aie2p_low_descriptor_registry_initialize,
     .initialize_low_lower_policy_registry =
         loom_aie2p_low_lower_policy_registry_initialize,
+    .initialize_math_policy_registry =
+        loom_aie2p_math_policy_registry_initialize,
     .low_verify_provider_list =
         {
             .count = IREE_ARRAYSIZE(kAie2pLowVerifyProviders),
