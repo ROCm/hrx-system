@@ -18,22 +18,37 @@ iree_runtime_cc_library(
     srcs = [
         "buffer.c",
         "environment.c",
+        "execution.c",
+        "module.c",
         "ref.c",
+        "reflection.c",
         "variant.c",
     ],
     hdrs = [
         "buffer.h",
         "environment.h",
+        "execution.h",
         "function.h",
+        "module.h",
         "ref.h",
+        "reflection.h",
         "scalar.h",
         "variant.h",
     ],
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:unicode",
         "//runtime/src/iree/base/threading",
     ],
+)
+
+iree_runtime_cc_library(
+    name = "module_test_provider",
+    testonly = True,
+    srcs = ["module_test_provider.c"],
+    hdrs = ["module_test_provider.h"],
+    deps = [":vm"],
 )
 
 iree_runtime_cc_test(
@@ -57,9 +72,51 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "execution_test",
+    srcs = ["execution_test.cc"],
+    deps = [
+        ":vm",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "module_test",
+    srcs = ["module_test.cc"],
+    deps = [
+        ":module_test_provider",
+        ":vm",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "module_validation_test",
+    srcs = ["module_validation_test.cc"],
+    deps = [
+        ":vm",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "ref_test",
     srcs = ["ref_test.cc"],
     deps = [
+        ":vm",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "reflection_test",
+    srcs = ["reflection_test.cc"],
+    deps = [
+        ":module_test_provider",
         ":vm",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

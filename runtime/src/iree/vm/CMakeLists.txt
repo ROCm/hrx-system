@@ -15,19 +15,39 @@ iree_cc_library(
   HDRS
     "buffer.h"
     "environment.h"
+    "execution.h"
     "function.h"
+    "module.h"
     "ref.h"
+    "reflection.h"
     "scalar.h"
     "variant.h"
   SRCS
     "buffer.c"
     "environment.c"
+    "execution.c"
+    "module.c"
     "ref.c"
+    "reflection.c"
     "variant.c"
   DEPS
     iree::base
     iree::base::internal
+    iree::base::internal::unicode
     iree::base::threading
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    module_test_provider
+  HDRS
+    "module_test_provider.h"
+  SRCS
+    "module_test_provider.c"
+  DEPS
+    ::vm
+  TESTONLY
   PUBLIC
 )
 
@@ -55,10 +75,56 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    execution_test
+  SRCS
+    "execution_test.cc"
+  DEPS
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    module_test
+  SRCS
+    "module_test.cc"
+  DEPS
+    ::module_test_provider
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    module_validation_test
+  SRCS
+    "module_validation_test.cc"
+  DEPS
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     ref_test
   SRCS
     "ref_test.cc"
   DEPS
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    reflection_test
+  SRCS
+    "reflection_test.cc"
+  DEPS
+    ::module_test_provider
     ::vm
     iree::testing::gtest
     iree::testing::gtest_main
