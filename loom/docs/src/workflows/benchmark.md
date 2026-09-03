@@ -117,8 +117,9 @@ jq '.work_items[] | {benchmark, case, launches}' results.json
 
 Dispatch measurements rotate through physical device-buffer binding sets. The
 default ring targets at least 32 MiB and at least one binding set per dispatch
-in the batch, reducing accidental hot-cache results. A deliberate hot-reuse
-experiment states that choice directly:
+in the batch, reducing accidental hot-cache results.
+`--input-ring-min-bytes=BYTES` changes the byte target without fixing the ring
+count. A deliberate hot-reuse experiment states that choice directly:
 
 ```shell
 iree-benchmark-loom program.loom \
@@ -214,7 +215,8 @@ Start with the score and its interpretation:
 jq '.work_items[] |
     {state,
      measure: .policy.measure,
-     p50: .measurement.operation_timing_ns.p50,
+     p50: (.measurement.operation_timing_ns.p50 //
+           .measurement.timing_ns.p50),
      warnings: .measurement.timing_interpretation.warnings}' results.json
 ```
 
@@ -222,6 +224,10 @@ JSONL is the better form for long sweeps and dashboards. Rows are flushed as
 planning, compilation, correctness, measurement, profiling, and comparison
 events occur. `run_id` and `candidate_id` fields join those events without
 loading the complete run in memory.
+
+The complete snapshot and event-row contracts, including queries for failures,
+interleaved repetitions, retained artifacts, counters, and profile summaries,
+live in [Read benchmark results](benchmark-results.md).
 
 ## Preserve the experiment
 
@@ -250,4 +256,5 @@ data-reuse policy, and enough work to make timing warnings empty.
 
 When a score changes, compile reports answer which emitted property changed.
 Continue with the compilation and report workflows from the
-[workflow map](index.md#compilation-and-evidence).
+[workflow map](index.md#compilation-and-evidence). The raw result and report
+query recipes remain separately indexed by the question they answer.

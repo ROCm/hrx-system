@@ -69,7 +69,8 @@ The JSON views are smaller and more stable than the complete compiler report.
 Use raw report fields only after a bounded view identifies a question that needs
 row-level scheduling, allocation, memory, or legalization evidence. The detailed
 workflow and advanced `jq` cuts live in
-`loom/docs/src/workflows/compile-reports.md`.
+`loom/docs/src/workflows/compile-reports.md` and
+`loom/docs/src/workflows/compile-report-queries.md`.
 """
 
 

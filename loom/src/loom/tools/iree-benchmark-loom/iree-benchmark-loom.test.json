@@ -61,6 +61,7 @@
             "--output-format=jsonl",
             "--artifact-bundle-dir=DIR",
             "loom/docs/src/workflows/benchmark.md",
+            "loom/docs/src/workflows/benchmark-results.md",
             "loom/docs/src/workflows/compile-reports.md"
           ]
         },

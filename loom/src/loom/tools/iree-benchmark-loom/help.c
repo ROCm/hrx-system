@@ -53,7 +53,8 @@ void iree_benchmark_loom_print_agents_md(FILE* file) {
       "```shell\n"
       "jq '{summary, benchmarks, work_items}' results.json\n"
       "jq '.work_items[] | {work_item_index,state,measure:.policy.measure,"
-      "p50:.measurement.timing_ns.p50}' results.json\n"
+      "p50:(.measurement.operation_timing_ns.p50 // "
+      ".measurement.timing_ns.p50)}' results.json\n"
       "jq '(.work_items[] | select(.failure)), .failed_samples[]?, "
       ".failures[]?' results.json\n"
       "jq 'select(.row==\"benchmark\") | .benchmark_result | "
@@ -77,7 +78,8 @@ void iree_benchmark_loom_print_agents_md(FILE* file) {
       "question that needs row-level evidence.\n"
       "\n"
       "Detailed measurement, comparison, output, and report workflows live in\n"
-      "`loom/docs/src/workflows/benchmark.md` and\n"
+      "`loom/docs/src/workflows/benchmark.md`,\n"
+      "`loom/docs/src/workflows/benchmark-results.md`, and\n"
       "`loom/docs/src/workflows/compile-reports.md`.\n");
 }
 

@@ -14,6 +14,7 @@
           "--emit-command-artifacts=",
           "--emit-kernel-requests=",
           "disables all compiler transformations",
+          "loom/docs/src/workflows/compile-report-queries.md",
           "loom/docs/src/workflows/oracles/native-schedule.md"
         ]
       }

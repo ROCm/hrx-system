@@ -1280,7 +1280,9 @@ static void loom_compile_print_agents_markdown(FILE* stream) {
       "\n"
       "Detailed compilation and report workflows live in\n"
       "`loom/docs/src/workflows/compile-artifacts.md` and\n"
-      "`loom/docs/src/workflows/compile-reports.md`. Native-to-Loom\n"
+      "`loom/docs/src/workflows/compile-reports.md`. Scenario-indexed raw\n"
+      "queries live in\n"
+      "`loom/docs/src/workflows/compile-report-queries.md`. Native-to-Loom\n"
       "reconstruction lives in\n"
       "`loom/docs/src/workflows/oracles/native-schedule.md`.\n");
 }

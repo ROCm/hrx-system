@@ -12,7 +12,8 @@ and the source-to-Low decisions that produced them.
 - `suggest` asks the selected target family for evidence-backed experiments.
 
 Raw JSON remains available after one of those views identifies the exact
-evidence that needs deeper inspection.
+evidence that needs deeper inspection. The scenario-indexed field and `jq`
+recipes live in [Query compile evidence](compile-report-queries.md).
 
 ## Capture one report
 
@@ -278,6 +279,10 @@ jq '[.spill_rows.rows[]?] |
 The focused tool supplied the question; the JSON path retrieves its provenance.
 This is materially different from scanning an undifferentiated disassembly and
 trying to recover which source decision produced it.
+
+Pressure, allocation, scheduling, wait, memory, target-capability, and IR-trace
+queries are collected in [Query compile evidence](compile-report-queries.md)
+instead of being repeated in every tool's help.
 
 ## Relate reports to benchmark results
 

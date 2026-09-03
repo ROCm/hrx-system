@@ -85,8 +85,10 @@ nav:
       - Build libraries and binaries with Bazel: workflows/build-with-bazel.md
       - Test correctness: workflows/test-correctness.md
       - Benchmark checked work: workflows/benchmark.md
+      - Read benchmark results: workflows/benchmark-results.md
       - Compile artifacts: workflows/compile-artifacts.md
       - Read compile reports: workflows/compile-reports.md
+      - Query compile evidence: workflows/compile-report-queries.md
       - External oracles:
           - Native schedule reconstruction: workflows/oracles/native-schedule.md
           - RADV and Vulkan: workflows/oracles/radv.md

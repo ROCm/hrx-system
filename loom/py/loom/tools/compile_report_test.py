@@ -139,6 +139,7 @@ def test_agents_markdown(capsys: pytest.CaptureFixture[str]) -> None:
         "jq '{status, identity, workload, entries, missing_evidence}'" in captured.out
     )
     assert "loom/docs/src/workflows/compile-reports.md" in captured.out
+    assert "loom/docs/src/workflows/compile-report-queries.md" in captured.out
 
 
 def test_agents_markdown_rejects_other_arguments(
