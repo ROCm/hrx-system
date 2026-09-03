@@ -47,6 +47,7 @@ HRX_HDRS = [
     "buffer_table.h",
     "hrx_internal.h",
     "mem_pool.h",
+    "transfer.h",
     "//libhrx/src:iree_hal_compat.h",
 ]
 

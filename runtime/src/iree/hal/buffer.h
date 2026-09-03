@@ -449,15 +449,6 @@ typedef enum iree_hal_buffer_overlap_e {
 
 typedef uint32_t iree_hal_buffer_compatibility_t;
 
-// A bitfield specifying buffer transfer behavior.
-enum iree_hal_transfer_buffer_flag_bits_t {
-  // TODO(benvanik): flags controlling blocking, flushing, invalidation, and
-  // persistence. We may also want to set a bit that causes failure on emulated
-  // transfers that would otherwise be really expensive.
-  IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT = 0,
-};
-typedef uint32_t iree_hal_transfer_buffer_flags_t;
-
 // Determines buffer mapping behavior.
 enum iree_hal_mapping_mode_bits_t {
   // Buffers are mapped as part of a scoped map-access-unmap sequence.

@@ -240,6 +240,9 @@ typedef struct hrx_device_s {
   hrx_accelerator_type_t type;
   int ordinal;
   iree_hal_device_t* hal_device;
+  // Provisioned queue used for direct host and device transfers. Borrowed from
+  // |hal_device|, which must outlive every use.
+  iree_hal_queue_t* transfer_queue;
   iree_hal_device_group_t* hal_device_group;
   bool profiling_active;
   hrx_allocator_s allocator;           // Inline, owned by device.

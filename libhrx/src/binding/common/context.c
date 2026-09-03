@@ -132,7 +132,6 @@ iree_status_t iree_hal_streaming_context_create(
                     iree_memory_order_relaxed);
   context->host_allocator = host_allocator;
   iree_slim_mutex_initialize(&context->mutex);
-  iree_slim_mutex_initialize(&context->direct_transfer_mutex);
   iree_slim_mutex_initialize(&context->pending_free_mutex);
 
   // Initialize global list pointers.
@@ -307,7 +306,6 @@ static void iree_hal_streaming_context_destroy(
   iree_hal_device_release(context->device);
 
   // Deinitialize synchronization.
-  iree_slim_mutex_deinitialize(&context->direct_transfer_mutex);
   iree_slim_mutex_deinitialize(&context->mutex);
 
   // Free context memory.

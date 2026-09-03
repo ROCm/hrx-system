@@ -1,10 +1,28 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <cstring>
 
 #include "hrx_test_fixture.hpp"
+
+namespace {
+
+struct StreamTransferResources {
+  ~StreamTransferResources() {
+    if (stream) hrx().stream_release(stream);
+    if (target_buffer) hrx().buffer_release(target_buffer);
+    if (source_buffer) hrx().buffer_release(source_buffer);
+  }
+
+  hrx_stream_t stream = nullptr;
+  hrx_buffer_t source_buffer = nullptr;
+  hrx_buffer_t target_buffer = nullptr;
+};
+
+}  // namespace
 
 TEST_CASE_METHOD(HrxTestFixture, "synchronous_h2d basic", "[transfer][h2d]") {
   hrx_allocator_t alloc = hrx().device_allocator(device_);
@@ -82,6 +100,36 @@ TEST_CASE_METHOD(HrxTestFixture, "synchronous h2d then d2h roundtrip",
   REQUIRE(memcmp(pattern, readback, sizeof(pattern)) == 0);
 
   hrx().buffer_release(buf);
+}
+
+TEST_CASE_METHOD(HrxTestFixture,
+                 "stream transfers order intervening command-buffer work",
+                 "[transfer][stream]") {
+  static constexpr size_t kBufferSize = 257;
+  std::array<uint8_t, kBufferSize> source = {};
+  std::array<uint8_t, kBufferSize> target = {};
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = static_cast<uint8_t>((i * 29 + 17) & 0xFF);
+  }
+
+  StreamTransferResources resources;
+  REQUIRE_OK(hrx().stream_create(device_, /*flags=*/0, &resources.stream));
+  REQUIRE_OK(hrx().buffer_allocate(
+      resources.stream, kBufferSize, HRX_MEMORY_TYPE_DEVICE_LOCAL,
+      HRX_BUFFER_USAGE_DEFAULT, &resources.source_buffer));
+  REQUIRE_OK(hrx().buffer_allocate(
+      resources.stream, kBufferSize, HRX_MEMORY_TYPE_DEVICE_LOCAL,
+      HRX_BUFFER_USAGE_DEFAULT, &resources.target_buffer));
+
+  REQUIRE_OK(hrx().stream_copy_h2d(resources.stream, source.data(),
+                                   resources.source_buffer, 0, source.size()));
+  REQUIRE_OK(hrx().stream_copy_buffer(resources.stream, resources.source_buffer,
+                                      0, resources.target_buffer, 0,
+                                      source.size()));
+  REQUIRE_OK(hrx().stream_copy_d2h(resources.stream, resources.target_buffer, 0,
+                                   target.data(), target.size()));
+  REQUIRE_OK(hrx().stream_synchronize(resources.stream));
+  REQUIRE(target == source);
 }
 
 TEST_CASE_METHOD(HrxTestFixture, "synchronous_h2d out of range fails",

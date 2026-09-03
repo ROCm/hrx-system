@@ -297,6 +297,40 @@ static void hrx_release_shared_state(void) {
   g_shared.shared_initialized = false;
 }
 
+// Selects the first provisioned queue whose family provides every
+// |required_roles|. Queue-family facts and the provisioned queue table are two
+// views of the same immutable device inventory; disagreement is a malformed
+// device rather than a queue-selection fallback case.
+static iree_status_t hrx_select_provisioned_queue(
+    iree_hal_device_t* device,
+    iree_hal_queue_family_role_flags_t required_roles,
+    iree_hal_queue_t** out_queue) {
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  for (iree_host_size_t i = 0; i < queue_spec->family_count; ++i) {
+    const iree_hal_queue_family_spec_t* family = &queue_spec->families[i];
+    if (family->provisioned_queue_count == 0 ||
+        !iree_all_bits_set(family->role_flags, required_roles)) {
+      continue;
+    }
+    iree_hal_queue_t* queue = iree_hal_device_queue(
+        device, (iree_hal_queue_family_ordinal_t)i, /*queue_ordinal=*/0);
+    if (!queue) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "HAL device queue family %" PRIhsz
+          " advertises a provisioned queue that cannot be resolved",
+          i);
+    }
+    *out_queue = queue;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "HAL device has no provisioned queue with required roles 0x%08" PRIx32,
+      required_roles);
+}
+
 //===----------------------------------------------------------------------===//
 // Helper: create a task-driver device
 //===----------------------------------------------------------------------===//
@@ -630,12 +664,24 @@ hrx_status_t hrx_cpu_initialize(uint32_t flags) {
     return hrx_status_from_iree(iree_status);
   }
 
+  iree_hal_queue_t* transfer_queue = NULL;
+  iree_status = hrx_select_provisioned_queue(
+      hal_device, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER, &transfer_queue);
+  if (!iree_status_is_ok(iree_status)) {
+    iree_hal_device_group_release(device_group);
+    iree_hal_device_release(hal_device);
+    iree_hal_driver_release(driver);
+    hrx_release_shared_state();
+    return hrx_status_from_iree(iree_status);
+  }
+
   hrx_device_s* dev = &g_cpu.devices[0];
   memset(dev, 0, sizeof(*dev));
   iree_atomic_ref_count_init(&dev->ref_count);
   dev->type = HRX_ACCELERATOR_CPU;
   dev->ordinal = 0;
   dev->hal_device = hal_device;
+  dev->transfer_queue = transfer_queue;
   dev->hal_device_group = device_group;
   dev->allocator.hal_allocator = iree_hal_device_allocator(hal_device);
   iree_hal_allocator_retain(dev->allocator.hal_allocator);
@@ -837,12 +883,27 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
       return hrx_status_from_iree(iree_status);
     }
 
+    iree_hal_queue_t* transfer_queue = NULL;
+    iree_status = hrx_select_provisioned_queue(
+        hal_device, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER, &transfer_queue);
+    if (!iree_status_is_ok(iree_status)) {
+      iree_hal_device_group_release(device_group);
+      iree_hal_device_release(hal_device);
+      hrx_gpu_release_created_devices(created_count);
+      iree_hal_profile_sink_release(profile_sink);
+      iree_allocator_free(alloc, device_infos);
+      iree_hal_driver_release(driver);
+      hrx_release_shared_state();
+      return hrx_status_from_iree(iree_status);
+    }
+
     hrx_device_s* dev = &g_gpu.devices[created_count];
     memset(dev, 0, sizeof(*dev));
     iree_atomic_ref_count_init(&dev->ref_count);
     dev->type = HRX_ACCELERATOR_GPU;
     dev->ordinal = created_count;
     dev->hal_device = hal_device;
+    dev->transfer_queue = transfer_queue;
     dev->hal_device_group = device_group;
     dev->allocator.hal_allocator = iree_hal_device_allocator(hal_device);
     iree_hal_allocator_retain(dev->allocator.hal_allocator);

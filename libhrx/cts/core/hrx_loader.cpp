@@ -162,6 +162,8 @@ void HrxLoader::load(const std::string& path) {
 
   LOAD(synchronous_h2d);
   LOAD(synchronous_d2h);
+  LOAD(stream_copy_h2d);
+  LOAD(stream_copy_d2h);
 
   LOAD(stream_fill_buffer);
   LOAD(stream_copy_buffer);

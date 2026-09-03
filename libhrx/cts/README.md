@@ -11,7 +11,7 @@
 | `device` | device_test.cpp | Property queries (name, arch, total_memory, compute_units, warp_size, max_shared_memory, clock_rate, pci_bus_id), device type, synchronize |
 | `allocator` | allocator_test.cpp | device_allocator() borrowed ref, allocate_buffer with params, import_buffer from host ptr, retain/release |
 | `memory` | memory_test.cpp | Stream-ordered buffer_allocate, map/unmap, read-back, zero-size rejection, buffer_get_size |
-| `transfer` | transfer_test.cpp | synchronous_h2d, synchronous_d2h, h2d+d2h roundtrip, out-of-range rejection |
+| `transfer` | transfer_test.cpp | synchronous and stream-ordered H2D/D2H transfers, command-buffer ordering, out-of-range rejection |
 | `semaphore` | semaphore_test.cpp | Create, query, signal, wait, retain/release |
 | `stream` | stream_test.cpp | Create, flush, synchronize, query, get_semaphore, timeline position, wait_on |
 | `stream_ops` | stream_ops_test.cpp | fill_buffer, copy_buffer, update_buffer with verification |

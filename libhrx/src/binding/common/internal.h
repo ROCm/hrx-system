@@ -262,8 +262,6 @@ struct iree_hal_streaming_context_t {
 
   // Synchronization.
   iree_slim_mutex_t mutex;
-  // Serializes direct HAL device transfer calls issued outside command buffers.
-  iree_slim_mutex_t direct_transfer_mutex;
 
   // Host allocator.
   iree_allocator_t host_allocator;

@@ -14,7 +14,6 @@
 #include "common/stream.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/base/threading/call_once.h"
-#include "iree/hal/buffer_transfer.h"
 
 //===----------------------------------------------------------------------===//
 // Memory management
@@ -2322,9 +2321,8 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
         z0, iree_hal_streaming_stream_synchronize(stream));
   }
 
-  if (size >= staging_threshold) {
-    iree_hal_streaming_stream_t* copy_stream =
-        stream ? stream : context->default_stream;
+  if (stream && size >= staging_threshold) {
+    iree_hal_streaming_stream_t* copy_stream = stream;
     iree_hal_streaming_buffer_t* staging = NULL;
     iree_slim_mutex_lock(&context->mutex);
     iree_status_t status =
@@ -2361,8 +2359,8 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
     iree_slim_mutex_unlock(&context->mutex);
     IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   } else {
-    // Small host-to-device transfers are faster through the direct blocking
-    // path than paying temporary host-visible allocation overhead.
+    // Blocking copies submit directly instead of materializing a temporary
+    // host-visible buffer and one-shot command buffer.
     iree_status_t direct_status = iree_hal_streaming_direct_transfer_h2d(
         context, src, dst_ref.buffer->buffer, dst_ref.offset, size);
     IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, direct_status);
@@ -2496,57 +2494,9 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
     return iree_ok_status();
   }
 
-  iree_status_t direct_status = iree_hal_streaming_direct_transfer_d2h(
-      context, src_ref.buffer->buffer, src_ref.offset, dst, size);
-  if (iree_status_is_ok(direct_status)) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_ok_status();
-  }
-  iree_status_ignore(direct_status);
-
-  iree_hal_streaming_stream_t* copy_stream =
-      stream ? stream : context->default_stream;
-  iree_hal_streaming_buffer_t* staging = NULL;
-  iree_status_t status =
-      iree_hal_streaming_memory_allocate_host_with_context_mode(
-          context, size, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
-          IREE_HAL_BUFFER_USAGE_TRANSFER,
-          /*min_alignment=*/64, IREE_HAL_STREAMING_BUFFER_CONTEXT_BORROWED,
-          &staging);
-  if (iree_status_is_ok(status) && !copy_stream->command_buffer) {
-    status = iree_hal_streaming_stream_begin(copy_stream);
-  }
-  if (iree_status_is_ok(status)) {
-    iree_slim_mutex_lock(&copy_stream->mutex);
-    status = iree_hal_streaming_stream_begin_locked(copy_stream);
-    if (iree_status_is_ok(status)) {
-      iree_hal_streaming_buffer_ref_t staging_ref = {
-          .buffer = staging,
-          .offset = 0,
-      };
-      iree_hal_buffer_ref_t src_buffer_ref =
-          iree_hal_streaming_convert_range_buffer_ref(src_ref, size);
-      iree_hal_buffer_ref_t staging_buffer_ref =
-          iree_hal_streaming_convert_range_buffer_ref(staging_ref, size);
-      status = iree_hal_command_buffer_copy_buffer(
-          copy_stream->command_buffer, src_buffer_ref, staging_buffer_ref,
-          IREE_HAL_COPY_FLAG_NONE);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_streaming_command_buffer_barrier(
-          copy_stream->command_buffer);
-    }
-    iree_slim_mutex_unlock(&copy_stream->mutex);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_stream_synchronize(copy_stream);
-  }
-  if (iree_status_is_ok(status)) {
-    memcpy(dst, staging->host_ptr, size);
-  }
-  iree_hal_streaming_temporary_host_buffer_free(context, staging);
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
-
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_direct_transfer_d2h(
+              context, src_ref.buffer->buffer, src_ref.offset, dst, size));
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
@@ -2710,11 +2660,9 @@ iree_status_t iree_hal_streaming_memcpy_device_to_device(
 
     // Transfer.
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_hal_device_transfer_d2d(
-            context->device, src_ref.buffer->buffer, src_ref.offset,
-            dst_ref.buffer->buffer, dst_ref.offset, size,
-            IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+        z0, iree_hal_streaming_direct_transfer_d2d(
+                context, src_ref.buffer->buffer, src_ref.offset,
+                dst_ref.buffer->buffer, dst_ref.offset, size));
   } else {
     // Device-to-device copy is the same as memcpy with offset 0.
     IREE_RETURN_AND_END_ZONE_IF_ERROR(

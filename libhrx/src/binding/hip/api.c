@@ -30,6 +30,7 @@
 #include "binding/hip/blocking_printf_provider.h"
 #include "binding/hip/handle_registry.h"
 #include "binding/hip/launch_params.h"
+#include "common/direct_transfer.h"
 #include "common/graph.h"
 #include "common/internal.h"
 #include "common/stream.h"
@@ -6178,21 +6179,11 @@ static hipError_t iree_hip_try_cross_context_h2d(
     return iree_status_to_hip_result(sync_status);
   }
 
-  const uint8_t* src_ptr = (const uint8_t*)src;
-  iree_device_size_t remaining = size;
-  iree_device_size_t offset = 0;
   iree_status_t transfer_status =
       iree_hal_streaming_context_synchronize(owner_context);
-  while (remaining > 0 && iree_status_is_ok(transfer_status)) {
-    const iree_device_size_t chunk_size = 4 * 1024 * 1024;
-    const iree_device_size_t this_chunk =
-        remaining < chunk_size ? remaining : chunk_size;
-    transfer_status = iree_hal_device_transfer_h2d(
-        owner_context->device, src_ptr + offset, dst_ref.buffer->buffer,
-        dst_ref.offset + offset, this_chunk,
-        IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
-    offset += this_chunk;
-    remaining -= this_chunk;
+  if (iree_status_is_ok(transfer_status)) {
+    transfer_status = iree_hal_streaming_direct_transfer_h2d(
+        owner_context, src, dst_ref.buffer->buffer, dst_ref.offset, size);
   }
   iree_hal_streaming_context_release(owner_context);
   return iree_status_to_hip_result(transfer_status);
@@ -6247,21 +6238,11 @@ static hipError_t iree_hip_try_cross_context_d2h(
     return iree_status_to_hip_result(sync_status);
   }
 
-  uint8_t* dst_ptr = (uint8_t*)dst;
-  iree_device_size_t remaining = size;
-  iree_device_size_t offset = 0;
   iree_status_t transfer_status =
       iree_hal_streaming_context_synchronize(owner_context);
-  while (remaining > 0 && iree_status_is_ok(transfer_status)) {
-    const iree_device_size_t chunk_size = 4 * 1024 * 1024;
-    const iree_device_size_t this_chunk =
-        remaining < chunk_size ? remaining : chunk_size;
-    transfer_status = iree_hal_device_transfer_d2h(
-        owner_context->device, src_ref.buffer->buffer, src_ref.offset + offset,
-        dst_ptr + offset, this_chunk, IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-        iree_infinite_timeout());
-    offset += this_chunk;
-    remaining -= this_chunk;
+  if (iree_status_is_ok(transfer_status)) {
+    transfer_status = iree_hal_streaming_direct_transfer_d2h(
+        owner_context, src_ref.buffer->buffer, src_ref.offset, dst, size);
   }
   iree_hal_streaming_context_release(owner_context);
   return iree_status_to_hip_result(transfer_status);
@@ -6346,21 +6327,19 @@ static hipError_t iree_hip_try_managed_d2d(
           iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                            "managed D2D destination copy is not supported");
     } else {
-      status = iree_hal_device_transfer_d2h(
-          src_context->device, src_ref.buffer->buffer, src_ref.offset,
-          (uint8_t*)dst_ref.buffer->host_ptr + dst_ref.offset, size,
-          IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
+      status = iree_hal_streaming_direct_transfer_d2h(
+          src_context, src_ref.buffer->buffer, src_ref.offset,
+          (uint8_t*)dst_ref.buffer->host_ptr + dst_ref.offset, size);
     }
   } else if (iree_status_is_ok(status) && src_is_managed) {
     if (!src_ref.buffer->host_ptr || !dst_ref.buffer->buffer) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "managed D2D source copy is not supported");
     } else {
-      status = iree_hal_device_transfer_h2d(
-          dst_context->device,
+      status = iree_hal_streaming_direct_transfer_h2d(
+          dst_context,
           (const uint8_t*)src_ref.buffer->host_ptr + src_ref.offset,
-          dst_ref.buffer->buffer, dst_ref.offset, size,
-          IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
+          dst_ref.buffer->buffer, dst_ref.offset, size);
     }
   }
 

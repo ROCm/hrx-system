@@ -918,9 +918,16 @@ HRX_API hrx_status_t hrx_buffer_lookup(hrx_device_t device,
 // Async host/device transfers
 //===----------------------------------------------------------------------===//
 
+// Enqueues a host-to-device transfer after prior work in |stream|. |host_src|
+// remains live and unmodified until the stream reaches the transfer's timeline
+// point. A NULL |stream| performs the transfer synchronously.
 HRX_API hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream,
                                          const void* host_src, hrx_buffer_t dst,
                                          size_t dst_offset, size_t size);
+
+// Enqueues a device-to-host transfer after prior work in |stream|. |host_dst|
+// remains live and inaccessible until the stream reaches the transfer's
+// timeline point. A NULL |stream| performs the transfer synchronously.
 HRX_API hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
                                          size_t src_offset, void* host_dst,
                                          size_t size);
