@@ -42,6 +42,7 @@ loom_cc_library(
     "include/loomc/target.h"
     "include/loomc/task.h"
     "include/loomc/workspace.h"
+    "src/artifact.h"
     "src/config.h"
     "src/context.h"
     "src/diagnostic.h"
@@ -137,6 +138,8 @@ loom_cc_library(
     loom::pass::registry
     loom::pass::tooling
     loom::pass::value_facts
+    loom::product
+    loom::product::artifact
     loom::sanitizer::options
     loom::target::function_version
     loom::target::function_version_projection

@@ -102,14 +102,14 @@ bool IsLiveSkipStatus(iree_status_code_t code) {
 }
 
 const loomc_artifact_t* FindArtifact(const loomc_result_t* result,
-                                     loomc_artifact_kind_t artifact_kind,
+                                     loomc_string_view_t artifact_role,
                                      loomc_string_view_t artifact_format) {
   for (loomc_host_size_t i = 0; i < loomc_result_artifact_count(result); ++i) {
     const loomc_artifact_t* artifact = loomc_result_artifact_at(result, i);
     if (artifact == nullptr) {
       continue;
     }
-    if (artifact->kind == artifact_kind &&
+    if (loomc_string_view_equal(artifact->role, artifact_role) &&
         loomc_string_view_equal(artifact->format, artifact_format)) {
       return artifact;
     }
@@ -530,7 +530,7 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
   ASSERT_TRUE(ResultSucceeded(result.get(), "module compilation"));
 
   const loomc_artifact_t* launch_config_artifact = FindArtifact(
-      result.get(), LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
+      result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_LAUNCH_CONFIG),
       loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE));
   ASSERT_NE(launch_config_artifact, nullptr);
   loomc_launch_config_program_t* launch_program = nullptr;
@@ -564,7 +564,8 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
   LOOMC_ASSERT_OK(emit_status);
   ASSERT_TRUE(ResultSucceeded(result.get(), "artifact emission"));
   const loomc_artifact_t* artifact = FindArtifact(
-      result.get(), LOOMC_ARTIFACT_KIND_EXECUTABLE, target.artifact_format);
+      result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
+      target.artifact_format);
   ASSERT_NE(artifact, nullptr);
   ASSERT_GE(loomc_byte_sequence_length(artifact->contents), sizeof(uint32_t));
 

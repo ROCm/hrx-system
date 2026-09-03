@@ -175,7 +175,7 @@ TEST(TargetLlvmirTest, EmitsTextAndBitcodeArtifacts) {
   const loomc_artifact_t* text_artifact =
       loomc_result_artifact_at(text_result.get(), 0);
   ASSERT_NE(text_artifact, nullptr);
-  EXPECT_EQ(text_artifact->kind, LOOMC_ARTIFACT_KIND_TEXT);
+  EXPECT_EQ(ToString(text_artifact->role), LOOMC_ARTIFACT_ROLE_KERNEL);
   EXPECT_EQ(ToString(text_artifact->format), LOOMC_ARTIFACT_FORMAT_LLVMIR_TEXT);
   EXPECT_EQ(ToString(text_artifact->identifier), "low_add.ll");
   EXPECT_NE(ToString(text_artifact->contents)
@@ -190,7 +190,7 @@ TEST(TargetLlvmirTest, EmitsTextAndBitcodeArtifacts) {
   const loomc_artifact_t* bitcode_artifact =
       loomc_result_artifact_at(bitcode_result.get(), 0);
   ASSERT_NE(bitcode_artifact, nullptr);
-  EXPECT_EQ(bitcode_artifact->kind, LOOMC_ARTIFACT_KIND_EXECUTABLE);
+  EXPECT_EQ(ToString(bitcode_artifact->role), LOOMC_ARTIFACT_ROLE_KERNEL);
   EXPECT_EQ(ToString(bitcode_artifact->format),
             LOOMC_ARTIFACT_FORMAT_LLVMIR_BITCODE);
   EXPECT_EQ(ToString(bitcode_artifact->identifier), "low_add.bc");

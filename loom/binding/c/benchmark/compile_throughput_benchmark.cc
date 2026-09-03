@@ -77,11 +77,11 @@ static iree_status_t CreateTextSourceFromViews(loomc_string_view_t identifier,
 }  // namespace
 
 const loomc_artifact_t* FindArtifact(const loomc_result_t* result,
-                                     loomc_artifact_kind_t kind,
+                                     loomc_string_view_t role,
                                      loomc_string_view_t format) {
   for (loomc_host_size_t i = 0; i < loomc_result_artifact_count(result); ++i) {
     const loomc_artifact_t* artifact = loomc_result_artifact_at(result, i);
-    if (artifact != nullptr && artifact->kind == kind &&
+    if (artifact != nullptr && loomc_string_view_equal(artifact->role, role) &&
         loomc_string_view_equal(artifact->format, format)) {
       return artifact;
     }
@@ -90,12 +90,12 @@ const loomc_artifact_t* FindArtifact(const loomc_result_t* result,
 }
 
 iree_status_t ValidateArtifact(const loomc_result_t* result,
-                               loomc_artifact_kind_t kind,
+                               loomc_string_view_t role,
                                loomc_string_view_t format,
                                iree_host_size_t minimum_data_length,
                                const char* description,
                                int64_t* out_artifact_bytes) {
-  const loomc_artifact_t* artifact = FindArtifact(result, kind, format);
+  const loomc_artifact_t* artifact = FindArtifact(result, role, format);
   if (artifact == nullptr) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
                             "%s artifact was not produced", description);
@@ -166,7 +166,7 @@ iree_status_t ReadArtifactPrefix(const loomc_artifact_t* artifact,
 iree_status_t ValidateModuleBytecodeArtifact(const loomc_result_t* result,
                                              int64_t* out_artifact_bytes) {
   return ValidateArtifact(
-      result, LOOMC_ARTIFACT_KIND_MODULE,
+      result, loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_MODULE),
       loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE),
       /*minimum_data_length=*/1, "module bytecode", out_artifact_bytes);
 }

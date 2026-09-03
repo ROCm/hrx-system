@@ -162,8 +162,8 @@ typedef struct loomc_cmd_program_t {
 
   /// Portable command-program artifact.
   ///
-  /// The artifact identifier is `symbol`, its kind is
-  /// `LOOMC_ARTIFACT_KIND_EXECUTABLE`, and its format is
+  /// The artifact identifier is `symbol`, its role is
+  /// `LOOMC_ARTIFACT_ROLE_COMMAND_PROGRAM`, and its format is
   /// `LOOMC_ARTIFACT_FORMAT_CMD_PROGRAM`.
   loomc_artifact_t artifact;
 
@@ -186,10 +186,10 @@ typedef struct loomc_cmd_entry_requirement_t {
 
 /// Builds portable command programs and optional kernel source requests.
 ///
-/// The returned product has the command descriptor, one executable artifact
-/// and exported root per selected command root, and one requirement per
-/// product-wide executable-entry binding. Command-specific queries expose the
-/// root symbols, root-to-requirement projections, and requirement symbols.
+/// The returned product has the command descriptor, one command-program
+/// artifact and exported root per selected command root, and one requirement
+/// per product-wide executable-entry binding. Command-specific queries expose
+/// the root symbols, root-to-requirement projections, and requirement symbols.
 /// The product owns all serialized bytes and copied names and retains no source
 /// module, link index, workspace, compiler plan, or analysis state.
 ///

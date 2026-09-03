@@ -148,12 +148,12 @@ class SpirvScenarioBase : public TargetCompileScenario {
 
     int64_t artifact_bytes = 0;
     IREE_RETURN_IF_ERROR(ValidateArtifact(
-        result.get(), LOOMC_ARTIFACT_KIND_EXECUTABLE,
+        result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
         loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV), sizeof(uint32_t),
         "SPIR-V executable", &artifact_bytes));
 
     const loomc_artifact_t* artifact = loomc::bench::FindArtifact(
-        result.get(), LOOMC_ARTIFACT_KIND_EXECUTABLE,
+        result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
         loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV));
     uint32_t magic = 0;
     IREE_RETURN_IF_ERROR(ReadArtifactPrefix(

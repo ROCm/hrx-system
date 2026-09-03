@@ -101,14 +101,14 @@ static loomc_status_t require_successful_result(const loomc_result_t* result,
 }
 
 static const loomc_artifact_t* find_result_artifact(
-    const loomc_result_t* result, loomc_artifact_kind_t kind,
+    const loomc_result_t* result, loomc_string_view_t role,
     loomc_string_view_t format) {
   for (loomc_host_size_t i = 0; i < loomc_result_artifact_count(result); ++i) {
     const loomc_artifact_t* artifact = loomc_result_artifact_at(result, i);
     if (artifact == NULL) {
       continue;
     }
-    if (artifact->kind == kind &&
+    if (loomc_string_view_equal(artifact->role, role) &&
         loomc_string_view_equal(artifact->format, format)) {
       return artifact;
     }
@@ -218,7 +218,7 @@ static loomc_status_t compile_module(compile_text_state_t* state) {
 static loomc_status_t write_module_artifact_to_stdout(
     compile_text_state_t* state) {
   const loomc_artifact_t* artifact = find_result_artifact(
-      state->result, LOOMC_ARTIFACT_KIND_MODULE,
+      state->result, loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_MODULE),
       loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_TEXT));
   if (artifact == NULL) {
     return loomc_make_status(LOOMC_STATUS_NOT_FOUND,

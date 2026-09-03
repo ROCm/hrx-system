@@ -585,7 +585,7 @@ TEST(TargetTest, EmitReturnsArtifactManifestSidecar) {
 
   const loomc_artifact_t* primary = loomc_result_artifact_at(result.get(), 0);
   ASSERT_NE(primary, nullptr);
-  EXPECT_EQ(primary->kind, LOOMC_ARTIFACT_KIND_EXECUTABLE);
+  EXPECT_EQ(ToString(primary->role), LOOMC_ARTIFACT_ROLE_KERNEL);
   EXPECT_EQ(ToString(primary->format), "fake-elf");
   EXPECT_EQ(ToString(primary->identifier), "fake.bin");
   EXPECT_EQ(ToString(primary->contents), std::string("\x7F"
@@ -594,7 +594,7 @@ TEST(TargetTest, EmitReturnsArtifactManifestSidecar) {
 
   const loomc_artifact_t* manifest = loomc_result_artifact_at(result.get(), 1);
   ASSERT_NE(manifest, nullptr);
-  EXPECT_EQ(manifest->kind, LOOMC_ARTIFACT_KIND_REPORT);
+  EXPECT_EQ(ToString(manifest->role), LOOMC_ARTIFACT_ROLE_ARTIFACT_MANIFEST);
   EXPECT_EQ(ToString(manifest->format),
             LOOMC_ARTIFACT_FORMAT_ARTIFACT_MANIFEST_JSON);
   EXPECT_EQ(ToString(manifest->identifier), "fake.bin.manifest.json");
@@ -637,13 +637,13 @@ TEST(TargetTest, EmitReturnsCompileReportArtifact) {
 
   const loomc_artifact_t* primary = loomc_result_artifact_at(result.get(), 0);
   ASSERT_NE(primary, nullptr);
-  EXPECT_EQ(primary->kind, LOOMC_ARTIFACT_KIND_EXECUTABLE);
+  EXPECT_EQ(ToString(primary->role), LOOMC_ARTIFACT_ROLE_KERNEL);
   EXPECT_EQ(ToString(primary->format), "fake-elf");
   EXPECT_EQ(ToString(primary->identifier), "fake.bin");
 
   const loomc_artifact_t* report = loomc_result_artifact_at(result.get(), 1);
   ASSERT_NE(report, nullptr);
-  EXPECT_EQ(report->kind, LOOMC_ARTIFACT_KIND_REPORT);
+  EXPECT_EQ(ToString(report->role), LOOMC_ARTIFACT_ROLE_COMPILE_REPORT);
   EXPECT_EQ(ToString(report->format),
             LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON);
   EXPECT_EQ(ToString(report->identifier), "fake.bin.compile-report.json");
@@ -1167,7 +1167,7 @@ func.def public @unbound() {
   const loomc_artifact_t* report =
       loomc_result_artifact_at(result_ptr.get(), 0);
   ASSERT_NE(report, nullptr);
-  EXPECT_EQ(report->kind, LOOMC_ARTIFACT_KIND_REPORT);
+  EXPECT_EQ(ToString(report->role), LOOMC_ARTIFACT_ROLE_COMPILE_REPORT);
   EXPECT_EQ(ToString(report->format), LOOMC_ARTIFACT_FORMAT_JSON);
   const std::string report_contents = ToString(report->contents);
   EXPECT_NE(report_contents.find("\"target_specialization_count\":1"),

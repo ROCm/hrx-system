@@ -27,7 +27,7 @@ using IreeHalTargetEnvironmentCreateFn =
 using IreeHalTargetProfileValidateFn = loomc_status_t (*)(
     loomc_target_profile_t* target_profile, const char** out_skip_reason);
 
-// Emits a target-specific executable artifact from the compiled module.
+// Emits a target-specific kernel artifact from the compiled module.
 using IreeHalTargetModuleEmitFn = loomc_status_t (*)(
     loomc_target_environment_t* target_environment,
     loomc_workspace_t* workspace, loomc_module_t* module,

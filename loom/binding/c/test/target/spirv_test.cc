@@ -164,7 +164,7 @@ void ExpectSpirvArtifact(const loomc_result_t* result,
 
   const loomc_artifact_t* artifact = loomc_result_artifact_at(result, 0);
   ASSERT_NE(artifact, nullptr);
-  EXPECT_EQ(artifact->kind, LOOMC_ARTIFACT_KIND_EXECUTABLE);
+  EXPECT_EQ(ToString(artifact->role), LOOMC_ARTIFACT_ROLE_KERNEL);
   EXPECT_EQ(ToString(artifact->format), LOOMC_ARTIFACT_FORMAT_SPIRV);
   EXPECT_EQ(ToString(artifact->identifier), expected_identifier);
   const std::string contents = ToString(artifact->contents);

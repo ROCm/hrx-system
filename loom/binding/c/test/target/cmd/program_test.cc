@@ -301,16 +301,17 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   ASSERT_TRUE(loomc_cmd_program_product_program_at(product_ptr.get(), 0,
                                                    &private_program));
   EXPECT_EQ(ToString(private_program.symbol), "private_root");
-  EXPECT_EQ(private_program.artifact.kind, LOOMC_ARTIFACT_KIND_EXECUTABLE);
+  EXPECT_EQ(ToString(private_program.artifact.role),
+            LOOMC_ARTIFACT_ROLE_COMMAND_PROGRAM);
   EXPECT_EQ(ToString(private_program.artifact.format),
             LOOMC_ARTIFACT_FORMAT_CMD_PROGRAM);
   EXPECT_EQ(ToString(private_program.artifact.identifier), "private_root");
   EXPECT_GT(loomc_byte_sequence_length(private_program.artifact.contents), 0u);
   EXPECT_EQ(private_program.entry_requirement_count, 1u);
-  const loomc_artifact_t* private_artifact =
-      loomc_product_artifact_at(product_ptr.get(), 0);
-  ASSERT_NE(private_artifact, nullptr);
-  EXPECT_EQ(private_artifact->contents, private_program.artifact.contents);
+  loomc_artifact_t private_artifact = {};
+  ASSERT_TRUE(
+      loomc_product_artifact_at(product_ptr.get(), 0, &private_artifact));
+  EXPECT_EQ(private_artifact.contents, private_program.artifact.contents);
 
   loomc_cmd_program_t public_program = {};
   ASSERT_TRUE(loomc_cmd_program_product_program_at(product_ptr.get(), 1,
