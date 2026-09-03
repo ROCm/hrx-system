@@ -785,6 +785,13 @@ def emit_row(descriptor_refs: Mapping[str, int], row: LowerEmit) -> list[str]:
             row.structural_offset,
             always=True,
         )
+        if row.structural_unit_count:
+            _append_field(
+                fields,
+                "structural_unit_count",
+                row.structural_unit_count,
+                always=True,
+            )
     return fields
 
 

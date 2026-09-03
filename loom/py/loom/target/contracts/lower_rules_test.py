@@ -18,9 +18,7 @@ from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
 from loom.target.contracts import (
-    LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
     LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE,
-    LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN,
     LOWER_RULE_FLAG_CONTRACT_ONLY,
     LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
     AttrProject,
@@ -131,7 +129,7 @@ def test_compile_structural_register_emits() -> None:
                         source=ValueRef.operand("source"),
                         result=ValueRef.temporary("element"),
                         unit_offset=1,
-                        result_type=i32,
+                        unit_count=1,
                     ),
                     EmitRegisterSlice(
                         source=ValueRef.temporary("element"),
@@ -156,9 +154,8 @@ def test_compile_structural_register_emits() -> None:
     assert compiled.emits[0].operand_ref_count == 2
     assert compiled.emits[1].operand_ref_count == 1
     assert compiled.emits[1].structural_offset == 1
-    assert compiled.emits[1].flags == (
-        LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS | LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN
-    )
+    assert compiled.emits[1].structural_unit_count == 1
+    assert compiled.emits[1].flags == 0
     typed_slice_result = compiled.value_refs[compiled.emits[1].result_bind_ref_start]
     assert typed_slice_result.kind is SourceValueKind.TEMPORARY
     assert compiled.emits[2].operand_ref_count == 1
