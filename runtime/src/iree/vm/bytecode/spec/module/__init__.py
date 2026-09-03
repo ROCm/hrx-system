@@ -9,7 +9,7 @@
 import enum
 from typing import NamedTuple
 
-from iree.vm.bytecode.spec.schema import Field, RuleKind, place_fields
+from iree.vm.bytecode.spec.schema import Field, NumericTable, RuleKind, place_fields
 from iree.vm.bytecode.spec.version import Version
 
 
@@ -77,6 +77,13 @@ class ModuleFormat(NamedTuple):
     minimum_section_alignment: int
     summary: str
     contract: str
+    numeric_tables: tuple[NumericTable, ...]
     envelope: tuple[WireRecord, ...]
     sections: tuple[Section, ...]
     constraints: tuple[StructuralConstraint, ...]
+
+    @property
+    def records(self) -> tuple[WireRecord, ...]:
+        return self.envelope + tuple(
+            record for section in self.sections for record in section.records
+        )

@@ -15,6 +15,11 @@ class ProjectionTest(unittest.TestCase):
     def setUp(self) -> None:
         self.outputs = generate_outputs()
 
+    def assert_output_contains(self, output_name: str, *fragments: str) -> str:
+        for fragment in fragments:
+            self.assertIn(fragment, self.outputs[output_name])
+        return self.outputs[output_name]
+
     def test_output_family_is_closed(self) -> None:
         self.assertEqual(
             set(self.outputs),
@@ -30,47 +35,62 @@ class ProjectionTest(unittest.TestCase):
         self.assertTrue(all(self.outputs.values()))
 
     def test_wire_layout_has_one_assertion_translation_unit(self) -> None:
-        self.assertIn(
+        module_header = self.assert_output_contains(
+            "wire_module_header",
             "typedef struct iree_vm_bytecode_v0_image_header_t",
-            self.outputs["wire_module_header"],
+            "IREE_VM_BYTECODE_SECTION_METADATA = 0x000D",
+            "IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION = 0x0200",
         )
-        self.assertIn(
+        core_header = self.assert_output_contains(
+            "wire_core_header",
             "typedef struct iree_vm_bytecode_control_switch_t",
-            self.outputs["wire_core_header"],
         )
-        self.assertNotIn("static_assert", self.outputs["wire_module_header"])
-        self.assertNotIn("static_assert", self.outputs["wire_core_header"])
-        assertions = self.outputs["wire_assertions_source"]
-        self.assertIn("sizeof(iree_vm_bytecode_v0_image_header_t) == 16u", assertions)
-        self.assertIn(
+        self.assertNotIn("static_assert", module_header)
+        self.assertNotIn("static_assert", core_header)
+        self.assert_output_contains(
+            "wire_assertions_source",
+            "sizeof(iree_vm_bytecode_v0_image_header_t) == 16u",
+            "offsetof(iree_vm_bytecode_v0_section_directory_row_t, "
+            "byte_length_u64) == 8u",
             "offsetof(iree_vm_bytecode_control_switch_t, target_base_u32) == 4u",
-            assertions,
         )
 
     def test_verification_is_data_not_control_flow(self) -> None:
-        source = self.outputs["verification_source"]
-        self.assertIn("iree_vm_bytecode_instruction_verification[256]", source)
-        self.assertIn("IREE_VM_BYTECODE_VERIFICATION_RULE_CONTROL_TARGET_S16", source)
-        self.assertIn("IREE_VM_BYTECODE_VERIFICATION_RULE_SIGNATURE_DESCRIPTOR", source)
-        self.assertIn("IREE_VM_BYTECODE_CONTROL_FLOW_CONDITIONAL_BRANCH", source)
+        source = self.assert_output_contains(
+            "verification_source",
+            "iree_vm_bytecode_instruction_verification[256]",
+            "IREE_VM_BYTECODE_VERIFICATION_RULE_CONTROL_TARGET_S16",
+            "IREE_VM_BYTECODE_VERIFICATION_RULE_SIGNATURE_DESCRIPTOR",
+            "IREE_VM_BYTECODE_VERIFICATION_RULE_BYTE_ALIGNMENT",
+            "IREE_VM_BYTECODE_VERIFICATION_RULE_ORDINAL_OR_NULL",
+            "IREE_VM_BYTECODE_CONTROL_FLOW_CONDITIONAL_BRANCH",
+        )
         self.assertNotIn("switch (", source)
         self.assertNotIn("iree_status_t", source)
 
     def test_tooling_uses_one_byte_length_strings(self) -> None:
-        data = self.outputs["tooling_data"]
-        self.assertIn('"\\x0d" "control.block"', data)
-        self.assertIn("uint16_t iree_vm_bytecode_instruction_name_offsets[256]", data)
+        data = self.assert_output_contains(
+            "tooling_data",
+            '"\\x0d" "control.block"',
+            "uint16_t iree_vm_bytecode_instruction_name_offsets[256]",
+        )
         self.assertNotIn("iree_string_view_t", data)
 
     def test_documentation_carries_normative_surfaces(self) -> None:
-        markdown = self.outputs["documentation"]
-        self.assertIn("## Module records", markdown)
-        self.assertIn("#### `integer.add.i32`", markdown)
-        self.assertIn("#### `control.yield.s32`", markdown)
-        self.assertIn("#### Preconditions", markdown)
-        self.assertIn("#### Failures", markdown)
-        self.assertIn("#### Ownership", markdown)
-        self.assertIn("#### Reference pseudocode", markdown)
+        self.assert_output_contains(
+            "documentation",
+            "## Module container",
+            "#### `metadata_value_type`",
+            "## Module sections",
+            "### `functions`",
+            "#### Structural verification obligations",
+            "#### `integer.add.i32`",
+            "#### `control.yield.s32`",
+            "#### Preconditions",
+            "#### Failures",
+            "#### Ownership",
+            "#### Reference pseudocode",
+        )
 
 
 if __name__ == "__main__":

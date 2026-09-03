@@ -31,8 +31,33 @@ enum iree_vm_bytecode_verification_rule_kind_e {
   IREE_VM_BYTECODE_VERIFICATION_RULE_CORE_REQUIRED_MINOR = 9,
   IREE_VM_BYTECODE_VERIFICATION_RULE_ALLOWED_RANGE = 10,
   IREE_VM_BYTECODE_VERIFICATION_RULE_SIGNATURE_DESCRIPTOR = 11,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_ALLOWED_BITS = 12,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_MULTIPLE = 13,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_BYTE_ALIGNMENT = 14,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_NONCORE_PAGE = 15,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_ORDINAL = 16,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_ORDINAL_OR_NULL = 17,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_PAGE_MAJOR = 18,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_PAGE_REQUIRED_MINOR = 19,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_SECTION_BYTE_LENGTH = 20,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_SECTION_FLAGS = 21,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_SECTION_TYPE = 22,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_STRING_OFFSET = 23,
+  IREE_VM_BYTECODE_VERIFICATION_RULE_SWITCH_TARGET = 24,
 };
 typedef uint8_t iree_vm_bytecode_verification_rule_kind_t;
+
+// Module-local ordinal domain interpreted by ordinal validation rules.
+enum iree_vm_bytecode_ordinal_domain_e {
+  IREE_VM_BYTECODE_ORDINAL_DOMAIN_INVALID = 0,
+  IREE_VM_BYTECODE_ORDINAL_DOMAIN_STRING = 1,
+  IREE_VM_BYTECODE_ORDINAL_DOMAIN_STRING_NONEMPTY = 2,
+  IREE_VM_BYTECODE_ORDINAL_DOMAIN_REF_TYPE = 3,
+  IREE_VM_BYTECODE_ORDINAL_DOMAIN_SIGNATURE = 4,
+  IREE_VM_BYTECODE_ORDINAL_DOMAIN_CALLABLE_TYPE = 5,
+  IREE_VM_BYTECODE_ORDINAL_DOMAIN_FUNCTION = 6,
+};
+typedef uint8_t iree_vm_bytecode_ordinal_domain_t;
 
 // Structural continuation kind used by function-level verification.
 enum iree_vm_bytecode_control_flow_e {
@@ -77,13 +102,13 @@ extern const iree_vm_bytecode_verification_rule_t
     iree_vm_bytecode_verification_rules[];
 
 // Number of rows in |iree_vm_bytecode_verification_rules|.
-extern const uint16_t iree_vm_bytecode_verification_rule_count;
+extern const uint32_t iree_vm_bytecode_verification_rule_count;
 
 // Rule-specific literal and range words referenced by validation rules.
 extern const uint32_t iree_vm_bytecode_verification_parameters[];
 
 // Number of words in |iree_vm_bytecode_verification_parameters|.
-extern const uint16_t iree_vm_bytecode_verification_parameter_count;
+extern const uint32_t iree_vm_bytecode_verification_parameter_count;
 
 // Returns the encoded record byte length from a packed descriptor.
 static inline uint8_t iree_vm_bytecode_verification_byte_length(

@@ -14,6 +14,7 @@ from typing import NamedTuple
 from iree.vm.bytecode.spec import isa, module
 from iree.vm.bytecode.spec.isa.core import rules as core_rules
 from iree.vm.bytecode.spec.module import rules as module_rules
+from iree.vm.bytecode.spec.schema import NumericKind
 from iree.vm.bytecode.spec.specification import Specification
 
 _COPYRIGHT = """\
@@ -61,6 +62,52 @@ def _header_epilogue(guard: str) -> list[str]:
     return ["", f"#endif  // {guard}", ""]
 
 
+def _render_numeric_table(lines: list[str], table) -> None:
+    stem = table.name.replace(".", "_")
+    type_stem = f"{stem}s" if table.kind == NumericKind.FLAGS else stem
+    lines.extend(
+        [
+            f"// {table.summary}",
+            f"typedef {table.encoding.c_type} iree_vm_bytecode_{type_stem}_t;",
+            f"enum iree_vm_bytecode_{stem}{'_bits' if table.kind == NumericKind.FLAGS else ''}_e {{",
+        ]
+    )
+    prefix = f"IREE_VM_BYTECODE_{_identifier(table.name)}"
+    width = table.encoding.byte_length * 2
+    for value in table.values:
+        lines.extend(
+            [
+                f"  // {value.summary}",
+                f"  {prefix}_{_identifier(value.name)} = 0x{value.value:0{width}X},",
+            ]
+        )
+    lines.extend(["};", "", "enum {"])
+    lines.extend(
+        f"  {prefix}_{_identifier(value.name)}_SINCE_MINOR = {value.since.minor},"
+        for value in table.values
+    )
+    lines.extend(["};", ""])
+
+
+def _render_exact_bytes(lines: list[str], record: module.WireRecord) -> None:
+    for wire_field in record.fields:
+        rule = wire_field.rule
+        if not isinstance(rule, module.FieldRuleUse):
+            continue
+        if rule.kind != module_rules.FieldRule.EXACT_BYTES:
+            continue
+        encoded = "".join(f"\\x{value:02X}" for value in rule.data)
+        prefix = _identifier(f"{record.name}_{wire_field.field.name}")
+        lines.extend(
+            [
+                f"// Exact {record.name}.{wire_field.field.name} bytes.",
+                f'#define IREE_VM_BYTECODE_{prefix}_BYTES "{encoded}"',
+                f"#define IREE_VM_BYTECODE_{prefix}_LENGTH {len(rule.data)}u",
+                "",
+            ]
+        )
+
+
 def render_module_header(specification: Specification) -> str:
     """Renders natural C overlays for selected module records."""
 
@@ -68,12 +115,45 @@ def render_module_header(specification: Specification) -> str:
     lines = _header_prologue(guard)
     lines.extend(
         [
+            "enum {",
+            f"  IREE_VM_BYTECODE_CORE_MAJOR = {specification.version.major},",
+            f"  IREE_VM_BYTECODE_CORE_MINOR = {specification.version.minor},",
+            f"  IREE_VM_BYTECODE_IMAGE_ALIGNMENT = {specification.module_format.image_alignment},",
+            f"  IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT = {specification.module_format.minimum_section_alignment},",
+            "};",
+            "",
+            "// Architectural module section identifier.",
+            "typedef uint16_t iree_vm_bytecode_section_type_t;",
+            "enum iree_vm_bytecode_section_type_e {",
+        ]
+    )
+    for section in specification.module_format.sections:
+        lines.append(
+            f"  IREE_VM_BYTECODE_SECTION_{_identifier(section.name)} = "
+            f"0x{section.section_type:04X},"
+        )
+    lines.extend(["};", "", "enum {"])
+    for section in specification.module_format.sections:
+        prefix = f"IREE_VM_BYTECODE_SECTION_{_identifier(section.name)}"
+        lines.extend(
+            [
+                f"  {prefix}_REQUIRED_FLAGS = 0x{section.required_flags:04X},",
+                f"  {prefix}_SINCE_MINOR = {section.since.minor},",
+            ]
+        )
+    lines.extend(["};", ""])
+    for table in specification.module_format.numeric_tables:
+        _render_numeric_table(lines, table)
+    for record in specification.module_format.records:
+        _render_exact_bytes(lines, record)
+    lines.extend(
+        [
             "// Dense ordinal identifying one module record declaration.",
             "typedef uint8_t iree_vm_bytecode_module_record_ordinal_t;",
             "",
         ]
     )
-    for ordinal, record in enumerate(specification.records):
+    for ordinal, record in enumerate(specification.module_format.records):
         lines.append(
             f"#define IREE_VM_BYTECODE_MODULE_RECORD_{_identifier(record.name)} "
             f"((iree_vm_bytecode_module_record_ordinal_t){ordinal}u)"
@@ -81,11 +161,11 @@ def render_module_header(specification: Specification) -> str:
     lines.extend(
         [
             "#define IREE_VM_BYTECODE_MODULE_RECORD_COUNT "
-            f"((iree_vm_bytecode_module_record_ordinal_t){len(specification.records)}u)",
+            f"((iree_vm_bytecode_module_record_ordinal_t){len(specification.module_format.records)}u)",
             "",
         ]
     )
-    for record in specification.records:
+    for record in specification.module_format.records:
         lines.append(f"// {record.summary}")
         lines.append(f"typedef struct {record.c_type} {{")
         for wire_field in record.fields:
@@ -156,7 +236,7 @@ def render_wire_assertions(specification: Specification) -> str:
         '#include "iree/vm/bytecode/wire/module.h"',
         "",
     ]
-    for record in specification.records:
+    for record in specification.module_format.records:
         lines.append(
             _static_assert(
                 f"sizeof({record.c_type}) == {record.byte_length}u", "wire size"
@@ -218,6 +298,11 @@ _INSTRUCTION_FIELD_RULE_KIND = {
     core_rules.FieldRule.REGISTER_VALUE: "VALUE_REGISTER",
     core_rules.FieldRule.CONTROL_TARGET_S16: "CONTROL_TARGET_S16",
     core_rules.FieldRule.CONTROL_TARGET_S32: "CONTROL_TARGET_S32",
+}
+
+_MODULE_VERSION_RULE = {
+    module_rules.FieldRule.CORE_MAJOR: "major",
+    module_rules.FieldRule.CORE_REQUIRED_MINOR: "minor",
 }
 
 _CONTROL_FLOW_C_NAME = {
@@ -294,85 +379,54 @@ def _module_rules(
     for wire_field, offset in zip(record.fields, record.field_offsets, strict=True):
         rule = wire_field.rule
         label = f"{record.name}.{wire_field.field.name}"
-        if rule == module_rules.FieldRule.ANY_BITS:
+        if not isinstance(rule, module.FieldRuleUse):
+            rule = module.FieldRuleUse(rule)
+        rule_kind = rule.kind
+        if rule_kind == module_rules.FieldRule.ANY_BITS:
             continue
-        if rule == module_rules.FieldRule.ZERO:
-            rules.append(
-                _VerificationRule(
-                    "ZERO", offset, wire_field.field.byte_length, label=label
-                )
-            )
-        elif rule == module_rules.FieldRule.CORE_MAJOR:
-            rules.append(
-                _VerificationRule(
-                    "CORE_MAJOR",
-                    offset,
-                    2,
-                    parameter=specification.version.major,
-                    label=label,
-                )
-            )
-        elif rule == module_rules.FieldRule.CORE_REQUIRED_MINOR:
-            rules.append(
-                _VerificationRule(
-                    "CORE_REQUIRED_MINOR",
-                    offset,
-                    2,
-                    parameter=specification.version.minor,
-                    label=label,
-                )
-            )
-        elif (
-            isinstance(rule, module.FieldRuleUse)
-            and rule.kind == module_rules.FieldRule.EXACT_BYTES
-        ):
+        verification_kind = rule_kind.name.upper()
+        field_offset = offset
+        field_length = wire_field.field.byte_length
+        auxiliary = parameter = 0
+        if rule_kind in _MODULE_VERSION_RULE:
+            version_component = _MODULE_VERSION_RULE[rule_kind]
+            parameter = getattr(specification.version, version_component)
+        elif rule_kind == module_rules.FieldRule.EXACT_BYTES:
             expected = rule.data
             padded = expected + bytes((-len(expected)) % 4)
             words = (
                 int.from_bytes(padded[index : index + 4], "little")
                 for index in range(0, len(padded), 4)
             )
+            verification_kind = "EXACT_BYTES"
+            field_length = len(expected)
+            auxiliary = len(padded) // 4
             parameter = _append_parameter_words(parameters, words)
-            rules.append(
-                _VerificationRule(
-                    "EXACT_BYTES",
-                    offset,
-                    len(expected),
-                    len(padded) // 4,
-                    parameter,
-                    label,
-                )
-            )
-        elif (
-            isinstance(rule, module.FieldRuleUse)
-            and rule.kind == module_rules.FieldRule.ALLOWED_RANGE
-        ):
+        elif rule_kind == module_rules.FieldRule.ALLOWED_RANGE:
+            verification_kind = "ALLOWED_RANGE"
+            auxiliary = 2
             parameter = _append_parameter_words(parameters, rule.values)
-            rules.append(
-                _VerificationRule(
-                    "ALLOWED_RANGE",
-                    offset,
-                    wire_field.field.byte_length,
-                    2,
-                    parameter,
-                    label,
-                )
-            )
-        elif (
-            isinstance(rule, module.FieldRuleUse)
-            and rule.kind == module_rules.FieldRule.SIGNATURE_DESCRIPTOR
-        ):
-            rules.append(
-                _VerificationRule(
-                    "SIGNATURE_DESCRIPTOR",
-                    offsets_by_name[rule.fields[0]],
-                    2,
-                    offset,
-                    label=label,
-                )
-            )
-        else:
+        elif isinstance(rule.data, module_rules.OrdinalDomain):
+            auxiliary = int(rule.data)
+            parameter = rule.values[0] if rule.values else 0
+        elif rule_kind == module_rules.FieldRule.SIGNATURE_DESCRIPTOR:
+            field_offset = offsets_by_name[rule.fields[0]]
+            field_length = 2
+            auxiliary = offset
+        elif rule.values:
+            parameter = rule.values[0]
+        elif rule.fields or rule.data is not None:
             raise ValueError(f"{label}: unsupported module field rule")
+        rules.append(
+            _VerificationRule(
+                verification_kind,
+                field_offset,
+                field_length,
+                auxiliary,
+                parameter,
+                label,
+            )
+        )
     return rules
 
 
@@ -420,7 +474,7 @@ def render_verification_data(specification: Specification) -> str:
         rules.extend(instruction_rules)
 
     record_descriptors = []
-    for record in specification.records:
+    for record in specification.module_format.records:
         record_rules = _module_rules(specification, record, parameters)
         record_descriptors.append(
             _pack_record_descriptor(record, len(rules), len(record_rules))
@@ -491,7 +545,7 @@ def render_verification_data(specification: Specification) -> str:
     lines.extend(
         [
             "};",
-            f"const uint16_t iree_vm_bytecode_verification_rule_count = {len(rules)}u;",
+            f"const uint32_t iree_vm_bytecode_verification_rule_count = {len(rules)}u;",
             "",
             "const uint32_t iree_vm_bytecode_verification_parameters[] = {",
         ]
@@ -500,7 +554,7 @@ def render_verification_data(specification: Specification) -> str:
     lines.extend(
         [
             "};",
-            f"const uint16_t iree_vm_bytecode_verification_parameter_count = {len(parameters)}u;",
+            f"const uint32_t iree_vm_bytecode_verification_parameter_count = {len(parameters)}u;",
             "",
         ]
     )
@@ -542,7 +596,9 @@ def render_tooling_data(specification: Specification) -> str:
     instruction_offsets = [0] * 256
     for instruction in specification.instructions:
         instruction_offsets[instruction.opcode] = intern(instruction.mnemonic)
-    record_offsets = [intern(record.name) for record in specification.records]
+    record_offsets = [
+        intern(record.name) for record in specification.module_format.records
+    ]
 
     lines = [
         _GENERATED.rstrip(),

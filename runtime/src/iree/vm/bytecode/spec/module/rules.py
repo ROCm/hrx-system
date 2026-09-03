@@ -8,16 +8,16 @@
 
 import enum
 
-from iree.vm.bytecode.spec.schema import U8, U16, U32, U64, RuleKind
+from iree.vm.bytecode.spec.schema import U16, U32, U64, RuleKind
 
 
-class OrdinalDomain(enum.Enum):
-    STRING = "string"
-    STRING_NONEMPTY = "string_nonempty"
-    REF_TYPE = "ref_type"
-    SIGNATURE = "signature"
-    CALLABLE_TYPE = "callable_type"
-    FUNCTION = "function"
+class OrdinalDomain(enum.IntEnum):
+    STRING = 1
+    STRING_NONEMPTY = 2
+    REF_TYPE = 3
+    SIGNATURE = 4
+    CALLABLE_TYPE = 5
+    FUNCTION = 6
 
 
 class FieldRule:
@@ -30,7 +30,7 @@ class FieldRule:
     BYTE_ALIGNMENT = RuleKind("byte_alignment", value_count=1)
     CORE_MAJOR = RuleKind("core_major", U16)
     CORE_REQUIRED_MINOR = RuleKind("core_required_minor", U16)
-    NONCORE_PAGE = RuleKind("noncore_page", U8)
+    NONCORE_PAGE = RuleKind("noncore_page", U16)
     ORDINAL = RuleKind("ordinal", U16, data_type=OrdinalDomain)
     ORDINAL_OR_NULL = RuleKind(
         "ordinal_or_null", U16, value_count=1, data_type=OrdinalDomain

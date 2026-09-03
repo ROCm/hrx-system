@@ -11,7 +11,23 @@ from __future__ import annotations
 from iree.vm.bytecode.spec import module
 from iree.vm.bytecode.spec.isa.core import rules as core_rules
 from iree.vm.bytecode.spec.module import rules as module_rules
+from iree.vm.bytecode.spec.schema import NumericKind, UnknownNumericPolicy
 from iree.vm.bytecode.spec.specification import Specification
+
+_MODULE_RULE_TEXT = {
+    module_rules.FieldRule.ANY_BITS: "Any bit pattern.",
+    module_rules.FieldRule.ZERO: "Must be zero.",
+    module_rules.FieldRule.CORE_MAJOR: "Must equal the loader's Core major version.",
+    module_rules.FieldRule.CORE_REQUIRED_MINOR: "Must not exceed the loader's supported Core minor version.",
+    module_rules.FieldRule.NONCORE_PAGE: "Must be an architectural extension page ID in `0xF0..0xFD`.",
+    module_rules.FieldRule.PAGE_MAJOR: "Must exactly match the registered extension page major version.",
+    module_rules.FieldRule.PAGE_REQUIRED_MINOR: "Must not exceed the registered extension page minor version.",
+    module_rules.FieldRule.SECTION_BYTE_LENGTH: "Must produce an in-range payload extent under widened checked arithmetic.",
+    module_rules.FieldRule.SECTION_FLAGS: "Must satisfy the known- or unknown-section flag contract.",
+    module_rules.FieldRule.SECTION_TYPE: "Must name a known section or a valid declared extension authority.",
+    module_rules.FieldRule.STRING_OFFSET: "Must participate in the canonical count-plus-one string offsets.",
+    module_rules.FieldRule.SWITCH_TARGET: "Must name an exact control.block in the owning function.",
+}
 
 
 def _instruction_rule(rule) -> str:
@@ -25,24 +41,31 @@ def _instruction_rule(rule) -> str:
 
 
 def _module_rule(rule) -> str:
-    if isinstance(rule, module.FieldRuleUse):
-        if rule.kind == module_rules.FieldRule.EXACT_BYTES:
-            return f"Must equal `{rule.data!r}` byte-for-byte."
-        if rule.kind == module_rules.FieldRule.ALLOWED_RANGE:
-            return (
-                f"Must be in the inclusive range [{rule.values[0]}, {rule.values[1]}]."
-            )
-        if rule.kind == module_rules.FieldRule.SIGNATURE_DESCRIPTOR:
-            return "Must match the scalar, ref, or function kind in `kind_u16`."
-        raise ValueError(f"unsupported module field rule {rule!r}")
-    if rule == module_rules.FieldRule.ANY_BITS:
-        return "Any bit pattern."
-    if rule == module_rules.FieldRule.ZERO:
-        return "Must be zero."
-    if rule == module_rules.FieldRule.CORE_MAJOR:
-        return "Must equal the loader's Core major version."
-    if rule == module_rules.FieldRule.CORE_REQUIRED_MINOR:
-        return "Must not exceed the loader's supported Core minor version."
+    if not isinstance(rule, module.FieldRuleUse):
+        rule = module.FieldRuleUse(rule)
+    kind = rule.kind
+    text = _MODULE_RULE_TEXT.get(kind)
+    if text is not None:
+        return text
+    if kind == module_rules.FieldRule.ALLOWED_BITS:
+        return f"May set only bits in `0x{rule.values[0]:X}`."
+    if kind == module_rules.FieldRule.ALLOWED_RANGE:
+        return f"Must be in the inclusive range [{rule.values[0]}, {rule.values[1]}]."
+    if kind == module_rules.FieldRule.EXACT_BYTES:
+        return f"Must equal `{rule.data!r}` byte-for-byte."
+    if kind == module_rules.FieldRule.MULTIPLE:
+        return f"Must be an exact multiple of {rule.values[0]}."
+    if kind == module_rules.FieldRule.BYTE_ALIGNMENT:
+        return f"Must be a power-of-two byte alignment of at least {rule.values[0]}."
+    if kind == module_rules.FieldRule.ORDINAL:
+        return f"Must be an in-range `{rule.data.name.lower()}` ordinal."
+    if kind == module_rules.FieldRule.ORDINAL_OR_NULL:
+        return (
+            f"Must be an in-range `{rule.data.name.lower()}` ordinal or canonical "
+            f"null `0x{rule.values[0]:X}`."
+        )
+    if kind == module_rules.FieldRule.SIGNATURE_DESCRIPTOR:
+        return f"Must match the scalar, ref, or function kind in `{rule.fields[0]}`."
     raise ValueError(f"unsupported module field rule {rule!r}")
 
 
@@ -51,6 +74,83 @@ def _field_table_header() -> list[str]:
         "| Offset | Bytes | Field | Encoding | Role | Verification |",
         "| ---: | ---: | --- | --- | --- | --- |",
     ]
+
+
+def _render_record(lines: list[str], record, ordinal: int) -> None:
+    lines.extend(
+        [
+            f"#### `{record.name}`",
+            "",
+            f"Record ordinal **{ordinal}**; C overlay `{record.c_type}`; "
+            f"{record.byte_length} bytes; {record.alignment}-byte natural alignment; "
+            f"introduced in Core {record.since.major}.{record.since.minor}.",
+            "",
+            record.summary,
+            "",
+            record.contract,
+            "",
+            *_field_table_header(),
+        ]
+    )
+    for wire_field, offset in zip(record.fields, record.field_offsets, strict=True):
+        field = wire_field.field
+        lines.append(
+            f"| {offset} | {field.byte_length} | `{field.name}` | "
+            f"`{field.encoding.name}` | module field | "
+            f"{_module_rule(wire_field.rule)} {field.summary} |"
+        )
+    lines.append("")
+
+
+def _render_constraints(lines: list[str], constraints) -> None:
+    lines.extend(
+        [
+            "| Obligation | Inputs | Contract |",
+            "| --- | --- | --- |",
+        ]
+    )
+    for constraint in constraints:
+        inputs = ", ".join(
+            f"`{reference.record.name}"
+            + (f".{reference.field_name}" if reference.field_name else "")
+            + "`"
+            for reference in constraint.inputs
+        )
+        lines.append(
+            f"| `{constraint.name}` | {inputs or 'none'} | {constraint.contract} |"
+        )
+    lines.append("")
+
+
+def _render_numeric_tables(lines: list[str], specification: Specification) -> None:
+    lines.extend(["### Module numeric domains", ""])
+    for table in specification.module_format.numeric_tables:
+        unknowns = (
+            "preserved when nonzero"
+            if table.unknown_policy == UnknownNumericPolicy.PRESERVE_NONZERO
+            else "rejected"
+        )
+        lines.extend(
+            [
+                f"#### `{table.name}`",
+                "",
+                table.summary,
+                "",
+                f"Encoding `{table.encoding.name}`; kind `{table.kind.value}`; "
+                f"unknown values are {unknowns}.",
+                "",
+                "| Value | Name | Meaning | Introduced |",
+                "| ---: | --- | --- | --- |",
+            ]
+        )
+        width = table.encoding.byte_length * 2
+        for value in table.values:
+            bit = "bit " if table.kind == NumericKind.FLAGS else ""
+            lines.append(
+                f"| {bit}`0x{value.value:0{width}X}` | `{value.name}` | "
+                f"{value.summary} | Core {value.since.major}.{value.since.minor} |"
+            )
+        lines.append("")
 
 
 def _statements(lines: list[str], heading: str, statements: tuple[str, ...]) -> None:
@@ -70,33 +170,49 @@ def render_specification(specification: Specification) -> str:
         "",
         f"Core version: **{version.major}.{version.minor}**",
         "",
-        "This document is generated from the authoritative Python declaration model. ",
-        "The current projection is a representative reconstruction slice, not the complete Core ISA.",
+        "This document is generated from the authoritative Python declaration model.",
+        "The module container is complete; the Core instruction set below is the currently transcribed reconstruction slice.",
         "All multi-byte scalars are little-endian. Module records use their stated natural alignment; instruction records begin on four-byte boundaries and have four-byte-multiple lengths.",
         "",
-        "## Module records",
+        "## Module container",
+        "",
+        specification.module_format.summary,
+        "",
+        specification.module_format.contract,
+        "",
+        f"The image base and every section payload are aligned to at least {specification.module_format.image_alignment} bytes. A directory row may require a greater power-of-two payload alignment.",
         "",
     ]
-    for ordinal, record in enumerate(specification.records):
+    _render_numeric_tables(lines, specification)
+    record_ordinals = {
+        record: ordinal
+        for ordinal, record in enumerate(specification.module_format.records)
+    }
+    lines.extend(["### Image envelope", ""])
+    for record in specification.module_format.envelope:
+        _render_record(lines, record, record_ordinals[record])
+    lines.extend(["### Container verification obligations", ""])
+    _render_constraints(lines, specification.module_format.constraints)
+    lines.extend(["## Module sections", ""])
+    for section in specification.module_format.sections:
         lines.extend(
             [
-                f"### `{record.name}`",
+                f"### `{section.name}`",
                 "",
-                f"Ordinal **{ordinal}**; C overlay `{record.c_type}`; {record.byte_length} bytes; {record.alignment}-byte natural alignment; introduced in Core {record.since.major}.{record.since.minor}.",
+                f"Section type `0x{section.section_type:04X}`; required flags "
+                f"`0x{section.required_flags:04X}`; introduced in Core "
+                f"{section.since.major}.{section.since.minor}.",
                 "",
-                record.summary,
+                section.summary,
                 "",
-                record.contract,
+                section.contract,
                 "",
-                *_field_table_header(),
             ]
         )
-        for wire_field, offset in zip(record.fields, record.field_offsets, strict=True):
-            field = wire_field.field
-            lines.append(
-                f"| {offset} | {field.byte_length} | `{field.name}` | `{field.encoding.name}` | module field | {_module_rule(wire_field.rule)} {field.summary} |"
-            )
-        lines.append("")
+        for record in section.records:
+            _render_record(lines, record, record_ordinals[record])
+        lines.extend(["#### Structural verification obligations", ""])
+        _render_constraints(lines, section.constraints)
     lines.extend(["## Core instruction set", ""])
     for family in specification.families:
         family_instructions = tuple(

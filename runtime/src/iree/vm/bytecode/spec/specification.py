@@ -11,9 +11,9 @@ import dataclasses
 from iree.vm.bytecode.spec.isa import Instruction, InstructionFamily
 from iree.vm.bytecode.spec.isa.core import FAMILIES, INSTRUCTIONS
 from iree.vm.bytecode.spec.isa.validation import validate_instruction
-from iree.vm.bytecode.spec.module import WireRecord
-from iree.vm.bytecode.spec.module.records import RECORDS
-from iree.vm.bytecode.spec.module.validation import validate_wire_record
+from iree.vm.bytecode.spec.module import ModuleFormat
+from iree.vm.bytecode.spec.module import validation as module_validation
+from iree.vm.bytecode.spec.module.container import MODULE_FORMAT
 from iree.vm.bytecode.spec.version import CORE_0, Version
 
 
@@ -25,15 +25,13 @@ class Specification:
     version: Version
     families: tuple[InstructionFamily, ...]
     instructions: tuple[Instruction, ...]
-    records: tuple[WireRecord, ...]
+    module_format: ModuleFormat
 
     def __post_init__(self) -> None:
         if not self.version.is_valid():
             raise ValueError("invalid specification version")
-        for item in (*self.families, *self.instructions, *self.records):
-            if not item.since.is_valid() or not item.since.is_available_in(
-                self.version
-            ):
+        for item in (*self.families, *self.instructions):
+            if not item.since.is_available_in(self.version):
                 raise ValueError("declaration is unavailable in the specification")
 
         if len({family.name for family in self.families}) != len(self.families):
@@ -45,16 +43,11 @@ class Specification:
                 or not instruction.family.since.is_available_in(instruction.since)
             ):
                 raise ValueError(f"{instruction.mnemonic}: unknown family")
-        opcodes = [instruction.opcode for instruction in self.instructions]
-        mnemonics = [instruction.mnemonic for instruction in self.instructions]
-        if len(set(opcodes)) != len(opcodes):
+        if len({item.opcode for item in self.instructions}) != len(self.instructions):
             raise ValueError("duplicate opcode")
-        if len(set(mnemonics)) != len(mnemonics):
+        if len({item.mnemonic for item in self.instructions}) != len(self.instructions):
             raise ValueError("duplicate mnemonic")
-        for record in self.records:
-            validate_wire_record(record)
-        if len({record.name for record in self.records}) != len(self.records):
-            raise ValueError("duplicate wire record")
+        module_validation.validate_module_format(self.module_format, self.version)
 
     def project(self, version: Version) -> "Specification":
         if not version.is_available_in(self.version):
@@ -65,7 +58,7 @@ class Specification:
             version,
             version.select(self.families),
             version.select(self.instructions),
-            version.select(self.records),
+            module_validation.project_module_format(self.module_format, version),
         )
 
 
@@ -74,5 +67,5 @@ SPECIFICATION = Specification(
     version=CORE_0,
     families=FAMILIES,
     instructions=INSTRUCTIONS,
-    records=RECORDS,
+    module_format=MODULE_FORMAT,
 )

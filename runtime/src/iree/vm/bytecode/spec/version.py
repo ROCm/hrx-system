@@ -25,11 +25,9 @@ class Version(NamedTuple):
 
     def is_available_in(self, version: "Version") -> bool:
         """Returns whether a declaration introduced here is visible in version."""
-        return (
-            self.authority == version.authority
-            and self.major == version.major
-            and self.minor <= version.minor
-        )
+        valid = self.is_valid() and version.is_valid()
+        valid &= (self.authority, self.major) == (version.authority, version.major)
+        return valid and self.minor <= version.minor
 
     def select(self, items):
         return tuple(item for item in items if item.since.is_available_in(self))

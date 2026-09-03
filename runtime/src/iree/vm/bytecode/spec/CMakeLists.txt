@@ -21,6 +21,8 @@ iree_py_library(
     "isa/core/rules.py"
     "isa/validation.py"
     "module/__init__.py"
+    "module/container.py"
+    "module/numeric.py"
     "module/records.py"
     "module/rules.py"
     "module/validation.py"
