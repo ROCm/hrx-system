@@ -40,6 +40,18 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    completion_wait
+  HDRS
+    "completion_wait.h"
+  SRCS
+    "completion_wait.c"
+  DEPS
+    loom::codegen::low::descriptors
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     ready_frontier
   HDRS
     "ready_frontier.h"
@@ -82,6 +94,7 @@ loom_cc_library(
     "target_pressure.c"
     "target_pressure.h"
   DEPS
+    ::completion_wait
     ::dependencies
     ::dependency_index
     ::ready_frontier
@@ -131,11 +144,11 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    pressure_test
+    completion_wait_test
   SRCS
-    "pressure_test.cc"
+    "completion_wait_test.cc"
   DEPS
-    ::schedule
+    ::completion_wait
     iree::testing::gtest
     iree::testing::gtest_main
 )

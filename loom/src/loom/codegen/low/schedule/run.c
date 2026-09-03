@@ -11,6 +11,7 @@
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/schedule/candidate_policy.h"
+#include "loom/codegen/low/schedule/completion_wait.h"
 #include "loom/codegen/low/schedule/context.h"
 #include "loom/codegen/low/schedule/descriptor_rows.h"
 #include "loom/codegen/low/schedule/diagnostics.h"
@@ -1237,7 +1238,8 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
         const loom_low_schedule_class_t* schedule_class =
             state->nodes[chosen_node].schedule_class;
         has_wait_counter_hazard = loom_low_schedule_class_query_completion_wait(
-            state, schedule_class, &completion_wait_cycles);
+            state->target.descriptor_set, schedule_class,
+            &completion_wait_cycles);
         result_ready_issue_cycle = iree_math_saturating_add_u32(
             node_issue_cycle,
             loom_low_schedule_class_schedule_distance_cycles(schedule_class));

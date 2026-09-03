@@ -40,6 +40,14 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "completion_wait",
+    srcs = ["completion_wait.c"],
+    hdrs = ["completion_wait.h"],
+    visibility = ["//visibility:private"],
+    deps = ["//loom/src/loom/codegen/low:descriptors"],
+)
+
+loom_cc_library(
     name = "ready_frontier",
     srcs = ["ready_frontier.c"],
     hdrs = ["ready_frontier.h"],
@@ -81,6 +89,7 @@ loom_cc_library(
         "types.h",
     ],
     deps = [
+        ":completion_wait",
         ":dependencies",
         ":dependency_index",
         ":ready_frontier",
@@ -128,10 +137,10 @@ loom_cc_test(
 )
 
 loom_cc_test(
-    name = "pressure_test",
-    srcs = ["pressure_test.cc"],
+    name = "completion_wait_test",
+    srcs = ["completion_wait_test.cc"],
     deps = [
-        ":schedule",
+        ":completion_wait",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

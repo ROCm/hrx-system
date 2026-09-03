@@ -211,12 +211,6 @@ typedef struct loom_low_schedule_candidate_score_t {
   uint8_t flags;
 } loom_low_schedule_candidate_score_t;
 
-// Queries the target-provided issue cost for resolving a schedule class's
-// wait-counter hazard. Returns false when the class is not counter tracked.
-bool loom_low_schedule_class_query_completion_wait(
-    const loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_class_t* schedule_class, uint16_t* out_wait_cycles);
-
 enum loom_low_schedule_candidate_flag_bits_e {
   // Candidate unlocks a descriptor-backed scheduling node.
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR = 1u << 0,

@@ -10,6 +10,7 @@
 
 #include "iree/base/internal/math.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
+#include "loom/codegen/low/schedule/completion_wait.h"
 #include "loom/codegen/low/schedule/ready_frontier.h"
 #include "loom/codegen/low/schedule/target_pressure.h"
 #include "loom/target/registers.h"
@@ -869,26 +870,6 @@ static uint32_t loom_low_schedule_min_distance_hazard_stall(
   return stall_cycles;
 }
 
-bool loom_low_schedule_class_query_completion_wait(
-    const loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_class_t* schedule_class,
-    uint16_t* out_wait_cycles) {
-  *out_wait_cycles = 0;
-  if (state->target.descriptor_set == NULL || schedule_class == NULL) {
-    return false;
-  }
-  bool has_wait_counter_hazard = false;
-  for (uint16_t i = 0; i < schedule_class->hazard_count; ++i) {
-    const loom_low_hazard_t* hazard =
-        &state->target.descriptor_set
-             ->hazards[schedule_class->hazard_start + i];
-    if (hazard->kind != LOOM_LOW_HAZARD_KIND_WAIT_COUNTER) continue;
-    has_wait_counter_hazard = true;
-    *out_wait_cycles = iree_max(*out_wait_cycles, hazard->distance);
-  }
-  return has_wait_counter_hazard;
-}
-
 static void loom_low_schedule_score_candidate_hazards(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_node_t* node, uint32_t node_index,
@@ -1717,7 +1698,8 @@ void loom_low_schedule_pressure_compute_node_priorities(
         has_effect_consumer) {
       uint16_t completion_wait_cycles = 0;
       if (loom_low_schedule_class_query_completion_wait(
-              state, node->schedule_class, &completion_wait_cycles)) {
+              state->target.descriptor_set, node->schedule_class,
+              &completion_wait_cycles)) {
         state->node_opened_completion_latency_cycles[node_index] =
             node->schedule_class->latency_cycles;
       }

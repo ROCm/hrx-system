@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/codegen/low/schedule/pressure.h"
+#include "loom/codegen/low/schedule/completion_wait.h"
 
 #include <cstdint>
 
@@ -18,7 +18,6 @@ class ScheduleCompletionWaitTest : public ::testing::Test {
   void SetUp() override {
     descriptor_set_.hazards = hazards_;
     descriptor_set_.hazard_count = IREE_ARRAYSIZE(hazards_);
-    state_.target.descriptor_set = &descriptor_set_;
   }
 
   // Target hazard rows selected by schedule_class_.
@@ -27,21 +26,17 @@ class ScheduleCompletionWaitTest : public ::testing::Test {
   loom_low_descriptor_set_t descriptor_set_ = {};
   // Schedule class queried by each test.
   loom_low_schedule_class_t schedule_class_ = {};
-  // Minimal scheduler state resolving descriptor_set_.
-  loom_low_schedule_build_state_t state_ = {};
 };
 
 TEST_F(ScheduleCompletionWaitTest, MissingTargetModelHasNoCompletionWait) {
-  state_.target.descriptor_set = nullptr;
   uint16_t wait_cycles = 7;
   EXPECT_FALSE(loom_low_schedule_class_query_completion_wait(
-      &state_, &schedule_class_, &wait_cycles));
+      nullptr, &schedule_class_, &wait_cycles));
   EXPECT_EQ(wait_cycles, 0u);
 
-  state_.target.descriptor_set = &descriptor_set_;
   wait_cycles = 7;
-  EXPECT_FALSE(loom_low_schedule_class_query_completion_wait(&state_, nullptr,
-                                                             &wait_cycles));
+  EXPECT_FALSE(loom_low_schedule_class_query_completion_wait(
+      &descriptor_set_, nullptr, &wait_cycles));
   EXPECT_EQ(wait_cycles, 0u);
 }
 
@@ -57,7 +52,7 @@ TEST_F(ScheduleCompletionWaitTest,
 
   uint16_t wait_cycles = 7;
   EXPECT_FALSE(loom_low_schedule_class_query_completion_wait(
-      &state_, &schedule_class_, &wait_cycles));
+      &descriptor_set_, &schedule_class_, &wait_cycles));
   EXPECT_EQ(wait_cycles, 0u);
 }
 
@@ -69,7 +64,7 @@ TEST_F(ScheduleCompletionWaitTest, ZeroCostCounterStillRequiresCompletion) {
 
   uint16_t wait_cycles = 7;
   EXPECT_TRUE(loom_low_schedule_class_query_completion_wait(
-      &state_, &schedule_class_, &wait_cycles));
+      &descriptor_set_, &schedule_class_, &wait_cycles));
   EXPECT_EQ(wait_cycles, 0u);
 }
 
@@ -88,7 +83,7 @@ TEST_F(ScheduleCompletionWaitTest, UsesCounterCostInScheduleClassHazardSlice) {
 
   uint16_t wait_cycles = 0;
   EXPECT_TRUE(loom_low_schedule_class_query_completion_wait(
-      &state_, &schedule_class_, &wait_cycles));
+      &descriptor_set_, &schedule_class_, &wait_cycles));
   EXPECT_EQ(wait_cycles, 5u);
 }
 
