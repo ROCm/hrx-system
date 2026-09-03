@@ -668,6 +668,20 @@ def test_attr_copy_row_emits_attr_minus_literal_payload() -> None:
     assert ".literal_i64 = INT64_C(32)" in fields
 
 
+def test_attr_copy_row_emits_source_memory_offset_literal_payload() -> None:
+    fields = attr_copy_row(
+        LowerAttrCopy(
+            kind=LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_PLUS_LITERAL,
+            target_name="offset",
+            literal_i64=192,
+        ),
+        target_name_string_offset="TEST_STRING_OFFSET",
+    )
+
+    assert ".target_name_string_offset = TEST_STRING_OFFSET" in fields
+    assert ".literal_i64 = INT64_C(192)" in fields
+
+
 def test_diagnostic_param_row_emits_portable_signed_i64_literal() -> None:
     fields = diagnostic_param_row(
         LowerDiagnosticParam(
