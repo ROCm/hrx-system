@@ -96,6 +96,22 @@ typedef loom_target_low_call_policy_t (
     *loom_target_select_low_call_policy_fn_t)(
     const loom_resolved_target_t* resolved_target);
 
+// Selects direct Low call preservation for every resolved target.
+static inline loom_target_low_call_policy_t
+loom_target_select_low_call_policy_direct(
+    const loom_resolved_target_t* resolved_target) {
+  (void)resolved_target;
+  return LOOM_TARGET_LOW_CALL_POLICY_DIRECT;
+}
+
+// Selects required Low call inlining for every resolved target.
+static inline loom_target_low_call_policy_t
+loom_target_select_low_call_policy_require_inline(
+    const loom_resolved_target_t* resolved_target) {
+  (void)resolved_target;
+  return LOOM_TARGET_LOW_CALL_POLICY_REQUIRE_INLINE;
+}
+
 // Target emission artifact storage release callback.
 typedef void (*loom_target_emit_artifact_storage_release_fn_t)(void* storage);
 
@@ -317,6 +333,10 @@ struct loom_target_provider_t {
   // calls. A REQUIRE_INLINE result is a target emission requirement, not an
   // authored inline hint.
   loom_target_select_low_call_policy_fn_t select_low_call_policy;
+  // Target-family fact representation owned by this provider. This is required
+  // for providers with authored target definitions but no structured profile.
+  // When |profile_type| is also present, both must name the same fact type.
+  const loom_target_fact_type_t* target_fact_type;
 };
 
 // Static target provider table linked into a binary or embedding.

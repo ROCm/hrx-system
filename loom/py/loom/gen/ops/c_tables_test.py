@@ -1073,14 +1073,20 @@ def test_generate_target_projection_emits_typed_fields() -> None:
 
 
 def test_generate_target_projection_emits_typed_fact_contract() -> None:
+    ops_h = generate_ops_h(
+        "test",
+        0,
+        [_target_projection_test_op(fact_specialization=TargetFactSpecialization.STRUCTURAL)],
+    )
     tables_c = generate_tables_c(
         "test",
         0,
         [_target_projection_test_op(fact_specialization=TargetFactSpecialization.STRUCTURAL)],
     )
 
+    assert "extern const loom_target_fact_type_t loom_test_target_fact_type;" in ops_h
     assert '#include "loom/ops/target/facts.h"' in tables_c
-    assert "static const loom_target_fact_type_t loom_test_target_fact_type = {" in tables_c
+    assert "const loom_target_fact_type_t loom_test_target_fact_type = {" in tables_c
     assert '.name = IREE_SVL("test"),' in tables_c
     assert ".storage_size = sizeof(loom_target_facts_t)," in tables_c
     assert ".satisfies_identity_requirement = loom_target_facts_selector_satisfies_identity_requirement," in tables_c

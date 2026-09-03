@@ -725,6 +725,26 @@ TEST_LOW_CONVERGENT_I32_DESCRIPTOR = Descriptor(
     schedule_class=_SCHEDULE_SCALAR_ALU,
 )
 
+TEST_LOW_PROJECTABLE_EFFECT_I32_DESCRIPTOR = Descriptor(
+    key="test.projectable_effect.i32",
+    mnemonic="test.projectable_effect.i32",
+    semantic_tag="test.projectable_effect.i32",
+    operands=(_i32_result(), _i32_operand("input")),
+    asm_forms=_asm(results=("dst",), operands=("input",)),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.SIDE_EFFECTING,),
+)
+
+TEST_LOW_ALT_PROJECTABLE_EFFECT_I32_DESCRIPTOR = Descriptor(
+    key="test.projectable_effect.i32",
+    mnemonic="test.projectable_effect.i32",
+    semantic_tag="test.projectable_effect.i32",
+    operands=(_i32_result(), _i32_operand("input")),
+    effects=(_CONVERGENT_EFFECT,),
+    asm_forms=_asm(results=("dst",), operands=("input",)),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+)
+
 TEST_LOW_AMBIGUOUS_DESCRIPTOR = Descriptor(
     key="test.ambiguous",
     mnemonic="test.ambiguous",
@@ -1427,6 +1447,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_COND_BR_I32_DESCRIPTOR,
         TEST_LOW_RETURN_I32_DESCRIPTOR,
         TEST_LOW_RETURN_VOID_DESCRIPTOR,
+        TEST_LOW_PROJECTABLE_EFFECT_I32_DESCRIPTOR,
     ),
 )
 
@@ -1468,5 +1489,6 @@ TEST_LOW_ALT_DESCRIPTOR_SET = DescriptorSet(
     descriptors=(
         TEST_LOW_ALT_CONST_I32_DESCRIPTOR,
         TEST_LOW_ALT_NEG_I32_DESCRIPTOR,
+        TEST_LOW_ALT_PROJECTABLE_EFFECT_I32_DESCRIPTOR,
     ),
 )

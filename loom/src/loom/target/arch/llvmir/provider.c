@@ -8,10 +8,12 @@
 
 #include "loom/ops/llvmir/registry.h"
 #include "loom/target/arch/llvmir/descriptors/low_registry.h"
+#include "loom/target/arch/llvmir/facts.h"
 #include "loom/target/arch/llvmir/lower/lower.h"
 #include "loom/target/arch/llvmir/math_policy.h"
 
 const loom_target_provider_t loom_llvmir_target_provider = {
+    .select_low_call_policy = loom_target_select_low_call_policy_require_inline,
     .register_context = loom_llvmir_ops_register_dialect,
     .initialize_math_policy_registry =
         loom_llvmir_math_policy_registry_initialize,
@@ -19,6 +21,7 @@ const loom_target_provider_t loom_llvmir_target_provider = {
         loom_llvmir_low_descriptor_registry_initialize,
     .initialize_low_lower_policy_registry =
         loom_llvmir_low_lower_policy_registry_initialize,
+    .target_fact_type = &loom_llvmir_target_fact_type,
 };
 
 static const loom_target_provider_t* const kLoomLlvmirTargetProviders[] = {

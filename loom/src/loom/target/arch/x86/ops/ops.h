@@ -19,6 +19,8 @@
 extern "C" {
 #endif
 
+extern const loom_target_fact_type_t loom_x86_target_fact_type;
+
 enum {
   LOOM_OP_X86_TARGET = LOOM_OP_KIND(LOOM_DIALECT_X86, 0),
   LOOM_OP_X86_COUNT_ = 1,

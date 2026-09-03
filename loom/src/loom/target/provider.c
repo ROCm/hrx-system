@@ -250,6 +250,12 @@ iree_status_t loom_target_environment_initialize(
   iree_host_size_t pass_registry_count = 0;
   for (iree_host_size_t i = 0; i < provider_set->provider_count; ++i) {
     const loom_target_provider_t* provider = provider_set->providers[i];
+    if (provider->target_fact_type != NULL && provider->profile_type != NULL &&
+        provider->target_fact_type != provider->profile_type->fact_type) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "target provider fact type must match its profile fact type");
+    }
     if (provider->pass_registry != NULL) {
       if (pass_registry_count >= IREE_ARRAYSIZE(pass_registries)) {
         return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -441,8 +447,11 @@ const loom_target_provider_t* loom_target_environment_lookup_fact_provider(
        ++i) {
     const loom_target_provider_t* provider =
         environment->provider_set->providers[i];
-    if (provider->profile_type != NULL &&
-        provider->profile_type->fact_type == fact_type) {
+    const loom_target_fact_type_t* provider_fact_type =
+        provider->target_fact_type != NULL ? provider->target_fact_type
+        : provider->profile_type != NULL   ? provider->profile_type->fact_type
+                                           : NULL;
+    if (provider_fact_type == fact_type) {
       return provider;
     }
   }

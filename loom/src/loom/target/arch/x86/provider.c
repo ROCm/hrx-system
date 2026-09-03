@@ -10,6 +10,7 @@
 #include "loom/target/arch/x86/legalization.h"
 #include "loom/target/arch/x86/lower/lower.h"
 #include "loom/target/arch/x86/math_policy.h"
+#include "loom/target/arch/x86/ops/ops.h"
 #include "loom/target/arch/x86/ops/registry.h"
 
 static const loom_target_legalizer_provider_t* kLoomX86LegalizerProviders[] = {
@@ -17,6 +18,7 @@ static const loom_target_legalizer_provider_t* kLoomX86LegalizerProviders[] = {
 };
 
 const loom_target_provider_t loom_x86_target_provider = {
+    .select_low_call_policy = loom_target_select_low_call_policy_require_inline,
     .register_context = loom_x86_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_x86_low_descriptor_registry_initialize,
@@ -28,6 +30,7 @@ const loom_target_provider_t loom_x86_target_provider = {
             .count = IREE_ARRAYSIZE(kLoomX86LegalizerProviders),
             .values = kLoomX86LegalizerProviders,
         },
+    .target_fact_type = &loom_x86_target_fact_type,
 };
 
 static const loom_target_provider_t* const kLoomX86TargetProviders[] = {

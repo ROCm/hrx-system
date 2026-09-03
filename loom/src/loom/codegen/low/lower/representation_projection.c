@@ -11,6 +11,7 @@
 
 #include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/builder.h"
+#include "loom/codegen/low/descriptor_traits.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
@@ -37,6 +38,8 @@ typedef struct loom_low_representation_descriptor_update_t {
   uint8_t attr_index;
   // Target representation descriptor ordinal.
   uint32_t ordinal;
+  // Generic IR traits implied by the target representation descriptor.
+  loom_trait_flags_t effective_traits;
 } loom_low_representation_descriptor_update_t;
 
 typedef struct loom_low_representation_projection_plan_t {
@@ -217,11 +220,22 @@ static iree_status_t loom_low_representation_plan_descriptor(
         (int)target_set_name.size, target_set_name.data,
         (int)descriptor_key.size, descriptor_key.data);
   }
+  const loom_low_descriptor_t* target_descriptor =
+      loom_low_descriptor_set_descriptor_at(projection->target_descriptor_set,
+                                            target_ordinal);
+  if (target_descriptor == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "target descriptor lookup returned an invalid ordinal %u",
+        target_ordinal);
+  }
   plan->descriptor_updates[plan->descriptor_count++] =
       (loom_low_representation_descriptor_update_t){
           .op = op,
           .attr_index = attr_index,
           .ordinal = target_ordinal,
+          .effective_traits = loom_low_descriptor_effective_traits(
+              projection->target_descriptor_set, target_descriptor),
       };
   return iree_ok_status();
 }
@@ -308,9 +322,17 @@ static iree_status_t loom_low_representation_apply_plan(
     const loom_low_representation_descriptor_update_t* update =
         &plan->descriptor_updates[i];
     loom_attribute_t* attr = &loom_op_attrs(update->op)[update->attr_index];
-    if (loom_attr_as_scoped_enum(*attr) == update->ordinal) continue;
-    *attr = loom_attr_scoped_enum(update->ordinal);
-    *out_changed = true;
+    if (loom_attr_as_scoped_enum(*attr) != update->ordinal) {
+      *attr = loom_attr_scoped_enum(update->ordinal);
+      *out_changed = true;
+    }
+    if (update->op->traits != update->effective_traits) {
+      const loom_trait_flags_t old_traits = update->op->traits;
+      update->op->traits = update->effective_traits;
+      loom_module_update_op_direct_summaries(module, update->op, old_traits,
+                                             update->effective_traits);
+      *out_changed = true;
+    }
   }
   return iree_ok_status();
 }

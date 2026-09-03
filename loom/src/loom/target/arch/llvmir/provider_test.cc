@@ -117,6 +117,13 @@ TEST(LlvmirProviderTest, ProviderSetContainsOnlyLlvmir) {
   ASSERT_NE(loom_llvmir_target_provider_set.providers, nullptr);
   EXPECT_EQ(loom_llvmir_target_provider_set.providers[0],
             &loom_llvmir_target_provider);
+  EXPECT_EQ(loom_llvmir_target_provider.target_fact_type,
+            &loom_llvmir_target_fact_type);
+  ASSERT_NE(loom_llvmir_target_provider.select_low_call_policy, nullptr);
+  const loom_resolved_target_t resolved_target = {};
+  EXPECT_EQ(
+      loom_llvmir_target_provider.select_low_call_policy(&resolved_target),
+      LOOM_TARGET_LOW_CALL_POLICY_REQUIRE_INLINE);
 }
 
 }  // namespace

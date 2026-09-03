@@ -166,6 +166,51 @@ static iree_status_t loom_callable_validate_single_block_body(
   return iree_ok_status();
 }
 
+bool loom_callable_body_is_linear(const loom_module_t* module,
+                                  loom_func_like_t callee) {
+  if (!module || !loom_func_like_isa(callee)) return false;
+  loom_region_t* body = loom_func_like_body(callee);
+  if (!body || body->block_count != 1) return false;
+  const loom_block_t* entry_block = loom_region_const_entry_block(body);
+  if (!entry_block || entry_block->op_count == 0) return false;
+  const loom_op_t* terminator = loom_block_const_last_op(entry_block);
+  const loom_op_vtable_t* callee_vtable = loom_op_vtable(module, callee.op);
+  const loom_region_descriptor_t* body_descriptor =
+      loom_op_vtable_region_descriptor(
+          callee_vtable, loom_func_like_body_region_index(callee));
+  return body_descriptor != NULL &&
+         body_descriptor->terminator != LOOM_OP_KIND_UNKNOWN &&
+         terminator->kind == body_descriptor->terminator;
+}
+
+bool loom_callable_call_site_allows_cfg_splice(const loom_module_t* module,
+                                               const loom_op_t* call_op) {
+  if (!module || !call_op || !call_op->parent_block || !call_op->parent_op ||
+      iree_any_bit_set(call_op->flags, LOOM_OP_FLAG_DEAD)) {
+    return false;
+  }
+  const loom_block_t* caller_block = call_op->parent_block;
+  const loom_region_t* caller_region = caller_block->parent_region;
+  uint16_t caller_block_index = 0;
+  if (!caller_region || !loom_region_try_block_index(
+                            caller_region, caller_block, &caller_block_index)) {
+    return false;
+  }
+
+  const loom_op_t* parent_op = call_op->parent_op;
+  const loom_op_vtable_t* parent_vtable = loom_op_vtable(module, parent_op);
+  loom_region_t* const* parent_regions = loom_op_regions(parent_op);
+  for (uint8_t region_index = 0; region_index < parent_op->region_count;
+       ++region_index) {
+    if (parent_regions[region_index] != caller_region) continue;
+    const loom_region_descriptor_t* descriptor =
+        loom_op_vtable_region_descriptor(parent_vtable, region_index);
+    return descriptor != NULL &&
+           !iree_any_bit_set(descriptor->flags, LOOM_REGION_SINGLE_BLOCK);
+  }
+  return false;
+}
+
 typedef struct loom_callable_cfg_body_t {
   // Callee body being spliced into the caller.
   loom_region_t* region;
@@ -537,6 +582,11 @@ static iree_status_t loom_callable_inline_cfg_call(
         IREE_STATUS_FAILED_PRECONDITION,
         "multi-block callable inlining requires a branch builder");
   }
+  if (!loom_callable_call_site_allows_cfg_splice(rewriter->module, call_op)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "multi-block callable inlining requires a CFG-capable caller region");
+  }
   loom_block_t* caller_block = call_op->parent_block;
   loom_region_t* caller_region = caller_block->parent_region;
   uint16_t caller_block_index = 0;
@@ -691,7 +741,7 @@ iree_status_t loom_callable_inline_call_with_branch(
   loom_callable_cfg_body_t body = {0};
   IREE_RETURN_IF_ERROR(loom_callable_validate_cfg_body(
       rewriter->module, call_op, callee, call, &body));
-  if (body.region->block_count == 1) {
+  if (loom_callable_body_is_linear(rewriter->module, callee)) {
     return loom_callable_inline_single_block_call(rewriter, call_op, callee);
   }
   return loom_callable_inline_cfg_call(rewriter, call_op, callee, call, &body,

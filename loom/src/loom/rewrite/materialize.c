@@ -517,6 +517,10 @@ iree_status_t loom_ir_clone_region_blocks(loom_builder_t* builder,
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "builder module must be the remap target module");
   }
+  if (source_region == target_region) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "source and target regions must be distinct");
+  }
   if (target_block_index > target_region->block_count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,

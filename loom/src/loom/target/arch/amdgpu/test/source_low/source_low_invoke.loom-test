@@ -220,6 +220,44 @@ low.func.def target<amdgpu.rdna3_5.core>(@caller_target) abi(hal_kernel) @cfg_id
 
 // ====
 
+// schedule(locked) preserves source order independently in every helper CFG
+// block. The inliner materializes each block's order as fences before the
+// target-neutral splice remaps its block argument and return edge.
+amdgpu.target<gfx11-generic> @helper_target
+amdgpu.target<gfx1151> @caller_target
+
+low.func.def schedule(locked) target<amdgpu.gfx11.generic.core>(@helper_target) @locked_cfg_add(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+  %first = low.op<amdgpu.v_add_u32>(%value, %value) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.br ^tail(%first: reg<amdgpu.vgpr>)
+^tail(%forwarded: reg<amdgpu.vgpr>):
+  %second = low.op<amdgpu.v_add_u32>(%forwarded, %value) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.return %second : reg<amdgpu.vgpr>
+}
+
+func.def target(@caller_target) @locked_cfg_caller(%value: vector<1xi32>) -> (vector<1xi32>) {
+  %result = low.invoke inline @locked_cfg_add(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core>(@caller_target) abi(hal_kernel) @locked_cfg_caller(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  low.br ^_bb1
+^_bb1:
+  low.schedule.fence
+  %first = v_add_u32 %value, %value
+  low.schedule.fence
+  low.br ^_bb2
+^_bb2:
+  low.schedule.fence
+  %second = v_add_u32 %first, %value
+  low.schedule.fence
+  low.br ^_bb3
+^_bb3:
+  return %second
+}
+
+// ====
+
 // AMDGPU requires the normalized Low call closure to inline before emission.
 // Both generic helpers are specialized to the exact caller representation,
 // including the nested descriptor operation and the outer CFG block argument.

@@ -17,7 +17,7 @@ from loom.dsl import (
     ParameterizedAttrDef,
 )
 from loom.fields import compute_layout
-from loom.gen.ops import c_builders
+from loom.gen.ops import c_builders, c_interfaces
 from loom.gen.ops.c_enum_attrs import (
     collect_encoding_auxiliary_key_enum as _collect_encoding_auxiliary_key_enum,
 )
@@ -72,6 +72,7 @@ def generate_ops_h(
     encoding_enums = _collect_encoding_enums(encoding_families)
     encoding_enum_types = _collect_encoding_enum_types(dialect_name, encoding_families)
     auxiliary_key_enum = _collect_encoding_auxiliary_key_enum(encoding_families)
+    target_fact_type_symbols = c_interfaces.target_like_generated_fact_type_symbols(ops)
 
     lines.append(COPYRIGHT)
     lines.extend(
@@ -111,6 +112,7 @@ def generate_ops_h(
             if parameter.attr_type in ("enum", "enum_array", "signed_enum_set") and parameter.enum_def is not None and parameter.enum_def.c_include is not None
         }
         | {family.auxiliary_key_enum.c_include for family in encoding_families if family.auxiliary_key_enum is not None and family.auxiliary_key_enum.c_include is not None}
+        | ({"loom/target/types.h"} if target_fact_type_symbols else set())
     )
     lines.extend(f'#include "{include}"' for include in enum_includes)
     lines.append("")
@@ -217,6 +219,10 @@ def generate_ops_h(
     lines.append('extern "C" {')
     lines.append("#endif")
     lines.append("")
+
+    lines.extend(f"extern const loom_target_fact_type_t {symbol};" for symbol in target_fact_type_symbols)
+    if target_fact_type_symbols:
+        lines.append("")
 
     if auxiliary_key_enum is not None:
         c_prefix = _c_encoding_enum_prefix(dialect_name, auxiliary_key_enum)

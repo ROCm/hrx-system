@@ -39,7 +39,8 @@
   V(statistics_type, functions_cloned, "functions-cloned",                  \
     "Number of private callable definitions cloned for target contexts.")   \
   V(statistics_type, calls_retargeted, "calls-retargeted",                  \
-    "Number of semantic calls retargeted to concrete callable versions.")
+    "Number of target-propagating calls retargeted to concrete callable "   \
+    "versions.")
 
 LOOM_PASS_STATISTICS_DEFINE(loom_target_callgraph_specialization_statistics,
                             loom_target_callgraph_specialization_statistics_t,

@@ -9,6 +9,7 @@
 #include "loom/pass/test/registry.h"
 #include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/target/test/lower.h"
+#include "loom/target/test/target_records.h"
 
 const loom_target_provider_t loom_test_target_provider = {
     .initialize_low_descriptor_registry =
@@ -16,4 +17,5 @@ const loom_target_provider_t loom_test_target_provider = {
     .initialize_low_lower_policy_registry =
         loom_test_low_lower_policy_registry_initialize,
     .pass_registry = &loom_test_pass_registry_storage,
+    .target_fact_type = &loom_test_target_fact_type,
 };

@@ -70,6 +70,7 @@ loom_cc_library(
     ],
     deps = [
         ":lower",
+        ":target_record_table",
         "//loom/src/loom/pass/test:registry",
         "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//loom/src/loom/target:provider",

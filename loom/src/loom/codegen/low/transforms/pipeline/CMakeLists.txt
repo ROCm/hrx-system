@@ -24,6 +24,7 @@ loom_cc_library(
     loom::codegen::low::lower::source_selection
     loom::codegen::low::pipeline::pass_environment
     loom::ir
+    loom::ops::low
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::types
@@ -102,7 +103,9 @@ loom_cc_test(
     loom::target::function_contract
     loom::target::function_version
     loom::target::provider
+    loom::target::test::alt_descriptors
     loom::target::test::contracts::core_lower_rules
+    loom::target::test::descriptors
     loom::target::test::low_registry
     loom::target::test::lower
     loom::target::test::target_record_table

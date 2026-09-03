@@ -19,6 +19,8 @@
 extern "C" {
 #endif
 
+extern const loom_target_fact_type_t loom_wasm_target_fact_type;
+
 enum {
   LOOM_OP_WASM_TARGET = LOOM_OP_KIND(LOOM_DIALECT_WASM, 0),
   LOOM_OP_WASM_COUNT_ = 1,

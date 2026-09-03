@@ -118,6 +118,7 @@ loom_check_test_suite(
     "test/source_low/source_low_avx512_packed_dot.loom-test"
     "test/source_low/source_low_avx_vnni.loom-test"
     "test/source_low/source_low_contraction.loom-test"
+    "test/source_low/source_low_invoke.loom-test"
     "test/source_low/source_low_packed_dot.loom-test"
     "test/source_low/source_low_scalar_addressing.loom-test"
     "test/source_low/source_low_scalar_arithmetic.loom-test"

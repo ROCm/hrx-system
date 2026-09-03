@@ -19,6 +19,7 @@
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/type_registry.h"
@@ -836,6 +837,7 @@ static iree_status_t loom_target_low_legality_verify_op_class(
     case LOOM_OP_CFG_COND_BR:
     case LOOM_OP_FUNC_RETURN:
     case LOOM_OP_KERNEL_RETURN:
+    case LOOM_OP_LOW_INVOKE:
       return iree_ok_status();
     default:
       break;

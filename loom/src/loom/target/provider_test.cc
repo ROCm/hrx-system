@@ -317,5 +317,47 @@ TEST_F(TargetProviderTest, LooksUpProfileProvider) {
   loom_target_environment_deinitialize(&environment);
 }
 
+TEST_F(TargetProviderTest, LooksUpProviderWithoutProfileByFactType) {
+  static const loom_target_fact_type_t kOwnedFactType = {};
+  static const loom_target_fact_type_t kUnownedFactType = {};
+  loom_target_provider_t provider = {};
+  provider.target_fact_type = &kOwnedFactType;
+  const loom_target_provider_t* providers[] = {&provider};
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_ASSERT_OK(
+      loom_target_environment_initialize(&provider_set, &environment));
+
+  EXPECT_EQ(loom_target_environment_lookup_fact_provider(&environment,
+                                                         &kOwnedFactType),
+            &provider);
+  EXPECT_EQ(loom_target_environment_lookup_fact_provider(&environment,
+                                                         &kUnownedFactType),
+            nullptr);
+
+  loom_target_environment_deinitialize(&environment);
+}
+
+TEST_F(TargetProviderTest, RejectsMismatchedProfileAndProviderFactTypes) {
+  static const loom_target_fact_type_t kProfileFactType = {};
+  static const loom_target_fact_type_t kProviderFactType = {};
+  static const loom_target_profile_type_t kProfileType = {
+      /*.name=*/IREE_SVL("mismatched"),
+      /*.fact_type=*/&kProfileFactType,
+  };
+  loom_target_provider_t provider = {};
+  provider.profile_type = &kProfileType;
+  provider.target_fact_type = &kProviderFactType;
+  const loom_target_provider_t* providers[] = {&provider};
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
+}
+
 }  // namespace
 }  // namespace loom

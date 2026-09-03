@@ -178,6 +178,7 @@ typedef enum loom_inline_blocker_e {
   LOOM_INLINE_BLOCKER_LOW_ENTRY_RESOURCE = 24,
   LOOM_INLINE_BLOCKER_LOW_LOCKED_NESTED_REGION = 25,
   LOOM_INLINE_BLOCKER_CALLEE_SUCCESSOR_OUTSIDE_BODY = 26,
+  LOOM_INLINE_BLOCKER_CALLER_REGION_NOT_CFG_CAPABLE = 27,
 } loom_inline_blocker_t;
 
 typedef struct loom_inline_symbol_info_t {
@@ -191,6 +192,9 @@ typedef struct loom_inline_symbol_info_t {
   uint32_t incoming_non_call_ref_count;
   // Number of incoming call edges selected for required inlining.
   uint32_t planned_call_removals;
+  // Whether the function body remains linear after its required call closure
+  // is flattened in callee-before-caller order.
+  bool body_will_be_linear;
 } loom_inline_symbol_info_t;
 
 typedef struct loom_inline_plan_entry_t {
@@ -384,6 +388,8 @@ static iree_string_view_t loom_inline_blocker_code(
       return IREE_SV("low_locked_nested_region");
     case LOOM_INLINE_BLOCKER_CALLEE_SUCCESSOR_OUTSIDE_BODY:
       return IREE_SV("callee_successor_outside_body");
+    case LOOM_INLINE_BLOCKER_CALLER_REGION_NOT_CFG_CAPABLE:
+      return IREE_SV("caller_region_not_cfg_capable");
     case LOOM_INLINE_BLOCKER_NONE:
     default:
       return IREE_SV("unknown");
@@ -459,6 +465,8 @@ static void loom_inline_initialize_symbol_infos(loom_inline_state_t* state) {
     info->symbol = &state->module->symbols.entries[i];
     info->function =
         loom_func_like_cast(state->module, info->symbol->defining_op);
+    info->body_will_be_linear =
+        loom_callable_body_is_linear(state->module, info->function);
   }
 }
 
@@ -704,6 +712,57 @@ static void loom_inline_mark_cycle_blockers(loom_inline_state_t* state) {
   }
 }
 
+static bool loom_inline_call_is_in_function_body(
+    const loom_inline_state_t* state, const loom_inline_plan_entry_t* entry) {
+  if (entry->source_symbol_id >= state->module->symbols.count ||
+      entry->call_op == NULL || entry->call_op->parent_block == NULL) {
+    return false;
+  }
+  const loom_region_t* source_body =
+      loom_func_like_body(state->symbols[entry->source_symbol_id].function);
+  return source_body != NULL &&
+         entry->call_op->parent_block->parent_region == source_body;
+}
+
+// Predicts the body shape seen when each required edge executes. Flattening a
+// non-linear callee at a function-body call site makes that caller non-linear,
+// and the effect propagates transitively through the acyclic required-inline
+// graph. Calls in nested regions do not change the containing function body's
+// block topology. SCC order is successor-before-predecessor, so every callee's
+// final shape is known before its callers are visited.
+static void loom_inline_propagate_required_cfg_shapes(
+    loom_inline_state_t* state) {
+  for (iree_host_size_t component_index = 0;
+       component_index < state->sccs.count; ++component_index) {
+    const loom_scc_t* component = &state->sccs.values[component_index];
+    if (component->is_cycle) continue;
+    for (iree_host_size_t node_index = 0; node_index < component->node_count;
+         ++node_index) {
+      const loom_symbol_id_t source_symbol_id =
+          (loom_symbol_id_t)component->nodes[node_index];
+      loom_inline_symbol_info_t* source_info =
+          &state->symbols[source_symbol_id];
+      if (!source_info->body_will_be_linear) continue;
+      for (uint32_t entry_index =
+               state->first_required_by_source[source_symbol_id];
+           entry_index != LOOM_INLINE_PLAN_ENTRY_INVALID;
+           entry_index =
+               state->entries[entry_index].next_required_from_source) {
+        const loom_inline_plan_entry_t* entry = &state->entries[entry_index];
+        if (entry->action != LOOM_INLINE_PLAN_ACTION_REQUIRED ||
+            entry->target_symbol_id >= state->module->symbols.count ||
+            !loom_inline_call_is_in_function_body(state, entry)) {
+          continue;
+        }
+        if (!state->symbols[entry->target_symbol_id].body_will_be_linear) {
+          source_info->body_will_be_linear = false;
+          break;
+        }
+      }
+    }
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // Preflight
 //===----------------------------------------------------------------------===//
@@ -755,7 +814,8 @@ static loom_inline_blocker_t loom_inline_validate_low_body_op(
 }
 
 static loom_inline_blocker_t loom_inline_validate_inline_body(
-    const loom_module_t* module, const loom_inline_plan_entry_t* entry) {
+    const loom_inline_state_t* state, const loom_inline_plan_entry_t* entry) {
+  const loom_module_t* module = state->module;
   if (!loom_call_like_isa(entry->call)) {
     return LOOM_INLINE_BLOCKER_CALL_NOT_CALL_LIKE;
   }
@@ -901,6 +961,11 @@ static loom_inline_blocker_t loom_inline_validate_inline_body(
     }
   }
 
+  if (!state->symbols[entry->target_symbol_id].body_will_be_linear &&
+      !loom_callable_call_site_allows_cfg_splice(module, entry->call_op)) {
+    return LOOM_INLINE_BLOCKER_CALLER_REGION_NOT_CFG_CAPABLE;
+  }
+
   return LOOM_INLINE_BLOCKER_NONE;
 }
 
@@ -911,7 +976,7 @@ static void loom_inline_preflight_required_entries(loom_inline_state_t* state) {
       continue;
     }
     loom_inline_blocker_t blocker =
-        loom_inline_validate_inline_body(state->module, entry);
+        loom_inline_validate_inline_body(state, entry);
     if (blocker != LOOM_INLINE_BLOCKER_NONE) {
       loom_inline_mark_blocker(entry, blocker);
     }
@@ -986,6 +1051,11 @@ static bool loom_inline_symbol_can_transfer(const loom_inline_state_t* state,
   if (!loom_inline_symbol_is_transferable(state->module, info->symbol)) {
     return false;
   }
+  if (state->version_owner == NULL &&
+      loom_target_function_version_snapshot_handle_at(&state->target_versions,
+                                                      symbol_id) != NULL) {
+    return false;
+  }
   const loom_symbol_ref_t family =
       loom_func_like_template_family(info->function);
   if (loom_symbol_ref_is_valid(family) &&
@@ -1033,8 +1103,7 @@ static iree_status_t loom_inline_select_transfer_actions(
       continue;
     }
     if (final_entry_by_symbol[entry->target_symbol_id] == entry_index) {
-      loom_region_t* body = loom_func_like_body(entry->callee);
-      if (body != NULL && body->block_count == 1) {
+      if (state->symbols[entry->target_symbol_id].body_will_be_linear) {
         entry->action = LOOM_INLINE_PLAN_ACTION_TRANSFER;
         ++*out_transfer_count;
       } else {
@@ -1061,9 +1130,9 @@ static iree_status_t loom_inline_execute_entry(
       IREE_RETURN_IF_ERROR(loom_callable_inline_call_with_branch(
           rewriter, entry->call_op, entry->callee, build_branch));
       if (entry->erase_callee_after_clone) {
-        loom_function_version_t* version = loom_function_version_list_find(
-            loom_function_version_owner_list(state->version_owner),
-            entry->callee);
+        loom_function_version_t* version =
+            loom_target_function_version_snapshot_handle_at(
+                &state->target_versions, entry->target_symbol_id);
         IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, entry->callee.op));
         if (version != NULL) {
           const bool removed =
@@ -1078,9 +1147,9 @@ static iree_status_t loom_inline_execute_entry(
     }
     case LOOM_INLINE_PLAN_ACTION_TRANSFER: {
       IREE_ASSERT(transfer_availability);
-      loom_function_version_t* version = loom_function_version_list_find(
-          loom_function_version_owner_list(state->version_owner),
-          entry->callee);
+      loom_function_version_t* version =
+          loom_target_function_version_snapshot_handle_at(
+              &state->target_versions, entry->target_symbol_id);
       IREE_RETURN_IF_ERROR(loom_callable_inline_consuming_call(
           rewriter, transfer_availability, entry->call_op, entry->callee));
       if (version != NULL) {
@@ -1100,9 +1169,11 @@ static iree_status_t loom_inline_execute_entry(
 
 // Makes a locked Low function's per-block source order explicit before its
 // body crosses a callable boundary. Each nonempty block receives a leading
-// fence and a fence after every non-terminator operation. The generic CFG
-// splice then treats those fences as ordinary cloned IR and remains unaware of
-// Low scheduling semantics.
+// fence and a fence after every non-terminator operation. The now-redundant
+// function-level lock is cleared, making this normalization idempotent when a
+// retained helper participates in a later inline pass. The generic CFG splice
+// treats the fences as ordinary cloned IR and remains unaware of Low scheduling
+// semantics.
 static iree_status_t loom_inline_materialize_locked_low_schedules(
     loom_inline_state_t* state, loom_rewriter_t* rewriter) {
   uint8_t* normalized_symbols = NULL;
@@ -1147,6 +1218,8 @@ static iree_status_t loom_inline_materialize_locked_low_schedules(
         op = next_op;
       }
     }
+    loom_op_attrs(entry->callee.op)[loom_low_func_def_schedule_ATTR_INDEX] =
+        loom_attr_absent();
     loom_pass_mark_changed(state->pass);
   }
   return iree_ok_status();
@@ -1209,18 +1282,16 @@ iree_status_t loom_inline_callables_run(loom_pass_t* pass,
   };
   IREE_RETURN_IF_ERROR(loom_symbol_reference_table_build(module, pass->arena,
                                                          &state.references));
-  if (options->policy_source == LOOM_INLINE_POLICY_SOURCE_TARGET) {
-    IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
-        module,
-        loom_target_pass_capability_function_versions(target_capability),
-        pass->arena, &state.target_versions));
-  }
+  IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
+      module, loom_target_pass_capability_function_versions(target_capability),
+      pass->arena, &state.target_versions));
   IREE_RETURN_IF_ERROR(loom_inline_allocate_state(&state));
   loom_inline_initialize_symbol_infos(&state);
   IREE_RETURN_IF_ERROR(loom_inline_build_plan(&state));
   IREE_RETURN_IF_ERROR(loom_inline_compute_required_sccs(&state));
   IREE_RETURN_IF_ERROR(loom_inline_index_required_entries_by_component(&state));
   loom_inline_mark_cycle_blockers(&state);
+  loom_inline_propagate_required_cfg_shapes(&state);
   loom_inline_preflight_required_entries(&state);
   IREE_RETURN_IF_ERROR(loom_inline_emit_blockers(&state));
   if (loom_pass_has_error_diagnostics(pass)) {

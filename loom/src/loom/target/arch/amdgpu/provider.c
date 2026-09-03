@@ -96,12 +96,6 @@ static const loom_low_verify_provider_t* kLoomAmdgpuLowVerifyProviders[] = {
     &loom_amdgpu_low_verify_provider,
 };
 
-static loom_target_low_call_policy_t loom_amdgpu_select_low_call_policy(
-    const loom_resolved_target_t* resolved_target) {
-  (void)resolved_target;
-  return LOOM_TARGET_LOW_CALL_POLICY_REQUIRE_INLINE;
-}
-
 static iree_status_t loom_amdgpu_provider_build_string_attr(
     loom_builder_t* builder, iree_string_view_t name, iree_string_view_t value,
     loom_named_attr_t* out_attr) {
@@ -172,7 +166,7 @@ static iree_status_t loom_amdgpu_provider_contribute_pipeline(
 const loom_target_provider_t loom_amdgpu_target_provider = {
     .profile_type = &loom_amdgpu_target_profile_type,
     .materialize_definition = loom_amdgpu_target_materialize_definition,
-    .select_low_call_policy = loom_amdgpu_select_low_call_policy,
+    .select_low_call_policy = loom_target_select_low_call_policy_require_inline,
     .register_context = loom_amdgpu_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_amdgpu_low_descriptor_registry_initialize,
@@ -210,6 +204,7 @@ const loom_target_provider_t loom_amdgpu_target_provider = {
     .select_profile = loom_amdgpu_target_provider_select_profile,
     .release_profile_selection =
         loom_amdgpu_target_provider_release_profile_selection,
+    .target_fact_type = &loom_amdgpu_target_fact_type,
 };
 
 static const loom_target_provider_t* const kLoomAmdgpuTargetProviders[] = {

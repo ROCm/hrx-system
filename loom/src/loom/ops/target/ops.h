@@ -25,6 +25,8 @@ enum {
 extern "C" {
 #endif
 
+extern const loom_target_fact_type_t loom_target_generic_fact_type;
+
 extern const loom_target_condition_descriptor_t loom_target_subgroup_size_condition;
 
 // Requires the active function-version facts to establish this subgroup size.

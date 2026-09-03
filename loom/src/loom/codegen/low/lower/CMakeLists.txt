@@ -62,6 +62,7 @@ loom_cc_library(
     loom::analysis::vector_memory_footprint
     loom::analysis::view_regions
     loom::codegen::low::builder
+    loom::codegen::low::descriptor_traits
     loom::codegen::low::descriptors
     loom::codegen::low::memory_access
     loom::codegen::low::memory_access_ir

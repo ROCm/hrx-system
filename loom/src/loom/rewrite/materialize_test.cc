@@ -419,6 +419,19 @@ TEST_F(MaterializeTest, RejectsCrossModuleCloneWithUnmappedSuccessor) {
   EXPECT_EQ(loom_module_block(target_)->op_count, 0u);
 }
 
+TEST_F(MaterializeTest, RejectsCloningRegionIntoItselfBeforeMutation) {
+  loom_ir_remap_t remap =
+      InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
+  const uint16_t original_block_count = source_->body->block_count;
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_ir_clone_region_blocks(&source_builder_, source_->body,
+                                  source_->body, original_block_count, &remap));
+
+  EXPECT_EQ(source_->body->block_count, original_block_count);
+}
+
 TEST_F(MaterializeTest, ClonesStandaloneSuccessorThroughExplicitBlockMap) {
   loom_region_t* source_region = nullptr;
   IREE_ASSERT_OK(loom_module_allocate_region(source_, 2, &source_region));

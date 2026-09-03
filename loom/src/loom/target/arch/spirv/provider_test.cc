@@ -122,6 +122,15 @@ class SpirvProviderTest : public ::testing::Test {
   loom_symbol_fact_table_t requirement_fact_table_;
 };
 
+TEST_F(SpirvProviderTest, RequiresLowCallsInline) {
+  EXPECT_EQ(loom_spirv_target_provider.target_fact_type,
+            &loom_spirv_target_fact_type);
+  ASSERT_NE(loom_spirv_target_provider.select_low_call_policy, nullptr);
+  const loom_resolved_target_t resolved_target = {};
+  EXPECT_EQ(loom_spirv_target_provider.select_low_call_policy(&resolved_target),
+            LOOM_TARGET_LOW_CALL_POLICY_REQUIRE_INLINE);
+}
+
 TEST_F(SpirvProviderTest, ProjectedProfileSatisfiesStructuredRequirements) {
   ModulePtr requirements =
       Parse(IREE_SV("spirv.target<vulkan1_3> @baseline_a\n"

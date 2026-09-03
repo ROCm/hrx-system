@@ -305,8 +305,10 @@ iree_status_t loom_rewriter_erase(loom_rewriter_t* rewriter, loom_op_t* op);
 
 // Moves |op| before |before_op|, preserving operands/results/regions while
 // retargeting ancestry, worklist membership, and region effect summaries.
-// Both ops must already be live in the same module. Moving an op before itself
-// or before its current immediate successor is a no-op.
+// Both ops must be owned by the rewrite module, though |op| may be staged in a
+// detached same-module region. |before_op| must be rooted in the module body.
+// Moving an op before itself or before its current immediate successor is a
+// no-op.
 iree_status_t loom_rewriter_move_before(loom_rewriter_t* rewriter,
                                         loom_op_t* op, loom_op_t* before_op);
 

@@ -627,6 +627,7 @@ loom_cc_library(
     loom::ops::cfg
     loom::ops::func
     loom::ops::kernel
+    loom::ops::low
     loom::ops::op_defs
     loom::ops::scf
     loom::ops::type_registry

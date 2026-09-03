@@ -563,6 +563,7 @@ loom_cc_library(
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:walk",
