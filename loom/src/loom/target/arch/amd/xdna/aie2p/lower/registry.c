@@ -11,6 +11,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/contracts/core_lower_rules.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
+#include "loom/target/arch/amd/xdna/aie2p/lower/matrix.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/storage.h"
 
 static iree_status_t loom_aie2p_map_type(void* user_data,
@@ -40,6 +41,10 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
       loom_type_is_all_static(source_type)) {
     const int64_t lane_count = loom_type_dim_static_size_at(source_type, 0);
     const loom_scalar_type_t element_type = loom_type_element_type(source_type);
+    if (lane_count == 64 && element_type == LOOM_SCALAR_TYPE_I32) {
+      return loom_low_lower_make_register_type(
+          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMS, 4, out_low_type);
+    }
     if (lane_count > 0 && lane_count <= 64 &&
         element_type == LOOM_SCALAR_TYPE_I1) {
       return loom_low_lower_make_register_type(
@@ -121,6 +126,11 @@ static iree_status_t loom_aie2p_preselect_op(void* user_data,
                                              const loom_op_t* source_op,
                                              loom_low_lower_plan_t* out_plan) {
   (void)user_data;
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_select_matrix_plan(context, source_op, out_plan));
+  if (!loom_low_lower_plan_is_empty(*out_plan)) {
+    return iree_ok_status();
+  }
   return loom_aie2p_select_storage_plan(context, source_op, out_plan);
 }
 
@@ -128,7 +138,13 @@ static void loom_aie2p_mark_plan_storage_demands(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_op, loom_low_lower_plan_t plan) {
   (void)user_data;
-  loom_aie2p_mark_storage_plan_demands(context, source_op, plan);
+  if (loom_aie2p_matrix_plan_isa(plan)) {
+    loom_aie2p_mark_matrix_plan_demands(context, source_op, plan);
+  } else if (loom_aie2p_storage_plan_isa(plan)) {
+    loom_aie2p_mark_storage_plan_demands(context, source_op, plan);
+  } else {
+    IREE_ASSERT_UNREACHABLE("AIE2P storage demand has unknown plan kind");
+  }
 }
 
 static void loom_aie2p_describe_plan(void* user_data,
@@ -137,7 +153,13 @@ static void loom_aie2p_describe_plan(void* user_data,
                                      loom_low_lower_plan_t plan,
                                      loom_low_lower_plan_report_t* out_report) {
   (void)user_data;
-  loom_aie2p_describe_storage_plan(context, source_op, plan, out_report);
+  if (loom_aie2p_matrix_plan_isa(plan)) {
+    loom_aie2p_describe_matrix_plan(context, source_op, plan, out_report);
+  } else if (loom_aie2p_storage_plan_isa(plan)) {
+    loom_aie2p_describe_storage_plan(context, source_op, plan, out_report);
+  } else {
+    IREE_ASSERT_UNREACHABLE("AIE2P report has unknown plan kind");
+  }
 }
 
 static iree_status_t loom_aie2p_emit_op(void* user_data,
@@ -145,7 +167,14 @@ static iree_status_t loom_aie2p_emit_op(void* user_data,
                                         const loom_op_t* source_op,
                                         loom_low_lower_plan_t plan) {
   (void)user_data;
-  return loom_aie2p_emit_storage_plan(context, source_op, plan);
+  if (loom_aie2p_matrix_plan_isa(plan)) {
+    return loom_aie2p_emit_matrix_plan(context, source_op, plan);
+  }
+  if (loom_aie2p_storage_plan_isa(plan)) {
+    return loom_aie2p_emit_storage_plan(context, source_op, plan);
+  }
+  IREE_ASSERT_UNREACHABLE("AIE2P emission has unknown plan kind");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 static const loom_low_lower_policy_t kAie2pCoreLowLowerPolicy = {
@@ -160,6 +189,13 @@ static const loom_low_lower_policy_t kAie2pCoreLowLowerPolicy = {
         },
     .contract_bindings = kAie2pCoreContractBindings,
     .contract_binding_count = IREE_ARRAYSIZE(kAie2pCoreContractBindings),
+    .descriptor_matrix =
+        {
+            .options = loom_aie2p_descriptor_matrix_options,
+            .query = loom_aie2p_descriptor_matrix_query,
+            .attrs = NULL,
+            .user_data = NULL,
+        },
     .preselect_op = {.fn = loom_aie2p_preselect_op, .user_data = NULL},
     .mark_plan_storage_demands =
         {

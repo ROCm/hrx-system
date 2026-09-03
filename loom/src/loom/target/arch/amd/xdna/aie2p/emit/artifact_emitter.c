@@ -14,7 +14,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/low_registry.h"
-#include "loom/target/arch/amd/xdna/aie2p/emit/bundle_plan.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/leaf_compile.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_object.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/tile_image.h"
 #include "loom/target/arch/amd/xdna/array/facts.h"
@@ -166,53 +166,16 @@ static iree_status_t loom_aie2p_tile_elf_emit(
     loom_target_compile_report_record_low_kernel_workload(report, function_op);
   }
 
-  loom_low_planning_statistics_t planning_statistics = {0};
-  const loom_low_emission_frame_options_t frame_options = {
+  loom_aie2p_leaf_contribution_t contribution = {0};
+  const loom_aie2p_leaf_compile_options_t leaf_compile_options = {
       .descriptor_registry = request->low_descriptor_registry,
       .function_target_facts = function_target_facts,
-      .memory_access_table = loom_low_memory_access_table_empty(),
-      .schedule_structural_models = loom_aie2p_low_structural_schedule_models(),
-      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
-      .emitter = request->diagnostic_emitter,
-      .statistics = report != NULL ? &planning_statistics : NULL,
+      .diagnostic_emitter = request->diagnostic_emitter,
+      .compile_report = report,
   };
-  const loom_low_emission_frame_spill_free_options_t spill_free_options = {
-      .materialization_options =
-          {
-              .has_supported_storage_spaces = true,
-              .supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_NONE,
-              .record_materialized_spills = true,
-              .emitter = request->diagnostic_emitter,
-          },
-  };
-  loom_low_emission_frame_t frame = {0};
-  iree_status_t status = loom_low_emission_frame_build_spill_free(
-      request->module, function_op, &frame_options, &spill_free_options,
-      request->scratch_arena, &frame);
-  if (report != NULL) {
-    loom_target_compile_report_record_low_planning(report,
-                                                   &planning_statistics);
-  }
-  if (iree_status_is_ok(status) && report != NULL) {
-    const loom_target_bundle_t* bundle =
-        loom_low_resolved_target_bundle(&frame.target);
-    if (bundle != NULL) {
-      loom_target_compile_report_record_target_bundle(report, bundle);
-    }
-    status =
-        loom_target_compile_report_record_low_emission_frame(report, &frame);
-  }
-
-  loom_aie2p_bundle_plan_t bundle_plan = {0};
-  if (iree_status_is_ok(status)) {
-    status = loom_aie2p_bundle_plan_build(&frame, request->scratch_arena,
-                                          &bundle_plan);
-  }
-  loom_aie2p_leaf_contribution_t contribution = {0};
-  if (iree_status_is_ok(status)) {
-    status = loom_aie2p_leaf_object_emit(&bundle_plan, request->scratch_arena,
-                                         &contribution);
-  }
+  iree_status_t status = loom_aie2p_leaf_compile(
+      request->module, function_op, &leaf_compile_options,
+      request->scratch_arena, &contribution);
 
   loom_aie2p_tile_storage_placement_t
       storage_placements[LOOM_STORAGE_SPACE_COUNT_];
@@ -245,9 +208,6 @@ static iree_status_t loom_aie2p_tile_elf_emit(
     status = iree_io_vec_stream_move_contents(stream, &contents);
   }
   if (iree_status_is_ok(status) && report != NULL) {
-    loom_target_compile_report_record_emission(report, bundle_plan.slot_count,
-                                               bundle_plan.encoded_byte_length,
-                                               bundle_plan.encoded_byte_length);
     loom_target_compile_report_record_artifact_size(report,
                                                     (uint64_t)stream_length);
   }

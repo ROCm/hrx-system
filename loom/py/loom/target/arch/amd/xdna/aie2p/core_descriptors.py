@@ -391,6 +391,30 @@ _BASE_DESCRIPTOR_SPECS = (
         asm_mnemonic="vmul.i16x32",
     ),
     _DescriptorSpec(
+        "VCLR",
+        f"{_TARGET_KEY}.accumulator.clear.i32x64",
+        "matrix.accumulator.clear.i32x64",
+        "II_VCLR",
+        storage_overrides=(("dst", "mBMs"),),
+        asm_mnemonic="acc.clear.i32x64",
+    ),
+    _DescriptorSpec(
+        "VMUL_vmul_cm_core_X_X",
+        f"{_TARGET_KEY}.matrix.multiply.s8s8.m8n8k8.configured",
+        "matrix.multiply.s8s8.m8n8k8.configured",
+        "II_VMUL_vmul_cm_core_X_X",
+        storage_overrides=(("dst", "mBMs"),),
+        asm_mnemonic="mmul.s8s8.m8n8k8",
+    ),
+    _DescriptorSpec(
+        "VST_dmx_sts_bm_idx_imm",
+        f"{_TARGET_KEY}.store.accumulator.i32x16.indexed.immediate",
+        "memory.store.accumulator.indexed.i32x16",
+        "II_VST_dmx_sts_bm_idx_imm",
+        asm_mnemonic="vst.acc.i32x16",
+        memory_width_bits=512,
+    ),
+    _DescriptorSpec(
         "VSRS_4x_mv_x_srs_dm_srsSign1",
         f"{_TARGET_KEY}.narrow.trunc.signed.i16x32",
         "integer.narrow.trunc.signed.i16x32",
@@ -1049,24 +1073,54 @@ def _aggregate_register_units(
     register_name: str,
 ) -> tuple[str, ...]:
     unit_count = _storage_unit_count(source_class_name, target_class_name)
-    register = _MACHINE_REGISTERS[register_name]
-    if len(register.subregisters) != unit_count:
+    target_candidates = set(_MACHINE_CLASSES[target_class_name].candidates)
+
+    def collect_units(name: str) -> tuple[str, ...]:
+        if name in target_candidates:
+            return (name,)
+        register = _MACHINE_REGISTERS[name]
+        if not register.subregisters:
+            raise ValueError(
+                f"{register_name}: {name} cannot be decomposed into storage "
+                f"class {target_class_name}"
+            )
+        units = tuple(
+            unit
+            for subregister_name in register.subregisters
+            for unit in collect_units(subregister_name)
+        )
+        covered_atomic_units = tuple(
+            sorted(
+                atomic_unit
+                for unit_name in units
+                for atomic_unit in _MACHINE_REGISTERS[unit_name].atomic_units
+            )
+        )
+        if covered_atomic_units != register.atomic_units:
+            raise ValueError(
+                f"{register_name}: recursive subregisters do not exactly cover "
+                f"{name} atomic storage"
+            )
+        return units
+
+    units = collect_units(register_name)
+    if len(units) != unit_count:
         raise ValueError(
             f"{register_name}: expected {unit_count} named subregister units for "
             f"{source_class_name} as {target_class_name}, found "
-            f"{len(register.subregisters)}"
+            f"{len(units)}"
         )
-    target_candidates = set(_MACHINE_CLASSES[target_class_name].candidates)
-    if not set(register.subregisters) <= target_candidates:
+    if len(units) != len(set(units)) or not set(units) <= target_candidates:
         raise ValueError(
-            f"{register_name}: subregisters {register.subregisters} are outside "
+            f"{register_name}: subregisters {units} are outside "
             f"storage class {target_class_name}"
         )
+    register = _MACHINE_REGISTERS[register_name]
     covered_units = tuple(
         sorted(
             atomic_unit
-            for subregister_name in register.subregisters
-            for atomic_unit in _MACHINE_REGISTERS[subregister_name].atomic_units
+            for unit_name in units
+            for atomic_unit in _MACHINE_REGISTERS[unit_name].atomic_units
         )
     )
     if covered_units != register.atomic_units:
@@ -1074,7 +1128,7 @@ def _aggregate_register_units(
             f"{register_name}: named subregisters do not exactly cover aggregate "
             "atomic storage"
         )
-    return register.subregisters
+    return units
 
 
 def _validate_aggregate_storage_domain(source: str, target: str) -> None:

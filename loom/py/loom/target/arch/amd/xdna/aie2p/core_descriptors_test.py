@@ -61,8 +61,19 @@ def test_core_descriptor_closure_is_complete() -> None:
         (view.physical_register, view.reg_class): view.units
         for view in descriptor_set.physical_register_views
     } == {
-        (f"x{index}", "aie2p.vec256"): (f"wl{index}", f"wh{index}")
-        for index in range(12)
+        **{
+            (f"x{index}", "aie2p.vec256"): (f"wl{index}", f"wh{index}")
+            for index in range(12)
+        },
+        **{
+            (f"dm{index}", "aie2p.mbms"): (
+                f"bmll{index}",
+                f"bmlh{index}",
+                f"bmhl{index}",
+                f"bmhh{index}",
+            )
+            for index in range(5)
+        },
     }
 
 
@@ -682,6 +693,38 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
         "aie2p.er",
     ]
     assert [operand.unit_count for operand in multiply.operands] == [1, 2, 2, 1]
+
+    matrix_multiply = descriptors[
+        "amd.xdna.aie2p.matrix.multiply.s8s8.m8n8k8.configured"
+    ]
+    assert [operand.field_name for operand in matrix_multiply.operands] == [
+        "dst",
+        "s1",
+        "s2",
+        "acc",
+    ]
+    assert [operand.reg_alts[0].reg_class for operand in matrix_multiply.operands] == [
+        "aie2p.mbms",
+        "aie2p.vec256",
+        "aie2p.vec256",
+        "aie2p.er",
+    ]
+    assert [operand.unit_count for operand in matrix_multiply.operands] == [4, 2, 2, 1]
+
+    accumulator_clear = descriptors["amd.xdna.aie2p.accumulator.clear.i32x64"]
+    assert accumulator_clear.operands[0].reg_alts[0].reg_class == "aie2p.mbms"
+    assert accumulator_clear.operands[0].unit_count == 4
+
+    accumulator_store = descriptors[
+        "amd.xdna.aie2p.store.accumulator.i32x16.indexed.immediate"
+    ]
+    assert [
+        operand.reg_alts[0].reg_class for operand in accumulator_store.operands
+    ] == [
+        "aie2p.mbms",
+        "aie2p.ep",
+    ]
+    assert accumulator_store.effects[0].width_bits == 512
 
     narrow = descriptors["amd.xdna.aie2p.narrow.trunc.signed.i16x32"]
     assert [operand.reg_alts[0].reg_class for operand in narrow.operands[:3]] == [

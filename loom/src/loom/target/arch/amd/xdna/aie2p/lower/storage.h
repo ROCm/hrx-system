@@ -15,6 +15,9 @@
 extern "C" {
 #endif
 
+// Returns true when |plan| is owned by function-storage lowering.
+bool loom_aie2p_storage_plan_isa(loom_low_lower_plan_t plan);
+
 // Selects a function-storage plan for one source operation.
 iree_status_t loom_aie2p_select_storage_plan(loom_low_lower_context_t* context,
                                              const loom_op_t* source_op,
