@@ -803,11 +803,13 @@ def default_ops() -> tuple[Op, ...]:
     from loom.dialect.encoding import ALL_ENCODING_OPS
     from loom.dialect.func import ALL_FUNC_OPS
     from loom.dialect.globals import ALL_GLOBAL_OPS
+    from loom.dialect.group import ALL_GROUP_OPS
     from loom.dialect.index import ALL_INDEX_OPS
     from loom.dialect.kernel import ALL_KERNEL_OPS
     from loom.dialect.llvmir import ALL_LLVMIR_OPS
     from loom.dialect.low import ALL_LOW_OPS
     from loom.dialect.pass_ import ALL_PASS_OPS
+    from loom.dialect.pipeline import ALL_PIPELINE_OPS
     from loom.dialect.pool import ALL_POOL_OPS
     from loom.dialect.sanitizer import ALL_SANITIZER_OPS
     from loom.dialect.scalar import ALL_SCALAR_OPS
@@ -825,11 +827,13 @@ def default_ops() -> tuple[Op, ...]:
         *ALL_ENCODING_OPS,
         *ALL_FUNC_OPS,
         *ALL_GLOBAL_OPS,
+        *ALL_GROUP_OPS,
         *ALL_INDEX_OPS,
         *ALL_KERNEL_OPS,
         *ALL_LLVMIR_OPS,
         *ALL_LOW_OPS,
         *ALL_PASS_OPS,
+        *ALL_PIPELINE_OPS,
         *ALL_POOL_OPS,
         *ALL_SANITIZER_OPS,
         *ALL_SCALAR_OPS,
@@ -843,11 +847,15 @@ def default_ops() -> tuple[Op, ...]:
 
 def default_types() -> tuple[TypeDef, ...]:
     """Return every type in the default Loom Python type registry."""
+    from loom.dialect.group import ALL_GROUP_TYPES
     from loom.dialect.hal import ALL_HAL_TYPES
     from loom.dialect.kernel import ALL_KERNEL_TYPES
+    from loom.dialect.pipeline import ALL_PIPELINE_TYPES
 
     return (
         *ALL_BUILTIN_TYPES,
+        *ALL_GROUP_TYPES,
         *ALL_HAL_TYPES,
         *ALL_KERNEL_TYPES,
+        *ALL_PIPELINE_TYPES,
     )

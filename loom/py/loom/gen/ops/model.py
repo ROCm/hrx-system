@@ -120,6 +120,18 @@ def _load_command_generation() -> DialectGeneration:
     return DialectGeneration(command_ops, list(ALL_COMMAND_OPS), None)
 
 
+def _load_group_generation() -> DialectGeneration:
+    from loom.dialect.group import ALL_GROUP_OPS, group_ops
+
+    return DialectGeneration(group_ops, list(ALL_GROUP_OPS), None)
+
+
+def _load_pipeline_generation() -> DialectGeneration:
+    from loom.dialect.pipeline import ALL_PIPELINE_OPS, pipeline_ops
+
+    return DialectGeneration(pipeline_ops, list(ALL_PIPELINE_OPS), None)
+
+
 def _load_buffer_generation() -> DialectGeneration:
     from loom.dialect.buffer import ALL_BUFFER_OPS, buffer_ops
 
@@ -242,6 +254,8 @@ _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
     ("cfg", _load_cfg_generation),
     ("check", _load_check_generation),
     ("command", _load_command_generation),
+    ("group", _load_group_generation),
+    ("pipeline", _load_pipeline_generation),
     ("buffer", _load_buffer_generation),
     ("view", _load_view_generation),
     ("vector", _load_vector_generation),
@@ -269,13 +283,17 @@ def dialect_names() -> tuple[str, ...]:
 
 def _load_core_types() -> list[Any]:
     from loom.builtin_types import ALL_BUILTIN_TYPES
+    from loom.dialect.group import ALL_GROUP_TYPES
     from loom.dialect.hal import ALL_HAL_TYPES
     from loom.dialect.kernel import ALL_KERNEL_TYPES
+    from loom.dialect.pipeline import ALL_PIPELINE_TYPES
 
     return [
         *ALL_BUILTIN_TYPES,
+        *ALL_GROUP_TYPES,
         *ALL_HAL_TYPES,
         *ALL_KERNEL_TYPES,
+        *ALL_PIPELINE_TYPES,
     ]
 
 

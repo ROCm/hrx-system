@@ -28,6 +28,7 @@ _SYMBOL_INTERFACE_MAP: dict[str, str] = {
     "kernel": "LOOM_SYMBOL_INTERFACE_KERNEL",
     "kernel_entry": "LOOM_SYMBOL_INTERFACE_KERNEL_ENTRY",
     "command_program": "LOOM_SYMBOL_INTERFACE_COMMAND_PROGRAM",
+    "pipeline": "LOOM_SYMBOL_INTERFACE_PIPELINE",
     "template_family": "LOOM_SYMBOL_INTERFACE_TEMPLATE_FAMILY",
     "template_provider": "LOOM_SYMBOL_INTERFACE_TEMPLATE_PROVIDER",
 }

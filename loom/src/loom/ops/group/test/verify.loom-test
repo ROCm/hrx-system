@@ -1,0 +1,14 @@
+// RUN: verify
+
+func.def @valid_group(%lanes: index) {
+  %workers = group.create %lanes : index -> group
+  func.return
+}
+
+// ====
+
+func.def @wrong_group_result(%lanes: index) {
+  // ERROR@+1: TYPE/004 {result_name="result", actual_type="i32", expected_constraint="group"}
+  %workers = group.create %lanes : index -> i32
+  func.return
+}

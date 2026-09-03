@@ -45,6 +45,7 @@ from loom.format.bytecode.writer import (
     SECTION_SYMBOLS,
     SOURCE_TRIVIA_LEADING_BLANK_LINE,
     SYMBOL_FLAG_EXPORT,
+    SYMBOL_INTERFACE_FLAG_MASK,
     write_module,
 )
 from loom.ir import (
@@ -248,6 +249,37 @@ def _find_section_entry(
         if kind == section_kind:
             return entry_offset, section_offset, length
     raise AssertionError(f"missing section kind {section_kind}")
+
+
+def _replace_section_varint(
+    data: bytearray, section_kind: int, offset: int, value: int
+) -> None:
+    """Replace one section varint and repair enclosing byte ranges."""
+    module_offset, module_length = _module_range(data)
+    entries = _section_entries(data)
+    entry_offset, section_offset, section_length = _find_section_entry(
+        data, section_kind
+    )
+    section_start = module_offset + section_offset
+    assert section_start <= offset < section_start + section_length
+
+    _old_value, old_end = decode_varint(data, offset)
+    replacement = encode_varint(value)
+    size_delta = len(replacement) - (old_end - offset)
+    data[offset:old_end] = replacement
+    if size_delta == 0:
+        return
+
+    struct.pack_into("<Q", data, entry_offset + 16, section_length + size_delta)
+    for other_entry_offset, _kind, other_offset, _length in entries:
+        if other_offset > section_offset:
+            struct.pack_into(
+                "<Q", data, other_entry_offset + 8, other_offset + size_delta
+            )
+
+    producer_end = data.index(0, 16)
+    directory_offset = (producer_end + 1 + 7) & ~7
+    struct.pack_into("<Q", data, directory_offset + 16, module_length + size_delta)
 
 
 def _make_single_op_body_module(op_name: str = "test.yield") -> Module:
@@ -595,8 +627,12 @@ class TestMalformedSymbolReferences:
         assert caller_dependency_count == 1
         _source_root, offset = decode_varint(data, offset)
         _target_symbol, offset = decode_varint(data, offset)
-        assert data[offset : offset + 2] == b"\x80\x02"
-        data[offset + 1] = 0x40
+        _replace_section_varint(
+            data,
+            SECTION_SYMBOL_REFERENCES,
+            offset,
+            SYMBOL_INTERFACE_FLAG_MASK + 1,
+        )
 
         with pytest.raises(BytecodeError, match="target interfaces"):
             read_module(bytes(data))

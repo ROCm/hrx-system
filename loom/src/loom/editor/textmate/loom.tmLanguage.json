@@ -353,7 +353,7 @@
       "patterns": [
         {
           "name": "keyword.other.loom",
-          "match": "\\b(?:workgroup_count|workgroup_size|memory_access|cluster_size|abi_layout|allocation|workgroups|iter_args|artifact|expected|ordering|priority|requires|schedule|default|dgroups|linkage|ordinal|actual|blocks|bounds|callee|config|device|export|extent|import|inputs|launch|layout|module|offset|period|public|reason|source|symbol|target|unroll|values|align|attrs|count|range|scope|shape|using|value|where|atol|axes|base|case|else|from|host|into|mode|name|path|rtol|seed|step|abi|for|nan|as|do|to|x)\\b"
+          "match": "\\b(?:workgroup_count|workgroup_size|memory_access|cluster_size|abi_layout|allocation|workgroups|iter_args|artifact|capacity|expected|ordering|priority|requires|schedule|default|dgroups|linkage|ordinal|across|actual|blocks|bounds|callee|config|device|export|extent|import|inputs|launch|layout|module|offset|period|public|reason|source|symbol|target|unroll|values|align|attrs|count|range|scope|shape|using|value|where|atol|axes|base|case|else|from|host|into|mode|name|path|rtol|seed|step|abi|for|nan|as|do|on|to|x)\\b"
         },
         {
           "name": "constant.language.boolean.loom",

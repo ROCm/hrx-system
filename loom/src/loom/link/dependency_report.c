@@ -29,6 +29,7 @@ static const loom_link_dependency_named_flag_t
         {LOOM_SYMBOL_INTERFACE_TEMPLATE_PROVIDER,
          IREE_SVL("template_provider")},
         {LOOM_SYMBOL_INTERFACE_KERNEL_ENTRY, IREE_SVL("kernel_entry")},
+        {LOOM_SYMBOL_INTERFACE_PIPELINE, IREE_SVL("pipeline")},
 };
 
 static const loom_link_dependency_named_flag_t

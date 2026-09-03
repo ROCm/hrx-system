@@ -23,12 +23,14 @@ iree_py_library(
     loom::py::loom::dialect::encoding::encoding
     loom::py::loom::dialect::func::func
     loom::py::loom::dialect::globals::globals
+    loom::py::loom::dialect::group::group
     loom::py::loom::dialect::hal::hal
     loom::py::loom::dialect::index::index
     loom::py::loom::dialect::kernel::kernel
     loom::py::loom::dialect::llvmir::llvmir
     loom::py::loom::dialect::low::low
     loom::py::loom::dialect::pass_::pass_
+    loom::py::loom::dialect::pipeline::pipeline
     loom::py::loom::dialect::pool::pool
     loom::py::loom::dialect::sanitizer::sanitizer
     loom::py::loom::dialect::scalar::scalar
