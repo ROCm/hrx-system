@@ -530,6 +530,29 @@ loom_aie2p_bundle_plan_encode_structural_descriptor(
                                       NULL);
 }
 
+typedef struct loom_aie2p_physical_move_route_t {
+  // Native encoding register class read by the move.
+  uint16_t source_encoding_reg_class_id;
+  // Native encoding register class written by the move.
+  uint16_t destination_encoding_reg_class_id;
+  // Native descriptor encoding the move.
+  uint16_t descriptor_ref;
+} loom_aie2p_physical_move_route_t;
+
+static const loom_aie2p_physical_move_route_t kPhysicalMoveRoutes[] = {
+    {
+        .source_encoding_reg_class_id = AIE2P_CORE_REG_CLASS_ID_AIE2P_VEC256,
+        .destination_encoding_reg_class_id =
+            AIE2P_CORE_REG_CLASS_ID_AIE2P_VEC256,
+        .descriptor_ref = AIE2P_CORE_DESCRIPTOR_REF_MOVE_VEC256,
+    },
+    {
+        .source_encoding_reg_class_id = AIE2P_CORE_REG_CLASS_ID_AIE2P_ER,
+        .destination_encoding_reg_class_id = AIE2P_CORE_REG_CLASS_ID_AIE2P_ER,
+        .descriptor_ref = AIE2P_CORE_DESCRIPTOR_REF_MOVE_SCALAR,
+    },
+};
+
 static iree_status_t loom_aie2p_bundle_plan_encode_move(
     const loom_low_emission_frame_t* frame, const loom_low_move_t* move,
     loom_aie2p_encoded_slot_t* out_encoded_slot) {
@@ -543,12 +566,21 @@ static iree_status_t loom_aie2p_bundle_plan_encode_move(
                  descriptor_set->physical_register_count);
   IREE_ASSERT_LT(move->source.location,
                  descriptor_set->physical_register_count);
-  if (!loom_low_descriptor_set_find_physical_register_candidate(
-          descriptor_set, AIE2P_CORE_REG_CLASS_ID_AIE2P_ER,
-          move->destination.location, NULL) ||
-      !loom_low_descriptor_set_find_physical_register_candidate(
-          descriptor_set, AIE2P_CORE_REG_CLASS_ID_AIE2P_ER,
-          move->source.location, NULL)) {
+
+  const loom_aie2p_physical_move_route_t* route = NULL;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kPhysicalMoveRoutes); ++i) {
+    const loom_aie2p_physical_move_route_t* candidate = &kPhysicalMoveRoutes[i];
+    if (loom_low_descriptor_set_find_physical_register_candidate(
+            descriptor_set, candidate->source_encoding_reg_class_id,
+            move->source.location, NULL) &&
+        loom_low_descriptor_set_find_physical_register_candidate(
+            descriptor_set, candidate->destination_encoding_reg_class_id,
+            move->destination.location, NULL)) {
+      route = candidate;
+      break;
+    }
+  }
+  if (route == NULL) {
     const iree_string_view_t destination_name = loom_low_descriptor_set_string(
         descriptor_set,
         descriptor_set->physical_registers[move->destination.location]
@@ -557,22 +589,35 @@ static iree_status_t loom_aie2p_bundle_plan_encode_move(
         descriptor_set,
         descriptor_set->physical_registers[move->source.location]
             .name_string_offset);
+    const iree_string_view_t destination_class_name =
+        loom_low_descriptor_set_string(
+            descriptor_set,
+            descriptor_set
+                ->reg_classes[move->destination.descriptor_reg_class_id]
+                .name_string_offset);
+    const iree_string_view_t source_class_name = loom_low_descriptor_set_string(
+        descriptor_set,
+        descriptor_set->reg_classes[move->source.descriptor_reg_class_id]
+            .name_string_offset);
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
-        "AIE2P has no selected physical move route from %.*s to %.*s",
-        (int)source_name.size, source_name.data, (int)destination_name.size,
-        destination_name.data);
+        "AIE2P has no selected physical move route from %.*s:%.*s to "
+        "%.*s:%.*s",
+        (int)source_class_name.size, source_class_name.data,
+        (int)source_name.size, source_name.data,
+        (int)destination_class_name.size, destination_class_name.data,
+        (int)destination_name.size, destination_name.data);
   }
 
   const loom_low_allocation_assignment_t destination_assignment = {
-      .descriptor_reg_class_id = AIE2P_CORE_REG_CLASS_ID_AIE2P_ER,
+      .descriptor_reg_class_id = route->destination_encoding_reg_class_id,
       .unit_count = 1,
       .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
       .location_base = move->destination.location,
       .location_count = 1,
   };
   const loom_low_allocation_assignment_t source_assignment = {
-      .descriptor_reg_class_id = AIE2P_CORE_REG_CLASS_ID_AIE2P_ER,
+      .descriptor_reg_class_id = route->source_encoding_reg_class_id,
       .unit_count = 1,
       .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
       .location_base = move->source.location,
@@ -583,8 +628,7 @@ static iree_status_t loom_aie2p_bundle_plan_encode_move(
       &source_assignment,
   };
   *out_encoded_slot = loom_aie2p_descriptor_encode(
-      descriptor_set, AIE2P_CORE_DESCRIPTOR_REF_MOVE_SCALAR,
-      operand_assignments, NULL);
+      descriptor_set, route->descriptor_ref, operand_assignments, NULL);
   return iree_ok_status();
 }
 
