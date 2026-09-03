@@ -22,28 +22,53 @@
 // https://github.com/petewarden/tensorflow_makefile/blob/master/tensorflow/core/platform/denormal.cc
 // https://chromium.googlesource.com/chromium/blink/+/main/Source/platform/audio/DenormalDisabler.h
 
-static uint64_t iree_fpu_state_set_dtz(uint64_t state, bool denormals_to_zero);
-
 #if defined(IREE_ARCH_ARM_32)
 static uint64_t iree_fpu_state_set_dtz(uint64_t state, bool denormals_to_zero) {
   return (state & ~0x1000000) | (denormals_to_zero ? 0x1000000 : 0);
+}
+static uint64_t iree_fpu_state_mask_exceptions(uint64_t state) {
+  return state & ~UINT64_C(0x00009F00);
+}
+static uint64_t iree_fpu_state_round_to_nearest(uint64_t state) {
+  return state & ~UINT64_C(0x00C00000);
 }
 #elif defined(IREE_ARCH_ARM_64)
 static uint64_t iree_fpu_state_set_dtz(uint64_t state, bool denormals_to_zero) {
   return (state & ~0x1080000) | (denormals_to_zero ? 0x1080000 : 0);
 }
+static uint64_t iree_fpu_state_mask_exceptions(uint64_t state) {
+  return state & ~UINT64_C(0x00009F00);
+}
+static uint64_t iree_fpu_state_round_to_nearest(uint64_t state) {
+  return state & ~UINT64_C(0x00C00000);
+}
 #elif defined(IREE_ARCH_X86_32) || defined(IREE_ARCH_X86_64)
 static uint64_t iree_fpu_state_set_dtz(uint64_t state, bool denormals_to_zero) {
   return (state & ~0x8040) | (denormals_to_zero ? 0x8040 : 0);
+}
+static uint64_t iree_fpu_state_mask_exceptions(uint64_t state) {
+  return state | UINT64_C(0x00001F80);
+}
+static uint64_t iree_fpu_state_round_to_nearest(uint64_t state) {
+  return state & ~UINT64_C(0x00006000);
+}
+#elif defined(IREE_ARCH_RISCV_32) || defined(IREE_ARCH_RISCV_64)
+static uint64_t iree_fpu_state_set_dtz(uint64_t state, bool denormals_to_zero) {
+  return state;
+}
+static uint64_t iree_fpu_state_mask_exceptions(uint64_t state) { return state; }
+static uint64_t iree_fpu_state_round_to_nearest(uint64_t state) {
+  return state & ~UINT64_C(0x000000E0);
 }
 #else
 static uint64_t iree_fpu_state_set_dtz(uint64_t state, bool denormals_to_zero) {
   return state;
 }
+static uint64_t iree_fpu_state_mask_exceptions(uint64_t state) { return state; }
+static uint64_t iree_fpu_state_round_to_nearest(uint64_t state) {
+  return state;
+}
 #endif  // IREE_ARCH_*
-
-static uint64_t iree_fpu_load_state(void);
-static void iree_fpu_store_state(uint64_t state);
 
 #if defined(IREE_ARCH_ARM_32) && defined(IREE_COMPILER_MSVC)
 static uint64_t iree_fpu_load_state(void) {
@@ -82,6 +107,16 @@ static uint64_t iree_fpu_load_state(void) { return (uint64_t)_mm_getcsr(); }
 static void iree_fpu_store_state(uint64_t state) {
   _mm_setcsr((unsigned int)state);
 }
+#elif (defined(IREE_ARCH_RISCV_32) || defined(IREE_ARCH_RISCV_64)) && \
+    defined(__riscv_flen)
+static uint64_t iree_fpu_load_state(void) {
+  uintptr_t fcsr = 0;
+  __asm__ __volatile__("frcsr %0" : "=r"(fcsr));
+  return (uint64_t)fcsr;
+}
+static void iree_fpu_store_state(uint64_t state) {
+  __asm__ __volatile__("fscsr %0" : : "r"((uintptr_t)state));
+}
 #else
 static uint64_t iree_fpu_load_state(void) { return 0; }
 static void iree_fpu_store_state(uint64_t state) {}
@@ -93,6 +128,12 @@ iree_fpu_state_t iree_fpu_state_push(iree_fpu_state_flags_t flags) {
   state.current_value = iree_fpu_state_set_dtz(
       state.current_value,
       (flags & IREE_FPU_STATE_FLAG_FLUSH_DENORMALS_TO_ZERO) ? true : false);
+  if (iree_any_bit_set(flags, IREE_FPU_STATE_FLAG_MASK_EXCEPTIONS)) {
+    state.current_value = iree_fpu_state_mask_exceptions(state.current_value);
+  }
+  if (iree_any_bit_set(flags, IREE_FPU_STATE_FLAG_ROUND_TO_NEAREST)) {
+    state.current_value = iree_fpu_state_round_to_nearest(state.current_value);
+  }
   if (state.previous_value != state.current_value) {
     iree_fpu_store_state(state.current_value);
   }
