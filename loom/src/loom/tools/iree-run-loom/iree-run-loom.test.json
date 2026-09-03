@@ -14,7 +14,8 @@
             "--backend=",
             "--kernel-input-buffer=64xf32=0",
             "--emit-target-artifact=",
-            "--compile-report=summary"
+            "--compile-report=summary",
+            "disables all compiler transformations"
           ]
         }
       }

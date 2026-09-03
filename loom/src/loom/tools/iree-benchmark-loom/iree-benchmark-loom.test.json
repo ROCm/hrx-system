@@ -53,34 +53,22 @@
         "contains": {
           "unordered": [
             "## iree-benchmark-loom",
-            "default output is a compact JSON snapshot",
+            "gates every",
+            "--dry-run",
+            "--measure=dispatch_complete",
             "work_items",
-            "ordered, typed `workload`",
-            "`launch_config`",
-            "failure.entry",
             "select(.failure)",
             "--output-format=jsonl",
-            "compile_report",
-            ".compile_report.entries.rows[]",
-            ".compile_report.schedule_band_summary_rows.rows[]",
-            "dynamic_instruction_mix",
-            "max_band_node_count",
-            ".compile_report.wait_reason_summary_rows.rows[]",
-            ".compile_report.wait_action_rows.rows[]",
-            "materialized_spill_storage",
-            "group_by",
-            "full_drains",
-            "semantic_tag",
-            "compile_report_path",
-            "artifact_manifest_path",
-            "target_artifact_path",
-            "rounding=finite_only",
-            "fp8_packed_bf16_decode_repair_zero_subnormal",
-            ".compile_report.target_capability_rows.rows[]",
-            "matrix_fp8_native_kind"
+            "--artifact-bundle-dir=DIR",
+            "loom/docs/src/workflows/benchmark.md",
+            "loom/docs/src/workflows/compile-reports.md"
           ]
         },
-        "not_contains": ["static_summary"]
+        "not_contains": [
+          "iree-bazel-run",
+          "schedule_band_summary_rows",
+          "static_summary"
+        ]
       }
     },
     {
@@ -93,6 +81,28 @@
         "contains": [
           "Runs correctness-gated check.benchmark records from a Loom module.",
           "Usage:"
+        ]
+      }
+    },
+    {
+      "name": "rejects an unavailable explicit device",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/testdata/scalar_benchmarks.loom",
+          "--benchmark=@scalar_equal_latency",
+          "--device=loom-unavailable",
+          "--dry-run"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "--device=loom-unavailable",
+          "not available in this Loom installation",
+          "available --device drivers:"
         ]
       }
     }

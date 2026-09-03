@@ -116,7 +116,7 @@ typedef enum loom_low_scf_for_unroll_policy_e {
   LOOM_LOW_SCF_FOR_UNROLL_POLICY_COUNT_ = 2,
 } loom_low_scf_for_unroll_policy_t;
 
-// LOOM_OP_LOW_FUNC_DEF: Target-bound low function definition with register-typed signature values.
+// LOOM_OP_LOW_FUNC_DEF: Target-bound low function definition with register-typed signature values. Without exactness modifiers, registers are virtual and the instruction schedule is free. allocation(...) and schedule(...) are independent contracts: fixed preserves physical register assignment, while locked preserves authored instruction order.
 // low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {
 //   %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>
 //   low.return %sum : reg<amdgpu.vgpr x1>
@@ -262,7 +262,7 @@ iree_status_t loom_low_kernel_def_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_LOW_FUNC_DECL: Target-bound low function declaration with register-typed signature values.
+// LOOM_OP_LOW_FUNC_DECL: Target-bound low function declaration with register-typed signature values. Allocation and scheduling exactness independently describe the imported implementation contract.
 // low.func.decl target<amdgpu.gfx11.generic.core>(@gfx11_generic) @extern_add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>)
 LOOM_DEFINE_ISA(loom_low_func_decl_isa, LOOM_OP_LOW_FUNC_DECL)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_func_decl_args, 0)

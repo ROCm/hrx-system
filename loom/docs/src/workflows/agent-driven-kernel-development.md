@@ -413,9 +413,13 @@ boundary:
 - [RADV and Vulkan](oracles/radv.md) join an optimized Vulkan dispatch to its
   selected SPIR-V, ACO native program, launch geometry, and score;
 - [LLVM MC](oracles/llvm-mc.md) independently qualifies selected native packet
-  encodings; and
+  encodings;
 - [GGML and llama.cpp](oracles/ggml-llama-cpp.md) preserve model, quantized
-  storage, graph, runtime-selection, and semantic-cut contracts during a port.
+  storage, graph, runtime-selection, and semantic-cut contracts during a port;
+  and
+- [Native schedule reconstruction](oracles/native-schedule.md) preserves an
+  executable Low oracle while raising its behavior into default-pipeline source
+  and minimizing the first compiler divergence.
 
 An oracle answers the question named by its page. It does not become Loom's
 source language, force its dispatch boundaries into a model program, or waive

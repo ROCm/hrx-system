@@ -77,6 +77,11 @@ void loom_run_hal_testbench_context_set_runtime_sanitizer_options(
 void loom_run_hal_testbench_context_deinitialize(
     loom_run_hal_testbench_context_t* context);
 
+// Validates an explicit --device selection against the linked providers.
+// Empty selection remains lazy and does not initialize a HAL runtime.
+iree_status_t loom_run_hal_testbench_context_validate_explicit_device(
+    loom_run_hal_testbench_context_t* context);
+
 // Selects a linked device provider and initializes the HAL runtime on demand.
 iree_status_t loom_run_hal_testbench_context_ensure_runtime(
     loom_run_hal_testbench_context_t* context);

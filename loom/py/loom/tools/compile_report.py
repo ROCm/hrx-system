@@ -27,11 +27,62 @@ from loom.reporting.compile_report_view import (
     format_compile_report_show_text,
 )
 
+_AGENTS_MARKDOWN = """## loom-compile-report
+
+`loom-compile-report` turns version-zero compile report JSON into bounded views
+for one compiler checkout. Start here before querying the complete report tree.
+
+### Read, compare, and choose an experiment
+
+```shell
+loom-compile-report show kernel.report.json
+loom-compile-report diff baseline.report.json candidate.report.json
+loom-compile-report diff gfx11.report.json gfx1151.report.json \\
+  --comparison=target
+loom-compile-report suggest kernel.report.json
+```
+
+`show` separates emitted artifact facts from compiler analysis and marks omitted
+metrics as unavailable. `diff` uses an exact compilation identity by default, so
+a changed source, workload, target, backend, or configuration fails instead of
+producing a false causal comparison. `--comparison=target` admits target
+specialization changes within one target and backend family. `--force` retains
+identity mismatches for historical inspection; its result is observational.
+
+`suggest` asks the selected target provider for evidence-backed experiments.
+Suggestions are hypotheses to recompile, retest, and measure, not performance
+claims.
+
+### Use the bounded JSON views
+
+```shell
+loom-compile-report show kernel.report.json --format=json | \\
+  jq '{status, identity, workload, entries, missing_evidence}'
+loom-compile-report diff baseline.report.json candidate.report.json \\
+  --format=json | \\
+  jq '{identity_mismatches, changed_entry_count, entries}'
+loom-compile-report suggest kernel.report.json --format=json | \\
+  jq '{status, provider, findings}'
+```
+
+The JSON views are smaller and more stable than the complete compiler report.
+Use raw report fields only after a bounded view identifies a question that needs
+row-level scheduling, allocation, memory, or legalization evidence. The detailed
+workflow and advanced `jq` cuts live in
+`loom/docs/src/workflows/compile-reports.md`.
+"""
+
 
 def main(argv: list[str] | None = None) -> int:
     """Runs the compile report analysis tool."""
     parser = _create_argument_parser()
-    args = parser.parse_args(argv)
+    arguments = list(argv) if argv is not None else sys.argv[1:]
+    if arguments == ["--agents_md"]:
+        sys.stdout.write(_AGENTS_MARKDOWN)
+        return 0
+    if "--agents_md" in arguments:
+        parser.error("--agents_md must be used alone")
+    args = parser.parse_args(arguments)
     try:
         return run(args, stdout=sys.stdout)
     except (CompileReportError, IncomparableCompileReportsError) as exc:
@@ -89,6 +140,11 @@ def _create_argument_parser() -> argparse.ArgumentParser:
         description=(
             "Renders and compares ephemeral version-zero Loom compile reports."
         ),
+    )
+    parser.add_argument(
+        "--agents_md",
+        action="store_true",
+        help="Print a compact Markdown workflow for coding agents and exit.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

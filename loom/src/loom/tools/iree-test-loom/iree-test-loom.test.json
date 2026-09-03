@@ -16,6 +16,7 @@
             "--max-samples-per-case=16",
             "--sanitizer=tsan",
             "--sanitizer-reporting=report-only",
+            "disables all compiler transformations",
             "loom.test.v0",
             "failed_sample_count",
             "{case, provider, op, code, provider_code}",
@@ -102,6 +103,26 @@
           "\"case\":\"missing_provider_skip_if\",\"provider\":\"missing.provider\",\"op\":\"skip_if\",\"code\":\"provider_not_registered\",\"display_message\":\"human skip display text\""
         ],
         "not_contains": ["\"reason\""]
+      }
+    },
+    {
+      "name": "rejects an unavailable explicit device",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/scalar_cases.loom",
+          "--device=loom-unavailable"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "--device=loom-unavailable",
+          "not available in this Loom installation",
+          "available --device drivers:"
+        ]
       }
     }
   ]

@@ -58,6 +58,7 @@ exact selected program, workload, tool identity, and evidence boundary.
 
 | Oracle | Question it can answer |
 | --- | --- |
+| [Native schedule reconstruction](oracles/native-schedule.md) | Which behaviors in a selected native program must move into maintained Loom source, and where the default pipeline first diverges. |
 | [RADV and Vulkan](oracles/radv.md) | Which shader and physical schedule an optimized Vulkan stack selected for one dispatch. |
 | [LLVM MC](oracles/llvm-mc.md) | Whether selected native instructions and packets encode to the expected target bytes. |
 | [GGML and llama.cpp](oracles/ggml-llama-cpp.md) | Which model, storage, graph, and optimized-runtime contracts a port must preserve. |

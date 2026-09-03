@@ -127,6 +127,31 @@ def _write_report(
     path.write_text(json.dumps(report), encoding="utf-8")
 
 
+def test_agents_markdown(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["--agents_md"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "## loom-compile-report" in captured.out
+    assert "loom-compile-report show" in captured.out
+    assert "--comparison=target" in captured.out
+    assert (
+        "jq '{status, identity, workload, entries, missing_evidence}'" in captured.out
+    )
+    assert "loom/docs/src/workflows/compile-reports.md" in captured.out
+
+
+def test_agents_markdown_rejects_other_arguments(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit, match="2"):
+        main(["--agents_md", "show", "report.json"])
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--agents_md must be used alone" in captured.err
+
+
 def test_show_json_reads_direct_report(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -98,8 +98,8 @@ void loom_device_provider_registry_initialize_from_entries(
 const loom_device_provider_t* loom_device_provider_registry_lookup(
     const loom_device_provider_registry_t* registry, iree_string_view_t name);
 
-// Appends a comma-separated list of registered device provider names.
-iree_status_t loom_device_provider_registry_format_names(
+// Appends the comma-separated --device driver names accepted by |registry|.
+iree_status_t loom_device_provider_registry_format_driver_names(
     const loom_device_provider_registry_t* registry,
     iree_string_builder_t* output);
 
