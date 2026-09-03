@@ -43,6 +43,7 @@ from loom.target.low_descriptors import (
     OperandFormMatchKind,
     OperandRole,
     PhysicalRegister,
+    PhysicalRegisterView,
     RegClass,
     RegClassAlt,
     RegClassFlag,
@@ -1560,9 +1561,13 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         PhysicalRegister("test.r1", (0,)),
         PhysicalRegister("test.r2", (3,)),
         PhysicalRegister("test.r3", (2,)),
-        PhysicalRegister("test.l0", (0, 1)),
-        PhysicalRegister("test.l1", (2, 3)),
+        PhysicalRegister("test.l0", (1, 3)),
+        PhysicalRegister("test.l1", (0, 2)),
         PhysicalRegister("test.q0", (0, 1, 2, 3)),
+    ),
+    physical_register_views=(
+        PhysicalRegisterView("test.l0", _REG_EXPLICIT32, ("test.r0", "test.r2")),
+        PhysicalRegisterView("test.l1", _REG_EXPLICIT32, ("test.r1", "test.r3")),
     ),
     register_parts=(
         RegisterPart(_REG_PART_I32_LOW16, _REG_I32, 0x1),
