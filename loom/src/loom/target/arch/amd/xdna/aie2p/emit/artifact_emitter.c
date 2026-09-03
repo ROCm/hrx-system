@@ -120,15 +120,32 @@ static iree_status_t loom_aie2p_xdna_compile_source_leaves(
                                       IREE_SV("amd.xdna.aie2p.core"))) {
       continue;
     }
+    loom_target_compile_report_t leaf_report;
+    loom_target_compile_report_t* leaf_report_ptr = NULL;
+    if (request->compile_report != NULL) {
+      loom_target_compile_report_initialize(&leaf_report,
+                                            request->compile_report->allocator);
+      leaf_report.requested_detail_flags =
+          request->compile_report->requested_detail_flags;
+      leaf_report_ptr = &leaf_report;
+    }
     const loom_aie2p_leaf_compile_options_t options = {
         .descriptor_registry = request->low_descriptor_registry,
         .function_target_facts =
             loom_aie2p_xdna_function_target_facts(request, function_op),
         .diagnostic_emitter = request->diagnostic_emitter,
+        .compile_report = leaf_report_ptr,
     };
-    IREE_RETURN_IF_ERROR(loom_aie2p_leaf_compile(
+    iree_status_t status = loom_aie2p_leaf_compile(
         request->module, function_op, &options, request->scratch_arena,
-        &contributions[leaf_index]));
+        &contributions[leaf_index]);
+    if (leaf_report_ptr != NULL) {
+      status = iree_status_join(status,
+                                loom_target_compile_report_record_entry_report(
+                                    request->compile_report, leaf_report_ptr));
+      loom_target_compile_report_deinitialize(leaf_report_ptr);
+    }
+    IREE_RETURN_IF_ERROR(status);
     leaves[leaf_index] = (loom_aie2p_array_leaf_t){
         .entry =
             {
@@ -239,9 +256,10 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
     iree_status_t status = loom_aie2p_leaf_compile(
         request->module, resident->function_op, &worker_compile_options,
         request->scratch_arena, contribution);
-    if (iree_status_is_ok(status) && worker_report_ptr != NULL) {
-      status = loom_target_compile_report_record_entry_report(
-          request->compile_report, worker_report_ptr);
+    if (worker_report_ptr != NULL) {
+      status = iree_status_join(
+          status, loom_target_compile_report_record_entry_report(
+                      request->compile_report, worker_report_ptr));
     }
     if (worker_report_ptr != NULL) {
       loom_target_compile_report_deinitialize(worker_report_ptr);
