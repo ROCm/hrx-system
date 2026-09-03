@@ -69,6 +69,7 @@ loom_cc_library(
     loom::codegen::low::memory_access
     loom::codegen::low::memory_access_ir
     loom::codegen::low::source_memory_plan
+    loom::codegen::low::source_representation
     loom::codegen::low::target_binding
     loom::decision::predicate
     loom::error::emitter

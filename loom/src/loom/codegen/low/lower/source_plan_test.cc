@@ -15,6 +15,7 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/target/test/low_registry.h"
 #include "loom/target/test/lower.h"
+#include "loom/target/test/lower/source_representation.h"
 #include "loom/target/test/target_records.h"
 #include "loom/util/fact_table.h"
 
@@ -34,6 +35,9 @@ class LowLowerSourcePlanTest : public ::testing::Test {
     ObservedPlan plans[3];
     iree_host_size_t plan_count = 0;
     bool overflow = false;
+    bool representation_plan_present = false;
+    bool all_representations_retained = true;
+    bool representation_query_recomputed = false;
   };
 
   static iree_status_t ObservePlan(void* user_data,
@@ -52,6 +56,28 @@ class LowLowerSourcePlanTest : public ::testing::Test {
           plan.source_op == observer->expected_source_ops[i];
       observer->plans[i].elided = plan.elided;
     }
+    const loom_low_source_representation_plan_t* representation_plan =
+        loom_low_lower_context_source_representation_plan(context);
+    observer->representation_plan_present = representation_plan != nullptr;
+    if (representation_plan == nullptr) return iree_ok_status();
+    const uint64_t predicate_invocation_count =
+        representation_plan->statistics.predicate_invocation_count;
+    for (iree_host_size_t i = 0; i < observer->plan_count; ++i) {
+      loom_low_source_representation_candidate_view_t candidate = {};
+      if (!loom_low_source_representation_plan_find_candidate(
+              representation_plan, observer->expected_source_ops[i],
+              LOOM_TEST_LOW_SOURCE_REPRESENTATION_ADDI_GROUP_KEY, &candidate) ||
+          !candidate.selected || candidate.target_data == nullptr ||
+          static_cast<const loom_test_low_source_representation_target_data_t*>(
+              candidate.target_data)
+                  ->realization !=
+              LOOM_TEST_LOW_SOURCE_REPRESENTATION_REALIZATION_ADDI_ALTERNATE) {
+        observer->all_representations_retained = false;
+      }
+    }
+    observer->representation_query_recomputed =
+        representation_plan->statistics.predicate_invocation_count !=
+        predicate_invocation_count;
     return iree_ok_status();
   }
 
@@ -176,6 +202,9 @@ TEST_F(LowLowerSourcePlanTest,
   EXPECT_TRUE(observer_.plans[0].elided);
   EXPECT_FALSE(observer_.plans[1].elided);
   EXPECT_FALSE(observer_.plans[2].elided);
+  EXPECT_TRUE(observer_.representation_plan_present);
+  EXPECT_TRUE(observer_.all_representations_retained);
+  EXPECT_FALSE(observer_.representation_query_recomputed);
 }
 
 }  // namespace

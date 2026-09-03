@@ -87,14 +87,17 @@ loom_cc_library(
   HDRS
     "lower.h"
     "lower/source_dataflow.h"
+    "lower/source_representation.h"
   SRCS
     "lower/registry.c"
     "lower/source_dataflow.c"
+    "lower/source_representation.c"
   DEPS
     ::descriptors
     iree::base
     loom::analysis::source_dataflow
     loom::codegen::low::lower
+    loom::codegen::low::source_representation
     loom::error::error_defs
     loom::ir
     loom::ops::scalar

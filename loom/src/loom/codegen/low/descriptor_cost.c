@@ -156,24 +156,21 @@ static bool loom_low_descriptor_cost_span_is_valid(uint32_t start,
   return start <= capacity && count <= capacity - start;
 }
 
-iree_status_t loom_low_descriptor_cost_compute(
+iree_status_t loom_low_descriptor_cost_compute_independent(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_recipe_t* recipe, iree_arena_allocator_t* arena,
-    loom_low_descriptor_cost_t* out_cost) {
+    const loom_low_descriptor_recipe_t* recipes, iree_host_size_t recipe_count,
+    iree_arena_allocator_t* arena, loom_low_descriptor_cost_t* out_cost) {
   IREE_ASSERT_ARGUMENT(descriptor_set);
-  IREE_ASSERT_ARGUMENT(recipe);
   IREE_ASSERT_ARGUMENT(arena);
   IREE_ASSERT_ARGUMENT(out_cost);
   *out_cost = (loom_low_descriptor_cost_t){
       .descriptor_set = descriptor_set,
       .model_quality = LOOM_LOW_MODEL_QUALITY_EXACT,
   };
-  if ((recipe->entry_count != 0) != (recipe->entries != NULL) ||
-      (recipe->dependency_count != 0) != (recipe->dependencies != NULL) ||
-      (recipe->durable_pressure_delta_count != 0) !=
-          (recipe->durable_pressure_deltas != NULL)) {
+  if ((recipe_count != 0) != (recipes != NULL)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "descriptor recipe has inconsistent row storage");
+                            "descriptor recipe collection has inconsistent "
+                            "row storage");
   }
   if (descriptor_set->resource_count > UINT16_MAX ||
       descriptor_set->reg_class_count > UINT16_MAX) {
@@ -205,127 +202,145 @@ iree_status_t loom_low_descriptor_cost_compute(
     }
   }
 
+  uint16_t maximum_entry_count = 0;
+  for (iree_host_size_t recipe_ordinal = 0; recipe_ordinal < recipe_count;
+       ++recipe_ordinal) {
+    const loom_low_descriptor_recipe_t* recipe = &recipes[recipe_ordinal];
+    if ((recipe->entry_count != 0) != (recipe->entries != NULL) ||
+        (recipe->dependency_count != 0) != (recipe->dependencies != NULL) ||
+        (recipe->durable_pressure_delta_count != 0) !=
+            (recipe->durable_pressure_deltas != NULL)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "descriptor recipe has inconsistent row storage");
+    }
+    maximum_entry_count = iree_max(maximum_entry_count, recipe->entry_count);
+  }
+
   uint64_t* entry_critical_path_cycles = NULL;
-  if (recipe->entry_count != 0) {
+  if (maximum_entry_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, recipe->entry_count, sizeof(*entry_critical_path_cycles),
+        arena, maximum_entry_count, sizeof(*entry_critical_path_cycles),
         (void**)&entry_critical_path_cycles));
   }
 
-  for (uint16_t i = 0; i < recipe->entry_count; ++i) {
-    const loom_low_descriptor_recipe_entry_t* entry = &recipe->entries[i];
-    if (entry->occurrence_count == 0) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "descriptor recipe entry has zero occurrences");
-    }
-    const loom_low_descriptor_t* descriptor =
-        loom_low_descriptor_set_descriptor_at(descriptor_set,
-                                              entry->descriptor_ordinal);
-    if (descriptor == NULL || descriptor_set->descriptor_views == NULL) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "descriptor recipe references invalid "
-                              "descriptor ordinal");
-    }
-    const uint16_t schedule_class_id =
-        descriptor_set->descriptor_views[entry->descriptor_ordinal]
-            .schedule_class_id;
-    if (schedule_class_id >= descriptor_set->schedule_class_count) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "descriptor recipe references invalid schedule "
-                              "class");
-    }
-    const loom_low_schedule_class_t* schedule_class =
-        &descriptor_set->schedule_classes[schedule_class_id];
-    if (!loom_low_descriptor_cost_span_is_valid(
-            schedule_class->issue_use_start, schedule_class->issue_use_count,
-            descriptor_set->issue_use_count) ||
-        !loom_low_descriptor_cost_span_is_valid(
-            schedule_class->pressure_delta_start,
-            schedule_class->pressure_delta_count,
-            descriptor_set->pressure_delta_count) ||
-        !loom_low_descriptor_cost_span_is_valid(descriptor->effect_start,
-                                                descriptor->effect_count,
-                                                descriptor_set->effect_count)) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "descriptor recipe references malformed "
-                              "descriptor spans");
-    }
-    IREE_RETURN_IF_ERROR(loom_low_descriptor_cost_add_u64(
-        entry->occurrence_count, "instruction count",
-        &out_cost->instruction_count));
-    IREE_RETURN_IF_ERROR(loom_low_descriptor_cost_note_model_quality(
-        schedule_class->model_quality, out_cost));
-    entry_critical_path_cycles[i] = schedule_class->latency_cycles;
-    out_cost->critical_path_cycles =
-        iree_max(out_cost->critical_path_cycles, entry_critical_path_cycles[i]);
-
-    for (uint16_t j = 0; j < schedule_class->issue_use_count; ++j) {
-      const loom_low_issue_use_t* issue_use =
-          &descriptor_set->issue_uses[schedule_class->issue_use_start + j];
-      if (issue_use->resource_id >= descriptor_set->resource_count) {
-        return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                                "descriptor recipe issue use references "
-                                "invalid resource");
+  for (iree_host_size_t recipe_ordinal = 0; recipe_ordinal < recipe_count;
+       ++recipe_ordinal) {
+    const loom_low_descriptor_recipe_t* recipe = &recipes[recipe_ordinal];
+    for (uint16_t i = 0; i < recipe->entry_count; ++i) {
+      const loom_low_descriptor_recipe_entry_t* entry = &recipe->entries[i];
+      if (entry->occurrence_count == 0) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "descriptor recipe entry has zero occurrences");
       }
-      IREE_RETURN_IF_ERROR(loom_low_descriptor_resource_cost_accumulate(
-          issue_use, entry->occurrence_count,
-          &resource_costs[issue_use->resource_id]));
+      const loom_low_descriptor_t* descriptor =
+          loom_low_descriptor_set_descriptor_at(descriptor_set,
+                                                entry->descriptor_ordinal);
+      if (descriptor == NULL || descriptor_set->descriptor_views == NULL) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "descriptor recipe references invalid "
+                                "descriptor ordinal");
+      }
+      const uint16_t schedule_class_id =
+          descriptor_set->descriptor_views[entry->descriptor_ordinal]
+              .schedule_class_id;
+      if (schedule_class_id >= descriptor_set->schedule_class_count) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "descriptor recipe references invalid schedule class");
+      }
+      const loom_low_schedule_class_t* schedule_class =
+          &descriptor_set->schedule_classes[schedule_class_id];
+      if (!loom_low_descriptor_cost_span_is_valid(
+              schedule_class->issue_use_start, schedule_class->issue_use_count,
+              descriptor_set->issue_use_count) ||
+          !loom_low_descriptor_cost_span_is_valid(
+              schedule_class->pressure_delta_start,
+              schedule_class->pressure_delta_count,
+              descriptor_set->pressure_delta_count) ||
+          !loom_low_descriptor_cost_span_is_valid(
+              descriptor->effect_start, descriptor->effect_count,
+              descriptor_set->effect_count)) {
+        return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "descriptor recipe references malformed "
+                                "descriptor spans");
+      }
+      IREE_RETURN_IF_ERROR(loom_low_descriptor_cost_add_u64(
+          entry->occurrence_count, "instruction count",
+          &out_cost->instruction_count));
+      IREE_RETURN_IF_ERROR(loom_low_descriptor_cost_note_model_quality(
+          schedule_class->model_quality, out_cost));
+      entry_critical_path_cycles[i] = schedule_class->latency_cycles;
+      out_cost->critical_path_cycles = iree_max(out_cost->critical_path_cycles,
+                                                entry_critical_path_cycles[i]);
+
+      for (uint16_t j = 0; j < schedule_class->issue_use_count; ++j) {
+        const loom_low_issue_use_t* issue_use =
+            &descriptor_set->issue_uses[schedule_class->issue_use_start + j];
+        if (issue_use->resource_id >= descriptor_set->resource_count) {
+          return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                  "descriptor recipe issue use references "
+                                  "invalid resource");
+        }
+        IREE_RETURN_IF_ERROR(loom_low_descriptor_resource_cost_accumulate(
+            issue_use, entry->occurrence_count,
+            &resource_costs[issue_use->resource_id]));
+      }
+      for (uint16_t j = 0; j < schedule_class->pressure_delta_count; ++j) {
+        IREE_RETURN_IF_ERROR(loom_low_descriptor_cost_note_pressure_delta(
+            &descriptor_set
+                 ->pressure_deltas[schedule_class->pressure_delta_start + j],
+            entry->occurrence_count, descriptor_set->reg_class_count,
+            pressure_costs));
+      }
+      for (uint16_t j = 0; j < descriptor->effect_count; ++j) {
+        IREE_RETURN_IF_ERROR(loom_low_descriptor_cost_note_memory_effect(
+            &descriptor_set->effects[descriptor->effect_start + j],
+            entry->occurrence_count, &out_cost->memory));
+      }
     }
-    for (uint16_t j = 0; j < schedule_class->pressure_delta_count; ++j) {
+
+    uint32_t previous_dependency_key = 0;
+    bool has_previous_dependency = false;
+    for (uint16_t i = 0; i < recipe->dependency_count; ++i) {
+      const loom_low_descriptor_recipe_dependency_t dependency =
+          recipe->dependencies[i];
+      const uint32_t dependency_key =
+          ((uint32_t)dependency.target_entry << 16) | dependency.source_entry;
+      if (dependency.source_entry >= dependency.target_entry ||
+          dependency.target_entry >= recipe->entry_count ||
+          (has_previous_dependency &&
+           dependency_key <= previous_dependency_key)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "descriptor recipe dependencies are not unique topological rows");
+      }
+      const loom_low_descriptor_recipe_entry_t* target_entry =
+          &recipe->entries[dependency.target_entry];
+      const loom_low_descriptor_view_t* target_view =
+          &descriptor_set->descriptor_views[target_entry->descriptor_ordinal];
+      const uint16_t target_latency_cycles =
+          descriptor_set->schedule_classes[target_view->schedule_class_id]
+              .latency_cycles;
+      uint64_t dependent_path_cycles = 0;
+      if (!iree_checked_add_u64(
+              entry_critical_path_cycles[dependency.source_entry],
+              target_latency_cycles, &dependent_path_cycles)) {
+        return loom_low_descriptor_cost_overflow("critical path");
+      }
+      entry_critical_path_cycles[dependency.target_entry] =
+          iree_max(entry_critical_path_cycles[dependency.target_entry],
+                   dependent_path_cycles);
+      out_cost->critical_path_cycles =
+          iree_max(out_cost->critical_path_cycles, dependent_path_cycles);
+      previous_dependency_key = dependency_key;
+      has_previous_dependency = true;
+    }
+
+    for (uint16_t i = 0; i < recipe->durable_pressure_delta_count; ++i) {
       IREE_RETURN_IF_ERROR(loom_low_descriptor_cost_note_pressure_delta(
-          &descriptor_set
-               ->pressure_deltas[schedule_class->pressure_delta_start + j],
-          entry->occurrence_count, descriptor_set->reg_class_count,
-          pressure_costs));
+          &recipe->durable_pressure_deltas[i], /*occurrence_count=*/1,
+          descriptor_set->reg_class_count, pressure_costs));
     }
-    for (uint16_t j = 0; j < descriptor->effect_count; ++j) {
-      IREE_RETURN_IF_ERROR(loom_low_descriptor_cost_note_memory_effect(
-          &descriptor_set->effects[descriptor->effect_start + j],
-          entry->occurrence_count, &out_cost->memory));
-    }
-  }
-
-  uint32_t previous_dependency_key = 0;
-  bool has_previous_dependency = false;
-  for (uint16_t i = 0; i < recipe->dependency_count; ++i) {
-    const loom_low_descriptor_recipe_dependency_t dependency =
-        recipe->dependencies[i];
-    const uint32_t dependency_key =
-        ((uint32_t)dependency.target_entry << 16) | dependency.source_entry;
-    if (dependency.source_entry >= dependency.target_entry ||
-        dependency.target_entry >= recipe->entry_count ||
-        (has_previous_dependency &&
-         dependency_key <= previous_dependency_key)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "descriptor recipe dependencies are not unique "
-                              "topological rows");
-    }
-    const loom_low_descriptor_recipe_entry_t* target_entry =
-        &recipe->entries[dependency.target_entry];
-    const loom_low_descriptor_view_t* target_view =
-        &descriptor_set->descriptor_views[target_entry->descriptor_ordinal];
-    const uint16_t target_latency_cycles =
-        descriptor_set->schedule_classes[target_view->schedule_class_id]
-            .latency_cycles;
-    uint64_t dependent_path_cycles = 0;
-    if (!iree_checked_add_u64(
-            entry_critical_path_cycles[dependency.source_entry],
-            target_latency_cycles, &dependent_path_cycles)) {
-      return loom_low_descriptor_cost_overflow("critical path");
-    }
-    entry_critical_path_cycles[dependency.target_entry] =
-        iree_max(entry_critical_path_cycles[dependency.target_entry],
-                 dependent_path_cycles);
-    out_cost->critical_path_cycles =
-        iree_max(out_cost->critical_path_cycles, dependent_path_cycles);
-    previous_dependency_key = dependency_key;
-    has_previous_dependency = true;
-  }
-
-  for (uint16_t i = 0; i < recipe->durable_pressure_delta_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_low_descriptor_cost_note_pressure_delta(
-        &recipe->durable_pressure_deltas[i], /*occurrence_count=*/1,
-        descriptor_set->reg_class_count, pressure_costs));
   }
 
   iree_host_size_t resource_write_index = 0;
@@ -350,6 +365,15 @@ iree_status_t loom_low_descriptor_cost_compute(
   out_cost->pressure_costs = pressure_costs;
   out_cost->pressure_cost_count = pressure_write_index;
   return iree_ok_status();
+}
+
+iree_status_t loom_low_descriptor_cost_compute(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_recipe_t* recipe, iree_arena_allocator_t* arena,
+    loom_low_descriptor_cost_t* out_cost) {
+  IREE_ASSERT_ARGUMENT(recipe);
+  return loom_low_descriptor_cost_compute_independent(
+      descriptor_set, recipe, /*recipe_count=*/1, arena, out_cost);
 }
 
 static bool loom_low_descriptor_cost_evidence_is_compatible(

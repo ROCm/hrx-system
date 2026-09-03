@@ -171,6 +171,15 @@ iree_status_t loom_low_descriptor_cost_compute(
     const loom_low_descriptor_recipe_t* recipe, iree_arena_allocator_t* arena,
     loom_low_descriptor_cost_t* out_cost);
 
+// Resolves and aggregates independent descriptor recipes. Resource, memory,
+// instruction, and pressure work is accumulated across every recipe while the
+// critical path is the maximum recipe-local dependency path. Output arrays are
+// owned by arena and remain sorted by descriptor-set-local identifiers.
+iree_status_t loom_low_descriptor_cost_compute_independent(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_recipe_t* recipes, iree_host_size_t recipe_count,
+    iree_arena_allocator_t* arena, loom_low_descriptor_cost_t* out_cost);
+
 // Returns true when left has compatible exact-enough evidence, is no worse in
 // every retained cost dimension, and is strictly better in at least one.
 bool loom_low_descriptor_cost_dominates(

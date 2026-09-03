@@ -99,15 +99,18 @@ loom_cc_library(
     srcs = [
         "lower/registry.c",
         "lower/source_dataflow.c",
+        "lower/source_representation.c",
     ],
     hdrs = [
         "lower.h",
         "lower/source_dataflow.h",
+        "lower/source_representation.h",
     ],
     visibility = _TEST_LOW_LOWER_VISIBILITY,
     deps = [
         ":descriptors",
         "//loom/src/loom/analysis:source_dataflow",
+        "//loom/src/loom/codegen/low:source_representation",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",

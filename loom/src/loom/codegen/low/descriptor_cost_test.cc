@@ -128,6 +128,47 @@ TEST_F(LowDescriptorCostTest,
   EXPECT_EQ(store_cost->use_count, 1u);
 }
 
+TEST_F(LowDescriptorCostTest,
+       IndependentRecipesAggregateWorkButNotDependencyPaths) {
+  const loom_low_descriptor_recipe_entry_t entries[] = {
+      {DescriptorOrdinal(IREE_SV("test.add.i32")), 1},
+      {DescriptorOrdinal(IREE_SV("test.load.v4i32")), 1},
+  };
+  const loom_low_descriptor_recipe_dependency_t dependencies[] = {
+      {/*.source_entry=*/0, /*.target_entry=*/1},
+  };
+  const loom_low_descriptor_recipe_t recipe = {
+      .entries = entries,
+      .entry_count = IREE_ARRAYSIZE(entries),
+      .dependencies = dependencies,
+      .dependency_count = IREE_ARRAYSIZE(dependencies),
+  };
+  const loom_low_descriptor_recipe_t recipes[] = {recipe, recipe};
+
+  loom_low_descriptor_cost_t single_cost = {};
+  loom_low_descriptor_cost_t aggregate_cost = {};
+  IREE_ASSERT_OK(loom_low_descriptor_cost_compute(descriptor_set_, &recipe,
+                                                  &arena_, &single_cost));
+  IREE_ASSERT_OK(loom_low_descriptor_cost_compute_independent(
+      descriptor_set_, recipes, IREE_ARRAYSIZE(recipes), &arena_,
+      &aggregate_cost));
+
+  EXPECT_EQ(aggregate_cost.instruction_count,
+            single_cost.instruction_count * 2);
+  EXPECT_EQ(aggregate_cost.critical_path_cycles,
+            single_cost.critical_path_cycles);
+  EXPECT_EQ(aggregate_cost.memory.read_operation_count,
+            single_cost.memory.read_operation_count * 2);
+  ASSERT_EQ(aggregate_cost.resource_cost_count,
+            single_cost.resource_cost_count);
+  for (iree_host_size_t i = 0; i < single_cost.resource_cost_count; ++i) {
+    EXPECT_EQ(aggregate_cost.resource_costs[i].resource_id,
+              single_cost.resource_costs[i].resource_id);
+    EXPECT_EQ(aggregate_cost.resource_costs[i].total_unit_cycles,
+              single_cost.resource_costs[i].total_unit_cycles * 2);
+  }
+}
+
 TEST_F(LowDescriptorCostTest, UnknownEvidenceCannotDisplaceCanonical) {
   std::vector<loom_low_schedule_class_t> schedule_classes(
       descriptor_set_->schedule_classes,

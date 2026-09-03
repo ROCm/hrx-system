@@ -106,6 +106,67 @@ iree_status_t loom_low_lower_context_initialize_source_dataflow(
                                     &context->lowering.source_dataflow);
 }
 
+iree_status_t loom_low_lower_context_initialize_source_representation_plan(
+    loom_low_lower_context_t* context) {
+  const loom_low_source_representation_provider_t* provider =
+      context->policy->source_representation_provider;
+  if (provider == NULL) return iree_ok_status();
+  if (context->lowering.source_representation_plan.provider != NULL) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "source representation plan is already initialized for this lowering "
+        "frame");
+  }
+  const loom_low_source_representation_environment_t environment = {
+      .module = context->module,
+      .fact_table = context->lowering.fact_table,
+      .source_dataflow = loom_low_lower_context_source_dataflow(context),
+      .descriptor_set = context->descriptor_set,
+      .target_facts = context->options->target_facts,
+      .configuration = context->policy->source_representation_configuration,
+  };
+  IREE_RETURN_IF_ERROR(loom_low_source_representation_plan(
+      provider, &context->lowering.source_program, &environment,
+      &context->function_arena, &context->lowering.source_representation_plan));
+
+  const loom_low_source_representation_problem_t problem =
+      context->lowering.source_representation_plan.problem;
+  if (problem.kind == LOOM_LOW_SOURCE_REPRESENTATION_PROBLEM_NONE) {
+    return iree_ok_status();
+  }
+  const loom_op_t* source_op = problem.source_op != NULL
+                                   ? problem.source_op
+                                   : context->source_function.op;
+  if (problem.kind ==
+      LOOM_LOW_SOURCE_REPRESENTATION_PROBLEM_UNAVAILABLE_GROUP) {
+    IREE_ASSERT_LT(problem.group_index, provider->group_count);
+    const loom_low_source_representation_group_t* group =
+        &provider->groups[problem.group_index];
+    const iree_string_view_t group_name =
+        loom_bstring_view(loom_bstring_table_get(&provider->string_table,
+                                                 group->name_string_offset));
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(group_name),
+    };
+    return loom_low_lower_emit_target_context_error(context, source_op,
+                                                    LOOM_ERR_TARGET_079, params,
+                                                    IREE_ARRAYSIZE(params));
+  }
+  IREE_ASSERT_EQ(problem.kind,
+                 LOOM_LOW_SOURCE_REPRESENTATION_PROBLEM_EMPTY_DOMAIN);
+  iree_string_view_t value_name = IREE_SV("<unnamed>");
+  if (problem.source_value_id != LOOM_VALUE_ID_INVALID) {
+    value_name = loom_low_lower_nonempty(
+        loom_module_value_name(context->module, problem.source_value_id),
+        value_name);
+  }
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(value_name),
+  };
+  return loom_low_lower_emit_target_context_error(
+      context, source_op, LOOM_ERR_TARGET_080, params, IREE_ARRAYSIZE(params));
+}
+
 static iree_status_t loom_low_lower_emit(loom_low_lower_context_t* context,
                                          const loom_op_t* source_op,
                                          const loom_error_def_t* error,
@@ -320,6 +381,14 @@ const loom_source_dataflow_result_t* loom_low_lower_context_source_dataflow(
     const loom_low_lower_context_t* context) {
   return context->lowering.source_dataflow.provider != NULL
              ? &context->lowering.source_dataflow
+             : NULL;
+}
+
+const loom_low_source_representation_plan_t*
+loom_low_lower_context_source_representation_plan(
+    const loom_low_lower_context_t* context) {
+  return context->lowering.source_representation_plan.provider != NULL
+             ? &context->lowering.source_representation_plan
              : NULL;
 }
 

@@ -67,6 +67,64 @@ loom_cc_test(
     loom::target::test::descriptors
 )
 
+loom_cc_library(
+  NAME
+    source_representation
+  HDRS
+    "source_representation.h"
+  SRCS
+    "source_representation.c"
+  DEPS
+    ::descriptor_cost
+    ::descriptors
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::source_dataflow
+    loom::analysis::source_program
+    loom::ir
+    loom::ops::op_defs
+    loom::util::bstring
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    source_representation_verify
+  HDRS
+    "source_representation_verify.h"
+  SRCS
+    "source_representation_verify.c"
+  DEPS
+    ::source_representation
+    iree::base
+    iree::base::internal::arena
+  TESTONLY
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    source_representation_test
+  SRCS
+    "source_representation_test.cc"
+  DEPS
+    ::source_representation
+    ::source_representation_verify
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::cfg
+    loom::ops::func
+    loom::ops::scalar
+    loom::ops::scf
+    loom::ops::test
+    loom::target::test::descriptors
+    loom::target::test::lower
+    loom::testing::module_ptr
+)
+
 loom_cc_test(
   NAME
     descriptor_traits_test

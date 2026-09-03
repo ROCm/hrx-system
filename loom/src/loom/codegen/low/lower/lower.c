@@ -1375,6 +1375,16 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
     return iree_ok_status();
   }
 
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_low_lower_context_initialize_source_representation_plan(&context);
+  }
+  if (iree_status_is_ok(status) && out_result->error_count != 0) {
+    loom_low_lowering_frame_deinitialize(&context);
+    iree_arena_deinitialize(&context.function_arena);
+    return iree_ok_status();
+  }
+
   iree_arena_initialize(module->arena.block_pool, &context.emission_arena);
 
   if (iree_status_is_ok(status) &&

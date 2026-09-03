@@ -26,6 +26,7 @@
 #include "loom/codegen/low/lower/source_plan.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/codegen/low/source_memory_plan.h"
+#include "loom/codegen/low/source_representation.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 
@@ -78,6 +79,8 @@ typedef struct loom_low_lowering_frame_t {
   loom_source_program_t source_program;
   // Target-declared physical source-value facts solved over source_program.
   loom_source_dataflow_result_t source_dataflow;
+  // Common cost-selected physical source representations.
+  loom_low_source_representation_plan_t source_representation_plan;
   // Borrowed source value facts computed before planning.
   loom_value_fact_table_t* fact_table;
   // Reusable traversal state for condition-fact queries.
@@ -174,6 +177,11 @@ bool loom_low_lower_context_should_stop(
 iree_status_t loom_low_lower_context_initialize_source_dataflow(
     loom_low_lower_context_t* context,
     const loom_view_region_table_t* view_regions);
+
+// Selects and retains the policy's optional source representations exactly
+// once before source value type mapping begins.
+iree_status_t loom_low_lower_context_initialize_source_representation_plan(
+    loom_low_lower_context_t* context);
 
 // Emits a TARGET-domain diagnostic with the standard target-low source
 // context followed by |extra_params|.

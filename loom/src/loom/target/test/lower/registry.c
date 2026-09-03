@@ -11,6 +11,7 @@
 #include "loom/target/test/contracts/core_lower_rules.h"
 #include "loom/target/test/descriptors.h"
 #include "loom/target/test/lower.h"
+#include "loom/target/test/lower/source_representation.h"
 
 //===----------------------------------------------------------------------===//
 // Type mapping
@@ -289,10 +290,19 @@ static const loom_target_contract_binding_t kTestLowContractBindings[] = {
     },
 };
 
+static const loom_test_low_source_representation_configuration_t
+    kTestLowSourceRepresentationConfiguration = {
+        .flags = LOOM_TEST_LOW_SOURCE_REPRESENTATION_ENABLE_ALTERNATE,
+};
+
 static const loom_low_lower_policy_t kTestLowLowerPolicy = {
     .name = IREE_SVL("test-low-lower-policy"),
     .error_catalog = &loom_error_catalog_core,
     .source_dataflow_provider = &loom_test_low_source_dataflow,
+    .source_representation_provider =
+        &loom_test_low_source_representation_provider,
+    .source_representation_configuration =
+        &kTestLowSourceRepresentationConfiguration,
     .map_type = {.fn = loom_test_low_lower_map_type, .user_data = NULL},
     .map_contract_value = {.fn = loom_test_low_lower_map_contract_value,
                            .user_data = NULL},

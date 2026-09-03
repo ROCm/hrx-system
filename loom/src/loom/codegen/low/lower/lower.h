@@ -26,6 +26,7 @@
 #include "loom/codegen/low/lower/module_state.h"
 #include "loom/codegen/low/lower/report.h"
 #include "loom/codegen/low/memory_access.h"
+#include "loom/codegen/low/source_representation.h"
 #include "loom/error/emitter.h"
 #include "loom/error/error_defs.h"
 #include "loom/ir/ir.h"
@@ -754,6 +755,13 @@ typedef struct loom_low_lower_policy_t {
   // Optional table-driven physical source-value analysis. The common
   // source-dataflow engine solves this once before target legality.
   const loom_source_dataflow_provider_t* source_dataflow_provider;
+  // Optional table-driven native source-representation alternatives. The
+  // common representation planner selects and retains these after legality and
+  // before any source value maps to a Low type.
+  const loom_low_source_representation_provider_t*
+      source_representation_provider;
+  // Optional immutable target payload exposed to representation callbacks.
+  const void* source_representation_configuration;
   // Maps source semantic types to target-low register types.
   loom_low_lower_map_type_callback_t map_type;
   // Optionally reports source types accepted by target-low legality because
@@ -1051,6 +1059,12 @@ const loom_value_fact_table_t* loom_low_lower_context_fact_table(
 // Returns the retained physical source-value dataflow result, or NULL when the
 // active policy has no provider.
 const loom_source_dataflow_result_t* loom_low_lower_context_source_dataflow(
+    const loom_low_lower_context_t* context);
+
+// Returns the retained physical source-representation plan, or NULL when the
+// active policy has no provider.
+const loom_low_source_representation_plan_t*
+loom_low_lower_context_source_representation_plan(
     const loom_low_lower_context_t* context);
 
 // Returns reusable traversal state for condition-fact queries.

@@ -1435,6 +1435,49 @@ ERR_TARGET_078 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_079: Target has no legal source representation realization.
+ERR_TARGET_079 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=79,
+    severity=Severity.ERROR,
+    summary="Target has no legal source representation realization.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': physical representation "
+        "group '{group_name}' has no capability-compatible realization"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("group_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Select a target contract with a legal realization or refine the "
+        "source representation requirements"
+    ),
+)
+
+# ERR_TARGET_080: Source values have no shared physical representation.
+ERR_TARGET_080 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=80,
+    severity=Severity.ERROR,
+    summary="Source values have no shared physical representation.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': the physical component "
+        "containing source value '{value_name}' has no representation "
+        "satisfying all exact source-flow and operation constraints"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("value_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Insert an explicit representation transition or select compatible "
+        "producer, consumer, and control-flow representations"
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1504,4 +1547,6 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_075,
     ERR_TARGET_076,
     ERR_TARGET_078,
+    ERR_TARGET_079,
+    ERR_TARGET_080,
 )

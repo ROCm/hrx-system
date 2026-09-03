@@ -93,6 +93,58 @@ loom_cc_test(
     ],
 )
 
+loom_cc_library(
+    name = "source_representation",
+    srcs = ["source_representation.c"],
+    hdrs = ["source_representation.h"],
+    visibility = _LOW_DESCRIPTOR_VISIBILITY,
+    deps = [
+        ":descriptor_cost",
+        ":descriptors",
+        "//loom/src/loom/analysis:source_dataflow",
+        "//loom/src/loom/analysis:source_program",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/util:bstring",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "source_representation_verify",
+    testonly = True,
+    srcs = ["source_representation_verify.c"],
+    hdrs = ["source_representation_verify.h"],
+    deps = [
+        ":source_representation",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "source_representation_test",
+    srcs = ["source_representation_test.cc"],
+    deps = [
+        ":source_representation",
+        ":source_representation_verify",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target/test:descriptors",
+        "//loom/src/loom/target/test:lower",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_test(
     name = "descriptor_traits_test",
     srcs = ["descriptor_traits_test.cc"],
