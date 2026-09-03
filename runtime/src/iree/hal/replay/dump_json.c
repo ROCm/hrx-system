@@ -683,6 +683,72 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
               builder, record, payload_range, &payload, &layout));
       return iree_string_builder_append_cstring(builder, "}");
     }
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_READ: {
+      if (record->payload.data_length <
+          sizeof(iree_hal_replay_queue_read_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay exact queue read payload is short");
+      }
+      iree_hal_replay_queue_read_payload_t payload;
+      memcpy(&payload, record->payload.data, sizeof(payload));
+      iree_hal_replay_dump_queue_payload_layout_t layout;
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
+          record, sizeof(payload), payload.wait_semaphore_count,
+          payload.signal_semaphore_count, payload.captured_data_length,
+          &layout));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          ",\"payload\":{\"source_file_id\":%" PRIu64
+          ",\"source_offset\":%" PRIu64 ",\"flags\":%" PRIu64
+          ",\"captured_data_length\":%" PRIu64
+          ",\"wait_semaphore_count\":%" PRIu64
+          ",\"signal_semaphore_count\":%" PRIu64,
+          payload.source_file_id, payload.source_offset, payload.flags,
+          payload.captured_data_length, payload.wait_semaphore_count,
+          payload.signal_semaphore_count));
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
+          builder, "target_ref", &payload.target_ref));
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_queue_semaphores(
+          builder, record, payload_range, &layout,
+          (iree_host_size_t)payload.wait_semaphore_count,
+          (iree_host_size_t)payload.signal_semaphore_count));
+      iree_hal_replay_file_range_t captured_data_range =
+          iree_hal_replay_dump_payload_subrange(payload_range,
+                                                layout.trailing_payload_offset,
+                                                layout.trailing_payload_size);
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
+          builder, "captured_data_range", &captured_data_range));
+      return iree_string_builder_append_cstring(builder, "}");
+    }
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_WRITE: {
+      if (record->payload.data_length <
+          sizeof(iree_hal_replay_queue_write_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay exact queue write payload is short");
+      }
+      iree_hal_replay_queue_write_payload_t payload;
+      memcpy(&payload, record->payload.data, sizeof(payload));
+      iree_hal_replay_dump_queue_payload_layout_t layout;
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
+          record, sizeof(payload), payload.wait_semaphore_count,
+          payload.signal_semaphore_count, /*trailing_payload_length=*/0,
+          &layout));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          ",\"payload\":{\"target_file_id\":%" PRIu64
+          ",\"target_offset\":%" PRIu64 ",\"flags\":%" PRIu64
+          ",\"wait_semaphore_count\":%" PRIu64
+          ",\"signal_semaphore_count\":%" PRIu64,
+          payload.target_file_id, payload.target_offset, payload.flags,
+          payload.wait_semaphore_count, payload.signal_semaphore_count));
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
+          builder, "source_ref", &payload.source_ref));
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_queue_semaphores(
+          builder, record, payload_range, &layout,
+          (iree_host_size_t)payload.wait_semaphore_count,
+          (iree_host_size_t)payload.signal_semaphore_count));
+      return iree_string_builder_append_cstring(builder, "}");
+    }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ALLOCA: {
       if (record->payload.data_length <
           sizeof(iree_hal_replay_device_queue_alloca_payload_t)) {

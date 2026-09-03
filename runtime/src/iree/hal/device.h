@@ -331,18 +331,6 @@ enum iree_hal_dealloca_flag_bits_t {
   IREE_HAL_DEALLOCA_FLAG_PREFER_ORIGIN = 1ull << 0,
 };
 
-// Bitfield specifying flags controlling a file read operation.
-typedef uint64_t iree_hal_read_flags_t;
-enum iree_hal_read_flag_bits_t {
-  IREE_HAL_READ_FLAG_NONE = 0,
-};
-
-// Bitfield specifying flags controlling a file write operation.
-typedef uint64_t iree_hal_write_flags_t;
-enum iree_hal_write_flag_bits_t {
-  IREE_HAL_WRITE_FLAG_NONE = 0,
-};
-
 // Bitfield specifying flags controlling a host call operation.
 typedef uint64_t iree_hal_host_call_flags_t;
 enum iree_hal_host_call_flag_bits_e {

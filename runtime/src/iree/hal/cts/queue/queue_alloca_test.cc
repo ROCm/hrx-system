@@ -110,17 +110,15 @@ class QueueAllocaTest : public CtsTestBase<> {
                                      iree_allocator_system(), out_pool);
   }
 
-  void QueueWriteAndWait(iree_hal_queue_affinity_t queue_affinity,
-                         iree_hal_buffer_t* source_buffer,
+  void QueueWriteAndWait(iree_hal_buffer_t* source_buffer,
                          iree_device_size_t source_offset,
                          iree_hal_file_t* target_file, uint64_t target_offset,
                          iree_device_size_t length) {
     SemaphoreList empty_wait;
     SemaphoreList write_signal(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_device_queue_write(
-        device_, queue_affinity, empty_wait, write_signal, source_buffer,
-        source_offset, target_file, target_offset, length,
-        IREE_HAL_WRITE_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_write(
+        transfer_queue_, empty_wait, write_signal, source_buffer, source_offset,
+        target_file, target_offset, length, IREE_HAL_WRITE_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
         write_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
   }
@@ -170,7 +168,7 @@ class QueueAllocaTest : public CtsTestBase<> {
     iree_io_file_handle_release(handle);
     if (!file) return data;
 
-    QueueWriteAndWait(queue_affinity, buffer, offset, file, 0, length);
+    QueueWriteAndWait(buffer, offset, file, 0, length);
     iree_hal_file_release(file);
     return data;
   }

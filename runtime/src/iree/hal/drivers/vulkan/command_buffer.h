@@ -66,11 +66,18 @@ typedef struct iree_hal_vulkan_command_buffer_descriptor_requirements_t {
 } iree_hal_vulkan_command_buffer_descriptor_requirements_t;
 
 // Returns descriptor pool capacity required to replay |command_buffer| once
-// into a native VkCommandBuffer.
+// into a native VkCommandBuffer with |binding_table|.
 iree_status_t
 iree_hal_vulkan_command_buffer_native_descriptor_pool_requirements(
     iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t binding_table,
     iree_hal_vulkan_command_buffer_descriptor_requirements_t* out_requirements);
+
+// Returns whether recorded native commands can be cached across submissions.
+// Binding-dependent copies encode Vulkan handles and offsets directly and must
+// be recorded independently for each binding table.
+bool iree_hal_vulkan_command_buffer_native_replay_compatible(
+    iree_hal_command_buffer_t* command_buffer);
 
 // Host-published BDA storage used while replaying a command buffer once into a
 // native VkCommandBuffer.

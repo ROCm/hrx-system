@@ -192,6 +192,9 @@ typedef struct iree_hal_vulkan_command_buffer_t {
   iree_hal_vulkan_command_buffer_descriptor_requirements_t
       descriptor_requirements;
 
+  // Whether a copy command resolves buffer handles from a binding table.
+  bool has_indirect_copy;
+
   // Host-published BDA byte length required to replay recorded commands.
   iree_device_size_t bda_publication_length;
 } iree_hal_vulkan_command_buffer_t;
@@ -562,7 +565,8 @@ static iree_status_t iree_hal_vulkan_command_buffer_resolve_buffer_ref(
 static iree_status_t iree_hal_vulkan_command_buffer_resolve_native_buffer_ref(
     iree_hal_buffer_binding_table_t binding_table,
     iree_hal_buffer_ref_t buffer_ref, iree_string_view_t usage,
-    VkBuffer* out_handle, VkDeviceSize* out_offset, VkDeviceSize* out_length) {
+    VkBuffer* out_handle, VkDeviceSize* out_handle_length,
+    VkDeviceSize* out_offset, VkDeviceSize* out_length) {
   iree_hal_buffer_ref_t resolved_ref;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_resolve_buffer_ref(
       binding_table, buffer_ref, usage, &resolved_ref));
@@ -590,8 +594,14 @@ static iree_status_t iree_hal_vulkan_command_buffer_resolve_native_buffer_ref(
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_buffer_resolve_backing_offset(
       resolved_ref.buffer, backing_buffer, resolved_ref.offset,
       &absolute_offset));
+  VkDeviceSize handle_length = 0;
+  if (out_handle_length) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_vulkan_buffer_handle_length(backing_buffer, &handle_length));
+  }
 
   *out_handle = handle;
+  if (out_handle_length) *out_handle_length = handle_length;
   *out_offset = (VkDeviceSize)absolute_offset;
   *out_length = (VkDeviceSize)resolved_ref.length;
   return iree_ok_status();
@@ -1248,14 +1258,71 @@ static iree_status_t iree_hal_vulkan_command_buffer_dispatch_payload_layout(
 iree_status_t
 iree_hal_vulkan_command_buffer_native_descriptor_pool_requirements(
     iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_buffer_binding_table_t binding_table,
     iree_hal_vulkan_command_buffer_descriptor_requirements_t*
         out_requirements) {
   IREE_ASSERT_ARGUMENT(base_command_buffer);
   IREE_ASSERT_ARGUMENT(out_requirements);
   iree_hal_vulkan_command_buffer_t* command_buffer =
       iree_hal_vulkan_command_buffer_cast(base_command_buffer);
-  *out_requirements = command_buffer->descriptor_requirements;
+  iree_hal_vulkan_command_buffer_descriptor_requirements_t requirements =
+      command_buffer->descriptor_requirements;
+  iree_hal_vulkan_command_buffer_iterator_t iterator =
+      iree_hal_vulkan_command_buffer_iterator(command_buffer);
+  const iree_hal_vulkan_command_t* command = NULL;
+  while (iree_hal_vulkan_command_buffer_iterator_next(
+      &iterator, &command, /*out_command_index=*/NULL)) {
+    if (command->type != IREE_HAL_VULKAN_COMMAND_TYPE_COPY_BUFFER) continue;
+    const iree_hal_vulkan_command_copy_buffer_t* copy_buffer =
+        iree_hal_vulkan_command_copy_buffer_payload(command);
+    VkBuffer source_handle = VK_NULL_HANDLE;
+    VkDeviceSize source_offset = 0;
+    VkDeviceSize source_length = 0;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_vulkan_command_buffer_resolve_native_buffer_ref(
+            binding_table, copy_buffer->source_ref, IREE_SV("copy source"),
+            &source_handle, /*out_handle_length=*/NULL, &source_offset,
+            &source_length));
+    (void)source_handle;
+    VkBuffer target_handle = VK_NULL_HANDLE;
+    VkDeviceSize target_offset = 0;
+    VkDeviceSize target_length = 0;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_vulkan_command_buffer_resolve_native_buffer_ref(
+            binding_table, copy_buffer->target_ref, IREE_SV("copy target"),
+            &target_handle, /*out_handle_length=*/NULL, &target_offset,
+            &target_length));
+    (void)target_handle;
+    if (source_length != target_length) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "resolved Vulkan command buffer copy spans differ");
+    }
+    uint32_t descriptor_set_count = 0;
+    IREE_RETURN_IF_ERROR(iree_hal_vulkan_builtins_copy_descriptor_set_count(
+        source_offset, target_offset, source_length, &descriptor_set_count));
+    IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_add_descriptor_count(
+        requirements.set_count, descriptor_set_count, &requirements.set_count));
+    iree_host_size_t storage_buffer_count = 0;
+    if (!iree_host_size_checked_mul(descriptor_set_count, 2,
+                                    &storage_buffer_count)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "Vulkan copy descriptor requirement count overflows");
+    }
+    IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_add_descriptor_count(
+        requirements.storage_buffer_count, storage_buffer_count,
+        &requirements.storage_buffer_count));
+  }
+  *out_requirements = requirements;
   return iree_ok_status();
+}
+
+bool iree_hal_vulkan_command_buffer_native_replay_compatible(
+    iree_hal_command_buffer_t* base_command_buffer) {
+  iree_hal_vulkan_command_buffer_t* command_buffer =
+      iree_hal_vulkan_command_buffer_cast(base_command_buffer);
+  return !command_buffer->has_indirect_copy;
 }
 
 iree_status_t iree_hal_vulkan_command_buffer_native_bda_publication_length(
@@ -1557,23 +1624,25 @@ static iree_status_t iree_hal_vulkan_command_buffer_resolve_bda_binding(
 }
 
 static iree_status_t iree_hal_vulkan_command_buffer_record_copy_native_refs(
-    const iree_hal_vulkan_device_syms_t* syms,
-    VkCommandBuffer native_command_buffer,
+    const iree_hal_vulkan_builtins_t* builtins,
+    VkCommandBuffer native_command_buffer, VkDescriptorPool descriptor_pool,
     iree_hal_buffer_binding_table_t binding_table,
     iree_hal_buffer_ref_t source_ref, iree_string_view_t source_usage,
     iree_hal_buffer_ref_t target_ref, iree_string_view_t target_usage) {
   VkBuffer source_handle = VK_NULL_HANDLE;
+  VkDeviceSize source_handle_length = 0;
   VkDeviceSize source_offset = 0;
   VkDeviceSize source_length = 0;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_resolve_native_buffer_ref(
-      binding_table, source_ref, source_usage, &source_handle, &source_offset,
-      &source_length));
+      binding_table, source_ref, source_usage, &source_handle,
+      &source_handle_length, &source_offset, &source_length));
   VkBuffer target_handle = VK_NULL_HANDLE;
+  VkDeviceSize target_handle_length = 0;
   VkDeviceSize target_offset = 0;
   VkDeviceSize target_length = 0;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_resolve_native_buffer_ref(
-      binding_table, target_ref, target_usage, &target_handle, &target_offset,
-      &target_length));
+      binding_table, target_ref, target_usage, &target_handle,
+      &target_handle_length, &target_offset, &target_length));
   if (source_length != target_length) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "resolved Vulkan command buffer copy spans differ "
@@ -1596,15 +1665,10 @@ static iree_status_t iree_hal_vulkan_command_buffer_record_copy_native_refs(
       iree_hal_buffer_allowed_usage(resolved_target_ref.buffer),
       IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET));
 
-  VkBufferCopy copy_region = {
-      .srcOffset = source_offset,
-      .dstOffset = target_offset,
-      .size = source_length,
-  };
-  iree_vkCmdCopyBuffer(IREE_VULKAN_DEVICE(syms), native_command_buffer,
-                       source_handle, target_handle, /*regionCount=*/1,
-                       &copy_region);
-  return iree_ok_status();
+  return iree_hal_vulkan_builtins_record_copy(
+      builtins, native_command_buffer, descriptor_pool, source_handle,
+      source_handle_length, source_offset, target_handle, target_handle_length,
+      target_offset, source_length);
 }
 
 static iree_status_t iree_hal_vulkan_command_buffer_record_fill_native(
@@ -1620,7 +1684,8 @@ static iree_status_t iree_hal_vulkan_command_buffer_record_fill_native(
   VkDeviceSize target_length = 0;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_resolve_native_buffer_ref(
       binding_table, fill_buffer->target_ref, IREE_SV("fill target"),
-      &target_handle, &target_offset, &target_length));
+      &target_handle, /*out_handle_length=*/NULL, &target_offset,
+      &target_length));
   if (target_length == 0) return iree_ok_status();
 
   iree_hal_buffer_ref_t resolved_target_ref;
@@ -1706,7 +1771,8 @@ static iree_status_t iree_hal_vulkan_command_buffer_record_update_native(
   VkDeviceSize target_length = 0;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_resolve_native_buffer_ref(
       binding_table, update_buffer->target_ref, IREE_SV("update target"),
-      &target_handle, &target_offset, &target_length));
+      &target_handle, /*out_handle_length=*/NULL, &target_offset,
+      &target_length));
   if (target_length == 0) return iree_ok_status();
   if (target_length != update_buffer->source_data_length) {
     return iree_make_status(
@@ -1762,15 +1828,16 @@ static iree_status_t iree_hal_vulkan_command_buffer_record_update_native(
 }
 
 static iree_status_t iree_hal_vulkan_command_buffer_record_copy_native(
-    const iree_hal_vulkan_device_syms_t* syms,
-    VkCommandBuffer native_command_buffer,
+    const iree_hal_vulkan_builtins_t* builtins,
+    VkCommandBuffer native_command_buffer, VkDescriptorPool descriptor_pool,
     iree_hal_buffer_binding_table_t binding_table,
     const iree_hal_vulkan_command_t* command) {
   const iree_hal_vulkan_command_copy_buffer_t* copy_buffer =
       iree_hal_vulkan_command_copy_buffer_payload(command);
   return iree_hal_vulkan_command_buffer_record_copy_native_refs(
-      syms, native_command_buffer, binding_table, copy_buffer->source_ref,
-      IREE_SV("copy source"), copy_buffer->target_ref, IREE_SV("copy target"));
+      builtins, native_command_buffer, descriptor_pool, binding_table,
+      copy_buffer->source_ref, IREE_SV("copy source"), copy_buffer->target_ref,
+      IREE_SV("copy target"));
 }
 
 static void iree_hal_vulkan_command_buffer_record_execution_barrier_native(
@@ -1827,7 +1894,8 @@ iree_hal_vulkan_command_buffer_resolve_indirect_parameters_buffer(
   VkDeviceSize parameter_length = 0;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_resolve_native_buffer_ref(
       binding_table, workgroup_count_ref, IREE_SV("indirect parameters"),
-      &parameter_handle, &parameter_offset, &parameter_length));
+      &parameter_handle, /*out_handle_length=*/NULL, &parameter_offset,
+      &parameter_length));
   if (parameter_offset % sizeof(uint32_t) != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -2287,7 +2355,8 @@ iree_status_t iree_hal_vulkan_command_buffer_record_native(
         break;
       case IREE_HAL_VULKAN_COMMAND_TYPE_COPY_BUFFER:
         status = iree_hal_vulkan_command_buffer_record_copy_native(
-            syms, native_command_buffer, binding_table, command);
+            builtins, native_command_buffer, descriptor_pool, binding_table,
+            command);
         break;
       case IREE_HAL_VULKAN_COMMAND_TYPE_DISPATCH: {
         iree_hal_vulkan_command_buffer_dispatch_profile_marker_t
@@ -2794,6 +2863,7 @@ static iree_status_t iree_hal_vulkan_command_buffer_copy_buffer(
   copy_buffer->source_ref = source_ref;
   copy_buffer->target_ref = target_ref;
   copy_buffer->flags = flags;
+  command_buffer->has_indirect_copy |= !source_ref.buffer || !target_ref.buffer;
   return iree_ok_status();
 }
 

@@ -2419,6 +2419,9 @@ TEST_F(HostQueueCommandBufferTest,
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(
       test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  iree_hal_queue_t* queue = iree_hal_device_queue(
+      test_device.base_device(), /*family_ordinal=*/0, /*queue_ordinal=*/0);
+  ASSERT_NE(queue, nullptr);
 
   const uint32_t input_values[4] = {1, 2, 3, 4};
   const uint8_t* input_bytes = reinterpret_cast<const uint8_t*>(input_values);
@@ -2504,10 +2507,10 @@ TEST_F(HostQueueCommandBufferTest,
       /*semaphores=*/&read_signal_ptr,
       /*payload_values=*/&read_signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_read(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY, read_wait_list,
-      read_signal_list, source_file, /*source_offset=*/0, transient_buffer,
-      kDispatchInputOffset, sizeof(input_values), IREE_HAL_READ_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_read(
+      queue, read_wait_list, read_signal_list, source_file, /*source_offset=*/0,
+      transient_buffer, kDispatchInputOffset, sizeof(input_values),
+      IREE_HAL_READ_FLAG_NONE));
 
   Ref<iree_hal_semaphore_t> dispatch_signal;
   IREE_ASSERT_OK(

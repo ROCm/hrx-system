@@ -16,6 +16,7 @@ iree_c_embed_data(
   SRCS
     "atomic_32.spv"
     "atomic_64.spv"
+    "copy_unaligned.spv"
     "fill_unaligned.spv"
     "update_unaligned.spv"
   C_FILE_OUTPUT
@@ -77,6 +78,21 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN)
 iree_spirv_asm_module(
   NAME
+    copy_unaligned_generated
+  SRC
+    "copy_unaligned.spvasm"
+  OUT
+    "copy_unaligned_generated.spv"
+  TARGET_ENV
+    "spv1.0"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN)
+iree_spirv_asm_module(
+  NAME
     fill_unaligned_generated
   SRC
     "fill_unaligned.spvasm"
@@ -111,6 +127,7 @@ iree_c_embed_data(
   SRCS
     "atomic_32_generated.spv"
     "atomic_64_generated.spv"
+    "copy_unaligned_generated.spv"
     "fill_unaligned_generated.spv"
     "update_unaligned_generated.spv"
   C_FILE_OUTPUT

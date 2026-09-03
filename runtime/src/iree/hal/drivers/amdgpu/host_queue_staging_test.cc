@@ -385,10 +385,16 @@ class HostQueueStagingTest : public ::testing::Test {
     iree_hal_semaphore_t* signal_semaphore_ptr = signal_semaphore.get();
     iree_hal_semaphore_list_t signal_list =
         MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
-    IREE_RETURN_IF_ERROR(iree_hal_device_queue_read(
-        device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-        signal_list, source_file, source_offset, target_buffer, target_offset,
-        length, IREE_HAL_READ_FLAG_NONE));
+    iree_hal_queue_t* queue = iree_hal_device_queue(
+        device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+    if (!queue) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "test device has no provisioned queue");
+    }
+    IREE_RETURN_IF_ERROR(
+        iree_hal_queue_read(queue, iree_hal_semaphore_list_empty(), signal_list,
+                            source_file, source_offset, target_buffer,
+                            target_offset, length, IREE_HAL_READ_FLAG_NONE));
     return iree_hal_semaphore_wait(signal_semaphore, signal_value,
                                    iree_infinite_timeout(),
                                    IREE_ASYNC_WAIT_FLAG_NONE);
@@ -406,10 +412,16 @@ class HostQueueStagingTest : public ::testing::Test {
     iree_hal_semaphore_t* signal_semaphore_ptr = signal_semaphore.get();
     iree_hal_semaphore_list_t signal_list =
         MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
-    IREE_RETURN_IF_ERROR(iree_hal_device_queue_write(
-        device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-        signal_list, source_buffer, source_offset, target_file, target_offset,
-        length, IREE_HAL_WRITE_FLAG_NONE));
+    iree_hal_queue_t* queue = iree_hal_device_queue(
+        device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+    if (!queue) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "test device has no provisioned queue");
+    }
+    IREE_RETURN_IF_ERROR(iree_hal_queue_write(
+        queue, iree_hal_semaphore_list_empty(), signal_list, source_buffer,
+        source_offset, target_file, target_offset, length,
+        IREE_HAL_WRITE_FLAG_NONE));
     return iree_hal_semaphore_wait(signal_semaphore, signal_value,
                                    iree_infinite_timeout(),
                                    IREE_ASYNC_WAIT_FLAG_NONE);
@@ -557,10 +569,10 @@ TEST_F(HostQueueStagingTest,
   iree_hal_semaphore_t* read_signal_ptr = read_signal.get();
   iree_hal_semaphore_list_t read_signal_list =
       MakeSemaphoreList(&read_signal_ptr, &read_signal_value);
-  IREE_ASSERT_OK(iree_hal_device_queue_read(
-      test_device.base_device(), kQueueAffinity0, read_wait_list,
-      read_signal_list, source_file, /*source_offset=*/0, transient_buffer,
-      /*target_offset=*/0, kMultiSlotTransferSize, IREE_HAL_READ_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_read(
+      &test_device.first_host_queue()->base, read_wait_list, read_signal_list,
+      source_file, /*source_offset=*/0, transient_buffer, /*target_offset=*/0,
+      kMultiSlotTransferSize, IREE_HAL_READ_FLAG_NONE));
 
   Ref<iree_hal_semaphore_t> write_signal;
   IREE_ASSERT_OK(
@@ -571,10 +583,10 @@ TEST_F(HostQueueStagingTest,
       MakeSemaphoreList(&read_signal_ptr, &read_signal_value);
   iree_hal_semaphore_list_t write_signal_list =
       MakeSemaphoreList(&write_signal_ptr, &write_signal_value);
-  IREE_ASSERT_OK(iree_hal_device_queue_write(
-      test_device.base_device(), kQueueAffinity0, write_wait_list,
-      write_signal_list, transient_buffer, /*source_offset=*/0, output_file,
-      /*target_offset=*/0, kMultiSlotTransferSize, IREE_HAL_WRITE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_write(
+      &test_device.first_host_queue()->base, write_wait_list, write_signal_list,
+      transient_buffer, /*source_offset=*/0, output_file, /*target_offset=*/0,
+      kMultiSlotTransferSize, IREE_HAL_WRITE_FLAG_NONE));
 
   Ref<iree_hal_semaphore_t> dealloca_signal;
   IREE_ASSERT_OK(
@@ -695,11 +707,10 @@ TEST_F(HostQueueStagingTest, CapacityParkedStagedWriteRetriesAfterPostDrain) {
   iree_hal_semaphore_list_t write_signal_list =
       MakeSemaphoreList(&write_signal_ptr, &write_signal_value);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_device_queue_write(
-        test_device.base_device(), kQueueAffinity0,
-        iree_hal_semaphore_list_empty(), write_signal_list, source_buffer,
-        /*source_offset=*/0, file, /*target_offset=*/0, kMultiSlotTransferSize,
-        IREE_HAL_WRITE_FLAG_NONE);
+    status = iree_hal_queue_write(
+        &queue->base, iree_hal_semaphore_list_empty(), write_signal_list,
+        source_buffer, /*source_offset=*/0, file, /*target_offset=*/0,
+        kMultiSlotTransferSize, IREE_HAL_WRITE_FLAG_NONE);
   }
   const bool write_parked =
       iree_status_is_ok(status) && HostQueueHasPendingOperation(queue);
@@ -759,8 +770,8 @@ TEST_F(HostQueueStagingTest, ShortReadFailsTerminalSignal) {
   iree_hal_semaphore_list_t signal_list =
       MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
 
-  IREE_ASSERT_OK(iree_hal_device_queue_read(
-      test_device.base_device(), kQueueAffinity0, wait_list, signal_list, file,
+  IREE_ASSERT_OK(iree_hal_queue_read(
+      &test_device.first_host_queue()->base, wait_list, signal_list, file,
       /*source_offset=*/0, buffer, /*target_offset=*/0, kStagingSlotSize,
       IREE_HAL_READ_FLAG_NONE));
   IREE_ASSERT_OK(TruncateTempFile(path));

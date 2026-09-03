@@ -18,6 +18,7 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct iree_hal_buffer_t iree_hal_buffer_t;
+typedef struct iree_hal_file_t iree_hal_file_t;
 typedef struct iree_hal_semaphore_t iree_hal_semaphore_t;
 
 //===----------------------------------------------------------------------===//
@@ -125,6 +126,18 @@ enum iree_hal_update_flag_bits_t {
 typedef uint64_t iree_hal_copy_flags_t;
 enum iree_hal_copy_flag_bits_t {
   IREE_HAL_COPY_FLAG_NONE = 0,
+};
+
+// Bitfield specifying flags controlling a file read operation.
+typedef uint64_t iree_hal_read_flags_t;
+enum iree_hal_read_flag_bits_t {
+  IREE_HAL_READ_FLAG_NONE = 0,
+};
+
+// Bitfield specifying flags controlling a file write operation.
+typedef uint64_t iree_hal_write_flags_t;
+enum iree_hal_write_flag_bits_t {
+  IREE_HAL_WRITE_FLAG_NONE = 0,
 };
 
 // Identifies the payload active in an iree_hal_transfer_operation_t.
@@ -420,6 +433,53 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_download(
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     void* target, iree_device_size_t length);
 
+// Enqueues a file read on the exact hardware |queue|.
+//
+// A non-empty operation retains |source_file| and |target_buffer| until it
+// reaches a terminal state. The file must allow read access and the buffer must
+// allow write access with transfer-target usage. When |source_file| wraps host
+// memory, callers order host writes before the read with
+// |wait_semaphore_list| and do not mutate the source range again until
+// |signal_semaphore_list| is reached.
+//
+// Device-visible storage-backed files are copied on |queue| through the normal
+// transfer path. Other file representations are handled by the queue
+// implementation.
+//
+// A zero-length read performs no data access, ignores the file, buffer, offset,
+// and flag arguments, and forwards the wait dependencies to the signal
+// dependencies as an empty transfer transaction.
+IREE_API_EXPORT iree_status_t iree_hal_queue_read(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_file_t* source_file, uint64_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_read_flags_t flags);
+
+// Enqueues a file write on the exact hardware |queue|.
+//
+// A non-empty operation retains |source_buffer| and |target_file| until it
+// reaches a terminal state. The buffer must allow read access with
+// transfer-source usage and the file must allow write access. When
+// |target_file| wraps host memory, callers do not access the target range until
+// |signal_semaphore_list| is reached.
+//
+// Device-visible storage-backed files are copied on |queue| through the normal
+// transfer path. Other file representations are handled by the queue
+// implementation.
+//
+// A zero-length write performs no data access, ignores the buffer, file,
+// offset, and flag arguments, and forwards the wait dependencies to the signal
+// dependencies as an empty transfer transaction.
+IREE_API_EXPORT iree_status_t iree_hal_queue_write(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    iree_hal_file_t* target_file, uint64_t target_offset,
+    iree_device_size_t length, iree_hal_write_flags_t flags);
+
 //===----------------------------------------------------------------------===//
 // iree_hal_queue_family_t implementation details
 //===----------------------------------------------------------------------===//
@@ -452,6 +512,24 @@ typedef struct iree_hal_queue_vtable_t {
       const iree_hal_semaphore_list_t signal_semaphore_list,
       iree_host_size_t operation_count,
       const iree_hal_transfer_operation_t* operations);
+
+  // Enqueues a file read operation.
+  iree_status_t(IREE_API_PTR* read)(
+      iree_hal_queue_t* queue,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_file_t* source_file, uint64_t source_offset,
+      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+      iree_device_size_t length, iree_hal_read_flags_t flags);
+
+  // Enqueues a file write operation.
+  iree_status_t(IREE_API_PTR* write)(
+      iree_hal_queue_t* queue,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+      iree_hal_file_t* target_file, uint64_t target_offset,
+      iree_device_size_t length, iree_hal_write_flags_t flags);
 } iree_hal_queue_vtable_t;
 IREE_HAL_ASSERT_VTABLE_LAYOUT(iree_hal_queue_vtable_t);
 

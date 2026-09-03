@@ -151,6 +151,8 @@ enum iree_hal_replay_operation_code_e {
   IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_LOOKUP_FUNCTION_BY_NAME = 503u,
 
   IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TRANSFER = 600u,
+  IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_READ = 601u,
+  IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_WRITE = 602u,
 };
 
 // Producer-defined payload schema stored in record headers.
@@ -188,6 +190,8 @@ enum iree_hal_replay_payload_type_e {
   IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW = 32u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT = 33u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER = 34u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_READ = 35u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_WRITE = 36u,
 };
 
 // Type of one operation in a captured exact-queue transfer transaction.
@@ -523,6 +527,46 @@ typedef struct iree_hal_replay_queue_transfer_payload_t {
 } iree_hal_replay_queue_transfer_payload_t;
 static_assert(sizeof(iree_hal_replay_queue_transfer_payload_t) == 32,
               "queue transfer replay header must be 32 bytes");
+
+// Payload describing an exact-queue file read followed by semaphore timepoints
+// and optional captured source bytes.
+typedef struct iree_hal_replay_queue_read_payload_t {
+  // Session-local source file object id.
+  iree_hal_replay_object_id_t source_file_id;
+  // Source byte offset in the file.
+  uint64_t source_offset;
+  // Target buffer range read into.
+  iree_hal_replay_buffer_ref_payload_t target_ref;
+  // Read flags.
+  uint64_t flags;
+  // Byte length of captured source data following the semaphore timepoints.
+  uint64_t captured_data_length;
+  // Number of wait semaphore timepoints following this header.
+  uint64_t wait_semaphore_count;
+  // Number of signal semaphore timepoints following the wait timepoints.
+  uint64_t signal_semaphore_count;
+} iree_hal_replay_queue_read_payload_t;
+static_assert(sizeof(iree_hal_replay_queue_read_payload_t) == 80,
+              "queue read replay payload must be 80 bytes");
+
+// Payload describing an exact-queue file write followed by semaphore
+// timepoints.
+typedef struct iree_hal_replay_queue_write_payload_t {
+  // Source buffer range written from.
+  iree_hal_replay_buffer_ref_payload_t source_ref;
+  // Session-local target file object id.
+  iree_hal_replay_object_id_t target_file_id;
+  // Target byte offset in the file.
+  uint64_t target_offset;
+  // Write flags.
+  uint64_t flags;
+  // Number of wait semaphore timepoints following this header.
+  uint64_t wait_semaphore_count;
+  // Number of signal semaphore timepoints following the wait timepoints.
+  uint64_t signal_semaphore_count;
+} iree_hal_replay_queue_write_payload_t;
+static_assert(sizeof(iree_hal_replay_queue_write_payload_t) == 72,
+              "queue write replay payload must be 72 bytes");
 
 // One operation in a captured exact-queue transfer transaction.
 typedef struct iree_hal_replay_queue_transfer_operation_payload_t {

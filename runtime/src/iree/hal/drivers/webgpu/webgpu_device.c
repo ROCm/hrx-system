@@ -571,7 +571,7 @@ static iree_status_t iree_hal_webgpu_device_queue_read(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, iree_hal_read_flags_t flags) {
   iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
-  return iree_hal_webgpu_queue_read(
+  return iree_hal_webgpu_queue_submit_read(
       &device->queue, wait_semaphore_list, signal_semaphore_list, source_file,
       source_offset, target_buffer, target_offset, length, flags);
 }
@@ -584,7 +584,7 @@ static iree_status_t iree_hal_webgpu_device_queue_write(
     iree_hal_file_t* target_file, uint64_t target_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags) {
   iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
-  return iree_hal_webgpu_queue_write(
+  return iree_hal_webgpu_queue_submit_write(
       &device->queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
       source_offset, target_file, target_offset, length, flags);
 }

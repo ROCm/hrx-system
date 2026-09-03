@@ -8,6 +8,7 @@
 
 #include "iree/hal/buffer.h"
 #include "iree/hal/detail.h"
+#include "iree/hal/file.h"
 #include "iree/hal/semaphore.h"
 
 #define _VTABLE_DISPATCH(queue, method_name) \
@@ -412,6 +413,144 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_download(
   };
   return iree_hal_queue_transfer(queue, wait_semaphore_list,
                                  signal_semaphore_list, 1, &operation);
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_queue_read(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_file_t* source_file, uint64_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_read_flags_t flags) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)length);
+
+  iree_status_t status = iree_ok_status();
+  if (IREE_UNLIKELY(!queue)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
+  }
+  if (iree_status_is_ok(status) && length == 0) {
+    status = _VTABLE_DISPATCH(queue, transfer)(
+        queue, wait_semaphore_list, signal_semaphore_list,
+        /*operation_count=*/0, /*operations=*/NULL);
+  } else if (iree_status_is_ok(status)) {
+    if (IREE_UNLIKELY(flags != IREE_HAL_READ_FLAG_NONE)) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "unsupported queue read flags: 0x%016" PRIx64,
+                                flags);
+    } else if (IREE_UNLIKELY(!source_file)) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "read source file is null");
+    }
+  }
+  if (iree_status_is_ok(status) && length != 0) {
+    status =
+        iree_hal_file_validate_access(source_file, IREE_HAL_MEMORY_ACCESS_READ);
+  }
+  if (iree_status_is_ok(status) && length != 0) {
+    status = iree_hal_file_validate_range(source_file, source_offset, length);
+  }
+  if (iree_status_is_ok(status) && length != 0) {
+    status = iree_hal_queue_validate_transfer_buffer(
+        queue, target_buffer, target_offset, length,
+        IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET, IREE_HAL_MEMORY_ACCESS_WRITE);
+  }
+  if (iree_status_is_ok(status) && length != 0) {
+    iree_hal_buffer_t* source_storage_buffer =
+        iree_hal_file_storage_buffer(source_file);
+    if (source_storage_buffer &&
+        iree_all_bits_set(iree_hal_buffer_memory_type(source_storage_buffer),
+                          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
+      status = iree_hal_queue_copy(
+          queue, wait_semaphore_list, signal_semaphore_list,
+          source_storage_buffer, (iree_device_size_t)source_offset,
+          target_buffer, target_offset, length, IREE_HAL_COPY_FLAG_NONE);
+    } else {
+      status = _VTABLE_DISPATCH(queue, read)(
+          queue, wait_semaphore_list, signal_semaphore_list, source_file,
+          source_offset, target_buffer, target_offset, length, flags);
+    }
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_queue_write(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    iree_hal_file_t* target_file, uint64_t target_offset,
+    iree_device_size_t length, iree_hal_write_flags_t flags) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)length);
+
+  iree_status_t status = iree_ok_status();
+  if (IREE_UNLIKELY(!queue)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
+  }
+  if (iree_status_is_ok(status) && length == 0) {
+    status = _VTABLE_DISPATCH(queue, transfer)(
+        queue, wait_semaphore_list, signal_semaphore_list,
+        /*operation_count=*/0, /*operations=*/NULL);
+  } else if (iree_status_is_ok(status)) {
+    if (IREE_UNLIKELY(flags != IREE_HAL_WRITE_FLAG_NONE)) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "unsupported queue write flags: 0x%016" PRIx64,
+                                flags);
+    } else if (IREE_UNLIKELY(!target_file)) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "write target file is null");
+    }
+  }
+  if (iree_status_is_ok(status) && length != 0) {
+    status = iree_hal_queue_validate_transfer_buffer(
+        queue, source_buffer, source_offset, length,
+        IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE, IREE_HAL_MEMORY_ACCESS_READ);
+  }
+  if (iree_status_is_ok(status) && length != 0) {
+    status = iree_hal_file_validate_access(target_file,
+                                           IREE_HAL_MEMORY_ACCESS_WRITE);
+  }
+  if (iree_status_is_ok(status) && length != 0) {
+    status = iree_hal_file_validate_range(target_file, target_offset, length);
+  }
+  if (iree_status_is_ok(status) && length != 0) {
+    iree_hal_buffer_t* target_storage_buffer =
+        iree_hal_file_storage_buffer(target_file);
+    if (target_storage_buffer &&
+        iree_all_bits_set(iree_hal_buffer_memory_type(target_storage_buffer),
+                          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
+      status = iree_hal_queue_copy(
+          queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
+          source_offset, target_storage_buffer,
+          (iree_device_size_t)target_offset, length, IREE_HAL_COPY_FLAG_NONE);
+    } else {
+      status = _VTABLE_DISPATCH(queue, write)(
+          queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
+          source_offset, target_file, target_offset, length, flags);
+    }
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 IREE_API_EXPORT void iree_hal_queue_initialize(

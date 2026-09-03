@@ -193,6 +193,10 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "executable.lookup_function_by_name";
     case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TRANSFER:
       return "queue.transfer";
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_READ:
+      return "queue.read";
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_WRITE:
+      return "queue.write";
     default:
       return "unknown";
   }
@@ -265,6 +269,10 @@ IREE_API_EXPORT const char* iree_hal_replay_payload_type_string(
       return "provisioned_queue_object";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER:
       return "queue_transfer";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_READ:
+      return "queue_read";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_WRITE:
+      return "queue_write";
     default:
       return "unknown";
   }

@@ -46,6 +46,16 @@ iree_hal_file_t* iree_hal_replay_recorder_file_base_or_self(
 iree_hal_replay_object_id_t iree_hal_replay_recorder_file_id_or_none(
     iree_hal_file_t* file);
 
+// Returns the captured object id for |file| when it belongs to |recorder|, or
+// NONE for files outside that recording session.
+iree_hal_replay_object_id_t iree_hal_replay_recorder_find_file_id(
+    iree_hal_replay_recorder_t* recorder, iree_hal_file_t* file);
+
+// Returns true when |file| is an fd-backed file whose reads must be embedded as
+// captured ranges under the immutable |recorder| policy.
+bool iree_hal_replay_recorder_file_uses_captured_ranges(
+    iree_hal_replay_recorder_t* recorder, iree_hal_file_t* file);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

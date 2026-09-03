@@ -781,7 +781,7 @@ iree_status_t iree_hal_amdgpu_host_queue_copy(
     iree_device_size_t length, iree_hal_copy_flags_t flags);
 
 // Enqueues a file-to-buffer read on |queue|.
-iree_status_t iree_hal_amdgpu_host_queue_read(
+iree_status_t iree_hal_amdgpu_host_queue_submit_read(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
@@ -790,7 +790,7 @@ iree_status_t iree_hal_amdgpu_host_queue_read(
     iree_device_size_t length, iree_hal_read_flags_t flags);
 
 // Enqueues a buffer-to-file write on |queue|.
-iree_status_t iree_hal_amdgpu_host_queue_write(
+iree_status_t iree_hal_amdgpu_host_queue_submit_write(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,

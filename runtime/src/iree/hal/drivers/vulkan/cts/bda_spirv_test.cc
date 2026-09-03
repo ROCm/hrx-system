@@ -729,7 +729,8 @@ TEST_P(BdaSpirvTest, CommandBufferCachesBdaPublicationRequirements) {
   iree_hal_vulkan_command_buffer_descriptor_requirements_t requirements = {0};
   IREE_ASSERT_OK(
       iree_hal_vulkan_command_buffer_native_descriptor_pool_requirements(
-          command_buffer, &requirements));
+          command_buffer, iree_hal_buffer_binding_table_empty(),
+          &requirements));
   EXPECT_EQ(requirements.set_count, 0u);
   EXPECT_EQ(requirements.sampler_count, 0u);
   EXPECT_EQ(requirements.uniform_buffer_count, 0u);

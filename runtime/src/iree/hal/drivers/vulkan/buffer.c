@@ -70,6 +70,9 @@ typedef struct iree_hal_vulkan_buffer_t {
   // Vulkan buffer handle.
   VkBuffer handle;
 
+  // Byte length of |handle| as declared to Vulkan.
+  VkDeviceSize handle_length;
+
   // Byte offset within |handle| where this HAL allocation begins.
   VkDeviceSize handle_offset;
 
@@ -130,7 +133,7 @@ static iree_status_t iree_hal_vulkan_buffer_create_internal(
     VkDeviceSize handle_offset, VkDeviceSize device_memory_offset,
     VkDeviceSize device_memory_size,
     iree_hal_vulkan_buffer_mapping_state_t* borrowed_mapping_state,
-    VkBuffer handle, VkDeviceAddress device_address,
+    VkBuffer handle, VkDeviceSize handle_length, VkDeviceAddress device_address,
     iree_hal_vulkan_buffer_ownership_t ownership,
     iree_hal_buffer_release_callback_t release_callback,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer) {
@@ -173,6 +176,7 @@ static iree_status_t iree_hal_vulkan_buffer_create_internal(
     buffer->mapping_state = borrowed_mapping_state;
   }
   buffer->handle = handle;
+  buffer->handle_length = handle_length;
   buffer->handle_offset = handle_offset;
   buffer->device_address = device_address;
   buffer->memory_property_flags = memory_property_flags;
@@ -202,7 +206,8 @@ iree_status_t iree_hal_vulkan_buffer_create(
       allowed_usage, allocation_size, /*byte_offset=*/0, byte_length,
       memory_property_flags, non_coherent_atom_size, device_memory,
       /*handle_offset=*/0, device_memory_offset, device_memory_size,
-      /*borrowed_mapping_state=*/NULL, handle, device_address,
+      /*borrowed_mapping_state=*/NULL, handle, (VkDeviceSize)allocation_size,
+      device_address,
       IREE_HAL_VULKAN_BUFFER_OWNS_HANDLE |
           IREE_HAL_VULKAN_BUFFER_OWNS_DEVICE_MEMORY |
           IREE_HAL_VULKAN_BUFFER_OWNS_MAPPING_STATE,
@@ -235,8 +240,9 @@ iree_status_t iree_hal_vulkan_buffer_create_borrowed(
       memory_property_flags, non_coherent_atom_size, device_memory,
       (VkDeviceSize)handle_offset, (VkDeviceSize)handle_offset,
       mapping_state ? mapping_state->device_memory_size : 0, mapping_state,
-      handle, device_address, IREE_HAL_VULKAN_BUFFER_OWNS_NONE,
-      release_callback, host_allocator, out_buffer);
+      handle, (VkDeviceSize)allocation_size, device_address,
+      IREE_HAL_VULKAN_BUFFER_OWNS_NONE, release_callback, host_allocator,
+      out_buffer);
 }
 
 static void iree_hal_vulkan_buffer_destroy(iree_hal_buffer_t* base_buffer) {
@@ -419,6 +425,31 @@ iree_status_t iree_hal_vulkan_buffer_handle(iree_hal_buffer_t* buffer,
       iree_hal_vulkan_buffer_cast(allocated_buffer);
   *out_memory = vulkan_buffer->device_memory;
   *out_handle = vulkan_buffer->handle;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_vulkan_buffer_handle_length(
+    iree_hal_buffer_t* buffer, VkDeviceSize* out_handle_length) {
+  IREE_ASSERT_ARGUMENT(buffer);
+  IREE_ASSERT_ARGUMENT(out_handle_length);
+  iree_hal_buffer_t* backing_buffer = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_buffer_resolve_backing(buffer, &backing_buffer));
+  iree_hal_buffer_t* allocated_buffer =
+      iree_hal_buffer_allocated_buffer(backing_buffer);
+  VkDeviceSize handle_length = 0;
+  if (iree_hal_vulkan_sparse_buffer_isa(allocated_buffer)) {
+    handle_length =
+        (VkDeviceSize)iree_hal_buffer_allocation_size(allocated_buffer);
+  } else if (!iree_hal_vulkan_buffer_isa(allocated_buffer)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "buffer is not backed by the Vulkan HAL");
+  } else {
+    const iree_hal_vulkan_buffer_t* vulkan_buffer =
+        iree_hal_vulkan_buffer_cast(allocated_buffer);
+    handle_length = vulkan_buffer->handle_length;
+  }
+  *out_handle_length = handle_length;
   return iree_ok_status();
 }
 

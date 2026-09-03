@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "iree/hal/replay/digest.h"
+#include "iree/hal/replay/recorder_record.h"
 
 #if IREE_FILE_IO_ENABLE && \
     (defined(IREE_PLATFORM_ANDROID) || defined(IREE_PLATFORM_LINUX))
@@ -416,6 +417,30 @@ iree_hal_replay_object_id_t iree_hal_replay_recorder_file_id_or_none(
   return file && iree_hal_replay_recorder_file_isa(file)
              ? iree_hal_replay_recorder_file_cast(file)->file_id
              : IREE_HAL_REPLAY_OBJECT_ID_NONE;
+}
+
+iree_hal_replay_object_id_t iree_hal_replay_recorder_find_file_id(
+    iree_hal_replay_recorder_t* recorder, iree_hal_file_t* file) {
+  if (!recorder || !file || !iree_hal_replay_recorder_file_isa(file)) {
+    return IREE_HAL_REPLAY_OBJECT_ID_NONE;
+  }
+  iree_hal_replay_recorder_file_t* recorder_file =
+      iree_hal_replay_recorder_file_cast(file);
+  return recorder_file->recorder == recorder ? recorder_file->file_id
+                                             : IREE_HAL_REPLAY_OBJECT_ID_NONE;
+}
+
+bool iree_hal_replay_recorder_file_uses_captured_ranges(
+    iree_hal_replay_recorder_t* recorder, iree_hal_file_t* file) {
+  if (iree_hal_replay_recorder_find_file_id(recorder, file) ==
+      IREE_HAL_REPLAY_OBJECT_ID_NONE) {
+    return false;
+  }
+  const iree_hal_replay_recorder_file_t* recorder_file =
+      iree_hal_replay_recorder_file_cast(file);
+  return recorder_file->primitive_type == IREE_IO_FILE_HANDLE_TYPE_FD &&
+         iree_hal_replay_recorder_options(recorder)->external_file_policy ==
+             IREE_HAL_REPLAY_RECORDER_EXTERNAL_FILE_POLICY_CAPTURE_RANGES;
 }
 
 static void iree_hal_replay_recorder_file_destroy(

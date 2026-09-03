@@ -17,6 +17,7 @@ package(
 _KERNELS = [
     "atomic_32",
     "atomic_64",
+    "copy_unaligned",
     "fill_unaligned",
     "update_unaligned",
 ]

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/hal/replay/recorder_buffer.h"
+#include "iree/hal/replay/recorder_file.h"
 #include "iree/hal/replay/recorder_record.h"
 
 typedef struct iree_hal_replay_recorder_transfer_storage_t {
@@ -460,9 +461,222 @@ static iree_status_t iree_hal_replay_recorder_queue_transfer(
   return status;
 }
 
+static iree_status_t iree_hal_replay_recorder_queue_read(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_file_t* source_file, uint64_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_read_flags_t flags) {
+  iree_hal_replay_recorder_queue_t* queue =
+      (iree_hal_replay_recorder_queue_t*)base_queue;
+  const iree_hal_replay_object_id_t source_file_id =
+      iree_hal_replay_recorder_find_file_id(queue->recorder, source_file);
+  const iree_hal_replay_object_id_t target_buffer_id =
+      iree_hal_replay_recorder_find_buffer_id(queue->recorder, target_buffer);
+  const bool uses_captured_ranges =
+      iree_hal_replay_recorder_file_uses_captured_ranges(queue->recorder,
+                                                         source_file);
+  bool can_record = source_file_id != IREE_HAL_REPLAY_OBJECT_ID_NONE &&
+                    target_buffer_id != IREE_HAL_REPLAY_OBJECT_ID_NONE &&
+                    iree_hal_replay_recorder_queue_has_captured_semaphores(
+                        queue->recorder, wait_semaphore_list) &&
+                    iree_hal_replay_recorder_queue_has_captured_semaphores(
+                        queue->recorder, signal_semaphore_list);
+  if (uses_captured_ranges && wait_semaphore_list.count != 0) {
+    can_record = false;
+  }
+
+  iree_hal_replay_queue_read_payload_t payload;
+  memset(&payload, 0, sizeof(payload));
+  payload.source_file_id = source_file_id;
+  payload.source_offset = source_offset;
+  payload.flags = flags;
+  payload.wait_semaphore_count = wait_semaphore_list.count;
+  payload.signal_semaphore_count = signal_semaphore_list.count;
+  if (can_record) {
+    iree_hal_replay_recorder_queue_make_buffer_ref_payload(
+        queue, target_buffer, target_offset, length, &payload.target_ref);
+  }
+
+  iree_hal_replay_semaphore_timepoint_payload_t* wait_payloads = NULL;
+  iree_host_size_t wait_payloads_size = 0;
+  iree_hal_replay_semaphore_timepoint_payload_t* signal_payloads = NULL;
+  iree_host_size_t signal_payloads_size = 0;
+  iree_byte_span_t captured_data = iree_byte_span_empty();
+  iree_status_t status = iree_ok_status();
+  if (can_record) {
+    status = iree_hal_replay_recorder_allocate_semaphore_payloads(
+        queue->recorder, wait_semaphore_list, queue->host_allocator,
+        &wait_payloads, &wait_payloads_size);
+  }
+  if (iree_status_is_ok(status) && can_record) {
+    status = iree_hal_replay_recorder_allocate_semaphore_payloads(
+        queue->recorder, signal_semaphore_list, queue->host_allocator,
+        &signal_payloads, &signal_payloads_size);
+  }
+  if (iree_status_is_ok(status) && can_record && uses_captured_ranges) {
+    status = iree_hal_replay_recorder_file_capture_read_data(
+        source_file, source_offset, length, queue->host_allocator,
+        &captured_data);
+    payload.captured_data_length = captured_data.data_length;
+  }
+
+  iree_hal_replay_pending_record_t pending_record = {0};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_recorder_begin_operation(
+        queue->recorder, queue->device_id, queue->queue_id, target_buffer_id,
+        IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+        IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_READ,
+        can_record ? IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_READ
+                   : IREE_HAL_REPLAY_PAYLOAD_TYPE_NONE,
+        &pending_record);
+  }
+  if (iree_status_is_ok(status) && !can_record) {
+    iree_hal_replay_recorder_mark_unsupported(&pending_record);
+  }
+
+  iree_hal_buffer_t* base_target_buffer = NULL;
+  iree_hal_buffer_t* temporary_target_buffer = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_recorder_buffer_unwrap_for_call(
+        target_buffer, queue->host_allocator, &base_target_buffer,
+        &temporary_target_buffer);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_read(
+        queue->base_queue, wait_semaphore_list, signal_semaphore_list,
+        iree_hal_replay_recorder_file_base_or_self(source_file), source_offset,
+        base_target_buffer, target_offset, length, flags);
+  }
+  iree_hal_replay_recorder_buffer_release_temporary(temporary_target_buffer);
+
+  if (pending_record.recorder) {
+    if (can_record) {
+      const iree_const_byte_span_t iovecs[] = {
+          iree_make_const_byte_span(&payload, sizeof(payload)),
+          iree_make_const_byte_span(wait_payloads, wait_payloads_size),
+          iree_make_const_byte_span(signal_payloads, signal_payloads_size),
+          iree_make_const_byte_span(captured_data.data,
+                                    captured_data.data_length),
+      };
+      status = iree_hal_replay_recorder_end_operation_with_payload(
+          &pending_record, status, IREE_ARRAYSIZE(iovecs), iovecs);
+    } else {
+      status = iree_hal_replay_recorder_end_operation(&pending_record, status);
+    }
+  }
+  iree_allocator_free(queue->host_allocator, captured_data.data);
+  iree_allocator_free(queue->host_allocator, signal_payloads);
+  iree_allocator_free(queue->host_allocator, wait_payloads);
+  return status;
+}
+
+static iree_status_t iree_hal_replay_recorder_queue_write(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    iree_hal_file_t* target_file, uint64_t target_offset,
+    iree_device_size_t length, iree_hal_write_flags_t flags) {
+  iree_hal_replay_recorder_queue_t* queue =
+      (iree_hal_replay_recorder_queue_t*)base_queue;
+  const iree_hal_replay_object_id_t source_buffer_id =
+      iree_hal_replay_recorder_find_buffer_id(queue->recorder, source_buffer);
+  const iree_hal_replay_object_id_t target_file_id =
+      iree_hal_replay_recorder_find_file_id(queue->recorder, target_file);
+  bool can_record = source_buffer_id != IREE_HAL_REPLAY_OBJECT_ID_NONE &&
+                    target_file_id != IREE_HAL_REPLAY_OBJECT_ID_NONE &&
+                    iree_hal_replay_recorder_queue_has_captured_semaphores(
+                        queue->recorder, wait_semaphore_list) &&
+                    iree_hal_replay_recorder_queue_has_captured_semaphores(
+                        queue->recorder, signal_semaphore_list);
+  if (iree_hal_replay_recorder_file_uses_captured_ranges(queue->recorder,
+                                                         target_file)) {
+    can_record = false;
+  }
+
+  iree_hal_replay_queue_write_payload_t payload;
+  memset(&payload, 0, sizeof(payload));
+  payload.target_file_id = target_file_id;
+  payload.target_offset = target_offset;
+  payload.flags = flags;
+  payload.wait_semaphore_count = wait_semaphore_list.count;
+  payload.signal_semaphore_count = signal_semaphore_list.count;
+  if (can_record) {
+    iree_hal_replay_recorder_queue_make_buffer_ref_payload(
+        queue, source_buffer, source_offset, length, &payload.source_ref);
+  }
+
+  iree_hal_replay_semaphore_timepoint_payload_t* wait_payloads = NULL;
+  iree_host_size_t wait_payloads_size = 0;
+  iree_hal_replay_semaphore_timepoint_payload_t* signal_payloads = NULL;
+  iree_host_size_t signal_payloads_size = 0;
+  iree_status_t status = iree_ok_status();
+  if (can_record) {
+    status = iree_hal_replay_recorder_allocate_semaphore_payloads(
+        queue->recorder, wait_semaphore_list, queue->host_allocator,
+        &wait_payloads, &wait_payloads_size);
+  }
+  if (iree_status_is_ok(status) && can_record) {
+    status = iree_hal_replay_recorder_allocate_semaphore_payloads(
+        queue->recorder, signal_semaphore_list, queue->host_allocator,
+        &signal_payloads, &signal_payloads_size);
+  }
+
+  iree_hal_replay_pending_record_t pending_record = {0};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_recorder_begin_operation(
+        queue->recorder, queue->device_id, queue->queue_id, source_buffer_id,
+        IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+        IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_WRITE,
+        can_record ? IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_WRITE
+                   : IREE_HAL_REPLAY_PAYLOAD_TYPE_NONE,
+        &pending_record);
+  }
+  if (iree_status_is_ok(status) && !can_record) {
+    iree_hal_replay_recorder_mark_unsupported(&pending_record);
+  }
+
+  iree_hal_buffer_t* base_source_buffer = NULL;
+  iree_hal_buffer_t* temporary_source_buffer = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_recorder_buffer_unwrap_for_call(
+        source_buffer, queue->host_allocator, &base_source_buffer,
+        &temporary_source_buffer);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_write(
+        queue->base_queue, wait_semaphore_list, signal_semaphore_list,
+        base_source_buffer, source_offset,
+        iree_hal_replay_recorder_file_base_or_self(target_file), target_offset,
+        length, flags);
+  }
+  iree_hal_replay_recorder_buffer_release_temporary(temporary_source_buffer);
+
+  if (pending_record.recorder) {
+    if (can_record) {
+      const iree_const_byte_span_t iovecs[] = {
+          iree_make_const_byte_span(&payload, sizeof(payload)),
+          iree_make_const_byte_span(wait_payloads, wait_payloads_size),
+          iree_make_const_byte_span(signal_payloads, signal_payloads_size),
+      };
+      status = iree_hal_replay_recorder_end_operation_with_payload(
+          &pending_record, status, IREE_ARRAYSIZE(iovecs), iovecs);
+    } else {
+      status = iree_hal_replay_recorder_end_operation(&pending_record, status);
+    }
+  }
+  iree_allocator_free(queue->host_allocator, signal_payloads);
+  iree_allocator_free(queue->host_allocator, wait_payloads);
+  return status;
+}
+
 static const iree_hal_queue_vtable_t iree_hal_replay_recorder_queue_vtable = {
     .destroy = iree_hal_replay_recorder_queue_destroy,
     .transfer = iree_hal_replay_recorder_queue_transfer,
+    .read = iree_hal_replay_recorder_queue_read,
+    .write = iree_hal_replay_recorder_queue_write,
 };
 
 void iree_hal_replay_recorder_queue_initialize(

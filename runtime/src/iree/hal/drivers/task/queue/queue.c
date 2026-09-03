@@ -4603,7 +4603,53 @@ static iree_status_t iree_hal_task_queue_transfer(
       signal_semaphore_list, operation_count, operations);
 }
 
+static iree_status_t iree_hal_task_queue_read(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_file_t* source_file, uint64_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_read_flags_t flags) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+  (void)flags;
+  if (!iree_hal_file_async_handle(source_file) &&
+      !iree_hal_file_supports_synchronous_io(source_file)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "file has no async handle and does not support synchronous I/O; "
+        "cannot perform read");
+  }
+  return iree_hal_task_queue_submit_read(
+      (iree_hal_task_queue_t*)base_queue, source_file, source_offset,
+      target_buffer, target_offset, length, wait_semaphore_list,
+      signal_semaphore_list);
+}
+
+static iree_status_t iree_hal_task_queue_write(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    iree_hal_file_t* target_file, uint64_t target_offset,
+    iree_device_size_t length, iree_hal_write_flags_t flags) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+  (void)flags;
+  if (!iree_hal_file_async_handle(target_file) &&
+      !iree_hal_file_supports_synchronous_io(target_file)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "file has no async handle and does not support synchronous I/O; "
+        "cannot perform write");
+  }
+  return iree_hal_task_queue_submit_write(
+      (iree_hal_task_queue_t*)base_queue, source_buffer, source_offset,
+      target_file, target_offset, length, wait_semaphore_list,
+      signal_semaphore_list);
+}
+
 static const iree_hal_queue_vtable_t iree_hal_task_queue_vtable = {
     .destroy = iree_hal_task_queue_destroy,
     .transfer = iree_hal_task_queue_transfer,
+    .read = iree_hal_task_queue_read,
+    .write = iree_hal_task_queue_write,
 };

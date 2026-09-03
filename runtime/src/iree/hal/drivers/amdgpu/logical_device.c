@@ -3124,7 +3124,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_read(
   iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return iree_hal_amdgpu_host_queue_read(
+  return iree_hal_amdgpu_host_queue_submit_read(
       queue, wait_semaphore_list, signal_semaphore_list, source_file,
       source_offset, target_buffer, target_offset, length, flags);
 }
@@ -3143,7 +3143,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_write(
   iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return iree_hal_amdgpu_host_queue_write(
+  return iree_hal_amdgpu_host_queue_submit_write(
       queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
       source_offset, target_file, target_offset, length, flags);
 }
