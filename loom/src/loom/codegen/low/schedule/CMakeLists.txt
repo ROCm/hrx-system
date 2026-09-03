@@ -131,6 +131,17 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
+    pressure_test
+  SRCS
+    "pressure_test.cc"
+  DEPS
+    ::schedule
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
     ready_frontier_test
   SRCS
     "ready_frontier_test.cc"

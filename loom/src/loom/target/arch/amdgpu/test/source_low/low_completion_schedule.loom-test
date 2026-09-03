@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @counter_tracked_effect_braid strategy=resource-stall diagnostics=candidates
+// RUN: emit amdgpu-assembly @counter_tracked_effect_braid strategy=resource-stall
 
 amdgpu.target<gfx1100> @target {subgroup_size = 32}
 
@@ -10,31 +10,22 @@ low.func.def target<amdgpu.rdna3.core>(@target) @counter_tracked_effect_braid(
     %acc1: reg<amdgpu.vgpr x8>,
     %next_payload: reg<amdgpu.vgpr x4>) ->
     (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm {
-  // REMARK@+1: BACKEND/015
   %lhs0_low = ds_read_b128 %address
-  // REMARK@+1: BACKEND/015
   %lhs0_high = ds_read_b128 %address {offset = 16}
-  // REMARK@+1: BACKEND/015
   %lhs0 = concat(%lhs0_low, %lhs0_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
-  // REMARK@+1: BACKEND/015 {chosen_packet="amdgpu.v_wmma_f32_16x16x16_f16", rejected_packet="amdgpu.ds_write_b128", rejected_completion_wait_cycles="1"}
   %next0 = v_wmma_f32_16x16x16_f16 %lhs0, %rhs0, %acc0
-  // REMARK@+1: BACKEND/015
   %lhs1_low = ds_read_b128 %address {offset = 32}
-  // REMARK@+1: BACKEND/015
   %lhs1_high = ds_read_b128 %address {offset = 48}
-  // REMARK@+1: BACKEND/015
   %lhs1 = concat(%lhs1_low, %lhs1_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
   %next1 = v_wmma_f32_16x16x16_f16 %lhs1, %rhs1, %acc1
-  // REMARK@+1: BACKEND/015
   ds_write_b128 %address, %next_payload {offset = 1024}
   s_barrier
   return %next0, %next1
 }
 
 // The four reads make both WMMAs and the effect-dependent write ready. The
-// scheduler prices the write's completion wait, lets the oldest inputs reach
-// useful matrix work first, and leaves the wait planner to select the partial
-// counter target.
+// emitted plan must consume only the oldest inputs, issue useful matrix work,
+// and defer the conflicting write until the later full drain.
 // ----
   ds_read_b128 v[40:43], v16 offset:0
   ds_read_b128 v[44:47], v16 offset:16

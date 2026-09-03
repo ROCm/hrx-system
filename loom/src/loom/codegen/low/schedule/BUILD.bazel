@@ -128,6 +128,16 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "pressure_test",
+    srcs = ["pressure_test.cc"],
+    deps = [
+        ":schedule",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "ready_frontier_test",
     srcs = ["ready_frontier_test.cc"],
     deps = [

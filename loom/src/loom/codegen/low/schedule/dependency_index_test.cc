@@ -79,6 +79,8 @@ TEST_F(ScheduleDependencyIndexTest, GroupsDuplicateProducerConsumerEdges) {
       loom_low_schedule_dependency_index_group_at(&index, 1);
   const loom_low_schedule_dependency_group_t* group2 =
       loom_low_schedule_dependency_index_group_at(&index, 2);
+  const loom_low_schedule_dependency_group_t* group3 =
+      loom_low_schedule_dependency_index_group_at(&index, 3);
   EXPECT_EQ(group0->consumer_node, 3u);
   EXPECT_EQ(group0->dependency_count, 3u);
   EXPECT_TRUE(loom_low_schedule_dependency_index_group_has_ssa(&index, 0));
@@ -91,6 +93,10 @@ TEST_F(ScheduleDependencyIndexTest, GroupsDuplicateProducerConsumerEdges) {
   EXPECT_EQ(loom_low_schedule_dependency_index_group_end(&index, 1), 3u);
   EXPECT_EQ(loom_low_schedule_dependency_index_group_begin(&index, 2), 3u);
   EXPECT_EQ(loom_low_schedule_dependency_index_group_end(&index, 2), 4u);
+  EXPECT_FALSE(loom_low_schedule_dependency_index_group_has_ssa(&index, 2));
+  EXPECT_FALSE(loom_low_schedule_dependency_index_group_has_effect(&index, 2));
+  EXPECT_TRUE(loom_low_schedule_dependency_index_group_has_ssa(&index, 3));
+  EXPECT_FALSE(loom_low_schedule_dependency_index_group_has_effect(&index, 3));
 
   loom_low_schedule_dependency_frontier_t frontier;
   IREE_ASSERT_OK(loom_low_schedule_dependency_frontier_initialize(
@@ -107,6 +113,8 @@ TEST_F(ScheduleDependencyIndexTest, GroupsDuplicateProducerConsumerEdges) {
   EXPECT_EQ(
       loom_low_schedule_dependency_frontier_consume_group(&frontier, 1, group2),
       2u);
+  EXPECT_EQ(group3->consumer_node, 3u);
+  EXPECT_EQ(group3->dependency_count, 1u);
   EXPECT_EQ(frontier.remaining_producer_counts[3], 1u);
   EXPECT_EQ(frontier.consumed_group_count, 2u);
 }
