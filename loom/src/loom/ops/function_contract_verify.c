@@ -162,9 +162,9 @@ static iree_status_t loom_function_contract_verify_predicates(
             module, op, emitter, predicate_index, argument_index);
       }
       const loom_type_t value_type = loom_module_value_type(module, value_id);
-      // Registers without a semantic value type do not expose a numeric domain
-      // to this target-independent verifier. The target-bound Low verifier
-      // decides whether that register form is canonical for its register class.
+      // Carrier-only registers do not expose a numeric domain to this
+      // target-independent verifier. Boundaries that map semantic source values
+      // to carrier-only contracts prove predicates against the source values.
       // Ordinary source values and typed registers retain the strict domain
       // check here.
       const bool has_verifiable_semantic_type =

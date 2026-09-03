@@ -175,8 +175,10 @@ low.kernel.def target<amdgpu.rdna3_5.core>(@caller_target) workgroup_size(1, 1, 
 // ====
 
 // A targetless helper inherits compatibility from its representation contract
-// alone. This form is useful when the same helper body is valid for every
-// concrete target represented by the generic descriptor set.
+// alone. The caller retains its semantic vector type while AMDGPU target
+// mapping selects the helper's carrier-only VGPR contract. This form is useful
+// when the same helper body is valid for every concrete target represented by
+// the generic descriptor set.
 amdgpu.target<gfx1151> @caller_target
 
 low.func.def target<amdgpu.gfx11.generic.core> @identity_helper(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {

@@ -165,9 +165,9 @@ typedef uint32_t loom_low_register_part_mask_t;
 
 // Register class is virtual-only and has no physical register inventory.
 #define LOOM_LOW_REG_CLASS_FLAG_VIRTUAL_ONLY ((uint16_t)1u << 0)
-// Register class represents target-visible physical storage. Values in a
-// physical class use carrier-only register types; semantic domains remain in
-// predicates and facts rather than typed register payloads.
+// Register class represents target-visible physical storage and participates
+// in physical allocation. This does not constrain whether values carry a
+// semantic value type.
 #define LOOM_LOW_REG_CLASS_FLAG_PHYSICAL ((uint16_t)1u << 1)
 // Register class contains reference-counted or GC-visible references.
 #define LOOM_LOW_REG_CLASS_FLAG_REFERENCE ((uint16_t)1u << 2)
