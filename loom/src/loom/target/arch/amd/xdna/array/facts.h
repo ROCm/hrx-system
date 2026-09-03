@@ -140,6 +140,20 @@ typedef struct loom_xdna_dma_facts_t {
   uint8_t address_dimension_count;
   // Required byte-address alignment.
   uint8_t address_alignment;
+  // Right shift applied to byte addresses before register-field encoding.
+  uint8_t address_encoding_shift;
+  // Number of bytes represented by one encoded transfer-length unit.
+  uint8_t transfer_length_granularity;
+  // Value subtracted after scaling a transfer length to encoded units.
+  uint8_t transfer_length_offset;
+  // Stream-switch port channel selected by memory-to-stream DMA channel zero.
+  uint8_t memory_to_stream_port_base;
+  // Stream-switch port-channel stride between memory-to-stream DMA channels.
+  uint8_t memory_to_stream_port_stride;
+  // Stream-switch port channel selected by stream-to-memory DMA channel zero.
+  uint8_t stream_to_memory_port_base;
+  // Stream-switch port-channel stride between stream-to-memory DMA channels.
+  uint8_t stream_to_memory_port_stride;
   // Encoded step-size field width.
   uint8_t step_size_bits;
   // Encoded wrap field width.

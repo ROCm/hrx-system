@@ -101,6 +101,33 @@ def test_npu2_stream_ordinals_match_programmable_register_order() -> None:
     ] == (2, 8)
 
 
+def test_npu2_dma_encoding_and_stream_port_mappings_are_exact() -> None:
+    dma = {tile.kind: tile.dma for tile in NPU2_ARRAY_FAMILY.tiles}
+
+    shim = dma[TileKind.SHIM_NOC]
+    compute = dma[TileKind.COMPUTE]
+    assert shim is not None
+    assert compute is not None
+    assert (
+        shim.address_encoding_shift,
+        shim.transfer_length_granularity,
+        shim.transfer_length_offset,
+    ) == (0, 4, 0)
+    assert (
+        shim.memory_to_stream_port_base,
+        shim.memory_to_stream_port_stride,
+        shim.stream_to_memory_port_base,
+        shim.stream_to_memory_port_stride,
+    ) == (3, 4, 2, 1)
+    assert (
+        compute.address_encoding_shift,
+        compute.memory_to_stream_port_base,
+        compute.memory_to_stream_port_stride,
+        compute.stream_to_memory_port_base,
+        compute.stream_to_memory_port_stride,
+    ) == (2, 0, 1, 0, 1)
+
+
 def test_register_patterns_cover_complete_seed_resource_families() -> None:
     family = NPU2_ARRAY_FAMILY
 

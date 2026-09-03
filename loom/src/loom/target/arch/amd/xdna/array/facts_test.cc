@@ -24,6 +24,13 @@ TEST(XdnaArrayFactsTest, ExposesCompleteNpu2Topology) {
   IREE_ASSERT_OK(loom_xdna_array_tile_facts(family, {0, 0}, &tile));
   EXPECT_EQ(tile->kind, LOOM_XDNA_TILE_KIND_SHIM_NOC);
   EXPECT_EQ(tile->dma.buffer_descriptor_count, 16u);
+  EXPECT_EQ(tile->dma.address_encoding_shift, 0u);
+  EXPECT_EQ(tile->dma.transfer_length_granularity, 4u);
+  EXPECT_EQ(tile->dma.transfer_length_offset, 0u);
+  EXPECT_EQ(tile->dma.memory_to_stream_port_base, 3u);
+  EXPECT_EQ(tile->dma.memory_to_stream_port_stride, 4u);
+  EXPECT_EQ(tile->dma.stream_to_memory_port_base, 2u);
+  EXPECT_EQ(tile->dma.stream_to_memory_port_stride, 1u);
   IREE_ASSERT_OK(loom_xdna_array_tile_facts(family, {7, 1}, &tile));
   EXPECT_EQ(tile->kind, LOOM_XDNA_TILE_KIND_MEMORY);
   EXPECT_EQ(tile->memory.local_capacity, 512u * 1024u);
@@ -32,6 +39,11 @@ TEST(XdnaArrayFactsTest, ExposesCompleteNpu2Topology) {
   EXPECT_EQ(tile->kind, LOOM_XDNA_TILE_KIND_COMPUTE);
   EXPECT_EQ(tile->memory.local_capacity, 64u * 1024u);
   EXPECT_EQ(tile->memory.program_capacity, 16u * 1024u);
+  EXPECT_EQ(tile->dma.address_encoding_shift, 2u);
+  EXPECT_EQ(tile->dma.memory_to_stream_port_base, 0u);
+  EXPECT_EQ(tile->dma.memory_to_stream_port_stride, 1u);
+  EXPECT_EQ(tile->dma.stream_to_memory_port_base, 0u);
+  EXPECT_EQ(tile->dma.stream_to_memory_port_stride, 1u);
 }
 
 TEST(XdnaArrayFactsTest, CanonicalizesComputeNeighborAliases) {
