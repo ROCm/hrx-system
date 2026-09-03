@@ -277,3 +277,42 @@ iree_status_t loom_xdna_array_form_load_address(
       IREE_STATUS_OUT_OF_RANGE,
       "XDNA owner storage is not visible through an accessor load window");
 }
+
+iree_status_t loom_xdna_array_form_lock_selector(
+    const loom_xdna_array_family_t* family,
+    loom_xdna_tile_coordinate_t accessor, loom_xdna_tile_coordinate_t owner,
+    uint16_t owner_lock_ordinal, uint16_t* out_selector) {
+  IREE_ASSERT_ARGUMENT(family);
+  IREE_ASSERT_ARGUMENT(out_selector);
+  *out_selector = 0;
+
+  const loom_xdna_tile_facts_t* accessor_tile = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_xdna_array_tile_facts(family, accessor, &accessor_tile));
+  const loom_xdna_tile_facts_t* owner_tile = NULL;
+  IREE_RETURN_IF_ERROR(loom_xdna_array_tile_facts(family, owner, &owner_tile));
+  if (owner_lock_ordinal >= owner_tile->lock_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "XDNA owner lock ordinal %u exceeds tile (%u, %u) lock count %u",
+        owner_lock_ordinal, owner.column, owner.row, owner_tile->lock_count);
+  }
+
+  for (uint8_t i = 0; i < accessor_tile->memory.window_count; ++i) {
+    const loom_xdna_address_window_t* window =
+        &family->address_windows[accessor_tile->memory.window_start + i];
+    const int32_t window_owner_column =
+        (int32_t)accessor.column + window->owner_column_delta;
+    const int32_t window_owner_row =
+        (int32_t)accessor.row + window->owner_row_delta;
+    if (window_owner_column != owner.column || window_owner_row != owner.row ||
+        window->owner_kind != owner_tile->kind) {
+      continue;
+    }
+    *out_selector = window->lock_selector_base + owner_lock_ordinal;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_OUT_OF_RANGE,
+      "XDNA owner lock is not visible from the accessor tile");
+}

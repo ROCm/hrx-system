@@ -100,6 +100,7 @@ def emit_array_facts() -> str:
                 f'.name = "{c_string_literal(window.name)}", '
                 f".base = UINT32_C(0x{window.base:08x}), "
                 f".capacity = UINT32_C(0x{window.capacity:08x}), "
+                f".lock_selector_base = {window.lock_selector_base}, "
                 f".owner_column_delta = {window.owner_column_delta}, "
                 f".owner_row_delta = {window.owner_row_delta}, "
                 f".owner_kind = {_TILE_KIND_IDS[window.owner_kind]}"

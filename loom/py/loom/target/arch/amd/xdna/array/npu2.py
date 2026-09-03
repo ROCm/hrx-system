@@ -591,9 +591,15 @@ NPU2_ARRAY_FAMILY = ArrayFamily(
                 program_base=0,
                 program_capacity=0,
                 load_windows=(
-                    AddressWindow("west", 0x00000, 512 * 1024, -1, 0, TileKind.MEMORY),
-                    AddressWindow("self", 0x80000, 512 * 1024, 0, 0, TileKind.MEMORY),
-                    AddressWindow("east", 0x100000, 512 * 1024, 1, 0, TileKind.MEMORY),
+                    AddressWindow(
+                        "west", 0x00000, 512 * 1024, 0, -1, 0, TileKind.MEMORY
+                    ),
+                    AddressWindow(
+                        "self", 0x80000, 512 * 1024, 64, 0, 0, TileKind.MEMORY
+                    ),
+                    AddressWindow(
+                        "east", 0x100000, 512 * 1024, 128, 1, 0, TileKind.MEMORY
+                    ),
                 ),
             ),
             lock_count=64,
@@ -629,10 +635,18 @@ NPU2_ARRAY_FAMILY = ArrayFamily(
                 program_base=0,
                 program_capacity=16 * 1024,
                 load_windows=(
-                    AddressWindow("south", 0x40000, 64 * 1024, 0, -1, TileKind.COMPUTE),
-                    AddressWindow("west", 0x50000, 64 * 1024, -1, 0, TileKind.COMPUTE),
-                    AddressWindow("north", 0x60000, 64 * 1024, 0, 1, TileKind.COMPUTE),
-                    AddressWindow("self", 0x70000, 64 * 1024, 0, 0, TileKind.COMPUTE),
+                    AddressWindow(
+                        "south", 0x40000, 64 * 1024, 0, 0, -1, TileKind.COMPUTE
+                    ),
+                    AddressWindow(
+                        "west", 0x50000, 64 * 1024, 16, -1, 0, TileKind.COMPUTE
+                    ),
+                    AddressWindow(
+                        "north", 0x60000, 64 * 1024, 32, 0, 1, TileKind.COMPUTE
+                    ),
+                    AddressWindow(
+                        "self", 0x70000, 64 * 1024, 48, 0, 0, TileKind.COMPUTE
+                    ),
                 ),
             ),
             lock_count=16,

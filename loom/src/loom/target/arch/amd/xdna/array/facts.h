@@ -89,6 +89,8 @@ typedef struct loom_xdna_address_window_t {
   uint32_t base;
   // Addressable bytes in the aperture.
   uint32_t capacity;
+  // First accessor-relative lock selector for the owner memory module.
+  uint16_t lock_selector_base;
   // Signed column displacement from accessor to owner.
   int8_t owner_column_delta;
   // Signed row displacement from accessor to owner.
@@ -300,6 +302,16 @@ iree_status_t loom_xdna_array_form_load_address(
     loom_xdna_tile_coordinate_t accessor, loom_xdna_memory_space_t memory_space,
     loom_xdna_tile_coordinate_t owner, uint32_t owner_offset,
     uint32_t byte_length, uint32_t* out_address);
+
+// Forms an accessor-relative lock selector for a physical owner lock.
+//
+// The owner lock ordinal is relative to its physical tile. The returned
+// selector is relative to the accessor's architectural lock namespace and can
+// be encoded directly in an accessor core instruction.
+iree_status_t loom_xdna_array_form_lock_selector(
+    const loom_xdna_array_family_t* family,
+    loom_xdna_tile_coordinate_t accessor, loom_xdna_tile_coordinate_t owner,
+    uint16_t owner_lock_ordinal, uint16_t* out_selector);
 
 #ifdef __cplusplus
 }  // extern "C"

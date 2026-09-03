@@ -82,6 +82,7 @@ class AddressWindow:
     name: str
     base: int
     capacity: int
+    lock_selector_base: int
     owner_column_delta: int
     owner_row_delta: int
     owner_kind: TileKind
@@ -229,7 +230,12 @@ def _validate_tile_memory(tile: TileFacts) -> None:
     if len(names) != len(set(names)):
         raise ValueError(f"{tile.kind.value}: duplicate load-window name")
     for index, window in enumerate(memory.load_windows):
-        if not window.name or window.base < 0 or window.capacity <= 0:
+        if (
+            not window.name
+            or window.base < 0
+            or window.capacity <= 0
+            or window.lock_selector_base < 0
+        ):
             raise ValueError(f"{tile.kind.value}: invalid load window")
         end = window.base + window.capacity
         if end > 1 << 32:
@@ -241,6 +247,29 @@ def _validate_tile_memory(tile: TileFacts) -> None:
                     f"{tile.kind.value}: load windows {window.name} and "
                     f"{other.name} overlap"
                 )
+
+
+def _validate_lock_windows(family: ArrayFamily, tile: TileFacts) -> None:
+    tile_kinds = {row.kind: row for row in family.tiles}
+    lock_ranges: list[tuple[int, int, str]] = []
+    for window in tile.memory.load_windows:
+        owner = tile_kinds.get(window.owner_kind)
+        if owner is None:
+            raise ValueError(
+                f"{tile.kind.value}.{window.name}: lock owner kind is unavailable"
+            )
+        lock_end = window.lock_selector_base + owner.lock_count
+        if lock_end > 1 << 16:
+            raise ValueError(
+                f"{tile.kind.value}.{window.name}: lock selector range overflows"
+            )
+        for other_base, other_end, other_name in lock_ranges:
+            if window.lock_selector_base < other_end and other_base < lock_end:
+                raise ValueError(
+                    f"{tile.kind.value}: lock windows {window.name} and "
+                    f"{other_name} overlap"
+                )
+        lock_ranges.append((window.lock_selector_base, lock_end, window.name))
 
 
 def _validate_dma(tile: TileFacts) -> None:
@@ -397,6 +426,7 @@ def validate_array_family(family: ArrayFamily) -> None:
         if tile.lock_count <= 0 or tile.lock_value_minimum >= tile.lock_value_maximum:
             raise ValueError(f"{tile.kind.value}: invalid lock domain")
         _validate_tile_memory(tile)
+        _validate_lock_windows(family, tile)
         _validate_dma(tile)
     if covered_rows != set(range(family.row_count)):
         raise ValueError(f"{family.key}: tile rows do not cover the array")
