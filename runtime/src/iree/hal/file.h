@@ -60,13 +60,13 @@ typedef uint32_t iree_hal_external_file_flags_t;
 // hardware-accelerated. See iree_hal_file_import for more information.
 typedef struct iree_hal_file_t iree_hal_file_t;
 
-// TODO(benvanik): support opening files from paths.
-// IREE_API_EXPORT iree_status_t iree_hal_file_open(
-//     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-//     iree_hal_file_mode_t mode, iree_hal_memory_access_t access,
-//     iree_string_view_t path, iree_hal_file_t** out_file);
-
 // Imports an external |handle| for use on |device|.
+//
+// |queue_family_affinity| specifies the queue families that may access any
+// device-visible resources created for the imported file. It is a resource
+// accessibility domain and does not select a queue or establish ordering.
+// IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY makes the file available to every queue
+// family owned by |device|.
 //
 // Access checks will be performed against the provided |access| bits and
 // callers must ensure the access is accurate (don't allow writes to read-only
@@ -82,7 +82,8 @@ typedef struct iree_hal_file_t iree_hal_file_t;
 // This may be due to unavailable device/platform capabilities or the properties
 // of the external file handle.
 IREE_API_EXPORT iree_status_t iree_hal_file_import(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file);
 

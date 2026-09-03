@@ -186,7 +186,8 @@ static iree_status_t iree_hal_replay_recorder_file_capture_fd_contents(
 }
 
 iree_status_t iree_hal_replay_recorder_file_make_object_payload(
-    iree_io_file_handle_t* handle, iree_hal_queue_affinity_t queue_affinity,
+    iree_io_file_handle_t* handle,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_access_t access, iree_hal_external_file_flags_t flags,
     iree_hal_file_t* base_file,
     iree_hal_replay_recorder_external_file_policy_t external_file_policy,
@@ -200,7 +201,7 @@ iree_status_t iree_hal_replay_recorder_file_make_object_payload(
   memset(out_payload, 0, sizeof(*out_payload));
   *out_allocated_reference_storage = iree_byte_span_empty();
   *out_reference = iree_string_view_empty();
-  out_payload->queue_affinity = queue_affinity;
+  out_payload->queue_family_affinity = queue_family_affinity;
   out_payload->file_length = base_file ? iree_hal_file_length(base_file) : 0;
   out_payload->access = access;
   out_payload->flags = flags;

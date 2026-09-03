@@ -906,9 +906,9 @@ static iree_status_t iree_hal_replay_executor_import_file(
 
   iree_hal_file_t* file = NULL;
   if (iree_status_is_ok(status) && import_file_handle) {
-    status =
-        iree_hal_file_import(device_entry->value.device, payload.queue_affinity,
-                             payload.access, handle, payload.flags, &file);
+    status = iree_hal_file_import(device_entry->value.device,
+                                  payload.queue_family_affinity, payload.access,
+                                  handle, payload.flags, &file);
   }
   if (iree_status_is_ok(status) &&
       payload.reference_type ==

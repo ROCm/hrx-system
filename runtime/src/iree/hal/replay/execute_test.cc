@@ -751,9 +751,10 @@ static void CaptureFdBackedQueueRead(
       IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_RANDOM_ACCESS, source_path,
       iree_allocator_system(), &file_handle));
   iree_hal_file_t* file = nullptr;
-  IREE_ASSERT_OK(iree_hal_file_import(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_ACCESS_READ,
-      file_handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
+  IREE_ASSERT_OK(iree_hal_file_import(wrapped_device,
+                                      IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+                                      IREE_HAL_MEMORY_ACCESS_READ, file_handle,
+                                      IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
   iree_io_file_handle_release(file_handle);
 
   iree_hal_buffer_params_t params = {0};
@@ -876,9 +877,10 @@ TEST(ReplayExecuteTest, ExecutesRecordedHostAllocationFileRead) {
       iree_io_file_handle_release_callback_null(), iree_allocator_system(),
       &file_handle));
   iree_hal_file_t* file = nullptr;
-  IREE_ASSERT_OK(iree_hal_file_import(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_ACCESS_READ,
-      file_handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
+  IREE_ASSERT_OK(iree_hal_file_import(wrapped_device,
+                                      IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+                                      IREE_HAL_MEMORY_ACCESS_READ, file_handle,
+                                      IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
   iree_io_file_handle_release(file_handle);
 
   iree_hal_buffer_params_t params = {0};
@@ -957,9 +959,10 @@ TEST(ReplayExecuteTest, ExecutesRecordedFdBackedQueueRead) {
       IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_RANDOM_ACCESS,
       source_file.path_view(), iree_allocator_system(), &file_handle));
   iree_hal_file_t* file = nullptr;
-  IREE_ASSERT_OK(iree_hal_file_import(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_ACCESS_READ,
-      file_handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
+  IREE_ASSERT_OK(iree_hal_file_import(wrapped_device,
+                                      IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+                                      IREE_HAL_MEMORY_ACCESS_READ, file_handle,
+                                      IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
   iree_io_file_handle_release(file_handle);
 
   iree_hal_buffer_params_t params = {0};
@@ -1110,9 +1113,10 @@ TEST(ReplayExecuteTest, ExecutesRemappedFdBackedQueueRead) {
       IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_RANDOM_ACCESS,
       source_file.path_view(), iree_allocator_system(), &file_handle));
   iree_hal_file_t* file = nullptr;
-  IREE_ASSERT_OK(iree_hal_file_import(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_ACCESS_READ,
-      file_handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
+  IREE_ASSERT_OK(iree_hal_file_import(wrapped_device,
+                                      IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+                                      IREE_HAL_MEMORY_ACCESS_READ, file_handle,
+                                      IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
   iree_io_file_handle_release(file_handle);
 
   iree_hal_buffer_params_t params = {0};

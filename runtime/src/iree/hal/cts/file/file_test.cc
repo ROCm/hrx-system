@@ -218,7 +218,7 @@ class FileTest : public CtsTestBase<> {
         iree_io_file_handle_release_callback_null(), iree_allocator_system(),
         &handle));
     iree_status_t status = iree_hal_file_import(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, access, handle,
+        device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, access, handle,
         IREE_HAL_EXTERNAL_FILE_FLAG_NONE, out_file->out_file());
     iree_io_file_handle_release(handle);
     if (iree_status_is_ok(status)) {
@@ -328,7 +328,7 @@ class FileTest : public CtsTestBase<> {
     }
     if (iree_status_is_ok(status)) {
       status = iree_hal_file_import(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, access, handle,
+          device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, access, handle,
           IREE_HAL_EXTERNAL_FILE_FLAG_NONE, out_file->out_file());
     }
     if (iree_status_is_ok(status)) {
@@ -362,7 +362,7 @@ class FileTest : public CtsTestBase<> {
     }
     if (iree_status_is_ok(status)) {
       status = iree_hal_file_import(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, access, handle,
+          device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, access, handle,
           IREE_HAL_EXTERNAL_FILE_FLAG_NONE, out_file->out_file());
     }
 
@@ -408,9 +408,29 @@ TEST_P(FileTest, ImportRejectsUnknownFlags) {
   iree_hal_file_t* file = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_file_import(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_ACCESS_READ,
-          handle, static_cast<iree_hal_external_file_flags_t>(1u), &file));
+      iree_hal_file_import(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+                           IREE_HAL_MEMORY_ACCESS_READ, handle,
+                           static_cast<iree_hal_external_file_flags_t>(1u),
+                           &file));
+  EXPECT_EQ(file, nullptr);
+  iree_io_file_handle_release(handle);
+}
+
+TEST_P(FileTest, ImportRejectsEmptyQueueFamilyAffinity) {
+  std::vector<uint8_t> contents(16, 0);
+  iree_io_file_handle_t* handle = nullptr;
+  IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+      IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
+      iree_make_byte_span(contents.data(), contents.size()),
+      iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+      &handle));
+
+  iree_hal_file_t* file = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_file_import(device_, /*queue_family_affinity=*/0,
+                           IREE_HAL_MEMORY_ACCESS_READ, handle,
+                           IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
   EXPECT_EQ(file, nullptr);
   iree_io_file_handle_release(handle);
 }

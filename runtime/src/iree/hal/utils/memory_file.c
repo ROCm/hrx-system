@@ -113,15 +113,17 @@ static iree_hal_memory_file_t* iree_hal_memory_file_cast(
 }
 
 static iree_status_t iree_hal_memory_file_try_import_buffer(
-    iree_hal_memory_file_t* file, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_memory_file_t* file,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_access_t access, iree_byte_span_t contents,
     iree_hal_allocator_t* device_allocator);
 
 IREE_API_EXPORT iree_status_t iree_hal_memory_file_wrap(
     iree_hal_allocator_t* device_allocator,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_access_t access,
-    iree_io_file_handle_t* handle, iree_hal_memory_file_flags_t flags,
-    iree_allocator_t host_allocator, iree_hal_file_t** out_file) {
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
+    iree_hal_memory_file_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_file_t** out_file) {
   IREE_ASSERT_ARGUMENT(out_file);
   *out_file = NULL;
 
@@ -143,7 +145,6 @@ IREE_API_EXPORT iree_status_t iree_hal_memory_file_wrap(
   }
 
   IREE_TRACE_ZONE_BEGIN(z0);
-  (void)queue_affinity;
 
   iree_byte_span_t contents = iree_io_file_handle_value(handle).host_allocation;
 
@@ -182,7 +183,7 @@ IREE_API_EXPORT iree_status_t iree_hal_memory_file_wrap(
   // host-backed file even when the target device cannot import this pointer.
   if (iree_status_is_ok(status) && device_allocator) {
     iree_status_t import_status = iree_hal_memory_file_try_import_buffer(
-        file, queue_affinity, access, contents, device_allocator);
+        file, queue_family_affinity, access, contents, device_allocator);
     if (iree_all_bits_set(
             flags, IREE_HAL_MEMORY_FILE_FLAG_REQUIRE_DEVICE_VISIBLE_STORAGE)) {
       status = import_status;
@@ -257,7 +258,8 @@ static void iree_hal_memory_file_buffer_release(void* user_data,
 // A storage buffer is only exposed when the device allocator can directly
 // import the host allocation with device visibility.
 static iree_status_t iree_hal_memory_file_try_import_buffer(
-    iree_hal_memory_file_t* file, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_memory_file_t* file,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_access_t access, iree_byte_span_t contents,
     iree_hal_allocator_t* device_allocator) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -267,7 +269,7 @@ static iree_status_t iree_hal_memory_file_try_import_buffer(
   iree_hal_buffer_params_t storage_buffer_params = {
       .access = access | IREE_HAL_MEMORY_ACCESS_DISCARD |
                 (!is_aligned ? IREE_HAL_MEMORY_ACCESS_UNALIGNED : 0),
-      .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      .queue_family_affinity = queue_family_affinity,
       .type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_HOST |
               IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
       .usage = IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |

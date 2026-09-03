@@ -233,8 +233,8 @@ static iree_status_t ImportNativeFile(iree_hal_device_t* device,
   IREE_RETURN_IF_ERROR(iree_io_file_handle_open(
       mode, path.path_view(), iree_allocator_system(), &handle));
   iree_status_t status =
-      iree_hal_file_import(device, IREE_HAL_QUEUE_AFFINITY_ANY, access, handle,
-                           IREE_HAL_EXTERNAL_FILE_FLAG_NONE, out_file);
+      iree_hal_file_import(device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, access,
+                           handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, out_file);
   iree_io_file_handle_release(handle);
   return status;
 }

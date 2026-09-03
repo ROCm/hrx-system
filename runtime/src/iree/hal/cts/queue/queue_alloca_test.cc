@@ -163,9 +163,10 @@ class QueueAllocaTest : public CtsTestBase<> {
     if (!handle) return data;
 
     iree_hal_file_t* file = NULL;
-    IREE_EXPECT_OK(iree_hal_file_import(
-        device_, queue_affinity, IREE_HAL_MEMORY_ACCESS_WRITE, handle,
-        IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
+    IREE_EXPECT_OK(
+        iree_hal_file_import(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+                             IREE_HAL_MEMORY_ACCESS_WRITE, handle,
+                             IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
     iree_io_file_handle_release(handle);
     if (!file) return data;
 

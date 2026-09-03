@@ -1218,7 +1218,8 @@ static iree_status_t iree_hal_vulkan_logical_device_load_executable(
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_import_file(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
   IREE_ASSERT_ARGUMENT(out_file);
@@ -1226,12 +1227,10 @@ static iree_status_t iree_hal_vulkan_logical_device_import_file(
   (void)flags;
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_affinity_normalize(
-      device->queues.affinity_mask, queue_affinity, &queue_affinity));
 
   iree_hal_file_t* file = NULL;
   iree_status_t status = iree_hal_file_from_handle(
-      device->device_allocator, queue_affinity, access, handle,
+      device->device_allocator, queue_family_affinity, access, handle,
       device->proactor, device->host_allocator, &file);
   if (iree_status_is_ok(status) &&
       iree_io_file_handle_type(handle) == IREE_IO_FILE_HANDLE_TYPE_FD &&

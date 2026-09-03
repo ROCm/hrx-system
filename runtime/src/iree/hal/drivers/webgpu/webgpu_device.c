@@ -431,7 +431,8 @@ static iree_status_t iree_hal_webgpu_device_load_executable(
 }
 
 static iree_status_t iree_hal_webgpu_device_import_file(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
   iree_io_file_handle_primitive_t primitive =
@@ -442,7 +443,7 @@ static iree_status_t iree_hal_webgpu_device_import_file(
       // buffer via the heap_buffer_wrap fallback (since WebGPU cannot import
       // host allocations as GPU buffers).
       return iree_hal_memory_file_wrap(
-          iree_hal_device_allocator(base_device), queue_affinity, access,
+          iree_hal_device_allocator(base_device), queue_family_affinity, access,
           handle, IREE_HAL_MEMORY_FILE_FLAG_NONE,
           iree_hal_device_host_allocator(base_device), out_file);
     case IREE_IO_FILE_HANDLE_TYPE_FD: {

@@ -11,9 +11,10 @@
 
 IREE_API_EXPORT iree_status_t iree_hal_file_from_handle(
     iree_hal_allocator_t* device_allocator,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_access_t access,
-    iree_io_file_handle_t* handle, iree_async_proactor_t* proactor,
-    iree_allocator_t host_allocator, iree_hal_file_t** out_file) {
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
+    iree_async_proactor_t* proactor, iree_allocator_t host_allocator,
+    iree_hal_file_t** out_file) {
   IREE_ASSERT_ARGUMENT(handle);
   IREE_ASSERT_ARGUMENT(out_file);
   *out_file = NULL;
@@ -23,7 +24,7 @@ IREE_API_EXPORT iree_status_t iree_hal_file_from_handle(
   switch (iree_io_file_handle_type(handle)) {
     case IREE_IO_FILE_HANDLE_TYPE_HOST_ALLOCATION:
       status = iree_hal_memory_file_wrap(
-          device_allocator, queue_affinity, access, handle,
+          device_allocator, queue_family_affinity, access, handle,
           IREE_HAL_MEMORY_FILE_FLAG_NONE, host_allocator, out_file);
       break;
     case IREE_IO_FILE_HANDLE_TYPE_FD:

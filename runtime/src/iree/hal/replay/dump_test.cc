@@ -762,7 +762,7 @@ TEST(ReplayDumpTest, EmitsFilePayloads) {
   iree_io_file_handle_release(file_handle);
 
   iree_hal_replay_file_object_payload_t file_payload = {};
-  file_payload.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  file_payload.queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
   file_payload.file_length = 4096;
   file_payload.file_device = 10;
   file_payload.file_inode = 20;

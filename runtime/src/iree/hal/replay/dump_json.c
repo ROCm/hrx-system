@@ -442,7 +442,7 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
       IREE_RETURN_IF_ERROR(
           iree_string_builder_append_format(
               builder,
-              ",\"payload\":{\"queue_affinity\":%" PRIu64
+              ",\"payload\":{\"queue_family_affinity\":%" PRIu64
               ",\"file_length\":%" PRIu64 ",\"file_device\":%" PRIu64
               ",\"file_inode\":%" PRIu64 ",\"file_mtime_ns\":%" PRIu64
               ",\"reference_length\":%" PRIu64 ",\"access\":%" PRIu32
@@ -451,8 +451,8 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
               ",\"validation_type\":%" PRIu32 ",\"validation_type_name\":\"%s\""
               ",\"digest_type\":%" PRIu32 ",\"digest_fnv1a64\":\"0x%016" PRIx64
               "\"",
-              payload.queue_affinity, payload.file_length, payload.file_device,
-              payload.file_inode, payload.file_mtime_ns,
+              payload.queue_family_affinity, payload.file_length,
+              payload.file_device, payload.file_inode, payload.file_mtime_ns,
               payload.reference_length, payload.access, payload.flags,
               payload.handle_type, payload.reference_type,
               iree_hal_replay_dump_file_reference_type_string(

@@ -295,7 +295,7 @@ class HostQueueStagingTest : public ::testing::Test {
     IREE_RETURN_IF_ERROR(iree_io_file_handle_open(
         mode, path.path_view(), iree_allocator_system(), &handle));
     iree_status_t status = iree_hal_file_import(
-        device, IREE_HAL_QUEUE_AFFINITY_ANY, access, handle,
+        device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, access, handle,
         IREE_HAL_EXTERNAL_FILE_FLAG_NONE, out_file);
     iree_io_file_handle_release(handle);
     return status;
@@ -344,9 +344,10 @@ class HostQueueStagingTest : public ::testing::Test {
         iree_make_byte_span(data->data(), data->size()),
         iree_io_file_handle_release_callback_null(), iree_allocator_system(),
         &handle));
-    iree_status_t status = iree_hal_file_import(
-        device, IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_ACCESS_WRITE,
-        handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, out_file);
+    iree_status_t status =
+        iree_hal_file_import(device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+                             IREE_HAL_MEMORY_ACCESS_WRITE, handle,
+                             IREE_HAL_EXTERNAL_FILE_FLAG_NONE, out_file);
     iree_io_file_handle_release(handle);
     return status;
   }
@@ -427,9 +428,10 @@ class HostQueueStagingTest : public ::testing::Test {
         iree_io_file_handle_release_callback_null(), iree_allocator_system(),
         &handle));
     Ref<iree_hal_file_t> file;
-    iree_status_t status = iree_hal_file_import(
-        device, IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_ACCESS_WRITE,
-        handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, file.out());
+    iree_status_t status =
+        iree_hal_file_import(device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+                             IREE_HAL_MEMORY_ACCESS_WRITE, handle,
+                             IREE_HAL_EXTERNAL_FILE_FLAG_NONE, file.out());
     iree_io_file_handle_release(handle);
     if (iree_status_is_ok(status)) {
       status = QueueWriteAndWait(device, buffer, offset, file,

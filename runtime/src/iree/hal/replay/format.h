@@ -415,8 +415,8 @@ typedef struct iree_hal_replay_semaphore_object_payload_t {
 
 // Payload describing a captured file object followed by file reference bytes.
 typedef struct iree_hal_replay_file_object_payload_t {
-  // Queue affinity requested at import.
-  uint64_t queue_affinity;
+  // Queue family compatibility domain requested at import.
+  uint64_t queue_family_affinity;
   // Accessible byte length reported by the imported HAL file.
   uint64_t file_length;
   // Platform file device identifier, or zero when unavailable.

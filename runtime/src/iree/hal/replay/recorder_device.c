@@ -309,7 +309,8 @@ static iree_status_t iree_hal_replay_device_load_executable(
 }
 
 static iree_status_t iree_hal_replay_device_import_file(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
   iree_hal_replay_device_t* device = iree_hal_replay_device_cast(base_device);
@@ -328,8 +329,9 @@ static iree_status_t iree_hal_replay_device_import_file(
 
   iree_hal_file_t* base_file = NULL;
   iree_hal_file_t* replay_file = NULL;
-  iree_status_t status = iree_hal_file_import(
-      device->base_device, queue_affinity, access, handle, flags, &base_file);
+  iree_status_t status =
+      iree_hal_file_import(device->base_device, queue_family_affinity, access,
+                           handle, flags, &base_file);
 
   char reference_storage[IREE_MAX_PATH];
   iree_byte_span_t allocated_reference_storage = iree_byte_span_empty();
@@ -340,7 +342,7 @@ static iree_status_t iree_hal_replay_device_import_file(
       iree_hal_replay_recorder_options(device->recorder);
   iree_status_t payload_status =
       iree_hal_replay_recorder_file_make_object_payload(
-          handle, queue_affinity, access, flags, base_file,
+          handle, queue_family_affinity, access, flags, base_file,
           recorder_options->external_file_policy,
           recorder_options->external_file_validation, device->host_allocator,
           iree_make_byte_span((uint8_t*)reference_storage,

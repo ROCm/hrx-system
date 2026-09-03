@@ -3186,7 +3186,7 @@ static iree_status_t iree_hal_task_queue_drain_read(
       &operation->arena, sizeof(*io_context), (void**)&io_context));
   memset(io_context, 0, sizeof(*io_context));
   io_context->operation = operation;
-  io_context->proactor = queue->proactor;
+  io_context->proactor = operation->read.async_file->proactor;
   io_context->requested_length = (iree_host_size_t)operation->read.length;
 
   iree_status_t status = iree_hal_buffer_map_range(
@@ -3210,7 +3210,7 @@ static iree_status_t iree_hal_task_queue_drain_read(
 
   // Submit to the proactor and return immediately.
   iree_status_t submit_status = iree_async_proactor_submit_one(
-      queue->proactor, &io_context->read_op.base);
+      io_context->proactor, &io_context->read_op.base);
   if (!iree_status_is_ok(submit_status)) {
     submit_status = iree_status_join(
         submit_status, iree_hal_buffer_unmap_range(&io_context->mapping));
@@ -3250,7 +3250,7 @@ static iree_status_t iree_hal_task_queue_drain_write(
       &operation->arena, sizeof(*io_context), (void**)&io_context));
   memset(io_context, 0, sizeof(*io_context));
   io_context->operation = operation;
-  io_context->proactor = queue->proactor;
+  io_context->proactor = operation->write.async_file->proactor;
   io_context->requested_length = (iree_host_size_t)operation->write.length;
 
   iree_status_t status = iree_hal_buffer_map_range(
@@ -3288,7 +3288,7 @@ static iree_status_t iree_hal_task_queue_drain_write(
 
   // Submit to the proactor and return immediately.
   iree_status_t submit_status = iree_async_proactor_submit_one(
-      queue->proactor, &io_context->write_op.base);
+      io_context->proactor, &io_context->write_op.base);
   if (!iree_status_is_ok(submit_status)) {
     submit_status = iree_status_join(
         submit_status, iree_hal_buffer_unmap_range(&io_context->mapping));

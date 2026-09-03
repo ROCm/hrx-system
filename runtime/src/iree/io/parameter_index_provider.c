@@ -124,8 +124,8 @@ static bool iree_io_parameter_index_provider_query_support(
 // file will be NULL.
 static iree_status_t iree_io_parameter_index_provider_resolve(
     iree_io_parameter_index_provider_t* provider, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity, iree_string_view_t scope,
-    iree_string_view_t key, iree_hal_memory_access_t access,
+    iree_string_view_t scope, iree_string_view_t key,
+    iree_hal_memory_access_t access,
     const iree_io_parameter_index_entry_t** out_entry,
     iree_hal_file_t** out_file) {
   IREE_ASSERT_ARGUMENT(out_entry);
@@ -145,9 +145,10 @@ static iree_status_t iree_io_parameter_index_provider_resolve(
   if (entry->type == IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0,
-        iree_hal_file_cache_lookup(provider->file_cache, device, queue_affinity,
-                                   access, entry->storage.file.handle,
-                                   IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &file));
+        iree_hal_file_cache_lookup(provider->file_cache, device,
+                                   IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, access,
+                                   entry->storage.file.handle,
+                                   IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
   }
 
   *out_entry = entry;
@@ -323,9 +324,8 @@ static void iree_io_parameter_op_batch_begin(
 // caller if set.
 static iree_status_t iree_io_parameter_index_provider_resolve_entry(
     iree_io_parameter_index_provider_t* provider, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity, iree_string_view_t scope,
-    iree_io_parameter_enumerator_t enumerator, iree_host_size_t i,
-    iree_hal_memory_access_t access,
+    iree_string_view_t scope, iree_io_parameter_enumerator_t enumerator,
+    iree_host_size_t i, iree_hal_memory_access_t access,
     const iree_io_parameter_index_entry_t** IREE_RESTRICT out_entry,
     iree_io_parameter_span_t* IREE_RESTRICT out_span,
     iree_hal_file_t** IREE_RESTRICT out_file) {
@@ -345,7 +345,7 @@ static iree_status_t iree_io_parameter_index_provider_resolve_entry(
   const iree_io_parameter_index_entry_t* entry = NULL;
   iree_hal_file_t* file = NULL;  // retained, NULL if splat
   IREE_RETURN_IF_ERROR(iree_io_parameter_index_provider_resolve(
-      provider, device, queue_affinity, scope, key, access, &entry, &file));
+      provider, device, scope, key, access, &entry, &file));
 
   // Validate the parameter range is in-bounds.
   iree_status_t status = iree_io_validate_parameter_range(
@@ -1137,7 +1137,7 @@ static iree_status_t iree_io_parameter_index_provider_load(
     iree_io_parameter_span_t span;
     iree_hal_file_t* source_file = NULL;  // retained, NULL if splat
     status = iree_io_parameter_index_provider_resolve_entry(
-        provider, device, queue_affinity, source_scope, enumerator, i,
+        provider, device, source_scope, enumerator, i,
         IREE_HAL_MEMORY_ACCESS_READ, &source_entry, &span, &source_file);
     if (iree_status_is_ok(status)) {
       IREE_TRACE_ZONE_APPEND_TEXT(z_entry, source_entry->key.data,
@@ -1292,7 +1292,7 @@ static iree_status_t iree_io_parameter_index_provider_gather(
     iree_io_parameter_span_t span;
     iree_hal_file_t* source_file = NULL;  // retained, NULL if splat
     status = iree_io_parameter_index_provider_resolve_entry(
-        provider, device, queue_affinity, source_scope, enumerator, i,
+        provider, device, source_scope, enumerator, i,
         IREE_HAL_MEMORY_ACCESS_READ, &source_entry, &span, &source_file);
     if (iree_status_is_ok(status)) {
       IREE_TRACE_ZONE_APPEND_TEXT(z_entry, source_entry->key.data,
@@ -1420,9 +1420,8 @@ static iree_status_t iree_io_parameter_index_provider_gather_batch(
       iree_io_parameter_span_t span;
       iree_hal_file_t* source_file = NULL;
       status = iree_io_parameter_index_provider_resolve_entry(
-          provider, device, queue_affinity, gather->source_scope,
-          gather->enumerator, i, IREE_HAL_MEMORY_ACCESS_READ, &source_entry,
-          &span, &source_file);
+          provider, device, gather->source_scope, gather->enumerator, i,
+          IREE_HAL_MEMORY_ACCESS_READ, &source_entry, &span, &source_file);
       if (iree_status_is_ok(status)) {
         IREE_TRACE_ZONE_APPEND_TEXT(z_entry, source_entry->key.data,
                                     source_entry->key.size);
@@ -1524,7 +1523,7 @@ static iree_status_t iree_io_parameter_index_provider_scatter(
     iree_io_parameter_span_t span;
     iree_hal_file_t* target_file = NULL;  // retained, NULL if splat
     status = iree_io_parameter_index_provider_resolve_entry(
-        provider, device, queue_affinity, target_scope, enumerator, i,
+        provider, device, target_scope, enumerator, i,
         IREE_HAL_MEMORY_ACCESS_WRITE, &target_entry, &span, &target_file);
     if (iree_status_is_ok(status)) {
       IREE_TRACE_ZONE_APPEND_TEXT(z_entry, target_entry->key.data,
@@ -1642,9 +1641,8 @@ static iree_status_t iree_io_parameter_index_provider_scatter_batch(
       iree_io_parameter_span_t span;
       iree_hal_file_t* target_file = NULL;
       status = iree_io_parameter_index_provider_resolve_entry(
-          provider, device, queue_affinity, scatter->target_scope,
-          scatter->enumerator, i, IREE_HAL_MEMORY_ACCESS_WRITE, &target_entry,
-          &span, &target_file);
+          provider, device, scatter->target_scope, scatter->enumerator, i,
+          IREE_HAL_MEMORY_ACCESS_WRITE, &target_entry, &span, &target_file);
       if (iree_status_is_ok(status)) {
         IREE_TRACE_ZONE_APPEND_TEXT(z_entry, target_entry->key.data,
                                     target_entry->key.size);

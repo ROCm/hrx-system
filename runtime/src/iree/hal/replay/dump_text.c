@@ -325,14 +325,14 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
       }
       return iree_string_builder_append_format(
           builder,
-          " queue_affinity=%" PRIu64 " file_length=%" PRIu64
+          " queue_family_affinity=%" PRIu64 " file_length=%" PRIu64
           " access=0x%08" PRIx32 " flags=0x%08" PRIx32 " handle_type=%" PRIu32
           " reference_type=%s(%" PRIu32 ") file_device=%" PRIu64
           " file_inode=%" PRIu64 " file_mtime_ns=%" PRIu64
           " validation_type=%s(%" PRIu32 ") digest_type=%" PRIu32
           " digest_fnv1a64=0x%016" PRIx64 " reference_range=[%" PRIu64
           ", +%" PRIu64 "]",
-          payload.queue_affinity, payload.file_length, payload.access,
+          payload.queue_family_affinity, payload.file_length, payload.access,
           payload.flags, payload.handle_type,
           iree_hal_replay_dump_file_reference_type_string(
               payload.reference_type),

@@ -15,7 +15,6 @@
 #include "iree/async/notification.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/internal/arena.h"
-#include "iree/base/internal/math.h"
 #include "iree/hal/drivers/task/atomic.h"
 #include "iree/hal/drivers/task/command/block_command_buffer.h"
 #include "iree/hal/drivers/task/device_spec_builder.h"
@@ -653,31 +652,16 @@ static iree_status_t iree_hal_task_device_load_executable(
       worker_capacity, out_executable);
 }
 
-// Returns the proactor for the given queue affinity. If the affinity specifies
-// a particular queue, returns that queue's NUMA-correct proactor. Otherwise
-// returns the device default proactor (from queue 0's NUMA node).
-static iree_async_proactor_t* iree_hal_task_device_proactor_for_affinity(
-    iree_hal_task_device_t* device, iree_hal_queue_affinity_t queue_affinity) {
-  if (queue_affinity != 0 && queue_affinity != IREE_HAL_QUEUE_AFFINITY_ANY) {
-    iree_host_size_t queue_index =
-        iree_math_count_trailing_zeros_u64(queue_affinity);
-    if (queue_index < device->queue_count) {
-      return device->queues[queue_index].proactor;
-    }
-  }
-  return device->proactor;
-}
-
 static iree_status_t iree_hal_task_device_import_file(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
   iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  iree_async_proactor_t* proactor =
-      iree_hal_task_device_proactor_for_affinity(device, queue_affinity);
   return iree_hal_file_from_handle(
-      iree_hal_device_allocator(base_device), queue_affinity, access, handle,
-      proactor, iree_hal_device_host_allocator(base_device), out_file);
+      iree_hal_device_allocator(base_device), queue_family_affinity, access,
+      handle, device->proactor, iree_hal_device_host_allocator(base_device),
+      out_file);
 }
 
 static iree_status_t iree_hal_task_device_create_semaphore(
