@@ -76,6 +76,10 @@ def test_core_descriptor_closure_is_complete() -> None:
             )
             for index in range(5)
         },
+        **{
+            (f"dm{index}", "aie2p.mcms"): (f"cml{index}", f"cmh{index}")
+            for index in range(5)
+        },
     }
 
 
@@ -783,6 +787,49 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
         "aie2p.er",
     ]
     assert [operand.unit_count for operand in multiply.operands] == [1, 2, 2, 1]
+
+    bf16_multiply = descriptors["amd.xdna.aie2p.multiply.bf16x32.configured"]
+    assert [operand.field_name for operand in bf16_multiply.operands] == [
+        "dst",
+        "s1",
+        "s2",
+        "acc",
+        "implicit_def_srfpflags",
+        "implicit_use_crfpmask",
+    ]
+    assert [operand.reg_alts[0].reg_class for operand in bf16_multiply.operands] == [
+        "aie2p.mcms",
+        "aie2p.vec256",
+        "aie2p.vec256",
+        "aie2p.er",
+        "aie2p.state.srfpflags",
+        "aie2p.state.crfpmask",
+    ]
+    assert [operand.unit_count for operand in bf16_multiply.operands] == [
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+    ]
+
+    bf16_convert = descriptors["amd.xdna.aie2p.convert.f32x32.to.bf16x32"]
+    assert [operand.field_name for operand in bf16_convert.operands] == [
+        "dst",
+        "src",
+        "implicit_def_srf2fflags",
+        "implicit_use_crf2fmask",
+        "implicit_use_crrnd",
+    ]
+    assert [operand.reg_alts[0].reg_class for operand in bf16_convert.operands] == [
+        "aie2p.vec256",
+        "aie2p.mcms",
+        "aie2p.state.srf2fflags",
+        "aie2p.state.crf2fmask",
+        "aie2p.mcrrnd",
+    ]
+    assert [operand.unit_count for operand in bf16_convert.operands] == [2, 1, 1, 1, 1]
 
     matrix_multiply = descriptors[
         "amd.xdna.aie2p.matrix.multiply.s8s8.m8n8k8.configured"

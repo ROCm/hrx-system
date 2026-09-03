@@ -42,6 +42,7 @@ from loom.target.contracts import (
     DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
+    EmitRegisterSlice,
     Guard,
     RecipeRule,
     ResultTypeBinding,
@@ -64,8 +65,10 @@ _OFFSET = Scalar("offset")
 _I8_VECTOR = Vector("i8", minimum_lanes=1, maximum_lanes=64)
 _I16_VECTOR = Vector("i16", minimum_lanes=1, maximum_lanes=32)
 _BF16_VECTOR = Vector("bf16", minimum_lanes=1, maximum_lanes=32)
+_BF16X32_VECTOR = Vector("bf16", lanes=32)
 _I32_VECTOR = Vector("i32", minimum_lanes=1, maximum_lanes=16)
 _F32_VECTOR = Vector("f32", minimum_lanes=1, maximum_lanes=16)
+_F32X32_ACCUMULATOR = Vector("f32", lanes=32)
 _I32_MATRIX_ACCUMULATOR = Vector("i32", lanes=64)
 _I1_VECTOR = Vector("i1", minimum_lanes=1, maximum_lanes=64)
 _INTEGER_VECTOR_TYPES = (_I8_VECTOR, _I16_VECTOR, _I32_VECTOR)
@@ -87,7 +90,7 @@ _SHORT_MIN = -1024
 _SHORT_MAX = 1023
 
 
-def _plain_integer_multiply_control(
+def _plain_vector_multiply_control(
     *,
     lhs_signed: bool,
     rhs_signed: bool,
@@ -95,7 +98,7 @@ def _plain_integer_multiply_control(
     rhs_mode: int,
     variant: int,
 ) -> int:
-    """Encodes the AIE2P control word for a non-accumulating integer multiply."""
+    """Encodes the AIE2P control word for a non-accumulating vector multiply."""
 
     if lhs_mode < 0 or lhs_mode > 0b11:
         raise ValueError("AIE2P multiply lhs mode must fit two bits")
@@ -112,13 +115,21 @@ def _plain_integer_multiply_control(
     )
 
 
-_I16_ELEMENTWISE_MULTIPLY_CONTROL = _plain_integer_multiply_control(
+_I16_ELEMENTWISE_MULTIPLY_CONTROL = _plain_vector_multiply_control(
     lhs_signed=True,
     rhs_signed=True,
     lhs_mode=1,
     rhs_mode=3,
     variant=2,
 )
+_BF16_ELEMENTWISE_MULTIPLY_CONTROL = _plain_vector_multiply_control(
+    lhs_signed=False,
+    rhs_signed=False,
+    lhs_mode=2,
+    rhs_mode=3,
+    variant=1,
+)
+_BF16_CONVERSION_ROUNDING = 12
 
 
 def _descriptor(key: str) -> Descriptor:
@@ -570,6 +581,51 @@ def _vector_multiply_i16_rule() -> DescriptorRule:
                     "src": ValueRef.temporary("wide_product"),
                     "su": ValueRef.temporary("narrow_shift"),
                 },
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _vector_multiply_bf16x32_rule() -> DescriptorRule:
+    config_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
+    multiply = _descriptor("amd.xdna.aie2p.multiply.bf16x32.configured")
+    set_rounding = _descriptor("amd.xdna.aie2p.state.rounding.immediate")
+    convert = _descriptor("amd.xdna.aie2p.convert.f32x32.to.bf16x32")
+    return DescriptorRule(
+        source_op=vector.vector_mulf,
+        descriptor=convert,
+        guards=_typed_guards(("lhs", "rhs", "result"), _BF16X32_VECTOR),
+        emit=(
+            _const_emit(
+                config_constant,
+                ValueRef.temporary("multiply_control"),
+                _BF16_ELEMENTWISE_MULTIPLY_CONTROL,
+                result_type=DescriptorResultType(),
+            ),
+            _op_emit(
+                multiply,
+                operands={
+                    "s1": ValueRef.operand("lhs"),
+                    "s2": ValueRef.operand("rhs"),
+                    "acc": ValueRef.temporary("multiply_control"),
+                },
+                results={"dst": ValueRef.temporary("wide_product")},
+                result_types={"dst": DescriptorResultType()},
+            ),
+            EmitRegisterSlice(
+                source=ValueRef.temporary("wide_product"),
+                result=ValueRef.temporary("product"),
+                result_type=_F32X32_ACCUMULATOR,
+            ),
+            EmitDescriptorOp(
+                descriptor=set_rounding,
+                immediates={"i": _BF16_CONVERSION_ROUNDING},
+                form=DescriptorEmitForm.OP,
+            ),
+            _op_emit(
+                convert,
+                operands={"src": ValueRef.temporary("product")},
                 results={"dst": ValueRef.result("result")},
             ),
         ),
@@ -2139,6 +2195,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             )
         ),
         _vector_multiply_i16_rule(),
+        _vector_multiply_bf16x32_rule(),
         _matrix_accumulator_zero_rule(),
         *(
             _vector_binary_rule(source_op, type_pattern, descriptor_key)

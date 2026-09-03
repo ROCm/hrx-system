@@ -466,6 +466,21 @@ _BASE_DESCRIPTOR_SPECS = (
         asm_mnemonic="vmul.i16x32",
     ),
     _DescriptorSpec(
+        "VMUL_f_vmul_bf_vmul_bf_core_X_X",
+        f"{_TARGET_KEY}.multiply.bf16x32.configured",
+        "floating.multiply.bf16x32.configured",
+        "II_VMUL_f_vmul_bf_vmul_bf_core_X_X",
+        storage_overrides=(("dst", "mCMs"),),
+        asm_mnemonic="vmul.bf16x32",
+    ),
+    _DescriptorSpec(
+        "VCONV_bf16_fp32_mv_x_srs_bf",
+        f"{_TARGET_KEY}.convert.f32x32.to.bf16x32",
+        "floating.convert.f32x32.to.bf16x32",
+        "II_VCONV_bf16_fp32_mv_x_srs_bf",
+        asm_mnemonic="vconv.bf16.fp32",
+    ),
+    _DescriptorSpec(
         "VCLR",
         f"{_TARGET_KEY}.accumulator.clear.i32x64",
         "matrix.accumulator.clear.i32x64",
