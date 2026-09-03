@@ -869,16 +869,41 @@ static uint32_t loom_low_schedule_min_distance_hazard_stall(
   return stall_cycles;
 }
 
+bool loom_low_schedule_class_query_completion_wait(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_class_t* schedule_class,
+    uint16_t* out_wait_cycles) {
+  *out_wait_cycles = 0;
+  if (state->target.descriptor_set == NULL || schedule_class == NULL) {
+    return false;
+  }
+  bool has_wait_counter_hazard = false;
+  for (uint16_t i = 0; i < schedule_class->hazard_count; ++i) {
+    const loom_low_hazard_t* hazard =
+        &state->target.descriptor_set
+             ->hazards[schedule_class->hazard_start + i];
+    if (hazard->kind != LOOM_LOW_HAZARD_KIND_WAIT_COUNTER) continue;
+    has_wait_counter_hazard = true;
+    *out_wait_cycles = iree_max(*out_wait_cycles, hazard->distance);
+  }
+  return has_wait_counter_hazard;
+}
+
 static void loom_low_schedule_score_candidate_hazards(
     const loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_node_t* node,
+    const loom_low_schedule_node_t* node, uint32_t node_index,
     loom_low_schedule_candidate_score_t* score) {
+  score->completion_wait_cycles = 0;
   score->hazard_stall_cycles = 0;
-  const loom_low_schedule_class_t* schedule_class = node->schedule_class;
-  if (state->options->strategy != LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL ||
-      schedule_class == NULL) {
+  if (state->options->strategy != LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
     return;
   }
+  if (state->node_completion_wait_cycles != NULL) {
+    score->completion_wait_cycles =
+        state->node_completion_wait_cycles[node_index];
+  }
+  const loom_low_schedule_class_t* schedule_class = node->schedule_class;
+  if (schedule_class == NULL) return;
   for (uint16_t i = 0; i < schedule_class->hazard_count; ++i) {
     const loom_low_hazard_t* hazard =
         &state->target.descriptor_set
@@ -1419,6 +1444,10 @@ void loom_low_schedule_pressure_score_candidate(
               ? pressure_demand.activation_units
               : 0,
       .data_ready_stall_cycles = data_ready_stall_cycles,
+      .opened_completion_latency_cycles =
+          state->node_opened_completion_latency_cycles != NULL
+              ? state->node_opened_completion_latency_cycles[node_index]
+              : 0,
       .pair_affinity_score =
           iree_max(preferred_anchor_score,
                    iree_max(direct_pair_affinity_score,
@@ -1444,11 +1473,12 @@ void loom_low_schedule_pressure_score_candidate(
             out_score, pressure_state->current_persistent_pressure_penalty);
   }
   loom_low_schedule_score_candidate_resources(state, node, out_score);
-  loom_low_schedule_score_candidate_hazards(state, node, out_score);
+  loom_low_schedule_score_candidate_hazards(state, node, node_index, out_score);
   out_score->effective_stall_cycles =
       iree_max(out_score->data_ready_stall_cycles,
                iree_max(out_score->resource_stall_cycles,
-                        out_score->hazard_stall_cycles));
+                        iree_max(out_score->hazard_stall_cycles,
+                                 out_score->completion_wait_cycles)));
 }
 
 void loom_low_schedule_pressure_note_node_scheduled(
@@ -1575,6 +1605,7 @@ void loom_low_schedule_pressure_compute_node_priorities(
     loom_low_schedule_pressure_state_t* pressure_state) {
   if (state->node_critical_path_cycles == NULL &&
       state->node_dependency_latency_cycles == NULL &&
+      state->node_opened_completion_latency_cycles == NULL &&
       state->node_pressure_demand_units == NULL &&
       state->node_pressure_activation_units == NULL &&
       pressure_state->first_actionable_pressure_cliff_indices == NULL) {
@@ -1611,6 +1642,7 @@ void loom_low_schedule_pressure_compute_node_priorities(
     uint32_t successor_path_cycles = 0;
     uint32_t pressure_demand_units = 0;
     uint32_t pressure_activation_units = 0;
+    bool has_effect_consumer = false;
     if (dependency_details->dependency_count != 0) {
       const uint32_t dependency_begin =
           dependency_details->producer_dependency_starts[node_index];
@@ -1631,6 +1663,8 @@ void loom_low_schedule_pressure_compute_node_priorities(
         if (consumer->block_index != node->block_index) {
           continue;
         }
+        has_effect_consumer |=
+            dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT;
         if (state->node_critical_path_cycles != NULL) {
           successor_path_cycles = iree_max(
               successor_path_cycles,
@@ -1678,6 +1712,15 @@ void loom_low_schedule_pressure_compute_node_priorities(
               node->schedule_class);
       state->node_critical_path_cycles[node_index] =
           iree_math_saturating_add_u32(latency_cycles, successor_path_cycles);
+    }
+    if (state->node_opened_completion_latency_cycles != NULL &&
+        has_effect_consumer) {
+      uint16_t completion_wait_cycles = 0;
+      if (loom_low_schedule_class_query_completion_wait(
+              state, node->schedule_class, &completion_wait_cycles)) {
+        state->node_opened_completion_latency_cycles[node_index] =
+            node->schedule_class->latency_cycles;
+      }
     }
     if (state->node_pressure_demand_units != NULL) {
       state->node_pressure_demand_units[node_index] =

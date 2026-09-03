@@ -155,6 +155,18 @@ static iree_status_t loom_low_schedule_initialize_storage(
       memset(state->node_ready_issue_cycles, 0,
              node_count * sizeof(*state->node_ready_issue_cycles));
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          state->arena, node_count, sizeof(*state->node_completion_wait_cycles),
+          (void**)&state->node_completion_wait_cycles));
+      memset(state->node_completion_wait_cycles, 0,
+             node_count * sizeof(*state->node_completion_wait_cycles));
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          state->arena, node_count,
+          sizeof(*state->node_opened_completion_latency_cycles),
+          (void**)&state->node_opened_completion_latency_cycles));
+      memset(
+          state->node_opened_completion_latency_cycles, 0,
+          node_count * sizeof(*state->node_opened_completion_latency_cycles));
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
           state->arena, node_count, sizeof(*state->node_critical_path_cycles),
           (void**)&state->node_critical_path_cycles));
       memset(state->node_critical_path_cycles, 0,
@@ -1214,16 +1226,24 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
       IREE_RETURN_IF_ERROR(
           loom_low_schedule_note_descriptor_rows_for_node(state, chosen_node));
 
+      uint32_t node_issue_cycle = state->current_issue_cycle;
       uint32_t result_ready_issue_cycle = state->current_issue_cycle;
+      uint32_t completion_ready_issue_cycle = state->current_issue_cycle;
+      bool has_wait_counter_hazard = false;
+      uint16_t completion_wait_cycles = 0;
       if (state->node_ready_issue_cycles != NULL) {
-        result_ready_issue_cycle =
-            iree_max(result_ready_issue_cycle,
-                     state->node_ready_issue_cycles[chosen_node]);
+        node_issue_cycle = iree_max(
+            node_issue_cycle, state->node_ready_issue_cycles[chosen_node]);
         const loom_low_schedule_class_t* schedule_class =
             state->nodes[chosen_node].schedule_class;
+        has_wait_counter_hazard = loom_low_schedule_class_query_completion_wait(
+            state, schedule_class, &completion_wait_cycles);
         result_ready_issue_cycle = iree_math_saturating_add_u32(
-            result_ready_issue_cycle,
+            node_issue_cycle,
             loom_low_schedule_class_schedule_distance_cycles(schedule_class));
+        completion_ready_issue_cycle = iree_math_saturating_add_u32(
+            node_issue_cycle,
+            schedule_class != NULL ? schedule_class->latency_cycles : 0);
       }
       const uint32_t group_begin =
           loom_low_schedule_dependency_index_group_begin(
@@ -1248,13 +1268,28 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
                 state, &pressure_state, remaining_producer, consumer_node);
           }
         }
-        if (state->node_ready_issue_cycles != NULL &&
-            loom_low_schedule_dependency_index_group_has_ssa(
-                &state->dependency_index, group_index)) {
-          if (result_ready_issue_cycle >
+        if (state->node_ready_issue_cycles != NULL) {
+          uint32_t dependency_ready_issue_cycle = 0;
+          if (loom_low_schedule_dependency_index_group_has_ssa(
+                  &state->dependency_index, group_index)) {
+            dependency_ready_issue_cycle = result_ready_issue_cycle;
+          }
+          // Memory effects only require completion latency when the target
+          // identifies the producer as counter-tracked. Other effect edges
+          // order issue but do not imply a completion wait.
+          if (has_wait_counter_hazard &&
+              loom_low_schedule_dependency_index_group_has_effect(
+                  &state->dependency_index, group_index)) {
+            dependency_ready_issue_cycle = iree_max(
+                dependency_ready_issue_cycle, completion_ready_issue_cycle);
+            state->node_completion_wait_cycles[consumer_node] =
+                iree_max(state->node_completion_wait_cycles[consumer_node],
+                         completion_wait_cycles);
+          }
+          if (dependency_ready_issue_cycle >
               state->node_ready_issue_cycles[consumer_node]) {
             state->node_ready_issue_cycles[consumer_node] =
-                result_ready_issue_cycle;
+                dependency_ready_issue_cycle;
           }
         }
         if (indegrees[consumer_node] == 0 && consumer_node >= range_start &&

@@ -85,6 +85,8 @@ typedef struct loom_low_schedule_dependency_index_t {
   loom_segmented_storage_t groups;
   // Bitset identifying groups containing at least one SSA dependency.
   uint8_t* ssa_group_bits;
+  // Bitset identifying groups containing at least one memory-effect dependency.
+  uint8_t* effect_group_bits;
   // Number of represented nodes.
   uint32_t node_count;
   // Number of populated groups.
@@ -144,6 +146,14 @@ static inline bool loom_low_schedule_dependency_index_group_has_ssa(
     const loom_low_schedule_dependency_index_t* index, uint32_t group_index) {
   IREE_ASSERT_LT(group_index, index->group_count);
   return (index->ssa_group_bits[group_index >> 3] &
+          (uint8_t)(1u << (group_index & 7u))) != 0;
+}
+
+// Returns true when |group_index| contains a memory-effect dependency.
+static inline bool loom_low_schedule_dependency_index_group_has_effect(
+    const loom_low_schedule_dependency_index_t* index, uint32_t group_index) {
+  IREE_ASSERT_LT(group_index, index->group_count);
+  return (index->effect_group_bits[group_index >> 3] &
           (uint8_t)(1u << (group_index & 7u))) != 0;
 }
 

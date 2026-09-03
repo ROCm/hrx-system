@@ -57,6 +57,7 @@ TEST_F(ScheduleDependencyIndexTest, GroupsDuplicateProducerConsumerEdges) {
   Append(&graph, 0, 4, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, UINT32_MAX);
   Append(&graph, 1, 3, LOOM_LOW_SCHEDULE_DEPENDENCY_STORAGE, 0);
   Append(&graph, 0, 3, LOOM_LOW_SCHEDULE_DEPENDENCY_SSA, 1);
+  Append(&graph, 0, 3, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, UINT32_MAX);
   Append(&graph, 2, 3, LOOM_LOW_SCHEDULE_DEPENDENCY_SSA, 2);
 
   std::array<uint32_t, 5> indegrees;
@@ -68,8 +69,8 @@ TEST_F(ScheduleDependencyIndexTest, GroupsDuplicateProducerConsumerEdges) {
 
   EXPECT_EQ(index.node_count, static_cast<uint32_t>(indegrees.size()));
   EXPECT_EQ(index.group_count, 4u);
-  EXPECT_EQ(detail_index.dependency_count, 5u);
-  EXPECT_EQ(indegrees, (std::array<uint32_t, 5>{0, 0, 0, 4, 1}));
+  EXPECT_EQ(detail_index.dependency_count, 6u);
+  EXPECT_EQ(indegrees, (std::array<uint32_t, 5>{0, 0, 0, 5, 1}));
   EXPECT_EQ(loom_low_schedule_dependency_index_group_begin(&index, 0), 0u);
   EXPECT_EQ(loom_low_schedule_dependency_index_group_end(&index, 0), 2u);
   const loom_low_schedule_dependency_group_t* group0 =
@@ -79,11 +80,13 @@ TEST_F(ScheduleDependencyIndexTest, GroupsDuplicateProducerConsumerEdges) {
   const loom_low_schedule_dependency_group_t* group2 =
       loom_low_schedule_dependency_index_group_at(&index, 2);
   EXPECT_EQ(group0->consumer_node, 3u);
-  EXPECT_EQ(group0->dependency_count, 2u);
+  EXPECT_EQ(group0->dependency_count, 3u);
   EXPECT_TRUE(loom_low_schedule_dependency_index_group_has_ssa(&index, 0));
+  EXPECT_TRUE(loom_low_schedule_dependency_index_group_has_effect(&index, 0));
   EXPECT_EQ(group1->consumer_node, 4u);
   EXPECT_EQ(group1->dependency_count, 1u);
   EXPECT_FALSE(loom_low_schedule_dependency_index_group_has_ssa(&index, 1));
+  EXPECT_TRUE(loom_low_schedule_dependency_index_group_has_effect(&index, 1));
   EXPECT_EQ(loom_low_schedule_dependency_index_group_begin(&index, 1), 2u);
   EXPECT_EQ(loom_low_schedule_dependency_index_group_end(&index, 1), 3u);
   EXPECT_EQ(loom_low_schedule_dependency_index_group_begin(&index, 2), 3u);

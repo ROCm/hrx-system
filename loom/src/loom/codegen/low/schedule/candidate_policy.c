@@ -211,6 +211,12 @@ static bool loom_low_schedule_candidate_score_less(
     if (lhs->data_ready_stall_cycles != rhs->data_ready_stall_cycles) {
       return lhs->data_ready_stall_cycles < rhs->data_ready_stall_cycles;
     }
+    if (compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT &&
+        lhs->opened_completion_latency_cycles !=
+            rhs->opened_completion_latency_cycles) {
+      return lhs->opened_completion_latency_cycles >
+             rhs->opened_completion_latency_cycles;
+    }
     if (loom_low_schedule_candidate_pair_affinity_differs(lhs, rhs)) {
       return loom_low_schedule_candidate_has_better_pair_affinity(lhs, rhs);
     }
@@ -303,6 +309,7 @@ void loom_low_schedule_candidate_policy_record_decision(
               chosen_score->data_ready_stall_cycles,
           .chosen_resource_stall_cycles = chosen_score->resource_stall_cycles,
           .chosen_hazard_stall_cycles = chosen_score->hazard_stall_cycles,
+          .chosen_completion_wait_cycles = chosen_score->completion_wait_cycles,
           .chosen_effective_stall_cycles = chosen_score->effective_stall_cycles,
           .chosen_bottleneck_resource_id = chosen_score->bottleneck_resource_id,
           .chosen_pressure_cliff_penalty = chosen_score->pressure_cliff_penalty,
@@ -318,6 +325,8 @@ void loom_low_schedule_candidate_policy_record_decision(
           .rejected_resource_stall_cycles =
               rejected_score->resource_stall_cycles,
           .rejected_hazard_stall_cycles = rejected_score->hazard_stall_cycles,
+          .rejected_completion_wait_cycles =
+              rejected_score->completion_wait_cycles,
           .rejected_effective_stall_cycles =
               rejected_score->effective_stall_cycles,
           .rejected_bottleneck_resource_id =

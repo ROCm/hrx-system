@@ -215,8 +215,13 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_schedule_model_summary_t* model_summaries;
   // Per-resource next issue cycle available to descriptor-resource scoring.
   uint32_t* resource_ready_issue_cycles;
-  // Earliest issue cycle at which each node's SSA inputs are ready.
+  // Earliest issue cycle at which each node's latency-bearing dependencies are
+  // ready.
   uint32_t* node_ready_issue_cycles;
+  // Target-provided issue cost for completion waits required by each node.
+  uint16_t* node_completion_wait_cycles;
+  // Completion latency opened by counter-tracked memory-effect producers.
+  uint16_t* node_opened_completion_latency_cycles;
   // Maximum same-block producer latency consumed by each node.
   uint16_t* node_dependency_latency_cycles;
   // Longest same-block latency path starting at each node.

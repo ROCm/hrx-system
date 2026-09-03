@@ -89,7 +89,6 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_wmma_concat_resourc
 // ----
   v_and_b32 v1, 15, v0
   v_lshlrev_b32 v1, 5, v1
-  v_lshlrev_b32 v0, 2, v0
   global_load_b32 v8, v1, s[0:1] offset:0
   global_load_b32 v9, v1, s[0:1] offset:4
   global_load_b32 v10, v1, s[0:1] offset:8
@@ -106,6 +105,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_wmma_concat_resourc
   global_load_b32 v21, v1, s[2:3] offset:20
   global_load_b32 v22, v1, s[2:3] offset:24
   global_load_b32 v23, v1, s[2:3] offset:28
+  v_lshlrev_b32 v0, 2, v0
   global_load_b32 v24, v0, s[4:5] offset:0
   global_load_b32 v25, v0, s[4:5] offset:128
   global_load_b32 v26, v0, s[4:5] offset:256

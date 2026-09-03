@@ -590,18 +590,47 @@ def _instruction_encoding_opcode(
 _MUBUF_SOFFSET_INLINE_ZERO = _predefined("0")
 _VBUFFER_SOFFSET_NULL = _predefined("NULL", "OPR_SREG_M0")
 
+_WAIT_COUNTER_RESOLUTION_CYCLES = 1
 _VMEM_LOAD_COUNTER_HAZARD = Hazard(
-    HazardKind.WAIT_COUNTER, counter_id=_COUNTER_VMEM_LOAD
+    HazardKind.WAIT_COUNTER,
+    counter_id=_COUNTER_VMEM_LOAD,
+    distance=_WAIT_COUNTER_RESOLUTION_CYCLES,
 )
 _VMEM_STORE_COUNTER_HAZARD = Hazard(
-    HazardKind.WAIT_COUNTER, counter_id=_COUNTER_VMEM_STORE
+    HazardKind.WAIT_COUNTER,
+    counter_id=_COUNTER_VMEM_STORE,
+    distance=_WAIT_COUNTER_RESOLUTION_CYCLES,
 )
-_LDS_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_LDS)
-_SMEM_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_SMEM)
-_ALU_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_ALU)
-_TENSOR_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_TENSOR)
-_ASYNC_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_ASYNC)
-_X_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_X)
+_LDS_COUNTER_HAZARD = Hazard(
+    HazardKind.WAIT_COUNTER,
+    counter_id=_COUNTER_LDS,
+    distance=_WAIT_COUNTER_RESOLUTION_CYCLES,
+)
+_SMEM_COUNTER_HAZARD = Hazard(
+    HazardKind.WAIT_COUNTER,
+    counter_id=_COUNTER_SMEM,
+    distance=_WAIT_COUNTER_RESOLUTION_CYCLES,
+)
+_ALU_COUNTER_HAZARD = Hazard(
+    HazardKind.WAIT_COUNTER,
+    counter_id=_COUNTER_ALU,
+    distance=_WAIT_COUNTER_RESOLUTION_CYCLES,
+)
+_TENSOR_COUNTER_HAZARD = Hazard(
+    HazardKind.WAIT_COUNTER,
+    counter_id=_COUNTER_TENSOR,
+    distance=_WAIT_COUNTER_RESOLUTION_CYCLES,
+)
+_ASYNC_COUNTER_HAZARD = Hazard(
+    HazardKind.WAIT_COUNTER,
+    counter_id=_COUNTER_ASYNC,
+    distance=_WAIT_COUNTER_RESOLUTION_CYCLES,
+)
+_X_COUNTER_HAZARD = Hazard(
+    HazardKind.WAIT_COUNTER,
+    counter_id=_COUNTER_X,
+    distance=_WAIT_COUNTER_RESOLUTION_CYCLES,
+)
 _GFX950_MEMORY_WAIT_HAZARDS = (
     _VMEM_LOAD_COUNTER_HAZARD,
     _VMEM_STORE_COUNTER_HAZARD,

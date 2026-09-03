@@ -158,6 +158,9 @@ static void loom_low_schedule_dependency_index_fill_groups(
       if (dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_SSA) {
         index->ssa_group_bits[group_index >> 3] |=
             (uint8_t)(1u << (group_index & 7u));
+      } else if (dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT) {
+        index->effect_group_bits[group_index >> 3] |=
+            (uint8_t)(1u << (group_index & 7u));
       }
     }
     IREE_ASSERT_EQ(next_group_index, producer_group_starts[producer_node + 1]);
@@ -239,12 +242,16 @@ iree_status_t loom_low_schedule_dependency_index_initialize(
   IREE_RETURN_IF_ERROR(loom_low_schedule_dependency_index_allocate_segments(
       &out_index->groups, out_index->group_count,
       LOOM_LOW_SCHEDULE_DEPENDENCY_GROUP_SEGMENT_CAPACITY, arena));
-  const iree_host_size_t ssa_bitset_size =
+  const iree_host_size_t group_bitset_size =
       ((iree_host_size_t)out_index->group_count + 7) / 8;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, ssa_bitset_size, sizeof(*out_index->ssa_group_bits),
+      arena, group_bitset_size, sizeof(*out_index->ssa_group_bits),
       (void**)&out_index->ssa_group_bits));
-  memset(out_index->ssa_group_bits, 0, ssa_bitset_size);
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, group_bitset_size, sizeof(*out_index->effect_group_bits),
+      (void**)&out_index->effect_group_bits));
+  memset(out_index->ssa_group_bits, 0, group_bitset_size);
+  memset(out_index->effect_group_bits, 0, group_bitset_size);
   loom_low_schedule_dependency_index_fill_groups(
       graph, node_count, out_detail_index->producer_dependency_starts,
       out_detail_index, out_index->producer_group_starts, last_producer_nodes,
