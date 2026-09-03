@@ -24,6 +24,7 @@ iree_cc_library(
     "ref.h"
     "reflection.h"
     "scalar.h"
+    "sync.h"
     "variant.h"
   SRCS
     "buffer.c"
@@ -38,6 +39,7 @@ iree_cc_library(
     "program_storage.h"
     "ref.c"
     "reflection.c"
+    "sync.c"
     "variant.c"
   DEPS
     iree::base
@@ -200,6 +202,18 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    sync_test
+  SRCS
+    "sync_test.cc"
+  DEPS
+    ::invocation_test_module
+    ::vm
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     variant_test
   SRCS
     "variant_test.cc"
@@ -208,6 +222,20 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm::bytecode::wire
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    execution_benchmark
+  SRCS
+    "execution_benchmark.cc"
+  DEPS
+    ::invocation_test_module
+    ::vm
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

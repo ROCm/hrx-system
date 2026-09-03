@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
@@ -29,6 +30,7 @@ iree_runtime_cc_library(
         "program_storage.h",
         "ref.c",
         "reflection.c",
+        "sync.c",
         "variant.c",
     ],
     hdrs = [
@@ -43,6 +45,7 @@ iree_runtime_cc_library(
         "ref.h",
         "reflection.h",
         "scalar.h",
+        "sync.h",
         "variant.h",
     ],
     deps = [
@@ -186,6 +189,17 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "sync_test",
+    srcs = ["sync_test.cc"],
+    deps = [
+        ":invocation_test_module",
+        ":vm",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "variant_test",
     srcs = ["variant_test.cc"],
     deps = [
@@ -193,5 +207,16 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm/bytecode:wire",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "execution_benchmark",
+    srcs = ["execution_benchmark.cc"],
+    deps = [
+        ":invocation_test_module",
+        ":vm",
+        "//runtime/src/iree/testing:benchmark",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )

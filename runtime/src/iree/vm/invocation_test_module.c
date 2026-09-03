@@ -15,9 +15,10 @@ enum {
   IREE_VM_TEST_CALLABLE_REF = 1,
   IREE_VM_TEST_CALLABLE_YIELD_REF = 2,
   IREE_VM_TEST_CALLABLE_ADD = 3,
-  IREE_VM_TEST_CALLABLE_F32 = 4,
-  IREE_VM_TEST_CALLABLE_RETURN_FUNCTION = 5,
-  IREE_VM_TEST_CALLABLE_CALL_FUNCTION = 6,
+  IREE_VM_TEST_CALLABLE_LAUNCH_CONFIG = 4,
+  IREE_VM_TEST_CALLABLE_F32 = 5,
+  IREE_VM_TEST_CALLABLE_RETURN_FUNCTION = 6,
+  IREE_VM_TEST_CALLABLE_CALL_FUNCTION = 7,
 };
 
 enum {
@@ -37,7 +38,8 @@ enum {
   IREE_VM_TEST_FUNCTION_RETURN_OPTIONAL = 13,
   IREE_VM_TEST_FUNCTION_YIELD_REF = 14,
   IREE_VM_TEST_FUNCTION_YIELD_TWICE = 15,
-  IREE_VM_TEST_FUNCTION_COUNT = 16,
+  IREE_VM_TEST_FUNCTION_LAUNCH_CONFIG = 16,
+  IREE_VM_TEST_FUNCTION_COUNT = 17,
 };
 
 typedef enum iree_vm_test_frame_action_e {
@@ -148,6 +150,20 @@ static const iree_vm_module_signature_type_t
         {IREE_VM_SCALAR_TYPE_I32, 0},
         {IREE_VM_SCALAR_TYPE_I32, 0},
 };
+static const iree_vm_module_signature_type_t
+    iree_vm_test_launch_config_arguments[] = {
+        {IREE_VM_SCALAR_TYPE_I32, 0},
+        {IREE_VM_SCALAR_TYPE_BF16, 0},
+};
+static const iree_vm_module_signature_type_t
+    iree_vm_test_launch_config_results[] = {
+        {IREE_VM_SCALAR_TYPE_I64, 0}, {IREE_VM_SCALAR_TYPE_I64, 0},
+        {IREE_VM_SCALAR_TYPE_I64, 0}, {IREE_VM_SCALAR_TYPE_I64, 0},
+        {IREE_VM_SCALAR_TYPE_I64, 0}, {IREE_VM_SCALAR_TYPE_I64, 0},
+        {IREE_VM_SCALAR_TYPE_I64, 0}, {IREE_VM_SCALAR_TYPE_I64, 0},
+        {IREE_VM_SCALAR_TYPE_I64, 0}, {IREE_VM_SCALAR_TYPE_I64, 0},
+        {IREE_VM_SCALAR_TYPE_I64, 0},
+};
 
 static const iree_vm_module_callable_type_declaration_t
     iree_vm_test_callable_types[] = {
@@ -169,6 +185,13 @@ static const iree_vm_module_callable_type_declaration_t
         {{{iree_vm_test_add_arguments,
            IREE_ARRAYSIZE(iree_vm_test_add_arguments)},
           {iree_vm_test_i32, IREE_ARRAYSIZE(iree_vm_test_i32)}},
+         IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+         0,
+         0},
+        {{{iree_vm_test_launch_config_arguments,
+           IREE_ARRAYSIZE(iree_vm_test_launch_config_arguments)},
+          {iree_vm_test_launch_config_results,
+           IREE_ARRAYSIZE(iree_vm_test_launch_config_results)}},
          IREE_VM_CALLABLE_TYPE_FLAG_NONE,
          0,
          0},
@@ -222,6 +245,8 @@ static const iree_vm_module_export_declaration_t iree_vm_test_exports[] = {
      IREE_VM_TEST_FUNCTION_EXHAUST, 0},
     {IREE_SVL("fail"), IREE_VM_TEST_CALLABLE_ADD, IREE_VM_TEST_FUNCTION_FAIL,
      0},
+    {IREE_SVL("launch_config"), IREE_VM_TEST_CALLABLE_LAUNCH_CONFIG,
+     IREE_VM_TEST_FUNCTION_LAUNCH_CONFIG, 0},
     {IREE_SVL("multiply_f32"), IREE_VM_TEST_CALLABLE_F32,
      IREE_VM_TEST_FUNCTION_MULTIPLY_F32, 0},
     {IREE_SVL("return_import"), IREE_VM_TEST_CALLABLE_RETURN_FUNCTION,
@@ -342,6 +367,15 @@ static void iree_vm_test_multiply_f32(const iree_vm_call_packet_t* call) {
   iree_vm_call_value_result_store(call, 0, product_bits);
 }
 
+static void iree_vm_test_launch_config(const iree_vm_call_packet_t* call) {
+  const uint64_t row_count =
+      (uint32_t)iree_vm_call_value_argument_load(call, 0);
+  const uint64_t values[] = {row_count * 2, 1, 1, 1, 1, 1, 1, 1, 1, 32, 256};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(values); ++i) {
+    iree_vm_call_value_result_store(call, (uint16_t)i, values[i]);
+  }
+}
+
 static iree_status_t iree_vm_test_return_function(
     const iree_vm_module_function_start_params_t* params,
     uint16_t function_ordinal, iree_vm_execution_outcome_t* out_outcome) {
@@ -426,6 +460,9 @@ static iree_status_t iree_vm_test_function_start(
       return iree_make_status(IREE_STATUS_ABORTED, "injected function failure");
     case IREE_VM_TEST_FUNCTION_MULTIPLY_F32:
       iree_vm_test_multiply_f32(&params->call);
+      break;
+    case IREE_VM_TEST_FUNCTION_LAUNCH_CONFIG:
+      iree_vm_test_launch_config(&params->call);
       break;
     case IREE_VM_TEST_FUNCTION_RETURN_IMPORT:
     case IREE_VM_TEST_FUNCTION_RETURN_LOCAL:
