@@ -75,6 +75,31 @@ TEST(XdnaArrayFactsTest, FormsLoadAddressesFromCanonicalStorage) {
                             {4, 3}, 0, 64, &address));
 }
 
+TEST(XdnaArrayFactsTest, FormsCoreRelativeLockSelectors) {
+  const loom_xdna_array_family_t* family = loom_xdna_npu2_array_family();
+  uint16_t selector = 0;
+
+  IREE_ASSERT_OK(
+      loom_xdna_array_form_lock_selector(family, {0, 3}, {0, 2}, 7, &selector));
+  EXPECT_EQ(selector, 7u);
+  IREE_ASSERT_OK(
+      loom_xdna_array_form_lock_selector(family, {1, 3}, {0, 3}, 7, &selector));
+  EXPECT_EQ(selector, 23u);
+  IREE_ASSERT_OK(
+      loom_xdna_array_form_lock_selector(family, {0, 3}, {0, 4}, 7, &selector));
+  EXPECT_EQ(selector, 39u);
+  IREE_ASSERT_OK(
+      loom_xdna_array_form_lock_selector(family, {0, 3}, {0, 3}, 7, &selector));
+  EXPECT_EQ(selector, 55u);
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      loom_xdna_array_form_lock_selector(family, {0, 3}, {1, 3}, 0, &selector));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_xdna_array_form_lock_selector(
+                            family, {0, 3}, {0, 3}, 16, &selector));
+}
+
 TEST(XdnaArrayFactsTest, RejectsMissingOrCrossKindNeighbors) {
   const loom_xdna_array_family_t* family = loom_xdna_npu2_array_family();
   loom_xdna_memory_placement_t placement = {};

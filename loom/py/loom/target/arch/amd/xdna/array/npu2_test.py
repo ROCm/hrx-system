@@ -65,15 +65,16 @@ def test_npu2_memory_distinguishes_local_storage_from_load_apertures() -> None:
         window.name: (
             window.base,
             window.capacity,
+            window.lock_selector_base,
             window.owner_column_delta,
             window.owner_row_delta,
         )
         for window in compute.memory.load_windows
     } == {
-        "south": (0x40000, 64 * 1024, 0, -1),
-        "west": (0x50000, 64 * 1024, -1, 0),
-        "north": (0x60000, 64 * 1024, 0, 1),
-        "self": (0x70000, 64 * 1024, 0, 0),
+        "south": (0x40000, 64 * 1024, 0, 0, -1),
+        "west": (0x50000, 64 * 1024, 16, -1, 0),
+        "north": (0x60000, 64 * 1024, 32, 0, 1),
+        "self": (0x70000, 64 * 1024, 48, 0, 0),
     }
     assert (memory.memory.local_capacity, memory.memory.bank_count) == (512 * 1024, 8)
 
