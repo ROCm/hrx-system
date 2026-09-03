@@ -11,36 +11,52 @@ import unittest
 from iree.vm.bytecode.spec.generate import generate_outputs
 from iree.vm.bytecode.spec.isa.core import INTEGER_INSTRUCTIONS
 from iree.vm.bytecode.spec.render.c import _instruction_rules
+from iree.vm.bytecode.spec.specification import SPECIFICATION
+
+
+def _bstring(value: str) -> str:
+    return f'"\\x{len(value.encode("utf-8")):02x}" "{value}"'
 
 
 class ProjectionTest(unittest.TestCase):
     def setUp(self) -> None:
         self.outputs = generate_outputs()
 
-    def assert_output_contains(self, output_name: str, *fragments: str) -> str:
-        for fragment in fragments:
-            self.assertIn(fragment, self.outputs[output_name])
-        return self.outputs[output_name]
-
-    def test_wire_layout_has_one_assertion_translation_unit(self) -> None:
-        module_header = self.assert_output_contains(
-            "wire_module_header",
-            "typedef struct iree_vm_bytecode_v0_image_header_t",
-        )
-        core_header = self.assert_output_contains(
-            "wire_core_header",
-            "typedef struct iree_vm_bytecode_stack_pack_i64_u32_x8_t",
-        )
-        self.assertNotIn("static_assert", module_header)
-        self.assertNotIn("static_assert", core_header)
-        self.assert_output_contains(
-            "wire_assertions_source",
-            "sizeof(iree_vm_bytecode_stack_pack_i64_u32_x8_t) == 36u",
-        )
+    def test_every_declaration_projects_to_each_required_surface(self) -> None:
+        module_header = self.outputs["wire_module_header"]
+        core_header = self.outputs["wire_core_header"]
+        assertions = self.outputs["wire_assertions_source"]
+        tooling = self.outputs["tooling_data"]
+        documentation = self.outputs["documentation"]
+        self.assertNotIn("static_assert", module_header + core_header)
+        self.assertNotIn("iree_string_view_t", tooling)
+        for record in SPECIFICATION.module_format.records:
+            self.assertIn(f"typedef struct {record.c_type}", module_header)
+            self.assertIn(
+                f"sizeof({record.c_type}) == {record.byte_length}u", assertions
+            )
+            self.assertIn(_bstring(record.name), tooling)
+            self.assertEqual(documentation.count(f"#### `{record.name}`"), 1)
+        for instruction in SPECIFICATION.instructions:
+            c_type = f"iree_vm_bytecode_{instruction.mnemonic.replace('.', '_')}_t"
+            self.assertIn(f"typedef struct {c_type}", core_header)
+            self.assertIn(f"sizeof({c_type}) == {instruction.byte_length}u", assertions)
+            self.assertIn(_bstring(instruction.mnemonic), tooling)
+            self.assertEqual(documentation.count(f"#### `{instruction.mnemonic}`"), 1)
+        for table in (
+            SPECIFICATION.module_format.numeric_tables + SPECIFICATION.selectors
+        ):
+            self.assertEqual(documentation.count(f"#### `{table.name}`"), 1)
+        for section in SPECIFICATION.module_format.sections:
+            self.assertEqual(documentation.count(f"### `{section.name}`"), 1)
+        for family in SPECIFICATION.families:
+            self.assertEqual(documentation.count(f"### {family.name}"), 1)
+        self.assertIn("#### Structural verification obligations", documentation)
+        self.assertIn("#### Reference pseudocode", documentation)
 
     def test_verification_is_data_not_control_flow(self) -> None:
-        source = self.assert_output_contains(
-            "verification_source",
+        source = self.outputs["verification_source"]
+        for fragment in (
             "iree_vm_bytecode_instruction_verification[256]",
             "VERIFICATION_RULE_SELECTOR, 3u, 1u, 2u},  // float.math.unary.f64.selector_u8",
             "UINT32_C(0x000D0008), IREE_VM_BYTECODE_VERIFICATION_RULE_GLOBAL_ORDINAL",
@@ -53,7 +69,8 @@ class ProjectionTest(unittest.TestCase):
             "UINT32_C(0x0033001F)",
             "UINT32_C(0x00170003)",
             "UINT32_C(0x00001A1F)",
-        )
+        ):
+            self.assertIn(fragment, source)
         self.assertNotIn("switch (", source)
         self.assertNotIn("iree_status_t", source)
         parameters = []
@@ -61,24 +78,6 @@ class ProjectionTest(unittest.TestCase):
         self.assertEqual(
             (rule.kind, *rule[1:4], *parameters[rule.parameter :]),
             ("INTEGER_BITSTREAM_SHAPE", 3, 4, 5, 6, 7, 0, 64),
-        )
-
-    def test_tooling_uses_one_byte_length_strings(self) -> None:
-        data = self.assert_output_contains(
-            "tooling_data",
-            '"\\x1b" "conversion.float.to.integer"',
-            "uint16_t iree_vm_bytecode_instruction_name_offsets[256]",
-        )
-        self.assertNotIn("iree_string_view_t", data)
-
-    def test_documentation_carries_normative_surfaces(self) -> None:
-        self.assert_output_contains(
-            "documentation",
-            "## Module container",
-            "#### Structural verification obligations",
-            "## Core selector domains",
-            "#### `buffer.atomic.cmpxchg`",
-            "#### Reference pseudocode",
         )
 
 
