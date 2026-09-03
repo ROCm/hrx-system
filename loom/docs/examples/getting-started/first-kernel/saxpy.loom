@@ -1,0 +1,39 @@
+// Computes y = alpha * x + y for a runtime-sized f32 vector.
+kernel.def export("saxpy_f32") @saxpy_f32(%element_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %rounding = index.sub %workgroup_size, %unit : index
+  %rounded_count = index.add %element_count, %rounding : index
+  %workgroups = index.div %rounded_count, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%element_count: index, %alpha: f32, %x: buffer, %y: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = kernel.workgroup.size<x> : index
+  %element_index = index.madd %workgroup, %workgroup_size, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %x_noalias, %y_noalias = buffer.assume.noalias %x, %y : buffer, buffer
+  %base = index.constant 0 : offset
+  %x_view = buffer.view %x_noalias[%base] : buffer -> view<[%element_count]xf32>
+  %y_view = buffer.view %y_noalias[%base] : buffer -> view<[%element_count]xf32>
+  scf.if %in_bounds {
+    %x_value = view.load %x_view[%element_index] : view<[%element_count]xf32> -> f32
+    %y_value = view.load %y_view[%element_index] : view<[%element_count]xf32> -> f32
+    %result = scalar.fmaf %alpha, %x_value, %y_value : f32
+    view.store %result, %y_view[%element_index] : f32, view<[%element_count]xf32>
+  }
+  kernel.return
+}
+
+check.case public @saxpy_f32_case {
+  %element_count = check.param.choice values([1, 255, 256, 257, 1009, 65536]) name("element_count") : index
+  %alpha = check.literal value(4.0) : f32
+  %x = check.generate.fill value(2.0) : tensor<[%element_count]xf32>
+  %y = check.generate.fill value(3.0) : tensor<[%element_count]xf32>
+  %expected = check.generate.fill value(11.0) : tensor<[%element_count]xf32>
+  kernel.launch @saxpy_f32[%element_count](%element_count, %alpha, %x, %y) : [index](index, f32, tensor<[%element_count]xf32>, tensor<[%element_count]xf32>)
+  check.expect.equal actual(%y) expected(%expected) : tensor<[%element_count]xf32>
+  check.return
+}
+
+check.benchmark<@saxpy_f32_case> @saxpy_f32_64k {element_count = 65536}

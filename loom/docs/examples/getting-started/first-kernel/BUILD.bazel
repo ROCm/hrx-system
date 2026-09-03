@@ -1,0 +1,30 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# bazel-to-cmake: skip
+
+# --8<-- [start:kernel-library]
+load(
+    "@hrx//loom/build_tools/bazel:defs.bzl",
+    "loom_kernel_library",
+)
+load(
+    "@hrx//loom/target/amdgpu:execution_profiles.bzl",
+    "AMDGPU_HARDWARE_PROFILE",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_kernel_library(
+    name = "saxpy",
+    srcs = ["saxpy.loom"],
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+    targets = ["@hrx//loom/target/amdgpu:gfx11-generic"],
+)
+# --8<-- [end:kernel-library]

@@ -4,10 +4,12 @@ The programming guide explains Loom by the boundary that owns each decision.
 It is written for systems and ML engineers who are comfortable reading a
 kernel.
 
-Start with the [source-to-artifacts walkthrough](../getting-started/source-to-artifacts.md)
-if modules, templates, launch configuration, checks, and command programs are
-all new. Use the chapters here to understand why a source construct exists and
-when it is the right construct. Use the [generated
+Start with [Run your first Loom kernel](../getting-started/first-kernel.md) for
+one direct author-test-benchmark loop. Continue with the
+[source-to-artifacts walkthrough](../getting-started/source-to-artifacts.md)
+when you are ready to add modules, templates, specialization, and command
+programs. Use the chapters here to understand why a source construct exists
+and when it is the right construct. Use the [generated
 reference](../reference/index.md) when you need the exhaustive syntax or field
 contract for one operation.
 

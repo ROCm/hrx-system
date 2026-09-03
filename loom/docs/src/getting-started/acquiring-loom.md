@@ -31,3 +31,6 @@ registers source-built toolchains automatically, while a local module override
 keeps compiler and kernel edits in one live Bazel graph. [Build libraries and
 binaries with Bazel](../workflows/build-with-bazel.md#depend-on-hrx) defines the
 module declaration, public loads, target profiles, and deployment products.
+
+Once the tools or Bzlmod dependency are available, [run your first
+kernel](first-kernel.md) from one checked source file.
