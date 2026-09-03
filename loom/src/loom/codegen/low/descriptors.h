@@ -786,7 +786,8 @@ typedef struct loom_low_hazard_t {
   uint16_t producer_stage;
   // Consumer pipeline stage participating in the hazard.
   uint16_t consumer_stage;
-  // Required distance or target-owned hazard value.
+  // Required producer/consumer distance for minimum-distance hazards, or the
+  // candidate issue cost of resolving a wait-counter hazard.
   uint16_t distance;
   // Hazard flags for target-owned refinements.
   loom_low_hazard_flags_t flags;

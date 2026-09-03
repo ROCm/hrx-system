@@ -79,6 +79,7 @@ _SCHEDULE_CONST = "test.const"
 _SCHEDULE_SCALAR_ALU = "test.scalar.alu"
 _SCHEDULE_VECTOR_ALU = "test.vector.alu"
 _SCHEDULE_LOAD = "test.load"
+_SCHEDULE_COUNTER_LOAD = "test.counter_load"
 _SCHEDULE_STORE = "test.store"
 _SCHEDULE_CALL = "test.call"
 _SCHEDULE_CONTROL = "test.control"
@@ -346,6 +347,14 @@ _LOAD_EFFECT = Effect(
     EffectKind.READ,
     memory_space=MemorySpace.GENERIC,
     flags=(EffectFlag.DEPENDENCY,),
+    width_bits=128,
+)
+
+_COUNTER_LOAD_EFFECT = Effect(
+    EffectKind.READ,
+    memory_space=MemorySpace.GENERIC,
+    flags=(EffectFlag.DEPENDENCY,),
+    counter_id=0,
     width_bits=128,
 )
 
@@ -961,6 +970,20 @@ TEST_LOW_LOAD_V4I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.SIDE_EFFECTING,),
 )
 
+TEST_LOW_COUNTER_LOAD_V4I32_DESCRIPTOR = Descriptor(
+    key="test.counter_load.v4i32",
+    mnemonic="test.counter_load.v4i32",
+    semantic_tag="memory.counter_load.v128",
+    operands=(
+        Operand("dst", OperandRole.RESULT, _I32_ALT, unit_count=4),
+        _ptr_resource("address"),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("address",)),
+    effects=(_COUNTER_LOAD_EFFECT,),
+    schedule_class=_SCHEDULE_COUNTER_LOAD,
+    flags=(DescriptorFlag.SIDE_EFFECTING,),
+)
+
 TEST_LOW_LOAD_V4F32_DESCRIPTOR = Descriptor(
     key="test.load.v4f32",
     mnemonic="test.load.v4f32",
@@ -1301,6 +1324,25 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             model_quality=ModelQuality.FALLBACK,
         ),
         ScheduleClass(
+            _SCHEDULE_COUNTER_LOAD,
+            latency_kind=LatencyKind.VARIABLE,
+            latency_cycles=4,
+            schedule_distance_cycles=1,
+            issue_uses=(
+                IssueUse(_RESOURCE_ADDRESS, cycles=1, units=1, stage=0),
+                IssueUse(_RESOURCE_LOAD, cycles=1, units=1, stage=1),
+            ),
+            hazards=(
+                Hazard(
+                    HazardKind.WAIT_COUNTER,
+                    counter_id=0,
+                    distance=1,
+                ),
+            ),
+            flags=(ScheduleClassFlag.MAY_LOAD,),
+            model_quality=ModelQuality.FALLBACK,
+        ),
+        ScheduleClass(
             _SCHEDULE_STORE,
             latency_kind=LatencyKind.VARIABLE,
             latency_cycles=2,
@@ -1371,6 +1413,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
         TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
         TEST_LOW_LOAD_V4I32_DESCRIPTOR,
+        TEST_LOW_COUNTER_LOAD_V4I32_DESCRIPTOR,
         TEST_LOW_LOAD_V4F32_DESCRIPTOR,
         TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
         TEST_LOW_LOAD_INDEX_V4F32_DESCRIPTOR,

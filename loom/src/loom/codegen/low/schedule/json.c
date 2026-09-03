@@ -216,6 +216,7 @@ static const iree_string_view_t kLoomLowScheduleRejectedMetricNames[] = {
     IREE_SVL("rejected_data_ready_stall_cycles"),
     IREE_SVL("rejected_resource_stall_cycles"),
     IREE_SVL("rejected_hazard_stall_cycles"),
+    IREE_SVL("rejected_completion_wait_cycles"),
     IREE_SVL("rejected_effective_stall_cycles"),
     IREE_SVL("rejected_bottleneck_resource_id"),
     IREE_SVL("rejected_pressure_cliff_penalty"),
@@ -566,6 +567,9 @@ iree_status_t loom_low_schedule_format_json(
           &decision_object, IREE_SV("chosen_hazard_stall_cycles"),
           decision->chosen_hazard_stall_cycles));
       IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &decision_object, IREE_SV("chosen_completion_wait_cycles"),
+          decision->chosen_completion_wait_cycles));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
           &decision_object, IREE_SV("chosen_effective_stall_cycles"),
           decision->chosen_effective_stall_cycles));
       IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_nullable_u16_field(
@@ -622,6 +626,9 @@ iree_status_t loom_low_schedule_format_json(
         IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
             &decision_object, IREE_SV("rejected_hazard_stall_cycles"),
             decision->rejected_hazard_stall_cycles));
+        IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+            &decision_object, IREE_SV("rejected_completion_wait_cycles"),
+            decision->rejected_completion_wait_cycles));
         IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
             &decision_object, IREE_SV("rejected_effective_stall_cycles"),
             decision->rejected_effective_stall_cycles));

@@ -377,13 +377,16 @@ typedef struct loom_low_schedule_candidate_decision_t {
   uint64_t rejected_killed_live_units;
   // Best rejected live register units produced by scheduling the node.
   uint64_t rejected_produced_live_units;
-  // Chosen cycles until all SSA inputs are ready.
+  // Chosen cycles until all latency-bearing dependencies are ready.
   uint32_t chosen_data_ready_stall_cycles;
   // Chosen cycles blocked by descriptor resource occupancy.
   uint32_t chosen_resource_stall_cycles;
   // Chosen cycles blocked by target hazard distance rows.
   uint32_t chosen_hazard_stall_cycles;
-  // Chosen maximum stall across data, resources, and hazards.
+  // Chosen target-provided issue cost for a completion wait.
+  uint32_t chosen_completion_wait_cycles;
+  // Chosen maximum stall across dependencies, resources, hazards, and
+  // completion waits.
   uint32_t chosen_effective_stall_cycles;
   // Target resource table identifier causing the chosen resource stall, or
   // LOOM_LOW_RESOURCE_NONE.
@@ -398,13 +401,16 @@ typedef struct loom_low_schedule_candidate_decision_t {
   // Chosen live units remaining before the next pressure cliff when no cliff
   // was crossed, or LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE.
   uint32_t chosen_units_until_pressure_cliff;
-  // Best rejected cycles until all SSA inputs are ready.
+  // Best rejected cycles until all latency-bearing dependencies are ready.
   uint32_t rejected_data_ready_stall_cycles;
   // Best rejected cycles blocked by descriptor resource occupancy.
   uint32_t rejected_resource_stall_cycles;
   // Best rejected cycles blocked by target hazard distance rows.
   uint32_t rejected_hazard_stall_cycles;
-  // Best rejected maximum stall across data, resources, and hazards.
+  // Best rejected target-provided issue cost for a completion wait.
+  uint32_t rejected_completion_wait_cycles;
+  // Best rejected maximum stall across dependencies, resources, hazards, and
+  // completion waits.
   uint32_t rejected_effective_stall_cycles;
   // Target resource table identifier causing the rejected resource stall, or
   // LOOM_LOW_RESOURCE_NONE.

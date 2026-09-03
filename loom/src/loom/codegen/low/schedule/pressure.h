@@ -158,13 +158,18 @@ typedef struct loom_low_schedule_candidate_score_t {
   uint32_t pressure_demand_units;
   // Register headroom needed by the downstream frontier this candidate opens.
   uint32_t activation_reserve_units;
-  // Cycles until all same-block SSA producers are ready.
+  // Cycles until all same-block latency-bearing dependencies are ready.
   uint32_t data_ready_stall_cycles;
   // Cycles until descriptor resources can accept this candidate.
   uint32_t resource_stall_cycles;
-  // Cycles until target hazard distance rows are satisfied.
+  // Target-provided issue cost of a completion wait.
+  uint32_t completion_wait_cycles;
+  // Completion latency opened before a downstream memory-effect consumer.
+  uint16_t opened_completion_latency_cycles;
+  // Cycles needed to satisfy target minimum-distance hazards.
   uint32_t hazard_stall_cycles;
-  // Maximum stall across data, resources, and target hazards.
+  // Maximum stall across dependencies, resources, hazards, and completion
+  // waits.
   uint32_t effective_stall_cycles;
   // Penalty from the candidate's maximum required physical pressure.
   uint32_t pressure_cliff_penalty;
