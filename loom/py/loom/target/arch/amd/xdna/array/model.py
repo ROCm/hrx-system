@@ -109,6 +109,13 @@ class DmaEngineFacts:
     address_dimension_count: int
     address_maximum: int
     address_alignment: int
+    address_encoding_shift: int
+    transfer_length_granularity: int
+    transfer_length_offset: int
+    memory_to_stream_port_base: int
+    memory_to_stream_port_stride: int
+    stream_to_memory_port_base: int
+    stream_to_memory_port_stride: int
     step_size_bits: int
     wrap_bits: int
     iteration_bits: int
@@ -282,6 +289,9 @@ def _validate_dma(tile: TileFacts) -> None:
         dma.address_dimension_count,
         dma.address_maximum,
         dma.address_alignment,
+        dma.transfer_length_granularity,
+        dma.memory_to_stream_port_stride,
+        dma.stream_to_memory_port_stride,
         dma.step_size_bits,
         dma.wrap_bits,
         dma.iteration_bits,
@@ -293,6 +303,20 @@ def _validate_dma(tile: TileFacts) -> None:
         raise ValueError(f"{tile.kind.value}: DMA alignment is not a power of two")
     if dma.address_maximum % dma.address_alignment:
         raise ValueError(f"{tile.kind.value}: DMA address range is misaligned")
+    if dma.address_encoding_shift < 0:
+        raise ValueError(f"{tile.kind.value}: invalid DMA address encoding shift")
+    if dma.transfer_length_granularity & (dma.transfer_length_granularity - 1):
+        raise ValueError(
+            f"{tile.kind.value}: DMA length granularity is not a power of two"
+        )
+    if dma.transfer_length_offset < 0:
+        raise ValueError(f"{tile.kind.value}: invalid DMA length encoding offset")
+    for base, stride in (
+        (dma.memory_to_stream_port_base, dma.memory_to_stream_port_stride),
+        (dma.stream_to_memory_port_base, dma.stream_to_memory_port_stride),
+    ):
+        if base < 0 or base + (dma.channel_count_per_direction - 1) * stride > 255:
+            raise ValueError(f"{tile.kind.value}: invalid DMA stream-port mapping")
 
 
 def _validate_stream_ports(family: ArrayFamily) -> None:
