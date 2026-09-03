@@ -1456,6 +1456,27 @@ def test_generate_command_program_symbol_interface() -> None:
     assert (".interfaces = LOOM_SYMBOL_INTERFACE_FUNC_LIKE | LOOM_SYMBOL_INTERFACE_COMMAND_PROGRAM,") in tables_c
 
 
+def test_generate_pipeline_symbol_interface() -> None:
+    op = Op(
+        "test.pipeline",
+        group=Dialect("test"),
+        traits=[SYMBOL_DEFINE],
+        attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+        symbol_def=SymbolDefinition(
+            field="callee",
+            name="pipeline",
+            interfaces=["func_like", "pipeline"],
+        ),
+        regions=[RegionDef("body")],
+        interfaces=[FuncLikeInterface(callee="callee", body="body")],
+        format=[SymbolRef("callee"), FuncArgs("args"), Region("body")],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert (".interfaces = LOOM_SYMBOL_INTERFACE_FUNC_LIKE | LOOM_SYMBOL_INTERFACE_PIPELINE,") in tables_c
+
+
 def test_generate_body_signature_partition() -> None:
     op = Op(
         "test.partitioned_function",

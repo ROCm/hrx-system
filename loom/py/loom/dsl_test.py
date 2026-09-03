@@ -3183,6 +3183,14 @@ class TestSymbolKernelContract:
                 interfaces=["callable"],
             )
 
+    def test_pipeline_interface_requires_func_like_interface(self) -> None:
+        with _raises(ValueError, match="requires the func_like interface"):
+            SymbolDefinition(
+                field="callee",
+                name="pipeline",
+                interfaces=["pipeline"],
+            )
+
     def test_func_like_requires_one_signature_representation(self) -> None:
         for func_like in (
             FuncLikeInterface(callee="callee"),

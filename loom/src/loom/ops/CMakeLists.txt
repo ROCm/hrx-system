@@ -253,10 +253,12 @@ loom_cc_library(
     loom::ops::encoding
     loom::ops::func
     loom::ops::global
+    loom::ops::group
     loom::ops::index
     loom::ops::kernel
     loom::ops::low
     loom::ops::pass
+    loom::ops::pipeline
     loom::ops::pool
     loom::ops::sanitizer
     loom::ops::scalar

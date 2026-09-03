@@ -54,6 +54,19 @@ static inline bool loom_low_storage_type_space_parse(iree_string_view_t name, lo
   return true;
 }
 
+extern const loom_parameterized_type_descriptor_t loom_pipeline_flow_type_parameterized_descriptor;
+static inline bool loom_pipeline_flow_type_isa(loom_type_t type) {
+  return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_pipeline_flow_type_parameterized_descriptor;
+}
+enum { LOOM_PIPELINE_FLOW_TYPE_ELEMENT_TYPE_PARAMETER_INDEX = 0 };
+static inline loom_type_id_t loom_pipeline_flow_type_element_type(loom_type_t type) {
+  return loom_attr_as_type_id(loom_type_parameterized_parameters(type)[LOOM_PIPELINE_FLOW_TYPE_ELEMENT_TYPE_PARAMETER_INDEX]);
+}
+iree_status_t loom_pipeline_flow_type_make(
+    loom_module_t* module,
+    loom_type_id_t element_type,
+    loom_type_t* out_type);
+
 // Returns the number of entries in the common type registry.
 iree_host_size_t loom_type_registry_count(void);
 

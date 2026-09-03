@@ -600,6 +600,7 @@ _VALID_SYMBOL_INTERFACES = frozenset(
         "kernel",
         "kernel_entry",
         "command_program",
+        "pipeline",
     }
 )
 
@@ -818,6 +819,11 @@ class SymbolDefinition:
             raise ValueError(
                 f"SymbolDefinition '{name}': the command_program interface "
                 "requires the func_like interface for its launch ABI"
+            )
+        if "pipeline" in frozen_interfaces and "func_like" not in frozen_interfaces:
+            raise ValueError(
+                f"SymbolDefinition '{name}': the pipeline interface requires "
+                "the func_like interface for its launch ABI"
             )
         object.__setattr__(self, "field", field)
         object.__setattr__(self, "name", name)

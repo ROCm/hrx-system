@@ -86,3 +86,6 @@
   LOOM_KW_REQUIRES = 77,  // "requires"
   LOOM_KW_SCOPE = 78,  // "scope"
   LOOM_KW_ORDERING = 79,  // "ordering"
+  LOOM_KW_ACROSS = 80,  // "across"
+  LOOM_KW_ON = 81,  // "on"
+  LOOM_KW_CAPACITY = 82,  // "capacity"

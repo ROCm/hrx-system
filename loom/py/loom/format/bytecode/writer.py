@@ -196,8 +196,9 @@ SYMBOL_INTERFACE_BITS = {
     "template_family": 1 << 10,
     "template_provider": 1 << 11,
     "kernel_entry": 1 << 12,
+    "pipeline": 1 << 13,
 }
-SYMBOL_INTERFACE_FLAG_MASK = (1 << 13) - 1
+SYMBOL_INTERFACE_FLAG_MASK = (1 << 14) - 1
 
 SOURCE_TRIVIA_LEADING_BLANK_LINE = 1
 SOURCE_TRIVIA_COMMENT_COUNT_SHIFT = 1

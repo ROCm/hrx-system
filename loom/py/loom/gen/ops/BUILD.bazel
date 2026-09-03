@@ -177,6 +177,13 @@ iree_py_binary(
 )
 
 iree_py_binary(
+    name = "c_tables_group_generator",
+    main_module = "loom.gen.ops.c_tables",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/group"],
+)
+
+iree_py_binary(
     name = "c_tables_index_generator",
     main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
@@ -235,6 +242,16 @@ iree_py_binary(
     main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/pool"],
+)
+
+iree_py_binary(
+    name = "c_tables_pipeline_generator",
+    main_module = "loom.gen.ops.c_tables",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + [
+        "//loom/py/loom/dialect/func",
+        "//loom/py/loom/dialect/pipeline",
+    ],
 )
 
 iree_py_binary(

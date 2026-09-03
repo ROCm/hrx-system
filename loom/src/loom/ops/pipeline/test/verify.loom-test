@@ -1,0 +1,94 @@
+// RUN: verify
+
+func.def @copy(%input: buffer, %output: buffer) {
+  func.return
+}
+
+pipeline.def<kernel> @valid() launch(%input: buffer, %output: buffer) {
+  %worker_lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %worker_lanes : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<8x8xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<8x8xi8>
+  %input_tiles = pipeline.read %input_view on %workers : view<8x8xi8>, group -> pipeline.flow<tile<8x8xi8>>
+  %output_tiles = pipeline.stage @copy on %workers(%input_tiles) : (group, pipeline.flow<tile<8x8xi8>>) -> (pipeline.flow<tile<8x8xi8>>)
+  pipeline.write %output_tiles to %output_view : pipeline.flow<tile<8x8xi8>>, view<8x8xi8>
+  pipeline.return
+}
+
+// ====
+
+pipeline.def @non_buffer_binding() launch(%binding: i32) {
+  // ERROR@-1: TYPE/003 {operand_name="launch binding 0", actual_type="i32", expected_constraint="buffer"}
+  pipeline.return
+}
+
+// ====
+
+func.def @wrong_group(%input: buffer) {
+  func.return
+}
+
+pipeline.def @scatter_wrong_group() launch(%input: buffer) {
+  %base = index.constant 0 : offset
+  %not_group = index.constant 1 : index
+  %input_view = buffer.view %input[%base] : buffer -> view<1x8xi8>
+  // ERROR@+1: TYPE/003 {operand_name="group", actual_type="index", expected_constraint="group"}
+  %tiles = pipeline.scatter %input_view across %not_group : view<1x8xi8>, index -> pipeline.flow<tile<8xi8>>
+  pipeline.return
+}
+
+// ====
+
+pipeline.def @scatter_wrong_shape() launch(%input: buffer) {
+  %worker_lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %worker_lanes : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<1x8xi8>
+  // ERROR@+1: TYPE/004 {result_name="result", actual_type="pipeline.flow<tile<4xi8>>", expected_constraint="pipeline.flow tile matching the source view suffix"}
+  %tiles = pipeline.scatter %input_view across %workers : view<1x8xi8>, group -> pipeline.flow<tile<4xi8>>
+  pipeline.return
+}
+
+// ====
+
+pipeline.def @read_non_tile_flow() launch(%input: buffer) {
+  %worker_lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %worker_lanes : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<8xi8>
+  // ERROR@+1: TYPE/004 {result_name="result", actual_type="pipeline.flow<i8>", expected_constraint="pipeline.flow<tile<...>>"}
+  %tiles = pipeline.read %input_view on %workers : view<8xi8>, group -> pipeline.flow<i8>
+  pipeline.return
+}
+
+// ====
+
+func.def @one_buffer(%input: buffer) {
+  func.return
+}
+
+pipeline.def @stage_wrong_arity() launch(%input: buffer) {
+  %worker_lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %worker_lanes : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<8xi8>
+  %input_tiles = pipeline.read %input_view on %workers : view<8xi8>, group -> pipeline.flow<tile<8xi8>>
+  // ERROR@+1: STRUCTURE/013 "entry argument" "1" "stage flow" "2"
+  %output_tiles = pipeline.stage @one_buffer on %workers(%input_tiles) : (group, pipeline.flow<tile<8xi8>>) -> (pipeline.flow<tile<8xi8>>)
+  pipeline.return
+}
+
+// ====
+
+pipeline.def @write_wrong_shape() launch(%input: buffer, %output: buffer) {
+  %worker_lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %worker_lanes : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<8xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<4xi8>
+  %tiles = pipeline.read %input_view on %workers : view<8xi8>, group -> pipeline.flow<tile<8xi8>>
+  // ERROR@+1: TYPE/003 {operand_name="source", actual_type="pipeline.flow<tile<8xi8>>", expected_constraint="pipeline.flow tile matching the complete target view"}
+  pipeline.write %tiles to %output_view : pipeline.flow<tile<8xi8>>, view<4xi8>
+  pipeline.return
+}
