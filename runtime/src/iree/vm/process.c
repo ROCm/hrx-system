@@ -241,13 +241,13 @@ IREE_API_EXPORT iree_status_t iree_vm_process_create_start(
         "a program without initialize accepts no process arguments");
   }
 
-  iree_vm_root_preflight_t preflight = {0};
+  bool has_external_borrowed_arguments = false;
   iree_vm_call_packet_t root_packet;
   if (program->initializer.target_bits) {
     iree_status_t status = iree_vm_invocation_preflight_root(
         invocation, program, program->initializer.target_bits,
         program->initializer.callable_abi, arguments,
-        iree_vm_variant_span_empty(), &preflight);
+        iree_vm_variant_span_empty(), &has_external_borrowed_arguments);
     if (!iree_status_is_ok(status)) return status;
   }
 
@@ -261,8 +261,8 @@ IREE_API_EXPORT iree_status_t iree_vm_process_create_start(
   if (program->initializer.target_bits) {
     root_packet = iree_vm_invocation_commit_root(
         invocation, IREE_VM_INVOCATION_OPERATION_PROCESS_CREATE, process,
-        program->initializer.target_bits, program->initializer.callable_abi,
-        arguments, wake_callback, preflight);
+        program->initializer.callable_abi, arguments, wake_callback,
+        has_external_borrowed_arguments);
   } else {
     iree_vm_invocation_consume_arguments(arguments);
   }
@@ -279,8 +279,9 @@ IREE_API_EXPORT iree_status_t iree_vm_process_create_start(
   }
 
   iree_vm_execution_outcome_t execution_outcome = UINT32_MAX;
-  status = iree_vm_invocation_drive_start(invocation, &root_packet,
-                                          &execution_outcome);
+  status = iree_vm_invocation_drive_start(invocation,
+                                          program->initializer.target_bits,
+                                          &root_packet, &execution_outcome);
   if (!iree_status_is_ok(status)) {
     iree_vm_invocation_abort(invocation);
     iree_vm_process_free_unpublished(process, program->linked_module_count);

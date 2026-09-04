@@ -27,22 +27,6 @@ enum iree_vm_invocation_operation_e {
   IREE_VM_INVOCATION_OPERATION_PROCESS_CREATE = 2u,
 };
 
-// Active root target and its directly indexed linked ABI.
-typedef struct iree_vm_root_call_t {
-  // Program-linked callable ABI borrowed for the operation.
-  const iree_vm_program_callable_abi_t* callable_abi;
-  // Complete packed root target bits.
-  uint64_t target_bits;
-} iree_vm_root_call_t;
-
-// Validated facts carried from root preflight into its no-fail commit.
-typedef struct iree_vm_root_preflight_t {
-  // Exact root-bank bytes reserved before the first provider frame.
-  iree_host_size_t root_storage_size;
-  // Whether staged arguments contain a nonnull external borrowed ref.
-  bool has_external_borrowed_arguments;
-} iree_vm_root_preflight_t;
-
 // Driver-local child call requested by one module callback.
 typedef struct iree_vm_call_request_t {
   // Resolved child module or null when no request is pending.
@@ -57,12 +41,8 @@ typedef struct iree_vm_call_request_t {
 
 // Native-stack context valid only during one module callback.
 typedef struct iree_vm_callback_context_t {
-  // Linked module currently executing.
-  const iree_vm_linked_module_t* linked_module;
   // Driver-local child request published by call helpers.
   iree_vm_call_request_t* call_request;
-  // Module-local function currently executing.
-  uint16_t function_ordinal;
   // Whether the current function may yield.
   bool may_yield;
 } iree_vm_callback_context_t;
@@ -97,8 +77,8 @@ struct iree_vm_invocation_t {
   iree_vm_process_t* process;
   // Native-stack callback context or null outside a module callback.
   const iree_vm_callback_context_t* callback_context;
-  // Active root call description.
-  iree_vm_root_call_t root_call;
+  // Program-linked callable ABI borrowed for the active root operation.
+  const iree_vm_program_callable_abi_t* root_callable_abi;
   // Wake callback stable for the complete active operation.
   iree_vm_invocation_wake_callback_t wake_callback;
   // IDLE sentinel, active NONE, or the first cancellation reason.
@@ -113,12 +93,8 @@ struct iree_vm_invocation_t {
   bool is_allocated;
 };
 
-static_assert(sizeof(void*) != 8 || sizeof(iree_vm_root_call_t) == 16,
-              "64-bit root call descriptions must remain 16 bytes");
 static_assert(sizeof(void*) != 8 || sizeof(iree_vm_frame_t) <= 48,
               "64-bit generic frames must fit in 48 bytes");
-static_assert(sizeof(void*) != 8 || sizeof(iree_vm_invocation_t) <= 88,
-              "64-bit invocation headers must fit in 88 bytes");
 
 // Private atomic sentinel distinguishing idle from active uncancelled state.
 #define IREE_VM_INVOCATION_CANCEL_REASON_IDLE INT32_MAX
@@ -150,20 +126,21 @@ iree_status_t iree_vm_invocation_preflight_root(
     iree_vm_invocation_t* invocation, const iree_vm_program_t* program,
     uint64_t target_bits, const iree_vm_program_callable_abi_t* callable_abi,
     iree_vm_variant_span_t arguments, iree_vm_variant_span_t results,
-    iree_vm_root_preflight_t* out_preflight);
+    bool* out_has_external_borrowed_arguments);
 
 // Stages and consumes a preflighted root call and publishes active state.
 iree_vm_call_packet_t iree_vm_invocation_commit_root(
     iree_vm_invocation_t* invocation, iree_vm_invocation_operation_t operation,
-    iree_vm_process_t* process, uint64_t target_bits,
+    iree_vm_process_t* process,
     const iree_vm_program_callable_abi_t* callable_abi,
     iree_vm_variant_span_t arguments,
     iree_vm_invocation_wake_callback_t wake_callback,
-    iree_vm_root_preflight_t preflight);
+    bool has_external_borrowed_arguments);
 
 // Drives an already committed root target until completion or suspension.
 iree_status_t iree_vm_invocation_drive_start(
-    iree_vm_invocation_t* invocation, const iree_vm_call_packet_t* root_packet,
+    iree_vm_invocation_t* invocation, uint64_t target_bits,
+    const iree_vm_call_packet_t* root_packet,
     iree_vm_execution_outcome_t* out_outcome);
 
 // Drives suspended frames until the root completes or suspends again.
