@@ -999,6 +999,11 @@ def compile_descriptor_set(
         )
         rematerializable_results_by_descriptor[descriptor.key] = validation.validate_descriptor_constraints(descriptor)
         validation.validate_descriptor_op_kind(descriptor, result_count)
+        validation.validate_allocation_move_descriptor(
+            descriptor,
+            result_count,
+            reg_class_inputs,
+        )
         validation.validate_descriptor_storage_continuations(
             descriptor,
             register_part_inputs,

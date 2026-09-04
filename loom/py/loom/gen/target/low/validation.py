@@ -1275,6 +1275,53 @@ def validate_descriptor_op_kind(descriptor: Descriptor, result_count: int) -> No
             raise ValueError(f"descriptor '{descriptor.key}' low.const asm form '{mnemonic}' must expose exactly one result and no operands")
 
 
+def validate_allocation_move_descriptor(
+    descriptor: Descriptor,
+    result_count: int,
+    register_classes: Mapping[str, RegClass],
+) -> None:
+    """Validates a descriptor promised as an allocator repair move."""
+
+    if DescriptorFlag.ALLOCATION_MOVE not in descriptor.flags:
+        return
+    description = f"descriptor '{descriptor.key}' allocation move"
+    if descriptor.op_kind is not DescriptorOpKind.OP:
+        raise ValueError(f"{description} must use low.op")
+    if result_count != 1 or len(descriptor.operands) != 2:
+        raise ValueError(f"{description} must declare exactly one result and one operand")
+    destination, source = descriptor.operands
+    if source.role is not OperandRole.OPERAND:
+        raise ValueError(f"{description} source must be an ordinary operand")
+    if destination.unit_count != 1 or source.unit_count != 1:
+        raise ValueError(f"{description} must copy exactly one allocation unit")
+    if len(destination.reg_alts) != 1 or len(source.reg_alts) != 1:
+        raise ValueError(f"{description} operands must each name one register class")
+    destination_class_name = destination.reg_alts[0].reg_class
+    source_class_name = source.reg_alts[0].reg_class
+    if destination_class_name is None or source_class_name is None:
+        raise ValueError(f"{description} cannot use literal register alternatives")
+    destination_class = register_classes[destination_class_name]
+    source_class = register_classes[source_class_name]
+    if destination_class.alloc_unit_bits != source_class.alloc_unit_bits:
+        raise ValueError(f"{description} changes allocation-unit width from {source_class.alloc_unit_bits} to {destination_class.alloc_unit_bits} bits")
+    if destination.register_part is not None or source.register_part is not None:
+        raise ValueError(f"{description} cannot address register parts")
+    if destination.encoding_field_id == 0 or source.encoding_field_id == 0:
+        raise ValueError(f"{description} must encode both physical registers")
+    if descriptor.immediates:
+        raise ValueError(f"{description} cannot require immediates")
+    if descriptor.effects:
+        raise ValueError(f"{description} cannot carry effects")
+    if descriptor.constraints:
+        raise ValueError(f"{description} cannot carry operand constraints")
+    if descriptor.storage_leases:
+        raise ValueError(f"{description} cannot carry storage leases")
+    if descriptor.operand_forms:
+        raise ValueError(f"{description} cannot carry operand forms")
+    if DescriptorFlag.DEAD_REMOVABLE not in descriptor.flags:
+        raise ValueError(f"{description} must be dead-removable")
+
+
 def descriptor_operand_source_value_indices(
     descriptor: Descriptor,
     result_count: int,

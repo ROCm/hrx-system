@@ -863,6 +863,90 @@ def test_compiler_rejects_barrier_flag_without_effect() -> None:
         compiler.compile_descriptor_set(descriptor_set)
 
 
+def _allocation_move_descriptor() -> Descriptor:
+    return replace(
+        TEST_LOW_ADD_PHYS_DESCRIPTOR,
+        key="test.move.phys",
+        mnemonic="test.move.phys",
+        semantic_tag="register.move.phys",
+        operands=(
+            replace(
+                TEST_LOW_ADD_PHYS_DESCRIPTOR.operands[0],
+                encoding_field_id=1,
+            ),
+            replace(
+                TEST_LOW_ADD_PHYS_DESCRIPTOR.operands[1],
+                field_name="src",
+                encoding_field_id=2,
+            ),
+        ),
+        asm_forms=(),
+        flags=(
+            DescriptorFlag.DEAD_REMOVABLE,
+            DescriptorFlag.ALLOCATION_MOVE,
+        ),
+    )
+
+
+def test_compiler_emits_allocation_move_descriptor_flag() -> None:
+    descriptor = _allocation_move_descriptor()
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert DescriptorFlag.ALLOCATION_MOVE in compiled.descriptors[0].flags
+    assert "LOOM_LOW_DESCRIPTOR_FLAG_ALLOCATION_MOVE" in generated.source
+
+
+def test_compiler_rejects_multiunit_allocation_move() -> None:
+    descriptor = _allocation_move_descriptor()
+    descriptor = replace(
+        descriptor,
+        operands=(
+            descriptor.operands[0],
+            replace(descriptor.operands[1], unit_count=2),
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="allocation move must copy exactly one allocation unit",
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_width_changing_allocation_move() -> None:
+    descriptor = _allocation_move_descriptor()
+    descriptor = replace(
+        descriptor,
+        operands=(
+            descriptor.operands[0],
+            replace(
+                descriptor.operands[1],
+                reg_alts=(RegClassAlt("test.i32"),),
+            ),
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="allocation move changes allocation-unit width from 32 to 512 bits",
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
 def test_compiler_derives_early_clobber_descriptor_flag() -> None:
     descriptor = replace(
         TEST_LOW_ADD_I32_DESCRIPTOR,

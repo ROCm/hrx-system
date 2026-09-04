@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 41u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 42u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -456,6 +456,8 @@ typedef uint16_t loom_low_descriptor_flags_t;
 #define LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER ((uint16_t)1u << 5)
 // Descriptor ends in a variadic packet operand row.
 #define LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS ((uint16_t)1u << 6)
+// Descriptor may encode one allocator-planned, bit-preserving register move.
+#define LOOM_LOW_DESCRIPTOR_FLAG_ALLOCATION_MOVE ((uint16_t)1u << 7)
 
 // Target-neutral semantic classes attached to generated low descriptors.
 // Multiple classes may be present when a packet contributes to several
