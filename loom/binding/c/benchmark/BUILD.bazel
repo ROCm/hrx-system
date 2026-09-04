@@ -23,6 +23,8 @@ iree_c_embed_data(
     testonly = True,
     srcs = [
         "kernels/i32_memory_chain.loom",
+        "kernels/qwen38_attention_prefill_wmma.loom",
+        "kernels/qwen3_moe_routed_gate_up_q4k.loom",
     ],
     c_file_output = "benchmark_kernels.c",
     flatten = True,

@@ -40,6 +40,10 @@ class CompileScenario {
 
   virtual iree_host_size_t job_count() const = 0;
 
+  // Number of kernels represented by each benchmark job. Most scenarios
+  // compile one kernel per job; module-scaling scenarios may compile several.
+  virtual iree_host_size_t kernel_count_per_job() const { return 1; }
+
   // Prepares every worker-owned state and workload shape needed by timed jobs.
   virtual iree_status_t WarmUp(iree_host_size_t worker_count);
 
@@ -53,7 +57,7 @@ class CompileScenario {
   int64_t artifact_bytes() const;
 
   void SetWorkspaceAllocationCounters(::benchmark::State& state,
-                                      int64_t total_jobs) const;
+                                      int64_t total_kernels) const;
 
  protected:
   iree_status_t SetUpWorkerSlots(iree_host_size_t worker_count);
@@ -102,6 +106,10 @@ class TargetCompileScenario : public CompileScenario {
 
   loomc_target_environment_t* target_environment() const {
     return target_environment_.get();
+  }
+
+  loomc_target_profile_t* target_profile() const {
+    return target_profile_.get();
   }
 
  private:
@@ -175,6 +183,7 @@ iree_status_t AddSourceToIndex(loomc_link_index_builder_t* builder,
                                loomc_link_provider_role_t role);
 
 iree_status_t PreparePassProgram(loomc_context_t* context,
+                                 loomc_string_view_t pipeline_text,
                                  PassProgramPtr* out_pass_program);
 
 }  // namespace loomc::bench

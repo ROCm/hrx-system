@@ -14,6 +14,8 @@ iree_c_embed_data(
     benchmark_kernels
   SRCS
     "kernels/i32_memory_chain.loom"
+    "kernels/qwen38_attention_prefill_wmma.loom"
+    "kernels/qwen3_moe_routed_gate_up_q4k.loom"
   C_FILE_OUTPUT
     "benchmark_kernels.c"
   H_FILE_OUTPUT
