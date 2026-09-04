@@ -231,6 +231,34 @@ TEST_F(EncodingStorageTest, FixedGgmlSchemasExposeCanonicalContracts) {
       },
       {
           /*.source=*/IREE_SV(
+              "%schema = encoding.define #ggml.q5_k : encoding<schema>\n"),
+          /*.descriptor=*/&loom_encoding_ggml_q5_k_family_descriptor,
+          /*.record=*/{256, 176, 2},
+          /*.operand=*/
+          {
+              /*.element_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_U5,
+              /*.scale_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_F16,
+              /*.secondary_scale_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_U6,
+              /*.payload_packing=*/LOOM_VALUE_FACT_PAYLOAD_PACKING_MULTI_STREAM,
+              /*.scale_topology=*/LOOM_VALUE_FACT_SCALE_TOPOLOGY_HIERARCHICAL,
+              /*.affine_policy=*/LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_PLUS_MIN,
+              /*.rounding_policy=*/{},
+              /*.codebook_policy=*/{},
+              /*.sparsity_policy=*/{},
+              /*.flags=*/{},
+              /*.sparsity_group=*/{},
+              /*.payload_register_count=*/{},
+              /*.payload_element_count=*/256,
+              /*.scale_group=*/{32, {32}},
+              /*.scale_operand_count=*/2,
+          },
+          /*.required_auxiliary_keys=*/
+          (1ull << LOOM_ENCODING_AUXILIARY_KEY_SCALE) |
+              (1ull << LOOM_ENCODING_AUXILIARY_KEY_SECONDARY_SCALE) |
+              (1ull << LOOM_ENCODING_AUXILIARY_KEY_MINIMUM),
+      },
+      {
+          /*.source=*/IREE_SV(
               "%schema = encoding.define #ggml.q6_k : encoding<schema>\n"),
           /*.descriptor=*/&loom_encoding_ggml_q6_k_family_descriptor,
           /*.record=*/{256, 210, 2},

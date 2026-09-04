@@ -684,6 +684,10 @@ static const loom_encoding_vtable_t loom_encoding_ggml_q4_k_vtable = {
     .descriptor = &loom_encoding_ggml_q4_k_family_descriptor,
 };
 
+static const loom_encoding_vtable_t loom_encoding_ggml_q5_k_vtable = {
+    .descriptor = &loom_encoding_ggml_q5_k_family_descriptor,
+};
+
 static const loom_encoding_vtable_t loom_encoding_ggml_q6_k_vtable = {
     .descriptor = &loom_encoding_ggml_q6_k_family_descriptor,
 };
@@ -706,9 +710,9 @@ static const loom_encoding_vtable_t loom_encoding_hadamard_vtable = {
 static const loom_encoding_vtable_t* const loom_encoding_builtin_vtables[] = {
     &loom_encoding_layout_dense_vtable, &loom_encoding_layout_strided_vtable,
     &loom_encoding_ggml_q4_0_vtable,    &loom_encoding_ggml_q8_0_vtable,
-    &loom_encoding_ggml_q4_k_vtable,    &loom_encoding_ggml_q6_k_vtable,
-    &loom_encoding_ggml_q8_1_x4_vtable, &loom_encoding_operand_vtable,
-    &loom_encoding_hadamard_vtable,
+    &loom_encoding_ggml_q4_k_vtable,    &loom_encoding_ggml_q5_k_vtable,
+    &loom_encoding_ggml_q6_k_vtable,    &loom_encoding_ggml_q8_1_x4_vtable,
+    &loom_encoding_operand_vtable,      &loom_encoding_hadamard_vtable,
 };
 
 iree_status_t loom_context_register_builtin_encoding_vtables(
