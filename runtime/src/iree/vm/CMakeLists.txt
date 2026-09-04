@@ -14,6 +14,7 @@ iree_cc_library(
     vm
   HDRS
     "buffer.h"
+    "buffer_provider.h"
     "environment.h"
     "execution.h"
     "function.h"

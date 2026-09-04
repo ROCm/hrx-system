@@ -35,6 +35,7 @@ iree_runtime_cc_library(
     ],
     hdrs = [
         "buffer.h",
+        "buffer_provider.h",
         "environment.h",
         "execution.h",
         "function.h",

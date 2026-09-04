@@ -7,11 +7,7 @@
 #include "iree/vm/environment.h"
 
 #include "iree/base/threading/mutex.h"
-#include "iree/vm/buffer.h"
-
-// Returns the process-static provider table for the core "vm" family.
-// This is a private seam consumed only by environment construction.
-const iree_vm_ref_type_table_t* iree_vm_buffer_provider_table(void);
+#include "iree/vm/buffer_provider.h"
 
 // Maximum provider families registered in one version-zero environment,
 // including the automatically registered core "vm" family.
