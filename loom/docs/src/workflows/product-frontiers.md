@@ -167,6 +167,6 @@ The boundaries distinguish unsupported source from deliberately external work:
 
 Use [`loom-link --print-plan`](link-and-package.md#inspect-before-linking) to
 inspect requester roots and provider selection before materialization. Use
-[`loom-compile --backend=command`](compile-artifacts.md#emit-portable-command-programs)
+[`loom-compile --format=loom-command`](compile-artifacts.md#emit-portable-command-programs)
 to emit the parent artifacts and optional child requests from an already linked
 catalog.

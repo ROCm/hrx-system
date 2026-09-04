@@ -169,7 +169,7 @@ code-object profiling and source reverse-mapping.
 
 TileLang AMDGPU differential reporting compares two real code objects: the
 TileLang/TVM code-object oracle and the Loom artifact produced through
-`loom-compile --backend=amdgpu-hal`. The comparison is intentionally at the
+`loom-compile --format=amdgpu-hsaco`. The comparison is intentionally at the
 external disassembly summary level. Raw source, code objects, manifests,
 compile reports, and disassembly stay available for inspection, while the
 durable signal groups instruction-family mismatches into categories such as

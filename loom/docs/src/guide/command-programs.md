@@ -316,7 +316,7 @@ them to one device runtime:
 ```shell
 loom-compile model.loombc \
   --root=@two_layer \
-  --backend=command \
+  --format=loom-command \
   --output=commands.json \
   --emit-command-artifacts=commands/ \
   --emit-kernel-requests=kernel-requests/

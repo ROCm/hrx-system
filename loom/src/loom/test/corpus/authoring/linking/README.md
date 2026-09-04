@@ -147,7 +147,7 @@ Compile the merged bytecode with a function specialization target:
 
 ```bash
 loom-compile portable.loombc \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx1100 \
   --output=scale_i32.hal \
   --emit-target-artifact=scale_i32.hsaco \
@@ -186,7 +186,7 @@ specialized function:
 
 ```bash
 loom-compile portable.loombc \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx1100 \
   --output=scale_i32.hal \
   --emit-target-artifact=scale_i32.hsaco \

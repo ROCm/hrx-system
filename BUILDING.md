@@ -337,18 +337,17 @@ IREE_ROCM_PATH=/opt/rocm python dev.py bazel configure \
 
 Loom target options describe product compiler capability: `LOOM_TARGET_AMDGPU=ON`
 means Loom can compile for AMDGPU, including the target architecture metadata and
-production artifact emission needed by that backend. Runtime execution remains a
-separate concern controlled by Loom execution support and the runtime
+canonical artifact formats registered for that target family. Runtime execution
+remains a separate concern controlled by Loom execution support and the runtime
 `IREE_HAL_DRIVER_*` options.
 
 The default dependency-satisfied Loom target set is
 `amdgpu,llvmir,spirv,x86`. AMDGPU and SPIR-V target compilation use pinned
 source dependencies by default and do not enable the matching runtime HAL
 drivers. WebAssembly remains opt-in until the WASI SDK repository is available
-in this checkout. The default execution substrate set is `iree_hal`;
-backend execution providers still require a matching runtime HAL driver such as
-`IREE_HAL_DRIVER_VULKAN` or
-`IREE_HAL_DRIVER_AMDGPU`.
+in this checkout. The default execution substrate set is `iree_hal`; HAL
+execution providers still require a matching runtime HAL driver such as
+`IREE_HAL_DRIVER_VULKAN` or `IREE_HAL_DRIVER_AMDGPU`.
 
 CMake exposes `LOOM_TARGET_DEFAULTS` and `LOOM_EXECUTE_DEFAULTS` to set the
 default value for dependency-satisfied target and execution options before the
@@ -470,9 +469,9 @@ python dev.py bazel configure \
 ```
 
 Execution options describe the runtime substrate available to Loom tools, not a
-target backend by themselves. For example, AMDGPU execution needs the AMDGPU
-Loom target, the IREE HAL execution substrate, and the AMDGPU runtime HAL
-driver:
+compilation target by themselves. For example, AMDGPU execution needs the
+AMDGPU Loom target, the IREE HAL execution substrate, and the AMDGPU runtime
+HAL driver:
 
 ```bash
 python dev.py bazel configure \

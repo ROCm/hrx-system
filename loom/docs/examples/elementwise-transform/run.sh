@@ -57,7 +57,7 @@ loom_example_run_tool loom-link "${loom_link}" \
 loom_example_section "Specialize and compile the selected kernel for ${target}"
 loom_example_run_tool loom-compile "${loom_compile}" \
   "${output_dir}/elementwise-transform.loom" \
-  --backend="${LOOM_EXAMPLE_BACKEND}" \
+  --format="${LOOM_EXAMPLE_FORMAT}" \
   --target="amdgpu:${LOOM_EXAMPLE_TARGET}" \
   --root=@elementwise_transform_f32 \
   --output="${output_dir}/elementwise-transform.hsaco" \
@@ -67,7 +67,7 @@ loom_example_run_tool loom-compile "${loom_compile}" \
 loom_example_section "Materialize the portable command program"
 loom_example_run_tool loom-compile "${loom_compile}" \
   "${output_dir}/elementwise-transform.loom" \
-  --backend=command \
+  --format=loom-command \
   --root=@elementwise_transform \
   --output="${output_dir}/elementwise-transform.commands.json" \
   --emit-command-artifacts="${output_dir}/elementwise-transform.commands"

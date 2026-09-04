@@ -58,7 +58,7 @@ loom_example_run_tool loom-link "${loom_link}" \
 loom_example_section "Emit the parent command product and child requests"
 loom_example_run_tool loom-compile "${loom_compile}" \
   "${output_dir}/heterogeneous.loombc" \
-  --backend=command \
+  --format=loom-command \
   --root=@heterogeneous \
   --output="${output_dir}/commands.json" \
   --emit-command-artifacts="${output_dir}/commands" \

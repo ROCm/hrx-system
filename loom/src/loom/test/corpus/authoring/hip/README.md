@@ -302,7 +302,7 @@ Target compile evidence:
 
 ```bash
 loom-compile shared_memory_tile.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
   --output=/tmp/shared-memory-tile.hal \
   --emit-target-artifact=/tmp/shared-memory-tile.hsaco \
@@ -377,7 +377,7 @@ Target compile evidence:
 
 ```bash
 loom-compile shared_memory_transpose.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
   --output=/tmp/shared-memory-transpose.hal \
   --emit-target-artifact=/tmp/shared-memory-transpose.hsaco \
@@ -447,7 +447,7 @@ Target compile evidence:
 
 ```bash
 loom-compile shared_memory_vector_tile.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
   --output=/tmp/shared-memory-vector-tile.hal \
   --emit-target-artifact=/tmp/shared-memory-vector-tile.hsaco \
@@ -703,7 +703,7 @@ Compile the same source for generic wave32 and wave64 target profiles:
 
 ```bash
 loom-compile target_provider_selection.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
   --output=/tmp/target-provider-gfx11-generic.hal \
   --emit-target-artifact=/tmp/target-provider-gfx11-generic.hsaco \
@@ -712,7 +712,7 @@ loom-compile target_provider_selection.loom \
   --dump-ir-output=/tmp/target-provider-gfx11-generic-trace.jsonl
 
 loom-compile target_provider_selection.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx9-4-generic \
   --output=/tmp/target-provider-gfx9-4-generic.hal \
   --emit-target-artifact=/tmp/target-provider-gfx9-4-generic.hsaco \
@@ -791,7 +791,7 @@ Proof command:
 
 ```bash
 loom-compile cluster_b128_multicast.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx1250 \
   --output=/tmp/cluster-b128-multicast.hal \
   --emit-target-artifact=/tmp/cluster-b128-multicast.hsaco \

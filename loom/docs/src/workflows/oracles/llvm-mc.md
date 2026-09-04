@@ -41,7 +41,7 @@ Compile the exact kernel entry and retain both compiler and object metadata:
 ```shell
 loom-compile kernel.loom \
   --root=@kernel \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx1170 \
   --output=kernel.hsaco \
   --artifact-manifest=details \
