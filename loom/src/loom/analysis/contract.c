@@ -196,6 +196,22 @@ void loom_contract_request_initialize(loom_contract_request_t* out_request) {
   };
 }
 
+void loom_contract_request_transpose_mn(loom_contract_request_t* request) {
+  const int64_t m = request->shape.m;
+  request->shape.m = request->shape.n;
+  request->shape.n = m;
+
+  const loom_contract_value_ref_t m_ref = request->shape_value_refs.m;
+  request->shape_value_refs.m = request->shape_value_refs.n;
+  request->shape_value_refs.n = m_ref;
+
+  const loom_contract_operand_t lhs = request->lhs;
+  request->lhs = request->rhs;
+  request->rhs = lhs;
+  request->lhs.role = LOOM_CONTRACT_OPERAND_ROLE_LHS;
+  request->rhs.role = LOOM_CONTRACT_OPERAND_ROLE_RHS;
+}
+
 bool loom_contract_request_validate(
     const loom_contract_request_t* request,
     loom_contract_diagnostic_t* out_diagnostic) {

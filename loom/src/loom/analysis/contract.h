@@ -459,6 +459,12 @@ typedef struct loom_contract_diagnostic_t {
 // policy. Callers then fill the fields they have proven.
 void loom_contract_request_initialize(loom_contract_request_t* out_request);
 
+// Transposes the matrix product represented by |request|. The result describes
+// the exact identity A*B=transpose(transpose(B)*transpose(A)): M/N shape facts
+// and witnesses are exchanged, as are the complete LHS/RHS operand contracts.
+// Operand role tags are restored to match their new request fields.
+void loom_contract_request_transpose_mn(loom_contract_request_t* request);
+
 // Validates the target-independent fields required before target projection.
 bool loom_contract_request_validate(const loom_contract_request_t* request,
                                     loom_contract_diagnostic_t* out_diagnostic);

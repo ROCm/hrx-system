@@ -77,6 +77,8 @@ typedef struct loom_low_lower_selected_plan_t {
 typedef struct loom_low_lower_descriptor_matrix_plan_t {
   // Shared source adapter used by this matrix descriptor plan.
   loom_target_contract_descriptor_matrix_source_t source;
+  // Exact source-to-native transform selected with the descriptor.
+  loom_target_contract_descriptor_matrix_transform_flags_t transform_flags;
   // Descriptor row selected by the target matrix projection.
   loom_low_lower_resolved_descriptor_t descriptor;
   // Target-independent request facts used to materialize descriptor operands.

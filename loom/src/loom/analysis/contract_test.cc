@@ -92,6 +92,50 @@ TEST(ContractTest, ValidatesDynamicShapeWithValueRefs) {
   EXPECT_EQ(diagnostic.rejection_bits, LOOM_CONTRACT_REJECTION_NONE);
 }
 
+TEST(ContractTest, TransposesMatrixProductRequest) {
+  loom_contract_request_t request = CompletePackedDotRequest();
+  request.shape.m = 8;
+  request.shape.n = 4;
+  request.shape_value_refs.m = loom_contract_value_ref_from_value_id(10);
+  request.shape_value_refs.n = loom_contract_value_ref_from_value_id(11);
+  request.lhs.numeric_type = LOOM_CONTRACT_NUMERIC_F16;
+  request.lhs.payload_register_count = 2;
+  request.lhs.encoded.available_auxiliary_operands =
+      LOOM_CONTRACT_AUXILIARY_OPERAND_SCALE;
+  request.lhs.encoded
+      .auxiliary_value_refs[LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE] =
+      loom_contract_value_ref_from_value_id(20);
+  request.rhs.numeric_type = LOOM_CONTRACT_NUMERIC_BF16;
+  request.rhs.payload_register_count = 3;
+  request.rhs.encoded.available_auxiliary_operands =
+      LOOM_CONTRACT_AUXILIARY_OPERAND_SPARSE_METADATA;
+  request.rhs.encoded.auxiliary_value_refs
+      [LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SPARSE_METADATA] =
+      loom_contract_value_ref_from_value_id(21);
+
+  loom_contract_request_transpose_mn(&request);
+
+  EXPECT_EQ(request.shape.m, 4);
+  EXPECT_EQ(request.shape.n, 8);
+  EXPECT_EQ(loom_contract_value_ref_value_id(request.shape_value_refs.m), 11u);
+  EXPECT_EQ(loom_contract_value_ref_value_id(request.shape_value_refs.n), 10u);
+  EXPECT_EQ(request.lhs.role, LOOM_CONTRACT_OPERAND_ROLE_LHS);
+  EXPECT_EQ(request.lhs.numeric_type, LOOM_CONTRACT_NUMERIC_BF16);
+  EXPECT_EQ(request.lhs.payload_register_count, 3);
+  EXPECT_EQ(loom_contract_value_ref_value_id(
+                request.lhs.encoded.auxiliary_value_refs
+                    [LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SPARSE_METADATA]),
+            21u);
+  EXPECT_EQ(request.rhs.role, LOOM_CONTRACT_OPERAND_ROLE_RHS);
+  EXPECT_EQ(request.rhs.numeric_type, LOOM_CONTRACT_NUMERIC_F16);
+  EXPECT_EQ(request.rhs.payload_register_count, 2);
+  EXPECT_EQ(
+      loom_contract_value_ref_value_id(
+          request.rhs.encoded
+              .auxiliary_value_refs[LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE]),
+      20u);
+}
+
 TEST(ContractTest, RejectsDynamicShapeWithoutValueRef) {
   loom_contract_request_t request = CompletePackedDotRequest();
   request.shape.k = 0;

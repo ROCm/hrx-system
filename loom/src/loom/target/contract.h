@@ -62,6 +62,13 @@ typedef struct loom_target_contract_rejection_t {
   iree_host_size_t param_count;
 } loom_target_contract_rejection_t;
 
+enum loom_target_contract_descriptor_matrix_transform_flag_bits_e {
+  // The selected descriptor computes the transposed matrix product by
+  // exchanging source LHS/RHS operands and transposing M/N request facts.
+  LOOM_TARGET_CONTRACT_DESCRIPTOR_MATRIX_TRANSFORM_TRANSPOSE_MN = 1u << 0,
+};
+typedef uint32_t loom_target_contract_descriptor_matrix_transform_flags_t;
+
 typedef struct loom_target_contract_query_result_t {
   // Query outcome.
   loom_target_contract_query_outcome_t outcome;
@@ -95,6 +102,9 @@ typedef struct loom_target_contract_query_result_t {
   uint32_t missing_feature_bits;
   // Value fact categories missing for the selected rule.
   uint32_t missing_fact_bits;
+  // Exact source-to-native transform selected with a descriptor-matrix row.
+  loom_target_contract_descriptor_matrix_transform_flags_t
+      selected_descriptor_matrix_transform_flags;
   // Optional rejection payload. Usually points into rodata or a scoped arena.
   const loom_target_contract_rejection_t* rejection;
 } loom_target_contract_query_result_t;
@@ -322,6 +332,7 @@ loom_target_contract_query_result_empty(void) {
       /*.target_rejection_bits=*/0,
       /*.missing_feature_bits=*/0,
       /*.missing_fact_bits=*/0,
+      /*.selected_descriptor_matrix_transform_flags=*/0,
       /*.rejection=*/NULL,
   };
 }

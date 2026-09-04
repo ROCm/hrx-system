@@ -771,12 +771,19 @@ static iree_status_t loom_low_lower_record_descriptor_matrix_plan(
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_plan_data(
       context, sizeof(*plan_data), (void**)&plan_data));
   plan_data->source = matrix_rule->source;
+  plan_data->transform_flags =
+      query_result->selected_descriptor_matrix_transform_flags;
   if (query_result->selected_descriptor == NULL) {
     IREE_ASSERT_UNREACHABLE("descriptor-matrix legal query has no descriptor");
     IREE_BUILTIN_UNREACHABLE();
   }
   plan_data->descriptor.descriptor = query_result->selected_descriptor;
   plan_data->contract_request = *contract_request;
+  if (iree_any_bit_set(
+          plan_data->transform_flags,
+          LOOM_TARGET_CONTRACT_DESCRIPTOR_MATRIX_TRANSFORM_TRANSPOSE_MN)) {
+    loom_contract_request_transpose_mn(&plan_data->contract_request);
+  }
   plan_data->attrs = loom_named_attr_slice_empty();
   plan_data->native_contraction_facts =
       query_result->selected_native_contraction_facts;
