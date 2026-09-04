@@ -188,7 +188,7 @@ changing the product graph.
 The Bazel rules orchestrate the public tools; they do not add a second linkage
 model. `loom_library` corresponds to a strict relocatable merge. A kernel or
 command binary first performs a root-selected `loom-link --mode=link` with the
-selected `--target-profile`, then invokes the appropriate `loom-compile`
+selected `--target`, then invokes the appropriate `loom-compile`
 backend on that one closed module. A VM binary performs the same selective
 link without a device profile. The command product invokes the command and
 AMDGPU emitters over the same linked input.

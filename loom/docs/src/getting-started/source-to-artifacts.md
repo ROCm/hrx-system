@@ -283,7 +283,7 @@ loom/docs/examples/elementwise-transform/run.sh \
 The resulting directory contains the closed target-specialized
 `elementwise-transform.loom` module, the GFX11 HSACO, a command manifest, one
 portable `.loomcmd`, and the captured target Low IR. The
-`--target-profile=amdgpu:gfx11-generic` link argument makes subgroup facts
+`--target=amdgpu:gfx11-generic` link argument makes subgroup facts
 available before template-provider pruning, so the wave32 implementation is
 selected without pulling the portable alternative into the product. The
 documentation build invokes the same script and regenerates the views below;

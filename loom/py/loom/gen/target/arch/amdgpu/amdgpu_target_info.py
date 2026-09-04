@@ -1099,6 +1099,21 @@ def _emit_header(descriptor_sets: Sequence[AmdgpuDescriptorSetInfo]) -> str:
         [
             f"#define LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_COUNT {_u16_expr(len(descriptor_sets))}",
             "",
+            "#ifdef __cplusplus",
+            'extern "C" {',
+            "#endif",
+            "",
+            "// Address-stable generated compiler target rows in target-kind order.",
+            "//",
+            "// Target-owned immutable aggregates use these addresses in constant",
+            "// initializers. Runtime lookup uses the checked target-info accessors.",
+            "extern const loom_amdgpu_target_info_t",
+            "    loom_amdgpu_target_info_target_infos[];",
+            "",
+            "#ifdef __cplusplus",
+            '}  // extern "C"',
+            "#endif",
+            "",
         ]
     )
     lines.extend(
@@ -1138,8 +1153,6 @@ def _emit_tables_header() -> str:
         "extern const iree_host_size_t",
         "    loom_amdgpu_target_info_processor_info_count;",
         "",
-        "extern const loom_amdgpu_target_info_t",
-        "    loom_amdgpu_target_info_target_infos[];",
         "extern const iree_host_size_t",
         "    loom_amdgpu_target_info_target_info_count;",
         "",

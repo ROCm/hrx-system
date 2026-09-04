@@ -799,8 +799,7 @@ TEST(AmdgpuHsacoTest, WritesEveryTargetCodeObjectFlags) {
     loom_amdgpu_target_profile_t target_profile = {};
     IREE_ASSERT_OK(
         loom_amdgpu_target_profile_initialize(&identity, &target_profile));
-    metadata.target_extensions =
-        target_profile.properties.kernel_metadata_extensions;
+    metadata.target_extensions = target->kernel_metadata_extensions;
     const loom_amdgpu_hsaco_kernel_t kernel = {
         /*.metadata=*/metadata,
         /*.descriptor_options=*/{},

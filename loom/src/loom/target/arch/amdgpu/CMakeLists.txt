@@ -218,10 +218,12 @@ loom_cc_library(
   SRCS
     "profile.c"
   DEPS
+    ::artifact_key
     ::facts
     ::target_info
     iree::base
     loom::target::arch::amdgpu::records::target_records
+    loom::target::arch::amdgpu::records::target_records_tables
     loom::target::profile
   PUBLIC
 )
@@ -234,6 +236,7 @@ loom_cc_test(
   SRCS
     "profile_test.cc"
   DEPS
+    ::artifact_key
     ::profile
     ::target_info
     iree::base::internal::arena

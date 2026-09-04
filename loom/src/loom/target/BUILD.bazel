@@ -254,6 +254,26 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "selection",
+    srcs = ["selection.c"],
+    hdrs = ["selection.h"],
+    deps = [
+        ":provider",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "selection_test",
+    srcs = ["selection_test.cc"],
+    deps = [
+        ":selection",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "residency",
     srcs = ["residency.c"],
     hdrs = ["residency.h"],

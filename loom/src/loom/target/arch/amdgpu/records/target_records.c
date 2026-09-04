@@ -73,7 +73,7 @@ static const loom_target_export_plan_t kAmdgpuHalExportPlan = {
 #define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(                                  \
     symbol_suffix, bundle_name, snapshot_name, key, descriptor_set_flags,   \
     wavefront_size, workgroup_storage_byte_limit)                           \
-  static const loom_target_bundle_t kAmdgpuLowTargetBundle##symbol_suffix##Core = { \
+  const loom_target_bundle_t kAmdgpuLowTargetBundle##symbol_suffix##Core = { \
     .name = IREE_SVL(bundle_name), \
     .snapshot = &kAmdgpu##symbol_suffix##Snapshot, \
     .export_plan = &kAmdgpuHalExportPlan, \

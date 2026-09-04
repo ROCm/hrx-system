@@ -276,10 +276,12 @@ loom_cc_library(
         ]
     ),
     deps = [
+        ":artifact_key",
         ":facts",
         ":target_info",
         "//loom/src/loom/target:profile",
         "//loom/src/loom/target/arch/amdgpu/records:target_records",
+        "//loom/src/loom/target/arch/amdgpu/records:target_records_tables",
         "//runtime/src/iree/base",
     ],
 )
@@ -288,6 +290,7 @@ loom_cc_test(
     name = "profile_test",
     srcs = ["profile_test.cc"],
     deps = [
+        ":artifact_key",
         ":profile",
         ":target_info",
         "//loom/src/loom/target/arch/amdgpu/records:target_records",

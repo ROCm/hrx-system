@@ -111,6 +111,29 @@ TEST(SpirvTargetProfileTest, ProjectsOwnedCooperativePropertyFacts) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
+TEST(SpirvTargetProfileTest, SelectsImmutableVulkanProfile) {
+  const loom_spirv_target_profile_t* profile = nullptr;
+  IREE_ASSERT_OK(
+      loom_spirv_target_profile_select(IREE_SV("vulkan1.3+bda"), &profile));
+  ASSERT_NE(profile, nullptr);
+  EXPECT_EQ(profile->base.target_bundle,
+            &loom_spirv_low_target_bundle_vulkan1_3);
+  EXPECT_EQ(profile->cooperative_properties, nullptr);
+
+  const loom_spirv_target_profile_t* repeated_profile = nullptr;
+  IREE_ASSERT_OK(loom_spirv_target_profile_select(IREE_SV("vulkan1.3+bda"),
+                                                  &repeated_profile));
+  EXPECT_EQ(repeated_profile, profile);
+}
+
+TEST(SpirvTargetProfileTest, RejectsUnknownNamedProfile) {
+  const loom_spirv_target_profile_t* profile = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_spirv_target_profile_select(IREE_SV("vulkan1.2"), &profile));
+  EXPECT_EQ(profile, nullptr);
+}
+
 TEST(SpirvTargetProfileTest, CheckedCastRejectsAnotherFamily) {
   static const loom_target_profile_type_t kOtherProfileType = {
       /*.name=*/IREE_SVL("other"),

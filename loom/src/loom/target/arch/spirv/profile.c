@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "loom/target/arch/spirv/records/target_records.h"
+
 static iree_status_t loom_spirv_target_profile_allocate_copy(
     iree_arena_allocator_t* arena, const void* source,
     iree_host_size_t byte_length, void** out_copy) {
@@ -136,6 +138,14 @@ const loom_target_profile_type_t loom_spirv_target_profile_type = {
     .project_facts = loom_spirv_target_profile_project_facts,
 };
 
+static const loom_spirv_target_profile_t kSpirvVulkan13BdaTargetProfile = {
+    .base =
+        {
+            .type = &loom_spirv_target_profile_type,
+            .target_bundle = &loom_spirv_low_target_bundle_vulkan1_3,
+        },
+};
+
 void loom_spirv_target_profile_initialize(
     const loom_target_bundle_t* target_bundle,
     const loom_spirv_cooperative_property_set_t* cooperative_properties,
@@ -149,4 +159,19 @@ void loom_spirv_target_profile_initialize(
           },
       .cooperative_properties = cooperative_properties,
   };
+}
+
+iree_status_t loom_spirv_target_profile_select(
+    iree_string_view_t selector,
+    const loom_spirv_target_profile_t** out_profile) {
+  IREE_ASSERT_ARGUMENT(out_profile);
+  *out_profile = NULL;
+  if (!iree_string_view_equal(selector, IREE_SV("vulkan1.3+bda"))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "unknown SPIR-V target selector '%.*s'; expected vulkan1.3+bda",
+        (int)selector.size, selector.data);
+  }
+  *out_profile = &kSpirvVulkan13BdaTargetProfile;
+  return iree_ok_status();
 }

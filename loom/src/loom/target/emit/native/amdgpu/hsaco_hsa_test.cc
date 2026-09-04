@@ -1081,7 +1081,7 @@ iree_status_t EmitRuntimeGlobalKernelForAmdgpu(const AmdgpuHsaTarget& target,
       CodeObjectTargetIdForIdentity(target_profile.identity);
   loom_amdgpu_hsaco_kernel_t revisioned_kernel = kernel;
   revisioned_kernel.metadata.target_extensions =
-      target_profile.properties.kernel_metadata_extensions;
+      target_profile.identity.target->kernel_metadata_extensions;
   const loom_amdgpu_hsaco_file_t file = {
       /*.target=*/iree_make_string_view(target_id.data(), target_id.size()),
       /*.processor=*/processor->name,

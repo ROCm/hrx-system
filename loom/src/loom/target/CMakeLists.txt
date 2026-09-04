@@ -286,6 +286,30 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    selection
+  HDRS
+    "selection.h"
+  SRCS
+    "selection.c"
+  DEPS
+    ::provider
+    iree::base
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    selection_test
+  SRCS
+    "selection_test.cc"
+  DEPS
+    ::selection
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
     residency
   HDRS
     "residency.h"

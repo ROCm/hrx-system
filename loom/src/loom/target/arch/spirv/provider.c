@@ -25,6 +25,14 @@ static const loom_target_legalizer_provider_t* const
         &loom_spirv_target_legalizer_provider_storage,
 };
 
+static iree_status_t loom_spirv_provider_select_profile(
+    iree_string_view_t selector, const loom_target_profile_t** out_profile) {
+  const loom_spirv_target_profile_t* profile = NULL;
+  IREE_RETURN_IF_ERROR(loom_spirv_target_profile_select(selector, &profile));
+  *out_profile = profile ? &profile->base : NULL;
+  return iree_ok_status();
+}
+
 const loom_target_provider_t loom_spirv_target_provider = {
     .profile_type = &loom_spirv_target_profile_type,
     .materialize_definition = loom_spirv_target_materialize_definition,
@@ -47,6 +55,7 @@ const loom_target_provider_t loom_spirv_target_provider = {
             .values = kLoomSpirvLowVerifyProviders,
         },
     .target_fact_type = &loom_spirv_target_fact_type,
+    .select_profile = loom_spirv_provider_select_profile,
 };
 
 static const loom_target_provider_t* const kLoomSpirvTargetProviders[] = {

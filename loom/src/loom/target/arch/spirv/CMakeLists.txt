@@ -236,6 +236,7 @@ loom_cc_library(
   DEPS
     ::facts
     iree::base
+    loom::target::arch::spirv::records::target_records
     loom::target::profile
   PUBLIC
 )

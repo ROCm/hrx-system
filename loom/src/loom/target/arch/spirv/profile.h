@@ -35,6 +35,15 @@ void loom_spirv_target_profile_initialize(
     const loom_spirv_cooperative_property_set_t* cooperative_properties,
     loom_spirv_target_profile_t* out_profile);
 
+// Selects the immutable profile matching one SPIR-V target selector.
+//
+// The returned profile has process lifetime. Named profiles model static API
+// environments; device-discovered profiles may additionally carry dynamic
+// cooperative operation rows through |loom_spirv_target_profile_initialize|.
+iree_status_t loom_spirv_target_profile_select(
+    iree_string_view_t selector,
+    const loom_spirv_target_profile_t** out_profile);
+
 // Returns |profile| as a SPIR-V profile, or NULL for another family.
 static inline const loom_spirv_target_profile_t* loom_spirv_target_profile_cast(
     const loom_target_profile_t* profile) {

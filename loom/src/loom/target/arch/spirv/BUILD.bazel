@@ -229,6 +229,7 @@ loom_cc_library(
     deps = [
         ":facts",
         "//loom/src/loom/target:profile",
+        "//loom/src/loom/target/arch/spirv/records:target_records",
         "//runtime/src/iree/base",
     ],
 )

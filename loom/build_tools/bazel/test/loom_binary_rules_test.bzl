@@ -99,7 +99,7 @@ def _test_kernel_binary_roots_direct_library_exports_impl(env, target):
         "--mode=link",
         "--strip-check",
         "--require-resolved-config",
-        "--target-profile=amdgpu:gfx11-generic",
+        "--target=amdgpu:gfx11-generic",
         "--to=bc",
     ]:
         if expected_arg not in link_action.argv:
@@ -159,7 +159,7 @@ def _test_kernel_binary_sources_are_an_implicit_library_impl(env, target):
     )
 
     link_action = _find_action(env, actions, "LoomBinaryLink")
-    if "--target-profile=amdgpu:gfx11-generic" not in link_action.argv:
+    if "--target=amdgpu:gfx11-generic" not in link_action.argv:
         env.fail(
             "expected target profile in link arguments %r" %
             link_action.argv,
@@ -275,7 +275,7 @@ def _test_command_binary_emits_composite_product_impl(env, target):
 
     actions = target[TestingAspectInfo].actions
     link_action = _find_action(env, actions, "LoomBinaryLink")
-    if "--target-profile=amdgpu:gfx11-generic" not in link_action.argv:
+    if "--target=amdgpu:gfx11-generic" not in link_action.argv:
         env.fail(
             "expected target profile in link arguments %r" %
             link_action.argv,
