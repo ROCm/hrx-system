@@ -28,15 +28,15 @@ static const loom_product_descriptor_t kProductDescriptor = {
     /*.destroy=*/DestroyTestProduct,
 };
 
-static const iree_string_view_t kRootOperationNames[] = {
-    IREE_SV("test.root"),
+static const loom_product_root_match_t kRootMatches[] = {
+    {IREE_SV("test.root"), LOOM_SYMBOL_PRODUCT_CARRIER_UNCLASSIFIED},
 };
 
 static const loom_product_operation_t kOperation = {
     /*.name=*/IREE_SV("test"),
     /*.product_descriptor=*/&kProductDescriptor,
-    /*.root_operation_names=*/kRootOperationNames,
-    /*.root_operation_name_count=*/IREE_ARRAYSIZE(kRootOperationNames),
+    /*.root_matches=*/kRootMatches,
+    /*.root_match_count=*/IREE_ARRAYSIZE(kRootMatches),
 };
 
 static const loom_product_artifact_schema_t kArtifactSchemas[] = {

@@ -732,6 +732,10 @@ class SymbolDefinition:
         their FuncLike interface when this is absent.
     retain: Optional enum attribute that marks symbols which ordinary symbol
         DCE must preserve even when unreachable.
+    product_carrier: Optional enum attribute that classifies the product
+        boundary of a polymorphic durable root. The absent value is the enum's
+        zero carrier; symbol definitions without this contract remain
+        unclassified.
     flags: Generic roles that affect symbol processing independent of the
         defining dialect.
     value_contract: Optional typed-value contract described by generated field
@@ -746,6 +750,7 @@ class SymbolDefinition:
     fact_domain: str | None = None
     visibility: str | None = None
     retain: str | None = None
+    product_carrier: str | None = None
     flags: tuple[SymbolDefinitionFlag, ...] = ()
     value_contract: SymbolValueContract | None = None
     kernel_contract: SymbolKernelContract | None = None
@@ -760,6 +765,7 @@ class SymbolDefinition:
         fact_domain: str | None = None,
         visibility: str | None = None,
         retain: str | None = None,
+        product_carrier: str | None = None,
         flags: list[SymbolDefinitionFlag] | tuple[SymbolDefinitionFlag, ...] = (),
         value_contract: SymbolValueContract | None = None,
         kernel_contract: SymbolKernelContract | None = None,
@@ -774,6 +780,8 @@ class SymbolDefinition:
             raise ValueError("SymbolDefinition: visibility must be non-empty")
         if retain is not None and not retain:
             raise ValueError("SymbolDefinition: retain must be non-empty")
+        if product_carrier is not None and not product_carrier:
+            raise ValueError("SymbolDefinition: product_carrier must be non-empty")
         if not frozen_interfaces:
             raise ValueError("SymbolDefinition: interfaces must be non-empty")
         for interface in frozen_interfaces:
@@ -832,6 +840,7 @@ class SymbolDefinition:
         object.__setattr__(self, "fact_domain", fact_domain)
         object.__setattr__(self, "visibility", visibility)
         object.__setattr__(self, "retain", retain)
+        object.__setattr__(self, "product_carrier", product_carrier)
         object.__setattr__(self, "flags", frozen_flags)
         object.__setattr__(self, "value_contract", value_contract)
         object.__setattr__(self, "kernel_contract", kernel_contract)
@@ -5770,6 +5779,25 @@ class Op:
                     raise ValueError(
                         f"Op '{name}': symbol_def retain '{symbol_def.retain}' "
                         "must be an enum attr"
+                    )
+            if symbol_def.product_carrier is not None:
+                product_carrier_attr = next(
+                    (
+                        attr
+                        for attr in frozen_attrs
+                        if attr.name == symbol_def.product_carrier
+                    ),
+                    None,
+                )
+                if product_carrier_attr is None:
+                    raise ValueError(
+                        f"Op '{name}': symbol_def product_carrier "
+                        f"'{symbol_def.product_carrier}' does not name an attr"
+                    )
+                if product_carrier_attr.attr_type != ATTR_TYPE_ENUM:
+                    raise ValueError(
+                        f"Op '{name}': symbol_def product_carrier "
+                        f"'{symbol_def.product_carrier}' must be an enum attr"
                     )
         func_like = next(
             (

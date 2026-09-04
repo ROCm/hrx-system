@@ -95,6 +95,7 @@ loom_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":artifact_set",
+        "//loom/src/loom/ops/pipeline",
         "//loom/src/loom/product:registry",
         "//runtime/src/iree/base",
     ],

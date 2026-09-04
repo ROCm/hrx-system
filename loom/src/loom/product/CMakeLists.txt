@@ -29,6 +29,7 @@ loom_cc_library(
   DEPS
     ::registry
     iree::base
+    loom::ops::pipeline
     loom::target::types
   PUBLIC
 )
@@ -57,6 +58,7 @@ loom_cc_library(
   DEPS
     ::product
     iree::base
+    loom::ir
     loom::target::pipeline_options
     loom::target::product_contract
     loom::target::profile

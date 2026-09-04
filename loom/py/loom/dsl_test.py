@@ -3175,6 +3175,41 @@ class TestSymbolReference:
 
 
 class TestSymbolKernelContract:
+    def test_product_carrier_requires_declared_enum_attr(self) -> None:
+        with _raises(ValueError, match="does not name an attr"):
+            Op(
+                "test.pipeline",
+                traits=[SYMBOL_DEFINE],
+                attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="pipeline",
+                    interfaces=["func_like", "pipeline"],
+                    product_carrier="scope",
+                ),
+                regions=[RegionDef("body")],
+                interfaces=[FuncLikeInterface(callee="callee", body="body")],
+                format=[FuncArgs("args"), Region("body")],
+            )
+        with _raises(ValueError, match="must be an enum attr"):
+            Op(
+                "test.pipeline",
+                traits=[SYMBOL_DEFINE],
+                attrs=[
+                    AttrDef("callee", ATTR_TYPE_SYMBOL),
+                    AttrDef("scope", "i64"),
+                ],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="pipeline",
+                    interfaces=["func_like", "pipeline"],
+                    product_carrier="scope",
+                ),
+                regions=[RegionDef("body")],
+                interfaces=[FuncLikeInterface(callee="callee", body="body")],
+                format=[FuncArgs("args"), Region("body")],
+            )
+
     def test_callable_interface_requires_func_like_interface(self) -> None:
         with _raises(ValueError, match="requires the func_like interface"):
             SymbolDefinition(

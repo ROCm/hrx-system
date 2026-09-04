@@ -24,6 +24,7 @@
 #include "loom/ops/check/ops.h"
 #include "loom/ops/config/ops.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/pipeline/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
@@ -55,6 +56,8 @@ class ModuleIndexTest : public ::testing::Test {
                     loom_config_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables,
                     loom_func_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_PIPELINE, loom_pipeline_dialect_vtables,
+                    loom_pipeline_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables,
                     loom_target_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables,
@@ -403,6 +406,73 @@ func.def @ordinary() {
         iree_all_bits_set(retained->flags, LOOM_LINK_SYMBOL_FLAG_RETAIN));
     EXPECT_FALSE(
         iree_any_bit_set(ordinary->flags, LOOM_LINK_SYMBOL_FLAG_RETAIN));
+  };
+
+  loom_link_module_index_add_options_t options = {
+      /*.provider_name=*/IREE_SV("input"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+  };
+  IndexPtr materialized_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      materialized_index.get(), module, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(materialized_index.get());
+
+  IndexPtr bytecode_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+      bytecode_index.get(),
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("input.loombc"), /*index_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(bytecode_index.get());
+
+  IndexPtr text_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_text(
+      text_index.get(), source, IREE_SV("input.loom"),
+      /*parse_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(text_index.get());
+}
+
+TEST_F(ModuleIndexTest, PreservesProductCarrierAcrossProviderForms) {
+  const iree_string_view_t source = IREE_SV(R"(
+pipeline.def<kernel> @kernel_pipeline() launch() {
+  pipeline.return
+}
+
+pipeline.def<command> @command_pipeline() launch() {
+  pipeline.return
+}
+
+pipeline.def @generic_pipeline() launch() {
+  pipeline.return
+}
+)");
+  loom_module_t* module = Parse(source);
+  std::vector<uint8_t> bytes = WriteModule(module);
+
+  auto verify_index = [&](const loom_link_module_index_t* index) {
+    const loom_link_module_index_module_t* indexed_module =
+        loom_link_module_index_module_at(index, 0);
+    ASSERT_NE(indexed_module, nullptr);
+    const loom_link_module_index_symbol_t* kernel_pipeline =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("kernel_pipeline"));
+    const loom_link_module_index_symbol_t* command_pipeline =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("command_pipeline"));
+    const loom_link_module_index_symbol_t* generic_pipeline =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("generic_pipeline"));
+    ASSERT_NE(kernel_pipeline, nullptr);
+    ASSERT_NE(command_pipeline, nullptr);
+    ASSERT_NE(generic_pipeline, nullptr);
+    EXPECT_EQ(StringViewToString(kernel_pipeline->defining_op_name),
+              "pipeline.def");
+    EXPECT_EQ(kernel_pipeline->product_carrier, LOOM_PIPELINE_DEF_SCOPE_KERNEL);
+    EXPECT_EQ(command_pipeline->product_carrier,
+              LOOM_PIPELINE_DEF_SCOPE_COMMAND);
+    EXPECT_EQ(generic_pipeline->product_carrier, 0u);
   };
 
   loom_link_module_index_add_options_t options = {

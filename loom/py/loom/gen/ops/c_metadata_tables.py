@@ -207,6 +207,18 @@ def _symbol_retain_attr_index(op: Op) -> int | None:
     return retain_attr_index
 
 
+def _symbol_product_carrier_attr_index(op: Op) -> int | None:
+    """Returns the product-carrier attribute index for a symbol op."""
+
+    if op.symbol_def is None or op.symbol_def.product_carrier is None:
+        return None
+    carrier_attr_index = c_queries.resolve_attr_index(op, op.symbol_def.product_carrier, "symbol_def.product_carrier")
+    carrier_attr = c_queries.non_flags_attrs(op)[carrier_attr_index]
+    if carrier_attr.attr_type != ATTR_TYPE_ENUM:
+        raise ValueError(f"Op {op.name!r}: symbol_def.product_carrier {op.symbol_def.product_carrier!r} must name an enum attr")
+    return carrier_attr_index
+
+
 def _symbol_visibility_attr_index(op: Op) -> int | None:
     """Returns the generic visibility attribute index for a symbol op."""
 
@@ -955,6 +967,7 @@ def generate_tables_c(
             attr_index = c_queries.resolve_attr_index(op, op.symbol_def.field, "symbol_def")
             visibility_attr_index = _symbol_visibility_attr_index(op)
             retain_attr_index = _symbol_retain_attr_index(op)
+            product_carrier_attr_index = _symbol_product_carrier_attr_index(op)
             value_contract_indices = _symbol_value_contract_indices(op)
             kernel_contract_indices = _symbol_kernel_contract_indices(op)
             flags = c_symbols.symbol_interface_flags(op.symbol_def.interfaces)
@@ -967,6 +980,8 @@ def generate_tables_c(
                 lines.append(f"    .visibility_attr_index_plus_one = {visibility_attr_index + 1},")
             if retain_attr_index is not None:
                 lines.append(f"    .retain_attr_index_plus_one = {retain_attr_index + 1},")
+            if product_carrier_attr_index is not None:
+                lines.append(f"    .product_carrier_attr_index_plus_one = {product_carrier_attr_index + 1},")
             definition_flags: list[str] = []
             if op.symbol_def.is_declaration:
                 definition_flags.append("LOOM_SYMBOL_DEFINITION_FLAG_DECLARATION")

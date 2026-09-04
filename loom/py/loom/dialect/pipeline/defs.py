@@ -161,6 +161,7 @@ pipeline_def = Op(
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
+        product_carrier="scope",
     ),
     regions=[
         RegionDef(

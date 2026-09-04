@@ -212,6 +212,7 @@ loom_cc_test(
     loom::ir
     loom::ops::func
     loom::ops::op_registry
+    loom::ops::pipeline
     loom::ops::target
     loom::ops::template
     loom::ops::test
@@ -260,6 +261,7 @@ loom_cc_test(
     loom::ops::check
     loom::ops::config
     loom::ops::func
+    loom::ops::pipeline
     loom::ops::target
     loom::ops::template
     loom::ops::test

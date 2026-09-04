@@ -108,6 +108,12 @@ static iree_status_t loom_bytecode_reader_skip_func_payload_attrs(
   }
   loom_bytecode_symbol_attribute_metadata_t retained_attributes[2];
   uint8_t retained_attribute_count = 0;
+  const uint8_t product_carrier_attr_index =
+      loom_symbol_definition_product_carrier_attr_index(vtable->symbol_def);
+  bool saw_product_carrier = false;
+  if (product_carrier_attr_index != LOOM_ATTR_INDEX_NONE) {
+    symbol_metadata->product_carrier = 0;
+  }
   const bool retain_template_contract =
       retained_arena != NULL &&
       (symbol_metadata->kind == LOOM_BYTECODE_SYMBOL_TEMPLATE_DEF ||
@@ -155,12 +161,32 @@ static iree_status_t loom_bytecode_reader_skip_func_payload_attrs(
     loom_bytecode_attr_kind_t value_kind = LOOM_BYTECODE_ATTR_I64;
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_read_kind(
         &reader->decoder, cursor, &value_kind));
+    const bool is_product_carrier = attr_index == product_carrier_attr_index;
     const uint64_t value_offset =
         retain_attribute ? loom_bytecode_reader_cursor_absolute_position(cursor)
                          : 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_ssa(
-        &attribute_validator, cursor, &vtable->attr_descriptors[attr_index],
-        value_kind, reader->view.types.count, ssa_scope));
+    if (is_product_carrier) {
+      if (value_kind != LOOM_BYTECODE_ATTR_ENUM) {
+        return loom_bytecode_reader_emit_invalid_field(
+            &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"),
+            symbol_index, IREE_SV("product_carrier"), key_offset,
+            IREE_SV("product_carrier_attribute_must_use_enum_wire_kind"));
+      }
+      uint8_t product_carrier = 0;
+      const uint64_t product_carrier_offset =
+          loom_bytecode_reader_cursor_absolute_position(cursor);
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u8(
+          &reader->decoder, cursor, &product_carrier));
+      IREE_RETURN_IF_ERROR(loom_bytecode_symbol_validate_func_enum(
+          &reader->decoder, symbol_index, vtable, attr_index,
+          IREE_SV("product_carrier"), product_carrier, product_carrier_offset));
+      symbol_metadata->product_carrier = product_carrier;
+      saw_product_carrier = true;
+    } else {
+      IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_ssa(
+          &attribute_validator, cursor, &vtable->attr_descriptors[attr_index],
+          value_kind, reader->view.types.count, ssa_scope));
+    }
     if (retain_attribute) {
       IREE_ASSERT(retained_attribute_count <
                   IREE_ARRAYSIZE(retained_attributes));
@@ -177,6 +203,16 @@ static iree_status_t loom_bytecode_reader_skip_func_payload_attrs(
             retained_attribute_count;
       }
     }
+  }
+  if (product_carrier_attr_index != LOOM_ATTR_INDEX_NONE &&
+      !saw_product_carrier &&
+      !iree_any_bit_set(
+          vtable->attr_descriptors[product_carrier_attr_index].flags,
+          LOOM_ATTR_OPTIONAL)) {
+    return loom_bytecode_reader_emit_invalid_field(
+        &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
+        IREE_SV("product_carrier"), attr_count_offset,
+        IREE_SV("required_product_carrier_attribute_is_missing"));
   }
   return loom_bytecode_symbol_copy_attribute_metadata(
       retained_arena, retained_attributes, retained_attribute_count,
@@ -714,6 +750,7 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
   symbol_metadata->entry_offset = entry_offset;
   symbol_metadata->template_family_symbol_ordinal = UINT32_MAX;
   symbol_metadata->defining_op_ordinal = UINT32_MAX;
+  symbol_metadata->product_carrier = LOOM_SYMBOL_PRODUCT_CARRIER_UNCLASSIFIED;
   uint64_t name_offset =
       loom_bytecode_reader_cursor_absolute_position(&table->cursor);
   uint64_t name_id = 0;

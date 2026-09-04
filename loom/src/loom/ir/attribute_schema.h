@@ -66,6 +66,13 @@ enum loom_symbol_interface_bits_e {
   LOOM_SYMBOL_INTERFACE_FLAG_MASK = (1u << 14) - 1,
 };
 
+// Compact operation-local product classification for durable symbol roots.
+// Enum-backed carriers occupy [0, UINT8_MAX]. The wider representation leaves
+// one sentinel for symbol definitions that have no product-carrier contract.
+typedef uint16_t loom_symbol_product_carrier_t;
+#define LOOM_SYMBOL_PRODUCT_CARRIER_UNCLASSIFIED \
+  ((loom_symbol_product_carrier_t)UINT16_MAX)
+
 enum loom_symbol_reference_role_e {
   // Zero/default: the reference contributes to reachability and link closure.
   LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY = 0,

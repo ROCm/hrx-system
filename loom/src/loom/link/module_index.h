@@ -180,6 +180,9 @@ typedef struct loom_link_module_index_symbol_t {
   iree_string_view_t defining_op_name;
   // Canonical in-memory symbol kind.
   loom_symbol_kind_t kind;
+  // Operation-local durable product carrier, or UNCLASSIFIED when the symbol
+  // definition has no carrier contract.
+  loom_symbol_product_carrier_t product_carrier;
   // Dense family identity for template family symbols and providers, or
   // INVALID when this symbol has no template-family role.
   loom_link_template_family_ordinal_t template_family_ordinal;

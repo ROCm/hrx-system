@@ -82,6 +82,7 @@ loom_cc_library(
   DEPS
     ::artifact_set
     iree::base
+    loom::ops::pipeline
     loom::product::registry
   PUBLIC
 )

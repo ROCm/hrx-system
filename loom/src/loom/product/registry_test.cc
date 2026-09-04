@@ -26,27 +26,29 @@ static const loom_product_descriptor_t kCommandProductDescriptor = {
     /*.destroy=*/DestroyProduct,
 };
 
-static const iree_string_view_t kKernelRootOperationNames[] = {
-    IREE_SV("kernel.def"),
-    IREE_SV("low.kernel.def"),
+static const loom_product_root_match_t kKernelRootMatches[] = {
+    {IREE_SV("kernel.def"), LOOM_SYMBOL_PRODUCT_CARRIER_UNCLASSIFIED},
+    {IREE_SV("low.kernel.def"), LOOM_SYMBOL_PRODUCT_CARRIER_UNCLASSIFIED},
+    {IREE_SV("pipeline.def"), 1},
 };
 
 static const loom_product_operation_t kKernelOperation = {
     /*.name=*/IREE_SV("kernel"),
     /*.product_descriptor=*/&kKernelProductDescriptor,
-    /*.root_operation_names=*/kKernelRootOperationNames,
-    /*.root_operation_name_count=*/IREE_ARRAYSIZE(kKernelRootOperationNames),
+    /*.root_matches=*/kKernelRootMatches,
+    /*.root_match_count=*/IREE_ARRAYSIZE(kKernelRootMatches),
 };
 
-static const iree_string_view_t kCommandRootOperationNames[] = {
-    IREE_SV("command.program.def"),
+static const loom_product_root_match_t kCommandRootMatches[] = {
+    {IREE_SV("command.program.def"), LOOM_SYMBOL_PRODUCT_CARRIER_UNCLASSIFIED},
+    {IREE_SV("pipeline.def"), 2},
 };
 
 static const loom_product_operation_t kCommandOperation = {
     /*.name=*/IREE_SV("command"),
     /*.product_descriptor=*/&kCommandProductDescriptor,
-    /*.root_operation_names=*/kCommandRootOperationNames,
-    /*.root_operation_name_count=*/IREE_ARRAYSIZE(kCommandRootOperationNames),
+    /*.root_matches=*/kCommandRootMatches,
+    /*.root_match_count=*/IREE_ARRAYSIZE(kCommandRootMatches),
 };
 
 static const loom_product_artifact_schema_t kAmdgpuHsacoArtifactSchemas[] = {
@@ -253,15 +255,27 @@ TEST(ProductRegistryTest, ValidatesAndLooksUpOpenIdentities) {
   EXPECT_EQ(
       loom_product_registry_lookup_operation(&kRegistry, IREE_SV("missing")),
       nullptr);
-  EXPECT_EQ(loom_product_registry_lookup_root_operation(&kRegistry,
-                                                        IREE_SV("kernel.def")),
+  EXPECT_EQ(loom_product_registry_lookup_root_operation(
+                &kRegistry, IREE_SV("kernel.def"),
+                LOOM_SYMBOL_PRODUCT_CARRIER_UNCLASSIFIED),
             &kKernelOperation);
   EXPECT_EQ(loom_product_registry_lookup_root_operation(
-                &kRegistry, IREE_SV("low.kernel.def")),
+                &kRegistry, IREE_SV("low.kernel.def"),
+                LOOM_SYMBOL_PRODUCT_CARRIER_UNCLASSIFIED),
             &kKernelOperation);
   EXPECT_EQ(loom_product_registry_lookup_root_operation(
-                &kRegistry, IREE_SV("command.program.def")),
+                &kRegistry, IREE_SV("command.program.def"),
+                LOOM_SYMBOL_PRODUCT_CARRIER_UNCLASSIFIED),
             &kCommandOperation);
+  EXPECT_EQ(loom_product_registry_lookup_root_operation(
+                &kRegistry, IREE_SV("pipeline.def"), 1),
+            &kKernelOperation);
+  EXPECT_EQ(loom_product_registry_lookup_root_operation(
+                &kRegistry, IREE_SV("pipeline.def"), 2),
+            &kCommandOperation);
+  EXPECT_EQ(loom_product_registry_lookup_root_operation(
+                &kRegistry, IREE_SV("pipeline.def"), 0),
+            nullptr);
   EXPECT_EQ(loom_product_registry_lookup_format(&kRegistry, &kKernelOperation,
                                                 IREE_SV("llvmir-text")),
             &kLlvmirTextFormat);
@@ -365,13 +379,12 @@ TEST(ProductRegistryTest, RejectsUnconditionalCanonicalOverlap) {
 }
 
 TEST(ProductRegistryTest, RejectsDuplicateRootOwnership) {
-  const iree_string_view_t duplicate_root_names[] = {
-      IREE_SV("kernel.def"),
+  const loom_product_root_match_t duplicate_root_matches[] = {
+      {IREE_SV("pipeline.def"), 1},
   };
   loom_product_operation_t duplicate_operation = kCommandOperation;
-  duplicate_operation.root_operation_names = duplicate_root_names;
-  duplicate_operation.root_operation_name_count =
-      IREE_ARRAYSIZE(duplicate_root_names);
+  duplicate_operation.root_matches = duplicate_root_matches;
+  duplicate_operation.root_match_count = IREE_ARRAYSIZE(duplicate_root_matches);
   const loom_product_operation_t* operations[] = {
       &kKernelOperation,
       &duplicate_operation,

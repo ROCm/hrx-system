@@ -10,6 +10,7 @@
 #define LOOM_PRODUCT_REGISTRY_H_
 
 #include "iree/base/api.h"
+#include "loom/ir/attribute_schema.h"
 #include "loom/product/product.h"
 #include "loom/target/pipeline_options.h"
 #include "loom/target/product_contract.h"
@@ -22,10 +23,23 @@ extern "C" {
 typedef struct loom_product_build_request_t loom_product_build_request_t;
 typedef struct loom_product_format_provider_t loom_product_format_provider_t;
 
-// Semantic compiler product and the durable operations that define its roots.
+// Exact indexed-symbol classification accepted by one product operation.
 //
-// Product names are open configuration keys. Defining-operation names are
-// serialized IR identities and must have exactly one owner in a registry.
+// The carrier is an operation-local enum value. UNCLASSIFIED matches only
+// symbol definitions without a carrier contract; it is not a wildcard.
+typedef struct loom_product_root_match_t {
+  // Public name of the operation defining the durable root.
+  iree_string_view_t defining_op_name;
+
+  // Exact product carrier or UNCLASSIFIED for non-polymorphic root ops.
+  loom_symbol_product_carrier_t carrier;
+} loom_product_root_match_t;
+
+// Semantic compiler product and the indexed symbols that may define its roots.
+//
+// Product names are open configuration keys. Each complete root match must
+// have exactly one owner in a registry; distinct carrier values allow a
+// polymorphic operation such as pipeline.def to route to different products.
 typedef struct loom_product_operation_t {
   // Public product name used by tools and build systems.
   iree_string_view_t name;
@@ -33,11 +47,11 @@ typedef struct loom_product_operation_t {
   // Process-local descriptor carried by products built by this operation.
   const loom_product_descriptor_t* product_descriptor;
 
-  // Public names of operations accepted as durable product roots.
-  const iree_string_view_t* root_operation_names;
+  // Exact indexed-symbol classifications accepted as durable product roots.
+  const loom_product_root_match_t* root_matches;
 
-  // Number of entries in |root_operation_names|.
-  iree_host_size_t root_operation_name_count;
+  // Number of entries in |root_matches|.
+  iree_host_size_t root_match_count;
 } loom_product_operation_t;
 
 // On-disk persistence shape selected by a product format.
@@ -199,10 +213,17 @@ iree_status_t loom_product_registry_validate(
 const loom_product_operation_t* loom_product_registry_lookup_operation(
     const loom_product_registry_t* registry, iree_string_view_t name);
 
-// Returns the unique product owning |defining_op_name|, or NULL.
+// Returns whether |operation| accepts the exact indexed root classification.
+bool loom_product_operation_matches_root(
+    const loom_product_operation_t* operation,
+    iree_string_view_t defining_op_name,
+    loom_symbol_product_carrier_t product_carrier);
+
+// Returns the unique product owning the exact root classification, or NULL.
 const loom_product_operation_t* loom_product_registry_lookup_root_operation(
     const loom_product_registry_t* registry,
-    iree_string_view_t defining_op_name);
+    iree_string_view_t defining_op_name,
+    loom_symbol_product_carrier_t product_carrier);
 
 // Looks up |name| within |operation|, or returns NULL.
 const loom_product_format_t* loom_product_registry_lookup_format(

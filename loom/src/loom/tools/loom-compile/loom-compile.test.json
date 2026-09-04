@@ -101,6 +101,27 @@
           "--backend=command requires --emit-command-artifacts=<directory>"
         ]
       }
+    },
+    {
+      "name": "rejects a root owned by another product",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/testdata/command_artifacts.loom",
+          "--backend=command",
+          "--root=@increment",
+          "--output={tmp}/manifest.json",
+          "--emit-command-artifacts={tmp}/commands"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "product root '@increment' selects product 'kernel'"
+        ]
+      }
     }
   ]
 }

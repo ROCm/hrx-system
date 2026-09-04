@@ -28,6 +28,7 @@ loom_cc_library(
     hdrs = ["kernel.h"],
     deps = [
         ":registry",
+        "//loom/src/loom/ops/pipeline",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
     ],
@@ -50,6 +51,7 @@ loom_cc_library(
     hdrs = ["registry.h"],
     deps = [
         ":product",
+        "//loom/src/loom/ir",
         "//loom/src/loom/target:pipeline_options",
         "//loom/src/loom/target:product_contract",
         "//loom/src/loom/target:profile",

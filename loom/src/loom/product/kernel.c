@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "loom/ops/pipeline/ops.h"
+
 typedef struct loom_kernel_product_t {
   // Generic immutable product interface.
   loom_product_t base;
@@ -31,9 +33,10 @@ typedef struct loom_kernel_product_t {
   char* string_storage;
 } loom_kernel_product_t;
 
-static const iree_string_view_t kLoomKernelProductRootOperationNames[] = {
-    IREE_SVL("kernel.def"),
-    IREE_SVL("low.kernel.def"),
+static const loom_product_root_match_t kLoomKernelProductRootMatches[] = {
+    {IREE_SVL("kernel.def"), LOOM_SYMBOL_PRODUCT_CARRIER_UNCLASSIFIED},
+    {IREE_SVL("low.kernel.def"), LOOM_SYMBOL_PRODUCT_CARRIER_UNCLASSIFIED},
+    {IREE_SVL("pipeline.def"), LOOM_PIPELINE_DEF_SCOPE_KERNEL},
 };
 
 static void loom_kernel_product_destroy(loom_product_t* base_product) {
@@ -55,9 +58,8 @@ const loom_product_descriptor_t loom_kernel_product_descriptor = {
 const loom_product_operation_t loom_kernel_product_operation = {
     .name = IREE_SVL("kernel"),
     .product_descriptor = &loom_kernel_product_descriptor,
-    .root_operation_names = kLoomKernelProductRootOperationNames,
-    .root_operation_name_count =
-        IREE_ARRAYSIZE(kLoomKernelProductRootOperationNames),
+    .root_matches = kLoomKernelProductRootMatches,
+    .root_match_count = IREE_ARRAYSIZE(kLoomKernelProductRootMatches),
 };
 
 static const loom_kernel_product_t* loom_kernel_product_cast(

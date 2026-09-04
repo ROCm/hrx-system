@@ -52,30 +52,40 @@ static iree_status_t loom_product_operation_validate(
         (int)operation->product_descriptor->name.size,
         operation->product_descriptor->name.data);
   }
-  if (operation->root_operation_name_count == 0 ||
-      operation->root_operation_names == NULL) {
+  if (operation->root_match_count == 0 || operation->root_matches == NULL) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "product operation '%.*s' has no durable root operations",
         (int)operation->name.size, operation->name.data);
   }
-  for (iree_host_size_t i = 0; i < operation->root_operation_name_count; ++i) {
-    const iree_string_view_t root_name = operation->root_operation_names[i];
+  for (iree_host_size_t i = 0; i < operation->root_match_count; ++i) {
+    const loom_product_root_match_t root = operation->root_matches[i];
+    const iree_string_view_t root_name = root.defining_op_name;
     if (iree_string_view_is_empty(root_name)) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
           "product operation '%.*s' has an empty durable root operation",
           (int)operation->name.size, operation->name.data);
     }
+    if (root.carrier != LOOM_SYMBOL_PRODUCT_CARRIER_UNCLASSIFIED &&
+        root.carrier > UINT8_MAX) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "product operation '%.*s' durable root '%.*s' has carrier %u "
+          "outside the enum value domain",
+          (int)operation->name.size, operation->name.data, (int)root_name.size,
+          root_name.data, (unsigned)root.carrier);
+    }
     for (iree_host_size_t j = 0; j < i; ++j) {
-      if (iree_string_view_equal(operation->root_operation_names[j],
-                                 root_name)) {
+      const loom_product_root_match_t prior = operation->root_matches[j];
+      if (iree_string_view_equal(prior.defining_op_name, root_name) &&
+          prior.carrier == root.carrier) {
         return iree_make_status(
             IREE_STATUS_ALREADY_EXISTS,
             "product operation '%.*s' owns durable root operation '%.*s' "
-            "more than once",
+            "with carrier %u more than once",
             (int)operation->name.size, operation->name.data,
-            (int)root_name.size, root_name.data);
+            (int)root_name.size, root_name.data, (unsigned)root.carrier);
       }
     }
   }
@@ -294,21 +304,23 @@ iree_status_t loom_product_registry_validate(
             "product operation '%.*s' is registered more than once",
             (int)operation->name.size, operation->name.data);
       }
-      for (iree_host_size_t root_i = 0;
-           root_i < operation->root_operation_name_count; ++root_i) {
-        for (iree_host_size_t root_j = 0;
-             root_j < prior->root_operation_name_count; ++root_j) {
-          if (iree_string_view_equal(operation->root_operation_names[root_i],
-                                     prior->root_operation_names[root_j])) {
-            const iree_string_view_t root_name =
-                operation->root_operation_names[root_i];
+      for (iree_host_size_t root_i = 0; root_i < operation->root_match_count;
+           ++root_i) {
+        const loom_product_root_match_t root = operation->root_matches[root_i];
+        for (iree_host_size_t root_j = 0; root_j < prior->root_match_count;
+             ++root_j) {
+          const loom_product_root_match_t prior_root =
+              prior->root_matches[root_j];
+          if (iree_string_view_equal(root.defining_op_name,
+                                     prior_root.defining_op_name) &&
+              root.carrier == prior_root.carrier) {
             return iree_make_status(
                 IREE_STATUS_ALREADY_EXISTS,
-                "durable root operation '%.*s' is owned by products '%.*s' "
-                "and '%.*s'",
-                (int)root_name.size, root_name.data, (int)prior->name.size,
-                prior->name.data, (int)operation->name.size,
-                operation->name.data);
+                "durable root operation '%.*s' with carrier %u is owned by "
+                "products '%.*s' and '%.*s'",
+                (int)root.defining_op_name.size, root.defining_op_name.data,
+                (unsigned)root.carrier, (int)prior->name.size, prior->name.data,
+                (int)operation->name.size, operation->name.data);
           }
         }
       }
@@ -451,20 +463,35 @@ const loom_product_operation_t* loom_product_registry_lookup_operation(
   return NULL;
 }
 
+bool loom_product_operation_matches_root(
+    const loom_product_operation_t* operation,
+    iree_string_view_t defining_op_name,
+    loom_symbol_product_carrier_t product_carrier) {
+  if (operation == NULL || iree_string_view_is_empty(defining_op_name)) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < operation->root_match_count; ++i) {
+    const loom_product_root_match_t root = operation->root_matches[i];
+    if (iree_string_view_equal(root.defining_op_name, defining_op_name) &&
+        root.carrier == product_carrier) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const loom_product_operation_t* loom_product_registry_lookup_root_operation(
     const loom_product_registry_t* registry,
-    iree_string_view_t defining_op_name) {
+    iree_string_view_t defining_op_name,
+    loom_symbol_product_carrier_t product_carrier) {
   if (registry == NULL || iree_string_view_is_empty(defining_op_name)) {
     return NULL;
   }
   for (iree_host_size_t i = 0; i < registry->operations.count; ++i) {
     const loom_product_operation_t* operation = registry->operations.values[i];
-    for (iree_host_size_t j = 0; j < operation->root_operation_name_count;
-         ++j) {
-      if (iree_string_view_equal(operation->root_operation_names[j],
-                                 defining_op_name)) {
-        return operation;
-      }
+    if (loom_product_operation_matches_root(operation, defining_op_name,
+                                            product_carrier)) {
+      return operation;
     }
   }
   return NULL;

@@ -19,6 +19,7 @@
 #include "loom/error/diagnostic.h"
 #include "loom/format/bytecode/format.h"
 #include "loom/format/bytecode/module_summary.h"
+#include "loom/ir/attribute_schema.h"
 #include "loom/ir/context.h"
 
 #ifdef __cplusplus
@@ -117,6 +118,9 @@ typedef struct loom_bytecode_symbol_metadata_t {
   loom_bytecode_symbol_flags_t flags;
   // Structural symbol interfaces declared by the defining op metadata.
   uint32_t interfaces;
+  // Operation-local durable product carrier, or UNCLASSIFIED when the symbol
+  // definition has no carrier contract.
+  loom_symbol_product_carrier_t product_carrier;
   // Borrowed source module name for imports, or empty when not imported.
   iree_string_view_t import_module;
   // Borrowed source symbol name for imports, or empty when not imported.

@@ -1347,6 +1347,32 @@ def test_generate_tables_emits_generic_symbol_visibility() -> None:
     assert ".visibility_attr_index_plus_one = 2," in tables_c
 
 
+def test_generate_tables_emits_symbol_product_carrier() -> None:
+    scope = EnumDef(
+        "Scope",
+        [EnumCase("kernel", 1), EnumCase("command", 2)],
+    )
+    op = Op(
+        "test.pipeline",
+        group=Dialect("test"),
+        traits=[SYMBOL_DEFINE],
+        attrs=[
+            AttrDef("callee", ATTR_TYPE_SYMBOL),
+            AttrDef("scope", ATTR_TYPE_ENUM, enum_def=scope, optional=True),
+        ],
+        symbol_def=SymbolDefinition(
+            field="callee",
+            name="pipeline",
+            interfaces=["record"],
+            product_carrier="scope",
+        ),
+    )
+
+    tables_c = generate_tables_c("test", 0x01, [op])
+
+    assert ".product_carrier_attr_index_plus_one = 2," in tables_c
+
+
 def test_generate_tables_inherits_func_like_symbol_visibility() -> None:
     visibility = EnumDef("Visibility", [EnumCase("public", 1)])
     op = Op(

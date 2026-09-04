@@ -278,45 +278,128 @@ static iree_status_t loom_compile_materialize_config_set(
       run_module->module, &options, loom_run_session_block_pool(session), NULL);
 }
 
+static iree_string_view_t loom_compile_normalize_root_name(
+    iree_string_view_t root_name) {
+  return iree_string_view_starts_with_char(root_name, '@')
+             ? iree_string_view_remove_prefix(root_name, 1)
+             : root_name;
+}
+
+static const loom_symbol_t* loom_compile_lookup_root_symbol(
+    const loom_module_t* module, iree_string_view_t root_name) {
+  root_name = loom_compile_normalize_root_name(root_name);
+  const loom_string_id_t name_id = loom_module_lookup_string(module, root_name);
+  if (name_id == LOOM_STRING_ID_INVALID) return NULL;
+  const uint16_t symbol_id = loom_module_find_symbol(module, name_id);
+  return symbol_id == LOOM_SYMBOL_ID_INVALID
+             ? NULL
+             : &module->symbols.entries[symbol_id];
+}
+
+static bool loom_compile_symbol_matches_product(
+    const loom_module_t* module, const loom_symbol_t* symbol,
+    const loom_product_operation_t* product_operation) {
+  if (symbol == NULL || symbol->defining_op == NULL) return false;
+  const loom_symbol_product_carrier_t product_carrier =
+      loom_symbol_definition_product_carrier(symbol->definition,
+                                             symbol->defining_op);
+  return loom_product_operation_matches_root(
+      product_operation, loom_op_name(module, symbol->defining_op),
+      product_carrier);
+}
+
+static iree_status_t loom_compile_validate_product_root(
+    const loom_module_t* module,
+    const loom_product_registry_t* product_registry,
+    const loom_product_format_provider_t* product_provider,
+    iree_string_view_t root_name) {
+  const loom_symbol_t* symbol =
+      loom_compile_lookup_root_symbol(module, root_name);
+  if (symbol == NULL || symbol->defining_op == NULL) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "product root '%.*s' is not defined",
+                            (int)root_name.size, root_name.data);
+  }
+  if (loom_compile_symbol_matches_product(module, symbol,
+                                          product_provider->operation)) {
+    return iree_ok_status();
+  }
+
+  const iree_string_view_t defining_op_name =
+      loom_op_name(module, symbol->defining_op);
+  const loom_symbol_product_carrier_t product_carrier =
+      loom_symbol_definition_product_carrier(symbol->definition,
+                                             symbol->defining_op);
+  const loom_product_operation_t* actual_operation =
+      loom_product_registry_lookup_root_operation(
+          product_registry, defining_op_name, product_carrier);
+  if (actual_operation != NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "product root '%.*s' selects product '%.*s', but provider '%.*s' "
+        "builds product '%.*s'",
+        (int)root_name.size, root_name.data, (int)actual_operation->name.size,
+        actual_operation->name.data, (int)product_provider->name.size,
+        product_provider->name.data,
+        (int)product_provider->operation->name.size,
+        product_provider->operation->name.data);
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "product root '%.*s' is defined by '%.*s' with unregistered carrier %u",
+      (int)root_name.size, root_name.data, (int)defining_op_name.size,
+      defining_op_name.data, (unsigned)product_carrier);
+}
+
 static iree_status_t loom_compile_select_roots(
     loom_run_session_t* session, loom_run_module_t* run_module,
+    const loom_product_registry_t* product_registry,
     const loom_product_format_provider_t* product_provider,
     iree_allocator_t allocator, iree_host_size_t* out_root_count) {
   *out_root_count = 0;
   iree_string_view_list_t roots = FLAG_root_list();
   iree_string_view_t* implicit_root_values = NULL;
-  if (roots.count == 0 && product_provider != NULL &&
-      product_provider->operation == &loom_kernel_product_operation) {
-    loom_op_t* op = NULL;
-    loom_block_for_each_op(loom_module_block(run_module->module), op) {
-      if (loom_func_like_is_kernel_entry(
-              loom_func_like_cast(run_module->module, op))) {
+  if (roots.count == 0 && product_provider != NULL) {
+    for (iree_host_size_t i = 0; i < run_module->module->symbols.count; ++i) {
+      const loom_symbol_t* symbol = &run_module->module->symbols.entries[i];
+      if (loom_compile_symbol_matches_product(run_module->module, symbol,
+                                              product_provider->operation)) {
         ++roots.count;
       }
     }
     if (roots.count == 0) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "product provider '%.*s' requires at least one kernel entry",
-          (int)product_provider->name.size, product_provider->name.data);
+          "product provider '%.*s' requires at least one '%.*s' root",
+          (int)product_provider->name.size, product_provider->name.data,
+          (int)product_provider->operation->name.size,
+          product_provider->operation->name.data);
     }
     IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
         allocator, roots.count, sizeof(*implicit_root_values),
         (void**)&implicit_root_values));
     iree_host_size_t root_ordinal = 0;
-    loom_block_for_each_op(loom_module_block(run_module->module), op) {
-      const loom_func_like_t function =
-          loom_func_like_cast(run_module->module, op);
-      if (!loom_func_like_is_kernel_entry(function)) {
+    for (iree_host_size_t i = 0; i < run_module->module->symbols.count; ++i) {
+      const loom_symbol_t* symbol = &run_module->module->symbols.entries[i];
+      if (!loom_compile_symbol_matches_product(run_module->module, symbol,
+                                               product_provider->operation)) {
         continue;
       }
-      const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
-      const loom_symbol_t* function_symbol =
-          &run_module->module->symbols.entries[function_ref.symbol_id];
       implicit_root_values[root_ordinal++] =
-          run_module->module->strings.entries[function_symbol->name_id];
+          run_module->module->strings.entries[symbol->name_id];
     }
     roots.values = implicit_root_values;
+  }
+  if (product_provider != NULL) {
+    for (iree_host_size_t i = 0; i < roots.count; ++i) {
+      iree_status_t status = loom_compile_validate_product_root(
+          run_module->module, product_registry, product_provider,
+          roots.values[i]);
+      if (!iree_status_is_ok(status)) {
+        iree_allocator_free(allocator, implicit_root_values);
+        return status;
+      }
+    }
   }
   *out_root_count = roots.count;
   if (roots.count == 0) {
@@ -1066,11 +1149,15 @@ static iree_status_t loom_compile_require_product_kernel_targets(
         IREE_STATUS_INVALID_ARGUMENT,
         "artifact target validation requires a module with a body block");
   }
-  loom_op_t* op = NULL;
-  loom_block_for_each_op(loom_module_block(module), op) {
-    const loom_func_like_t function = loom_func_like_cast(module, op);
-    if (loom_func_like_is_kernel_entry(function) &&
-        !loom_symbol_ref_is_valid(loom_func_like_target(function))) {
+  for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
+    const loom_symbol_t* symbol = &module->symbols.entries[i];
+    if (!loom_compile_symbol_matches_product(module, symbol,
+                                             product_provider->operation)) {
+      continue;
+    }
+    const loom_func_like_t function =
+        loom_func_like_cast(module, symbol->defining_op);
+    if (!loom_symbol_ref_is_valid(loom_func_like_target(function))) {
       ++unselected_root_count;
     }
   }
@@ -1079,9 +1166,8 @@ static iree_status_t loom_compile_require_product_kernel_targets(
   }
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
-      "product provider '%.*s' requires --target= when %u kernel.def root%s "
-      "omit "
-      "target(...) attrs",
+      "product provider '%.*s' requires --target= when %u kernel product "
+      "root%s omit target(...) attrs",
       (int)product_provider->name.size, product_provider->name.data,
       (unsigned)unselected_root_count, unselected_root_count == 1 ? "" : "s");
 }
@@ -1305,8 +1391,9 @@ int main(int argc, char** argv) {
         &explicit_target_selection, &compile_report_capture, allocator);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_compile_select_roots(&session, &run_module, product_provider,
-                                       allocator, &root_count);
+    status =
+        loom_compile_select_roots(&session, &run_module, product_registry,
+                                  product_provider, allocator, &root_count);
   }
   if (iree_status_is_ok(status)) {
     status = loom_compile_artifact_manifest_options_initialize(

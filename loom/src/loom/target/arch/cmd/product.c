@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "loom/ops/pipeline/ops.h"
+
 typedef struct loom_cmd_product_t {
   // Generic immutable product interface.
   loom_product_t base;
@@ -19,8 +21,9 @@ typedef struct loom_cmd_product_t {
   loom_cmd_program_artifact_set_t artifact_set;
 } loom_cmd_product_t;
 
-static const iree_string_view_t kLoomCmdProductRootOperationNames[] = {
-    IREE_SVL("command.program.def"),
+static const loom_product_root_match_t kLoomCmdProductRootMatches[] = {
+    {IREE_SVL("command.program.def"), LOOM_SYMBOL_PRODUCT_CARRIER_UNCLASSIFIED},
+    {IREE_SVL("pipeline.def"), LOOM_PIPELINE_DEF_SCOPE_COMMAND},
 };
 
 static const loom_product_artifact_schema_t kLoomCmdProductArtifactSchemas[] = {
@@ -47,9 +50,8 @@ const loom_product_descriptor_t loom_cmd_product_descriptor = {
 const loom_product_operation_t loom_cmd_product_operation = {
     .name = IREE_SVL("command"),
     .product_descriptor = &loom_cmd_product_descriptor,
-    .root_operation_names = kLoomCmdProductRootOperationNames,
-    .root_operation_name_count =
-        IREE_ARRAYSIZE(kLoomCmdProductRootOperationNames),
+    .root_matches = kLoomCmdProductRootMatches,
+    .root_match_count = IREE_ARRAYSIZE(kLoomCmdProductRootMatches),
 };
 
 const loom_product_format_t loom_cmd_product_format = {
