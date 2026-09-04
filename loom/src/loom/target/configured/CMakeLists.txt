@@ -9,52 +9,66 @@
 
 iree_add_all_subdirs()
 
-set(_provider_platform_copts "")
+set(_provider_set_platform_copts "")
 if(LOOM_TARGET_ARCH_AMDGPU)
-  list(APPEND _provider_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_AMDGPU=1")
+  list(APPEND _provider_set_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_AMDGPU=1")
 endif()
 if(LOOM_TARGET_ARCH_LLVMIR)
-  list(APPEND _provider_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_LLVMIR=1")
+  list(APPEND _provider_set_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_LLVMIR=1")
 endif()
 if(LOOM_TARGET_ARCH_SPIRV)
-  list(APPEND _provider_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_SPIRV=1")
+  list(APPEND _provider_set_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_SPIRV=1")
 endif()
 if(LOOM_TARGET_ARCH_WASM)
-  list(APPEND _provider_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_WASM=1")
+  list(APPEND _provider_set_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_WASM=1")
 endif()
 if(LOOM_TARGET_ARCH_X86)
-  list(APPEND _provider_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_X86=1")
+  list(APPEND _provider_set_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_X86=1")
 endif()
-set(_provider_platform_deps "")
+set(_provider_set_platform_deps "")
 if(LOOM_TARGET_ARCH_AMDGPU)
-  list(APPEND _provider_platform_deps loom::target::arch::amdgpu::provider)
+  list(APPEND _provider_set_platform_deps loom::target::arch::amdgpu::provider)
 endif()
 if(LOOM_TARGET_ARCH_LLVMIR)
-  list(APPEND _provider_platform_deps loom::target::arch::llvmir::provider)
+  list(APPEND _provider_set_platform_deps loom::target::arch::llvmir::provider)
 endif()
 if(LOOM_TARGET_ARCH_SPIRV)
-  list(APPEND _provider_platform_deps loom::target::arch::spirv::provider)
+  list(APPEND _provider_set_platform_deps loom::target::arch::spirv::provider)
 endif()
 if(LOOM_TARGET_ARCH_WASM)
-  list(APPEND _provider_platform_deps loom::target::arch::wasm::provider)
+  list(APPEND _provider_set_platform_deps loom::target::arch::wasm::provider)
 endif()
 if(LOOM_TARGET_ARCH_X86)
-  list(APPEND _provider_platform_deps loom::target::arch::x86::provider)
+  list(APPEND _provider_set_platform_deps loom::target::arch::x86::provider)
 endif()
 loom_cc_library(
   NAME
-    provider
+    provider_set
   COPTS
-    ${_provider_platform_copts}
+    ${_provider_set_platform_copts}
+  HDRS
+    "provider_set.h"
+  SRCS
+    "provider_set.c"
+  DEPS
+    iree::base
+    iree::base::threading
+    loom::target::provider
+    ${_provider_set_platform_deps}
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    provider
   HDRS
     "provider.h"
   SRCS
     "provider.c"
   DEPS
-    iree::base
+    ::provider_set
     iree::base::threading
     loom::target::provider
-    ${_provider_platform_deps}
   PUBLIC
 )
 

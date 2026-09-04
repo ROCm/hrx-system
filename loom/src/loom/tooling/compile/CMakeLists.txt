@@ -47,6 +47,69 @@ loom_cc_library(
   PUBLIC
 )
 
+set(_configured_platform_copts "")
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+  list(APPEND _configured_platform_copts "-DLOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS=1")
+endif()
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+  list(APPEND _configured_platform_copts "-DLOOM_CONFIG_COMPILE_HAVE_SPIRV_ARTIFACTS=1")
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
+  list(APPEND _configured_platform_copts "-DLOOM_CONFIG_COMPILE_HAVE_LLVMIR_ARTIFACTS=1")
+endif()
+set(_configured_platform_deps "")
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+  list(APPEND _configured_platform_deps loom::tooling::target::amdgpu::artifact_provider)
+endif()
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+  list(APPEND _configured_platform_deps loom::tooling::target::spirv::artifact_provider)
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
+  list(APPEND _configured_platform_deps loom::target::emit::llvmir::artifact_emitter)
+endif()
+loom_cc_library(
+  NAME
+    configured
+  COPTS
+    ${_configured_platform_copts}
+  HDRS
+    "configured.h"
+  SRCS
+    "configured.c"
+  DEPS
+    ::artifact
+    iree::base
+    iree::base::threading
+    loom::target::arch::cmd::provider
+    loom::target::configured::provider_set
+    loom::target::provider
+    ${_configured_platform_deps}
+  PUBLIC
+)
+
+set(_configured_test_platform_copts "")
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+  list(APPEND _configured_test_platform_copts "-DLOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS=1")
+endif()
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+  list(APPEND _configured_test_platform_copts "-DLOOM_CONFIG_COMPILE_HAVE_SPIRV_ARTIFACTS=1")
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
+  list(APPEND _configured_test_platform_copts "-DLOOM_CONFIG_COMPILE_HAVE_LLVMIR_ARTIFACTS=1")
+endif()
+loom_cc_test(
+  NAME
+    configured_test
+  SRCS
+    "configured_test.cc"
+  COPTS
+    ${_configured_test_platform_copts}
+  DEPS
+    ::configured
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_test(
   NAME
     artifact_test

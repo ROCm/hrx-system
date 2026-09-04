@@ -15,7 +15,7 @@
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
 #include "loom/target/arch/cmd/provider.h"
-#include "loom/target/configured/provider.h"
+#include "loom/target/configured/provider_set.h"
 #include "loom/target/provider.h"
 #include "loom/target/test/provider.h"
 #include "loom/testing/test_file_format.h"
