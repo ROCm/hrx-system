@@ -84,6 +84,7 @@
 #include "iree/base/attributes.h"      // IWYU pragma: export
 #include "iree/base/bitfield.h"        // IWYU pragma: export
 #include "iree/base/bitmap.h"          // IWYU pragma: export
+#include "iree/base/byte_sequence.h"   // IWYU pragma: export
 #include "iree/base/config.h"          // IWYU pragma: export
 #include "iree/base/printf.h"          // IWYU pragma: export
 #include "iree/base/status.h"          // IWYU pragma: export
