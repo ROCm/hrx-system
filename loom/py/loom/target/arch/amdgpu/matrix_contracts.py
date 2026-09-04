@@ -178,6 +178,9 @@ def _cdna4_mfma_f8f6f4_contracts(
                 "f32", accumulator_register_count, accumulator_register_count
             ),
             scale_kind=scale_kind,
+            fragment_layout=(
+                f"cdna4_mfma_f32_{m}x{n}x{k}_{lhs_format.token}_{rhs_format.token}"
+            ),
             implicit_scale_formats=implicit_scale_formats,
         )
         for m, n, k, accumulator_register_count in (

@@ -692,8 +692,9 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
   %642 = s_mov_b32_m0_imm 0
   %rhs = global_load_dwordx2_saddr %639, %rhs_view, %642
   %644 = v_lshlrev_b32_src0_inline %631, 3
-  %647 = v_add_u32 %644, %635
-  %649 = v_lshlrev_b32_src0_inline %637, 5
+  %646 = v_lshlrev_b32_src0_inline %634, 5
+  %647 = v_add_u32 %644, %646
+  %649 = v_lshlrev_b32_src0_inline %637, 7
   %650 = v_add_u32 %647, %649
   %651 = s_mov_b32_m0_imm 0
   %init = global_load_dwordx2_saddr %650, %init_view, %651
