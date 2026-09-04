@@ -10,11 +10,19 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
-load("//build_tools/bazel:cc.bzl", "iree_cc_library")
+load("//build_tools/bazel:cc.bzl", "iree_cc_binary", "iree_cc_library")
 load("//build_tools/bazel:cc_link.bzl", "cc_link")
 load("//build_tools/bazel:python.bzl", "iree_py_test")
 
 package(default_visibility = ["//visibility:public"])
+
+# Executable wrappers use this through an exec transition so sanitized target
+# binaries never impose their dynamic runtime dependency on the launcher.
+iree_cc_binary(
+    name = "executable_launcher",
+    srcs = ["executable_launcher.c"],
+    tags = ["manual"],
+)
 
 iree_cc_library(
     name = "pthreads",
