@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "benchmark/benchmark.h"
+#include "loom/binding/c/benchmark/workload_compile_benchmark.h"
 #include "loomc/target/spirv.h"
 
 namespace {
@@ -28,6 +29,7 @@ using loomc::bench::DeserializeSource;
 using loomc::bench::loom_allocator;
 using loomc::bench::ModulePtr;
 using loomc::bench::ReadArtifactPrefix;
+using loomc::bench::RegisterInputScalingCompileBenchmarks;
 using loomc::bench::RequireSucceededResult;
 using loomc::bench::ResultPtr;
 using loomc::bench::RunCompileBenchmark;
@@ -38,6 +40,7 @@ using loomc::bench::TargetEnvironmentPtr;
 using loomc::bench::TargetProfilePtr;
 using loomc::bench::to_iree_status;
 using loomc::bench::ValidateArtifact;
+using loomc::bench::WorkloadCompileTarget;
 using loomc::bench::WorkspacePtr;
 
 constexpr uint32_t kSpirvMagic = 0x07230203u;
@@ -47,6 +50,119 @@ enum class ModuleMaterializationMode {
   kCloneTemplate,
 };
 
+static iree_status_t CreateSpirvBenchmarkTarget(
+    TargetEnvironmentPtr* out_target_environment,
+    TargetProfilePtr* out_target_profile) {
+  loomc_target_environment_t* raw_target_environment = nullptr;
+  IREE_RETURN_IF_ERROR(to_iree_status(loomc_target_environment_create_spirv(
+      loom_allocator(), &raw_target_environment)));
+  TargetEnvironmentPtr target_environment(raw_target_environment);
+
+  const loomc_spirv_limit_fact_t limit_facts[] = {
+      {
+          /*.limit=*/LOOMC_SPIRV_LIMIT_MAX_WORKGROUP_SIZE_X,
+          /*.state=*/LOOMC_TARGET_FACT_STATE_TRUE,
+          /*.value=*/256,
+          /*.provenance=*/loomc_make_cstring_view("benchmark profile"),
+      },
+      {
+          /*.limit=*/LOOMC_SPIRV_LIMIT_MAX_FLAT_WORKGROUP_SIZE,
+          /*.state=*/LOOMC_TARGET_FACT_STATE_TRUE,
+          /*.value=*/256,
+          /*.provenance=*/loomc_make_cstring_view("benchmark profile"),
+      },
+      {
+          /*.limit=*/LOOMC_SPIRV_LIMIT_SUBGROUP_SIZE,
+          /*.state=*/LOOMC_TARGET_FACT_STATE_TRUE,
+          /*.value=*/32,
+          /*.provenance=*/loomc_make_cstring_view("benchmark profile"),
+      },
+  };
+  const loomc_spirv_environment_fact_t environment_facts[] = {
+      {
+          /*.environment=*/LOOMC_SPIRV_ENVIRONMENT_MAX_SPIRV_VERSION,
+          /*.state=*/LOOMC_TARGET_FACT_STATE_TRUE,
+          /*.value=*/LOOMC_SPIRV_VERSION_1_6,
+          /*.provenance=*/loomc_make_cstring_view("benchmark profile"),
+      },
+  };
+  const loomc_spirv_profile_options_t profile_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS,
+      /*.structure_size=*/sizeof(profile_options),
+      /*.next=*/nullptr,
+      /*.identifier=*/loomc_make_cstring_view("benchmark-vulkan13"),
+      /*.preset=*/LOOMC_SPIRV_PROFILE_PRESET_VULKAN_1_3_BDA,
+      /*.feature_facts=*/nullptr,
+      /*.feature_fact_count=*/0,
+      /*.limit_facts=*/limit_facts,
+      /*.limit_fact_count=*/IREE_ARRAYSIZE(limit_facts),
+      /*.environment_facts=*/environment_facts,
+      /*.environment_fact_count=*/IREE_ARRAYSIZE(environment_facts),
+      /*.cooperative_matrix_rows=*/nullptr,
+      /*.cooperative_matrix_row_count=*/0,
+      /*.cooperative_vector_rows=*/nullptr,
+      /*.cooperative_vector_row_count=*/0,
+  };
+  loomc_target_profile_t* raw_profile = nullptr;
+  loomc_result_t* raw_result = nullptr;
+  iree_status_t status = to_iree_status(loomc_target_profile_create_spirv(
+      target_environment.get(), &profile_options, loom_allocator(),
+      &raw_profile, &raw_result));
+  TargetProfilePtr target_profile(raw_profile);
+  ResultPtr result(raw_result);
+  IREE_RETURN_IF_ERROR(status);
+  IREE_RETURN_IF_ERROR(
+      RequireSucceededResult(result.get(), "SPIR-V profile preparation"));
+  out_target_environment->reset(target_environment.release());
+  out_target_profile->reset(target_profile.release());
+  return iree_ok_status();
+}
+
+static iree_status_t EmitSpirvBenchmarkArtifact(
+    loomc_target_environment_t* target_environment,
+    loomc_workspace_t* workspace, loomc_module_t* module,
+    loomc_string_view_t identifier, int64_t* out_artifact_byte_count) {
+  const loomc_spirv_emit_options_t spirv_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_EMIT_OPTIONS,
+      /*.structure_size=*/sizeof(spirv_options),
+      /*.next=*/nullptr,
+  };
+  const loomc_emit_options_t emit_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      /*.structure_size=*/sizeof(emit_options),
+      /*.next=*/&spirv_options,
+      /*.artifact_format=*/
+      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY),
+      /*.identifier=*/identifier,
+      /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+  };
+
+  loomc_result_t* raw_result = nullptr;
+  iree_status_t status = to_iree_status(
+      loomc_emit_module(target_environment, workspace, module, &emit_options,
+                        loom_allocator(), &raw_result));
+  ResultPtr result(raw_result);
+  IREE_RETURN_IF_ERROR(status);
+  IREE_RETURN_IF_ERROR(RequireSucceededResult(result.get(), "SPIR-V emission"));
+
+  IREE_RETURN_IF_ERROR(ValidateArtifact(
+      result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
+      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY),
+      sizeof(uint32_t), "SPIR-V executable", out_artifact_byte_count));
+  const loomc_artifact_t* artifact = loomc::bench::FindArtifact(
+      result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
+      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY));
+  uint32_t magic = 0;
+  IREE_RETURN_IF_ERROR(
+      ReadArtifactPrefix(artifact, iree_make_byte_span(&magic, sizeof(magic))));
+  ::benchmark::DoNotOptimize(magic);
+  if (magic != kSpirvMagic) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "SPIR-V executable has magic 0x%08x", magic);
+  }
+  return iree_ok_status();
+}
+
 class SpirvScenarioBase : public TargetCompileScenario {
  protected:
   explicit SpirvScenarioBase(iree_host_size_t workspace_block_size = 0)
@@ -54,66 +170,9 @@ class SpirvScenarioBase : public TargetCompileScenario {
 
   iree_status_t SetUpSpirv(iree_host_size_t worker_count) {
     TargetEnvironmentPtr target_environment;
-    loomc_target_environment_t* raw_target_environment = nullptr;
-    IREE_RETURN_IF_ERROR(to_iree_status(loomc_target_environment_create_spirv(
-        loom_allocator(), &raw_target_environment)));
-    target_environment.reset(raw_target_environment);
-
-    const loomc_spirv_limit_fact_t limit_facts[] = {
-        {
-            /*.limit=*/LOOMC_SPIRV_LIMIT_MAX_WORKGROUP_SIZE_X,
-            /*.state=*/LOOMC_TARGET_FACT_STATE_TRUE,
-            /*.value=*/256,
-            /*.provenance=*/loomc_make_cstring_view("benchmark profile"),
-        },
-        {
-            /*.limit=*/LOOMC_SPIRV_LIMIT_MAX_FLAT_WORKGROUP_SIZE,
-            /*.state=*/LOOMC_TARGET_FACT_STATE_TRUE,
-            /*.value=*/256,
-            /*.provenance=*/loomc_make_cstring_view("benchmark profile"),
-        },
-        {
-            /*.limit=*/LOOMC_SPIRV_LIMIT_SUBGROUP_SIZE,
-            /*.state=*/LOOMC_TARGET_FACT_STATE_TRUE,
-            /*.value=*/32,
-            /*.provenance=*/loomc_make_cstring_view("benchmark profile"),
-        },
-    };
-    const loomc_spirv_environment_fact_t environment_facts[] = {
-        {
-            /*.environment=*/LOOMC_SPIRV_ENVIRONMENT_MAX_SPIRV_VERSION,
-            /*.state=*/LOOMC_TARGET_FACT_STATE_TRUE,
-            /*.value=*/LOOMC_SPIRV_VERSION_1_6,
-            /*.provenance=*/loomc_make_cstring_view("benchmark profile"),
-        },
-    };
-    loomc_spirv_profile_options_t profile_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS,
-        /*.structure_size=*/sizeof(profile_options),
-        /*.next=*/nullptr,
-        /*.identifier=*/loomc_make_cstring_view("benchmark-vulkan13"),
-        /*.preset=*/LOOMC_SPIRV_PROFILE_PRESET_VULKAN_1_3_BDA,
-        /*.feature_facts=*/nullptr,
-        /*.feature_fact_count=*/0,
-        /*.limit_facts=*/limit_facts,
-        /*.limit_fact_count=*/IREE_ARRAYSIZE(limit_facts),
-        /*.environment_facts=*/environment_facts,
-        /*.environment_fact_count=*/IREE_ARRAYSIZE(environment_facts),
-        /*.cooperative_matrix_rows=*/nullptr,
-        /*.cooperative_matrix_row_count=*/0,
-        /*.cooperative_vector_rows=*/nullptr,
-        /*.cooperative_vector_row_count=*/0,
-    };
-    loomc_target_profile_t* raw_profile = nullptr;
-    loomc_result_t* raw_result = nullptr;
-    iree_status_t status = to_iree_status(loomc_target_profile_create_spirv(
-        target_environment.get(), &profile_options, loom_allocator(),
-        &raw_profile, &raw_result));
-    TargetProfilePtr target_profile(raw_profile);
-    ResultPtr result(raw_result);
-    IREE_RETURN_IF_ERROR(status);
+    TargetProfilePtr target_profile;
     IREE_RETURN_IF_ERROR(
-        RequireSucceededResult(result.get(), "SPIR-V profile preparation"));
+        CreateSpirvBenchmarkTarget(&target_environment, &target_profile));
 
     return SetUpTarget(worker_count, std::move(target_environment),
                        std::move(target_profile),
@@ -122,52 +181,53 @@ class SpirvScenarioBase : public TargetCompileScenario {
 
   iree_status_t EmitSpirvArtifact(WorkspacePtr& workspace, ModulePtr& module,
                                   loomc_string_view_t identifier) {
-    loomc_spirv_emit_options_t spirv_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_EMIT_OPTIONS,
-        /*.structure_size=*/sizeof(spirv_options),
-        /*.next=*/nullptr,
-    };
-    loomc_emit_options_t emit_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-        /*.structure_size=*/sizeof(emit_options),
-        /*.next=*/&spirv_options,
-        /*.artifact_format=*/
-        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY),
-        /*.identifier=*/identifier,
-        /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
-    };
-
-    loomc_result_t* raw_result = nullptr;
-    iree_status_t status = to_iree_status(
-        loomc_emit_module(target_environment(), workspace.get(), module.get(),
-                          &emit_options, loom_allocator(), &raw_result));
-    ResultPtr result(raw_result);
-    IREE_RETURN_IF_ERROR(status);
-    IREE_RETURN_IF_ERROR(
-        RequireSucceededResult(result.get(), "SPIR-V emission"));
-
     int64_t artifact_bytes = 0;
-    IREE_RETURN_IF_ERROR(ValidateArtifact(
-        result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
-        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY),
-        sizeof(uint32_t), "SPIR-V executable", &artifact_bytes));
-
-    const loomc_artifact_t* artifact = loomc::bench::FindArtifact(
-        result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
-        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY));
-    uint32_t magic = 0;
-    IREE_RETURN_IF_ERROR(ReadArtifactPrefix(
-        artifact, iree_make_byte_span(&magic, sizeof(magic))));
-    ::benchmark::DoNotOptimize(magic);
-    if (magic != kSpirvMagic) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "SPIR-V executable has magic 0x%08x", magic);
-    }
-
+    IREE_RETURN_IF_ERROR(
+        EmitSpirvBenchmarkArtifact(target_environment(), workspace.get(),
+                                   module.get(), identifier, &artifact_bytes));
     RecordArtifactBytes(artifact_bytes);
     return iree_ok_status();
   }
 };
+
+class SpirvWorkloadCompileTarget final : public WorkloadCompileTarget {
+ public:
+  const char* benchmark_name() const override { return "spirv-vulkan13"; }
+
+  loomc_string_view_t pipeline_identifier() const override {
+    return loomc_make_cstring_view("benchmark-spirv-prepared-low");
+  }
+
+  iree_status_t CreateTarget(
+      TargetEnvironmentPtr* out_target_environment,
+      TargetProfilePtr* out_target_profile) const override {
+    return CreateSpirvBenchmarkTarget(out_target_environment,
+                                      out_target_profile);
+  }
+
+  iree_status_t EmitArtifact(loomc_target_environment_t* target_environment,
+                             loomc_workspace_t* workspace,
+                             loomc_module_t* module,
+                             loomc_string_view_t identifier,
+                             int64_t* out_artifact_byte_count) const override {
+    return EmitSpirvBenchmarkArtifact(target_environment, workspace, module,
+                                      identifier, out_artifact_byte_count);
+  }
+};
+
+const SpirvWorkloadCompileTarget kSpirvQwenTarget;
+
+[[maybe_unused]] const bool kSpirvQwenBenchmarksRegistered = [] {
+  RegisterInputScalingCompileBenchmarks(
+      kSpirvQwenTarget, "QwenFfn",
+      {
+          /*.source_identifier=*/"qwen3_ffn_gate_up_f32_spirv.loom",
+          /*.function_symbol=*/"qwen3_ffn_gate_up_quadratic_f32",
+          /*.artifact_identifier=*/"qwen_ffn_benchmark.spv",
+          /*.input_size_config_symbol=*/"qwen3_ffn.input_size",
+      });
+  return true;
+}();
 
 class SpirvTunerFlowScenario final : public SpirvScenarioBase {
  public:

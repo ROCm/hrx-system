@@ -19,6 +19,7 @@ loom_cc_benchmark(
     iree::base
     iree::testing::benchmark_main
     loom::binding::c::benchmark::compile_throughput_benchmark_harness
+    loom::binding::c::benchmark::workload_compile_benchmark
     loom::binding::c::loomc
     loom::binding::c::target::amdgpu
   ARGS

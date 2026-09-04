@@ -24,6 +24,8 @@ iree_c_embed_data(
     srcs = [
         "kernels/i32_memory_chain.loom",
         "kernels/qwen38_attention_prefill_wmma.loom",
+        "kernels/qwen3_ffn_gate_up_f32_amdgpu.loom",
+        "kernels/qwen3_ffn_gate_up_f32_spirv.loom",
         "kernels/qwen3_moe_routed_gate_up_q4k.loom",
     ],
     c_file_output = "benchmark_kernels.c",
@@ -65,6 +67,19 @@ loom_cc_library(
         ":benchmark_kernels",
         ":benchmark_support",
         ":compile_pool_prototype",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//third_party:google_benchmark",
+    ],
+)
+
+loom_cc_library(
+    name = "workload_compile_benchmark",
+    testonly = True,
+    srcs = ["workload_compile_benchmark.cc"],
+    hdrs = ["workload_compile_benchmark.h"],
+    deps = [
+        ":compile_throughput_benchmark_harness",
         "//loom/binding/c:loomc",
         "//runtime/src/iree/base",
         "//third_party:google_benchmark",

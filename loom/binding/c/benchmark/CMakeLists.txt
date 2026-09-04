@@ -15,6 +15,8 @@ iree_c_embed_data(
   SRCS
     "kernels/i32_memory_chain.loom"
     "kernels/qwen38_attention_prefill_wmma.loom"
+    "kernels/qwen3_ffn_gate_up_f32_amdgpu.loom"
+    "kernels/qwen3_ffn_gate_up_f32_spirv.loom"
     "kernels/qwen3_moe_routed_gate_up_q4k.loom"
   C_FILE_OUTPUT
     "benchmark_kernels.c"
@@ -68,6 +70,22 @@ loom_cc_library(
     ::benchmark_kernels
     ::benchmark_support
     ::compile_pool_prototype
+    iree::base
+    iree::third_party::google_benchmark
+    loom::binding::c::loomc
+  TESTONLY
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    workload_compile_benchmark
+  HDRS
+    "workload_compile_benchmark.h"
+  SRCS
+    "workload_compile_benchmark.cc"
+  DEPS
+    ::compile_throughput_benchmark_harness
     iree::base
     iree::third_party::google_benchmark
     loom::binding::c::loomc
