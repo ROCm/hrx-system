@@ -133,10 +133,11 @@ class AtomicTargetValidationTest : public ::testing::Test {
     command_buffer_vtable_.begin = NoopCommandBufferBegin;
     command_buffer_vtable_.end = NoopCommandBufferEnd;
     command_buffer_vtable_.atomic_store = NoopCommandBufferAtomicStore;
+    iree_hal_queue_family_initialize(/*ordinal=*/0, &queue_family_);
     iree_hal_command_buffer_initialize(
-        allocator_, /*mode=*/0, IREE_HAL_COMMAND_CATEGORY_ATOMIC,
-        /*queue_affinity=*/1, /*binding_capacity=*/1, validation_state_,
-        &command_buffer_vtable_, &command_buffer_);
+        allocator_, &queue_family_, /*mode=*/0,
+        IREE_HAL_COMMAND_CATEGORY_ATOMIC, /*binding_capacity=*/1,
+        validation_state_, &command_buffer_vtable_, &command_buffer_);
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(&command_buffer_));
   }
 
@@ -152,6 +153,7 @@ class AtomicTargetValidationTest : public ::testing::Test {
   iree_hal_buffer_t* root_buffer_ = nullptr;
   iree_hal_buffer_t* unaligned_buffer_ = nullptr;
   void* validation_state_ = nullptr;
+  iree_hal_queue_family_t queue_family_ = {};
   iree_hal_command_buffer_vtable_t command_buffer_vtable_ = {};
   iree_hal_command_buffer_t command_buffer_ = {};
 };

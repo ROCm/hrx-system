@@ -124,15 +124,15 @@ class HostQueueAtomicTest
   }
 
   static iree_status_t CreateReusableAtomicProgram(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_device_t* device, iree_hal_queue_t* queue,
       iree_hal_buffer_t* static_buffer,
       iree_hal_command_buffer_t** out_command_buffer) {
     Ref<iree_hal_command_buffer_t> command_buffer;
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
-        device,
+        device, iree_hal_queue_family(queue),
         IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT |
             IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
-        IREE_HAL_COMMAND_CATEGORY_ATOMIC, queue_affinity,
+        IREE_HAL_COMMAND_CATEGORY_ATOMIC,
         /*binding_capacity=*/1, command_buffer.out()));
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_begin(command_buffer));
 
@@ -200,12 +200,12 @@ class HostQueueAtomicTest
   }
 
   static iree_status_t CreateReusableDynamicStoreProgram(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_device_t* device, iree_hal_queue_t* queue,
       iree_hal_command_buffer_t** out_command_buffer) {
     Ref<iree_hal_command_buffer_t> command_buffer;
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
-        device, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-        IREE_HAL_COMMAND_CATEGORY_ATOMIC, queue_affinity,
+        device, iree_hal_queue_family(queue),
+        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, IREE_HAL_COMMAND_CATEGORY_ATOMIC,
         /*binding_capacity=*/1, command_buffer.out()));
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_begin(command_buffer));
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_atomic_store(
@@ -247,13 +247,12 @@ TEST_F(HostQueueAtomicTest, AutoCommandBufferModeSelectsPm4) {
     GTEST_SKIP() << "PM4 command buffers are not supported on this device";
   }
 
-  iree_hal_queue_affinity_t queue_affinity = 0;
-  IREE_ASSERT_OK(QueueAffinityForPhysicalDevice(
-      test_device, /*physical_device_ordinal=*/0, &queue_affinity));
+  iree_hal_queue_t* queue = test_device.queue(/*family_ordinal=*/0);
+  ASSERT_NE(queue, nullptr);
   Ref<iree_hal_command_buffer_t> command_buffer;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_ATOMIC, queue_affinity,
+      test_device.base_device(), iree_hal_queue_family(queue),
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, IREE_HAL_COMMAND_CATEGORY_ATOMIC,
       /*binding_capacity=*/0, command_buffer.out()));
   EXPECT_TRUE(iree_hal_amdgpu_pm4_command_buffer_isa(command_buffer));
 }
@@ -684,9 +683,8 @@ TEST_P(HostQueueAtomicTest, ReusableProgramRetainsAndRebindsResources) {
     GTEST_SKIP() << "PM4 command buffers are not supported on this device";
   }
 
-  iree_hal_queue_affinity_t queue_affinity = 0;
-  IREE_ASSERT_OK(QueueAffinityForPhysicalDevice(
-      test_device, /*physical_device_ordinal=*/0, &queue_affinity));
+  iree_hal_queue_t* queue = test_device.queue(/*family_ordinal=*/0);
+  ASSERT_NE(queue, nullptr);
 
   alignas(64) std::array<uint32_t, 16> static_storage = {};
   alignas(64) std::array<uint32_t, 16> first_storage = {};
@@ -718,9 +716,8 @@ TEST_P(HostQueueAtomicTest, ReusableProgramRetainsAndRebindsResources) {
             IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAGS_ALL);
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  IREE_ASSERT_OK(CreateReusableAtomicProgram(test_device.base_device(),
-                                             queue_affinity, static_buffer,
-                                             command_buffer.out()));
+  IREE_ASSERT_OK(CreateReusableAtomicProgram(
+      test_device.base_device(), queue, static_buffer, command_buffer.out()));
   if (GetParam() == IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4) {
     uint32_t operation_count = 0;
     const iree_hal_profile_command_operation_record_t* operations =
@@ -787,10 +784,9 @@ TEST_P(HostQueueAtomicTest, ReusableProgramRetainsAndRebindsResources) {
       /*.count=*/1,
       /*.bindings=*/&first_binding,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), queue_affinity, first_wait_list,
-      first_signal_list, command_buffer, first_binding_table,
-      IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      queue, first_wait_list, first_signal_list, command_buffer,
+      first_binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
 
   const iree_hal_semaphore_list_t second_wait_list = first_signal_list;
   uint64_t second_completion_value = 2;
@@ -808,10 +804,9 @@ TEST_P(HostQueueAtomicTest, ReusableProgramRetainsAndRebindsResources) {
       /*.count=*/1,
       /*.bindings=*/&second_binding,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), queue_affinity, second_wait_list,
-      second_signal_list, command_buffer, second_binding_table,
-      IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      queue, second_wait_list, second_signal_list, command_buffer,
+      second_binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
 
   command_buffer.reset();
   static_buffer.reset();
@@ -848,12 +843,11 @@ TEST_P(HostQueueAtomicTest, DeferredResolvedMisalignmentFailsAndQueueRecovers) {
     GTEST_SKIP() << "PM4 command buffers are not supported on this device";
   }
 
-  iree_hal_queue_affinity_t queue_affinity = 0;
-  IREE_ASSERT_OK(QueueAffinityForPhysicalDevice(
-      test_device, /*physical_device_ordinal=*/0, &queue_affinity));
+  iree_hal_queue_t* queue = test_device.queue(/*family_ordinal=*/0);
+  ASSERT_NE(queue, nullptr);
   Ref<iree_hal_command_buffer_t> command_buffer;
   IREE_ASSERT_OK(CreateReusableDynamicStoreProgram(
-      test_device.base_device(), queue_affinity, command_buffer.out()));
+      test_device.base_device(), queue, command_buffer.out()));
   if (GetParam() == IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4) {
     const iree_hal_amdgpu_pm4_command_buffer_fixup_plan_t* fixup_plan =
         iree_hal_amdgpu_pm4_command_buffer_fixup_plan(command_buffer);
@@ -910,9 +904,9 @@ TEST_P(HostQueueAtomicTest, DeferredResolvedMisalignmentFailsAndQueueRecovers) {
       /*.count=*/1,
       /*.bindings=*/&misaligned_binding,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), queue_affinity, wait_list, failed_signal_list,
-      command_buffer, misaligned_binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      queue, wait_list, failed_signal_list, command_buffer,
+      misaligned_binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   misaligned_buffer.reset();
   EXPECT_EQ(misaligned_release_latch.remaining(), 1);
   IREE_ASSERT_OK(
@@ -951,10 +945,9 @@ TEST_P(HostQueueAtomicTest, DeferredResolvedMisalignmentFailsAndQueueRecovers) {
       /*.count=*/1,
       /*.bindings=*/&valid_binding,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), queue_affinity,
-      iree_hal_semaphore_list_empty(), valid_signal_list, command_buffer,
-      valid_binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      queue, iree_hal_semaphore_list_empty(), valid_signal_list, command_buffer,
+      valid_binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       valid_completion, valid_completion_value, iree_infinite_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE));
@@ -980,9 +973,8 @@ TEST_P(HostQueueAtomicTest, SupportsWidthsConditionsAndRmwOperations) {
     GTEST_SKIP() << "PM4 command buffers are not supported on this device";
   }
 
-  iree_hal_queue_affinity_t queue_affinity = 0;
-  IREE_ASSERT_OK(QueueAffinityForPhysicalDevice(
-      test_device, /*physical_device_ordinal=*/0, &queue_affinity));
+  iree_hal_queue_t* queue = test_device.queue(/*family_ordinal=*/0);
+  ASSERT_NE(queue, nullptr);
   alignas(64) std::array<uint64_t, 8> storage = {};
   ReleaseLatch release_latch(/*release_count=*/1);
   Ref<iree_hal_buffer_t> buffer;
@@ -993,8 +985,8 @@ TEST_P(HostQueueAtomicTest, SupportsWidthsConditionsAndRmwOperations) {
 
   Ref<iree_hal_command_buffer_t> command_buffer;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_ATOMIC, queue_affinity,
+      test_device.base_device(), iree_hal_queue_family(queue),
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, IREE_HAL_COMMAND_CATEGORY_ATOMIC,
       /*binding_capacity=*/1, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   const iree_hal_atomic_flags_t atomic_flags =
@@ -1115,10 +1107,9 @@ TEST_P(HostQueueAtomicTest, SupportsWidthsConditionsAndRmwOperations) {
       /*.count=*/1,
       /*.bindings=*/&binding,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), queue_affinity,
-      iree_hal_semaphore_list_empty(), signal_list, command_buffer,
-      binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      queue, iree_hal_semaphore_list_empty(), signal_list, command_buffer,
+      binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   command_buffer.reset();
   buffer.reset();
   IREE_ASSERT_OK(iree_hal_semaphore_wait(completion, completion_value,

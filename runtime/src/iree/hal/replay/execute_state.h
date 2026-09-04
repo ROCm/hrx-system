@@ -218,9 +218,11 @@ iree_status_t iree_hal_replay_buffer_binding_table_storage_initialize(
     iree_hal_replay_executor_t* executor, iree_host_size_t count,
     iree_hal_replay_buffer_binding_table_storage_t* out_storage);
 
-iree_status_t iree_hal_replay_executor_flush_and_wait(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t signal_list);
+iree_status_t iree_hal_replay_executor_flush_queue_and_wait(
+    iree_hal_queue_t* queue, const iree_hal_semaphore_list_t signal_list);
+
+iree_status_t iree_hal_replay_executor_flush_device_and_wait(
+    iree_hal_device_t* device, const iree_hal_semaphore_list_t signal_list);
 
 iree_status_t iree_hal_replay_executor_dispatch_layout(
     const iree_hal_replay_file_record_t* record,

@@ -50,14 +50,16 @@ iree_hal_replay_recorder_command_buffer_cast(
 }
 
 void iree_hal_replay_recorder_command_buffer_make_object_payload(
+    const iree_hal_queue_family_t* queue_family,
     iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
-    iree_hal_replay_command_buffer_object_payload_t* out_payload) {
+    iree_host_size_t binding_capacity,
+    iree_hal_replay_queue_family_command_buffer_object_payload_t* out_payload) {
   memset(out_payload, 0, sizeof(*out_payload));
   out_payload->mode = mode;
   out_payload->command_categories = command_categories;
-  out_payload->queue_affinity = queue_affinity;
+  out_payload->queue_family_ordinal =
+      iree_hal_queue_family_ordinal(queue_family);
   out_payload->binding_capacity = binding_capacity;
 }
 
@@ -80,11 +82,13 @@ iree_hal_replay_object_id_t iree_hal_replay_recorder_command_buffer_id_or_none(
 iree_status_t iree_hal_replay_recorder_command_buffer_create_proxy(
     iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,
     iree_hal_replay_object_id_t command_buffer_id,
+    const iree_hal_queue_family_t* queue_family,
     iree_hal_allocator_t* device_allocator,
     iree_hal_command_buffer_t* base_command_buffer,
     iree_allocator_t host_allocator,
     iree_hal_command_buffer_t** out_command_buffer) {
   IREE_ASSERT_ARGUMENT(recorder);
+  IREE_ASSERT_ARGUMENT(queue_family);
   IREE_ASSERT_ARGUMENT(device_allocator);
   IREE_ASSERT_ARGUMENT(base_command_buffer);
   IREE_ASSERT_ARGUMENT(out_command_buffer);
@@ -111,9 +115,9 @@ iree_status_t iree_hal_replay_recorder_command_buffer_create_proxy(
       validation_state_size ? (uint8_t*)command_buffer + sizeof(*command_buffer)
                             : NULL;
   iree_hal_command_buffer_initialize(
-      device_allocator, iree_hal_command_buffer_mode(base_command_buffer),
+      device_allocator, queue_family,
+      iree_hal_command_buffer_mode(base_command_buffer),
       iree_hal_command_buffer_allowed_categories(base_command_buffer),
-      iree_hal_command_buffer_queue_affinity(base_command_buffer),
       base_command_buffer->binding_capacity, validation_state,
       &iree_hal_replay_recorder_command_buffer_vtable, &command_buffer->base);
   command_buffer->host_allocator = host_allocator;

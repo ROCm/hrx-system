@@ -18,6 +18,7 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct iree_hal_buffer_t iree_hal_buffer_t;
+typedef struct iree_hal_command_buffer_t iree_hal_command_buffer_t;
 typedef struct iree_hal_file_t iree_hal_file_t;
 typedef struct iree_hal_pool_t iree_hal_pool_t;
 typedef struct iree_hal_pool_reservation_request_t
@@ -112,6 +113,64 @@ static inline bool iree_hal_semaphore_list_is_empty(
     iree_hal_semaphore_list_t semaphore_list) {
   return semaphore_list.count == 0;
 }
+
+// Describes a subrange of a buffer bound to a command-buffer binding slot.
+typedef struct iree_hal_buffer_binding_t {
+  // Buffer bound to the slot. Unowned. May be NULL when the slot is unused by
+  // the submitted command buffer.
+  iree_hal_buffer_t* buffer;
+
+  // Byte offset into |buffer| where the binding begins.
+  iree_device_size_t offset;
+
+  // Byte length of the buffer range available to the command buffer.
+  // May be IREE_HAL_WHOLE_BUFFER.
+  iree_device_size_t length;
+} iree_hal_buffer_binding_t;
+
+// Binding table provided when executing an indirect command buffer.
+// The table storage is captured before iree_hal_queue_execute returns.
+typedef struct iree_hal_buffer_binding_table_t {
+  // Number of entries in |bindings|.
+  iree_host_size_t count;
+
+  // Binding entries indexed by command-buffer binding slot. Unowned.
+  const iree_hal_buffer_binding_t* bindings;
+} iree_hal_buffer_binding_table_t;
+
+// Returns an empty binding table.
+static inline iree_hal_buffer_binding_table_t
+iree_hal_buffer_binding_table_empty(void) {
+  iree_hal_buffer_binding_table_t table = {0};
+  return table;
+}
+
+// Returns true if |binding_table| is empty.
+static inline bool iree_hal_buffer_binding_table_is_empty(
+    iree_hal_buffer_binding_table_t binding_table) {
+  return binding_table.count == 0;
+}
+
+// Bitfield controlling an exact-queue barrier operation.
+typedef uint64_t iree_hal_queue_barrier_flags_t;
+enum iree_hal_queue_barrier_flag_bits_t {
+  // Default synchronization, cache, and latency behavior.
+  IREE_HAL_QUEUE_BARRIER_FLAG_NONE = 0,
+};
+
+// Bitfield controlling an exact-queue command-buffer execution operation.
+typedef uint64_t iree_hal_queue_execute_flags_t;
+enum iree_hal_queue_execute_flag_bits_t {
+  // Default execution behavior.
+  IREE_HAL_QUEUE_EXECUTE_FLAG_NONE = 0,
+
+  // Allows the implementation to borrow binding-table buffer lifetimes instead
+  // of retaining them until the submitted work completes. Callers using this
+  // flag must keep all buffers referenced by the binding table live and backed
+  // by stable storage until the signal semaphores indicate completion. Binding
+  // table entries are still captured before iree_hal_queue_execute returns.
+  IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME = 1ull << 0,
+};
 
 // Bitfield specifying flags controlling a fill operation.
 typedef uint64_t iree_hal_fill_flags_t;
@@ -359,6 +418,47 @@ IREE_API_EXPORT void iree_hal_queue_release(iree_hal_queue_t* queue);
 IREE_API_EXPORT const iree_hal_queue_family_t* iree_hal_queue_family(
     const iree_hal_queue_t* queue);
 
+// Enqueues a semaphore barrier on the exact hardware |queue|.
+//
+// The barrier becomes eligible after every |wait_semaphore_list| timepoint is
+// reached and publishes every |signal_semaphore_list| timepoint after its
+// synchronization and visibility effects complete. Queue submissions are not
+// implicitly FIFO; callers use semaphore dependencies to order operations.
+//
+// |flags| controls barrier-specific synchronization, cache, and latency policy.
+// Only IREE_HAL_QUEUE_BARRIER_FLAG_NONE is currently defined.
+IREE_API_EXPORT iree_status_t
+iree_hal_queue_barrier(iree_hal_queue_t* queue,
+                       const iree_hal_semaphore_list_t wait_semaphore_list,
+                       const iree_hal_semaphore_list_t signal_semaphore_list,
+                       iree_hal_queue_barrier_flags_t flags);
+
+// Executes |command_buffer| on the exact hardware |queue|.
+//
+// The command buffer must have been created for the family containing |queue|.
+// No commands become eligible until every |wait_semaphore_list| timepoint is
+// reached, and every |signal_semaphore_list| timepoint is published only after
+// the command buffer reaches terminal completion. Queue submissions are not
+// implicitly FIFO; callers use semaphore dependencies to order operations.
+//
+// An optional |binding_table| supplies indirect bindings recorded by the
+// command buffer. Its entries are captured before the call returns. By default
+// the referenced buffers are retained until terminal completion; callers that
+// already guarantee those lifetimes may use
+// IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME.
+IREE_API_EXPORT iree_status_t
+iree_hal_queue_execute(iree_hal_queue_t* queue,
+                       const iree_hal_semaphore_list_t wait_semaphore_list,
+                       const iree_hal_semaphore_list_t signal_semaphore_list,
+                       iree_hal_command_buffer_t* command_buffer,
+                       iree_hal_buffer_binding_table_t binding_table,
+                       iree_hal_queue_execute_flags_t flags);
+
+// Flushes locally pending submissions on the exact hardware |queue|.
+// When batching queue operations this may eagerly publish earlier submissions
+// while later submissions are still being constructed.
+IREE_API_EXPORT iree_status_t iree_hal_queue_flush(iree_hal_queue_t* queue);
+
 // Enqueues one all-or-nothing allocation transaction on the exact hardware
 // |queue|.
 //
@@ -557,6 +657,25 @@ typedef struct iree_hal_queue_vtable_t {
   // Implementations embedding queues in a device allocation deinitialize the
   // queue but leave storage reclamation to the device.
   void(IREE_API_PTR* destroy)(iree_hal_queue_t* queue);
+
+  // Enqueues a semaphore barrier.
+  iree_status_t(IREE_API_PTR* barrier)(
+      iree_hal_queue_t* queue,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_queue_barrier_flags_t flags);
+
+  // Executes one command buffer.
+  iree_status_t(IREE_API_PTR* execute)(
+      iree_hal_queue_t* queue,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_command_buffer_t* command_buffer,
+      iree_hal_buffer_binding_table_t binding_table,
+      iree_hal_queue_execute_flags_t flags);
+
+  // Flushes locally pending submissions.
+  iree_status_t(IREE_API_PTR* flush)(iree_hal_queue_t* queue);
 
   // Enqueues an all-or-nothing allocation transaction.
   iree_status_t(IREE_API_PTR* alloca)(

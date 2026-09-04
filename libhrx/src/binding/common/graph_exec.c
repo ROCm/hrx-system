@@ -14,7 +14,7 @@
 //===----------------------------------------------------------------------===//
 
 typedef enum iree_hal_streaming_graph_block_type_e {
-  // iree_hal_device_queue_barrier
+  // iree_hal_queue_barrier
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER = 0,
   // iree_hal_queue_fill
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_FILL,
@@ -28,7 +28,7 @@ typedef enum iree_hal_streaming_graph_block_type_e {
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_WAIT,
   // iree_hal_device_queue_dispatch
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_DISPATCH,
-  // iree_hal_device_queue_execute
+  // iree_hal_queue_execute
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE,
   // Nested graph executable.
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH,
@@ -38,7 +38,7 @@ typedef void (*iree_hal_streaming_host_callback_t)(void* user_data);
 
 // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER
 typedef struct iree_hal_streaming_graph_barrier_block_attrs_t {
-  iree_hal_execute_flags_t flags;
+  iree_hal_queue_barrier_flags_t flags;
 } iree_hal_streaming_graph_barrier_block_attrs_t;
 
 // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_FILL
@@ -94,7 +94,7 @@ typedef struct iree_hal_streaming_graph_dispatch_block_attrs_t {
 // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE
 typedef struct iree_hal_streaming_graph_execute_block_attrs_t {
   iree_hal_command_buffer_t* command_buffer;
-  iree_hal_execute_flags_t flags;
+  iree_hal_queue_execute_flags_t flags;
 } iree_hal_streaming_graph_execute_block_attrs_t;
 
 // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH
@@ -1104,7 +1104,7 @@ static iree_status_t iree_hal_streaming_graph_block_allocate(
 static iree_status_t iree_hal_streaming_graph_create_barrier_block(
     iree_hal_streaming_graph_exec_t* exec, uint32_t node_start_index,
     uint32_t node_count, uint16_t wait_semaphore_count,
-    uint16_t signal_semaphore_count, iree_hal_execute_flags_t flags,
+    uint16_t signal_semaphore_count, iree_hal_queue_barrier_flags_t flags,
     iree_hal_streaming_graph_block_t** out_block,
     iree_hal_streaming_graph_block_ptrs_t* out_ptrs) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -1361,7 +1361,7 @@ static iree_status_t iree_hal_streaming_graph_create_dispatch_block(
 static iree_status_t iree_hal_streaming_graph_create_execute_block(
     iree_hal_streaming_graph_exec_t* exec, uint32_t node_start_index,
     uint32_t node_count, uint16_t wait_semaphore_count,
-    uint16_t signal_semaphore_count, iree_hal_execute_flags_t flags,
+    uint16_t signal_semaphore_count, iree_hal_queue_execute_flags_t flags,
     iree_hal_streaming_graph_block_t** out_block,
     iree_hal_streaming_graph_block_ptrs_t* out_ptrs) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -1384,15 +1384,14 @@ static iree_status_t iree_hal_streaming_graph_create_execute_block(
   // destruction waits for active streams, and stream-ordered destruction queues
   // the release after prior work.
   //
-  // TODO: limit queue affinity to the device being instantiated on, if scoped
-  // to a queue. Currently we are assuming we are targeting a single
-  // iree_hal_device_t but it should really be a pair of (iree_hal_device_t,
-  // queue_affinity_mask).
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_command_buffer_create(
-              exec->context->device, IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
-              IREE_HAL_COMMAND_CATEGORY_ANY, exec->context->queue_affinity,
-              /*binding_capacity=*/0, &attrs->command_buffer));
+      z0,
+      iree_hal_command_buffer_create(
+          exec->context->device, iree_hal_queue_family(exec->context->queue),
+          IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
+          IREE_HAL_COMMAND_CATEGORY_TRANSFER |
+              IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+          /*binding_capacity=*/0, &attrs->command_buffer));
 
   // Add to resource set for cleanup.
   iree_status_t status = iree_hal_resource_set_insert(exec->resource_set, 1,
@@ -1826,7 +1825,7 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
             z0, iree_hal_streaming_graph_create_execute_block(
                     exec, partition->start_index, partition->count,
                     wait_semaphore_count, block_signal_count,
-                    IREE_HAL_EXECUTE_FLAG_NONE, &block, &ptrs));
+                    IREE_HAL_QUEUE_EXECUTE_FLAG_NONE, &block, &ptrs));
 
         // Record nodes for this stream into the command buffer.
         // For single stream (s=0), records all nodes.
@@ -1911,7 +1910,7 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
               z0, iree_hal_streaming_graph_create_barrier_block(
                       exec, partition->start_index, partition->count,
                       wait_semaphore_count, signal_semaphore_count,
-                      IREE_HAL_EXECUTE_FLAG_NONE, &block, &ptrs));
+                      IREE_HAL_QUEUE_BARRIER_FLAG_NONE, &block, &ptrs));
         }
       }
       if (wait_semaphore_count > 0) {
@@ -2066,13 +2065,12 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
           record_point);
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_WAIT:
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER: {
-      const iree_hal_execute_flags_t flags =
+      const iree_hal_queue_barrier_flags_t flags =
           block->type == IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER
               ? ptrs->attrs->barrier.flags
-              : IREE_HAL_EXECUTE_FLAG_NONE;
-      return iree_hal_device_queue_barrier(
-          stream->context->device, stream->queue_affinity, wait_semaphores,
-          signal_semaphores, flags);
+              : IREE_HAL_QUEUE_BARRIER_FLAG_NONE;
+      return iree_hal_queue_barrier(stream->queue, wait_semaphores,
+                                    signal_semaphores, flags);
     }
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_FILL: {
       return iree_hal_queue_fill(
@@ -2094,18 +2092,20 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
           .values = ptrs->attrs->dispatch.bindings.values,
       };
       return iree_hal_device_queue_dispatch(
-          stream->context->device, stream->queue_affinity, wait_semaphores,
-          signal_semaphores, ptrs->attrs->dispatch.executable,
+          stream->context->device,
+          iree_hal_streaming_queue_family_affinity(stream->queue),
+          wait_semaphores, signal_semaphores, ptrs->attrs->dispatch.executable,
           iree_hal_executable_function_from_index(
               (uint32_t)ptrs->attrs->dispatch.entry_point),
           ptrs->attrs->dispatch.config, ptrs->attrs->dispatch.constants,
           bindings_list, ptrs->attrs->dispatch.flags);
     }
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE: {
-      return iree_hal_device_queue_execute(
-          stream->context->device, stream->queue_affinity, wait_semaphores,
-          signal_semaphores, ptrs->attrs->execute.command_buffer,
-          iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE);
+      return iree_hal_queue_execute(stream->queue, wait_semaphores,
+                                    signal_semaphores,
+                                    ptrs->attrs->execute.command_buffer,
+                                    iree_hal_buffer_binding_table_empty(),
+                                    IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
     }
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL: {
       ptrs->attrs->host_call.args[0] = (uint64_t)ptrs->attrs->host_call.fn;
@@ -2114,8 +2114,9 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
       ptrs->attrs->host_call.args[2] = 0;
       ptrs->attrs->host_call.args[3] = 0;
       return iree_hal_device_queue_host_call(
-          stream->context->device, stream->queue_affinity, wait_semaphores,
-          signal_semaphores,
+          stream->context->device,
+          iree_hal_streaming_queue_family_affinity(stream->queue),
+          wait_semaphores, signal_semaphores,
           iree_hal_make_host_call(iree_hal_streaming_graph_host_callback, NULL),
           ptrs->attrs->host_call.args, ptrs->attrs->host_call.flags);
     }
@@ -2167,10 +2168,9 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
         external_signal_semaphores.count == 0) {
       return iree_ok_status();
     }
-    return iree_hal_device_queue_barrier(
-        stream->context->device, stream->queue_affinity,
-        external_wait_semaphores, external_signal_semaphores,
-        IREE_HAL_EXECUTE_FLAG_NONE);
+    return iree_hal_queue_barrier(stream->queue, external_wait_semaphores,
+                                  external_signal_semaphores,
+                                  IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
   }
 
   iree_status_t status = iree_ok_status();

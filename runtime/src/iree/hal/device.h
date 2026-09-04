@@ -435,19 +435,6 @@ static inline iree_hal_host_call_t iree_hal_make_host_call_with_resource(
   return call;
 }
 
-// Bitfield specifying flags controlling an execution operation.
-typedef uint64_t iree_hal_execute_flags_t;
-enum iree_hal_execute_flag_bits_t {
-  IREE_HAL_EXECUTE_FLAG_NONE = 0,
-  // Allows the implementation to borrow binding table buffer lifetimes instead
-  // of retaining them until the submitted work completes. Callers using this
-  // flag must keep all buffers referenced by the binding table live and backed
-  // by stable storage until the submission's signal semaphores indicate
-  // completion. The binding table entries themselves are still captured during
-  // the queue_execute call and need not remain live after it returns.
-  IREE_HAL_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME = 1ull << 0,
-};
-
 // Device's cached view of topology for fast compatibility checks.
 //
 // The bitmaps provide O(1) "can I interact with device X?" answers for the
@@ -866,41 +853,6 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_dispatch(
     const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     const iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags);
 
-// Executes a command buffer on a device queue.
-// No commands will execute until the wait fence has been reached and the signal
-// fence will be signaled when all commands have completed. If a command buffer
-// is omitted this will act as a barrier.
-//
-// The queue is selected based on the command buffer submitted and the
-// |queue_affinity|. As the number of available queues can vary the
-// |queue_affinity| is used to hash into the available queues for the required
-// categories. For example if 2 queues support transfer commands and the
-// affinity is 5 the resulting queue could be index hash(5)=1. The affinity can
-// thus be treated as just a way to indicate whether two submissions must be
-// placed on to the same queue. Note that the exact hashing function is
-// implementation dependent.
-//
-// An optional binding table must be provided if the command buffer has indirect
-// bindings and may otherwise be `iree_hal_buffer_binding_table_empty()`. The
-// binding table contents will be captured during the call and need not persist
-// after the call returns. By default, buffers referenced by the binding table
-// are retained until the submitted work completes. Callers that already
-// guarantee buffer lifetimes may pass
-// IREE_HAL_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME to allow implementations
-// to skip that tracking on hot paths.
-//
-// The submission behavior matches Vulkan's vkQueueSubmit, with each submission
-// executing its command buffers in the order they are defined but allowing the
-// command buffers to complete out-of-order. See:
-// https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkQueueSubmit.html
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_execute(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_command_buffer_t* command_buffer,
-    iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t flags);
-
 // Enqueues an asynchronous atomic wait on a device queue.
 //
 // The operation becomes eligible after |wait_semaphore_list| is satisfied and
@@ -985,10 +937,10 @@ enum iree_hal_timestamp_flag_bits_t {
 // and physical_device_affinity identifying the domain its queues capture in.
 // Two ticks may only be compared or subtracted when both captures resolved to
 // the same domain. Two captures issued with the same |queue_affinity| always
-// resolve to the same domain: as with iree_hal_device_queue_execute an
-// affinity selects one queue and a queue captures in one domain, so reusing an
-// affinity keeps captures comparable on a device spanning several physical
-// devices. Which family an affinity resolves to is internal to the
+// resolve to the same domain: an affinity selects one queue and a queue
+// captures in one domain, so reusing an affinity keeps captures comparable on
+// a device spanning several physical devices. Which family an affinity
+// resolves to is internal to the
 // implementation, but a caller pairing its own captures need not know it:
 // iree_hal_queue_affinity_t bits and physical-device affinity bits are
 // independent namespaces that the device spec does not map between. Differing
@@ -1011,21 +963,6 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_timestamp(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_timestamp_flags_t flags);
-
-// Enqueues a barrier waiting for |wait_semaphore_list| and signaling
-// |signal_semaphore_list| when reached.
-// Equivalent to iree_hal_device_queue_execute with no command buffers.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_barrier(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_execute_flags_t flags);
-
-// Flushes any locally-pending submissions in the queue.
-// When submitting many queue operations this can be used to eagerly flush
-// earlier submissions while later ones are still being constructed.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_flush(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity);
 
 // Blocks the caller until the semaphores reach or exceed the specified payload
 // values or the |timeout| elapses. All semaphores in |semaphore_list| must be
@@ -1175,9 +1112,9 @@ typedef struct iree_hal_device_vtable_t {
       iree_hal_channel_params_t params, iree_hal_channel_t** out_channel);
 
   iree_status_t(IREE_API_PTR* create_command_buffer)(
-      iree_hal_device_t* device, iree_hal_command_buffer_mode_t mode,
+      iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
+      iree_hal_command_buffer_mode_t mode,
       iree_hal_command_category_t command_categories,
-      iree_hal_queue_affinity_t queue_affinity,
       iree_host_size_t binding_capacity,
       iree_hal_command_buffer_t** out_command_buffer);
 
@@ -1224,14 +1161,6 @@ typedef struct iree_hal_device_vtable_t {
       const iree_hal_buffer_ref_list_t bindings,
       iree_hal_dispatch_flags_t flags);
 
-  iree_status_t(IREE_API_PTR* queue_execute)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_command_buffer_t* command_buffer,
-      iree_hal_buffer_binding_table_t binding_table,
-      iree_hal_execute_flags_t flags);
-
   iree_status_t(IREE_API_PTR* queue_atomic_wait)(
       iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
       const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -1259,9 +1188,6 @@ typedef struct iree_hal_device_vtable_t {
       const iree_hal_semaphore_list_t signal_semaphore_list,
       iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
       iree_hal_timestamp_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* queue_flush)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity);
 
   iree_status_t(IREE_API_PTR* profiling_begin)(
       iree_hal_device_t* device,

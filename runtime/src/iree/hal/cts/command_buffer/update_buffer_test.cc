@@ -53,10 +53,9 @@ TEST_P(CommandBufferUpdateBufferTest, WholeBuffer) {
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(target_buffer_size, &device_buffer));
 
   iree_hal_command_buffer_t* command_buffer = NULL;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
-      binding_capacity(), &command_buffer));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                     binding_capacity(), &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
   IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
@@ -87,10 +86,9 @@ TEST_P(CommandBufferUpdateBufferTest, LargerPayload) {
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(target_buffer_size, &device_buffer));
 
   iree_hal_command_buffer_t* command_buffer = NULL;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
-      binding_capacity(), &command_buffer));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                     binding_capacity(), &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
   IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
@@ -121,10 +119,9 @@ TEST_P(CommandBufferUpdateBufferTest, WithOffsets) {
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(target_buffer_size, &device_buffer));
 
   iree_hal_command_buffer_t* command_buffer = NULL;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
-      binding_capacity(), &command_buffer));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                     binding_capacity(), &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
   IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
@@ -166,10 +163,9 @@ TEST_P(CommandBufferUpdateBufferTest, Subspan) {
                               iree_allocator_system(), &buffer_subspan));
 
   iree_hal_command_buffer_t* command_buffer = NULL;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
-      binding_capacity(), &command_buffer));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                     binding_capacity(), &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
   IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(

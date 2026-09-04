@@ -61,8 +61,7 @@ class AsanExecutableTest : public ::testing::TestWithParam<BackendInfo> {
 
   void TearDown() override {
     if (device()) {
-      IREE_EXPECT_OK(
-          iree_hal_device_queue_flush(device(), IREE_HAL_QUEUE_AFFINITY_ANY));
+      IREE_EXPECT_OK(iree_hal_queue_flush(queue()));
     }
   }
 

@@ -125,8 +125,9 @@ class PM4CommandDispatchTest : public ::testing::Test {
           IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT) {
     Ref<iree_hal_command_buffer_t> command_buffer;
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
-        test_device_.base_device(), mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
-        IREE_HAL_QUEUE_AFFINITY_ANY, binding_capacity, command_buffer.out()));
+        test_device_.base_device(), iree_hal_queue_family(test_device_.queue()),
+        mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH, binding_capacity,
+        command_buffer.out()));
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_begin(command_buffer));
     iree_hal_buffer_ref_t output_ref = iree_hal_make_buffer_ref(
         output_buffer, /*offset=*/0, kOutputByteLength);
@@ -158,10 +159,9 @@ class PM4CommandDispatchTest : public ::testing::Test {
         /*.semaphores=*/&signal_ptr,
         /*.payload_values=*/&signal_value,
     };
-    IREE_RETURN_IF_ERROR(iree_hal_device_queue_execute(
-        test_device_.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-        iree_hal_semaphore_list_empty(), signal_list, command_buffer,
-        binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+    IREE_RETURN_IF_ERROR(iree_hal_queue_execute(
+        test_device_.queue(), iree_hal_semaphore_list_empty(), signal_list,
+        command_buffer, binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
     return iree_hal_semaphore_wait(signal, signal_value,
                                    iree_infinite_timeout(),
                                    IREE_ASYNC_WAIT_FLAG_NONE);
@@ -324,8 +324,8 @@ TEST_F(PM4CommandDispatchTest, DynamicParametersObservePriorDispatch) {
 
   Ref<iree_hal_command_buffer_t> command_buffer;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      test_device_.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+      test_device_.base_device(), iree_hal_queue_family(test_device_.queue()),
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
       /*binding_capacity=*/0, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   iree_hal_buffer_ref_t parameter_ref = iree_hal_make_buffer_ref(
@@ -514,8 +514,8 @@ TEST_F(PM4CommandDispatchTest, RejectsImplicitBlockCountKernargs) {
       CreateParameterBuffer(/*workgroup_count_x=*/1, parameter_buffer.out()));
   Ref<iree_hal_command_buffer_t> command_buffer;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      test_device_.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+      test_device_.base_device(), iree_hal_queue_family(test_device_.queue()),
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
       /*binding_capacity=*/0, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   iree_hal_dispatch_config_t config = {};

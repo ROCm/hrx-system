@@ -407,15 +407,16 @@ static iree_status_t iree_hal_webgpu_device_create_channel(
 }
 
 static iree_status_t iree_hal_webgpu_device_create_command_buffer(
-    iree_hal_device_t* base_device, iree_hal_command_buffer_mode_t mode,
+    iree_hal_device_t* base_device, const iree_hal_queue_family_t* queue_family,
+    iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
+    iree_host_size_t binding_capacity,
     iree_hal_command_buffer_t** out_command_buffer) {
   iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
   return iree_hal_webgpu_command_buffer_create(
       device->device_handle, device->queue.queue_handle, &device->builtins,
-      &device->queue.block_pool, iree_hal_device_allocator(base_device), mode,
-      command_categories, queue_affinity, binding_capacity,
+      &device->queue.block_pool, iree_hal_device_allocator(base_device),
+      queue_family, mode, command_categories, binding_capacity,
       device->host_allocator, out_command_buffer);
 }
 
@@ -527,19 +528,6 @@ static iree_status_t iree_hal_webgpu_device_queue_dispatch(
       function, config, constants, bindings, flags);
 }
 
-static iree_status_t iree_hal_webgpu_device_queue_execute(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_command_buffer_t* command_buffer,
-    iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t flags) {
-  iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
-  return iree_hal_webgpu_queue_execute(&device->queue, wait_semaphore_list,
-                                       signal_semaphore_list, command_buffer,
-                                       binding_table, flags);
-}
-
 static iree_status_t iree_hal_webgpu_device_queue_atomic_wait(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -579,12 +567,6 @@ static iree_status_t iree_hal_webgpu_device_queue_timestamp(
     iree_hal_timestamp_flags_t flags) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "WebGPU device-side timestamps not implemented");
-}
-
-static iree_status_t iree_hal_webgpu_device_queue_flush(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity) {
-  iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
-  return iree_hal_webgpu_queue_flush(&device->queue);
 }
 
 //===----------------------------------------------------------------------===//
@@ -635,12 +617,10 @@ static const iree_hal_device_vtable_t iree_hal_webgpu_device_vtable = {
         iree_hal_webgpu_device_query_semaphore_compatibility,
     .queue_host_call = iree_hal_webgpu_device_queue_host_call,
     .queue_dispatch = iree_hal_webgpu_device_queue_dispatch,
-    .queue_execute = iree_hal_webgpu_device_queue_execute,
     .queue_atomic_wait = iree_hal_webgpu_device_queue_atomic_wait,
     .queue_atomic_store = iree_hal_webgpu_device_queue_atomic_store,
     .queue_atomic_rmw = iree_hal_webgpu_device_queue_atomic_rmw,
     .queue_timestamp = iree_hal_webgpu_device_queue_timestamp,
-    .queue_flush = iree_hal_webgpu_device_queue_flush,
     .profiling_begin = iree_hal_webgpu_device_profiling_begin,
     .profiling_flush = iree_hal_webgpu_device_profiling_flush,
     .profiling_end = iree_hal_webgpu_device_profiling_end,

@@ -286,7 +286,7 @@ iree_status_t iree_hal_replay_dump_dispatch_layout(
 
 iree_status_t iree_hal_replay_dump_queue_execute_layout(
     const iree_hal_replay_file_record_t* record,
-    const iree_hal_replay_device_queue_execute_payload_t* payload,
+    const iree_hal_replay_queue_execute_payload_t* payload,
     iree_host_size_t* out_wait_payloads_offset,
     iree_host_size_t* out_wait_payloads_size,
     iree_host_size_t* out_signal_payloads_offset,

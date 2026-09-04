@@ -187,10 +187,9 @@ TEST_P(DispatchIndirectParametersTest, StaticParametersFromQueueUpdate) {
   IREE_ASSERT_OK(CreateIndirectParameterBuffer(parameter_buffer.out()));
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      binding_capacity(), command_buffer.out()));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     binding_capacity(), command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   RecordWorkgroupIdDispatch(command_buffer, output_buffer, parameter_buffer,
                             IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS);
@@ -212,9 +211,9 @@ TEST_P(DispatchIndirectParametersTest, StaticParametersFromQueueUpdate) {
   iree_hal_buffer_binding_table_t binding_table =
       BindingTable(binding_table_values, output_buffer, parameter_buffer);
   SemaphoreList execute_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, update_signal, execute_signal,
-      command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      QueueForCommandBuffer(command_buffer), update_signal, execute_signal,
+      command_buffer, binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       execute_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
@@ -232,10 +231,9 @@ TEST_P(DispatchIndirectParametersTest, WholeBufferParameterRef) {
   IREE_ASSERT_OK(CreateIndirectParameterBuffer(parameter_buffer.out()));
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      binding_capacity(), command_buffer.out()));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     binding_capacity(), command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   RecordWorkgroupIdDispatch(command_buffer, output_buffer, parameter_buffer,
                             IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS,
@@ -258,9 +256,9 @@ TEST_P(DispatchIndirectParametersTest, WholeBufferParameterRef) {
   iree_hal_buffer_binding_table_t binding_table =
       BindingTable(binding_table_values, output_buffer, parameter_buffer);
   SemaphoreList execute_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, update_signal, execute_signal,
-      command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      QueueForCommandBuffer(command_buffer), update_signal, execute_signal,
+      command_buffer, binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       execute_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
@@ -278,10 +276,10 @@ TEST_P(DispatchIndirectParametersTest, DynamicParametersFromUpdate) {
   IREE_ASSERT_OK(CreateIndirectParameterBuffer(parameter_buffer.out()));
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+  IREE_ASSERT_OK(CreateCommandBuffer(
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
       IREE_HAL_COMMAND_CATEGORY_TRANSFER | IREE_HAL_COMMAND_CATEGORY_DISPATCH,
-      IREE_HAL_QUEUE_AFFINITY_ANY, binding_capacity(), command_buffer.out()));
+      binding_capacity(), command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   const uint32_t parameter_data[3] = {
       kDispatchedWorkgroupCount,
@@ -307,10 +305,10 @@ TEST_P(DispatchIndirectParametersTest, DynamicParametersFromFill) {
   IREE_ASSERT_OK(CreateIndirectParameterBuffer(parameter_buffer.out()));
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+  IREE_ASSERT_OK(CreateCommandBuffer(
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
       IREE_HAL_COMMAND_CATEGORY_TRANSFER | IREE_HAL_COMMAND_CATEGORY_DISPATCH,
-      IREE_HAL_QUEUE_AFFINITY_ANY, binding_capacity(), command_buffer.out()));
+      binding_capacity(), command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   const uint32_t one = 1;
   IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
@@ -340,10 +338,9 @@ TEST_P(DispatchIndirectParametersTest, DynamicParametersFromDispatch) {
   IREE_ASSERT_OK(CreateIndirectParameterBuffer(parameter_buffer.out()));
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      binding_capacity(), command_buffer.out()));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     binding_capacity(), command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   {
     iree_hal_buffer_ref_t binding_refs[1] = {ParameterRef(parameter_buffer)};

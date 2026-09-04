@@ -1793,6 +1793,9 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueBarrier) {
 
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
+  iree_hal_queue_t* wrapped_queue = iree_hal_device_queue(
+      wrapped_device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+  ASSERT_NE(nullptr, wrapped_queue);
 
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
@@ -1806,12 +1809,10 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueBarrier) {
       semaphores,
       &signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal_list, /*command_buffer=*/nullptr,
-      iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(
-      iree_hal_device_queue_flush(wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY));
+      iree_hal_queue_barrier(wrapped_queue, iree_hal_semaphore_list_empty(),
+                             signal_list, IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_flush(wrapped_queue));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
@@ -1842,6 +1843,9 @@ TEST(ReplayExecuteTest, ExecutesRecordedCommandBufferTransfers) {
 
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
+  iree_hal_queue_t* wrapped_queue = iree_hal_device_queue(
+      wrapped_device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+  ASSERT_NE(nullptr, wrapped_queue);
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(wrapped_device);
   ASSERT_NE(nullptr, allocator);
 
@@ -1857,8 +1861,8 @@ TEST(ReplayExecuteTest, ExecutesRecordedCommandBufferTransfers) {
 
   iree_hal_command_buffer_t* command_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      wrapped_device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+      wrapped_device, iree_hal_queue_family(wrapped_queue),
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
       /*binding_capacity=*/0, &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   uint32_t fill_pattern = 0xCDCDCDCDu;
@@ -1893,12 +1897,11 @@ TEST(ReplayExecuteTest, ExecutesRecordedCommandBufferTransfers) {
       semaphores,
       &signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal_list, command_buffer,
-      iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE));
-  IREE_ASSERT_OK(
-      iree_hal_device_queue_flush(wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      wrapped_queue, iree_hal_semaphore_list_empty(), signal_list,
+      command_buffer, iree_hal_buffer_binding_table_empty(),
+      IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_flush(wrapped_queue));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
@@ -1931,6 +1934,9 @@ TEST(ReplayExecuteTest, ExecutesRecordedIndirectCommandBufferBindings) {
 
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
+  iree_hal_queue_t* wrapped_queue = iree_hal_device_queue(
+      wrapped_device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+  ASSERT_NE(nullptr, wrapped_queue);
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(wrapped_device);
   ASSERT_NE(nullptr, allocator);
 
@@ -1949,8 +1955,8 @@ TEST(ReplayExecuteTest, ExecutesRecordedIndirectCommandBufferBindings) {
 
   iree_hal_command_buffer_t* command_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      wrapped_device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+      wrapped_device, iree_hal_queue_family(wrapped_queue),
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
       /*binding_capacity=*/1, &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
@@ -1979,12 +1985,10 @@ TEST(ReplayExecuteTest, ExecutesRecordedIndirectCommandBufferBindings) {
       1,
       &binding,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal_list, command_buffer,
-      binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
-  IREE_ASSERT_OK(
-      iree_hal_device_queue_flush(wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      wrapped_queue, iree_hal_semaphore_list_empty(), signal_list,
+      command_buffer, binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_flush(wrapped_queue));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 

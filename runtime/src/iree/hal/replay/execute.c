@@ -73,14 +73,12 @@ typedef struct iree_hal_replay_plan_command_buffer_dispatch_t {
 } iree_hal_replay_plan_command_buffer_dispatch_t;
 
 typedef struct iree_hal_replay_plan_queue_execute_t {
-  // Captured device object id receiving the queue operation.
-  iree_hal_replay_object_id_t device_id;
-  // Captured command buffer object id, or NONE for a queue barrier.
+  // Captured exact queue object id receiving the operation.
+  iree_hal_replay_object_id_t queue_id;
+  // Captured command buffer object id.
   iree_hal_replay_object_id_t command_buffer_id;
-  // Queue affinity captured from the original call.
-  iree_hal_queue_affinity_t queue_affinity;
   // Queue execution flags captured from the original call.
-  iree_hal_execute_flags_t flags;
+  iree_hal_queue_execute_flags_t flags;
   // Number of serialized wait semaphore timepoints.
   iree_host_size_t wait_semaphore_count;
   // Serialized wait semaphore timepoints borrowed from the replay file.
@@ -261,9 +259,9 @@ static iree_status_t iree_hal_replay_plan_prepare_queue_execute(
     const iree_hal_replay_file_record_t* record,
     iree_hal_replay_plan_queue_execute_t* out_execute) {
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
-      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_EXECUTE,
-      sizeof(iree_hal_replay_device_queue_execute_payload_t)));
-  iree_hal_replay_device_queue_execute_payload_t payload;
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_EXECUTE,
+      sizeof(iree_hal_replay_queue_execute_payload_t)));
+  iree_hal_replay_queue_execute_payload_t payload;
   memcpy(&payload, record->payload.data, sizeof(payload));
   iree_host_size_t wait_size = 0;
   iree_host_size_t signal_size = 0;
@@ -295,9 +293,13 @@ static iree_status_t iree_hal_replay_plan_prepare_queue_execute(
                             "replay queue execute payload length mismatch");
   }
   const uint8_t* cursor = record->payload.data + sizeof(payload);
-  out_execute->device_id = record->header.object_id;
+  if (IREE_UNLIKELY(payload.command_buffer_id ==
+                    IREE_HAL_REPLAY_OBJECT_ID_NONE)) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "replay queue execute has no command buffer");
+  }
+  out_execute->queue_id = record->header.object_id;
   out_execute->command_buffer_id = payload.command_buffer_id;
-  out_execute->queue_affinity = payload.queue_affinity;
   out_execute->flags = payload.flags;
   out_execute->wait_semaphore_count =
       (iree_host_size_t)payload.wait_semaphore_count;
@@ -348,7 +350,7 @@ static iree_status_t iree_hal_replay_plan_prepare_record(
           IREE_HAL_REPLAY_PLAN_RECORD_KIND_COMMAND_BUFFER_DISPATCH;
       return iree_hal_replay_plan_prepare_command_buffer_dispatch(
           record, &plan_record->payload.command_buffer_dispatch);
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_EXECUTE:
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_EXECUTE:
       plan_record->kind = IREE_HAL_REPLAY_PLAN_RECORD_KIND_QUEUE_EXECUTE;
       return iree_hal_replay_plan_prepare_queue_execute(
           record, &plan_record->payload.queue_execute);
@@ -641,39 +643,26 @@ static iree_status_t iree_hal_replay_plan_execute_queue_execute(
     }
   }
 
-  iree_hal_replay_object_entry_t* device_entry = NULL;
+  iree_hal_replay_object_entry_t* queue_entry = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_hal_replay_executor_lookup(executor, queue_execute->device_id,
-                                             IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
-                                             &device_entry);
+    status = iree_hal_replay_executor_lookup(executor, queue_execute->queue_id,
+                                             IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+                                             &queue_entry);
   }
   iree_hal_replay_object_entry_t* command_buffer_entry = NULL;
-  if (iree_status_is_ok(status) &&
-      queue_execute->command_buffer_id != IREE_HAL_REPLAY_OBJECT_ID_NONE) {
+  if (iree_status_is_ok(status)) {
     status = iree_hal_replay_executor_lookup(
         executor, queue_execute->command_buffer_id,
         IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER, &command_buffer_entry);
   }
   if (iree_status_is_ok(status)) {
-    if (command_buffer_entry) {
-      status = iree_hal_device_queue_execute(
-          device_entry->value.device, queue_execute->queue_affinity,
-          wait_storage.list, signal_storage.list,
-          command_buffer_entry->value.command_buffer, binding_storage.table,
-          queue_execute->flags);
-    } else if (queue_execute->binding_count == 0) {
-      status = iree_hal_device_queue_barrier(
-          device_entry->value.device, queue_execute->queue_affinity,
-          wait_storage.list, signal_storage.list, queue_execute->flags);
-    } else {
-      status = iree_make_status(
-          IREE_STATUS_DATA_LOSS,
-          "replay queue barrier payload unexpectedly has bindings");
-    }
+    status = iree_hal_queue_execute(
+        queue_entry->value.queue, wait_storage.list, signal_storage.list,
+        command_buffer_entry->value.command_buffer, binding_storage.table,
+        queue_execute->flags);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_device_queue_flush(device_entry->value.device,
-                                         queue_execute->queue_affinity);
+    status = iree_hal_queue_flush(queue_entry->value.queue);
   }
   if (iree_status_is_ok(status) && signal_storage.list.count != 0) {
     status = iree_hal_semaphore_list_wait(signal_storage.list,

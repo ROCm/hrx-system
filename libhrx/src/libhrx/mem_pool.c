@@ -555,17 +555,22 @@ hrx_status_t hrx_mem_pool_allocate_buffer(hrx_mem_pool_t pool,
   }
   *buffer = NULL;
 
+  iree_hal_queue_family_affinity_t queue_family_affinity = 0;
+  iree_status_t status = hrx_hal_queue_affinity_to_family_affinity(
+      pool->device->hal_device, params.queue_affinity, &queue_family_affinity);
+  if (!iree_status_is_ok(status)) {
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
+  }
   iree_hal_buffer_params_t hal_params = {
       .usage = (iree_hal_buffer_usage_t)params.usage,
       .access = (iree_hal_memory_access_t)params.access,
       .type = (iree_hal_memory_type_t)params.type,
-      .queue_family_affinity =
-          (iree_hal_queue_family_affinity_t)params.queue_affinity,
+      .queue_family_affinity = queue_family_affinity,
   };
 
   iree_hal_pool_t* hal_pool = NULL;
   iree_hal_buffer_t* hal_buffer = NULL;
-  iree_status_t status = hrx_mem_pool_allocate_hal_buffer(
+  status = hrx_mem_pool_allocate_hal_buffer(
       pool, hal_params, (iree_device_size_t)size, &hal_pool, &hal_buffer);
   if (!iree_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));

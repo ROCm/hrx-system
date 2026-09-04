@@ -67,6 +67,13 @@ iree_status_t iree_hal_replay_recorder_buffer_unwrap_for_call(
     iree_hal_buffer_t** out_base_buffer,
     iree_hal_buffer_t** out_temporary_buffer);
 
+// Rewrites |inout_ref| to the corresponding range on the wrapped device.
+// Unlike iree_hal_replay_recorder_buffer_unwrap_for_call this never creates a
+// temporary subspan, so the rewritten buffer remains valid while the original
+// replay buffer is live.
+iree_status_t iree_hal_replay_recorder_buffer_ref_unwrap_for_call(
+    iree_hal_buffer_ref_t* inout_ref);
+
 void iree_hal_replay_recorder_buffer_release_temporary(
     iree_hal_buffer_t* temporary_buffer);
 

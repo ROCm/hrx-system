@@ -42,15 +42,6 @@ typedef struct iree_hal_vulkan_builtins_t {
   // Compute pipeline patching partial dwords for unaligned updates.
   VkPipeline update_pipeline;
 
-  // Descriptor set layout for source and target copy buffers.
-  VkDescriptorSetLayout copy_descriptor_set_layout;
-
-  // Pipeline layout for byte-exact buffer copies.
-  VkPipelineLayout copy_pipeline_layout;
-
-  // Compute pipeline implementing byte-exact buffer copies.
-  VkPipeline copy_pipeline;
-
   // BDA pipelines implementing atomic wait, store, and RMW operations.
   iree_hal_vulkan_atomic_pipelines_t atomic_pipelines;
 } iree_hal_vulkan_builtins_t;
@@ -111,22 +102,6 @@ iree_status_t iree_hal_vulkan_builtins_record_update_unaligned_descriptor_sets(
     const VkDescriptorSet* descriptor_sets, uint32_t descriptor_set_count,
     VkBuffer target_buffer, VkDeviceSize target_offset, VkDeviceSize length,
     const uint8_t* source_data, iree_host_size_t source_data_length);
-
-// Returns the descriptor set count required for a byte-exact buffer copy.
-iree_status_t iree_hal_vulkan_builtins_copy_descriptor_set_count(
-    VkDeviceSize source_offset, VkDeviceSize target_offset, VkDeviceSize length,
-    uint32_t* out_descriptor_set_count);
-
-// Records a byte-exact buffer copy.
-//
-// Vulkan transfer commands handle aligned ranges. A compute built-in handles
-// unaligned edges and copies whose source and target alignments differ.
-iree_status_t iree_hal_vulkan_builtins_record_copy(
-    const iree_hal_vulkan_builtins_t* builtins, VkCommandBuffer command_buffer,
-    VkDescriptorPool descriptor_pool, VkBuffer source_buffer,
-    VkDeviceSize source_buffer_length, VkDeviceSize source_offset,
-    VkBuffer target_buffer, VkDeviceSize target_buffer_length,
-    VkDeviceSize target_offset, VkDeviceSize length);
 
 #ifdef __cplusplus
 }  // extern "C"

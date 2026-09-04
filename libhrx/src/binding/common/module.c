@@ -586,8 +586,8 @@ static iree_status_t iree_hal_streaming_module_load_executable(
   load_params.flags = load_flags;
   load_params.executable_data = executable_data;
   return iree_hal_device_load_executable(
-      context->device, context->queue_affinity, executable_target, &load_params,
-      out_executable);
+      context->device, iree_hal_streaming_queue_family_affinity(context->queue),
+      executable_target, &load_params, out_executable);
 }
 
 iree_status_t iree_hal_streaming_module_create_from_memory(

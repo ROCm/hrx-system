@@ -45,7 +45,8 @@ typedef struct iree_hal_vulkan_queue_selection_t {
   // Canonical ordinal of the selected queue within its HAL queue family.
   uint32_t queue_ordinal;
 
-  // Queue family capability flags cached from the physical snapshot.
+  // Effective queue family capabilities, including implicit transfer support
+  // on graphics and compute families.
   VkQueueFlags flags;
 
   // Valid timestamp bits reported by the selected queue family.
@@ -75,7 +76,8 @@ typedef struct iree_hal_vulkan_queue_family_plan_t {
   // Queue family index from the selected physical device.
   uint32_t native_family_index;
 
-  // Queue family capability flags cached from the physical snapshot.
+  // Effective queue family capabilities, including implicit transfer support
+  // on graphics and compute families.
   VkQueueFlags flags;
 
   // Valid timestamp bits reported by the queue family.

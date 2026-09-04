@@ -217,6 +217,10 @@ typedef struct iree_hal_amdgpu_logical_device_t {
 void iree_hal_amdgpu_logical_device_error_handler(void* logical_device,
                                                   iree_status_t status);
 
+// Returns the sticky asynchronous failure recorded for |logical_device|.
+iree_status_t iree_hal_amdgpu_logical_device_check_failure(
+    iree_hal_amdgpu_logical_device_t* logical_device);
+
 // Creates a AMDGPU logical HAL device with the given |options| and |topology|.
 //
 // The provided |identifier| will be used by programs to distinguish the device

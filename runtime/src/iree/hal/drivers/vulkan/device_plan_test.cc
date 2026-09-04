@@ -317,7 +317,7 @@ TEST(DevicePlanTest, OwnedCreateInventoriesEverySelectedFamilyQueue) {
 TEST(DevicePlanTest,
      OwnedCreateUsesSecondQueueWhenTransferSharesComputeFamily) {
   PhysicalDeviceSnapshotBuilder builder;
-  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 2);
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT, 2);
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
@@ -333,6 +333,8 @@ TEST(DevicePlanTest,
   EXPECT_EQ(0u, plan.queue_assignment.compute.queue_ordinal);
   EXPECT_EQ(1u, plan.queue_assignment.transfer.queue_ordinal);
   ASSERT_EQ(1u, plan.queue_inventory.family_count);
+  EXPECT_TRUE(iree_all_bits_set(plan.queue_inventory.families[0].flags,
+                                VK_QUEUE_TRANSFER_BIT));
   EXPECT_EQ(2u, plan.queue_inventory.families[0].queue_count);
   EXPECT_EQ(2u, plan.queue_inventory.queue_count);
   EXPECT_EQ(1u, plan.queue_create_info_count);
@@ -788,9 +790,9 @@ TEST(DevicePlanTest, WrapRejectsRequestFlagsInEnabledFeatures) {
                             builder.snapshot(), &options, &params, &plan));
 }
 
-TEST(DevicePlanTest, WrapInfersTransferFromComputeWhenSupported) {
+TEST(DevicePlanTest, WrapInfersImplicitTransferFromCompute) {
   PhysicalDeviceSnapshotBuilder builder;
-  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT, 1);
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
   iree_hal_vulkan_external_device_params_t params = DefaultExternalParams();
@@ -1096,21 +1098,6 @@ TEST(DevicePlanTest, WrapRejectsQueuesOutsideTheNativeFamily) {
 
   ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(StatusCode::kOutOfRange,
-                        iree_hal_vulkan_device_plan_initialize_for_wrap(
-                            builder.snapshot(), &options, &params, &plan));
-}
-
-TEST(DevicePlanTest, WrapRequiresTransferQueueWhenComputeCannotTransfer) {
-  PhysicalDeviceSnapshotBuilder builder;
-  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT, 1);
-
-  iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
-  iree_hal_vulkan_external_device_params_t params = DefaultExternalParams();
-  params.compute_queue_set.queue_family_index = 0;
-  params.compute_queue_set.queue_indices = 1ull << 0;
-
-  ScopedDevicePlan plan;
-  IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition,
                         iree_hal_vulkan_device_plan_initialize_for_wrap(
                             builder.snapshot(), &options, &params, &plan));
 }

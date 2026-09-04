@@ -31,10 +31,9 @@ class CommandBufferFillBufferTest : public CtsTestBase<> {
     const iree_host_size_t binding_capacity = indirect ? 1 : 0;
 
     iree_hal_command_buffer_t* command_buffer = NULL;
-    IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-        IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
-        binding_capacity, &command_buffer));
+    IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                       IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                       binding_capacity, &command_buffer));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
     iree_hal_buffer_ref_t target_ref;

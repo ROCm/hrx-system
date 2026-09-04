@@ -149,10 +149,16 @@ struct ReplayRecordSummary {
   iree_host_size_t command_buffer_object_record_count = 0;
   iree_host_size_t semaphore_object_record_count = 0;
   iree_host_size_t file_object_record_count = 0;
-  // Queue object and exact-transfer records.
+  // Queue objects and exact-queue operation records.
   struct {
     // Session-local object identifiers assigned to provisioned queues.
     std::vector<iree_hal_replay_object_id_t> provisioned_object_ids;
+    // Number of successful exact-queue execute operation records.
+    iree_host_size_t execute_record_count = 0;
+    // Number of exact-queue execute records carrying replayable payloads.
+    iree_host_size_t execute_payload_count = 0;
+    // Queue object identifier targeted by the last exact-queue execute.
+    iree_hal_replay_object_id_t last_execute_object_id = 0;
     // Number of successful exact-transfer operation records.
     iree_host_size_t transfer_record_count = 0;
     // Number of exact-transfer records carrying replayable payloads.
@@ -174,7 +180,6 @@ struct ReplayRecordSummary {
   iree_host_size_t buffer_map_range_record_count = 0;
   iree_host_size_t buffer_flush_range_record_count = 0;
   iree_host_size_t buffer_unmap_range_record_count = 0;
-  iree_host_size_t queue_execute_record_count = 0;
   // Replay scope marker records.
   struct {
     // Number of scope begin records.
@@ -190,7 +195,6 @@ struct ReplayRecordSummary {
   iree_host_size_t buffer_range_data_payload_count = 0;
   iree_host_size_t import_buffer_payload_count = 0;
   uint64_t import_buffer_captured_data_length = 0;
-  iree_host_size_t device_queue_execute_payload_count = 0;
   iree_host_size_t semaphore_object_payload_count = 0;
   // Memory type from the last parsed buffer object payload.
   iree_hal_memory_type_t last_buffer_memory_type = 0;
@@ -303,8 +307,9 @@ static ReplayRecordSummary ParseReplayRecordSummary(
                    IREE_HAL_REPLAY_OPERATION_CODE_BUFFER_UNMAP_RANGE) {
           ++summary.buffer_unmap_range_record_count;
         } else if (record.header.operation_code ==
-                   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_EXECUTE) {
-          ++summary.queue_execute_record_count;
+                   IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_EXECUTE) {
+          ++summary.queue.execute_record_count;
+          summary.queue.last_execute_object_id = record.header.object_id;
         } else if (record.header.operation_code ==
                    IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TRANSFER) {
           ++summary.queue.transfer_record_count;
@@ -331,8 +336,8 @@ static ReplayRecordSummary ParseReplayRecordSummary(
           summary.import_buffer_captured_data_length +=
               import_payload.data_length;
         } else if (record.header.payload_type ==
-                   IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_EXECUTE) {
-          ++summary.device_queue_execute_payload_count;
+                   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_EXECUTE) {
+          ++summary.queue.execute_payload_count;
         } else if (record.header.payload_type ==
                    IREE_HAL_REPLAY_PAYLOAD_TYPE_SEMAPHORE_OBJECT) {
           ++summary.semaphore_object_payload_count;
@@ -1006,7 +1011,7 @@ TEST(ReplayRecorderTest, ExternalFileCaptureAllPolicyEmbedsFdBackedFiles) {
         // IREE_PLATFORM_LINUX)
 }
 
-TEST(ReplayRecorderTest, WrappedDeviceRecordsQueueExecuteSemaphores) {
+TEST(ReplayRecorderTest, WrappedDeviceRecordsQueueExecuteWithSparseBindings) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
@@ -1017,13 +1022,32 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsQueueExecuteSemaphores) {
 
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
+  iree_hal_queue_t* wrapped_queue = iree_hal_device_queue(
+      wrapped_device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+  ASSERT_NE(nullptr, wrapped_queue);
+
+  const iree_hal_buffer_params_t buffer_params = {
+      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+      /*.access=*/IREE_HAL_MEMORY_ACCESS_WRITE,
+      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+          IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+  };
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(wrapped_device), buffer_params, 64, &buffer));
 
   iree_hal_command_buffer_t* command_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      wrapped_device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/0, &command_buffer));
+      wrapped_device, iree_hal_queue_family(wrapped_queue),
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+      /*binding_capacity=*/2, &command_buffer));
+  const uint32_t fill_pattern = 0xA5A5A5A5u;
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      command_buffer,
+      iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/1, /*offset=*/0,
+                                        /*length=*/64),
+      &fill_pattern, sizeof(fill_pattern), IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
   iree_hal_semaphore_t* wait_semaphore = nullptr;
@@ -1049,18 +1073,21 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsQueueExecuteSemaphores) {
       signal_semaphores,
       signal_values,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list, signal_list,
-      command_buffer, iree_hal_buffer_binding_table_empty(),
-      IREE_HAL_EXECUTE_FLAG_NONE));
-  IREE_ASSERT_OK(
-      iree_hal_device_queue_flush(wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY));
+  const iree_hal_buffer_binding_t bindings[] = {
+      {/*.buffer=*/nullptr, /*.offset=*/0, /*.length=*/0},
+      {buffer, /*offset=*/0, IREE_HAL_WHOLE_BUFFER},
+  };
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      wrapped_queue, wait_list, signal_list, command_buffer,
+      {IREE_ARRAYSIZE(bindings), bindings}, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_flush(wrapped_queue));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
   iree_hal_semaphore_release(signal_semaphore);
   iree_hal_semaphore_release(wait_semaphore);
   iree_hal_command_buffer_release(command_buffer);
+  iree_hal_buffer_release(buffer);
 
   IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
   iree_hal_replay_recorder_release(recorder);
@@ -1071,8 +1098,11 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsQueueExecuteSemaphores) {
   EXPECT_EQ(1u, summary.command_buffer_object_record_count);
   EXPECT_EQ(2u, summary.semaphore_object_record_count);
   EXPECT_EQ(2u, summary.semaphore_object_payload_count);
-  EXPECT_EQ(1u, summary.queue_execute_record_count);
-  EXPECT_EQ(1u, summary.device_queue_execute_payload_count);
+  EXPECT_EQ(1u, summary.queue.execute_record_count);
+  EXPECT_EQ(1u, summary.queue.execute_payload_count);
+  ASSERT_FALSE(summary.queue.provisioned_object_ids.empty());
+  EXPECT_EQ(summary.queue.provisioned_object_ids.front(),
+            summary.queue.last_execute_object_id);
 }
 
 TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
@@ -1085,6 +1115,9 @@ TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
       recorder, source_group, iree_allocator_system(), &wrapped_group));
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
+  iree_hal_queue_t* wrapped_queue = iree_hal_device_queue(
+      wrapped_device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+  ASSERT_NE(nullptr, wrapped_queue);
 
   const iree_hal_buffer_params_t buffer_params = {
       /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,
@@ -1098,8 +1131,8 @@ TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
 
   iree_hal_command_buffer_t* command_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      wrapped_device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_ATOMIC, /*queue_affinity=*/1,
+      wrapped_device, iree_hal_queue_family(wrapped_queue),
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, IREE_HAL_COMMAND_CATEGORY_ATOMIC,
       /*binding_capacity=*/1, &command_buffer));
   const iree_hal_atomic_wait_params_t wait_params = {
       /*.value=*/UINT64_C(0x1020304050607080),

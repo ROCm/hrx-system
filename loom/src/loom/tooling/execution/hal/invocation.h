@@ -99,7 +99,7 @@ typedef struct loom_run_hal_dispatch_batch_options_t {
   // Command-buffer mode used while recording the batch.
   iree_hal_command_buffer_mode_t command_buffer_mode;
   // Queue execute flags used for each batch submission.
-  iree_hal_execute_flags_t execute_flags;
+  iree_hal_queue_execute_flags_t execute_flags;
 } loom_run_hal_dispatch_batch_options_t;
 
 typedef struct loom_run_hal_queue_dispatch_t {
@@ -137,7 +137,7 @@ typedef struct loom_run_hal_dispatch_batch_t {
   // Number of dispatches recorded in |command_buffer|.
   iree_host_size_t dispatch_count;
   // Queue execute flags used for each batch submission.
-  iree_hal_execute_flags_t execute_flags;
+  iree_hal_queue_execute_flags_t execute_flags;
 } loom_run_hal_dispatch_batch_t;
 
 typedef struct loom_run_hal_dispatch_sequence_t {

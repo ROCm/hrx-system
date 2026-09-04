@@ -77,12 +77,12 @@ typedef struct CapturingCommandBuffer {
 typedef struct CapturingDevice {
   // Base resource dispatched through the public HAL API.
   iree_hal_resource_t resource;
+  // Borrowed concrete device providing queue enumeration and synchronization.
+  iree_hal_device_t* task_device;
   // Most recent atomic backend invocation.
   AtomicInvocation invocation;
   // Total number of atomic backend invocations.
   iree_host_size_t invocation_count;
-  // Total number of queue flush invocations.
-  iree_host_size_t flush_count;
 } CapturingDevice;
 
 static CapturingCommandBuffer* CastCommandBuffer(
@@ -168,6 +168,26 @@ static void CapturingDeviceDestroy(iree_hal_device_t* base_device) {
   (void)base_device;
 }
 
+static const iree_hal_device_spec_t* CapturingDeviceSpec(
+    iree_hal_device_t* base_device) {
+  return iree_hal_device_spec(CastDevice(base_device)->task_device);
+}
+
+static const iree_hal_queue_family_t* CapturingDeviceQueueFamily(
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_ordinal_t family_ordinal) {
+  return iree_hal_device_queue_family(CastDevice(base_device)->task_device,
+                                      family_ordinal);
+}
+
+static iree_hal_queue_t* CapturingDeviceQueue(
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_ordinal_t family_ordinal,
+    iree_hal_queue_ordinal_t queue_ordinal) {
+  return iree_hal_device_queue(CastDevice(base_device)->task_device,
+                               family_ordinal, queue_ordinal);
+}
+
 static AtomicInvocation* BeginDeviceInvocation(
     iree_hal_device_t* base_device, AtomicInvocationKind kind,
     iree_hal_queue_affinity_t queue_affinity,
@@ -238,13 +258,6 @@ static iree_status_t CapturingDeviceAtomicRmw(
   invocation->rmw_params = params;
   return iree_hal_semaphore_list_signal(signal_semaphore_list,
                                         /*frontier=*/nullptr);
-}
-
-static iree_status_t CapturingDeviceQueueFlush(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity) {
-  (void)queue_affinity;
-  ++CastDevice(base_device)->flush_count;
-  return iree_ok_status();
 }
 
 static iree_hal_device_t* CreateTaskDevice() {
@@ -353,6 +366,9 @@ class ReplayAtomicExecutionTest : public ::testing::Test {
           iree_allocator_system(), validation_state_size, &validation_state_));
       memset(validation_state_, 0, validation_state_size);
     }
+    iree_hal_queue_t* task_queue = iree_hal_device_queue(
+        task_device_, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+    ASSERT_NE(nullptr, task_queue);
     command_buffer_vtable_.destroy = CapturingCommandBufferDestroy;
     command_buffer_vtable_.begin = CapturingCommandBufferBegin;
     command_buffer_vtable_.end = CapturingCommandBufferEnd;
@@ -360,17 +376,21 @@ class ReplayAtomicExecutionTest : public ::testing::Test {
     command_buffer_vtable_.atomic_store = CapturingCommandBufferAtomicStore;
     command_buffer_vtable_.atomic_rmw = CapturingCommandBufferAtomicRmw;
     iree_hal_command_buffer_initialize(
-        iree_hal_device_allocator(task_device_), /*mode=*/0,
-        IREE_HAL_COMMAND_CATEGORY_ATOMIC, /*queue_affinity=*/1,
+        iree_hal_device_allocator(task_device_),
+        iree_hal_queue_family(task_queue), /*mode=*/0,
+        IREE_HAL_COMMAND_CATEGORY_ATOMIC,
         /*binding_capacity=*/1, validation_state_, &command_buffer_vtable_,
         &command_buffer_.base);
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(&command_buffer_.base));
 
     device_vtable_.destroy = CapturingDeviceDestroy;
+    device_vtable_.device_spec = CapturingDeviceSpec;
+    device_vtable_.queue_family = CapturingDeviceQueueFamily;
+    device_vtable_.queue = CapturingDeviceQueue;
     device_vtable_.queue_atomic_wait = CapturingDeviceAtomicWait;
     device_vtable_.queue_atomic_store = CapturingDeviceAtomicStore;
     device_vtable_.queue_atomic_rmw = CapturingDeviceAtomicRmw;
-    device_vtable_.queue_flush = CapturingDeviceQueueFlush;
+    device_.task_device = task_device_;
     iree_hal_resource_initialize(&device_vtable_, &device_.resource);
     execute_options_ = iree_hal_replay_execute_options_default();
     IREE_ASSERT_OK(iree_hal_replay_executor_initialize(
@@ -576,7 +596,6 @@ TEST_F(ReplayAtomicExecutionTest, ReplaysQueueOperations) {
                wait_payload, {WaitTimepoint(), SignalTimepoint(9)});
   IREE_ASSERT_OK(Replay(record));
   EXPECT_EQ(1u, device_.invocation_count);
-  EXPECT_EQ(1u, device_.flush_count);
   EXPECT_EQ(kAtomicInvocationWait, device_.invocation.kind);
   EXPECT_EQ(1u, device_.invocation.queue_affinity);
   EXPECT_EQ(1u, device_.invocation.wait_semaphore_count);
@@ -608,7 +627,6 @@ TEST_F(ReplayAtomicExecutionTest, ReplaysQueueOperations) {
                {WaitTimepoint(), SignalTimepoint(10)});
   IREE_ASSERT_OK(Replay(record));
   EXPECT_EQ(2u, device_.invocation_count);
-  EXPECT_EQ(2u, device_.flush_count);
   EXPECT_EQ(kAtomicInvocationStore, device_.invocation.kind);
   EXPECT_EQ(16u, device_.invocation.target_ref.offset);
   EXPECT_EQ(4u, device_.invocation.target_ref.length);
@@ -631,7 +649,6 @@ TEST_F(ReplayAtomicExecutionTest, ReplaysQueueOperations) {
                rmw_payload, {WaitTimepoint(), SignalTimepoint(11)});
   IREE_ASSERT_OK(Replay(record));
   EXPECT_EQ(3u, device_.invocation_count);
-  EXPECT_EQ(3u, device_.flush_count);
   EXPECT_EQ(kAtomicInvocationRmw, device_.invocation.kind);
   EXPECT_EQ(24u, device_.invocation.target_ref.offset);
   EXPECT_EQ(8u, device_.invocation.target_ref.length);
@@ -713,7 +730,6 @@ TEST_F(ReplayAtomicExecutionTest, RejectsMalformedRecords) {
                kDeviceId, queue_payload, {WaitTimepoint(), SignalTimepoint(9)});
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, Replay(record));
   EXPECT_EQ(0u, device_.invocation_count);
-  EXPECT_EQ(0u, device_.flush_count);
 }
 
 }  // namespace

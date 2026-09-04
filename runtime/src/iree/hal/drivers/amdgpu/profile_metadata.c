@@ -704,14 +704,14 @@ iree_status_t iree_hal_amdgpu_profile_metadata_register_command_buffer(
     iree_hal_amdgpu_profile_metadata_registry_t* registry,
     iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_family_ordinal_t queue_family_ordinal,
     iree_host_size_t physical_device_ordinal, uint64_t* out_command_buffer_id) {
   IREE_ASSERT_ARGUMENT(out_command_buffer_id);
   *out_command_buffer_id = 0;
   if (IREE_UNLIKELY(physical_device_ordinal > UINT32_MAX)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "profile command-buffer physical device ordinal exceeds uint32_t");
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "profile command-buffer physical device ordinal "
+                            "exceeds uint32_t");
   }
 
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -741,7 +741,7 @@ iree_status_t iree_hal_amdgpu_profile_metadata_register_command_buffer(
     record.command_buffer_id = command_buffer_id;
     record.mode = mode;
     record.command_categories = command_categories;
-    record.queue_affinity = queue_affinity;
+    record.queue_family_ordinal = queue_family_ordinal;
     record.physical_device_ordinal = (uint32_t)physical_device_ordinal;
     registry->command_buffer_records[registry->command_buffer_record_count++] =
         record;

@@ -331,14 +331,15 @@ loomc_status_t CompileModule(const IreeHalKernelExecutionTarget& target,
   return status;
 }
 
-iree_hal_queue_t* SelectProvisionedTransferQueue(iree_hal_device_t* device) {
+iree_hal_queue_t* SelectProvisionedQueue(
+    iree_hal_device_t* device,
+    iree_hal_queue_family_role_flags_t required_roles) {
   const iree_hal_device_queue_spec_t* queue_spec =
       iree_hal_device_spec_queues(iree_hal_device_spec(device));
   for (iree_host_size_t i = 0; i < queue_spec->family_count; ++i) {
     const iree_hal_queue_family_spec_t* family_spec = &queue_spec->families[i];
     if (family_spec->provisioned_queue_count > 0 &&
-        iree_all_bits_set(family_spec->role_flags,
-                          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER)) {
+        iree_all_bits_set(family_spec->role_flags, required_roles)) {
       return iree_hal_device_queue(
           device, static_cast<iree_hal_queue_family_ordinal_t>(i),
           /*queue_ordinal=*/0);
@@ -388,7 +389,7 @@ iree_status_t PrepareExecutableFromArtifact(
   return status;
 }
 
-iree_status_t Dispatch(iree_hal_device_t* device,
+iree_status_t Dispatch(iree_hal_device_t* device, iree_hal_queue_t* queue,
                        iree_hal_executable_t* executable,
                        iree_hal_buffer_t* input_buffer,
                        iree_hal_buffer_t* output_buffer,
@@ -399,8 +400,8 @@ iree_status_t Dispatch(iree_hal_device_t* device,
   const uint64_t constants[] = {4};
 
   iree_status_t status = iree_hal_command_buffer_create(
-      device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device, iree_hal_queue_family(queue),
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
       /*binding_capacity=*/0, &command_buffer);
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_begin(command_buffer);
@@ -429,10 +430,10 @@ iree_status_t Dispatch(iree_hal_device_t* device,
     status = iree_hal_command_buffer_end(command_buffer);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_device_queue_execute(
-        device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores, signal_semaphores,
-        command_buffer, iree_hal_buffer_binding_table_empty(),
-        IREE_HAL_EXECUTE_FLAG_NONE);
+    status = iree_hal_queue_execute(queue, wait_semaphores, signal_semaphores,
+                                    command_buffer,
+                                    iree_hal_buffer_binding_table_empty(),
+                                    IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
   }
   iree_hal_command_buffer_release(command_buffer);
   return status;
@@ -473,9 +474,12 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
     GTEST_SKIP() << "no live IREE HAL device is available for " << target.label;
   }
   IREE_ASSERT_OK(iree_status);
-  iree_hal_queue_t* transfer_queue =
-      SelectProvisionedTransferQueue(device.get());
+  iree_hal_queue_t* transfer_queue = SelectProvisionedQueue(
+      device.get(), IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER);
   ASSERT_NE(transfer_queue, nullptr);
+  iree_hal_queue_t* dispatch_queue = SelectProvisionedQueue(
+      device.get(), IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH);
+  ASSERT_NE(dispatch_queue, nullptr);
 
   TargetEnvironmentPtr target_environment;
   ContextPtr context;
@@ -625,7 +629,7 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
       /*.semaphores=*/&transfer_semaphore,
       /*.payload_values=*/&dispatch_value,
   };
-  IREE_ASSERT_OK(Dispatch(device.get(), executable_ptr.get(),
+  IREE_ASSERT_OK(Dispatch(device.get(), dispatch_queue, executable_ptr.get(),
                           input_buffer_ptr.get(), output_buffer_ptr.get(),
                           workgroup_count, dispatch_wait, dispatch_signal));
 

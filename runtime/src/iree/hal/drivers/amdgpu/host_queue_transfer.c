@@ -594,24 +594,21 @@ static void iree_hal_amdgpu_transfer_waits_complete(
       iree_hal_amdgpu_transfer_start_post_drain, transaction);
 }
 
-iree_status_t iree_hal_amdgpu_host_queue_transfer(
-    iree_hal_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_enqueue_transfer(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations) {
-  iree_hal_amdgpu_host_queue_t* queue =
-      (iree_hal_amdgpu_host_queue_t*)base_queue;
   iree_host_size_t active_operation_count = 0;
   for (iree_host_size_t i = 0; i < operation_count; ++i) {
     active_operation_count +=
         iree_hal_amdgpu_transfer_operation_length(&operations[i]) != 0;
   }
   if (active_operation_count == 0) {
-    return iree_hal_amdgpu_host_queue_execute(
-        queue, wait_semaphore_list, signal_semaphore_list,
-        /*command_buffer=*/NULL, iree_hal_buffer_binding_table_empty(),
-        IREE_HAL_EXECUTE_FLAG_NONE);
+    return iree_hal_queue_barrier(&queue->base, wait_semaphore_list,
+                                  signal_semaphore_list,
+                                  IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
   }
 
   iree_hal_amdgpu_transfer_transaction_t* transaction = NULL;

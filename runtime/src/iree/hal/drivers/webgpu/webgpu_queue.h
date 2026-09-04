@@ -148,15 +148,13 @@ iree_status_t iree_hal_webgpu_queue_dispatch(
     iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags);
 
-iree_status_t iree_hal_webgpu_queue_execute(
+iree_status_t iree_hal_webgpu_queue_submit_execute(
     iree_hal_webgpu_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t flags);
-
-iree_status_t iree_hal_webgpu_queue_flush(iree_hal_webgpu_queue_t* queue);
+    iree_hal_queue_execute_flags_t flags);
 
 #ifdef __cplusplus
 }  // extern "C"

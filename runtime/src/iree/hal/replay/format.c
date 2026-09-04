@@ -85,26 +85,10 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "device.create_semaphore";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUERY_QUEUE_POOL_BACKEND:
       return "device.query_queue_pool_backend";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ALLOCA:
-      return "device.queue_alloca";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_DEALLOCA:
-      return "device.queue_dealloca";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_FILL:
-      return "device.queue_fill";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_UPDATE:
-      return "device.queue_update";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_COPY:
-      return "device.queue_copy";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_READ:
-      return "device.queue_read";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_WRITE:
-      return "device.queue_write";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_HOST_CALL:
       return "device.queue_host_call";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_DISPATCH:
       return "device.queue_dispatch";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_EXECUTE:
-      return "device.queue_execute";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_TIMESTAMP:
       return "device.queue_timestamp";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_WAIT:
@@ -113,8 +97,6 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "device.queue_atomic_store";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_RMW:
       return "device.queue_atomic_rmw";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_FLUSH:
-      return "device.queue_flush";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_PROFILING_BEGIN:
       return "device.profiling_begin";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_PROFILING_FLUSH:
@@ -201,6 +183,12 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "queue.alloca";
     case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_DEALLOCA:
       return "queue.dealloca";
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER:
+      return "queue.barrier";
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_EXECUTE:
+      return "queue.execute";
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_FLUSH:
+      return "queue.flush";
     default:
       return "unknown";
   }
@@ -223,40 +211,22 @@ IREE_API_EXPORT const char* iree_hal_replay_payload_type_string(
       return "buffer_range";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_BUFFER_RANGE_DATA:
       return "buffer_range_data";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_OBJECT:
-      return "command_buffer_object";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_LOAD:
       return "executable_load";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_DISPATCH:
       return "dispatch";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_EXECUTE:
-      return "device_queue_execute";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_SEMAPHORE_OBJECT:
       return "semaphore_object";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_COPY_BUFFER:
       return "command_buffer_copy_buffer";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ALLOCA:
-      return "device_queue_alloca";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_EXECUTION_BARRIER:
       return "command_buffer_execution_barrier";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_DEALLOCA:
-      return "device_queue_dealloca";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_FILL:
-      return "device_queue_fill";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_UPDATE:
-      return "device_queue_update";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_COPY:
-      return "device_queue_copy";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_FILL_BUFFER:
       return "command_buffer_fill_buffer";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_UPDATE_BUFFER:
       return "command_buffer_update_buffer";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_FILE_OBJECT:
       return "file_object";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_READ:
-      return "device_queue_read";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_WRITE:
-      return "device_queue_write";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_WAIT:
       return "command_buffer_atomic_wait";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_STORE:
@@ -281,6 +251,12 @@ IREE_API_EXPORT const char* iree_hal_replay_payload_type_string(
       return "queue_alloca";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_DEALLOCA:
       return "queue_dealloca";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_BARRIER:
+      return "queue_barrier";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_EXECUTE:
+      return "queue_execute";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_FAMILY_COMMAND_BUFFER_OBJECT:
+      return "queue_family_command_buffer_object";
     default:
       return "unknown";
   }

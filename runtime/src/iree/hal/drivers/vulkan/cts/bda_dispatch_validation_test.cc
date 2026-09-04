@@ -85,13 +85,19 @@ class BdaDispatchValidationTest : public CtsTestBase<> {
     *out_input_buffer = nullptr;
     *out_output_buffer = nullptr;
     const uint32_t input_data[4] = {1, 2, 3, 4};
-    IREE_RETURN_IF_ERROR(CreateDeviceBufferWithData(
-        input_data, sizeof(input_data), out_input_buffer));
-    iree_status_t status =
-        CreateZeroedDeviceBuffer(sizeof(input_data), out_output_buffer);
-    if (!iree_status_is_ok(status)) {
-      iree_hal_buffer_release(*out_input_buffer);
-      *out_input_buffer = nullptr;
+    iree_hal_buffer_t* input_buffer = nullptr;
+    iree_hal_buffer_t* output_buffer = nullptr;
+    iree_status_t status = CreateDeviceBufferWithData(
+        input_data, sizeof(input_data), &input_buffer);
+    if (iree_status_is_ok(status)) {
+      status = CreateZeroedDeviceBuffer(sizeof(input_data), &output_buffer);
+    }
+    if (iree_status_is_ok(status)) {
+      *out_input_buffer = input_buffer;
+      *out_output_buffer = output_buffer;
+    } else {
+      iree_hal_buffer_release(output_buffer);
+      iree_hal_buffer_release(input_buffer);
     }
     return status;
   }
@@ -137,10 +143,9 @@ TEST_P(BdaDispatchValidationTest,
   IREE_ASSERT_OK(CreateInputOutputBuffers(&input_buffer, &output_buffer));
 
   iree_hal_command_buffer_t* command_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/0, &command_buffer));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     /*binding_capacity=*/0, &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
   iree_hal_buffer_ref_t binding_refs[1] = {
@@ -199,10 +204,9 @@ TEST_P(BdaDispatchValidationTest,
   IREE_ASSERT_OK(CreateInputOutputBuffers(&input_buffer, &output_buffer));
 
   iree_hal_command_buffer_t* command_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/0, &command_buffer));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     /*binding_capacity=*/0, &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
   iree_hal_buffer_ref_t binding_refs[2] = {
@@ -220,12 +224,14 @@ TEST_P(BdaDispatchValidationTest,
       IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
-  EXPECT_THAT(
-      Status(iree_hal_device_queue_execute(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-          iree_hal_semaphore_list_empty(), command_buffer,
-          iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE)),
-      StatusIs(StatusCode::kInvalidArgument));
+  iree_hal_queue_t* queue = QueueForCommandBuffer(command_buffer);
+  ASSERT_NE(nullptr, queue);
+  EXPECT_THAT(Status(iree_hal_queue_execute(
+                  queue, iree_hal_semaphore_list_empty(),
+                  iree_hal_semaphore_list_empty(), command_buffer,
+                  iree_hal_buffer_binding_table_empty(),
+                  IREE_HAL_QUEUE_EXECUTE_FLAG_NONE)),
+              StatusIs(StatusCode::kInvalidArgument));
 
   iree_hal_command_buffer_release(command_buffer);
   iree_hal_buffer_release(output_buffer);
@@ -272,10 +278,9 @@ TEST_P(BdaDispatchValidationTest,
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(64, &output_buffer));
 
   iree_hal_command_buffer_t* command_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/0, &command_buffer));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     /*binding_capacity=*/0, &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
   iree_hal_buffer_ref_t binding_refs[2] = {
@@ -295,12 +300,14 @@ TEST_P(BdaDispatchValidationTest,
       iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
-  EXPECT_THAT(
-      Status(iree_hal_device_queue_execute(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-          iree_hal_semaphore_list_empty(), command_buffer,
-          iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE)),
-      StatusIs(StatusCode::kOutOfRange));
+  iree_hal_queue_t* queue = QueueForCommandBuffer(command_buffer);
+  ASSERT_NE(nullptr, queue);
+  EXPECT_THAT(Status(iree_hal_queue_execute(
+                  queue, iree_hal_semaphore_list_empty(),
+                  iree_hal_semaphore_list_empty(), command_buffer,
+                  iree_hal_buffer_binding_table_empty(),
+                  IREE_HAL_QUEUE_EXECUTE_FLAG_NONE)),
+              StatusIs(StatusCode::kOutOfRange));
 
   iree_hal_command_buffer_release(command_buffer);
   iree_hal_buffer_release(output_buffer);
@@ -351,10 +358,9 @@ TEST_P(BdaDispatchValidationTest,
   const iree_device_size_t output_offset = 1;
 
   iree_hal_command_buffer_t* command_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/0, &command_buffer));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     /*binding_capacity=*/0, &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
   iree_hal_buffer_ref_t binding_refs[2] = {
@@ -375,12 +381,14 @@ TEST_P(BdaDispatchValidationTest,
       iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
-  EXPECT_THAT(
-      Status(iree_hal_device_queue_execute(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-          iree_hal_semaphore_list_empty(), command_buffer,
-          iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE)),
-      StatusIs(StatusCode::kInvalidArgument));
+  iree_hal_queue_t* queue = QueueForCommandBuffer(command_buffer);
+  ASSERT_NE(nullptr, queue);
+  EXPECT_THAT(Status(iree_hal_queue_execute(
+                  queue, iree_hal_semaphore_list_empty(),
+                  iree_hal_semaphore_list_empty(), command_buffer,
+                  iree_hal_buffer_binding_table_empty(),
+                  IREE_HAL_QUEUE_EXECUTE_FLAG_NONE)),
+              StatusIs(StatusCode::kInvalidArgument));
 
   iree_hal_command_buffer_release(command_buffer);
   iree_hal_buffer_release(output_buffer);

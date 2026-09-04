@@ -70,9 +70,9 @@ class TestLogicalDevice {
 
   iree_hal_device_t* base_device() const { return base_device_; }
 
-  iree_hal_queue_t* queue() const {
-    return iree_hal_device_queue(base_device_, /*family_ordinal=*/0,
-                                 /*queue_ordinal=*/0);
+  iree_hal_queue_t* queue(iree_hal_queue_family_ordinal_t family_ordinal = 0,
+                          iree_hal_queue_ordinal_t queue_ordinal = 0) const {
+    return iree_hal_device_queue(base_device_, family_ordinal, queue_ordinal);
   }
 
   iree_hal_allocator_t* allocator() const {
@@ -383,8 +383,8 @@ static iree_status_t CreateTwoDispatchCommandBuffer(
   IREE_RETURN_IF_ERROR(
       InitializeTwoDispatchCommandBufferResources(test_device, out_fixture));
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
-      test_device->base_device(), mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
-      IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/0,
+      test_device->base_device(), iree_hal_queue_family(test_device->queue()),
+      mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH, /*binding_capacity=*/0,
       out_fixture->command_buffer.out()));
   IREE_RETURN_IF_ERROR(
       iree_hal_command_buffer_begin(out_fixture->command_buffer));

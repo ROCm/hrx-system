@@ -480,7 +480,8 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_execute(
     const iree_hal_semaphore_list_t* signal_semaphore_list,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t flags, iree_hal_amdgpu_pending_op_t** out_op) {
+    iree_hal_queue_execute_flags_t flags,
+    iree_hal_amdgpu_pending_op_t** out_op) {
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_host_queue_validate_execute_flags(flags));
   if (IREE_UNLIKELY(!command_buffer && binding_table.count != 0)) {

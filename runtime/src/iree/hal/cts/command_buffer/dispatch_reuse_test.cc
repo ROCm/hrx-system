@@ -120,9 +120,9 @@ class DispatchReuseTest : public CtsTestBase<> {
                                  iree_hal_command_buffer_mode_t mode =
                                      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT) {
     iree_hal_command_buffer_t* command_buffer = nullptr;
-    IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        device_, mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
-        IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/1, &command_buffer));
+    IREE_ASSERT_OK(CreateCommandBuffer(mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                       /*binding_capacity=*/1,
+                                       &command_buffer));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
     iree_hal_buffer_ref_t binding_refs[1] = {{
@@ -160,9 +160,9 @@ class DispatchReuseTest : public CtsTestBase<> {
       iree_hal_command_buffer_mode_t mode =
           IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT) {
     iree_hal_command_buffer_t* command_buffer = nullptr;
-    IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        device_, mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
-        IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/2, &command_buffer));
+    IREE_ASSERT_OK(CreateCommandBuffer(mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                       /*binding_capacity=*/2,
+                                       &command_buffer));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
     for (uint32_t buffer_slot = 0; buffer_slot < 2; ++buffer_slot) {
@@ -195,9 +195,9 @@ class DispatchReuseTest : public CtsTestBase<> {
       iree_hal_buffer_binding_table_t binding_table) {
     SemaphoreList signal(device_, {0}, {1});
     SemaphoreList empty_wait;
-    IREE_ASSERT_OK(iree_hal_device_queue_execute(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, signal,
-        command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        QueueForCommandBuffer(command_buffer), empty_wait, signal,
+        command_buffer, binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
                                                 IREE_ASYNC_WAIT_FLAG_NONE));
   }
@@ -360,9 +360,8 @@ TEST_P(DispatchReuseTest, MixedDirectAndIndirectBindings) {
       CreateFilledDeviceBuffer<float>(kByteLength, -9.0f, output.out()));
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+  IREE_ASSERT_OK(CreateCommandBuffer(
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
       /*binding_capacity=*/1, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
@@ -419,10 +418,9 @@ TEST_P(DispatchReuseTest, DeferredExecuteRetainsDispatchBindingTable) {
       CreateFilledDeviceBuffer<float>(kByteLength, -9.0f, output.out()));
 
   iree_hal_command_buffer_t* command_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/2, &command_buffer));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     /*binding_capacity=*/2, &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
   iree_hal_buffer_ref_t binding_refs[2] = {
@@ -459,9 +457,9 @@ TEST_P(DispatchReuseTest, DeferredExecuteRetainsDispatchBindingTable) {
       IREE_ARRAYSIZE(table_bindings),
       table_bindings,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait, signal, command_buffer,
-      binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      QueueForCommandBuffer(command_buffer), wait, signal, command_buffer,
+      binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
 
   iree_hal_command_buffer_release(command_buffer);
   iree_hal_buffer_release(input);
@@ -511,9 +509,9 @@ TEST_P(DispatchReuseTest, AllocaExecuteDeallocaCycle) {
     SemaphoreList execute_signal(device_, {0}, {1});
     iree_hal_buffer_binding_t bindings[1] = {{transient, 0, buffer_size}};
     iree_hal_buffer_binding_table_t binding_table = {1, bindings};
-    IREE_ASSERT_OK(iree_hal_device_queue_execute(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, alloca_signal, execute_signal,
-        command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        QueueForCommandBuffer(command_buffer), alloca_signal, execute_signal,
+        command_buffer, binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
 
     // Wait for execute to complete, then verify.
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -560,9 +558,9 @@ TEST_P(DispatchReuseTest, PipelinedAllocaExecuteDealloca) {
   SemaphoreList execute_a_signal(device_, {0}, {1});
   iree_hal_buffer_binding_t bindings_a[1] = {{buffer_a, 0, buffer_size}};
   iree_hal_buffer_binding_table_t table_a = {1, bindings_a};
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, alloca_a_signal, execute_a_signal,
-      command_buffer, table_a, IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      QueueForCommandBuffer(command_buffer), alloca_a_signal, execute_a_signal,
+      command_buffer, table_a, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
 
   // Phase 2: alloca + execute for buffer B (independent of phase 1).
   SemaphoreList alloca_b_signal(device_, {0}, {1});
@@ -574,9 +572,9 @@ TEST_P(DispatchReuseTest, PipelinedAllocaExecuteDealloca) {
   SemaphoreList execute_b_signal(device_, {0}, {1});
   iree_hal_buffer_binding_t bindings_b[1] = {{buffer_b, 0, buffer_size}};
   iree_hal_buffer_binding_table_t table_b = {1, bindings_b};
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, alloca_b_signal, execute_b_signal,
-      command_buffer, table_b, IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      QueueForCommandBuffer(command_buffer), alloca_b_signal, execute_b_signal,
+      command_buffer, table_b, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
 
   // Wait for both executes, then verify results.
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(

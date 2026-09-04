@@ -13,22 +13,21 @@
 static hrx_status_t hrx_stream_begin_cb(hrx_stream_t stream) {
   if (stream->pending_cb) return hrx_ok_status();
 
+  iree_hal_command_buffer_t* command_buffer = NULL;
   iree_status_t status = iree_hal_command_buffer_create(
-      stream->device->hal_device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+      stream->device->hal_device, iree_hal_queue_family(stream->hal_queue),
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
       IREE_HAL_COMMAND_CATEGORY_TRANSFER | IREE_HAL_COMMAND_CATEGORY_DISPATCH,
-      IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/0, &stream->pending_cb);
-  if (!iree_status_is_ok(status)) {
-    return hrx_status_from_iree(status);
+      /*binding_capacity=*/0, &command_buffer);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_begin(command_buffer);
   }
-
-  status = iree_hal_command_buffer_begin(stream->pending_cb);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_command_buffer_release(stream->pending_cb);
-    stream->pending_cb = NULL;
-    return hrx_status_from_iree(status);
+  if (iree_status_is_ok(status)) {
+    stream->pending_cb = command_buffer;
+  } else {
+    iree_hal_command_buffer_release(command_buffer);
   }
-
-  return hrx_ok_status();
+  return hrx_status_from_iree(status);
 }
 
 static iree_status_t hrx_stream_record_ordering_barrier(hrx_stream_t stream) {
@@ -58,6 +57,7 @@ hrx_status_t hrx_stream_create(hrx_device_t device, uint32_t flags,
   iree_atomic_ref_count_init(&s->ref_count);
   s->device = device;
   hrx_device_retain(s->device);
+  s->hal_queue = device->dispatch_queue;
   s->flags = flags;
   s->timepoint = 0;
   s->has_pending_work = false;
@@ -67,6 +67,7 @@ hrx_status_t hrx_stream_create(hrx_device_t device, uint32_t flags,
   hrx_status_t status =
       hrx_semaphore_create(device, /*initial_value=*/0, &s->semaphore);
   if (!hrx_status_is_ok(status)) {
+    hrx_device_release(s->device);
     free(s);
     return status;
   }
@@ -138,9 +139,9 @@ hrx_status_t hrx_stream_flush(hrx_stream_t stream) {
 
   iree_hal_buffer_binding_table_t binding_table =
       iree_hal_buffer_binding_table_empty();
-  status = iree_hal_device_queue_execute(
-      stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
-      signal_list, stream->pending_cb, binding_table, /*flags=*/0);
+  status = iree_hal_queue_execute(stream->hal_queue, wait_list, signal_list,
+                                  stream->pending_cb, binding_table,
+                                  IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
   if (!iree_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
@@ -268,9 +269,9 @@ hrx_status_t hrx_stream_wait_on(hrx_stream_t stream,
       .payload_values = &signal_value,
   };
 
-  iree_status_t iree_status = iree_hal_device_queue_barrier(
-      stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
-      signal_list, /*flags=*/0);
+  iree_status_t iree_status =
+      iree_hal_queue_barrier(stream->hal_queue, wait_list, signal_list,
+                             IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
   if (!iree_status_is_ok(iree_status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
   }

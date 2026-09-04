@@ -149,10 +149,10 @@ class TransientBufferTest : public CtsTestBase<> {
   iree_status_t SubmitTransferAndWait(
       std::function<iree_status_t(iree_hal_command_buffer_t*)> record_fn) {
     Ref<iree_hal_command_buffer_t> command_buffer;
-    IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
-        device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-        IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
-        /*binding_capacity=*/0, command_buffer.out()));
+    IREE_RETURN_IF_ERROR(
+        CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                            IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                            /*binding_capacity=*/0, command_buffer.out()));
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_begin(command_buffer));
     IREE_RETURN_IF_ERROR(record_fn(command_buffer));
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_end(command_buffer));
@@ -457,9 +457,8 @@ TEST_P(AsyncTransientBufferTest, StaticRefRecordedBeforeAllocaCommitExecutes) {
   EXPECT_EQ(0u, alloca_value);
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+  IREE_ASSERT_OK(CreateCommandBuffer(
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
       /*binding_capacity=*/0, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   uint32_t pattern = 0xA55A1337u;
@@ -469,10 +468,10 @@ TEST_P(AsyncTransientBufferTest, StaticRefRecordedBeforeAllocaCommitExecutes) {
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
   SemaphoreList execute_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, alloca_signal, execute_signal,
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      QueueForCommandBuffer(command_buffer), alloca_signal, execute_signal,
       command_buffer, iree_hal_buffer_binding_table_empty(),
-      IREE_HAL_EXECUTE_FLAG_NONE));
+      IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
 
   IREE_ASSERT_OK(release_alloca_wait.SignalNow());
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -492,9 +491,8 @@ TEST_P(AsyncTransientBufferTest, IndirectRefResolvedAfterAllocaCommit) {
   const iree_device_size_t buffer_size = 256;
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+  IREE_ASSERT_OK(CreateCommandBuffer(
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
       /*binding_capacity=*/1, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   uint32_t pattern = 0x5AA5C0DEu;
@@ -516,11 +514,11 @@ TEST_P(AsyncTransientBufferTest, IndirectRefResolvedAfterAllocaCommit) {
       {transient, 0, IREE_HAL_WHOLE_BUFFER},
   };
   SemaphoreList execute_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, alloca_signal, execute_signal,
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      QueueForCommandBuffer(command_buffer), alloca_signal, execute_signal,
       command_buffer,
       iree_hal_buffer_binding_table_t{IREE_ARRAYSIZE(bindings), bindings},
-      IREE_HAL_EXECUTE_FLAG_NONE));
+      IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
 
   IREE_ASSERT_OK(release_alloca_wait.SignalNow());
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(

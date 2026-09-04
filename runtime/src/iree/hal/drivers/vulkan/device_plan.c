@@ -57,10 +57,21 @@ void iree_hal_vulkan_device_plan_deinitialize(
   memset(plan, 0, sizeof(*plan));
 }
 
+static VkQueueFlags iree_hal_vulkan_effective_queue_flags(
+    VkQueueFlags queue_flags) {
+  if (iree_any_bit_set(queue_flags,
+                       VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) {
+    queue_flags |= VK_QUEUE_TRANSFER_BIT;
+  }
+  return queue_flags;
+}
+
 static bool iree_hal_vulkan_queue_family_has(
     const VkQueueFamilyProperties* queue_family, VkQueueFlags required_flags) {
   return queue_family->queueCount > 0 &&
-         iree_all_bits_set(queue_family->queueFlags, required_flags);
+         iree_all_bits_set(
+             iree_hal_vulkan_effective_queue_flags(queue_family->queueFlags),
+             required_flags);
 }
 
 static uint32_t iree_hal_vulkan_select_compute_queue_family(
@@ -197,14 +208,16 @@ static iree_status_t iree_hal_vulkan_select_queue_assignment(
   out_queue_assignment->compute = (iree_hal_vulkan_queue_selection_t){
       .family_index = compute_family_index,
       .queue_index = 0,
-      .flags = compute_family->queueFlags,
+      .flags =
+          iree_hal_vulkan_effective_queue_flags(compute_family->queueFlags),
       .timestamp_valid_bits = compute_family->timestampValidBits,
       .affinity = 1ull << 0,
   };
   out_queue_assignment->transfer = (iree_hal_vulkan_queue_selection_t){
       .family_index = transfer_family_index,
       .queue_index = transfer_queue_index,
-      .flags = transfer_family->queueFlags,
+      .flags =
+          iree_hal_vulkan_effective_queue_flags(transfer_family->queueFlags),
       .timestamp_valid_bits = transfer_family->timestampValidBits,
       .affinity = 1ull << 1,
   };
@@ -214,7 +227,8 @@ static iree_status_t iree_hal_vulkan_select_queue_assignment(
     out_queue_assignment->sparse_binding = (iree_hal_vulkan_queue_selection_t){
         .family_index = sparse_family_index,
         .queue_index = 0,
-        .flags = sparse_family->queueFlags,
+        .flags =
+            iree_hal_vulkan_effective_queue_flags(sparse_family->queueFlags),
         .timestamp_valid_bits = sparse_family->timestampValidBits,
         .affinity = 0,
     };
@@ -444,7 +458,7 @@ static iree_status_t iree_hal_vulkan_device_plan_initialize_owned_queues(
         &snapshot->queue_families[family_index].queueFamilyProperties;
     plan->queue_inventory.families[i] = (iree_hal_vulkan_queue_family_plan_t){
         .native_family_index = family_index,
-        .flags = properties->queueFlags,
+        .flags = iree_hal_vulkan_effective_queue_flags(properties->queueFlags),
         .timestamp_valid_bits = properties->timestampValidBits,
         .queue_count = properties->queueCount,
         .queue_offset = queue_offset,
@@ -1299,7 +1313,9 @@ static iree_status_t iree_hal_vulkan_select_external_queue(
   const VkQueueFamilyProperties* queue_family =
       &snapshot->queue_families[queue_set->queue_family_index]
            .queueFamilyProperties;
-  if (!iree_all_bits_set(queue_family->queueFlags, required_flags)) {
+  if (!iree_all_bits_set(
+          iree_hal_vulkan_effective_queue_flags(queue_family->queueFlags),
+          required_flags)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "external Vulkan %.*s queue family %u flags 0x%08x do not include "
@@ -1322,7 +1338,7 @@ static iree_status_t iree_hal_vulkan_select_external_queue(
       .family_index = queue_set->queue_family_index,
       .queue_index =
           iree_hal_vulkan_first_queue_index(queue_set->queue_indices),
-      .flags = queue_family->queueFlags,
+      .flags = iree_hal_vulkan_effective_queue_flags(queue_family->queueFlags),
       .timestamp_valid_bits = queue_family->timestampValidBits,
       .affinity = affinity,
   };
@@ -1430,7 +1446,7 @@ static iree_status_t iree_hal_vulkan_device_plan_initialize_wrapped_queues(
         iree_math_count_ones_u64(family_queue_masks[i]);
     plan->queue_inventory.families[i] = (iree_hal_vulkan_queue_family_plan_t){
         .native_family_index = family_index,
-        .flags = properties->queueFlags,
+        .flags = iree_hal_vulkan_effective_queue_flags(properties->queueFlags),
         .timestamp_valid_bits = properties->timestampValidBits,
         .queue_count = family_queue_count,
         .queue_offset = queue_offset,

@@ -22,10 +22,10 @@ extern "C" {
 #define IREE_HAL_PROFILE_FILE_MAGIC 0x46505249u
 
 // Major version of the IREE HAL profile bundle file format.
-#define IREE_HAL_PROFILE_FILE_VERSION_MAJOR 1u
+#define IREE_HAL_PROFILE_FILE_VERSION_MAJOR 2u
 
 // Minor version of the IREE HAL profile bundle file format.
-#define IREE_HAL_PROFILE_FILE_VERSION_MINOR 7u
+#define IREE_HAL_PROFILE_FILE_VERSION_MINOR 0u
 
 // File header stored at byte 0 of every IREE HAL profile bundle.
 typedef struct iree_hal_profile_file_header_t {

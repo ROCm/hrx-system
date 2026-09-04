@@ -71,10 +71,10 @@ class CommandBufferCopyBufferTest : public CtsTestBase<> {
     IREE_ASSERT_OK(CreateZeroedDeviceBuffer(buffer_size, target_buffer.out()));
 
     Ref<iree_hal_command_buffer_t> command_buffer;
-    IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-        IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
-        binding_capacity(), command_buffer.out()));
+    IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                       IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                       binding_capacity(),
+                                       command_buffer.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
     IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
         command_buffer,
@@ -107,10 +107,9 @@ TEST_P(CommandBufferCopyBufferTest, CopyWholeBuffer) {
 
   // Copy the source buffer to the target buffer.
   Ref<iree_hal_command_buffer_t> command_buffer;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
-      binding_capacity(), command_buffer.out()));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                     binding_capacity(), command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
       command_buffer,
@@ -147,10 +146,9 @@ TEST_P(CommandBufferCopyBufferTest, CopySubBuffer) {
 
   // Zero-fill, copy a sub-region, then zero-fill the remainder.
   Ref<iree_hal_command_buffer_t> command_buffer;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
-      binding_capacity(), command_buffer.out()));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                     binding_capacity(), command_buffer.out()));
   uint8_t zero_val = 0x0;
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(

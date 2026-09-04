@@ -328,13 +328,17 @@ class QueueBenchmark : public benchmark::Fixture {
 
   bool EnsureQueueAvailable(benchmark::State& state,
                             iree_hal_queue_affinity_t queue_affinity) {
-    if (queue_affinity == kQueue1) {
+    if (queue_affinity == kQueue1 && !EnsurePrivateStreamQueuePair(state)) {
       // Cross-queue rows are same-physical-agent measurements; skip instead
       // of silently turning them into cross-device/system-scope rows.
-      return EnsurePrivateStreamQueuePair(state);
+      return false;
     }
-    return HandleStatus(state,
-                        iree_hal_device_queue_flush(device_, queue_affinity),
+    iree_hal_amdgpu_host_queue_t* host_queue = nullptr;
+    if (!HandleStatus(state, LookupHostQueue(queue_affinity, &host_queue),
+                      "queue affinity not available")) {
+      return false;
+    }
+    return HandleStatus(state, iree_hal_queue_flush(&host_queue->base),
                         "queue affinity not available");
   }
 
@@ -596,9 +600,11 @@ class QueueBenchmark : public benchmark::Fixture {
       iree_hal_queue_affinity_t queue_affinity,
       iree_hal_semaphore_list_t wait_semaphore_list,
       iree_hal_semaphore_list_t signal_semaphore_list) {
-    return iree_hal_device_queue_barrier(
-        device_, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-        IREE_HAL_EXECUTE_FLAG_NONE);
+    iree_hal_amdgpu_host_queue_t* host_queue = nullptr;
+    IREE_RETURN_IF_ERROR(LookupHostQueue(queue_affinity, &host_queue));
+    return iree_hal_queue_barrier(&host_queue->base, wait_semaphore_list,
+                                  signal_semaphore_list,
+                                  IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
   }
 
   iree_status_t SubmitPayloadWithLists(
@@ -1860,10 +1866,11 @@ class QueueBenchmark : public benchmark::Fixture {
     IREE_RETURN_IF_ERROR(BindingCountDispatchConfig(&dispatch_config));
 
     iree_hal_command_buffer_t* command_buffer = nullptr;
-    iree_status_t status = iree_hal_command_buffer_create(
-        device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-        IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-        /*binding_capacity=*/0, &command_buffer);
+    iree_status_t status =
+        iree_hal_command_buffer_create(device_, iree_hal_queue_family(queue0_),
+                                       IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                                       IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                       /*binding_capacity=*/0, &command_buffer);
     if (iree_status_is_ok(status)) {
       status = iree_hal_command_buffer_begin(command_buffer);
     }
@@ -1917,10 +1924,11 @@ class QueueBenchmark : public benchmark::Fixture {
     IREE_RETURN_IF_ERROR(BindingCountDispatchConfig(&dispatch_config));
 
     iree_hal_command_buffer_t* command_buffer = nullptr;
-    iree_status_t status = iree_hal_command_buffer_create(
-        device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-        IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-        /*binding_capacity=*/0, &command_buffer);
+    iree_status_t status =
+        iree_hal_command_buffer_create(device_, iree_hal_queue_family(queue0_),
+                                       IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                                       IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                       /*binding_capacity=*/0, &command_buffer);
     if (iree_status_is_ok(status)) {
       status = iree_hal_command_buffer_begin(command_buffer);
     }
@@ -2087,10 +2095,11 @@ class QueueBenchmark : public benchmark::Fixture {
         /*semaphores=*/&signal_semaphore,
         /*payload_values=*/&completion_payload_value,
     };
-    IREE_RETURN_IF_ERROR(iree_hal_device_queue_execute(
-        device_, kQueue0, iree_hal_semaphore_list_empty(),
-        signal_semaphore_list, binding_count_command_buffers_[binding_count],
-        iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE));
+    IREE_RETURN_IF_ERROR(iree_hal_queue_execute(
+        queue0_, iree_hal_semaphore_list_empty(), signal_semaphore_list,
+        binding_count_command_buffers_[binding_count],
+        iree_hal_buffer_binding_table_empty(),
+        IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
     *out_completion = {completion_semaphore_, completion_payload_value};
     return iree_ok_status();
   }
@@ -2105,10 +2114,10 @@ class QueueBenchmark : public benchmark::Fixture {
         /*semaphores=*/&signal_semaphore,
         /*payload_values=*/&completion_payload_value,
     };
-    IREE_RETURN_IF_ERROR(iree_hal_device_queue_execute(
-        device_, kQueue0, iree_hal_semaphore_list_empty(),
-        signal_semaphore_list, command_buffer,
-        iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE));
+    IREE_RETURN_IF_ERROR(iree_hal_queue_execute(
+        queue0_, iree_hal_semaphore_list_empty(), signal_semaphore_list,
+        command_buffer, iree_hal_buffer_binding_table_empty(),
+        IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
     *out_completion = {completion_semaphore_, completion_payload_value};
     return iree_ok_status();
   }

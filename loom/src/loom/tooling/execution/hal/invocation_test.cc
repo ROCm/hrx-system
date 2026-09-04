@@ -61,9 +61,9 @@ TEST_F(HalInvocationTest, DispatchBatchOptionsUseFastReusableDefaults) {
                                 IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED));
   EXPECT_FALSE(iree_all_bits_set(options.command_buffer_mode,
                                  IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT));
-  EXPECT_TRUE(
-      iree_all_bits_set(options.execute_flags,
-                        IREE_HAL_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME));
+  EXPECT_TRUE(iree_all_bits_set(
+      options.execute_flags,
+      IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME));
 }
 
 TEST_F(HalInvocationTest, ResultOwnsOutputBuilder) {

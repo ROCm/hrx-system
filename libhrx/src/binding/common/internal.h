@@ -210,7 +210,10 @@ struct iree_hal_streaming_context_t {
   iree_hal_device_t* device;
   iree_hal_streaming_device_ordinal_t device_ordinal;
   iree_hal_streaming_device_t* device_entry;
-  iree_hal_queue_affinity_t queue_affinity;
+
+  // Provisioned hardware queue used by streams in this context. Borrowed from
+  // |device| and valid for the context lifetime.
+  iree_hal_queue_t* queue;
 
   // HAL resources.
   iree_hal_allocator_t* device_allocator;
@@ -518,10 +521,6 @@ typedef struct iree_hal_streaming_stream_t {
   // retained by |context| and valid while the context remains attached.
   iree_hal_queue_t* queue;
 
-  // Legacy affinity used by device-level operations pending exact-queue
-  // migration.
-  iree_hal_queue_affinity_t queue_affinity;
-
   // Event dependencies that establish safe cross-stream allocation reuse.
   iree_hal_streaming_memory_reuse_dependency_t* memory_reuse_dependencies;
   // Number of valid entries in |memory_reuse_dependencies|.
@@ -553,6 +552,13 @@ typedef struct iree_hal_streaming_stream_t {
   // Host allocator.
   iree_allocator_t host_allocator;
 } iree_hal_streaming_stream_t;
+
+// Returns the stable family-affinity bit identifying |queue|'s family.
+static inline iree_hal_queue_family_affinity_t
+iree_hal_streaming_queue_family_affinity(const iree_hal_queue_t* queue) {
+  return iree_hal_make_queue_family_affinity(
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(queue)));
+}
 
 // Reserves the next value on |stream|'s timeline for one submission. Callers
 // must hold |stream->mutex| and publish |*out_signal_value| to
@@ -1939,7 +1945,7 @@ iree_hal_streaming_event_exchange_capture_graph(
 // tick slot is acquired, and covers the device allocation a pool growth
 // performs). Runs under whichever lock the calling record path holds - the
 // stream mutex, which is a precondition because the body reads
-// stream->context and stream->queue_affinity from under it, and on the launch
+// stream->context and stream->queue from under it, and on the launch
 // path the mutex of the executable the launch was issued on, which is the one
 // held for a record inside a child graph too - with the pool mutex nested
 // inside both.

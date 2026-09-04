@@ -14,8 +14,8 @@ extern "C" {
 #endif  // __cplusplus
 
 // Captures and submits one exact-queue transfer transaction.
-iree_status_t iree_hal_amdgpu_host_queue_transfer(
-    iree_hal_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_enqueue_transfer(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_host_size_t operation_count,

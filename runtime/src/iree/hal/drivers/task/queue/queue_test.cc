@@ -89,11 +89,15 @@ TEST_P(TaskQueueShutdownTest, ReleasesDeviceGroupWithAcceptedExecuteInFlight) {
     IREE_ASSERT_OK(CreateDeviceGroup(&device_group));
     iree_hal_device_t* device =
         iree_hal_device_group_device_at(device_group, 0);
+    iree_hal_queue_t* queue = iree_hal_device_queue(
+        device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+    ASSERT_NE(queue, nullptr);
 
     iree_hal_command_buffer_t* command_buffer = nullptr;
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-        IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+        device, iree_hal_queue_family(queue),
+        IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+        IREE_HAL_COMMAND_CATEGORY_TRANSFER,
         /*binding_capacity=*/0, &command_buffer));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
@@ -110,10 +114,10 @@ TEST_P(TaskQueueShutdownTest, ReleasesDeviceGroupWithAcceptedExecuteInFlight) {
         signal_values,
     };
 
-    IREE_ASSERT_OK(iree_hal_device_queue_execute(
-        device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-        signal_list, command_buffer, iree_hal_buffer_binding_table_empty(),
-        IREE_HAL_EXECUTE_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        queue, iree_hal_semaphore_list_empty(), signal_list, command_buffer,
+        iree_hal_buffer_binding_table_empty(),
+        IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
 
     iree_hal_semaphore_release(signal_semaphore);
     iree_hal_command_buffer_release(command_buffer);

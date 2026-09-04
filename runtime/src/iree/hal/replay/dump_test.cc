@@ -565,29 +565,32 @@ TEST(ReplayDumpTest, EmitsQueueAllocaSemaphoreRanges) {
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
-  iree_hal_replay_device_queue_alloca_payload_t payload = {};
-  payload.allocation.allocation_size = 4096;
-  payload.allocation.queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
-  payload.allocation.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
-  payload.allocation.type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-  payload.allocation.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  payload.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  iree_hal_replay_queue_alloca_payload_t payload = {};
   payload.signal_semaphore_count = 1;
+  payload.request_count = 1;
   iree_hal_replay_semaphore_timepoint_payload_t signal = {};
   signal.semaphore_id = 42;
   signal.value = 7;
-  iree_const_byte_span_t iovecs[2] = {
+  iree_hal_replay_queue_alloca_request_payload_t request = {};
+  request.buffer_id = 9;
+  request.allocation.allocation_size = 4096;
+  request.allocation.queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
+  request.allocation.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  request.allocation.type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+  request.allocation.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  iree_const_byte_span_t iovecs[3] = {
       iree_make_const_byte_span(&payload, sizeof(payload)),
       iree_make_const_byte_span(&signal, sizeof(signal)),
+      iree_make_const_byte_span(&request, sizeof(request)),
   };
   iree_hal_replay_file_record_metadata_t metadata = {};
   metadata.sequence_ordinal = 0;
   metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
-  metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ALLOCA;
-  metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE;
-  metadata.operation_code = IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ALLOCA;
-  IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(writer, &metadata, 2,
-                                                           iovecs, nullptr));
+  metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ALLOCA;
+  metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE;
+  metadata.operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ALLOCA;
+  IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
+      writer, &metadata, IREE_ARRAYSIZE(iovecs), iovecs, nullptr));
   IREE_ASSERT_OK(iree_hal_replay_file_writer_close(writer));
   iree_hal_replay_file_writer_free(writer);
 
@@ -596,10 +599,11 @@ TEST(ReplayDumpTest, EmitsQueueAllocaSemaphoreRanges) {
   std::string text_output;
   IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
                                     &text_options, &text_output));
-  EXPECT_THAT(text_output, HasSubstr("payload=device_queue_alloca"));
-  EXPECT_THAT(text_output, HasSubstr("submit_queue_affinity="));
+  EXPECT_THAT(text_output, HasSubstr("payload=queue_alloca"));
+  EXPECT_THAT(text_output, HasSubstr("request_count=1"));
   EXPECT_THAT(text_output, HasSubstr("wait_range="));
   EXPECT_THAT(text_output, HasSubstr("signal_range="));
+  EXPECT_THAT(text_output, HasSubstr("request_range="));
 
   iree_hal_replay_dump_options_t json_options =
       iree_hal_replay_dump_options_default();
@@ -607,13 +611,13 @@ TEST(ReplayDumpTest, EmitsQueueAllocaSemaphoreRanges) {
   std::string json_output;
   IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
                                     &json_options, &json_output));
-  EXPECT_THAT(json_output,
-              HasSubstr("\"payload_type\":\"device_queue_alloca\""));
+  EXPECT_THAT(json_output, HasSubstr("\"payload_type\":\"queue_alloca\""));
   EXPECT_THAT(json_output, HasSubstr("\"wait_semaphores_range\""));
   EXPECT_THAT(json_output, HasSubstr("\"signal_semaphores_range\""));
+  EXPECT_THAT(json_output, HasSubstr("\"requests_range\""));
 }
 
-TEST(ReplayDumpTest, EmitsQueueExecuteTables) {
+TEST(ReplayDumpTest, EmitsQueueSubmissionPayloads) {
   std::vector<uint8_t> storage(4096, 0);
   iree_io_file_handle_t* file_handle = nullptr;
   IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
@@ -627,9 +631,8 @@ TEST(ReplayDumpTest, EmitsQueueExecuteTables) {
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
-  iree_hal_replay_device_queue_execute_payload_t payload = {};
+  iree_hal_replay_queue_execute_payload_t payload = {};
   payload.command_buffer_id = 9;
-  payload.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   payload.wait_semaphore_count = 1;
   payload.signal_semaphore_count = 1;
   payload.binding_count = 1;
@@ -652,9 +655,27 @@ TEST(ReplayDumpTest, EmitsQueueExecuteTables) {
   iree_hal_replay_file_record_metadata_t metadata = {};
   metadata.sequence_ordinal = 0;
   metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
-  metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_EXECUTE;
-  metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE;
-  metadata.operation_code = IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_EXECUTE;
+  metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_BARRIER;
+  metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE;
+  metadata.operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER;
+  iree_hal_replay_queue_barrier_payload_t barrier_payload = {};
+  barrier_payload.wait_semaphore_count = 1;
+  barrier_payload.signal_semaphore_count = 1;
+  iree_const_byte_span_t barrier_iovecs[] = {
+      iree_make_const_byte_span(&barrier_payload, sizeof(barrier_payload)),
+      iree_make_const_byte_span(&wait, sizeof(wait)),
+      iree_make_const_byte_span(&signal, sizeof(signal)),
+  };
+  IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
+      writer, &metadata, IREE_ARRAYSIZE(barrier_iovecs), barrier_iovecs,
+      nullptr));
+
+  metadata = {};
+  metadata.sequence_ordinal = 1;
+  metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
+  metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_EXECUTE;
+  metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE;
+  metadata.operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_EXECUTE;
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
       writer, &metadata, IREE_ARRAYSIZE(iovecs), iovecs, nullptr));
   IREE_ASSERT_OK(iree_hal_replay_file_writer_close(writer));
@@ -665,7 +686,8 @@ TEST(ReplayDumpTest, EmitsQueueExecuteTables) {
   std::string text_output;
   IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
                                     &text_options, &text_output));
-  EXPECT_THAT(text_output, HasSubstr("payload=device_queue_execute"));
+  EXPECT_THAT(text_output, HasSubstr("payload=queue_barrier"));
+  EXPECT_THAT(text_output, HasSubstr("payload=queue_execute"));
   EXPECT_THAT(text_output, HasSubstr("wait_semaphores=[{semaphore_id=42"));
   EXPECT_THAT(text_output, HasSubstr("signal_semaphores=[{semaphore_id=43"));
   EXPECT_THAT(text_output, HasSubstr("bindings=[{buffer_id=7"));
@@ -676,8 +698,8 @@ TEST(ReplayDumpTest, EmitsQueueExecuteTables) {
   std::string json_output;
   IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
                                     &json_options, &json_output));
-  EXPECT_THAT(json_output,
-              HasSubstr("\"payload_type\":\"device_queue_execute\""));
+  EXPECT_THAT(json_output, HasSubstr("\"payload_type\":\"queue_barrier\""));
+  EXPECT_THAT(json_output, HasSubstr("\"payload_type\":\"queue_execute\""));
   EXPECT_THAT(json_output,
               HasSubstr("\"wait_semaphores\":[{\"semaphore_id\":42"));
   EXPECT_THAT(json_output,
@@ -789,56 +811,6 @@ TEST(ReplayDumpTest, EmitsFilePayloads) {
       writer, &file_metadata, IREE_ARRAYSIZE(file_iovecs), file_iovecs,
       nullptr));
 
-  iree_hal_replay_device_queue_read_payload_t read_payload = {};
-  read_payload.source_file_id = 7;
-  read_payload.source_offset = 64;
-  read_payload.target_ref.buffer_id = 8;
-  read_payload.target_ref.length = 16;
-  read_payload.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
-  read_payload.signal_semaphore_count = 1;
-  iree_hal_replay_semaphore_timepoint_payload_t signal = {};
-  signal.semaphore_id = 9;
-  signal.value = 1;
-  iree_const_byte_span_t read_iovecs[2] = {
-      iree_make_const_byte_span(&read_payload, sizeof(read_payload)),
-      iree_make_const_byte_span(&signal, sizeof(signal)),
-  };
-  iree_hal_replay_file_record_metadata_t read_metadata = {};
-  read_metadata.sequence_ordinal = 1;
-  read_metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
-  read_metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_READ;
-  read_metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE;
-  read_metadata.operation_code =
-      IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_READ;
-  IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
-      writer, &read_metadata, IREE_ARRAYSIZE(read_iovecs), read_iovecs,
-      nullptr));
-
-  iree_hal_replay_device_queue_write_payload_t write_payload = {};
-  write_payload.source_ref.buffer_id = 8;
-  write_payload.source_ref.length = 16;
-  write_payload.target_file_id = 7;
-  write_payload.target_offset = 128;
-  write_payload.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
-  write_payload.wait_semaphore_count = 1;
-  iree_hal_replay_semaphore_timepoint_payload_t wait = {};
-  wait.semaphore_id = 9;
-  wait.value = 1;
-  iree_const_byte_span_t write_iovecs[2] = {
-      iree_make_const_byte_span(&write_payload, sizeof(write_payload)),
-      iree_make_const_byte_span(&wait, sizeof(wait)),
-  };
-  iree_hal_replay_file_record_metadata_t write_metadata = {};
-  write_metadata.sequence_ordinal = 2;
-  write_metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
-  write_metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_WRITE;
-  write_metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE;
-  write_metadata.operation_code =
-      IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_WRITE;
-  IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
-      writer, &write_metadata, IREE_ARRAYSIZE(write_iovecs), write_iovecs,
-      nullptr));
-
   IREE_ASSERT_OK(iree_hal_replay_file_writer_close(writer));
   iree_hal_replay_file_writer_free(writer);
 
@@ -860,10 +832,6 @@ TEST(ReplayDumpTest, EmitsFilePayloads) {
   EXPECT_THAT(text_output, HasSubstr("reference_type=external_path(1)"));
   EXPECT_THAT(text_output, HasSubstr("validation_type=identity(1)"));
   EXPECT_THAT(text_output, HasSubstr("reference_range="));
-  EXPECT_THAT(text_output, HasSubstr("payload=device_queue_read"));
-  EXPECT_THAT(text_output, HasSubstr("source_file_id=7"));
-  EXPECT_THAT(text_output, HasSubstr("payload=device_queue_write"));
-  EXPECT_THAT(text_output, HasSubstr("target_file_id=7"));
 
   iree_hal_replay_dump_options_t json_options =
       iree_hal_replay_dump_options_default();
@@ -883,13 +851,6 @@ TEST(ReplayDumpTest, EmitsFilePayloads) {
               HasSubstr("\"reference_type_name\":\"external_path\""));
   EXPECT_THAT(json_output, HasSubstr("\"validation_type_name\":\"identity\""));
   EXPECT_THAT(json_output, HasSubstr("\"reference_range\""));
-  EXPECT_THAT(json_output, HasSubstr("\"payload_type\":\"device_queue_read\""));
-  EXPECT_THAT(json_output,
-              HasSubstr("\"payload_type\":\"device_queue_write\""));
-  EXPECT_THAT(json_output, HasSubstr("\"source_file_id\":7"));
-  EXPECT_THAT(json_output, HasSubstr("\"target_file_id\":7"));
-  EXPECT_THAT(json_output, HasSubstr("\"wait_semaphores_range\""));
-  EXPECT_THAT(json_output, HasSubstr("\"signal_semaphores_range\""));
 }
 
 TEST(ReplayDumpTest, EmitsQueueTransferRanges) {

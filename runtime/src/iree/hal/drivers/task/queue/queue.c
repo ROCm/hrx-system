@@ -4927,6 +4927,42 @@ static iree_status_t iree_hal_task_queue_dealloca(
       queue, buffer_count, buffers, wait_semaphore_list, signal_semaphore_list);
 }
 
+static iree_status_t iree_hal_task_queue_barrier(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_queue_barrier_flags_t flags) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+  (void)flags;
+  return iree_hal_task_queue_submit_barrier((iree_hal_task_queue_t*)base_queue,
+                                            wait_semaphore_list,
+                                            signal_semaphore_list);
+}
+
+static iree_status_t iree_hal_task_queue_execute(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t binding_table,
+    iree_hal_queue_execute_flags_t flags) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+  (void)flags;
+  iree_hal_task_submission_batch_t batch = {
+      .wait_semaphores = wait_semaphore_list,
+      .signal_semaphores = signal_semaphore_list,
+      .command_buffer = command_buffer,
+      .binding_table = binding_table,
+  };
+  return iree_hal_task_queue_submit_commands((iree_hal_task_queue_t*)base_queue,
+                                             /*batch_count=*/1, &batch);
+}
+
+static iree_status_t iree_hal_task_queue_flush(iree_hal_queue_t* base_queue) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_task_queue_read(
     iree_hal_queue_t* base_queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -4973,6 +5009,9 @@ static iree_status_t iree_hal_task_queue_write(
 
 static const iree_hal_queue_vtable_t iree_hal_task_queue_vtable = {
     .destroy = iree_hal_task_queue_destroy,
+    .barrier = iree_hal_task_queue_barrier,
+    .execute = iree_hal_task_queue_execute,
+    .flush = iree_hal_task_queue_flush,
     .alloca = iree_hal_task_queue_alloca,
     .dealloca = iree_hal_task_queue_dealloca,
     .transfer = iree_hal_task_queue_transfer,

@@ -130,8 +130,9 @@ TEST_F(ExecutableTest, PublishesAndEnforcesResourceLimits) {
       [&](uint32_t dynamic_workgroup_local_memory_size) -> iree_status_t {
     Ref<iree_hal_command_buffer_t> command_buffer;
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
-        test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-        IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+        test_device.base_device(), iree_hal_queue_family(test_device.queue()),
+        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+        IREE_HAL_COMMAND_CATEGORY_DISPATCH,
         /*binding_capacity=*/0, command_buffer.out()));
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_begin(command_buffer));
     iree_hal_dispatch_config_t dispatch_config =

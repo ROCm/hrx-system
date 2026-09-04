@@ -7,6 +7,7 @@
 #include "iree/hal/queue.h"
 
 #include "iree/hal/buffer.h"
+#include "iree/hal/command_buffer.h"
 #include "iree/hal/detail.h"
 #include "iree/hal/file.h"
 #include "iree/hal/pool.h"
@@ -87,6 +88,106 @@ static iree_status_t iree_hal_queue_validate_family_access(
         queue_family_ordinal, queue_family_affinity);
   }
   return iree_ok_status();
+}
+
+IREE_API_EXPORT iree_status_t
+iree_hal_queue_barrier(iree_hal_queue_t* queue,
+                       const iree_hal_semaphore_list_t wait_semaphore_list,
+                       const iree_hal_semaphore_list_t signal_semaphore_list,
+                       iree_hal_queue_barrier_flags_t flags) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_status_t status = iree_ok_status();
+  if (IREE_UNLIKELY(!queue)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
+  }
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(flags != IREE_HAL_QUEUE_BARRIER_FLAG_NONE)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unsupported queue barrier flags: 0x%016" PRIx64,
+                              flags);
+  }
+  if (iree_status_is_ok(status)) {
+    status = _VTABLE_DISPATCH(queue, barrier)(queue, wait_semaphore_list,
+                                              signal_semaphore_list, flags);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t
+iree_hal_queue_execute(iree_hal_queue_t* queue,
+                       const iree_hal_semaphore_list_t wait_semaphore_list,
+                       const iree_hal_semaphore_list_t signal_semaphore_list,
+                       iree_hal_command_buffer_t* command_buffer,
+                       iree_hal_buffer_binding_table_t binding_table,
+                       iree_hal_queue_execute_flags_t flags) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  const iree_hal_queue_execute_flags_t known_flags =
+      IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME;
+  iree_status_t status = iree_ok_status();
+  if (IREE_UNLIKELY(!queue)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+  } else if (IREE_UNLIKELY(!command_buffer)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "command buffer is null");
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
+  }
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(iree_any_bit_set(flags, ~known_flags))) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unsupported queue execute flags: 0x%016" PRIx64,
+                              flags);
+  }
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(iree_hal_command_buffer_queue_family(command_buffer) !=
+                    iree_hal_queue_family(queue))) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "command buffer family %u does not match queue family %u",
+        iree_hal_queue_family_ordinal(
+            iree_hal_command_buffer_queue_family(command_buffer)),
+        iree_hal_queue_family_ordinal(iree_hal_queue_family(queue)));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_validate_submission(command_buffer,
+                                                         binding_table);
+  }
+  if (iree_status_is_ok(status)) {
+    status = _VTABLE_DISPATCH(queue, execute)(
+        queue, wait_semaphore_list, signal_semaphore_list, command_buffer,
+        binding_table, flags);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_queue_flush(iree_hal_queue_t* queue) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_status_t status =
+      IREE_UNLIKELY(!queue)
+          ? iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null")
+          : _VTABLE_DISPATCH(queue, flush)(queue);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 IREE_API_EXPORT iree_status_t

@@ -576,19 +576,36 @@ static iree_status_t iree_hal_replay_executor_load_executable(
 static iree_status_t iree_hal_replay_executor_create_command_buffer(
     iree_hal_replay_executor_t* executor,
     const iree_hal_replay_file_record_t* record) {
-  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
-      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_OBJECT,
-      sizeof(iree_hal_replay_command_buffer_object_payload_t)));
-  iree_hal_replay_command_buffer_object_payload_t payload;
-  memcpy(&payload, record->payload.data, sizeof(payload));
   iree_hal_replay_object_entry_t* device_entry = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
       executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
       &device_entry));
+
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_FAMILY_COMMAND_BUFFER_OBJECT,
+      sizeof(iree_hal_replay_queue_family_command_buffer_object_payload_t)));
+  iree_hal_replay_queue_family_command_buffer_object_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+  if (IREE_UNLIKELY(payload.reserved0 != 0 ||
+                    payload.binding_capacity > IREE_HOST_SIZE_MAX)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay queue family command buffer payload is invalid");
+  }
+  const iree_hal_queue_family_t* queue_family = iree_hal_device_queue_family(
+      device_entry->value.device,
+      (iree_hal_queue_family_ordinal_t)payload.queue_family_ordinal);
+  if (IREE_UNLIKELY(!queue_family)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "replay command buffer queue family %u is unavailable",
+        payload.queue_family_ordinal);
+  }
+
   iree_hal_command_buffer_t* command_buffer = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
-      device_entry->value.device, payload.mode, payload.command_categories,
-      payload.queue_affinity, (iree_host_size_t)payload.binding_capacity,
+      device_entry->value.device, queue_family, payload.mode,
+      payload.command_categories, (iree_host_size_t)payload.binding_capacity,
       &command_buffer));
   iree_hal_replay_object_entry_t entry = {.value.command_buffer =
                                               command_buffer};

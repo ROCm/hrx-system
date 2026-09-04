@@ -797,10 +797,11 @@ static void iree_hal_amdgpu_aql_command_buffer_destroy(
     iree_hal_command_buffer_t* base_command_buffer);
 
 iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
-    iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
+    iree_hal_allocator_t* device_allocator,
+    const iree_hal_queue_family_t* queue_family,
+    iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
-    iree_host_size_t device_ordinal,
+    iree_host_size_t binding_capacity, iree_host_size_t device_ordinal,
     iree_host_size_t queue_count_per_physical_device,
     uint32_t tsan_shadow_slot_count,
     iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
@@ -812,6 +813,7 @@ iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
     iree_allocator_t host_allocator,
     iree_hal_command_buffer_t** out_command_buffer) {
   IREE_ASSERT_ARGUMENT(device_allocator);
+  IREE_ASSERT_ARGUMENT(queue_family);
   IREE_ASSERT_ARGUMENT(out_command_buffer);
   *out_command_buffer = NULL;
 
@@ -872,7 +874,7 @@ iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
                                 (void**)&command_buffer));
   memset(command_buffer, 0, sizeof(*command_buffer));
   iree_hal_command_buffer_initialize(
-      device_allocator, mode, command_categories, queue_affinity,
+      device_allocator, queue_family, mode, command_categories,
       binding_capacity, (uint8_t*)command_buffer + validation_state_offset,
       &iree_hal_amdgpu_aql_command_buffer_vtable, &command_buffer->base);
   command_buffer->host_allocator = host_allocator;
@@ -894,8 +896,9 @@ iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
   iree_status_t status = iree_ok_status();
   if (retain_profile_metadata) {
     status = iree_hal_amdgpu_profile_metadata_register_command_buffer(
-        profile_metadata, mode, command_categories, queue_affinity,
-        device_ordinal, &command_buffer->profile.id);
+        profile_metadata, mode, command_categories,
+        iree_hal_queue_family_ordinal(queue_family), device_ordinal,
+        &command_buffer->profile.id);
   }
   if (iree_status_is_ok(status)) {
     *out_command_buffer = &command_buffer->base;

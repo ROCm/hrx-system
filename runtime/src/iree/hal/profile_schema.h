@@ -421,12 +421,14 @@ typedef struct iree_hal_profile_command_buffer_record_t {
   uint64_t mode;
   // HAL command categories supported by the command buffer.
   uint64_t command_categories;
-  // Queue affinity normalized at command-buffer creation.
-  uint64_t queue_affinity;
+  // Canonical queue family ordinal selected at command-buffer creation.
+  uint32_t queue_family_ordinal;
+  // Reserved for future queue-family fields; must be zero.
+  uint32_t reserved0;
   // Physical device ordinal selected for recorded device-specific packets.
   uint32_t physical_device_ordinal;
   // Reserved for future command-buffer record fields; must be zero.
-  uint32_t reserved0;
+  uint32_t reserved1;
 } iree_hal_profile_command_buffer_record_t;
 
 // Returns a default command-buffer record.
@@ -435,6 +437,7 @@ iree_hal_profile_command_buffer_record_default(void) {
   iree_hal_profile_command_buffer_record_t record;
   memset(&record, 0, sizeof(record));
   record.record_length = sizeof(record);
+  record.queue_family_ordinal = UINT32_MAX;
   record.physical_device_ordinal = UINT32_MAX;
   return record;
 }

@@ -542,7 +542,7 @@ iree_status_t iree_hal_vulkan_queue_submit_execute(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t flags,
+    iree_hal_queue_execute_flags_t flags,
     iree_hal_profile_queue_event_type_t queue_event_type);
 
 // Submits a queue-ordered host call.

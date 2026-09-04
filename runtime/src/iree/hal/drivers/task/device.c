@@ -585,14 +585,15 @@ static iree_status_t iree_hal_task_device_create_channel(
 }
 
 static iree_status_t iree_hal_task_device_create_command_buffer(
-    iree_hal_device_t* base_device, iree_hal_command_buffer_mode_t mode,
+    iree_hal_device_t* base_device, const iree_hal_queue_family_t* queue_family,
+    iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
+    iree_host_size_t binding_capacity,
     iree_hal_command_buffer_t** out_command_buffer) {
   iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
   return iree_hal_block_command_buffer_create(
-      iree_hal_device_allocator(base_device), mode, command_categories,
-      queue_affinity, binding_capacity, &device->large_block_pool,
+      iree_hal_device_allocator(base_device), queue_family, mode,
+      command_categories, binding_capacity, &device->large_block_pool,
       device->host_allocator, out_command_buffer);
 }
 
@@ -694,33 +695,6 @@ static iree_status_t iree_hal_task_device_queue_host_call(
       wait_semaphore_list, signal_semaphore_list, call, args, flags);
 }
 
-static iree_status_t iree_hal_task_device_queue_execute(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_command_buffer_t* command_buffer,
-    iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t flags) {
-  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  // NOTE: today we are not discriminating queues based on command type.
-  const iree_host_size_t queue_index = iree_hal_task_device_select_queue(
-      device, IREE_HAL_COMMAND_CATEGORY_ANY, queue_affinity);
-  if (command_buffer == NULL) {
-    // Fast-path for barriers (fork/join/sequence).
-    return iree_hal_task_queue_submit_barrier(&device->queues[queue_index],
-                                              wait_semaphore_list,
-                                              signal_semaphore_list);
-  }
-  iree_hal_task_submission_batch_t batch = {
-      .wait_semaphores = wait_semaphore_list,
-      .signal_semaphores = signal_semaphore_list,
-      .command_buffer = command_buffer,
-      .binding_table = binding_table,
-  };
-  return iree_hal_task_queue_submit_commands(&device->queues[queue_index], 1,
-                                             &batch);
-}
-
 static iree_status_t iree_hal_task_device_check_atomic_width(
     iree_hal_atomic_width_t width) {
   if (IREE_UNLIKELY(!iree_hal_task_atomic_width_is_lock_free(width))) {
@@ -785,12 +759,6 @@ static iree_status_t iree_hal_task_device_queue_timestamp(
     iree_hal_timestamp_flags_t flags) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "task device-side timestamps not implemented");
-}
-
-static iree_status_t iree_hal_task_device_queue_flush(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity) {
-  // Currently unused; we flush as submissions are made.
-  return iree_ok_status();
 }
 
 static uint32_t iree_hal_task_device_profile_count(iree_host_size_t count) {
@@ -938,12 +906,10 @@ static const iree_hal_device_vtable_t iree_hal_task_device_vtable = {
     .query_queue_pool_backend = iree_hal_task_device_query_queue_pool_backend,
     .queue_host_call = iree_hal_task_device_queue_host_call,
     .queue_dispatch = iree_hal_task_device_queue_dispatch,
-    .queue_execute = iree_hal_task_device_queue_execute,
     .queue_atomic_wait = iree_hal_task_device_queue_atomic_wait,
     .queue_atomic_store = iree_hal_task_device_queue_atomic_store,
     .queue_atomic_rmw = iree_hal_task_device_queue_atomic_rmw,
     .queue_timestamp = iree_hal_task_device_queue_timestamp,
-    .queue_flush = iree_hal_task_device_queue_flush,
     .profiling_begin = iree_hal_task_device_profiling_begin,
     .profiling_flush = iree_hal_task_device_profiling_flush,
     .profiling_end = iree_hal_task_device_profiling_end,

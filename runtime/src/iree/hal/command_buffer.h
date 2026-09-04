@@ -460,41 +460,6 @@ IREE_API_EXPORT iree_string_view_t iree_hal_command_category_format(
 #define IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE \
   ((iree_device_size_t)(64 * 1024))
 
-//===----------------------------------------------------------------------===//
-// iree_hal_buffer_binding_table_t
-//===----------------------------------------------------------------------===//
-
-// Describes a subrange of a buffer that can be bound to a binding slot.
-typedef struct iree_hal_buffer_binding_t {
-  // Buffer being bound to the slot, if any.
-  iree_hal_buffer_t* buffer;
-  // Offset, in bytes, into the buffer that the binding starts at.
-  // This will be added to the offset specified on each usage of the slot.
-  iree_device_size_t offset;
-  // Length, in bytes, of the buffer that is available to the executable.
-  // This can be IREE_HAL_WHOLE_BUFFER, however note that if the entire buffer
-  // contents are larger than supported by the device (~128MiB, usually) this
-  // will fail. If the descriptor type is dynamic this will be used for all
-  // ranges regardless of offset.
-  iree_device_size_t length;
-} iree_hal_buffer_binding_t;
-
-typedef struct iree_hal_buffer_binding_table_t {
-  iree_host_size_t count;
-  const iree_hal_buffer_binding_t* bindings;
-} iree_hal_buffer_binding_table_t;
-
-static inline iree_hal_buffer_binding_table_t
-iree_hal_buffer_binding_table_empty(void) {
-  iree_hal_buffer_binding_table_t table = {0, NULL};
-  return table;
-}
-
-static inline bool iree_hal_buffer_binding_table_is_empty(
-    iree_hal_buffer_binding_table_t binding_table) {
-  return binding_table.count == 0;
-}
-
 // Returns an unretained buffer specified in |buffer_ref| or from
 // |binding_table| with the slot specified if indirect. If the caller needs to
 // preserve the buffer for longer than the (known) lifetime of the binding table
@@ -541,9 +506,18 @@ static inline iree_status_t iree_hal_buffer_binding_table_resolve_ref(
 // iree_hal_command_buffer_t
 //===----------------------------------------------------------------------===//
 
-// Asynchronous command buffer recording interface.
-// Commands are recorded by the implementation for later submission to device
-// queues.
+// Asynchronous reusable command recording interface.
+// Commands are captured by the implementation for later submission to queues
+// in one queue family, amortizing recording and synchronization setup across
+// repeated executions. A HAL command buffer does not imply a native hardware
+// command buffer: implementations may lower the captured commands to native
+// command buffers, packet streams, queue operations, or another family-specific
+// representation.
+//
+// Every queue family supports command buffers for the command categories it
+// advertises. Families may use entirely different command buffer
+// implementations; the abstraction guarantees reusable capture, not a common
+// native representation.
 //
 // Resources referenced must remain valid and not be modified or read while
 // there are commands in-flight. The usual flow is to populate input buffers,
@@ -585,13 +559,14 @@ typedef struct iree_hal_command_buffer_t iree_hal_command_buffer_t;
 // referencing the binding table. Must only be non-zero for command buffer modes
 // supporting indirect bindings.
 //
-// |queue_affinity| specifies the device queues the command buffer may be
-// submitted to. The queue affinity provided to iree_hal_device_queue_execute
-// must match or be a subset of the |queue_affinity|.
+// |queue_family| identifies the one queue family the command buffer may be
+// submitted to. The pointer is borrowed from |device| and remains valid because
+// the device must outlive every command buffer created from it.
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_create(
-    iree_hal_device_t* device, iree_hal_command_buffer_mode_t mode,
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
+    iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
+    iree_host_size_t binding_capacity,
     iree_hal_command_buffer_t** out_command_buffer);
 
 // Retains the given |command_buffer| for the caller.
@@ -612,9 +587,10 @@ IREE_API_EXPORT iree_hal_command_category_t
 iree_hal_command_buffer_allowed_categories(
     const iree_hal_command_buffer_t* command_buffer);
 
-// Returns the queue affinity selected for the command buffer.
-IREE_API_EXPORT iree_hal_queue_affinity_t
-iree_hal_command_buffer_queue_affinity(
+// Returns the queue family the command buffer was created for.
+// The returned pointer is borrowed from the parent device.
+IREE_API_EXPORT const iree_hal_queue_family_t*
+iree_hal_command_buffer_queue_family(
     const iree_hal_command_buffer_t* command_buffer);
 
 // Returns the process-local nonzero profiling identifier for |command_buffer|.
@@ -821,68 +797,6 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_validate_submission(
     iree_hal_buffer_binding_table_t binding_table);
 
 //===----------------------------------------------------------------------===//
-// Utilities for command buffer creation
-//===----------------------------------------------------------------------===//
-
-// Defines a transfer command operation.
-typedef enum iree_hal_transfer_command_type_t {
-  // iree_hal_command_buffer_fill_buffer
-  IREE_HAL_TRANSFER_COMMAND_TYPE_FILL = 0u,
-  // iree_hal_command_buffer_update_buffer
-  IREE_HAL_TRANSFER_COMMAND_TYPE_UPDATE = 1u,
-  // iree_hal_command_buffer_copy_buffer
-  IREE_HAL_TRANSFER_COMMAND_TYPE_COPY = 2u,
-} iree_hal_transfer_command_type_t;
-
-// Represents a single transfer command within a batch of commands.
-typedef struct iree_hal_transfer_command_t {
-  // The type of the command selecting which of the payload data is used.
-  iree_hal_transfer_command_type_t type;
-  union {
-    // IREE_HAL_TRANSFER_COMMAND_TYPE_FILL
-    struct {
-      iree_hal_buffer_t* target_buffer;
-      iree_device_size_t target_offset;
-      iree_device_size_t length;
-      const void* pattern;
-      iree_host_size_t pattern_length;
-    } fill;
-    // IREE_HAL_TRANSFER_COMMAND_TYPE_UPDATE
-    struct {
-      const void* source_buffer;
-      iree_host_size_t source_offset;
-      iree_hal_buffer_t* target_buffer;
-      iree_device_size_t target_offset;
-      iree_device_size_t length;
-    } update;
-    // IREE_HAL_TRANSFER_COMMAND_TYPE_COPY
-    struct {
-      iree_hal_buffer_t* source_buffer;
-      iree_device_size_t source_offset;
-      iree_hal_buffer_t* target_buffer;
-      iree_device_size_t target_offset;
-      iree_device_size_t length;
-    } copy;
-  };
-} iree_hal_transfer_command_t;
-
-// Builds a command buffer containing a recording of all |transfer_commands|.
-// All buffers must be compatible with |device| and ranges must not overlap
-// (same as with memcpy). All commands are executed concurrently with no
-// barriers. The provided commands and any referenced data needs only remain
-// live during recording, while all referenced buffers must be kept valid by
-// the caller until the command buffer has completed execution.
-//
-// This is just a utility to make it easier to quickly construct batches of
-// transfer operations. If more control is required then record the command
-// buffer as normal.
-IREE_API_EXPORT iree_status_t iree_hal_create_transfer_command_buffer(
-    iree_hal_device_t* device, iree_hal_command_buffer_mode_t mode,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t transfer_count,
-    const iree_hal_transfer_command_t* transfer_commands,
-    iree_hal_command_buffer_t** out_command_buffer);
-
-//===----------------------------------------------------------------------===//
 // iree_hal_command_buffer_t implementation details
 //===----------------------------------------------------------------------===//
 
@@ -957,16 +871,28 @@ typedef struct iree_hal_command_buffer_vtable_t {
 IREE_HAL_ASSERT_VTABLE_LAYOUT(iree_hal_command_buffer_vtable_t);
 
 struct iree_hal_command_buffer_t {
+  // Base HAL resource state. Must be at offset zero.
   iree_hal_resource_t resource;
+
+  // Queue family this command buffer can be submitted to. Borrowed.
+  const iree_hal_queue_family_t* queue_family;
+
+  // Recording and lifetime mode bits.
   iree_hal_command_buffer_mode_t mode;
+
+  // Categories permitted while recording this command buffer.
   iree_hal_command_category_t allowed_categories;
-  iree_hal_queue_affinity_t queue_affinity;
 
   // Process-local nonzero command-buffer identifier used by profiling sessions.
   uint64_t profile_id;
 
+  // Maximum number of indirect binding slots.
   uint32_t binding_capacity;
+
+  // Number of indirect binding slots referenced by recorded commands.
   uint32_t binding_count;
+
+  // Optional implementation-independent validation state.
   void* validation_state;
 };
 
@@ -976,10 +902,12 @@ IREE_API_EXPORT iree_host_size_t iree_hal_command_buffer_validation_state_size(
     iree_hal_command_buffer_mode_t mode, iree_host_size_t binding_capacity);
 
 IREE_API_EXPORT void iree_hal_command_buffer_initialize(
-    iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
+    iree_hal_allocator_t* device_allocator,
+    const iree_hal_queue_family_t* queue_family,
+    iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
-    void* validation_state, const iree_hal_command_buffer_vtable_t* vtable,
+    iree_host_size_t binding_capacity, void* validation_state,
+    const iree_hal_command_buffer_vtable_t* vtable,
     iree_hal_command_buffer_t* command_buffer);
 
 IREE_API_EXPORT void iree_hal_command_buffer_destroy(

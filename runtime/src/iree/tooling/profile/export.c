@@ -14,7 +14,7 @@
 #include "iree/tooling/profile/model.h"
 #include "iree/tooling/profile/reader.h"
 
-#define IREE_PROFILE_EXPORT_SCHEMA_VERSION 16
+#define IREE_PROFILE_EXPORT_SCHEMA_VERSION 17
 
 static void iree_profile_export_print_prefix(FILE* file,
                                              const char* record_type,
@@ -431,11 +431,11 @@ static iree_status_t iree_profile_export_process_command_buffer_records(
         ",\"command_buffer_id\":%" PRIu64
         ",\"flags\":%u"
         ",\"physical_device_ordinal\":%u,\"mode\":%" PRIu64
-        ",\"command_categories\":%" PRIu64 ",\"queue_affinity\":%" PRIu64 "}\n",
+        ",\"command_categories\":%" PRIu64 ",\"queue_family_ordinal\":%u}\n",
         command_buffer_record.command_buffer_id, command_buffer_record.flags,
         command_buffer_record.physical_device_ordinal,
         command_buffer_record.mode, command_buffer_record.command_categories,
-        command_buffer_record.queue_affinity);
+        command_buffer_record.queue_family_ordinal);
   }
   return status;
 }

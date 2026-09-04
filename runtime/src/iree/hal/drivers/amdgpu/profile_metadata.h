@@ -158,7 +158,7 @@ iree_status_t iree_hal_amdgpu_profile_metadata_register_command_buffer(
     iree_hal_amdgpu_profile_metadata_registry_t* registry,
     iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_family_ordinal_t queue_family_ordinal,
     iree_host_size_t physical_device_ordinal, uint64_t* out_command_buffer_id);
 
 // Registers immutable command-buffer operation records.

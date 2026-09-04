@@ -103,9 +103,9 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
 
     SemaphoreList empty_wait;
     SemaphoreList signal(device_, {0}, {1});
-    iree_status_t status = iree_hal_device_queue_execute(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, signal,
-        command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE);
+    iree_status_t status = iree_hal_queue_execute(
+        QueueForCommandBuffer(command_buffer), empty_wait, signal,
+        command_buffer, binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
     if (iree_status_is_ok(status)) {
       status = iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
                                             IREE_ASYNC_WAIT_FLAG_NONE);
@@ -155,10 +155,9 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
     const bool indirect = recording_mode() == RecordingMode::kIndirect;
     const iree_host_size_t binding_capacity = indirect ? 1 : 0;
     Ref<iree_hal_command_buffer_t> command_buffer;
-    IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-        IREE_HAL_COMMAND_CATEGORY_ATOMIC, IREE_HAL_QUEUE_AFFINITY_ANY,
-        binding_capacity, command_buffer.out()));
+    IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                                       IREE_HAL_COMMAND_CATEGORY_ATOMIC,
+                                       binding_capacity, command_buffer.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
     const iree_hal_buffer_ref_t target_ref =
         indirect ? iree_hal_make_indirect_buffer_ref(
@@ -185,9 +184,9 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
     };
     SemaphoreList empty_wait;
     SemaphoreList signal(device_, {0}, {1});
-    Status submission_status(iree_hal_device_queue_execute(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, signal,
-        command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+    Status submission_status(iree_hal_queue_execute(
+        QueueForCommandBuffer(command_buffer), empty_wait, signal,
+        command_buffer, binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
     if (submission_status.ok()) {
       EXPECT_THAT(
           Status(iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
@@ -227,10 +226,9 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
     const bool indirect = recording_mode() == RecordingMode::kIndirect;
     const iree_host_size_t binding_capacity = indirect ? 1 : 0;
     Ref<iree_hal_command_buffer_t> command_buffer;
-    IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-        IREE_HAL_COMMAND_CATEGORY_ATOMIC, IREE_HAL_QUEUE_AFFINITY_ANY,
-        binding_capacity, command_buffer.out()));
+    IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                                       IREE_HAL_COMMAND_CATEGORY_ATOMIC,
+                                       binding_capacity, command_buffer.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
     const iree_device_size_t target_length =
@@ -329,10 +327,9 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
     const bool indirect = recording_mode() == RecordingMode::kIndirect;
     const iree_host_size_t binding_capacity = indirect ? 1 : 0;
     Ref<iree_hal_command_buffer_t> command_buffer;
-    IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-        IREE_HAL_COMMAND_CATEGORY_ATOMIC, IREE_HAL_QUEUE_AFFINITY_ANY,
-        binding_capacity, command_buffer.out()));
+    IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                                       IREE_HAL_COMMAND_CATEGORY_ATOMIC,
+                                       binding_capacity, command_buffer.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
     const iree_device_size_t target_length =

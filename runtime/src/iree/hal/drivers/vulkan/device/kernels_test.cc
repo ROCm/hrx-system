@@ -27,8 +27,8 @@ TEST(KernelsTest, CheckedModulesMatchCanonicalAssembly) {
   const iree_file_toc_t* checked_toc = iree_hal_vulkan_device_kernels_create();
   const iree_file_toc_t* generated_toc =
       iree_hal_vulkan_device_kernels_generated_create();
-  const char* const file_names[] = {"atomic_32", "atomic_64", "copy_unaligned",
-                                    "fill_unaligned", "update_unaligned"};
+  const char* const file_names[] = {"atomic_32", "atomic_64", "fill_unaligned",
+                                    "update_unaligned"};
   for (const char* file_name : file_names) {
     const std::string checked_name = std::string(file_name) + ".spv";
     const std::string generated_name =

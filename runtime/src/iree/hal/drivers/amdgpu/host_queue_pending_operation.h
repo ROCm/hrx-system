@@ -175,7 +175,7 @@ struct iree_hal_amdgpu_pending_op_t {
       // Binding resources captured until the deferred execute operation issues.
       iree_hal_resource_set_t* binding_resource_set;
       // HAL execute flags captured from queue_execute.
-      iree_hal_execute_flags_t flags;
+      iree_hal_queue_execute_flags_t flags;
     } execute;
 
     // Captured queue_atomic_wait/store/rmw payload.

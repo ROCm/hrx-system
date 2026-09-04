@@ -138,6 +138,9 @@ iree_status_t EmitDispatchBarrier(iree_hal_command_buffer_t* command_buffer) {
 struct DeviceBundle {
   // HAL device configured for one command-buffer path family.
   iree_hal_device_t* device = nullptr;
+  // Provisioned hardware queue used to execute benchmark command buffers.
+  // Borrowed from |device| and valid for the bundle lifetime.
+  iree_hal_queue_t* queue = nullptr;
   // Device group assigning topology/frontier metadata to |device|.
   iree_hal_device_group_t* device_group = nullptr;
   // Two-entrypoint benchmark executable with identical binding layout.
@@ -167,6 +170,7 @@ struct DeviceBundle {
     }
     iree_hal_executable_release(executable);
     executable = nullptr;
+    queue = nullptr;
     iree_hal_device_release(device);
     device = nullptr;
     iree_hal_device_group_release(device_group);
@@ -283,6 +287,14 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
     }
     iree_async_frontier_tracker_release(frontier_tracker);
 
+    if (iree_status_is_ok(status)) {
+      out_bundle->queue = iree_hal_device_queue(
+          out_bundle->device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+      if (!out_bundle->queue) {
+        status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                  "benchmark device has no provisioned queue");
+      }
+    }
     if (iree_status_is_ok(status)) {
       status = LoadExecutable(out_bundle);
     }
@@ -443,8 +455,8 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
     }
     iree_hal_command_buffer_t* command_buffer = nullptr;
     iree_status_t status = iree_hal_command_buffer_create(
-        bundle.device, command_buffer_mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
-        IREE_HAL_QUEUE_AFFINITY_ANY, binding_capacity, &command_buffer);
+        bundle.device, iree_hal_queue_family(bundle.queue), command_buffer_mode,
+        IREE_HAL_COMMAND_CATEGORY_DISPATCH, binding_capacity, &command_buffer);
     if (iree_status_is_ok(status)) {
       status = iree_hal_command_buffer_begin(command_buffer);
     }
@@ -502,12 +514,16 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
   iree_status_t RecordAbabaCommandBuffer(
       CommandBufferPath path, BenchmarkSpec spec,
       iree_hal_command_buffer_t** out_command_buffer) {
-    IREE_RETURN_IF_ERROR(
-        BeginAbabaCommandBuffer(path, spec, out_command_buffer));
-    iree_status_t status = iree_hal_command_buffer_end(*out_command_buffer);
-    if (!iree_status_is_ok(status)) {
-      iree_hal_command_buffer_release(*out_command_buffer);
-      *out_command_buffer = nullptr;
+    *out_command_buffer = nullptr;
+    iree_hal_command_buffer_t* command_buffer = nullptr;
+    iree_status_t status = BeginAbabaCommandBuffer(path, spec, &command_buffer);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_command_buffer_end(command_buffer);
+    }
+    if (iree_status_is_ok(status)) {
+      *out_command_buffer = command_buffer;
+    } else {
+      iree_hal_command_buffer_release(command_buffer);
     }
     return status;
   }
@@ -530,10 +546,9 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
                   /*bindings=*/bundle.binding_table.data(),
               }
             : iree_hal_buffer_binding_table_empty();
-    IREE_RETURN_IF_ERROR(iree_hal_device_queue_execute(
-        bundle.device, IREE_HAL_QUEUE_AFFINITY_ANY,
-        iree_hal_semaphore_list_empty(), signal_semaphore_list, command_buffer,
-        binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+    IREE_RETURN_IF_ERROR(iree_hal_queue_execute(
+        bundle.queue, iree_hal_semaphore_list_empty(), signal_semaphore_list,
+        command_buffer, binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
     out_completion->semaphore = signal_semaphore;
     out_completion->payload_value = payload_value;
     return iree_ok_status();

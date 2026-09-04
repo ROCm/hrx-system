@@ -109,9 +109,9 @@ hrx_status_t hrx_event_record(hrx_event_t event, hrx_stream_t stream) {
       .payload_values = sig_vals,
   };
 
-  iree_status_t iree_status = iree_hal_device_queue_barrier(
-      stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
-      signal_list, IREE_HAL_EXECUTE_FLAG_NONE);
+  iree_status_t iree_status =
+      iree_hal_queue_barrier(stream->hal_queue, wait_list, signal_list,
+                             IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
   if (!iree_status_is_ok(iree_status)) {
     return hrx_status_from_iree(iree_status);
   }
@@ -221,9 +221,9 @@ hrx_status_t hrx_stream_wait_event(hrx_stream_t stream, hrx_event_t event) {
       .payload_values = &signal_value,
   };
 
-  iree_status_t iree_status = iree_hal_device_queue_barrier(
-      stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
-      signal_list, IREE_HAL_EXECUTE_FLAG_NONE);
+  iree_status_t iree_status =
+      iree_hal_queue_barrier(stream->hal_queue, wait_list, signal_list,
+                             IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
   if (!iree_status_is_ok(iree_status)) {
     return hrx_status_from_iree(iree_status);
   }

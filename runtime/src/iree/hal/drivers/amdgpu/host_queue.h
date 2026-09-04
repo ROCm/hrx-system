@@ -737,22 +737,6 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
 // Trims transient resources retained by |queue|.
 void iree_hal_amdgpu_host_queue_trim(iree_hal_amdgpu_host_queue_t* queue);
 
-// Enqueues an asynchronous pool allocation transaction on |queue|.
-iree_status_t iree_hal_amdgpu_host_queue_alloca(
-    iree_hal_amdgpu_host_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_pool_t* pool, iree_host_size_t request_count,
-    const iree_hal_pool_reservation_request_t* requests,
-    iree_hal_buffer_t** IREE_RESTRICT out_buffers);
-
-// Enqueues an asynchronous pool deallocation transaction on |queue|.
-iree_status_t iree_hal_amdgpu_host_queue_dealloca(
-    iree_hal_amdgpu_host_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers);
-
 // Enqueues a buffer fill on |queue|.
 iree_status_t iree_hal_amdgpu_host_queue_fill(
     iree_hal_amdgpu_host_queue_t* queue,
@@ -816,15 +800,6 @@ iree_status_t iree_hal_amdgpu_host_queue_dispatch(
     const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     const iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags);
 
-// Enqueues a command buffer execution on |queue|.
-iree_status_t iree_hal_amdgpu_host_queue_execute(
-    iree_hal_amdgpu_host_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_command_buffer_t* command_buffer,
-    iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t flags);
-
 // Enqueues an atomic wait on |queue|.
 iree_status_t iree_hal_amdgpu_host_queue_atomic_wait(
     iree_hal_amdgpu_host_queue_t* queue,
@@ -856,10 +831,6 @@ iree_status_t iree_hal_amdgpu_host_queue_timestamp(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_timestamp_flags_t flags);
-
-// Flushes host-side work pending on |queue|.
-iree_status_t iree_hal_amdgpu_host_queue_flush(
-    iree_hal_amdgpu_host_queue_t* queue);
 
 // Initializes queue-owned TSAN state.
 //

@@ -243,6 +243,9 @@ typedef struct hrx_device_s {
   // Provisioned queue used for direct host and device transfers. Borrowed from
   // |hal_device|, which must outlive every use.
   iree_hal_queue_t* transfer_queue;
+  // Provisioned queue used for stream command buffers. Borrowed from
+  // |hal_device|, which must outlive every use.
+  iree_hal_queue_t* dispatch_queue;
   iree_hal_device_group_t* hal_device_group;
   bool profiling_active;
   hrx_allocator_s allocator;           // Inline, owned by device.
@@ -274,6 +277,8 @@ typedef struct hrx_event_s {
 typedef struct hrx_stream_s {
   iree_atomic_ref_count_t ref_count;
   hrx_device_t device;
+  // Exact HAL queue used by this stream. Borrowed from |device|.
+  iree_hal_queue_t* hal_queue;
   hrx_semaphore_t semaphore;
   uint64_t timepoint;
   iree_hal_command_buffer_t* pending_cb;
@@ -643,6 +648,19 @@ hrx_status_t hrx_ensure_shared_state(void);
 // cannot be represented.
 hrx_status_t hrx_device_query_total_memory_from_spec(
     hrx_device_t device, bool* out_known, iree_device_size_t* out_total);
+
+// Collapses an HRX flattened queue-affinity mask into the corresponding HAL
+// queue-family affinity for resource placement. Zero selects every family.
+iree_status_t hrx_hal_queue_affinity_to_family_affinity(
+    iree_hal_device_t* device, hrx_queue_affinity_t affinity,
+    iree_hal_queue_family_affinity_t* out_family_affinity);
+
+// Selects a provisioned queue matching an HRX flattened queue-affinity mask and
+// all required HAL queue-family roles. An affinity of zero selects any queue.
+iree_status_t hrx_hal_device_select_queue(
+    iree_hal_device_t* device, hrx_queue_affinity_t affinity,
+    iree_hal_queue_family_role_flags_t required_roles,
+    iree_hal_queue_t** out_queue);
 
 // Convert iree_status_t to hrx_status_t.
 hrx_status_t hrx_status_from_iree(iree_status_t iree_status);

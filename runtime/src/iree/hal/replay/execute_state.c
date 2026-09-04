@@ -436,10 +436,37 @@ iree_status_t iree_hal_replay_buffer_binding_table_storage_initialize(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_replay_executor_flush_and_wait(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t signal_list) {
-  IREE_RETURN_IF_ERROR(iree_hal_device_queue_flush(device, queue_affinity));
+iree_status_t iree_hal_replay_executor_flush_queue_and_wait(
+    iree_hal_queue_t* queue, const iree_hal_semaphore_list_t signal_list) {
+  IREE_RETURN_IF_ERROR(iree_hal_queue_flush(queue));
+  if (signal_list.count == 0) return iree_ok_status();
+  return iree_hal_semaphore_list_wait(signal_list, iree_infinite_timeout(),
+                                      IREE_ASYNC_WAIT_FLAG_NONE);
+}
+
+iree_status_t iree_hal_replay_executor_flush_device_and_wait(
+    iree_hal_device_t* device, const iree_hal_semaphore_list_t signal_list) {
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  for (iree_host_size_t family_ordinal = 0;
+       family_ordinal < queue_spec->family_count; ++family_ordinal) {
+    const iree_hal_queue_family_spec_t* family_spec =
+        &queue_spec->families[family_ordinal];
+    for (iree_hal_queue_ordinal_t queue_ordinal = 0;
+         queue_ordinal < family_spec->provisioned_queue_count;
+         ++queue_ordinal) {
+      iree_hal_queue_t* queue = iree_hal_device_queue(
+          device, (iree_hal_queue_family_ordinal_t)family_ordinal,
+          queue_ordinal);
+      if (IREE_UNLIKELY(!queue)) {
+        return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "replay device provisioned queue %" PRIhsz
+                                ":%u is unavailable",
+                                family_ordinal, queue_ordinal);
+      }
+      IREE_RETURN_IF_ERROR(iree_hal_queue_flush(queue));
+    }
+  }
   if (signal_list.count == 0) return iree_ok_status();
   return iree_hal_semaphore_list_wait(signal_list, iree_infinite_timeout(),
                                       IREE_ASYNC_WAIT_FLAG_NONE);

@@ -729,7 +729,67 @@ class CtsTestBase : public BaseType {
   // Command buffer and semaphore helpers
   //===--------------------------------------------------------------------===//
 
-  // Submits |command_buffer| to the device and waits for completion.
+  // Selects a provisioned queue whose family supports |command_categories|.
+  iree_hal_queue_t* QueueForCommandCategories(
+      iree_hal_command_category_t command_categories) const {
+    iree_hal_queue_family_role_flags_t required_roles = 0;
+    if (iree_any_bit_set(command_categories,
+                         IREE_HAL_COMMAND_CATEGORY_TRANSFER)) {
+      required_roles |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER;
+    }
+    if (iree_any_bit_set(command_categories,
+                         IREE_HAL_COMMAND_CATEGORY_DISPATCH)) {
+      required_roles |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH;
+    }
+    if (iree_any_bit_set(command_categories,
+                         IREE_HAL_COMMAND_CATEGORY_ATOMIC)) {
+      required_roles |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC;
+    }
+    const iree_hal_device_queue_spec_t* queue_spec =
+        iree_hal_device_spec_queues(iree_hal_device_spec(device_));
+    for (iree_host_size_t family_ordinal = 0;
+         family_ordinal < queue_spec->family_count; ++family_ordinal) {
+      const iree_hal_queue_family_spec_t* family_spec =
+          &queue_spec->families[family_ordinal];
+      if (family_spec->provisioned_queue_count == 0 ||
+          !iree_all_bits_set(family_spec->role_flags, required_roles)) {
+        continue;
+      }
+      return iree_hal_device_queue(
+          device_, (iree_hal_queue_family_ordinal_t)family_ordinal,
+          /*queue_ordinal=*/0);
+    }
+    return nullptr;
+  }
+
+  iree_status_t CreateCommandBuffer(
+      iree_hal_command_buffer_mode_t mode,
+      iree_hal_command_category_t command_categories,
+      iree_host_size_t binding_capacity,
+      iree_hal_command_buffer_t** out_command_buffer) const {
+    iree_hal_queue_t* queue = QueueForCommandCategories(command_categories);
+    if (!queue) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "device has no provisioned queue for command categories 0x%08x",
+          command_categories);
+    }
+    return iree_hal_command_buffer_create(device_, iree_hal_queue_family(queue),
+                                          mode, command_categories,
+                                          binding_capacity, out_command_buffer);
+  }
+
+  // Returns the first provisioned queue in the command buffer's family.
+  iree_hal_queue_t* QueueForCommandBuffer(
+      const iree_hal_command_buffer_t* command_buffer) const {
+    const iree_hal_queue_family_t* queue_family =
+        iree_hal_command_buffer_queue_family(command_buffer);
+    return iree_hal_device_queue(device_,
+                                 iree_hal_queue_family_ordinal(queue_family),
+                                 /*queue_ordinal=*/0);
+  }
+
+  // Submits |command_buffer| to a queue in its family and waits for completion.
   iree_status_t SubmitCommandBufferAndWait(
       iree_hal_command_buffer_t* command_buffer,
       iree_hal_buffer_binding_table_t binding_table =
@@ -747,10 +807,14 @@ class CtsTestBase : public BaseType {
         /*payload_values=*/&target_payload_value,
     };
 
-    iree_status_t status = iree_hal_device_queue_execute(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-        signal_semaphores, command_buffer, binding_table,
-        IREE_HAL_EXECUTE_FLAG_NONE);
+    iree_hal_queue_t* queue = QueueForCommandBuffer(command_buffer);
+    iree_status_t status =
+        queue ? iree_hal_queue_execute(
+                    queue, wait_semaphores, signal_semaphores, command_buffer,
+                    binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE)
+              : iree_make_status(
+                    IREE_STATUS_FAILED_PRECONDITION,
+                    "command buffer family has no provisioned queue");
     if (iree_status_is_ok(status)) {
       status = iree_hal_semaphore_wait(signal_semaphore, target_payload_value,
                                        iree_infinite_timeout(),
@@ -769,10 +833,9 @@ class CtsTestBase : public BaseType {
   iree_hal_command_buffer_t* CreateEmptyCommandBuffer(
       iree_host_size_t binding_capacity = 0) {
     iree_hal_command_buffer_t* command_buffer = nullptr;
-    IREE_EXPECT_OK(iree_hal_command_buffer_create(
-        device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-        IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-        binding_capacity, &command_buffer));
+    IREE_EXPECT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                       IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                       binding_capacity, &command_buffer));
     IREE_EXPECT_OK(iree_hal_command_buffer_begin(command_buffer));
     IREE_EXPECT_OK(iree_hal_command_buffer_end(command_buffer));
     return command_buffer;

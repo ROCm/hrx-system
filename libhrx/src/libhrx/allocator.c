@@ -31,16 +31,22 @@ hrx_status_t hrx_allocator_allocate_buffer(hrx_allocator_t allocator,
                                                 "allocator or buffer is NULL"));
   }
 
+  iree_hal_queue_family_affinity_t queue_family_affinity = 0;
+  iree_status_t status = hrx_hal_queue_affinity_to_family_affinity(
+      allocator->device->hal_device, params.queue_affinity,
+      &queue_family_affinity);
+  if (!iree_status_is_ok(status)) {
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
+  }
   iree_hal_buffer_params_t hal_params = {
       .usage = (iree_hal_buffer_usage_t)params.usage,
       .access = (iree_hal_memory_access_t)params.access,
       .type = (iree_hal_memory_type_t)params.type,
-      .queue_family_affinity =
-          (iree_hal_queue_family_affinity_t)params.queue_affinity,
+      .queue_family_affinity = queue_family_affinity,
   };
 
   iree_hal_buffer_t* hal_buffer = NULL;
-  iree_status_t status =
+  status =
       iree_hal_allocator_allocate_buffer(allocator->hal_allocator, hal_params,
                                          (iree_device_size_t)size, &hal_buffer);
   if (!iree_status_is_ok(status)) {
@@ -78,12 +84,18 @@ hrx_status_t hrx_allocator_import_buffer(hrx_allocator_t allocator,
                             "allocator, host_ptr, or buffer is NULL"));
   }
 
+  iree_hal_queue_family_affinity_t queue_family_affinity = 0;
+  iree_status_t status = hrx_hal_queue_affinity_to_family_affinity(
+      allocator->device->hal_device, params.queue_affinity,
+      &queue_family_affinity);
+  if (!iree_status_is_ok(status)) {
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
+  }
   iree_hal_buffer_params_t hal_params = {
       .usage = (iree_hal_buffer_usage_t)params.usage,
       .access = (iree_hal_memory_access_t)params.access,
       .type = (iree_hal_memory_type_t)params.type,
-      .queue_family_affinity =
-          (iree_hal_queue_family_affinity_t)params.queue_affinity,
+      .queue_family_affinity = queue_family_affinity,
   };
 
   iree_hal_external_buffer_t ext = {
@@ -94,7 +106,7 @@ hrx_status_t hrx_allocator_import_buffer(hrx_allocator_t allocator,
   };
 
   iree_hal_buffer_t* hal_buffer = NULL;
-  iree_status_t status = iree_hal_allocator_import_buffer(
+  status = iree_hal_allocator_import_buffer(
       allocator->hal_allocator, hal_params, &ext,
       iree_hal_buffer_release_callback_null(), &hal_buffer);
   if (!iree_status_is_ok(status)) {
@@ -134,9 +146,8 @@ hrx_status_t hrx_allocator_query_virtual_memory(hrx_allocator_t allocator,
                            "allocator or supported is NULL");
   }
 
-  *supported =
-      iree_hal_allocator_supports_virtual_memory(allocator->hal_allocator);
-  if (!*supported) {
+  if (!iree_hal_allocator_supports_virtual_memory(allocator->hal_allocator)) {
+    *supported = false;
     if (min_page_size) *min_page_size = 0;
     if (recommended_page_size) *recommended_page_size = 0;
     return hrx_ok_status();
@@ -147,19 +158,20 @@ hrx_status_t hrx_allocator_query_virtual_memory(hrx_allocator_t allocator,
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
       .type = (iree_hal_memory_type_t)mem_type,
   };
-  iree_device_size_t iree_min = 0, iree_rec = 0;
+  iree_device_size_t hal_minimum_page_size = 0;
+  iree_device_size_t hal_recommended_page_size = 0;
   iree_status_t status = iree_hal_allocator_virtual_memory_query_granularity(
-      allocator->hal_allocator, hal_params, &iree_min, &iree_rec);
+      allocator->hal_allocator, hal_params, &hal_minimum_page_size,
+      &hal_recommended_page_size);
   if (!iree_status_is_ok(status)) {
-    *supported = false;
-    if (min_page_size) *min_page_size = 0;
-    if (recommended_page_size) *recommended_page_size = 0;
-    iree_status_ignore(status);
-    return hrx_ok_status();
+    return hrx_status_from_iree(status);
   }
 
-  if (min_page_size) *min_page_size = (size_t)iree_min;
-  if (recommended_page_size) *recommended_page_size = (size_t)iree_rec;
+  *supported = true;
+  if (min_page_size) *min_page_size = (size_t)hal_minimum_page_size;
+  if (recommended_page_size) {
+    *recommended_page_size = (size_t)hal_recommended_page_size;
+  }
   return hrx_ok_status();
 }
 
@@ -173,10 +185,16 @@ hrx_status_t hrx_allocator_virtual_memory_reserve(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument"));
   }
 
+  iree_hal_queue_family_affinity_t queue_family_affinity = 0;
+  iree_status_t status = hrx_hal_queue_affinity_to_family_affinity(
+      allocator->device->hal_device, affinity, &queue_family_affinity);
+  if (!iree_status_is_ok(status)) {
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
+  }
   iree_hal_buffer_t* hal_buffer = NULL;
-  iree_status_t status = iree_hal_allocator_virtual_memory_reserve(
-      allocator->hal_allocator, (iree_hal_queue_family_affinity_t)affinity,
-      (iree_device_size_t)size, &hal_buffer);
+  status = iree_hal_allocator_virtual_memory_reserve(
+      allocator->hal_allocator, queue_family_affinity, (iree_device_size_t)size,
+      &hal_buffer);
   if (!iree_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }

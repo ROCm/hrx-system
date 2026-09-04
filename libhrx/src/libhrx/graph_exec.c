@@ -24,7 +24,7 @@ typedef enum hrx_graph_block_type_e {
 typedef void (*hrx_graph_host_callback_fn_t)(void* user_data);
 
 typedef struct hrx_graph_barrier_block_attrs_t {
-  iree_hal_execute_flags_t flags;
+  iree_hal_queue_barrier_flags_t flags;
 } hrx_graph_barrier_block_attrs_t;
 
 typedef struct hrx_graph_fill_block_attrs_t {
@@ -62,7 +62,7 @@ typedef struct hrx_graph_dispatch_block_attrs_t {
 
 typedef struct hrx_graph_execute_block_attrs_t {
   iree_hal_command_buffer_t* command_buffer;
-  iree_hal_execute_flags_t flags;
+  iree_hal_queue_execute_flags_t flags;
 } hrx_graph_execute_block_attrs_t;
 
 typedef union hrx_graph_block_attrs_t {
@@ -424,10 +424,12 @@ iree_status_t hrx_graph_exec_instantiate_locked(
             z0,
             iree_hal_command_buffer_create(
                 exec->device->hal_device,
+                iree_hal_queue_family(exec->device->dispatch_queue),
                 IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
-                IREE_HAL_COMMAND_CATEGORY_ANY, IREE_HAL_QUEUE_AFFINITY_ANY,
+                IREE_HAL_COMMAND_CATEGORY_TRANSFER |
+                    IREE_HAL_COMMAND_CATEGORY_DISPATCH,
                 /*binding_capacity=*/0, &ptrs.attrs->execute.command_buffer));
-        ptrs.attrs->execute.flags = IREE_HAL_EXECUTE_FLAG_NONE;
+        ptrs.attrs->execute.flags = IREE_HAL_QUEUE_EXECUTE_FLAG_NONE;
 
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
             z0,
@@ -486,7 +488,7 @@ iree_status_t hrx_graph_exec_instantiate_locked(
                 &exec->arena_allocator, HRX_GRAPH_BLOCK_TYPE_QUEUE_BARRIER,
                 partition->start_index, partition->count, wait_semaphore_count,
                 signal_semaphore_count, &block, &ptrs));
-        ptrs.attrs->barrier.flags = IREE_HAL_EXECUTE_FLAG_NONE;
+        ptrs.attrs->barrier.flags = IREE_HAL_QUEUE_BARRIER_FLAG_NONE;
       }
       if (wait_semaphore_count > 0) {
         for (uint16_t w = 0; w < wait_semaphore_count; w++) {
@@ -630,9 +632,9 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
 
     switch (block->type) {
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_BARRIER:
-        status = iree_hal_device_queue_barrier(
-            hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-            signal_semaphores, ptrs.attrs->barrier.flags);
+        status = iree_hal_queue_barrier(stream->hal_queue, wait_semaphores,
+                                        signal_semaphores,
+                                        ptrs.attrs->barrier.flags);
         break;
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_FILL:
         status = iree_hal_queue_fill(
@@ -663,10 +665,11 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
         break;
       }
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE:
-        status = iree_hal_device_queue_execute(
-            hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-            signal_semaphores, ptrs.attrs->execute.command_buffer,
-            iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE);
+        status = iree_hal_queue_execute(stream->hal_queue, wait_semaphores,
+                                        signal_semaphores,
+                                        ptrs.attrs->execute.command_buffer,
+                                        iree_hal_buffer_binding_table_empty(),
+                                        IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
         break;
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL: {
         uint64_t call_args[4] = {

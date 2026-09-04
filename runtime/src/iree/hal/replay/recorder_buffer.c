@@ -238,6 +238,41 @@ iree_status_t iree_hal_replay_recorder_buffer_unwrap_for_call(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_replay_recorder_buffer_ref_unwrap_for_call(
+    iree_hal_buffer_ref_t* inout_ref) {
+  IREE_ASSERT_ARGUMENT(inout_ref);
+
+  // Binding tables may contain unused slots. Preserve them while unwrapping
+  // the populated slots for the underlying device call.
+  if (!inout_ref->buffer) return iree_ok_status();
+
+  if (iree_hal_replay_recorder_buffer_isa(inout_ref->buffer)) {
+    inout_ref->buffer =
+        iree_hal_replay_recorder_buffer_cast(inout_ref->buffer)->base_buffer;
+    return iree_ok_status();
+  }
+
+  iree_hal_buffer_t* allocated_buffer =
+      iree_hal_buffer_allocated_buffer(inout_ref->buffer);
+  if (!iree_hal_replay_recorder_buffer_isa(allocated_buffer)) {
+    return iree_ok_status();
+  }
+
+  iree_device_size_t base_offset = 0;
+  if (IREE_UNLIKELY(!iree_device_size_checked_add(
+          iree_hal_buffer_byte_offset(inout_ref->buffer), inout_ref->offset,
+          &base_offset))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "replay buffer reference offset overflow");
+  }
+  iree_hal_replay_recorder_buffer_t* replay_allocated_buffer =
+      iree_hal_replay_recorder_buffer_cast(allocated_buffer);
+  inout_ref->buffer =
+      iree_hal_buffer_allocated_buffer(replay_allocated_buffer->base_buffer);
+  inout_ref->offset = base_offset;
+  return iree_ok_status();
+}
+
 void iree_hal_replay_recorder_buffer_release_temporary(
     iree_hal_buffer_t* temporary_buffer) {
   iree_hal_buffer_release(temporary_buffer);

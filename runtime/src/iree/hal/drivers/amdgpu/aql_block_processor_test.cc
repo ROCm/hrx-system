@@ -527,6 +527,7 @@ class AqlBlockProcessorRecordedTest : public ::testing::Test {
                                                 &profile_metadata_);
     IREE_ASSERT_OK(iree_hal_amdgpu_aql_program_block_pool_initialize(
         block_size_, iree_allocator_system(), &block_pool_));
+    iree_hal_queue_family_initialize(/*ordinal=*/0, &queue_family_);
   }
 
   void TearDown() override {
@@ -538,8 +539,8 @@ class AqlBlockProcessorRecordedTest : public ::testing::Test {
   CommandBufferPtr CreateCommandBuffer(iree_host_size_t binding_capacity) {
     iree_hal_command_buffer_t* command_buffer = nullptr;
     IREE_EXPECT_OK(iree_hal_amdgpu_aql_command_buffer_create(
-        device_allocator_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-        IREE_HAL_COMMAND_CATEGORY_ANY, IREE_HAL_QUEUE_AFFINITY_ANY,
+        device_allocator_, &queue_family_,
+        IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, IREE_HAL_COMMAND_CATEGORY_ANY,
         binding_capacity, /*device_ordinal=*/0,
         /*queue_count_per_physical_device=*/1,
         /*tsan_shadow_slot_count=*/16,
@@ -570,6 +571,8 @@ class AqlBlockProcessorRecordedTest : public ::testing::Test {
  private:
   // Test allocator borrowed by command buffers for validation.
   iree_hal_allocator_t* device_allocator_ = nullptr;
+  // Family identity borrowed by command buffers under test.
+  iree_hal_queue_family_t queue_family_ = {};
   // Fixed block size used by recorded command-buffer tests.
   iree_host_size_t block_size_ = 4096;
   // Program and resource-set block pool borrowed by test command buffers.

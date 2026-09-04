@@ -88,17 +88,8 @@ enum iree_hal_replay_operation_code_e {
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_IMPORT_FILE = 10u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_SEMAPHORE = 11u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUERY_QUEUE_POOL_BACKEND = 12u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ALLOCA = 13u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_DEALLOCA = 14u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_FILL = 15u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_UPDATE = 16u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_COPY = 17u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_READ = 18u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_WRITE = 19u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_HOST_CALL = 20u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_DISPATCH = 21u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_EXECUTE = 22u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_FLUSH = 23u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_PROFILING_BEGIN = 24u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_PROFILING_FLUSH = 25u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_PROFILING_END = 26u,
@@ -155,6 +146,9 @@ enum iree_hal_replay_operation_code_e {
   IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_WRITE = 602u,
   IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ALLOCA = 603u,
   IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_DEALLOCA = 604u,
+  IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER = 605u,
+  IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_EXECUTE = 606u,
+  IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_FLUSH = 607u,
 };
 
 // Producer-defined payload schema stored in record headers.
@@ -165,23 +159,14 @@ enum iree_hal_replay_payload_type_e {
   IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_ALLOCATE_BUFFER = 2u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_BUFFER_RANGE = 3u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_BUFFER_RANGE_DATA = 4u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_OBJECT = 5u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_LOAD = 6u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_DISPATCH = 7u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_EXECUTE = 8u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_SEMAPHORE_OBJECT = 9u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_COPY_BUFFER = 10u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ALLOCA = 11u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_EXECUTION_BARRIER = 12u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_DEALLOCA = 13u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_FILL = 14u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_UPDATE = 15u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_COPY = 16u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_FILL_BUFFER = 17u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_UPDATE_BUFFER = 18u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_FILE_OBJECT = 22u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_READ = 23u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_WRITE = 24u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_IMPORT_BUFFER = 25u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_REPLAY_SCOPE = 26u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_WAIT = 27u,
@@ -196,6 +181,9 @@ enum iree_hal_replay_payload_type_e {
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_WRITE = 36u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ALLOCA = 37u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_DEALLOCA = 38u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_BARRIER = 39u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_EXECUTE = 40u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_FAMILY_COMMAND_BUFFER_OBJECT = 41u,
 };
 
 // Type of one operation in a captured exact-queue transfer transaction.
@@ -341,17 +329,22 @@ typedef struct iree_hal_replay_buffer_range_data_payload_t {
   uint32_t reserved1;
 } iree_hal_replay_buffer_range_data_payload_t;
 
-// Payload describing a command buffer object.
-typedef struct iree_hal_replay_command_buffer_object_payload_t {
+// Payload describing a command buffer bound to one canonical queue family.
+typedef struct iree_hal_replay_queue_family_command_buffer_object_payload_t {
   // Command buffer mode bits requested at creation.
   uint32_t mode;
   // Command categories allowed by the command buffer.
   uint32_t command_categories;
-  // Queue affinity requested at creation.
-  uint64_t queue_affinity;
+  // Canonical queue family ordinal selected at creation.
+  uint32_t queue_family_ordinal;
+  // Reserved for future queue-family metadata; must be zero.
+  uint32_t reserved0;
   // Indirect binding capacity requested at creation.
   uint64_t binding_capacity;
-} iree_hal_replay_command_buffer_object_payload_t;
+} iree_hal_replay_queue_family_command_buffer_object_payload_t;
+static_assert(
+    sizeof(iree_hal_replay_queue_family_command_buffer_object_payload_t) == 24,
+    "queue family command buffer replay payload must be 24 bytes");
 
 // Payload describing one device executable load request.
 typedef struct iree_hal_replay_executable_load_payload_t {
@@ -502,6 +495,38 @@ typedef struct iree_hal_replay_semaphore_timepoint_payload_t {
   // Timeline payload value associated with the semaphore.
   uint64_t value;
 } iree_hal_replay_semaphore_timepoint_payload_t;
+
+// Payload describing an exact-queue semaphore barrier followed by semaphore
+// timepoints.
+typedef struct iree_hal_replay_queue_barrier_payload_t {
+  // Queue barrier flags.
+  uint64_t flags;
+  // Number of wait semaphore timepoints following this header.
+  uint64_t wait_semaphore_count;
+  // Number of signal semaphore timepoints following the wait timepoints.
+  uint64_t signal_semaphore_count;
+  // Reserved for future barrier metadata; must be zero.
+  uint64_t reserved0;
+} iree_hal_replay_queue_barrier_payload_t;
+static_assert(sizeof(iree_hal_replay_queue_barrier_payload_t) == 32,
+              "queue barrier replay payload must be 32 bytes");
+
+// Payload describing an exact-queue command-buffer execution followed by
+// semaphore timepoints and serialized binding table entries.
+typedef struct iree_hal_replay_queue_execute_payload_t {
+  // Session-local command buffer object id.
+  iree_hal_replay_object_id_t command_buffer_id;
+  // Queue execute flags.
+  uint64_t flags;
+  // Number of wait semaphore timepoints following this header.
+  uint64_t wait_semaphore_count;
+  // Number of signal semaphore timepoints following the wait timepoints.
+  uint64_t signal_semaphore_count;
+  // Number of serialized binding table entries following the timepoints.
+  uint64_t binding_count;
+} iree_hal_replay_queue_execute_payload_t;
+static_assert(sizeof(iree_hal_replay_queue_execute_payload_t) == 40,
+              "queue execute replay payload must be 40 bytes");
 
 // Serialized replay reference to a HAL buffer or indirect binding slot.
 typedef struct iree_hal_replay_buffer_ref_payload_t {
@@ -788,142 +813,6 @@ typedef struct iree_hal_replay_dispatch_payload_t {
   // Number of serialized buffer references following constant data.
   uint64_t binding_count;
 } iree_hal_replay_dispatch_payload_t;
-
-// Payload describing a device queue execute request followed by a serialized
-// binding table.
-typedef struct iree_hal_replay_device_queue_execute_payload_t {
-  // Session-local command buffer object id.
-  iree_hal_replay_object_id_t command_buffer_id;
-  // Queue affinity used for the submission.
-  uint64_t queue_affinity;
-  // Execute flags.
-  uint64_t flags;
-  // Number of wait semaphore timepoints following this header.
-  uint64_t wait_semaphore_count;
-  // Number of signal semaphore timepoints following the wait timepoints.
-  uint64_t signal_semaphore_count;
-  // Number of serialized binding table entries following the semaphore lists.
-  uint64_t binding_count;
-} iree_hal_replay_device_queue_execute_payload_t;
-
-// Payload describing a device queue alloca request followed by semaphore lists.
-typedef struct iree_hal_replay_device_queue_alloca_payload_t {
-  // Buffer allocation request submitted to the device queue.
-  iree_hal_replay_allocator_allocate_buffer_payload_t allocation;
-  // Queue affinity used for the submission.
-  uint64_t queue_affinity;
-  // Alloca flags.
-  uint64_t flags;
-  // Number of wait semaphore timepoints following this header.
-  uint64_t wait_semaphore_count;
-  // Number of signal semaphore timepoints following the wait timepoints.
-  uint64_t signal_semaphore_count;
-} iree_hal_replay_device_queue_alloca_payload_t;
-
-// Payload describing a device queue dealloca request followed by semaphore
-// lists.
-typedef struct iree_hal_replay_device_queue_dealloca_payload_t {
-  // Buffer range submitted for queue-ordered deallocation.
-  iree_hal_replay_buffer_ref_payload_t buffer_ref;
-  // Queue affinity used for the submission.
-  uint64_t queue_affinity;
-  // Dealloca flags.
-  uint64_t flags;
-  // Number of wait semaphore timepoints following this header.
-  uint64_t wait_semaphore_count;
-  // Number of signal semaphore timepoints following the wait timepoints.
-  uint64_t signal_semaphore_count;
-} iree_hal_replay_device_queue_dealloca_payload_t;
-
-// Payload describing a device queue fill request followed by semaphore lists
-// and the fill pattern bytes.
-typedef struct iree_hal_replay_device_queue_fill_payload_t {
-  // Target buffer range filled by the queue operation.
-  iree_hal_replay_buffer_ref_payload_t target_ref;
-  // Queue affinity used for the submission.
-  uint64_t queue_affinity;
-  // Fill flags.
-  uint64_t flags;
-  // Number of wait semaphore timepoints following this header.
-  uint64_t wait_semaphore_count;
-  // Number of signal semaphore timepoints following the wait timepoints.
-  uint64_t signal_semaphore_count;
-  // Byte length of the captured fill pattern following the semaphore lists.
-  uint64_t pattern_length;
-} iree_hal_replay_device_queue_fill_payload_t;
-
-// Payload describing a device queue update request followed by semaphore lists
-// and the captured source bytes.
-typedef struct iree_hal_replay_device_queue_update_payload_t {
-  // Target buffer range updated by the queue operation.
-  iree_hal_replay_buffer_ref_payload_t target_ref;
-  // Queue affinity used for the submission.
-  uint64_t queue_affinity;
-  // Update flags.
-  uint64_t flags;
-  // Caller-provided source byte offset, retained for diagnostics/projection.
-  uint64_t source_offset;
-  // Byte length of the captured source data following the semaphore lists.
-  uint64_t data_length;
-  // Number of wait semaphore timepoints following this header.
-  uint64_t wait_semaphore_count;
-  // Number of signal semaphore timepoints following the wait timepoints.
-  uint64_t signal_semaphore_count;
-} iree_hal_replay_device_queue_update_payload_t;
-
-// Payload describing a device queue copy request followed by semaphore lists.
-typedef struct iree_hal_replay_device_queue_copy_payload_t {
-  // Source buffer range copied from.
-  iree_hal_replay_buffer_ref_payload_t source_ref;
-  // Target buffer range copied to.
-  iree_hal_replay_buffer_ref_payload_t target_ref;
-  // Queue affinity used for the submission.
-  uint64_t queue_affinity;
-  // Copy flags.
-  uint64_t flags;
-  // Number of wait semaphore timepoints following this header.
-  uint64_t wait_semaphore_count;
-  // Number of signal semaphore timepoints following the wait timepoints.
-  uint64_t signal_semaphore_count;
-} iree_hal_replay_device_queue_copy_payload_t;
-
-// Payload describing a device queue read request followed by semaphore lists.
-typedef struct iree_hal_replay_device_queue_read_payload_t {
-  // Session-local source file object id.
-  iree_hal_replay_object_id_t source_file_id;
-  // Source byte offset in the file.
-  uint64_t source_offset;
-  // Target buffer range read into.
-  iree_hal_replay_buffer_ref_payload_t target_ref;
-  // Queue affinity used for the submission.
-  uint64_t queue_affinity;
-  // Read flags.
-  uint64_t flags;
-  // Byte length of captured source data following the semaphore lists.
-  uint64_t captured_data_length;
-  // Number of wait semaphore timepoints following this header.
-  uint64_t wait_semaphore_count;
-  // Number of signal semaphore timepoints following the wait timepoints.
-  uint64_t signal_semaphore_count;
-} iree_hal_replay_device_queue_read_payload_t;
-
-// Payload describing a device queue write request followed by semaphore lists.
-typedef struct iree_hal_replay_device_queue_write_payload_t {
-  // Source buffer range written from.
-  iree_hal_replay_buffer_ref_payload_t source_ref;
-  // Session-local target file object id.
-  iree_hal_replay_object_id_t target_file_id;
-  // Target byte offset in the file.
-  uint64_t target_offset;
-  // Queue affinity used for the submission.
-  uint64_t queue_affinity;
-  // Write flags.
-  uint64_t flags;
-  // Number of wait semaphore timepoints following this header.
-  uint64_t wait_semaphore_count;
-  // Number of signal semaphore timepoints following the wait timepoints.
-  uint64_t signal_semaphore_count;
-} iree_hal_replay_device_queue_write_payload_t;
 
 // Payload describing a device queue atomic wait followed by semaphore lists.
 typedef struct iree_hal_replay_device_queue_atomic_wait_payload_t {

@@ -87,9 +87,10 @@ class GraphBarrierTest : public ::testing::Test {
  protected:
   void SetUp() override {
     memset(&command_buffer_, 0, sizeof(command_buffer_));
+    iree_hal_queue_family_initialize(/*ordinal=*/0, &queue_family_);
     iree_hal_command_buffer_initialize(
-        /*device_allocator=*/nullptr, IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
-        IREE_HAL_COMMAND_CATEGORY_ANY, IREE_HAL_QUEUE_AFFINITY_ANY,
+        /*device_allocator=*/nullptr, &queue_family_,
+        IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED, IREE_HAL_COMMAND_CATEGORY_ANY,
         /*binding_capacity=*/0, /*validation_state=*/nullptr,
         &kBarrierSpyVtable, &command_buffer_.base);
     hrx_graph_barrier_state_reset(&state_);
@@ -112,6 +113,7 @@ class GraphBarrierTest : public ::testing::Test {
                                   11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
                                   22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
   hrx_graph_barrier_state_t state_;
+  iree_hal_queue_family_t queue_family_;
   BarrierSpyCommandBuffer command_buffer_;
 };
 

@@ -143,10 +143,12 @@ void iree_hal_amdgpu_pm4_command_buffer_resident_pool_trim(
 // All device builtin contexts are borrowed immutable planning and launch
 // metadata and must remain valid for the command buffer lifetime.
 iree_status_t iree_hal_amdgpu_pm4_command_buffer_create(
-    iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
+    iree_hal_allocator_t* device_allocator,
+    const iree_hal_queue_family_t* queue_family,
+    iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
-    iree_host_size_t device_ordinal, iree_host_size_t physical_queue_count,
+    iree_host_size_t binding_capacity, iree_host_size_t device_ordinal,
+    iree_host_size_t physical_queue_count,
     iree_hal_amdgpu_pm4_command_buffer_flags_t flags,
     iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities,
     const iree_hal_amdgpu_device_atomic_pm4_context_t* atomic_context,

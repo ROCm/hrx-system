@@ -309,9 +309,7 @@ iree_status_t iree_hal_streaming_stream_create(
   stream->timeline_semaphore = NULL;
   stream->pending_value = 0;
   stream->completed_value = 0;
-  stream->queue = iree_hal_device_queue(context->device, /*family_ordinal=*/0,
-                                        /*queue_ordinal=*/0);
-  stream->queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  stream->queue = context->queue;
   stream->memory_reuse_dependencies = NULL;
   stream->memory_reuse_dependency_count = 0;
   stream->memory_reuse_dependency_capacity = 0;
@@ -441,14 +439,21 @@ iree_status_t iree_hal_streaming_stream_begin_locked(
   // destruction queues the release after prior stream work.
   iree_status_t status = iree_ok_status();
   if (!stream->command_buffer) {
+    iree_hal_command_buffer_t* command_buffer = NULL;
     status = iree_hal_command_buffer_create(
-        stream->context->device,
+        stream->context->device, iree_hal_queue_family(stream->queue),
         IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
             IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
-        IREE_HAL_COMMAND_CATEGORY_ANY, stream->queue_affinity,
-        /*binding_capacity=*/0, &stream->command_buffer);
-    if (!iree_status_is_ok(status)) return status;
-    status = iree_hal_command_buffer_begin(stream->command_buffer);
+        IREE_HAL_COMMAND_CATEGORY_TRANSFER | IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+        /*binding_capacity=*/0, &command_buffer);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_command_buffer_begin(command_buffer);
+    }
+    if (iree_status_is_ok(status)) {
+      stream->command_buffer = command_buffer;
+    } else {
+      iree_hal_command_buffer_release(command_buffer);
+    }
   }
 
   return status;
@@ -506,7 +511,6 @@ iree_status_t iree_hal_streaming_stream_flush(
 
     // Submit to device queue with timeline semaphore.
     // Wait for the previous submission to complete before executing.
-    iree_hal_queue_affinity_t queue_affinity = stream->queue_affinity;
     iree_hal_semaphore_list_t wait_semaphores = {
         .count = wait_value > 0
                      ? 1
@@ -521,16 +525,15 @@ iree_status_t iree_hal_streaming_stream_flush(
     };
 
     timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
-    status = iree_hal_device_queue_execute(
-        stream->context->device, queue_affinity, wait_semaphores,
-        signal_semaphores, stream->command_buffer,
-        iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE);
+    status = iree_hal_queue_execute(stream->queue, wait_semaphores,
+                                    signal_semaphores, stream->command_buffer,
+                                    iree_hal_buffer_binding_table_empty(),
+                                    IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
     if (iree_status_is_ok(status)) {
       // The accepted submission owns the value it signals, so the timeline
       // advances here and stays advanced even when the flush below fails.
       stream->pending_value = signal_value;
-      status =
-          iree_hal_device_queue_flush(stream->context->device, queue_affinity);
+      status = iree_hal_queue_flush(stream->queue);
     }
     if (timing_enabled) {
       timing_execute_ns += hrx_launch_timing_now_ns() - timing_step_ns;
@@ -741,16 +744,15 @@ iree_status_t iree_hal_streaming_stream_wait_streams(
           .semaphores = &stream->timeline_semaphore,
           .payload_values = &signal_value,
       };
-      status = iree_hal_device_queue_barrier(
-          stream->context->device, stream->queue_affinity, wait_semaphores,
-          signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
+      status = iree_hal_queue_barrier(stream->queue, wait_semaphores,
+                                      signal_semaphores,
+                                      IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
       if (iree_status_is_ok(status)) {
         // The accepted barrier owns the value it signals, so the timeline
         // advances here and stays advanced even when the flush below fails.
         submitted = true;
         stream->pending_value = signal_value;
-        status = iree_hal_device_queue_flush(stream->context->device,
-                                             stream->queue_affinity);
+        status = iree_hal_queue_flush(stream->queue);
       }
     }
     iree_slim_mutex_unlock(&stream->mutex);
@@ -1082,16 +1084,15 @@ iree_status_t iree_hal_streaming_stream_wait_event(
           .payload_values = &signal_value,
       };
 
-      status = iree_hal_device_queue_barrier(
-          stream->context->device, stream->queue_affinity, wait_semaphores,
-          signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
+      status = iree_hal_queue_barrier(stream->queue, wait_semaphores,
+                                      signal_semaphores,
+                                      IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
       if (iree_status_is_ok(status)) {
         // The accepted barrier owns the value it signals, so the timeline
         // advances here and stays advanced even when the flush below fails.
         submitted = true;
         stream->pending_value = signal_value;
-        status = iree_hal_device_queue_flush(stream->context->device,
-                                             stream->queue_affinity);
+        status = iree_hal_queue_flush(stream->queue);
       }
     }
 
@@ -1465,8 +1466,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
       };
       if (iree_status_is_ok(status)) {
         status = iree_hal_device_queue_dispatch(
-            stream->context->device, stream->queue_affinity, wait_semaphores,
-            signal_semaphores, symbol->executable,
+            stream->context->device,
+            iree_hal_streaming_queue_family_affinity(stream->queue),
+            wait_semaphores, signal_semaphores, symbol->executable,
             iree_hal_executable_function_from_index(symbol->export_ordinal),
             config,
             iree_make_const_byte_span(arguments.constants,
@@ -1477,8 +1479,7 @@ iree_status_t iree_hal_streaming_launch_kernel(
         // The accepted dispatch owns the value it signals, so the timeline
         // advances here and stays advanced even when the flush below fails.
         stream->pending_value = signal_value;
-        status = iree_hal_device_queue_flush(stream->context->device,
-                                             stream->queue_affinity);
+        status = iree_hal_queue_flush(stream->queue);
       }
     } else {
       uint64_t timing_begin_step_ns =
@@ -1617,7 +1618,8 @@ iree_status_t iree_hal_streaming_queue_host_call(
   };
 
   status = iree_hal_device_queue_host_call(
-      stream->context->device, stream->queue_affinity, wait_semaphores,
+      stream->context->device,
+      iree_hal_streaming_queue_family_affinity(stream->queue), wait_semaphores,
       signal_semaphores, call, args, flags);
   if (iree_status_is_ok(status)) {
     stream->pending_value = signal_value;

@@ -25,9 +25,11 @@ typedef struct iree_arena_block_pool_t iree_arena_block_pool_t;
 // |atomic_pipelines| is borrowed from the logical device and must outlive the
 // command buffer.
 iree_status_t iree_hal_vulkan_command_buffer_create(
-    iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
+    iree_hal_allocator_t* device_allocator,
+    const iree_hal_queue_family_t* queue_family, VkQueueFlags queue_flags,
+    iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
+    iree_host_size_t binding_capacity,
     const iree_hal_vulkan_atomic_pipelines_t* atomic_pipelines,
     iree_arena_block_pool_t* command_buffer_block_pool,
     iree_allocator_t host_allocator,
@@ -66,16 +68,15 @@ typedef struct iree_hal_vulkan_command_buffer_descriptor_requirements_t {
 } iree_hal_vulkan_command_buffer_descriptor_requirements_t;
 
 // Returns descriptor pool capacity required to replay |command_buffer| once
-// into a native VkCommandBuffer with |binding_table|.
+// into a native VkCommandBuffer.
 iree_status_t
 iree_hal_vulkan_command_buffer_native_descriptor_pool_requirements(
     iree_hal_command_buffer_t* command_buffer,
-    iree_hal_buffer_binding_table_t binding_table,
     iree_hal_vulkan_command_buffer_descriptor_requirements_t* out_requirements);
 
 // Returns whether recorded native commands can be cached across submissions.
-// Binding-dependent copies encode Vulkan handles and offsets directly and must
-// be recorded independently for each binding table.
+// Binding-dependent transfers encode Vulkan handles and offsets directly and
+// must be recorded independently for each binding table.
 bool iree_hal_vulkan_command_buffer_native_replay_compatible(
     iree_hal_command_buffer_t* command_buffer);
 
