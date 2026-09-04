@@ -18,7 +18,6 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_registry.h"
 #include "loom/sanitizer/options.h"
-#include "loom/target/arch/amdgpu/artifact_key.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/ops/registry.h"
 #include "loom/target/arch/amdgpu/profile.h"
@@ -162,112 +161,6 @@ class AmdgpuArtifactProviderTest : public ::testing::Test {
   loom_context_t context_ = {};
   loom_target_low_descriptor_registry_t low_registry_ = {};
 };
-
-TEST_F(AmdgpuArtifactProviderTest, SelectTargetKeyBuildsOfflineTarget) {
-  loom_artifact_target_t target = {};
-  IREE_ASSERT_OK(loom_artifact_provider_select_target(
-      &loom_amdgpu_artifact_provider, IREE_SV("gfx1100"),
-      iree_allocator_system(), &target));
-
-  const loom_amdgpu_target_profile_t* profile =
-      loom_amdgpu_target_profile_cast(target.target_profile);
-  ASSERT_NE(profile, nullptr);
-  EXPECT_NE(loom_artifact_target_bundle(&target), nullptr);
-  EXPECT_TRUE(iree_string_view_equal(target.target_key, IREE_SV("gfx1100")));
-  ASSERT_NE(profile->identity.target, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(profile->identity.target->name,
-                                     IREE_SV("gfx1100")));
-
-  loom_amdgpu_artifact_provider.deinitialize_target(
-      &loom_amdgpu_artifact_provider, &target, iree_allocator_system());
-}
-
-TEST_F(AmdgpuArtifactProviderTest, SelectTargetKeyPreservesAllFeatureStates) {
-  struct TestCase {
-    iree_string_view_t target_key;
-    loom_amdgpu_amdhsa_feature_states_t expected_features;
-  };
-  const TestCase test_cases[] = {
-      {
-          IREE_SV("gfx942"),
-          {
-              LOOM_AMDGPU_TARGET_FEATURE_ANY,
-              LOOM_AMDGPU_TARGET_FEATURE_ANY,
-          },
-      },
-      {
-          IREE_SV("gfx942:sramecc+:xnack-"),
-          {
-              LOOM_AMDGPU_TARGET_FEATURE_ON,
-              LOOM_AMDGPU_TARGET_FEATURE_OFF,
-          },
-      },
-      {
-          IREE_SV("gfx1151"),
-          {
-              LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED,
-              LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED,
-          },
-      },
-  };
-  for (const TestCase& test_case : test_cases) {
-    loom_artifact_target_t target = {};
-    IREE_ASSERT_OK(loom_artifact_provider_select_target(
-        &loom_amdgpu_artifact_provider, test_case.target_key,
-        iree_allocator_system(), &target));
-
-    const loom_amdgpu_target_profile_t* profile =
-        loom_amdgpu_target_profile_cast(target.target_profile);
-    ASSERT_NE(profile, nullptr);
-    EXPECT_EQ(profile->identity.amdhsa_features.sramecc,
-              test_case.expected_features.sramecc);
-    EXPECT_EQ(profile->identity.amdhsa_features.xnack,
-              test_case.expected_features.xnack);
-    EXPECT_TRUE(
-        iree_string_view_equal(target.target_key, test_case.target_key));
-
-    loom_amdgpu_artifact_provider.deinitialize_target(
-        &loom_amdgpu_artifact_provider, &target, iree_allocator_system());
-  }
-}
-
-TEST_F(AmdgpuArtifactProviderTest,
-       SelectTargetKeyPreservesEveryCanonicalTarget) {
-  const iree_host_size_t target_count = loom_amdgpu_target_info_target_count();
-  ASSERT_GT(target_count, 0u);
-  for (iree_host_size_t i = 0; i < target_count; ++i) {
-    const loom_amdgpu_target_info_t* target_info =
-        loom_amdgpu_target_info_target_at(i);
-    ASSERT_NE(target_info, nullptr);
-    const loom_amdgpu_processor_info_t* processor =
-        loom_amdgpu_target_info_target_processor(target_info);
-    ASSERT_NE(processor, nullptr);
-    ASSERT_TRUE(
-        loom_amdgpu_processor_properties_support_hsaco(&processor->properties));
-
-    loom_amdgpu_target_identity_t identity = {};
-    loom_amdgpu_target_identity_initialize(target_info, &identity);
-    char target_key_storage[128] = {};
-    iree_string_view_t target_key = iree_string_view_empty();
-    IREE_ASSERT_OK(
-        loom_amdgpu_artifact_key_format(&identity, sizeof(target_key_storage),
-                                        target_key_storage, &target_key));
-    loom_artifact_target_t target = {};
-    IREE_ASSERT_OK(loom_artifact_provider_select_target(
-        &loom_amdgpu_artifact_provider, target_key, iree_allocator_system(),
-        &target));
-    const loom_amdgpu_target_profile_t* target_profile =
-        loom_amdgpu_target_profile_cast(target.target_profile);
-    ASSERT_NE(target_profile, nullptr);
-    EXPECT_NE(loom_artifact_target_bundle(&target), nullptr);
-    EXPECT_TRUE(iree_string_view_equal(target.target_key, target_key));
-    EXPECT_EQ(target_profile->identity.target, target_info);
-    EXPECT_TRUE(loom_amdgpu_target_identity_equal(&target_profile->identity,
-                                                  &identity));
-    loom_amdgpu_artifact_provider.deinitialize_target(
-        &loom_amdgpu_artifact_provider, &target, iree_allocator_system());
-  }
-}
 
 TEST_F(AmdgpuArtifactProviderTest, RecordsDetailedReportRows) {
   ModulePtr module;

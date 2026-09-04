@@ -8,6 +8,7 @@
 
 #include "loom/target/arch/spirv/descriptors/low_registry.h"
 #include "loom/target/arch/spirv/low_verify.h"
+#include "loom/target/arch/spirv/profile.h"
 #include "loom/target/emit/spirv/module_builder.h"
 #include "loom/target/emit/spirv/module_emitter.h"
 #include "loom/target/entry_selection.h"
@@ -252,7 +253,7 @@ static void loom_spirv_artifact_provider_deinitialize_artifact(
 
 const loom_artifact_provider_t loom_spirv_vulkan_artifact_provider = {
     .name = IREE_SVL("spirv-vulkan-hal"),
-    .target_family_name = IREE_SVL("SPIR-V/Vulkan"),
+    .target_profile_type = &loom_spirv_target_profile_type,
     .artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_EXECUTABLE,
     .default_pipeline_options =
         {

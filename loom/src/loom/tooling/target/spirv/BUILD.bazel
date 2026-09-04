@@ -45,6 +45,7 @@ loom_cc_library(
         "//loom/src/loom/target:low_descriptor_registry",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/spirv:low_verify",
+        "//loom/src/loom/target/arch/spirv:profile",
         "//loom/src/loom/target/arch/spirv/descriptors:low_registry",
         "//loom/src/loom/target/emit/spirv:module_builder",
         "//loom/src/loom/target/emit/spirv:module_emitter",

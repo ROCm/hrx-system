@@ -6,26 +6,46 @@
 
 #include "loom/tooling/compile/artifact.h"
 
-iree_status_t loom_artifact_provider_select_target(
-    const loom_artifact_provider_t* provider, iree_string_view_t target_key,
-    iree_allocator_t allocator, loom_artifact_target_t* out_target) {
+#include "loom/target/selection.h"
+
+iree_status_t loom_artifact_target_select(
+    const loom_artifact_provider_t* provider,
+    const loom_target_environment_t* target_environment,
+    iree_string_view_t target_specification,
+    loom_artifact_target_t* out_target) {
   IREE_ASSERT_ARGUMENT(provider);
+  IREE_ASSERT_ARGUMENT(target_environment);
   IREE_ASSERT_ARGUMENT(out_target);
   *out_target = (loom_artifact_target_t){0};
 
-  target_key = iree_string_view_trim(target_key);
-  if (iree_string_view_is_empty(target_key)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "offline target key must not be empty");
-  }
-  if (provider->select_target == NULL) {
+  if (provider->target_profile_type == NULL) {
     return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "artifact provider '%.*s' does not support explicit target "
-        "specialization",
+        IREE_STATUS_FAILED_PRECONDITION,
+        "artifact provider '%.*s' has no target profile type",
         (int)provider->name.size, provider->name.data);
   }
-  return provider->select_target(provider, target_key, allocator, out_target);
+
+  loom_target_specification_t specification = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_target_specification_parse(target_specification, &specification));
+  const loom_target_profile_t* target_profile = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_environment_select_profile(
+      target_environment, &specification, &target_profile));
+  if (target_profile->type != provider->target_profile_type) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "artifact provider '%.*s' requires target family '%.*s'; got '%.*s'",
+        (int)provider->name.size, provider->name.data,
+        (int)provider->target_profile_type->name.size,
+        provider->target_profile_type->name.data,
+        (int)specification.family.size, specification.family.data);
+  }
+
+  *out_target = (loom_artifact_target_t){
+      .target_profile = target_profile,
+      .target_key = specification.selector,
+  };
+  return iree_ok_status();
 }
 
 const loom_artifact_provider_t* loom_artifact_provider_registry_lookup(
@@ -76,7 +96,7 @@ static iree_status_t loom_artifact_candidate_initialize(
   loom_target_compile_report_initialize_if_empty(report, report_allocator);
   report->artifact_kind = provider->artifact_kind;
   report->backend_name = provider->name;
-  report->target_family_name = provider->target_family_name;
+  report->target_family_name = provider->target_profile_type->name;
   return iree_ok_status();
 }
 
@@ -90,7 +110,7 @@ static void loom_artifact_candidate_record_report_status(
   }
   report->artifact_kind = candidate->provider->artifact_kind;
   report->backend_name = candidate->provider->name;
-  report->target_family_name = candidate->provider->target_family_name;
+  report->target_family_name = candidate->provider->target_profile_type->name;
   if (candidate->compiled) {
     report->target_key = candidate->artifact.target_key;
     report->artifact_format = loom_target_artifact_format_name(

@@ -27,7 +27,7 @@ def _compile_report(
         "schema_version": 0,
         "mode": "details",
         "status": {"code": 0, "name": "OK"},
-        "target_family": "AMDGPU",
+        "target_family": "amdgpu",
         "entries": {
             "count": 1,
             "rows": [
