@@ -282,6 +282,27 @@ iree_vm_invocation_wake_callback(iree_vm_invocation_t* invocation);
 IREE_API_EXPORT iree_vm_cancel_reason_t
 iree_vm_invocation_cancel_reason(const iree_vm_invocation_t* invocation);
 
+// Returns the process allocator available to module-owned guest allocations.
+IREE_API_EXPORT iree_allocator_t
+iree_vm_invocation_host_allocator(const iree_vm_invocation_t* invocation);
+
+// Returns whether the root call contains an external borrowed ref. Such a call
+// must complete synchronously and may not publish durable continuation state.
+IREE_API_EXPORT bool iree_vm_invocation_has_external_borrowed_arguments(
+    const iree_vm_invocation_t* invocation);
+
+// Returns OK while the invocation is active and uncancelled, or a terminal
+// cancellation status carrying the winning cancellation reason.
+IREE_API_EXPORT iree_status_t
+iree_vm_invocation_check_cancelled(const iree_vm_invocation_t* invocation);
+
+// Returns whether |function_ref| is null or satisfies one module-local callable
+// type. This performs only indexed program-table checks.
+IREE_API_EXPORT bool iree_vm_function_ref_matches_callable_type(
+    const iree_vm_module_execution_t* execution,
+    iree_vm_function_ref_t function_ref,
+    uint16_t expected_callable_type_ordinal);
+
 // Requests one trusted function in the current linked module. The target is
 // entered later by the iterative driver and never recursively by this call.
 IREE_API_EXPORT iree_status_t

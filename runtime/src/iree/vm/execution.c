@@ -208,6 +208,34 @@ static void iree_vm_execution_publish_call_request(
   *out_outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
 }
 
+IREE_API_EXPORT iree_allocator_t
+iree_vm_invocation_host_allocator(const iree_vm_invocation_t* invocation) {
+  return invocation->process->host_allocator;
+}
+
+IREE_API_EXPORT bool iree_vm_invocation_has_external_borrowed_arguments(
+    const iree_vm_invocation_t* invocation) {
+  return invocation->has_external_borrowed_arguments;
+}
+
+IREE_API_EXPORT iree_status_t
+iree_vm_invocation_check_cancelled(const iree_vm_invocation_t* invocation) {
+  const iree_vm_cancel_reason_t cancel_reason =
+      iree_vm_invocation_cancel_reason(invocation);
+  return cancel_reason == IREE_VM_CANCEL_REASON_NONE
+             ? iree_ok_status()
+             : iree_vm_invocation_cancel_status(cancel_reason);
+}
+
+IREE_API_EXPORT bool iree_vm_function_ref_matches_callable_type(
+    const iree_vm_module_execution_t* execution,
+    iree_vm_function_ref_t function_ref,
+    uint16_t expected_callable_type_ordinal) {
+  return iree_vm_program_function_ref_matches(
+      execution->invocation->process->program, function_ref,
+      execution->linked_module, expected_callable_type_ordinal);
+}
+
 IREE_API_EXPORT iree_status_t
 iree_vm_invocation_call_local(const iree_vm_module_execution_t* execution,
                               iree_vm_module_local_function_t local_function,
