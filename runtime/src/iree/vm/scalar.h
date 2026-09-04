@@ -7,6 +7,7 @@
 #ifndef IREE_VM_SCALAR_H_
 #define IREE_VM_SCALAR_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -42,6 +43,34 @@ enum iree_vm_scalar_type_e {
   IREE_VM_SCALAR_TYPE_F64 = 0x0A,
 };
 typedef uint8_t iree_vm_scalar_type_t;
+
+// Returns true when |scalar_type| names a recognized scalar type.
+static inline bool iree_vm_scalar_type_is_valid(
+    iree_vm_scalar_type_t scalar_type) {
+  return scalar_type > IREE_VM_SCALAR_TYPE_NONE &&
+         scalar_type <= IREE_VM_SCALAR_TYPE_F64;
+}
+
+// Returns the canonical payload mask for |scalar_type|. The caller must pass a
+// recognized scalar type.
+static inline uint64_t iree_vm_scalar_type_payload_mask(
+    iree_vm_scalar_type_t scalar_type) {
+  switch (scalar_type) {
+    case IREE_VM_SCALAR_TYPE_I8:
+    case IREE_VM_SCALAR_TYPE_F8E4M3FN:
+    case IREE_VM_SCALAR_TYPE_F8E5M2:
+      return UINT8_MAX;
+    case IREE_VM_SCALAR_TYPE_I16:
+    case IREE_VM_SCALAR_TYPE_F16:
+    case IREE_VM_SCALAR_TYPE_BF16:
+      return UINT16_MAX;
+    case IREE_VM_SCALAR_TYPE_I32:
+    case IREE_VM_SCALAR_TYPE_F32:
+      return UINT32_MAX;
+    default:
+      return UINT64_MAX;
+  }
+}
 
 #ifdef __cplusplus
 }  // extern "C"

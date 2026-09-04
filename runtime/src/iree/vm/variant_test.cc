@@ -245,6 +245,9 @@ TEST(VMVariantTest, ScalarFailuresLeaveOutputsUntouched) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_vm_variant_from_scalar_bits(IREE_VM_SCALAR_TYPE_NONE, 0, &output));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_vm_variant_from_scalar_bits(
+                            (iree_vm_scalar_type_t)UINT8_MAX, 0, &output));
   EXPECT_EQ(output.payload, original_output.payload);
   EXPECT_EQ(output.metadata, original_output.metadata);
 

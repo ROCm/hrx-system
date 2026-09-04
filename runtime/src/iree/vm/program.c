@@ -126,25 +126,6 @@ const iree_vm_linked_module_t* iree_vm_program_lookup_linked_module(
 // Structural callable linking
 //===----------------------------------------------------------------------===//
 
-static uint64_t iree_vm_program_scalar_payload_mask(
-    iree_vm_scalar_type_t scalar_type) {
-  switch (scalar_type) {
-    case IREE_VM_SCALAR_TYPE_I8:
-    case IREE_VM_SCALAR_TYPE_F8E4M3FN:
-    case IREE_VM_SCALAR_TYPE_F8E5M2:
-      return UINT8_MAX;
-    case IREE_VM_SCALAR_TYPE_I16:
-    case IREE_VM_SCALAR_TYPE_F16:
-    case IREE_VM_SCALAR_TYPE_BF16:
-      return UINT16_MAX;
-    case IREE_VM_SCALAR_TYPE_I32:
-    case IREE_VM_SCALAR_TYPE_F32:
-      return UINT32_MAX;
-    default:
-      return UINT64_MAX;
-  }
-}
-
 typedef struct iree_vm_program_field_storage_t {
   // Next unassigned scalar field record.
   iree_vm_program_scalar_field_abi_t* scalar_fields;
@@ -177,7 +158,7 @@ static void iree_vm_program_build_signature_side_abi(
     if (type.kind > IREE_VM_SCALAR_TYPE_NONE &&
         type.kind <= IREE_VM_SCALAR_TYPE_F64) {
       *field_storage->scalar_fields++ = (iree_vm_program_scalar_field_abi_t){
-          .payload_mask = iree_vm_program_scalar_payload_mask(type.kind),
+          .payload_mask = iree_vm_scalar_type_payload_mask(type.kind),
           .variant_metadata =
               ((uint32_t)type.kind << 2) | IREE_VM_VARIANT_TAG_SCALAR,
           .variant_offset = (uint32_t)(i * sizeof(iree_vm_variant_t)),

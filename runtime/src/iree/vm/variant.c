@@ -11,32 +11,6 @@ static inline uint64_t iree_vm_variant_scalar_metadata(
   return ((uint64_t)scalar_type << 2) | IREE_VM_VARIANT_TAG_SCALAR;
 }
 
-static bool iree_vm_scalar_type_bit_width(iree_vm_scalar_type_t scalar_type,
-                                          uint32_t* out_bit_width) {
-  switch (scalar_type) {
-    case IREE_VM_SCALAR_TYPE_I8:
-    case IREE_VM_SCALAR_TYPE_F8E4M3FN:
-    case IREE_VM_SCALAR_TYPE_F8E5M2:
-      *out_bit_width = 8;
-      return true;
-    case IREE_VM_SCALAR_TYPE_I16:
-    case IREE_VM_SCALAR_TYPE_F16:
-    case IREE_VM_SCALAR_TYPE_BF16:
-      *out_bit_width = 16;
-      return true;
-    case IREE_VM_SCALAR_TYPE_I32:
-    case IREE_VM_SCALAR_TYPE_F32:
-      *out_bit_width = 32;
-      return true;
-    case IREE_VM_SCALAR_TYPE_I64:
-    case IREE_VM_SCALAR_TYPE_F64:
-      *out_bit_width = 64;
-      return true;
-    default:
-      return false;
-  }
-}
-
 static inline bool iree_vm_variant_ref_is_borrowed(iree_vm_variant_t variant) {
   return (variant.metadata & IREE_VM_VARIANT_TAG_MASK) ==
          IREE_VM_VARIANT_TAG_BORROWED_REF;
@@ -94,13 +68,12 @@ IREE_API_EXPORT iree_status_t iree_vm_variant_from_scalar_bits(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "out_variant is required");
   }
-  uint32_t bit_width = 0;
-  if (!iree_vm_scalar_type_bit_width(scalar_type, &bit_width)) {
+  if (!iree_vm_scalar_type_is_valid(scalar_type)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unrecognized scalar type %u",
                             (unsigned)scalar_type);
   }
-  if (bit_width < 64) bits &= (UINT64_C(1) << bit_width) - 1;
+  bits &= iree_vm_scalar_type_payload_mask(scalar_type);
   iree_vm_variant_t variant = {
       bits,
       iree_vm_variant_scalar_metadata(scalar_type),
@@ -116,8 +89,7 @@ IREE_API_EXPORT iree_status_t iree_vm_scalar_bits_from_variant(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "out_bits is required");
   }
-  uint32_t bit_width = 0;
-  if (!iree_vm_scalar_type_bit_width(expected_type, &bit_width)) {
+  if (!iree_vm_scalar_type_is_valid(expected_type)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unrecognized scalar type %u",
                             (unsigned)expected_type);
@@ -126,9 +98,7 @@ IREE_API_EXPORT iree_status_t iree_vm_scalar_bits_from_variant(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "variant scalar type mismatch");
   }
-  *out_bits = bit_width < 64
-                  ? variant.payload & ((UINT64_C(1) << bit_width) - 1)
-                  : variant.payload;
+  *out_bits = variant.payload & iree_vm_scalar_type_payload_mask(expected_type);
   return iree_ok_status();
 }
 
