@@ -457,7 +457,7 @@ amdgpu.target<gfx1100> @target
 low.func.def target<amdgpu.rdna3.core>(@target) @buffer_load_dword_off_zero(%resource: reg<amdgpu.sgpr x4>) -> (reg<amdgpu.vgpr>) asm {
   %vaddr = v_mov_b32 0
   %soffset = s_mov_b32 0
-  %result = low.op<amdgpu.buffer_load_dword>(%resource, %vaddr, %soffset) {offset = 32} : (reg<amdgpu.sgpr x4>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.vgpr>
+  %result = buffer_load_dword %resource, %vaddr, %soffset {offset = 32}
   return %result
 }
 

@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 aie2p.target<core> @target
+
 func.def target(@target) @i8x8_bitwise_storage_tuple(%lhs: vector<8xi8>, %rhs: vector<8xi8>) -> (vector<8xi8>, vector<8xi8>, vector<8xi8>) {
   %and = vector.andi %lhs, %rhs : vector<8xi8>
   %or = vector.ori %lhs, %rhs : vector<8xi8>
@@ -20,6 +21,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x8_bit
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @i16x4_bitwise_storage_tuple(%lhs: vector<4xi16>, %rhs: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>) {
   %and = vector.andi %lhs, %rhs : vector<4xi16>
   %or = vector.ori %lhs, %rhs : vector<4xi16>
@@ -38,6 +40,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_bi
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @i16x4_add_sub_storage_tuple(%lhs: vector<4xi16>, %rhs: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>) {
   %sum = vector.addi %lhs, %rhs : vector<4xi16>
   %diff = vector.subi %lhs, %rhs : vector<4xi16>
@@ -54,6 +57,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_ad
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @i16x4_mul_minmax_storage_tuple(%lhs: vector<4xi16>, %rhs: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>, vector<4xi16>, vector<4xi16>) {
   %product = vector.muli %lhs, %rhs : vector<4xi16>
   %smin = vector.minsi %lhs, %rhs : vector<4xi16>
@@ -82,6 +86,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_mu
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @i16x4_shift_storage_tuple(%value: vector<4xi16>, %shift: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>) {
   %left = vector.shli %value, %shift : vector<4xi16>
   %signed_right = vector.shrsi %value, %shift : vector<4xi16>
@@ -162,6 +167,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_sh
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @i16x4_bitcast_mul_maxui_chain(%packed: vector<2xi32>, %scale: vector<4xi16>, %limit: vector<4xi16>) -> (vector<4xi16>) {
   %lanes = vector.bitcast %packed : vector<2xi32> to vector<4xi16>
   %product = vector.muli %lanes, %scale : vector<4xi16>
@@ -185,6 +191,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_bi
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @i16x4_select_xori(%lhs: i32, %rhs: i32, %true_value: vector<4xi16>, %false_value: vector<4xi16>, %mask: vector<4xi16>) -> (vector<4xi16>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %predicate = vector.splat %condition : vector<4xi1>
@@ -207,6 +214,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_se
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @i16x4_cfg_arg_andi(%lhs: i32, %rhs: i32, %true_value: vector<4xi16>, %false_value: vector<4xi16>, %mask: vector<4xi16>) -> (vector<4xi16>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   cfg.cond_br %condition, ^then, ^else

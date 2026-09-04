@@ -1,6 +1,7 @@
 // RUN: emit source-low output=module
 
 aie2p.target<array> @array_target
+
 aie2p.target<core> @core_target
 
 low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @vector_add_array() asm {
@@ -10,9 +11,9 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array
   %row = constant.u32 2 : reg<aie2p.array.scalar : index>
   %workers = group %one
   %worker = worker %workers, %zero, @vector_add_core
-  %lhs_binding = binding 0, read
-  %rhs_binding = binding 1, read
-  %output_binding = binding 2, write
+  %lhs_binding = binding 0, "read"
+  %rhs_binding = binding 1, "read"
+  %output_binding = binding 2, "write"
   %lhs_sender = sender %lhs_binding, 0 : reg<aie2p.array.sender : tile<16xi32>>
   %rhs_sender = sender %rhs_binding, 0 : reg<aie2p.array.sender : tile<16xi32>>
   %output_receiver = receiver %output_binding, 0 : reg<aie2p.array.receiver : tile<16xi32>>
@@ -116,13 +117,14 @@ low.func.def target<amd.xdna.aie2p.array>(@array_target) @cross_target_call() as
 }
 
 // ====
-// RUN: pass @array_cleanup_pipeline
+// RUN: with-low-asm pass @array_cleanup_pipeline
 
 aie2p.target<array> @array_target
+
 aie2p.target<core> @core_target
 
 low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @array_cleanup() asm {
-  %unused = binding 7, read
+  %unused = binding 7, "read"
   return
 }
 

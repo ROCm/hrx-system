@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 aie2p.target<core> @target
+
 func.def target(@target) @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: i32) -> (i32) {
   %add = scalar.addi %lhs, %rhs : i32
   %sub = scalar.subi %add, %rhs : i32
@@ -33,6 +34,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_i
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @scalar_i32_bitfield_sgpr(%word: i32) -> (i32, i32, i32, i32) {
   %unsigned_byte = scalar.bitfield.extractu %word {offset = 8, width = 8} : i32 -> i32
   %signed_byte = scalar.bitfield.extracts %word {offset = 16, width = 8} : i32 -> i32
@@ -61,6 +63,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_i
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @scalar_i32_compare_scc(%lhs: i32, %rhs: i32) -> (i1) {
   %cmp = scalar.cmpi slt, %lhs, %rhs : i32
   func.return %cmp : i1
@@ -75,6 +78,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_i
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @scalar_i1_constants_scc() -> (i1, i1) {
   %true = scalar.constant true : i1
   %false = scalar.constant false : i1
@@ -91,6 +95,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_i
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
   %inactive_condition = scalar.constant 0 : i32
   %lhs_nonzero = scalar.cmpi ne, %lhs, %inactive_condition : i32

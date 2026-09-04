@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 aie2p.target<core> @target
+
 func.def target(@target) @matrix_multiply_s8s8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffer) {
   %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
   %base = index.constant 0 : offset

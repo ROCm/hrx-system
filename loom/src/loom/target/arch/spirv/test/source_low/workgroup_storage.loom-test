@@ -63,10 +63,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @spirv_unbounded_workgroup_storage(
-    %value: i32,
-    %byte_length: offset
-) {
+func.def target(@target) @spirv_unbounded_workgroup_storage(%value: i32, %byte_length: offset) {
   %base = index.constant 0 : offset
   // ERROR@+1: TARGET/080 {storage_space="workgroup", byte_length_value="byte_length"}
   %scratch = buffer.alloca<workgroup> align(4) %byte_length : buffer

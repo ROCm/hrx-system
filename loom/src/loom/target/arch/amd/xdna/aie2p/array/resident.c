@@ -384,8 +384,8 @@ static iree_status_t loom_aie2p_array_resident_materialize_worker(
   IREE_RETURN_IF_ERROR(loom_low_func_def_build(
       &ir_builder, build_flags,
       /*visibility=*/0, LOOM_LOW_RETAIN_RETAIN,
-      /*cc=*/0, /*purity=*/0, /*allocation=*/0, /*schedule=*/0,
-      loom_low_func_def_descriptor_set(source_function), target,
+      /*cc=*/0, /*purity=*/0, /*inline_policy=*/0, /*allocation=*/0,
+      /*schedule=*/0, loom_low_func_def_descriptor_set(source_function), target,
       /*abi=*/0, loom_named_attr_slice_empty(), loom_named_attr_slice_empty(),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), resident_ref,
       /*arg_types=*/NULL, /*arg_types_count=*/0,
@@ -417,9 +417,10 @@ static iree_status_t loom_aie2p_array_resident_materialize_worker(
     IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
         builder->module, builder->module, builder->arena,
         /*options=*/NULL, &remap));
-    IREE_RETURN_IF_ERROR(loom_ir_clone_region_into(&ir_builder, source_body,
-                                                   resident_body, &remap,
-                                                   &phase_entries[phase]));
+    const uint16_t phase_block_start = resident_body->block_count;
+    IREE_RETURN_IF_ERROR(loom_ir_clone_region_blocks(
+        &ir_builder, source_body, resident_body, phase_block_start, &remap));
+    phase_entries[phase] = loom_region_block(resident_body, phase_block_start);
 
     loom_op_t* last_address_op = NULL;
     IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_materialize_resources(

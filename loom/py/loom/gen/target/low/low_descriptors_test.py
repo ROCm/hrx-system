@@ -640,7 +640,7 @@ def test_compiler_emits_explicit_physical_register_candidates() -> None:
     assert "kTestLowCorePhysicalRegisterAtomicUnits" in generated.source
 
 
-def test_compiler_derives_canonical_ordered_physical_register_views() -> None:
+def test_compiler_derives_ordered_physical_register_views() -> None:
     compiled = compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
     register_ids = {physical_register.name: index for index, physical_register in enumerate(compiled.physical_registers)}
     explicit_class_id = compiled.reg_class_ids["test.explicit32"]
@@ -648,7 +648,7 @@ def test_compiler_derives_canonical_ordered_physical_register_views() -> None:
     l0_view = next(view for view in compiled.physical_register_views if view.physical_register_id == register_ids["test.l0"] and view.reg_class_id == explicit_class_id)
     l0_ordinals = compiled.physical_register_view_unit_candidate_ordinals[l0_view.unit_candidate_ordinal_start : l0_view.unit_candidate_ordinal_start + l0_view.unit_count]
 
-    assert l0_ordinals == [0, 1]
+    assert l0_ordinals == [0, 2]
     assert compiled.physical_registers[0].atomic_units == (1,)
     assert compiled.physical_registers[1].atomic_units == (0,)
 

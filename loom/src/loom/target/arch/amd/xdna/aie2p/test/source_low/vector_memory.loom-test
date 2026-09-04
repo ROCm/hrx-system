@@ -1,10 +1,8 @@
 // RUN: emit source-low output=low
 
 aie2p.target<core> @target
-func.def target(@target) @volatile_copy_i8x64(
-    %source: buffer,
-    %output: buffer
-) {
+
+func.def target(@target) @volatile_copy_i8x64(%source: buffer, %output: buffer) {
   %source_aligned, %output_aligned = buffer.assume.alignment %source, %output {minimum_alignment = 64} : buffer, buffer
   %base = index.constant 0 : offset
   %source_view = buffer.view %source_aligned[%base] : buffer -> view<64xi8>
@@ -25,11 +23,7 @@ func.def target(@target) @copy_i8x64(%source: buffer, %output: buffer) {
   func.return
 }
 
-func.def target(@target) @add_i16x32(
-    %lhs: buffer,
-    %rhs: buffer,
-    %output: buffer
-) {
+func.def target(@target) @add_i16x32(%lhs: buffer, %rhs: buffer, %output: buffer) {
   %lhs_generic = buffer.assume.memory_space<generic> %lhs : buffer
   %rhs_generic = buffer.assume.memory_space<generic> %rhs : buffer
   %output_generic = buffer.assume.memory_space<generic> %output : buffer
@@ -45,11 +39,7 @@ func.def target(@target) @add_i16x32(
   func.return
 }
 
-func.def target(@target) @add_i32x16(
-    %lhs: buffer,
-    %rhs: buffer,
-    %output: buffer
-) {
+func.def target(@target) @add_i32x16(%lhs: buffer, %rhs: buffer, %output: buffer) {
   %lhs_local = buffer.assume.memory_space<workgroup> %lhs : buffer
   %rhs_local = buffer.assume.memory_space<workgroup> %rhs : buffer
   %output_local = buffer.assume.memory_space<workgroup> %output : buffer
@@ -65,10 +55,7 @@ func.def target(@target) @add_i32x16(
   func.return
 }
 
-func.def target(@target) @copy_i32x16_materialized_static(
-    %source: buffer,
-    %output: buffer
-) {
+func.def target(@target) @copy_i32x16_materialized_static(%source: buffer, %output: buffer) {
   %source_aligned, %output_aligned = buffer.assume.alignment %source, %output {minimum_alignment = 64} : buffer, buffer
   %base = index.constant 0 : offset
   %source_view = buffer.view %source_aligned[%base] : buffer -> view<512xi32>
@@ -78,11 +65,7 @@ func.def target(@target) @copy_i32x16_materialized_static(
   func.return
 }
 
-func.def target(@target) @copy_i32x16_dynamic(
-    %source: buffer,
-    %output: buffer,
-    %element0: index
-) {
+func.def target(@target) @copy_i32x16_dynamic(%source: buffer, %output: buffer, %element0: index) {
   %source_aligned, %output_aligned = buffer.assume.alignment %source, %output {minimum_alignment = 64} : buffer, buffer
   %element = index.assume %element0 [range(%element0, 0, 48), mul(%element0, 16)] : index
   %base = index.constant 0 : offset
@@ -93,11 +76,7 @@ func.def target(@target) @copy_i32x16_dynamic(
   func.return
 }
 
-func.def target(@target) @copy_i32x16_dynamic_static(
-    %source: buffer,
-    %output: buffer,
-    %element0: index
-) {
+func.def target(@target) @copy_i32x16_dynamic_static(%source: buffer, %output: buffer, %element0: index) {
   %source_aligned, %output_aligned = buffer.assume.alignment %source, %output {minimum_alignment = 64} : buffer, buffer
   %element = index.assume %element0 [range(%element0, 0, 48), mul(%element0, 16)] : index
   %base = index.constant 64 : offset
@@ -108,11 +87,7 @@ func.def target(@target) @copy_i32x16_dynamic_static(
   func.return
 }
 
-func.def target(@target) @add_i32x8(
-    %lhs: buffer,
-    %rhs: buffer,
-    %output: buffer
-) {
+func.def target(@target) @add_i32x8(%lhs: buffer, %rhs: buffer, %output: buffer) {
   %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 32} : buffer, buffer, buffer
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<8xi32>
@@ -125,11 +100,7 @@ func.def target(@target) @add_i32x8(
   func.return
 }
 
-func.def target(@target) @add_i8x16(
-    %lhs: buffer,
-    %rhs: buffer,
-    %output: buffer
-) {
+func.def target(@target) @add_i8x16(%lhs: buffer, %rhs: buffer, %output: buffer) {
   %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 16} : buffer, buffer, buffer
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<16xi8>
@@ -184,13 +155,7 @@ func.def target(@target) @copy_float_vectors(%source: buffer, %output: buffer) {
   func.return
 }
 
-func.def target(@target) @float_vector_bitcasts(
-    %f32_values: vector<2xf32>,
-    %bf16_values: vector<4xbf16>,
-    %f16_values: vector<4xf16>,
-    %f8e4m3_values: vector<8xf8E4M3>,
-    %f8e5m2_values: vector<8xf8E5M2>
-) -> (vector<2xi32>, vector<4xi16>, vector<4xi16>, vector<8xi8>, vector<8xi8>) {
+func.def target(@target) @float_vector_bitcasts(%f32_values: vector<2xf32>, %bf16_values: vector<4xbf16>, %f16_values: vector<4xf16>, %f8e4m3_values: vector<8xf8E4M3>, %f8e5m2_values: vector<8xf8E5M2>) -> (vector<2xi32>, vector<4xi16>, vector<4xi16>, vector<8xi8>, vector<8xi8>) {
   %f32_bits = vector.bitcast %f32_values : vector<2xf32> to vector<2xi32>
   %bf16_bits = vector.bitcast %bf16_values : vector<4xbf16> to vector<4xi16>
   %f16_bits = vector.bitcast %f16_values : vector<4xf16> to vector<4xi16>
@@ -199,11 +164,7 @@ func.def target(@target) @float_vector_bitcasts(
   func.return %f32_bits, %bf16_bits, %f16_bits, %f8e4m3_bits, %f8e5m2_bits : vector<2xi32>, vector<4xi16>, vector<4xi16>, vector<8xi8>, vector<8xi8>
 }
 
-func.def target(@target) @add_f32x64_accumulator(
-    %lhs: buffer,
-    %rhs: buffer,
-    %output: buffer
-) {
+func.def target(@target) @add_f32x64_accumulator(%lhs: buffer, %rhs: buffer, %output: buffer) {
   %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xf32>
@@ -393,11 +354,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @add_f32x
 // ====
 
 aie2p.target<core> @target
-func.def target(@target) @multiply_bf16x32(
-    %lhs: buffer,
-    %rhs: buffer,
-    %output: buffer
-) {
+
+func.def target(@target) @multiply_bf16x32(%lhs: buffer, %rhs: buffer, %output: buffer) {
   %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<32xbf16>
@@ -429,6 +387,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @multiply
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @outer_product_bf16bf16_m8n8k1(%lhs: buffer, %rhs: buffer) -> (vector<64xf32>) {
   %lhs_aligned, %rhs_aligned = buffer.assume.alignment %lhs, %rhs {minimum_alignment = 64} : buffer, buffer
   %base = index.constant 0 : offset
@@ -471,10 +430,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @outer_pr
 // ====
 
 aie2p.target<core> @target
-func.def target(@target) @copy_bf16x8_exact_ssa_index(
-    %source: buffer,
-    %output: buffer
-) {
+
+func.def target(@target) @copy_bf16x8_exact_ssa_index(%source: buffer, %output: buffer) {
   %source_aligned, %output_aligned = buffer.assume.alignment %source, %output {minimum_alignment = 64} : buffer, buffer
   %base = index.constant 0 : offset
   %element = index.constant 8 : index
@@ -497,6 +454,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_bf1
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @roundtrip_f32x7(%input: buffer, %output: buffer) {
   %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
   %base = index.constant 0 : offset
@@ -528,6 +486,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @roundtri
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @roundtrip_bf16x14(%input: buffer, %output: buffer) {
   %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
   %base = index.constant 0 : offset
@@ -590,6 +549,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @roundtri
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @roundtrip_f8e4m3x19(%input: buffer, %output: buffer) {
   %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
   %base = index.constant 0 : offset
@@ -627,11 +587,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @roundtri
 // ====
 
 aie2p.target<core> @target
-func.def target(@target) @add_i32x32(
-    %lhs: buffer,
-    %rhs: buffer,
-    %output: buffer
-) {
+
+func.def target(@target) @add_i32x32(%lhs: buffer, %rhs: buffer, %output: buffer) {
   %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<32xi32>
@@ -663,6 +620,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @add_i32x
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @reduce_positive_i32x7(%input: buffer) -> (i32) {
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %base = index.constant 0 : offset

@@ -2,13 +2,10 @@
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @event_schedule_class_fallback(
-    %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
-  %producer = low.op<test.event.fast.i32>(%lhs, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %consumer = low.op<test.add.i32>(%producer, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %consumer : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @event_schedule_class_fallback(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %producer = test.event.fast.i32 %lhs, %rhs
+  %consumer = test.add.i32 %producer, %rhs
+  return %consumer
 }
 
 // ----
@@ -19,13 +16,10 @@ low.func.def target<test.low.core>(@test_target) @event_schedule_class_fallback(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @event_pair_exact_zero(
-    %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
-  %producer = low.op<test.event.fast.i32>(%lhs, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %consumer = low.op<test.event.consume.early.i32>(%producer, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %consumer : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @event_pair_exact_zero(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %producer = test.event.fast.i32 %lhs, %rhs
+  %consumer = test.event.consume.early.i32 %producer, %rhs
+  return %consumer
 }
 
 // ----
@@ -36,13 +30,10 @@ low.func.def target<test.low.core>(@test_target) @event_pair_exact_zero(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @event_pair_calibrated_positive(
-    %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
-  %producer = low.op<test.event.slow.i32>(%lhs, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %consumer = low.op<test.event.consume.early.i32>(%producer, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %consumer : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @event_pair_calibrated_positive(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %producer = test.event.slow.i32 %lhs, %rhs
+  %consumer = test.event.consume.early.i32 %producer, %rhs
+  return %consumer
 }
 
 // ----
@@ -53,13 +44,10 @@ low.func.def target<test.low.core>(@test_target) @event_pair_calibrated_positive
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @event_pair_signed_negative(
-    %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
-  %producer = low.op<test.event.fast.i32>(%lhs, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %consumer = low.op<test.event.consume.late.i32>(%producer, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %consumer : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @event_pair_signed_negative(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %producer = test.event.fast.i32 %lhs, %rhs
+  %consumer = test.event.consume.late.i32 %producer, %rhs
+  return %consumer
 }
 
 // ----
@@ -70,17 +58,11 @@ low.func.def target<test.low.core>(@test_target) @event_pair_signed_negative(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @shared_resource_calendar(
-    %lhs: reg<test.i32>, %rhs: reg<test.i32>) ->
-    (reg<test.i32>, reg<test.i32>, reg<test.i32>) {
-  %first = low.op<test.event.fast.i32>(%lhs, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %second = low.op<test.event.fast.i32>(%lhs, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %third = low.op<test.event.fast.i32>(%lhs, %rhs) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %first, %second, %third :
-      reg<test.i32>, reg<test.i32>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @shared_resource_calendar(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %first = test.event.fast.i32 %lhs, %rhs
+  %second = test.event.fast.i32 %lhs, %rhs
+  %third = test.event.fast.i32 %lhs, %rhs
+  return %first, %second, %third
 }
 
 // ----
@@ -91,11 +73,10 @@ low.func.def target<test.low.core>(@test_target) @shared_resource_calendar(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @effect_event_war_zero(
-    %read_value: reg<test.i32>, %write_value: reg<test.i32>) {
-  low.op<test.event.memory.read.i32>(%read_value) : (reg<test.i32>)
-  low.op<test.event.memory.write.i32>(%write_value) : (reg<test.i32>)
-  low.return
+low.func.def target<test.low.core>(@test_target) @effect_event_war_zero(%read_value: reg<test.i32>, %write_value: reg<test.i32>) asm {
+  test.event.memory.read.i32 %read_value
+  test.event.memory.write.i32 %write_value
+  return
 }
 
 // ----
@@ -106,11 +87,10 @@ low.func.def target<test.low.core>(@test_target) @effect_event_war_zero(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @effect_event_raw_positive(
-    %write_value: reg<test.i32>, %read_value: reg<test.i32>) {
-  low.op<test.event.memory.write.i32>(%write_value) : (reg<test.i32>)
-  low.op<test.event.memory.read.i32>(%read_value) : (reg<test.i32>)
-  low.return
+low.func.def target<test.low.core>(@test_target) @effect_event_raw_positive(%write_value: reg<test.i32>, %read_value: reg<test.i32>) asm {
+  test.event.memory.write.i32 %write_value
+  test.event.memory.read.i32 %read_value
+  return
 }
 
 // ----
@@ -121,11 +101,10 @@ low.func.def target<test.low.core>(@test_target) @effect_event_raw_positive(
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @effect_event_waw_positive(
-    %first_value: reg<test.i32>, %second_value: reg<test.i32>) {
-  low.op<test.event.memory.write.i32>(%first_value) : (reg<test.i32>)
-  low.op<test.event.memory.write.i32>(%second_value) : (reg<test.i32>)
-  low.return
+low.func.def target<test.low.core>(@test_target) @effect_event_waw_positive(%first_value: reg<test.i32>, %second_value: reg<test.i32>) asm {
+  test.event.memory.write.i32 %first_value
+  test.event.memory.write.i32 %second_value
+  return
 }
 
 // ----
@@ -1308,14 +1287,10 @@ low.func.def target<test.low.core>(@test_target) @live_in_source_preamble(%lhs: 
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @encoding_equivalent_schedule_alternatives(
-    %lhs0: reg<test.i32>, %rhs0: reg<test.i32>,
-    %lhs1: reg<test.i32>, %rhs1: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
-  %a = low.op<test.schedule.alternative.a.i32>(%lhs0, %rhs0) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %b = low.op<test.schedule.alternative.a.i32>(%lhs1, %rhs1) :
-      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %a, %b : reg<test.i32>, reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @encoding_equivalent_schedule_alternatives(%lhs0: reg<test.i32>, %rhs0: reg<test.i32>, %lhs1: reg<test.i32>, %rhs1: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %a = test.schedule.alternative.a.i32 %lhs0, %rhs0
+  %b = test.schedule.alternative.a.i32 %lhs1, %rhs1
+  return %a, %b
 }
 
 // ----
@@ -1326,10 +1301,7 @@ low.func.def target<test.low.core>(@test_target) @encoding_equivalent_schedule_a
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @register_packing_avoids_fragmentation(
-    %lhs_source0: reg<test.i32>, %lhs_source1: reg<test.i32>,
-    %rhs_source0: reg<test.i32>, %rhs_source1: reg<test.i32>) ->
-    (reg<test.i32>, reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @register_packing_avoids_fragmentation(%lhs_source0: reg<test.i32>, %lhs_source1: reg<test.i32>, %rhs_source0: reg<test.i32>, %rhs_source1: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="4", chosen_packet="test.packing.create", rejected_packet="test.packing.create"}
   %lhs_narrow0 = test.packing.create %lhs_source0
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", scored_candidate_count="2", chosen_packet="test.packing.create", rejected_packet="test.packing.create"}

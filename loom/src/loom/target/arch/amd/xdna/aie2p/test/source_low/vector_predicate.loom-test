@@ -1,10 +1,8 @@
 // RUN: emit source-low output=low
 
 aie2p.target<core> @target
-func.def target(@target) @cmp_i8_matrix(
-    %lhs: vector<64xi8>,
-    %rhs: vector<64xi8>
-) -> (vector<64xi1>, vector<64xi1>, vector<64xi1>, vector<64xi1>, vector<64xi1>, vector<64xi1>, vector<64xi1>, vector<64xi1>, vector<64xi1>, vector<64xi1>) {
+
+func.def target(@target) @cmp_i8_matrix(%lhs: vector<64xi8>, %rhs: vector<64xi8>) -> (vector<64xi1>, vector<64xi1>, vector<64xi1>, vector<64xi1>, vector<64xi1>, vector<64xi1>, vector<64xi1>, vector<64xi1>, vector<64xi1>, vector<64xi1>) {
   %eq = vector.cmpi eq, %lhs, %rhs : vector<64xi8> -> vector<64xi1>
   %ne = vector.cmpi ne, %lhs, %rhs : vector<64xi8> -> vector<64xi1>
   %slt = vector.cmpi slt, %lhs, %rhs : vector<64xi8> -> vector<64xi1>
@@ -38,10 +36,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @cmp_i8_m
 // ====
 
 aie2p.target<core> @target
-func.def target(@target) @cmp_i16_matrix(
-    %lhs: vector<32xi16>,
-    %rhs: vector<32xi16>
-) -> (vector<32xi1>, vector<32xi1>, vector<32xi1>, vector<32xi1>, vector<32xi1>, vector<32xi1>, vector<32xi1>, vector<32xi1>, vector<32xi1>, vector<32xi1>) {
+
+func.def target(@target) @cmp_i16_matrix(%lhs: vector<32xi16>, %rhs: vector<32xi16>) -> (vector<32xi1>, vector<32xi1>, vector<32xi1>, vector<32xi1>, vector<32xi1>, vector<32xi1>, vector<32xi1>, vector<32xi1>, vector<32xi1>, vector<32xi1>) {
   %eq = vector.cmpi eq, %lhs, %rhs : vector<32xi16> -> vector<32xi1>
   %ne = vector.cmpi ne, %lhs, %rhs : vector<32xi16> -> vector<32xi1>
   %slt = vector.cmpi slt, %lhs, %rhs : vector<32xi16> -> vector<32xi1>
@@ -86,10 +82,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @cmp_i16_
 // ====
 
 aie2p.target<core> @target
-func.def target(@target) @cmp_i32_matrix(
-    %lhs: vector<16xi32>,
-    %rhs: vector<16xi32>
-) -> (vector<16xi1>, vector<16xi1>, vector<16xi1>, vector<16xi1>, vector<16xi1>, vector<16xi1>, vector<16xi1>, vector<16xi1>, vector<16xi1>, vector<16xi1>) {
+
+func.def target(@target) @cmp_i32_matrix(%lhs: vector<16xi32>, %rhs: vector<16xi32>) -> (vector<16xi1>, vector<16xi1>, vector<16xi1>, vector<16xi1>, vector<16xi1>, vector<16xi1>, vector<16xi1>, vector<16xi1>, vector<16xi1>, vector<16xi1>) {
   %eq = vector.cmpi eq, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
   %ne = vector.cmpi ne, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
   %slt = vector.cmpi slt, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
@@ -134,12 +128,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @cmp_i32_
 // ====
 
 aie2p.target<core> @target
-func.def target(@target) @predicate_logic_and_select(
-    %lhs: vector<64xi8>,
-    %rhs: vector<64xi8>,
-    %true_value: vector<64xi8>,
-    %false_value: vector<64xi8>
-) -> (vector<64xi8>, vector<32xi16>, vector<16xi32>) {
+
+func.def target(@target) @predicate_logic_and_select(%lhs: vector<64xi8>, %rhs: vector<64xi8>, %true_value: vector<64xi8>, %false_value: vector<64xi8>) -> (vector<64xi8>, vector<32xi16>, vector<16xi32>) {
   %byte_lt = vector.cmpi slt, %lhs, %rhs : vector<64xi8> -> vector<64xi1>
   %byte_ne = vector.cmpi ne, %lhs, %rhs : vector<64xi8> -> vector<64xi1>
   %byte_and = vector.andi %byte_lt, %byte_ne : vector<64xi1>

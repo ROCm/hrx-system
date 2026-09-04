@@ -275,13 +275,10 @@ low.func.def target<test.low.core>(@test_target) @structural_physical_span_rebas
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @explicit_physical_aggregate_views(
-    %wide: reg<test.explicit32 x2>) -> (reg<test.explicit32 x2>) asm {
+low.func.def target<test.low.core>(@test_target) @explicit_physical_aggregate_views(%wide: reg<test.explicit32 x2>) -> (reg<test.explicit32 x2>) asm {
   %low = slice %wide[0] : reg<test.explicit32 x2> -> reg<test.explicit32>
   %high = slice %wide[1] : reg<test.explicit32 x2> -> reg<test.explicit32>
-  %packed = concat(%low, %high) :
-      (reg<test.explicit32>, reg<test.explicit32>) ->
-      reg<test.explicit32 x2>
+  %packed = concat(%low, %high) : (reg<test.explicit32>, reg<test.explicit32>) -> reg<test.explicit32 x2>
   return %packed
 }
 
@@ -482,8 +479,7 @@ low.func.def target<test.low.core>(@test_target) @unspillable_interval_exceeds_b
 test.target<low_core> @test_target
 
 // ERROR@+1: BACKEND/005 {function_name="explicit_register_view_unavailable", value_class="test.explicit32", budget="4", peak="3", failure_code="unspillable-register-exhausted"}
-low.func.def target<test.low.core>(@test_target) @explicit_register_view_unavailable(
-    %wide: reg<test.explicit32 x3>) -> (reg<test.explicit32 x3>) asm {
+low.func.def target<test.low.core>(@test_target) @explicit_register_view_unavailable(%wide: reg<test.explicit32 x3>) -> (reg<test.explicit32 x3>) asm {
   return %wide
 }
 
@@ -917,8 +913,7 @@ low.func.def target<test.low.core>(@test_target) @tied_concat_loop_edge_preserve
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @explicit_physical_noncanonical_slice(
-    %wide: reg<test.explicit32 x2>) -> (reg<test.explicit32>) asm {
+low.func.def target<test.low.core>(@test_target) @explicit_physical_noncanonical_slice(%wide: reg<test.explicit32 x2>) -> (reg<test.explicit32>) asm {
   %high = slice %wide[1] : reg<test.explicit32 x2> -> reg<test.explicit32>
   return %high
 }

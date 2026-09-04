@@ -637,8 +637,8 @@ static iree_status_t loom_aie2p_pipeline_create_low_function(
   loom_builder_set_before(&emitter->builder, pipeline.op);
   IREE_RETURN_IF_ERROR(loom_low_func_def_build(
       &emitter->builder, build_flags, visibility, retain,
-      /*cc=*/0, /*purity=*/0, /*allocation=*/0, /*schedule=*/0,
-      descriptor_set_key, target, LOOM_TARGET_ABI_ARRAY_PROGRAM,
+      /*cc=*/0, /*purity=*/0, /*inline_policy=*/0, /*allocation=*/0,
+      /*schedule=*/0, descriptor_set_key, target, LOOM_TARGET_ABI_ARRAY_PROGRAM,
       loom_named_attr_slice_empty(), loom_named_attr_slice_empty(),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), callee,
       /*arg_types=*/NULL, /*arg_types_count=*/0,

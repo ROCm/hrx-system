@@ -2,11 +2,11 @@
 
 amdgpu.target<gfx9-4-generic> @gfx9_4_generic_target
 
-low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_generic_target) @gfx9_4_generic_sgpr_spill_reload(%value: reg<amdgpu.sgpr x2>) {
-  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 8} : low.storage<private>
+low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_generic_target) @gfx9_4_generic_sgpr_spill_reload(%value: reg<amdgpu.sgpr x2>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 8} : low.storage<private>
   low.spill %value, %storage : reg<amdgpu.sgpr x2>, low.storage<private>
   %reload = low.reload %storage : low.storage<private> -> reg<amdgpu.sgpr x2>
-  low.return
+  return
 }
 
 // ----
@@ -62,11 +62,11 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @spill_repair_values_remai
 
 amdgpu.target<gfx9-4-generic> @gfx9_4_generic_target
 
-low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_generic_target) @gfx9_4_generic_sgpr_spill_reload_waits(%value: reg<amdgpu.sgpr x2>) {
-  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 8} : low.storage<private>
+low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_generic_target) @gfx9_4_generic_sgpr_spill_reload_waits(%value: reg<amdgpu.sgpr x2>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 8} : low.storage<private>
   low.spill %value, %storage : reg<amdgpu.sgpr x2>, low.storage<private>
   %reload = low.reload %storage : low.storage<private> -> reg<amdgpu.sgpr x2>
-  low.return
+  return
 }
 
 // ----
@@ -99,11 +99,11 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_generic_target) @gfx9_4_
 
 amdgpu.target<gfx11-generic> @gfx11_generic_target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_generic_sgpr_spill_reload(%value: reg<amdgpu.sgpr x2>) {
-  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 8} : low.storage<private>
+low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_generic_sgpr_spill_reload(%value: reg<amdgpu.sgpr x2>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 8} : low.storage<private>
   low.spill %value, %storage : reg<amdgpu.sgpr x2>, low.storage<private>
   %reload = low.reload %storage : low.storage<private> -> reg<amdgpu.sgpr x2>
-  low.return
+  return
 }
 
 // ----
@@ -129,11 +129,11 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_gen
 
 amdgpu.target<gfx12-generic> @gfx12_generic_target
 
-low.func.def target<amdgpu.gfx12.generic.core>(@gfx12_generic_target) @gfx12_generic_sgpr_spill_reload(%value: reg<amdgpu.sgpr x2>) {
-  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 8} : low.storage<private>
+low.func.def target<amdgpu.gfx12.generic.core>(@gfx12_generic_target) @gfx12_generic_sgpr_spill_reload(%value: reg<amdgpu.sgpr x2>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 8} : low.storage<private>
   low.spill %value, %storage : reg<amdgpu.sgpr x2>, low.storage<private>
   %reload = low.reload %storage : low.storage<private> -> reg<amdgpu.sgpr x2>
-  low.return
+  return
 }
 
 // ----
@@ -159,11 +159,11 @@ low.func.def target<amdgpu.gfx12.generic.core>(@gfx12_generic_target) @gfx12_gen
 
 amdgpu.target<gfx12-5-generic> @gfx12_5_generic_target
 
-low.func.def target<amdgpu.gfx12_5.generic.core>(@gfx12_5_generic_target) @gfx12_5_generic_sgpr_spill_reload(%value: reg<amdgpu.sgpr x2>) {
-  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 8} : low.storage<private>
+low.func.def target<amdgpu.gfx12_5.generic.core>(@gfx12_5_generic_target) @gfx12_5_generic_sgpr_spill_reload(%value: reg<amdgpu.sgpr x2>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 8} : low.storage<private>
   low.spill %value, %storage : reg<amdgpu.sgpr x2>, low.storage<private>
   %reload = low.reload %storage : low.storage<private> -> reg<amdgpu.sgpr x2>
-  low.return
+  return
 }
 
 // ----
@@ -189,13 +189,13 @@ low.func.def target<amdgpu.gfx12_5.generic.core>(@gfx12_5_generic_target) @gfx12
 
 amdgpu.target<gfx11-generic> @gfx11_generic_target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_spill_packet_widths(%aligned: reg<amdgpu.vgpr x4>, %misaligned: reg<amdgpu.vgpr x4>) {
-  %storage = low.storage.reserve {byte_alignment = 16, byte_length = 64} : low.storage<private>
+low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_spill_packet_widths(%aligned: reg<amdgpu.vgpr x4>, %misaligned: reg<amdgpu.vgpr x4>) asm {
+  %storage = storage {byte_alignment = 16, byte_length = 64} : low.storage<private>
   low.spill %aligned, %storage : reg<amdgpu.vgpr x4>, low.storage<private>
   %aligned_reload = low.reload %storage : low.storage<private> -> reg<amdgpu.vgpr x4>
   low.spill %misaligned, %storage {offset = 20} : reg<amdgpu.vgpr x4>, low.storage<private>
   %misaligned_reload = low.reload %storage {offset = 20} : low.storage<private> -> reg<amdgpu.vgpr x4>
-  low.return
+  return
 }
 
 // ----
@@ -229,15 +229,15 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_spi
 
 amdgpu.target<gfx11-generic> @gfx11_generic_target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_spill_vaddr_packet_widths(%b32: reg<amdgpu.vgpr>, %b64: reg<amdgpu.vgpr x2>, %b128: reg<amdgpu.vgpr x4>) {
-  %storage = low.storage.reserve {byte_alignment = 16, byte_length = 8192} : low.storage<private>
+low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_spill_vaddr_packet_widths(%b32: reg<amdgpu.vgpr>, %b64: reg<amdgpu.vgpr x2>, %b128: reg<amdgpu.vgpr x4>) asm {
+  %storage = storage {byte_alignment = 16, byte_length = 8192} : low.storage<private>
   low.spill %b32, %storage {offset = 4104} : reg<amdgpu.vgpr>, low.storage<private>
   %b32_reload = low.reload %storage {offset = 4104} : low.storage<private> -> reg<amdgpu.vgpr>
   low.spill %b64, %storage {offset = 4112} : reg<amdgpu.vgpr x2>, low.storage<private>
   %b64_reload = low.reload %storage {offset = 4112} : low.storage<private> -> reg<amdgpu.vgpr x2>
   low.spill %b128, %storage {offset = 4128} : reg<amdgpu.vgpr x4>, low.storage<private>
   %b128_reload = low.reload %storage {offset = 4128} : low.storage<private> -> reg<amdgpu.vgpr x4>
-  low.return
+  return
 }
 
 // ----
@@ -279,11 +279,11 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_spi
 
 amdgpu.target<gfx11-generic> @gfx11_generic_target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @spill_rejects_workgroup_storage(%value: reg<amdgpu.vgpr>) {
-  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<workgroup>
+low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @spill_rejects_workgroup_storage(%value: reg<amdgpu.vgpr>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<workgroup>
   // ERROR@+1: AMDGPU/037 {function_name="spill_rejects_workgroup_storage", op_name="low.spill", storage_value_name="storage", storage_space="workgroup", supported_storage_spaces="[scratch, private]"}
   low.spill %value, %storage : reg<amdgpu.vgpr>, low.storage<workgroup>
-  low.return
+  return
 }
 
 // ====
@@ -292,11 +292,11 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @spill_rej
 
 amdgpu.target<gfx9-4-generic> @gfx9_4_generic_target
 
-low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_generic_target) @spill_rejects_agpr_registers(%value: reg<amdgpu.agpr>) {
-  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
+low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_generic_target) @spill_rejects_agpr_registers(%value: reg<amdgpu.agpr>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
   // ERROR@+1: AMDGPU/038 {function_name="spill_rejects_agpr_registers", op_name="low.spill", value_name="value", actual_type="reg<amdgpu.agpr>"}
   low.spill %value, %storage : reg<amdgpu.agpr>, low.storage<private>
-  low.return
+  return
 }
 
 // ====
@@ -305,9 +305,9 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_generic_target) @spill_r
 
 amdgpu.target<gfx11-generic> @gfx11_generic_target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @reload_rejects_access_past_storage_end() {
-  %storage = low.storage.reserve {byte_alignment = 8, byte_length = 8} : low.storage<private>
+low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @reload_rejects_access_past_storage_end() asm {
+  %storage = storage {byte_alignment = 8, byte_length = 8} : low.storage<private>
   // ERROR@+1: AMDGPU/039 {function_name="reload_rejects_access_past_storage_end", op_name="low.reload", storage_value_name="storage", access_byte_offset="4", access_byte_length="8", storage_byte_length="8"}
   %value = low.reload %storage {offset = 4} : low.storage<private> -> reg<amdgpu.vgpr x2>
-  low.return
+  return
 }

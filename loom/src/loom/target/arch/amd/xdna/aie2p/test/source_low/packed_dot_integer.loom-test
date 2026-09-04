@@ -2,6 +2,7 @@
 // RUN: emit source-low output=low
 
 aie2p.target<core> @target
+
 func.def target(@target) @dot4i_s8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -41,6 +42,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_s8
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @dot4i_u8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot4i<u8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -80,6 +82,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_u8
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @dot8i4_u4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<u4u4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -166,6 +169,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_u
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @dot4i_u8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -205,6 +209,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_u8
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @dot4i_s8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot4i<s8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -244,6 +249,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_s8
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @dot8i4_s4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<s4s4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -378,6 +384,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_s
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @dot8i4_u4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<u4s4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -488,6 +495,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_u
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @dot8i4_s4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<s4u4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
@@ -598,6 +606,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_s
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @dot8i4_s4u4_q4_offset_binary(%rows: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %offset_to_signed_mask = vector.constant -2004318072 : vector<1xi32>
   %signed_rows = vector.xori %rows, %offset_to_signed_mask : vector<1xi32>
@@ -712,6 +721,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_s
 // ====
 
 aie2p.target<core> @target
+
 func.def target(@target) @dot4i_s8s8_q6_offset_binary(%codes: vector<1xi32>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %offset_to_signed_bias = vector.constant -32 : vector<4xi8>
   %bytes = vector.bitcast %codes : vector<1xi32> to vector<4xi8>

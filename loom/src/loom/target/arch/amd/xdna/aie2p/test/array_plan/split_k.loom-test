@@ -1,6 +1,7 @@
 // RUN: emit aie2p-array-plan @split_k_array
 
 aie2p.target<array> @array_target
+
 aie2p.target<core> @core_target
 
 low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @split_k_array() asm {
@@ -21,10 +22,10 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array
   %product1 = worker %products, %product1_lane, @product_branch_bf16
   %reducer = worker %reducers, %product0_lane, @reduce_bias_f32
 
-  %lhs = binding 0, read
-  %rhs = binding 1, read
-  %bias = binding 2, read
-  %output = binding 3, write
+  %lhs = binding 0, "read"
+  %rhs = binding 1, "read"
+  %bias = binding 2, "read"
+  %output = binding 3, "write"
 
   %lhs_tiles = sender %lhs, 0 : reg<aie2p.array.sender : tile<2x8xbf16>>
   %rhs_tiles = sender %rhs, 0 : reg<aie2p.array.sender : tile<2x8xbf16>>
@@ -62,11 +63,7 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array
   return
 }
 
-func.def target(@core_target) @product_branch_bf16(
-    %lhs: buffer,
-    %rhs: buffer,
-    %partial: buffer
-) {
+func.def target(@core_target) @product_branch_bf16(%lhs: buffer, %rhs: buffer, %partial: buffer) {
   %lhs_aligned, %rhs_aligned, %partial_aligned = buffer.assume.alignment %lhs, %rhs, %partial {minimum_alignment = 64} : buffer, buffer, buffer
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<8xbf16>
@@ -86,12 +83,7 @@ func.def target(@core_target) @product_branch_bf16(
   func.return
 }
 
-func.def target(@core_target) @reduce_bias_f32(
-    %partial0: buffer,
-    %partial1: buffer,
-    %bias: buffer,
-    %output: buffer
-) {
+func.def target(@core_target) @reduce_bias_f32(%partial0: buffer, %partial1: buffer, %bias: buffer, %output: buffer) {
   %partial0_aligned, %partial1_aligned, %bias_aligned, %output_aligned = buffer.assume.alignment %partial0, %partial1, %bias, %output {minimum_alignment = 64} : buffer, buffer, buffer, buffer
   %base = index.constant 0 : offset
   %partial0_view = buffer.view %partial0_aligned[%base] : buffer -> view<64xf32>

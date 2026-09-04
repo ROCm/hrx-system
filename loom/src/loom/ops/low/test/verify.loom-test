@@ -95,26 +95,26 @@ low.func.def target<test.low.core>(@test_target) @typed_register_predicate_misma
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @storage_view_passes(%value: reg<test.i32>) -> (reg<test.i32>) {
-  %storage = low.storage.reserve {byte_alignment = 16, byte_length = 64} : low.storage<scratch>
-  %view = low.storage.view %storage {byte_length = 16, offset = 16} : low.storage<scratch> -> low.storage<scratch>
+low.func.def target<test.low.core>(@test_target) @storage_view_passes(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %storage = storage {byte_alignment = 16, byte_length = 64} : low.storage<scratch>
+  %view = storage_view %storage {offset = 16, byte_length = 16} : low.storage<scratch> -> low.storage<scratch>
   low.spill %value, %view : reg<test.i32>, low.storage<scratch>
   %reload = low.reload %view : low.storage<scratch> -> reg<test.i32>
-  low.return %reload : reg<test.i32>
+  return %reload
 }
 
 // ====
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @storage_view_chain_passes(%value: reg<test.i32>) -> (reg<test.i32>) {
-  %storage = low.storage.reserve {byte_alignment = 16, byte_length = 128} : low.storage<scratch>
-  %outer = low.storage.view %storage {byte_length = 96, offset = 16} : low.storage<scratch> -> low.storage<scratch>
-  %middle = low.storage.view %outer {byte_length = 48, offset = 24} : low.storage<scratch> -> low.storage<scratch>
-  %inner = low.storage.view %middle {byte_length = 16, offset = 8} : low.storage<scratch> -> low.storage<scratch>
+low.func.def target<test.low.core>(@test_target) @storage_view_chain_passes(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %storage = storage {byte_alignment = 16, byte_length = 128} : low.storage<scratch>
+  %outer = storage_view %storage {offset = 16, byte_length = 96} : low.storage<scratch> -> low.storage<scratch>
+  %middle = storage_view %outer {offset = 24, byte_length = 48} : low.storage<scratch> -> low.storage<scratch>
+  %inner = storage_view %middle {offset = 8, byte_length = 16} : low.storage<scratch> -> low.storage<scratch>
   low.spill %value, %inner {offset = 15} : reg<test.i32>, low.storage<scratch>
   %reload = low.reload %inner {offset = 15} : low.storage<scratch> -> reg<test.i32>
-  low.return %reload : reg<test.i32>
+  return %reload
 }
 
 // ====
@@ -453,13 +453,13 @@ func.def @pure_invoke_observable_low(%ptr: i64) {
 test.target<low_core> @test_target
 
 // Storage traffic is valid when all traffic stays inside owned storage views.
-low.func.def target<test.low.core>(@test_target) @slot_roundtrip(%input: reg<test.i32>) -> (reg<test.i32>) {
-  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<scratch>
-  %view = low.storage.view %storage {byte_length = 4} : low.storage<scratch> -> low.storage<scratch>
+low.func.def target<test.low.core>(@test_target) @slot_roundtrip(%input: reg<test.i32>) -> (reg<test.i32>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<scratch>
+  %view = storage_view %storage {byte_length = 4} : low.storage<scratch> -> low.storage<scratch>
   low.spill %input, %view : reg<test.i32>, low.storage<scratch>
   %reload = low.reload %view : low.storage<scratch> -> reg<test.i32>
-  %addr = low.storage.address %view : low.storage<scratch> -> reg<test.ptr>
-  low.return %reload : reg<test.i32>
+  %addr = storage_address %view : low.storage<scratch> -> reg<test.ptr>
+  return %reload
 }
 
 // ====

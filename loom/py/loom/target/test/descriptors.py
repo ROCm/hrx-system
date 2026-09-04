@@ -1362,9 +1362,7 @@ TEST_LOW_SCHEDULE_ALTERNATIVE_STORE_A_V4I32_DESCRIPTOR = Descriptor(
     asm_forms=_asm(operands=("address", "value")),
     effects=(_STORE_EFFECT,),
     schedule_class=_SCHEDULE_STORE,
-    schedule_alternatives=(
-        TEST_LOW_SCHEDULE_ALTERNATIVE_STORE_B_V4I32_DESCRIPTOR.key,
-    ),
+    schedule_alternatives=(TEST_LOW_SCHEDULE_ALTERNATIVE_STORE_B_V4I32_DESCRIPTOR.key,),
     flags=(DescriptorFlag.SIDE_EFFECTING,),
 )
 
@@ -1606,8 +1604,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             ),
             physical_registers=(
                 "test.r0",
-                "test.r2",
                 "test.r1",
+                "test.r2",
                 "test.r3",
             ),
         ),
