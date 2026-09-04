@@ -139,6 +139,36 @@ class EmitRegisterSlice:
 
 
 @dataclass(frozen=True, slots=True)
+class EmitRegisterCopy:
+    """Copies one register value into a compatible register class."""
+
+    source: ValueRef
+    result: ValueRef
+    result_type: ResultTypeBinding | None = None
+
+    def validate(
+        self,
+        source_op: Op,
+        descriptor_set: DescriptorSet,
+        defined_temporaries: set[str],
+    ) -> tuple[str, ...]:
+        del descriptor_set
+        _validate_structural_source(
+            source_op,
+            self.source,
+            "register copy source",
+            defined_temporaries,
+        )
+        return _validate_structural_result(
+            source_op,
+            self.result,
+            self.result_type,
+            "register copy result",
+            defined_temporaries,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class EmitRegisterConcat:
     """Concatenates register-unit sources into one aggregate value."""
 
@@ -182,7 +212,9 @@ class EmitRegisterConcat:
         )
 
 
-type ContractEmit = EmitDescriptorOp | EmitRegisterSlice | EmitRegisterConcat
+type ContractEmit = (
+    EmitDescriptorOp | EmitRegisterCopy | EmitRegisterSlice | EmitRegisterConcat
+)
 
 
 @dataclass(frozen=True, slots=True)

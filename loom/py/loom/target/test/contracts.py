@@ -29,6 +29,7 @@ from loom.target.contracts import (
     DirectTypePatterns,
     EmitDescriptorOp,
     EmitRegisterConcat,
+    EmitRegisterCopy,
     EmitRegisterSlice,
     Guard,
     GuardDiagnostic,
@@ -369,6 +370,19 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
             TEST_LOW_MUL_F32_DESCRIPTOR,
             _F32,
             semantic_tag="float.mul.f32",
+        ),
+        DescriptorRule(
+            source_op=scalar_conversion.scalar_bitcast,
+            guards=(
+                Guard.value_type("input", _I32),
+                Guard.value_type("result", _F32),
+            ),
+            emit=(
+                EmitRegisterCopy(
+                    source=ValueRef.operand("input"),
+                    result=ValueRef.result("result"),
+                ),
+            ),
         ),
         _select_rule(
             vector.vector_select,
