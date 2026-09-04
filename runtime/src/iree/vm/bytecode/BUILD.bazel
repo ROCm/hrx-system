@@ -9,6 +9,7 @@ load("//build_tools/bazel:generate.bzl", "iree_generated_files")
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
+load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
@@ -129,6 +130,16 @@ iree_runtime_cc_benchmark(
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:benchmark",
         "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+iree_runtime_cc_fuzz(
+    name = "verifier_fuzz",
+    srcs = ["verifier_fuzz.cc"],
+    deps = [
+        ":verifier",
+        ":verifier_testdata",
+        "//runtime/src/iree/base",
     ],
 )
 

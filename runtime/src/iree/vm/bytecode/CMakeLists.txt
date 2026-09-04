@@ -116,6 +116,17 @@ iree_cc_binary_benchmark(
   TESTONLY
 )
 
+iree_cc_fuzz(
+  NAME
+    verifier_fuzz
+  SRCS
+    "verifier_fuzz.cc"
+  DEPS
+    ::verifier
+    ::verifier_testdata
+    iree::base
+)
+
 iree_cc_test(
   NAME
     disassembler_test
