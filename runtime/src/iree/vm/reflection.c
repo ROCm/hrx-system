@@ -500,44 +500,32 @@ IREE_API_EXPORT iree_status_t iree_vm_bool_from_metadata_value(
   return iree_ok_status();
 }
 
-IREE_API_EXPORT iree_status_t iree_vm_i64_from_metadata_value(
-    iree_vm_metadata_value_t value, int64_t* out_value) {
-  if (!out_value) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "out_value is required");
+#define IREE_VM_DEFINE_U64_BITS_METADATA_EXTRACTOR(function_name, value_type, \
+                                                   metadata_type)             \
+  IREE_API_EXPORT iree_status_t function_name(iree_vm_metadata_value_t value, \
+                                              value_type* out_value) {        \
+    if (!out_value) {                                                         \
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,                   \
+                              "out_value is required");                       \
+    }                                                                         \
+    IREE_RETURN_IF_ERROR(iree_vm_validate_metadata_value_payload(             \
+        value, metadata_type, sizeof(*out_value)));                           \
+    const uint64_t bits = iree_unaligned_load_le_u64(value.data.data);        \
+    memcpy(out_value, &bits, sizeof(*out_value));                             \
+    return iree_ok_status();                                                  \
   }
-  IREE_RETURN_IF_ERROR(iree_vm_validate_metadata_value_payload(
-      value, IREE_VM_METADATA_VALUE_TYPE_I64, 8));
-  const uint64_t bits = iree_unaligned_load_le_u64(value.data.data);
-  int64_t result = 0;
-  memcpy(&result, &bits, sizeof(result));
-  *out_value = result;
-  return iree_ok_status();
-}
 
-IREE_API_EXPORT iree_status_t iree_vm_u64_from_metadata_value(
-    iree_vm_metadata_value_t value, uint64_t* out_value) {
-  if (!out_value) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "out_value is required");
-  }
-  IREE_RETURN_IF_ERROR(iree_vm_validate_metadata_value_payload(
-      value, IREE_VM_METADATA_VALUE_TYPE_U64, 8));
-  *out_value = iree_unaligned_load_le_u64(value.data.data);
-  return iree_ok_status();
-}
+IREE_VM_DEFINE_U64_BITS_METADATA_EXTRACTOR(iree_vm_i64_from_metadata_value,
+                                           int64_t,
+                                           IREE_VM_METADATA_VALUE_TYPE_I64)
+IREE_VM_DEFINE_U64_BITS_METADATA_EXTRACTOR(iree_vm_u64_from_metadata_value,
+                                           uint64_t,
+                                           IREE_VM_METADATA_VALUE_TYPE_U64)
+IREE_VM_DEFINE_U64_BITS_METADATA_EXTRACTOR(iree_vm_f64_from_metadata_value,
+                                           double,
+                                           IREE_VM_METADATA_VALUE_TYPE_F64)
 
-IREE_API_EXPORT iree_status_t iree_vm_f64_from_metadata_value(
-    iree_vm_metadata_value_t value, double* out_value) {
-  if (!out_value) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "out_value is required");
-  }
-  IREE_RETURN_IF_ERROR(iree_vm_validate_metadata_value_payload(
-      value, IREE_VM_METADATA_VALUE_TYPE_F64, 8));
-  *out_value = iree_unaligned_load_le_f64(value.data.data);
-  return iree_ok_status();
-}
+#undef IREE_VM_DEFINE_U64_BITS_METADATA_EXTRACTOR
 
 IREE_API_EXPORT iree_status_t iree_vm_string_view_from_metadata_value(
     iree_vm_metadata_value_t value, iree_string_view_t* out_value) {
