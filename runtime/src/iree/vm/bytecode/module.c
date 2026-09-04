@@ -33,13 +33,15 @@ static iree_status_t iree_vm_bytecode_module_build_plan(
 
   // Keeps small function CFGs allocation-free with one cache line of scratch.
   uint32_t inline_block_offsets[16];
+  const uint32_t maximum_block_count =
+      plan.layout.functions.maximum_block_count;
   uint32_t* block_offsets =
-      plan.maximum_block_count == 0 ? NULL : inline_block_offsets;
+      maximum_block_count == 0 ? NULL : inline_block_offsets;
   iree_status_t status = iree_ok_status();
-  if (plan.maximum_block_count > IREE_ARRAYSIZE(inline_block_offsets)) {
-    status = iree_allocator_malloc_array(
-        scratch_allocator, plan.maximum_block_count, sizeof(*block_offsets),
-        (void**)&block_offsets);
+  if (maximum_block_count > IREE_ARRAYSIZE(inline_block_offsets)) {
+    status = iree_allocator_malloc_array(scratch_allocator, maximum_block_count,
+                                         sizeof(*block_offsets),
+                                         (void**)&block_offsets);
   }
   if (iree_status_is_ok(status)) {
     status = iree_vm_bytecode_verify_module_instructions(&plan, block_offsets);

@@ -115,6 +115,8 @@ typedef struct iree_vm_bytecode_function_table_t {
   uint32_t switch_target_count;
   // Exact byte length of |bytecode_data|.
   uint32_t bytecode_length;
+  // Declared maximum block count across all function rows.
+  uint32_t maximum_block_count;
 } iree_vm_bytecode_function_table_t;
 
 // Mapped canonical constant pool.
@@ -249,8 +251,6 @@ typedef struct iree_vm_bytecode_module_plan_t {
   iree_vm_bytecode_module_layout_t layout;
   // Aggregate physical fields across all callable-type signatures.
   iree_vm_module_callable_field_counts_t callable_fields;
-  // Largest decoded control.block count among all functions.
-  uint32_t maximum_block_count;
   // Exact process-storage layout.
   iree_vm_bytecode_process_layout_t process_layout;
   // Exact fallback storage for image-misaligned rodata.

@@ -483,13 +483,23 @@ EXPORT_ROW = _record(
 
 FUNCTIONS_HEADER = _record(
     "functions_header",
-    "Counts bytecode function declarations.",
-    "The count sizes the immediately following function row array.",
+    "Declares bytecode function and block-count high waters.",
+    (
+        "The function count sizes the immediately following function row array. "
+        "The maximum block count is the exact maximum block_count across those "
+        "rows and bounds one reusable instruction-verifier block-offset array."
+    ),
     (
         _field(
             "function_count_u32",
             U32,
             "Number of bytecode functions.",
+            FieldRuleUse(FieldRule.ALLOWED_RANGE, values=(1, 65536)),
+        ),
+        _field(
+            "maximum_block_count_u32",
+            U32,
+            "Maximum block_count across all bytecode functions.",
             FieldRuleUse(FieldRule.ALLOWED_RANGE, values=(1, 65536)),
         ),
     ),

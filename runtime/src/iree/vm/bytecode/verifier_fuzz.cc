@@ -27,7 +27,8 @@ void VerifyImage(iree_const_byte_span_t contents) {
     return;
   }
 
-  std::vector<uint32_t> block_offsets(plan.maximum_block_count);
+  std::vector<uint32_t> block_offsets(
+      plan.layout.functions.maximum_block_count);
   status =
       iree_vm_bytecode_verify_module_instructions(&plan, block_offsets.data());
   iree_status_free(status);

@@ -15,15 +15,15 @@ extern "C" {
 
 // Verifies provider-independent image and declaration structure and derives
 // the exact mapped construction plan. This first stage maps function byte
-// spans and derives |out_plan->maximum_block_count| without validating their
-// instruction records. |out_plan| is untouched on failure.
+// spans without validating their instruction records. |out_plan| is untouched
+// on failure.
 iree_status_t iree_vm_bytecode_verify_module_structure(
     iree_const_byte_span_t contents, iree_vm_bytecode_module_plan_t* out_plan);
 
 // Verifies every instruction record in a structurally verified module plan.
 // |block_offsets| provides transient storage for
-// |plan->maximum_block_count| uint32_t entries and may be null when the count
-// is zero.
+// |plan->layout.functions.maximum_block_count| uint32_t entries and may be null
+// when the count is zero.
 iree_status_t iree_vm_bytecode_verify_module_instructions(
     const iree_vm_bytecode_module_plan_t* plan, uint32_t* block_offsets);
 

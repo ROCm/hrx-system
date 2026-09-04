@@ -835,10 +835,8 @@ static iree_status_t iree_vm_bytecode_verify_function_signature(
 }
 
 static iree_status_t iree_vm_bytecode_verify_functions(
-    iree_const_byte_span_t span, iree_vm_bytecode_module_layout_t* layout,
-    uint32_t* out_maximum_block_count) {
+    iree_const_byte_span_t span, iree_vm_bytecode_module_layout_t* layout) {
   if (iree_const_byte_span_is_empty(span)) {
-    *out_maximum_block_count = 0;
     return iree_ok_status();
   }
   iree_vm_bytecode_cursor_t cursor = {span, 0, "Functions section"};
@@ -862,7 +860,7 @@ static iree_status_t iree_vm_bytecode_verify_functions(
   layout->functions.count = header->function_count_u32;
   uint32_t switch_target_count = 0;
   uint32_t bytecode_length = 0;
-  uint32_t maximum_block_count = 0;
+  uint32_t observed_maximum_block_count = 0;
   for (uint32_t i = 0; i < header->function_count_u32; ++i) {
     const iree_vm_bytecode_v0_function_row_t* row = &rows[i];
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record(
@@ -882,7 +880,13 @@ static iree_status_t iree_vm_bytecode_verify_functions(
         iree_vm_bytecode_verify_function_signature(layout, row));
     switch_target_count += row->switch_target_entry_count_u32;
     bytecode_length += row->bytecode_length_u32;
-    maximum_block_count = iree_max(maximum_block_count, row->block_count_u32);
+    observed_maximum_block_count =
+        iree_max(observed_maximum_block_count, row->block_count_u32);
+  }
+  if (header->maximum_block_count_u32 != observed_maximum_block_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Functions maximum_block_count does not match its rows");
   }
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
       &cursor, switch_target_count,
@@ -898,7 +902,7 @@ static iree_status_t iree_vm_bytecode_verify_functions(
   layout->functions.bytecode_data = bytecode_data;
   layout->functions.switch_target_count = switch_target_count;
   layout->functions.bytecode_length = bytecode_length;
-  *out_maximum_block_count = maximum_block_count;
+  layout->functions.maximum_block_count = header->maximum_block_count_u32;
   return iree_ok_status();
 }
 
@@ -1426,8 +1430,7 @@ iree_status_t iree_vm_bytecode_verify_module_structure(
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_imports(
       sections.spans[IREE_VM_BYTECODE_SECTION_IMPORTS], &plan.layout));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_functions(
-      sections.spans[IREE_VM_BYTECODE_SECTION_FUNCTIONS], &plan.layout,
-      &plan.maximum_block_count));
+      sections.spans[IREE_VM_BYTECODE_SECTION_FUNCTIONS], &plan.layout));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_exports(
       sections.spans[IREE_VM_BYTECODE_SECTION_EXPORTS], &plan.layout));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_constants(

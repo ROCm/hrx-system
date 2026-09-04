@@ -94,11 +94,18 @@ class ModuleVerificationTest : public ::testing::Test {
     return nullptr;
   }
 
+  const iree_vm_bytecode_v0_functions_header_t* FunctionsHeader() const {
+    return reinterpret_cast<const iree_vm_bytecode_v0_functions_header_t*>(
+        reinterpret_cast<const uint8_t*>(plan_.layout.functions.rows) -
+        sizeof(iree_vm_bytecode_v0_functions_header_t));
+  }
+
   void ExpectInstructionsRejected(std::vector<uint8_t> bytes) const {
     iree_vm_bytecode_module_plan_t plan = {};
     IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
         iree_make_const_byte_span(bytes.data(), bytes.size()), &plan));
-    std::vector<uint32_t> block_offsets(plan.maximum_block_count);
+    std::vector<uint32_t> block_offsets(
+        plan.layout.functions.maximum_block_count);
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                           iree_vm_bytecode_verify_module_instructions(
                               &plan, block_offsets.data()));
@@ -118,7 +125,8 @@ TEST(CoreExecutionModuleVerificationTest, MapsAndVerifies) {
 
   iree_vm_bytecode_module_plan_t plan = {};
   IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(contents, &plan));
-  std::vector<uint32_t> block_offsets(plan.maximum_block_count);
+  std::vector<uint32_t> block_offsets(
+      plan.layout.functions.maximum_block_count);
   IREE_ASSERT_OK(
       iree_vm_bytecode_verify_module_instructions(&plan, block_offsets.data()));
 
@@ -169,11 +177,12 @@ TEST_F(ModuleVerificationTest, MapsCompleteCanonicalImage) {
             sizeof(iree_vm_bytecode_process_header_t));
   EXPECT_EQ(plan_.rodata_storage.copy_length, 0u);
   EXPECT_EQ(plan_.rodata_storage.copy_alignment, 0u);
-  EXPECT_EQ(plan_.maximum_block_count, 1u);
+  EXPECT_EQ(plan_.layout.functions.maximum_block_count, 1u);
 }
 
 TEST_F(ModuleVerificationTest, VerifiesEveryCoreInstruction) {
-  std::vector<uint32_t> block_offsets(plan_.maximum_block_count);
+  std::vector<uint32_t> block_offsets(
+      plan_.layout.functions.maximum_block_count);
   IREE_ASSERT_OK(iree_vm_bytecode_verify_module_instructions(
       &plan_, block_offsets.data()));
 }
@@ -224,6 +233,8 @@ TEST_F(ModuleVerificationTest, RejectsFunctionFallthrough) {
 
 TEST_F(ModuleVerificationTest, RejectsBlockCountMismatch) {
   std::vector<uint8_t> bytes = CopyImage();
+  MutableRecord(&bytes, contents_, FunctionsHeader())->maximum_block_count_u32 =
+      2;
   MutableRecord(&bytes, contents_, &plan_.layout.functions.rows[1])
       ->block_count_u32 = 2;
   ExpectInstructionsRejected(std::move(bytes));
@@ -406,6 +417,12 @@ TEST_F(ModuleVerificationTest, RejectsDeclarationCorruption) {
     std::vector<uint8_t> bytes = CopyImage();
     MutableRecord(&bytes, contents_, plan_.layout.functions.rows)
         ->value_register_count_u16 = 0;
+    ExpectRejected(bytes);
+  }
+  {
+    std::vector<uint8_t> bytes = CopyImage();
+    MutableRecord(&bytes, contents_, FunctionsHeader())
+        ->maximum_block_count_u32 = 2;
     ExpectRejected(bytes);
   }
   {

@@ -202,7 +202,13 @@ def _functions(functions: Sequence[_FixtureFunction]) -> bytes:
         switch_target_base += len(function.switch_target_word_offsets)
     return b"".join(
         (
-            _record(records.FUNCTIONS_HEADER, function_count_u32=len(functions)),
+            _record(
+                records.FUNCTIONS_HEADER,
+                function_count_u32=len(functions),
+                maximum_block_count_u32=max(
+                    function.block_count for function in functions
+                ),
+            ),
             *rows,
             *(
                 _record(

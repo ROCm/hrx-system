@@ -22,7 +22,8 @@ IREE_BENCHMARK_FN(BM_VerifyInstructions) {
   iree_vm_bytecode_module_plan_t plan = {};
   IREE_RETURN_IF_ERROR(
       iree_vm_bytecode_verify_module_structure(GetFixtureContents(), &plan));
-  std::vector<uint32_t> block_offsets(plan.maximum_block_count);
+  std::vector<uint32_t> block_offsets(
+      plan.layout.functions.maximum_block_count);
 
   iree_status_t status = iree_ok_status();
   while (iree_status_is_ok(status) &&
@@ -38,7 +39,8 @@ IREE_BENCHMARK_FN(BM_VerifyModule) {
   iree_vm_bytecode_module_plan_t initial_plan = {};
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_module_structure(
       GetFixtureContents(), &initial_plan));
-  std::vector<uint32_t> block_offsets(initial_plan.maximum_block_count);
+  std::vector<uint32_t> block_offsets(
+      initial_plan.layout.functions.maximum_block_count);
 
   iree_status_t status = iree_ok_status();
   while (iree_status_is_ok(status) &&
