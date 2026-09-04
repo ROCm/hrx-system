@@ -99,7 +99,7 @@ sidecar when validating target lowering and packaging:
 loom-compile \
   loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom \
   --backend=amdgpu-hal \
-  --target=gfx11-generic \
+  --target=amdgpu:gfx11-generic \
   --output=/tmp/loom-q6q8.hal \
   --emit-target-artifact=/tmp/loom-q6q8.hsaco \
   --artifact-manifest=summary \
@@ -108,7 +108,7 @@ loom-compile \
   --compile-report-output=/tmp/loom-q6q8.compile-report.json
 ```
 
-`--target=gfx11-generic` specializes the kernel function for this compile
+`--target=amdgpu:gfx11-generic` specializes the kernel function for this compile
 invocation; it does not establish a module-global target. Template providers
 and target-sensitive passes resolve the durable target written onto that
 function, while other functions in a multi-target module remain unchanged. A
@@ -210,7 +210,7 @@ snapshots around those boundaries:
 loom-compile \
   loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom \
   --backend=amdgpu-hal \
-  --target=gfx11-generic \
+  --target=amdgpu:gfx11-generic \
   --output=/tmp/loom-q6q8.hal \
   --emit-target-artifact=/tmp/loom-q6q8.hsaco \
   --dump-ir-after=select-templates \
@@ -481,7 +481,7 @@ padding, swizzling, vectorization, or imported kernel staging choices:
 ```bash
 loom-compile loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom \
   --backend=amdgpu-hal \
-  --target=gfx11-generic \
+  --target=amdgpu:gfx11-generic \
   --output=/tmp/shared-memory-vector-tile.hal \
   --compile-report=json-details \
   --compile-report-output=/tmp/shared-memory-vector-tile.compile-report.json
@@ -521,7 +521,7 @@ greppable report is more convenient:
 ```bash
 loom-compile loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom \
   --backend=amdgpu-hal \
-  --target=gfx11-generic \
+  --target=amdgpu:gfx11-generic \
   --output=/tmp/shared-memory-vector-tile.hal \
   --compile-report=text-details \
   --compile-report-output=/tmp/shared-memory-vector-tile.compile-report.txt
