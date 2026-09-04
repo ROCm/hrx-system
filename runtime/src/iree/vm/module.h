@@ -61,18 +61,30 @@ typedef struct iree_vm_module_signature_type_t {
 static_assert(sizeof(iree_vm_module_signature_type_t) == 4,
               "module signature types must remain four bytes");
 
-typedef struct iree_vm_module_signature_type_span_t {
-  // Stable source-ordered machine signature types.
+// One source-ordered side of a machine signature and its exact physical-bank
+// partition. Providers preserve these counts from construction or verified
+// bytecode so linking never needs to rediscover them from |data|.
+typedef struct iree_vm_module_signature_side_t {
+  // Stable source-ordered machine signature fields.
   const iree_vm_module_signature_type_t* data;
-  // Number of signature types in |data|.
-  iree_host_size_t count;
-} iree_vm_module_signature_type_span_t;
+  // Number of signature fields in |data|.
+  uint16_t count;
+  // Number of fields carried in the value bank.
+  uint16_t value_count;
+  // Number of fields carried in the ref bank.
+  uint16_t ref_count;
+  // Number of fields carried in the function bank.
+  uint16_t function_count;
+} iree_vm_module_signature_side_t;
+static_assert(sizeof(void*) != 8 ||
+                  sizeof(iree_vm_module_signature_side_t) == 16,
+              "64-bit module signature sides must remain 16 bytes");
 
 typedef struct iree_vm_module_signature_t {
   // Source-ordered machine arguments.
-  iree_vm_module_signature_type_span_t arguments;
+  iree_vm_module_signature_side_t arguments;
   // Source-ordered machine results.
-  iree_vm_module_signature_type_span_t results;
+  iree_vm_module_signature_side_t results;
 } iree_vm_module_signature_t;
 
 enum iree_vm_module_import_flag_bits_e {
@@ -175,6 +187,18 @@ typedef struct iree_vm_import_target_t {
 // Fixed Module Descriptor
 //===----------------------------------------------------------------------===//
 
+// Aggregate physical fields across all callable-type signatures. Counts may
+// conservatively include the same structural signature more than once when
+// callable declarations differ only in behavior flags.
+typedef struct iree_vm_module_callable_field_counts_t {
+  // Number of value-bank fields.
+  iree_host_size_t value_count;
+  // Number of ref-bank fields.
+  iree_host_size_t ref_count;
+  // Number of function-bank fields.
+  iree_host_size_t function_count;
+} iree_vm_module_callable_field_counts_t;
+
 typedef struct iree_vm_module_counts_t {
   // Private executable-function domain.
   iree_host_size_t function_count;
@@ -188,6 +212,8 @@ typedef struct iree_vm_module_counts_t {
   iree_host_size_t export_count;
   // Module-scope metadata entry count.
   iree_host_size_t metadata_count;
+  // Aggregate physical fields across all callable-type signatures.
+  iree_vm_module_callable_field_counts_t callable_fields;
 } iree_vm_module_counts_t;
 
 enum iree_vm_module_flag_bits_e {

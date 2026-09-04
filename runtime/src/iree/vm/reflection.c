@@ -47,7 +47,7 @@ static iree_vm_signature_type_t iree_vm_module_resolve_signature_type(
 
 static void iree_vm_module_resolve_signature_fields(
     const iree_vm_module_t* module,
-    iree_vm_module_signature_type_span_t source_types,
+    iree_vm_module_signature_side_t source_types,
     iree_vm_signature_field_t* target_fields) {
   for (iree_host_size_t i = 0; i < source_types.count; ++i) {
     target_fields[i].type =
@@ -57,7 +57,7 @@ static void iree_vm_module_resolve_signature_fields(
 
 static void iree_vm_module_resolve_signature_types(
     const iree_vm_module_t* module,
-    iree_vm_module_signature_type_span_t source_types,
+    iree_vm_module_signature_side_t source_types,
     iree_vm_signature_type_t* target_types) {
   for (iree_host_size_t i = 0; i < source_types.count; ++i) {
     target_types[i] =

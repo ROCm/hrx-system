@@ -69,7 +69,7 @@ struct TestModuleDefinition {
       : descriptor{name,
                    flags,
                    {nullptr, 0},
-                   {function_count, 0, 0, 0, 0, 0},
+                   {function_count, 0, 0, 0, 0, 0, {0, 0, 0}},
                    process_storage_size},
         import_groups(nullptr),
         imports(nullptr),
@@ -87,6 +87,18 @@ struct TestModuleDefinition {
       const iree_vm_module_callable_type_declaration_t (&values)[N]) {
     callable_types = values;
     descriptor.counts.callable_type_count = N;
+    descriptor.counts.callable_fields = {};
+    for (const auto& value : values) {
+      descriptor.counts.callable_fields.value_count +=
+          value.signature.arguments.value_count +
+          value.signature.results.value_count;
+      descriptor.counts.callable_fields.ref_count +=
+          value.signature.arguments.ref_count +
+          value.signature.results.ref_count;
+      descriptor.counts.callable_fields.function_count +=
+          value.signature.arguments.function_count +
+          value.signature.results.function_count;
+    }
     return *this;
   }
 
@@ -251,23 +263,23 @@ static const iree_vm_module_signature_type_t kInitializeArguments[] = {
 };
 
 static const iree_vm_module_callable_type_declaration_t kAppCallableTypes[] = {
-    {{{kCallbackArguments, IREE_ARRAYSIZE(kCallbackArguments)},
-      {kCallbackResults, IREE_ARRAYSIZE(kCallbackResults)}},
+    {{{kCallbackArguments, IREE_ARRAYSIZE(kCallbackArguments), 1, 0, 0},
+      {kCallbackResults, IREE_ARRAYSIZE(kCallbackResults), 1, 0, 0}},
      IREE_VM_CALLABLE_TYPE_FLAG_NONE,
      0,
      0},
-    {{{kCallbackArguments, IREE_ARRAYSIZE(kCallbackArguments)},
-      {kCallbackResults, IREE_ARRAYSIZE(kCallbackResults)}},
+    {{{kCallbackArguments, IREE_ARRAYSIZE(kCallbackArguments), 1, 0, 0},
+      {kCallbackResults, IREE_ARRAYSIZE(kCallbackResults), 1, 0, 0}},
      IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
      0,
      0},
-    {{{kAppWorkArguments, IREE_ARRAYSIZE(kAppWorkArguments)},
-      {kAppWorkResults, IREE_ARRAYSIZE(kAppWorkResults)}},
+    {{{kAppWorkArguments, IREE_ARRAYSIZE(kAppWorkArguments), 0, 1, 1},
+      {kAppWorkResults, IREE_ARRAYSIZE(kAppWorkResults), 0, 1, 0}},
      IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
      1,
      0},
-    {{{kInitializeArguments, IREE_ARRAYSIZE(kInitializeArguments)},
-      {nullptr, 0}},
+    {{{kInitializeArguments, IREE_ARRAYSIZE(kInitializeArguments), 1, 1, 1},
+      {nullptr, 0, 0, 0, 0}},
      IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
      1,
      0},
@@ -275,21 +287,22 @@ static const iree_vm_module_callable_type_declaration_t kAppCallableTypes[] = {
 
 static const iree_vm_module_callable_type_declaration_t kAlphaCallableTypes[] =
     {
-        {{{kCallbackArguments, IREE_ARRAYSIZE(kCallbackArguments)},
-          {kCallbackResults, IREE_ARRAYSIZE(kCallbackResults)}},
+        {{{kCallbackArguments, IREE_ARRAYSIZE(kCallbackArguments), 1, 0, 0},
+          {kCallbackResults, IREE_ARRAYSIZE(kCallbackResults), 1, 0, 0}},
          IREE_VM_CALLABLE_TYPE_FLAG_NONE,
          0,
          0},
-        {{{kLibraryWorkArguments, IREE_ARRAYSIZE(kLibraryWorkArguments)},
-          {kLibraryWorkResults, IREE_ARRAYSIZE(kLibraryWorkResults)}},
+        {{{kLibraryWorkArguments, IREE_ARRAYSIZE(kLibraryWorkArguments), 0, 1,
+           1},
+          {kLibraryWorkResults, IREE_ARRAYSIZE(kLibraryWorkResults), 0, 1, 0}},
          IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
          1,
          0},
 };
 
 static const iree_vm_module_callable_type_declaration_t kBetaCallableTypes[] = {
-    {{{kCallbackArguments, IREE_ARRAYSIZE(kCallbackArguments)},
-      {kCallbackResults, IREE_ARRAYSIZE(kCallbackResults)}},
+    {{{kCallbackArguments, IREE_ARRAYSIZE(kCallbackArguments), 1, 0, 0},
+      {kCallbackResults, IREE_ARRAYSIZE(kCallbackResults), 1, 0, 0}},
      IREE_VM_CALLABLE_TYPE_FLAG_NONE,
      0,
      0},
@@ -659,7 +672,8 @@ static const iree_vm_module_signature_type_t kI64Results[] = {
 };
 static const iree_vm_module_callable_type_declaration_t
     kIncompatibleCallableTypes[] = {
-        {{{nullptr, 0}, {kI64Results, IREE_ARRAYSIZE(kI64Results)}},
+        {{{nullptr, 0, 0, 0, 0},
+          {kI64Results, IREE_ARRAYSIZE(kI64Results), 1, 0, 0}},
          IREE_VM_CALLABLE_TYPE_FLAG_NONE,
          0,
          0},
@@ -685,8 +699,8 @@ static const TestModuleDefinition kIncompatibleTargetDefinition =
 
 static const iree_vm_module_callable_type_declaration_t
     kYieldingCallableTypes[] = {
-        {{{kCallbackArguments, IREE_ARRAYSIZE(kCallbackArguments)},
-          {kCallbackResults, IREE_ARRAYSIZE(kCallbackResults)}},
+        {{{kCallbackArguments, IREE_ARRAYSIZE(kCallbackArguments), 1, 0, 0},
+          {kCallbackResults, IREE_ARRAYSIZE(kCallbackResults), 1, 0, 0}},
          IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
          0,
          0},

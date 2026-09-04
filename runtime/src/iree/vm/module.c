@@ -11,7 +11,6 @@
 
 #define IREE_VM_MODULE_DIRECT_ORDINAL_CAPACITY \
   ((iree_host_size_t)UINT16_MAX + 1)
-#define IREE_VM_MODULE_SIGNATURE_COUNT_MAX ((iree_host_size_t)UINT16_MAX)
 
 static iree_status_t iree_vm_module_validate_symbol(iree_string_view_t value,
                                                     const char* label) {
@@ -183,9 +182,9 @@ static int iree_vm_module_compare_signature_type(
   return iree_vm_module_compare_u32(lhs.type_ordinal, rhs.type_ordinal);
 }
 
-static int iree_vm_module_compare_signature_spans(
-    const iree_vm_module_t* module, iree_vm_module_signature_type_span_t lhs,
-    iree_vm_module_signature_type_span_t rhs) {
+static int iree_vm_module_compare_signature_sides(
+    const iree_vm_module_t* module, iree_vm_module_signature_side_t lhs,
+    iree_vm_module_signature_side_t rhs) {
   int comparison =
       iree_vm_module_compare_u32((uint32_t)lhs.count, (uint32_t)rhs.count);
   if (comparison != 0) return comparison;
@@ -204,39 +203,44 @@ static int iree_vm_module_compare_callable_types(
   int comparison =
       iree_vm_module_compare_u32(lhs->nesting_depth, rhs->nesting_depth);
   if (comparison != 0) return comparison;
-  comparison = iree_vm_module_compare_signature_spans(
+  comparison = iree_vm_module_compare_signature_sides(
       module, lhs->signature.arguments, rhs->signature.arguments);
   if (comparison != 0) return comparison;
-  comparison = iree_vm_module_compare_signature_spans(
+  comparison = iree_vm_module_compare_signature_sides(
       module, lhs->signature.results, rhs->signature.results);
   return comparison != 0 ? comparison
                          : iree_vm_module_compare_u32(lhs->flags, rhs->flags);
 }
 
-static iree_status_t iree_vm_module_validate_signature_span(
-    const iree_vm_module_t* module, iree_vm_module_signature_type_span_t span,
+static iree_status_t iree_vm_module_validate_signature_side(
+    const iree_vm_module_t* module, iree_vm_module_signature_side_t side,
     iree_host_size_t current_callable_ordinal, const char* label,
     uint32_t* inout_nesting_depth) {
-  if (span.count != 0 && !span.data) {
+  if (side.count != 0 && !side.data) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "%s signature storage is required", label);
   }
-  if (span.count != 0 &&
+  if (side.count != 0 &&
       !iree_host_ptr_has_alignment(
-          span.data, iree_alignof(iree_vm_module_signature_type_t))) {
+          side.data, iree_alignof(iree_vm_module_signature_type_t))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "%s signature storage is misaligned", label);
   }
-  if (span.count > IREE_VM_MODULE_SIGNATURE_COUNT_MAX) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "%s signature count cannot exceed 65535", label);
-  }
-  for (iree_host_size_t i = 0; i < span.count; ++i) {
+  uint16_t expected_value_count = 0;
+  uint16_t expected_ref_count = 0;
+  uint16_t expected_function_count = 0;
+  for (uint16_t i = 0; i < side.count; ++i) {
     IREE_RETURN_IF_ERROR(iree_vm_module_validate_signature_type(
-        module->descriptor, span.data[i], current_callable_ordinal));
-    if (span.data[i].kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION) {
+        module->descriptor, side.data[i], current_callable_ordinal));
+    if (side.data[i].kind > IREE_VM_SCALAR_TYPE_NONE &&
+        side.data[i].kind <= IREE_VM_SCALAR_TYPE_F64) {
+      ++expected_value_count;
+    } else if (side.data[i].kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
+      ++expected_ref_count;
+    } else {
+      ++expected_function_count;
       iree_vm_module_callable_type_declaration_t child = {0};
-      module->vtable->query_callable_type(module, span.data[i].type_ordinal,
+      module->vtable->query_callable_type(module, side.data[i].type_ordinal,
                                           &child);
       if (child.nesting_depth == UINT16_MAX) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -246,12 +250,19 @@ static iree_status_t iree_vm_module_validate_signature_span(
           iree_max(*inout_nesting_depth, (uint32_t)child.nesting_depth + 1);
     }
   }
+  if (side.value_count != expected_value_count ||
+      side.ref_count != expected_ref_count ||
+      side.function_count != expected_function_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "%s signature bank counts are not exact", label);
+  }
   return iree_ok_status();
 }
 
 static iree_status_t iree_vm_module_validate_callable_types(
     const iree_vm_module_t* module) {
   iree_vm_module_callable_type_declaration_t previous = {0};
+  iree_vm_module_callable_field_counts_t total_fields = {0};
   for (iree_host_size_t i = 0;
        i < module->descriptor->counts.callable_type_count; ++i) {
     iree_vm_module_callable_type_declaration_t callable_type = {0};
@@ -265,12 +276,30 @@ static iree_status_t iree_vm_module_validate_callable_types(
                               i);
     }
     uint32_t expected_nesting_depth = 0;
-    IREE_RETURN_IF_ERROR(iree_vm_module_validate_signature_span(
+    IREE_RETURN_IF_ERROR(iree_vm_module_validate_signature_side(
         module, callable_type.signature.arguments, i, "argument",
         &expected_nesting_depth));
-    IREE_RETURN_IF_ERROR(iree_vm_module_validate_signature_span(
+    IREE_RETURN_IF_ERROR(iree_vm_module_validate_signature_side(
         module, callable_type.signature.results, i, "result",
         &expected_nesting_depth));
+    const iree_host_size_t value_count =
+        callable_type.signature.arguments.value_count +
+        callable_type.signature.results.value_count;
+    const iree_host_size_t ref_count =
+        callable_type.signature.arguments.ref_count +
+        callable_type.signature.results.ref_count;
+    const iree_host_size_t function_count =
+        callable_type.signature.arguments.function_count +
+        callable_type.signature.results.function_count;
+    if (!iree_host_size_checked_add(total_fields.value_count, value_count,
+                                    &total_fields.value_count) ||
+        !iree_host_size_checked_add(total_fields.ref_count, ref_count,
+                                    &total_fields.ref_count) ||
+        !iree_host_size_checked_add(total_fields.function_count, function_count,
+                                    &total_fields.function_count)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "callable signature field counts overflow");
+    }
     if (callable_type.nesting_depth != expected_nesting_depth) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
@@ -283,6 +312,14 @@ static iree_status_t iree_vm_module_validate_callable_types(
           "callable types must be unique and strictly ordered");
     }
     previous = callable_type;
+  }
+  const iree_vm_module_callable_field_counts_t declared_fields =
+      module->descriptor->counts.callable_fields;
+  if (declared_fields.value_count != total_fields.value_count ||
+      declared_fields.ref_count != total_fields.ref_count ||
+      declared_fields.function_count != total_fields.function_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "aggregate callable field counts are not exact");
   }
   return iree_ok_status();
 }
@@ -724,5 +761,4 @@ iree_vm_export_name(iree_vm_export_t export_value) {
   return export_declaration.export_name;
 }
 
-#undef IREE_VM_MODULE_SIGNATURE_COUNT_MAX
 #undef IREE_VM_MODULE_DIRECT_ORDINAL_CAPACITY

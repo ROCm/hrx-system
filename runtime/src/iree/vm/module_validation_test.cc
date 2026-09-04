@@ -15,7 +15,10 @@
 namespace {
 
 static const iree_vm_module_callable_type_declaration_t kLeafCallableTypes[] = {
-    {{{nullptr, 0}, {nullptr, 0}}, IREE_VM_CALLABLE_TYPE_FLAG_NONE, 0, 0},
+    {{{nullptr, 0, 0, 0, 0}, {nullptr, 0, 0, 0, 0}},
+     IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+     0,
+     0},
 };
 static const iree_vm_module_export_declaration_t kUnsortedExports[] = {
     {IREE_SVL("z"), 0, 0, 0},
@@ -27,27 +30,39 @@ static const iree_vm_module_signature_type_t kRecursiveArgument = {
 };
 static const iree_vm_module_callable_type_declaration_t
     kRecursiveCallableTypes[] = {
-        {{{&kRecursiveArgument, 1}, {nullptr, 0}},
+        {{{&kRecursiveArgument, 1, 0, 0, 1}, {nullptr, 0, 0, 0, 0}},
          IREE_VM_CALLABLE_TYPE_FLAG_NONE,
          0,
          0},
 };
 static const iree_vm_module_callable_type_declaration_t
     kWrongDepthCallableTypes[] = {
-        {{{nullptr, 0}, {nullptr, 0}}, IREE_VM_CALLABLE_TYPE_FLAG_NONE, 1, 0},
+        {{{nullptr, 0, 0, 0, 0}, {nullptr, 0, 0, 0, 0}},
+         IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+         1,
+         0},
 };
 static const iree_vm_module_callable_type_declaration_t
     kDuplicateCallableTypes[] = {
-        {{{nullptr, 0}, {nullptr, 0}}, IREE_VM_CALLABLE_TYPE_FLAG_NONE, 0, 0},
-        {{{nullptr, 0}, {nullptr, 0}}, IREE_VM_CALLABLE_TYPE_FLAG_NONE, 0, 0},
+        {{{nullptr, 0, 0, 0, 0}, {nullptr, 0, 0, 0, 0}},
+         IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+         0,
+         0},
+        {{{nullptr, 0, 0, 0, 0}, {nullptr, 0, 0, 0, 0}},
+         IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+         0,
+         0},
 };
 static const iree_vm_module_callable_type_declaration_t
     kUnsortedCallableTypes[] = {
-        {{{nullptr, 0}, {nullptr, 0}},
+        {{{nullptr, 0, 0, 0, 0}, {nullptr, 0, 0, 0, 0}},
          IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
          0,
          0},
-        {{{nullptr, 0}, {nullptr, 0}}, IREE_VM_CALLABLE_TYPE_FLAG_NONE, 0, 0},
+        {{{nullptr, 0, 0, 0, 0}, {nullptr, 0, 0, 0, 0}},
+         IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+         0,
+         0},
 };
 static const iree_vm_module_import_group_t kTwoImportGroup[] = {
     {IREE_SVL("target.module"), 0, 2},
@@ -141,6 +156,18 @@ struct ValidationModule {
       const iree_vm_module_callable_type_declaration_t (&values)[N]) {
     callable_types = values;
     descriptor.counts.callable_type_count = N;
+    descriptor.counts.callable_fields = {};
+    for (const auto& value : values) {
+      descriptor.counts.callable_fields.value_count +=
+          value.signature.arguments.value_count +
+          value.signature.results.value_count;
+      descriptor.counts.callable_fields.ref_count +=
+          value.signature.arguments.ref_count +
+          value.signature.results.ref_count;
+      descriptor.counts.callable_fields.function_count +=
+          value.signature.arguments.function_count +
+          value.signature.results.function_count;
+    }
   }
 
   template <std::size_t N>
@@ -262,6 +289,18 @@ TEST(VMModuleValidationTest, RejectsIncompleteOrIncompatibleVtables) {
 }
 
 TEST(VMModuleValidationTest, RejectsMalformedSemanticTables) {
+  {
+    iree_vm_module_callable_type_declaration_t wrong_bank_counts[] = {
+        kLeafCallableTypes[0]};
+    wrong_bank_counts[0].signature.arguments.value_count = 1;
+    ExpectCallableTypesRejected(wrong_bank_counts);
+  }
+  {
+    ValidationModule module;
+    module.SetCallableTypes(kLeafCallableTypes);
+    module.descriptor.counts.callable_fields.value_count = 1;
+    ExpectRejected(module);
+  }
   {
     ValidationModule module;
     module.SetCallableTypes(kLeafCallableTypes);

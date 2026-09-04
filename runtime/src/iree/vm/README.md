@@ -324,6 +324,16 @@ place descriptors and declaration arrays in the same allocation or borrow them
 from static read-only storage; either way they remain immutable and live until
 the final module release.
 
+Each callable declaration preserves both the source-ordered fields and the
+exact value, ref, and function-bank counts for its argument and result sides.
+The fixed module descriptor also sums those physical fields across all callable
+declarations. A native module normally emits both facts with its static tables;
+a bytecode module copies the per-signature counts from its verified image and
+accumulates the descriptor summary during verification. Module initialization
+checks both levels during its existing semantic walk. Program linking then
+sizes its single allocation from the summary and materializes each ABI directly
+from the per-side counts without rescanning signatures.
+
 Program creation queries the immutable declaration tables and performs all
 generic linking once. Process creation allocates one zeroed slab containing an
 opaque slice for each module. `attach_state` constructs a slice, the executable

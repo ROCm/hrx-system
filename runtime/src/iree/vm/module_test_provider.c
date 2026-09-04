@@ -22,18 +22,19 @@ static const iree_vm_module_signature_type_t iree_vm_test_function[] = {
 
 static const iree_vm_module_callable_type_declaration_t
     iree_vm_test_callable_types[] = {
-        {{{iree_vm_test_i32, IREE_ARRAYSIZE(iree_vm_test_i32)},
-          {iree_vm_test_i32, IREE_ARRAYSIZE(iree_vm_test_i32)}},
+        {{{iree_vm_test_i32, IREE_ARRAYSIZE(iree_vm_test_i32), 1, 0, 0},
+          {iree_vm_test_i32, IREE_ARRAYSIZE(iree_vm_test_i32), 1, 0, 0}},
          IREE_VM_CALLABLE_TYPE_FLAG_NONE,
          0,
          0},
-        {{{iree_vm_test_ref, IREE_ARRAYSIZE(iree_vm_test_ref)},
-          {iree_vm_test_ref, IREE_ARRAYSIZE(iree_vm_test_ref)}},
+        {{{iree_vm_test_ref, IREE_ARRAYSIZE(iree_vm_test_ref), 0, 1, 0},
+          {iree_vm_test_ref, IREE_ARRAYSIZE(iree_vm_test_ref), 0, 1, 0}},
          IREE_VM_CALLABLE_TYPE_FLAG_NONE,
          0,
          0},
-        {{{iree_vm_test_function, IREE_ARRAYSIZE(iree_vm_test_function)},
-          {iree_vm_test_i32, IREE_ARRAYSIZE(iree_vm_test_i32)}},
+        {{{iree_vm_test_function, IREE_ARRAYSIZE(iree_vm_test_function), 0, 0,
+           1},
+          {iree_vm_test_i32, IREE_ARRAYSIZE(iree_vm_test_i32), 1, 0, 0}},
          IREE_VM_CALLABLE_TYPE_FLAG_NONE,
          1,
          0},
@@ -234,6 +235,7 @@ iree_status_t iree_vm_module_test_provider_initialize(
       IREE_ARRAYSIZE(iree_vm_test_imports),
       IREE_ARRAYSIZE(iree_vm_test_exports),
       2,
+      {3, 2, 1},
   };
   const iree_vm_module_descriptor_t descriptor = {
       IREE_SVL("fixture"),

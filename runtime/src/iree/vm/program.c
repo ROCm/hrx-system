@@ -126,47 +126,6 @@ const iree_vm_linked_module_t* iree_vm_program_lookup_linked_module(
 // Structural callable linking
 //===----------------------------------------------------------------------===//
 
-static iree_vm_program_bank_counts_t iree_vm_program_count_signature_banks(
-    iree_vm_module_signature_type_span_t types) {
-  iree_vm_program_bank_counts_t counts = {0};
-  for (iree_host_size_t i = 0; i < types.count; ++i) {
-    const iree_vm_module_signature_type_t type = types.data[i];
-    if (type.kind > IREE_VM_SCALAR_TYPE_NONE &&
-        type.kind <= IREE_VM_SCALAR_TYPE_F64) {
-      ++counts.value_count;
-    } else if (type.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
-      ++counts.ref_count;
-    } else {
-      ++counts.function_count;
-    }
-  }
-  return counts;
-}
-
-typedef struct iree_vm_program_field_counts_t {
-  // Total scalar field records.
-  iree_host_size_t scalar_count;
-  // Total ref field records.
-  iree_host_size_t ref_count;
-  // Total function field records.
-  iree_host_size_t function_count;
-} iree_vm_program_field_counts_t;
-
-static bool iree_vm_program_accumulate_field_counts(
-    iree_vm_module_signature_type_span_t types,
-    iree_vm_program_field_counts_t* inout_counts) {
-  const iree_vm_program_bank_counts_t counts =
-      iree_vm_program_count_signature_banks(types);
-  return iree_host_size_checked_add(inout_counts->scalar_count,
-                                    counts.value_count,
-                                    &inout_counts->scalar_count) &&
-         iree_host_size_checked_add(inout_counts->ref_count, counts.ref_count,
-                                    &inout_counts->ref_count) &&
-         iree_host_size_checked_add(inout_counts->function_count,
-                                    counts.function_count,
-                                    &inout_counts->function_count);
-}
-
 static uint64_t iree_vm_program_scalar_payload_mask(
     iree_vm_scalar_type_t scalar_type) {
   switch (scalar_type) {
@@ -198,20 +157,23 @@ typedef struct iree_vm_program_field_storage_t {
 static void iree_vm_program_build_signature_side_abi(
     const iree_vm_program_t* program,
     const iree_vm_linked_module_t* linked_module,
-    iree_vm_module_signature_type_span_t types,
+    iree_vm_module_signature_side_t signature_side,
     iree_vm_program_field_storage_t* field_storage,
     const iree_vm_program_scalar_field_abi_t** out_value_fields,
     const iree_vm_program_ref_field_abi_t** out_ref_fields,
     const iree_vm_program_function_field_abi_t** out_function_fields,
     iree_vm_program_bank_counts_t* out_counts) {
-  const iree_vm_program_bank_counts_t counts =
-      iree_vm_program_count_signature_banks(types);
+  const iree_vm_program_bank_counts_t counts = {
+      signature_side.value_count,
+      signature_side.ref_count,
+      signature_side.function_count,
+  };
   *out_value_fields = counts.value_count ? field_storage->scalar_fields : NULL;
   *out_ref_fields = counts.ref_count ? field_storage->ref_fields : NULL;
   *out_function_fields =
       counts.function_count ? field_storage->function_fields : NULL;
-  for (iree_host_size_t i = 0; i < types.count; ++i) {
-    const iree_vm_module_signature_type_t type = types.data[i];
+  for (uint16_t i = 0; i < signature_side.count; ++i) {
+    const iree_vm_module_signature_type_t type = signature_side.data[i];
     if (type.kind > IREE_VM_SCALAR_TYPE_NONE &&
         type.kind <= IREE_VM_SCALAR_TYPE_F64) {
       *field_storage->scalar_fields++ = (iree_vm_program_scalar_field_abi_t){
@@ -345,11 +307,11 @@ static int iree_vm_program_compare_signature_type(
   return 0;
 }
 
-static int iree_vm_program_compare_signature_spans(
+static int iree_vm_program_compare_signature_sides(
     const iree_vm_program_t* program, const iree_vm_linked_module_t* lhs_module,
-    iree_vm_module_signature_type_span_t lhs,
+    iree_vm_module_signature_side_t lhs,
     const iree_vm_linked_module_t* rhs_module,
-    iree_vm_module_signature_type_span_t rhs) {
+    iree_vm_module_signature_side_t rhs) {
   int comparison =
       iree_vm_program_compare_u32((uint32_t)lhs.count, (uint32_t)rhs.count);
   if (comparison != 0) return comparison;
@@ -365,11 +327,11 @@ static int iree_vm_program_compare_signatures(
     const iree_vm_program_t* program, const iree_vm_linked_module_t* lhs_module,
     iree_vm_module_signature_t lhs, const iree_vm_linked_module_t* rhs_module,
     iree_vm_module_signature_t rhs) {
-  int comparison = iree_vm_program_compare_signature_spans(
+  int comparison = iree_vm_program_compare_signature_sides(
       program, lhs_module, lhs.arguments, rhs_module, rhs.arguments);
   return comparison != 0
              ? comparison
-             : iree_vm_program_compare_signature_spans(
+             : iree_vm_program_compare_signature_sides(
                    program, lhs_module, lhs.results, rhs_module, rhs.results);
 }
 
@@ -706,7 +668,7 @@ IREE_API_EXPORT iree_status_t iree_vm_program_create(
   const iree_host_size_t module_count = modules.libraries.count + 1;
   iree_host_size_t import_count = 0;
   iree_host_size_t callable_count = 0;
-  iree_vm_program_field_counts_t field_counts = {0};
+  iree_vm_module_callable_field_counts_t field_counts = {0};
   for (iree_host_size_t i = 0; i < module_count; ++i) {
     iree_vm_module_t* module =
         i == 0 ? modules.executable : modules.libraries.data[i - 1];
@@ -715,28 +677,25 @@ IREE_API_EXPORT iree_status_t iree_vm_program_create(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "program contains a non-linkable module");
     }
+    const iree_vm_module_callable_field_counts_t module_fields =
+        module->descriptor->counts.callable_fields;
     if (!iree_host_size_checked_add(import_count,
                                     module->descriptor->counts.import_count,
                                     &import_count) ||
         !iree_host_size_checked_add(
             callable_count, module->descriptor->counts.callable_type_count,
-            &callable_count)) {
+            &callable_count) ||
+        !iree_host_size_checked_add(field_counts.value_count,
+                                    module_fields.value_count,
+                                    &field_counts.value_count) ||
+        !iree_host_size_checked_add(field_counts.ref_count,
+                                    module_fields.ref_count,
+                                    &field_counts.ref_count) ||
+        !iree_host_size_checked_add(field_counts.function_count,
+                                    module_fields.function_count,
+                                    &field_counts.function_count)) {
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "program declaration count overflows host size");
-    }
-    for (iree_host_size_t callable_i = 0;
-         callable_i < module->descriptor->counts.callable_type_count;
-         ++callable_i) {
-      iree_vm_module_callable_type_declaration_t callable_type = {0};
-      module->vtable->query_callable_type(module, callable_i, &callable_type);
-      if (!iree_vm_program_accumulate_field_counts(
-              callable_type.signature.arguments, &field_counts) ||
-          !iree_vm_program_accumulate_field_counts(
-              callable_type.signature.results, &field_counts)) {
-        return iree_make_status(
-            IREE_STATUS_RESOURCE_EXHAUSTED,
-            "program signature field count overflows host size");
-      }
     }
   }
   if (callable_count > IREE_VM_PROGRAM_CALLABLE_TOKEN_MASK) {
@@ -769,7 +728,7 @@ IREE_API_EXPORT iree_status_t iree_vm_program_create(
                                 iree_alignof(iree_vm_program_callable_abi_t),
                                 &callable_abis_offset),
       IREE_STRUCT_FIELD_ALIGNED(
-          field_counts.scalar_count, iree_vm_program_scalar_field_abi_t,
+          field_counts.value_count, iree_vm_program_scalar_field_abi_t,
           iree_alignof(iree_vm_program_scalar_field_abi_t),
           &scalar_fields_offset),
       IREE_STRUCT_FIELD_ALIGNED(
@@ -806,7 +765,7 @@ IREE_API_EXPORT iree_status_t iree_vm_program_create(
   program->callable_mapping_count = (uint32_t)callable_count;
   const iree_vm_program_field_storage_t field_storage = {
       .scalar_fields =
-          field_counts.scalar_count
+          field_counts.value_count
               ? (iree_vm_program_scalar_field_abi_t*)((uint8_t*)program +
                                                       scalar_fields_offset)
               : NULL,
