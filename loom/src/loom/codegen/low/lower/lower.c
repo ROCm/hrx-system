@@ -1263,11 +1263,14 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
   };
   context.lowering.fact_table = options->fact_table;
   iree_arena_initialize(module->arena.block_pool, &context.function_arena);
-  loom_condition_query_initialize(module, &context.function_arena,
-                                  &context.lowering.condition_query);
 
   iree_status_t status =
       loom_low_lowering_frame_initialize_value_ordinals(&context, source_body);
+  if (iree_status_is_ok(status)) {
+    loom_condition_query_initialize(module, &context.lowering.value_domain,
+                                    &context.function_arena,
+                                    &context.lowering.condition_query);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_low_lower_record_static_launch_config(&context);
   }

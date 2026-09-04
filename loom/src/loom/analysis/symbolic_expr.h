@@ -105,6 +105,9 @@ typedef struct loom_symbolic_expr_context_t {
   // Module containing SSA value definitions queried by the context.
   const loom_module_t* module;
 
+  // Optional active domain mapping module value IDs to compact local ordinals.
+  loom_local_value_domain_t* value_domain;
+
   // Dense facts used to seed ranges, exact constants, and divisibility.
   const loom_value_fact_table_t* fact_table;
 
@@ -121,17 +124,35 @@ typedef struct loom_symbolic_expr_context_t {
   // Maximum number of terms retained before degrading to facts-only.
   iree_host_size_t maximum_term_count;
 
-  // Memo entries indexed by value ID.
+  // Memo entries indexed by storage ordinal.
   loom_symbolic_expr_memo_entry_t* memo_entries;
 
   // Allocated memo entry count.
   iree_host_size_t memo_capacity;
 
-  // Condition-refined fact memo entries indexed by value ID.
+  // Storage ordinals whose memo entries are live in the current epoch.
+  loom_value_ordinal_t* touched_memo_ordinals;
+
+  // Number of populated entries in touched_memo_ordinals.
+  iree_host_size_t touched_memo_ordinal_count;
+
+  // Allocated entry count in touched_memo_ordinals.
+  iree_host_size_t touched_memo_ordinal_capacity;
+
+  // Condition-refined fact memo entries indexed by storage ordinal.
   loom_symbolic_expr_condition_fact_memo_entry_t* condition_fact_memo_entries;
 
   // Allocated condition-refined fact memo entry count.
   iree_host_size_t condition_fact_memo_capacity;
+
+  // Storage ordinals whose condition-fact memo entries are live.
+  loom_value_ordinal_t* touched_condition_fact_memo_ordinals;
+
+  // Number of populated entries in touched_condition_fact_memo_ordinals.
+  iree_host_size_t touched_condition_fact_memo_ordinal_count;
+
+  // Allocated entry count in touched_condition_fact_memo_ordinals.
+  iree_host_size_t touched_condition_fact_memo_ordinal_capacity;
 
   // Reusable term buffer for normalization and comparison.
   loom_symbolic_term_t* scratch_terms;
@@ -155,10 +176,13 @@ static inline bool loom_symbolic_expr_is_constant(
 }
 
 // Initializes a symbolic expression context. The caller owns |arena| and may
-// reset it only after all expressions produced by this context are dead.
+// reset it only after all expressions produced by this context are dead. When
+// provided, |value_domain| must remain acquired for the context lifetime and
+// may be extended by queries that encounter rewrite-created values.
 void loom_symbolic_expr_context_initialize(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    iree_arena_allocator_t* arena, loom_symbolic_expr_context_t* out_context);
+    const loom_module_t* module, loom_local_value_domain_t* value_domain,
+    const loom_value_fact_table_t* fact_table, iree_arena_allocator_t* arena,
+    loom_symbolic_expr_context_t* out_context);
 
 // Clears memoized expressions and condition-refined facts while retaining
 // scratch and memo capacity.

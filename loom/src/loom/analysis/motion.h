@@ -62,8 +62,8 @@ typedef struct loom_motion_analysis_t {
   iree_arena_allocator_t* arena;
   // Function facts used for counted-loop and symbolic memory proofs.
   loom_value_fact_table_t* fact_table;
-  // Active function-local value domain backing movement analysis.
-  const loom_local_value_domain_t* value_domain;
+  // Active function-local value domain extended by movement analysis.
+  loom_local_value_domain_t* value_domain;
   // Value, type, and attribute capture availability queries.
   loom_availability_analysis_t availability;
   // Lazily populated source memory movement analysis.
@@ -84,8 +84,8 @@ typedef struct loom_motion_analysis_t {
 iree_status_t loom_motion_analysis_initialize_region(
     const loom_module_t* module, const loom_region_t* region,
     loom_value_fact_table_t* fact_table,
-    const loom_local_value_domain_t* value_domain,
-    iree_arena_allocator_t* arena, loom_motion_analysis_t* out_analysis);
+    loom_local_value_domain_t* value_domain, iree_arena_allocator_t* arena,
+    loom_motion_analysis_t* out_analysis);
 
 //===----------------------------------------------------------------------===//
 // Loop hoist evaluation

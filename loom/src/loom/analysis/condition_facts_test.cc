@@ -45,8 +45,8 @@ class ConditionFactsTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"),
                                         &block_pool_, NULL,
                                         iree_allocator_system(), &module_));
-    loom_condition_query_initialize(module_, &analysis_arena_,
-                                    &condition_query_);
+    loom_condition_query_initialize(module_, /*value_domain=*/nullptr,
+                                    &analysis_arena_, &condition_query_);
     loom_builder_initialize(module_, &module_->arena,
                             loom_module_block(module_), &builder_);
     IREE_ASSERT_OK(
@@ -162,6 +162,46 @@ TEST_F(ConditionFactsTest, DirectConditionQueryDoesNotAllocateScratch) {
   ASSERT_TRUE(Query(loom_index_cmp_result(compare)));
 
   EXPECT_EQ(analysis_arena_.used_allocation_size, used_allocation_size);
+}
+
+TEST_F(ConditionFactsTest, LocalDomainRegistersHighIdsCreatedAfterAcquisition) {
+  for (iree_host_size_t i = 0; i < 4096; ++i) {
+    DefineIndexValue();
+  }
+
+  loom_local_value_domain_t value_domain = {};
+  IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
+      module_, module_->body, &analysis_arena_, &value_domain));
+  loom_condition_query_initialize(module_, &value_domain, &analysis_arena_,
+                                  &condition_query_);
+
+  loom_value_id_t induction = DefineIndexValue();
+  loom_value_id_t upper_bound = DefineIndexValue();
+  DefineFacts(induction, loom_value_facts_exact_i64(0));
+  DefineFacts(upper_bound, loom_value_facts_exact_i64(1));
+  loom_op_t* compare =
+      BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_SLT, induction, upper_bound);
+  ASSERT_GT(loom_index_cmp_result(compare), 4096u);
+  const loom_value_id_t condition = loom_scalar_andi_result(BuildBoolAnd(
+      loom_index_cmp_result(compare), loom_index_cmp_result(compare)));
+
+  EXPECT_TRUE(Query(condition));
+  EXPECT_NE(loom_local_value_domain_try_ordinal(&value_domain,
+                                                loom_index_cmp_result(compare)),
+            LOOM_VALUE_ORDINAL_INVALID);
+  EXPECT_LT(condition_query_.value_state_capacity, 64u);
+
+  bool proven_condition = false;
+  bool proven = false;
+  IREE_ASSERT_OK(loom_condition_fact_set_proves_condition(
+      &condition_query_, &fact_table_, &condition_facts_, condition,
+      &proven_condition, &proven));
+  EXPECT_TRUE(proven);
+  EXPECT_TRUE(proven_condition);
+  EXPECT_NE(loom_local_value_domain_try_ordinal(&value_domain, condition),
+            LOOM_VALUE_ORDINAL_INVALID);
+
+  loom_local_value_domain_release(&value_domain);
 }
 
 TEST_F(ConditionFactsTest, RepeatedConditionDoesNotDuplicateRelation) {

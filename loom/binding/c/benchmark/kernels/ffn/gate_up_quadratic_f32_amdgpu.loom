@@ -1,0 +1,93 @@
+// Fused gate/up compiler workload for AMDGPU.
+//
+// AMDGPU preserves the runtime dot loop through target lowering and emits its
+// CFG directly instead of expanding one operation sequence per input chunk.
+//
+// One workgroup computes one [token, output channel] result. The two F32 dot
+// products share each input load and feed a portable quadratic gate epilogue.
+// Target benchmarks specialize this same functional kernel and let their
+// pipelines choose the concrete register, control-flow, and executable
+// representation.
+
+config.decl @ffn_gate_up.input_size : %value: index where [range(%value, 512, 32768), mul(%value, 512)]
+
+config.def @ffn_gate_up.output_size = 768 : index
+
+config.def @ffn_gate_up.token_capacity = 16 : index
+
+kernel.def retain export("ffn_gate_up_quadratic_f32") @ffn_gate_up_quadratic_f32(%token_count0: index, %output_size0: index) {
+  %token_capacity = config.get @ffn_gate_up.token_capacity : index
+  %output_size = config.get @ffn_gate_up.output_size : index
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 16), le(%token_count0, %token_capacity)] : index
+  %bounded_output_size, %configured_output_size = index.assume %output_size0, %output_size [range(%output_size0, 1, 4096), eq(%output_size0, %output_size)] : index, index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%configured_output_size, %token_count, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%token_count0: index, %output_size0: index, %input: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+  %input_size = config.get @ffn_gate_up.input_size : index
+  %token_capacity = config.get @ffn_gate_up.token_capacity : index
+  %configured_output_size0 = config.get @ffn_gate_up.output_size : index
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 16), le(%token_count0, %token_capacity)] : index
+  %bounded_output_size, %configured_output_size = index.assume %output_size0, %configured_output_size0 [range(%output_size0, 1, 4096), eq(%output_size0, %configured_output_size0)] : index, index
+  %token0 = kernel.workgroup.id<y> : index
+  %channel0 = kernel.workgroup.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %token, %body_token_count = index.assume %token0, %token_count [lt(%token0, %token_count)] : index, index
+  %channel, %body_output_size = index.assume %channel0, %bounded_output_size [lt(%channel0, %bounded_output_size)] : index, index
+  %base = index.constant 0 : offset
+  %c0_f32 = scalar.constant 0.0 : f32
+  %half = scalar.constant 0.5 : f32
+  %quarter = scalar.constant 0.25 : f32
+  %input_noalias, %gate_noalias, %up_noalias, %output_noalias = buffer.assume.noalias %input, %gate_weight, %up_weight, %output : buffer, buffer, buffer, buffer
+  %input_aligned = buffer.assume.alignment %input_noalias {minimum_alignment = 16} : buffer
+  %gate_aligned = buffer.assume.alignment %gate_noalias {minimum_alignment = 16} : buffer
+  %up_aligned = buffer.assume.alignment %up_noalias {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output_noalias {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<[%body_token_count]x[%input_size]xf32>
+  %gate_view = buffer.view %gate_aligned[%base] : buffer -> view<[%body_output_size]x[%input_size]xf32>
+  %up_view = buffer.view %up_aligned[%base] : buffer -> view<[%body_output_size]x[%input_size]xf32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%body_token_count]x[%body_output_size]xf32>
+  %gate_dot, %up_dot = scf.for %input_base = [%c0 to %input_size step %c4](%gate_acc = %c0_f32 : f32, %up_acc = %c0_f32 : f32) -> (f32, f32) {
+    %input_index1 = index.add %input_base, %c1 : index
+    %input_index2 = index.add %input_base, %c2 : index
+    %input_index3 = index.add %input_base, %c3 : index
+    %input_value0 = view.load %input_view[%token, %input_base] : view<[%body_token_count]x[%input_size]xf32> -> f32
+    %input_value1 = view.load %input_view[%token, %input_index1] : view<[%body_token_count]x[%input_size]xf32> -> f32
+    %input_value2 = view.load %input_view[%token, %input_index2] : view<[%body_token_count]x[%input_size]xf32> -> f32
+    %input_value3 = view.load %input_view[%token, %input_index3] : view<[%body_token_count]x[%input_size]xf32> -> f32
+    %gate_value0 = view.load %gate_view[%channel, %input_base] : view<[%body_output_size]x[%input_size]xf32> -> f32
+    %gate_value1 = view.load %gate_view[%channel, %input_index1] : view<[%body_output_size]x[%input_size]xf32> -> f32
+    %gate_value2 = view.load %gate_view[%channel, %input_index2] : view<[%body_output_size]x[%input_size]xf32> -> f32
+    %gate_value3 = view.load %gate_view[%channel, %input_index3] : view<[%body_output_size]x[%input_size]xf32> -> f32
+    %up_value0 = view.load %up_view[%channel, %input_base] : view<[%body_output_size]x[%input_size]xf32> -> f32
+    %up_value1 = view.load %up_view[%channel, %input_index1] : view<[%body_output_size]x[%input_size]xf32> -> f32
+    %up_value2 = view.load %up_view[%channel, %input_index2] : view<[%body_output_size]x[%input_size]xf32> -> f32
+    %up_value3 = view.load %up_view[%channel, %input_index3] : view<[%body_output_size]x[%input_size]xf32> -> f32
+    %gate_product0 = scalar.mulf %input_value0, %gate_value0 : f32
+    %gate_product1 = scalar.mulf %input_value1, %gate_value1 : f32
+    %gate_product2 = scalar.mulf %input_value2, %gate_value2 : f32
+    %gate_product3 = scalar.mulf %input_value3, %gate_value3 : f32
+    %gate_sum01 = scalar.addf %gate_product0, %gate_product1 : f32
+    %gate_sum23 = scalar.addf %gate_product2, %gate_product3 : f32
+    %gate_sum = scalar.addf %gate_sum01, %gate_sum23 : f32
+    %up_product0 = scalar.mulf %input_value0, %up_value0 : f32
+    %up_product1 = scalar.mulf %input_value1, %up_value1 : f32
+    %up_product2 = scalar.mulf %input_value2, %up_value2 : f32
+    %up_product3 = scalar.mulf %input_value3, %up_value3 : f32
+    %up_sum01 = scalar.addf %up_product0, %up_product1 : f32
+    %up_sum23 = scalar.addf %up_product2, %up_product3 : f32
+    %up_sum = scalar.addf %up_sum01, %up_sum23 : f32
+    %gate_next = scalar.addf %gate_acc, %gate_sum : f32
+    %up_next = scalar.addf %up_acc, %up_sum : f32
+    scf.yield %gate_next, %up_next : f32, f32
+  }
+  %gate_linear = scalar.mulf %gate_dot, %quarter : f32
+  %gate_scale = scalar.addf %half, %gate_linear : f32
+  %gate_activation = scalar.mulf %gate_dot, %gate_scale : f32
+  %result = scalar.mulf %gate_activation, %up_dot : f32
+  view.store %result, %output_view[%token, %channel] : f32, view<[%body_token_count]x[%body_output_size]xf32>
+  kernel.return
+}

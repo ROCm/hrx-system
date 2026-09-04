@@ -19,11 +19,19 @@ loom_cc_benchmark(
     iree::base
     iree::testing::benchmark_main
     loom::binding::c::benchmark::compile_throughput_benchmark_harness
+    loom::binding::c::benchmark::kernels::attention_prefill_smoke
+    loom::binding::c::benchmark::kernels::ffn_gate_up_smoke
+    loom::binding::c::benchmark::kernels::ffn_routed_gate_up_smoke
+    loom::binding::c::benchmark::kernels::synthetic_i32_chain_smoke
+    loom::binding::c::benchmark::workload_compile_benchmark
     loom::binding::c::loomc
     loom::binding::c::target::amdgpu
   ARGS
     "--benchmark_filter=Smoke"
   TESTONLY
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
 )
 endif()
 

@@ -741,7 +741,8 @@ iree_status_t loom_low_lower_import_declaration(
   };
   out_result->descriptor_set = descriptor_set;
   iree_arena_initialize(module->arena.block_pool, &context.function_arena);
-  loom_condition_query_initialize(module, &context.function_arena,
+  loom_condition_query_initialize(module, /*value_domain=*/NULL,
+                                  &context.function_arena,
                                   &context.lowering.condition_query);
   iree_arena_initialize(module->arena.block_pool, &context.emission_arena);
 

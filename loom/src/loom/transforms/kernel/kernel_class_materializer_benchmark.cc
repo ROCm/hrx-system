@@ -130,7 +130,8 @@ class KernelClassMaterializerBenchmarkFixture {
     IREE_CHECK_OK(
         loom_value_fact_table_compute(&kernel_facts_, module_.get(), kernel));
     loom_symbolic_expr_context_initialize(
-        module_.get(), &kernel_facts_, &analysis_arena_, &expression_context_);
+        module_.get(), /*value_domain=*/nullptr, &kernel_facts_,
+        &analysis_arena_, &expression_context_);
     const loom_template_applicability_target_t kernel_target = {};
     IREE_CHECK_OK(loom_kernel_class_classifier_build(
         module_.get(), kernel_symbol_id, &references_, &decision_models_,

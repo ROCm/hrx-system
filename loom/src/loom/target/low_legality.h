@@ -218,7 +218,7 @@ const loom_value_fact_table_t* loom_target_low_legality_fact_table(
     const loom_target_low_legality_context_t* context);
 
 // Returns the active value domain owned by the shared function analysis.
-const loom_local_value_domain_t* loom_target_low_legality_value_domain(
+loom_local_value_domain_t* loom_target_low_legality_value_domain(
     const loom_target_low_legality_context_t* context);
 
 // Returns the shared analyzed view-region table.

@@ -47,7 +47,7 @@ static iree_status_t loom_view_region_table_append_region(
 }
 
 iree_status_t loom_view_region_table_initialize(
-    const loom_local_value_domain_t* value_domain,
+    loom_local_value_domain_t* value_domain,
     loom_symbolic_expr_context_t* expression_context,
     loom_view_region_table_t* out_table) {
   IREE_ASSERT(loom_local_value_domain_is_acquired(value_domain));

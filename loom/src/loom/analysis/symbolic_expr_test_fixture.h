@@ -56,8 +56,9 @@ class SymbolicExprTest : public ::testing::Test {
                             loom_module_block(module_), &builder_);
     IREE_ASSERT_OK(
         loom_value_fact_table_initialize(&fact_table_, &analysis_arena_, 16));
-    loom_symbolic_expr_context_initialize(
-        module_, &fact_table_, &analysis_arena_, &expression_context_);
+    loom_symbolic_expr_context_initialize(module_, /*value_domain=*/nullptr,
+                                          &fact_table_, &analysis_arena_,
+                                          &expression_context_);
   }
 
   void TearDown() override {

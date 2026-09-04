@@ -13,7 +13,6 @@
 #include <utility>
 
 #include "benchmark/benchmark.h"
-#include "loom/binding/c/benchmark/benchmark_kernels.h"
 #include "loom/binding/c/benchmark/util/compile_pool_prototype.h"
 
 namespace loomc::bench {
@@ -39,16 +38,19 @@ static iree_status_t RunScenarioJob(void* user_data,
 static void SetThroughputCounters(::benchmark::State& state,
                                   const CompileScenario& scenario,
                                   int64_t total_jobs, int64_t worker_count) {
-  int64_t total_artifact_bytes = scenario.artifact_bytes();
-  state.SetItemsProcessed(total_jobs);
+  const int64_t total_kernels =
+      total_jobs * (int64_t)scenario.kernel_count_per_job();
+  const int64_t total_artifact_bytes = scenario.artifact_bytes();
+  state.SetItemsProcessed(total_kernels);
   state.SetBytesProcessed(total_artifact_bytes);
   state.counters["kernels/s"] =
-      ::benchmark::Counter(total_jobs, ::benchmark::Counter::kIsRate);
+      ::benchmark::Counter(total_kernels, ::benchmark::Counter::kIsRate);
   state.counters["worker_count"] = (double)worker_count;
   state.counters["artifact_bytes"] = (double)total_artifact_bytes;
   state.counters["artifact_bytes/kernel"] =
-      total_jobs == 0 ? 0.0 : (double)total_artifact_bytes / (double)total_jobs;
-  scenario.SetWorkspaceAllocationCounters(state, total_jobs);
+      total_kernels == 0 ? 0.0
+                         : (double)total_artifact_bytes / (double)total_kernels;
+  scenario.SetWorkspaceAllocationCounters(state, total_kernels);
   scenario.SetExtraCounters(state);
 }
 
@@ -178,21 +180,10 @@ iree_status_t CreateTextSource(const std::string& identifier,
       loomc_make_byte_span(text.data(), text.size()), out_source);
 }
 
-iree_status_t CreateBenchmarkKernelSource(loomc_string_view_t identifier,
-                                          SourcePtr* out_source) {
-  const iree_file_toc_t* kernels = loomc_benchmark_kernels_create();
-  for (size_t i = 0; i < loomc_benchmark_kernels_size(); ++i) {
-    const iree_file_toc_t& file = kernels[i];
-    loomc_string_view_t file_name = loomc_make_cstring_view(file.name);
-    if (!loomc_string_view_equal(identifier, file_name)) {
-      continue;
-    }
-    return CreateTextSourceFromViews(
-        file_name, loomc_make_byte_span(file.data, file.size), out_source);
-  }
-  return iree_make_status(IREE_STATUS_NOT_FOUND,
-                          "benchmark kernel %.*s not found",
-                          (int)identifier.size, identifier.data);
+iree_status_t CreateBenchmarkSource(EmbeddedSource source,
+                                    SourcePtr* out_source) {
+  return CreateTextSourceFromViews(source.identifier, source.contents,
+                                   out_source);
 }
 
 iree_status_t CreateWorkspace(iree_host_size_t block_size,
@@ -263,14 +254,15 @@ iree_status_t AddSourceToIndex(loomc_link_index_builder_t* builder,
 }
 
 iree_status_t PreparePassProgram(loomc_context_t* context,
+                                 loomc_string_view_t pipeline_text,
                                  PassProgramPtr* out_pass_program) {
   out_pass_program->reset();
   loomc_pass_program_t* pass_program = nullptr;
   loomc_result_t* raw_result = nullptr;
   iree_status_t status =
       to_iree_status(loomc_pass_program_create_from_pipeline_text(
-          context, loomc_make_cstring_view("canonicalize,dce"),
-          /*options=*/nullptr, loom_allocator(), &pass_program, &raw_result));
+          context, pipeline_text, /*options=*/nullptr, loom_allocator(),
+          &pass_program, &raw_result));
   PassProgramPtr pass_program_ptr(pass_program);
   ResultPtr result(raw_result);
   IREE_RETURN_IF_ERROR(status);
@@ -296,7 +288,9 @@ iree_status_t CompileScenario::SetUp(iree_host_size_t worker_count) {
       context_.get(), /*options=*/nullptr, loom_allocator(), &compiler)));
   compiler_.reset(compiler);
 
-  IREE_RETURN_IF_ERROR(PreparePassProgram(context_.get(), &pass_program_));
+  IREE_RETURN_IF_ERROR(PreparePassProgram(
+      context_.get(), loomc_make_cstring_view("canonicalize,dce"),
+      &pass_program_));
   return SetUpWorkerSlots(worker_count);
 }
 
@@ -324,8 +318,8 @@ int64_t CompileScenario::artifact_bytes() const {
   return artifact_bytes_.load(std::memory_order_relaxed);
 }
 
-void CompileScenario::SetWorkspaceAllocationCounters(::benchmark::State& state,
-                                                     int64_t total_jobs) const {
+void CompileScenario::SetWorkspaceAllocationCounters(
+    ::benchmark::State& state, int64_t total_kernels) const {
   loomc_workspace_statistics_t total = {0};
   uint64_t lifetime_block_system_allocation_count = 0;
   uint64_t lifetime_block_system_allocation_bytes = 0;
@@ -350,7 +344,7 @@ void CompileScenario::SetWorkspaceAllocationCounters(::benchmark::State& state,
         worker.allocation_baseline.oversized_allocation_bytes;
   }
 
-  const double job_count = (double)total_jobs;
+  const double kernel_count = (double)total_kernels;
   if (!workers_.empty()) {
     loomc_workspace_statistics_t statistics;
     loomc_workspace_query_statistics(workers_.front().workspace.get(),
@@ -361,21 +355,25 @@ void CompileScenario::SetWorkspaceAllocationCounters(::benchmark::State& state,
         (double)statistics.usable_block_size;
   }
   state.counters["workspace_block_allocations/kernel"] =
-      total_jobs == 0 ? 0.0
-                      : (double)total.block_system_allocation_count / job_count;
+      total_kernels == 0
+          ? 0.0
+          : (double)total.block_system_allocation_count / kernel_count;
   state.counters["workspace_block_bytes/kernel"] =
-      total_jobs == 0 ? 0.0
-                      : (double)total.block_system_allocation_bytes / job_count;
+      total_kernels == 0
+          ? 0.0
+          : (double)total.block_system_allocation_bytes / kernel_count;
   state.counters["workspace_block_system_allocations"] =
       (double)lifetime_block_system_allocation_count;
   state.counters["workspace_block_system_bytes"] =
       (double)lifetime_block_system_allocation_bytes;
   state.counters["workspace_oversized_allocations/kernel"] =
-      total_jobs == 0 ? 0.0
-                      : (double)total.oversized_allocation_count / job_count;
+      total_kernels == 0
+          ? 0.0
+          : (double)total.oversized_allocation_count / kernel_count;
   state.counters["workspace_oversized_bytes/kernel"] =
-      total_jobs == 0 ? 0.0
-                      : (double)total.oversized_allocation_bytes / job_count;
+      total_kernels == 0
+          ? 0.0
+          : (double)total.oversized_allocation_bytes / kernel_count;
 }
 
 iree_status_t CompileScenario::SetUpWorkerSlots(iree_host_size_t worker_count) {

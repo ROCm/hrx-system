@@ -63,8 +63,8 @@ loom_low_lower_source_query_scope_callback(
 
 // Returns the function-local value domain owned by |scope|, or NULL when the
 // source function has no body.
-const loom_local_value_domain_t* loom_low_lower_source_query_scope_value_domain(
-    const loom_low_lower_source_query_scope_t* scope);
+loom_local_value_domain_t* loom_low_lower_source_query_scope_value_domain(
+    loom_low_lower_source_query_scope_t* scope);
 
 // Returns the lazily analyzed source view regions owned by |scope|.
 iree_status_t loom_low_lower_source_query_scope_view_regions(

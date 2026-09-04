@@ -84,7 +84,8 @@ class ConditionFactsBenchmark {
       proof_condition_ = loom_scalar_andi_result(proof_and_op);
     }
 
-    loom_condition_query_initialize(module_, &analysis_arena_, &query_);
+    loom_condition_query_initialize(module_, /*value_domain=*/nullptr,
+                                    &analysis_arena_, &query_);
     loom_condition_fact_set_initialize(relation_storage_,
                                        IREE_ARRAYSIZE(relation_storage_),
                                        &condition_facts_);

@@ -1,0 +1,303 @@
+// Routed Q4_K gate/up SwiGLU compiler workload.
+//
+// One wave computes one routed output channel. Each unrolled iteration consumes
+// a 1024-element K stripe through paired Q4_K decode, Q8_1 dot products, and
+// gate/up accumulation. Varying input_size scales one production function body
+// without manufacturing unrelated operations.
+
+config.decl @ffn_routed_gate_up.input_size : %value: index where [range(%value, 512, 32768), mul(%value, 512)]
+
+config.def @ffn_routed_gate_up.expert_count = 128 : index
+
+config.def @ffn_routed_gate_up.route_count = 8 : index
+
+config.def @ffn_routed_gate_up.output_size = 768 : index
+
+config.def @ffn_routed_gate_up.token_capacity = 16 : index
+
+// Decodes one Q4_K scale/minimum pair from a header loaded as three packed
+// scale words. Keeping the complete header in registers lets paired-group
+// contractions share both the header and packed-code load.
+func.def inline @ffn_routed_q4k_scale_from_header(%scale0: i32, %scale1: i32, %scale2: i32, %q4_group: index) -> (i32, i32) {
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c2_i32 = scalar.constant 2 : i32
+  %c4_i32 = scalar.constant 4 : i32
+  %c15_i32 = scalar.constant 15 : i32
+  %c48_i32 = scalar.constant 48 : i32
+  %bounded_group = index.assume %q4_group [range(%q4_group, 0, 7)] : index
+  %is_low_group = index.cmp ult, %bounded_group, %c4 : index
+  %scale_lane = index.rem %bounded_group, %c4 : index
+  %scale_shift_index = index.mul %scale_lane, %c8 : index
+  %scale_shift = index.cast %scale_shift_index : index to i32
+  %high_shift = scalar.addi %scale_shift, %c2_i32 : i32
+  %minimum_shift = scalar.addi %scale_shift, %c4_i32 : i32
+  %selected_scale_source = scf.select %is_low_group, %scale0, %scale2 : i32
+  %selected_minimum_source = scf.select %is_low_group, %scale1, %scale2 : i32
+  %selected_scale_high_shift = scf.select %is_low_group, %scale_shift, %high_shift : i32
+  %selected_minimum_low_shift = scf.select %is_low_group, %scale_shift, %minimum_shift : i32
+  %scale_low0 = scalar.shrui %selected_scale_source, %scale_shift : i32
+  %scale_low = scalar.andi %scale_low0, %c15_i32 : i32
+  %scale_high0 = scalar.shrui %scale0, %selected_scale_high_shift : i32
+  %scale_high = scalar.andi %scale_high0, %c48_i32 : i32
+  %scale = scalar.ori %scale_low, %scale_high : i32
+  %minimum_low0 = scalar.shrui %selected_minimum_source, %selected_minimum_low_shift : i32
+  %minimum_low = scalar.andi %minimum_low0, %c15_i32 : i32
+  %minimum_high0 = scalar.shrui %scale1, %selected_scale_high_shift : i32
+  %minimum_high = scalar.andi %minimum_high0, %c48_i32 : i32
+  %minimum = scalar.ori %minimum_low, %minimum_high : i32
+  func.return %scale, %minimum : i32, i32
+}
+
+// Decodes two adjacent Q4_K groups from the low and high nibbles of one
+// packed-code load. The caller supplies the already-loaded 16-byte header.
+func.def inline @ffn_routed_q4k_chunk_pair_global(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group_pair: index, %q4_half: index, %header_words: vector<4xi32>) -> (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %block_bytes = index.constant 144 : offset
+  %code_byte_add = index.constant 16 : offset
+  %c4_i32 = scalar.constant 4 : i32
+  %nibble_mask = vector.constant 252645135 : vector<4xi32>
+  %bounded_pair = index.assume %q4_group_pair [range(%q4_group_pair, 0, 3)] : index
+  %bounded_half = index.assume %q4_half [range(%q4_half, 0, 1)] : index
+  %block_byte_add = index.scale %q4_block, %block_bytes : index, offset -> offset
+  %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
+  %code_byte_base = index.add %block_byte_base, %code_byte_add : offset
+  %code_view = buffer.view %weight[%code_byte_base] : buffer -> view<32xi32>
+  %header_halves = vector.bitcast %header_words : vector<4xi32> to vector<8xf16>
+  %d_f16 = vector.extract %header_halves[0] : vector<8xf16> -> f16
+  %dmin_f16 = vector.extract %header_halves[1] : vector<8xf16> -> f16
+  %scale0 = vector.extract %header_words[1] : vector<4xi32> -> i32
+  %scale1 = vector.extract %header_words[2] : vector<4xi32> -> i32
+  %scale2 = vector.extract %header_words[3] : vector<4xi32> -> i32
+  %d = scalar.extf %d_f16 : f16 to f32
+  %dmin = scalar.extf %dmin_f16 : f16 to f32
+  %pair_code_base = index.mul %bounded_pair, %c8 : index
+  %half_code_add = index.mul %bounded_half, %c4 : index
+  %code_index0 = index.add %pair_code_base, %half_code_add : index
+  %code_index = index.assume %code_index0 [range(%code_index0, 0, 28)] : index
+  %packed_codes = vector.load %code_view[%code_index] : view<32xi32> -> vector<4xi32>
+  %low_codes = vector.andi %packed_codes, %nibble_mask : vector<4xi32>
+  %c4_i32v = vector.splat %c4_i32 : vector<4xi32>
+  %high_shifted = vector.shrui %packed_codes, %c4_i32v : vector<4xi32>
+  %high_codes = vector.andi %high_shifted, %nibble_mask : vector<4xi32>
+  %q4_low = vector.bitcast %low_codes : vector<4xi32> to vector<16xi8>
+  %q4_high = vector.bitcast %high_codes : vector<4xi32> to vector<16xi8>
+  %low_group = index.mul %bounded_pair, %c2 : index
+  %high_group = index.add %low_group, %c1 : index
+  %low_scale, %low_minimum = func.call @ffn_routed_q4k_scale_from_header(%scale0, %scale1, %scale2, %low_group) : (i32, i32, i32, index) -> (i32, i32)
+  %high_scale, %high_minimum = func.call @ffn_routed_q4k_scale_from_header(%scale0, %scale1, %scale2, %high_group) : (i32, i32, i32, index) -> (i32, i32)
+  %low_scale_f32 = scalar.uitofp %low_scale : i32 to f32
+  %low_minimum_f32 = scalar.uitofp %low_minimum : i32 to f32
+  %high_scale_f32 = scalar.uitofp %high_scale : i32 to f32
+  %high_minimum_f32 = scalar.uitofp %high_minimum : i32 to f32
+  %low_d_scale = scalar.mulf %d, %low_scale_f32 : f32
+  %low_dmin_scale = scalar.mulf %dmin, %low_minimum_f32 : f32
+  %high_d_scale = scalar.mulf %d, %high_scale_f32 : f32
+  %high_dmin_scale = scalar.mulf %dmin, %high_minimum_f32 : f32
+  func.return %q4_low, %low_d_scale, %low_dmin_scale, %q4_high, %high_d_scale, %high_dmin_scale : vector<16xi8>, f32, f32, vector<16xi8>, f32, f32
+}
+
+// Contracts one decoded Q4_K half-group with a Q8_1 half-block. Both
+// half-groups apply half of the Q8_1 block-sum correction.
+func.def inline @ffn_routed_q4k_q8_1_dot(%q4_values: vector<16xi8>, %d_scale: f32, %dmin_scale: f32, %q8_values: vector<16xi8>, %q8_d: f32, %q8_s: f32) -> (f32) {
+  %c0_i32 = scalar.constant 0 : i32
+  %c0_i32v = vector.constant 0 : vector<4xi32>
+  %half_f32 = scalar.constant 0.5 : f32
+  %partial_dots = vector.dot4i<u8s8> %q4_values, %q8_values, %c0_i32v : vector<16xi8>, vector<16xi8>, vector<4xi32>
+  %q_sum = vector.reduce<addi> %partial_dots, %c0_i32 : vector<4xi32>, i32
+  %q_sum_f32 = scalar.sitofp %q_sum : i32 to f32
+  %scaled_dot0 = scalar.mulf %q8_d, %d_scale : f32
+  %scaled_dot = scalar.mulf %scaled_dot0, %q_sum_f32 : f32
+  %q8_half_sum = scalar.mulf %q8_s, %half_f32 : f32
+  %minimum_correction = scalar.mulf %dmin_scale, %q8_half_sum : f32
+  %contribution = scalar.subf %scaled_dot, %minimum_correction : f32
+  func.return %contribution : f32
+}
+
+template.decl @ffn_routed_gate_up.q4k_q8.body(%publish_output: i1, %token_count: index, %token: index, %route_count: index, %route: index, %route_stride: index, %expert_count: index, %output_size: index, %channel: index, %lane: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer)
+
+// Small-token body for routed Q4_K gate/up projections. One wave computes one
+// [token, route, output channel]. Callers own launch geometry and may append a
+// producer epilogue after the F32 SwiGLU value is visible.
+template.def<@ffn_routed_gate_up.q4k_q8.body> device @ffn_routed_gate_up_swiglu_q4k_q8_body(%publish_output: i1, %token_count: index, %token: index, %route_count: index, %route: index, %route_stride: index, %expert_count: index, %output_size: index, %channel: index, %lane: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+  %input_size = config.get @ffn_routed_gate_up.input_size : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %bounded_route_count, %bounded_route_stride = index.assume %route_count, %route_stride [range(%route_count, 1, 8), range(%route_stride, 1, 128), le(%route_count, %route_stride)] : index, index
+  %bounded_expert_count = index.assume %expert_count [range(%expert_count, 1, 128)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 1, 4096)] : index
+  %bounded_token, %body_token_count = index.assume %token, %bounded_token_count [lt(%token, %bounded_token_count)] : index, index
+  %bounded_channel, %body_output_size = index.assume %channel, %bounded_output_size [lt(%channel, %bounded_output_size)] : index, index
+  %bounded_route, %body_route_count = index.assume %route, %bounded_route_count [lt(%route, %bounded_route_count)] : index, index
+  %bounded_lane = index.assume %lane [range(%lane, 0, 31)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c128 = index.constant 128 : index
+  %c256 = index.constant 256 : index
+  %c1023 = index.constant 1023 : index
+  %c1024 = index.constant 1024 : index
+  %q4_block_bytes = index.constant 144 : index
+  %q4_block_bytes_offset = index.constant 144 : offset
+  %q8_group_bytes = index.constant 144 : offset
+  %q8_payload_byte_add = index.constant 16 : offset
+  %c1_byte = index.constant 1 : offset
+  %c0_f32 = scalar.constant 0.0 : f32
+  %c0_i32 = scalar.constant 0 : i32
+  %c0_offset = index.constant 0 : offset
+  %q4_block_count = index.div %input_size, %c256 : index
+  %weight_row_bytes = index.mul %q4_block_count, %q4_block_bytes : index
+  %weight_expert_bytes = index.mul %bounded_output_size, %weight_row_bytes : index
+  %q8_group_count = index.div %input_size, %c128 : index
+  %q8_bytes_per_token = index.mul %q8_group_count, %q4_block_bytes : index
+  %padded_input_size = index.add %input_size, %c1023 : index
+  %iteration_count = index.div %padded_input_size, %c1024 : index
+  %q8_noalias, %route_ids_noalias, %gate_noalias, %up_noalias, %output_noalias = buffer.assume.noalias %q8_input, %route_ids, %gate_weight, %up_weight, %output : buffer, buffer, buffer, buffer, buffer
+  %route_ids_view = buffer.view %route_ids_noalias[%c0_offset] : buffer -> view<[%bounded_token_count]x[%bounded_route_stride]xi32>
+  %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<[%bounded_token_count]x[%bounded_route_count]x[%bounded_output_size]xf32>
+  %route_index, %route_row_stride = index.assume %bounded_route, %bounded_route_stride [lt(%bounded_route, %bounded_route_stride)] : index, index
+  %expert_i32 = view.load %route_ids_view[%bounded_token, %route_index] : view<[%bounded_token_count]x[%bounded_route_stride]xi32> -> i32
+  %expert0 = index.cast %expert_i32 : i32 to index
+  %expert = index.assume %expert0 [range(%expert0, 0, 127)] : index
+  %expert_byte_base = index.mul %expert, %weight_expert_bytes : index
+  %channel_byte_add = index.mul %bounded_channel, %weight_row_bytes : index
+  %row_byte_index = index.add %expert_byte_base, %channel_byte_add : index
+  %row_byte_base = index.scale %row_byte_index, %c1_byte : index, offset -> offset
+  %q8_token_byte_index = index.mul %bounded_token, %q8_bytes_per_token : index
+  %q8_token_byte_base = index.scale %q8_token_byte_index, %c1_byte : index, offset -> offset
+  %q4_group_pair0 = index.div %bounded_lane, %c2 : index
+  %q4_group_pair1 = index.rem %q4_group_pair0, %c4 : index
+  %q4_group_pair = index.assume %q4_group_pair1 [range(%q4_group_pair1, 0, 3)] : index
+  %q4_half0 = index.rem %bounded_lane, %c2 : index
+  %q4_half = index.assume %q4_half0 [range(%q4_half0, 0, 1)] : index
+  %lane_q4_block = index.div %bounded_lane, %c8 : index
+  %q8_group_in_block0 = index.div %q4_group_pair, %c2 : index
+  %q8_group_in_block = index.assume %q8_group_in_block0 [range(%q8_group_in_block0, 0, 1)] : index
+  %pair_in_q8_group0 = index.rem %q4_group_pair, %c2 : index
+  %pair_in_q8_group = index.assume %pair_in_q8_group0 [range(%pair_in_q8_group0, 0, 1)] : index
+  %q8_low_inner_block0 = index.mul %pair_in_q8_group, %c2 : index
+  %q8_low_inner_block = index.assume %q8_low_inner_block0 [range(%q8_low_inner_block0, 0, 2)] : index
+  %q8_high_inner_block0 = index.add %q8_low_inner_block, %c1 : index
+  %q8_high_inner_block = index.assume %q8_high_inner_block0 [range(%q8_high_inner_block0, 1, 3)] : index
+  %q8_half_word_add = index.mul %q4_half, %c4 : index
+  %q8_low_inner_word_base = index.mul %q8_low_inner_block, %c8 : index
+  %q8_low_word_index0 = index.add %q8_low_inner_word_base, %q8_half_word_add : index
+  %q8_low_word_index = index.assume %q8_low_word_index0 [range(%q8_low_word_index0, 0, 20)] : index
+  %q8_high_inner_word_base = index.mul %q8_high_inner_block, %c8 : index
+  %q8_high_word_index0 = index.add %q8_high_inner_word_base, %q8_half_word_add : index
+  %q8_high_word_index = index.assume %q8_high_word_index0 [range(%q8_high_word_index0, 8, 28)] : index
+  %q8_low_ds_index0 = index.mul %q8_low_inner_block, %c2 : index
+  %q8_low_ds_index = index.assume %q8_low_ds_index0 [range(%q8_low_ds_index0, 0, 4)] : index
+  %gate_acc, %up_acc = scf.for %iteration = [%c0 to %iteration_count step %c1](%gate_iter = %c0_f32 : f32, %up_iter = %c0_f32 : f32) -> (f32, f32) unroll {
+    %iteration_q4_block = index.mul %iteration, %c4 : index
+    %q4_block0 = index.add %iteration_q4_block, %lane_q4_block : index
+    %valid_q4_block = index.cmp ult, %q4_block0, %q4_block_count : index
+    %gate_contribution, %up_contribution = scf.if %valid_q4_block -> (f32, f32) {
+      %q4_block, %bounded_q4_block_count = index.assume %q4_block0, %q4_block_count [lt(%q4_block0, %q4_block_count)] : index, index
+      %q8_block_group_base = index.mul %q4_block, %c2 : index
+      %q8_group0 = index.add %q8_block_group_base, %q8_group_in_block : index
+      %q8_group, %bounded_q8_group_count = index.assume %q8_group0, %q8_group_count [lt(%q8_group0, %q8_group_count)] : index, index
+      %q8_group_byte_add = index.scale %q8_group, %q8_group_bytes : index, offset -> offset
+      %q8_group_byte_base = index.add %q8_token_byte_base, %q8_group_byte_add : offset
+      %q8_payload_byte_base = index.add %q8_group_byte_base, %q8_payload_byte_add : offset
+      %q8_ds_view = buffer.view %q8_noalias[%q8_group_byte_base] : buffer -> view<8xf16>
+      %q8_words_view = buffer.view %q8_noalias[%q8_payload_byte_base] : buffer -> view<32xi32>
+      %q8_ds = vector.load %q8_ds_view[%q8_low_ds_index] : view<8xf16> -> vector<4xf16>
+      %q8_low_d_f16 = vector.extract %q8_ds[0] : vector<4xf16> -> f16
+      %q8_low_s_f16 = vector.extract %q8_ds[1] : vector<4xf16> -> f16
+      %q8_high_d_f16 = vector.extract %q8_ds[2] : vector<4xf16> -> f16
+      %q8_high_s_f16 = vector.extract %q8_ds[3] : vector<4xf16> -> f16
+      %q8_low_d = scalar.extf %q8_low_d_f16 : f16 to f32
+      %q8_low_s = scalar.extf %q8_low_s_f16 : f16 to f32
+      %q8_high_d = scalar.extf %q8_high_d_f16 : f16 to f32
+      %q8_high_s = scalar.extf %q8_high_s_f16 : f16 to f32
+      %q8_low_words = vector.load %q8_words_view[%q8_low_word_index] : view<32xi32> -> vector<4xi32>
+      %q8_high_words = vector.load %q8_words_view[%q8_high_word_index] : view<32xi32> -> vector<4xi32>
+      %q8_low_values = vector.bitcast %q8_low_words : vector<4xi32> to vector<16xi8>
+      %q8_high_values = vector.bitcast %q8_high_words : vector<4xi32> to vector<16xi8>
+      %q4_block_byte_add = index.scale %q4_block, %q4_block_bytes_offset : index, offset -> offset
+      %q4_block_byte_base = index.add %row_byte_base, %q4_block_byte_add : offset
+      %gate_header_view = buffer.view %gate_noalias[%q4_block_byte_base] : buffer -> view<4xi32>
+      %up_header_view = buffer.view %up_noalias[%q4_block_byte_base] : buffer -> view<4xi32>
+      %gate_header_words = vector.load %gate_header_view[0] : view<4xi32> -> vector<4xi32>
+      %up_header_words = vector.load %up_header_view[0] : view<4xi32> -> vector<4xi32>
+      %gate_q4_low, %gate_low_d_scale, %gate_low_dmin_scale, %gate_q4_high, %gate_high_d_scale, %gate_high_dmin_scale = func.call @ffn_routed_q4k_chunk_pair_global(%gate_noalias, %row_byte_base, %q4_block, %q4_group_pair, %q4_half, %gate_header_words) : (buffer, offset, index, index, index, vector<4xi32>) -> (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32)
+      %up_q4_low, %up_low_d_scale, %up_low_dmin_scale, %up_q4_high, %up_high_d_scale, %up_high_dmin_scale = func.call @ffn_routed_q4k_chunk_pair_global(%up_noalias, %row_byte_base, %q4_block, %q4_group_pair, %q4_half, %up_header_words) : (buffer, offset, index, index, index, vector<4xi32>) -> (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32)
+      %gate_low = func.call @ffn_routed_q4k_q8_1_dot(%gate_q4_low, %gate_low_d_scale, %gate_low_dmin_scale, %q8_low_values, %q8_low_d, %q8_low_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
+      %gate_high = func.call @ffn_routed_q4k_q8_1_dot(%gate_q4_high, %gate_high_d_scale, %gate_high_dmin_scale, %q8_high_values, %q8_high_d, %q8_high_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
+      %up_low = func.call @ffn_routed_q4k_q8_1_dot(%up_q4_low, %up_low_d_scale, %up_low_dmin_scale, %q8_low_values, %q8_low_d, %q8_low_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
+      %up_high = func.call @ffn_routed_q4k_q8_1_dot(%up_q4_high, %up_high_d_scale, %up_high_dmin_scale, %q8_high_values, %q8_high_d, %q8_high_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
+      %gate_pair = scalar.addf %gate_low, %gate_high : f32
+      %up_pair = scalar.addf %up_low, %up_high : f32
+      scf.yield %gate_pair, %up_pair : f32, f32
+    } else {
+      scf.yield %c0_f32, %c0_f32 : f32, f32
+    }
+    %gate_next = scalar.addf %gate_iter, %gate_contribution : f32
+    %up_next = scalar.addf %up_iter, %up_contribution : f32
+    scf.yield %gate_next, %up_next : f32, f32
+  }
+  %gate_dot = kernel.subgroup.reduce<addf> %gate_acc : f32
+  %up_dot = kernel.subgroup.reduce<addf> %up_acc : f32
+  %lane_i32 = index.cast %bounded_lane : index to i32
+  %is_lane_zero = scalar.cmpi eq, %lane_i32, %c0_i32 : i32
+  %writes_output = scalar.andi %publish_output, %is_lane_zero : i1
+  scf.if %writes_output {
+    %gate_silu = scalar.siluf %gate_dot : f32
+    %result = scalar.mulf %gate_silu, %up_dot : f32
+    view.store %result, %output_view[%bounded_token, %bounded_route, %bounded_channel] : f32, view<[%bounded_token_count]x[%bounded_route_count]x[%bounded_output_size]xf32>
+  }
+  template.return
+}
+
+// Small-token schedule for routed Q4_K gate/up projections. Each workgroup
+// packs four independent channel waves for one [token, route] pair. Eight
+// lanes consume both nibbles of the packed codes for one 256-element block, so
+// each wave advances through K in 1024-element stripes. Gate and up share each
+// paired Q8_1 load before independent raw-weight dot products and a fused
+// SwiGLU epilogue.
+kernel.def retain export("ffn_routed_gate_up_swiglu_q4k_q8") @ffn_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index) {
+  %token_capacity = config.get @ffn_routed_gate_up.token_capacity : index
+  %configured_route_count = config.get @ffn_routed_gate_up.route_count : index
+  %configured_output_size = config.get @ffn_routed_gate_up.output_size : index
+  %unit = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %workgroup_size = index.constant 128 : index
+  %padded_output_size = index.add %configured_output_size, %c3 : index
+  %channel_workgroup_count = index.div %padded_output_size, %c4 : index
+  kernel.launch.config workgroups(%channel_workgroup_count, %configured_route_count, %token_capacity) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+  %token_capacity = config.get @ffn_routed_gate_up.token_capacity : index
+  %configured_route_count0 = config.get @ffn_routed_gate_up.route_count : index
+  %configured_expert_count0 = config.get @ffn_routed_gate_up.expert_count : index
+  %configured_output_size0 = config.get @ffn_routed_gate_up.output_size : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512), le(%token_count, %token_capacity)] : index
+  %bounded_route_count, %configured_route_count = index.assume %route_count, %configured_route_count0 [range(%route_count, 1, 8), eq(%route_count, %configured_route_count0)] : index, index
+  %bounded_route_stride = index.assume %route_stride [range(%route_stride, 1, 128)] : index
+  %bounded_expert_count, %configured_expert_count = index.assume %expert_count, %configured_expert_count0 [range(%expert_count, 1, 128), eq(%expert_count, %configured_expert_count0)] : index, index
+  %bounded_output_size, %configured_output_size = index.assume %output_size, %configured_output_size0 [range(%output_size, 1, 4096), eq(%output_size, %configured_output_size0)] : index, index
+  %token0 = kernel.workgroup.id<z> : index
+  %channel_workgroup = kernel.workgroup.id<x> : index
+  %route0 = kernel.workgroup.id<y> : index
+  %subgroup = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %c4 = index.constant 4 : index
+  %valid_token = index.cmp ult, %token0, %bounded_token_count : index
+  %safe_token0 = scf.select %valid_token, %token0, %c0 : index
+  %safe_token, %body_token_count = index.assume %safe_token0, %bounded_token_count [lt(%safe_token0, %bounded_token_count)] : index, index
+  %channel_base = index.mul %channel_workgroup, %c4 : index
+  %channel0 = index.add %channel_base, %subgroup : index
+  %valid_channel = index.cmp ult, %channel0, %bounded_output_size : index
+  %safe_channel0 = scf.select %valid_channel, %channel0, %c0 : index
+  %safe_channel, %body_output_size = index.assume %safe_channel0, %bounded_output_size [lt(%safe_channel0, %bounded_output_size)] : index, index
+  %route, %body_route_count = index.assume %route0, %bounded_route_count [lt(%route0, %bounded_route_count)] : index, index
+  %publishes_output = scalar.andi %valid_token, %valid_channel : i1
+  template.apply<@ffn_routed_gate_up.q4k_q8.body>(%publishes_output, %body_token_count, %safe_token, %body_route_count, %route, %bounded_route_stride, %bounded_expert_count, %body_output_size, %safe_channel, %lane, %q8_input, %route_ids, %gate_weight, %up_weight, %output) : (i1, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}

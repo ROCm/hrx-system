@@ -1528,7 +1528,8 @@ iree_status_t loom_template_selection_query(
               .flags = LOOM_SYMBOL_PRUNING_RETAIN_TARGET_SOURCE_ENTRIES,
           },
   };
-  loom_condition_query_initialize(module, arena, &state.condition_query);
+  loom_condition_query_initialize(module, /*value_domain=*/NULL, arena,
+                                  &state.condition_query);
   loom_symbol_fact_table_initialize(&state.fact_table, arena);
 
   iree_status_t status =
@@ -1571,7 +1572,8 @@ iree_status_t loom_template_selection_run(loom_pass_t* pass,
               .flags = LOOM_SYMBOL_PRUNING_RETAIN_TARGET_SOURCE_ENTRIES,
           },
   };
-  loom_condition_query_initialize(module, pass->arena, &state.condition_query);
+  loom_condition_query_initialize(module, /*value_domain=*/NULL, pass->arena,
+                                  &state.condition_query);
   loom_symbol_fact_table_initialize(&state.fact_table, pass->arena);
   loom_template_provider_catalog_initialize(&catalog, pass->arena);
 

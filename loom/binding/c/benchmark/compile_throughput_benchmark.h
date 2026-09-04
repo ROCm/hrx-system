@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -22,6 +23,33 @@ class State;
 }  // namespace benchmark
 
 namespace loomc::bench {
+
+// One immutable source file selected from an embedded smoke-workload cluster.
+struct EmbeddedSource {
+  // Stable source identifier reported by diagnostics.
+  loomc_string_view_t identifier;
+
+  // Borrowed source bytes retained by the generated embedded-data library.
+  loomc_byte_span_t contents;
+};
+
+// Finds a source in an iree_c_embed_data table during benchmark registration.
+// The generated table and its registrations are one build-time unit, so a
+// missing identifier is a benchmark construction bug rather than user input.
+template <typename FileToc>
+EmbeddedSource FindEmbeddedSource(const FileToc* files, size_t file_count,
+                                  const char* identifier) {
+  for (size_t i = 0; i < file_count; ++i) {
+    if (std::strcmp(files[i].name, identifier) == 0) {
+      return {
+          /*.identifier=*/loomc_make_cstring_view(files[i].name),
+          /*.contents=*/loomc_make_byte_span(files[i].data, files[i].size),
+      };
+    }
+  }
+  IREE_ASSERT(false && "embedded benchmark source must exist");
+  return {};
+}
 
 struct WorkerSlot {
   // Invocation-local scratch workspace used by one compile-pool worker.
@@ -40,6 +68,10 @@ class CompileScenario {
 
   virtual iree_host_size_t job_count() const = 0;
 
+  // Number of kernels represented by each benchmark job. Most scenarios
+  // compile one kernel per job; module-scaling scenarios may compile several.
+  virtual iree_host_size_t kernel_count_per_job() const { return 1; }
+
   // Prepares every worker-owned state and workload shape needed by timed jobs.
   virtual iree_status_t WarmUp(iree_host_size_t worker_count);
 
@@ -53,7 +85,7 @@ class CompileScenario {
   int64_t artifact_bytes() const;
 
   void SetWorkspaceAllocationCounters(::benchmark::State& state,
-                                      int64_t total_jobs) const;
+                                      int64_t total_kernels) const;
 
  protected:
   iree_status_t SetUpWorkerSlots(iree_host_size_t worker_count);
@@ -104,6 +136,10 @@ class TargetCompileScenario : public CompileScenario {
     return target_environment_.get();
   }
 
+  loomc_target_profile_t* target_profile() const {
+    return target_profile_.get();
+  }
+
  private:
   // Target provider set shared by all jobs in the scenario.
   TargetEnvironmentPtr target_environment_;
@@ -150,8 +186,8 @@ iree_status_t ValidateModuleBytecodeArtifact(const loomc_result_t* result,
 iree_status_t CreateTextSource(const std::string& identifier,
                                const std::string& text, SourcePtr* out_source);
 
-iree_status_t CreateBenchmarkKernelSource(loomc_string_view_t identifier,
-                                          SourcePtr* out_source);
+iree_status_t CreateBenchmarkSource(EmbeddedSource source,
+                                    SourcePtr* out_source);
 
 iree_status_t CreateWorkspace(iree_host_size_t block_size,
                               WorkspacePtr* out_workspace);
@@ -175,6 +211,7 @@ iree_status_t AddSourceToIndex(loomc_link_index_builder_t* builder,
                                loomc_link_provider_role_t role);
 
 iree_status_t PreparePassProgram(loomc_context_t* context,
+                                 loomc_string_view_t pipeline_text,
                                  PassProgramPtr* out_pass_program);
 
 }  // namespace loomc::bench

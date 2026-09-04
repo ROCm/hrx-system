@@ -125,8 +125,8 @@ typedef struct loom_view_region_table_t {
   // Borrowed symbolic expression context shared by all region construction.
   loom_symbolic_expr_context_t* expression_context;
 
-  // Borrowed active local value domain used for value ID to ordinal mapping.
-  const loom_local_value_domain_t* value_domain;
+  // Borrowed active local value domain extended for discovered values.
+  loom_local_value_domain_t* value_domain;
 
   // Dense map from local value ordinal to region ID, or INVALID.
   loom_view_region_id_t* region_ids_by_value_ordinal;
@@ -148,7 +148,7 @@ typedef struct loom_view_region_table_t {
 // domain and its matching symbolic expression context. The value domain and
 // expression context must remain active until the table is dead.
 iree_status_t loom_view_region_table_initialize(
-    const loom_local_value_domain_t* value_domain,
+    loom_local_value_domain_t* value_domain,
     loom_symbolic_expr_context_t* expression_context,
     loom_view_region_table_t* out_table);
 

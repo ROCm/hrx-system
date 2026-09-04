@@ -211,8 +211,6 @@ iree_status_t loom_low_lower_source_query_scope_create(
   scope->context.lowering.fact_table = options->fact_table;
   iree_arena_initialize(module->arena.block_pool,
                         &scope->context.function_arena);
-  loom_condition_query_initialize(module, &scope->context.function_arena,
-                                  &scope->context.lowering.condition_query);
 
   iree_status_t status =
       loom_target_low_descriptor_set_select_for_source_lowering(
@@ -225,6 +223,14 @@ iree_status_t loom_low_lower_source_query_scope_create(
         module, source_body, &scope->context.function_arena,
         &scope->context.lowering.value_domain);
     scope->value_domain_initialized = iree_status_is_ok(status);
+  }
+  if (iree_status_is_ok(status)) {
+    loom_condition_query_initialize(module,
+                                    scope->value_domain_initialized
+                                        ? &scope->context.lowering.value_domain
+                                        : NULL,
+                                    &scope->context.function_arena,
+                                    &scope->context.lowering.condition_query);
   }
   if (iree_status_is_ok(status)) {
     status = loom_target_contract_index_compose(
@@ -261,8 +267,8 @@ loom_low_lower_source_query_scope_callback(
   return loom_low_lower_source_query_callback(&scope->context);
 }
 
-const loom_local_value_domain_t* loom_low_lower_source_query_scope_value_domain(
-    const loom_low_lower_source_query_scope_t* scope) {
+loom_local_value_domain_t* loom_low_lower_source_query_scope_value_domain(
+    loom_low_lower_source_query_scope_t* scope) {
   return scope->value_domain_initialized ? &scope->context.lowering.value_domain
                                          : NULL;
 }

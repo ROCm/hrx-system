@@ -17,20 +17,31 @@
 #include <vector>
 
 #include "benchmark/benchmark.h"
+#include "loom/binding/c/benchmark/kernels/attention_prefill_smoke.h"
+#include "loom/binding/c/benchmark/kernels/ffn_gate_up_smoke.h"
+#include "loom/binding/c/benchmark/kernels/ffn_routed_gate_up_smoke.h"
+#include "loom/binding/c/benchmark/kernels/synthetic_i32_chain_smoke.h"
+#include "loom/binding/c/benchmark/workload_compile_benchmark.h"
 #include "loomc/target/amdgpu.h"
 
 namespace {
 
 using loomc::bench::CloneModule;
 using loomc::bench::CompileScenario;
-using loomc::bench::CreateBenchmarkKernelSource;
+using loomc::bench::CreateBenchmarkSource;
 using loomc::bench::CreateTextModule;
 using loomc::bench::CreateTextSource;
 using loomc::bench::CreateWorkspace;
 using loomc::bench::DeserializeSource;
+using loomc::bench::EmbeddedSource;
+using loomc::bench::FindEmbeddedSource;
 using loomc::bench::loom_allocator;
 using loomc::bench::ModulePtr;
+using loomc::bench::PassProgramPtr;
+using loomc::bench::PreparePassProgram;
 using loomc::bench::ReadArtifactPrefix;
+using loomc::bench::RegisterAttentionCompileBenchmarks;
+using loomc::bench::RegisterInputScalingCompileBenchmarks;
 using loomc::bench::RequireSucceededResult;
 using loomc::bench::ResultPtr;
 using loomc::bench::RunCompileBenchmarkDirect;
@@ -41,17 +52,96 @@ using loomc::bench::TargetEnvironmentPtr;
 using loomc::bench::TargetProfilePtr;
 using loomc::bench::to_iree_status;
 using loomc::bench::ValidateArtifact;
+using loomc::bench::WorkloadCompileTarget;
 using loomc::bench::WorkspacePtr;
 
 struct AmdgpuBenchmarkTarget {
+  // Stable target/profile name included in benchmark result names.
+  const char* benchmark_name;
+
   // Processor key resolved by the production AMDGPU profile table.
   const char* processor;
 };
 
-constexpr AmdgpuBenchmarkTarget kGfx1100Target = {"gfx1100"};
-constexpr AmdgpuBenchmarkTarget kGfx942Target = {"gfx942"};
-constexpr AmdgpuBenchmarkTarget kGfx1200Target = {"gfx1200"};
-constexpr AmdgpuBenchmarkTarget kGfx1250Target = {"gfx1250"};
+constexpr AmdgpuBenchmarkTarget kGfx1100Target = {"amdgpu-gfx1100", "gfx1100"};
+constexpr AmdgpuBenchmarkTarget kGfx942Target = {"amdgpu-gfx942", "gfx942"};
+constexpr AmdgpuBenchmarkTarget kGfx1200Target = {"amdgpu-gfx1200", "gfx1200"};
+constexpr AmdgpuBenchmarkTarget kGfx1250Target = {"amdgpu-gfx1250", "gfx1250"};
+
+static iree_status_t CreateAmdgpuBenchmarkTarget(
+    AmdgpuBenchmarkTarget target, TargetEnvironmentPtr* out_target_environment,
+    TargetProfilePtr* out_target_profile) {
+  loomc_target_environment_t* raw_target_environment = nullptr;
+  IREE_RETURN_IF_ERROR(to_iree_status(loomc_target_environment_create_amdgpu(
+      loom_allocator(), &raw_target_environment)));
+  TargetEnvironmentPtr target_environment(raw_target_environment);
+
+  const loomc_string_view_t processor =
+      loomc_make_cstring_view(target.processor);
+  const loomc_amdgpu_profile_options_t profile_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
+      /*.structure_size=*/sizeof(profile_options),
+      /*.next=*/nullptr,
+      /*.identifier=*/processor,
+      /*.identity=*/
+      {
+          /*.processor=*/processor,
+      },
+  };
+  loomc_target_profile_t* raw_profile = nullptr;
+  IREE_RETURN_IF_ERROR(to_iree_status(loomc_target_profile_create_amdgpu(
+      target_environment.get(), &profile_options, loom_allocator(),
+      &raw_profile)));
+  out_target_environment->reset(target_environment.release());
+  out_target_profile->reset(raw_profile);
+  return iree_ok_status();
+}
+
+static iree_status_t EmitAmdgpuBenchmarkArtifact(
+    loomc_target_environment_t* target_environment,
+    loomc_workspace_t* workspace, loomc_module_t* module,
+    loomc_string_view_t identifier, int64_t* out_artifact_byte_count) {
+  const loomc_amdgpu_emit_options_t amdgpu_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_EMIT_OPTIONS,
+      /*.structure_size=*/sizeof(amdgpu_options),
+      /*.next=*/nullptr,
+      /*.runtime_globals=*/LOOMC_AMDGPU_RUNTIME_GLOBAL_NONE,
+  };
+  const loomc_emit_options_t emit_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      /*.structure_size=*/sizeof(emit_options),
+      /*.next=*/&amdgpu_options,
+      /*.artifact_format=*/
+      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
+      /*.identifier=*/identifier,
+      /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+  };
+
+  loomc_result_t* raw_result = nullptr;
+  iree_status_t status = to_iree_status(
+      loomc_emit_module(target_environment, workspace, module, &emit_options,
+                        loom_allocator(), &raw_result));
+  ResultPtr result(raw_result);
+  IREE_RETURN_IF_ERROR(status);
+  IREE_RETURN_IF_ERROR(RequireSucceededResult(result.get(), "AMDGPU emission"));
+
+  constexpr uint8_t kElfMagic[] = {0x7F, 'E', 'L', 'F'};
+  IREE_RETURN_IF_ERROR(ValidateArtifact(
+      result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
+      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
+      sizeof(kElfMagic), "AMDGPU HSACO executable", out_artifact_byte_count));
+  const loomc_artifact_t* artifact = loomc::bench::FindArtifact(
+      result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
+      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO));
+  uint8_t magic[sizeof(kElfMagic)] = {0};
+  IREE_RETURN_IF_ERROR(
+      ReadArtifactPrefix(artifact, iree_make_byte_span(magic, sizeof(magic))));
+  if (std::memcmp(magic, kElfMagic, sizeof(kElfMagic)) != 0) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "AMDGPU executable is not an ELF image");
+  }
+  return iree_ok_status();
+}
 
 class AmdgpuTargetCompileScenario : public TargetCompileScenario {
  public:
@@ -62,28 +152,9 @@ class AmdgpuTargetCompileScenario : public TargetCompileScenario {
  protected:
   iree_status_t SetUpAmdgpuTarget(iree_host_size_t worker_count) {
     TargetEnvironmentPtr target_environment;
-    loomc_target_environment_t* raw_target_environment = nullptr;
-    IREE_RETURN_IF_ERROR(to_iree_status(loomc_target_environment_create_amdgpu(
-        loom_allocator(), &raw_target_environment)));
-    target_environment.reset(raw_target_environment);
-
-    const loomc_string_view_t processor =
-        loomc_make_cstring_view(target_.processor);
-    loomc_amdgpu_profile_options_t profile_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
-        /*.structure_size=*/sizeof(profile_options),
-        /*.next=*/nullptr,
-        /*.identifier=*/processor,
-        /*.identity=*/
-        {
-            /*.processor=*/processor,
-        },
-    };
-    loomc_target_profile_t* raw_profile = nullptr;
-    IREE_RETURN_IF_ERROR(to_iree_status(loomc_target_profile_create_amdgpu(
-        target_environment.get(), &profile_options, loom_allocator(),
-        &raw_profile)));
-    TargetProfilePtr target_profile(raw_profile);
+    TargetProfilePtr target_profile;
+    IREE_RETURN_IF_ERROR(CreateAmdgpuBenchmarkTarget(
+        target_, &target_environment, &target_profile));
 
     return SetUpTarget(
         worker_count, std::move(target_environment), std::move(target_profile),
@@ -92,48 +163,10 @@ class AmdgpuTargetCompileScenario : public TargetCompileScenario {
 
   iree_status_t EmitAmdgpuArtifact(WorkspacePtr& workspace, ModulePtr& module,
                                    loomc_string_view_t identifier) {
-    loomc_amdgpu_emit_options_t amdgpu_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_EMIT_OPTIONS,
-        /*.structure_size=*/sizeof(amdgpu_options),
-        /*.next=*/nullptr,
-        /*.runtime_globals=*/LOOMC_AMDGPU_RUNTIME_GLOBAL_NONE,
-    };
-    loomc_emit_options_t emit_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-        /*.structure_size=*/sizeof(emit_options),
-        /*.next=*/&amdgpu_options,
-        /*.artifact_format=*/
-        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
-        /*.identifier=*/identifier,
-        /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
-    };
-
-    loomc_result_t* raw_result = nullptr;
-    iree_status_t status = to_iree_status(
-        loomc_emit_module(target_environment(), workspace.get(), module.get(),
-                          &emit_options, loom_allocator(), &raw_result));
-    ResultPtr result(raw_result);
-    IREE_RETURN_IF_ERROR(status);
-    IREE_RETURN_IF_ERROR(
-        RequireSucceededResult(result.get(), "AMDGPU emission"));
-
-    constexpr uint8_t kElfMagic[] = {0x7F, 'E', 'L', 'F'};
     int64_t artifact_bytes = 0;
-    IREE_RETURN_IF_ERROR(ValidateArtifact(
-        result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
-        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
-        sizeof(kElfMagic), "AMDGPU HSACO executable", &artifact_bytes));
-    const loomc_artifact_t* artifact = loomc::bench::FindArtifact(
-        result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
-        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO));
-    uint8_t magic[sizeof(kElfMagic)] = {0};
-    IREE_RETURN_IF_ERROR(ReadArtifactPrefix(
-        artifact, iree_make_byte_span(magic, sizeof(magic))));
-    if (std::memcmp(magic, kElfMagic, sizeof(kElfMagic)) != 0) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "AMDGPU executable is not an ELF image");
-    }
-
+    IREE_RETURN_IF_ERROR(
+        EmitAmdgpuBenchmarkArtifact(target_environment(), workspace.get(),
+                                    module.get(), identifier, &artifact_bytes));
     RecordArtifactBytes(artifact_bytes);
     return iree_ok_status();
   }
@@ -142,6 +175,83 @@ class AmdgpuTargetCompileScenario : public TargetCompileScenario {
   // Immutable target row selected by the benchmark registration.
   AmdgpuBenchmarkTarget target_;
 };
+
+class AmdgpuWorkloadCompileTarget final : public WorkloadCompileTarget {
+ public:
+  explicit AmdgpuWorkloadCompileTarget(AmdgpuBenchmarkTarget target)
+      : target_(target) {}
+
+  const char* benchmark_name() const override { return target_.benchmark_name; }
+
+  loomc_string_view_t pipeline_identifier() const override {
+    return loomc_make_cstring_view("benchmark-amdgpu-prepared-low");
+  }
+
+  iree_status_t CreateTarget(
+      TargetEnvironmentPtr* out_target_environment,
+      TargetProfilePtr* out_target_profile) const override {
+    return CreateAmdgpuBenchmarkTarget(target_, out_target_environment,
+                                       out_target_profile);
+  }
+
+  iree_status_t EmitArtifact(loomc_target_environment_t* target_environment,
+                             loomc_workspace_t* workspace,
+                             loomc_module_t* module,
+                             loomc_string_view_t identifier,
+                             int64_t* out_artifact_byte_count) const override {
+    return EmitAmdgpuBenchmarkArtifact(target_environment, workspace, module,
+                                       identifier, out_artifact_byte_count);
+  }
+
+ private:
+  // Exact AMDGPU target selected for every workload benchmark.
+  AmdgpuBenchmarkTarget target_;
+};
+
+const AmdgpuWorkloadCompileTarget kAmdgpuWorkloadTarget(kGfx1100Target);
+
+const EmbeddedSource kAttentionPrefillSource =
+    FindEmbeddedSource(loomc_benchmark_attention_prefill_smoke_create(),
+                       loomc_benchmark_attention_prefill_smoke_size(),
+                       "prefill_f16_wmma_amdgpu.loom");
+const EmbeddedSource kFfnRoutedGateUpSource =
+    FindEmbeddedSource(loomc_benchmark_ffn_routed_gate_up_smoke_create(),
+                       loomc_benchmark_ffn_routed_gate_up_smoke_size(),
+                       "routed_gate_up_swiglu_q4k_q8_amdgpu.loom");
+const EmbeddedSource kFfnGateUpSource =
+    FindEmbeddedSource(loomc_benchmark_ffn_gate_up_smoke_create(),
+                       loomc_benchmark_ffn_gate_up_smoke_size(),
+                       "gate_up_quadratic_f32_amdgpu.loom");
+const EmbeddedSource kI32MemoryChainSource = FindEmbeddedSource(
+    loomc_benchmark_synthetic_i32_chain_smoke_create(),
+    loomc_benchmark_synthetic_i32_chain_smoke_size(), "i32_memory_chain.loom");
+
+[[maybe_unused]] const bool kAmdgpuWorkloadBenchmarksRegistered = [] {
+  RegisterAttentionCompileBenchmarks(
+      kAmdgpuWorkloadTarget,
+      {
+          /*.source=*/kAttentionPrefillSource,
+          /*.function_symbol=*/"attention_prefill_f16_wmma",
+          /*.artifact_identifier=*/"attention_prefill_benchmark.hsaco",
+      });
+  RegisterInputScalingCompileBenchmarks(
+      kAmdgpuWorkloadTarget, "FfnRoutedGateUpQ4KQ8",
+      {
+          /*.source=*/kFfnRoutedGateUpSource,
+          /*.function_symbol=*/"ffn_routed_gate_up_swiglu_q4k_q8",
+          /*.artifact_identifier=*/"ffn_routed_gate_up_benchmark.hsaco",
+          /*.input_size_config_symbol=*/"ffn_routed_gate_up.input_size",
+      });
+  RegisterInputScalingCompileBenchmarks(
+      kAmdgpuWorkloadTarget, "FfnGateUpQuadraticF32",
+      {
+          /*.source=*/kFfnGateUpSource,
+          /*.function_symbol=*/"ffn_gate_up_quadratic_f32",
+          /*.artifact_identifier=*/"ffn_gate_up_benchmark.hsaco",
+          /*.input_size_config_symbol=*/"ffn_gate_up.input_size",
+      });
+  return true;
+}();
 
 class AmdgpuI32ChainScenario final : public AmdgpuTargetCompileScenario {
  public:
@@ -160,8 +270,8 @@ class AmdgpuI32ChainScenario final : public AmdgpuTargetCompileScenario {
 
   iree_status_t SetUp(iree_host_size_t worker_count) override {
     IREE_RETURN_IF_ERROR(SetUpAmdgpuTarget(worker_count));
-    IREE_RETURN_IF_ERROR(CreateBenchmarkKernelSource(
-        loomc_make_cstring_view("i32_memory_chain.loom"), &source_));
+    IREE_RETURN_IF_ERROR(
+        CreateBenchmarkSource(kI32MemoryChainSource, &source_));
     IREE_RETURN_IF_ERROR(
         CreateWorkspace(/*block_size=*/0, &template_workspace_));
     IREE_RETURN_IF_ERROR(DeserializeSource(context_.get(),

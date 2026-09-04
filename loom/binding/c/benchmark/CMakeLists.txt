@@ -9,22 +9,6 @@
 
 iree_add_all_subdirs()
 
-iree_c_embed_data(
-  NAME
-    benchmark_kernels
-  SRCS
-    "kernels/i32_memory_chain.loom"
-  C_FILE_OUTPUT
-    "benchmark_kernels.c"
-  H_FILE_OUTPUT
-    "benchmark_kernels.h"
-  IDENTIFIER
-    "loomc_benchmark_kernels"
-  TESTONLY
-  FLATTEN
-  PUBLIC
-)
-
 loom_cc_library(
   NAME
     benchmark_support
@@ -63,9 +47,24 @@ loom_cc_library(
   SRCS
     "compile_throughput_benchmark.cc"
   DEPS
-    ::benchmark_kernels
     ::benchmark_support
     ::compile_pool_prototype
+    iree::base
+    iree::third_party::google_benchmark
+    loom::binding::c::loomc
+  TESTONLY
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    workload_compile_benchmark
+  HDRS
+    "workload_compile_benchmark.h"
+  SRCS
+    "workload_compile_benchmark.cc"
+  DEPS
+    ::compile_throughput_benchmark_harness
     iree::base
     iree::third_party::google_benchmark
     loom::binding::c::loomc

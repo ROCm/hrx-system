@@ -49,8 +49,8 @@ static loom_region_t* loom_motion_region_stack_pop(
 iree_status_t loom_motion_analysis_initialize_region(
     const loom_module_t* module, const loom_region_t* region,
     loom_value_fact_table_t* fact_table,
-    const loom_local_value_domain_t* value_domain,
-    iree_arena_allocator_t* arena, loom_motion_analysis_t* out_analysis) {
+    loom_local_value_domain_t* value_domain, iree_arena_allocator_t* arena,
+    loom_motion_analysis_t* out_analysis) {
   *out_analysis = (loom_motion_analysis_t){
       .module = module,
       .arena = arena,

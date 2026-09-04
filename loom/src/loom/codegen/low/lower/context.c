@@ -244,8 +244,8 @@ const loom_low_lower_abi_argument_t* loom_low_lower_context_argument_map(
   return context->lowering.argument_map;
 }
 
-const loom_local_value_domain_t* loom_low_lower_context_value_domain(
-    const loom_low_lower_context_t* context) {
+loom_local_value_domain_t* loom_low_lower_context_value_domain(
+    loom_low_lower_context_t* context) {
   return &context->lowering.value_domain;
 }
 
@@ -301,7 +301,7 @@ loom_symbolic_expr_context_t* loom_low_lower_context_symbolic_expr_context(
       &context->lowering.function_analysis;
   if (analysis->phase < LOOM_LOW_LOWER_FUNCTION_ANALYSIS_EXPRESSIONS) {
     loom_symbolic_expr_context_initialize(
-        loom_low_lower_context_module(context),
+        loom_low_lower_context_module(context), &context->lowering.value_domain,
         loom_low_lower_context_fact_table(context), &context->function_arena,
         &analysis->expression_context);
     analysis->phase = LOOM_LOW_LOWER_FUNCTION_ANALYSIS_EXPRESSIONS;

@@ -967,10 +967,11 @@ static iree_status_t loom_movement_describe_async(
 
 iree_status_t loom_movement_analysis_initialize(
     const loom_value_fact_table_t* fact_table,
-    const loom_local_value_domain_t* value_domain,
-    iree_arena_allocator_t* arena, loom_movement_analysis_t* out_analysis) {
+    loom_local_value_domain_t* value_domain, iree_arena_allocator_t* arena,
+    loom_movement_analysis_t* out_analysis) {
   *out_analysis = (loom_movement_analysis_t){0};
-  loom_symbolic_expr_context_initialize(value_domain->module, fact_table, arena,
+  loom_symbolic_expr_context_initialize(value_domain->module, value_domain,
+                                        fact_table, arena,
                                         &out_analysis->expression_context);
   return loom_view_region_table_initialize(value_domain,
                                            &out_analysis->expression_context,

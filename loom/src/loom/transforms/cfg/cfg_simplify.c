@@ -2252,8 +2252,8 @@ iree_status_t loom_cfg_simplify_run(loom_pass_t* pass, loom_module_t* module,
   while (iree_status_is_ok(status) && changed) {
     changed = false;
     iree_arena_reset(&analysis_arena);
-    loom_condition_query_initialize(module, &analysis_arena,
-                                    &state.condition_query);
+    loom_condition_query_initialize(module, /*value_domain=*/NULL,
+                                    &analysis_arena, &state.condition_query);
 
     loom_value_fact_table_t* fact_table = NULL;
     status = loom_pass_value_facts_acquire(

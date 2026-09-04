@@ -1,0 +1,55 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_c_embed_data(
+    name = "attention_prefill_smoke",
+    testonly = True,
+    srcs = ["attention/prefill_f16_wmma_amdgpu.loom"],
+    c_file_output = "attention_prefill_smoke.c",
+    flatten = True,
+    h_file_output = "attention_prefill_smoke.h",
+    identifier = "loomc_benchmark_attention_prefill_smoke",
+)
+
+iree_c_embed_data(
+    name = "ffn_gate_up_smoke",
+    testonly = True,
+    srcs = [
+        "ffn/gate_up_quadratic_f32_amdgpu.loom",
+        "ffn/gate_up_quadratic_f32_spirv.loom",
+    ],
+    c_file_output = "ffn_gate_up_smoke.c",
+    flatten = True,
+    h_file_output = "ffn_gate_up_smoke.h",
+    identifier = "loomc_benchmark_ffn_gate_up_smoke",
+)
+
+iree_c_embed_data(
+    name = "ffn_routed_gate_up_smoke",
+    testonly = True,
+    srcs = ["ffn/routed_gate_up_swiglu_q4k_q8_amdgpu.loom"],
+    c_file_output = "ffn_routed_gate_up_smoke.c",
+    flatten = True,
+    h_file_output = "ffn_routed_gate_up_smoke.h",
+    identifier = "loomc_benchmark_ffn_routed_gate_up_smoke",
+)
+
+iree_c_embed_data(
+    name = "synthetic_i32_chain_smoke",
+    testonly = True,
+    srcs = ["synthetic/i32_memory_chain.loom"],
+    c_file_output = "synthetic_i32_chain_smoke.c",
+    flatten = True,
+    h_file_output = "synthetic_i32_chain_smoke.h",
+    identifier = "loomc_benchmark_synthetic_i32_chain_smoke",
+)

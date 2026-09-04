@@ -402,7 +402,8 @@ iree_status_t loom_cfg_condition_fact_table_compute(
       arena, graph->block_count, sizeof(*facts), (void**)&facts));
   memset(facts, 0, graph->block_count * sizeof(*facts));
   loom_condition_query_t condition_query;
-  loom_condition_query_initialize(module, arena, &condition_query);
+  loom_condition_query_initialize(module, /*value_domain=*/NULL, arena,
+                                  &condition_query);
 
   iree_host_size_t max_iterations = (iree_host_size_t)graph->block_count + 1;
   for (iree_host_size_t iteration = 0; iteration < max_iterations;

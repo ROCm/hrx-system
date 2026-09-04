@@ -105,6 +105,10 @@ PACKAGE_POLICIES = [
         build_requirements = [IMPORT_TILELANG],
     ),
     package_policy(
+        packages = ["loom/binding/c/benchmark/target/amdgpu/..."],
+        build_requirements = [TARGET_ARCH_AMDGPU, EMIT_AMDGPU],
+    ),
+    package_policy(
         packages = ["loom/binding/c/benchmark/target/spirv/..."],
         build_requirements = [TARGET_ARCH_SPIRV, EMIT_SPIRV],
     ),
