@@ -199,6 +199,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->schedule_classes[1].latency_kind = LOOM_LOW_LATENCY_KIND_EXACT;
   tables->schedule_classes[1].issue_use_start = 0;
   tables->schedule_classes[1].issue_use_count = 1;
+  tables->schedule_classes[1].minimum_issue_cycles = 1;
   tables->schedule_classes[1].model_quality = LOOM_LOW_MODEL_QUALITY_EXACT;
 
   tables->feature_mask_words[0] = UINT64_C(0x5);
@@ -2155,6 +2156,15 @@ TEST(LowDescriptorsTest, RejectsFallbackModelWithoutVariableLatency) {
   InitializeTestTables(&tables);
   tables.schedule_classes[1].latency_kind = LOOM_LOW_LATENCY_KIND_ESTIMATE;
   tables.schedule_classes[1].model_quality = LOOM_LOW_MODEL_QUALITY_FALLBACK;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsIncorrectMinimumIssueCycles) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.schedule_classes[1].minimum_issue_cycles = 2;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));

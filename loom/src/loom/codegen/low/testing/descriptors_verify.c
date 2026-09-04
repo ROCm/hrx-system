@@ -2936,6 +2936,55 @@ static iree_status_t loom_low_verify_resource(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_verify_schedule_class_minimum_issue_cycles(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint32_t schedule_class_index) {
+  const loom_low_schedule_class_t* schedule_class =
+      &descriptor_set->schedule_classes[schedule_class_index];
+  uint64_t expected_minimum_issue_cycles = 0;
+  for (uint16_t i = 0; i < schedule_class->issue_use_count; ++i) {
+    const uint32_t issue_use_index = schedule_class->issue_use_start + i;
+    const loom_low_issue_use_t* issue_use =
+        &descriptor_set->issue_uses[issue_use_index];
+    bool is_first_use_of_resource = true;
+    for (uint16_t j = 0; j < i; ++j) {
+      const loom_low_issue_use_t* previous_issue_use =
+          &descriptor_set->issue_uses[schedule_class->issue_use_start + j];
+      if (previous_issue_use->resource_id == issue_use->resource_id) {
+        is_first_use_of_resource = false;
+        break;
+      }
+    }
+    if (!is_first_use_of_resource) continue;
+
+    uint64_t resource_unit_cycles = 0;
+    for (uint16_t j = i; j < schedule_class->issue_use_count; ++j) {
+      const loom_low_issue_use_t* matching_issue_use =
+          &descriptor_set->issue_uses[schedule_class->issue_use_start + j];
+      if (matching_issue_use->resource_id == issue_use->resource_id) {
+        resource_unit_cycles +=
+            (uint64_t)matching_issue_use->cycles * matching_issue_use->units;
+      }
+    }
+    const uint16_t capacity =
+        descriptor_set->resources[issue_use->resource_id].capacity_per_cycle;
+    const uint64_t resource_cycles = 1 + (resource_unit_cycles - 1) / capacity;
+    if (resource_cycles > expected_minimum_issue_cycles) {
+      expected_minimum_issue_cycles = resource_cycles;
+    }
+  }
+  if (expected_minimum_issue_cycles > UINT16_MAX ||
+      schedule_class->minimum_issue_cycles != expected_minimum_issue_cycles) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low schedule class %" PRIu32 " declares minimum issue cycles %" PRIu16
+        " but its resource rows derive %" PRIu64,
+        schedule_class_index, schedule_class->minimum_issue_cycles,
+        expected_minimum_issue_cycles);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_verify_effect(uint32_t effect_index,
                                             const loom_low_effect_t* effect) {
   IREE_RETURN_IF_ERROR(loom_low_verify_known_flags(
@@ -3102,6 +3151,10 @@ iree_status_t loom_low_descriptor_set_verify(
   }
   for (uint32_t i = 0; i < descriptor_set->resource_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_low_verify_resource(descriptor_set, i));
+  }
+  for (uint32_t i = 0; i < descriptor_set->schedule_class_count; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_verify_schedule_class_minimum_issue_cycles(descriptor_set, i));
   }
   for (uint32_t i = 0; i < descriptor_set->hazard_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_low_verify_hazard(descriptor_set, i));
