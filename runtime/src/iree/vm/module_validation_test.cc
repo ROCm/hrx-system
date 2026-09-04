@@ -10,9 +10,12 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/module.h"
+#include "iree/vm/module_test_util.h"
 #include "iree/vm/reflection.h"
 
 namespace {
+
+using iree::vm::testing::TableModule;
 
 static const iree_vm_module_callable_type_declaration_t kLeafCallableTypes[] = {
     {{{nullptr, 0, 0, 0, 0}, {nullptr, 0, 0, 0, 0}},
@@ -93,198 +96,55 @@ static const iree_vm_metadata_entry_t kUnknownMetadata[] = {
     {IREE_SVL("value"), {99, {nullptr, 0}}},
 };
 
-struct ValidationModule {
-  // Generic base published by the operation under test.
-  iree_vm_module_t base = {};
-  // Mutable vtable used to inject ABI defects.
-  iree_vm_module_vtable_t vtable = {};
-  // Fixed descriptor configured by each test.
-  iree_vm_module_descriptor_t descriptor = {};
-  // Immutable import groups borrowed during publication.
-  const iree_vm_module_import_group_t* import_groups = nullptr;
-  // Immutable imports borrowed during publication.
-  const iree_vm_module_import_declaration_t* imports = nullptr;
-  // Immutable exports borrowed during publication.
-  const iree_vm_module_export_declaration_t* exports = nullptr;
-  // Immutable callable types borrowed during publication.
-  const iree_vm_module_callable_type_declaration_t* callable_types = nullptr;
-  // Immutable metadata entries borrowed during publication.
-  const iree_vm_metadata_entry_t* metadata = nullptr;
-  // Whether final release reached the provider callback.
-  bool destroy_called = false;
-
-  ValidationModule() {
-    vtable = {
-        sizeof(vtable),
-        IREE_VM_MODULE_ABI_VERSION_0,
-        Destroy,
-        FunctionStart,
-        iree_vm_module_function_resume_unreachable,
-        nullptr,
-        nullptr,
-        nullptr,
-        QueryImportGroup,
-        QueryImport,
-        QueryExport,
-        QueryCallableType,
-        iree_vm_module_query_presentation_none,
-        MetadataByOrdinal,
-    };
-    descriptor.name = IREE_SV("validation.module");
-  }
-
-  template <std::size_t N>
-  void SetImportGroups(const iree_vm_module_import_group_t (&values)[N]) {
-    import_groups = values;
-    descriptor.counts.import_group_count = N;
-  }
-
-  template <std::size_t N>
-  void SetImports(const iree_vm_module_import_declaration_t (&values)[N]) {
-    imports = values;
-    descriptor.counts.import_count = N;
-  }
-
-  template <std::size_t N>
-  void SetExports(const iree_vm_module_export_declaration_t (&values)[N]) {
-    exports = values;
-    descriptor.counts.export_count = N;
-  }
-
-  template <std::size_t N>
-  void SetCallableTypes(
-      const iree_vm_module_callable_type_declaration_t (&values)[N]) {
-    callable_types = values;
-    descriptor.counts.callable_type_count = N;
-    descriptor.counts.callable_fields = {};
-    for (const auto& value : values) {
-      descriptor.counts.callable_fields.value_count +=
-          value.signature.arguments.value_count +
-          value.signature.results.value_count;
-      descriptor.counts.callable_fields.ref_count +=
-          value.signature.arguments.ref_count +
-          value.signature.results.ref_count;
-      descriptor.counts.callable_fields.function_count +=
-          value.signature.arguments.function_count +
-          value.signature.results.function_count;
-    }
-  }
-
-  template <std::size_t N>
-  void SetMetadata(const iree_vm_metadata_entry_t (&values)[N]) {
-    metadata = values;
-    descriptor.counts.metadata_count = N;
-  }
-
-  iree_status_t Publish() {
-    return iree_vm_module_initialize(&vtable, &descriptor, &base);
-  }
-
-  static ValidationModule* Cast(iree_vm_module_t* module) {
-    return iree_containerof(module, ValidationModule, base);
-  }
-
-  static const ValidationModule* Cast(const iree_vm_module_t* module) {
-    return iree_containerof(module, ValidationModule, base);
-  }
-
-  static void Destroy(iree_vm_module_t* module) {
-    Cast(module)->destroy_called = true;
-  }
-
-  static iree_status_t FunctionStart(
-      iree_vm_module_t* module,
-      const iree_vm_module_function_start_params_t* params,
-      iree_vm_execution_outcome_t* out_outcome) {
-    (void)module;
-    (void)params;
-    *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
-    return iree_ok_status();
-  }
-
-  static void QueryImportGroup(const iree_vm_module_t* module,
-                               iree_host_size_t ordinal,
-                               iree_vm_module_import_group_t* out_group) {
-    *out_group = Cast(module)->import_groups[ordinal];
-  }
-
-  static void QueryImport(const iree_vm_module_t* module,
-                          iree_host_size_t ordinal,
-                          iree_vm_module_import_declaration_t* out_import) {
-    *out_import = Cast(module)->imports[ordinal];
-  }
-
-  static void QueryExport(const iree_vm_module_t* module,
-                          iree_host_size_t ordinal,
-                          iree_vm_module_export_declaration_t* out_export) {
-    *out_export = Cast(module)->exports[ordinal];
-  }
-
-  static void QueryCallableType(
-      const iree_vm_module_t* module, iree_host_size_t ordinal,
-      iree_vm_module_callable_type_declaration_t* out_callable_type) {
-    *out_callable_type = Cast(module)->callable_types[ordinal];
-  }
-
-  static void MetadataByOrdinal(const iree_vm_module_t* module,
-                                const iree_vm_module_metadata_query_t* query,
-                                iree_vm_metadata_entry_t* out_entry) {
-    *out_entry = Cast(module)->metadata[query->ordinal];
-  }
-};
-
-static_assert(offsetof(ValidationModule, base) == 0,
-              "validation module base must remain at offset zero");
-
-static void ExpectRejected(ValidationModule& module) {
+static void ExpectRejected(TableModule& module) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, module.Publish());
-  EXPECT_EQ(module.base.vtable, nullptr);
-  EXPECT_EQ(module.base.descriptor, nullptr);
-  EXPECT_FALSE(module.destroy_called);
+  EXPECT_EQ(module.storage()->vtable, nullptr);
+  EXPECT_EQ(module.storage()->descriptor, nullptr);
+  EXPECT_EQ(module.destruction_count(), 0);
 }
 
 template <std::size_t N>
 static void ExpectCallableTypesRejected(
     const iree_vm_module_callable_type_declaration_t (&values)[N]) {
-  ValidationModule module;
-  module.SetCallableTypes(values);
+  TableModule module;
+  module.definition().WithCallableTypes(values);
   ExpectRejected(module);
 }
 
 template <std::size_t N>
 static void ExpectMetadataRejected(
     const iree_vm_metadata_entry_t (&values)[N]) {
-  ValidationModule module;
-  module.SetMetadata(values);
+  TableModule module;
+  module.definition().WithMetadata(values);
   ExpectRejected(module);
 }
 
 TEST(VMModuleValidationTest, PublishesOwnerOnlyAfterValidation) {
-  ValidationModule module;
+  TableModule module;
   IREE_ASSERT_OK(module.Publish());
-  EXPECT_EQ(module.base.vtable, &module.vtable);
-  EXPECT_EQ(module.base.descriptor, &module.descriptor);
-  EXPECT_FALSE(module.destroy_called);
-  iree_vm_module_release(&module.base);
-  EXPECT_TRUE(module.destroy_called);
+  EXPECT_EQ(module.storage()->vtable, &module.vtable());
+  EXPECT_EQ(module.storage()->descriptor, &module.descriptor());
+  EXPECT_EQ(module.destruction_count(), 0);
+  module.ReleaseOwner();
+  EXPECT_EQ(module.destruction_count(), 1);
 }
 
 TEST(VMModuleValidationTest, RejectsIncompleteOrIncompatibleVtables) {
-  ValidationModule module;
-  module.vtable.structure_size = IREE_VM_MODULE_VTABLE_V0_REQUIRED_SIZE - 1;
+  TableModule module;
+  module.vtable().structure_size = IREE_VM_MODULE_VTABLE_V0_REQUIRED_SIZE - 1;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INCOMPATIBLE, module.Publish());
-  EXPECT_EQ(module.base.vtable, nullptr);
-  EXPECT_EQ(module.base.descriptor, nullptr);
-  EXPECT_FALSE(module.destroy_called);
+  EXPECT_EQ(module.storage()->vtable, nullptr);
+  EXPECT_EQ(module.storage()->descriptor, nullptr);
+  EXPECT_EQ(module.destruction_count(), 0);
 
-  module.vtable.structure_size = sizeof(module.vtable);
-  module.vtable.abi_version = IREE_VM_MODULE_ABI_VERSION_0 + 1;
+  module.vtable().structure_size = sizeof(module.vtable());
+  module.vtable().abi_version = IREE_VM_MODULE_ABI_VERSION_0 + 1;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INCOMPATIBLE, module.Publish());
-  EXPECT_EQ(module.base.vtable, nullptr);
-  EXPECT_EQ(module.base.descriptor, nullptr);
+  EXPECT_EQ(module.storage()->vtable, nullptr);
+  EXPECT_EQ(module.storage()->descriptor, nullptr);
 
-  module.vtable.abi_version = IREE_VM_MODULE_ABI_VERSION_0;
-  module.vtable.query_export = nullptr;
+  module.vtable().abi_version = IREE_VM_MODULE_ABI_VERSION_0;
+  module.vtable().query_export = nullptr;
   ExpectRejected(module);
 }
 
@@ -296,16 +156,17 @@ TEST(VMModuleValidationTest, RejectsMalformedSemanticTables) {
     ExpectCallableTypesRejected(wrong_bank_counts);
   }
   {
-    ValidationModule module;
-    module.SetCallableTypes(kLeafCallableTypes);
-    module.descriptor.counts.callable_fields.value_count = 1;
+    TableModule module;
+    module.definition().WithCallableTypes(kLeafCallableTypes);
+    module.descriptor().counts.callable_fields.value_count = 1;
     ExpectRejected(module);
   }
   {
-    ValidationModule module;
-    module.SetCallableTypes(kLeafCallableTypes);
-    module.SetExports(kUnsortedExports);
-    module.descriptor.counts.function_count = 1;
+    TableModule module;
+    module.definition()
+        .WithCallableTypes(kLeafCallableTypes)
+        .WithExports(kUnsortedExports);
+    module.descriptor().counts.function_count = 1;
     ExpectRejected(module);
   }
   ExpectCallableTypesRejected(kRecursiveCallableTypes);
@@ -313,16 +174,17 @@ TEST(VMModuleValidationTest, RejectsMalformedSemanticTables) {
   ExpectCallableTypesRejected(kDuplicateCallableTypes);
   ExpectCallableTypesRejected(kUnsortedCallableTypes);
   {
-    ValidationModule module;
-    module.SetCallableTypes(kLeafCallableTypes);
-    module.descriptor.counts.import_count = 1;
+    TableModule module;
+    module.definition().WithCallableTypes(kLeafCallableTypes);
+    module.descriptor().counts.import_count = 1;
     ExpectRejected(module);
   }
   {
-    ValidationModule module;
-    module.SetCallableTypes(kLeafCallableTypes);
-    module.SetImportGroups(kTwoImportGroup);
-    module.SetImports(kUnsortedImports);
+    TableModule module;
+    module.definition()
+        .WithCallableTypes(kLeafCallableTypes)
+        .WithImportGroups(kTwoImportGroup)
+        .WithImports(kUnsortedImports);
     ExpectRejected(module);
   }
   ExpectMetadataRejected(kUnsortedMetadata);
@@ -331,14 +193,15 @@ TEST(VMModuleValidationTest, RejectsMalformedSemanticTables) {
 }
 
 TEST(VMModuleValidationTest, AcceptsDuplicateTargetsAndUnknownMetadataTypes) {
-  ValidationModule module;
-  module.SetCallableTypes(kLeafCallableTypes);
-  module.SetImportGroups(kTwoImportGroup);
-  module.SetImports(kDuplicateTargetImports);
-  module.SetMetadata(kUnknownMetadata);
+  TableModule module;
+  module.definition()
+      .WithCallableTypes(kLeafCallableTypes)
+      .WithImportGroups(kTwoImportGroup)
+      .WithImports(kDuplicateTargetImports)
+      .WithMetadata(kUnknownMetadata);
   IREE_ASSERT_OK(module.Publish());
-  iree_vm_module_release(&module.base);
-  EXPECT_TRUE(module.destroy_called);
+  module.ReleaseOwner();
+  EXPECT_EQ(module.destruction_count(), 1);
 }
 
 TEST(VMModuleValidationTest, ReflectionOnlyTypesCannotEnterLinkableModules) {
@@ -356,22 +219,22 @@ TEST(VMModuleValidationTest, ReflectionOnlyTypesCannotEnterLinkableModules) {
   const iree_vm_ref_type_t types[] = {&descriptor};
   table.types = {types, IREE_ARRAYSIZE(types)};
 
-  ValidationModule linkable_module;
-  linkable_module.descriptor.flags = IREE_VM_MODULE_FLAG_LINKABLE;
-  linkable_module.descriptor.ref_types = {types, IREE_ARRAYSIZE(types)};
+  TableModule linkable_module;
+  linkable_module.descriptor().flags = IREE_VM_MODULE_FLAG_LINKABLE;
+  linkable_module.descriptor().ref_types = {types, IREE_ARRAYSIZE(types)};
   ExpectRejected(linkable_module);
 
-  ValidationModule inspection_module;
-  inspection_module.descriptor.ref_types = {types, IREE_ARRAYSIZE(types)};
+  TableModule inspection_module;
+  inspection_module.descriptor().ref_types = {types, IREE_ARRAYSIZE(types)};
   IREE_ASSERT_OK(inspection_module.Publish());
-  iree_vm_module_release(&inspection_module.base);
-  EXPECT_TRUE(inspection_module.destroy_called);
+  inspection_module.ReleaseOwner();
+  EXPECT_EQ(inspection_module.destruction_count(), 1);
 }
 
 #if UINTPTR_MAX > UINT32_MAX
 TEST(VMModuleValidationTest, RejectsUnrepresentableProcessStorage) {
-  ValidationModule module;
-  module.descriptor.process_storage_size =
+  TableModule module;
+  module.descriptor().process_storage_size =
       static_cast<iree_host_size_t>(UINT32_MAX) + 1;
   ExpectRejected(module);
 }

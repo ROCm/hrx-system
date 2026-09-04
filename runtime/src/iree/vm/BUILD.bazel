@@ -74,17 +74,23 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
-    name = "test_allocator",
+    name = "test_support",
     testonly = True,
-    hdrs = ["test_allocator.h"],
-    deps = ["//runtime/src/iree/base"],
+    hdrs = [
+        "module_test_util.h",
+        "test_allocator.h",
+    ],
+    deps = [
+        ":vm",
+        "//runtime/src/iree/base",
+    ],
 )
 
 iree_runtime_cc_test(
     name = "buffer_test",
     srcs = ["buffer_test.cc"],
     deps = [
-        ":test_allocator",
+        ":test_support",
         ":vm",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -95,7 +101,7 @@ iree_runtime_cc_test(
     name = "environment_test",
     srcs = ["environment_test.cc"],
     deps = [
-        ":test_allocator",
+        ":test_support",
         ":vm",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -147,6 +153,7 @@ iree_runtime_cc_test(
     name = "module_validation_test",
     srcs = ["module_validation_test.cc"],
     deps = [
+        ":test_support",
         ":vm",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -160,7 +167,7 @@ iree_runtime_cc_test(
         "program_test.cc",
     ],
     deps = [
-        ":test_allocator",
+        ":test_support",
         ":vm",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -171,7 +178,7 @@ iree_runtime_cc_test(
     name = "process_test",
     srcs = ["process_test.cc"],
     deps = [
-        ":test_allocator",
+        ":test_support",
         ":vm",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

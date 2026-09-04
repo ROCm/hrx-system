@@ -78,10 +78,12 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    test_allocator
+    test_support
   HDRS
+    "module_test_util.h"
     "test_allocator.h"
   DEPS
+    ::vm
     iree::base
   TESTONLY
   PUBLIC
@@ -93,7 +95,7 @@ iree_cc_test(
   SRCS
     "buffer_test.cc"
   DEPS
-    ::test_allocator
+    ::test_support
     ::vm
     iree::testing::gtest
     iree::testing::gtest_main
@@ -105,7 +107,7 @@ iree_cc_test(
   SRCS
     "environment_test.cc"
   DEPS
-    ::test_allocator
+    ::test_support
     ::vm
     iree::testing::gtest
     iree::testing::gtest_main
@@ -162,6 +164,7 @@ iree_cc_test(
   SRCS
     "module_validation_test.cc"
   DEPS
+    ::test_support
     ::vm
     iree::testing::gtest
     iree::testing::gtest_main
@@ -174,7 +177,7 @@ iree_cc_test(
     "program_storage.h"
     "program_test.cc"
   DEPS
-    ::test_allocator
+    ::test_support
     ::vm
     iree::testing::gtest
     iree::testing::gtest_main
@@ -186,7 +189,7 @@ iree_cc_test(
   SRCS
     "process_test.cc"
   DEPS
-    ::test_allocator
+    ::test_support
     ::vm
     iree::testing::gtest
     iree::testing::gtest_main

@@ -13,182 +13,19 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "iree/vm/module_test_util.h"
 #include "iree/vm/program_storage.h"
-#include "iree/vm/reflection.h"
 #include "iree/vm/test_allocator.h"
 #include "iree/vm/variant.h"
 
 namespace {
 
 using iree::vm::testing::CountingAllocator;
+using iree::vm::testing::TableModule;
+using iree::vm::testing::TableModuleDefinition;
 
 std::string_view ToStringView(iree_string_view_t value) {
   return std::string_view(value.data ? value.data : "", value.size);
-}
-
-struct TestModule {
-  // Generic module storage published at offset zero.
-  iree_vm_module_t storage = {};
-  // Live owner pointer, or null after releasing the test's owner.
-  iree_vm_module_t* module = &storage;
-  // Borrowed immutable semantic definition.
-  const struct TestModuleDefinition* definition = nullptr;
-  // Number of final provider destruction callbacks.
-  int destruction_count = 0;
-
-  TestModule() = default;
-  TestModule(const TestModule&) = delete;
-  TestModule& operator=(const TestModule&) = delete;
-  ~TestModule() { ReleaseOwner(); }
-
-  void Create(const struct TestModuleDefinition* new_definition);
-
-  void ReleaseOwner() {
-    iree_vm_module_release(module);
-    module = nullptr;
-  }
-};
-
-struct TestModuleDefinition {
-  // Complete fixed generic module descriptor.
-  iree_vm_module_descriptor_t descriptor;
-  // Import groups matching the descriptor count.
-  const iree_vm_module_import_group_t* import_groups;
-  // Imports matching the descriptor count.
-  const iree_vm_module_import_declaration_t* imports;
-  // Exports matching the descriptor count.
-  const iree_vm_module_export_declaration_t* exports;
-  // Callable types matching the descriptor count.
-  const iree_vm_module_callable_type_declaration_t* callable_types;
-
-  TestModuleDefinition() = default;
-  explicit TestModuleDefinition(
-      iree_string_view_t name, iree_host_size_t function_count = 0,
-      iree_host_size_t process_storage_size = 0,
-      iree_vm_module_flags_t flags = IREE_VM_MODULE_FLAG_LINKABLE)
-      : descriptor{name,
-                   flags,
-                   {nullptr, 0},
-                   {function_count, 0, 0, 0, 0, 0, {0, 0, 0}},
-                   process_storage_size},
-        import_groups(nullptr),
-        imports(nullptr),
-        exports(nullptr),
-        callable_types(nullptr) {}
-
-  template <iree_host_size_t N>
-  TestModuleDefinition& WithRefTypes(const iree_vm_ref_type_t (&values)[N]) {
-    descriptor.ref_types = {values, N};
-    return *this;
-  }
-
-  template <iree_host_size_t N>
-  TestModuleDefinition& WithCallableTypes(
-      const iree_vm_module_callable_type_declaration_t (&values)[N]) {
-    callable_types = values;
-    descriptor.counts.callable_type_count = N;
-    descriptor.counts.callable_fields = {};
-    for (const auto& value : values) {
-      descriptor.counts.callable_fields.value_count +=
-          value.signature.arguments.value_count +
-          value.signature.results.value_count;
-      descriptor.counts.callable_fields.ref_count +=
-          value.signature.arguments.ref_count +
-          value.signature.results.ref_count;
-      descriptor.counts.callable_fields.function_count +=
-          value.signature.arguments.function_count +
-          value.signature.results.function_count;
-    }
-    return *this;
-  }
-
-  template <iree_host_size_t GroupCount, iree_host_size_t ImportCount>
-  TestModuleDefinition& WithImports(
-      const iree_vm_module_import_group_t (&groups)[GroupCount],
-      const iree_vm_module_import_declaration_t (&declarations)[ImportCount]) {
-    import_groups = groups;
-    imports = declarations;
-    descriptor.counts.import_group_count = GroupCount;
-    descriptor.counts.import_count = ImportCount;
-    return *this;
-  }
-
-  template <iree_host_size_t N>
-  TestModuleDefinition& WithExports(
-      const iree_vm_module_export_declaration_t (&values)[N]) {
-    exports = values;
-    descriptor.counts.export_count = N;
-    return *this;
-  }
-};
-
-TestModule* CastTestModule(iree_vm_module_t* module) {
-  return iree_containerof(module, TestModule, storage);
-}
-
-const TestModule* CastTestModule(const iree_vm_module_t* module) {
-  return iree_containerof(module, TestModule, storage);
-}
-
-void DestroyTestModule(iree_vm_module_t* module) {
-  ++CastTestModule(module)->destruction_count;
-}
-
-iree_status_t StartTestFunction(
-    iree_vm_module_t* module,
-    const iree_vm_module_function_start_params_t* params,
-    iree_vm_execution_outcome_t* out_outcome) {
-  (void)module;
-  (void)params;
-  (void)out_outcome;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "program-linking module is not executable");
-}
-
-void QueryTestImportGroup(const iree_vm_module_t* module,
-                          iree_host_size_t ordinal,
-                          iree_vm_module_import_group_t* out_group) {
-  *out_group = CastTestModule(module)->definition->import_groups[ordinal];
-}
-
-void QueryTestImport(const iree_vm_module_t* module, iree_host_size_t ordinal,
-                     iree_vm_module_import_declaration_t* out_import) {
-  *out_import = CastTestModule(module)->definition->imports[ordinal];
-}
-
-void QueryTestExport(const iree_vm_module_t* module, iree_host_size_t ordinal,
-                     iree_vm_module_export_declaration_t* out_export) {
-  *out_export = CastTestModule(module)->definition->exports[ordinal];
-}
-
-void QueryTestCallableType(
-    const iree_vm_module_t* module, iree_host_size_t ordinal,
-    iree_vm_module_callable_type_declaration_t* out_callable_type) {
-  *out_callable_type =
-      CastTestModule(module)->definition->callable_types[ordinal];
-}
-
-const iree_vm_module_vtable_t kTestModuleVtable = {
-    sizeof(kTestModuleVtable),
-    IREE_VM_MODULE_ABI_VERSION_0,
-    DestroyTestModule,
-    StartTestFunction,
-    iree_vm_module_function_resume_unreachable,
-    nullptr,
-    nullptr,
-    nullptr,
-    QueryTestImportGroup,
-    QueryTestImport,
-    QueryTestExport,
-    QueryTestCallableType,
-    iree_vm_module_query_presentation_none,
-    iree_vm_module_metadata_by_ordinal_none,
-};
-
-void TestModule::Create(const TestModuleDefinition* new_definition) {
-  definition = new_definition;
-  IREE_ASSERT_OK(iree_vm_module_initialize(&kTestModuleVtable,
-                                           &definition->descriptor, module));
 }
 
 void DestroyTestRef(void* object) { (void)object; }
@@ -357,41 +194,41 @@ static const iree_vm_ref_type_t kAlphaRefTypes[] = {
     kSharedRefType,
 };
 
-static const TestModuleDefinition kAppDefinition =
-    TestModuleDefinition(IREE_SVL("root.app"), 2, 17)
+static const TableModuleDefinition kAppDefinition =
+    TableModuleDefinition(IREE_SVL("root.app"), 2, 17)
         .WithRefTypes(kAppRefTypes)
         .WithCallableTypes(kAppCallableTypes)
         .WithImports(kAppImportGroups, kAppImports)
         .WithExports(kAppExports);
-static const TestModuleDefinition kAlphaDefinition =
-    TestModuleDefinition(IREE_SVL("lib.alpha"), 1, 1)
+static const TableModuleDefinition kAlphaDefinition =
+    TableModuleDefinition(IREE_SVL("lib.alpha"), 1, 1)
         .WithRefTypes(kAlphaRefTypes)
         .WithCallableTypes(kAlphaCallableTypes)
         .WithImports(kAlphaImportGroups, kAlphaImports)
         .WithExports(kAlphaExports);
-static const TestModuleDefinition kBetaDefinition =
-    TestModuleDefinition(IREE_SVL("lib.beta"), 1)
+static const TableModuleDefinition kBetaDefinition =
+    TableModuleDefinition(IREE_SVL("lib.beta"), 1)
         .WithCallableTypes(kBetaCallableTypes)
         .WithExports(kBetaExports);
 
 TEST(VMProgramTest, LinksOneSlabAndPrecomputesComposition) {
-  TestModule app;
-  TestModule alpha;
-  TestModule beta;
-  app.Create(&kAppDefinition);
-  alpha.Create(&kAlphaDefinition);
-  beta.Create(&kBetaDefinition);
+  TableModule app;
+  TableModule alpha;
+  TableModule beta;
+  IREE_ASSERT_OK(app.Publish(kAppDefinition));
+  IREE_ASSERT_OK(alpha.Publish(kAlphaDefinition));
+  IREE_ASSERT_OK(beta.Publish(kBetaDefinition));
 
-  iree_vm_module_t* libraries[] = {beta.module, alpha.module};
+  iree_vm_module_t* libraries[] = {beta.module(), alpha.module()};
   CountingAllocator allocator_a;
   CountingAllocator allocator_b;
   iree_vm_program_t* program_a = nullptr;
   iree_vm_program_t* program_b = nullptr;
   IREE_ASSERT_OK(iree_vm_program_create(
-      {app.module, iree_vm_module_span_from_array(libraries)},
+      {app.module(), iree_vm_module_span_from_array(libraries)},
       allocator_a.allocator(), &program_a));
   IREE_ASSERT_OK(iree_vm_program_create(
-      {app.module, iree_vm_module_span_from_array(libraries)},
+      {app.module(), iree_vm_module_span_from_array(libraries)},
       allocator_b.allocator(), &program_b));
   ASSERT_NE(program_a, nullptr);
   ASSERT_NE(program_b, nullptr);
@@ -514,9 +351,10 @@ TEST(VMProgramTest, LinksOneSlabAndPrecomputesComposition) {
 
   iree_vm_export_t run_export = {};
   iree_vm_export_t alias_export = {};
-  IREE_ASSERT_OK(iree_vm_module_export_by_ordinal(app.module, 1, &run_export));
   IREE_ASSERT_OK(
-      iree_vm_module_export_by_ordinal(app.module, 2, &alias_export));
+      iree_vm_module_export_by_ordinal(app.module(), 1, &run_export));
+  IREE_ASSERT_OK(
+      iree_vm_module_export_by_ordinal(app.module(), 2, &alias_export));
   iree_vm_function_ref_t run_function = iree_vm_function_ref_null();
   iree_vm_function_ref_t alias_function = iree_vm_function_ref_null();
   IREE_ASSERT_OK(
@@ -544,11 +382,11 @@ TEST(VMProgramTest, LinksOneSlabAndPrecomputesComposition) {
                                                  &module_ordinal),
             nullptr);
 
-  TestModule foreign_app;
-  foreign_app.Create(&kAppDefinition);
+  TableModule foreign_app;
+  IREE_ASSERT_OK(foreign_app.Publish(kAppDefinition));
   iree_vm_export_t foreign_export = {};
-  IREE_ASSERT_OK(
-      iree_vm_module_export_by_ordinal(foreign_app.module, 1, &foreign_export));
+  IREE_ASSERT_OK(iree_vm_module_export_by_ordinal(foreign_app.module(), 1,
+                                                  &foreign_export));
   iree_vm_function_ref_t untouched = {123, 456};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -559,40 +397,40 @@ TEST(VMProgramTest, LinksOneSlabAndPrecomputesComposition) {
   app.ReleaseOwner();
   alpha.ReleaseOwner();
   beta.ReleaseOwner();
-  EXPECT_EQ(app.destruction_count, 0);
-  EXPECT_EQ(alpha.destruction_count, 0);
-  EXPECT_EQ(beta.destruction_count, 0);
+  EXPECT_EQ(app.destruction_count(), 0);
+  EXPECT_EQ(alpha.destruction_count(), 0);
+  EXPECT_EQ(beta.destruction_count(), 0);
   iree_vm_program_release(program_a);
   EXPECT_EQ(allocator_a.free_count(), 1u);
-  EXPECT_EQ(app.destruction_count, 0);
+  EXPECT_EQ(app.destruction_count(), 0);
   iree_vm_program_release(program_b);
   EXPECT_EQ(allocator_b.free_count(), 1u);
-  EXPECT_EQ(app.destruction_count, 1);
-  EXPECT_EQ(alpha.destruction_count, 1);
-  EXPECT_EQ(beta.destruction_count, 1);
+  EXPECT_EQ(app.destruction_count(), 1);
+  EXPECT_EQ(alpha.destruction_count(), 1);
+  EXPECT_EQ(beta.destruction_count(), 1);
 }
 
 void ExpectReverseOrderedComposition(iree_host_size_t module_count) {
   ASSERT_GE(module_count, 1u);
   ASSERT_LE(module_count, 17u);
   std::array<std::array<char, 16>, 17> names = {};
-  std::array<TestModuleDefinition, 17> definitions = {};
-  std::array<TestModule, 17> modules;
+  std::array<TableModuleDefinition, 17> definitions = {};
+  std::array<TableModule, 17> modules;
   for (iree_host_size_t i = 0; i < module_count; ++i) {
     std::snprintf(names[i].data(), names[i].size(), "module.%02zu",
                   static_cast<size_t>(i));
     definitions[i].descriptor.name = iree_make_cstring_view(names[i].data());
     definitions[i].descriptor.flags = IREE_VM_MODULE_FLAG_LINKABLE;
-    modules[i].Create(&definitions[i]);
+    IREE_ASSERT_OK(modules[i].Publish(definitions[i]));
   }
   std::array<iree_vm_module_t*, 16> libraries = {};
   for (iree_host_size_t i = 0; i + 1 < module_count; ++i) {
-    libraries[i] = modules[module_count - i - 2].module;
+    libraries[i] = modules[module_count - i - 2].module();
   }
   CountingAllocator allocator;
   iree_vm_program_t* program = nullptr;
   IREE_ASSERT_OK(iree_vm_program_create(
-      {modules[module_count - 1].module,
+      {modules[module_count - 1].module(),
        iree_vm_module_span_from_ptr(libraries.data(), module_count - 1)},
       allocator.allocator(), &program));
   ASSERT_NE(program, nullptr);
@@ -615,26 +453,26 @@ TEST(VMProgramTest, SortsInsertionAndHeapBoundariesWithoutTransientStorage) {
 }
 
 TEST(VMProgramTest, LeavesInputsUnownedWhenSlabAllocationFails) {
-  TestModule app;
-  TestModule alpha;
-  TestModule beta;
-  app.Create(&kAppDefinition);
-  alpha.Create(&kAlphaDefinition);
-  beta.Create(&kBetaDefinition);
-  iree_vm_module_t* libraries[] = {beta.module, alpha.module};
+  TableModule app;
+  TableModule alpha;
+  TableModule beta;
+  IREE_ASSERT_OK(app.Publish(kAppDefinition));
+  IREE_ASSERT_OK(alpha.Publish(kAlphaDefinition));
+  IREE_ASSERT_OK(beta.Publish(kBetaDefinition));
+  iree_vm_module_t* libraries[] = {beta.module(), alpha.module()};
   CountingAllocator allocator(/*fail_at_allocation=*/1);
   iree_vm_program_t* program = reinterpret_cast<iree_vm_program_t*>(1);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
       iree_vm_program_create(
-          {app.module, iree_vm_module_span_from_array(libraries)},
+          {app.module(), iree_vm_module_span_from_array(libraries)},
           allocator.allocator(), &program));
   EXPECT_EQ(program, nullptr);
   EXPECT_EQ(allocator.allocation_count(), 1u);
   EXPECT_EQ(allocator.free_count(), 0u);
-  EXPECT_EQ(app.destruction_count, 0);
-  EXPECT_EQ(alpha.destruction_count, 0);
-  EXPECT_EQ(beta.destruction_count, 0);
+  EXPECT_EQ(app.destruction_count(), 0);
+  EXPECT_EQ(alpha.destruction_count(), 0);
+  EXPECT_EQ(beta.destruction_count(), 0);
 }
 
 //===----------------------------------------------------------------------===//
@@ -648,8 +486,8 @@ static const iree_vm_module_import_declaration_t kMissingModuleImports[] = {
     {IREE_SVL("absent"), IREE_SVL("work"), 0, IREE_VM_MODULE_IMPORT_FLAG_NONE,
      0},
 };
-static const TestModuleDefinition kMissingModuleDefinition =
-    TestModuleDefinition(IREE_SVL("missing.source"))
+static const TableModuleDefinition kMissingModuleDefinition =
+    TableModuleDefinition(IREE_SVL("missing.source"))
         .WithCallableTypes(kBetaCallableTypes)
         .WithImports(kMissingModuleGroups, kMissingModuleImports);
 
@@ -660,11 +498,11 @@ static const iree_vm_module_import_declaration_t kMissingExportImports[] = {
     {IREE_SVL("target.empty"), IREE_SVL("work"), 0,
      IREE_VM_MODULE_IMPORT_FLAG_NONE, 0},
 };
-static const TestModuleDefinition kMissingExportSourceDefinition =
-    TestModuleDefinition(IREE_SVL("source.empty"))
+static const TableModuleDefinition kMissingExportSourceDefinition =
+    TableModuleDefinition(IREE_SVL("source.empty"))
         .WithCallableTypes(kBetaCallableTypes)
         .WithImports(kMissingExportGroups, kMissingExportImports);
-static const TestModuleDefinition kEmptyTargetDefinition(
+static const TableModuleDefinition kEmptyTargetDefinition(
     IREE_SVL("target.empty"));
 
 static const iree_vm_module_signature_type_t kI64Results[] = {
@@ -685,15 +523,15 @@ static const iree_vm_module_import_declaration_t kIncompatibleImports[] = {
     {IREE_SVL("target"), IREE_SVL("work"), 0,
      IREE_VM_MODULE_IMPORT_FLAG_OPTIONAL, 0},
 };
-static const TestModuleDefinition kIncompatibleSourceDefinition =
-    TestModuleDefinition(IREE_SVL("source"))
+static const TableModuleDefinition kIncompatibleSourceDefinition =
+    TableModuleDefinition(IREE_SVL("source"))
         .WithCallableTypes(kBetaCallableTypes)
         .WithImports(kIncompatibleImportGroups, kIncompatibleImports);
 static const iree_vm_module_export_declaration_t kIncompatibleExports[] = {
     {IREE_SVL("work"), 0, 0, 0},
 };
-static const TestModuleDefinition kIncompatibleTargetDefinition =
-    TestModuleDefinition(IREE_SVL("target"), 1)
+static const TableModuleDefinition kIncompatibleTargetDefinition =
+    TableModuleDefinition(IREE_SVL("target"), 1)
         .WithCallableTypes(kIncompatibleCallableTypes)
         .WithExports(kIncompatibleExports);
 
@@ -712,33 +550,35 @@ static const iree_vm_module_import_declaration_t kYieldImports[] = {
     {IREE_SVL("target.yield"), IREE_SVL("work"), 0,
      IREE_VM_MODULE_IMPORT_FLAG_NONE, 0},
 };
-static const TestModuleDefinition kYieldSourceDefinition =
-    TestModuleDefinition(IREE_SVL("source.yield"))
+static const TableModuleDefinition kYieldSourceDefinition =
+    TableModuleDefinition(IREE_SVL("source.yield"))
         .WithCallableTypes(kBetaCallableTypes)
         .WithImports(kYieldImportGroups, kYieldImports);
 static const iree_vm_module_export_declaration_t kYieldExports[] = {
     {IREE_SVL("work"), 0, 0, 0},
 };
-static const TestModuleDefinition kYieldTargetDefinition =
-    TestModuleDefinition(IREE_SVL("target.yield"), 1)
+static const TableModuleDefinition kYieldTargetDefinition =
+    TableModuleDefinition(IREE_SVL("target.yield"), 1)
         .WithCallableTypes(kYieldingCallableTypes)
         .WithExports(kYieldExports);
 
 void ExpectLinkFailure(
     iree_status_code_t expected_code,
-    const TestModuleDefinition* source_definition,
-    const TestModuleDefinition* target_definition = nullptr) {
-  TestModule source;
-  TestModule target;
-  source.Create(source_definition);
+    const TableModuleDefinition* source_definition,
+    const TableModuleDefinition* target_definition = nullptr) {
+  TableModule source;
+  TableModule target;
+  IREE_ASSERT_OK(source.Publish(*source_definition));
   iree_vm_module_span_t libraries = iree_vm_module_span_empty();
+  iree_vm_module_t* target_module = nullptr;
   if (target_definition) {
-    target.Create(target_definition);
-    libraries = iree_vm_module_span_from_ptr(&target.module, 1);
+    IREE_ASSERT_OK(target.Publish(*target_definition));
+    target_module = target.module();
+    libraries = iree_vm_module_span_from_ptr(&target_module, 1);
   }
   iree_vm_program_t* program = nullptr;
   IREE_EXPECT_STATUS_IS(
-      expected_code, iree_vm_program_create({source.module, libraries},
+      expected_code, iree_vm_program_create({source.module(), libraries},
                                             iree_allocator_system(), &program));
   EXPECT_EQ(program, nullptr);
 }
@@ -754,71 +594,72 @@ TEST(VMProgramTest, RejectsMissingAndIncompatibleImports) {
                     &kYieldTargetDefinition);
 }
 
-static const TestModuleDefinition kDuplicateDefinition(IREE_SVL("duplicate"));
-static const TestModuleDefinition kNonLinkableDefinition(
+static const TableModuleDefinition kDuplicateDefinition(IREE_SVL("duplicate"));
+static const TableModuleDefinition kNonLinkableDefinition(
     IREE_SVL("inspection.only"), 0, 0, IREE_VM_MODULE_FLAG_NONE);
-static const TestModuleDefinition kLargeStateDefinition(
+static const TableModuleDefinition kLargeStateDefinition(
     IREE_SVL("storage.large"), 0, UINT32_MAX);
-static const TestModuleDefinition kTailStateDefinition(IREE_SVL("storage.tail"),
-                                                       0, 1);
+static const TableModuleDefinition kTailStateDefinition(
+    IREE_SVL("storage.tail"), 0, 1);
 static const iree_vm_module_export_declaration_t kInvalidInitializerExports[] =
     {
         {IREE_SVL("initialize"), 0, 0, 0},
 };
-static const TestModuleDefinition kInvalidInitializerDefinition =
-    TestModuleDefinition(IREE_SVL("invalid.initializer"), 1)
+static const TableModuleDefinition kInvalidInitializerDefinition =
+    TableModuleDefinition(IREE_SVL("invalid.initializer"), 1)
         .WithCallableTypes(kBetaCallableTypes)
         .WithExports(kInvalidInitializerExports);
 
 TEST(VMProgramTest, RejectsInvalidCompositionAndInitializer) {
   {
-    TestModule executable;
-    TestModule duplicate;
-    executable.Create(&kDuplicateDefinition);
-    duplicate.Create(&kDuplicateDefinition);
-    iree_vm_module_t* libraries[] = {duplicate.module};
+    TableModule executable;
+    TableModule duplicate;
+    IREE_ASSERT_OK(executable.Publish(kDuplicateDefinition));
+    IREE_ASSERT_OK(duplicate.Publish(kDuplicateDefinition));
+    iree_vm_module_t* libraries[] = {duplicate.module()};
     iree_vm_program_t* program = nullptr;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_ALREADY_EXISTS,
         iree_vm_program_create(
-            {executable.module, iree_vm_module_span_from_array(libraries)},
+            {executable.module(), iree_vm_module_span_from_array(libraries)},
             iree_allocator_system(), &program));
     EXPECT_EQ(program, nullptr);
   }
   {
-    TestModule executable;
-    executable.Create(&kInvalidInitializerDefinition);
+    TableModule executable;
+    IREE_ASSERT_OK(executable.Publish(kInvalidInitializerDefinition));
     iree_vm_program_t* program = nullptr;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
-        iree_vm_program_create({executable.module, iree_vm_module_span_empty()},
-                               iree_allocator_system(), &program));
+        iree_vm_program_create(
+            {executable.module(), iree_vm_module_span_empty()},
+            iree_allocator_system(), &program));
     EXPECT_EQ(program, nullptr);
   }
   {
-    TestModule module;
-    module.Create(&kNonLinkableDefinition);
+    TableModule module;
+    IREE_ASSERT_OK(module.Publish(kNonLinkableDefinition));
     CountingAllocator allocator;
     iree_vm_program_t* program = nullptr;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
-        iree_vm_program_create({module.module, iree_vm_module_span_empty()},
+        iree_vm_program_create({module.module(), iree_vm_module_span_empty()},
                                allocator.allocator(), &program));
     EXPECT_EQ(program, nullptr);
     EXPECT_EQ(allocator.allocation_count(), 0u);
   }
   {
-    TestModule large;
-    TestModule tail;
-    large.Create(&kLargeStateDefinition);
-    tail.Create(&kTailStateDefinition);
-    iree_vm_module_t* libraries[] = {tail.module};
+    TableModule large;
+    TableModule tail;
+    IREE_ASSERT_OK(large.Publish(kLargeStateDefinition));
+    IREE_ASSERT_OK(tail.Publish(kTailStateDefinition));
+    iree_vm_module_t* libraries[] = {tail.module()};
     CountingAllocator allocator;
     iree_vm_program_t* program = nullptr;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         iree_vm_program_create(
-            {large.module, iree_vm_module_span_from_array(libraries)},
+            {large.module(), iree_vm_module_span_from_array(libraries)},
             allocator.allocator(), &program));
     EXPECT_EQ(program, nullptr);
     EXPECT_EQ(allocator.allocation_count(), 1u);
@@ -834,13 +675,13 @@ TEST(VMProgramTest, RejectsInvalidPublicInputsBeforeProviderAccess) {
                              iree_allocator_system(), &program));
   EXPECT_EQ(program, nullptr);
 
-  TestModule executable;
-  executable.Create(&kDuplicateDefinition);
+  TableModule executable;
+  IREE_ASSERT_OK(executable.Publish(kDuplicateDefinition));
   iree_vm_module_span_t malformed_span = {nullptr, 1};
   program = reinterpret_cast<iree_vm_program_t*>(1);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_vm_program_create({executable.module, malformed_span},
+      iree_vm_program_create({executable.module(), malformed_span},
                              iree_allocator_system(), &program));
   EXPECT_EQ(program, nullptr);
 }
