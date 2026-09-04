@@ -1,4 +1,4 @@
-// Qwen3.8-27B tiled causal full-attention prefill compiler workload.
+// Tiled causal full-attention prefill compiler workload.
 //
 // One four-wave workgroup computes 16 query rows for one query head. QK uses
 // four 16x16 F16 WMMA fragments across each 64-row cache block. Scores cross
@@ -9,11 +9,11 @@
 // This benchmark-only source retains the rooted production kernel and omits
 // numerical check declarations so compiler timing covers reachable program IR.
 
-amdgpu.target<gfx11-generic> @qwen38_attention_prefill_gfx11_wave64 {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @attention_prefill_gfx11_wave64 {subgroup_size = 64}
 
-config.def @qwen38.attention.cache_capacity = 512 : index
+config.def @attention_prefill.cache_capacity = 512 : index
 
-kernel.def retain target(@qwen38_attention_prefill_gfx11_wave64) export("qwen38_attention_prefill_f16_wmma") @qwen38_attention_prefill_f16_wmma(%token_count0: index) {
+kernel.def retain target(@attention_prefill_gfx11_wave64) export("attention_prefill_f16_wmma") @attention_prefill_f16_wmma(%token_count0: index) {
   %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
   %c1 = index.constant 1 : index
   %c15 = index.constant 15 : index
@@ -24,7 +24,7 @@ kernel.def retain target(@qwen38_attention_prefill_gfx11_wave64) export("qwen38_
   %query_tile_count = index.div %padded_token_count, %c16 : index
   kernel.launch.config workgroups(%query_tile_count, %c24, %c1) workgroup_size(%c256, %c1, %c1) : index
 } launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer) {
-  %cache_capacity = config.get @qwen38.attention.cache_capacity : index
+  %cache_capacity = config.get @attention_prefill.cache_capacity : index
   %query_tile = kernel.workgroup.id<x> : index
   %query_head0 = kernel.workgroup.id<y> : index
   %query_head = index.assume %query_head0 [range(%query_head0, 0, 23)] : index

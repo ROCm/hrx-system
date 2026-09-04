@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "iree_cmake_extra_content",
@@ -16,22 +15,6 @@ package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
-)
-
-iree_c_embed_data(
-    name = "benchmark_kernels",
-    testonly = True,
-    srcs = [
-        "kernels/i32_memory_chain.loom",
-        "kernels/qwen38_attention_prefill_wmma.loom",
-        "kernels/qwen3_ffn_gate_up_f32_amdgpu.loom",
-        "kernels/qwen3_ffn_gate_up_f32_spirv.loom",
-        "kernels/qwen3_moe_routed_gate_up_q4k.loom",
-    ],
-    c_file_output = "benchmark_kernels.c",
-    flatten = True,
-    h_file_output = "benchmark_kernels.h",
-    identifier = "loomc_benchmark_kernels",
 )
 
 loom_cc_library(
@@ -64,7 +47,6 @@ loom_cc_library(
     srcs = ["compile_throughput_benchmark.cc"],
     hdrs = ["compile_throughput_benchmark.h"],
     deps = [
-        ":benchmark_kernels",
         ":benchmark_support",
         ":compile_pool_prototype",
         "//loom/binding/c:loomc",

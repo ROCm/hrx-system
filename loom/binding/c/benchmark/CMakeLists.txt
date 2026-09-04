@@ -9,26 +9,6 @@
 
 iree_add_all_subdirs()
 
-iree_c_embed_data(
-  NAME
-    benchmark_kernels
-  SRCS
-    "kernels/i32_memory_chain.loom"
-    "kernels/qwen38_attention_prefill_wmma.loom"
-    "kernels/qwen3_ffn_gate_up_f32_amdgpu.loom"
-    "kernels/qwen3_ffn_gate_up_f32_spirv.loom"
-    "kernels/qwen3_moe_routed_gate_up_q4k.loom"
-  C_FILE_OUTPUT
-    "benchmark_kernels.c"
-  H_FILE_OUTPUT
-    "benchmark_kernels.h"
-  IDENTIFIER
-    "loomc_benchmark_kernels"
-  TESTONLY
-  FLATTEN
-  PUBLIC
-)
-
 loom_cc_library(
   NAME
     benchmark_support
@@ -67,7 +47,6 @@ loom_cc_library(
   SRCS
     "compile_throughput_benchmark.cc"
   DEPS
-    ::benchmark_kernels
     ::benchmark_support
     ::compile_pool_prototype
     iree::base

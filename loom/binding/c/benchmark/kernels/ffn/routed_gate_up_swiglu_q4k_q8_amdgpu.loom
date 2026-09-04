@@ -1,24 +1,24 @@
-// Qwen3-30B-A3B routed Q4_K gate/up SwiGLU compiler workload.
+// Routed Q4_K gate/up SwiGLU compiler workload.
 //
 // One wave computes one routed output channel. Each unrolled iteration consumes
 // a 1024-element K stripe through paired Q4_K decode, Q8_1 dot products, and
 // gate/up accumulation. Varying input_size scales one production function body
 // without manufacturing unrelated operations.
 
-config.decl @qwen3_moe.routed_gate_up.input_size : %value: index where [range(%value, 512, 32768), mul(%value, 512)]
+config.decl @ffn_routed_gate_up.input_size : %value: index where [range(%value, 512, 32768), mul(%value, 512)]
 
-config.def @qwen3_moe.routed_gate_up.expert_count = 128 : index
+config.def @ffn_routed_gate_up.expert_count = 128 : index
 
-config.def @qwen3_moe.routed_gate_up.route_count = 8 : index
+config.def @ffn_routed_gate_up.route_count = 8 : index
 
-config.def @qwen3_moe.routed_gate_up.output_size = 768 : index
+config.def @ffn_routed_gate_up.output_size = 768 : index
 
-config.def @qwen3_moe.workload.token_capacity = 16 : index
+config.def @ffn_routed_gate_up.token_capacity = 16 : index
 
 // Decodes one Q4_K scale/minimum pair from a header loaded as three packed
 // scale words. Keeping the complete header in registers lets paired-group
 // contractions share both the header and packed-code load.
-func.def inline @qwen3_moe_q4k_scale_from_header(%scale0: i32, %scale1: i32, %scale2: i32, %q4_group: index) -> (i32, i32) {
+func.def inline @ffn_routed_q4k_scale_from_header(%scale0: i32, %scale1: i32, %scale2: i32, %q4_group: index) -> (i32, i32) {
   %c4 = index.constant 4 : index
   %c8 = index.constant 8 : index
   %c2_i32 = scalar.constant 2 : i32
@@ -51,7 +51,7 @@ func.def inline @qwen3_moe_q4k_scale_from_header(%scale0: i32, %scale1: i32, %sc
 
 // Decodes two adjacent Q4_K groups from the low and high nibbles of one
 // packed-code load. The caller supplies the already-loaded 16-byte header.
-func.def inline @qwen3_moe_q4k_chunk_pair_global(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group_pair: index, %q4_half: index, %header_words: vector<4xi32>) -> (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) {
+func.def inline @ffn_routed_q4k_chunk_pair_global(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group_pair: index, %q4_half: index, %header_words: vector<4xi32>) -> (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
   %c4 = index.constant 4 : index
@@ -87,8 +87,8 @@ func.def inline @qwen3_moe_q4k_chunk_pair_global(%weight: buffer, %row_byte_base
   %q4_high = vector.bitcast %high_codes : vector<4xi32> to vector<16xi8>
   %low_group = index.mul %bounded_pair, %c2 : index
   %high_group = index.add %low_group, %c1 : index
-  %low_scale, %low_minimum = func.call @qwen3_moe_q4k_scale_from_header(%scale0, %scale1, %scale2, %low_group) : (i32, i32, i32, index) -> (i32, i32)
-  %high_scale, %high_minimum = func.call @qwen3_moe_q4k_scale_from_header(%scale0, %scale1, %scale2, %high_group) : (i32, i32, i32, index) -> (i32, i32)
+  %low_scale, %low_minimum = func.call @ffn_routed_q4k_scale_from_header(%scale0, %scale1, %scale2, %low_group) : (i32, i32, i32, index) -> (i32, i32)
+  %high_scale, %high_minimum = func.call @ffn_routed_q4k_scale_from_header(%scale0, %scale1, %scale2, %high_group) : (i32, i32, i32, index) -> (i32, i32)
   %low_scale_f32 = scalar.uitofp %low_scale : i32 to f32
   %low_minimum_f32 = scalar.uitofp %low_minimum : i32 to f32
   %high_scale_f32 = scalar.uitofp %high_scale : i32 to f32
@@ -102,7 +102,7 @@ func.def inline @qwen3_moe_q4k_chunk_pair_global(%weight: buffer, %row_byte_base
 
 // Contracts one decoded Q4_K half-group with a Q8_1 half-block. Both
 // half-groups apply half of the Q8_1 block-sum correction.
-func.def inline @qwen3_moe_q4k_q8_1_dot(%q4_values: vector<16xi8>, %d_scale: f32, %dmin_scale: f32, %q8_values: vector<16xi8>, %q8_d: f32, %q8_s: f32) -> (f32) {
+func.def inline @ffn_routed_q4k_q8_1_dot(%q4_values: vector<16xi8>, %d_scale: f32, %dmin_scale: f32, %q8_values: vector<16xi8>, %q8_d: f32, %q8_s: f32) -> (f32) {
   %c0_i32 = scalar.constant 0 : i32
   %c0_i32v = vector.constant 0 : vector<4xi32>
   %half_f32 = scalar.constant 0.5 : f32
@@ -117,13 +117,13 @@ func.def inline @qwen3_moe_q4k_q8_1_dot(%q4_values: vector<16xi8>, %d_scale: f32
   func.return %contribution : f32
 }
 
-template.decl @qwen3_moe.routed_gate_up.q4k_q8.body(%publish_output: i1, %token_count: index, %token: index, %route_count: index, %route: index, %route_stride: index, %expert_count: index, %output_size: index, %channel: index, %lane: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer)
+template.decl @ffn_routed_gate_up.q4k_q8.body(%publish_output: i1, %token_count: index, %token: index, %route_count: index, %route: index, %route_stride: index, %expert_count: index, %output_size: index, %channel: index, %lane: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer)
 
 // Small-token body for routed Q4_K gate/up projections. One wave computes one
 // [token, route, output channel]. Callers own launch geometry and may append a
 // producer epilogue after the F32 SwiGLU value is visible.
-template.def<@qwen3_moe.routed_gate_up.q4k_q8.body> device @qwen3_moe_routed_gate_up_swiglu_q4k_q8_body(%publish_output: i1, %token_count: index, %token: index, %route_count: index, %route: index, %route_stride: index, %expert_count: index, %output_size: index, %channel: index, %lane: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
-  %input_size = config.get @qwen3_moe.routed_gate_up.input_size : index
+template.def<@ffn_routed_gate_up.q4k_q8.body> device @ffn_routed_gate_up_swiglu_q4k_q8_body(%publish_output: i1, %token_count: index, %token: index, %route_count: index, %route: index, %route_stride: index, %expert_count: index, %output_size: index, %channel: index, %lane: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+  %input_size = config.get @ffn_routed_gate_up.input_size : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
   %bounded_route_count, %bounded_route_stride = index.assume %route_count, %route_stride [range(%route_count, 1, 8), range(%route_stride, 1, 128), le(%route_count, %route_stride)] : index, index
   %bounded_expert_count = index.assume %expert_count [range(%expert_count, 1, 128)] : index
@@ -225,12 +225,12 @@ template.def<@qwen3_moe.routed_gate_up.q4k_q8.body> device @qwen3_moe_routed_gat
       %up_header_view = buffer.view %up_noalias[%q4_block_byte_base] : buffer -> view<4xi32>
       %gate_header_words = vector.load %gate_header_view[0] : view<4xi32> -> vector<4xi32>
       %up_header_words = vector.load %up_header_view[0] : view<4xi32> -> vector<4xi32>
-      %gate_q4_low, %gate_low_d_scale, %gate_low_dmin_scale, %gate_q4_high, %gate_high_d_scale, %gate_high_dmin_scale = func.call @qwen3_moe_q4k_chunk_pair_global(%gate_noalias, %row_byte_base, %q4_block, %q4_group_pair, %q4_half, %gate_header_words) : (buffer, offset, index, index, index, vector<4xi32>) -> (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32)
-      %up_q4_low, %up_low_d_scale, %up_low_dmin_scale, %up_q4_high, %up_high_d_scale, %up_high_dmin_scale = func.call @qwen3_moe_q4k_chunk_pair_global(%up_noalias, %row_byte_base, %q4_block, %q4_group_pair, %q4_half, %up_header_words) : (buffer, offset, index, index, index, vector<4xi32>) -> (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32)
-      %gate_low = func.call @qwen3_moe_q4k_q8_1_dot(%gate_q4_low, %gate_low_d_scale, %gate_low_dmin_scale, %q8_low_values, %q8_low_d, %q8_low_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
-      %gate_high = func.call @qwen3_moe_q4k_q8_1_dot(%gate_q4_high, %gate_high_d_scale, %gate_high_dmin_scale, %q8_high_values, %q8_high_d, %q8_high_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
-      %up_low = func.call @qwen3_moe_q4k_q8_1_dot(%up_q4_low, %up_low_d_scale, %up_low_dmin_scale, %q8_low_values, %q8_low_d, %q8_low_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
-      %up_high = func.call @qwen3_moe_q4k_q8_1_dot(%up_q4_high, %up_high_d_scale, %up_high_dmin_scale, %q8_high_values, %q8_high_d, %q8_high_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
+      %gate_q4_low, %gate_low_d_scale, %gate_low_dmin_scale, %gate_q4_high, %gate_high_d_scale, %gate_high_dmin_scale = func.call @ffn_routed_q4k_chunk_pair_global(%gate_noalias, %row_byte_base, %q4_block, %q4_group_pair, %q4_half, %gate_header_words) : (buffer, offset, index, index, index, vector<4xi32>) -> (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32)
+      %up_q4_low, %up_low_d_scale, %up_low_dmin_scale, %up_q4_high, %up_high_d_scale, %up_high_dmin_scale = func.call @ffn_routed_q4k_chunk_pair_global(%up_noalias, %row_byte_base, %q4_block, %q4_group_pair, %q4_half, %up_header_words) : (buffer, offset, index, index, index, vector<4xi32>) -> (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32)
+      %gate_low = func.call @ffn_routed_q4k_q8_1_dot(%gate_q4_low, %gate_low_d_scale, %gate_low_dmin_scale, %q8_low_values, %q8_low_d, %q8_low_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
+      %gate_high = func.call @ffn_routed_q4k_q8_1_dot(%gate_q4_high, %gate_high_d_scale, %gate_high_dmin_scale, %q8_high_values, %q8_high_d, %q8_high_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
+      %up_low = func.call @ffn_routed_q4k_q8_1_dot(%up_q4_low, %up_low_d_scale, %up_low_dmin_scale, %q8_low_values, %q8_low_d, %q8_low_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
+      %up_high = func.call @ffn_routed_q4k_q8_1_dot(%up_q4_high, %up_high_d_scale, %up_high_dmin_scale, %q8_high_values, %q8_high_d, %q8_high_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
       %gate_pair = scalar.addf %gate_low, %gate_high : f32
       %up_pair = scalar.addf %up_low, %up_high : f32
       scf.yield %gate_pair, %up_pair : f32, f32
@@ -260,10 +260,10 @@ template.def<@qwen3_moe.routed_gate_up.q4k_q8.body> device @qwen3_moe_routed_gat
 // each wave advances through K in 1024-element stripes. Gate and up share each
 // paired Q8_1 load before independent raw-weight dot products and a fused
 // SwiGLU epilogue.
-kernel.def retain export("qwen3_moe_routed_gate_up_swiglu_q4k_q8") @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index) {
-  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
-  %configured_route_count = config.get @qwen3_moe.routed_gate_up.route_count : index
-  %configured_output_size = config.get @qwen3_moe.routed_gate_up.output_size : index
+kernel.def retain export("ffn_routed_gate_up_swiglu_q4k_q8") @ffn_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index) {
+  %token_capacity = config.get @ffn_routed_gate_up.token_capacity : index
+  %configured_route_count = config.get @ffn_routed_gate_up.route_count : index
+  %configured_output_size = config.get @ffn_routed_gate_up.output_size : index
   %unit = index.constant 1 : index
   %c3 = index.constant 3 : index
   %c4 = index.constant 4 : index
@@ -272,10 +272,10 @@ kernel.def retain export("qwen3_moe_routed_gate_up_swiglu_q4k_q8") @qwen3_moe_ro
   %channel_workgroup_count = index.div %padded_output_size, %c4 : index
   kernel.launch.config workgroups(%channel_workgroup_count, %configured_route_count, %token_capacity) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
-  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
-  %configured_route_count0 = config.get @qwen3_moe.routed_gate_up.route_count : index
-  %configured_expert_count0 = config.get @qwen3_moe.routed_gate_up.expert_count : index
-  %configured_output_size0 = config.get @qwen3_moe.routed_gate_up.output_size : index
+  %token_capacity = config.get @ffn_routed_gate_up.token_capacity : index
+  %configured_route_count0 = config.get @ffn_routed_gate_up.route_count : index
+  %configured_expert_count0 = config.get @ffn_routed_gate_up.expert_count : index
+  %configured_output_size0 = config.get @ffn_routed_gate_up.output_size : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512), le(%token_count, %token_capacity)] : index
   %bounded_route_count, %configured_route_count = index.assume %route_count, %configured_route_count0 [range(%route_count, 1, 8), eq(%route_count, %configured_route_count0)] : index, index
   %bounded_route_stride = index.assume %route_stride [range(%route_stride, 1, 128)] : index
@@ -298,6 +298,6 @@ kernel.def retain export("qwen3_moe_routed_gate_up_swiglu_q4k_q8") @qwen3_moe_ro
   %safe_channel, %body_output_size = index.assume %safe_channel0, %bounded_output_size [lt(%safe_channel0, %bounded_output_size)] : index, index
   %route, %body_route_count = index.assume %route0, %bounded_route_count [lt(%route0, %bounded_route_count)] : index, index
   %publishes_output = scalar.andi %valid_token, %valid_channel : i1
-  template.apply<@qwen3_moe.routed_gate_up.q4k_q8.body>(%publishes_output, %body_token_count, %safe_token, %body_route_count, %route, %bounded_route_stride, %bounded_expert_count, %body_output_size, %safe_channel, %lane, %q8_input, %route_ids, %gate_weight, %up_weight, %output) : (i1, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@ffn_routed_gate_up.q4k_q8.body>(%publishes_output, %body_token_count, %safe_token, %body_route_count, %route, %bounded_route_stride, %bounded_expert_count, %body_output_size, %safe_channel, %lane, %q8_input, %route_ids, %gate_weight, %up_weight, %output) : (i1, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }

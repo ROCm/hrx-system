@@ -13,7 +13,6 @@
 #include <utility>
 
 #include "benchmark/benchmark.h"
-#include "loom/binding/c/benchmark/benchmark_kernels.h"
 #include "loom/binding/c/benchmark/util/compile_pool_prototype.h"
 
 namespace loomc::bench {
@@ -181,21 +180,10 @@ iree_status_t CreateTextSource(const std::string& identifier,
       loomc_make_byte_span(text.data(), text.size()), out_source);
 }
 
-iree_status_t CreateBenchmarkKernelSource(loomc_string_view_t identifier,
-                                          SourcePtr* out_source) {
-  const iree_file_toc_t* kernels = loomc_benchmark_kernels_create();
-  for (size_t i = 0; i < loomc_benchmark_kernels_size(); ++i) {
-    const iree_file_toc_t& file = kernels[i];
-    loomc_string_view_t file_name = loomc_make_cstring_view(file.name);
-    if (!loomc_string_view_equal(identifier, file_name)) {
-      continue;
-    }
-    return CreateTextSourceFromViews(
-        file_name, loomc_make_byte_span(file.data, file.size), out_source);
-  }
-  return iree_make_status(IREE_STATUS_NOT_FOUND,
-                          "benchmark kernel %.*s not found",
-                          (int)identifier.size, identifier.data);
+iree_status_t CreateBenchmarkSource(EmbeddedSource source,
+                                    SourcePtr* out_source) {
+  return CreateTextSourceFromViews(source.identifier, source.contents,
+                                   out_source);
 }
 
 iree_status_t CreateWorkspace(iree_host_size_t block_size,

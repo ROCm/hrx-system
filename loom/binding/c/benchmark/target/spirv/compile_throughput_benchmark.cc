@@ -15,6 +15,8 @@
 #include <vector>
 
 #include "benchmark/benchmark.h"
+#include "loom/binding/c/benchmark/kernels/ffn_gate_up_smoke.h"
+#include "loom/binding/c/benchmark/kernels/synthetic_i32_chain_smoke.h"
 #include "loom/binding/c/benchmark/workload_compile_benchmark.h"
 #include "loomc/target/spirv.h"
 
@@ -22,10 +24,12 @@ namespace {
 
 using loomc::bench::CloneModule;
 using loomc::bench::CompileScenario;
-using loomc::bench::CreateBenchmarkKernelSource;
+using loomc::bench::CreateBenchmarkSource;
 using loomc::bench::CreateTextModule;
 using loomc::bench::CreateWorkspace;
 using loomc::bench::DeserializeSource;
+using loomc::bench::EmbeddedSource;
+using loomc::bench::FindEmbeddedSource;
 using loomc::bench::loom_allocator;
 using loomc::bench::ModulePtr;
 using loomc::bench::ReadArtifactPrefix;
@@ -215,16 +219,24 @@ class SpirvWorkloadCompileTarget final : public WorkloadCompileTarget {
   }
 };
 
-const SpirvWorkloadCompileTarget kSpirvQwenTarget;
+const SpirvWorkloadCompileTarget kSpirvWorkloadTarget;
 
-[[maybe_unused]] const bool kSpirvQwenBenchmarksRegistered = [] {
+const EmbeddedSource kFfnGateUpSource =
+    FindEmbeddedSource(loomc_benchmark_ffn_gate_up_smoke_create(),
+                       loomc_benchmark_ffn_gate_up_smoke_size(),
+                       "gate_up_quadratic_f32_spirv.loom");
+const EmbeddedSource kI32MemoryChainSource = FindEmbeddedSource(
+    loomc_benchmark_synthetic_i32_chain_smoke_create(),
+    loomc_benchmark_synthetic_i32_chain_smoke_size(), "i32_memory_chain.loom");
+
+[[maybe_unused]] const bool kSpirvWorkloadBenchmarksRegistered = [] {
   RegisterInputScalingCompileBenchmarks(
-      kSpirvQwenTarget, "QwenFfn",
+      kSpirvWorkloadTarget, "FfnGateUpQuadraticF32",
       {
-          /*.source_identifier=*/"qwen3_ffn_gate_up_f32_spirv.loom",
-          /*.function_symbol=*/"qwen3_ffn_gate_up_quadratic_f32",
-          /*.artifact_identifier=*/"qwen_ffn_benchmark.spv",
-          /*.input_size_config_symbol=*/"qwen3_ffn.input_size",
+          /*.source=*/kFfnGateUpSource,
+          /*.function_symbol=*/"ffn_gate_up_quadratic_f32",
+          /*.artifact_identifier=*/"ffn_gate_up_benchmark.spv",
+          /*.input_size_config_symbol=*/"ffn_gate_up.input_size",
       });
   return true;
 }();
@@ -237,8 +249,8 @@ class SpirvTunerFlowScenario final : public SpirvScenarioBase {
 
   iree_status_t SetUp(iree_host_size_t worker_count) override {
     IREE_RETURN_IF_ERROR(SetUpSpirv(worker_count));
-    IREE_RETURN_IF_ERROR(CreateBenchmarkKernelSource(
-        loomc_make_cstring_view("i32_memory_chain.loom"), &source_));
+    IREE_RETURN_IF_ERROR(
+        CreateBenchmarkSource(kI32MemoryChainSource, &source_));
     IREE_RETURN_IF_ERROR(CreateWorkspace(/*block_size=*/0, &config_workspace_));
     config_modules_.reserve(64);
     for (iree_host_size_t workgroup_size = 1; workgroup_size <= 64;
@@ -310,8 +322,8 @@ class SpirvI32ChainScenario final : public SpirvScenarioBase {
 
   iree_status_t SetUp(iree_host_size_t worker_count) override {
     IREE_RETURN_IF_ERROR(SetUpSpirv(worker_count));
-    IREE_RETURN_IF_ERROR(CreateBenchmarkKernelSource(
-        loomc_make_cstring_view("i32_memory_chain.loom"), &source_));
+    IREE_RETURN_IF_ERROR(
+        CreateBenchmarkSource(kI32MemoryChainSource, &source_));
     IREE_RETURN_IF_ERROR(CreateWorkspace(/*block_size=*/0, &config_workspace_));
     const std::string config_text =
         "config.def @benchmark.workgroup_size = 64 : index\n"

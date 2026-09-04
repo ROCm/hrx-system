@@ -45,7 +45,7 @@ class WorkloadCompileTarget {
 // One target implementation of a target-independent functional workload.
 struct CompileWorkload {
   // Embedded source file read during benchmark setup.
-  const char* source_identifier;
+  EmbeddedSource source;
 
   // Root function specialized to the target profile.
   const char* function_symbol;
@@ -58,7 +58,7 @@ struct CompileWorkload {
 // value before target lowering.
 struct InputScalingCompileWorkload {
   // Embedded source file read during benchmark setup.
-  const char* source_identifier;
+  EmbeddedSource source;
 
   // Root function specialized to the target profile.
   const char* function_symbol;
@@ -70,10 +70,10 @@ struct InputScalingCompileWorkload {
   const char* input_size_config_symbol;
 };
 
-// Registers the Qwen full-attention phase and module-scaling benchmarks for one
+// Registers the full-attention phase and module-scaling benchmarks for one
 // target implementation.
-void RegisterQwenAttentionCompileBenchmarks(const WorkloadCompileTarget& target,
-                                            CompileWorkload workload);
+void RegisterAttentionCompileBenchmarks(const WorkloadCompileTarget& target,
+                                        CompileWorkload workload);
 
 // Registers one input-size compiler-scaling workload for a target
 // implementation. The workload name identifies the shared functional contract

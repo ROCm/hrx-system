@@ -20,7 +20,7 @@
 namespace loomc::bench {
 namespace {
 
-enum class QwenAttentionCompilePhase {
+enum class AttentionCompilePhase {
   kParse,
   kCloneSource,
   kCanonicalizeSource,
@@ -35,9 +35,9 @@ enum class QwenAttentionCompilePhase {
   kCompileAndEmit,
 };
 
-struct QwenAttentionBenchmarkSpec {
+struct AttentionBenchmarkSpec {
   // Compiler boundary measured by one benchmark iteration.
-  QwenAttentionCompilePhase phase;
+  AttentionCompilePhase phase;
 
   // Target profile and emitter used for target-dependent phases.
   const WorkloadCompileTarget* target;
@@ -96,16 +96,17 @@ static int64_t CountPrintedOperations(const std::string& text) {
   return operation_count;
 }
 
-static iree_status_t BuildQwenAttentionSource(
-    const loomc_source_t* fixture_source, iree_host_size_t kernel_copy_count,
-    const char* kernel_symbol, std::string* out_text) {
+static iree_status_t BuildAttentionSource(const loomc_source_t* fixture_source,
+                                          iree_host_size_t kernel_copy_count,
+                                          const char* kernel_symbol,
+                                          std::string* out_text) {
   const loomc_byte_span_t contents = loomc_source_contents(fixture_source);
   const std::string fixture_text((const char*)contents.data,
                                  contents.data_length);
   const size_t kernel_start = fixture_text.find("kernel.def retain");
   if (kernel_start == std::string::npos) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "Qwen attention fixture has no retained kernel");
+                            "attention fixture has no retained kernel");
   }
 
   const std::string prefix = fixture_text.substr(0, kernel_start);
@@ -129,7 +130,7 @@ static iree_status_t CaptureModuleShape(const loomc_module_t* module,
       /*.structure_size=*/sizeof(options),
       /*.next=*/nullptr,
       /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("qwen-attention-shape.loom"),
+      /*.identifier=*/loomc_make_cstring_view("attention-shape.loom"),
       /*.text_presentation=*/LOOMC_MODULE_TEXT_PRESENTATION_GENERIC,
   };
   loomc_source_t* raw_source = nullptr;
@@ -175,8 +176,8 @@ static iree_status_t PrepareStructuredPassProgram(
     PassProgramPtr* out_pass_program) {
   ModulePtr pipeline_module;
   IREE_RETURN_IF_ERROR(CreateTextModule(context, workspace,
-                                        "qwen-attention-pipeline.loom",
-                                        source_text, &pipeline_module));
+                                        "attention-pipeline.loom", source_text,
+                                        &pipeline_module));
   loomc_pass_program_t* raw_pass_program = nullptr;
   loomc_result_t* raw_result = nullptr;
   iree_status_t status =
@@ -192,12 +193,12 @@ static iree_status_t PrepareStructuredPassProgram(
   return iree_ok_status();
 }
 
-class QwenAttentionCompileScenario final : public TargetCompileScenario {
+class AttentionCompileScenario final : public TargetCompileScenario {
  public:
-  QwenAttentionCompileScenario(QwenAttentionCompilePhase phase,
-                               iree_host_size_t kernel_copy_count,
-                               const WorkloadCompileTarget& target,
-                               CompileWorkload workload)
+  AttentionCompileScenario(AttentionCompilePhase phase,
+                           iree_host_size_t kernel_copy_count,
+                           const WorkloadCompileTarget& target,
+                           CompileWorkload workload)
       : phase_(phase),
         kernel_copy_count_(std::max<iree_host_size_t>(kernel_copy_count, 1)),
         target_(target),
@@ -213,11 +214,11 @@ class QwenAttentionCompileScenario final : public TargetCompileScenario {
         std::move(selected_target_profile), target_.pipeline_identifier()));
 
     SourcePtr fixture_source;
-    IREE_RETURN_IF_ERROR(CreateBenchmarkKernelSource(
-        loomc_make_cstring_view(workload_.source_identifier), &fixture_source));
     IREE_RETURN_IF_ERROR(
-        BuildQwenAttentionSource(fixture_source.get(), kernel_copy_count_,
-                                 workload_.function_symbol, &source_text_));
+        CreateBenchmarkSource(workload_.source, &fixture_source));
+    IREE_RETURN_IF_ERROR(
+        BuildAttentionSource(fixture_source.get(), kernel_copy_count_,
+                             workload_.function_symbol, &source_text_));
     kernel_symbols_.reserve(kernel_copy_count_);
     target_specializations_.reserve(kernel_copy_count_);
     for (iree_host_size_t i = 0; i < kernel_copy_count_; ++i) {
@@ -233,8 +234,10 @@ class QwenAttentionCompileScenario final : public TargetCompileScenario {
         });
       }
     }
+    const std::string source_identifier(workload_.source.identifier.data,
+                                        workload_.source.identifier.size);
     IREE_RETURN_IF_ERROR(
-        CreateTextSource(workload_.source_identifier, source_text_, &source_));
+        CreateTextSource(source_identifier, source_text_, &source_));
     source_shape_.byte_count = (int64_t)source_text_.size();
     source_shape_.printed_operation_count =
         CountPrintedOperations(source_text_);
@@ -246,30 +249,30 @@ class QwenAttentionCompileScenario final : public TargetCompileScenario {
                                            source_.get(), &source_template_));
 
     switch (phase_) {
-      case QwenAttentionCompilePhase::kCanonicalizeSource:
+      case AttentionCompilePhase::kCanonicalizeSource:
         return PreparePassProgram(context_.get(),
                                   loomc_make_cstring_view("canonicalize"),
                                   &pass_program_);
-      case QwenAttentionCompilePhase::kCseSource:
+      case AttentionCompilePhase::kCseSource:
         return PreparePassProgram(
             context_.get(), loomc_make_cstring_view("cse"), &pass_program_);
-      case QwenAttentionCompilePhase::kUnrollSource:
+      case AttentionCompilePhase::kUnrollSource:
         return PreparePassProgram(context_.get(),
                                   loomc_make_cstring_view("unroll-scf-for"),
                                   &pass_program_);
-      case QwenAttentionCompilePhase::kCloneUnrolled:
-      case QwenAttentionCompilePhase::kCanonicalizeUnrolled:
-      case QwenAttentionCompilePhase::kCanonicalizeLastUnrolled:
-      case QwenAttentionCompilePhase::kCseUnrolled: {
+      case AttentionCompilePhase::kCloneUnrolled:
+      case AttentionCompilePhase::kCanonicalizeUnrolled:
+      case AttentionCompilePhase::kCanonicalizeLastUnrolled:
+      case AttentionCompilePhase::kCseUnrolled: {
         IREE_RETURN_IF_ERROR(PrepareUnrolledTemplate());
-        if (phase_ == QwenAttentionCompilePhase::kCanonicalizeUnrolled) {
+        if (phase_ == AttentionCompilePhase::kCanonicalizeUnrolled) {
           return PreparePassProgram(context_.get(),
                                     loomc_make_cstring_view("canonicalize"),
                                     &pass_program_);
         }
-        if (phase_ == QwenAttentionCompilePhase::kCanonicalizeLastUnrolled) {
+        if (phase_ == AttentionCompilePhase::kCanonicalizeLastUnrolled) {
           const std::string pipeline_text =
-              "pass.pipeline<module> @qwen_attention_last pipeline {\n"
+              "pass.pipeline<module> @attention_last pipeline {\n"
               "  for func {\n"
               "    where name(value = \"" +
               kernel_symbols_.back() +
@@ -280,23 +283,23 @@ class QwenAttentionCompileScenario final : public TargetCompileScenario {
               "}\n";
           return PrepareStructuredPassProgram(
               context_.get(), template_workspace_.get(), pipeline_text,
-              loomc_make_cstring_view("qwen_attention_last"), &pass_program_);
+              loomc_make_cstring_view("attention_last"), &pass_program_);
         }
-        if (phase_ == QwenAttentionCompilePhase::kCseUnrolled) {
+        if (phase_ == AttentionCompilePhase::kCseUnrolled) {
           return PreparePassProgram(
               context_.get(), loomc_make_cstring_view("cse"), &pass_program_);
         }
         return iree_ok_status();
       }
-      case QwenAttentionCompilePhase::kSourceLow:
+      case AttentionCompilePhase::kSourceLow:
         return PrepareTargetPassProgram(
             context_.get(), LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
-            loomc_make_cstring_view("benchmark-qwen-attention-source-low"),
+            loomc_make_cstring_view("benchmark-attention-source-low"),
             &pass_program_);
-      case QwenAttentionCompilePhase::kParse:
-      case QwenAttentionCompilePhase::kCloneSource:
-      case QwenAttentionCompilePhase::kPreparedLow:
-      case QwenAttentionCompilePhase::kCompileAndEmit:
+      case AttentionCompilePhase::kParse:
+      case AttentionCompilePhase::kCloneSource:
+      case AttentionCompilePhase::kPreparedLow:
+      case AttentionCompilePhase::kCompileAndEmit:
         return iree_ok_status();
     }
     return iree_ok_status();
@@ -305,7 +308,7 @@ class QwenAttentionCompileScenario final : public TargetCompileScenario {
   iree_host_size_t job_count() const override { return 1; }
 
   iree_host_size_t kernel_count_per_job() const override {
-    return phase_ == QwenAttentionCompilePhase::kCanonicalizeLastUnrolled
+    return phase_ == AttentionCompilePhase::kCanonicalizeLastUnrolled
                ? 1
                : kernel_copy_count_;
   }
@@ -345,16 +348,16 @@ class QwenAttentionCompileScenario final : public TargetCompileScenario {
 
  private:
   bool UsesUnrolledTemplate() const {
-    return phase_ == QwenAttentionCompilePhase::kCloneUnrolled ||
-           phase_ == QwenAttentionCompilePhase::kCanonicalizeUnrolled ||
-           phase_ == QwenAttentionCompilePhase::kCanonicalizeLastUnrolled ||
-           phase_ == QwenAttentionCompilePhase::kCseUnrolled;
+    return phase_ == AttentionCompilePhase::kCloneUnrolled ||
+           phase_ == AttentionCompilePhase::kCanonicalizeUnrolled ||
+           phase_ == AttentionCompilePhase::kCanonicalizeLastUnrolled ||
+           phase_ == AttentionCompilePhase::kCseUnrolled;
   }
 
   bool UsesTargetPipeline() const {
-    return phase_ == QwenAttentionCompilePhase::kSourceLow ||
-           phase_ == QwenAttentionCompilePhase::kPreparedLow ||
-           phase_ == QwenAttentionCompilePhase::kCompileAndEmit;
+    return phase_ == AttentionCompilePhase::kSourceLow ||
+           phase_ == AttentionCompilePhase::kPreparedLow ||
+           phase_ == AttentionCompilePhase::kCompileAndEmit;
   }
 
   iree_status_t CompileWithPass(WorkspacePtr& workspace, ModulePtr& module,
@@ -375,7 +378,7 @@ class QwenAttentionCompileScenario final : public TargetCompileScenario {
         /*.next=*/specialize_target && !target_specializations_.empty()
             ? &target_options
             : nullptr,
-        /*.module_name=*/loomc_make_cstring_view("qwen_attention_benchmark"),
+        /*.module_name=*/loomc_make_cstring_view("attention_benchmark"),
         /*.artifact_flags=*/0,
         /*.config_flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
         /*.config_module=*/nullptr,
@@ -386,7 +389,7 @@ class QwenAttentionCompileScenario final : public TargetCompileScenario {
         &compile_options, loom_allocator(), &raw_result));
     ResultPtr result(raw_result);
     IREE_RETURN_IF_ERROR(status);
-    return RequireSucceededResult(result.get(), "Qwen attention compilation");
+    return RequireSucceededResult(result.get(), "attention compilation");
   }
 
   iree_status_t PrepareUnrolledTemplate() {
@@ -408,7 +411,7 @@ class QwenAttentionCompileScenario final : public TargetCompileScenario {
   iree_status_t RunPhase(iree_host_size_t worker_ordinal, bool capture_shape) {
     WorkspacePtr& workspace = workspace_at(worker_ordinal);
     ModulePtr module;
-    if (phase_ == QwenAttentionCompilePhase::kParse) {
+    if (phase_ == AttentionCompilePhase::kParse) {
       IREE_RETURN_IF_ERROR(DeserializeSource(context_.get(), workspace.get(),
                                              source_.get(), &module));
     } else {
@@ -417,12 +420,12 @@ class QwenAttentionCompileScenario final : public TargetCompileScenario {
                                                   : source_template_.get();
       IREE_RETURN_IF_ERROR(
           CloneModule(template_module, workspace.get(), &module));
-      if (phase_ != QwenAttentionCompilePhase::kCloneSource &&
-          phase_ != QwenAttentionCompilePhase::kCloneUnrolled) {
+      if (phase_ != AttentionCompilePhase::kCloneSource &&
+          phase_ != AttentionCompilePhase::kCloneUnrolled) {
         IREE_RETURN_IF_ERROR(CompileWithPass(workspace, module, pass_program_,
                                              UsesTargetPipeline()));
       }
-      if (phase_ == QwenAttentionCompilePhase::kCompileAndEmit) {
+      if (phase_ == AttentionCompilePhase::kCompileAndEmit) {
         int64_t artifact_byte_count = 0;
         IREE_RETURN_IF_ERROR(target_.EmitArtifact(
             target_environment(), workspace.get(), module.get(),
@@ -441,7 +444,7 @@ class QwenAttentionCompileScenario final : public TargetCompileScenario {
   }
 
   // Compiler boundary measured by each timed invocation.
-  QwenAttentionCompilePhase phase_;
+  AttentionCompilePhase phase_;
 
   // Number of independently named production kernels in the input module.
   iree_host_size_t kernel_copy_count_ = 0;
@@ -522,8 +525,7 @@ class InputScalingCompileScenario final : public TargetCompileScenario {
     IREE_RETURN_IF_ERROR(SetUpTarget(
         worker_count, std::move(target_environment),
         std::move(selected_target_profile), target_.pipeline_identifier()));
-    IREE_RETURN_IF_ERROR(CreateBenchmarkKernelSource(
-        loomc_make_cstring_view(workload_.source_identifier), &source_));
+    IREE_RETURN_IF_ERROR(CreateBenchmarkSource(workload_.source, &source_));
     const loomc_byte_span_t source_contents =
         loomc_source_contents(source_.get());
     const std::string source_text((const char*)source_contents.data,
@@ -669,10 +671,10 @@ class InputScalingCompileScenario final : public TargetCompileScenario {
   ModulePtr config_module_;
 };
 
-static std::unique_ptr<CompileScenario> CreateQwenAttentionCompileScenario(
+static std::unique_ptr<CompileScenario> CreateAttentionCompileScenario(
     const ::benchmark::State& state, const void* user_data) {
-  const auto* spec = static_cast<const QwenAttentionBenchmarkSpec*>(user_data);
-  return std::make_unique<QwenAttentionCompileScenario>(
+  const auto* spec = static_cast<const AttentionBenchmarkSpec*>(user_data);
+  return std::make_unique<AttentionCompileScenario>(
       spec->phase, (iree_host_size_t)state.range(1), *spec->target,
       spec->workload);
 }
@@ -694,21 +696,20 @@ static std::string BuildBenchmarkName(const char* workload_name,
 
 }  // namespace
 
-void RegisterQwenAttentionCompileBenchmarks(const WorkloadCompileTarget& target,
-                                            CompileWorkload workload) {
-  auto register_phase = [&](QwenAttentionCompilePhase phase,
-                            const char* phase_name,
+void RegisterAttentionCompileBenchmarks(const WorkloadCompileTarget& target,
+                                        CompileWorkload workload) {
+  auto register_phase = [&](AttentionCompilePhase phase, const char* phase_name,
                             std::initializer_list<int64_t> kernel_copy_counts) {
-    const QwenAttentionBenchmarkSpec spec = {
+    const AttentionBenchmarkSpec spec = {
         /*.phase=*/phase,
         /*.target=*/&target,
         /*.workload=*/workload,
     };
     const std::string name =
-        BuildBenchmarkName("QwenAttention", phase_name, target);
+        BuildBenchmarkName("AttentionPrefill", phase_name, target);
     auto* registration = ::benchmark::RegisterBenchmark(
         name.c_str(), [spec](::benchmark::State& state) {
-          RunCompileBenchmarkDirect(state, CreateQwenAttentionCompileScenario,
+          RunCompileBenchmarkDirect(state, CreateAttentionCompileScenario,
                                     &spec);
         });
     for (int64_t kernel_copy_count : kernel_copy_counts) {
@@ -717,29 +718,26 @@ void RegisterQwenAttentionCompileBenchmarks(const WorkloadCompileTarget& target,
     registration->UseRealTime();
   };
 
-  register_phase(QwenAttentionCompilePhase::kParse, "Parse", {1, 2, 4, 8});
-  register_phase(QwenAttentionCompilePhase::kCloneSource, "CloneSource",
+  register_phase(AttentionCompilePhase::kParse, "Parse", {1, 2, 4, 8});
+  register_phase(AttentionCompilePhase::kCloneSource, "CloneSource",
                  {1, 2, 4, 8});
-  register_phase(QwenAttentionCompilePhase::kCanonicalizeSource,
+  register_phase(AttentionCompilePhase::kCanonicalizeSource,
                  "CanonicalizeSource", {1, 2, 4, 8});
-  register_phase(QwenAttentionCompilePhase::kCseSource, "CseSource",
+  register_phase(AttentionCompilePhase::kCseSource, "CseSource", {1, 2, 4, 8});
+  register_phase(AttentionCompilePhase::kUnrollSource, "UnrollSource",
                  {1, 2, 4, 8});
-  register_phase(QwenAttentionCompilePhase::kUnrollSource, "UnrollSource",
+  register_phase(AttentionCompilePhase::kCloneUnrolled, "CloneUnrolled",
                  {1, 2, 4, 8});
-  register_phase(QwenAttentionCompilePhase::kCloneUnrolled, "CloneUnrolled",
-                 {1, 2, 4, 8});
-  register_phase(QwenAttentionCompilePhase::kCanonicalizeUnrolled,
+  register_phase(AttentionCompilePhase::kCanonicalizeUnrolled,
                  "CanonicalizeUnrolled", {1, 2, 4, 8});
-  register_phase(QwenAttentionCompilePhase::kCanonicalizeLastUnrolled,
+  register_phase(AttentionCompilePhase::kCanonicalizeLastUnrolled,
                  "CanonicalizeLastUnrolled", {1, 2, 4, 8});
-  register_phase(QwenAttentionCompilePhase::kCseUnrolled, "CseUnrolled",
+  register_phase(AttentionCompilePhase::kCseUnrolled, "CseUnrolled",
                  {1, 2, 4, 8});
-  register_phase(QwenAttentionCompilePhase::kSourceLow, "SourceLowSmoke", {1});
-  register_phase(QwenAttentionCompilePhase::kSourceLow, "SourceLow",
-                 {1, 2, 4, 8});
-  register_phase(QwenAttentionCompilePhase::kPreparedLow, "PreparedLow",
-                 {1, 2, 4});
-  register_phase(QwenAttentionCompilePhase::kCompileAndEmit, "CompileAndEmit",
+  register_phase(AttentionCompilePhase::kSourceLow, "SourceLowSmoke", {1});
+  register_phase(AttentionCompilePhase::kSourceLow, "SourceLow", {1, 2, 4, 8});
+  register_phase(AttentionCompilePhase::kPreparedLow, "PreparedLow", {1, 2, 4});
+  register_phase(AttentionCompilePhase::kCompileAndEmit, "CompileAndEmit",
                  {1, 2});
 }
 

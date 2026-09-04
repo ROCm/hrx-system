@@ -17,6 +17,10 @@
 #include <vector>
 
 #include "benchmark/benchmark.h"
+#include "loom/binding/c/benchmark/kernels/attention_prefill_smoke.h"
+#include "loom/binding/c/benchmark/kernels/ffn_gate_up_smoke.h"
+#include "loom/binding/c/benchmark/kernels/ffn_routed_gate_up_smoke.h"
+#include "loom/binding/c/benchmark/kernels/synthetic_i32_chain_smoke.h"
 #include "loom/binding/c/benchmark/workload_compile_benchmark.h"
 #include "loomc/target/amdgpu.h"
 
@@ -24,18 +28,20 @@ namespace {
 
 using loomc::bench::CloneModule;
 using loomc::bench::CompileScenario;
-using loomc::bench::CreateBenchmarkKernelSource;
+using loomc::bench::CreateBenchmarkSource;
 using loomc::bench::CreateTextModule;
 using loomc::bench::CreateTextSource;
 using loomc::bench::CreateWorkspace;
 using loomc::bench::DeserializeSource;
+using loomc::bench::EmbeddedSource;
+using loomc::bench::FindEmbeddedSource;
 using loomc::bench::loom_allocator;
 using loomc::bench::ModulePtr;
 using loomc::bench::PassProgramPtr;
 using loomc::bench::PreparePassProgram;
 using loomc::bench::ReadArtifactPrefix;
+using loomc::bench::RegisterAttentionCompileBenchmarks;
 using loomc::bench::RegisterInputScalingCompileBenchmarks;
-using loomc::bench::RegisterQwenAttentionCompileBenchmarks;
 using loomc::bench::RequireSucceededResult;
 using loomc::bench::ResultPtr;
 using loomc::bench::RunCompileBenchmarkDirect;
@@ -202,33 +208,47 @@ class AmdgpuWorkloadCompileTarget final : public WorkloadCompileTarget {
   AmdgpuBenchmarkTarget target_;
 };
 
-const AmdgpuWorkloadCompileTarget kAmdgpuQwenTarget(kGfx1100Target);
+const AmdgpuWorkloadCompileTarget kAmdgpuWorkloadTarget(kGfx1100Target);
 
-[[maybe_unused]] const bool kAmdgpuQwenBenchmarksRegistered = [] {
-  RegisterQwenAttentionCompileBenchmarks(
-      kAmdgpuQwenTarget,
+const EmbeddedSource kAttentionPrefillSource =
+    FindEmbeddedSource(loomc_benchmark_attention_prefill_smoke_create(),
+                       loomc_benchmark_attention_prefill_smoke_size(),
+                       "prefill_f16_wmma_amdgpu.loom");
+const EmbeddedSource kFfnRoutedGateUpSource =
+    FindEmbeddedSource(loomc_benchmark_ffn_routed_gate_up_smoke_create(),
+                       loomc_benchmark_ffn_routed_gate_up_smoke_size(),
+                       "routed_gate_up_swiglu_q4k_q8_amdgpu.loom");
+const EmbeddedSource kFfnGateUpSource =
+    FindEmbeddedSource(loomc_benchmark_ffn_gate_up_smoke_create(),
+                       loomc_benchmark_ffn_gate_up_smoke_size(),
+                       "gate_up_quadratic_f32_amdgpu.loom");
+const EmbeddedSource kI32MemoryChainSource = FindEmbeddedSource(
+    loomc_benchmark_synthetic_i32_chain_smoke_create(),
+    loomc_benchmark_synthetic_i32_chain_smoke_size(), "i32_memory_chain.loom");
+
+[[maybe_unused]] const bool kAmdgpuWorkloadBenchmarksRegistered = [] {
+  RegisterAttentionCompileBenchmarks(
+      kAmdgpuWorkloadTarget,
       {
-          /*.source_identifier=*/"qwen38_attention_prefill_wmma.loom",
-          /*.function_symbol=*/"qwen38_attention_prefill_f16_wmma",
-          /*.artifact_identifier=*/"qwen_attention_benchmark.hsaco",
+          /*.source=*/kAttentionPrefillSource,
+          /*.function_symbol=*/"attention_prefill_f16_wmma",
+          /*.artifact_identifier=*/"attention_prefill_benchmark.hsaco",
       });
   RegisterInputScalingCompileBenchmarks(
-      kAmdgpuQwenTarget, "QwenMoeQ4K",
+      kAmdgpuWorkloadTarget, "FfnRoutedGateUpQ4KQ8",
       {
-          /*.source_identifier=*/"qwen3_moe_routed_gate_up_q4k.loom",
-          /*.function_symbol=*/
-          "qwen3_moe_routed_gate_up_swiglu_q4k_q8",
-          /*.artifact_identifier=*/"qwen_moe_benchmark.hsaco",
-          /*.input_size_config_symbol=*/
-          "qwen3_moe.routed_gate_up.input_size",
+          /*.source=*/kFfnRoutedGateUpSource,
+          /*.function_symbol=*/"ffn_routed_gate_up_swiglu_q4k_q8",
+          /*.artifact_identifier=*/"ffn_routed_gate_up_benchmark.hsaco",
+          /*.input_size_config_symbol=*/"ffn_routed_gate_up.input_size",
       });
   RegisterInputScalingCompileBenchmarks(
-      kAmdgpuQwenTarget, "QwenFfn",
+      kAmdgpuWorkloadTarget, "FfnGateUpQuadraticF32",
       {
-          /*.source_identifier=*/"qwen3_ffn_gate_up_f32_amdgpu.loom",
-          /*.function_symbol=*/"qwen3_ffn_gate_up_quadratic_f32",
-          /*.artifact_identifier=*/"qwen_ffn_benchmark.hsaco",
-          /*.input_size_config_symbol=*/"qwen3_ffn.input_size",
+          /*.source=*/kFfnGateUpSource,
+          /*.function_symbol=*/"ffn_gate_up_quadratic_f32",
+          /*.artifact_identifier=*/"ffn_gate_up_benchmark.hsaco",
+          /*.input_size_config_symbol=*/"ffn_gate_up.input_size",
       });
   return true;
 }();
@@ -250,8 +270,8 @@ class AmdgpuI32ChainScenario final : public AmdgpuTargetCompileScenario {
 
   iree_status_t SetUp(iree_host_size_t worker_count) override {
     IREE_RETURN_IF_ERROR(SetUpAmdgpuTarget(worker_count));
-    IREE_RETURN_IF_ERROR(CreateBenchmarkKernelSource(
-        loomc_make_cstring_view("i32_memory_chain.loom"), &source_));
+    IREE_RETURN_IF_ERROR(
+        CreateBenchmarkSource(kI32MemoryChainSource, &source_));
     IREE_RETURN_IF_ERROR(
         CreateWorkspace(/*block_size=*/0, &template_workspace_));
     IREE_RETURN_IF_ERROR(DeserializeSource(context_.get(),
