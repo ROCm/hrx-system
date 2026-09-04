@@ -11,7 +11,7 @@ load(
     "LOOM_AMDGPU_SUPPORTED_TARGETS",
 )
 load(
-    "//loom/build_tools/bazel:defs.bzl",
+    "//loom/build_tools/amdgpu:target_profile.bzl",
     "loom_amdgpu_target_profile",
 )
 

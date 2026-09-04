@@ -9,8 +9,13 @@
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load(
-    "//loom/build_tools/bazel:defs.bzl",
+    "//loom/build_tools/amdgpu:target_profile.bzl",
     "loom_amdgpu_target_profile",
+)
+load(
+    "//loom/build_tools/bazel:defs.bzl",
+    "loom_artifact_set_product_format",
+    "loom_file_product_format",
     "loom_kernel_binary",
     "loom_kernel_library",
     "loom_library",
@@ -43,10 +48,61 @@ loom_amdgpu_target_profile(
     target = "gfx942",
 )
 
+loom_file_product_format(
+    name = "test_kernel_format",
+    format = "test-kernel-format",
+    output_extension = ".tbin",
+    product = "kernel",
+)
+
+loom_file_product_format(
+    name = "test_alternate_kernel_format",
+    format = "test-alternate-kernel-format",
+    output_extension = ".alt",
+    product = "kernel",
+)
+
+loom_file_product_format(
+    name = "test_unsupported_kernel_format",
+    format = "test-unsupported-kernel-format",
+    output_extension = ".unsupported",
+    product = "kernel",
+)
+
+loom_artifact_set_product_format(
+    name = "test_command_format",
+    artifact_directory_extension = ".test.commands",
+    format = "test-command-format",
+    manifest_extension = ".test.commands.json",
+    product = "command",
+)
+
 loom_target_profile(
-    name = "test_spirv_profile",
-    family = "spirv",
-    selector = "vulkan1.3+bda",
+    name = "test_target_profile",
+    canonical_formats = [
+        ":test_command_format",
+        ":test_kernel_format",
+    ],
+    family = "test-family",
+    formats = [":test_alternate_kernel_format"],
+    selector = "test-selector",
+)
+
+loom_target_profile(
+    name = "test_empty_profile",
+    family = "test-empty",
+    selector = "empty",
+)
+
+loom_target_profile(
+    name = "test_duplicate_canonical_profile",
+    canonical_formats = [
+        ":test_alternate_kernel_format",
+        ":test_kernel_format",
+    ],
+    family = "test-invalid",
+    selector = "duplicate-canonical",
+    tags = ["manual"],
 )
 
 loom_kernel_library(
@@ -99,6 +155,13 @@ loom_kernel_binary(
     tags = ["manual"],
     target = "//loom/target/amdgpu:gfx11-generic",
     deps = [":public_kernel_library"],
+)
+
+loom_kernel_binary(
+    name = "kernel_binary_spirv",
+    srcs = ["link_kernels.loom"],
+    tags = ["manual"],
+    target = "//loom/target/spirv:vulkan1.3+bda",
 )
 
 loom_library(

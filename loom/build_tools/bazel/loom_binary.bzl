@@ -11,8 +11,10 @@ load(
     "LoomLibraryInfo",
     "loom_linking",
 )
+load(":loom_product_format.bzl", "LoomProductFormatInfo")
 load(
     ":loom_target_profile.bzl",
+    "LoomTargetFormatSupportInfo",
     "LoomTargetProfileInfo",
 )
 
@@ -26,6 +28,7 @@ LoomBinaryInfo = provider(
         "kind": "Deployment product kind: kernel or command.",
         "linked_module": "Closed Loom bytecode module used for emission.",
         "primary_artifact": "Primary runtime artifact produced by this binary.",
+        "product_formats": "Product-name keyed selected format targets.",
         "reports": "Depset of compile reports for emitted artifacts.",
         "target_profiles": "Ordered configured target-profile targets used for compilation.",
     },
@@ -35,19 +38,99 @@ def _require_binary_inputs(ctx):
     if not ctx.files.srcs and not ctx.attr.deps:
         fail("%s requires at least one source across srcs and deps" % ctx.label)
 
-def _require_amdgpu_target_profile(ctx, product_kind):
-    target_profile = ctx.attr.target[LoomTargetProfileInfo]
-    if target_profile.family != "amdgpu":
+def _require_product_format(ctx, format_target, product, output_kind):
+    format_info = format_target[LoomProductFormatInfo]
+    if not format_info.format:
+        fail("%s format %s has an empty public format name" % (ctx.label, format_target.label))
+    if format_info.product != product:
         fail(
-            ("%s cannot emit a %s binary for target profile family %r; " +
-             "only amdgpu-backed %s products are available") % (
+            "%s format %s describes product %r, expected %r" % (
                 ctx.label,
-                product_kind,
-                target_profile.family,
-                product_kind,
+                format_target.label,
+                format_info.product,
+                product,
             ),
         )
-    return target_profile
+    if format_info.output_kind != output_kind:
+        fail(
+            "%s format %s has output kind %r, expected %r for product %r" % (
+                ctx.label,
+                format_target.label,
+                format_info.output_kind,
+                output_kind,
+                product,
+            ),
+        )
+    if not format_info.output_extension.startswith("."):
+        fail(
+            "%s format %s output extension must begin with '.'" %
+            (ctx.label, format_target.label),
+        )
+    if "/" in format_info.output_extension or "\\" in format_info.output_extension:
+        fail(
+            "%s format %s output extension must not contain a path" %
+            (ctx.label, format_target.label),
+        )
+    if output_kind == "file" and format_info.artifact_directory_extension:
+        fail(
+            "%s single-file format %s has an artifact directory extension" %
+            (ctx.label, format_target.label),
+        )
+    if output_kind == "artifact_set":
+        if not format_info.artifact_directory_extension.startswith("."):
+            fail(
+                "%s artifact-set format %s directory extension must begin with '.'" %
+                (ctx.label, format_target.label),
+            )
+        if ("/" in format_info.artifact_directory_extension or
+            "\\" in format_info.artifact_directory_extension):
+            fail(
+                "%s artifact-set format %s directory extension must not contain a path" %
+                (ctx.label, format_target.label),
+            )
+    return format_info
+
+def _resolve_target_product_format(ctx, product, output_kind, explicit_format):
+    support = ctx.attr.target[LoomTargetFormatSupportInfo]
+    selected_format = explicit_format
+    if selected_format == None:
+        selected_format = support.canonical_formats.get(product)
+        if selected_format == None:
+            fail(
+                "%s target profile %s has no canonical format for product %r" %
+                (ctx.label, ctx.attr.target.label, product),
+            )
+
+    match_count = 0
+    for supported_format in support.formats:
+        if supported_format.label == selected_format.label:
+            match_count += 1
+    if match_count == 0:
+        fail(
+            "%s target profile %s does not support product format %s" % (
+                ctx.label,
+                ctx.attr.target.label,
+                selected_format.label,
+            ),
+        )
+    if match_count != 1:
+        fail(
+            "%s target profile %s declares product format %s more than once" % (
+                ctx.label,
+                ctx.attr.target.label,
+                selected_format.label,
+            ),
+        )
+
+    return struct(
+        info = _require_product_format(
+            ctx,
+            selected_format,
+            product,
+            output_kind,
+        ),
+        target = selected_format,
+    )
 
 def _declare_binary_linked_module(ctx, product_kind, target_profile = None):
     dependency_infos = [dep[LoomLibraryInfo] for dep in ctx.attr.deps]
@@ -82,19 +165,22 @@ def _declare_binary_linked_module(ctx, product_kind, target_profile = None):
         linked_module = linked_module,
     )
 
-def _declare_amdgpu_kernel_product(
+def _declare_kernel_product(
         ctx,
         linked_module,
+        product_format,
         target_profile,
         output_stem,
         mnemonic,
         progress_message):
-    artifact = ctx.actions.declare_file(output_stem + ".hsaco")
+    artifact = ctx.actions.declare_file(
+        output_stem + product_format.info.output_extension,
+    )
     compile_report = ctx.actions.declare_file(output_stem + ".compile.json")
     args = ctx.actions.args()
     args.add(linked_module)
     args.add("--product=kernel")
-    args.add("--format=amdgpu-hsaco")
+    args.add("--format=%s" % product_format.info.format)
     args.add("--target=%s:%s" % (
         target_profile.family,
         target_profile.selector,
@@ -115,18 +201,24 @@ def _declare_amdgpu_kernel_product(
     return struct(
         artifact = artifact,
         compile_report = compile_report,
+        format = product_format.target,
     )
 
-def _declare_command_product(ctx, linked_module):
-    manifest = ctx.actions.declare_file(ctx.label.name + ".commands.json")
-    artifacts = ctx.actions.declare_directory(ctx.label.name + ".commands")
+def _declare_command_product(ctx, linked_module, product_format):
+    format_info = product_format.info
+    manifest = ctx.actions.declare_file(
+        ctx.label.name + format_info.output_extension,
+    )
+    artifacts = ctx.actions.declare_directory(
+        ctx.label.name + format_info.artifact_directory_extension,
+    )
     compile_report = ctx.actions.declare_file(
         ctx.label.name + ".commands.compile.json",
     )
     args = ctx.actions.args()
     args.add(linked_module)
     args.add("--product=command")
-    args.add("--format=loom-command")
+    args.add("--format=%s" % format_info.format)
     args.add("--output=%s" % manifest.path)
     args.add("--emit-command-artifacts=%s" % artifacts.path)
     args.add("--compile-report=details")
@@ -144,20 +236,28 @@ def _declare_command_product(ctx, linked_module):
     return struct(
         artifacts = artifacts,
         compile_report = compile_report,
+        format = product_format.target,
         manifest = manifest,
     )
 
 def _loom_kernel_binary_impl(ctx):
     _require_binary_inputs(ctx)
-    target_profile = _require_amdgpu_target_profile(ctx, "kernel")
+    target_profile = ctx.attr.target[LoomTargetProfileInfo]
+    product_format = _resolve_target_product_format(
+        ctx,
+        "kernel",
+        "file",
+        ctx.attr.format,
+    )
     linked = _declare_binary_linked_module(
         ctx,
         "kernel",
         target_profile = target_profile,
     )
-    product = _declare_amdgpu_kernel_product(
+    product = _declare_kernel_product(
         ctx = ctx,
         linked_module = linked.linked_module,
+        product_format = product_format,
         target_profile = target_profile,
         output_stem = ctx.label.name,
         mnemonic = "LoomKernelBinary",
@@ -179,6 +279,7 @@ def _loom_kernel_binary_impl(ctx):
             kind = "kernel",
             linked_module = linked.linked_module,
             primary_artifact = product.artifact,
+            product_formats = {"kernel": product.format},
             reports = depset([product.compile_report]),
             target_profiles = [ctx.attr.target],
         ),
@@ -202,11 +303,15 @@ def _binary_link_attrs():
         ),
     }
 
-def _target_binary_attrs(target_doc):
+def _target_binary_attrs(target_doc, format_doc):
     attrs = _binary_link_attrs()
+    attrs["format"] = attr.label(
+        providers = [LoomProductFormatInfo],
+        doc = format_doc,
+    )
     attrs["target"] = attr.label(
         mandatory = True,
-        providers = [LoomTargetProfileInfo],
+        providers = [LoomTargetFormatSupportInfo, LoomTargetProfileInfo],
         doc = target_doc,
     )
     return attrs
@@ -215,6 +320,7 @@ loom_kernel_binary = rule(
     implementation = _loom_kernel_binary_impl,
     attrs = _target_binary_attrs(
         "Immutable target profile used for every emitted kernel.",
+        "Optional kernel format; the target's canonical format is used when omitted.",
     ),
     doc = "Links and emits one closed loader-ready kernel product.",
     toolchains = [
@@ -225,18 +331,35 @@ loom_kernel_binary = rule(
 
 def _loom_command_binary_impl(ctx):
     _require_binary_inputs(ctx)
-    target_profile = _require_amdgpu_target_profile(ctx, "command")
+    target_profile = ctx.attr.target[LoomTargetProfileInfo]
+    command_format = _resolve_target_product_format(
+        ctx,
+        "command",
+        "artifact_set",
+        ctx.attr.format,
+    )
+    kernel_format = _resolve_target_product_format(
+        ctx,
+        "kernel",
+        "file",
+        ctx.attr.kernel_format,
+    )
     linked = _declare_binary_linked_module(
         ctx,
         "command",
         target_profile = target_profile,
     )
-    command_product = _declare_command_product(ctx, linked.linked_module)
-    kernel_product = _declare_amdgpu_kernel_product(
+    command_product = _declare_command_product(
+        ctx,
+        linked.linked_module,
+        command_format,
+    )
+    kernel_product = _declare_kernel_product(
         ctx = ctx,
         linked_module = linked.linked_module,
-        target_profile = target_profile,
+        product_format = kernel_format,
         output_stem = ctx.label.name + ".kernels",
+        target_profile = target_profile,
         mnemonic = "LoomCommandKernelBinary",
         progress_message = "Compiling command kernels for %s against %s" % (
             ctx.label,
@@ -272,16 +395,27 @@ def _loom_command_binary_impl(ctx):
             kind = "command",
             linked_module = linked.linked_module,
             primary_artifact = command_product.manifest,
+            product_formats = {
+                "command": command_product.format,
+                "kernel": kernel_product.format,
+            },
             reports = depset(reports),
             target_profiles = [ctx.attr.target],
         ),
     ]
 
+_COMMAND_BINARY_ATTRS = _target_binary_attrs(
+    "Immutable target profile used for every emitted kernel entry.",
+    "Optional command format; the target's canonical format is used when omitted.",
+)
+_COMMAND_BINARY_ATTRS["kernel_format"] = attr.label(
+    providers = [LoomProductFormatInfo],
+    doc = "Optional kernel format; the target's canonical format is used when omitted.",
+)
+
 loom_command_binary = rule(
     implementation = _loom_command_binary_impl,
-    attrs = _target_binary_attrs(
-        "Immutable target profile used for every emitted kernel entry.",
-    ),
+    attrs = _COMMAND_BINARY_ATTRS,
     doc = "Links and emits portable command programs with their kernel executable.",
     toolchains = [
         _LOOM_COMPILE_TOOLCHAIN_TYPE,

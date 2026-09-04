@@ -26,9 +26,15 @@ load(
     _loom_module = "loom_module",
 )
 load(
+    ":loom_product_format.bzl",
+    _LoomProductFormatInfo = "LoomProductFormatInfo",
+    _loom_artifact_set_product_format = "loom_artifact_set_product_format",
+    _loom_file_product_format = "loom_file_product_format",
+)
+load(
     ":loom_target_profile.bzl",
+    _LoomTargetFormatSupportInfo = "LoomTargetFormatSupportInfo",
     _LoomTargetProfileInfo = "LoomTargetProfileInfo",
-    _loom_amdgpu_target_profile = "loom_amdgpu_target_profile",
     _loom_target_profile = "loom_target_profile",
 )
 load(
@@ -39,10 +45,13 @@ load(
 LoomBinaryInfo = _LoomBinaryInfo
 LoomExecutionTestInfo = _LoomExecutionTestInfo
 LoomLibraryInfo = _LoomLibraryInfo
+LoomProductFormatInfo = _LoomProductFormatInfo
+LoomTargetFormatSupportInfo = _LoomTargetFormatSupportInfo
 LoomTargetProfileInfo = _LoomTargetProfileInfo
-loom_amdgpu_target_profile = _loom_amdgpu_target_profile
+loom_artifact_set_product_format = _loom_artifact_set_product_format
 loom_command_binary = _loom_command_binary
 loom_execution_profile = _loom_execution_profile
+loom_file_product_format = _loom_file_product_format
 loom_kernel_binary = _loom_kernel_binary
 loom_kernel_library = _loom_kernel_library
 loom_library = _loom_library

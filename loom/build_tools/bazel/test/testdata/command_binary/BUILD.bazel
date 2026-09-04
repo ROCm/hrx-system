@@ -70,6 +70,13 @@ loom_command_binary(
     ],
 )
 
+loom_command_binary(
+    name = "spirv_subject",
+    tags = ["manual"],
+    target = "//loom/target/spirv:vulkan1.3+bda",
+    deps = [":interface"],
+)
+
 filegroup(
     name = "deps_subject_command_report",
     srcs = [":deps_subject"],

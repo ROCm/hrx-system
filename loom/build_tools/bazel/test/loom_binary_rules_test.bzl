@@ -202,29 +202,152 @@ def _test_explicit_roots_replace_direct_exports_impl(env, target):
         "public_kernel_library.loombc",
     )
 
-def _test_kernel_binary_profile_mismatch(name, **kwargs):
+def _test_kernel_binary_accepts_generic_profile(name, **kwargs):
     subject = name + "_subject"
     util.helper_target(
         loom_kernel_binary,
         name = subject,
         deps = [":public_kernel_library"],
         tags = ["manual"],
-        target = ":test_spirv_profile",
+        target = ":test_target_profile",
     )
     analysis_test(
         name = name,
-        expect_failure = True,
-        impl = _test_kernel_binary_profile_mismatch_impl,
+        impl = _test_kernel_binary_accepts_generic_profile_impl,
         target = subject,
         **kwargs
     )
 
-def _test_kernel_binary_profile_mismatch_impl(env, target):
-    env.expect.that_target(target).failures().contains_predicate(
-        matching.contains(
-            "cannot emit a kernel binary for target profile family \"spirv\"",
-        ),
+def _test_kernel_binary_accepts_generic_profile_impl(env, target):
+    binary = target[LoomBinaryInfo]
+    env.expect.that_str(binary.primary_artifact.basename).equals(
+        target.label.name + ".tbin",
     )
+    env.expect.that_str(
+        binary.product_formats["kernel"].label.name,
+    ).equals("test_kernel_format")
+    actions = target[TestingAspectInfo].actions
+    link_action = _find_action(env, actions, "LoomBinaryLink")
+    if "--target=test-family:test-selector" not in link_action.argv:
+        env.fail("expected generic target in link arguments %r" % link_action.argv)
+    compile_action = _find_action(env, actions, "LoomKernelBinary")
+    for expected_arg in [
+        "--product=kernel",
+        "--format=test-kernel-format",
+        "--target=test-family:test-selector",
+    ]:
+        if expected_arg not in compile_action.argv:
+            env.fail(
+                "expected %r in compile arguments %r" %
+                (expected_arg, compile_action.argv),
+            )
+
+def _test_kernel_binary_accepts_explicit_format(name, **kwargs):
+    subject = name + "_subject"
+    util.helper_target(
+        loom_kernel_binary,
+        name = subject,
+        deps = [":public_kernel_library"],
+        format = ":test_alternate_kernel_format",
+        tags = ["manual"],
+        target = ":test_target_profile",
+    )
+    analysis_test(
+        name = name,
+        impl = _test_kernel_binary_accepts_explicit_format_impl,
+        target = subject,
+        **kwargs
+    )
+
+def _test_kernel_binary_accepts_explicit_format_impl(env, target):
+    binary = target[LoomBinaryInfo]
+    env.expect.that_str(binary.primary_artifact.basename).equals(
+        target.label.name + ".alt",
+    )
+    env.expect.that_str(
+        binary.product_formats["kernel"].label.name,
+    ).equals("test_alternate_kernel_format")
+    compile_action = _find_action(
+        env,
+        target[TestingAspectInfo].actions,
+        "LoomKernelBinary",
+    )
+    if "--format=test-alternate-kernel-format" not in compile_action.argv:
+        env.fail("expected explicit format in %r" % compile_action.argv)
+
+def _test_kernel_binary_rejects_unsupported_format(name, **kwargs):
+    subject = name + "_subject"
+    util.helper_target(
+        loom_kernel_binary,
+        name = subject,
+        deps = [":public_kernel_library"],
+        format = ":test_unsupported_kernel_format",
+        tags = ["manual"],
+        target = ":test_target_profile",
+    )
+    analysis_test(
+        name = name,
+        expect_failure = True,
+        impl = _test_kernel_binary_rejects_unsupported_format_impl,
+        target = subject,
+        **kwargs
+    )
+
+def _test_kernel_binary_rejects_unsupported_format_impl(env, target):
+    env.expect.that_target(target).failures().contains_predicate(
+        matching.contains("does not support product format"),
+    )
+
+def _test_kernel_binary_requires_canonical_format(name, **kwargs):
+    subject = name + "_subject"
+    util.helper_target(
+        loom_kernel_binary,
+        name = subject,
+        deps = [":public_kernel_library"],
+        tags = ["manual"],
+        target = ":test_empty_profile",
+    )
+    analysis_test(
+        name = name,
+        expect_failure = True,
+        impl = _test_kernel_binary_requires_canonical_format_impl,
+        target = subject,
+        **kwargs
+    )
+
+def _test_kernel_binary_requires_canonical_format_impl(env, target):
+    env.expect.that_target(target).failures().contains_predicate(
+        matching.contains("has no canonical format for product \"kernel\""),
+    )
+
+def _test_kernel_binary_uses_builtin_spirv_format(name, **kwargs):
+    subject = name + "_subject"
+    util.helper_target(
+        loom_kernel_binary,
+        name = subject,
+        deps = [":public_kernel_library"],
+        tags = ["manual"],
+        target = "//loom/target/spirv:vulkan1.3+bda",
+    )
+    analysis_test(
+        name = name,
+        impl = _test_kernel_binary_uses_builtin_spirv_format_impl,
+        target = subject,
+        **kwargs
+    )
+
+def _test_kernel_binary_uses_builtin_spirv_format_impl(env, target):
+    binary = target[LoomBinaryInfo]
+    env.expect.that_str(binary.primary_artifact.basename).equals(
+        target.label.name + ".spv",
+    )
+    compile_action = _find_action(
+        env,
+        target[TestingAspectInfo].actions,
+        "LoomKernelBinary",
+    )
+    if "--format=spirv-binary" not in compile_action.argv:
+        env.fail("expected SPIR-V format in %r" % compile_action.argv)
 
 def _test_command_binary_emits_composite_product(name, **kwargs):
     analysis_test(
@@ -396,29 +519,54 @@ def _test_command_binary_explicit_roots_replace_exports_impl(env, target):
         "interface.loombc",
     )
 
-def _test_command_binary_profile_mismatch(name, **kwargs):
+def _test_command_binary_uses_generic_profile_canonical_formats(name, **kwargs):
     subject = name + "_subject"
     util.helper_target(
         loom_command_binary,
         name = subject,
         deps = [":public_kernel_library"],
         tags = ["manual"],
-        target = ":test_spirv_profile",
+        target = ":test_target_profile",
     )
     analysis_test(
         name = name,
-        expect_failure = True,
-        impl = _test_command_binary_profile_mismatch_impl,
+        impl = _test_command_binary_uses_generic_profile_canonical_formats_impl,
         target = subject,
         **kwargs
     )
 
-def _test_command_binary_profile_mismatch_impl(env, target):
-    env.expect.that_target(target).failures().contains_predicate(
-        matching.contains(
-            "cannot emit a command binary for target profile family \"spirv\"",
-        ),
+def _test_command_binary_uses_generic_profile_canonical_formats_impl(env, target):
+    binary = target[LoomBinaryInfo]
+    env.expect.that_str(binary.primary_artifact.basename).equals(
+        target.label.name + ".test.commands.json",
     )
+    env.expect.that_str(
+        binary.product_formats["command"].label.name,
+    ).equals("test_command_format")
+    env.expect.that_str(
+        binary.product_formats["kernel"].label.name,
+    ).equals("test_kernel_format")
+    for basename in [
+        target.label.name + ".kernels.tbin",
+        target.label.name + ".test.commands",
+        target.label.name + ".test.commands.json",
+    ]:
+        _expect_basename(env, binary.artifacts.to_list(), basename)
+
+    actions = target[TestingAspectInfo].actions
+    command_action = _find_action(env, actions, "LoomCommandBinary")
+    if "--format=test-command-format" not in command_action.argv:
+        env.fail("expected generic command format in %r" % command_action.argv)
+    kernel_action = _find_action(env, actions, "LoomCommandKernelBinary")
+    for expected_arg in [
+        "--format=test-kernel-format",
+        "--target=test-family:test-selector",
+    ]:
+        if expected_arg not in kernel_action.argv:
+            env.fail(
+                "expected %r in kernel arguments %r" %
+                (expected_arg, kernel_action.argv),
+            )
 
 def loom_binary_rules_test_suite(name):
     test_suite(
@@ -426,11 +574,15 @@ def loom_binary_rules_test_suite(name):
         tests = [
             _test_command_binary_emits_composite_product,
             _test_command_binary_explicit_roots_replace_exports,
-            _test_command_binary_profile_mismatch,
             _test_command_binary_sources_are_an_implicit_library,
+            _test_command_binary_uses_generic_profile_canonical_formats,
             _test_explicit_roots_replace_direct_exports,
-            _test_kernel_binary_profile_mismatch,
+            _test_kernel_binary_accepts_explicit_format,
+            _test_kernel_binary_accepts_generic_profile,
             _test_kernel_binary_roots_direct_library_exports,
+            _test_kernel_binary_requires_canonical_format,
+            _test_kernel_binary_rejects_unsupported_format,
             _test_kernel_binary_sources_are_an_implicit_library,
+            _test_kernel_binary_uses_builtin_spirv_format,
         ],
     )

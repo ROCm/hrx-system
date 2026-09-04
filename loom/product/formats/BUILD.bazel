@@ -1,0 +1,50 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+# bazel-to-cmake: skip
+
+load(
+    "//loom/build_tools/bazel:loom_product_format.bzl",
+    "loom_artifact_set_product_format",
+    "loom_file_product_format",
+)
+
+package(default_visibility = ["//visibility:public"])
+
+loom_file_product_format(
+    name = "amdgpu_hsaco",
+    format = "amdgpu-hsaco",
+    output_extension = ".hsaco",
+    product = "kernel",
+)
+
+loom_file_product_format(
+    name = "spirv_binary",
+    format = "spirv-binary",
+    output_extension = ".spv",
+    product = "kernel",
+)
+
+loom_file_product_format(
+    name = "llvmir_text",
+    format = "llvmir-text",
+    output_extension = ".ll",
+    product = "kernel",
+)
+
+loom_file_product_format(
+    name = "llvmir_bitcode",
+    format = "llvmir-bitcode",
+    output_extension = ".bc",
+    product = "kernel",
+)
+
+loom_artifact_set_product_format(
+    name = "loom_command",
+    artifact_directory_extension = ".commands",
+    format = "loom-command",
+    manifest_extension = ".commands.json",
+    product = "command",
+)
