@@ -568,7 +568,9 @@ static int iree_vm_bytecode_compare_callable_types(
 }
 
 static iree_status_t iree_vm_bytecode_verify_callable_types(
-    iree_const_byte_span_t span, iree_vm_bytecode_module_layout_t* layout) {
+    iree_const_byte_span_t span, iree_vm_bytecode_module_layout_t* layout,
+    iree_vm_module_callable_field_counts_t* out_callable_fields) {
+  iree_vm_module_callable_field_counts_t callable_fields = {0};
   if (iree_const_byte_span_is_empty(span)) {
     for (uint32_t i = 0; i < layout->signatures.descriptor_count; ++i) {
       if (layout->signatures.descriptors[i].kind_u16 ==
@@ -578,6 +580,7 @@ static iree_status_t iree_vm_bytecode_verify_callable_types(
             "function signature type requires CallableTypes");
       }
     }
+    *out_callable_fields = callable_fields;
     return iree_ok_status();
   }
   iree_vm_bytecode_cursor_t cursor = {span, 0, "CallableTypes section"};
@@ -607,6 +610,26 @@ static iree_status_t iree_vm_bytecode_verify_callable_types(
         layout));
     const iree_vm_bytecode_v0_signature_row_t* signature =
         &layout->signatures.rows[row->signature_ordinal_u16];
+    const iree_host_size_t value_count =
+        (iree_host_size_t)signature->argument_value_count_u16 +
+        signature->result_value_count_u16;
+    const iree_host_size_t ref_count =
+        (iree_host_size_t)signature->argument_ref_count_u16 +
+        signature->result_ref_count_u16;
+    const iree_host_size_t function_count =
+        (iree_host_size_t)signature->argument_function_count_u16 +
+        signature->result_function_count_u16;
+    if (!iree_host_size_checked_add(callable_fields.value_count, value_count,
+                                    &callable_fields.value_count) ||
+        !iree_host_size_checked_add(callable_fields.ref_count, ref_count,
+                                    &callable_fields.ref_count) ||
+        !iree_host_size_checked_add(callable_fields.function_count,
+                                    function_count,
+                                    &callable_fields.function_count)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "aggregate callable signature fields overflow host size");
+    }
     const uint32_t descriptor_count =
         iree_vm_bytecode_signature_argument_count(signature) +
         iree_vm_bytecode_signature_result_count(signature);
@@ -649,6 +672,7 @@ static iree_status_t iree_vm_bytecode_verify_callable_types(
           "signature callable-type ordinal is out of range");
     }
   }
+  *out_callable_fields = callable_fields;
   return iree_ok_status();
 }
 
@@ -1397,7 +1421,8 @@ iree_status_t iree_vm_bytecode_verify_module_structure(
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_signatures(
       sections.spans[IREE_VM_BYTECODE_SECTION_SIGNATURES], &plan.layout));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_callable_types(
-      sections.spans[IREE_VM_BYTECODE_SECTION_CALLABLE_TYPES], &plan.layout));
+      sections.spans[IREE_VM_BYTECODE_SECTION_CALLABLE_TYPES], &plan.layout,
+      &plan.callable_fields));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_imports(
       sections.spans[IREE_VM_BYTECODE_SECTION_IMPORTS], &plan.layout));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_functions(
@@ -1856,7 +1881,7 @@ static iree_status_t iree_vm_bytecode_verify_function_instructions(
 }
 
 iree_status_t iree_vm_bytecode_verify_module_instructions(
-    iree_vm_bytecode_module_plan_t* plan, uint32_t* block_offsets) {
+    const iree_vm_bytecode_module_plan_t* plan, uint32_t* block_offsets) {
   for (uint32_t i = 0; i < plan->layout.functions.count; ++i) {
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_function_instructions(
         &plan->layout, &plan->layout.functions.rows[i], i, block_offsets));

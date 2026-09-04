@@ -25,7 +25,7 @@ iree_status_t iree_vm_bytecode_verify_module_structure(
 // |plan->maximum_block_count| uint32_t entries and may be null when the count
 // is zero.
 iree_status_t iree_vm_bytecode_verify_module_instructions(
-    iree_vm_bytecode_module_plan_t* plan, uint32_t* block_offsets);
+    const iree_vm_bytecode_module_plan_t* plan, uint32_t* block_offsets);
 
 #ifdef __cplusplus
 }  // extern "C"

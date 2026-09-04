@@ -9,8 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/vm/bytecode/wire/module.h"
-#include "iree/vm/function.h"
-#include "iree/vm/ref.h"
+#include "iree/vm/module.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -248,6 +247,8 @@ typedef struct iree_vm_bytecode_rodata_storage_plan_t {
 typedef struct iree_vm_bytecode_module_plan_t {
   // Complete mapped image layout.
   iree_vm_bytecode_module_layout_t layout;
+  // Aggregate physical fields across all callable-type signatures.
+  iree_vm_module_callable_field_counts_t callable_fields;
   // Largest decoded control.block count among all functions.
   uint32_t maximum_block_count;
   // Exact process-storage layout.
