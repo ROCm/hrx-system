@@ -17,6 +17,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/task/registration/driver_module.h"
+#include "iree/hal/memory/passthrough_pool.h"
 #include "iree/hal/replay/file_reader.h"
 #include "iree/hal/replay/recorder.h"
 #include "iree/hal/testing/mock_device.h"
@@ -1438,6 +1439,18 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueAlloca) {
 
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
+  iree_hal_queue_t* wrapped_queue = iree_hal_device_queue(wrapped_device, 0, 0);
+  ASSERT_NE(wrapped_queue, nullptr);
+
+  iree_hal_queue_pool_backend_t backend = {};
+  IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
+      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, &backend));
+  iree_hal_passthrough_pool_options_t pool_options = {};
+  pool_options.asan = backend.asan;
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
+      pool_options, backend.slab_provider, backend.notification,
+      iree_allocator_system(), &pool));
 
   iree_hal_semaphore_t* signal_semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
@@ -1456,16 +1469,22 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueAlloca) {
       IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(wrapped_queue)));
+  const iree_hal_pool_reservation_request_t request = {
+      .params = params,
+      .allocation_size = 16,
+  };
   iree_hal_buffer_t* buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal_list, /*pool=*/nullptr, params,
-      16, IREE_HAL_ALLOCA_FLAG_NONE, &buffer));
+  IREE_ASSERT_OK(iree_hal_queue_alloca(
+      wrapped_queue, iree_hal_semaphore_list_empty(), signal_list, pool,
+      /*request_count=*/1, &request, &buffer));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
   iree_hal_buffer_release(buffer);
   iree_hal_semaphore_release(signal_semaphore);
+  iree_hal_pool_release(pool);
 
   IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
   iree_hal_device_group_release(wrapped_group);

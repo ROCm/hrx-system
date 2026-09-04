@@ -295,42 +295,6 @@ iree_hal_device_create_params_default(void) {
 IREE_API_EXPORT iree_status_t iree_hal_device_create_params_verify(
     const iree_hal_device_create_params_t* params);
 
-// Bitfield specifying flags controlling an async allocation operation.
-typedef uint64_t iree_hal_alloca_flags_t;
-enum iree_hal_alloca_flag_bits_t {
-  IREE_HAL_ALLOCA_FLAG_NONE = 0,
-
-  // Buffer lifetime is indeterminate indicating that the compiler or
-  // application allocating the buffer is unable to determine when it is safe to
-  // deallocate the buffer. Explicit deallocation requests are ignored and the
-  // buffer deallocation will happen synchronously when the last remaining
-  // reference to the buffer is released.
-  IREE_HAL_ALLOCA_FLAG_INDETERMINATE_LIFETIME = 1ull << 0,
-
-  // Allows the queue to satisfy the allocation from recycled pool memory whose
-  // death frontier is not dominated by the requester's current queue frontier
-  // by inserting an internal dependency on that death frontier before the
-  // buffer's bytes are used. Without this flag, pools must return only
-  // immediately-usable reservations to queue_alloca.
-  IREE_HAL_ALLOCA_FLAG_ALLOW_POOL_WAIT_FRONTIER = 1ull << 1,
-};
-
-// Bitfield specifying flags controlling an async deallocation operation.
-typedef uint64_t iree_hal_dealloca_flags_t;
-enum iree_hal_dealloca_flag_bits_t {
-  IREE_HAL_DEALLOCA_FLAG_NONE = 0,
-
-  // The provided device will be overridden with the origin of the allocation
-  // as defined by the placement, if available. The provided queue affinity is
-  // retained because placement only describes queue-family accessibility and
-  // cannot select an exact execution queue.
-  // If the buffer has no origin device (imported heap buffers and other rare
-  // cases) or was not allocated asynchronously the provided device will be
-  // used to insert a queue barrier. Callers must ensure the provided device and
-  // queue affinity are compatible with the fences provided.
-  IREE_HAL_DEALLOCA_FLAG_PREFER_ORIGIN = 1ull << 0,
-};
-
 // Bitfield specifying flags controlling a host call operation.
 typedef uint64_t iree_hal_host_call_flags_t;
 enum iree_hal_host_call_flag_bits_e {
@@ -817,55 +781,6 @@ IREE_API_EXPORT iree_status_t iree_hal_device_load_executable(
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* params,
     iree_hal_executable_t** out_executable);
-
-// Reserves and returns a device-local queue-ordered transient buffer.
-// The allocation will not be committed until the entire |wait_semaphore_list|
-// has been reached. Once the storage is available for use the
-// |signal_semaphore_list| will be signaled. The contents of the buffer are
-// undefined until signaled even if all waits have been resolved and callers
-// must always wait for the signal.
-//
-// |pool| is a borrowed allocation pool selector. NULL selects the device's
-// default pool. Any non-NULL pool must outlive all queue submissions,
-// reservations, and materialized buffers that use it.
-//
-// For optimal performance and minimal memory consumption the returned buffer
-// should be deallocated using iree_hal_device_queue_dealloca as soon as
-// possible. It's still safe to synchronously release the buffer but the
-// lifetime will then be controlled by all potential retainers.
-//
-// Usage:
-//   iree_hal_device_queue_alloca(wait(0), signal(1), &buffer);
-//   iree_hal_device_queue_execute(wait(1), signal(2), commands...);
-//   iree_hal_device_queue_dealloca(wait(2), signal(3), buffer);
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_alloca(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
-    iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
-    iree_hal_buffer_t** IREE_RESTRICT out_buffer);
-
-// Deallocates a queue-ordered transient buffer.
-// The deallocation will not be made until the entire |wait_semaphore_list| has
-// been reached. Once the storage is available for reuse the
-// |signal_semaphore_list| will be signaled. After all waits have been resolved
-// the contents of the buffer are immediately undefined even if the signal has
-// not yet occurred. Queue implementations must perform target-visible release
-// effects such as decommit, sanitizer poisoning, or guard-page updates after
-// all waits are satisfied and before any signals are published. If the buffer
-// was not allocated asynchronously a barrier will be inserted to preserve fence
-// timelines.
-//
-// Deallocations will only be queue-ordered if the |buffer| was originally
-// allocated with iree_hal_device_queue_alloca. Any synchronous allocations will
-// be ignored and deallocated when the |buffer| has been released but a queue
-// barrier will be inserted to preserve the timeline.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_dealloca(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags);
 
 // Enqueues a single queue-ordered fill operation.
 // The |target_buffer| must be visible to the device queue performing the fill.
@@ -1392,20 +1307,6 @@ typedef struct iree_hal_device_vtable_t {
   iree_status_t(IREE_API_PTR* query_queue_pool_backend)(
       iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
       iree_hal_queue_pool_backend_t* out_backend);
-
-  iree_status_t(IREE_API_PTR* queue_alloca)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
-      iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
-      iree_hal_buffer_t** IREE_RESTRICT out_buffer);
-
-  iree_status_t(IREE_API_PTR* queue_dealloca)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags);
 
   iree_status_t(IREE_API_PTR* queue_fill)(
       iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,

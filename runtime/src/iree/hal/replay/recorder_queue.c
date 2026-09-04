@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "iree/hal/pool.h"
+#include "iree/hal/replay/recorder_allocator.h"
 #include "iree/hal/replay/recorder_buffer.h"
 #include "iree/hal/replay/recorder_file.h"
 #include "iree/hal/replay/recorder_record.h"
@@ -34,18 +36,70 @@ typedef struct iree_hal_replay_recorder_transfer_storage_t {
   iree_host_size_t signal_payloads_size;
 } iree_hal_replay_recorder_transfer_storage_t;
 
+typedef struct iree_hal_replay_recorder_alloca_storage_t {
+  // Number of allocation requests represented by all parallel arrays.
+  iree_host_size_t request_count;
+  // Buffers returned by the wrapped queue before proxying.
+  iree_hal_buffer_t** base_buffers;
+  // Preallocated proxy objects consumed after the wrapped call succeeds.
+  iree_hal_replay_recorder_buffer_t** proxy_buffers;
+  // Initialized proxy buffers published to the caller on success.
+  iree_hal_buffer_t** replay_buffers;
+  // Serialized allocation requests and resulting buffer ids.
+  iree_hal_replay_queue_alloca_request_payload_t* request_payloads;
+  // Serialized metadata for created buffer object records.
+  iree_hal_replay_buffer_object_payload_t* object_payloads;
+  // Byte spans over each entry in |object_payloads|.
+  iree_const_byte_span_t* object_iovecs;
+  // Created object records appended with the allocation operation.
+  iree_hal_replay_created_object_record_t* created_objects;
+  // Serialized wait semaphore timepoints.
+  iree_hal_replay_semaphore_timepoint_payload_t* wait_payloads;
+  // Byte length of |wait_payloads|.
+  iree_host_size_t wait_payloads_size;
+  // Serialized signal semaphore timepoints.
+  iree_hal_replay_semaphore_timepoint_payload_t* signal_payloads;
+  // Byte length of |signal_payloads|.
+  iree_host_size_t signal_payloads_size;
+} iree_hal_replay_recorder_alloca_storage_t;
+
+typedef struct iree_hal_replay_recorder_dealloca_storage_t {
+  // Number of allocation roots represented by all parallel arrays.
+  iree_host_size_t buffer_count;
+  // Underlying allocation roots passed to the wrapped queue.
+  iree_hal_buffer_t** base_buffers;
+  // Temporary subspans retained while the wrapped call captures arguments.
+  iree_hal_buffer_t** temporary_buffers;
+  // Serialized allocation-root object ids.
+  iree_hal_replay_object_id_t* buffer_ids;
+  // Serialized wait semaphore timepoints.
+  iree_hal_replay_semaphore_timepoint_payload_t* wait_payloads;
+  // Byte length of |wait_payloads|.
+  iree_host_size_t wait_payloads_size;
+  // Serialized signal semaphore timepoints.
+  iree_hal_replay_semaphore_timepoint_payload_t* signal_payloads;
+  // Byte length of |signal_payloads|.
+  iree_host_size_t signal_payloads_size;
+} iree_hal_replay_recorder_dealloca_storage_t;
+
 static iree_status_t iree_hal_replay_recorder_queue_allocate_array(
     iree_allocator_t host_allocator, iree_host_size_t element_count,
     iree_host_size_t element_size, void** out_ptr) {
-  *out_ptr = NULL;
-  if (element_count == 0) return iree_ok_status();
+  if (element_count == 0) {
+    *out_ptr = NULL;
+    return iree_ok_status();
+  }
   iree_host_size_t allocation_size = 0;
   if (IREE_UNLIKELY(!iree_host_size_checked_mul(element_count, element_size,
                                                 &allocation_size))) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "replay transfer storage size overflow");
+                            "replay queue storage size overflow");
   }
-  return iree_allocator_malloc(host_allocator, allocation_size, out_ptr);
+  void* ptr = NULL;
+  iree_status_t status =
+      iree_allocator_malloc(host_allocator, allocation_size, &ptr);
+  if (iree_status_is_ok(status)) *out_ptr = ptr;
+  return status;
 }
 
 static void iree_hal_replay_recorder_transfer_storage_deinitialize(
@@ -63,6 +117,54 @@ static void iree_hal_replay_recorder_transfer_storage_deinitialize(
   iree_allocator_free(host_allocator, storage->operation_payloads);
   iree_allocator_free(host_allocator, storage->temporary_buffers);
   iree_allocator_free(host_allocator, storage->base_operations);
+  memset(storage, 0, sizeof(*storage));
+}
+
+static void iree_hal_replay_recorder_alloca_storage_deinitialize(
+    iree_allocator_t host_allocator,
+    iree_hal_replay_recorder_alloca_storage_t* storage) {
+  if (storage->replay_buffers) {
+    for (iree_host_size_t i = 0; i < storage->request_count; ++i) {
+      iree_hal_buffer_release(storage->replay_buffers[i]);
+    }
+  }
+  if (storage->proxy_buffers) {
+    for (iree_host_size_t i = 0; i < storage->request_count; ++i) {
+      iree_hal_replay_recorder_buffer_free_proxy(host_allocator,
+                                                 storage->proxy_buffers[i]);
+    }
+  }
+  if (storage->base_buffers) {
+    for (iree_host_size_t i = 0; i < storage->request_count; ++i) {
+      iree_hal_buffer_release(storage->base_buffers[i]);
+    }
+  }
+  iree_allocator_free(host_allocator, storage->signal_payloads);
+  iree_allocator_free(host_allocator, storage->wait_payloads);
+  iree_allocator_free(host_allocator, storage->created_objects);
+  iree_allocator_free(host_allocator, storage->object_iovecs);
+  iree_allocator_free(host_allocator, storage->object_payloads);
+  iree_allocator_free(host_allocator, storage->request_payloads);
+  iree_allocator_free(host_allocator, storage->replay_buffers);
+  iree_allocator_free(host_allocator, storage->proxy_buffers);
+  iree_allocator_free(host_allocator, storage->base_buffers);
+  memset(storage, 0, sizeof(*storage));
+}
+
+static void iree_hal_replay_recorder_dealloca_storage_deinitialize(
+    iree_allocator_t host_allocator,
+    iree_hal_replay_recorder_dealloca_storage_t* storage) {
+  if (storage->temporary_buffers) {
+    for (iree_host_size_t i = 0; i < storage->buffer_count; ++i) {
+      iree_hal_replay_recorder_buffer_release_temporary(
+          storage->temporary_buffers[i]);
+    }
+  }
+  iree_allocator_free(host_allocator, storage->signal_payloads);
+  iree_allocator_free(host_allocator, storage->wait_payloads);
+  iree_allocator_free(host_allocator, storage->buffer_ids);
+  iree_allocator_free(host_allocator, storage->temporary_buffers);
+  iree_allocator_free(host_allocator, storage->base_buffers);
   memset(storage, 0, sizeof(*storage));
 }
 
@@ -390,6 +492,317 @@ static void iree_hal_replay_recorder_queue_destroy(
   (void)base_queue;
 }
 
+static iree_status_t iree_hal_replay_recorder_queue_allocate_alloca_storage(
+    iree_hal_replay_recorder_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests, bool can_record,
+    iree_hal_replay_recorder_alloca_storage_t* out_storage) {
+  iree_hal_replay_recorder_alloca_storage_t storage = {
+      .request_count = request_count,
+  };
+  iree_status_t status = iree_hal_replay_recorder_queue_allocate_array(
+      queue->host_allocator, request_count, sizeof(*storage.base_buffers),
+      (void**)&storage.base_buffers);
+  if (iree_status_is_ok(status)) {
+    memset(storage.base_buffers, 0,
+           request_count * sizeof(*storage.base_buffers));
+    status = iree_hal_replay_recorder_queue_allocate_array(
+        queue->host_allocator, request_count, sizeof(*storage.proxy_buffers),
+        (void**)&storage.proxy_buffers);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(storage.proxy_buffers, 0,
+           request_count * sizeof(*storage.proxy_buffers));
+    status = iree_hal_replay_recorder_queue_allocate_array(
+        queue->host_allocator, request_count, sizeof(*storage.replay_buffers),
+        (void**)&storage.replay_buffers);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(storage.replay_buffers, 0,
+           request_count * sizeof(*storage.replay_buffers));
+  }
+  if (iree_status_is_ok(status) && can_record) {
+    status = iree_hal_replay_recorder_queue_allocate_array(
+        queue->host_allocator, request_count, sizeof(*storage.request_payloads),
+        (void**)&storage.request_payloads);
+  }
+  if (iree_status_is_ok(status) && can_record) {
+    status = iree_hal_replay_recorder_queue_allocate_array(
+        queue->host_allocator, request_count, sizeof(*storage.object_payloads),
+        (void**)&storage.object_payloads);
+  }
+  if (iree_status_is_ok(status) && can_record) {
+    status = iree_hal_replay_recorder_queue_allocate_array(
+        queue->host_allocator, request_count, sizeof(*storage.object_iovecs),
+        (void**)&storage.object_iovecs);
+  }
+  if (iree_status_is_ok(status) && can_record) {
+    status = iree_hal_replay_recorder_queue_allocate_array(
+        queue->host_allocator, request_count, sizeof(*storage.created_objects),
+        (void**)&storage.created_objects);
+  }
+  for (iree_host_size_t i = 0; i < request_count && iree_status_is_ok(status);
+       ++i) {
+    status = iree_hal_replay_recorder_buffer_allocate_proxy(
+        queue->host_allocator, &storage.proxy_buffers[i]);
+    if (iree_status_is_ok(status) && can_record) {
+      iree_hal_replay_queue_alloca_request_payload_t* request_payload =
+          &storage.request_payloads[i];
+      status = iree_hal_replay_recorder_reserve_object_id(
+          queue->recorder, &request_payload->buffer_id);
+      if (iree_status_is_ok(status)) {
+        iree_hal_buffer_params_t canonical_params = requests[i].params;
+        iree_hal_buffer_params_canonicalize(&canonical_params);
+        iree_hal_replay_recorder_allocator_make_allocate_buffer_payload(
+            &canonical_params, requests[i].allocation_size,
+            &request_payload->allocation);
+      }
+    }
+  }
+  if (iree_status_is_ok(status) && can_record) {
+    status = iree_hal_replay_recorder_allocate_semaphore_payloads(
+        queue->recorder, wait_semaphore_list, queue->host_allocator,
+        &storage.wait_payloads, &storage.wait_payloads_size);
+  }
+  if (iree_status_is_ok(status) && can_record) {
+    status = iree_hal_replay_recorder_allocate_semaphore_payloads(
+        queue->recorder, signal_semaphore_list, queue->host_allocator,
+        &storage.signal_payloads, &storage.signal_payloads_size);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_storage = storage;
+  } else {
+    iree_hal_replay_recorder_alloca_storage_deinitialize(queue->host_allocator,
+                                                         &storage);
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_replay_recorder_queue_alloca(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t** IREE_RESTRICT out_buffers) {
+  iree_hal_replay_recorder_queue_t* queue =
+      (iree_hal_replay_recorder_queue_t*)base_queue;
+  const bool can_record =
+      iree_hal_replay_recorder_queue_has_captured_semaphores(
+          queue->recorder, wait_semaphore_list) &&
+      iree_hal_replay_recorder_queue_has_captured_semaphores(
+          queue->recorder, signal_semaphore_list);
+
+  iree_hal_replay_recorder_alloca_storage_t storage;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_recorder_queue_allocate_alloca_storage(
+      queue, wait_semaphore_list, signal_semaphore_list, request_count,
+      requests, can_record, &storage));
+
+  iree_hal_replay_pending_record_t pending_record = {0};
+  iree_status_t status = iree_hal_replay_recorder_begin_operation(
+      queue->recorder, queue->device_id, queue->queue_id,
+      IREE_HAL_REPLAY_OBJECT_ID_NONE, IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ALLOCA,
+      can_record ? IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ALLOCA
+                 : IREE_HAL_REPLAY_PAYLOAD_TYPE_NONE,
+      &pending_record);
+  if (iree_status_is_ok(status) && !can_record) {
+    iree_hal_replay_recorder_mark_unsupported(&pending_record);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_alloca(queue->base_queue, wait_semaphore_list,
+                                   signal_semaphore_list, pool, request_count,
+                                   requests, storage.base_buffers);
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < request_count; ++i) {
+      const iree_hal_replay_object_id_t buffer_id =
+          can_record ? storage.request_payloads[i].buffer_id
+                     : IREE_HAL_REPLAY_OBJECT_ID_NONE;
+      storage.replay_buffers[i] =
+          iree_hal_replay_recorder_buffer_initialize_proxy(
+              queue->recorder, queue->device_id, buffer_id,
+              queue->placement_device, storage.base_buffers[i],
+              queue->host_allocator, storage.proxy_buffers[i]);
+      storage.proxy_buffers[i] = NULL;
+      if (can_record) {
+        iree_hal_replay_recorder_buffer_make_object_payload(
+            storage.base_buffers[i], &storage.object_payloads[i]);
+        storage.object_iovecs[i] = iree_make_const_byte_span(
+            &storage.object_payloads[i], sizeof(storage.object_payloads[i]));
+        storage.created_objects[i] = (iree_hal_replay_created_object_record_t){
+            .object_id = buffer_id,
+            .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER,
+            .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_BUFFER_OBJECT,
+            .iovec_count = 1,
+            .iovecs = &storage.object_iovecs[i],
+        };
+      }
+      iree_hal_buffer_release(storage.base_buffers[i]);
+      storage.base_buffers[i] = NULL;
+    }
+  }
+
+  if (pending_record.recorder) {
+    if (can_record) {
+      const iree_hal_replay_queue_alloca_payload_t payload = {
+          .wait_semaphore_count = wait_semaphore_list.count,
+          .signal_semaphore_count = signal_semaphore_list.count,
+          .request_count = request_count,
+      };
+      const iree_const_byte_span_t iovecs[] = {
+          iree_make_const_byte_span(&payload, sizeof(payload)),
+          iree_make_const_byte_span(storage.wait_payloads,
+                                    storage.wait_payloads_size),
+          iree_make_const_byte_span(storage.signal_payloads,
+                                    storage.signal_payloads_size),
+          iree_make_const_byte_span(
+              storage.request_payloads,
+              request_count * sizeof(*storage.request_payloads)),
+      };
+      status = iree_hal_replay_recorder_end_creation_operation_list(
+          &pending_record, status, IREE_ARRAYSIZE(iovecs), iovecs,
+          request_count, storage.created_objects);
+    } else {
+      status = iree_hal_replay_recorder_end_operation(&pending_record, status);
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < request_count; ++i) {
+      out_buffers[i] = storage.replay_buffers[i];
+      storage.replay_buffers[i] = NULL;
+    }
+  }
+  iree_hal_replay_recorder_alloca_storage_deinitialize(queue->host_allocator,
+                                                       &storage);
+  return status;
+}
+
+static iree_status_t iree_hal_replay_recorder_queue_allocate_dealloca_storage(
+    iree_hal_replay_recorder_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers,
+    bool can_record, iree_hal_replay_recorder_dealloca_storage_t* out_storage) {
+  iree_hal_replay_recorder_dealloca_storage_t storage = {
+      .buffer_count = buffer_count,
+  };
+  iree_status_t status = iree_hal_replay_recorder_queue_allocate_array(
+      queue->host_allocator, buffer_count, sizeof(*storage.base_buffers),
+      (void**)&storage.base_buffers);
+  if (iree_status_is_ok(status)) {
+    memset(storage.base_buffers, 0,
+           buffer_count * sizeof(*storage.base_buffers));
+    status = iree_hal_replay_recorder_queue_allocate_array(
+        queue->host_allocator, buffer_count, sizeof(*storage.temporary_buffers),
+        (void**)&storage.temporary_buffers);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(storage.temporary_buffers, 0,
+           buffer_count * sizeof(*storage.temporary_buffers));
+  }
+  if (iree_status_is_ok(status) && can_record) {
+    status = iree_hal_replay_recorder_queue_allocate_array(
+        queue->host_allocator, buffer_count, sizeof(*storage.buffer_ids),
+        (void**)&storage.buffer_ids);
+  }
+  for (iree_host_size_t i = 0; i < buffer_count && iree_status_is_ok(status);
+       ++i) {
+    status = iree_hal_replay_recorder_buffer_unwrap_for_call(
+        buffers[i], queue->host_allocator, &storage.base_buffers[i],
+        &storage.temporary_buffers[i]);
+    if (iree_status_is_ok(status) && can_record) {
+      storage.buffer_ids[i] =
+          iree_hal_replay_recorder_find_buffer_id(queue->recorder, buffers[i]);
+    }
+  }
+  if (iree_status_is_ok(status) && can_record) {
+    status = iree_hal_replay_recorder_allocate_semaphore_payloads(
+        queue->recorder, wait_semaphore_list, queue->host_allocator,
+        &storage.wait_payloads, &storage.wait_payloads_size);
+  }
+  if (iree_status_is_ok(status) && can_record) {
+    status = iree_hal_replay_recorder_allocate_semaphore_payloads(
+        queue->recorder, signal_semaphore_list, queue->host_allocator,
+        &storage.signal_payloads, &storage.signal_payloads_size);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_storage = storage;
+  } else {
+    iree_hal_replay_recorder_dealloca_storage_deinitialize(
+        queue->host_allocator, &storage);
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_replay_recorder_queue_dealloca(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers) {
+  iree_hal_replay_recorder_queue_t* queue =
+      (iree_hal_replay_recorder_queue_t*)base_queue;
+  bool can_record = iree_hal_replay_recorder_queue_has_captured_semaphores(
+                        queue->recorder, wait_semaphore_list) &&
+                    iree_hal_replay_recorder_queue_has_captured_semaphores(
+                        queue->recorder, signal_semaphore_list);
+  for (iree_host_size_t i = 0; i < buffer_count && can_record; ++i) {
+    can_record = iree_hal_replay_recorder_queue_has_captured_buffer(
+        queue->recorder, buffers[i]);
+  }
+
+  iree_hal_replay_recorder_dealloca_storage_t storage;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_recorder_queue_allocate_dealloca_storage(
+      queue, wait_semaphore_list, signal_semaphore_list, buffer_count, buffers,
+      can_record, &storage));
+
+  iree_hal_replay_pending_record_t pending_record = {0};
+  iree_status_t status = iree_hal_replay_recorder_begin_operation(
+      queue->recorder, queue->device_id, queue->queue_id,
+      IREE_HAL_REPLAY_OBJECT_ID_NONE, IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_DEALLOCA,
+      can_record ? IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_DEALLOCA
+                 : IREE_HAL_REPLAY_PAYLOAD_TYPE_NONE,
+      &pending_record);
+  if (iree_status_is_ok(status) && !can_record) {
+    iree_hal_replay_recorder_mark_unsupported(&pending_record);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_dealloca(queue->base_queue, wait_semaphore_list,
+                                     signal_semaphore_list, buffer_count,
+                                     storage.base_buffers);
+  }
+  if (pending_record.recorder) {
+    if (can_record) {
+      const iree_hal_replay_queue_dealloca_payload_t payload = {
+          .wait_semaphore_count = wait_semaphore_list.count,
+          .signal_semaphore_count = signal_semaphore_list.count,
+          .buffer_count = buffer_count,
+      };
+      const iree_const_byte_span_t iovecs[] = {
+          iree_make_const_byte_span(&payload, sizeof(payload)),
+          iree_make_const_byte_span(storage.wait_payloads,
+                                    storage.wait_payloads_size),
+          iree_make_const_byte_span(storage.signal_payloads,
+                                    storage.signal_payloads_size),
+          iree_make_const_byte_span(storage.buffer_ids,
+                                    buffer_count * sizeof(*storage.buffer_ids)),
+      };
+      status = iree_hal_replay_recorder_end_operation_with_payload(
+          &pending_record, status, IREE_ARRAYSIZE(iovecs), iovecs);
+    } else {
+      status = iree_hal_replay_recorder_end_operation(&pending_record, status);
+    }
+  }
+
+  iree_hal_replay_recorder_dealloca_storage_deinitialize(queue->host_allocator,
+                                                         &storage);
+  return status;
+}
+
 static iree_status_t iree_hal_replay_recorder_queue_transfer(
     iree_hal_queue_t* base_queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -674,6 +1087,8 @@ static iree_status_t iree_hal_replay_recorder_queue_write(
 
 static const iree_hal_queue_vtable_t iree_hal_replay_recorder_queue_vtable = {
     .destroy = iree_hal_replay_recorder_queue_destroy,
+    .alloca = iree_hal_replay_recorder_queue_alloca,
+    .dealloca = iree_hal_replay_recorder_queue_dealloca,
     .transfer = iree_hal_replay_recorder_queue_transfer,
     .read = iree_hal_replay_recorder_queue_read,
     .write = iree_hal_replay_recorder_queue_write,
@@ -683,17 +1098,19 @@ void iree_hal_replay_recorder_queue_initialize(
     const iree_hal_queue_family_t* queue_family,
     iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,
     iree_hal_replay_object_id_t queue_id, iree_hal_queue_t* base_queue,
-    iree_allocator_t host_allocator,
+    iree_hal_device_t* placement_device, iree_allocator_t host_allocator,
     iree_hal_replay_recorder_queue_t* out_queue) {
   IREE_ASSERT_ARGUMENT(queue_family);
   IREE_ASSERT_ARGUMENT(recorder);
   IREE_ASSERT_ARGUMENT(base_queue);
+  IREE_ASSERT_ARGUMENT(placement_device);
   IREE_ASSERT_ARGUMENT(out_queue);
   iree_hal_queue_initialize(
       queue_family, &iree_hal_replay_recorder_queue_vtable, &out_queue->base);
   out_queue->host_allocator = host_allocator;
   out_queue->recorder = recorder;
   out_queue->base_queue = base_queue;
+  out_queue->placement_device = placement_device;
   out_queue->device_id = device_id;
   out_queue->queue_id = queue_id;
 }

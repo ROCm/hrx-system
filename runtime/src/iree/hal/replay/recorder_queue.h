@@ -32,6 +32,10 @@ typedef struct iree_hal_replay_recorder_queue_t {
   // wrapped device, which outlives this proxy.
   iree_hal_queue_t* base_queue;
 
+  // Wrapper device reported as the placement origin of returned proxy buffers.
+  // Borrowed from the object embedding this queue proxy.
+  iree_hal_device_t* placement_device;
+
   // Session-local parent device object id.
   iree_hal_replay_object_id_t device_id;
 
@@ -44,7 +48,7 @@ void iree_hal_replay_recorder_queue_initialize(
     const iree_hal_queue_family_t* queue_family,
     iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,
     iree_hal_replay_object_id_t queue_id, iree_hal_queue_t* base_queue,
-    iree_allocator_t host_allocator,
+    iree_hal_device_t* placement_device, iree_allocator_t host_allocator,
     iree_hal_replay_recorder_queue_t* out_queue);
 
 #ifdef __cplusplus

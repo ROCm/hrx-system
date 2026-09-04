@@ -37,6 +37,7 @@ static void iree_hal_replay_executor_release_entry(
       iree_hal_file_release(entry->value.file);
       break;
     case IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE:
+      iree_hal_pool_release(entry->queue_allocation_pool);
       iree_hal_queue_release(entry->value.queue);
       break;
     default:
@@ -188,6 +189,11 @@ iree_status_t iree_hal_replay_executor_require_payload(
 iree_status_t iree_hal_replay_executor_make_buffer_params(
     const iree_hal_replay_allocator_allocate_buffer_payload_t* payload,
     iree_hal_buffer_params_t* out_params) {
+  if (IREE_UNLIKELY(payload->reserved0 != 0 || payload->reserved1 != 0)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay allocation request reserved fields must be zero");
+  }
   memset(out_params, 0, sizeof(*out_params));
   out_params->usage = payload->usage;
   out_params->type = payload->type;

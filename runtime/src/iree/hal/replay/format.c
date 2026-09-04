@@ -197,6 +197,10 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "queue.read";
     case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_WRITE:
       return "queue.write";
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ALLOCA:
+      return "queue.alloca";
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_DEALLOCA:
+      return "queue.dealloca";
     default:
       return "unknown";
   }
@@ -273,6 +277,10 @@ IREE_API_EXPORT const char* iree_hal_replay_payload_type_string(
       return "queue_read";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_WRITE:
       return "queue_write";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ALLOCA:
+      return "queue_alloca";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_DEALLOCA:
+      return "queue_dealloca";
     default:
       return "unknown";
   }

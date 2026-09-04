@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMDGPU_HOST_QUEUE_PENDING_H_
 
 #include "iree/hal/drivers/amdgpu/host_queue.h"
+#include "iree/hal/drivers/amdgpu/host_queue_memory.h"
 #include "iree/hal/drivers/amdgpu/host_queue_submission.h"
 
 #ifdef __cplusplus
@@ -39,9 +40,10 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_alloca(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t* wait_semaphore_list,
     const iree_hal_semaphore_list_t* signal_semaphore_list,
-    iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
-    iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
-    iree_hal_pool_reserve_flags_t reserve_flags, iree_hal_buffer_t* buffer,
+    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t* const* buffers,
+    iree_hal_pool_reserve_flags_t reserve_flags,
     iree_hal_amdgpu_pending_op_t** out_op);
 
 // Submits an alloca operation after wait resolution. Caller must hold
@@ -52,9 +54,8 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_alloca(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_amdgpu_wait_resolution_t* resolution,
     const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
-    iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
-    iree_hal_pool_reserve_flags_t reserve_flags, iree_hal_buffer_t* buffer,
+    iree_hal_pool_t* pool, iree_hal_amdgpu_alloca_transaction_t* transaction,
+    iree_hal_pool_reserve_flags_t reserve_flags,
     iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
     iree_hal_amdgpu_pending_op_t* pending_op,
     iree_hal_amdgpu_pending_op_t** out_memory_wait_op, bool* out_ready);
@@ -65,7 +66,8 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_dealloca(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t* wait_semaphore_list,
     const iree_hal_semaphore_list_t* signal_semaphore_list,
-    iree_hal_buffer_t* buffer, iree_hal_amdgpu_pending_op_t** out_op);
+    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers,
+    iree_hal_pool_t* pool, iree_hal_amdgpu_pending_op_t** out_op);
 
 // Captures a queue_fill operation for later issue. Caller must hold
 // queue->locks.submission_mutex.

@@ -85,7 +85,7 @@ constexpr iree_hal_buffer_params_t kQueueAllocaBufferParams = {
     /*usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
     /*access=*/IREE_HAL_MEMORY_ACCESS_ALL,
     /*type=*/IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE,
-    /*queue_affinity=*/0,
+    /*queue_family_affinity=*/0,
     /*min_alignment=*/0,
 };
 
@@ -274,6 +274,12 @@ class QueueBenchmark : public benchmark::Fixture {
         !CreatePrivateStreamSemaphore(state, &producer_semaphore_)) {
       return;
     }
+    queue0_ = iree_hal_device_queue(device_, /*family_ordinal=*/0,
+                                    /*queue_ordinal=*/0);
+    if (!queue0_) {
+      state.SkipWithError("AMDGPU HAL queue 0 not available");
+      return;
+    }
   }
 
   void TearDown(benchmark::State& state) override {
@@ -303,6 +309,7 @@ class QueueBenchmark : public benchmark::Fixture {
     completion_semaphore_ = nullptr;
     stream_semaphore_ = nullptr;
     producer_semaphore_ = nullptr;
+    queue0_ = nullptr;
     completion_payload_value_ = 0;
     stream_payload_value_ = 0;
     producer_payload_value_ = 0;
@@ -735,7 +742,6 @@ class QueueBenchmark : public benchmark::Fixture {
                                   iree_device_size_t allocation_size,
                                   iree_hal_buffer_t** out_buffer,
                                   SubmittedCompletion* out_completion) {
-    *out_buffer = nullptr;
     uint64_t signal_payload_value = ++completion_payload_value_;
     iree_hal_semaphore_t* signal_semaphore = completion_semaphore_;
     iree_hal_semaphore_list_t signal_semaphore_list = {
@@ -743,10 +749,18 @@ class QueueBenchmark : public benchmark::Fixture {
         /*semaphores=*/&signal_semaphore,
         /*payload_values=*/&signal_payload_value,
     };
-    IREE_RETURN_IF_ERROR(iree_hal_device_queue_alloca(
-        device_, kQueue0, iree_hal_semaphore_list_empty(),
-        signal_semaphore_list, pool, kQueueAllocaBufferParams, allocation_size,
-        IREE_HAL_ALLOCA_FLAG_NONE, out_buffer));
+    iree_hal_buffer_params_t params = kQueueAllocaBufferParams;
+    params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+        iree_hal_queue_family_ordinal(iree_hal_queue_family(queue0_)));
+    const iree_hal_pool_reservation_request_t request = {
+        .params = params,
+        .allocation_size = allocation_size,
+    };
+    iree_hal_buffer_t* buffer = nullptr;
+    IREE_RETURN_IF_ERROR(iree_hal_queue_alloca(
+        queue0_, iree_hal_semaphore_list_empty(), signal_semaphore_list, pool,
+        /*request_count=*/1, &request, &buffer));
+    *out_buffer = buffer;
     *out_completion = {completion_semaphore_, signal_payload_value};
     return iree_ok_status();
   }
@@ -769,9 +783,9 @@ class QueueBenchmark : public benchmark::Fixture {
         /*semaphores=*/&signal_semaphore,
         /*payload_values=*/&signal_payload_value,
     };
-    IREE_RETURN_IF_ERROR(iree_hal_device_queue_dealloca(
-        device_, kQueue0, wait_semaphore_list, signal_semaphore_list, buffer,
-        IREE_HAL_DEALLOCA_FLAG_NONE));
+    IREE_RETURN_IF_ERROR(iree_hal_queue_dealloca(queue0_, wait_semaphore_list,
+                                                 signal_semaphore_list,
+                                                 /*buffer_count=*/1, &buffer));
     IREE_RETURN_IF_ERROR(Wait(completion_semaphore_, signal_payload_value));
     iree_hal_buffer_release(buffer);
     return iree_ok_status();
@@ -2194,6 +2208,8 @@ class QueueBenchmark : public benchmark::Fixture {
           {};
   // Public semaphore used for final host-observable completion.
   iree_hal_semaphore_t* completion_semaphore_ = nullptr;
+  // Exact hardware queue used by queue-allocation benchmark rows.
+  iree_hal_queue_t* queue0_ = nullptr;
   // Private single-producer stream semaphore used by queue 1.
   iree_hal_semaphore_t* stream_semaphore_ = nullptr;
   // Private single-producer stream semaphore used by queue 0.

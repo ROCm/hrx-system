@@ -11,6 +11,7 @@
 
 #include "iree/hal/cts/sanitizer/sanitizer_test_util.h"
 #include "iree/hal/cts/util/registry.h"
+#include "iree/hal/memory/passthrough_pool.h"
 
 namespace iree::hal::cts {
 
@@ -301,13 +302,31 @@ TEST_P(AsanAllocationTest, ReleasedAllocatorBufferReports) {
 }
 
 TEST_P(AsanAllocationTest, QueueDeallocaReleaseReportsAfterSignal) {
+  iree_hal_queue_t* queue = iree_hal_device_queue(device(), 0, 0);
+  ASSERT_NE(queue, nullptr);
+  iree_hal_queue_pool_backend_t backend = {};
+  IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
+      device(), IREE_HAL_QUEUE_AFFINITY_ANY, &backend));
+  iree_hal_passthrough_pool_options_t options = {};
+  options.asan = backend.asan;
+  Ref<iree_hal_pool_t> pool;
+  IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
+      options, backend.slab_provider, backend.notification,
+      iree_allocator_system(), pool.out()));
+
+  iree_hal_buffer_params_t params = AsanQueueAllocaBufferParams();
+  params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(queue)));
+  const iree_hal_pool_reservation_request_t request = {
+      .params = params,
+      .allocation_size = kAsanAllocationBufferLength,
+  };
   Ref<iree_hal_buffer_t> buffer;
   SemaphoreList empty_wait;
   SemaphoreList alloca_signal(device(), {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      device(), IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, alloca_signal,
-      /*pool=*/nullptr, AsanQueueAllocaBufferParams(),
-      kAsanAllocationBufferLength, IREE_HAL_ALLOCA_FLAG_NONE, buffer.out()));
+  IREE_ASSERT_OK(iree_hal_queue_alloca(queue, empty_wait, alloca_signal, pool,
+                                       /*request_count=*/1, &request,
+                                       buffer.out()));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       alloca_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
@@ -316,9 +335,9 @@ TEST_P(AsanAllocationTest, QueueDeallocaReleaseReportsAfterSignal) {
   ASSERT_NE(stale_address, 0u);
 
   SemaphoreList dealloca_signal(device(), {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      device(), IREE_HAL_QUEUE_AFFINITY_ANY, alloca_signal, dealloca_signal,
-      buffer, IREE_HAL_DEALLOCA_FLAG_NONE));
+  iree_hal_buffer_t* dealloca_buffer = buffer;
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queue, alloca_signal, dealloca_signal,
+                                         /*buffer_count=*/1, &dealloca_buffer));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       dealloca_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 

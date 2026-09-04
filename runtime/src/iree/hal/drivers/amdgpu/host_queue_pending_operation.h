@@ -9,6 +9,7 @@
 
 #include "iree/base/threading/notification.h"
 #include "iree/hal/drivers/amdgpu/host_queue_atomic.h"
+#include "iree/hal/drivers/amdgpu/host_queue_memory.h"
 #include "iree/hal/drivers/amdgpu/host_queue_pending.h"
 #include "iree/hal/utils/resource_set.h"
 
@@ -20,7 +21,7 @@ typedef struct iree_hal_amdgpu_alloca_memory_wait_t
     iree_hal_amdgpu_alloca_memory_wait_t;
 typedef struct iree_hal_amdgpu_wait_entry_t iree_hal_amdgpu_wait_entry_t;
 
-// Operation types corresponding to virtual queue vtable entries. Each type has
+// Operation types corresponding to queue operation entry points. Each type has
 // a per-operation capture struct in the pending_op_t union.
 typedef enum iree_hal_amdgpu_pending_op_type_e {
   IREE_HAL_AMDGPU_PENDING_OP_FILL,
@@ -184,24 +185,18 @@ struct iree_hal_amdgpu_pending_op_t {
     struct {
       // Borrowed pool resolved during queue_alloca capture.
       iree_hal_pool_t* pool;
-      // Buffer parameters captured from queue_alloca.
-      iree_hal_buffer_params_t params;
-      // Requested allocation size in bytes.
-      iree_device_size_t allocation_size;
-      // HAL allocation flags captured from queue_alloca.
-      iree_hal_alloca_flags_t flags;
       // Pool reservation flags used when probing the selected pool.
       iree_hal_pool_reserve_flags_t reserve_flags;
-      // Transient buffer returned to the caller and committed on success.
-      iree_hal_buffer_t* buffer;
+      // Arena-owned batch payload and transaction scratch storage.
+      iree_hal_amdgpu_alloca_transaction_t transaction;
       // Cold memory-readiness sidecar allocated only after user waits resolve.
       iree_hal_amdgpu_alloca_memory_wait_t* memory_wait;
     } alloca_op;
 
     // Captured queue_dealloca payload.
     struct {
-      // Transient buffer retained until the deferred dealloca operation issues.
-      iree_hal_buffer_t* buffer;
+      // Arena-owned batch payload and detached reservation storage.
+      iree_hal_amdgpu_dealloca_transaction_t transaction;
     } dealloca;
 
     // Captured queue_host_call payload.
@@ -259,10 +254,10 @@ void iree_hal_amdgpu_pending_op_retain(iree_hal_amdgpu_pending_op_t* op,
 void iree_hal_amdgpu_pending_op_release_retained(
     iree_hal_amdgpu_pending_op_t* op);
 
-// Destroys a capture-time failed operation. Caller must hold
-// queue->locks.submission_mutex.
-void iree_hal_amdgpu_pending_op_destroy_under_lock(
-    iree_hal_amdgpu_pending_op_t* op, iree_status_t status);
+// Discards a capture-time failed operation without publishing or failing its
+// signal semaphores. Caller must hold queue->locks.submission_mutex.
+void iree_hal_amdgpu_pending_op_discard_under_lock(
+    iree_hal_amdgpu_pending_op_t* op);
 
 // Issues the operation-family payload. Caller must hold
 // queue->locks.submission_mutex.

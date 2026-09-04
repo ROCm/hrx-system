@@ -241,8 +241,9 @@ static iree_status_t ImportNativeFile(iree_hal_device_t* device,
 #endif  // IREE_FILE_IO_ENABLE
 
 static iree_status_t QueueHostVisibleDispatchTransientBuffer(
-    iree_hal_device_t* device, const iree_hal_semaphore_list_t signal_list,
-    iree_device_size_t buffer_size, iree_hal_buffer_t** out_buffer) {
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t signal_list, iree_device_size_t buffer_size,
+    iree_hal_buffer_t** out_buffer) {
   iree_hal_buffer_params_t params = {0};
   params.type =
       IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
@@ -250,10 +251,21 @@ static iree_status_t QueueHostVisibleDispatchTransientBuffer(
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
                  IREE_HAL_BUFFER_USAGE_STORAGE |
                  IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
-  return iree_hal_device_queue_alloca(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      signal_list, /*pool=*/NULL, params, buffer_size,
-      IREE_HAL_ALLOCA_FLAG_NONE, out_buffer);
+  params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(&queue->base)));
+  iree_hal_pool_t* pool =
+      iree_hal_pool_set_select(queue->default_pool_set, params, buffer_size);
+  if (!pool) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "no queue pool supports the transient request");
+  }
+  const iree_hal_pool_reservation_request_t request = {
+      .params = params,
+      .allocation_size = buffer_size,
+  };
+  return iree_hal_queue_alloca(&queue->base, iree_hal_semaphore_list_empty(),
+                               signal_list, pool,
+                               /*request_count=*/1, &request, out_buffer);
 }
 
 TEST_F(HostQueueCommandBufferTest, DispatchSummariesRetainPacketOrdinals) {
@@ -2280,8 +2292,7 @@ TEST_F(HostQueueCommandBufferTest,
   };
   iree_hal_buffer_t* transient_raw = NULL;
   IREE_ASSERT_OK(QueueTransientTransferBuffer(
-      test_device.base_device(), alloca_signal_list, sizeof(uint32_t),
-      &transient_raw));
+      queue, alloca_signal_list, sizeof(uint32_t), &transient_raw));
   Ref<iree_hal_buffer_t> transient_buffer(transient_raw);
   IREE_ASSERT_OK(iree_hal_semaphore_wait(alloca_signal, alloca_signal_value,
                                          iree_infinite_timeout(),
@@ -2383,10 +2394,10 @@ TEST_F(HostQueueCommandBufferTest,
       /*payload_values=*/&dealloca_signal_value,
   };
   if (iree_status_is_ok(status)) {
-    status = iree_hal_device_queue_dealloca(
-        test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-        dealloca_wait_list, dealloca_signal_list, transient_buffer,
-        IREE_HAL_DEALLOCA_FLAG_NONE);
+    iree_hal_buffer_t* dealloca_buffer = transient_buffer;
+    status = iree_hal_queue_dealloca(&queue->base, dealloca_wait_list,
+                                     dealloca_signal_list,
+                                     /*buffer_count=*/1, &dealloca_buffer);
   }
   transient_buffer.reset();
   iree_hsa_signal_store_screlease(IREE_LIBHSA(&libhsa_), blocker_signal, 0);
@@ -2419,8 +2430,9 @@ TEST_F(HostQueueCommandBufferTest,
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(
       test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
-  iree_hal_queue_t* queue = iree_hal_device_queue(
-      test_device.base_device(), /*family_ordinal=*/0, /*queue_ordinal=*/0);
+  iree_hal_amdgpu_host_queue_t* host_queue = test_device.first_host_queue();
+  ASSERT_NE(host_queue, nullptr);
+  iree_hal_queue_t* queue = &host_queue->base;
   ASSERT_NE(queue, nullptr);
 
   const uint32_t input_values[4] = {1, 2, 3, 4};
@@ -2462,8 +2474,7 @@ TEST_F(HostQueueCommandBufferTest,
   static constexpr iree_device_size_t kDispatchInputOffset = 100663296;
   iree_hal_buffer_t* transient_raw = NULL;
   IREE_ASSERT_OK(QueueHostVisibleDispatchTransientBuffer(
-      test_device.base_device(), alloca_signal_list, kTransientByteLength,
-      &transient_raw));
+      host_queue, alloca_signal_list, kTransientByteLength, &transient_raw));
   Ref<iree_hal_buffer_t> transient_buffer(transient_raw);
 
   Ref<iree_hal_command_buffer_t> command_buffer;
@@ -2547,10 +2558,10 @@ TEST_F(HostQueueCommandBufferTest,
       /*semaphores=*/&dealloca_signal_ptr,
       /*payload_values=*/&dealloca_signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      dealloca_wait_list, dealloca_signal_list, transient_buffer,
-      IREE_HAL_DEALLOCA_FLAG_NONE));
+  iree_hal_buffer_t* dealloca_buffer = transient_buffer;
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queue, dealloca_wait_list,
+                                         dealloca_signal_list,
+                                         /*buffer_count=*/1, &dealloca_buffer));
 
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_signal, gate_signal_value,
                                            /*frontier=*/NULL));
@@ -2577,6 +2588,8 @@ TEST_F(HostQueueCommandBufferTest,
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(
       test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  iree_hal_amdgpu_host_queue_t* queue = test_device.first_host_queue();
+  ASSERT_NE(queue, nullptr);
 
   Ref<iree_hal_buffer_t> output_buffer;
   IREE_ASSERT_OK(CreateHostVisibleTransferBuffer(
@@ -2596,8 +2609,7 @@ TEST_F(HostQueueCommandBufferTest,
   };
   iree_hal_buffer_t* transient_raw = NULL;
   IREE_ASSERT_OK(QueueTransientTransferBuffer(
-      test_device.base_device(), alloca_signal_list, sizeof(uint32_t),
-      &transient_raw));
+      queue, alloca_signal_list, sizeof(uint32_t), &transient_raw));
   Ref<iree_hal_buffer_t> transient_buffer(transient_raw);
 
   Ref<iree_hal_command_buffer_t> command_buffer;
@@ -2646,10 +2658,10 @@ TEST_F(HostQueueCommandBufferTest,
       /*semaphores=*/&dealloca_signal_ptr,
       /*payload_values=*/&dealloca_signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      command_buffer_signal_list, dealloca_signal_list, transient_buffer,
-      IREE_HAL_DEALLOCA_FLAG_NONE));
+  iree_hal_buffer_t* dealloca_buffer = transient_buffer;
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(
+      &queue->base, command_buffer_signal_list, dealloca_signal_list,
+      /*buffer_count=*/1, &dealloca_buffer));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(dealloca_signal, dealloca_signal_value,
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));

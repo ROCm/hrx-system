@@ -20,7 +20,7 @@
 // iree_hal_replay_recorder_buffer_t
 //===----------------------------------------------------------------------===//
 
-typedef struct iree_hal_replay_recorder_buffer_t {
+struct iree_hal_replay_recorder_buffer_t {
   // HAL buffer header for the recording wrapper buffer.
   iree_hal_buffer_t base;
   // Host allocator used for wrapper lifetime.
@@ -37,7 +37,7 @@ typedef struct iree_hal_replay_recorder_buffer_t {
   iree_slim_mutex_t mutex;
   // Active write mappings whose flush/unmap bytes may need capture.
   struct iree_hal_replay_recorder_buffer_mapping_t* mapping_list;
-} iree_hal_replay_recorder_buffer_t;
+};
 
 typedef struct iree_hal_replay_recorder_buffer_mapping_t {
   // Caller-owned mapping object used to identify the mapping on unmap.
@@ -129,7 +129,6 @@ iree_status_t iree_hal_replay_recorder_buffer_create_proxy(
   IREE_ASSERT_ARGUMENT(recorder);
   IREE_ASSERT_ARGUMENT(base_buffer);
   IREE_ASSERT_ARGUMENT(out_buffer);
-  *out_buffer = NULL;
 
   if (iree_hal_replay_recorder_buffer_isa(base_buffer)) {
     iree_hal_buffer_retain(base_buffer);
@@ -139,8 +138,40 @@ iree_status_t iree_hal_replay_recorder_buffer_create_proxy(
 
   iree_hal_replay_recorder_buffer_t* buffer = NULL;
   IREE_RETURN_IF_ERROR(
+      iree_hal_replay_recorder_buffer_allocate_proxy(host_allocator, &buffer));
+  *out_buffer = iree_hal_replay_recorder_buffer_initialize_proxy(
+      recorder, device_id, buffer_id, placement_device, base_buffer,
+      host_allocator, buffer);
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_replay_recorder_buffer_allocate_proxy(
+    iree_allocator_t host_allocator,
+    iree_hal_replay_recorder_buffer_t** out_buffer) {
+  IREE_ASSERT_ARGUMENT(out_buffer);
+  iree_hal_replay_recorder_buffer_t* buffer = NULL;
+  IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*buffer), (void**)&buffer));
   memset(buffer, 0, sizeof(*buffer));
+  *out_buffer = buffer;
+  return iree_ok_status();
+}
+
+void iree_hal_replay_recorder_buffer_free_proxy(
+    iree_allocator_t host_allocator,
+    iree_hal_replay_recorder_buffer_t* buffer) {
+  iree_allocator_free(host_allocator, buffer);
+}
+
+iree_hal_buffer_t* iree_hal_replay_recorder_buffer_initialize_proxy(
+    iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,
+    iree_hal_replay_object_id_t buffer_id, iree_hal_device_t* placement_device,
+    iree_hal_buffer_t* base_buffer, iree_allocator_t host_allocator,
+    iree_hal_replay_recorder_buffer_t* buffer) {
+  IREE_ASSERT_ARGUMENT(recorder);
+  IREE_ASSERT_ARGUMENT(base_buffer);
+  IREE_ASSERT_ARGUMENT(buffer);
+  IREE_ASSERT_FALSE(iree_hal_replay_recorder_buffer_isa(base_buffer));
 
   iree_hal_buffer_placement_t placement =
       iree_hal_buffer_allocation_placement(base_buffer);
@@ -162,8 +193,7 @@ iree_status_t iree_hal_replay_recorder_buffer_create_proxy(
   buffer->buffer_id = buffer_id;
   iree_slim_mutex_initialize(&buffer->mutex);
 
-  *out_buffer = &buffer->base;
-  return iree_ok_status();
+  return &buffer->base;
 }
 
 iree_hal_buffer_t* iree_hal_replay_recorder_buffer_base_or_self(

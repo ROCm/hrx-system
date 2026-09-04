@@ -10,7 +10,91 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "iree/hal/memory/passthrough_pool.h"
 #include "iree/hal/replay/execute_object.h"
+
+static iree_status_t iree_hal_replay_executor_allocate_array(
+    iree_hal_replay_executor_t* executor, iree_host_size_t element_count,
+    iree_host_size_t element_size, void** out_ptr) {
+  if (element_count == 0) return iree_ok_status();
+  iree_host_size_t allocation_size = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(element_count, element_size,
+                                                &allocation_size))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "replay queue storage size overflow");
+  }
+  return iree_allocator_malloc(executor->host_allocator, allocation_size,
+                               out_ptr);
+}
+
+static iree_status_t iree_hal_replay_executor_require_queue_allocation_pool(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_file_record_t* record,
+    iree_hal_replay_object_entry_t* queue_entry, iree_hal_pool_t** out_pool) {
+  if (queue_entry->queue_allocation_pool) {
+    *out_pool = queue_entry->queue_allocation_pool;
+    return iree_ok_status();
+  }
+
+  iree_hal_replay_object_entry_t* device_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
+      executor, record->header.device_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+      &device_entry));
+  const iree_hal_queue_family_ordinal_t family_ordinal =
+      iree_hal_queue_family_ordinal(
+          iree_hal_queue_family(queue_entry->value.queue));
+  if (IREE_UNLIKELY(family_ordinal >= IREE_HAL_MAX_QUEUE_FAMILIES)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "replay queue family ordinal %u is not maskable",
+                            family_ordinal);
+  }
+  iree_hal_queue_pool_backend_t pool_backend;
+  IREE_RETURN_IF_ERROR(iree_hal_device_query_queue_pool_backend(
+      device_entry->value.device,
+      iree_hal_make_queue_family_affinity(family_ordinal), &pool_backend));
+  const iree_hal_passthrough_pool_options_t options = {
+      .asan = pool_backend.asan,
+      .trace_name = iree_make_cstring_view("iree_hal_replay_queue"),
+  };
+  iree_hal_pool_t* pool = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_passthrough_pool_create(
+      options, pool_backend.slab_provider, pool_backend.notification,
+      executor->host_allocator, &pool));
+  queue_entry->queue_allocation_pool = pool;
+  *out_pool = pool;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_replay_executor_find_provisioned_queue(
+    iree_hal_replay_executor_t* executor, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_replay_object_entry_t** out_queue_entry) {
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  for (iree_host_size_t i = 0; i < queue_spec->family_count; ++i) {
+    const iree_hal_queue_family_affinity_t family_affinity =
+        iree_hal_make_queue_family_affinity((iree_hal_queue_family_ordinal_t)i);
+    if (!iree_hal_queue_affinity_is_any(queue_affinity) &&
+        !iree_any_bit_set(queue_affinity, family_affinity)) {
+      continue;
+    }
+    iree_hal_queue_t* queue = iree_hal_device_queue(
+        device, (iree_hal_queue_family_ordinal_t)i, /*queue_ordinal=*/0);
+    if (!queue) continue;
+    for (iree_host_size_t j = 0; j < executor->object_capacity; ++j) {
+      iree_hal_replay_object_entry_t* entry = &executor->objects[j];
+      if (entry->type == IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE &&
+          entry->value.queue == queue) {
+        *out_queue_entry = entry;
+        return iree_ok_status();
+      }
+    }
+  }
+  return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                          "replay device has no captured provisioned queue "
+                          "matching affinity 0x%016" PRIx64,
+                          queue_affinity);
+}
 
 static iree_status_t iree_hal_replay_executor_require_fixed_payload(
     const iree_hal_replay_file_record_t* record,
@@ -624,6 +708,208 @@ static iree_status_t iree_hal_replay_executor_queue_alloca(
     iree_hal_replay_executor_t* executor,
     const iree_hal_replay_file_record_t* record) {
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ALLOCA,
+      sizeof(iree_hal_replay_queue_alloca_payload_t)));
+  iree_hal_replay_queue_alloca_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+  if (IREE_UNLIKELY(payload.reserved0 != 0 || payload.request_count == 0 ||
+                    payload.request_count > IREE_HOST_SIZE_MAX)) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "replay queue alloca header is invalid");
+  }
+  const iree_host_size_t request_count =
+      (iree_host_size_t)payload.request_count;
+  iree_host_size_t request_payloads_size = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+          request_count, sizeof(iree_hal_replay_queue_alloca_request_payload_t),
+          &request_payloads_size))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "replay queue alloca request size overflow");
+  }
+
+  iree_hal_replay_object_entry_t* queue_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
+      executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      &queue_entry));
+  iree_hal_pool_t* pool = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_queue_allocation_pool(
+      executor, record, queue_entry, &pool));
+
+  iree_hal_replay_semaphore_list_storage_t wait_storage;
+  iree_hal_replay_semaphore_list_storage_t signal_storage;
+  iree_const_byte_span_t trailing_payload;
+  iree_status_t status = iree_hal_replay_executor_make_queue_semaphore_lists(
+      executor, record, sizeof(payload), payload.wait_semaphore_count,
+      payload.signal_semaphore_count, request_payloads_size, &wait_storage,
+      &signal_storage, &trailing_payload);
+  iree_hal_replay_queue_alloca_request_payload_t* request_payloads = NULL;
+  iree_hal_pool_reservation_request_t* requests = NULL;
+  iree_hal_buffer_t** buffers = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_executor_allocate_array(executor, request_count,
+                                                     sizeof(*request_payloads),
+                                                     (void**)&request_payloads);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_executor_allocate_array(
+        executor, request_count, sizeof(*requests), (void**)&requests);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_executor_allocate_array(
+        executor, request_count, sizeof(*buffers), (void**)&buffers);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(buffers, 0, request_count * sizeof(*buffers));
+    memcpy(request_payloads, trailing_payload.data, request_payloads_size);
+  }
+  for (iree_host_size_t i = 0; i < request_count && iree_status_is_ok(status);
+       ++i) {
+    const iree_hal_replay_object_id_t buffer_id = request_payloads[i].buffer_id;
+    if (IREE_UNLIKELY(buffer_id == IREE_HAL_REPLAY_OBJECT_ID_NONE ||
+                      buffer_id >= executor->object_capacity ||
+                      executor->objects[buffer_id].type !=
+                          IREE_HAL_REPLAY_OBJECT_TYPE_NONE)) {
+      status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay queue alloca buffer id %" PRIu64
+                                " is invalid or assigned",
+                                buffer_id);
+      break;
+    }
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      if (IREE_UNLIKELY(request_payloads[j].buffer_id == buffer_id)) {
+        status = iree_make_status(
+            IREE_STATUS_DATA_LOSS,
+            "replay queue alloca repeats buffer id %" PRIu64, buffer_id);
+        break;
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_replay_executor_make_buffer_params(
+          &request_payloads[i].allocation, &requests[i].params);
+      requests[i].allocation_size =
+          request_payloads[i].allocation.allocation_size;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_alloca(queue_entry->value.queue, wait_storage.list,
+                                   signal_storage.list, pool, request_count,
+                                   requests, buffers);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_list_wait(signal_storage.list,
+                                          iree_infinite_timeout(),
+                                          IREE_ASYNC_WAIT_FLAG_NONE);
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < request_count; ++i) {
+      const iree_hal_replay_object_id_t buffer_id =
+          request_payloads[i].buffer_id;
+      executor->objects[buffer_id] = (iree_hal_replay_object_entry_t){
+          .type = IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER,
+          .value.buffer = buffers[i],
+      };
+      buffers[i] = NULL;
+    }
+  }
+  if (buffers) {
+    for (iree_host_size_t i = 0; i < request_count; ++i) {
+      iree_hal_buffer_release(buffers[i]);
+    }
+  }
+  iree_allocator_free(executor->host_allocator, buffers);
+  iree_allocator_free(executor->host_allocator, requests);
+  iree_allocator_free(executor->host_allocator, request_payloads);
+  iree_hal_replay_semaphore_list_storage_deinitialize(&signal_storage,
+                                                      executor->host_allocator);
+  iree_hal_replay_semaphore_list_storage_deinitialize(&wait_storage,
+                                                      executor->host_allocator);
+  return status;
+}
+
+static iree_status_t iree_hal_replay_executor_queue_dealloca(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_file_record_t* record) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_DEALLOCA,
+      sizeof(iree_hal_replay_queue_dealloca_payload_t)));
+  iree_hal_replay_queue_dealloca_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+  if (IREE_UNLIKELY(payload.reserved0 != 0 || payload.buffer_count == 0 ||
+                    payload.buffer_count > IREE_HOST_SIZE_MAX)) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "replay queue dealloca header is invalid");
+  }
+  const iree_host_size_t buffer_count = (iree_host_size_t)payload.buffer_count;
+  iree_host_size_t buffer_ids_size = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+          buffer_count, sizeof(iree_hal_replay_object_id_t),
+          &buffer_ids_size))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "replay queue dealloca buffer id size overflow");
+  }
+
+  iree_hal_replay_object_entry_t* queue_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
+      executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      &queue_entry));
+  iree_hal_replay_semaphore_list_storage_t wait_storage;
+  iree_hal_replay_semaphore_list_storage_t signal_storage;
+  iree_const_byte_span_t trailing_payload;
+  iree_status_t status = iree_hal_replay_executor_make_queue_semaphore_lists(
+      executor, record, sizeof(payload), payload.wait_semaphore_count,
+      payload.signal_semaphore_count, buffer_ids_size, &wait_storage,
+      &signal_storage, &trailing_payload);
+  iree_hal_replay_object_id_t* buffer_ids = NULL;
+  iree_hal_buffer_t** buffers = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_executor_allocate_array(
+        executor, buffer_count, sizeof(*buffer_ids), (void**)&buffer_ids);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_executor_allocate_array(
+        executor, buffer_count, sizeof(*buffers), (void**)&buffers);
+  }
+  if (iree_status_is_ok(status)) {
+    memcpy(buffer_ids, trailing_payload.data, buffer_ids_size);
+  }
+  for (iree_host_size_t i = 0; i < buffer_count && iree_status_is_ok(status);
+       ++i) {
+    iree_hal_replay_object_entry_t* buffer_entry = NULL;
+    status = iree_hal_replay_executor_lookup(executor, buffer_ids[i],
+                                             IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER,
+                                             &buffer_entry);
+    if (iree_status_is_ok(status)) buffers[i] = buffer_entry->value.buffer;
+    for (iree_host_size_t j = 0; j < i && iree_status_is_ok(status); ++j) {
+      if (IREE_UNLIKELY(buffer_ids[j] == buffer_ids[i])) {
+        status = iree_make_status(
+            IREE_STATUS_DATA_LOSS,
+            "replay queue dealloca repeats buffer id %" PRIu64, buffer_ids[i]);
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_dealloca(queue_entry->value.queue, wait_storage.list,
+                                signal_storage.list, buffer_count, buffers);
+  }
+  if (iree_status_is_ok(status) && signal_storage.list.count != 0) {
+    status = iree_hal_semaphore_list_wait(signal_storage.list,
+                                          iree_infinite_timeout(),
+                                          IREE_ASYNC_WAIT_FLAG_NONE);
+  }
+  iree_allocator_free(executor->host_allocator, buffers);
+  iree_allocator_free(executor->host_allocator, buffer_ids);
+  iree_hal_replay_semaphore_list_storage_deinitialize(&signal_storage,
+                                                      executor->host_allocator);
+  iree_hal_replay_semaphore_list_storage_deinitialize(&wait_storage,
+                                                      executor->host_allocator);
+  return status;
+}
+
+static iree_status_t iree_hal_replay_executor_device_queue_alloca(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_file_record_t* record) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
       record, IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ALLOCA,
       sizeof(iree_hal_replay_device_queue_alloca_payload_t)));
   iree_hal_replay_device_queue_alloca_payload_t payload;
@@ -633,6 +919,19 @@ static iree_status_t iree_hal_replay_executor_queue_alloca(
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
       executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
       &device_entry));
+  if (IREE_UNLIKELY(payload.flags != 0)) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "legacy replay queue alloca flags 0x%016" PRIx64
+                            " cannot be represented by exact queue allocation",
+                            payload.flags);
+  }
+  iree_hal_replay_object_entry_t* queue_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_find_provisioned_queue(
+      executor, device_entry->value.device, payload.queue_affinity,
+      &queue_entry));
+  iree_hal_pool_t* pool = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_queue_allocation_pool(
+      executor, record, queue_entry, &pool));
   iree_hal_replay_semaphore_list_storage_t wait_storage;
   iree_hal_replay_semaphore_list_storage_t signal_storage;
   iree_const_byte_span_t trailing_payload;
@@ -642,20 +941,21 @@ static iree_status_t iree_hal_replay_executor_queue_alloca(
       &wait_storage, &signal_storage, &trailing_payload);
   iree_hal_buffer_t* buffer = NULL;
   if (iree_status_is_ok(status)) {
-    iree_hal_buffer_params_t params;
+    iree_hal_pool_reservation_request_t request = {
+        .allocation_size = payload.allocation.allocation_size,
+    };
     status = iree_hal_replay_executor_make_buffer_params(&payload.allocation,
-                                                         &params);
+                                                         &request.params);
     if (iree_status_is_ok(status)) {
-      status = iree_hal_device_queue_alloca(
-          device_entry->value.device, payload.queue_affinity, wait_storage.list,
-          signal_storage.list, /*pool=*/NULL, params,
-          payload.allocation.allocation_size, payload.flags, &buffer);
+      status = iree_hal_queue_alloca(queue_entry->value.queue,
+                                     wait_storage.list, signal_storage.list,
+                                     pool, 1, &request, &buffer);
     }
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_replay_executor_flush_and_wait(device_entry->value.device,
-                                                     payload.queue_affinity,
-                                                     signal_storage.list);
+    status = iree_hal_semaphore_list_wait(signal_storage.list,
+                                          iree_infinite_timeout(),
+                                          IREE_ASYNC_WAIT_FLAG_NONE);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_replay_object_entry_t entry = {.value.buffer = buffer};
@@ -672,7 +972,7 @@ static iree_status_t iree_hal_replay_executor_queue_alloca(
   return status;
 }
 
-static iree_status_t iree_hal_replay_executor_queue_dealloca(
+static iree_status_t iree_hal_replay_executor_device_queue_dealloca(
     iree_hal_replay_executor_t* executor,
     const iree_hal_replay_file_record_t* record) {
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
@@ -685,6 +985,17 @@ static iree_status_t iree_hal_replay_executor_queue_dealloca(
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
       executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
       &device_entry));
+  if (IREE_UNLIKELY((payload.flags & ~1ull) != 0)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "legacy replay queue dealloca flags 0x%016" PRIx64
+        " cannot be represented by exact queue deallocation",
+        payload.flags);
+  }
+  iree_hal_replay_object_entry_t* queue_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_find_provisioned_queue(
+      executor, device_entry->value.device, payload.queue_affinity,
+      &queue_entry));
   iree_hal_replay_semaphore_list_storage_t wait_storage;
   iree_hal_replay_semaphore_list_storage_t signal_storage;
   iree_const_byte_span_t trailing_payload;
@@ -703,14 +1014,15 @@ static iree_status_t iree_hal_replay_executor_queue_dealloca(
         "replay queue dealloca requires a direct buffer reference");
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_device_queue_dealloca(
-        device_entry->value.device, payload.queue_affinity, wait_storage.list,
-        signal_storage.list, buffer_ref.buffer, payload.flags);
+    iree_hal_buffer_t* buffers[] = {buffer_ref.buffer};
+    status =
+        iree_hal_queue_dealloca(queue_entry->value.queue, wait_storage.list,
+                                signal_storage.list, 1, buffers);
   }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_replay_executor_flush_and_wait(device_entry->value.device,
-                                                     payload.queue_affinity,
-                                                     signal_storage.list);
+  if (iree_status_is_ok(status) && signal_storage.list.count != 0) {
+    status = iree_hal_semaphore_list_wait(signal_storage.list,
+                                          iree_infinite_timeout(),
+                                          IREE_ASYNC_WAIT_FLAG_NONE);
   }
   iree_hal_replay_semaphore_list_storage_deinitialize(&signal_storage,
                                                       executor->host_allocator);
@@ -1761,10 +2073,14 @@ iree_status_t iree_hal_replay_executor_replay_operation(
       return iree_hal_replay_executor_queue_read_exact(executor, record);
     case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_WRITE:
       return iree_hal_replay_executor_queue_write_exact(executor, record);
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ALLOCA:
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ALLOCA:
       return iree_hal_replay_executor_queue_alloca(executor, record);
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_DEALLOCA:
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_DEALLOCA:
       return iree_hal_replay_executor_queue_dealloca(executor, record);
+    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ALLOCA:
+      return iree_hal_replay_executor_device_queue_alloca(executor, record);
+    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_DEALLOCA:
+      return iree_hal_replay_executor_device_queue_dealloca(executor, record);
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_FILL:
       return iree_hal_replay_executor_queue_fill(executor, record);
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_UPDATE:

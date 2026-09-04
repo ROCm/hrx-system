@@ -596,24 +596,6 @@ static iree_status_t iree_hal_mock_device_query_queue_pool_backend(
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
 }
 
-static iree_status_t iree_hal_mock_device_queue_alloca(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
-    iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
-    iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
-}
-
-static iree_status_t iree_hal_mock_device_queue_dealloca(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
-}
-
 static iree_status_t iree_hal_mock_device_queue_fill(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -781,8 +763,6 @@ static const iree_hal_device_vtable_t iree_hal_mock_device_vtable = {
     .query_semaphore_compatibility =
         iree_hal_mock_device_query_semaphore_compatibility,
     .query_queue_pool_backend = iree_hal_mock_device_query_queue_pool_backend,
-    .queue_alloca = iree_hal_mock_device_queue_alloca,
-    .queue_dealloca = iree_hal_mock_device_queue_dealloca,
     .queue_fill = iree_hal_mock_device_queue_fill,
     .queue_update = iree_hal_mock_device_queue_update,
     .queue_copy = iree_hal_mock_device_queue_copy,

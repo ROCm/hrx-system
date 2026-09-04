@@ -476,16 +476,9 @@ typedef uint32_t iree_hal_mapping_mode_t;
 typedef uint32_t iree_hal_buffer_placement_flags_t;
 enum iree_hal_buffer_placement_flag_bits_t {
   IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE = 0u,
-  // Buffer was allocated with an asynchronous allocation API such as
-  // iree_hal_device_queue_alloca and/or can be deallocated with an asynchronous
-  // deallocation API such as iree_hal_device_queue_dealloca.
+  // Buffer was allocated with iree_hal_queue_alloca and can be deallocated with
+  // iree_hal_queue_dealloca.
   IREE_HAL_BUFFER_PLACEMENT_FLAG_ASYNCHRONOUS = 1u << 0,
-  // Buffer lifetime is indeterminate indicating that the compiler or
-  // application allocating the buffer is unable to determine when it is safe to
-  // deallocate the buffer. Explicit deallocation requests are ignored and the
-  // buffer deallocation will happen synchronously when the last remaining
-  // reference to the buffer is released.
-  IREE_HAL_BUFFER_PLACEMENT_FLAG_INDETERMINATE_LIFETIME = 1u << 1,
   // TODO(benvanik): flags for discrete/external to allow for quick export
   // checks.
 };
@@ -858,11 +851,10 @@ IREE_API_EXPORT void iree_hal_buffer_allocation_preserve(
 //     if (iree_all_bits_set(placement.flags,
 //                           IREE_HAL_BUFFER_PLACEMENT_FLAG_ASYNCHRONOUS)) {
 //       <timeline logic>
-//       iree_hal_device_queue_dealloca(
-//           placement.device, queue_affinity,
-//           wait_semaphore_list, signal_semaphore_list,
-//           IREE_HAL_DEALLOCA_FLAG_NONE,
-//           iree_hal_buffer_allocated_buffer(buffer));
+//       iree_hal_buffer_t* allocation =
+//           iree_hal_buffer_allocated_buffer(buffer);
+//       iree_hal_queue_dealloca(queue, wait_semaphore_list,
+//                               signal_semaphore_list, 1, &allocation);
 //     }
 //   }
 IREE_API_EXPORT IREE_MUST_USE_RESULT bool iree_hal_buffer_allocation_discard(
@@ -885,7 +877,7 @@ IREE_API_EXPORT IREE_MUST_USE_RESULT bool iree_hal_buffer_allocation_discard(
 //   if (iree_hal_buffer_allocation_is_terminal(buffer)) {
 //     new_buffer = buffer;  // safe to reuse
 //   } else {
-//     iree_hal_device_queue_alloca(..., &new_buffer);  // need a new buffer
+//     iree_hal_queue_alloca(..., &new_buffer);  // need a new buffer
 //   }
 IREE_API_EXPORT bool iree_hal_buffer_allocation_is_terminal(
     const iree_hal_buffer_t* buffer);

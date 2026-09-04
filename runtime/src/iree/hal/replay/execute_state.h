@@ -51,6 +51,9 @@ typedef struct iree_hal_replay_object_entry_t {
     // Retained exact HAL queue.
     iree_hal_queue_t* queue;
   } value;
+  // Lazily created functional-replay pool for a queue object, or NULL.
+  // Buffer entries and every other object type leave this field NULL.
+  iree_hal_pool_t* queue_allocation_pool;
 } iree_hal_replay_object_entry_t;
 
 // Mutable state owned by one prepared-plan execution.

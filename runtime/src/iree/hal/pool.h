@@ -424,7 +424,8 @@ IREE_API_EXPORT void iree_hal_pool_release(iree_hal_pool_t* pool);
 // output reservation and information record is assigned. Each information
 // record contains that request's successful result; the transaction result
 // summarizes them with OK_NEEDS_WAIT taking precedence over OK and OK taking
-// precedence over OK_FRESH. For OK_NEEDS_WAIT, each non-NULL wait frontier is
+// precedence over OK_FRESH. Each information record whose result is
+// OK_NEEDS_WAIT has a non-NULL, non-empty wait frontier. The frontier is
 // borrowed pool storage owned by its corresponding reservation and remains
 // valid until that reservation is released.
 //

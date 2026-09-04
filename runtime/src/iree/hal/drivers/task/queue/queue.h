@@ -191,24 +191,51 @@ struct iree_hal_task_queue_op_t {
       iree_hal_host_call_flags_t flags;
     } host_call;
     struct {
-      // Borrowed pool used to acquire and materialize the transient buffer.
+      // Borrowed pool used for the complete allocation transaction.
       iree_hal_pool_t* pool;
-      // Buffer parameters captured from queue_alloca after canonicalization.
-      iree_hal_buffer_params_t params;
-      // Requested allocation size in bytes.
-      iree_device_size_t allocation_size;
-      // HAL allocation flags captured from queue_alloca.
-      iree_hal_alloca_flags_t flags;
+
+      // Number of allocation requests in the transaction.
+      iree_host_size_t request_count;
+
+      // Arena-owned requests captured after allocator canonicalization.
+      iree_hal_pool_reservation_request_t* requests;
+
+      // Arena-owned transient wrapper pointers retained by |resource_set|.
+      iree_hal_buffer_t** transient_buffers;
+
+      // Arena-owned reservations populated by the pool acquisition.
+      iree_hal_pool_reservation_t* reservations;
+
+      // Arena-owned per-request pool acquisition information.
+      iree_hal_pool_acquire_info_t* acquire_infos;
+
+      // Arena-owned materialized backing buffer outputs.
+      iree_hal_buffer_t** backing_buffers;
+
       // Pool reservation flags used when probing the selected pool.
       iree_hal_pool_reserve_flags_t reserve_flags;
-      // Transient wrapper returned to the caller and committed on success.
-      iree_hal_buffer_t* transient_buffer;
+
+      // True while this operation owns every entry in |reservations|.
+      bool reservations_held;
+
       // Cold-path memory-readiness wait state. NULL on the immediate path.
       iree_hal_task_queue_alloca_memory_wait_t* memory_wait;
     } alloca;
     struct {
-      // Transient wrapper to decommit once dealloca waits resolve.
-      iree_hal_buffer_t* transient_buffer;
+      // Borrowed common source pool for every buffer in the transaction.
+      iree_hal_pool_t* pool;
+
+      // Number of transient buffers in the transaction.
+      iree_host_size_t buffer_count;
+
+      // Arena-owned transient wrapper pointers retained by |resource_set|.
+      iree_hal_buffer_t** transient_buffers;
+
+      // Arena-owned reservation storage populated when the operation runs.
+      iree_hal_pool_reservation_t* reservations;
+
+      // True while this operation owns each buffer's deallocation mark.
+      bool marks_owned;
     } dealloca;
     struct {
       iree_hal_file_t* hal_file;
@@ -623,14 +650,15 @@ iree_status_t iree_hal_task_queue_submit_host_call(
 
 iree_status_t iree_hal_task_queue_submit_alloca(
     iree_hal_task_queue_t* queue, iree_hal_pool_t* pool,
-    iree_hal_buffer_params_t params, iree_device_size_t allocation_size,
-    iree_hal_alloca_flags_t flags, iree_hal_pool_reserve_flags_t reserve_flags,
-    iree_hal_buffer_t* transient_buffer,
+    iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t* const* transient_buffers,
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores);
 
 iree_status_t iree_hal_task_queue_submit_dealloca(
-    iree_hal_task_queue_t* queue, iree_hal_buffer_t* transient_buffer,
+    iree_hal_task_queue_t* queue, iree_host_size_t buffer_count,
+    iree_hal_buffer_t* const* transient_buffers,
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores);
 

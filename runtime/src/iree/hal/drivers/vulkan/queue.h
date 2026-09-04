@@ -444,22 +444,21 @@ iree_status_t iree_hal_vulkan_queue_submit_barrier(
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list);
 
-// Submits a queue-ordered transient allocation.
+// Submits one queue-ordered allocation transaction.
 iree_status_t iree_hal_vulkan_queue_submit_alloca(
     iree_hal_vulkan_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_vulkan_queue_alloca_plan_t allocation_plan,
-    iree_hal_buffer_params_t params, iree_device_size_t allocation_size,
-    iree_device_size_t byte_length, iree_hal_alloca_flags_t flags,
-    iree_hal_buffer_t** IREE_RESTRICT out_buffer);
+    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t* const* buffers);
 
-// Submits a queue-ordered transient deallocation.
+// Submits one queue-ordered deallocation transaction.
 iree_status_t iree_hal_vulkan_queue_submit_dealloca(
     iree_hal_vulkan_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags);
+    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers);
 
 // Submits sparse buffer memory binds ordered by queue semaphores.
 //

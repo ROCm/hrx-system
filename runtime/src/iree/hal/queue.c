@@ -9,6 +9,7 @@
 #include "iree/hal/buffer.h"
 #include "iree/hal/detail.h"
 #include "iree/hal/file.h"
+#include "iree/hal/pool.h"
 #include "iree/hal/semaphore.h"
 
 #define _VTABLE_DISPATCH(queue, method_name) \
@@ -68,6 +69,149 @@ static iree_status_t iree_hal_queue_validate_semaphore_list(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_queue_validate_family_access(
+    const iree_hal_queue_t* queue,
+    iree_hal_queue_family_affinity_t queue_family_affinity) {
+  const iree_hal_queue_family_ordinal_t queue_family_ordinal =
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(queue));
+  if (IREE_UNLIKELY(
+          queue_family_ordinal >= IREE_HAL_MAX_QUEUE_FAMILIES ||
+          (!iree_hal_queue_family_affinity_is_any(queue_family_affinity) &&
+           !iree_any_bit_set(
+               queue_family_affinity,
+               iree_hal_make_queue_family_affinity(queue_family_ordinal))))) {
+    return iree_make_status(
+        IREE_STATUS_PERMISSION_DENIED,
+        "queue family %u cannot access a resource with family affinity "
+        "0x%016" PRIx64,
+        queue_family_ordinal, queue_family_affinity);
+  }
+  return iree_ok_status();
+}
+
+IREE_API_EXPORT iree_status_t
+iree_hal_queue_alloca(iree_hal_queue_t* queue,
+                      const iree_hal_semaphore_list_t wait_semaphore_list,
+                      const iree_hal_semaphore_list_t signal_semaphore_list,
+                      iree_hal_pool_t* pool, iree_host_size_t request_count,
+                      const iree_hal_pool_reservation_request_t* requests,
+                      iree_hal_buffer_t** IREE_RESTRICT out_buffers) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)request_count);
+
+  iree_status_t status = iree_ok_status();
+  if (IREE_UNLIKELY(!queue)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+  } else if (IREE_UNLIKELY(!pool)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "pool is null");
+  } else if (IREE_UNLIKELY(request_count == 0)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "allocation transaction is empty");
+  } else if (IREE_UNLIKELY(!requests)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "allocation request storage is null");
+  } else if (IREE_UNLIKELY(!out_buffers)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "allocation output storage is null");
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
+  }
+  if (iree_status_is_ok(status) && signal_semaphore_list.count == 0) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "queue allocations require a readiness signal semaphore");
+  }
+  for (iree_host_size_t i = 0; i < request_count && iree_status_is_ok(status);
+       ++i) {
+    if (IREE_UNLIKELY(requests[i].allocation_size == 0)) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "allocation request %" PRIhsz " has a zero allocation size", i);
+    } else {
+      const iree_hal_queue_family_affinity_t request_affinity =
+          requests[i].params.queue_family_affinity
+              ? requests[i].params.queue_family_affinity
+              : IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
+      status = iree_hal_queue_validate_family_access(queue, request_affinity);
+      if (!iree_status_is_ok(status)) {
+        status =
+            iree_status_annotate_f(status, "allocation request %" PRIhsz, i);
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = _VTABLE_DISPATCH(queue, alloca)(
+        queue, wait_semaphore_list, signal_semaphore_list, pool, request_count,
+        requests, out_buffers);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_queue_dealloca(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)buffer_count);
+
+  iree_status_t status = iree_ok_status();
+  if (IREE_UNLIKELY(!queue)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+  } else if (IREE_UNLIKELY(buffer_count == 0)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "deallocation transaction is empty");
+  } else if (IREE_UNLIKELY(!buffers)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "deallocation buffer storage is null");
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
+  }
+  for (iree_host_size_t i = 0; i < buffer_count && iree_status_is_ok(status);
+       ++i) {
+    if (IREE_UNLIKELY(!buffers[i])) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "deallocation buffer %" PRIhsz " is null", i);
+    } else if (IREE_UNLIKELY(iree_hal_buffer_allocated_buffer(buffers[i]) !=
+                             buffers[i])) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "deallocation buffer %" PRIhsz " is not an allocation root", i);
+    } else {
+      const iree_hal_buffer_placement_t placement =
+          iree_hal_buffer_allocation_placement(buffers[i]);
+      status = iree_hal_queue_validate_family_access(
+          queue, placement.queue_family_affinity);
+      if (!iree_status_is_ok(status)) {
+        status =
+            iree_status_annotate_f(status, "deallocation buffer %" PRIhsz, i);
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = _VTABLE_DISPATCH(queue, dealloca)(queue, wait_semaphore_list,
+                                               signal_semaphore_list,
+                                               buffer_count, buffers);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 static iree_status_t iree_hal_queue_validate_transfer_buffer(
     const iree_hal_queue_t* queue, iree_hal_buffer_t* buffer,
     iree_device_size_t offset, iree_device_size_t length,
@@ -92,18 +236,8 @@ static iree_status_t iree_hal_queue_validate_transfer_buffer(
       placement.queue_family_affinity;
   if (!iree_hal_buffer_placement_is_undefined(placement) &&
       !iree_hal_queue_family_affinity_is_any(queue_family_affinity)) {
-    const iree_hal_queue_family_ordinal_t queue_family_ordinal =
-        iree_hal_queue_family_ordinal(iree_hal_queue_family(queue));
-    if (IREE_UNLIKELY(queue_family_ordinal >= IREE_HAL_MAX_QUEUE_FAMILIES ||
-                      !iree_any_bit_set(queue_family_affinity,
-                                        iree_hal_make_queue_family_affinity(
-                                            queue_family_ordinal)))) {
-      return iree_make_status(
-          IREE_STATUS_PERMISSION_DENIED,
-          "queue family %u cannot access a buffer with family affinity "
-          "0x%016" PRIx64,
-          queue_family_ordinal, queue_family_affinity);
-    }
+    IREE_RETURN_IF_ERROR(
+        iree_hal_queue_validate_family_access(queue, queue_family_affinity));
   }
   return iree_ok_status();
 }

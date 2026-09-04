@@ -116,6 +116,7 @@ iree_cc_library(
     ::format
     iree::base
     iree::hal
+    iree::hal::memory::passthrough_pool
     iree::io::file_handle
   PUBLIC
 )
@@ -184,6 +185,7 @@ iree_cc_test(
     iree::base
     iree::hal
     iree::hal::drivers::task::registration
+    iree::hal::memory::passthrough_pool
     iree::hal::testing::mock_device
     iree::io::file_handle
     iree::testing::gtest

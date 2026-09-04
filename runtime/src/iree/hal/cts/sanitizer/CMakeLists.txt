@@ -31,6 +31,7 @@ iree_cc_library(
     iree::hal
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
+    iree::hal::memory::passthrough_pool
   TESTONLY
   ALWAYSLINK
   PUBLIC

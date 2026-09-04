@@ -199,6 +199,11 @@ class ParameterIndexProviderTest : public ::testing::Test {
     return iree_hal_device_group_device_at(device_group_, 0);
   }
 
+  static iree_hal_queue_t* queue() {
+    return iree_hal_device_queue(device(), /*family_ordinal=*/0,
+                                 /*queue_ordinal=*/0);
+  }
+
  private:
   static iree_hal_device_group_t* device_group_;
 };
@@ -290,8 +295,7 @@ TEST_F(ParameterIndexProviderTest, GatherBatchPreservesGroupSignals) {
   };
 
   IREE_ASSERT_OK(iree_io_parameter_provider_gather_batch(
-      provider.get(), device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      IREE_ARRAYSIZE(gathers), gathers));
+      provider.get(), device, queue(), IREE_ARRAYSIZE(gathers), gathers));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(first_signal.get(), first_signal_value,
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
@@ -380,8 +384,7 @@ TEST_F(ParameterIndexProviderTest, GatherBatchReadsAdjacentFileSpans) {
   };
 
   IREE_ASSERT_OK(iree_io_parameter_provider_gather_batch(
-      provider.get(), device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*gather_count=*/1, &gather));
+      provider.get(), device, queue(), /*gather_count=*/1, &gather));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(signal.get(), signal_value,
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
@@ -517,8 +520,7 @@ TEST_F(ParameterIndexProviderTest, ScatterBatchPreservesGroupSemaphores) {
   std::thread scatter_thread([&]() {
     scatter_started.store(true, std::memory_order_release);
     IREE_EXPECT_OK(iree_io_parameter_provider_scatter_batch(
-        provider.get(), device, IREE_HAL_QUEUE_AFFINITY_ANY,
-        IREE_ARRAYSIZE(scatters), scatters));
+        provider.get(), device, queue(), IREE_ARRAYSIZE(scatters), scatters));
   });
   while (!scatter_started.load(std::memory_order_acquire)) {
     std::this_thread::yield();
@@ -620,8 +622,7 @@ TEST_F(ParameterIndexProviderTest, ScatterBatchWritesAdjacentFileSpans) {
   };
 
   IREE_ASSERT_OK(iree_io_parameter_provider_scatter_batch(
-      provider.get(), device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*scatter_count=*/1, &scatter));
+      provider.get(), device, queue(), /*scatter_count=*/1, &scatter));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(signal.get(), signal_value,
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));

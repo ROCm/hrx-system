@@ -922,6 +922,31 @@ static iree_hal_buffer_params_t TransientTimestampBufferParams() {
   return params;
 }
 
+static iree_status_t QueueAlloca(iree_hal_amdgpu_host_queue_t* queue,
+                                 iree_hal_pool_t* pool,
+                                 iree_hal_semaphore_list_t wait_list,
+                                 iree_hal_semaphore_list_t signal_list,
+                                 iree_hal_buffer_params_t params,
+                                 iree_device_size_t allocation_size,
+                                 iree_hal_buffer_t** out_buffer) {
+  params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(&queue->base)));
+  const iree_hal_pool_reservation_request_t request = {
+      .params = params,
+      .allocation_size = allocation_size,
+  };
+  return iree_hal_queue_alloca(&queue->base, wait_list, signal_list, pool,
+                               /*request_count=*/1, &request, out_buffer);
+}
+
+static iree_status_t QueueDealloca(iree_hal_amdgpu_host_queue_t* queue,
+                                   iree_hal_semaphore_list_t wait_list,
+                                   iree_hal_semaphore_list_t signal_list,
+                                   iree_hal_buffer_t* buffer) {
+  return iree_hal_queue_dealloca(&queue->base, wait_list, signal_list,
+                                 /*buffer_count=*/1, &buffer);
+}
+
 // A queue_alloca target reaches the capture as a transient wrapper rather than
 // as an allocated buffer, so the capture has to resolve the staged backing
 // behind it. A fresh allocation may hold anything, so the tick is pinned by two
@@ -931,6 +956,8 @@ TEST_P(HostQueueTimestampTest, CapturesIntoQueueAllocaTarget) {
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(InitializeDevice(&test_device));
   iree_hal_device_t* device = test_device.base_device();
+  iree_hal_amdgpu_host_queue_t* queue = test_device.first_host_queue();
+  ASSERT_NE(queue, nullptr);
 
   Ref<iree_hal_buffer_t> before_target;
   Ref<iree_hal_buffer_t> after_target;
@@ -949,13 +976,17 @@ TEST_P(HostQueueTimestampTest, CapturesIntoQueueAllocaTarget) {
       /*target_offset=*/0, IREE_HAL_TIMESTAMP_FLAG_NONE));
 
   uint64_t alloca_value = 2;
+  iree_hal_buffer_params_t alloca_params = TransientTimestampBufferParams();
+  alloca_params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(&queue->base)));
+  iree_hal_pool_t* pool = iree_hal_pool_set_select(
+      queue->default_pool_set, alloca_params, sizeof(uint64_t));
+  ASSERT_NE(pool, nullptr);
   iree_hal_buffer_t* transient_target_ptr = NULL;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      TimelinePoint(timeline, &before_value),
-      TimelinePoint(timeline, &alloca_value), /*pool=*/NULL,
-      TransientTimestampBufferParams(), sizeof(uint64_t),
-      IREE_HAL_ALLOCA_FLAG_NONE, &transient_target_ptr));
+  IREE_ASSERT_OK(
+      QueueAlloca(queue, pool, TimelinePoint(timeline, &before_value),
+                  TimelinePoint(timeline, &alloca_value), alloca_params,
+                  sizeof(uint64_t), &transient_target_ptr));
   Ref<iree_hal_buffer_t> transient_target(transient_target_ptr);
   // Pin the premise: an allocated buffer here covers none of the wrapper path.
   ASSERT_TRUE(iree_hal_amdgpu_transient_buffer_isa(transient_target));
@@ -991,10 +1022,9 @@ TEST_P(HostQueueTimestampTest, CapturesIntoQueueAllocaTarget) {
   EXPECT_LE(transient_tick, after_tick);
 
   uint64_t dealloca_value = 5;
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      TimelinePoint(timeline, &dealloca_value), transient_target,
-      IREE_HAL_DEALLOCA_FLAG_NONE));
+  IREE_ASSERT_OK(QueueDealloca(queue, iree_hal_semaphore_list_empty(),
+                               TimelinePoint(timeline, &dealloca_value),
+                               transient_target));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(timeline, dealloca_value,
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
@@ -1041,6 +1071,8 @@ TEST_P(HostQueueTimestampTest, RejectsUnstagedTargetWithoutAllocationWait) {
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(InitializeDevice(&test_device));
   iree_hal_device_t* device = test_device.base_device();
+  iree_hal_amdgpu_host_queue_t* queue = test_device.first_host_queue();
+  ASSERT_NE(queue, nullptr);
 
   const iree_device_size_t allocation_size = 4096;
   Ref<iree_hal_pool_t> pool;
@@ -1064,11 +1096,10 @@ TEST_P(HostQueueTimestampTest, RejectsUnstagedTargetWithoutAllocationWait) {
 
   uint64_t held_alloca_value = 1;
   iree_hal_buffer_t* held_target_ptr = NULL;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      TimelinePoint(held_timeline, &held_alloca_value), pool,
-      DeviceLocalTransientBufferParams(), allocation_size,
-      IREE_HAL_ALLOCA_FLAG_NONE, &held_target_ptr));
+  IREE_ASSERT_OK(QueueAlloca(queue, pool, iree_hal_semaphore_list_empty(),
+                             TimelinePoint(held_timeline, &held_alloca_value),
+                             DeviceLocalTransientBufferParams(),
+                             allocation_size, &held_target_ptr));
   Ref<iree_hal_buffer_t> held_target(held_target_ptr);
   IREE_ASSERT_OK(iree_hal_semaphore_wait(held_timeline, held_alloca_value,
                                          iree_infinite_timeout(),
@@ -1076,11 +1107,11 @@ TEST_P(HostQueueTimestampTest, RejectsUnstagedTargetWithoutAllocationWait) {
 
   uint64_t blocked_alloca_value = 1;
   iree_hal_buffer_t* blocked_target_ptr = NULL;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      TimelinePoint(blocked_timeline, &blocked_alloca_value), pool,
-      DeviceLocalTransientBufferParams(), allocation_size,
-      IREE_HAL_ALLOCA_FLAG_NONE, &blocked_target_ptr));
+  IREE_ASSERT_OK(
+      QueueAlloca(queue, pool, iree_hal_semaphore_list_empty(),
+                  TimelinePoint(blocked_timeline, &blocked_alloca_value),
+                  DeviceLocalTransientBufferParams(), allocation_size,
+                  &blocked_target_ptr));
   Ref<iree_hal_buffer_t> blocked_target(blocked_target_ptr);
   // Pin the premise: a staged target makes this a duplicate of
   // CapturesIntoQueueAllocaTarget.
@@ -1098,19 +1129,18 @@ TEST_P(HostQueueTimestampTest, RejectsUnstagedTargetWithoutAllocationWait) {
   // Release the held block so the blocked allocation can complete, then unwind
   // both wrappers through the queue rather than through wrapper destruction.
   uint64_t held_dealloca_value = 2;
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      TimelinePoint(held_timeline, &held_dealloca_value), held_target,
-      IREE_HAL_DEALLOCA_FLAG_NONE));
+  IREE_ASSERT_OK(QueueDealloca(
+      queue, iree_hal_semaphore_list_empty(),
+      TimelinePoint(held_timeline, &held_dealloca_value), held_target));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(blocked_timeline, blocked_alloca_value,
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
 
   uint64_t blocked_dealloca_value = 2;
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      TimelinePoint(blocked_timeline, &blocked_dealloca_value), blocked_target,
-      IREE_HAL_DEALLOCA_FLAG_NONE));
+  IREE_ASSERT_OK(
+      QueueDealloca(queue, iree_hal_semaphore_list_empty(),
+                    TimelinePoint(blocked_timeline, &blocked_dealloca_value),
+                    blocked_target));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       blocked_timeline, blocked_dealloca_value, iree_infinite_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE));

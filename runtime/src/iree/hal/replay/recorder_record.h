@@ -24,6 +24,20 @@ typedef struct iree_hal_replay_pending_record_t {
   iree_hal_replay_file_record_metadata_t metadata;
 } iree_hal_replay_pending_record_t;
 
+// One object record appended after a successful creation operation.
+typedef struct iree_hal_replay_created_object_record_t {
+  // Session-local object id assigned before the operation began.
+  iree_hal_replay_object_id_t object_id;
+  // HAL object type stored under |object_id|.
+  iree_hal_replay_object_type_t object_type;
+  // Schema identifying the serialized object payload.
+  iree_hal_replay_payload_type_t payload_type;
+  // Number of byte spans composing the object payload.
+  iree_host_size_t iovec_count;
+  // Borrowed byte spans valid until the pending operation is completed.
+  const iree_const_byte_span_t* iovecs;
+} iree_hal_replay_created_object_record_t;
+
 // Returns the immutable options captured by |recorder| at creation.
 const iree_hal_replay_recorder_options_t* iree_hal_replay_recorder_options(
     const iree_hal_replay_recorder_t* recorder);
@@ -99,6 +113,15 @@ iree_status_t iree_hal_replay_recorder_end_creation_operation(
     iree_hal_replay_payload_type_t object_payload_type,
     iree_host_size_t object_iovec_count,
     const iree_const_byte_span_t* object_iovecs);
+
+// Completes a creation operation and atomically appends all successfully
+// created object records before releasing the recorder mutex.
+iree_status_t iree_hal_replay_recorder_end_creation_operation_list(
+    iree_hal_replay_pending_record_t* pending_record,
+    iree_status_t operation_status, iree_host_size_t operation_iovec_count,
+    const iree_const_byte_span_t* operation_iovecs,
+    iree_host_size_t created_object_count,
+    const iree_hal_replay_created_object_record_t* created_objects);
 
 #ifdef __cplusplus
 }  // extern "C"

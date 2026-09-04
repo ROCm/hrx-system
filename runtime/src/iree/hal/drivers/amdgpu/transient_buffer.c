@@ -16,8 +16,8 @@ struct iree_hal_amdgpu_transient_buffer_t {
   // Base HAL buffer resource returned to callers.
   iree_hal_buffer_t base;
 
-  // Pool this wrapper returns to when its HAL buffer refcount reaches zero.
-  iree_hal_amdgpu_transient_buffer_pool_t* pool;
+  // Wrapper pool this object returns to when its HAL refcount reaches zero.
+  iree_hal_amdgpu_transient_buffer_pool_t* wrapper_pool;
 
   // Next wrapper in either the pool return stack or acquire-side cache.
   iree_hal_amdgpu_transient_buffer_t* pool_next;
@@ -34,8 +34,8 @@ struct iree_hal_amdgpu_transient_buffer_t {
   // data-race-free and visible to TSAN.
   iree_atomic_intptr_t committed_backing;
 
-  // Borrowed source pool for the queue-owned reservation token.
-  iree_hal_pool_t* reservation_pool;
+  // Borrowed source pool for the complete logical allocation lifetime.
+  iree_hal_pool_t* source_pool;
 
   // Queue-owned pool reservation token attached after acquire succeeds.
   iree_hal_pool_reservation_t reservation;
@@ -113,7 +113,7 @@ static iree_status_t iree_hal_amdgpu_transient_buffer_pool_grow_locked(
   for (iree_host_size_t i = 0; i < slot_count; ++i) {
     iree_hal_amdgpu_transient_buffer_t* buffer =
         (iree_hal_amdgpu_transient_buffer_t*)slot_ptr;
-    buffer->pool = pool;
+    buffer->wrapper_pool = pool;
     buffer->pool_next = pool->acquire_head;
     pool->acquire_head = buffer;
     slot_ptr += slot_size;
@@ -130,7 +130,6 @@ iree_status_t iree_hal_amdgpu_transient_buffer_pool_initialize(
   IREE_ASSERT_ARGUMENT(out_pool);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  memset(out_pool, 0, sizeof(*out_pool));
   const iree_host_size_t slot_size =
       iree_hal_amdgpu_transient_buffer_pool_slot_size();
   if (IREE_UNLIKELY(block_pool->usable_block_size < slot_size)) {
@@ -141,6 +140,7 @@ iree_status_t iree_hal_amdgpu_transient_buffer_pool_initialize(
                             block_pool->usable_block_size, slot_size);
   }
 
+  memset(out_pool, 0, sizeof(*out_pool));
   out_pool->block_pool = block_pool;
   iree_atomic_store(&out_pool->return_head, 0, iree_memory_order_relaxed);
   iree_slim_mutex_initialize(&out_pool->mutex);
@@ -182,8 +182,6 @@ void iree_hal_amdgpu_transient_buffer_pool_deinitialize(
 static iree_status_t iree_hal_amdgpu_transient_buffer_pool_acquire(
     iree_hal_amdgpu_transient_buffer_pool_t* pool,
     iree_hal_amdgpu_transient_buffer_t** out_buffer) {
-  *out_buffer = NULL;
-
   iree_slim_mutex_lock(&pool->mutex);
 
   iree_status_t status = iree_ok_status();
@@ -242,11 +240,12 @@ static void iree_hal_amdgpu_transient_buffer_pool_release(
 iree_status_t iree_hal_amdgpu_transient_buffer_create(
     iree_hal_buffer_placement_t placement, iree_hal_buffer_params_t params,
     iree_device_size_t allocation_size, iree_device_size_t byte_length,
-    iree_hal_amdgpu_transient_buffer_pool_t* pool,
+    iree_hal_pool_t* source_pool,
+    iree_hal_amdgpu_transient_buffer_pool_t* wrapper_pool,
     iree_hal_buffer_t** out_buffer) {
-  IREE_ASSERT_ARGUMENT(pool);
+  IREE_ASSERT_ARGUMENT(source_pool);
+  IREE_ASSERT_ARGUMENT(wrapper_pool);
   IREE_ASSERT_ARGUMENT(out_buffer);
-  *out_buffer = NULL;
   if (IREE_UNLIKELY(byte_length > allocation_size)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "transient buffer byte length (%" PRIu64
@@ -257,16 +256,16 @@ iree_status_t iree_hal_amdgpu_transient_buffer_create(
 
   iree_hal_amdgpu_transient_buffer_t* buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdgpu_transient_buffer_pool_acquire(pool, &buffer));
+      z0, iree_hal_amdgpu_transient_buffer_pool_acquire(wrapper_pool, &buffer));
 
   iree_hal_buffer_initialize(
       placement, /*allocated_buffer=*/&buffer->base, allocation_size,
       /*byte_offset=*/0, byte_length, params.type, params.access, params.usage,
       &iree_hal_amdgpu_transient_buffer_vtable, &buffer->base);
-  buffer->pool = pool;
+  buffer->wrapper_pool = wrapper_pool;
   buffer->staged_backing = NULL;
   iree_atomic_store(&buffer->committed_backing, 0, iree_memory_order_relaxed);
-  buffer->reservation_pool = NULL;
+  buffer->source_pool = source_pool;
   memset(&buffer->reservation, 0, sizeof(buffer->reservation));
   iree_atomic_store(&buffer->reservation_armed, 0, iree_memory_order_relaxed);
   iree_atomic_store(&buffer->deallocation_state,
@@ -316,10 +315,9 @@ void iree_hal_amdgpu_transient_buffer_attach_reservation(
   IREE_ASSERT_ARGUMENT(reservation);
   iree_hal_amdgpu_transient_buffer_t* buffer =
       iree_hal_amdgpu_transient_buffer_cast(base_buffer);
-  IREE_ASSERT_TRUE(buffer->reservation_pool == NULL);
+  IREE_ASSERT_TRUE(buffer->source_pool == pool);
   IREE_ASSERT_TRUE(iree_atomic_load(&buffer->reservation_armed,
                                     iree_memory_order_acquire) == 0);
-  buffer->reservation_pool = pool;
   buffer->reservation = *reservation;
   iree_atomic_store(&buffer->reservation_armed, 1, iree_memory_order_release);
 }
@@ -371,16 +369,23 @@ bool iree_hal_amdgpu_transient_buffer_is_deallocated(
          IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_COMPLETE;
 }
 
-bool iree_hal_amdgpu_transient_buffer_begin_dealloca(
-    iree_hal_buffer_t* base_buffer) {
+iree_status_t iree_hal_amdgpu_transient_buffer_begin_dealloca(
+    iree_hal_buffer_t* base_buffer, iree_hal_pool_t** out_pool) {
   IREE_ASSERT_ARGUMENT(base_buffer);
+  IREE_ASSERT_ARGUMENT(out_pool);
   iree_hal_amdgpu_transient_buffer_t* buffer =
       iree_hal_amdgpu_transient_buffer_cast(base_buffer);
   int32_t expected = IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE;
-  return iree_atomic_compare_exchange_strong(
-      &buffer->deallocation_state, &expected,
-      IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_QUEUED,
-      iree_memory_order_acq_rel, iree_memory_order_acquire);
+  if (IREE_UNLIKELY(!iree_atomic_compare_exchange_strong(
+          &buffer->deallocation_state, &expected,
+          IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_QUEUED,
+          iree_memory_order_acq_rel, iree_memory_order_acquire))) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "transient buffer has already been queued for deallocation");
+  }
+  *out_pool = buffer->source_pool;
+  return iree_ok_status();
 }
 
 void iree_hal_amdgpu_transient_buffer_abort_dealloca(
@@ -388,9 +393,12 @@ void iree_hal_amdgpu_transient_buffer_abort_dealloca(
   IREE_ASSERT_ARGUMENT(base_buffer);
   iree_hal_amdgpu_transient_buffer_t* buffer =
       iree_hal_amdgpu_transient_buffer_cast(base_buffer);
-  iree_atomic_store(&buffer->deallocation_state,
-                    IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE,
-                    iree_memory_order_release);
+  int32_t expected = IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_QUEUED;
+  const bool aborted = iree_atomic_compare_exchange_strong(
+      &buffer->deallocation_state, &expected,
+      IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE,
+      iree_memory_order_acq_rel, iree_memory_order_acquire);
+  IREE_ASSERT_TRUE(aborted);
 }
 
 bool iree_hal_amdgpu_transient_buffer_query_reservation(
@@ -399,19 +407,35 @@ bool iree_hal_amdgpu_transient_buffer_query_reservation(
   IREE_ASSERT_ARGUMENT(base_buffer);
   IREE_ASSERT_ARGUMENT(out_pool);
   IREE_ASSERT_ARGUMENT(out_reservation);
-  *out_pool = NULL;
-  memset(out_reservation, 0, sizeof(*out_reservation));
 
   iree_hal_amdgpu_transient_buffer_t* buffer =
       iree_hal_amdgpu_transient_buffer_cast(base_buffer);
-  if (!buffer->reservation_pool) return false;
   if (iree_atomic_load(&buffer->reservation_armed, iree_memory_order_acquire) ==
       0) {
     return false;
   }
-  *out_pool = buffer->reservation_pool;
+  *out_pool = buffer->source_pool;
   *out_reservation = buffer->reservation;
   return true;
+}
+
+void iree_hal_amdgpu_transient_buffer_take_dealloca_reservation(
+    iree_hal_buffer_t* base_buffer, iree_hal_pool_t** out_pool,
+    iree_hal_pool_reservation_t* out_reservation) {
+  IREE_ASSERT_ARGUMENT(base_buffer);
+  IREE_ASSERT_ARGUMENT(out_pool);
+  IREE_ASSERT_ARGUMENT(out_reservation);
+  iree_hal_amdgpu_transient_buffer_t* buffer =
+      iree_hal_amdgpu_transient_buffer_cast(base_buffer);
+  IREE_ASSERT_TRUE(iree_atomic_load(&buffer->deallocation_state,
+                                    iree_memory_order_acquire) ==
+                   IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_QUEUED);
+  const int32_t was_armed = iree_atomic_exchange(&buffer->reservation_armed, 0,
+                                                 iree_memory_order_acq_rel);
+  IREE_ASSERT_TRUE(was_armed != 0);
+  *out_pool = buffer->source_pool;
+  *out_reservation = buffer->reservation;
+  memset(&buffer->reservation, 0, sizeof(buffer->reservation));
 }
 
 void iree_hal_amdgpu_transient_buffer_release_reservation(
@@ -420,15 +444,12 @@ void iree_hal_amdgpu_transient_buffer_release_reservation(
   IREE_ASSERT_ARGUMENT(base_buffer);
   iree_hal_amdgpu_transient_buffer_t* buffer =
       iree_hal_amdgpu_transient_buffer_cast(base_buffer);
-  iree_hal_pool_t* reservation_pool = buffer->reservation_pool;
-  if (!reservation_pool) return;
   const int32_t was_armed = iree_atomic_exchange(&buffer->reservation_armed, 0,
                                                  iree_memory_order_acq_rel);
   if (was_armed) {
-    iree_hal_pool_release_reservations(reservation_pool, 1,
+    iree_hal_pool_release_reservations(buffer->source_pool, 1,
                                        &buffer->reservation, death_frontier);
   }
-  buffer->reservation_pool = NULL;
   memset(&buffer->reservation, 0, sizeof(buffer->reservation));
 }
 
@@ -444,7 +465,6 @@ iree_status_t iree_hal_amdgpu_transient_buffer_resolve_committed_backing(
     iree_hal_buffer_t* base_buffer, iree_hal_buffer_t** out_backing_buffer) {
   IREE_ASSERT_ARGUMENT(base_buffer);
   IREE_ASSERT_ARGUMENT(out_backing_buffer);
-  *out_backing_buffer = NULL;
   iree_hal_amdgpu_transient_buffer_t* buffer =
       iree_hal_amdgpu_transient_buffer_cast(base_buffer);
   iree_hal_buffer_t* backing_buffer =
@@ -463,7 +483,7 @@ static void iree_hal_amdgpu_transient_buffer_destroy(
     iree_hal_buffer_t* base_buffer) {
   iree_hal_amdgpu_transient_buffer_t* buffer =
       iree_hal_amdgpu_transient_buffer_cast(base_buffer);
-  iree_hal_amdgpu_transient_buffer_pool_t* pool = buffer->pool;
+  iree_hal_amdgpu_transient_buffer_pool_t* wrapper_pool = buffer->wrapper_pool;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_amdgpu_transient_buffer_decommit(base_buffer);
@@ -475,7 +495,8 @@ static void iree_hal_amdgpu_transient_buffer_destroy(
                     iree_memory_order_relaxed);
   buffer->profile_session_id = 0;
   buffer->profile_allocation_id = 0;
-  iree_hal_amdgpu_transient_buffer_pool_release(pool, buffer);
+  buffer->source_pool = NULL;
+  iree_hal_amdgpu_transient_buffer_pool_release(wrapper_pool, buffer);
   IREE_TRACE_ZONE_END(z0);
 }
 

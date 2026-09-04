@@ -153,6 +153,8 @@ enum iree_hal_replay_operation_code_e {
   IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TRANSFER = 600u,
   IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_READ = 601u,
   IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_WRITE = 602u,
+  IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ALLOCA = 603u,
+  IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_DEALLOCA = 604u,
 };
 
 // Producer-defined payload schema stored in record headers.
@@ -192,6 +194,8 @@ enum iree_hal_replay_payload_type_e {
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER = 34u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_READ = 35u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_WRITE = 36u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ALLOCA = 37u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_DEALLOCA = 38u,
 };
 
 // Type of one operation in a captured exact-queue transfer transaction.
@@ -567,6 +571,47 @@ typedef struct iree_hal_replay_queue_write_payload_t {
 } iree_hal_replay_queue_write_payload_t;
 static_assert(sizeof(iree_hal_replay_queue_write_payload_t) == 72,
               "queue write replay payload must be 72 bytes");
+
+// Header for an exact-queue allocation transaction followed by semaphore
+// timepoints and allocation request descriptors.
+typedef struct iree_hal_replay_queue_alloca_payload_t {
+  // Number of wait semaphore timepoints following this header.
+  uint64_t wait_semaphore_count;
+  // Number of signal semaphore timepoints following the wait timepoints.
+  uint64_t signal_semaphore_count;
+  // Number of allocation request descriptors following the timepoints.
+  uint64_t request_count;
+  // Reserved for future allocation transaction metadata; must be zero.
+  uint64_t reserved0;
+} iree_hal_replay_queue_alloca_payload_t;
+static_assert(sizeof(iree_hal_replay_queue_alloca_payload_t) == 32,
+              "queue alloca replay header must be 32 bytes");
+
+// One request and resulting buffer identity in a captured exact-queue
+// allocation transaction.
+typedef struct iree_hal_replay_queue_alloca_request_payload_t {
+  // Session-local object id assigned to the returned allocation root.
+  iree_hal_replay_object_id_t buffer_id;
+  // Canonical allocation request submitted to the queue.
+  iree_hal_replay_allocator_allocate_buffer_payload_t allocation;
+} iree_hal_replay_queue_alloca_request_payload_t;
+static_assert(sizeof(iree_hal_replay_queue_alloca_request_payload_t) == 48,
+              "queue alloca replay request must be 48 bytes");
+
+// Header for an exact-queue deallocation transaction followed by semaphore
+// timepoints and allocation-root object ids.
+typedef struct iree_hal_replay_queue_dealloca_payload_t {
+  // Number of wait semaphore timepoints following this header.
+  uint64_t wait_semaphore_count;
+  // Number of signal semaphore timepoints following the wait timepoints.
+  uint64_t signal_semaphore_count;
+  // Number of allocation-root object ids following the timepoints.
+  uint64_t buffer_count;
+  // Reserved for future deallocation transaction metadata; must be zero.
+  uint64_t reserved0;
+} iree_hal_replay_queue_dealloca_payload_t;
+static_assert(sizeof(iree_hal_replay_queue_dealloca_payload_t) == 32,
+              "queue dealloca replay header must be 32 bytes");
 
 // One operation in a captured exact-queue transfer transaction.
 typedef struct iree_hal_replay_queue_transfer_operation_payload_t {

@@ -351,15 +351,27 @@ static void iree_hal_task_queue_profile_set_type(
   profile_operation->type = type;
 }
 
-static void iree_hal_task_queue_profile_set_transient_buffer(
-    iree_hal_task_queue_op_t* operation, iree_hal_buffer_t* transient_buffer) {
+static void iree_hal_task_queue_profile_set_transient_buffers(
+    iree_hal_task_queue_op_t* operation, iree_host_size_t buffer_count,
+    iree_hal_buffer_t* const* transient_buffers) {
   iree_hal_task_queue_profile_operation_t* profile_operation =
       iree_hal_task_queue_profile_operation(operation);
   if (!profile_operation) return;
+  profile_operation->operation_count =
+      iree_hal_task_queue_profile_count(buffer_count);
   profile_operation->allocation_id =
-      iree_hal_task_transient_buffer_profile_id(transient_buffer);
-  profile_operation->payload_length =
-      iree_hal_buffer_byte_length(transient_buffer);
+      buffer_count == 1
+          ? iree_hal_task_transient_buffer_profile_id(transient_buffers[0])
+          : 0;
+  uint64_t payload_length = 0;
+  for (iree_host_size_t i = 0; i < buffer_count; ++i) {
+    const uint64_t buffer_length =
+        (uint64_t)iree_hal_buffer_byte_length(transient_buffers[i]);
+    payload_length = payload_length > UINT64_MAX - buffer_length
+                         ? UINT64_MAX
+                         : payload_length + buffer_length;
+  }
+  profile_operation->payload_length = payload_length;
 }
 
 static void iree_hal_task_queue_profile_populate_memory_event_pool_stats(
@@ -629,6 +641,19 @@ static void iree_hal_task_queue_profile_finish_host_execution(
 static void iree_hal_task_queue_op_release_alloca_memory_wait(
     iree_hal_task_queue_op_t* operation);
 
+static void iree_hal_task_queue_op_abort_dealloca(
+    iree_hal_task_queue_op_t* operation) {
+  if (operation->type != IREE_HAL_TASK_QUEUE_OP_DEALLOCA ||
+      !operation->dealloca.marks_owned) {
+    return;
+  }
+  for (iree_host_size_t i = 0; i < operation->dealloca.buffer_count; ++i) {
+    iree_hal_task_transient_buffer_abort_dealloca(
+        operation->dealloca.transient_buffers[i]);
+  }
+  operation->dealloca.marks_owned = false;
+}
+
 // Unmaps any SCOPED mappings referenced by a deferred block recording before
 // user-visible completion is published. Dealloca can legally wait on command
 // completion and immediately decommit transient backing memory, so mappings
@@ -664,6 +689,8 @@ static void iree_hal_task_queue_op_discard(
     iree_hal_task_queue_op_t* operation) {
   iree_hal_task_queue_debug_record_destroy(operation->queue, operation,
                                            IREE_STATUS_CANCELLED);
+  iree_hal_task_queue_op_release_alloca_memory_wait(operation);
+  iree_hal_task_queue_op_abort_dealloca(operation);
   iree_hal_semaphore_list_release(operation->signal_semaphores);
   if (operation->resource_set) {
     iree_hal_resource_set_free(operation->resource_set);
@@ -695,6 +722,7 @@ static void iree_hal_task_queue_op_destroy(iree_hal_task_queue_op_t* operation,
       operation, failure_status);
 
   iree_hal_task_queue_op_release_alloca_memory_wait(operation);
+  iree_hal_task_queue_op_abort_dealloca(operation);
 
   // Fail signal semaphores on error (stores the error status in each), then
   // always release the semaphore references regardless of success/failure.
@@ -1097,13 +1125,10 @@ struct iree_hal_task_queue_alloca_memory_wait_t {
   // Active wait source.
   iree_hal_task_queue_alloca_memory_wait_kind_t kind;
 
-  // State for a held reservation blocked on a pool death frontier.
+  // State for a held reservation transaction blocked on pool death frontiers.
   struct {
-    // Queue-owned reservation held while waiting for its death frontier.
-    iree_hal_pool_reservation_t reservation;
-
-    // Pool-owned death frontier borrowed while the reservation is held.
-    const iree_async_frontier_t* wait_frontier;
+    // Arena-owned union of all reservation death frontiers in the transaction.
+    iree_async_frontier_t* wait_frontier;
 
     // Tracker waiter storage for |wait_frontier|.
     iree_async_frontier_waiter_t waiter;
@@ -1134,6 +1159,30 @@ static iree_status_t iree_hal_task_queue_alloca_memory_wait_ensure(
   return iree_ok_status();
 }
 
+static void iree_hal_task_queue_alloca_release_reservations(
+    iree_hal_task_queue_op_t* operation,
+    const iree_async_frontier_t* death_frontier) {
+  if (!operation->alloca.reservations_held) return;
+  iree_hal_pool_release_reservations(
+      operation->alloca.pool, operation->alloca.request_count,
+      operation->alloca.reservations, death_frontier);
+  operation->alloca.reservations_held = false;
+}
+
+// Releases reservations with their original death frontiers when constructing
+// a common transaction frontier fails. This is an exceptional rollback path;
+// successful allocation transactions release the complete batch together.
+static void iree_hal_task_queue_alloca_release_reservations_individually(
+    iree_hal_task_queue_op_t* operation) {
+  if (!operation->alloca.reservations_held) return;
+  for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
+    iree_hal_pool_release_reservations(
+        operation->alloca.pool, 1, &operation->alloca.reservations[i],
+        operation->alloca.acquire_infos[i].wait_frontier);
+  }
+  operation->alloca.reservations_held = false;
+}
+
 static void iree_hal_task_queue_op_release_alloca_memory_wait(
     iree_hal_task_queue_op_t* operation) {
   if (operation->type != IREE_HAL_TASK_QUEUE_OP_ALLOCA) {
@@ -1142,20 +1191,23 @@ static void iree_hal_task_queue_op_release_alloca_memory_wait(
   iree_hal_task_queue_alloca_memory_wait_t* wait =
       operation->alloca.memory_wait;
   if (!wait) {
+    iree_hal_task_queue_alloca_release_reservations(operation,
+                                                    /*death_frontier=*/NULL);
     return;
   }
 
   switch (wait->kind) {
     case IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_FRONTIER:
-      iree_hal_pool_release_reservations(operation->alloca.pool, 1,
-                                         &wait->frontier.reservation,
-                                         wait->frontier.wait_frontier);
+      iree_hal_task_queue_alloca_release_reservations(
+          operation, wait->frontier.wait_frontier);
       wait->kind = IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_NONE;
       break;
     case IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_POOL_NOTIFICATION:
       wait->kind = IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_NONE;
       break;
     case IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_NONE:
+      iree_hal_task_queue_alloca_release_reservations(operation,
+                                                      /*death_frontier=*/NULL);
       break;
   }
 }
@@ -1200,39 +1252,67 @@ static void iree_hal_task_queue_alloca_pool_notification_wait_resolved(
 }
 
 static iree_status_t iree_hal_task_queue_alloca_wait_for_frontier(
-    iree_hal_task_queue_op_t* operation,
-    const iree_hal_pool_reservation_t* reservation,
-    const iree_async_frontier_t* wait_frontier) {
-  if (IREE_UNLIKELY(!wait_frontier)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "queue_alloca waitable pool reservation did not provide a frontier");
-  }
-
+    iree_hal_task_queue_op_t* operation) {
   iree_hal_task_queue_alloca_memory_wait_t* wait = NULL;
   iree_status_t status =
       iree_hal_task_queue_alloca_memory_wait_ensure(operation, &wait);
   if (iree_status_is_ok(status)) {
-    wait->kind = IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_FRONTIER;
-    wait->frontier.reservation = *reservation;
-    wait->frontier.wait_frontier = wait_frontier;
-    status = iree_async_frontier_tracker_wait(
-        operation->frontier_tracker, wait_frontier,
-        iree_hal_task_queue_alloca_frontier_wait_resolved, operation,
-        &wait->frontier.waiter);
+    iree_host_size_t frontier_size = 0;
+    status = iree_async_frontier_size(UINT8_MAX, &frontier_size);
     if (iree_status_is_ok(status)) {
-      iree_hal_task_queue_profile_force_software_defer(operation);
-      iree_hal_task_queue_profile_record_memory_event(
-          operation, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_WAIT,
-          IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION |
-              IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_WAIT_FRONTIER,
-          IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT, operation->alloca.pool,
-          operation->alloca.params, reservation, wait_frontier->entry_count);
+      status = iree_arena_allocate(&operation->arena, frontier_size,
+                                   (void**)&wait->frontier.wait_frontier);
     }
   }
+  if (iree_status_is_ok(status)) {
+    iree_async_frontier_initialize(wait->frontier.wait_frontier,
+                                   /*entry_count=*/0);
+    for (iree_host_size_t i = 0;
+         i < operation->alloca.request_count && iree_status_is_ok(status);
+         ++i) {
+      const iree_async_frontier_t* request_frontier =
+          operation->alloca.acquire_infos[i].wait_frontier;
+      if (operation->alloca.acquire_infos[i].result !=
+          IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT) {
+        continue;
+      }
+      if (IREE_UNLIKELY(!request_frontier ||
+                        request_frontier->entry_count == 0)) {
+        status = iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "waitable pool reservation %" PRIhsz " has no dependency edge", i);
+        break;
+      }
+      if (!iree_async_frontier_merge(wait->frontier.wait_frontier, UINT8_MAX,
+                                     request_frontier)) {
+        status = iree_make_status(
+            IREE_STATUS_RESOURCE_EXHAUSTED,
+            "allocation transaction dependency frontier exceeds %u axes",
+            UINT8_MAX);
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    wait->kind = IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_FRONTIER;
+    // The tracker may invoke the callback inline and transfer ownership of the
+    // operation before returning. Record profiling state before registration
+    // and never access the operation after a successful call.
+    iree_hal_task_queue_profile_force_software_defer(operation);
+    iree_hal_task_queue_profile_record_memory_event(
+        operation, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_WAIT,
+        IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION |
+            IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_WAIT_FRONTIER,
+        IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT, operation->alloca.pool,
+        operation->alloca.requests[0].params,
+        &operation->alloca.reservations[0],
+        wait->frontier.wait_frontier->entry_count);
+    status = iree_async_frontier_tracker_wait(
+        operation->frontier_tracker, wait->frontier.wait_frontier,
+        iree_hal_task_queue_alloca_frontier_wait_resolved, operation,
+        &wait->frontier.waiter);
+  }
   if (!iree_status_is_ok(status)) {
-    iree_hal_pool_release_reservations(operation->alloca.pool, 1, reservation,
-                                       wait_frontier);
+    iree_hal_task_queue_alloca_release_reservations_individually(operation);
     if (wait) {
       wait->kind = IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_NONE;
     }
@@ -1272,7 +1352,8 @@ static iree_status_t iree_hal_task_queue_alloca_wait_for_pool_notification(
         operation, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_WAIT,
         IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION |
             IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_WAIT_NOTIFICATION,
-        acquire_result, operation->alloca.pool, operation->alloca.params,
+        acquire_result, operation->alloca.pool,
+        operation->alloca.requests[0].params,
         /*reservation=*/NULL, /*frontier_entry_count=*/0);
   }
   return status;
@@ -1776,53 +1857,61 @@ static iree_status_t iree_hal_task_queue_drain_host_call(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_task_queue_drain_alloca_submit_reservation(
+static iree_status_t iree_hal_task_queue_drain_alloca_submit_reservations(
     iree_hal_task_queue_op_t* operation,
     iree_hal_pool_acquire_result_t acquire_result,
-    const iree_hal_pool_reservation_t* reservation,
     const iree_async_frontier_t* reservation_failure_frontier) {
   iree_hal_task_queue_profile_record_queue_event(operation, iree_time_now());
   iree_hal_task_queue_profile_start_host_execution(operation);
-  iree_hal_task_transient_buffer_attach_reservation(
-      operation->alloca.transient_buffer, operation->alloca.pool, reservation);
-
-  const iree_hal_pool_reservation_request_t request = {
-      .params = operation->alloca.params,
-      .allocation_size = operation->alloca.allocation_size,
-  };
-  iree_hal_buffer_t* backing_buffer = NULL;
   iree_status_t status = iree_hal_pool_materialize_reservations(
-      operation->alloca.pool, 1, &request, reservation,
-      IREE_HAL_POOL_MATERIALIZE_FLAG_NONE, &backing_buffer);
+      operation->alloca.pool, operation->alloca.request_count,
+      operation->alloca.requests, operation->alloca.reservations,
+      IREE_HAL_POOL_MATERIALIZE_FLAG_NONE, operation->alloca.backing_buffers);
   if (iree_status_is_ok(status)) {
-    iree_hal_task_transient_buffer_stage_backing(
-        operation->alloca.transient_buffer, backing_buffer);
+    for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
+      iree_hal_task_transient_buffer_attach_reservation(
+          operation->alloca.transient_buffers[i], operation->alloca.pool,
+          &operation->alloca.reservations[i]);
+    }
+    operation->alloca.reservations_held = false;
+    for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
+      iree_hal_task_transient_buffer_stage_backing(
+          operation->alloca.transient_buffers[i],
+          operation->alloca.backing_buffers[i]);
+      iree_hal_buffer_release(operation->alloca.backing_buffers[i]);
+      operation->alloca.backing_buffers[i] = NULL;
+    }
     iree_hal_task_queue_profile_record_memory_event(
         operation, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_MATERIALIZE,
         IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION, acquire_result,
-        operation->alloca.pool, operation->alloca.params, reservation,
+        operation->alloca.pool, operation->alloca.requests[0].params,
+        &operation->alloca.reservations[0],
         reservation_failure_frontier ? reservation_failure_frontier->entry_count
                                      : 0);
   }
-  iree_hal_buffer_release(backing_buffer);
 
   if (iree_status_is_ok(status)) {
-    iree_hal_task_transient_buffer_commit(operation->alloca.transient_buffer);
+    for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
+      iree_hal_task_transient_buffer_commit(
+          operation->alloca.transient_buffers[i]);
+    }
     iree_hal_task_queue_profile_record_memory_event(
         operation, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_QUEUE_ALLOCA,
         IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION, acquire_result,
-        operation->alloca.pool, operation->alloca.params, reservation,
+        operation->alloca.pool, operation->alloca.requests[0].params,
+        &operation->alloca.reservations[0],
         reservation_failure_frontier ? reservation_failure_frontier->entry_count
                                      : 0);
     iree_hal_task_queue_op_complete(operation);
   } else {
-    iree_hal_task_transient_buffer_release_reservation(
-        operation->alloca.transient_buffer, reservation_failure_frontier);
+    iree_hal_task_queue_alloca_release_reservations(
+        operation, reservation_failure_frontier);
     iree_hal_task_queue_profile_record_memory_event(
         operation, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_RELEASE,
         IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION,
         iree_status_code(status), operation->alloca.pool,
-        operation->alloca.params, reservation,
+        operation->alloca.requests[0].params,
+        &operation->alloca.reservations[0],
         reservation_failure_frontier ? reservation_failure_frontier->entry_count
                                      : 0);
   }
@@ -1831,18 +1920,17 @@ static iree_status_t iree_hal_task_queue_drain_alloca_submit_reservation(
 
 static iree_status_t iree_hal_task_queue_drain_alloca_acquire(
     iree_hal_task_queue_op_t* operation,
-    iree_hal_pool_reservation_t* out_reservation,
-    iree_hal_pool_acquire_info_t* out_acquire_info,
     iree_hal_pool_acquire_result_t* out_acquire_result) {
-  const iree_hal_pool_reservation_request_t request = {
-      .params = operation->alloca.params,
-      .allocation_size = operation->alloca.allocation_size,
-  };
   iree_status_t status = iree_hal_pool_acquire_reservations(
-      operation->alloca.pool, 1, &request, /*requester_frontier=*/NULL,
-      operation->alloca.reserve_flags, out_reservation, out_acquire_info,
-      out_acquire_result);
+      operation->alloca.pool, operation->alloca.request_count,
+      operation->alloca.requests, /*requester_frontier=*/NULL,
+      operation->alloca.reserve_flags, operation->alloca.reservations,
+      operation->alloca.acquire_infos, out_acquire_result);
   if (iree_status_is_ok(status)) {
+    operation->alloca.reservations_held =
+        *out_acquire_result == IREE_HAL_POOL_ACQUIRE_OK ||
+        *out_acquire_result == IREE_HAL_POOL_ACQUIRE_OK_FRESH ||
+        *out_acquire_result == IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT;
     iree_hal_profile_memory_event_flags_t flags =
         IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION;
     if (*out_acquire_result == IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT) {
@@ -1853,13 +1941,14 @@ static iree_status_t iree_hal_task_queue_drain_alloca_acquire(
     }
     iree_hal_task_queue_profile_record_memory_event(
         operation, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_RESERVE, flags,
-        *out_acquire_result, operation->alloca.pool, operation->alloca.params,
+        *out_acquire_result, operation->alloca.pool,
+        operation->alloca.requests[0].params,
         *out_acquire_result == IREE_HAL_POOL_ACQUIRE_EXHAUSTED ||
                 *out_acquire_result == IREE_HAL_POOL_ACQUIRE_OVER_BUDGET
             ? NULL
-            : out_reservation,
-        out_acquire_info->wait_frontier
-            ? out_acquire_info->wait_frontier->entry_count
+            : &operation->alloca.reservations[0],
+        operation->alloca.acquire_infos[0].wait_frontier
+            ? operation->alloca.acquire_infos[0].wait_frontier->entry_count
             : 0);
   }
   return status;
@@ -1867,8 +1956,6 @@ static iree_status_t iree_hal_task_queue_drain_alloca_acquire(
 
 static iree_status_t iree_hal_task_queue_drain_alloca_on_acquire_result(
     iree_hal_task_queue_op_t* operation,
-    const iree_hal_pool_reservation_t* reservation,
-    const iree_hal_pool_acquire_info_t* acquire_info,
     iree_hal_pool_acquire_result_t acquire_result);
 
 static iree_status_t
@@ -1884,20 +1971,18 @@ iree_hal_task_queue_drain_alloca_wait_for_pool_notification(
 
   const uint32_t wait_token =
       iree_async_notification_begin_observe(notification);
-  iree_hal_pool_reservation_t reservation;
-  iree_hal_pool_acquire_info_t acquire_info;
   iree_hal_pool_acquire_result_t acquire_result =
       IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
 
-  iree_status_t status = iree_hal_task_queue_drain_alloca_acquire(
-      operation, &reservation, &acquire_info, &acquire_result);
+  iree_status_t status =
+      iree_hal_task_queue_drain_alloca_acquire(operation, &acquire_result);
   if (iree_status_is_ok(status)) {
     switch (acquire_result) {
       case IREE_HAL_POOL_ACQUIRE_OK:
       case IREE_HAL_POOL_ACQUIRE_OK_FRESH:
       case IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT:
         status = iree_hal_task_queue_drain_alloca_on_acquire_result(
-            operation, &reservation, &acquire_info, acquire_result);
+            operation, acquire_result);
         break;
       case IREE_HAL_POOL_ACQUIRE_EXHAUSTED:
       case IREE_HAL_POOL_ACQUIRE_OVER_BUDGET:
@@ -1917,28 +2002,15 @@ iree_hal_task_queue_drain_alloca_wait_for_pool_notification(
 
 static iree_status_t iree_hal_task_queue_drain_alloca_on_acquire_result(
     iree_hal_task_queue_op_t* operation,
-    const iree_hal_pool_reservation_t* reservation,
-    const iree_hal_pool_acquire_info_t* acquire_info,
     iree_hal_pool_acquire_result_t acquire_result) {
   switch (acquire_result) {
     case IREE_HAL_POOL_ACQUIRE_OK:
     case IREE_HAL_POOL_ACQUIRE_OK_FRESH:
-      return iree_hal_task_queue_drain_alloca_submit_reservation(
-          operation, acquire_result, reservation,
+      return iree_hal_task_queue_drain_alloca_submit_reservations(
+          operation, acquire_result,
           /*reservation_failure_frontier=*/NULL);
     case IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT:
-      if (!iree_all_bits_set(operation->alloca.flags,
-                             IREE_HAL_ALLOCA_FLAG_ALLOW_POOL_WAIT_FRONTIER)) {
-        iree_hal_pool_release_reservations(operation->alloca.pool, 1,
-                                           reservation,
-                                           acquire_info->wait_frontier);
-        return iree_make_status(
-            IREE_STATUS_RESOURCE_EXHAUSTED,
-            "queue_alloca recycled pool memory requires "
-            "IREE_HAL_ALLOCA_FLAG_ALLOW_POOL_WAIT_FRONTIER");
-      }
-      return iree_hal_task_queue_alloca_wait_for_frontier(
-          operation, reservation, acquire_info->wait_frontier);
+      return iree_hal_task_queue_alloca_wait_for_frontier(operation);
     case IREE_HAL_POOL_ACQUIRE_EXHAUSTED:
     case IREE_HAL_POOL_ACQUIRE_OVER_BUDGET:
       return iree_hal_task_queue_drain_alloca_wait_for_pool_notification(
@@ -1957,62 +2029,66 @@ static iree_status_t iree_hal_task_queue_drain_alloca(
   iree_hal_task_queue_alloca_memory_wait_t* wait =
       operation->alloca.memory_wait;
   if (wait && wait->kind == IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_FRONTIER) {
-    const iree_hal_pool_reservation_t reservation = wait->frontier.reservation;
     const iree_async_frontier_t* wait_frontier = wait->frontier.wait_frontier;
     wait->kind = IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_NONE;
-    return iree_hal_task_queue_drain_alloca_submit_reservation(
-        operation, IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT, &reservation,
+    return iree_hal_task_queue_drain_alloca_submit_reservations(
+        operation, IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT,
         /*reservation_failure_frontier=*/wait_frontier);
   }
 
-  iree_hal_pool_reservation_t reservation;
-  iree_hal_pool_acquire_info_t acquire_info;
   iree_hal_pool_acquire_result_t acquire_result =
       IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
-  IREE_RETURN_IF_ERROR(iree_hal_task_queue_drain_alloca_acquire(
-      operation, &reservation, &acquire_info, &acquire_result));
-  return iree_hal_task_queue_drain_alloca_on_acquire_result(
-      operation, &reservation, &acquire_info, acquire_result);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_task_queue_drain_alloca_acquire(operation, &acquire_result));
+  return iree_hal_task_queue_drain_alloca_on_acquire_result(operation,
+                                                            acquire_result);
 }
 
 // Handles a DEALLOCA operation after all wait semaphores are satisfied:
-// decommits target-visible backing, releases the reservation with a queue
-// frontier that gates future pool reuse, then publishes dealloca completion.
+// decommits target-visible backing, releases the reservation transaction with
+// a queue frontier that gates future pool reuse, then publishes dealloca
+// completion.
 static void iree_hal_task_queue_drain_dealloca(
     iree_hal_task_queue_op_t* operation) {
-  iree_hal_pool_t* pool = NULL;
-  iree_hal_pool_reservation_t reservation;
-  const bool has_reservation = iree_hal_task_transient_buffer_query_reservation(
-      operation->dealloca.transient_buffer, &pool, &reservation);
+  iree_hal_buffer_t* first_buffer = operation->dealloca.transient_buffers[0];
   const iree_hal_buffer_params_t params = {
-      .type = iree_hal_buffer_memory_type(operation->dealloca.transient_buffer),
-      .access =
-          iree_hal_buffer_allowed_access(operation->dealloca.transient_buffer),
-      .usage =
-          iree_hal_buffer_allowed_usage(operation->dealloca.transient_buffer),
+      .type = iree_hal_buffer_memory_type(first_buffer),
+      .access = iree_hal_buffer_allowed_access(first_buffer),
+      .usage = iree_hal_buffer_allowed_usage(first_buffer),
   };
 
-  iree_hal_task_transient_buffer_decommit(operation->dealloca.transient_buffer);
+  for (iree_host_size_t i = 0; i < operation->dealloca.buffer_count; ++i) {
+    iree_hal_task_transient_buffer_decommit(
+        operation->dealloca.transient_buffers[i]);
+  }
 
   const uint64_t epoch =
       iree_hal_task_queue_op_reserve_completion_epoch(operation);
   iree_async_single_frontier_t death_frontier;
   iree_async_single_frontier_initialize(&death_frontier, operation->axis,
                                         epoch);
-  iree_hal_task_transient_buffer_release_reservation(
-      operation->dealloca.transient_buffer,
+  for (iree_host_size_t i = 0; i < operation->dealloca.buffer_count; ++i) {
+    iree_hal_pool_t* source_pool = NULL;
+    iree_hal_task_transient_buffer_take_dealloca_reservation(
+        operation->dealloca.transient_buffers[i], &source_pool,
+        &operation->dealloca.reservations[i]);
+    IREE_ASSERT_TRUE(source_pool == operation->dealloca.pool);
+  }
+  operation->dealloca.marks_owned = false;
+  iree_hal_pool_release_reservations(
+      operation->dealloca.pool, operation->dealloca.buffer_count,
+      operation->dealloca.reservations,
       iree_async_single_frontier_as_const_frontier(&death_frontier));
   iree_hal_task_queue_profile_record_memory_event(
       operation, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_QUEUE_DEALLOCA,
-      IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION, UINT32_MAX, pool,
-      params, has_reservation ? &reservation : NULL,
+      IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION, UINT32_MAX,
+      operation->dealloca.pool, params, &operation->dealloca.reservations[0],
       death_frontier.entry_count);
-  if (has_reservation) {
-    iree_hal_task_queue_profile_record_memory_event(
-        operation, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_RELEASE,
-        IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION, UINT32_MAX, pool,
-        params, &reservation, death_frontier.entry_count);
-  }
+  iree_hal_task_queue_profile_record_memory_event(
+      operation, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_RELEASE,
+      IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION, UINT32_MAX,
+      operation->dealloca.pool, params, &operation->dealloca.reservations[0],
+      death_frontier.entry_count);
   iree_hal_task_queue_op_complete_with_epoch(operation, epoch);
 }
 
@@ -3878,9 +3954,9 @@ iree_status_t iree_hal_task_queue_submit_host_call(
 
 iree_status_t iree_hal_task_queue_submit_alloca(
     iree_hal_task_queue_t* queue, iree_hal_pool_t* pool,
-    iree_hal_buffer_params_t params, iree_device_size_t allocation_size,
-    iree_hal_alloca_flags_t flags, iree_hal_pool_reserve_flags_t reserve_flags,
-    iree_hal_buffer_t* transient_buffer,
+    iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t* const* transient_buffers,
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -3896,20 +3972,60 @@ iree_status_t iree_hal_task_queue_submit_alloca(
   iree_task_scope_begin(&queue->scope);
 
   operation->alloca.pool = pool;
-  operation->alloca.params = params;
-  operation->alloca.allocation_size = allocation_size;
-  operation->alloca.flags = flags;
-  operation->alloca.reserve_flags = reserve_flags;
-  operation->alloca.transient_buffer = transient_buffer;
+  operation->alloca.request_count = request_count;
+  operation->alloca.reserve_flags =
+      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER;
+  operation->alloca.reservations_held = false;
   operation->alloca.memory_wait = NULL;
-  iree_hal_task_queue_profile_set_transient_buffer(operation, transient_buffer);
 
-  // Retain the transient buffer until the operation completes. The selected
-  // pool is borrowed: pool lifetimes must outlive all allocations sourced from
-  // them, which avoids per-allocation pool refcount traffic in hot paths.
-  status = iree_hal_resource_set_insert(
-      operation->resource_set, 1,
-      (iree_hal_resource_t* const*)&transient_buffer);
+  status = iree_arena_allocate_array(&operation->arena, request_count,
+                                     sizeof(*operation->alloca.requests),
+                                     (void**)&operation->alloca.requests);
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_arena_allocate_array(&operation->arena, request_count,
+                                  sizeof(*operation->alloca.transient_buffers),
+                                  (void**)&operation->alloca.transient_buffers);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_arena_allocate_array(&operation->arena, request_count,
+                                       sizeof(*operation->alloca.reservations),
+                                       (void**)&operation->alloca.reservations);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_arena_allocate_array(&operation->arena, request_count,
+                                  sizeof(*operation->alloca.acquire_infos),
+                                  (void**)&operation->alloca.acquire_infos);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_arena_allocate_array(&operation->arena, request_count,
+                                  sizeof(*operation->alloca.backing_buffers),
+                                  (void**)&operation->alloca.backing_buffers);
+  }
+  if (iree_status_is_ok(status)) {
+    memcpy(operation->alloca.requests, requests,
+           request_count * sizeof(*requests));
+    memcpy(operation->alloca.transient_buffers, transient_buffers,
+           request_count * sizeof(*transient_buffers));
+    memset(operation->alloca.reservations, 0,
+           request_count * sizeof(*operation->alloca.reservations));
+    memset(operation->alloca.acquire_infos, 0,
+           request_count * sizeof(*operation->alloca.acquire_infos));
+    memset(operation->alloca.backing_buffers, 0,
+           request_count * sizeof(*operation->alloca.backing_buffers));
+    iree_hal_task_queue_profile_set_transient_buffers(operation, request_count,
+                                                      transient_buffers);
+  }
+
+  // Retain every transient buffer until the operation completes. The selected
+  // pool is borrowed and must outlive every allocation sourced from it.
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_resource_set_insert(
+        operation->resource_set, request_count,
+        (iree_hal_resource_t* const*)transient_buffers);
+  }
 
   const iree_host_size_t original_wait_count = wait_semaphores.count;
 
@@ -3933,7 +4049,7 @@ iree_status_t iree_hal_task_queue_submit_alloca(
 
   if (!iree_status_is_ok(status)) {
     iree_hal_task_queue_profile_record_failed_before_ready(operation);
-    iree_hal_task_queue_op_destroy(operation, iree_status_clone(status));
+    iree_hal_task_queue_op_discard(operation);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -3941,7 +4057,8 @@ iree_status_t iree_hal_task_queue_submit_alloca(
 }
 
 iree_status_t iree_hal_task_queue_submit_dealloca(
-    iree_hal_task_queue_t* queue, iree_hal_buffer_t* transient_buffer,
+    iree_hal_task_queue_t* queue, iree_host_size_t buffer_count,
+    iree_hal_buffer_t* const* transient_buffers,
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -3956,21 +4073,74 @@ iree_status_t iree_hal_task_queue_submit_dealloca(
 
   iree_task_scope_begin(&queue->scope);
 
-  // Store the transient buffer for decommit in the drain handler.
-  operation->dealloca.transient_buffer = transient_buffer;
-  iree_hal_task_queue_profile_set_transient_buffer(operation, transient_buffer);
-
-  // Retain the transient buffer so it survives until the operation completes.
-  status = iree_hal_resource_set_insert(
-      operation->resource_set, 1,
-      (iree_hal_resource_t* const*)&transient_buffer);
-
+  operation->dealloca.buffer_count = buffer_count;
+  operation->dealloca.marks_owned = false;
+  status =
+      iree_arena_allocate_array(&operation->arena, buffer_count,
+                                sizeof(*operation->dealloca.transient_buffers),
+                                (void**)&operation->dealloca.transient_buffers);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_task_queue_submit_op_finish(
-        operation, wait_semaphores, /*resource_count=*/0, /*resources=*/NULL);
+    status =
+        iree_arena_allocate_array(&operation->arena, buffer_count,
+                                  sizeof(*operation->dealloca.reservations),
+                                  (void**)&operation->dealloca.reservations);
+  }
+  if (iree_status_is_ok(status)) {
+    memcpy(operation->dealloca.transient_buffers, transient_buffers,
+           buffer_count * sizeof(*transient_buffers));
+    memset(operation->dealloca.reservations, 0,
+           buffer_count * sizeof(*operation->dealloca.reservations));
+  }
+
+  iree_host_size_t marked_count = 0;
+  while (marked_count < buffer_count && iree_status_is_ok(status)) {
+    iree_hal_pool_t* source_pool = NULL;
+    status = iree_hal_task_transient_buffer_begin_dealloca(
+        transient_buffers[marked_count], &source_pool);
+    if (iree_status_is_ok(status)) {
+      if (marked_count == 0) {
+        operation->dealloca.pool = source_pool;
+      } else if (source_pool != operation->dealloca.pool) {
+        iree_hal_task_transient_buffer_abort_dealloca(
+            transient_buffers[marked_count]);
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "deallocation transaction spans multiple source pools");
+        break;
+      }
+      ++marked_count;
+    }
+  }
+  if (!iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < marked_count; ++i) {
+      iree_hal_task_transient_buffer_abort_dealloca(transient_buffers[i]);
+    }
   } else {
+    operation->dealloca.marks_owned = true;
+    iree_hal_task_queue_profile_set_transient_buffers(operation, buffer_count,
+                                                      transient_buffers);
+  }
+
+  // Retain every transient buffer so it survives until the operation reaches
+  // a terminal state.
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_resource_set_insert(
+        operation->resource_set, buffer_count,
+        (iree_hal_resource_t* const*)transient_buffers);
+  }
+
+  const iree_host_size_t original_wait_count = wait_semaphores.count;
+  if (iree_status_is_ok(status) && wait_semaphores.count > 0) {
+    status = iree_hal_task_queue_try_satisfy_waits(&wait_semaphores);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_task_queue_profile_set_waits(operation, original_wait_count,
+                                          wait_semaphores.count);
+    status = iree_hal_task_queue_enqueue_waits(operation, wait_semaphores);
+  }
+  if (!iree_status_is_ok(status)) {
     iree_hal_task_queue_profile_record_failed_before_ready(operation);
-    iree_hal_task_queue_op_destroy(operation, iree_status_clone(status));
+    iree_hal_task_queue_op_discard(operation);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -4603,6 +4773,160 @@ static iree_status_t iree_hal_task_queue_transfer(
       signal_semaphore_list, operation_count, operations);
 }
 
+static bool iree_hal_task_pool_supports_queue_families(
+    iree_hal_queue_family_affinity_t supported_affinity,
+    iree_hal_queue_family_affinity_t requested_affinity) {
+  if (iree_hal_queue_family_affinity_is_any(supported_affinity)) return true;
+  return !iree_hal_queue_family_affinity_is_any(requested_affinity) &&
+         iree_all_bits_set(supported_affinity, requested_affinity);
+}
+
+static iree_status_t iree_hal_task_queue_validate_alloca_request(
+    iree_hal_task_queue_t* queue,
+    const iree_hal_pool_capabilities_t* capabilities, iree_host_size_t index,
+    iree_hal_pool_reservation_request_t* request) {
+  if (iree_any_bit_set(request->params.type, IREE_HAL_MEMORY_TYPE_OPTIMAL)) {
+    request->params.type &= ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
+    request->params.type |= capabilities->memory_type;
+  }
+  const iree_hal_buffer_compatibility_t compatibility =
+      iree_hal_allocator_query_buffer_compatibility(
+          queue->device_allocator, request->params, request->allocation_size,
+          &request->params, /*out_allocation_size=*/NULL);
+  if (IREE_UNLIKELY(!iree_all_bits_set(
+          compatibility, IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "allocation request %" PRIhsz
+                            " is not allocatable on this device",
+                            index);
+  }
+  if (IREE_UNLIKELY(!iree_all_bits_set(capabilities->memory_type,
+                                       request->params.type))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "allocation request %" PRIhsz
+                            " memory type is not supported by the source pool",
+                            index);
+  }
+  if (IREE_UNLIKELY(!iree_all_bits_set(capabilities->supported_usage,
+                                       request->params.usage))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "allocation request %" PRIhsz
+                            " usage is not supported by the source pool",
+                            index);
+  }
+  if (IREE_UNLIKELY(!iree_hal_task_pool_supports_queue_families(
+          capabilities->queue_family_affinity,
+          request->params.queue_family_affinity))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "allocation request %" PRIhsz
+        " queue family affinity is not supported by the source pool",
+        index);
+  }
+  if (IREE_UNLIKELY(capabilities->max_allocation_size != 0 &&
+                    request->allocation_size >
+                        capabilities->max_allocation_size)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "allocation request %" PRIhsz " size %" PRIdsz
+                            " exceeds source pool maximum %" PRIdsz,
+                            index, request->allocation_size,
+                            capabilities->max_allocation_size);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_task_queue_alloca(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t** IREE_RESTRICT out_buffers) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+  iree_hal_task_queue_t* queue = (iree_hal_task_queue_t*)base_queue;
+  iree_allocator_t host_allocator =
+      iree_hal_allocator_host_allocator(queue->device_allocator);
+  iree_hal_pool_capabilities_t pool_capabilities;
+  iree_hal_pool_query_capabilities(pool, &pool_capabilities);
+
+  iree_hal_pool_reservation_request_t* canonical_requests = NULL;
+  iree_hal_buffer_t** transient_buffers = NULL;
+  iree_status_t status = iree_allocator_malloc_array_uninitialized(
+      host_allocator, request_count, sizeof(*canonical_requests),
+      (void**)&canonical_requests);
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array_uninitialized(
+        host_allocator, request_count, sizeof(*transient_buffers),
+        (void**)&transient_buffers);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(transient_buffers, 0, request_count * sizeof(*transient_buffers));
+  }
+
+  for (iree_host_size_t i = 0; i < request_count && iree_status_is_ok(status);
+       ++i) {
+    canonical_requests[i] = requests[i];
+    status = iree_hal_task_queue_validate_alloca_request(
+        queue, &pool_capabilities, i, &canonical_requests[i]);
+    if (!iree_status_is_ok(status)) break;
+
+    const iree_hal_buffer_placement_t placement = {
+        .device = queue->device,
+        .queue_family_affinity =
+            canonical_requests[i].params.queue_family_affinity,
+        .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_ASYNCHRONOUS,
+    };
+    status = iree_hal_task_transient_buffer_create(
+        placement, canonical_requests[i].params, requests[i].allocation_size,
+        requests[i].allocation_size, pool, host_allocator,
+        &transient_buffers[i]);
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_task_queue_submit_alloca(
+        queue, pool, request_count, canonical_requests, transient_buffers,
+        wait_semaphore_list, signal_semaphore_list);
+  }
+  if (iree_status_is_ok(status)) {
+    memcpy(out_buffers, transient_buffers,
+           request_count * sizeof(*out_buffers));
+  } else if (transient_buffers) {
+    for (iree_host_size_t i = 0; i < request_count; ++i) {
+      iree_hal_buffer_release(transient_buffers[i]);
+    }
+  }
+
+  iree_allocator_free(host_allocator, transient_buffers);
+  iree_allocator_free(host_allocator, canonical_requests);
+  return status;
+}
+
+static iree_status_t iree_hal_task_queue_dealloca(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+  iree_hal_task_queue_t* queue = (iree_hal_task_queue_t*)base_queue;
+  for (iree_host_size_t i = 0; i < buffer_count; ++i) {
+    if (IREE_UNLIKELY(!iree_hal_task_transient_buffer_isa(buffers[i]))) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "deallocation buffer %" PRIhsz
+                              " is not a task queue allocation root",
+                              i);
+    }
+    const iree_hal_buffer_placement_t placement =
+        iree_hal_buffer_allocation_placement(buffers[i]);
+    if (IREE_UNLIKELY(placement.device != queue->device)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "deallocation buffer %" PRIhsz " belongs to another device", i);
+    }
+  }
+  return iree_hal_task_queue_submit_dealloca(
+      queue, buffer_count, buffers, wait_semaphore_list, signal_semaphore_list);
+}
+
 static iree_status_t iree_hal_task_queue_read(
     iree_hal_queue_t* base_queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -4649,6 +4973,8 @@ static iree_status_t iree_hal_task_queue_write(
 
 static const iree_hal_queue_vtable_t iree_hal_task_queue_vtable = {
     .destroy = iree_hal_task_queue_destroy,
+    .alloca = iree_hal_task_queue_alloca,
+    .dealloca = iree_hal_task_queue_dealloca,
     .transfer = iree_hal_task_queue_transfer,
     .read = iree_hal_task_queue_read,
     .write = iree_hal_task_queue_write,

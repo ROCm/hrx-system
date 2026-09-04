@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "iree/hal/cts/util/test_base.h"
+#include "iree/hal/memory/passthrough_pool.h"
 
 namespace iree::hal::cts {
 
@@ -56,6 +57,27 @@ class DeferredSemaphoreSignal {
 
 class TransientBufferTest : public CtsTestBase<> {
  protected:
+  void SetUp() override {
+    CtsTestBase<>::SetUp();
+    if (this->IsSkipped()) return;
+    if (!transfer_queue_) {
+      GTEST_SKIP() << "device has no provisioned transfer-capable queue";
+    }
+    iree_hal_queue_pool_backend_t backend = {};
+    IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
+        device_, IREE_HAL_QUEUE_AFFINITY_ANY, &backend));
+    iree_hal_passthrough_pool_options_t options = {};
+    options.asan = backend.asan;
+    IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
+        options, backend.slab_provider, backend.notification,
+        iree_allocator_system(), transient_pool_.out()));
+  }
+
+  void TearDown() override {
+    transient_pool_.reset();
+    CtsTestBase<>::TearDown();
+  }
+
   iree_hal_buffer_params_t MakeTransientBufferParams(
       iree_hal_memory_access_t access = IREE_HAL_MEMORY_ACCESS_ALL) {
     iree_hal_buffer_params_t params = {0};
@@ -63,6 +85,8 @@ class TransientBufferTest : public CtsTestBase<> {
     params.access = access;
     params.usage =
         IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+    params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+        iree_hal_queue_family_ordinal(iree_hal_queue_family(transfer_queue_)));
     return params;
   }
 
@@ -72,11 +96,14 @@ class TransientBufferTest : public CtsTestBase<> {
       iree_hal_buffer_t** out_buffer) {
     *out_buffer = nullptr;
     iree_hal_buffer_params_t params = MakeTransientBufferParams();
+    const iree_hal_pool_reservation_request_t request = {
+        .params = params,
+        .allocation_size = size,
+    };
     iree_hal_buffer_t* buffer = nullptr;
-    iree_status_t status = iree_hal_device_queue_alloca(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-        signal_semaphores,
-        /*pool=*/NULL, params, size, IREE_HAL_ALLOCA_FLAG_NONE, &buffer);
+    iree_status_t status = iree_hal_queue_alloca(
+        transfer_queue_, wait_semaphores, signal_semaphores, transient_pool_,
+        /*request_count=*/1, &request, &buffer);
     if (iree_status_is_ok(status)) {
       *out_buffer = buffer;
     } else {
@@ -111,9 +138,8 @@ class TransientBufferTest : public CtsTestBase<> {
   iree_status_t DeallocateTransient(iree_hal_buffer_t* buffer) {
     SemaphoreList signal(device_, {0}, {1});
     SemaphoreList empty_wait;
-    IREE_RETURN_IF_ERROR(iree_hal_device_queue_dealloca(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, signal, buffer,
-        IREE_HAL_DEALLOCA_FLAG_NONE));
+    IREE_RETURN_IF_ERROR(iree_hal_queue_dealloca(
+        transfer_queue_, empty_wait, signal, /*buffer_count=*/1, &buffer));
     return iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
                                         IREE_ASYNC_WAIT_FLAG_NONE);
   }
@@ -132,6 +158,8 @@ class TransientBufferTest : public CtsTestBase<> {
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_end(command_buffer));
     return SubmitCommandBufferAndWait(command_buffer);
   }
+
+  Ref<iree_hal_pool_t> transient_pool_;
 };
 
 class AsyncTransientBufferTest : public TransientBufferTest {};
@@ -381,9 +409,13 @@ TEST_P(TransientBufferTest, FillTransientWithZeroAccessFlags) {
   // Deliberately use access = 0 to match HAL module behavior.
 
   iree_hal_buffer_t* raw = nullptr;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, signal,
-      /*pool=*/NULL, params, buffer_size, IREE_HAL_ALLOCA_FLAG_NONE, &raw));
+  const iree_hal_pool_reservation_request_t request = {
+      .params = params,
+      .allocation_size = buffer_size,
+  };
+  IREE_ASSERT_OK(iree_hal_queue_alloca(transfer_queue_, empty_wait, signal,
+                                       transient_pool_,
+                                       /*request_count=*/1, &request, &raw));
   Ref<iree_hal_buffer_t> transient(raw);
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
                                               IREE_ASYNC_WAIT_FLAG_NONE));

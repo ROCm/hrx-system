@@ -157,6 +157,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/memory:passthrough_pool",
         "//runtime/src/iree/testing:gtest",
     ],
 )
@@ -191,6 +192,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/cts/util:profile_test_util",
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/memory:passthrough_pool",
         "//runtime/src/iree/testing:gtest",
     ],
 )

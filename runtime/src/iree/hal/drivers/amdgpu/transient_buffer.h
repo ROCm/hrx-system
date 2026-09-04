@@ -81,7 +81,8 @@ void iree_hal_amdgpu_transient_buffer_pool_deinitialize(
 iree_status_t iree_hal_amdgpu_transient_buffer_create(
     iree_hal_buffer_placement_t placement, iree_hal_buffer_params_t params,
     iree_device_size_t allocation_size, iree_device_size_t byte_length,
-    iree_hal_amdgpu_transient_buffer_pool_t* pool,
+    iree_hal_pool_t* source_pool,
+    iree_hal_amdgpu_transient_buffer_pool_t* wrapper_pool,
     iree_hal_buffer_t** out_buffer);
 
 // Returns true if |buffer| is an AMDGPU transient wrapper.
@@ -105,8 +106,9 @@ uint64_t iree_hal_amdgpu_transient_buffer_profile_session_id(
 
 // Attaches a queue-owned pool reservation to |buffer|.
 //
-// |pool| is borrowed and must outlive the transient buffer. |reservation|
-// ownership transfers to the wrapper until
+// |pool| must match the source pool captured at wrapper creation and is
+// borrowed for the logical allocation lifetime. |reservation| ownership
+// transfers to the wrapper until
 // iree_hal_amdgpu_transient_buffer_release_reservation() or destroy.
 void iree_hal_amdgpu_transient_buffer_attach_reservation(
     iree_hal_buffer_t* buffer, iree_hal_pool_t* pool,
@@ -129,9 +131,11 @@ void iree_hal_amdgpu_transient_buffer_decommit(iree_hal_buffer_t* buffer);
 // Returns true after queue_dealloca has decommitted |buffer|.
 bool iree_hal_amdgpu_transient_buffer_is_deallocated(iree_hal_buffer_t* buffer);
 
-// Marks the wrapper as queued for deallocation. Returns false if a dealloca has
-// already been queued for this wrapper.
-bool iree_hal_amdgpu_transient_buffer_begin_dealloca(iree_hal_buffer_t* buffer);
+// Marks the logical allocation as captured by a queue deallocation. This may
+// occur before queue ordering allows a physical reservation to be acquired.
+// Returns the borrowed source pool without transferring reservation ownership.
+iree_status_t iree_hal_amdgpu_transient_buffer_begin_dealloca(
+    iree_hal_buffer_t* buffer, iree_hal_pool_t** out_pool);
 
 // Clears a queued-dealloca marker after a submission/capture failure. Must only
 // be used when no dealloca completion action was published.
@@ -143,6 +147,13 @@ void iree_hal_amdgpu_transient_buffer_abort_dealloca(iree_hal_buffer_t* buffer);
 // before queue_dealloca releases its reuse metadata. Returns false if |buffer|
 // has no armed reservation.
 bool iree_hal_amdgpu_transient_buffer_query_reservation(
+    iree_hal_buffer_t* buffer, iree_hal_pool_t** out_pool,
+    iree_hal_pool_reservation_t* out_reservation);
+
+// Consumes a queued deallocation mark and transfers its reservation to the
+// caller. Queue ordering must have completed the matching allocation before
+// this is called. The returned source pool is borrowed.
+void iree_hal_amdgpu_transient_buffer_take_dealloca_reservation(
     iree_hal_buffer_t* buffer, iree_hal_pool_t** out_pool,
     iree_hal_pool_reservation_t* out_reservation);
 

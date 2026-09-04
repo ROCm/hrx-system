@@ -583,6 +583,87 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           (iree_host_size_t)payload.wait_semaphore_count,
           (iree_host_size_t)payload.signal_semaphore_count);
     }
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ALLOCA: {
+      if (record->payload.data_length <
+          sizeof(iree_hal_replay_queue_alloca_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay exact queue alloca payload is short");
+      }
+      iree_hal_replay_queue_alloca_payload_t payload;
+      memcpy(&payload, record->payload.data, sizeof(payload));
+      iree_host_size_t requests_size = 0;
+      if (payload.reserved0 != 0 ||
+          payload.request_count > IREE_HOST_SIZE_MAX ||
+          !iree_host_size_checked_mul(
+              (iree_host_size_t)payload.request_count,
+              sizeof(iree_hal_replay_queue_alloca_request_payload_t),
+              &requests_size)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay exact queue alloca payload is invalid");
+      }
+      iree_hal_replay_dump_queue_payload_layout_t layout;
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
+          record, sizeof(payload), payload.wait_semaphore_count,
+          payload.signal_semaphore_count, requests_size, &layout));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          " request_count=%" PRIu64 " wait_count=%" PRIu64
+          " signal_count=%" PRIu64 " wait_range=[%" PRIu64 ", +%" PRIhsz
+          "] signal_range=[%" PRIu64 ", +%" PRIhsz "] request_range=[%" PRIu64
+          ", +%" PRIhsz "]",
+          payload.request_count, payload.wait_semaphore_count,
+          payload.signal_semaphore_count,
+          payload_range->offset + layout.wait_payloads_offset,
+          layout.wait_payloads_size,
+          payload_range->offset + layout.signal_payloads_offset,
+          layout.signal_payloads_size,
+          payload_range->offset + layout.trailing_payload_offset,
+          layout.trailing_payload_size));
+      return iree_hal_replay_dump_append_text_queue_semaphores(
+          builder, record, &layout,
+          (iree_host_size_t)payload.wait_semaphore_count,
+          (iree_host_size_t)payload.signal_semaphore_count);
+    }
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_DEALLOCA: {
+      if (record->payload.data_length <
+          sizeof(iree_hal_replay_queue_dealloca_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay exact queue dealloca payload is short");
+      }
+      iree_hal_replay_queue_dealloca_payload_t payload;
+      memcpy(&payload, record->payload.data, sizeof(payload));
+      iree_host_size_t buffer_ids_size = 0;
+      if (payload.reserved0 != 0 || payload.buffer_count > IREE_HOST_SIZE_MAX ||
+          !iree_host_size_checked_mul((iree_host_size_t)payload.buffer_count,
+                                      sizeof(iree_hal_replay_object_id_t),
+                                      &buffer_ids_size)) {
+        return iree_make_status(
+            IREE_STATUS_DATA_LOSS,
+            "replay exact queue dealloca payload is invalid");
+      }
+      iree_hal_replay_dump_queue_payload_layout_t layout;
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
+          record, sizeof(payload), payload.wait_semaphore_count,
+          payload.signal_semaphore_count, buffer_ids_size, &layout));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          " buffer_count=%" PRIu64 " wait_count=%" PRIu64
+          " signal_count=%" PRIu64 " wait_range=[%" PRIu64 ", +%" PRIhsz
+          "] signal_range=[%" PRIu64 ", +%" PRIhsz "] buffer_id_range=[%" PRIu64
+          ", +%" PRIhsz "]",
+          payload.buffer_count, payload.wait_semaphore_count,
+          payload.signal_semaphore_count,
+          payload_range->offset + layout.wait_payloads_offset,
+          layout.wait_payloads_size,
+          payload_range->offset + layout.signal_payloads_offset,
+          layout.signal_payloads_size,
+          payload_range->offset + layout.trailing_payload_offset,
+          layout.trailing_payload_size));
+      return iree_hal_replay_dump_append_text_queue_semaphores(
+          builder, record, &layout,
+          (iree_host_size_t)payload.wait_semaphore_count,
+          (iree_host_size_t)payload.signal_semaphore_count);
+    }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ALLOCA: {
       if (record->payload.data_length <
           sizeof(iree_hal_replay_device_queue_alloca_payload_t)) {

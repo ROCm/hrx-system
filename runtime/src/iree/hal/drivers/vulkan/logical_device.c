@@ -1285,57 +1285,6 @@ static iree_status_t iree_hal_vulkan_logical_device_query_queue_pool_backend(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_vulkan_logical_device_queue_alloca(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
-    iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
-    iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
-  iree_hal_vulkan_logical_device_t* device =
-      iree_hal_vulkan_logical_device_cast(base_device);
-  *out_buffer = NULL;
-  const iree_device_size_t byte_length = allocation_size;
-
-  iree_hal_vulkan_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue(
-      device, IREE_HAL_VULKAN_QUEUE_ROLE_COMPUTE, /*required_flags=*/0,
-      queue_affinity, &queue));
-
-  iree_hal_vulkan_queue_alloca_plan_t allocation_plan;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_allocator_select_queue_alloca_plan(
-      device->device_allocator, pool, &params, &allocation_size,
-      &allocation_plan));
-  if (allocation_plan.strategy ==
-          IREE_HAL_VULKAN_QUEUE_ALLOCA_STRATEGY_SPARSE &&
-      !iree_all_bits_set(queue->queue_flags, VK_QUEUE_SPARSE_BINDING_BIT)) {
-    if (!device->queues.sparse_binding.queue) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "Vulkan sparse queue_alloca requires a sparse-binding queue");
-    }
-    queue = device->queues.sparse_binding.queue;
-  }
-  return iree_hal_vulkan_queue_submit_alloca(
-      queue, wait_semaphore_list, signal_semaphore_list, allocation_plan,
-      params, allocation_size, byte_length, flags, out_buffer);
-}
-
-static iree_status_t iree_hal_vulkan_logical_device_queue_dealloca(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags) {
-  iree_hal_vulkan_logical_device_t* device =
-      iree_hal_vulkan_logical_device_cast(base_device);
-  iree_hal_vulkan_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue(
-      device, IREE_HAL_VULKAN_QUEUE_ROLE_COMPUTE, /*required_flags=*/0,
-      queue_affinity, &queue));
-  return iree_hal_vulkan_queue_submit_dealloca(
-      queue, wait_semaphore_list, signal_semaphore_list, buffer, flags);
-}
-
 static iree_status_t iree_hal_vulkan_logical_device_queue_fill(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -2446,8 +2395,6 @@ static const iree_hal_device_vtable_t iree_hal_vulkan_logical_device_vtable = {
         iree_hal_vulkan_logical_device_query_semaphore_compatibility,
     .query_queue_pool_backend =
         iree_hal_vulkan_logical_device_query_queue_pool_backend,
-    .queue_alloca = iree_hal_vulkan_logical_device_queue_alloca,
-    .queue_dealloca = iree_hal_vulkan_logical_device_queue_dealloca,
     .queue_fill = iree_hal_vulkan_logical_device_queue_fill,
     .queue_update = iree_hal_vulkan_logical_device_queue_update,
     .queue_copy = iree_hal_vulkan_logical_device_queue_copy,

@@ -19,6 +19,9 @@ extern "C" {
 
 typedef struct iree_hal_buffer_t iree_hal_buffer_t;
 typedef struct iree_hal_file_t iree_hal_file_t;
+typedef struct iree_hal_pool_t iree_hal_pool_t;
+typedef struct iree_hal_pool_reservation_request_t
+    iree_hal_pool_reservation_request_t;
 typedef struct iree_hal_semaphore_t iree_hal_semaphore_t;
 
 //===----------------------------------------------------------------------===//
@@ -356,6 +359,56 @@ IREE_API_EXPORT void iree_hal_queue_release(iree_hal_queue_t* queue);
 IREE_API_EXPORT const iree_hal_queue_family_t* iree_hal_queue_family(
     const iree_hal_queue_t* queue);
 
+// Enqueues one all-or-nothing allocation transaction on the exact hardware
+// |queue|.
+//
+// |pool| is the exact caller-selected allocation pool and is borrowed. The
+// caller must keep it live until every returned buffer is destroyed and every
+// queue operation using those buffers is terminal. Pool selection and fallback
+// are performed before this call; the queue never substitutes another pool.
+//
+// Every request must have a non-zero allocation size, its queue family affinity
+// must include the family containing |queue|, and the transaction must contain
+// at least one request. The source pool must support the complete requested
+// queue family accessibility domain. The returned buffers are ordinary HAL
+// buffers whose contents and target-visible projections remain unavailable
+// until every |signal_semaphore_list| timepoint is reached. A non-empty signal
+// list is therefore required.
+//
+// Implementations validate and capture the complete transaction before
+// returning. On synchronous failure no operation is scheduled, signal
+// semaphores are not modified, and all |out_buffers| entries remain untouched.
+// Asynchronous failures after successful capture are reported through the
+// signal semaphores.
+IREE_API_EXPORT iree_status_t
+iree_hal_queue_alloca(iree_hal_queue_t* queue,
+                      const iree_hal_semaphore_list_t wait_semaphore_list,
+                      const iree_hal_semaphore_list_t signal_semaphore_list,
+                      iree_hal_pool_t* pool, iree_host_size_t request_count,
+                      const iree_hal_pool_reservation_request_t* requests,
+                      iree_hal_buffer_t** IREE_RESTRICT out_buffers);
+
+// Enqueues one all-or-nothing deallocation transaction on the exact hardware
+// |queue|.
+//
+// Every buffer must be an allocation root returned by iree_hal_queue_alloca,
+// must still own its queue allocation epoch, and must originate from the same
+// source pool. Each buffer's queue family affinity must include the family
+// containing |queue|. The buffers are borrowed for the call and retained by the
+// queue until the operation reaches a terminal state. Caller references are
+// not consumed.
+//
+// Buffer contents become undefined after every |wait_semaphore_list| timepoint
+// is reached. Target-visible release effects and return of reservations to the
+// source pool occur before the |signal_semaphore_list| timepoints are
+// published. A synchronous failure schedules no work and leaves every
+// allocation epoch live.
+IREE_API_EXPORT iree_status_t iree_hal_queue_dealloca(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers);
+
 // Enqueues one transfer transaction on the exact hardware |queue|.
 //
 // All operations become eligible after every |wait_semaphore_list| timepoint is
@@ -504,6 +557,22 @@ typedef struct iree_hal_queue_vtable_t {
   // Implementations embedding queues in a device allocation deinitialize the
   // queue but leave storage reclamation to the device.
   void(IREE_API_PTR* destroy)(iree_hal_queue_t* queue);
+
+  // Enqueues an all-or-nothing allocation transaction.
+  iree_status_t(IREE_API_PTR* alloca)(
+      iree_hal_queue_t* queue,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_pool_t* pool, iree_host_size_t request_count,
+      const iree_hal_pool_reservation_request_t* requests,
+      iree_hal_buffer_t** IREE_RESTRICT out_buffers);
+
+  // Enqueues an all-or-nothing deallocation transaction.
+  iree_status_t(IREE_API_PTR* dealloca)(
+      iree_hal_queue_t* queue,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers);
 
   // Enqueues an all-or-nothing transfer transaction.
   iree_status_t(IREE_API_PTR* transfer)(

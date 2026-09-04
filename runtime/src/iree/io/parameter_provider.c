@@ -55,18 +55,20 @@ IREE_API_EXPORT bool iree_io_parameter_provider_query_support(
 
 IREE_API_EXPORT iree_status_t iree_io_parameter_provider_load(
     iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_t* queue, iree_hal_pool_t* pool,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_string_view_t source_scope, iree_hal_buffer_params_t target_params,
     iree_host_size_t count, iree_io_parameter_enumerator_t enumerator,
     iree_io_parameter_emitter_t emitter) {
   IREE_ASSERT_ARGUMENT(provider);
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(queue);
+  IREE_ASSERT_ARGUMENT(pool);
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status = provider->vtable->load(
-      provider, device, queue_affinity, wait_semaphore_list,
-      signal_semaphore_list, source_scope, target_params, count, enumerator,
-      emitter);
+      provider, device, queue, pool, wait_semaphore_list, signal_semaphore_list,
+      source_scope, target_params, count, enumerator, emitter);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -88,13 +90,15 @@ static iree_status_t iree_io_parameter_provider_single_enumerator(
 
 IREE_API_EXPORT iree_status_t iree_io_parameter_provider_read(
     iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_string_view_t source_scope, iree_string_view_t source_key,
     uint64_t source_offset, iree_hal_buffer_t* target_buffer,
     iree_device_size_t target_offset, iree_device_size_t length) {
   IREE_ASSERT_ARGUMENT(provider);
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(queue);
   IREE_ASSERT_ARGUMENT(target_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_io_parameter_provider_single_enumerator_state_t enumerator_state = {
@@ -111,21 +115,23 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_provider_read(
       .user_data = &enumerator_state,
   };
   iree_status_t status = provider->vtable->gather(
-      provider, device, queue_affinity, wait_semaphore_list,
-      signal_semaphore_list, source_scope, target_buffer, 1, enumerator);
+      provider, device, queue, wait_semaphore_list, signal_semaphore_list,
+      source_scope, target_buffer, 1, enumerator);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
 IREE_API_EXPORT iree_status_t iree_io_parameter_provider_write(
     iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_string_view_t target_scope, iree_string_view_t target_key,
     uint64_t target_offset, iree_device_size_t length) {
   IREE_ASSERT_ARGUMENT(provider);
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(queue);
   IREE_ASSERT_ARGUMENT(source_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_io_parameter_provider_single_enumerator_state_t enumerator_state = {
@@ -142,35 +148,37 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_provider_write(
       .user_data = &enumerator_state,
   };
   iree_status_t status = provider->vtable->scatter(
-      provider, device, queue_affinity, wait_semaphore_list,
-      signal_semaphore_list, source_buffer, target_scope, 1, enumerator);
+      provider, device, queue, wait_semaphore_list, signal_semaphore_list,
+      source_buffer, target_scope, 1, enumerator);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
 IREE_API_EXPORT iree_status_t iree_io_parameter_provider_gather(
     iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_string_view_t source_scope, iree_hal_buffer_t* target_buffer,
     iree_host_size_t count, iree_io_parameter_enumerator_t enumerator) {
   IREE_ASSERT_ARGUMENT(provider);
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(queue);
   IREE_ASSERT_ARGUMENT(target_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, count);
   if (count == 0) {
     // Preserve the timeline when there's no work to do.
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_device_queue_barrier(
-                device, queue_affinity, wait_semaphore_list,
-                signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE));
+        z0, iree_hal_queue_transfer(queue, wait_semaphore_list,
+                                    signal_semaphore_list,
+                                    /*operation_count=*/0, NULL));
   } else {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, provider->vtable->gather(provider, device, queue_affinity,
-                                     wait_semaphore_list, signal_semaphore_list,
-                                     source_scope, target_buffer, count,
-                                     enumerator));
+        z0,
+        provider->vtable->gather(provider, device, queue, wait_semaphore_list,
+                                 signal_semaphore_list, source_scope,
+                                 target_buffer, count, enumerator));
   }
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -178,15 +186,17 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_provider_gather(
 
 IREE_API_EXPORT iree_status_t iree_io_parameter_provider_gather_batch(
     iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t gather_count,
+    iree_hal_queue_t* queue, iree_host_size_t gather_count,
     const iree_io_parameter_gather_t* gathers) {
   IREE_ASSERT_ARGUMENT(provider);
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(queue);
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, gather_count);
   if (gather_count != 0) {
     IREE_ASSERT_ARGUMENT(gathers);
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, provider->vtable->gather_batch(provider, device, queue_affinity,
+        z0, provider->vtable->gather_batch(provider, device, queue,
                                            gather_count, gathers));
   }
   IREE_TRACE_ZONE_END(z0);
@@ -195,27 +205,29 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_provider_gather_batch(
 
 IREE_API_EXPORT iree_status_t iree_io_parameter_provider_scatter(
     iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* source_buffer, iree_string_view_t target_scope,
     iree_host_size_t count, iree_io_parameter_enumerator_t enumerator) {
   IREE_ASSERT_ARGUMENT(provider);
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(queue);
   IREE_ASSERT_ARGUMENT(source_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, count);
   if (count == 0) {
     // Preserve the timeline when there's no work to do.
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_device_queue_barrier(
-                device, queue_affinity, wait_semaphore_list,
-                signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE));
+        z0, iree_hal_queue_transfer(queue, wait_semaphore_list,
+                                    signal_semaphore_list,
+                                    /*operation_count=*/0, NULL));
   } else {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, provider->vtable->scatter(provider, device, queue_affinity,
-                                      wait_semaphore_list,
-                                      signal_semaphore_list, source_buffer,
-                                      target_scope, count, enumerator));
+        z0,
+        provider->vtable->scatter(provider, device, queue, wait_semaphore_list,
+                                  signal_semaphore_list, source_buffer,
+                                  target_scope, count, enumerator));
   }
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -223,15 +235,17 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_provider_scatter(
 
 IREE_API_EXPORT iree_status_t iree_io_parameter_provider_scatter_batch(
     iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t scatter_count,
+    iree_hal_queue_t* queue, iree_host_size_t scatter_count,
     const iree_io_parameter_scatter_t* scatters) {
   IREE_ASSERT_ARGUMENT(provider);
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(queue);
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, scatter_count);
   if (scatter_count != 0) {
     IREE_ASSERT_ARGUMENT(scatters);
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, provider->vtable->scatter_batch(provider, device, queue_affinity,
+        z0, provider->vtable->scatter_batch(provider, device, queue,
                                             scatter_count, scatters));
   }
   IREE_TRACE_ZONE_END(z0);

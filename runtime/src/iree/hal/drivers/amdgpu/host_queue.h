@@ -737,21 +737,21 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
 // Trims transient resources retained by |queue|.
 void iree_hal_amdgpu_host_queue_trim(iree_hal_amdgpu_host_queue_t* queue);
 
-// Enqueues an asynchronous pool allocation on |queue|.
+// Enqueues an asynchronous pool allocation transaction on |queue|.
 iree_status_t iree_hal_amdgpu_host_queue_alloca(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
-    iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
-    iree_hal_buffer_t** IREE_RESTRICT out_buffer);
+    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t** IREE_RESTRICT out_buffers);
 
-// Enqueues an asynchronous pool deallocation on |queue|.
+// Enqueues an asynchronous pool deallocation transaction on |queue|.
 iree_status_t iree_hal_amdgpu_host_queue_dealloca(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags);
+    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers);
 
 // Enqueues a buffer fill on |queue|.
 iree_status_t iree_hal_amdgpu_host_queue_fill(

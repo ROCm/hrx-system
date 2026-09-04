@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "iree/hal/cts/util/test_base.h"
+#include "iree/hal/memory/passthrough_pool.h"
 
 namespace iree::hal::cts {
 
@@ -36,6 +37,15 @@ class DispatchPipelineTest : public CtsTestBase<> {
     CtsTestBase::SetUp();
     if (HasFatalFailure() || IsSkipped()) return;
 
+    iree_hal_queue_pool_backend_t backend = {};
+    IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
+        device_, IREE_HAL_QUEUE_AFFINITY_ANY, &backend));
+    iree_hal_passthrough_pool_options_t options = {};
+    options.asan = backend.asan;
+    IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
+        options, backend.slab_provider, backend.notification,
+        iree_allocator_system(), &transient_pool_));
+
     // Load the scale_and_offset kernel:
     //   output[i] = input[i] * scale + offset
     //   2 push constants (scale, offset), 2 bindings (input, output)
@@ -44,6 +54,8 @@ class DispatchPipelineTest : public CtsTestBase<> {
   }
 
   void TearDown() override {
+    iree_hal_pool_release(transient_pool_);
+    transient_pool_ = nullptr;
     iree_hal_executable_release(executable_);
     executable_ = nullptr;
     CtsTestBase::TearDown();
@@ -91,6 +103,7 @@ class DispatchPipelineTest : public CtsTestBase<> {
   }
 
   iree_hal_executable_t* executable_ = nullptr;
+  iree_hal_pool_t* transient_pool_ = nullptr;
 };
 
 // Fills an input buffer via queue_update, dispatches scale_and_offset,
@@ -244,11 +257,16 @@ TEST_P(DispatchPipelineTest, TransientInputPipeline) {
   alloca_params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
   alloca_params.usage =
       IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+  alloca_params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(transfer_queue_)));
+  const iree_hal_pool_reservation_request_t request = {
+      .params = alloca_params,
+      .allocation_size = kBufferSize,
+  };
   iree_hal_buffer_t* raw = nullptr;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, alloca_signal,
-      /*pool=*/NULL, alloca_params, kBufferSize, IREE_HAL_ALLOCA_FLAG_NONE,
-      &raw));
+  IREE_ASSERT_OK(iree_hal_queue_alloca(transfer_queue_, empty_wait,
+                                       alloca_signal, transient_pool_,
+                                       /*request_count=*/1, &request, &raw));
   Ref<iree_hal_buffer_t> transient_input(raw);
 
   // Wait for alloca, then fill the transient input.
@@ -288,9 +306,10 @@ TEST_P(DispatchPipelineTest, TransientInputPipeline) {
 
   // Dealloca after readback.
   SemaphoreList dealloca_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dealloca_signal,
-      transient_input, IREE_HAL_DEALLOCA_FLAG_NONE));
+  iree_hal_buffer_t* transient_input_buffer = transient_input;
+  IREE_ASSERT_OK(
+      iree_hal_queue_dealloca(transfer_queue_, empty_wait, dealloca_signal,
+                              /*buffer_count=*/1, &transient_input_buffer));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       dealloca_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 }

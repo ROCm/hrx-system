@@ -372,17 +372,40 @@ iree_status_t iree_hal_replay_recorder_end_creation_operation(
     iree_hal_replay_payload_type_t object_payload_type,
     iree_host_size_t object_iovec_count,
     const iree_const_byte_span_t* object_iovecs) {
+  const iree_hal_replay_created_object_record_t created_object = {
+      .object_id = created_object_id,
+      .object_type = created_object_type,
+      .payload_type = object_payload_type,
+      .iovec_count = object_iovec_count,
+      .iovecs = object_iovecs,
+  };
+  return iree_hal_replay_recorder_end_creation_operation_list(
+      pending_record, operation_status, operation_iovec_count, operation_iovecs,
+      1, &created_object);
+}
+
+iree_status_t iree_hal_replay_recorder_end_creation_operation_list(
+    iree_hal_replay_pending_record_t* pending_record,
+    iree_status_t operation_status, iree_host_size_t operation_iovec_count,
+    const iree_const_byte_span_t* operation_iovecs,
+    iree_host_size_t created_object_count,
+    const iree_hal_replay_created_object_record_t* created_objects) {
   iree_hal_replay_recorder_t* recorder = pending_record->recorder;
   pending_record->metadata.status_code =
       (uint32_t)iree_status_code(operation_status);
   iree_status_t record_status = iree_hal_replay_file_writer_append_record(
       recorder->writer, &pending_record->metadata, operation_iovec_count,
       operation_iovecs, NULL);
-  if (iree_status_is_ok(record_status) && iree_status_is_ok(operation_status)) {
+  for (iree_host_size_t i = 0;
+       i < created_object_count && iree_status_is_ok(record_status) &&
+       iree_status_is_ok(operation_status);
+       ++i) {
+    const iree_hal_replay_created_object_record_t* created_object =
+        &created_objects[i];
     record_status = iree_hal_replay_recorder_append_object_locked(
-        recorder, pending_record->metadata.device_id, created_object_id,
-        created_object_type, object_payload_type, object_iovec_count,
-        object_iovecs);
+        recorder, pending_record->metadata.device_id, created_object->object_id,
+        created_object->object_type, created_object->payload_type,
+        created_object->iovec_count, created_object->iovecs);
   }
   iree_hal_replay_recorder_fail_locked(recorder,
                                        iree_status_code(record_status));

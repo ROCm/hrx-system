@@ -27,6 +27,40 @@ static void iree_hal_webgpu_queue_destroy(iree_hal_queue_t* base_queue) {
   iree_hal_webgpu_queue_deinitialize((iree_hal_webgpu_queue_t*)base_queue);
 }
 
+static iree_status_t iree_hal_webgpu_queue_alloca(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t** IREE_RESTRICT out_buffers) {
+  (void)base_queue;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)pool;
+  (void)request_count;
+  (void)requests;
+  (void)out_buffers;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "WebGPU exact-queue allocation transactions are not implemented");
+}
+
+static iree_status_t iree_hal_webgpu_queue_dealloca(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers) {
+  (void)base_queue;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)buffer_count;
+  (void)buffers;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "WebGPU exact-queue deallocation transactions are not implemented");
+}
+
 static iree_status_t iree_hal_webgpu_queue_transfer(
     iree_hal_queue_t* base_queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -70,6 +104,8 @@ static iree_status_t iree_hal_webgpu_queue_write(
 
 static const iree_hal_queue_vtable_t iree_hal_webgpu_queue_vtable = {
     .destroy = iree_hal_webgpu_queue_destroy,
+    .alloca = iree_hal_webgpu_queue_alloca,
+    .dealloca = iree_hal_webgpu_queue_dealloca,
     .transfer = iree_hal_webgpu_queue_transfer,
     .read = iree_hal_webgpu_queue_read,
     .write = iree_hal_webgpu_queue_write,
@@ -394,7 +430,7 @@ static iree_status_t iree_hal_webgpu_queue_execute_one_shot(
 // inline (CPU-only ops) or transfers slab ownership to an embedded signal
 // completion (GPU-submit ops) for GPU completion tracking.
 //
-// CPU-only (barrier, alloca, dealloca):
+// CPU-only (barrier):
 //   wait → CPU work → signal inline → advance epoch → free slab.
 //
 // GPU-submit (fill, update, copy, dispatch, execute):
@@ -405,8 +441,6 @@ static iree_status_t iree_hal_webgpu_queue_execute_one_shot(
 typedef enum iree_hal_webgpu_queue_op_type_e {
   // CPU-only: wait → CPU work → signal inline.
   IREE_HAL_WEBGPU_QUEUE_OP_BARRIER,
-  IREE_HAL_WEBGPU_QUEUE_OP_ALLOCA,
-  IREE_HAL_WEBGPU_QUEUE_OP_DEALLOCA,
   // GPU-submit: wait → GPU work → signal on GPU completion.
   IREE_HAL_WEBGPU_QUEUE_OP_FILL,
   IREE_HAL_WEBGPU_QUEUE_OP_UPDATE,
@@ -438,14 +472,6 @@ typedef struct iree_hal_webgpu_queue_state_t {
   iree_hal_webgpu_queue_op_type_t op_type;
 
   union {
-    struct {
-      iree_hal_buffer_t* buffer;  // Retained stub.
-    } alloca_op;
-
-    struct {
-      iree_hal_buffer_t* buffer;  // Retained.
-    } dealloca;
-
     struct {
       iree_hal_buffer_t* target_buffer;  // Retained.
       iree_device_size_t target_offset;
@@ -514,12 +540,6 @@ static void iree_hal_webgpu_queue_op_release_resources(
     iree_hal_webgpu_queue_state_t* state) {
   switch (state->op_type) {
     case IREE_HAL_WEBGPU_QUEUE_OP_BARRIER:
-      break;
-    case IREE_HAL_WEBGPU_QUEUE_OP_ALLOCA:
-      iree_hal_buffer_release(state->alloca_op.buffer);
-      break;
-    case IREE_HAL_WEBGPU_QUEUE_OP_DEALLOCA:
-      iree_hal_buffer_release(state->dealloca.buffer);
       break;
     case IREE_HAL_WEBGPU_QUEUE_OP_FILL:
       iree_hal_buffer_release(state->fill.target_buffer);
@@ -682,26 +702,6 @@ static void iree_hal_webgpu_queue_op_wait_completion(
   switch (state->op_type) {
     case IREE_HAL_WEBGPU_QUEUE_OP_BARRIER:
       // CPU-only: no work — signal passes straight through.
-      iree_status_ignore(iree_hal_semaphore_list_signal(
-          state->signal_semaphore_list, frontier));
-      break;
-
-    case IREE_HAL_WEBGPU_QUEUE_OP_ALLOCA: {
-      // CPU-only: create the GPU buffer on the stub, then signal.
-      iree_status_t bind_status = iree_hal_webgpu_buffer_bind(
-          state->alloca_op.buffer, state->queue->device_handle);
-      if (iree_status_is_ok(bind_status)) {
-        iree_status_ignore(iree_hal_semaphore_list_signal(
-            state->signal_semaphore_list, frontier));
-      } else {
-        iree_hal_semaphore_list_fail(state->signal_semaphore_list, bind_status);
-      }
-      break;
-    }
-
-    case IREE_HAL_WEBGPU_QUEUE_OP_DEALLOCA:
-      // CPU-only: detach GPU buffer from the wrapper, then signal.
-      iree_hal_webgpu_buffer_unbind(state->dealloca.buffer);
       iree_status_ignore(iree_hal_semaphore_list_signal(
           state->signal_semaphore_list, frontier));
       break;
@@ -1041,144 +1041,6 @@ static void iree_hal_webgpu_queue_mark_signals_submitted(
         signal_semaphore_list.semaphores[i], queue->axis,
         signal_semaphore_list.payload_values[i]);
   }
-}
-
-//===----------------------------------------------------------------------===//
-// queue_alloca / queue_dealloca
-//===----------------------------------------------------------------------===//
-
-iree_status_t iree_hal_webgpu_queue_alloca(
-    iree_hal_webgpu_queue_t* queue, iree_hal_allocator_t* device_allocator,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
-    iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
-    iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
-  *out_buffer = NULL;
-
-  // Validate and coerce parameters through the allocator. This ensures the
-  // stub buffer stores the correct memory type and usage flags for when
-  // buffer_bind creates the actual GPU buffer.
-  iree_hal_buffer_params_t compat_params;
-  iree_device_size_t compat_allocation_size = allocation_size;
-  iree_hal_buffer_compatibility_t compatibility =
-      iree_hal_allocator_query_buffer_compatibility(
-          device_allocator, params, allocation_size, &compat_params,
-          &compat_allocation_size);
-  if (!iree_all_bits_set(compatibility,
-                         IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE)) {
-    iree_status_t status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "allocator cannot serve the requested buffer parameters");
-    iree_hal_semaphore_list_fail(signal_semaphore_list,
-                                 iree_status_clone(status));
-    return status;
-  }
-
-  // Create a stub buffer (handle = 0) with the coerced parameters. The GPU
-  // buffer is created later by buffer_bind, either inline (fast path) or in
-  // the async wait callback.
-  iree_hal_buffer_placement_t placement = {
-      .device = NULL,
-      .queue_family_affinity = compat_params.queue_family_affinity,
-      .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
-  };
-  iree_hal_buffer_t* buffer = NULL;
-  {
-    iree_status_t status = iree_hal_webgpu_buffer_create_stub(
-        placement, compat_params.type, compat_params.access,
-        compat_params.usage, compat_allocation_size, queue->host_allocator,
-        &buffer);
-    if (!iree_status_is_ok(status)) {
-      iree_hal_semaphore_list_fail(signal_semaphore_list,
-                                   iree_status_clone(status));
-      return status;
-    }
-  }
-
-  // Fast path: waits already satisfied (or FIFO-elided) — bind, signal, return.
-  if (wait_semaphore_list.count == 0 ||
-      iree_hal_semaphore_list_poll(wait_semaphore_list) ||
-      iree_hal_webgpu_queue_can_elide_waits(queue, wait_semaphore_list)) {
-    uint64_t epoch = iree_hal_webgpu_queue_reserve_epoch(queue);
-    iree_status_t status =
-        iree_hal_webgpu_buffer_bind(buffer, queue->device_handle);
-    if (iree_status_is_ok(status)) {
-      iree_async_single_frontier_t frontier_storage;
-      const iree_async_frontier_t* frontier =
-          iree_hal_webgpu_queue_build_frontier(queue, epoch, &frontier_storage);
-      status = iree_hal_semaphore_list_signal(signal_semaphore_list, frontier);
-    }
-    if (iree_status_is_ok(status)) {
-      iree_hal_webgpu_queue_advance_tracker(queue, epoch);
-      *out_buffer = buffer;
-    } else {
-      iree_hal_semaphore_list_fail(signal_semaphore_list,
-                                   iree_status_clone(status));
-      iree_hal_webgpu_queue_advance_tracker(queue, epoch);
-      iree_hal_buffer_release(buffer);
-    }
-    return status;
-  }
-
-  // Async path: give the stub to the caller immediately, then submit a wait
-  // that binds the GPU buffer in its completion callback.
-  iree_hal_webgpu_queue_state_t* state = NULL;
-  iree_status_t status = iree_hal_webgpu_queue_state_allocate(
-      queue, IREE_HAL_WEBGPU_QUEUE_OP_ALLOCA, wait_semaphore_list,
-      signal_semaphore_list, /*trailing_count=*/0,
-      /*trailing_element_size=*/0, /*out_trailing_offset=*/NULL, &state);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_buffer_release(buffer);
-    return status;
-  }
-
-  // Retain the buffer for the slab — the caller also holds a reference via
-  // *out_buffer. The slab's retain is released in release_resources (callback
-  // success) or in the submit failure cleanup below.
-  iree_hal_buffer_retain(buffer);
-  state->alloca_op.buffer = buffer;
-  *out_buffer = buffer;
-
-  status = iree_hal_webgpu_queue_state_submit(state);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_buffer_release(buffer);  // Caller's ref — buffer unusable.
-    *out_buffer = NULL;
-  }
-  return status;
-}
-
-iree_status_t iree_hal_webgpu_queue_dealloca(
-    iree_hal_webgpu_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags) {
-  // Fast path: waits already satisfied (or FIFO-elided) — unbind, signal.
-  if (wait_semaphore_list.count == 0 ||
-      iree_hal_semaphore_list_poll(wait_semaphore_list) ||
-      iree_hal_webgpu_queue_can_elide_waits(queue, wait_semaphore_list)) {
-    uint64_t epoch = iree_hal_webgpu_queue_reserve_epoch(queue);
-    iree_hal_webgpu_buffer_unbind(buffer);
-    iree_async_single_frontier_t frontier_storage;
-    const iree_async_frontier_t* frontier =
-        iree_hal_webgpu_queue_build_frontier(queue, epoch, &frontier_storage);
-    iree_status_t status =
-        iree_hal_semaphore_list_signal(signal_semaphore_list, frontier);
-    iree_hal_webgpu_queue_advance_tracker(queue, epoch);
-    return status;
-  }
-
-  // Async path: retain the buffer, submit a wait, and unbind in the callback.
-  iree_hal_webgpu_queue_state_t* state = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_webgpu_queue_state_allocate(
-      queue, IREE_HAL_WEBGPU_QUEUE_OP_DEALLOCA, wait_semaphore_list,
-      signal_semaphore_list, /*trailing_count=*/0,
-      /*trailing_element_size=*/0, /*out_trailing_offset=*/NULL, &state));
-
-  iree_hal_buffer_retain(buffer);
-  state->dealloca.buffer = buffer;
-
-  return iree_hal_webgpu_queue_state_submit(state);
 }
 
 //===----------------------------------------------------------------------===//

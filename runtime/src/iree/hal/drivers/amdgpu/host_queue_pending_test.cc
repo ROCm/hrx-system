@@ -162,7 +162,32 @@ static iree_hal_semaphore_list_t MakeSemaphoreList(
   };
 }
 
-static void RunDefaultPoolServesHostLocalMappedAlloca(
+static iree_status_t QueueAlloca(iree_hal_amdgpu_host_queue_t* queue,
+                                 iree_hal_pool_t* pool,
+                                 iree_hal_semaphore_list_t signal_list,
+                                 iree_hal_buffer_params_t params,
+                                 iree_device_size_t allocation_size,
+                                 iree_hal_buffer_t** out_buffer) {
+  params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(&queue->base)));
+  const iree_hal_pool_reservation_request_t request = {
+      .params = params,
+      .allocation_size = allocation_size,
+  };
+  return iree_hal_queue_alloca(&queue->base, iree_hal_semaphore_list_empty(),
+                               signal_list, pool,
+                               /*request_count=*/1, &request, out_buffer);
+}
+
+static iree_status_t QueueDealloca(iree_hal_amdgpu_host_queue_t* queue,
+                                   iree_hal_semaphore_list_t wait_list,
+                                   iree_hal_semaphore_list_t signal_list,
+                                   iree_hal_buffer_t* buffer) {
+  return iree_hal_queue_dealloca(&queue->base, wait_list, signal_list,
+                                 /*buffer_count=*/1, &buffer);
+}
+
+static void RunSelectedPoolServesHostLocalMappedAlloca(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology, iree_allocator_t host_allocator,
     iree_hal_memory_type_t extra_memory_type) {
@@ -173,6 +198,8 @@ static void RunDefaultPoolServesHostLocalMappedAlloca(
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(
       test_device.Initialize(&options, libhsa, topology, host_allocator));
+  iree_hal_amdgpu_host_queue_t* queue = test_device.first_host_queue();
+  ASSERT_NE(queue, nullptr);
 
   Ref<iree_hal_semaphore_t> alloca_signal;
   IREE_ASSERT_OK(
@@ -182,12 +209,17 @@ static void RunDefaultPoolServesHostLocalMappedAlloca(
   const iree_hal_semaphore_list_t alloca_signal_list =
       MakeSemaphoreList(&alloca_signal_ptr, &alloca_signal_value);
 
+  iree_hal_buffer_params_t params =
+      MakeHostLocalMappedTransientBufferParams(extra_memory_type);
+  params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(&queue->base)));
+  iree_hal_pool_t* pool =
+      iree_hal_pool_set_select(queue->default_pool_set, params,
+                               /*allocation_size=*/8);
+  ASSERT_NE(pool, nullptr);
   iree_hal_buffer_t* buffer = NULL;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      test_device.base_device(), kQueueAffinity0,
-      iree_hal_semaphore_list_empty(), alloca_signal_list, /*pool=*/NULL,
-      MakeHostLocalMappedTransientBufferParams(extra_memory_type),
-      /*allocation_size=*/8, IREE_HAL_ALLOCA_FLAG_NONE, &buffer));
+  IREE_ASSERT_OK(QueueAlloca(queue, pool, alloca_signal_list, params,
+                             /*allocation_size=*/8, &buffer));
   ASSERT_NE(buffer, nullptr);
   IREE_ASSERT_OK(iree_hal_semaphore_wait(alloca_signal, alloca_signal_value,
                                          iree_infinite_timeout(),
@@ -213,23 +245,21 @@ static void RunDefaultPoolServesHostLocalMappedAlloca(
   iree_hal_semaphore_t* dealloca_signal_ptr = dealloca_signal.get();
   const iree_hal_semaphore_list_t dealloca_signal_list =
       MakeSemaphoreList(&dealloca_signal_ptr, &dealloca_signal_value);
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      test_device.base_device(), kQueueAffinity0,
-      iree_hal_semaphore_list_empty(), dealloca_signal_list, buffer,
-      IREE_HAL_DEALLOCA_FLAG_NONE));
+  IREE_ASSERT_OK(QueueDealloca(queue, iree_hal_semaphore_list_empty(),
+                               dealloca_signal_list, buffer));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(dealloca_signal, dealloca_signal_value,
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
   iree_hal_buffer_release(buffer);
 }
 
-TEST_F(HostQueuePendingTest, DefaultPoolServesHostLocalMappedAlloca) {
-  RunDefaultPoolServesHostLocalMappedAlloca(
+TEST_F(HostQueuePendingTest, SelectedPoolServesHostLocalMappedAlloca) {
+  RunSelectedPoolServesHostLocalMappedAlloca(
       &libhsa_, &topology_, host_allocator_, IREE_HAL_MEMORY_TYPE_NONE);
 }
 
-TEST_F(HostQueuePendingTest, DefaultPoolServesOptimalHostLocalMappedAlloca) {
-  RunDefaultPoolServesHostLocalMappedAlloca(
+TEST_F(HostQueuePendingTest, SelectedPoolServesOptimalHostLocalMappedAlloca) {
+  RunSelectedPoolServesHostLocalMappedAlloca(
       &libhsa_, &topology_, host_allocator_, IREE_HAL_MEMORY_TYPE_OPTIMAL);
 }
 
@@ -567,46 +597,6 @@ TEST_F(HostQueuePendingTest, CapacityParkedHostActionRetriesAfterPostDrain) {
   HostActionStateDeinitialize(&action_state);
 }
 
-TEST_F(HostQueuePendingTest, QueueAllocaRejectsWaitableReservationWithoutFlag) {
-  const iree_device_size_t allocation_size = 4096;
-
-  iree_hal_amdgpu_logical_device_options_t options;
-  iree_hal_amdgpu_logical_device_options_initialize(&options);
-  options.preallocate_pools = 0;
-
-  TestLogicalDevice test_device;
-  IREE_ASSERT_OK(
-      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
-  iree_hal_amdgpu_host_queue_t* queue = test_device.first_host_queue();
-  ASSERT_NE(queue, nullptr);
-
-  Ref<iree_hal_pool_t> pool;
-  IREE_ASSERT_OK(CreateExplicitFixedBlockPool(test_device.base_device(),
-                                              allocation_size, pool.out()));
-  const iree_async_axis_t death_axis =
-      iree_async_axis_make_queue(0xFE, 0xFE, 0xFE, 0xFE);
-  IREE_ASSERT_OK(
-      SeedWaitableFixedBlockReservation(pool, allocation_size, death_axis));
-
-  Ref<iree_hal_semaphore_t> alloca_signal;
-  IREE_ASSERT_OK(
-      CreateSemaphore(test_device.base_device(), alloca_signal.out()));
-  uint64_t alloca_signal_value = 1;
-  iree_hal_semaphore_t* alloca_signal_ptr = alloca_signal.get();
-  const iree_hal_semaphore_list_t alloca_signal_list =
-      MakeSemaphoreList(&alloca_signal_ptr, &alloca_signal_value);
-
-  iree_hal_buffer_t* buffer = NULL;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        iree_hal_device_queue_alloca(
-                            test_device.base_device(), kQueueAffinity0,
-                            iree_hal_semaphore_list_empty(), alloca_signal_list,
-                            pool, MakeTransientBufferParams(), allocation_size,
-                            IREE_HAL_ALLOCA_FLAG_NONE, &buffer));
-  EXPECT_EQ(buffer, nullptr);
-  EXPECT_FALSE(HostQueueHasPendingOps(queue));
-}
-
 TEST_F(HostQueuePendingTest, QueueAllocaTlsfGrowthRetriesThroughColdPath) {
   const iree_device_size_t allocation_size = 4096;
 
@@ -633,11 +623,9 @@ TEST_F(HostQueuePendingTest, QueueAllocaTlsfGrowthRetriesThroughColdPath) {
       MakeSemaphoreList(&alloca0_signal_ptr, &alloca0_signal_value);
 
   iree_hal_buffer_t* buffer0 = NULL;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      test_device.base_device(), kQueueAffinity0,
-      iree_hal_semaphore_list_empty(), alloca0_signal_list, pool,
-      MakeTransientBufferParams(), allocation_size, IREE_HAL_ALLOCA_FLAG_NONE,
-      &buffer0));
+  IREE_ASSERT_OK(QueueAlloca(queue, pool, alloca0_signal_list,
+                             MakeTransientBufferParams(), allocation_size,
+                             &buffer0));
   ASSERT_NE(buffer0, nullptr);
   IREE_ASSERT_OK(iree_hal_semaphore_wait(alloca0_signal, alloca0_signal_value,
                                          iree_infinite_timeout(),
@@ -652,11 +640,9 @@ TEST_F(HostQueuePendingTest, QueueAllocaTlsfGrowthRetriesThroughColdPath) {
       MakeSemaphoreList(&alloca1_signal_ptr, &alloca1_signal_value);
 
   iree_hal_buffer_t* buffer1 = NULL;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      test_device.base_device(), kQueueAffinity0,
-      iree_hal_semaphore_list_empty(), alloca1_signal_list, pool,
-      MakeTransientBufferParams(), allocation_size, IREE_HAL_ALLOCA_FLAG_NONE,
-      &buffer1));
+  IREE_ASSERT_OK(QueueAlloca(queue, pool, alloca1_signal_list,
+                             MakeTransientBufferParams(), allocation_size,
+                             &buffer1));
   ASSERT_NE(buffer1, nullptr);
   IREE_ASSERT_OK(iree_hal_semaphore_wait(alloca1_signal, alloca1_signal_value,
                                          iree_infinite_timeout(),
@@ -700,11 +686,9 @@ TEST_F(HostQueuePendingTest,
       MakeSemaphoreList(&alloca0_signal_ptr, &alloca0_signal_value);
 
   iree_hal_buffer_t* buffer0 = NULL;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      test_device.base_device(), kQueueAffinity0,
-      iree_hal_semaphore_list_empty(), alloca0_signal_list, pool,
-      MakeTransientBufferParams(), allocation_size, IREE_HAL_ALLOCA_FLAG_NONE,
-      &buffer0));
+  IREE_ASSERT_OK(QueueAlloca(queue, pool, alloca0_signal_list,
+                             MakeTransientBufferParams(), allocation_size,
+                             &buffer0));
   ASSERT_NE(buffer0, nullptr);
   IREE_ASSERT_OK(iree_hal_semaphore_wait(alloca0_signal, alloca0_signal_value,
                                          iree_infinite_timeout(),
@@ -719,11 +703,9 @@ TEST_F(HostQueuePendingTest,
       MakeSemaphoreList(&alloca1_signal_ptr, &alloca1_signal_value);
 
   iree_hal_buffer_t* buffer1 = NULL;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      test_device.base_device(), kQueueAffinity0,
-      iree_hal_semaphore_list_empty(), alloca1_signal_list, pool,
-      MakeTransientBufferParams(), allocation_size, IREE_HAL_ALLOCA_FLAG_NONE,
-      &buffer1));
+  IREE_ASSERT_OK(QueueAlloca(queue, pool, alloca1_signal_list,
+                             MakeTransientBufferParams(), allocation_size,
+                             &buffer1));
   ASSERT_NE(buffer1, nullptr);
   EXPECT_FALSE(iree_hal_semaphore_list_poll(alloca1_signal_list));
   ASSERT_TRUE(HostQueueHasPendingOps(queue));
@@ -761,10 +743,8 @@ TEST_F(HostQueuePendingTest,
   iree_hal_semaphore_t* dealloca0_signal_ptr = dealloca0_signal.get();
   const iree_hal_semaphore_list_t dealloca0_signal_list =
       MakeSemaphoreList(&dealloca0_signal_ptr, &dealloca0_signal_value);
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      test_device.base_device(), kQueueAffinity0,
-      iree_hal_semaphore_list_empty(), dealloca0_signal_list, buffer0,
-      IREE_HAL_DEALLOCA_FLAG_NONE));
+  IREE_ASSERT_OK(QueueDealloca(queue, iree_hal_semaphore_list_empty(),
+                               dealloca0_signal_list, buffer0));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       dealloca0_signal, dealloca0_signal_value, iree_infinite_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE));
@@ -790,9 +770,8 @@ TEST_F(HostQueuePendingTest,
   iree_hal_semaphore_t* dealloca1_signal_ptr = dealloca1_signal.get();
   const iree_hal_semaphore_list_t dealloca1_signal_list =
       MakeSemaphoreList(&dealloca1_signal_ptr, &dealloca1_signal_value);
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      test_device.base_device(), kQueueAffinity0, copy_signal_list,
-      dealloca1_signal_list, buffer1, IREE_HAL_DEALLOCA_FLAG_NONE));
+  IREE_ASSERT_OK(
+      QueueDealloca(queue, copy_signal_list, dealloca1_signal_list, buffer1));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       dealloca1_signal, dealloca1_signal_value, iree_infinite_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE));
@@ -830,11 +809,9 @@ TEST_F(HostQueuePendingTest, CancelPendingAllocaFrontierWait) {
       MakeSemaphoreList(&alloca_signal_ptr, &alloca_signal_value);
 
   iree_hal_buffer_t* buffer = NULL;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      test_device.base_device(), kQueueAffinity0,
-      iree_hal_semaphore_list_empty(), alloca_signal_list, pool,
-      MakeTransientBufferParams(), allocation_size,
-      IREE_HAL_ALLOCA_FLAG_ALLOW_POOL_WAIT_FRONTIER, &buffer));
+  IREE_ASSERT_OK(QueueAlloca(queue, pool, alloca_signal_list,
+                             MakeTransientBufferParams(), allocation_size,
+                             &buffer));
   ASSERT_NE(buffer, nullptr);
   EXPECT_FALSE(iree_hal_semaphore_list_poll(alloca_signal_list));
   ASSERT_TRUE(HostQueueHasPendingOps(queue));
@@ -879,11 +856,9 @@ TEST_F(HostQueuePendingTest, CancelPendingAllocaPoolNotificationWait) {
       MakeSemaphoreList(&alloca0_signal_ptr, &alloca0_signal_value);
 
   iree_hal_buffer_t* buffer0 = NULL;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      test_device.base_device(), kQueueAffinity0,
-      iree_hal_semaphore_list_empty(), alloca0_signal_list, pool,
-      MakeTransientBufferParams(), allocation_size, IREE_HAL_ALLOCA_FLAG_NONE,
-      &buffer0));
+  IREE_ASSERT_OK(QueueAlloca(queue, pool, alloca0_signal_list,
+                             MakeTransientBufferParams(), allocation_size,
+                             &buffer0));
   ASSERT_NE(buffer0, nullptr);
   IREE_ASSERT_OK(iree_hal_semaphore_wait(alloca0_signal, alloca0_signal_value,
                                          iree_infinite_timeout(),
@@ -898,11 +873,9 @@ TEST_F(HostQueuePendingTest, CancelPendingAllocaPoolNotificationWait) {
       MakeSemaphoreList(&alloca1_signal_ptr, &alloca1_signal_value);
 
   iree_hal_buffer_t* buffer1 = NULL;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      test_device.base_device(), kQueueAffinity0,
-      iree_hal_semaphore_list_empty(), alloca1_signal_list, pool,
-      MakeTransientBufferParams(), allocation_size, IREE_HAL_ALLOCA_FLAG_NONE,
-      &buffer1));
+  IREE_ASSERT_OK(QueueAlloca(queue, pool, alloca1_signal_list,
+                             MakeTransientBufferParams(), allocation_size,
+                             &buffer1));
   ASSERT_NE(buffer1, nullptr);
   EXPECT_FALSE(iree_hal_semaphore_list_poll(alloca1_signal_list));
   ASSERT_TRUE(HostQueueHasPendingOps(queue));
