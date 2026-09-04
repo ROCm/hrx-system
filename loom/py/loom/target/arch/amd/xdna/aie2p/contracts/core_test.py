@@ -634,11 +634,11 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         rule for rule in alias_rules if rule.source_op is vector.vector_bitcast
     ]
     bitcast_types = (
-        Vector("i8", minimum_lanes=1, maximum_lanes=64),
-        Vector("i16", minimum_lanes=1, maximum_lanes=32),
-        Vector("bf16", minimum_lanes=1, maximum_lanes=32),
-        Vector("i32", minimum_lanes=1, maximum_lanes=16),
-        Vector("f32", minimum_lanes=1, maximum_lanes=16),
+        Vector("i8", minimum_static_elements=1, maximum_static_elements=64),
+        Vector("i16", minimum_static_elements=1, maximum_static_elements=32),
+        Vector("bf16", minimum_static_elements=1, maximum_static_elements=32),
+        Vector("i32", minimum_static_elements=1, maximum_static_elements=16),
+        Vector("f32", minimum_static_elements=1, maximum_static_elements=16),
     )
     assert [
         (rule.guards[0].type_pattern, rule.guards[1].type_pattern)

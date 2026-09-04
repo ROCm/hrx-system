@@ -14,6 +14,19 @@
 #include "loom/target/arch/amd/xdna/aie2p/lower/matrix.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/storage.h"
 
+static bool loom_aie2p_source_type_supported(void* user_data,
+                                             const loom_module_t* module,
+                                             loom_type_t source_type) {
+  (void)user_data;
+  (void)module;
+  if (!loom_type_is_scalar(source_type) && !loom_type_is_vector(source_type)) {
+    return false;
+  }
+  const loom_scalar_type_t element_type = loom_type_element_type(source_type);
+  return element_type == LOOM_SCALAR_TYPE_F8E4M3 ||
+         element_type == LOOM_SCALAR_TYPE_F8E5M2;
+}
+
 static iree_status_t loom_aie2p_map_type(void* user_data,
                                          loom_low_lower_context_t* context,
                                          const loom_op_t* source_op,
@@ -28,77 +41,68 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
       case LOOM_SCALAR_TYPE_I8:
       case LOOM_SCALAR_TYPE_I16:
       case LOOM_SCALAR_TYPE_I32:
+      case LOOM_SCALAR_TYPE_F8E4M3:
+      case LOOM_SCALAR_TYPE_F8E5M2:
+      case LOOM_SCALAR_TYPE_F16:
+      case LOOM_SCALAR_TYPE_BF16:
+      case LOOM_SCALAR_TYPE_F32:
         return loom_low_lower_make_register_type(
             context, AIE2P_CORE_REG_CLASS_ID_AIE2P_ER, 1, out_low_type);
       case LOOM_SCALAR_TYPE_I64:
+      case LOOM_SCALAR_TYPE_F64:
         return loom_low_lower_make_register_type(
             context, AIE2P_CORE_REG_CLASS_ID_AIE2P_ER, 2, out_low_type);
       default:
         break;
     }
   }
-  if (loom_type_is_vector(source_type) && loom_type_rank(source_type) == 1 &&
+  if (loom_type_is_vector(source_type) &&
       loom_type_is_all_static(source_type)) {
-    const int64_t lane_count = loom_type_dim_static_size_at(source_type, 0);
+    uint64_t element_count = 0;
+    if (!loom_type_static_element_count(source_type, &element_count) ||
+        element_count == 0) {
+      return loom_low_lower_emit_source_type_unsupported(
+          context, source_op, IREE_SV("source"), source_type);
+    }
     const loom_scalar_type_t element_type = loom_type_element_type(source_type);
-    if (lane_count == 8 && element_type == LOOM_SCALAR_TYPE_BF16) {
+    const bool is_rank_one = loom_type_rank(source_type) == 1;
+    if (is_rank_one && element_count == 8 &&
+        element_type == LOOM_SCALAR_TYPE_BF16) {
       return loom_low_lower_make_register_type(
           context, AIE2P_CORE_REG_CLASS_ID_AIE2P_EWL, 1, out_low_type);
     }
-    if (lane_count == 64 && element_type == LOOM_SCALAR_TYPE_BF16) {
+    if (is_rank_one && element_count == 64 &&
+        element_type == LOOM_SCALAR_TYPE_BF16) {
       return loom_low_lower_make_register_type(
           context, AIE2P_CORE_REG_CLASS_ID_AIE2P_VEC256, 4, out_low_type);
     }
-    if (lane_count == 64 && element_type == LOOM_SCALAR_TYPE_I32) {
+    if (is_rank_one && element_count == 64 &&
+        element_type == LOOM_SCALAR_TYPE_I32) {
       return loom_low_lower_make_register_type(
           context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMS, 4, out_low_type);
     }
-    if (lane_count == 32 && element_type == LOOM_SCALAR_TYPE_F32) {
+    if (is_rank_one && element_count == 32 &&
+        element_type == LOOM_SCALAR_TYPE_F32) {
       return loom_low_lower_make_register_type(
           context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMS, 2, out_low_type);
     }
-    if (lane_count == 64 && element_type == LOOM_SCALAR_TYPE_F32) {
+    if (is_rank_one && element_count == 64 &&
+        element_type == LOOM_SCALAR_TYPE_F32) {
       return loom_low_lower_make_register_type(
           context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMS, 4, out_low_type);
     }
-    if (lane_count > 0 && lane_count <= 64 &&
-        element_type == LOOM_SCALAR_TYPE_I1) {
+    if (element_count <= 64 && element_type == LOOM_SCALAR_TYPE_I1) {
       return loom_low_lower_make_register_type(
           context, AIE2P_CORE_REG_CLASS_ID_AIE2P_ELPREDICATE, 1, out_low_type);
     }
-    uint32_t element_bits = 0;
-    switch (element_type) {
-      case LOOM_SCALAR_TYPE_I8:
-        element_bits = 8;
-        break;
-      case LOOM_SCALAR_TYPE_I16:
-        element_bits = 16;
-        break;
-      case LOOM_SCALAR_TYPE_BF16:
-        element_bits = 16;
-        break;
-      case LOOM_SCALAR_TYPE_I32:
-        element_bits = 32;
-        break;
-      case LOOM_SCALAR_TYPE_F32:
-        element_bits = 32;
-        break;
-      default:
-        break;
-    }
-    if (lane_count > 0 && element_bits != 0 &&
-        lane_count <= 512 / element_bits) {
-      // Exact native W-memory shapes use one 256-bit storage unit. Smaller
-      // packed fragments retain the X carrier required by the selected vector
-      // ALU forms; logical bit width alone does not determine carrier width.
-      const bool is_native_w_shape =
-          (element_bits == 8 && (lane_count == 16 || lane_count == 32)) ||
-          (element_bits == 16 && (lane_count == 8 || lane_count == 16)) ||
-          (element_bits == 32 && (lane_count == 4 || lane_count == 8));
-      const uint32_t unit_count = is_native_w_shape ? 1 : 2;
+    const int32_t element_bits = loom_scalar_type_bitwidth(element_type);
+    if (element_bits > 0 && element_count <= 512 / (uint32_t)element_bits) {
+      // Ordinary vectors retain a full X-register carrier. Narrow vector
+      // memory forms address W subregisters of that carrier; choosing a W
+      // carrier from the logical type alone makes the same SSA value unusable
+      // by the 512-bit vector ALU.
       return loom_low_lower_make_register_type(
-          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_VEC256, unit_count,
-          out_low_type);
+          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_VEC256, 2, out_low_type);
     }
   }
   return loom_low_lower_emit_source_type_unsupported(
@@ -202,6 +206,11 @@ static iree_status_t loom_aie2p_emit_op(void* user_data,
 static const loom_low_lower_policy_t kAie2pCoreLowLowerPolicy = {
     .name = IREE_SVL("amd-xdna-aie2p-core-low-lower"),
     .error_catalog = &loom_error_catalog_core,
+    .source_type_supported =
+        {
+            .fn = loom_aie2p_source_type_supported,
+            .user_data = NULL,
+        },
     .map_type = {.fn = loom_aie2p_map_type, .user_data = NULL},
     .map_argument = {.fn = loom_aie2p_map_argument, .user_data = NULL},
     .rule_sets =

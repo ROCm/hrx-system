@@ -69,7 +69,19 @@ def _assert_address_forms(
     immediate_minimum: int,
     immediate_maximum: int,
 ) -> None:
-    assert [len(rule.emit) for rule in rules] == [1, 3, 2, 3, 4]
+    descriptor_emits = [
+        [
+            emit
+            for emit in rule.emit
+            if isinstance(emit, EmitDescriptorOp)
+            and (
+                emit.source_memory is not None
+                or emit.descriptor.key == "amd.xdna.aie2p.move.to.address-index"
+            )
+        ]
+        for rule in rules
+    ]
+    assert [len(emits) for emits in descriptor_emits] == [1, 3, 2, 3, 4]
     assert [
         (
             _source_memory_emit(rule).source_memory.static_byte_offset_minimum,
@@ -90,11 +102,11 @@ def _assert_address_forms(
         sum(guard.kind is GuardKind.OPERAND_SEGMENT_COUNT for guard in rule.guards)
         for rule in rules
     ] == [0, 0, 0, 0, 0]
-    immediate = rules[0].emit[0].immediates["imm"]
+    immediate = descriptor_emits[0][0].immediates["imm"]
     assert isinstance(immediate, SourceMemoryProject)
     assert immediate.kind is SourceMemoryProjectKind.STATIC_BYTE_OFFSET
-    for rule in rules[1:]:
-        assert rule.emit[-2].descriptor.key == ("amd.xdna.aie2p.move.to.address-index")
+    for emits in descriptor_emits[1:]:
+        assert emits[-2].descriptor.key == ("amd.xdna.aie2p.move.to.address-index")
 
 
 def test_scalar_memory_rules_cover_every_address_form() -> None:
@@ -244,6 +256,30 @@ def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None
                 immediate_maximum=width_bits - width_bits // 8,
             )
             for rule in operation_rules:
+                expands_logical_carrier = width_bits < 512 and not (
+                    width_bits == 128 and element_type == "bf16"
+                )
+                slices = [
+                    emit for emit in rule.emit if isinstance(emit, EmitRegisterSlice)
+                ]
+                concats = [
+                    emit for emit in rule.emit if isinstance(emit, EmitRegisterConcat)
+                ]
+                if expands_logical_carrier and operation is SourceMemoryOperation.LOAD:
+                    assert len(slices) == (2 if width_bits == 128 else 1)
+                    assert len(concats) == 1
+                    assert concats[0].sources[0] != concats[0].sources[1]
+                    assert concats[0].sources[1].field == "memory_padding"
+                elif expands_logical_carrier:
+                    assert len(slices) == 1
+                    assert slices[0].unit_count == 1
+                    assert not concats
+                elif width_bits == 128 and operation is SourceMemoryOperation.LOAD:
+                    assert not slices
+                    assert not concats
+                else:
+                    assert not slices
+                    assert not concats
                 memory_emit = _source_memory_emit(rule)
                 constraint = memory_emit.source_memory
                 assert constraint is not None

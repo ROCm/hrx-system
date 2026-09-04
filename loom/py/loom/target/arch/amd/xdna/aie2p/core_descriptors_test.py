@@ -32,6 +32,7 @@ from loom.target.arch.amd.xdna.aie2p.core_encoding_data import CORE_ENCODING_TAB
 from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
 from loom.target.arch.amd.xdna.aie2p.core_schedule_data import CORE_SCHEDULE_TABLE
 from loom.target.low_descriptors import (
+    Constraint,
     ConstraintKind,
     DescriptorFlag,
     Effect,
@@ -656,9 +657,34 @@ def test_vector_memory_descriptors_cover_each_native_width_and_value_shape() -> 
                 )
                 assert load.operands[0].register_part == expected_part
                 assert store.operands[0].register_part == expected_part
+                if element_type == "bf16":
+                    assert all(
+                        operand.field_name != "storage" for operand in load.operands
+                    )
+                else:
+                    storage = next(
+                        operand
+                        for operand in load.operands
+                        if operand.field_name == "storage"
+                    )
+                    assert storage.register_part == "aie2p.vec256.high128"
+                    assert set(storage.flags) == {
+                        OperandFlag.IMPLICIT,
+                        OperandFlag.STORAGE_CONTINUATION,
+                    }
+                    assert load.constraints[-1] == Constraint(
+                        ConstraintKind.TIED,
+                        0,
+                        next(
+                            index
+                            for index, operand in enumerate(load.operands)
+                            if operand.field_name == "storage"
+                        ),
+                    )
             else:
                 assert load.operands[0].register_part is None
                 assert store.operands[0].register_part is None
+                assert all(operand.field_name != "storage" for operand in load.operands)
 
 
 def test_float_vector_memory_descriptors_reuse_bit_exact_physical_forms() -> None:
@@ -690,9 +716,14 @@ def test_float_vector_memory_descriptors_reuse_bit_exact_physical_forms() -> Non
                         storage_descriptor.encoding_field_values
                     )
                     if width_bits == 128 and value_type == "bf16":
-                        assert (
-                            value_descriptor.operands[1:]
-                            == (storage_descriptor.operands[1:])
+                        assert tuple(
+                            operand
+                            for operand in value_descriptor.operands[1:]
+                            if operand.field_name != "storage"
+                        ) == tuple(
+                            operand
+                            for operand in storage_descriptor.operands[1:]
+                            if operand.field_name != "storage"
                         )
                         assert (
                             value_descriptor.operands[0].reg_alts[0].reg_class
@@ -701,6 +732,19 @@ def test_float_vector_memory_descriptors_reuse_bit_exact_physical_forms() -> Non
                         assert value_descriptor.operands[0].register_part == (
                             "aie2p.ewl.low128"
                         )
+                        if descriptor_family.startswith("load"):
+                            assert all(
+                                operand.field_name != "storage"
+                                for operand in value_descriptor.operands
+                            )
+                            storage_storage = next(
+                                operand
+                                for operand in storage_descriptor.operands
+                                if operand.field_name == "storage"
+                            )
+                            assert storage_storage.register_part == (
+                                "aie2p.vec256.high128"
+                            )
                     else:
                         assert value_descriptor.operands == storage_descriptor.operands
                     assert value_descriptor.immediates == storage_descriptor.immediates
