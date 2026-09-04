@@ -167,6 +167,8 @@ static iree_status_t FakeHalSelectCompatibleDeviceTarget(
 
 static const loom_artifact_provider_t kFakeArtifactProvider = {
     /*.name=*/IREE_SVL("fake-hal"),
+    /*.public_artifact_format=*/IREE_SVL("FakeExecutableFormat123"),
+    /*.flags=*/LOOM_ARTIFACT_PROVIDER_FLAG_CANONICAL,
     /*.target_profile_type=*/&kFakeTargetProfileType,
     /*.artifact_kind=*/LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_EXECUTABLE,
     /*.default_pipeline_options=*/{},

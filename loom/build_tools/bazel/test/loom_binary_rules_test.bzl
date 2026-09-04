@@ -105,7 +105,8 @@ def _test_kernel_binary_roots_direct_library_exports_impl(env, target):
 
     compile_action = _find_action(env, actions, "LoomKernelBinary")
     for expected_arg in [
-        "--backend=amdgpu-hal",
+        "--product=kernel",
+        "--format=amdgpu-hsaco",
         "--target=amdgpu:gfx11-generic",
         "--compile-report=details",
     ]:
@@ -293,7 +294,8 @@ def _test_command_binary_emits_composite_product_impl(env, target):
 
     command_action = _find_action(env, actions, "LoomCommandBinary")
     for expected_arg in [
-        "--backend=command",
+        "--product=command",
+        "--format=loom-command",
         "--compile-report=details",
     ]:
         if expected_arg not in command_action.argv:
@@ -316,7 +318,8 @@ def _test_command_binary_emits_composite_product_impl(env, target):
 
     kernel_action = _find_action(env, actions, "LoomCommandKernelBinary")
     for expected_arg in [
-        "--backend=amdgpu-hal",
+        "--product=kernel",
+        "--format=amdgpu-hsaco",
         "--target=amdgpu:gfx11-generic",
         "--compile-report=details",
     ]:

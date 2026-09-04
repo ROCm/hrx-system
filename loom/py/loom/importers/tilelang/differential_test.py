@@ -168,10 +168,11 @@ def test_capture_loom_amdgpu_artifact_runs_production_compiler(
     )
 
     compile_command = commands[0]
-    assert compile_command[:3] == (
+    assert compile_command[:4] == (
         str(loom_compile),
         str(tmp_path / "out" / "copy.gfx1100.loom"),
-        "--backend=amdgpu-hal",
+        "--product=kernel",
+        "--format=amdgpu-hsaco",
     )
     assert "--target=amdgpu:gfx1100" in compile_command
     assert "--compile-report=summary" in compile_command

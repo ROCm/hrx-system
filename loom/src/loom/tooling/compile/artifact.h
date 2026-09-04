@@ -31,6 +31,12 @@ extern "C" {
 
 typedef struct loom_artifact_provider_t loom_artifact_provider_t;
 
+typedef uint32_t loom_artifact_provider_flags_t;
+enum loom_artifact_provider_flag_bits_e {
+  // Provider is the default format for its target family.
+  LOOM_ARTIFACT_PROVIDER_FLAG_CANONICAL = 1u << 0,
+};
+
 // Borrowed concrete compiler target selected independently of a runtime device.
 typedef struct loom_artifact_target_t {
   // Immutable structured target profile. NULL requests the module's authored
@@ -87,8 +93,12 @@ typedef void (*loom_artifact_provider_deinitialize_artifact_fn_t)(
 
 // Linked offline compiler for one target artifact family.
 struct loom_artifact_provider_t {
-  // User-facing provider name accepted by compilation and execution tools.
+  // Stable provider name used in diagnostics and execution tooling.
   iree_string_view_t name;
+  // Public artifact format produced by this provider.
+  iree_string_view_t public_artifact_format;
+  // Format selection flags.
+  loom_artifact_provider_flags_t flags;
   // Required target-family profile representation.
   const loom_target_profile_type_t* target_profile_type;
   // Artifact kind recorded in structured compile reports.
@@ -121,10 +131,6 @@ typedef struct loom_artifact_provider_registry_t {
   // Number of entries in |providers|.
   iree_host_size_t provider_count;
 } loom_artifact_provider_registry_t;
-
-// Looks up an artifact provider by user-facing provider name.
-const loom_artifact_provider_t* loom_artifact_provider_registry_lookup(
-    const loom_artifact_provider_registry_t* registry, iree_string_view_t name);
 
 // Artifact candidate produced by an offline compiler provider.
 typedef struct loom_artifact_candidate_t {

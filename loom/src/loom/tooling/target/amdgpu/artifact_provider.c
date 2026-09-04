@@ -122,6 +122,8 @@ static void loom_amdgpu_artifact_provider_deinitialize_artifact(
 
 const loom_artifact_provider_t loom_amdgpu_artifact_provider = {
     .name = IREE_SVL("amdgpu-hal"),
+    .public_artifact_format = IREE_SVL("amdgpu-hsaco"),
+    .flags = LOOM_ARTIFACT_PROVIDER_FLAG_CANONICAL,
     .target_profile_type = &loom_amdgpu_target_profile_type,
     .artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_EXECUTABLE,
     .emit_artifact = loom_amdgpu_artifact_provider_emit_artifact,

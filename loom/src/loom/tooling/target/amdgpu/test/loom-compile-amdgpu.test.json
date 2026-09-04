@@ -7,7 +7,6 @@
         "tool": "loom-compile",
         "args": [
           "{srcdir}/complete_authoring_module.loom",
-          "--backend=amdgpu-hal",
           "--target=amdgpu:gfx1100",
           "--output={tmp}/complete_authoring_module.hal",
           "--emit-target-artifact={tmp}/complete_authoring_module.hsaco"
@@ -30,7 +29,8 @@
         "tool": "loom-compile",
         "args": [
           "{srcdir}/gfx1250_configured_fragment_bank.loom",
-          "--backend=amdgpu-hal",
+          "--product=kernel",
+          "--format=amdgpu-hsaco",
           "--target=amdgpu:gfx1250",
           "--config=test.fragment_bank.m_fragments=8",
           "--config=test.fragment_bank.n_fragments=4",
@@ -61,7 +61,8 @@
             "tool": "loom-compile",
             "args": [
               "{srcdir}/selected_root_amdgpu.loom",
-              "--backend=amdgpu-hal",
+              "--product=kernel",
+              "--format=amdgpu-hsaco",
               "--root=@selected_store_i32",
               "--target=amdgpu:gfx1151",
               "--output={tmp}/specialized_report.hal",

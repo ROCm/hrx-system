@@ -253,6 +253,8 @@ static void loom_spirv_artifact_provider_deinitialize_artifact(
 
 const loom_artifact_provider_t loom_spirv_vulkan_artifact_provider = {
     .name = IREE_SVL("spirv-vulkan-hal"),
+    .public_artifact_format = IREE_SVL("spirv-binary"),
+    .flags = LOOM_ARTIFACT_PROVIDER_FLAG_CANONICAL,
     .target_profile_type = &loom_spirv_target_profile_type,
     .artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_EXECUTABLE,
     .default_pipeline_options =

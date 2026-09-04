@@ -7,7 +7,7 @@
         "tool": "loom-compile",
         "args": [
           "{srcdir}/amdgcn_kernel.loom",
-          "--backend=llvmir-text",
+          "--format=llvmir-text",
           "--pipeline=none",
           "--output=-"
         ]
