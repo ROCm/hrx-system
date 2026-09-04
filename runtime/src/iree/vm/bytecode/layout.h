@@ -244,18 +244,12 @@ typedef struct iree_vm_bytecode_rodata_storage_plan_t {
   iree_host_size_t copy_alignment;
 } iree_vm_bytecode_rodata_storage_plan_t;
 
-// Atomic-carrier selectors required by verified instructions, one bit per
-// iree_vm_bytecode_buffer_atomic_carrier_t value.
-typedef uint32_t iree_vm_bytecode_atomic_carrier_bits_t;
-
 // Bounded allocation facts derived before constructing persistent storage.
 typedef struct iree_vm_bytecode_module_plan_t {
   // Complete mapped image layout.
   iree_vm_bytecode_module_layout_t layout;
   // Largest decoded control.block count among all functions.
   uint32_t maximum_block_count;
-  // Bit N is set when an instruction requires atomic-carrier selector N.
-  iree_vm_bytecode_atomic_carrier_bits_t required_atomic_carrier_bits;
   // Exact process-storage layout.
   iree_vm_bytecode_process_layout_t process_layout;
   // Exact fallback storage for image-misaligned rodata.

@@ -23,9 +23,7 @@ iree_status_t iree_vm_bytecode_verify_module_structure(
 // Verifies every instruction record in a structurally verified module plan.
 // |block_offsets| provides transient storage for
 // |plan->maximum_block_count| uint32_t entries and may be null when the count
-// is zero. On success |plan->required_atomic_carrier_bits| summarizes the
-// platform requirements module creation must compare against its capabilities
-// before publication.
+// is zero.
 iree_status_t iree_vm_bytecode_verify_module_instructions(
     iree_vm_bytecode_module_plan_t* plan, uint32_t* block_offsets);
 

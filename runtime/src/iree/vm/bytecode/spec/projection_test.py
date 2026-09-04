@@ -71,7 +71,6 @@ class ProjectionTest(unittest.TestCase):
             "iree_vm_bytecode_verify_direct_call",
             "iree_vm_bytecode_verify_integer_bitstream_shape",
             "iree_vm_bytecode_verify_signature_descriptor",
-            "*context->required_atomic_carrier_bits |=",
         ):
             self.assertIn(fragment, source)
         self.assertNotIn("switch (", verifier_source)

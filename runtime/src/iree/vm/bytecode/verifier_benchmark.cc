@@ -29,7 +29,6 @@ IREE_BENCHMARK_FN(BM_VerifyInstructions) {
          iree_benchmark_keep_running(benchmark_state, 1)) {
     status = iree_vm_bytecode_verify_module_instructions(&plan,
                                                          block_offsets.data());
-    iree_optimization_barrier(plan.required_atomic_carrier_bits);
   }
   return status;
 }
@@ -51,7 +50,6 @@ IREE_BENCHMARK_FN(BM_VerifyModule) {
       status = iree_vm_bytecode_verify_module_instructions(
           &plan, block_offsets.data());
     }
-    iree_optimization_barrier(plan.required_atomic_carrier_bits);
   }
   return status;
 }

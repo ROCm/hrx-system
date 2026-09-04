@@ -88,7 +88,7 @@ def _strings(values: tuple[str, ...]) -> tuple[bytes, dict[str, int]]:
 
 
 def _valid_instruction_values(
-    instruction: isa.Instruction, atomic_carrier_ordinal: int
+    instruction: isa.Instruction,
 ) -> dict[str, int]:
     """Returns deterministic field values satisfying declarative local rules."""
 
@@ -141,19 +141,6 @@ def _valid_instruction_values(
             values[result_count] = 1
             values[source_width] = 8
             values[result_width] = 8
-        elif record_rule.kind == core_rules.RecordRuleKind.ATOMIC_CARRIER_REQUIREMENT:
-            component = record_rule.data[0]
-            allowed_values = component.allowed_values or tuple(
-                item.value for item in component.table.values
-            )
-            selected_value = allowed_values[
-                atomic_carrier_ordinal % len(allowed_values)
-            ]
-            field_name = record_rule.fields[0]
-            component_mask = ((1 << component.bit_length) - 1) << component.bit_offset
-            values[field_name] = (values.get(field_name, 0) & ~component_mask) | (
-                selected_value << component.bit_offset
-            )
     return values
 
 
@@ -164,17 +151,11 @@ def _all_core_bytecode(specification: Specification) -> bytes:
     block = instruction_by_name["control.block"]
     return_instruction = instruction_by_name["control.return"]
     bytecode = bytearray(_instruction(block))
-    atomic_carrier_ordinal = 0
     for instruction in sorted(specification.instructions, key=lambda item: item.opcode):
         if instruction is block:
             continue
         record_offset = len(bytecode)
-        values = _valid_instruction_values(instruction, atomic_carrier_ordinal)
-        if any(
-            record_rule.kind == core_rules.RecordRuleKind.ATOMIC_CARRIER_REQUIREMENT
-            for record_rule in instruction.rules
-        ):
-            atomic_carrier_ordinal += 1
+        values = _valid_instruction_values(instruction)
         for instruction_field in instruction.fields:
             if instruction_field.rule.kind not in core_rules.DIRECT_TARGET_RULES:
                 continue

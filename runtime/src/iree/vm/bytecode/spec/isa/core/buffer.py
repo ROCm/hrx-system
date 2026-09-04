@@ -196,8 +196,8 @@ BUFFER_FAMILY = InstructionFamily(
         "Core 0.0 has no byte-swapping path. Atomic carriers are naturally aligned "
         "raw i32 or i64 storage requiring READ|WRITE. Integer arithmetic wraps; "
         "floating arithmetic uses the Core floating profile and float.minmax "
-        "rules. A CPU may strengthen atomic ordering or scope but never weaken it. "
-        "Unsupported carriers make the module incompatible at creation. No buffer "
+        "rules. Every Core runtime implements both carrier widths. A CPU may "
+        "strengthen atomic ordering or scope but never weaken it. No buffer "
         "instruction suspends."
     ),
 )
@@ -717,7 +717,7 @@ class _AtomicApplyForm(enum.Enum):
 
 def _atomic_apply_selectors(
     form: _AtomicApplyForm,
-) -> tuple[tuple[InstructionField, ...], PackedSelectorComponent]:
+) -> tuple[InstructionField, ...]:
     is_reduce = form == _AtomicApplyForm.REDUCE
     kind = _packed_component(
         "kind",
@@ -728,33 +728,16 @@ def _atomic_apply_selectors(
     )
     carrier = _packed_component("carrier", 7, 1, BUFFER_ATOMIC_CARRIER_SELECTOR)
     return (
-        (
-            _packed_selector(
-                "selector0_u8",
-                (kind, carrier),
-            ),
-            _packed_selector(
-                "selector1_u8",
-                (
-                    _packed_component(
-                        "ordering", 0, 3, BUFFER_ATOMIC_ORDERING_SELECTOR
-                    ),
-                    _packed_component("scope", 3, 3, BUFFER_ATOMIC_SCOPE_SELECTOR),
-                ),
-            ),
+        _packed_selector(
+            "selector0_u8",
+            (kind, carrier),
         ),
-        carrier,
-    )
-
-
-def _atomic_carrier_rule(component: PackedSelectorComponent) -> RecordRule:
-    return RecordRule(
-        RecordRuleKind.ATOMIC_CARRIER_REQUIREMENT,
-        fields=("selector0_u8",),
-        data=(component,),
-        summary=(
-            "The carrier component of selector0_u8 contributes one static "
-            "requirement checked against the selected target contract."
+        _packed_selector(
+            "selector1_u8",
+            (
+                _packed_component("ordering", 0, 3, BUFFER_ATOMIC_ORDERING_SELECTOR),
+                _packed_component("scope", 3, 3, BUFFER_ATOMIC_SCOPE_SELECTOR),
+            ),
         ),
     )
 
@@ -770,7 +753,7 @@ def _atomic_failures(mutation_boundary: str) -> tuple[FailureCase, ...]:
 
 def _atomic_apply(form: _AtomicApplyForm) -> Instruction:
     is_reduce = form == _AtomicApplyForm.REDUCE
-    selectors, carrier_component = _atomic_apply_selectors(form)
+    selectors = _atomic_apply_selectors(form)
     fields = (
         (
             _buffer_ref("buffer_r8"),
@@ -868,7 +851,6 @@ def _atomic_apply(form: _AtomicApplyForm) -> Instruction:
             )
             + "pc = pc + 8;"
         ),
-        rules=(_atomic_carrier_rule(carrier_component),),
         state_effects=(
             StateEffect(StateAccess.READ, StateResource.BUFFER, ("buffer_r8",)),
             StateEffect(StateAccess.WRITE, StateResource.BUFFER, ("buffer_r8",)),
@@ -966,7 +948,6 @@ BUFFER_ATOMIC_CMPXCHG = Instruction(
         "pc = pc + 8;"
     ),
     rules=(
-        _atomic_carrier_rule(_CMPXCHG_CARRIER),
         RecordRule(
             RecordRuleKind.PACKED_SELECTOR_PAIRS,
             fields=("selector0_u8",),

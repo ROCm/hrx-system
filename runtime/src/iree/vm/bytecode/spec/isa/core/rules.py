@@ -195,9 +195,6 @@ class RecordRuleKind:
         data_count=2,
         data_type=tuple,
     )
-    ATOMIC_CARRIER_REQUIREMENT = RuleKind(
-        "atomic_carrier_requirement", field_count=1, data_count=1, data_type=tuple
-    )
     VALUE_REGISTER_RANGE = RuleKind("value_register_range", field_count=2)
     VALUE_REGISTER_FORMAT_RANGE = RuleKind(
         "value_register_format_range", field_count=2, value_count=1

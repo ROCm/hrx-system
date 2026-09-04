@@ -1437,8 +1437,6 @@ typedef struct iree_vm_bytecode_instruction_context_t {
   const iree_vm_bytecode_v0_signature_row_t* signature;
   // Decoded control.block byte offsets in ascending order.
   const uint32_t* block_offsets;
-  // Accumulated atomic-carrier requirements.
-  iree_vm_bytecode_atomic_carrier_bits_t* required_atomic_carrier_bits;
 } iree_vm_bytecode_instruction_context_t;
 
 static bool iree_vm_bytecode_range_fits_u32(uint32_t base, uint32_t length,
@@ -1747,8 +1745,7 @@ static bool iree_vm_bytecode_control_flow_is_terminal(
 static iree_status_t iree_vm_bytecode_verify_function_instructions(
     const iree_vm_bytecode_module_layout_t* layout,
     const iree_vm_bytecode_v0_function_row_t* function,
-    uint32_t function_ordinal, uint32_t* block_offsets,
-    iree_vm_bytecode_atomic_carrier_bits_t* required_atomic_carrier_bits) {
+    uint32_t function_ordinal, uint32_t* block_offsets) {
   const iree_const_byte_span_t bytecode =
       iree_vm_bytecode_function_data(&layout->functions, function);
   uint32_t block_count = 0;
@@ -1824,7 +1821,6 @@ static iree_status_t iree_vm_bytecode_verify_function_instructions(
       .function = function,
       .signature = iree_vm_bytecode_function_signature(layout, function),
       .block_offsets = block_offsets,
-      .required_atomic_carrier_bits = required_atomic_carrier_bits,
   };
   record_offset = 0;
   while (record_offset < bytecode.data_length) {
@@ -1861,12 +1857,9 @@ static iree_status_t iree_vm_bytecode_verify_function_instructions(
 
 iree_status_t iree_vm_bytecode_verify_module_instructions(
     iree_vm_bytecode_module_plan_t* plan, uint32_t* block_offsets) {
-  iree_vm_bytecode_atomic_carrier_bits_t required_atomic_carrier_bits = 0;
   for (uint32_t i = 0; i < plan->layout.functions.count; ++i) {
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_function_instructions(
-        &plan->layout, &plan->layout.functions.rows[i], i, block_offsets,
-        &required_atomic_carrier_bits));
+        &plan->layout, &plan->layout.functions.rows[i], i, block_offsets));
   }
-  plan->required_atomic_carrier_bits = required_atomic_carrier_bits;
   return iree_ok_status();
 }

@@ -98,11 +98,9 @@ class ModuleVerificationTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
         iree_make_const_byte_span(bytes.data(), bytes.size()), &plan));
     std::vector<uint32_t> block_offsets(plan.maximum_block_count);
-    plan.required_atomic_carrier_bits = UINT32_C(0xFFFFFFFF);
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                           iree_vm_bytecode_verify_module_instructions(
                               &plan, block_offsets.data()));
-    EXPECT_EQ(plan.required_atomic_carrier_bits, UINT32_C(0xFFFFFFFF));
   }
 
   iree_const_byte_span_t contents_ = iree_const_byte_span_empty();
@@ -138,9 +136,6 @@ TEST_F(ModuleVerificationTest, VerifiesEveryCoreInstruction) {
   std::vector<uint32_t> block_offsets(plan_.maximum_block_count);
   IREE_ASSERT_OK(iree_vm_bytecode_verify_module_instructions(
       &plan_, block_offsets.data()));
-  EXPECT_EQ(plan_.required_atomic_carrier_bits,
-            (1u << IREE_VM_BYTECODE_BUFFER_ATOMIC_CARRIER_I32) |
-                (1u << IREE_VM_BYTECODE_BUFFER_ATOMIC_CARRIER_I64));
 }
 
 TEST_F(ModuleVerificationTest, RejectsUnknownInstruction) {

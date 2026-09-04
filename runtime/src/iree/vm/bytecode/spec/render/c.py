@@ -533,21 +533,6 @@ def _direct_instruction_rule_c(
             for first_item, second_item in zip(values[::2], values[1::2], strict=True)
         )
         return _allowed_values_predicate(pair, allowed_pairs), None
-    if kind == core_rules.RecordRuleKind.ATOMIC_CARRIER_REQUIREMENT:
-        component = data[0]
-        allowed_values = component.allowed_values or tuple(
-            item.value for item in component.table.values
-        )
-        if any(value >= 32 for value in allowed_values):
-            raise ValueError("atomic carrier requirements exceed the u32 bitset")
-        carrier = (
-            f"(({load} >> {component.bit_offset}u) & "
-            f"{_c_u32((1 << component.bit_length) - 1)})"
-        )
-        return (
-            None,
-            f"*context->required_atomic_carrier_bits |= UINT32_C(1) << {carrier};",
-        )
     if kind == core_rules.RecordRuleKind.VALUE_REGISTER_RANGE:
         count = related_load(0)
         return (
