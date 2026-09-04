@@ -46,8 +46,8 @@ struct loomc_target_profile_t {
   // Target-family profile carrying structured compiler target facts.
   loom_target_profile_t* target_profile;
 
-  // Releases target_profile when the final public reference is released.
-  loomc_target_profile_deinitialize_fn_t target_profile_deinitialize;
+  // Destroys target_profile when the final public reference is released.
+  loomc_target_profile_destroy_fn_t target_profile_destroy;
 };
 
 typedef struct loomc_descriptor_prefix_t {
@@ -232,14 +232,14 @@ static void loomc_target_pass_environment_deinitialize(
   *environment = (loomc_target_pass_environment_t){0};
 }
 
-static void loomc_target_profile_deinitialize_target_profile(
+static void loomc_target_profile_destroy_owned(
     loom_target_profile_t* target_profile,
-    loomc_target_profile_deinitialize_fn_t target_profile_deinitialize,
+    loomc_target_profile_destroy_fn_t target_profile_destroy,
     loomc_allocator_t allocator) {
-  if (target_profile == NULL || target_profile_deinitialize == NULL) {
+  if (target_profile == NULL || target_profile_destroy == NULL) {
     return;
   }
-  target_profile_deinitialize(target_profile, allocator);
+  target_profile_destroy(target_profile, allocator);
 }
 
 loomc_status_t loomc_target_environment_create_from_provider_set(
@@ -531,8 +531,8 @@ void loomc_target_environment_release(
 loomc_status_t loomc_target_profile_create(
     loomc_target_environment_t* target_environment,
     loomc_string_view_t identifier, loom_target_profile_t* target_profile,
-    loomc_target_profile_deinitialize_fn_t deinitialize,
-    loomc_allocator_t allocator, loomc_target_profile_t** out_profile) {
+    loomc_target_profile_destroy_fn_t destroy, loomc_allocator_t allocator,
+    loomc_target_profile_t** out_profile) {
   loom_target_profile_t* pending_target_profile = target_profile;
   loomc_target_profile_t* profile = NULL;
   loomc_status_t status = loomc_ok_status();
@@ -576,7 +576,7 @@ loomc_status_t loomc_target_profile_create(
     profile->target_environment = target_environment;
     loomc_target_environment_retain(profile->target_environment);
     profile->target_profile = pending_target_profile;
-    profile->target_profile_deinitialize = deinitialize;
+    profile->target_profile_destroy = destroy;
     pending_target_profile = NULL;
     status =
         loomc_string_view_clone(identifier, allocator, &profile->identifier);
@@ -586,8 +586,8 @@ loomc_status_t loomc_target_profile_create(
     profile = NULL;
   } else {
     loomc_target_profile_release(profile);
-    loomc_target_profile_deinitialize_target_profile(pending_target_profile,
-                                                     deinitialize, allocator);
+    loomc_target_profile_destroy_owned(pending_target_profile, destroy,
+                                       allocator);
   }
   return status;
 }
@@ -622,8 +622,8 @@ void loomc_target_profile_release(loomc_target_profile_t* profile) {
     return;
   }
   loomc_allocator_t allocator = profile->allocator;
-  loomc_target_profile_deinitialize_target_profile(
-      profile->target_profile, profile->target_profile_deinitialize, allocator);
+  loomc_target_profile_destroy_owned(
+      profile->target_profile, profile->target_profile_destroy, allocator);
   loomc_target_environment_release(profile->target_environment);
   loomc_allocator_free(allocator, (void*)profile->identifier.data);
   loomc_allocator_free(allocator, profile);

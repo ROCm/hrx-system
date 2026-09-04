@@ -20,7 +20,7 @@
 #include "loomc/iree.h"
 #include "target.h"
 
-static void loomc_amdgpu_target_profile_deinitialize(
+static void loomc_amdgpu_target_profile_destroy(
     loom_target_profile_t* target_profile, loomc_allocator_t allocator) {
   loomc_allocator_free(allocator,
                        (loom_amdgpu_target_profile_t*)target_profile);
@@ -420,7 +420,7 @@ loomc_status_t loomc_target_profile_create_amdgpu(
                                                       : options->identifier;
   return loomc_target_profile_create(
       target_environment, identifier, &target_profile->base,
-      loomc_amdgpu_target_profile_deinitialize, allocator, out_profile);
+      loomc_amdgpu_target_profile_destroy, allocator, out_profile);
 }
 
 loomc_status_t loomc_amdgpu_target_profile_query_identity(

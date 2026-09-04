@@ -26,8 +26,8 @@ typedef struct loom_low_repr_environment_t loom_low_repr_environment_t;
 extern "C" {
 #endif
 
-// Releases a target-family profile owned by a public profile handle.
-typedef void (*loomc_target_profile_deinitialize_fn_t)(
+// Destroys a target-family profile owned by a public profile handle.
+typedef void (*loomc_target_profile_destroy_fn_t)(
     loom_target_profile_t* profile, loomc_allocator_t allocator);
 
 // Prepared target pass capability tables derived from a public target
@@ -103,14 +103,14 @@ LOOMC_API_PRIVATE loomc_status_t loomc_target_specialization_options_make_lists(
     loom_target_declaration_binding_list_t* out_bindings);
 
 // Creates a public target profile from a prepared target-family profile. Takes
-// ownership of |target_profile| on entry and calls |deinitialize| on failure or
-// when the final handle reference is released. A NULL deinitializer denotes
+// ownership of |target_profile| on entry and calls |destroy| on failure or when
+// the final handle reference is released. A NULL destroy callback denotes
 // profile storage with process lifetime.
 LOOMC_API_PRIVATE loomc_status_t loomc_target_profile_create(
     loomc_target_environment_t* target_environment,
     loomc_string_view_t identifier, loom_target_profile_t* target_profile,
-    loomc_target_profile_deinitialize_fn_t deinitialize,
-    loomc_allocator_t allocator, loomc_target_profile_t** out_profile);
+    loomc_target_profile_destroy_fn_t destroy, loomc_allocator_t allocator,
+    loomc_target_profile_t** out_profile);
 
 // Returns the typed target-family profile owned by a public profile.
 LOOMC_API_PRIVATE const loom_target_profile_t*
