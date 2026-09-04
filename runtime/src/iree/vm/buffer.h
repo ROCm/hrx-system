@@ -78,7 +78,12 @@ IREE_VM_DEFINE_TYPE_ADAPTERS(iree_vm_buffer, iree_vm_ref_types_t, buffer,
 // Core Byte Buffers
 //===----------------------------------------------------------------------===//
 
-// Allowed byte access on an open VM buffer.
+// Allowed byte access on an open VM buffer. Ordinary constructors create open
+// roots with immutable rights and subspans may only attenuate them. A private
+// storage provider may close a root during explicit resource teardown by
+// clearing its access and data before native cleanup. Existing root/view refs
+// remain valid objects but report NONE and reject byte access. The generic VM
+// intentionally exposes no public close operation.
 enum iree_vm_buffer_access_flag_bits_e {
   // No byte access. Invalid when constructing a buffer.
   IREE_VM_BUFFER_ACCESS_FLAG_NONE = 0u,

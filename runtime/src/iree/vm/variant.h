@@ -28,7 +28,9 @@ extern "C" {
 // Fixed process-local logical call value. The raw lanes define the native ABI
 // layout used by inline construction and calling-compiler optimization. They
 // are not a wire format or an independent construction API. An owning carrier
-// must be moved or reset exactly once.
+// must be moved or reset exactly once. Ref-valued variants use the borrowed,
+// retained, and move ownership vocabulary from ref.h. Function refs are always
+// non-owning and borrow their program.
 typedef struct iree_vm_variant_t {
   // Canonical scalar bits or integer representation of an object pointer.
   uint64_t payload;
@@ -49,10 +51,15 @@ static_assert(sizeof(uintptr_t) <= sizeof(uint64_t),
 
 // Low metadata bits selecting the complete carrier kind.
 enum iree_vm_variant_tag_bits_e {
+  // Owned ref carrier, including canonical all-zero null.
   IREE_VM_VARIANT_TAG_OWNED_REF = 0u,
+  // Borrowed non-null ref carrier.
   IREE_VM_VARIANT_TAG_BORROWED_REF = 1u,
+  // Non-owning program-bound function-ref carrier.
   IREE_VM_VARIANT_TAG_FUNCTION_REF = 2u,
+  // Scalar carrier with its exact type in the remaining metadata bits.
   IREE_VM_VARIANT_TAG_SCALAR = 3u,
+  // Low metadata bits containing the carrier tag.
   IREE_VM_VARIANT_TAG_MASK = 3u,
 };
 
@@ -426,6 +433,12 @@ IREE_API_EXPORT void iree_vm_variant_span_reset(iree_vm_variant_span_t span);
 // |object_type| is the complete C object type. |types| must be a matching
 // resolved family prefix. Typed move helpers stage through a local void* and
 // never alias an object_type** as void**.
+//
+// For example, the core buffer declaration stamps helpers such as:
+//
+//   iree_vm_buffer_variant_from_ptr_borrowed(types, buffer)
+//   iree_vm_buffer_ptr_from_variant_retained(types, variant, &buffer)
+//   iree_vm_buffer_ptr_from_ref_move(types, &ref, &buffer)
 #define IREE_VM_DEFINE_TYPE_ADAPTERS(prefix, table_type, table_field,         \
                                      object_type)                             \
   IREE_ATTRIBUTE_UNUSED static inline iree_vm_ref_t                           \

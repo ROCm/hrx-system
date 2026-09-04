@@ -174,6 +174,16 @@ IREE_API_EXPORT void iree_vm_ref_object_release(void* object,
 // Reference Values
 //===----------------------------------------------------------------------===//
 
+// Ownership is explicit in every constructor and extractor suffix:
+//
+//   *_borrowed  creates no owner; the source anchor remains live.
+//   *_retained  creates a new owner; the destination must be reset/released.
+//   *_move      transfers an owner and clears the source.
+//
+// Moving a borrowed ref first retains it so the result can safely escape the
+// borrow anchor. Ref counts are never queried: live access is sufficient to
+// retain, and every owning carrier is reset exactly once.
+
 // Complete typed ref state. |type_and_state| contains the descriptor pointer in
 // its upper bits and one ownership bit in bit zero. Canonical null is all zero.
 // This is an in-process native ABI and is never serialized or copied across
@@ -187,8 +197,11 @@ typedef struct iree_vm_ref_t {
 
 // Low descriptor-pointer bits used by the public carrier representation.
 enum iree_vm_ref_state_bits_e {
+  // The carrier owns one object reference.
   IREE_VM_REF_STATE_OWNED = 0u,
+  // The carrier borrows an object kept live by another anchor.
   IREE_VM_REF_STATE_BORROWED = 1u,
+  // Reserved descriptor-pointer bits carrying the complete state.
   IREE_VM_REF_STATE_MASK = 3u,
 };
 

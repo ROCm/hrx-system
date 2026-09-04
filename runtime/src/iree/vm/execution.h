@@ -22,6 +22,12 @@ typedef struct iree_vm_invocation_t iree_vm_invocation_t;
 typedef struct iree_vm_linked_module_t iree_vm_linked_module_t;
 typedef struct iree_vm_module_t iree_vm_module_t;
 
+// Trusted execution ABI for module implementations. Host applications invoke
+// process-bound functions through invocation.h or sync.h; they do not construct
+// physical packets, frames, or module callback parameters. Module publication
+// validates implementation-neutral structure and program linking resolves
+// targets before any declaration in this header is used on the execution path.
+
 //===----------------------------------------------------------------------===//
 // Execution State
 //===----------------------------------------------------------------------===//
@@ -29,15 +35,20 @@ typedef struct iree_vm_module_t iree_vm_module_t;
 // Successful execution-driving outcomes. Suspension is ordinary control flow
 // and never encoded as an iree_status_t.
 enum iree_vm_execution_outcome_e {
+  // The operation completed and returned the invocation to idle.
   IREE_VM_EXECUTION_OUTCOME_COMPLETED = 0u,
+  // The operation owns durable state and requires a later resume.
   IREE_VM_EXECUTION_OUTCOME_SUSPENDED = 1u,
 };
 typedef uint32_t iree_vm_execution_outcome_t;
 
 // Sticky cancellation reasons visible to an active provider operation.
 enum iree_vm_cancel_reason_e {
+  // The active operation has no cancellation request.
   IREE_VM_CANCEL_REASON_NONE = 0u,
+  // The host requested ordinary cooperative cancellation.
   IREE_VM_CANCEL_REASON_CANCELLED = 1u,
+  // The host deadline expired before terminal completion.
   IREE_VM_CANCEL_REASON_DEADLINE_EXCEEDED = 2u,
 };
 typedef uint32_t iree_vm_cancel_reason_t;
@@ -234,16 +245,19 @@ typedef struct iree_vm_module_function_resume_params_t {
   iree_vm_frame_t* frame;
 } iree_vm_module_function_resume_params_t;
 
-// Starts one module-local function. On OK, COMPLETED means all exact results
-// are ready and SUSPENDED means continuation state is durable; terminal
-// failure leaves |out_outcome| untouched and never represents control flow.
+// Starts one module-local function. On OK, COMPLETED means every exact result
+// is ready and the callback restored its entry frame checkpoint. SUSPENDED
+// means the callback either preserved durable continuation state or published
+// one child call for the iterative driver. Terminal failure leaves
+// |out_outcome| untouched and never represents control flow.
 typedef iree_status_t(IREE_API_PTR* iree_vm_module_function_start_fn_t)(
     iree_vm_module_t* module,
     const iree_vm_module_function_start_params_t* params,
     iree_vm_execution_outcome_t* out_outcome);
 
 // Resumes one module-owned top frame with the same transactional outcome
-// contract as a function start.
+// contract as a function start. Completion pops all state owned by this resume;
+// suspension leaves a durable frame or one published child call.
 typedef iree_status_t(IREE_API_PTR* iree_vm_module_function_resume_fn_t)(
     iree_vm_module_t* module,
     const iree_vm_module_function_resume_params_t* params,
@@ -313,7 +327,8 @@ typedef struct iree_vm_frame_layout_t {
   iree_host_size_t storage_alignment;
 } iree_vm_frame_layout_t;
 
-// No-fail payload cleanup invoked once before its frame is removed.
+// No-fail payload cleanup invoked exactly once before its frame is removed by
+// normal completion or terminal unwind.
 typedef void(IREE_API_PTR* iree_vm_frame_cleanup_fn_t)(iree_vm_frame_t* frame);
 
 // Pushes one durable frame failure-atomically for the active start callback.

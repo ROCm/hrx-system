@@ -16,7 +16,9 @@ extern "C" {
 
 // A process contains one mutable program-state instance and no execution lock.
 // The host serializes uses of one process; independent processes may execute
-// freely on different threads.
+// freely on different threads. Process-bound functions borrow their process,
+// which must remain live through synchronous completion or the complete
+// suspended asynchronous operation.
 
 // Retains |process| for the caller. A null process is ignored.
 IREE_API_EXPORT void iree_vm_process_retain(iree_vm_process_t* process);
@@ -52,9 +54,12 @@ typedef struct iree_vm_process_create_outcome_t {
 } iree_vm_process_create_outcome_t;
 
 // Starts process construction and the executable's optional initializer.
-// Well-formed disjoint arguments are consumed after storage preflight. An OK
-// suspension leaves the unpublished process owned only by |invocation|; a
-// terminal non-OK leaves |out_outcome| untouched and returns it to idle.
+// Argument count and types must exactly match the initializer, or be empty when
+// none exists. Structural boundary failure consumes nothing. After that check,
+// every return consumes all arguments. OK+SUSPENDED publishes a null process
+// and leaves the unpublished process owned only by |invocation|. OK+COMPLETED
+// publishes the sole process owner. Terminal non-OK leaves |out_outcome|
+// untouched, releases the unpublished process, and returns the invocation idle.
 IREE_API_EXPORT iree_status_t iree_vm_process_create_start(
     iree_vm_program_t* program, iree_vm_invocation_t* invocation,
     iree_vm_variant_span_t arguments,
@@ -62,8 +67,10 @@ IREE_API_EXPORT iree_status_t iree_vm_process_create_start(
     iree_allocator_t host_allocator,
     iree_vm_process_create_outcome_t* out_outcome);
 
-// Resumes suspended process construction. Boundary rejection leaves the
-// unpublished process and invocation unchanged and enters no module.
+// Resumes suspended process construction. Boundary rejection leaves the output,
+// unpublished process, and invocation unchanged and enters no module. Terminal
+// failure leaves the output untouched, unwinds state, and returns the
+// invocation idle. Successful outcomes follow |iree_vm_process_create_start|.
 IREE_API_EXPORT iree_status_t
 iree_vm_process_create_resume(iree_vm_invocation_t* invocation,
                               iree_vm_process_create_outcome_t* out_outcome);

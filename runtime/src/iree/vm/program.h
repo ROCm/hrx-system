@@ -13,6 +13,12 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Immutable linked composition shared by any number of processes and threads.
+// Program-bound function refs borrow the program and remain valid only while an
+// owner keeps it live. Module names, callable mappings, and imports are all
+// resolved during creation; process construction and invocation consume the
+// resulting indexed tables.
+
 // Borrowed module input storage. Library order has no semantic effect.
 typedef struct iree_vm_module_span_t {
   // Contiguous module pointers borrowed for the call.

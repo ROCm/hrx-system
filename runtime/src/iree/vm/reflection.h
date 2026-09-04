@@ -26,12 +26,19 @@ extern "C" {
 // unaligned little-endian bytes; UTF8 may contain NUL bytes. Unknown nonzero
 // IDs remain valid opaque byte spans.
 enum iree_vm_metadata_value_type_e {
+  // Invalid type reserved for zero-initialized outputs.
   IREE_VM_METADATA_VALUE_TYPE_INVALID = 0u,
+  // One byte containing canonical zero or one.
   IREE_VM_METADATA_VALUE_TYPE_BOOL = 1u,
+  // Eight little-endian signed integer bytes.
   IREE_VM_METADATA_VALUE_TYPE_I64 = 2u,
+  // Eight little-endian unsigned integer bytes.
   IREE_VM_METADATA_VALUE_TYPE_U64 = 3u,
+  // Eight little-endian IEEE binary64 bytes.
   IREE_VM_METADATA_VALUE_TYPE_F64 = 4u,
+  // Valid UTF-8 bytes that may contain NUL.
   IREE_VM_METADATA_VALUE_TYPE_UTF8 = 5u,
+  // Uninterpreted bytes.
   IREE_VM_METADATA_VALUE_TYPE_BYTES = 6u,
 };
 typedef uint32_t iree_vm_metadata_value_type_t;
@@ -55,9 +62,13 @@ typedef struct iree_vm_metadata_entry_t {
 //===----------------------------------------------------------------------===//
 
 enum iree_vm_signature_type_kind_e {
+  // Invalid kind reserved for zero-initialized outputs.
   IREE_VM_SIGNATURE_TYPE_KIND_INVALID = 0u,
+  // Exact iree_vm_scalar_type_t payload.
   IREE_VM_SIGNATURE_TYPE_KIND_SCALAR = 1u,
+  // Canonical iree_vm_ref_type_t payload.
   IREE_VM_SIGNATURE_TYPE_KIND_REF = 2u,
+  // Borrowed module-bound iree_vm_callable_type_t payload.
   IREE_VM_SIGNATURE_TYPE_KIND_FUNCTION = 3u,
 };
 typedef uint32_t iree_vm_signature_type_kind_t;
@@ -154,8 +165,11 @@ typedef struct iree_vm_callable_type_description_t {
 //===----------------------------------------------------------------------===//
 
 enum iree_vm_module_declaration_kind_e {
+  // Invalid kind reserved for zero-initialized queries.
   IREE_VM_MODULE_DECLARATION_KIND_INVALID = 0u,
+  // Public import declaration.
   IREE_VM_MODULE_DECLARATION_KIND_IMPORT = 1u,
+  // Public export declaration.
   IREE_VM_MODULE_DECLARATION_KIND_EXPORT = 2u,
 };
 typedef uint32_t iree_vm_module_declaration_kind_t;
@@ -188,9 +202,13 @@ typedef struct iree_vm_module_presentation_t {
 } iree_vm_module_presentation_t;
 
 enum iree_vm_module_metadata_scope_kind_e {
+  // Invalid kind reserved for zero-initialized queries.
   IREE_VM_MODULE_METADATA_SCOPE_KIND_INVALID = 0u,
+  // Module-level public metadata.
   IREE_VM_MODULE_METADATA_SCOPE_KIND_MODULE = 1u,
+  // Metadata belonging to one public import alias.
   IREE_VM_MODULE_METADATA_SCOPE_KIND_IMPORT = 2u,
+  // Metadata belonging to one public export alias.
   IREE_VM_MODULE_METADATA_SCOPE_KIND_EXPORT = 3u,
 };
 typedef uint32_t iree_vm_module_metadata_scope_kind_t;
@@ -213,23 +231,35 @@ typedef struct iree_vm_module_metadata_query_t {
 // Public Reflection
 //===----------------------------------------------------------------------===//
 
-// Describes one valid borrowed import identity. The query always reports exact
-// caller-storage bytes, publishes only when sufficient max-aligned storage and
-// an output are supplied, and performs exactly one provider presentation call.
+// Import, export, and callable descriptions use a two-call caller-storage
+// protocol. First pass empty storage and a null description to obtain the exact
+// required byte size. Allocate that many bytes with normal iree_allocator_t
+// alignment, then repeat the query with the storage and output description.
+// Supplying insufficient storage is not an error: the call reports the required
+// size and leaves both storage and description untouched.
+//
+// Returned field/type spans point into caller storage. Presentation strings may
+// point into immutable module storage or the supplied transient tail. The
+// borrowed declaration's module and the caller storage must therefore remain
+// live until all description views are discarded. A query invokes provider
+// presentation exactly once per call and never allocates.
+
+// Describes one valid borrowed import identity using the caller-storage
+// protocol above.
 IREE_API_EXPORT iree_status_t iree_vm_import_query_description(
     iree_vm_import_t import_value, iree_byte_span_t storage,
     iree_host_size_t* out_required_storage_size,
     iree_vm_import_description_t* out_description);
 
-// Describes one valid borrowed export identity with the exact transactional
-// caller-storage protocol used by import descriptions.
+// Describes one valid borrowed export identity using the caller-storage
+// protocol above.
 IREE_API_EXPORT iree_status_t iree_vm_export_query_description(
     iree_vm_export_t export_value, iree_byte_span_t storage,
     iree_host_size_t* out_required_storage_size,
     iree_vm_export_description_t* out_description);
 
-// Describes one valid borrowed structural callable identity. The exact
-// caller-storage requirement contains only resolved signature types.
+// Describes one valid borrowed structural callable identity. Its storage
+// requirement contains only resolved signature types and no presentation tail.
 IREE_API_EXPORT iree_status_t iree_vm_callable_type_query_description(
     iree_vm_callable_type_t callable_type, iree_byte_span_t storage,
     iree_host_size_t* out_required_storage_size,

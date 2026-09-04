@@ -20,6 +20,23 @@ extern "C" {
 // caller has exclusive access to |invocation| for the complete call and must
 // not request cancellation concurrently. This method may deadlock when the
 // host cannot make provider progress while the calling thread blocks.
+//
+// Initializing results to empty permits one cleanup path on every return:
+//
+//   iree_vm_variant_t arguments[] = {iree_vm_variant_from_i32(value)};
+//   iree_vm_variant_t results[1] = {0};
+//   iree_status_t status = iree_vm_invoke(
+//       invocation, function, iree_vm_variant_span_from_array(arguments),
+//       iree_vm_variant_span_from_array(results));
+//   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+//   if (iree_status_is_ok(status)) {
+//     status = iree_vm_i32_from_variant(results[0], &result);
+//   }
+//   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+//
+// The argument reset releases owners only when structural rejection occurred;
+// otherwise invoke already emptied the carriers. The result reset is safe
+// because non-OK never modified the initially empty cells.
 IREE_API_EXPORT iree_status_t iree_vm_invoke(iree_vm_invocation_t* invocation,
                                              iree_vm_function_t function,
                                              iree_vm_variant_span_t arguments,

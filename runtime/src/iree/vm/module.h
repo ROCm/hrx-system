@@ -22,6 +22,12 @@ extern "C" {
 typedef struct iree_vm_module_t iree_vm_module_t;
 typedef struct iree_vm_module_vtable_t iree_vm_module_vtable_t;
 
+// Immutable provider-defined unit of composition. Implementations embed
+// iree_vm_module_t at offset zero and own the vtable, descriptor, declaration
+// storage, and private representation for the complete module lifetime. A
+// published module may receive concurrent callbacks for independent processes;
+// all mutable program-instance state lives in the process slices below.
+
 // Optional reflection payloads are completed by reflection.h. The provider
 // vtable passes only pointers and does not require their representations.
 typedef struct iree_vm_metadata_entry_t iree_vm_metadata_entry_t;
@@ -34,12 +40,15 @@ typedef struct iree_vm_module_presentation_query_t
 // Immutable Declarations
 //===----------------------------------------------------------------------===//
 
-// Four-byte module-local machine signature type.
+// Four-byte module-local machine signature type. Kind values 0x0001 through
+// 0x00FF are defined iree_vm_scalar_type_t IDs.
 typedef uint16_t iree_vm_module_signature_type_kind_t;
 enum iree_vm_module_signature_type_kind_e {
+  // Invalid type reserved for zero-initialized declarations.
   IREE_VM_MODULE_SIGNATURE_TYPE_KIND_INVALID = 0x0000,
-  // Values 0x0001 through 0x00FF carry defined iree_vm_scalar_type_t IDs.
+  // Module-local ref type named by |type_ordinal|.
   IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF = 0x0100,
+  // Module-local callable type named by |type_ordinal|.
   IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION = 0x0200,
 };
 
@@ -208,8 +217,6 @@ typedef struct iree_vm_module_descriptor_t {
 //===----------------------------------------------------------------------===//
 
 // Generic ref-counted module base embedded at offset zero by implementations.
-// One immutable module may receive concurrent calls for independent processes;
-// mutable process state exists only in the callback's opaque process slice.
 struct iree_vm_module_t {
   // Intrusive owner count published last by module initialization.
   iree_atomic_ref_count_t ref_count;
@@ -225,20 +232,24 @@ static_assert(sizeof(void*) != 8 || sizeof(iree_vm_module_t) == 24,
 static_assert(sizeof(void*) != 4 || sizeof(iree_vm_module_t) == 12,
               "32-bit module bases must remain 12 bytes");
 
-// Constructs one exact zeroed process-storage span synchronously. The callback
-// cannot execute guest code, call another module, or yield. On failure it
-// releases its own partial work; core detaches only earlier attached modules.
+// Constructs one exact zeroed process-storage span synchronously. A present
+// callback is invoked even when the span is empty. It cannot execute guest
+// code, call another module, or yield. On failure it releases its own partial
+// work; core detaches only earlier attached modules.
 typedef iree_status_t(IREE_API_PTR* iree_vm_module_attach_state_fn_t)(
     iree_vm_module_t* module, iree_byte_span_t zeroed_storage,
     iree_allocator_t host_allocator);
 
-// Validates that one attached process-storage span is publishable. Failure
-// leaves a representation accepted by |detach_state|.
+// Validates that one attached process-storage span is publishable after the
+// executable initializer completes. A present callback is invoked even when
+// the span is empty. Failure leaves a representation accepted by
+// |detach_state|.
 typedef iree_status_t(IREE_API_PTR* iree_vm_module_seal_state_fn_t)(
     iree_vm_module_t* module, iree_byte_span_t storage);
 
 // Releases one attached or sealed span without failing or freeing its
-// container.
+// container. Process-construction failure and final release invoke callbacks in
+// reverse attachment order, including present callbacks for empty spans.
 typedef void(IREE_API_PTR* iree_vm_module_detach_state_fn_t)(
     iree_vm_module_t* module, iree_byte_span_t storage);
 
@@ -279,11 +290,13 @@ typedef void(IREE_API_PTR* iree_vm_module_metadata_by_ordinal_fn_t)(
     const iree_vm_module_metadata_query_t* query,
     iree_vm_metadata_entry_t* out_entry);
 
+// Initial generic module provider ABI version.
 enum { IREE_VM_MODULE_ABI_VERSION_0 = 0 };
 
 // Versioned generic module implementation interface. State lifecycle callbacks
 // are independently nullable identity operations; every other callback is
-// required in version zero.
+// required in version zero. Common VM code allocates and routes process storage
+// but never interprets it.
 struct iree_vm_module_vtable_t {
   // Accessible bytes in this vtable.
   uint32_t structure_size;
@@ -323,9 +336,12 @@ static_assert(sizeof(void*) != 8 ||
                   offsetof(iree_vm_module_vtable_t, attach_state) == 32,
               "64-bit module vtable hot prefix must remain 32 bytes");
 
-// Failure-atomically validates and publishes the first module owner. Common
-// validation is allocation-free and covers only implementation-neutral facts;
-// failure leaves implementation cleanup with the unpublished factory object.
+// Failure-atomically validates and publishes the first module owner. The
+// factory calls this only after its immutable vtable, descriptor, declaration
+// storage, and private representation are complete. Common validation is
+// allocation-free and covers only implementation-neutral facts. Success makes
+// |destroy| responsible for final cleanup; failure does not call |destroy| and
+// leaves all cleanup with the unpublished factory object.
 IREE_API_EXPORT iree_status_t
 iree_vm_module_initialize(const iree_vm_module_vtable_t* vtable,
                           const iree_vm_module_descriptor_t* descriptor,
@@ -377,8 +393,8 @@ IREE_API_EXPORT iree_status_t iree_vm_module_export_by_ordinal(
     const iree_vm_module_t* module, iree_host_size_t ordinal,
     iree_vm_export_t* out_export);
 
-// Looks up one exact name in the sorted export directory. Failure leaves
-// |out_export| untouched.
+// Looks up one exact name in the sorted export directory. An absent name
+// returns NOT_FOUND. Failure leaves |out_export| untouched.
 IREE_API_EXPORT iree_status_t iree_vm_module_lookup_export(
     const iree_vm_module_t* module, iree_string_view_t name,
     iree_vm_export_t* out_export);
