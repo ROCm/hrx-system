@@ -4,6 +4,7 @@ load(
     "loom_cc_binary",
     "loom_cc_library",
     "loom_cc_test",
+    "loom_config_compatible_with",
 )
 
 package(
@@ -11,6 +12,10 @@ package(
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
 )
+
+_LLVMIR_ARTIFACTS_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:llvmir_artifacts",
+])
 
 _EMIT_AMDGPU_CHECK_COPTS = iree_select({
     "//loom/config/emit:amdgpu": [
@@ -445,6 +450,7 @@ loom_cc_library(
     name = "llvmir_provider",
     srcs = ["llvmir_provider.c"],
     hdrs = ["llvmir_provider.h"],
+    target_compatible_with = _LLVMIR_ARTIFACTS_COMPATIBLE_WITH,
     deps = [
         ":provider",
         "//loom/src/loom/target/emit/llvmir:loom_check",

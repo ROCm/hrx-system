@@ -42,6 +42,10 @@ PACKAGE_POLICIES = [
         build_requirements = [TARGET_ARCH_LLVMIR],
     ),
     package_policy(
+        packages = ["loom/src/loom/ops/llvmir/..."],
+        build_requirements = [TARGET_ARCH_LLVMIR],
+    ),
+    package_policy(
         packages = ["loom/src/loom/target/arch/spirv/..."],
         build_requirements = [TARGET_ARCH_SPIRV],
     ),
