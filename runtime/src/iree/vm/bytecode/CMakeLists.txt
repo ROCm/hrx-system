@@ -40,6 +40,22 @@ iree_c_embed_data(
 
 iree_c_embed_data(
   NAME
+    launch_config_testdata
+  SRCS
+    "testdata/launch_config.vmfb"
+  C_FILE_OUTPUT
+    "launch_config_testdata.c"
+  H_FILE_OUTPUT
+    "launch_config_testdata.h"
+  IDENTIFIER
+    "iree_vm_bytecode_launch_config_testdata"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
+iree_c_embed_data(
+  NAME
     verifier_testdata
   SRCS
     "testdata/structural.vmfb"
@@ -102,6 +118,97 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    module
+  HDRS
+    "image.h"
+    "interpreter.h"
+    "interpreter_atomic.h"
+    "interpreter_buffer.h"
+    "interpreter_call.h"
+    "interpreter_conversion.h"
+    "interpreter_float.h"
+    "interpreter_float_math.h"
+    "interpreter_frame.h"
+    "interpreter_integer.h"
+    "interpreter_memory.h"
+    "module.h"
+    "process.h"
+    "reflection.h"
+  TEXTUAL_HDRS
+    "interpreter/data.inl"
+    "interpreter_float_impl.inl"
+    "interpreter_float_math_impl.inl"
+    "interpreter_integer_impl.inl"
+  SRCS
+    "image.c"
+    "interpreter.c"
+    "interpreter_atomic.c"
+    "interpreter_call.c"
+    "interpreter_conversion.c"
+    "interpreter_float_math.c"
+    "interpreter_frame.c"
+    "module.c"
+    "process.c"
+    "reflection.c"
+  DEPS
+    ::verifier
+    ::wire
+    iree::base
+    iree::base::core_headers
+    iree::base::internal
+    iree::vm
+  PUBLIC
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    module_benchmark
+  SRCS
+    "module_benchmark.cc"
+  DEPS
+    ::launch_config_testdata
+    ::module
+    iree::base
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+    iree::vm
+  TESTONLY
+)
+
+iree_cc_test(
+  NAME
+    interpreter_test
+  SRCS
+    "interpreter_test.cc"
+  DEPS
+    ::execution_testdata
+    ::module
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    iree::vm::invocation_test_module
+)
+
+iree_cc_test(
+  NAME
+    module_test
+  SRCS
+    "module_test.cc"
+  DEPS
+    ::execution_testdata
+    ::launch_config_testdata
+    ::module
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    iree::vm::test_support
+)
+
 iree_cc_test(
   NAME
     verifier_test
@@ -157,6 +264,129 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+iree_cc_test(
+  NAME
+    reflection_test
+  SRCS
+    "reflection_test.cc"
+  DEPS
+    ::execution_testdata
+    ::module
+    ::verifier
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    process_test
+  SRCS
+    "process_test.cc"
+  DEPS
+    ::module
+    ::verifier
+    ::verifier_testdata
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+)
+
+iree_cc_test(
+  NAME
+    interpreter_atomic_test
+  SRCS
+    "interpreter_atomic_test.cc"
+  DEPS
+    ::module
+    ::wire
+    iree::base
+    iree::base::core_headers
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    interpreter_buffer_test
+  SRCS
+    "interpreter_buffer_test.cc"
+  DEPS
+    ::module
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    interpreter_conversion_test
+  SRCS
+    "interpreter/conversion_test_vectors.inl"
+    "interpreter_conversion_test.cc"
+  DEPS
+    ::module
+    ::wire
+    iree::base
+    iree::base::internal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    interpreter_memory_test
+  SRCS
+    "interpreter_memory_test.cc"
+  DEPS
+    ::module
+    ::wire
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    interpreter_float_math_test
+  SRCS
+    "interpreter_float_math_test.cc"
+  DEPS
+    ::module
+    ::wire
+    iree::base
+    iree::base::internal::fpu_state
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    interpreter_float_test
+  SRCS
+    "interpreter_float_test.cc"
+  DEPS
+    ::module
+    ::wire
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    interpreter_integer_test
+  SRCS
+    "interpreter_integer_test.cc"
+  DEPS
+    ::module
+    ::wire
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 iree_py_generated_files(
   NAME
     projections
@@ -165,7 +395,10 @@ iree_py_generated_files(
   OUTPUTS
     "docs/specification.md"
     "disassembler/data.inl"
+    "interpreter/conversion_test_vectors.inl"
+    "interpreter/data.inl"
     "testdata/core_execution.vmfb"
+    "testdata/launch_config.vmfb"
     "testdata/structural.vmfb"
     "verifier/data.c"
     "verifier/instruction_cases.inl"
@@ -176,11 +409,14 @@ iree_py_generated_files(
   OUTPUT_FLAGS
     "--documentation"
     "--disassembler-data"
+    "--conversion-test-vectors"
+    "--interpreter-data"
     "--core-execution-module-fixture"
-    "--instruction-verifier-cases"
-    "--module-verifier-cases"
+    "--launch-config-module-fixture"
     "--structural-module-fixture"
     "--verifier-source"
+    "--instruction-verifier-cases"
+    "--module-verifier-cases"
     "--wire-assertions-source"
     "--wire-core-header"
     "--wire-module-header"

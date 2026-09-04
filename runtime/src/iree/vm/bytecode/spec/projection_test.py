@@ -27,6 +27,7 @@ class ProjectionTest(unittest.TestCase):
         disassembler = self.outputs["disassembler_data"]
         documentation = self.outputs["documentation"]
         instruction_verifier = self.outputs["instruction_verifier_cases"]
+        interpreter_data = self.outputs["interpreter_data"]
         module_verifier = self.outputs["module_verifier_cases"]
         self.assertNotIn("static_assert", module_header + core_header)
         self.assertNotIn("iree_string_view_t", disassembler)
@@ -47,6 +48,11 @@ class ProjectionTest(unittest.TestCase):
             self.assertIn(f"sizeof({c_type}) == {instruction.byte_length}u", assertions)
             self.assertIn(_bstring(instruction.mnemonic), disassembler)
             self.assertIn(instruction.mnemonic, instruction_verifier)
+            self.assertIn(
+                f"OP({instruction.mnemonic.replace('.', '_').upper()}, "
+                f"{instruction.mnemonic.replace('.', '_')}, {c_type})",
+                interpreter_data,
+            )
             self.assertEqual(documentation.count(f"#### `{instruction.mnemonic}`"), 1)
         for table in (
             SPECIFICATION.module_format.numeric_tables + SPECIFICATION.selectors
@@ -77,9 +83,69 @@ class ProjectionTest(unittest.TestCase):
         self.assertNotIn("iree_status_t", verifier_source)
         self.assertNotIn("iree_status_t", instruction_cases)
         self.assertNotIn("VERIFICATION_RULE_", source)
-        self.assertLess(
-            instruction_cases.count("case "), len(SPECIFICATION.instructions)
+        self.assertEqual(
+            instruction_cases.count("case IREE_VM_BYTECODE_OPCODE_"),
+            len(SPECIFICATION.instructions),
         )
+        self.assertLess(
+            instruction_cases.count("return true;"), len(SPECIFICATION.instructions)
+        )
+
+    def test_interpreter_data_covers_core_directly(self) -> None:
+        data = self.outputs["interpreter_data"]
+        opcode_list = data.partition(
+            "#define IREE_VM_BYTECODE_INTERPRETER_INTEGER_TOTAL_LIST_COUNT"
+        )[0]
+        self.assertEqual(opcode_list.count("  OP("), len(SPECIFICATION.instructions))
+        self.assertNotIn("verification", data.lower())
+        for family_name, macro_name in (
+            ("integer", "INTEGER"),
+            ("float", "FLOAT"),
+            ("conversion", "CONVERSION"),
+        ):
+            family_instructions = tuple(
+                instruction
+                for instruction in SPECIFICATION.instructions
+                if instruction.family.name == family_name
+            )
+            if family_name == "float":
+                self.assertIn(
+                    f"#define IREE_VM_BYTECODE_INTERPRETER_{macro_name}_LIST_COUNT "
+                    f"{len(family_instructions)}u",
+                    data,
+                )
+            else:
+                total_count = sum(
+                    not instruction.failures for instruction in family_instructions
+                )
+                fallible_count = len(family_instructions) - total_count
+                self.assertIn(
+                    f"#define IREE_VM_BYTECODE_INTERPRETER_{macro_name}_TOTAL_LIST_COUNT "
+                    f"{total_count}u",
+                    data,
+                )
+                self.assertIn(
+                    f"#define IREE_VM_BYTECODE_INTERPRETER_{macro_name}_FALLIBLE_LIST_COUNT "
+                    f"{fallible_count}u",
+                    data,
+                )
+        for table_name, macro_name in (
+            ("integer.convert", "INTEGER_CONVERSION"),
+            ("float.extend", "FLOAT_EXTEND"),
+            ("float.truncate", "FLOAT_TRUNCATE"),
+            ("float.width", "FLOAT_WIDTH"),
+            ("integer.to.float", "INTEGER_TO_FLOAT"),
+            ("float.to.integer", "FLOAT_TO_INTEGER"),
+        ):
+            table = next(
+                table for table in SPECIFICATION.selectors if table.name == table_name
+            )
+            self.assertIn(
+                f"#define IREE_VM_BYTECODE_{macro_name}_COUNT {len(table.values)}u",
+                data,
+            )
+            for value in table.values:
+                self.assertIn(value.name.replace(".", "_").upper(), data)
 
 
 if __name__ == "__main__":

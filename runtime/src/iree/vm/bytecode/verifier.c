@@ -1749,9 +1749,8 @@ static bool iree_vm_bytecode_verify_indirect_call(
 
 static bool iree_vm_bytecode_verify_instruction(
     const uint8_t* record, uint32_t record_offset, uint8_t record_length,
-    uint32_t descriptor,
     const iree_vm_bytecode_instruction_context_t* context) {
-  switch (iree_vm_bytecode_instruction_verification_shape_ordinal(descriptor)) {
+  switch (record[0]) {
 #include "iree/vm/bytecode/verifier/instruction_cases.inl"
     default:
       IREE_ASSERT_UNREACHABLE("generated instruction verifier is incomplete");
@@ -1780,7 +1779,7 @@ static iree_status_t iree_vm_bytecode_verify_function_instructions(
   bool has_call = false;
   while (record_offset < bytecode.data_length) {
     const uint8_t opcode = bytecode.data[record_offset];
-    const uint32_t descriptor =
+    const uint16_t descriptor =
         iree_vm_bytecode_instruction_verification[opcode];
     if (descriptor == 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1850,12 +1849,12 @@ static iree_status_t iree_vm_bytecode_verify_function_instructions(
   record_offset = 0;
   while (record_offset < bytecode.data_length) {
     const uint8_t* record = bytecode.data + record_offset;
-    const uint32_t descriptor =
+    const uint16_t descriptor =
         iree_vm_bytecode_instruction_verification[record[0]];
     const uint8_t record_length =
         iree_vm_bytecode_verification_byte_length(descriptor);
-    if (!iree_vm_bytecode_verify_instruction(
-            record, record_offset, record_length, descriptor, &context)) {
+    if (!iree_vm_bytecode_verify_instruction(record, record_offset,
+                                             record_length, &context)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "function %" PRIu32 " opcode 0x%02" PRIx8
                               " at byte %" PRIu32

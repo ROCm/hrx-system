@@ -16,6 +16,7 @@ iree_py_library(
     name = "spec",
     srcs = [
         "__init__.py",
+        "conversion_test_vectors.py",
         "isa/__init__.py",
         "isa/core/__init__.py",
         "isa/core/abi.py",

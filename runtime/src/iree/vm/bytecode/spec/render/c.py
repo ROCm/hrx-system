@@ -289,14 +289,12 @@ def _field_layouts(fields, offsets) -> dict[str, tuple[int, int]]:
     }
 
 
-def _instruction_descriptor(
-    instruction: isa.Instruction, verification_shape_ordinal: int
-) -> str:
-    if verification_shape_ordinal > 0xFFFF or instruction.byte_length > 0xFF:
+def _instruction_descriptor(instruction: isa.Instruction) -> str:
+    if instruction.byte_length > 0xFF:
         raise ValueError(f"{instruction.mnemonic}: verification descriptor overflow")
     return (
         "    IREE_VM_BYTECODE_PACK_INSTRUCTION_VERIFICATION"
-        f"({verification_shape_ordinal}u, IREE_VM_BYTECODE_CONTROL_FLOW_"
+        f"(IREE_VM_BYTECODE_CONTROL_FLOW_"
         f"{instruction.control_flow.name}, {instruction.byte_length}u),"
     )
 
@@ -304,19 +302,17 @@ def _instruction_descriptor(
 def _instruction_verification_shapes(specification: Specification):
     """Returns stable deduplicated verification shapes for Core instructions."""
 
-    shape_ordinals = {}
+    shape_indices = {}
     shapes = []
-    instruction_shapes = []
     for instruction in sorted(specification.instructions, key=lambda item: item.opcode):
         checks = _instruction_checks(instruction)
-        shape_ordinal = shape_ordinals.get(checks)
-        if shape_ordinal is None:
-            shape_ordinal = len(shapes) + 1
-            shape_ordinals[checks] = shape_ordinal
+        shape_index = shape_indices.get(checks)
+        if shape_index is None:
+            shape_index = len(shapes)
+            shape_indices[checks] = shape_index
             shapes.append([checks, []])
-        shapes[shape_ordinal - 1][1].append(instruction.mnemonic)
-        instruction_shapes.append((instruction, shape_ordinal))
-    return instruction_shapes, shapes
+        shapes[shape_index][1].append(instruction)
+    return shapes
 
 
 def _c_u32(value: int) -> str:
@@ -595,11 +591,10 @@ def _instruction_checks(
 def render_verifier_data(specification: Specification) -> str:
     """Renders the dense runtime verification tables."""
 
-    instruction_descriptors = ["    UINT32_C(0),"] * 256
-    instruction_shapes, _ = _instruction_verification_shapes(specification)
-    for instruction, shape_ordinal in instruction_shapes:
+    instruction_descriptors = ["    UINT16_C(0),"] * 256
+    for instruction in specification.instructions:
         instruction_descriptors[instruction.opcode] = _instruction_descriptor(
-            instruction, shape_ordinal
+            instruction
         )
     section_descriptors = [0] * (
         max(section.section_type for section in specification.module_format.sections)
@@ -618,12 +613,10 @@ def render_verifier_data(specification: Specification) -> str:
         '#include "iree/vm/bytecode/wire/module.h"',
         "",
         "#define IREE_VM_BYTECODE_PACK_INSTRUCTION_VERIFICATION(\\",
-        "    verification_shape_ordinal, control_flow, byte_length)  \\",
-        "  (((uint32_t)(verification_shape_ordinal) << 16) |         \\",
-        "   ((uint32_t)(control_flow) << 12) |                        \\",
-        "   (uint32_t)(byte_length))",
+        "    control_flow, byte_length)                        \\",
+        "  (((uint16_t)(control_flow) << 12) | (uint16_t)(byte_length))",
         "",
-        "const uint32_t iree_vm_bytecode_instruction_verification[256] = {",
+        "const uint16_t iree_vm_bytecode_instruction_verification[256] = {",
     ]
     lines.extend(instruction_descriptors)
     lines.extend(
@@ -643,10 +636,14 @@ def render_verifier_data(specification: Specification) -> str:
 def render_instruction_verifier_cases(specification: Specification) -> str:
     """Renders direct deduplicated Core instruction validation cases."""
 
-    _, shapes = _instruction_verification_shapes(specification)
+    shapes = _instruction_verification_shapes(specification)
     lines = [_COPYRIGHT.rstrip(), "", _GENERATED.rstrip(), ""]
-    for shape_ordinal, (checks, mnemonics) in enumerate(shapes, 1):
-        lines.append(f"case {shape_ordinal}u:  // {', '.join(mnemonics)}")
+    for checks, instructions in shapes:
+        for instruction in instructions:
+            lines.append(
+                f"case IREE_VM_BYTECODE_OPCODE_{_identifier(instruction.mnemonic)}:"
+            )
+        lines.append(f"  // {', '.join(item.mnemonic for item in instructions)}")
         effects = []
         for predicate, effect in checks:
             if predicate:
@@ -818,6 +815,155 @@ def render_module_verifier_cases(specification: Specification) -> str:
                 lines.append(f"  if (!({predicate})) break;")
         lines.append("  return iree_ok_status();")
     return "\n".join(lines) + "\n"
+
+
+def _selector_values(specification: Specification, name: str):
+    table = next(table for table in specification.selectors if table.name == name)
+    values = tuple(sorted(table.values, key=lambda value: value.value))
+    if tuple(value.value for value in values) != tuple(range(len(values))):
+        raise ValueError(f"{name}: interpreter data requires dense selectors")
+    return values
+
+
+def _render_row_macro(lines: list[str], name: str, rows: Iterable[str]) -> None:
+    rows = tuple(rows)
+    lines.extend(
+        [
+            f"#define {name}_COUNT {len(rows)}u",
+            f"#define {name}_ROWS(ROW) \\",
+        ]
+    )
+    for index, row in enumerate(rows):
+        continuation = " \\" if index + 1 != len(rows) else ""
+        lines.append(f"  ROW({row}){continuation}")
+    lines.append("")
+
+
+def _render_instruction_macro(
+    lines: list[str], name: str, instructions: Iterable[isa.Instruction]
+) -> None:
+    """Renders one X-macro list of physical instruction declarations."""
+
+    instructions = tuple(instructions)
+    lines.extend(
+        [f"#define {name}_COUNT {len(instructions)}u", f"#define {name}(OP) \\"]
+    )
+    for index, instruction in enumerate(instructions):
+        continuation = " \\" if index + 1 != len(instructions) else ""
+        label = instruction.mnemonic.replace(".", "_")
+        lines.append(
+            f"  OP({_identifier(instruction.mnemonic)}, {label}, "
+            f"{_instruction_c_type(instruction)}){continuation}"
+        )
+    lines.append("")
+
+
+def render_interpreter_data(specification: Specification) -> str:
+    """Renders complete Core dispatch and compact semantic selector data."""
+
+    instructions = sorted(specification.instructions, key=lambda item: item.opcode)
+    lines = [_COPYRIGHT.rstrip(), "", _GENERATED.rstrip(), ""]
+    _render_instruction_macro(
+        lines, "IREE_VM_BYTECODE_INTERPRETER_OPCODE_LIST", instructions
+    )
+
+    family_instructions = {
+        family.name: tuple(
+            instruction for instruction in instructions if instruction.family == family
+        )
+        for family in specification.families
+    }
+    integer_instructions = family_instructions["integer"]
+    _render_instruction_macro(
+        lines,
+        "IREE_VM_BYTECODE_INTERPRETER_INTEGER_TOTAL_LIST",
+        (
+            instruction
+            for instruction in integer_instructions
+            if not instruction.failures
+        ),
+    )
+    _render_instruction_macro(
+        lines,
+        "IREE_VM_BYTECODE_INTERPRETER_INTEGER_FALLIBLE_LIST",
+        (instruction for instruction in integer_instructions if instruction.failures),
+    )
+    _render_instruction_macro(
+        lines,
+        "IREE_VM_BYTECODE_INTERPRETER_FLOAT_LIST",
+        family_instructions["float"],
+    )
+    conversion_instructions = family_instructions["conversion"]
+    _render_instruction_macro(
+        lines,
+        "IREE_VM_BYTECODE_INTERPRETER_CONVERSION_TOTAL_LIST",
+        (
+            instruction
+            for instruction in conversion_instructions
+            if not instruction.failures
+        ),
+    )
+    _render_instruction_macro(
+        lines,
+        "IREE_VM_BYTECODE_INTERPRETER_CONVERSION_FALLIBLE_LIST",
+        (
+            instruction
+            for instruction in conversion_instructions
+            if instruction.failures
+        ),
+    )
+
+    integer_rows = []
+    for value in _selector_values(specification, "integer.convert"):
+        source, destination = value.name.split(".to.")
+        source_kind = source[0]
+        if source_kind not in ("s", "u", "i") or destination[0] != "i":
+            raise ValueError(f"integer.convert: invalid selector {value.name}")
+        integer_rows.append(
+            f"{_identifier(value.name)}, {value.value}u, {int(source[1:])}u, "
+            f"{int(destination[1:])}u, {int(source_kind == 's')}u"
+        )
+    _render_row_macro(lines, "IREE_VM_BYTECODE_INTEGER_CONVERSION", integer_rows)
+
+    float_formats = {"f8e4m3", "f8e5m2", "f16", "bf16", "f32", "f64"}
+    for selector_name, macro_name in (
+        ("float.extend", "IREE_VM_BYTECODE_FLOAT_EXTEND"),
+        ("float.truncate", "IREE_VM_BYTECODE_FLOAT_TRUNCATE"),
+        ("float.width", "IREE_VM_BYTECODE_FLOAT_WIDTH"),
+    ):
+        rows = []
+        for value in _selector_values(specification, selector_name):
+            source, destination = value.name.split(".to.")
+            if source not in float_formats or destination not in float_formats:
+                raise ValueError(f"{selector_name}: invalid selector {value.name}")
+            rows.append(
+                f"{_identifier(value.name)}, {value.value}u, "
+                f"{_identifier(source)}, {_identifier(destination)}"
+            )
+        _render_row_macro(lines, macro_name, rows)
+
+    integer_to_float_rows = []
+    for value in _selector_values(specification, "integer.to.float"):
+        source, destination = value.name.split(".to.")
+        if source[0] not in ("s", "u") or destination not in float_formats:
+            raise ValueError(f"integer.to.float: invalid selector {value.name}")
+        integer_to_float_rows.append(
+            f"{_identifier(value.name)}, {value.value}u, {int(source[1:])}u, "
+            f"{int(source[0] == 's')}u, {_identifier(destination)}"
+        )
+    _render_row_macro(lines, "IREE_VM_BYTECODE_INTEGER_TO_FLOAT", integer_to_float_rows)
+
+    float_to_integer_rows = []
+    for value in _selector_values(specification, "float.to.integer"):
+        source, destination = value.name.split(".to.")
+        if source not in float_formats or destination[0] not in ("s", "u"):
+            raise ValueError(f"float.to.integer: invalid selector {value.name}")
+        float_to_integer_rows.append(
+            f"{_identifier(value.name)}, {value.value}u, {_identifier(source)}, "
+            f"{int(destination[1:])}u, {int(destination[0] == 's')}u"
+        )
+    _render_row_macro(lines, "IREE_VM_BYTECODE_FLOAT_TO_INTEGER", float_to_integer_rows)
+    return "\n".join(lines)
 
 
 def _c_string(value: str) -> str:

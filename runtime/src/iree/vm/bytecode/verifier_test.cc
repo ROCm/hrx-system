@@ -86,7 +86,7 @@ class ModuleVerificationTest : public ::testing::Test {
     for (iree_host_size_t offset = 0; offset < bytecode.data_length;) {
       const uint8_t* record = bytecode.data + offset;
       if (record[0] == opcode) return record;
-      const uint32_t descriptor =
+      const uint16_t descriptor =
           iree_vm_bytecode_instruction_verification[record[0]];
       if (descriptor == 0) return nullptr;
       offset += iree_vm_bytecode_verification_byte_length(descriptor);
@@ -123,22 +123,28 @@ TEST(CoreExecutionModuleVerificationTest, MapsAndVerifies) {
       iree_vm_bytecode_verify_module_instructions(&plan, block_offsets.data()));
 
   EXPECT_EQ(plan.layout.requirements.count, 0u);
-  EXPECT_EQ(plan.layout.imports.entry_count, 0u);
+  EXPECT_EQ(plan.layout.imports.entry_count, 2u);
   EXPECT_EQ(plan.layout.constants.count, 0u);
   EXPECT_EQ(plan.layout.ref_types.entry_count, 1u);
-  EXPECT_EQ(plan.layout.callable_types.count, 2u);
-  EXPECT_EQ(plan.layout.exports.count, 2u);
-  EXPECT_EQ(plan.layout.functions.count, 2u);
+  EXPECT_EQ(plan.layout.callable_types.count, 11u);
+  EXPECT_EQ(plan.layout.exports.count, 20u);
+  EXPECT_EQ(plan.layout.functions.count, 24u);
   EXPECT_EQ(plan.layout.rodata.count, 1u);
-  EXPECT_EQ(plan.callable_fields.value_count, 2u);
-  EXPECT_EQ(plan.callable_fields.ref_count, 1u);
+  EXPECT_EQ(plan.callable_fields.value_count, 45u);
+  EXPECT_EQ(plan.callable_fields.ref_count, 41u);
   EXPECT_EQ(plan.callable_fields.function_count, 0u);
   EXPECT_EQ(plan.rodata_storage.copy_length, 0u);
   ASSERT_NE(plan.layout.globals.header, nullptr);
-  EXPECT_EQ(plan.layout.globals.header->value_count_u32, 1u);
+  EXPECT_EQ(plan.layout.globals.header->value_count_u32, 2u);
   EXPECT_EQ(plan.layout.globals.header->immutable_value_count_u32, 1u);
+  EXPECT_EQ(plan.layout.globals.header->ref_count_u32, 2u);
+  EXPECT_EQ(plan.layout.globals.header->immutable_ref_count_u32, 1u);
+  EXPECT_EQ(plan.layout.globals.header->function_count_u32, 2u);
+  EXPECT_EQ(plan.layout.globals.header->immutable_function_count_u32, 1u);
   EXPECT_TRUE(iree_string_view_equal(
-      iree_vm_bytecode_string_at(&plan.layout.strings, 1), IREE_SV("run")));
+      iree_vm_bytecode_string_at(&plan.layout.strings,
+                                 plan.layout.exports.rows[16].name_string_u16),
+      IREE_SV("run")));
 }
 
 TEST_F(ModuleVerificationTest, MapsCompleteCanonicalImage) {

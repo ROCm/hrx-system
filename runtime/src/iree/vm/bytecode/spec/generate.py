@@ -11,10 +11,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from iree.vm.bytecode.spec.conversion_test_vectors import (
+    render_conversion_test_vectors,
+)
 from iree.vm.bytecode.spec.render.c import (
     render_core_header,
     render_disassembler_data,
     render_instruction_verifier_cases,
+    render_interpreter_data,
     render_module_header,
     render_module_verifier_cases,
     render_verifier_data,
@@ -22,6 +26,7 @@ from iree.vm.bytecode.spec.render.c import (
 )
 from iree.vm.bytecode.spec.render.fixture import (
     render_core_execution_module_fixture,
+    render_launch_config_module_fixture,
     render_structural_module_fixture,
 )
 from iree.vm.bytecode.spec.render.markdown import render_specification
@@ -51,8 +56,13 @@ def generate_outputs() -> dict[str, str | bytes]:
         "module_verifier_cases": render_module_verifier_cases(SPECIFICATION),
         "verifier_source": render_verifier_data(SPECIFICATION),
         "disassembler_data": render_disassembler_data(SPECIFICATION),
+        "interpreter_data": render_interpreter_data(SPECIFICATION),
+        "conversion_test_vectors": render_conversion_test_vectors(SPECIFICATION),
         "documentation": render_specification(SPECIFICATION),
         "core_execution_module_fixture": render_core_execution_module_fixture(
+            SPECIFICATION
+        ),
+        "launch_config_module_fixture": render_launch_config_module_fixture(
             SPECIFICATION
         ),
         "structural_module_fixture": render_structural_module_fixture(SPECIFICATION),

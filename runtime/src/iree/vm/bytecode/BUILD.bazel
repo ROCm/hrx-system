@@ -23,7 +23,10 @@ iree_generated_files(
     outs = [
         "disassembler/data.inl",
         "docs/specification.md",
+        "interpreter/conversion_test_vectors.inl",
+        "interpreter/data.inl",
         "testdata/core_execution.vmfb",
+        "testdata/launch_config.vmfb",
         "testdata/structural.vmfb",
         "verifier/data.c",
         "verifier/instruction_cases.inl",
@@ -35,7 +38,10 @@ iree_generated_files(
     output_args = {
         "disassembler/data.inl": "--disassembler-data={path}",
         "docs/specification.md": "--documentation={path}",
+        "interpreter/conversion_test_vectors.inl": "--conversion-test-vectors={path}",
+        "interpreter/data.inl": "--interpreter-data={path}",
         "testdata/core_execution.vmfb": "--core-execution-module-fixture={path}",
+        "testdata/launch_config.vmfb": "--launch-config-module-fixture={path}",
         "testdata/structural.vmfb": "--structural-module-fixture={path}",
         "verifier/data.c": "--verifier-source={path}",
         "verifier/instruction_cases.inl": "--instruction-verifier-cases={path}",
@@ -66,6 +72,16 @@ iree_c_embed_data(
     flatten = True,
     h_file_output = "execution_testdata.h",
     identifier = "iree_vm_bytecode_execution_testdata",
+)
+
+iree_c_embed_data(
+    name = "launch_config_testdata",
+    testonly = True,
+    srcs = ["testdata/launch_config.vmfb"],
+    c_file_output = "launch_config_testdata.c",
+    flatten = True,
+    h_file_output = "launch_config_testdata.h",
+    identifier = "iree_vm_bytecode_launch_config_testdata",
 )
 
 iree_c_embed_data(
@@ -119,6 +135,94 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "module",
+    srcs = [
+        "image.c",
+        "interpreter.c",
+        "interpreter_atomic.c",
+        "interpreter_call.c",
+        "interpreter_conversion.c",
+        "interpreter_float_math.c",
+        "interpreter_frame.c",
+        "module.c",
+        "process.c",
+        "reflection.c",
+    ],
+    hdrs = [
+        "image.h",
+        "interpreter.h",
+        "interpreter_atomic.h",
+        "interpreter_buffer.h",
+        "interpreter_call.h",
+        "interpreter_conversion.h",
+        "interpreter_float.h",
+        "interpreter_float_math.h",
+        "interpreter_frame.h",
+        "interpreter_integer.h",
+        "interpreter_memory.h",
+        "module.h",
+        "process.h",
+        "reflection.h",
+    ],
+    textual_hdrs = [
+        "interpreter/data.inl",
+        "interpreter_float_impl.inl",
+        "interpreter_float_math_impl.inl",
+        "interpreter_integer_impl.inl",
+    ],
+    deps = [
+        ":verifier",
+        ":wire",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "module_benchmark",
+    srcs = ["module_benchmark.cc"],
+    deps = [
+        ":launch_config_testdata",
+        ":module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:benchmark",
+        "//runtime/src/iree/testing:benchmark_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_test",
+    srcs = ["interpreter_test.cc"],
+    deps = [
+        ":execution_testdata",
+        ":module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm:invocation_test_module",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "module_test",
+    srcs = ["module_test.cc"],
+    deps = [
+        ":execution_testdata",
+        ":launch_config_testdata",
+        ":module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm:test_support",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "verifier_test",
     srcs = ["verifier_test.cc"],
@@ -168,10 +272,137 @@ iree_runtime_cc_test(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "reflection_test",
+    srcs = ["reflection_test.cc"],
+    deps = [
+        ":execution_testdata",
+        ":module",
+        ":verifier",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "process_test",
+    srcs = ["process_test.cc"],
+    deps = [
+        ":module",
+        ":verifier",
+        ":verifier_testdata",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_atomic_test",
+    srcs = ["interpreter_atomic_test.cc"],
+    deps = [
+        ":module",
+        ":wire",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_buffer_test",
+    srcs = ["interpreter_buffer_test.cc"],
+    deps = [
+        ":module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_conversion_test",
+    srcs = [
+        "interpreter/conversion_test_vectors.inl",
+        "interpreter_conversion_test.cc",
+    ],
+    deps = [
+        ":module",
+        ":wire",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_memory_test",
+    srcs = ["interpreter_memory_test.cc"],
+    deps = [
+        ":module",
+        ":wire",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_float_math_test",
+    srcs = ["interpreter_float_math_test.cc"],
+    deps = [
+        ":module",
+        ":wire",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:fpu_state",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_float_test",
+    srcs = ["interpreter_float_test.cc"],
+    deps = [
+        ":module",
+        ":wire",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_integer_test",
+    srcs = ["interpreter_integer_test.cc"],
+    deps = [
+        ":module",
+        ":wire",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 test_suite(
     name = "tests",
     tests = [
         ":disassembler_test",
+        ":interpreter_atomic_test",
+        ":interpreter_buffer_test",
+        ":interpreter_conversion_test",
+        ":interpreter_float_math_test",
+        ":interpreter_float_test",
+        ":interpreter_integer_test",
+        ":interpreter_memory_test",
+        ":interpreter_test",
+        ":module_test",
+        ":process_test",
+        ":reflection_test",
         ":verifier_test",
     ],
 )
@@ -186,7 +417,10 @@ iree_py_generated_files(
   OUTPUTS
     "docs/specification.md"
     "disassembler/data.inl"
+    "interpreter/conversion_test_vectors.inl"
+    "interpreter/data.inl"
     "testdata/core_execution.vmfb"
+    "testdata/launch_config.vmfb"
     "testdata/structural.vmfb"
     "verifier/data.c"
     "verifier/instruction_cases.inl"
@@ -197,11 +431,14 @@ iree_py_generated_files(
   OUTPUT_FLAGS
     "--documentation"
     "--disassembler-data"
+    "--conversion-test-vectors"
+    "--interpreter-data"
     "--core-execution-module-fixture"
-    "--instruction-verifier-cases"
-    "--module-verifier-cases"
+    "--launch-config-module-fixture"
     "--structural-module-fixture"
     "--verifier-source"
+    "--instruction-verifier-cases"
+    "--module-verifier-cases"
     "--wire-assertions-source"
     "--wire-core-header"
     "--wire-module-header"

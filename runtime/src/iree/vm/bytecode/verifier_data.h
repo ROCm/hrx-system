@@ -31,10 +31,9 @@ enum iree_vm_bytecode_control_flow_e {
 typedef uint8_t iree_vm_bytecode_control_flow_t;
 
 // Packed instruction validation descriptors indexed directly by u8 opcode.
-// Zero denotes an unknown opcode. Nonzero words encode, from most- to
-// least-significant bits, verification_shape_ordinal:u16, control_flow:u4,
+// Zero denotes an unknown opcode. Nonzero words encode control_flow:u4,
 // reserved_zero:u4, and byte_length:u8.
-extern const uint32_t iree_vm_bytecode_instruction_verification[256];
+extern const uint16_t iree_vm_bytecode_instruction_verification[256];
 
 // Packed known-section descriptors indexed by dense Core section type. Words
 // encode since_minor:u16 and required_flags:u16.
@@ -43,20 +42,13 @@ extern const uint32_t iree_vm_bytecode_module_section_verification
 
 // Returns the encoded instruction byte length from a packed descriptor.
 static inline uint8_t iree_vm_bytecode_verification_byte_length(
-    uint32_t descriptor) {
+    uint16_t descriptor) {
   return (uint8_t)descriptor;
-}
-
-// Returns the generated validation-shape ordinal from an instruction
-// descriptor.
-static inline uint16_t iree_vm_bytecode_instruction_verification_shape_ordinal(
-    uint32_t descriptor) {
-  return (uint16_t)(descriptor >> 16);
 }
 
 // Returns the structural continuation kind from an instruction descriptor.
 static inline iree_vm_bytecode_control_flow_t
-iree_vm_bytecode_instruction_verification_control_flow(uint32_t descriptor) {
+iree_vm_bytecode_instruction_verification_control_flow(uint16_t descriptor) {
   return (iree_vm_bytecode_control_flow_t)((descriptor >> 12) & 0xFu);
 }
 
