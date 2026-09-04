@@ -650,22 +650,22 @@ func.def public @nested_linear_cfg_entry(%entry_value: i32) -> (i32) {
 // a dominated outer block instead of being forwarded as its block argument.
 test.target<low_core> @nested_cfg_target
 
-low.func.def inline target<test.low.core>(@nested_cfg_target) @nested_cfg_child(%child_value: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def inline target<test.low.core>(@nested_cfg_target) @nested_cfg_child(%child_value: reg<test.i32>) -> (reg<test.i32>) asm {
   low.br ^child_exit(%child_value: reg<test.i32>)
 ^child_exit(%child_forwarded: reg<test.i32>):
-  low.return %child_forwarded : reg<test.i32>
+  return %child_forwarded
 }
 
-low.func.def inline target<test.low.core>(@nested_cfg_target) @nested_cfg_parent(%parent_value: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def inline target<test.low.core>(@nested_cfg_target) @nested_cfg_parent(%parent_value: reg<test.i32>) -> (reg<test.i32>) asm {
   %parent_result = low.func.call @nested_cfg_child(%parent_value) : (reg<test.i32>) -> (reg<test.i32>)
   low.br ^parent_exit
 ^parent_exit:
-  low.return %parent_result : reg<test.i32>
+  return %parent_result
 }
 
-low.func.def public target<test.low.core>(@nested_cfg_target) @nested_cfg_entry(%entry_value: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def public target<test.low.core>(@nested_cfg_target) @nested_cfg_entry(%entry_value: reg<test.i32>) -> (reg<test.i32>) asm {
   %entry_result = low.func.call @nested_cfg_parent(%entry_value) : (reg<test.i32>) -> (reg<test.i32>)
-  low.return %entry_result : reg<test.i32>
+  return %entry_result
 }
 
 // ----
