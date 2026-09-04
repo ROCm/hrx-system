@@ -379,6 +379,28 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "representation_plan",
+    srcs = ["representation_plan.c"],
+    hdrs = ["representation_plan.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "representation_plan_test",
+    srcs = ["representation_plan_test.cc"],
+    deps = [
+        ":representation_plan",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "placement_pair",
     hdrs = ["placement_pair.h"],
     deps = ["//runtime/src/iree/base"],

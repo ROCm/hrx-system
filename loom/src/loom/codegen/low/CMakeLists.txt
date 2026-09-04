@@ -390,6 +390,32 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    representation_plan
+  HDRS
+    "representation_plan.h"
+  SRCS
+    "representation_plan.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    representation_plan_test
+  SRCS
+    "representation_plan_test.cc"
+  DEPS
+    ::representation_plan
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
     placement_pair
   HDRS
     "placement_pair.h"
