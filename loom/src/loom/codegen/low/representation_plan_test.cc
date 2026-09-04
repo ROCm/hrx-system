@@ -57,6 +57,32 @@ TEST_F(RepresentationPlanTest, UnconstrainedValuesRemainUnselected) {
       loom_low_representation_plan_lookup(&plan, 500, &representation));
 }
 
+TEST_F(RepresentationPlanTest, GrowsSparseNodeStorageGeometrically) {
+  constexpr loom_value_ordinal_t kValueCount = 65;
+  auto plan = MakePlan(kValueCount);
+  for (loom_value_ordinal_t i = 1; i < kValueCount; ++i) {
+    IREE_ASSERT_OK(loom_low_representation_plan_union(&plan, i - 1, i));
+  }
+  EXPECT_EQ(plan.node_count, kValueCount);
+  EXPECT_TRUE(loom_low_representation_plan_solve(&plan, nullptr));
+}
+
+TEST_F(RepresentationPlanTest, TracksConstrainedComponentsAcrossUnions) {
+  auto plan = MakePlan(6);
+  const loom_low_representation_candidate_t candidates[] = {Candidate(10, 0)};
+  IREE_ASSERT_OK(loom_low_representation_plan_union(&plan, 0, 1));
+  IREE_ASSERT_OK(loom_low_representation_plan_constrain(
+      &plan, 1, nullptr, candidates, IREE_ARRAYSIZE(candidates)));
+  IREE_ASSERT_OK(loom_low_representation_plan_union(&plan, 2, 3));
+
+  EXPECT_TRUE(loom_low_representation_plan_component_is_constrained(&plan, 0));
+  EXPECT_FALSE(loom_low_representation_plan_component_is_constrained(&plan, 2));
+  EXPECT_FALSE(loom_low_representation_plan_component_is_constrained(&plan, 5));
+
+  IREE_ASSERT_OK(loom_low_representation_plan_union(&plan, 2, 0));
+  EXPECT_TRUE(loom_low_representation_plan_component_is_constrained(&plan, 3));
+}
+
 TEST_F(RepresentationPlanTest, IntersectsDomainsAcrossUnionedValues) {
   auto plan = MakePlan(4);
   int producer = 0;

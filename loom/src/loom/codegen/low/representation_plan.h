@@ -103,6 +103,11 @@ iree_status_t loom_low_representation_plan_constrain(
     const void* owner, const loom_low_representation_candidate_t* candidates,
     iree_host_size_t candidate_count);
 
+// Returns whether |value_ordinal|'s current component has received at least
+// one exact candidate constraint. This may be queried during construction.
+bool loom_low_representation_plan_component_is_constrained(
+    loom_low_representation_plan_t* plan, loom_value_ordinal_t value_ordinal);
+
 // Selects the least-cost exact representation for every constrained component.
 // Returns false and populates |out_conflict| when a component has no common
 // representation. Unconstrained components intentionally remain unselected.

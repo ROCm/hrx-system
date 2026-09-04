@@ -106,6 +106,20 @@ void loom_low_lower_representation_record_candidates(
                     candidates, candidate_count));
 }
 
+bool loom_low_lower_representation_component_is_constrained(
+    loom_low_lower_representation_recorder_t* recorder,
+    loom_value_id_t source_value_id) {
+  IREE_ASSERT_ARGUMENT(recorder);
+  if (!iree_status_is_ok(recorder->state->terminal_status)) return false;
+  loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
+  if (!loom_low_lower_representation_try_ordinal(recorder, source_value_id,
+                                                 &value_ordinal)) {
+    return false;
+  }
+  return loom_low_representation_plan_component_is_constrained(
+      &recorder->state->plan, value_ordinal);
+}
+
 static void loom_low_lower_representation_try_relation(
     loom_low_lower_representation_recorder_t* recorder,
     loom_low_lower_context_t* context, const loom_value_relation_t* relation) {

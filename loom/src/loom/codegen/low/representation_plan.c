@@ -18,6 +18,8 @@ struct loom_low_representation_node_t {
   uint16_t rank;
   // Selected physical representation, or NONE when unconstrained.
   loom_low_representation_id_t selected_representation;
+  // Whether this component has received an exact candidate constraint.
+  bool has_constraint;
   // Constraints attached to this component after union-find is finalized.
   loom_low_representation_constraint_t* constraint_head;
   // Last constraint attached to this component.
@@ -69,9 +71,11 @@ static iree_status_t loom_low_representation_plan_node(
     *out_node_ordinal = node_ordinal;
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-      plan->arena, plan->node_count, (iree_host_size_t)plan->node_count + 1,
-      sizeof(*plan->nodes), &plan->node_capacity, (void**)&plan->nodes));
+  if (plan->node_count == plan->node_capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        plan->arena, plan->node_count, (iree_host_size_t)plan->node_count + 1,
+        sizeof(*plan->nodes), &plan->node_capacity, (void**)&plan->nodes));
+  }
   node_ordinal = plan->node_count++;
   plan->nodes[node_ordinal] = (loom_low_representation_node_t){
       .value_ordinal = value_ordinal,
@@ -220,8 +224,12 @@ iree_status_t loom_low_representation_plan_union(
   }
   if (plan->nodes[left_root].rank < plan->nodes[right_root].rank) {
     plan->nodes[left_root].parent = right_root;
+    plan->nodes[right_root].has_constraint |=
+        plan->nodes[left_root].has_constraint;
   } else {
     plan->nodes[right_root].parent = left_root;
+    plan->nodes[left_root].has_constraint |=
+        plan->nodes[right_root].has_constraint;
     if (plan->nodes[left_root].rank == plan->nodes[right_root].rank) {
       ++plan->nodes[left_root].rank;
     }
@@ -251,7 +259,9 @@ iree_status_t loom_low_representation_plan_constrain(
   uint32_t node_ordinal = UINT32_MAX;
   IREE_RETURN_IF_ERROR(
       loom_low_representation_plan_node(plan, value_ordinal, &node_ordinal));
-  (void)node_ordinal;
+  const uint32_t root_ordinal =
+      loom_low_representation_plan_find_root(plan, node_ordinal);
+  plan->nodes[root_ordinal].has_constraint = true;
   const iree_host_size_t allocation_size =
       offsetof(loom_low_representation_constraint_t, candidates) +
       candidate_count * sizeof(*candidates);
@@ -272,6 +282,18 @@ iree_status_t loom_low_representation_plan_constrain(
   }
   plan->constraint_tail = constraint;
   return iree_ok_status();
+}
+
+bool loom_low_representation_plan_component_is_constrained(
+    loom_low_representation_plan_t* plan, loom_value_ordinal_t value_ordinal) {
+  IREE_ASSERT_ARGUMENT(plan);
+  IREE_ASSERT_LT(value_ordinal, plan->value_count);
+  if (plan->node_ordinals == NULL) return false;
+  const uint32_t node_ordinal = plan->node_ordinals[value_ordinal];
+  if (node_ordinal == UINT32_MAX) return false;
+  const uint32_t root_ordinal =
+      loom_low_representation_plan_find_root(plan, node_ordinal);
+  return plan->nodes[root_ordinal].has_constraint;
 }
 
 bool loom_low_representation_plan_solve(
