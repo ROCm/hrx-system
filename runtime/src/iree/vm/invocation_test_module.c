@@ -21,27 +21,6 @@ enum {
   IREE_VM_TEST_CALLABLE_CALL_FUNCTION = 7,
 };
 
-enum {
-  IREE_VM_TEST_FUNCTION_ADD = 0,
-  IREE_VM_TEST_FUNCTION_BAD_REF_RESULT = 1,
-  IREE_VM_TEST_FUNCTION_BAD_YIELD_REF = 2,
-  IREE_VM_TEST_FUNCTION_CALL_FUNCTION = 3,
-  IREE_VM_TEST_FUNCTION_CALL_IMPORT = 4,
-  IREE_VM_TEST_FUNCTION_CALL_LOCAL = 5,
-  IREE_VM_TEST_FUNCTION_CALL_OPTIONAL = 6,
-  IREE_VM_TEST_FUNCTION_ECHO_REF = 7,
-  IREE_VM_TEST_FUNCTION_EXHAUST = 8,
-  IREE_VM_TEST_FUNCTION_FAIL = 9,
-  IREE_VM_TEST_FUNCTION_MULTIPLY_F32 = 10,
-  IREE_VM_TEST_FUNCTION_RETURN_IMPORT = 11,
-  IREE_VM_TEST_FUNCTION_RETURN_LOCAL = 12,
-  IREE_VM_TEST_FUNCTION_RETURN_OPTIONAL = 13,
-  IREE_VM_TEST_FUNCTION_YIELD_REF = 14,
-  IREE_VM_TEST_FUNCTION_YIELD_TWICE = 15,
-  IREE_VM_TEST_FUNCTION_LAUNCH_CONFIG = 16,
-  IREE_VM_TEST_FUNCTION_COUNT = 17,
-};
-
 typedef enum iree_vm_test_frame_action_e {
   IREE_VM_TEST_FRAME_ACTION_CHILD = 0,
   IREE_VM_TEST_FRAME_ACTION_I32 = 1,
@@ -226,41 +205,43 @@ static const iree_vm_module_import_declaration_t iree_vm_test_imports[] = {
      IREE_VM_TEST_CALLABLE_ADD, IREE_VM_MODULE_IMPORT_FLAG_OPTIONAL, 0},
 };
 
-static const iree_vm_module_export_declaration_t iree_vm_test_exports[] = {
-    {IREE_SVL("add"), IREE_VM_TEST_CALLABLE_ADD, IREE_VM_TEST_FUNCTION_ADD, 0},
-    {IREE_SVL("bad_ref_result"), IREE_VM_TEST_CALLABLE_REF,
-     IREE_VM_TEST_FUNCTION_BAD_REF_RESULT, 0},
-    {IREE_SVL("bad_yield_ref"), IREE_VM_TEST_CALLABLE_REF,
-     IREE_VM_TEST_FUNCTION_BAD_YIELD_REF, 0},
-    {IREE_SVL("call_function"), IREE_VM_TEST_CALLABLE_CALL_FUNCTION,
-     IREE_VM_TEST_FUNCTION_CALL_FUNCTION, 0},
-    {IREE_SVL("call_import"), IREE_VM_TEST_CALLABLE_ADD,
-     IREE_VM_TEST_FUNCTION_CALL_IMPORT, 0},
-    {IREE_SVL("call_local"), IREE_VM_TEST_CALLABLE_ADD,
-     IREE_VM_TEST_FUNCTION_CALL_LOCAL, 0},
-    {IREE_SVL("call_optional"), IREE_VM_TEST_CALLABLE_ADD,
-     IREE_VM_TEST_FUNCTION_CALL_OPTIONAL, 0},
-    {IREE_SVL("echo_ref"), IREE_VM_TEST_CALLABLE_REF,
-     IREE_VM_TEST_FUNCTION_ECHO_REF, 0},
-    {IREE_SVL("exhaust"), IREE_VM_TEST_CALLABLE_ADD,
-     IREE_VM_TEST_FUNCTION_EXHAUST, 0},
-    {IREE_SVL("fail"), IREE_VM_TEST_CALLABLE_ADD, IREE_VM_TEST_FUNCTION_FAIL,
-     0},
-    {IREE_SVL("launch_config"), IREE_VM_TEST_CALLABLE_LAUNCH_CONFIG,
-     IREE_VM_TEST_FUNCTION_LAUNCH_CONFIG, 0},
-    {IREE_SVL("multiply_f32"), IREE_VM_TEST_CALLABLE_F32,
-     IREE_VM_TEST_FUNCTION_MULTIPLY_F32, 0},
-    {IREE_SVL("return_import"), IREE_VM_TEST_CALLABLE_RETURN_FUNCTION,
-     IREE_VM_TEST_FUNCTION_RETURN_IMPORT, 0},
-    {IREE_SVL("return_local"), IREE_VM_TEST_CALLABLE_RETURN_FUNCTION,
-     IREE_VM_TEST_FUNCTION_RETURN_LOCAL, 0},
-    {IREE_SVL("return_optional"), IREE_VM_TEST_CALLABLE_RETURN_FUNCTION,
-     IREE_VM_TEST_FUNCTION_RETURN_OPTIONAL, 0},
-    {IREE_SVL("yield_ref"), IREE_VM_TEST_CALLABLE_YIELD_REF,
-     IREE_VM_TEST_FUNCTION_YIELD_REF, 0},
-    {IREE_SVL("yield_twice"), IREE_VM_TEST_CALLABLE_YIELD_I32,
-     IREE_VM_TEST_FUNCTION_YIELD_TWICE, 0},
+// clang-format off
+#define IREE_VM_TEST_EXPORTS_(export)                                      \
+  export(ADD, add, IREE_VM_TEST_CALLABLE_ADD)                              \
+  export(BAD_REF_RESULT, bad_ref_result, IREE_VM_TEST_CALLABLE_REF)        \
+  export(BAD_YIELD_REF, bad_yield_ref, IREE_VM_TEST_CALLABLE_REF)          \
+  export(CALL_FUNCTION, call_function, IREE_VM_TEST_CALLABLE_CALL_FUNCTION) \
+  export(CALL_IMPORT, call_import, IREE_VM_TEST_CALLABLE_ADD)              \
+  export(CALL_LOCAL, call_local, IREE_VM_TEST_CALLABLE_ADD)                \
+  export(CALL_OPTIONAL, call_optional, IREE_VM_TEST_CALLABLE_ADD)          \
+  export(ECHO_REF, echo_ref, IREE_VM_TEST_CALLABLE_REF)                    \
+  export(EXHAUST, exhaust, IREE_VM_TEST_CALLABLE_ADD)                      \
+  export(FAIL, fail, IREE_VM_TEST_CALLABLE_ADD)                            \
+  export(LAUNCH_CONFIG, launch_config, IREE_VM_TEST_CALLABLE_LAUNCH_CONFIG) \
+  export(MULTIPLY_F32, multiply_f32, IREE_VM_TEST_CALLABLE_F32)            \
+  export(RETURN_IMPORT, return_import, IREE_VM_TEST_CALLABLE_RETURN_FUNCTION) \
+  export(RETURN_LOCAL, return_local, IREE_VM_TEST_CALLABLE_RETURN_FUNCTION) \
+  export(RETURN_OPTIONAL, return_optional, IREE_VM_TEST_CALLABLE_RETURN_FUNCTION) \
+  export(YIELD_REF, yield_ref, IREE_VM_TEST_CALLABLE_YIELD_REF)            \
+  export(YIELD_TWICE, yield_twice, IREE_VM_TEST_CALLABLE_YIELD_I32)
+// clang-format on
+
+enum {
+#define IREE_VM_TEST_FUNCTION_ENUM_(symbol, name, callable_type) \
+  IREE_VM_TEST_FUNCTION_##symbol,
+  IREE_VM_TEST_EXPORTS_(IREE_VM_TEST_FUNCTION_ENUM_)
+#undef IREE_VM_TEST_FUNCTION_ENUM_
+      IREE_VM_TEST_FUNCTION_COUNT,
 };
+
+static const iree_vm_module_export_declaration_t iree_vm_test_exports[] = {
+#define IREE_VM_TEST_EXPORT_ROW_(symbol, name, callable_type) \
+  {IREE_SVL(#name), callable_type, IREE_VM_TEST_FUNCTION_##symbol, 0},
+    IREE_VM_TEST_EXPORTS_(IREE_VM_TEST_EXPORT_ROW_)
+#undef IREE_VM_TEST_EXPORT_ROW_
+};
+
+#undef IREE_VM_TEST_EXPORTS_
 
 //===----------------------------------------------------------------------===//
 // Function execution
