@@ -44,6 +44,11 @@ _I32 = Scalar("i32")
 _OFFSET = Scalar("offset")
 _F32X64_ACCUMULATOR = Vector("f32", lanes=64)
 _ACCUMULATOR_CHUNK_BYTE_OFFSETS = (0, 64, 128, 192)
+_ZERO_X_SPLAT_BY_ELEMENT_BYTE_COUNT = {
+    1: "amd.xdna.aie2p.splat.i8x64",
+    2: "amd.xdna.aie2p.splat.i16x32",
+    4: "amd.xdna.aie2p.splat.i32x16",
+}
 _VECTOR_MEMORY_SHAPES = tuple(
     (
         width_bits,
@@ -246,6 +251,28 @@ def _register_address_emits(
     return tuple(emits), address_index
 
 
+def _zero_x_emits(element_byte_count: int) -> tuple[ContractEmit, ...]:
+    scalar_zero = ValueRef.temporary("scalar_zero")
+    return (
+        EmitDescriptorOp(
+            descriptor=_descriptor("amd.xdna.aie2p.constant.i32.short"),
+            results={"dst": scalar_zero},
+            result_types={"dst": DescriptorResultType()},
+            immediates={"i": 0},
+            form=DescriptorEmitForm.CONST,
+        ),
+        EmitDescriptorOp(
+            descriptor=_descriptor(
+                _ZERO_X_SPLAT_BY_ELEMENT_BYTE_COUNT[element_byte_count]
+            ),
+            operands={"src": scalar_zero},
+            results={"dst": ValueRef.temporary("vector_zero")},
+            result_types={"dst": DescriptorResultType()},
+            form=DescriptorEmitForm.OP,
+        ),
+    )
+
+
 def _memory_rule(
     operation: SourceMemoryOperation,
     address_form: _MemoryAddressForm,
@@ -262,6 +289,7 @@ def _memory_rule(
     immediate_offset_minimum: int,
     immediate_offset_maximum: int,
     volatile: bool,
+    expand_to_x_carrier: bool = False,
 ) -> DescriptorRule:
     is_load = operation is SourceMemoryOperation.LOAD
     immediate_memory = address_form is _MemoryAddressForm.IMMEDIATE
@@ -282,27 +310,81 @@ def _memory_rule(
         immediate_offset_minimum=immediate_offset_minimum,
         immediate_offset_maximum=immediate_offset_maximum,
     )
+    source_value = ValueRef.operand("value")
+    result_value = ValueRef.result("result")
+    descriptor_value = (
+        ValueRef.temporary("memory_value")
+        if expand_to_x_carrier
+        else (result_value if is_load else source_value)
+    )
     memory_operands = (
         {"ptr": ValueRef.operand("view")}
         if is_load
         else {
-            "src": ValueRef.operand("value"),
+            "src": descriptor_value,
             "ptr": ValueRef.operand("view"),
         }
     )
-    memory_results = {"dst": ValueRef.result("result")} if is_load else {}
-    emits: list[EmitDescriptorOp] = []
+    memory_results = {"dst": descriptor_value} if is_load else {}
+    memory_result_types = (
+        {"dst": DescriptorResultType()} if is_load and expand_to_x_carrier else None
+    )
+    emits: list[ContractEmit] = []
+    storage_continuation = next(
+        (
+            operand
+            for operand in memory_descriptor.operands
+            if operand.field_name == "storage"
+        ),
+        None,
+    )
+    padding_value = ValueRef.temporary("memory_padding")
+    # Ordinary vector SSA values use a full X carrier even when memory moves
+    # only one W unit. Seed the untouched storage once so partial 128-bit loads
+    # preserve defined high bits and narrower loads expose zeroed tail units.
+    if is_load and (expand_to_x_carrier or storage_continuation is not None):
+        vector_zero = ValueRef.temporary("vector_zero")
+        emits.extend(_zero_x_emits(element_byte_count))
+        if storage_continuation is not None:
+            storage_value = ValueRef.temporary("memory_storage")
+            emits.append(
+                EmitRegisterSlice(
+                    source=vector_zero,
+                    result=storage_value,
+                    unit_count=1,
+                )
+            )
+            memory_operands["storage"] = storage_value
+        if expand_to_x_carrier:
+            emits.append(
+                EmitRegisterSlice(
+                    source=vector_zero,
+                    result=padding_value,
+                    unit_offset=1,
+                    unit_count=1,
+                )
+            )
+    if not is_load and expand_to_x_carrier:
+        emits.append(
+            EmitRegisterSlice(
+                source=source_value,
+                result=descriptor_value,
+                unit_count=1,
+            )
+        )
     if immediate_memory:
         emits.append(
             EmitDescriptorOp(
                 descriptor=memory_descriptor,
                 operands=memory_operands,
                 results=memory_results,
+                result_types=memory_result_types,
                 immediates={"imm": SourceMemoryProject.static_byte_offset()},
                 source_memory=source_memory,
                 form=DescriptorEmitForm.OP,
             )
         )
+
     else:
         address_emits, address_index = _register_address_emits(
             source_memory, address_form
@@ -314,8 +396,16 @@ def _memory_rule(
                 descriptor=memory_descriptor,
                 operands=memory_operands,
                 results=memory_results,
+                result_types=memory_result_types,
                 source_memory=source_memory,
                 form=DescriptorEmitForm.OP,
+            )
+        )
+    if is_load and expand_to_x_carrier:
+        emits.append(
+            EmitRegisterConcat(
+                sources=(descriptor_value, padding_value),
+                result=result_value,
             )
         )
 
@@ -511,6 +601,9 @@ def _vector_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
             immediate_offset_minimum=-(width_bits),
             immediate_offset_maximum=width_bits - width_bits // 8,
             volatile=volatile,
+            expand_to_x_carrier=(
+                width_bits < 512 and not (width_bits == 128 and element_type == "bf16")
+            ),
         )
         for root_kind, memory_spaces in _MEMORY_ROOTS
         for (

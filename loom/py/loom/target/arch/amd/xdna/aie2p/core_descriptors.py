@@ -205,6 +205,11 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
             store_overrides = _vector_memory_operand_overrides(
                 width_bits, element_type, "src", store[2]
             )
+            load_storage_continuation_part = (
+                _VEC256_HIGH128_PART
+                if width_bits == 128 and element_type != "bf16"
+                else None
+            )
             result.extend(
                 (
                     _DescriptorSpec(
@@ -216,6 +221,7 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
                         asm_mnemonic=f"vlda.{width_bits}.{shape}",
                         operand_register_parts=load_a_overrides[1],
                         encoding_adapter_overrides=load_a_overrides[2],
+                        storage_continuation_part=load_storage_continuation_part,
                         schedule_alternatives=(load_b_immediate_key,),
                         memory_width_bits=width_bits,
                     ),
@@ -228,6 +234,7 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
                         asm_mnemonic=f"vlda.{width_bits}.{shape}.index",
                         operand_register_parts=load_a_overrides[1],
                         encoding_adapter_overrides=load_a_overrides[2],
+                        storage_continuation_part=load_storage_continuation_part,
                         schedule_alternatives=(load_b_register_key,),
                         memory_width_bits=width_bits,
                     ),
@@ -240,6 +247,7 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
                         asm_mnemonic=f"vldb.{width_bits}.{shape}",
                         operand_register_parts=load_b_overrides[1],
                         encoding_adapter_overrides=load_b_overrides[2],
+                        storage_continuation_part=load_storage_continuation_part,
                         memory_width_bits=width_bits,
                     ),
                     _DescriptorSpec(
@@ -251,6 +259,7 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
                         asm_mnemonic=f"vldb.{width_bits}.{shape}.index",
                         operand_register_parts=load_b_overrides[1],
                         encoding_adapter_overrides=load_b_overrides[2],
+                        storage_continuation_part=load_storage_continuation_part,
                         memory_width_bits=width_bits,
                     ),
                     _DescriptorSpec(
