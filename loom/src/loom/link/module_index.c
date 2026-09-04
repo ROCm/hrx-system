@@ -770,9 +770,8 @@ static iree_status_t loom_link_index_append_module(
 
 static iree_status_t loom_link_index_append_symbol(
     loom_link_module_index_t* index, loom_link_module_index_module_t* module,
-    iree_string_view_t name, iree_string_view_t defining_op_name,
-    loom_symbol_kind_t kind, loom_link_symbol_identity_t identity,
-    loom_link_symbol_flags_t flags,
+    iree_string_view_t name, loom_symbol_kind_t kind,
+    loom_link_symbol_identity_t identity, loom_link_symbol_flags_t flags,
     loom_link_symbol_facet_schema_t facet_schema) {
   iree_host_size_t symbol_ordinal = 0;
   if (!iree_host_size_checked_add(index->base.symbol_count,
@@ -823,7 +822,6 @@ static iree_status_t loom_link_index_append_symbol(
       .module_ordinal = module->ordinal,
       .module_symbol_ordinal = module->symbol_count,
       .name = name,
-      .defining_op_name = defining_op_name,
       .kind = kind,
       .template_family_ordinal = LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID,
       .identity = identity,
@@ -1052,13 +1050,10 @@ static iree_status_t loom_link_index_module_materialized_symbols(
     const loom_op_t* defining_op = symbol->defining_op;
     const loom_op_vtable_t* vtable =
         defining_op ? loom_op_vtable(source_module, defining_op) : NULL;
-    const iree_string_view_t defining_op_name =
-        defining_op ? loom_op_name(source_module, defining_op)
-                    : iree_string_view_empty();
     const loom_link_symbol_facet_schema_t facet_schema =
         loom_link_classify_materialized_symbol_facets(defining_op, vtable);
     IREE_RETURN_IF_ERROR(loom_link_index_append_symbol(
-        index, module, name, defining_op_name, symbol->kind, identity,
+        index, module, name, symbol->kind, identity,
         loom_link_materialized_symbol_flags(source_module, symbol),
         facet_schema));
   }
@@ -1310,12 +1305,8 @@ static iree_status_t loom_link_index_module_bytecode_symbols(
     loom_link_symbol_flags_t flags = loom_link_bytecode_symbol_flags(symbol);
     const loom_link_symbol_facet_schema_t facet_schema =
         loom_link_classify_bytecode_symbol_facets(symbol);
-    const iree_string_view_t defining_op_name =
-        symbol->defining_op_ordinal < bytecode_module->ops.count
-            ? bytecode_module->ops.entries[symbol->defining_op_ordinal].name
-            : iree_string_view_empty();
     IREE_RETURN_IF_ERROR(loom_link_index_append_symbol(
-        index, module, symbol->name, defining_op_name,
+        index, module, symbol->name,
         loom_link_bytecode_symbol_kind(symbol->kind),
         loom_link_bytecode_symbol_identity(symbol, flags), flags,
         facet_schema));

@@ -69,7 +69,6 @@ iree_status_t loom_target_specialize_module(
 iree_status_t loom_target_specialize_module_kernel_entries(
     const loom_target_environment_t* environment,
     const loom_target_profile_t* target_profile,
-    const loom_target_product_contract_t* product_contract,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_module_t** inout_module, uint32_t* out_error_count) {
@@ -112,7 +111,6 @@ iree_status_t loom_target_specialize_module_kernel_entries(
           .function_name =
               (*inout_module)->strings.entries[function_symbol->name_id],
           .target_profile = target_profile,
-          .product_contract = product_contract,
       };
     }
     status = loom_target_specialize_module_with_arena(

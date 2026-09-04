@@ -25,9 +25,6 @@ endif()
 if(LOOM_TARGET_ARCH_X86)
   list(APPEND _provider_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_X86=1")
 endif()
-if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
-  list(APPEND _provider_platform_copts "-DLOOM_CONFIG_TARGET_HAVE_LLVMIR_ARTIFACTS=1")
-endif()
 set(_provider_platform_deps "")
 if(LOOM_TARGET_ARCH_AMDGPU)
   list(APPEND _provider_platform_deps loom::target::arch::amdgpu::provider)
@@ -44,9 +41,6 @@ endif()
 if(LOOM_TARGET_ARCH_X86)
   list(APPEND _provider_platform_deps loom::target::arch::x86::provider)
 endif()
-if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
-  list(APPEND _provider_platform_deps loom::target::emit::llvmir::artifact_emitter)
-endif()
 loom_cc_library(
   NAME
     provider
@@ -59,7 +53,6 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::threading
-    loom::target::arch::cmd::provider
     loom::target::provider
     ${_provider_platform_deps}
   PUBLIC

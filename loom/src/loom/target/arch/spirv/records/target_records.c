@@ -29,34 +29,9 @@ static const loom_target_snapshot_t kSpirvVulkan13Snapshot = {
         },
 };
 
-static const loom_target_snapshot_t kSpirvVulkan13ProfileSnapshot = {
-    .name = IREE_SVL("spirv-vulkan1.3"),
-    .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_UNKNOWN,
-    .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
-    .default_pointer_bitwidth = 64,
-    .index_bitwidth = 32,
-    .offset_bitwidth = 64,
-    .memory_spaces =
-        {
-            .generic = LOOM_SPIRV_STORAGE_CLASS_GENERIC,
-            .global = LOOM_SPIRV_STORAGE_CLASS_CROSS_WORKGROUP,
-            .workgroup = LOOM_SPIRV_STORAGE_CLASS_WORKGROUP,
-            .constant = LOOM_SPIRV_STORAGE_CLASS_UNIFORM,
-            .private_memory = LOOM_SPIRV_STORAGE_CLASS_FUNCTION,
-            .host = UINT32_MAX,
-            .descriptor = LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
-        },
-};
-
 static const loom_target_export_plan_t kSpirvVulkan13ExportPlan = {
     .name = IREE_SVL("spirv-shader-entry-point"),
     .abi_kind = LOOM_TARGET_ABI_SHADER_ENTRY_POINT,
-    .linkage = LOOM_TARGET_LINKAGE_DEFAULT,
-};
-
-static const loom_target_export_plan_t kSpirvVulkan13ProfileExportPlan = {
-    .name = IREE_SVL("spirv-vulkan1.3"),
-    .abi_kind = LOOM_TARGET_ABI_UNKNOWN,
     .linkage = LOOM_TARGET_LINKAGE_DEFAULT,
 };
 
@@ -70,13 +45,6 @@ const loom_target_bundle_t loom_spirv_low_target_bundle_vulkan1_3 = {
     .name = IREE_SVL("spirv-vulkan1.3"),
     .snapshot = &kSpirvVulkan13Snapshot,
     .export_plan = &kSpirvVulkan13ExportPlan,
-    .config = &kSpirvVulkan13Config,
-};
-
-const loom_target_bundle_t loom_spirv_target_profile_bundle_vulkan1_3 = {
-    .name = IREE_SVL("spirv-vulkan1.3"),
-    .snapshot = &kSpirvVulkan13ProfileSnapshot,
-    .export_plan = &kSpirvVulkan13ProfileExportPlan,
     .config = &kSpirvVulkan13Config,
 };
 

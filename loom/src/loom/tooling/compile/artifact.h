@@ -6,11 +6,10 @@
 
 // Offline artifact compilation shared by command-line tools and live runners.
 //
-// Target providers own target profile selection and artifact providers consume
-// those profiles while emitting prepared target-low IR. Artifact providers have
-// no device discovery or runtime loading responsibilities. Live execution
-// layers may project a device into an ordinary artifact target and then use the
-// same provider that deterministic offline compilation uses.
+// Artifact providers own target-key parsing and emission from prepared target-
+// low IR. They have no device discovery or runtime loading responsibilities.
+// Live execution layers may project a device into an ordinary artifact target
+// and then use the same provider that deterministic offline compilation uses.
 
 #ifndef LOOM_TOOLING_COMPILE_ARTIFACT_H_
 #define LOOM_TOOLING_COMPILE_ARTIFACT_H_
@@ -19,7 +18,6 @@
 #include "iree/base/byte_sequence.h"
 #include "loom/ir/module.h"
 #include "loom/target/pipeline_options.h"
-#include "loom/target/product_contract.h"
 #include "loom/target/profile.h"
 #include "loom/target/provider.h"
 #include "loom/target/reporting/report.h"
@@ -71,6 +69,14 @@ typedef struct loom_artifact_t {
   void* storage;
 } loom_artifact_t;
 
+typedef iree_status_t (*loom_artifact_provider_select_target_fn_t)(
+    const loom_artifact_provider_t* provider, iree_string_view_t target_key,
+    iree_allocator_t allocator, loom_artifact_target_t* out_target);
+
+typedef void (*loom_artifact_provider_deinitialize_target_fn_t)(
+    const loom_artifact_provider_t* provider, loom_artifact_target_t* target,
+    iree_allocator_t allocator);
+
 // Emits a compiler artifact. When |out_emitted| is true the artifact has a
 // target bundle, non-empty target-native and executable contents, and a valid
 // descriptor and contents for every sidecar. Returning OK with |out_emitted|
@@ -96,17 +102,35 @@ struct loom_artifact_provider_t {
   loom_target_compile_artifact_kind_t artifact_kind;
   // Target-owned defaults used to prepare target-low IR before emission.
   loom_target_pipeline_options_t default_pipeline_options;
+  // Selects a concrete offline target by provider-owned key.
+  loom_artifact_provider_select_target_fn_t select_target;
+  // Releases storage owned by a target returned from |select_target|.
+  loom_artifact_provider_deinitialize_target_fn_t deinitialize_target;
   // Emits a prepared target-low module to executable artifact bytes.
   loom_artifact_provider_emit_fn_t emit_artifact;
   // Releases storage owned by an artifact returned from |emit_artifact|.
   loom_artifact_provider_deinitialize_artifact_fn_t deinitialize_artifact;
-  // Target profile representation accepted for explicit specialization, or
-  // NULL when this provider only consumes authored module targets.
-  const loom_target_profile_type_t* target_profile_type;
-  // Product-owned lowering contract applied to an explicit target profile, or
-  // NULL when the provider does not consume target-specialized functions.
-  const loom_target_product_contract_t* product_contract;
 };
+
+// Asks |provider| to select one concrete offline target by family-owned key.
+//
+// The key must be non-empty. Providers that do not support key-based target
+// selection return UNIMPLEMENTED. On failure |out_target| remains empty.
+iree_status_t loom_artifact_provider_select_target(
+    const loom_artifact_provider_t* provider, iree_string_view_t target_key,
+    iree_allocator_t allocator, loom_artifact_target_t* out_target);
+
+// A registry of artifact providers linked into a compiler binary.
+typedef struct loom_artifact_provider_registry_t {
+  // Linked artifact provider table; entries are non-NULL when count is nonzero.
+  const loom_artifact_provider_t* const* providers;
+  // Number of entries in |providers|.
+  iree_host_size_t provider_count;
+} loom_artifact_provider_registry_t;
+
+// Looks up an artifact provider by user-facing provider name.
+const loom_artifact_provider_t* loom_artifact_provider_registry_lookup(
+    const loom_artifact_provider_registry_t* registry, iree_string_view_t name);
 
 // Artifact candidate produced by an offline compiler provider.
 typedef struct loom_artifact_candidate_t {

@@ -17,7 +17,6 @@
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/hal_kernel_library.h"
-#include "loom/target/emit/native/amdgpu/product_contract.h"
 #include "loomc/iree.h"
 #include "target.h"
 
@@ -344,7 +343,6 @@ static const loom_target_emitter_t loomc_amdgpu_hsaco_emitter = {
                                sizeof(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO) - 1},
     .default_identifier = {"module.hsaco", 12},
     .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
-    .product_contract = &loom_amdgpu_hsaco_kernel_product_contract,
     .emit = loomc_amdgpu_emit_module_artifact,
 };
 

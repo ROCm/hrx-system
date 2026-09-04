@@ -53,9 +53,8 @@ struct loom_target_profile_t {
   // Target-family representation owning the complete profile.
   const loom_target_profile_type_t* type;
 
-  // Product-neutral target bundle projection, or NULL when the structured
-  // machine facts are not concrete enough to select one. Product-owned fields
-  // may carry non-explicit target-record defaults but are never profile facts.
+  // Target-neutral bundle projection, or NULL when the structured facts are
+  // not concrete enough to select one.
   const loom_target_bundle_t* target_bundle;
 };
 

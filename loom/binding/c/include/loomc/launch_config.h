@@ -67,9 +67,9 @@ extern "C" {
 /// Loaded program containing compiled kernel launch configurations.
 ///
 /// A program corresponds to one kernel compilation invocation and may describe
-/// entries later emitted across multiple kernel artifacts. Function names
+/// entries later emitted across multiple executable artifacts. Function names
 /// match the public export names in those artifacts; launch-config function
-/// tokens and kernel function tokens remain local to their respective
+/// tokens and executable function tokens remain local to their respective
 /// objects.
 ///
 /// @thread_safety
@@ -155,7 +155,7 @@ typedef struct loomc_launch_config_t {
 /// Loads and verifies a compiled launch-config program.
 ///
 /// The artifact must be the launch-config companion emitted from the same
-/// kernel compilation used to produce the matching kernel artifacts. The
+/// kernel compilation used to produce the matching executable artifacts. The
 /// loader validates the external bytes and constructs a program ready for
 /// invocation.
 ///

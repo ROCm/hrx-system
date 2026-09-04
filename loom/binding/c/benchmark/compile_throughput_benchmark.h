@@ -165,11 +165,11 @@ void RunCompileBenchmarkDirectCold(::benchmark::State& state,
                                    const void* user_data);
 
 const loomc_artifact_t* FindArtifact(const loomc_result_t* result,
-                                     loomc_string_view_t role,
+                                     loomc_artifact_kind_t kind,
                                      loomc_string_view_t format);
 
 iree_status_t ValidateArtifact(const loomc_result_t* result,
-                               loomc_string_view_t role,
+                               loomc_artifact_kind_t kind,
                                loomc_string_view_t format,
                                iree_host_size_t minimum_data_length,
                                const char* description,

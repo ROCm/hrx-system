@@ -50,7 +50,6 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/ops",
         "//loom/src/loom/target/arch/amdgpu/records:target_records",
         "//loom/src/loom/target/emit/native/amdgpu:hal_kernel_library",
-        "//loom/src/loom/target/emit/native/amdgpu:product_contract",
         "//runtime/src/iree/base",
     ],
     alwayslink = True,

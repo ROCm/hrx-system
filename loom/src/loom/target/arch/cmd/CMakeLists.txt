@@ -72,31 +72,6 @@ loom_cc_library(
   PUBLIC
 )
 
-loom_cc_library(
-  NAME
-    product
-  HDRS
-    "product.h"
-  SRCS
-    "product.c"
-  DEPS
-    ::artifact_set
-    iree::base
-    loom::product::registry
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    product_test
-  SRCS
-    "product_test.cc"
-  DEPS
-    ::product
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
 loom_cc_test(
   NAME
     program_test

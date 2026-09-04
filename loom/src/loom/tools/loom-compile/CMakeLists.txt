@@ -40,22 +40,62 @@ loom_cc_library(
     loom::error::diagnostic
     loom::format::bytecode::writer
     loom::format::low_repr
-    loom::target::arch::cmd::product
-    loom::tooling::compile::product
+    loom::link::materialization_environment
+    loom::link::module_index
+    loom::pass::builtin_registry
+    loom::target::arch::cmd::artifact_builder
+    loom::target::arch::cmd::artifact_set
+    loom::target::entry_selection
     loom::tooling::execution::session
     loom::tooling::io::file
-    loom::tooling::target::cmd::product_provider
     loom::transforms::kernel::kernel_class_materializer
     loom::transforms::kernel::kernel_request_producer
     loom::util::stream
   PUBLIC
 )
 
+set(_loom_compile_platform_copts "")
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+  list(APPEND _loom_compile_platform_copts "-DLOOM_COMPILE_HAVE_AMDGPU=1")
+endif()
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN)
+  list(APPEND _loom_compile_platform_copts "-DLOOM_COMPILE_HAVE_SPIRV_VULKAN=1")
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
+  list(APPEND _loom_compile_platform_copts "-DLOOM_COMPILE_HAVE_LLVMIR=1")
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _loom_compile_platform_copts "-DLOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV=1")
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
+  list(APPEND _loom_compile_platform_copts "-DLOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV=1")
+endif()
+set(_loom_compile_platform_deps "")
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+  list(APPEND _loom_compile_platform_deps loom::target::arch::amdgpu::provider)
+  list(APPEND _loom_compile_platform_deps loom::tooling::target::amdgpu::artifact_provider)
+endif()
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN)
+  list(APPEND _loom_compile_platform_deps loom::target::arch::spirv::provider)
+  list(APPEND _loom_compile_platform_deps loom::tooling::target::spirv::artifact_provider)
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
+  list(APPEND _loom_compile_platform_deps loom::target::arch::llvmir::provider)
+  list(APPEND _loom_compile_platform_deps loom::target::emit::llvmir::artifact_emitter)
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _loom_compile_platform_deps loom::target::emit::llvmir::amdgpu::target_env)
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
+  list(APPEND _loom_compile_platform_deps loom::target::emit::llvmir::x86::target_env)
+endif()
 loom_cc_binary(
   NAME
     loom-compile
   SRCS
     "loom-compile.c"
+  COPTS
+    ${_loom_compile_platform_copts}
   DEPS
     ::command_backend
     ::command_manifest
@@ -69,27 +109,26 @@ loom_cc_binary(
     loom::link::linker
     loom::ops::kernel
     loom::ops::op_defs
-    loom::product::kernel
     loom::sanitizer::options
-    loom::target::arch::cmd::product
-    loom::target::configured::provider
+    loom::target::arch::cmd::artifact_set
+    loom::target::arch::cmd::provider
     loom::target::entry_selection
     loom::target::low_descriptor_registry
     loom::target::module_specialization
     loom::target::reporting::artifact_manifest
     loom::tooling::cli::help
-    loom::tooling::compile::configured::emitter
-    loom::tooling::compile::configured::registry
+    loom::tooling::compile::artifact
     loom::tooling::compile::options
     loom::tooling::compile::pipeline
-    loom::tooling::compile::product
     loom::tooling::compile::report_capture
     loom::tooling::config
     loom::tooling::context
+    loom::tooling::execution::execution_provider
     loom::tooling::execution::session
     loom::tooling::io::file
     loom::tooling::io::source_path
     loom::tooling::pass::trace_cli
+    ${_loom_compile_platform_deps}
 )
 
 loom_cc_test(

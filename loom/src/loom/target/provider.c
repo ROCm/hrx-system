@@ -6,53 +6,6 @@
 
 #include "loom/target/provider.h"
 
-static iree_status_t loom_target_provider_set_validate(
-    const loom_target_provider_set_t* provider_set) {
-  if (provider_set->provider_count != 0 && provider_set->providers == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "target provider table is NULL with a nonzero provider count");
-  }
-  for (iree_host_size_t i = 0; i < provider_set->provider_count; ++i) {
-    const loom_target_provider_t* provider = provider_set->providers[i];
-    if (provider == NULL) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "target provider table contains a NULL entry");
-    }
-    if ((provider->select_profile == NULL) !=
-        (provider->release_profile_selection == NULL)) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "target provider profile selection and release hooks must be "
-          "registered together");
-    }
-    if (provider->select_profile != NULL && provider->profile_type == NULL) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "target provider with profile selection has no profile type");
-    }
-    if (provider->profile_type == NULL) {
-      continue;
-    }
-    const iree_string_view_t family = provider->profile_type->name;
-    if (iree_string_view_is_empty(family)) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "target profile family name must not be empty");
-    }
-    for (iree_host_size_t j = 0; j < i; ++j) {
-      const loom_target_provider_t* prior = provider_set->providers[j];
-      if (prior->profile_type != NULL &&
-          iree_string_view_equal(prior->profile_type->name, family)) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "target profile family '%.*s' is registered more than once",
-            (int)family.size, family.data);
-      }
-    }
-  }
-  return iree_ok_status();
-}
-
 void loom_target_emit_artifact_release(loom_target_emit_artifact_t* artifact) {
   if (artifact == NULL) {
     return;
@@ -243,7 +196,6 @@ iree_status_t loom_target_environment_initialize(
   *out_environment = (loom_target_environment_t){
       .provider_set = provider_set,
   };
-  IREE_RETURN_IF_ERROR(loom_target_provider_set_validate(provider_set));
 
   const loom_pass_registry_t*
       pass_registries[LOOM_TARGET_PROVIDER_PASS_REGISTRY_CAPACITY] = {0};
@@ -414,25 +366,6 @@ const loom_target_provider_t* loom_target_environment_lookup_profile_provider(
        ++i) {
     if (environment->provider_set->providers[i]->profile_type == profile_type) {
       return environment->provider_set->providers[i];
-    }
-  }
-  return NULL;
-}
-
-const loom_target_provider_t* loom_target_environment_lookup_family_provider(
-    const loom_target_environment_t* environment, iree_string_view_t family) {
-  IREE_ASSERT_ARGUMENT(environment);
-  family = iree_string_view_trim(family);
-  if (iree_string_view_is_empty(family)) {
-    return NULL;
-  }
-  for (iree_host_size_t i = 0; i < environment->provider_set->provider_count;
-       ++i) {
-    const loom_target_provider_t* provider =
-        environment->provider_set->providers[i];
-    if (provider->profile_type != NULL &&
-        iree_string_view_equal(provider->profile_type->name, family)) {
-      return provider;
     }
   }
   return NULL;

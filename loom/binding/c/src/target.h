@@ -94,22 +94,10 @@ loomc_target_specialization_options_validate_environment(
     const loomc_target_specialization_options_t* options,
     const loomc_target_environment_t* target_environment);
 
-// Controls internal specialization-list materialization.
-typedef uint32_t loomc_target_specialization_list_flags_t;
-enum loomc_target_specialization_list_flag_bits_e {
-  // Materializes target-only specialization rows.
-  LOOMC_TARGET_SPECIALIZATION_LIST_FLAG_NONE = 0u,
-  // Applies the unique product contract captured by each public profile.
-  LOOMC_TARGET_SPECIALIZATION_LIST_FLAG_APPLY_PRODUCT_CONTRACT = 1u << 0,
-};
-
 // Materializes internal function requests and target declaration bindings from
-// public options. |flags| selects whether compile-time product contracts are
-// included; link materialization leaves them out. Returned lists are owned by
-// |arena| until it is reset.
+// public options. Returned lists are owned by |arena| until it is reset.
 LOOMC_API_PRIVATE loomc_status_t loomc_target_specialization_options_make_lists(
     const loomc_target_specialization_options_t* options,
-    loomc_target_specialization_list_flags_t flags,
     iree_arena_allocator_t* arena,
     loom_target_specialization_request_list_t* out_requests,
     loom_target_declaration_binding_list_t* out_bindings);

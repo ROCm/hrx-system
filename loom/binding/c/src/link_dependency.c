@@ -168,8 +168,7 @@ static loomc_status_t loomc_link_dependency_add_report(
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_result_add_artifact_take_contents(
-        result,
-        loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_LINK_DEPENDENCY_REPORT),
+        result, LOOMC_ARTIFACT_KIND_REPORT,
         loomc_make_cstring_view(
             LOOMC_ARTIFACT_FORMAT_LINK_DEPENDENCY_REPORT_JSON),
         identifier, loomc_make_byte_span(report_storage, report_length));

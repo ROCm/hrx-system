@@ -7,6 +7,7 @@
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
+    "iree_select",
     "loom_cc_binary",
 )
 
@@ -16,9 +17,25 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+_AMDGPU_LINK_COPTS = iree_select({
+    "//loom/config/target/arch:amdgpu": [
+        "-DLOOM_LINK_HAVE_AMDGPU=1",
+    ],
+    "//conditions:default": [],
+})
+
+_AMDGPU_LINK_DEPS = iree_select({
+    "//loom/config/target/arch:amdgpu": [
+        "//loom/src/loom/target/arch/amdgpu:artifact_key",
+        "//loom/src/loom/target/arch/amdgpu:profile",
+    ],
+    "//conditions:default": [],
+})
+
 loom_cc_binary(
     name = "loom-link",
     srcs = ["loom-link.c"],
+    copts = _AMDGPU_LINK_COPTS,
     deps = [
         "//loom/src/loom/codegen/low:repr",
         "//loom/src/loom/codegen/low:text_asm",
@@ -48,7 +65,7 @@ loom_cc_binary(
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/io:stream",
-    ],
+    ] + _AMDGPU_LINK_DEPS,
 )
 
 iree_execution_test_suite(

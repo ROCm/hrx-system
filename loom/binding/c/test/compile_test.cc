@@ -188,14 +188,14 @@ void ExpectFailedResultCode(const loomc_result_t* result, const char* code) {
 }
 
 const loomc_artifact_t* FindArtifact(const loomc_result_t* result,
-                                     const char* role, const char* format) {
+                                     loomc_artifact_kind_t kind,
+                                     const char* format) {
   for (loomc_host_size_t i = 0; i < loomc_result_artifact_count(result); ++i) {
     const loomc_artifact_t* artifact = loomc_result_artifact_at(result, i);
     if (artifact == nullptr) {
       continue;
     }
-    if (loomc_string_view_equal(artifact->role,
-                                loomc_make_cstring_view(role)) &&
+    if (artifact->kind == kind &&
         loomc_string_view_equal(artifact->format,
                                 loomc_make_cstring_view(format))) {
       return artifact;
@@ -239,12 +239,11 @@ SourcePtr SerializeModuleToBytecode(const loomc_module_t* module,
   return SourcePtr(source);
 }
 
-void DestroyAlternateProduct(loom_product_t* base_product) {
+void DestroyAlternateProduct(loomc_product_t* base_product) {
   loomc_allocator_free(loomc_allocator_system(), base_product);
 }
 
-const loom_product_descriptor_t kAlternateProductDescriptor = {
-    /*.name=*/IREE_SV("alternate"),
+const loomc_product_descriptor_t kAlternateProductDescriptor = {
     /*.destroy=*/DestroyAlternateProduct,
 };
 
@@ -465,7 +464,7 @@ TEST(CompileTest, CompileModuleEmitsRequestedArtifacts) {
   ASSERT_EQ(loomc_result_artifact_count(result_ptr.get()), 3u);
 
   const loomc_artifact_t* text_artifact =
-      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_ROLE_MODULE,
+      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_KIND_MODULE,
                    LOOMC_ARTIFACT_FORMAT_LOOM_TEXT);
   ASSERT_NE(text_artifact, nullptr);
   EXPECT_EQ(ToString(text_artifact->identifier), "jit_kernel.loom");
@@ -476,7 +475,7 @@ TEST(CompileTest, CompileModuleEmitsRequestedArtifacts) {
             std::string::npos);
 
   const loomc_artifact_t* bytecode_artifact =
-      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_ROLE_MODULE,
+      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_KIND_MODULE,
                    LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE);
   ASSERT_NE(bytecode_artifact, nullptr);
   EXPECT_EQ(ToString(bytecode_artifact->identifier), "jit_kernel.loombc");
@@ -493,9 +492,8 @@ TEST(CompileTest, CompileModuleEmitsRequestedArtifacts) {
                                                 bytecode_source_ptr.get());
   EXPECT_NE(bytecode_module.get(), nullptr);
 
-  const loomc_artifact_t* report_artifact =
-      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_ROLE_COMPILE_REPORT,
-                   LOOMC_ARTIFACT_FORMAT_JSON);
+  const loomc_artifact_t* report_artifact = FindArtifact(
+      result_ptr.get(), LOOMC_ARTIFACT_KIND_REPORT, LOOMC_ARTIFACT_FORMAT_JSON);
   ASSERT_NE(report_artifact, nullptr);
   EXPECT_EQ(ToString(report_artifact->identifier),
             "jit_kernel.compile-report.json");
@@ -543,15 +541,13 @@ TEST(CompileTest, CompileRequestReturnsOwnedProduct) {
 
   request.reset();
   result_ptr.reset();
-  loomc_artifact_t artifact = {};
-  ASSERT_TRUE(loomc_product_artifact_at(product_ptr.get(), 0, &artifact));
-  EXPECT_EQ(ToString(artifact.role), LOOMC_ARTIFACT_ROLE_MODULE);
-  EXPECT_EQ(ToString(artifact.format), LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE);
-  EXPECT_EQ(ToString(artifact.identifier), "request-product.loombc");
-  EXPECT_NE(loomc_byte_sequence_length(artifact.contents), 0u);
-  EXPECT_FALSE(loomc_product_artifact_at(product_ptr.get(), 1, &artifact));
-  EXPECT_FALSE(loomc_product_artifact_at(product_ptr.get(), 0, nullptr));
-  EXPECT_FALSE(loomc_product_artifact_at(nullptr, 0, &artifact));
+  const loomc_artifact_t* artifact =
+      loomc_product_artifact_at(product_ptr.get(), 0);
+  ASSERT_NE(artifact, nullptr);
+  EXPECT_EQ(artifact->kind, LOOMC_ARTIFACT_KIND_MODULE);
+  EXPECT_EQ(ToString(artifact->format), LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE);
+  EXPECT_EQ(ToString(artifact->identifier), "request-product.loombc");
+  EXPECT_NE(loomc_byte_sequence_length(artifact->contents), 0u);
 }
 
 TEST(CompileTest, CompileRequestAppliesSharedConfigModule) {
@@ -591,9 +587,10 @@ config.def @model36.model.hidden_size = 4096 : index
   ASSERT_EQ(loomc_product_artifact_count(product_ptr.get()), 1u);
 
   config_module.reset();
-  loomc_artifact_t artifact = {};
-  ASSERT_TRUE(loomc_product_artifact_at(product_ptr.get(), 0, &artifact));
-  const std::string text = ToString(artifact.contents);
+  const loomc_artifact_t* artifact =
+      loomc_product_artifact_at(product_ptr.get(), 0);
+  ASSERT_NE(artifact, nullptr);
+  const std::string text = ToString(artifact->contents);
   EXPECT_NE(text.find("config.def @model36.model.hidden_size = 4096 : index"),
             std::string::npos);
   EXPECT_EQ(text.find("config.decl @model36.model.hidden_size"),
@@ -634,7 +631,7 @@ TEST(CompileTest, CompileRequestRejectsAnotherProductContract) {
   ModulePtr module = CreateValidModule(context.get(), workspace.get());
   RequestPtr request = CreateSingleRootRequest(
       SerializeModuleToBytecode(module.get(), "wrong-contract.loombc"),
-      loomc_product_descriptor_from_product(&kAlternateProductDescriptor));
+      &kAlternateProductDescriptor);
 
   loomc_product_t* product = nullptr;
   loomc_result_t* result = nullptr;
@@ -704,9 +701,8 @@ TEST(CompileTest, CompileModuleIgnoresUnusedConfig) {
   ResultPtr result_ptr(result);
   ExpectSucceededResult(result_ptr.get());
   ASSERT_EQ(loomc_result_artifact_count(result_ptr.get()), 1u);
-  const loomc_artifact_t* report_artifact =
-      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_ROLE_COMPILE_REPORT,
-                   LOOMC_ARTIFACT_FORMAT_JSON);
+  const loomc_artifact_t* report_artifact = FindArtifact(
+      result_ptr.get(), LOOMC_ARTIFACT_KIND_REPORT, LOOMC_ARTIFACT_FORMAT_JSON);
   ASSERT_NE(report_artifact, nullptr);
   std::string report = ToString(report_artifact->contents);
   EXPECT_NE(report.find(R"("state":"succeeded")"), std::string::npos);

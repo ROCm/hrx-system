@@ -358,8 +358,7 @@ iree_status_t loom_target_function_contract_resolve(
 
 typedef enum loom_target_function_contract_scope_e {
   LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_ARTIFACT = 0,
-  LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_TARGET_ONLY = 1,
-  LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_MODULE_INTERNAL = 2,
+  LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_MODULE_INTERNAL = 1,
 } loom_target_function_contract_scope_t;
 
 static iree_status_t loom_target_function_contract_resolve_scoped_bundle(
@@ -456,34 +455,6 @@ static void loom_target_function_contract_record_explicit_fields(
   }
 }
 
-static iree_status_t loom_target_function_contract_validate_export_constraints(
-    const loom_func_symbol_facts_t* func_facts, iree_string_view_t target_name,
-    const loom_target_facts_t* base_facts,
-    loom_target_function_contract_scope_t scope,
-    iree_diagnostic_emitter_t diagnostic_emitter, bool* out_valid) {
-  if (scope == LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_MODULE_INTERNAL) {
-    *out_valid = true;
-    return iree_ok_status();
-  }
-  if (func_facts->has_abi &&
-      loom_target_facts_field_is_explicit(base_facts,
-                                          LOOM_TARGET_FACT_FIELD_ABI) &&
-      func_facts->abi_kind != base_facts->storage.export_plan.abi_kind) {
-    return loom_target_function_contract_reject_constraint(
-        diagnostic_emitter, func_facts, target_name, IREE_SV("abi"), out_valid);
-  }
-  if (func_facts->has_export_linkage &&
-      loom_target_facts_field_is_explicit(base_facts,
-                                          LOOM_TARGET_FACT_FIELD_LINKAGE) &&
-      func_facts->export_linkage != base_facts->storage.export_plan.linkage) {
-    return loom_target_function_contract_reject_constraint(
-        diagnostic_emitter, func_facts, target_name, IREE_SV("linkage"),
-        out_valid);
-  }
-  *out_valid = true;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_target_function_contract_refine_scoped_facts(
     const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
     iree_string_view_t target_name, const loom_target_facts_t* base_facts,
@@ -492,14 +463,6 @@ static iree_status_t loom_target_function_contract_refine_scoped_facts(
     bool* out_valid, const loom_target_facts_t** out_facts) {
   *out_valid = false;
   *out_facts = NULL;
-
-  IREE_RETURN_IF_ERROR(
-      loom_target_function_contract_validate_export_constraints(
-          func_facts, target_name, base_facts, scope, diagnostic_emitter,
-          out_valid));
-  if (!*out_valid) {
-    return iree_ok_status();
-  }
 
   loom_target_bundle_storage_t bundle_storage = {0};
   IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve_scoped_bundle(
@@ -529,17 +492,6 @@ iree_status_t loom_target_function_contract_refine_facts(
       module, func_facts, target_name, base_facts,
       LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_ARTIFACT, diagnostic_emitter, arena,
       out_valid, out_facts);
-}
-
-iree_status_t loom_target_function_contract_refine_target_facts(
-    const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
-    iree_string_view_t target_name, const loom_target_facts_t* base_facts,
-    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
-    bool* out_valid, const loom_target_facts_t** out_facts) {
-  return loom_target_function_contract_refine_scoped_facts(
-      module, func_facts, target_name, base_facts,
-      LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_TARGET_ONLY, diagnostic_emitter,
-      arena, out_valid, out_facts);
 }
 
 iree_status_t loom_target_function_contract_refine_internal_facts(

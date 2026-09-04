@@ -13,11 +13,10 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/op_defs.h"
 #include "loom/ops/op_registry.h"
 #include "loom/ops/target/facts.h"
-#include "loom/pass/builder.h"
 #include "loom/target/arch/spirv/features.h"
-#include "loom/target/arch/spirv/ops/ops.h"
 #include "loom/target/arch/spirv/profile.h"
 #include "loom/target/arch/spirv/records/target_records.h"
 #include "loom/testing/module_ptr.h"
@@ -131,6 +130,49 @@ TEST_F(SpirvProviderTest, RequiresLowCallsInline) {
             LOOM_TARGET_LOW_CALL_POLICY_REQUIRE_INLINE);
 }
 
+TEST_F(SpirvProviderTest, MaterializesAuthoredRefinements) {
+  ModulePtr source =
+      Parse(IREE_SV("spirv.target<vulkan1_3> @source {abi = hal_kernel, "
+                    "max_workgroup_size_x = 128, subgroup_size = 32, "
+                    "export_symbol = \"roundtrip_export\", "
+                    "contract_set_key = \"roundtrip.contract\", "
+                    "contract_feature_bits = 8}\n"));
+  const loom_target_symbol_facts_t* source_symbol_facts =
+      Requirement(source.get(), IREE_SV("source"));
+
+  loom_module_t* raw_module = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("materialized"),
+                                      &block_pool_, nullptr,
+                                      iree_allocator_system(), &raw_module));
+  ModulePtr materialized(raw_module);
+  loom_string_id_t symbol_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(
+      materialized.get(), IREE_SV("sealed_target"), &symbol_name_id));
+  loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(materialized.get(), symbol_name_id, &symbol_id));
+  const loom_symbol_ref_t symbol = {
+      /*.module_id=*/0,
+      /*.symbol_id=*/symbol_id,
+  };
+  loom_builder_t builder;
+  loom_builder_initialize(materialized.get(), &materialized->arena,
+                          loom_module_block(materialized.get()), &builder);
+  const loom_resolved_target_t resolved_target = {
+      /*.provider=*/&loom_spirv_target_provider,
+      /*.facts=*/source_symbol_facts->projection,
+  };
+  ASSERT_NE(loom_spirv_target_provider.materialize_definition, nullptr);
+  IREE_ASSERT_OK(loom_spirv_target_provider.materialize_definition(
+      &builder, &resolved_target, symbol, LOOM_LOCATION_UNKNOWN));
+
+  loom_symbol_fact_table_reset(&requirement_fact_table_);
+  const loom_target_symbol_facts_t* materialized_symbol_facts =
+      Target(&requirement_fact_table_, materialized.get(), symbol);
+  EXPECT_TRUE(loom_target_facts_are_equivalent(
+      source_symbol_facts->projection, materialized_symbol_facts->projection));
+}
+
 TEST_F(SpirvProviderTest, ProjectedProfileSatisfiesStructuredRequirements) {
   ModulePtr requirements =
       Parse(IREE_SV("spirv.target<vulkan1_3> @baseline_a\n"
@@ -146,10 +188,10 @@ TEST_F(SpirvProviderTest, ProjectedProfileSatisfiesStructuredRequirements) {
                     "spirv.target<vulkan1_3> @float64 "
                     "{contract_feature_bits = 16}\n"));
   loom_target_bundle_storage_t live_storage = {
-      /*.snapshot=*/*loom_spirv_target_profile_bundle_vulkan1_3.snapshot,
-      /*.export_plan=*/*loom_spirv_target_profile_bundle_vulkan1_3.export_plan,
-      /*.config=*/*loom_spirv_target_profile_bundle_vulkan1_3.config,
-      /*.bundle=*/loom_spirv_target_profile_bundle_vulkan1_3,
+      /*.snapshot=*/*loom_spirv_low_target_bundle_vulkan1_3.snapshot,
+      /*.export_plan=*/*loom_spirv_low_target_bundle_vulkan1_3.export_plan,
+      /*.config=*/*loom_spirv_low_target_bundle_vulkan1_3.config,
+      /*.bundle=*/loom_spirv_low_target_bundle_vulkan1_3,
   };
   loom_target_bundle_storage_rebind(&live_storage);
   live_storage.bundle.name = IREE_SV("live-vulkan-device");
@@ -165,6 +207,7 @@ TEST_F(SpirvProviderTest, ProjectedProfileSatisfiesStructuredRequirements) {
       /*.y=*/65535,
       /*.z=*/65535,
   };
+  live_storage.export_plan.abi_kind = LOOM_TARGET_ABI_HAL_KERNEL;
   live_storage.config.contract_feature_bits |= LOOM_SPIRV_FEATURE_FLOAT16;
 
   loom_spirv_target_profile_t profile = {};
@@ -174,7 +217,8 @@ TEST_F(SpirvProviderTest, ProjectedProfileSatisfiesStructuredRequirements) {
   IREE_ASSERT_OK(loom_target_profile_project_facts(
       &profile.base, &analysis_arena_, &effective));
   ASSERT_NE(effective, nullptr);
-  EXPECT_EQ(effective->storage.export_plan.abi_kind, LOOM_TARGET_ABI_UNKNOWN);
+  EXPECT_EQ(effective->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_HAL_KERNEL);
 
   const loom_target_symbol_facts_t* baseline_a =
       Requirement(requirements.get(), IREE_SV("baseline_a"));
@@ -201,64 +245,6 @@ TEST_F(SpirvProviderTest, ProjectedProfileSatisfiesStructuredRequirements) {
             LOOM_TARGET_ABI_SHADER_ENTRY_POINT);
   EXPECT_FALSE(loom_target_facts_field_is_explicit(baseline_a->projection,
                                                    LOOM_TARGET_FACT_FIELD_ABI));
-}
-
-TEST_F(SpirvProviderTest, SelectedProfileRoundTripsThroughTargetDefinition) {
-  loom_target_profile_selection_t selection = {};
-  IREE_ASSERT_OK(loom_target_environment_select_profile(
-      &target_environment_, IREE_SV("spirv:vulkan1.3+bda"),
-      iree_allocator_system(), &selection));
-  EXPECT_EQ(selection.provider, &loom_spirv_target_provider);
-  EXPECT_TRUE(
-      iree_string_view_equal(selection.selector, IREE_SV("vulkan1.3+bda")));
-
-  loom_target_facts_t* selected_facts = nullptr;
-  IREE_ASSERT_OK(loom_target_profile_project_facts(
-      selection.profile, &analysis_arena_, &selected_facts));
-  ASSERT_NE(selected_facts, nullptr);
-
-  loom_module_t* raw_module = nullptr;
-  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("materialized"),
-                                      &block_pool_, nullptr,
-                                      iree_allocator_system(), &raw_module));
-  ModulePtr module(raw_module);
-  loom_string_id_t symbol_name_id = LOOM_STRING_ID_INVALID;
-  IREE_ASSERT_OK(loom_module_intern_string(module.get(), IREE_SV("selected"),
-                                           &symbol_name_id));
-  loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
-  IREE_ASSERT_OK(
-      loom_module_add_symbol(module.get(), symbol_name_id, &symbol_id));
-  const loom_symbol_ref_t symbol = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/symbol_id,
-  };
-  loom_builder_t builder;
-  loom_builder_initialize(module.get(), &module->arena,
-                          loom_module_block(module.get()), &builder);
-  const loom_resolved_target_t resolved_target = {
-      /*.provider=*/selection.provider,
-      /*.facts=*/selected_facts,
-  };
-  IREE_ASSERT_OK(selection.provider->materialize_definition(
-      &builder, &resolved_target, symbol, LOOM_LOCATION_UNKNOWN));
-  ASSERT_TRUE(
-      loom_spirv_target_isa(module->symbols.entries[symbol_id].defining_op));
-
-  loom_symbol_fact_table_reset(&requirement_fact_table_);
-  const loom_target_symbol_facts_t* materialized =
-      Target(&requirement_fact_table_, module.get(), symbol);
-  EXPECT_TRUE(loom_target_facts_are_equivalent(selected_facts,
-                                               materialized->projection));
-
-  loom_target_profile_selection_deinitialize(&selection);
-}
-
-TEST_F(SpirvProviderTest, RejectsUnknownFamilySelector) {
-  loom_target_profile_selection_t selection = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_target_environment_select_profile(
-                            &target_environment_, IREE_SV("spirv:opencl3.0"),
-                            iree_allocator_system(), &selection));
 }
 
 }  // namespace

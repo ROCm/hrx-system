@@ -79,11 +79,11 @@ static loomc_status_t require_successful_result(const loomc_result_t* result,
 }
 
 static const loomc_artifact_t* find_result_artifact(
-    const loomc_result_t* result, loomc_string_view_t role,
+    const loomc_result_t* result, loomc_artifact_kind_t kind,
     loomc_string_view_t format) {
   for (loomc_host_size_t i = 0; i < loomc_result_artifact_count(result); ++i) {
     const loomc_artifact_t* artifact = loomc_result_artifact_at(result, i);
-    if (artifact != NULL && loomc_string_view_equal(artifact->role, role) &&
+    if (artifact != NULL && artifact->kind == kind &&
         loomc_string_view_equal(artifact->format, format)) {
       return artifact;
     }
@@ -247,7 +247,7 @@ static loomc_status_t compile_kernel(jit_kernel_state_t* state) {
 static loomc_status_t prepare_and_evaluate_launch(
     jit_kernel_state_t* state, loomc_launch_config_t* out_launch_config) {
   const loomc_artifact_t* artifact = find_result_artifact(
-      state->result, loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_LAUNCH_CONFIG),
+      state->result, LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
       loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE));
   if (artifact == NULL) {
     return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
@@ -315,18 +315,18 @@ static loomc_status_t inspect_products(
                              "unexpected launch configuration");
   }
 
-  const loomc_artifact_t* kernel_artifact = find_result_artifact(
-      state->result, loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
+  const loomc_artifact_t* executable = find_result_artifact(
+      state->result, LOOMC_ARTIFACT_KIND_EXECUTABLE,
       loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO));
-  if (kernel_artifact == NULL) {
+  if (executable == NULL) {
     return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
-                             "AMDGPU kernel artifact was not produced");
+                             "AMDGPU executable artifact was not produced");
   }
-  const uint64_t kernel_artifact_length =
-      loomc_byte_sequence_length(kernel_artifact->contents);
-  if (kernel_artifact_length < 4) {
+  const uint64_t executable_length =
+      loomc_byte_sequence_length(executable->contents);
+  if (executable_length < 4) {
     return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
-                             "AMDGPU kernel artifact is too small");
+                             "AMDGPU executable artifact is too small");
   }
 
   printf("workload=%llu workgroups=%ux%ux%u workgroup_size=%ux%ux%u\n",
@@ -335,10 +335,9 @@ static loomc_status_t inspect_products(
          launch_config->workgroup_size.x, launch_config->workgroup_size.y,
          launch_config->workgroup_size.z);
   printf("artifact=%.*s format=%.*s bytes=%llu\n",
-         (int)kernel_artifact->identifier.size,
-         kernel_artifact->identifier.data, (int)kernel_artifact->format.size,
-         kernel_artifact->format.data,
-         (unsigned long long)kernel_artifact_length);
+         (int)executable->identifier.size, executable->identifier.data,
+         (int)executable->format.size, executable->format.data,
+         (unsigned long long)executable_length);
   return loomc_ok_status();
 }
 

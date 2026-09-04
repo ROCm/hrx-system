@@ -21,36 +21,15 @@ loom_cc_library(
     iree::base
     loom::target::arch::spirv::descriptors::low_registry
     loom::target::arch::spirv::low_verify
-    loom::target::arch::spirv::profile
     loom::target::emit::spirv::module_builder
     loom::target::emit::spirv::module_emitter
-    loom::target::emit::spirv::product_contract
     loom::target::entry_selection
+    loom::target::function_contract
     loom::target::low_descriptor_registry
     loom::target::reporting::artifact_manifest_collect
     loom::target::reporting::report
     loom::target::types
     loom::tooling::compile::artifact
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
-loom_cc_library(
-  NAME
-    product_provider
-  HDRS
-    "product_provider.h"
-  SRCS
-    "product_provider.c"
-  DEPS
-    ::artifact_provider
-    iree::base
-    loom::product::kernel
-    loom::product::registry
-    loom::target::arch::spirv::profile
-    loom::target::emit::spirv::product_contract
-    loom::tooling::compile::artifact_product
   PUBLIC
 )
 endif()
@@ -141,7 +120,6 @@ loom_cc_test(
     "artifact_provider_test.cc"
   DEPS
     ::artifact_provider
-    ::product_provider
     iree::base
     iree::base::internal::arena
     iree::testing::gtest
@@ -150,12 +128,10 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::op_registry
-    loom::product::kernel
     loom::target::arch::spirv::descriptors::low_registry
     loom::target::arch::spirv::ops
     loom::testing::byte_sequence
     loom::testing::module_ptr
-    loom::tooling::compile::product
   LABELS
     "iree-build-requirement=loom.target.arch.spirv"
     "iree-build-requirement=loom.emit.spirv"
@@ -212,7 +188,6 @@ loom_cc_test(
     loom::target::facts_builder
     loom::target::function_contract
     loom::target::function_version
-    loom::target::product_contract
     loom::target::profile
     loom::target::types
     loom::testing::module_ptr

@@ -8,7 +8,6 @@
 
 #include <string.h>
 
-#include "artifact.h"
 #include "config.h"
 #include "context.h"
 #include "diagnostic.h"
@@ -43,7 +42,7 @@ struct loomc_compiler_t {
 
 typedef struct loomc_compiled_module_product_t {
   // Generic immutable product interface exposed to callers.
-  loom_product_t base;
+  loomc_product_t base;
 
   // Allocator used for product-owned metadata.
   loomc_allocator_t allocator;
@@ -53,7 +52,7 @@ typedef struct loomc_compiled_module_product_t {
 } loomc_compiled_module_product_t;
 
 static void loomc_compiled_module_product_destroy(
-    loom_product_t* base_product) {
+    loomc_product_t* base_product) {
   loomc_compiled_module_product_t* product =
       (loomc_compiled_module_product_t*)base_product;
   const loomc_allocator_t allocator = product->allocator;
@@ -61,9 +60,8 @@ static void loomc_compiled_module_product_destroy(
   loomc_allocator_free(allocator, product);
 }
 
-static const loom_product_descriptor_t
+static const loomc_product_descriptor_t
     loomc_compiled_module_product_descriptor_ = {
-        .name = IREE_SVL("compiled-module"),
         .destroy = loomc_compiled_module_product_destroy,
 };
 
@@ -235,8 +233,7 @@ static loomc_status_t loomc_compile_specialize_functions(
   loom_target_specialization_request_list_t requests = {0};
   loom_target_declaration_binding_list_t bindings = {0};
   LOOMC_RETURN_IF_ERROR(loomc_target_specialization_options_make_lists(
-      options, LOOMC_TARGET_SPECIALIZATION_LIST_FLAG_APPLY_PRODUCT_CONTRACT,
-      arena, &requests, &bindings));
+      options, arena, &requests, &bindings));
 
   loomc_compile_diagnostic_capture_t capture = {
       .result = result,
@@ -282,14 +279,14 @@ static loomc_status_t loomc_compile_make_artifact_identifier(
 }
 
 static loomc_status_t loomc_compile_result_take_source_artifact(
-    loomc_result_t* result, loomc_string_view_t role,
+    loomc_result_t* result, loomc_artifact_kind_t kind,
     loomc_string_view_t format, loomc_source_t* source) {
   loomc_byte_span_t contents = loomc_byte_span_empty();
   loomc_allocator_t allocator = loomc_result_allocator(result);
   loomc_status_t status = loomc_source_take_contents(source, &contents);
   if (loomc_status_is_ok(status)) {
     status = loomc_result_add_artifact_take_contents(
-        result, role, format, loomc_source_identifier(source), contents);
+        result, kind, format, loomc_source_identifier(source), contents);
   }
   if (!loomc_status_is_ok(status)) {
     loomc_allocator_free(allocator, (void*)contents.data);
@@ -320,8 +317,7 @@ static loomc_status_t loomc_compile_add_module_artifact(
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_compile_result_take_source_artifact(
-        result, loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_MODULE),
-        artifact_format, source);
+        result, LOOMC_ARTIFACT_KIND_MODULE, artifact_format, source);
   }
 
   loomc_source_release(source);
@@ -346,7 +342,7 @@ static loomc_status_t loomc_compile_add_launch_config_artifact(
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_compile_result_take_source_artifact(
-        result, loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_LAUNCH_CONFIG),
+        result, LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
         loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE), source);
   }
 
@@ -449,7 +445,7 @@ static loomc_status_t loomc_compile_add_report_json_artifact(
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_result_add_artifact_take_contents(
-        result, loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_COMPILE_REPORT),
+        result, LOOMC_ARTIFACT_KIND_REPORT,
         loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_JSON), identifier,
         loomc_make_byte_span(report_storage, report_length));
   }
@@ -516,8 +512,7 @@ static loomc_status_t loomc_compiled_module_product_allocate(
   const loomc_host_size_t artifact_count = loomc_result_artifact_count(result);
   loomc_host_size_t artifact_storage_size = 0;
   loomc_host_size_t allocation_size = sizeof(loomc_compiled_module_product_t);
-  if (!iree_host_size_checked_mul(artifact_count,
-                                  sizeof(loom_product_artifact_t),
+  if (!iree_host_size_checked_mul(artifact_count, sizeof(loomc_artifact_t),
                                   &artifact_storage_size) ||
       !iree_host_size_checked_add(allocation_size, artifact_storage_size,
                                   &allocation_size)) {
@@ -533,15 +528,14 @@ static loomc_status_t loomc_compiled_module_product_allocate(
   product->result = result;
   loomc_result_retain(result);
 
-  loom_product_artifact_t* artifacts = (loom_product_artifact_t*)(product + 1);
+  loomc_artifact_t* artifacts = (loomc_artifact_t*)(product + 1);
   for (loomc_host_size_t i = 0; i < artifact_count; ++i) {
-    artifacts[i] =
-        loomc_artifact_to_product(loomc_result_artifact_at(result, i));
+    artifacts[i] = *loomc_result_artifact_at(result, i);
   }
-  loom_product_initialize(&loomc_compiled_module_product_descriptor_, artifacts,
-                          artifact_count, export_count,
-                          /*requirement_count=*/0, &product->base);
-  *out_product = loomc_product_from_product(&product->base);
+  loomc_product_initialize(&loomc_compiled_module_product_descriptor_,
+                           artifacts, artifact_count, export_count,
+                           /*requirement_count=*/0, &product->base);
+  *out_product = &product->base;
   return loomc_ok_status();
 }
 
@@ -818,8 +812,7 @@ loomc_status_t loomc_compile_request(
 
 const loomc_product_descriptor_t* loomc_compiled_module_product_descriptor(
     void) {
-  return loomc_product_descriptor_from_product(
-      &loomc_compiled_module_product_descriptor_);
+  return &loomc_compiled_module_product_descriptor_;
 }
 
 void loomc_compiler_retain(loomc_compiler_t* compiler) {

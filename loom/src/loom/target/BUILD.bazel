@@ -38,28 +38,6 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "product_contract",
-    srcs = ["product_contract.c"],
-    hdrs = ["product_contract.h"],
-    deps = [
-        ":facts",
-        ":types",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_test(
-    name = "product_contract_test",
-    srcs = ["product_contract_test.cc"],
-    deps = [
-        ":facts_builder",
-        ":product_contract",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_library(
     name = "resolved_target",
     hdrs = ["resolved_target.h"],
 )
@@ -269,7 +247,6 @@ loom_cc_library(
     deps = [
         ":facts",
         ":facts_builder",
-        ":product_contract",
         ":types",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -359,7 +336,6 @@ loom_cc_library(
         ":facts_builder",
         ":function_contract",
         ":function_version",
-        ":product_contract",
         ":profile",
         ":provider",
         "//loom/src/loom/analysis:symbol_facts",
@@ -600,14 +576,8 @@ loom_cc_library(
 
 loom_cc_library(
     name = "provider",
-    srcs = [
-        "profile_selection.c",
-        "provider.c",
-    ],
-    hdrs = [
-        "profile_selection.h",
-        "provider.h",
-    ],
+    srcs = ["provider.c"],
+    hdrs = ["provider.h"],
     deps = [
         ":legalization",
         ":low_asm_diagnostics",
@@ -615,7 +585,6 @@ loom_cc_library(
         ":low_legality",
         ":low_packet_diagnostics",
         ":math_policy",
-        ":product_contract",
         ":profile",
         ":resolved_target",
         "//loom/src/loom/codegen/low:verify",
@@ -704,16 +673,6 @@ loom_cc_test(
         "//loom/src/loom/pass:builder",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_test(
-    name = "profile_selection_test",
-    srcs = ["profile_selection_test.cc"],
-    deps = [
-        ":provider",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

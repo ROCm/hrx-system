@@ -164,8 +164,8 @@ void ExpectSpirvArtifact(const loomc_result_t* result,
 
   const loomc_artifact_t* artifact = loomc_result_artifact_at(result, 0);
   ASSERT_NE(artifact, nullptr);
-  EXPECT_EQ(ToString(artifact->role), LOOMC_ARTIFACT_ROLE_KERNEL);
-  EXPECT_EQ(ToString(artifact->format), LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY);
+  EXPECT_EQ(artifact->kind, LOOMC_ARTIFACT_KIND_EXECUTABLE);
+  EXPECT_EQ(ToString(artifact->format), LOOMC_ARTIFACT_FORMAT_SPIRV);
   EXPECT_EQ(ToString(artifact->identifier), expected_identifier);
   const std::string contents = ToString(artifact->contents);
   ASSERT_GE(contents.size(), sizeof(uint32_t));
@@ -244,8 +244,7 @@ TEST(TargetSpirvTest, EmitsSpirvBinaryArtifact) {
       /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
       /*.structure_size=*/sizeof(options),
       /*.next=*/&option_dict,
-      /*.artifact_format=*/
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY),
+      /*.artifact_format=*/loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
       /*.identifier=*/loomc_make_cstring_view("typed.spv"),
       /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };
@@ -367,8 +366,7 @@ TEST(TargetSpirvTest, RejectsUnknownEmitDictOptionThroughResult) {
       /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
       /*.structure_size=*/sizeof(options),
       /*.next=*/&option_dict,
-      /*.artifact_format=*/
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY),
+      /*.artifact_format=*/loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
       /*.identifier=*/loomc_make_cstring_view("spirv_barriers.spv"),
       /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };

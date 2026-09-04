@@ -9,7 +9,6 @@
 #include <string.h>
 
 #include "loom/target/facts_builder.h"
-#include "loom/target/product_contract.h"
 
 static bool loom_target_profile_bundle_is_complete(
     const loom_target_bundle_t* bundle) {
@@ -50,13 +49,6 @@ iree_status_t loom_target_profile_project_facts(
   loom_target_facts_builder_initialize(profile_type->fact_type,
                                        profile->target_bundle, facts);
   IREE_RETURN_IF_ERROR(profile_type->project_facts(profile, arena, facts));
-  if (iree_any_bit_set(facts->explicit_fields,
-                       loom_target_product_contract_fact_fields())) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "target profile family '%.*s' projected product-owned facts",
-        (int)profile_type->name.size, profile_type->name.data);
-  }
   *out_facts = facts;
   return iree_ok_status();
 }

@@ -317,10 +317,9 @@ void ExpectVulkanBdaProfileBundle(const loomc_target_profile_t* profile) {
   ASSERT_NE(bundle, nullptr);
   ASSERT_NE(bundle->snapshot, nullptr);
   ASSERT_NE(bundle->config, nullptr);
-  EXPECT_EQ(bundle->snapshot->codegen_format,
-            LOOM_TARGET_CODEGEN_FORMAT_UNKNOWN);
+  EXPECT_EQ(bundle->snapshot->codegen_format, LOOM_TARGET_CODEGEN_FORMAT_SPIRV);
   EXPECT_EQ(bundle->snapshot->artifact_format,
-            LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN);
+            LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY);
 }
 
 TEST(TargetSpirvProfileTest, CreatesEmptyPartialProfile) {

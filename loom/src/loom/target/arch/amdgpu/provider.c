@@ -8,7 +8,6 @@
 
 #include "loom/ir/module.h"
 #include "loom/pass/builder.h"
-#include "loom/target/arch/amdgpu/artifact_key.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/diagnostics/packet_diagnostics.h"
 #include "loom/target/arch/amdgpu/legalization.h"
@@ -20,57 +19,6 @@
 #include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/pass_registry.h"
 #include "loom/target/arch/amdgpu/profile.h"
-
-typedef struct loom_amdgpu_profile_selection_storage_t {
-  // Structured AMDGPU target profile.
-  loom_amdgpu_target_profile_t profile;
-
-  // Owned canonical selector storage.
-  iree_string_builder_t selector_builder;
-} loom_amdgpu_profile_selection_storage_t;
-
-static iree_status_t loom_amdgpu_target_provider_select_profile(
-    const loom_target_provider_t* provider, iree_string_view_t selector,
-    iree_allocator_t allocator,
-    loom_target_profile_selection_t* out_selection) {
-  (void)provider;
-  loom_amdgpu_target_identity_t identity = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_key_parse(selector, &identity));
-
-  loom_amdgpu_profile_selection_storage_t* storage = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(allocator, sizeof(*storage), (void**)&storage));
-  *storage = (loom_amdgpu_profile_selection_storage_t){0};
-  iree_string_builder_initialize(allocator, &storage->selector_builder);
-
-  iree_status_t status =
-      loom_amdgpu_target_profile_initialize(&identity, &storage->profile);
-  if (iree_status_is_ok(status)) {
-    status = loom_amdgpu_artifact_key_append(&storage->profile.identity,
-                                             &storage->selector_builder);
-  }
-  if (iree_status_is_ok(status)) {
-    *out_selection = (loom_target_profile_selection_t){
-        .profile = &storage->profile.base,
-        .selector = iree_string_builder_view(&storage->selector_builder),
-        .storage = storage,
-    };
-  } else {
-    iree_string_builder_deinitialize(&storage->selector_builder);
-    iree_allocator_free(allocator, storage);
-  }
-  return status;
-}
-
-static void loom_amdgpu_target_provider_release_profile_selection(
-    const loom_target_provider_t* provider,
-    loom_target_profile_selection_t* selection) {
-  (void)provider;
-  loom_amdgpu_profile_selection_storage_t* storage =
-      (loom_amdgpu_profile_selection_storage_t*)selection->storage;
-  iree_string_builder_deinitialize(&storage->selector_builder);
-  iree_allocator_free(selection->allocator, storage);
-}
 
 static const loom_target_low_legality_provider_t*
     kLoomAmdgpuLowLegalityProviders[] = {
@@ -201,9 +149,6 @@ const loom_target_provider_t loom_amdgpu_target_provider = {
         },
     .pass_registry = &loom_amdgpu_pass_registry,
     .contribute_pipeline = loom_amdgpu_provider_contribute_pipeline,
-    .select_profile = loom_amdgpu_target_provider_select_profile,
-    .release_profile_selection =
-        loom_amdgpu_target_provider_release_profile_selection,
     .target_fact_type = &loom_amdgpu_target_fact_type,
 };
 

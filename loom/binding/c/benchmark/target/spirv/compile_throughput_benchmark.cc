@@ -136,7 +136,7 @@ static iree_status_t EmitSpirvBenchmarkArtifact(
       /*.structure_size=*/sizeof(emit_options),
       /*.next=*/&spirv_options,
       /*.artifact_format=*/
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY),
+      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
       /*.identifier=*/identifier,
       /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };
@@ -150,12 +150,12 @@ static iree_status_t EmitSpirvBenchmarkArtifact(
   IREE_RETURN_IF_ERROR(RequireSucceededResult(result.get(), "SPIR-V emission"));
 
   IREE_RETURN_IF_ERROR(ValidateArtifact(
-      result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY),
-      sizeof(uint32_t), "SPIR-V executable", out_artifact_byte_count));
+      result.get(), LOOMC_ARTIFACT_KIND_EXECUTABLE,
+      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV), sizeof(uint32_t),
+      "SPIR-V executable", out_artifact_byte_count));
   const loomc_artifact_t* artifact = loomc::bench::FindArtifact(
-      result.get(), loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY));
+      result.get(), LOOMC_ARTIFACT_KIND_EXECUTABLE,
+      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV));
   uint32_t magic = 0;
   IREE_RETURN_IF_ERROR(
       ReadArtifactPrefix(artifact, iree_make_byte_span(&magic, sizeof(magic))));

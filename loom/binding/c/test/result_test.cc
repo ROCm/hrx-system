@@ -84,7 +84,7 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
       loomc_allocator_system(), &contents_sequence));
   ByteSequencePtr contents_owner(contents_sequence);
   loomc_artifact_t artifact = {
-      /*.role=*/loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_COMPILE_REPORT),
+      /*.kind=*/LOOMC_ARTIFACT_KIND_REPORT,
       /*.format=*/loomc_make_string_view(format, sizeof(format) - 1),
       /*.identifier=*/
       loomc_make_string_view(identifier, sizeof(identifier) - 1),
@@ -115,8 +115,7 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
   ASSERT_EQ(loomc_result_artifact_count(result), 1u);
   const loomc_artifact_t* stored_artifact = loomc_result_artifact_at(result, 0);
   ASSERT_NE(stored_artifact, nullptr);
-  EXPECT_EQ(ToString(stored_artifact->role),
-            LOOMC_ARTIFACT_ROLE_COMPILE_REPORT);
+  EXPECT_EQ(stored_artifact->kind, LOOMC_ARTIFACT_KIND_REPORT);
   EXPECT_EQ(ToString(stored_artifact->format), "text");
   EXPECT_EQ(ToString(stored_artifact->identifier), "report");
   EXPECT_EQ(ToString(stored_artifact->contents), "hello");
@@ -130,7 +129,7 @@ TEST(ResultTest, RejectsMalformedArtifact) {
                                       loomc_allocator_system(), &result));
 
   loomc_artifact_t artifact = {
-      /*.role=*/loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_COMPILE_REPORT),
+      /*.kind=*/LOOMC_ARTIFACT_KIND_REPORT,
       /*.format=*/loomc_make_cstring_view("text"),
       /*.identifier=*/loomc_make_cstring_view("broken"),
       /*.contents=*/nullptr,

@@ -69,45 +69,12 @@ bool loom_target_facts_structural_satisfy_specialization_requirement(
       effective->selector != requirement->selector) {
     return false;
   }
-  return loom_target_facts_product_contract_satisfies_specialization_requirement(
-             effective, requirement) &&
-         loom_target_snapshot_satisfies_specialization_requirement(
+  return loom_target_snapshot_satisfies_specialization_requirement(
              &effective->storage.snapshot, &requirement->storage.snapshot) &&
          iree_string_view_equal(effective->storage.config.contract_set_key,
                                 requirement->storage.config.contract_set_key) &&
          iree_all_bits_set(effective->storage.config.contract_feature_bits,
                            requirement->storage.config.contract_feature_bits);
-}
-
-static bool loom_target_facts_explicit_field_matches(
-    const loom_target_facts_t* effective,
-    const loom_target_facts_t* requirement, loom_target_fact_field_t field,
-    bool values_match) {
-  return !loom_target_facts_field_is_explicit(requirement, field) ||
-         !loom_target_facts_field_is_explicit(effective, field) || values_match;
-}
-
-bool loom_target_facts_product_contract_satisfies_specialization_requirement(
-    const loom_target_facts_t* effective,
-    const loom_target_facts_t* requirement) {
-  IREE_ASSERT_ARGUMENT(effective);
-  IREE_ASSERT_ARGUMENT(requirement);
-  return loom_target_facts_explicit_field_matches(
-             effective, requirement, LOOM_TARGET_FACT_FIELD_CODEGEN_FORMAT,
-             effective->storage.snapshot.codegen_format ==
-                 requirement->storage.snapshot.codegen_format) &&
-         loom_target_facts_explicit_field_matches(
-             effective, requirement, LOOM_TARGET_FACT_FIELD_ARTIFACT_FORMAT,
-             effective->storage.snapshot.artifact_format ==
-                 requirement->storage.snapshot.artifact_format) &&
-         loom_target_facts_explicit_field_matches(
-             effective, requirement, LOOM_TARGET_FACT_FIELD_ABI,
-             effective->storage.export_plan.abi_kind ==
-                 requirement->storage.export_plan.abi_kind) &&
-         loom_target_facts_explicit_field_matches(
-             effective, requirement, LOOM_TARGET_FACT_FIELD_LINKAGE,
-             effective->storage.export_plan.linkage ==
-                 requirement->storage.export_plan.linkage);
 }
 
 static bool loom_target_limit_satisfies(uint64_t effective_limit,
@@ -120,7 +87,11 @@ bool loom_target_snapshot_satisfies_specialization_requirement(
     const loom_target_snapshot_t* target_requirement) {
   IREE_ASSERT_ARGUMENT(effective_snapshot);
   IREE_ASSERT_ARGUMENT(target_requirement);
-  return effective_snapshot->default_pointer_bitwidth ==
+  return effective_snapshot->codegen_format ==
+             target_requirement->codegen_format &&
+         effective_snapshot->artifact_format ==
+             target_requirement->artifact_format &&
+         effective_snapshot->default_pointer_bitwidth ==
              target_requirement->default_pointer_bitwidth &&
          effective_snapshot->index_bitwidth ==
              target_requirement->index_bitwidth &&

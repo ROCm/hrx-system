@@ -351,7 +351,6 @@ loom_cc_library(
     loom::target::arch::spirv::descriptors::low_registry
     loom::target::arch::spirv::lower
     loom::target::arch::spirv::ops
-    loom::target::arch::spirv::records::target_records
     loom::target::provider
   PUBLIC
 )
@@ -374,10 +373,9 @@ loom_cc_test(
     loom::analysis::symbol_facts
     loom::format::text::parser
     loom::ir
+    loom::ops::op_defs
     loom::ops::op_registry
     loom::ops::target
-    loom::pass::builder
-    loom::target::arch::spirv::ops
     loom::target::arch::spirv::records::target_records
     loom::target::provider
     loom::testing::module_ptr
