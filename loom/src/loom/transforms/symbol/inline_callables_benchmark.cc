@@ -629,6 +629,9 @@ static void BM_InlineComposition(benchmark::State& state, CallableMode mode,
 
 static void RegisterCompositionScales(benchmark::Benchmark* benchmark) {
   benchmark->ArgName("scale");
+  // The pass is single-threaded. Wall time also avoids coarse process CPU
+  // accounting on Windows obscuring the smaller matrix points.
+  benchmark->UseRealTime();
   for (int64_t scale : {1, 4, 16, 64, 256, 1024}) {
     benchmark->Arg(scale);
   }

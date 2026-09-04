@@ -573,6 +573,59 @@ static iree_status_t loom_callable_collect_return_projections(
   return iree_ok_status();
 }
 
+static bool loom_callable_user_moves_to_continuation(const loom_op_t* call_op,
+                                                     const loom_op_t* user_op) {
+  const loom_block_t* caller_block = call_op->parent_block;
+  const loom_op_t* root_op = user_op;
+  while (root_op && root_op->parent_block != caller_block) {
+    root_op = root_op->parent_op;
+  }
+  return root_op && root_op->block_ordinal > call_op->block_ordinal;
+}
+
+static bool loom_callable_value_uses_move_to_continuation(
+    const loom_module_t* module, const loom_op_t* call_op,
+    loom_value_id_t value_id) {
+  if (value_id == LOOM_VALUE_ID_INVALID || value_id >= module->values.count) {
+    return false;
+  }
+  const loom_value_t* value = loom_module_value(module, value_id);
+  if (loom_value_has_attribute_uses(value) ||
+      loom_module_value_first_incoming_type_use(module, value_id) !=
+          LOOM_TYPE_USE_ID_INVALID) {
+    return false;
+  }
+  const loom_use_t* uses = loom_value_uses(value);
+  for (uint32_t use_index = 0; use_index < value->use_count; ++use_index) {
+    if (!loom_callable_user_moves_to_continuation(
+            call_op, loom_use_user_op(uses[use_index]))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Returns whether every value defined at or after the call is used by an op
+// that moves into the new continuation. This permits appending the cloned CFG
+// while preserving Loom's lexical SSA scope. Type and attribute uses retain
+// the ordered-splice path because they are not represented in the operand use
+// list.
+static bool loom_callable_tail_can_append(const loom_module_t* module,
+                                          const loom_op_t* call_op) {
+  for (const loom_op_t* tail_op = call_op; tail_op;
+       tail_op = tail_op->next_op) {
+    const loom_value_id_t* results = loom_op_const_results(tail_op);
+    for (uint16_t result_index = 0; result_index < tail_op->result_count;
+         ++result_index) {
+      if (!loom_callable_value_uses_move_to_continuation(
+              module, call_op, results[result_index])) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 static iree_status_t loom_callable_inline_cfg_call(
     loom_rewriter_t* rewriter, loom_op_t* call_op, loom_func_like_t callee,
     loom_call_like_t call, const loom_callable_cfg_body_t* body,
@@ -641,7 +694,13 @@ static iree_status_t loom_callable_inline_cfg_call(
 
   loom_builder_ip_t saved_ip = loom_builder_save(&rewriter->builder);
   rewriter->builder.ip.parent_op = caller_parent_op;
-  const uint16_t cloned_block_index = caller_block_index + 1;
+  // Appending avoids shifting an accumulated CFG. Uses outside the call tail
+  // require the ordered path so their blocks remain after the replacement
+  // continuation in Loom's lexical SSA scope.
+  const uint16_t cloned_block_index =
+      loom_callable_tail_can_append(rewriter->module, call_op)
+          ? caller_region->block_count
+          : caller_block_index + 1;
   iree_status_t status =
       loom_ir_clone_region_blocks(&rewriter->builder, body->region,
                                   caller_region, cloned_block_index, &remap);
@@ -835,7 +894,10 @@ static iree_status_t loom_callable_inline_consuming_cfg_call(
       rewriter->module, caller_region, final_block_count));
 
   const uint16_t moved_block_count = body->region->block_count;
-  const uint16_t moved_block_index = caller_block_index + 1;
+  const uint16_t moved_block_index =
+      loom_callable_tail_can_append(rewriter->module, call_op)
+          ? caller_region->block_count
+          : caller_block_index + 1;
   const loom_location_id_t call_location = call_op->location;
   loom_op_t* caller_parent_op = call_op->parent_op;
   const loom_value_id_t value_checkpoint =

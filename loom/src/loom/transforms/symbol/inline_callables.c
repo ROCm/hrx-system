@@ -1219,6 +1219,8 @@ typedef struct loom_inline_execution_symbol_t {
   uint32_t remaining_clone_count;
   // Head of the clone-use list targeting this symbol.
   uint32_t first_clone_entry;
+  // Tail used to preserve source occurrence order in the clone-use list.
+  uint32_t last_clone_entry;
   // Unique consuming use targeting this symbol, when present.
   uint32_t transfer_entry;
 } loom_inline_execution_symbol_t;
@@ -1251,7 +1253,10 @@ static void loom_inline_enqueue_ready_entry(
 // otherwise may move a single-use wrapper outward before flattening calls now
 // carried by that wrapper. Linear ready edges run before CFG edges so their
 // topology-preserving move can share one availability analysis and so a CFG
-// parent carries its linear producers when it moves.
+// parent carries its linear producers when it moves. The ready stacks reverse
+// source occurrence order: sibling CFG calls therefore splice right to left,
+// moving each original operation tail at most once while tail-local splices
+// append blocks without shifting the accumulated caller CFG.
 static iree_status_t loom_inline_execute_plan(loom_inline_state_t* state) {
   uint32_t execution_count = 0;
   for (uint32_t entry_index = 0; entry_index < state->entry_count;
@@ -1285,6 +1290,7 @@ static iree_status_t loom_inline_execute_plan(loom_inline_state_t* state) {
     for (iree_host_size_t i = 0; i < symbol_count; ++i) {
       execution_symbols[i] = (loom_inline_execution_symbol_t){
           .first_clone_entry = LOOM_INLINE_PLAN_ENTRY_INVALID,
+          .last_clone_entry = LOOM_INLINE_PLAN_ENTRY_INVALID,
           .transfer_entry = LOOM_INLINE_PLAN_ENTRY_INVALID,
       };
     }
@@ -1305,9 +1311,13 @@ static iree_status_t loom_inline_execute_plan(loom_inline_state_t* state) {
       loom_inline_execution_symbol_t* target =
           &execution_symbols[entry->target_symbol_id];
       ++target->remaining_clone_count;
-      execution_entries[entry_index].next_clone_entry =
-          target->first_clone_entry;
-      target->first_clone_entry = entry_index;
+      if (target->last_clone_entry == LOOM_INLINE_PLAN_ENTRY_INVALID) {
+        target->first_clone_entry = entry_index;
+      } else {
+        execution_entries[target->last_clone_entry].next_clone_entry =
+            entry_index;
+      }
+      target->last_clone_entry = entry_index;
     } else {
       loom_inline_execution_symbol_t* target =
           &execution_symbols[entry->target_symbol_id];
