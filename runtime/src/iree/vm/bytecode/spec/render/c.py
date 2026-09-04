@@ -588,14 +588,9 @@ def _instruction_checks(
     return tuple(checks)
 
 
-def render_verifier_data(specification: Specification) -> str:
-    """Renders the dense runtime verification tables."""
+def render_layout_data(specification: Specification) -> str:
+    """Renders the dense runtime section-layout table."""
 
-    instruction_descriptors = ["    UINT16_C(0),"] * 256
-    for instruction in specification.instructions:
-        instruction_descriptors[instruction.opcode] = _instruction_descriptor(
-            instruction
-        )
     section_descriptors = [0] * (
         max(section.section_type for section in specification.module_format.sections)
         + 1
@@ -609,8 +604,29 @@ def render_verifier_data(specification: Specification) -> str:
         "",
         _GENERATED.rstrip(),
         "",
+        "// Packed descriptors indexed by dense Core section type. Words encode",
+        "// since_minor:u16 and required_flags:u16.",
+        "static const uint32_t iree_vm_bytecode_section_layouts[] = {",
+    ]
+    lines.extend(f"    UINT32_C(0x{value:08X})," for value in section_descriptors)
+    lines.extend(["};", ""])
+    return "\n".join(lines)
+
+
+def render_verifier_data(specification: Specification) -> str:
+    """Renders the dense runtime instruction-verification table."""
+
+    instruction_descriptors = ["    UINT16_C(0),"] * 256
+    for instruction in specification.instructions:
+        instruction_descriptors[instruction.opcode] = _instruction_descriptor(
+            instruction
+        )
+    lines = [
+        _COPYRIGHT.rstrip(),
+        "",
+        _GENERATED.rstrip(),
+        "",
         '#include "iree/vm/bytecode/verifier_data.h"',
-        '#include "iree/vm/bytecode/wire/module.h"',
         "",
         "#define IREE_VM_BYTECODE_PACK_INSTRUCTION_VERIFICATION(\\",
         "    control_flow, byte_length)                        \\",
@@ -625,11 +641,8 @@ def render_verifier_data(specification: Specification) -> str:
             "",
             "#undef IREE_VM_BYTECODE_PACK_INSTRUCTION_VERIFICATION",
             "",
-            "const uint32_t iree_vm_bytecode_module_section_verification[] = {",
         ]
     )
-    lines.extend(f"    UINT32_C(0x{value:08X})," for value in section_descriptors)
-    lines.extend(["};", ""])
     return "\n".join(lines)
 
 

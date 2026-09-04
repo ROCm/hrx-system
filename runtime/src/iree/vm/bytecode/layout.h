@@ -15,9 +15,12 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Immutable mapped views produced by structural verification. All pointers
-// borrow the exact image passed to verification and remain valid only while
-// those bytes remain live and bitwise stable.
+// Immutable views mapped directly from a bytecode image. Mapping establishes
+// bounded pointers and construction arithmetic; canonical row contents and
+// cross-table semantics are established separately by verification or by the
+// trusted producer contract. All pointers borrow the exact image passed to
+// plan construction and remain valid only while those bytes remain live and
+// bitwise stable.
 
 // Mapped canonical image envelope.
 typedef struct iree_vm_bytecode_image_layout_t {
@@ -27,6 +30,8 @@ typedef struct iree_vm_bytecode_image_layout_t {
   const iree_vm_bytecode_v0_section_directory_row_t* sections;
   // Number of rows in |sections|.
   uint16_t section_count;
+  // Extension authorities owning at least one section.
+  uint16_t extension_pages;
 } iree_vm_bytecode_image_layout_t;
 
 // Mapped architectural extension requirements.
@@ -179,7 +184,7 @@ typedef struct iree_vm_bytecode_metadata_table_t {
   iree_host_size_t value_data_length;
 } iree_vm_bytecode_metadata_table_t;
 
-// Complete mapped view of one structurally verified module image.
+// Complete bounded view mapped from one module image.
 typedef struct iree_vm_bytecode_module_layout_t {
   // Canonical image envelope.
   iree_vm_bytecode_image_layout_t image;
@@ -256,6 +261,17 @@ typedef struct iree_vm_bytecode_module_plan_t {
   // Exact fallback storage for image-misaligned rodata.
   iree_vm_bytecode_rodata_storage_plan_t rodata_storage;
 } iree_vm_bytecode_module_plan_t;
+
+// Safely maps |contents| and derives the exact module construction plan.
+//
+// This validates the image envelope, table extents, host addressability, and
+// construction arithmetic required to form bounded views. It does not verify
+// canonical row contents, cross-table semantics, or instruction records.
+// Callers must complete verification or establish that |contents| is trusted
+// compiler output before dereferencing the mapped views. |out_plan| contains no
+// resources and must not be inspected after failure.
+iree_status_t iree_vm_bytecode_module_plan_build(
+    iree_const_byte_span_t contents, iree_vm_bytecode_module_plan_t* out_plan);
 
 // Returns one valid string ordinal as a stable image-backed view.
 static inline iree_string_view_t iree_vm_bytecode_string_at(

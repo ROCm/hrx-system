@@ -13,12 +13,16 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Verifies provider-independent image and declaration structure and derives
-// the exact mapped construction plan. This first stage maps function byte
-// spans without validating their instruction records. |out_plan| is untouched
-// on failure.
+// Verifies provider-independent image and declaration structure and produces
+// the exact mapped construction plan. This does not validate instruction
+// records. |out_plan| is untouched on failure.
 iree_status_t iree_vm_bytecode_verify_module_structure(
     iree_const_byte_span_t contents, iree_vm_bytecode_module_plan_t* out_plan);
+
+// Verifies provider-independent declaration semantics in an already safely
+// mapped module plan. This does not validate instruction records.
+iree_status_t iree_vm_bytecode_verify_module_layout(
+    const iree_vm_bytecode_module_plan_t* plan);
 
 // Verifies every instruction record in a structurally verified module plan.
 // |block_offsets| provides transient storage for

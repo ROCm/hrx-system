@@ -19,6 +19,7 @@ from iree.vm.bytecode.spec.render.c import (
     render_disassembler_data,
     render_instruction_verifier_cases,
     render_interpreter_data,
+    render_layout_data,
     render_module_header,
     render_module_verifier_cases,
     render_verifier_data,
@@ -57,6 +58,7 @@ def generate_outputs() -> dict[str, str | bytes]:
         "verifier_source": render_verifier_data(SPECIFICATION),
         "disassembler_data": render_disassembler_data(SPECIFICATION),
         "interpreter_data": render_interpreter_data(SPECIFICATION),
+        "layout_data": render_layout_data(SPECIFICATION),
         "conversion_test_vectors": render_conversion_test_vectors(SPECIFICATION),
         "documentation": render_specification(SPECIFICATION),
         "core_execution_module_fixture": render_core_execution_module_fixture(

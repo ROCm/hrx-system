@@ -16,20 +16,27 @@
 #include "iree/vm/bytecode/verifier.h"
 
 //===----------------------------------------------------------------------===//
-// Verification
+// Module plans
 //===----------------------------------------------------------------------===//
 
-static iree_status_t iree_vm_bytecode_module_build_plan(
-    iree_const_byte_span_t contents, iree_allocator_t scratch_allocator,
-    iree_vm_bytecode_module_plan_t* out_plan) {
-  iree_vm_bytecode_module_plan_t plan = {0};
-  IREE_RETURN_IF_ERROR(
-      iree_vm_bytecode_verify_module_structure(contents, &plan));
-  if (plan.layout.requirements.count != 0) {
+static iree_status_t iree_vm_bytecode_module_check_runtime_compatibility(
+    const iree_vm_bytecode_module_plan_t* plan) {
+  if (plan->layout.requirements.count != 0) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "bytecode architectural extension pages are not supported");
   }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_vm_bytecode_module_build_verified_plan(
+    iree_const_byte_span_t contents, iree_allocator_t scratch_allocator,
+    iree_vm_bytecode_module_plan_t* out_plan) {
+  iree_vm_bytecode_module_plan_t plan;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_module_plan_build(contents, &plan));
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_module_layout(&plan));
+  IREE_RETURN_IF_ERROR(
+      iree_vm_bytecode_module_check_runtime_compatibility(&plan));
 
   // Keeps small function CFGs allocation-free with one cache line of scratch.
   uint32_t inline_block_offsets[16];
@@ -53,10 +60,17 @@ static iree_status_t iree_vm_bytecode_module_build_plan(
   return status;
 }
 
+static iree_status_t iree_vm_bytecode_module_build_trusted_plan(
+    iree_const_byte_span_t contents, iree_vm_bytecode_module_plan_t* out_plan) {
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_module_plan_build(contents, out_plan));
+  return iree_vm_bytecode_module_check_runtime_compatibility(out_plan);
+}
+
 IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_verify(
     iree_const_byte_span_t contents, iree_allocator_t scratch_allocator) {
-  iree_vm_bytecode_module_plan_t plan = {0};
-  return iree_vm_bytecode_module_build_plan(contents, scratch_allocator, &plan);
+  iree_vm_bytecode_module_plan_t plan;
+  return iree_vm_bytecode_module_build_verified_plan(contents,
+                                                     scratch_allocator, &plan);
 }
 
 //===----------------------------------------------------------------------===//
@@ -170,9 +184,8 @@ static void iree_vm_bytecode_module_destroy(iree_vm_module_t* base_module) {
 
 static const iree_vm_module_vtable_t iree_vm_bytecode_module_vtable;
 
-IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
+static iree_status_t iree_vm_bytecode_module_validate_create_arguments(
     iree_vm_environment_t* environment, iree_string_view_t module_name,
-    iree_vm_bytecode_module_storage_t storage, iree_allocator_t host_allocator,
     iree_vm_module_t** out_module) {
   if (!out_module) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -183,11 +196,14 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "environment and module name are required");
   }
+  return iree_ok_status();
+}
 
-  iree_vm_bytecode_module_plan_t plan = {0};
-  IREE_RETURN_IF_ERROR(iree_vm_bytecode_module_build_plan(
-      storage.contents, host_allocator, &plan));
-
+static iree_status_t iree_vm_bytecode_module_create_from_plan(
+    iree_vm_environment_t* environment, iree_string_view_t module_name,
+    iree_vm_bytecode_module_storage_t storage,
+    const iree_vm_bytecode_module_plan_t* plan, iree_allocator_t host_allocator,
+    iree_vm_module_t** out_module) {
   iree_host_size_t total_size = 0;
   iree_host_size_t name_offset = 0;
   iree_host_size_t ref_types_offset = 0;
@@ -197,16 +213,16 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
       iree_sizeof_struct(iree_vm_bytecode_image_t), &total_size,
       IREE_STRUCT_FIELD(module_name.size, char, &name_offset),
       IREE_STRUCT_FIELD_ALIGNED(
-          plan.layout.ref_types.entry_count, iree_vm_ref_type_t,
+          plan->layout.ref_types.entry_count, iree_vm_ref_type_t,
           iree_alignof(iree_vm_ref_type_t), &ref_types_offset),
-      IREE_STRUCT_FIELD_ALIGNED(plan.layout.rodata.count, iree_vm_buffer_t,
+      IREE_STRUCT_FIELD_ALIGNED(plan->layout.rodata.count, iree_vm_buffer_t,
                                 iree_alignof(iree_vm_buffer_t),
                                 &rodata_roots_offset),
-      IREE_STRUCT_FIELD_ALIGNED(plan.rodata_storage.copy_length, uint8_t,
+      IREE_STRUCT_FIELD_ALIGNED(plan->rodata_storage.copy_length, uint8_t,
                                 iree_max_align_t, &rodata_copy_offset)));
 
   const iree_host_size_t slab_alignment =
-      iree_max(iree_max_align_t, plan.rodata_storage.copy_alignment);
+      iree_max(iree_max_align_t, plan->rodata_storage.copy_alignment);
   iree_vm_bytecode_image_t* image = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc_aligned(host_allocator, total_size, slab_alignment,
@@ -215,19 +231,19 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
   image->host_allocator = host_allocator;
   image->storage.contents = storage.contents;
   image->storage.deallocator = iree_allocator_null();
-  image->layout = plan.layout;
-  image->process_layout = plan.process_layout;
+  image->layout = plan->layout;
+  image->process_layout = plan->process_layout;
   image->resolved_ref_types =
-      plan.layout.ref_types.entry_count == 0
+      plan->layout.ref_types.entry_count == 0
           ? NULL
           : (iree_vm_ref_type_t*)((uint8_t*)image + ref_types_offset);
   image->buffer_type = iree_vm_ref_type_storage_at(
       iree_vm_buffer_provider_table()->types, IREE_VM_REF_TYPE_BUFFER);
   image->rodata_roots =
-      plan.layout.rodata.count == 0
+      plan->layout.rodata.count == 0
           ? NULL
           : (iree_vm_buffer_t*)((uint8_t*)image + rodata_roots_offset);
-  uint8_t* rodata_copy_storage = plan.rodata_storage.copy_alignment == 0
+  uint8_t* rodata_copy_storage = plan->rodata_storage.copy_alignment == 0
                                      ? NULL
                                      : (uint8_t*)image + rodata_copy_offset;
 
@@ -236,19 +252,20 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
   image->descriptor.name = iree_make_string_view(cloned_name, module_name.size);
   image->descriptor.flags = IREE_VM_MODULE_FLAG_LINKABLE;
   image->descriptor.ref_types.data = image->resolved_ref_types;
-  image->descriptor.ref_types.count = plan.layout.ref_types.entry_count;
-  image->descriptor.counts.function_count = plan.layout.functions.count;
+  image->descriptor.ref_types.count = plan->layout.ref_types.entry_count;
+  image->descriptor.counts.function_count = plan->layout.functions.count;
   image->descriptor.counts.callable_type_count =
-      plan.layout.callable_types.count;
-  image->descriptor.counts.import_group_count = plan.layout.imports.group_count;
-  image->descriptor.counts.import_count = plan.layout.imports.entry_count;
-  image->descriptor.counts.export_count = plan.layout.exports.count;
+      plan->layout.callable_types.count;
+  image->descriptor.counts.import_group_count =
+      plan->layout.imports.group_count;
+  image->descriptor.counts.import_count = plan->layout.imports.entry_count;
+  image->descriptor.counts.export_count = plan->layout.exports.count;
   image->descriptor.counts.metadata_count =
-      plan.layout.metadata.header
-          ? plan.layout.metadata.header->module_entry_count_u32
+      plan->layout.metadata.header
+          ? plan->layout.metadata.header->module_entry_count_u32
           : 0;
-  image->descriptor.counts.callable_fields = plan.callable_fields;
-  image->descriptor.process_storage_size = plan.process_layout.total_size;
+  image->descriptor.counts.callable_fields = plan->callable_fields;
+  image->descriptor.process_storage_size = plan->process_layout.total_size;
 
   iree_status_t status = iree_vm_bytecode_module_resolve_ref_types(
       environment, &image->layout, image->resolved_ref_types);
@@ -270,6 +287,32 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
     iree_vm_bytecode_image_release(image);
   }
   return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
+    iree_vm_environment_t* environment, iree_string_view_t module_name,
+    iree_vm_bytecode_module_storage_t storage, iree_allocator_t host_allocator,
+    iree_vm_module_t** out_module) {
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_module_validate_create_arguments(
+      environment, module_name, out_module));
+  iree_vm_bytecode_module_plan_t plan;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_module_build_verified_plan(
+      storage.contents, host_allocator, &plan));
+  return iree_vm_bytecode_module_create_from_plan(
+      environment, module_name, storage, &plan, host_allocator, out_module);
+}
+
+IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create_trusted(
+    iree_vm_environment_t* environment, iree_string_view_t module_name,
+    iree_vm_bytecode_module_storage_t storage, iree_allocator_t host_allocator,
+    iree_vm_module_t** out_module) {
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_module_validate_create_arguments(
+      environment, module_name, out_module));
+  iree_vm_bytecode_module_plan_t plan;
+  IREE_RETURN_IF_ERROR(
+      iree_vm_bytecode_module_build_trusted_plan(storage.contents, &plan));
+  return iree_vm_bytecode_module_create_from_plan(
+      environment, module_name, storage, &plan, host_allocator, out_module);
 }
 
 static const iree_vm_module_vtable_t iree_vm_bytecode_module_vtable = {

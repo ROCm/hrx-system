@@ -43,6 +43,21 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
     iree_vm_bytecode_module_storage_t storage, iree_allocator_t host_allocator,
     iree_vm_module_t** out_module);
 
+// Creates one bytecode module from trusted in-process compiler output.
+//
+// This performs the same bounds-safe image mapping, runtime compatibility,
+// type resolution, allocation, and ownership transfer as
+// iree_vm_bytecode_module_create but omits semantic and instruction
+// verification. The caller places the producer in the host trusted computing
+// base and must guarantee that |storage.contents| is a canonical module image.
+// Files, caches, network data, and other externally supplied images must use
+// iree_vm_bytecode_module_create instead. The ownership and output contracts
+// are otherwise identical.
+IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create_trusted(
+    iree_vm_environment_t* environment, iree_string_view_t module_name,
+    iree_vm_bytecode_module_storage_t storage, iree_allocator_t host_allocator,
+    iree_vm_module_t** out_module);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

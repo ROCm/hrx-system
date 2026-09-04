@@ -35,6 +35,30 @@ IREE_BENCHMARK_FN(BM_VerifyInstructions) {
 }
 IREE_BENCHMARK_REGISTER(BM_VerifyInstructions);
 
+IREE_BENCHMARK_FN(BM_MapModule) {
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) &&
+         iree_benchmark_keep_running(benchmark_state, 1)) {
+    iree_vm_bytecode_module_plan_t plan;
+    status = iree_vm_bytecode_module_plan_build(GetFixtureContents(), &plan);
+  }
+  return status;
+}
+IREE_BENCHMARK_REGISTER(BM_MapModule);
+
+IREE_BENCHMARK_FN(BM_VerifyLayout) {
+  iree_vm_bytecode_module_plan_t plan;
+  IREE_RETURN_IF_ERROR(
+      iree_vm_bytecode_module_plan_build(GetFixtureContents(), &plan));
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) &&
+         iree_benchmark_keep_running(benchmark_state, 1)) {
+    status = iree_vm_bytecode_verify_module_layout(&plan);
+  }
+  return status;
+}
+IREE_BENCHMARK_REGISTER(BM_VerifyLayout);
+
 IREE_BENCHMARK_FN(BM_VerifyModule) {
   iree_vm_bytecode_module_plan_t initial_plan = {};
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_module_structure(

@@ -9,6 +9,7 @@
 
 #include "iree/testing/benchmark.h"
 #include "iree/vm/bytecode/launch_config_testdata.h"
+#include "iree/vm/bytecode/layout.h"
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/sync.h"
 
@@ -40,6 +41,8 @@ struct LoadedProgram {
   // Owned initialized process.
   iree_vm_process_t* process = nullptr;
 };
+
+using BytecodeModuleCreateFn = decltype(&iree_vm_bytecode_module_create);
 
 iree_vm_bytecode_module_storage_t MakeModuleStorage() {
   const iree_file_toc_t* files =
@@ -90,6 +93,7 @@ iree_status_t InitializeBenchmarkContext(BenchmarkContext* context) {
   return status;
 }
 
+template <BytecodeModuleCreateFn create_module>
 iree_status_t RunModuleCreateBenchmark(
     iree_benchmark_state_t* benchmark_state) {
   BenchmarkContext context;
@@ -102,9 +106,9 @@ iree_status_t RunModuleCreateBenchmark(
     iree_host_size_t module_count = 0;
     while (module_count < IREE_ARRAYSIZE(modules) &&
            iree_status_is_ok(status)) {
-      status = iree_vm_bytecode_module_create(
-          context.environment, IREE_SV("launch"), MakeModuleStorage(),
-          iree_allocator_system(), &modules[module_count]);
+      status = create_module(context.environment, IREE_SV("launch"),
+                             MakeModuleStorage(), iree_allocator_system(),
+                             &modules[module_count]);
       if (iree_status_is_ok(status)) ++module_count;
     }
     iree_benchmark_pause_timing(benchmark_state);
@@ -118,6 +122,19 @@ iree_status_t RunModuleCreateBenchmark(
   return status;
 }
 
+iree_status_t RunModuleMapBenchmark(iree_benchmark_state_t* benchmark_state) {
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) &&
+         iree_benchmark_keep_running(benchmark_state, 1)) {
+    iree_vm_bytecode_module_plan_t plan;
+    status =
+        iree_vm_bytecode_module_plan_build(MakeModuleStorage().contents, &plan);
+    iree_optimization_barrier(plan.layout.image.header);
+  }
+  return status;
+}
+
+template <BytecodeModuleCreateFn create_module>
 iree_status_t RunLoadAndBindBenchmark(iree_benchmark_state_t* benchmark_state) {
   BenchmarkContext context;
   IREE_RETURN_IF_ERROR(InitializeBenchmarkContext(&context));
@@ -130,9 +147,9 @@ iree_status_t RunLoadAndBindBenchmark(iree_benchmark_state_t* benchmark_state) {
     while (program_count < IREE_ARRAYSIZE(programs) &&
            iree_status_is_ok(status)) {
       LoadedProgram* program = &programs[program_count++];
-      status = iree_vm_bytecode_module_create(
-          context.environment, IREE_SV("launch"), MakeModuleStorage(),
-          iree_allocator_system(), &program->module);
+      status = create_module(context.environment, IREE_SV("launch"),
+                             MakeModuleStorage(), iree_allocator_system(),
+                             &program->module);
       if (iree_status_is_ok(status)) {
         status = iree_vm_program_create(
             {program->module, iree_vm_module_span_empty()},
@@ -192,14 +209,33 @@ iree_status_t RunScalarLeafBenchmark(iree_benchmark_state_t* benchmark_state) {
 }
 
 IREE_BENCHMARK_FN(BM_BytecodeModuleCreate) {
-  return RunModuleCreateBenchmark(benchmark_state);
+  return RunModuleCreateBenchmark<iree_vm_bytecode_module_create>(
+      benchmark_state);
 }
 IREE_BENCHMARK_REGISTER(BM_BytecodeModuleCreate);
 
+IREE_BENCHMARK_FN(BM_BytecodeModuleCreateTrusted) {
+  return RunModuleCreateBenchmark<iree_vm_bytecode_module_create_trusted>(
+      benchmark_state);
+}
+IREE_BENCHMARK_REGISTER(BM_BytecodeModuleCreateTrusted);
+
+IREE_BENCHMARK_FN(BM_BytecodeModuleMap) {
+  return RunModuleMapBenchmark(benchmark_state);
+}
+IREE_BENCHMARK_REGISTER(BM_BytecodeModuleMap);
+
 IREE_BENCHMARK_FN(BM_BytecodeLoadAndBind) {
-  return RunLoadAndBindBenchmark(benchmark_state);
+  return RunLoadAndBindBenchmark<iree_vm_bytecode_module_create>(
+      benchmark_state);
 }
 IREE_BENCHMARK_REGISTER(BM_BytecodeLoadAndBind);
+
+IREE_BENCHMARK_FN(BM_BytecodeLoadAndBindTrusted) {
+  return RunLoadAndBindBenchmark<iree_vm_bytecode_module_create_trusted>(
+      benchmark_state);
+}
+IREE_BENCHMARK_REGISTER(BM_BytecodeLoadAndBindTrusted);
 
 IREE_BENCHMARK_FN(BM_BytecodeScalarLeaf) {
   return RunScalarLeafBenchmark(benchmark_state);

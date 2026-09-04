@@ -68,11 +68,12 @@ class ProjectionTest(unittest.TestCase):
     def test_verification_projects_direct_runtime_checks(self) -> None:
         verifier_source = self.outputs["verifier_source"]
         instruction_cases = self.outputs["instruction_verifier_cases"]
+        layout_data = self.outputs["layout_data"]
         module_cases = self.outputs["module_verifier_cases"]
-        source = verifier_source + instruction_cases + module_cases
+        source = verifier_source + instruction_cases + module_cases + layout_data
         for fragment in (
             "iree_vm_bytecode_instruction_verification[256]",
-            "iree_vm_bytecode_module_section_verification[]",
+            "iree_vm_bytecode_section_layouts[]",
             "iree_vm_bytecode_verify_control_target",
             "iree_vm_bytecode_verify_direct_call",
             "iree_vm_bytecode_verify_integer_bitstream_shape",
@@ -80,6 +81,7 @@ class ProjectionTest(unittest.TestCase):
         ):
             self.assertIn(fragment, source)
         self.assertNotIn("switch (", verifier_source)
+        self.assertNotIn("switch (", layout_data)
         self.assertNotIn("iree_status_t", verifier_source)
         self.assertNotIn("iree_status_t", instruction_cases)
         self.assertNotIn("VERIFICATION_RULE_", source)

@@ -78,8 +78,23 @@ iree_cc_library(
   SRCS
     "verifier/data.c"
   DEPS
-    ::wire
     iree::base::core_headers
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    layout
+  HDRS
+    "layout.h"
+  TEXTUAL_HDRS
+    "layout/data.inl"
+  SRCS
+    "layout.c"
+  DEPS
+    ::wire
+    iree::base
+    iree::vm
   PUBLIC
 )
 
@@ -87,7 +102,6 @@ iree_cc_library(
   NAME
     verifier
   HDRS
-    "layout.h"
     "verifier.h"
   TEXTUAL_HDRS
     "verifier/instruction_cases.inl"
@@ -95,6 +109,7 @@ iree_cc_library(
   SRCS
     "verifier.c"
   DEPS
+    ::layout
     ::verifier_data
     ::wire
     iree::base
@@ -153,6 +168,7 @@ iree_cc_library(
     "process.c"
     "reflection.c"
   DEPS
+    ::layout
     ::verifier
     ::wire
     iree::base
@@ -169,6 +185,7 @@ iree_cc_binary_benchmark(
     "module_benchmark.cc"
   DEPS
     ::launch_config_testdata
+    ::layout
     ::module
     iree::base
     iree::testing::benchmark

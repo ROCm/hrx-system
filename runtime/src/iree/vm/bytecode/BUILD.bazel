@@ -25,6 +25,7 @@ iree_generated_files(
         "docs/specification.md",
         "interpreter/conversion_test_vectors.inl",
         "interpreter/data.inl",
+        "layout/data.inl",
         "testdata/core_execution.vmfb",
         "testdata/launch_config.vmfb",
         "testdata/structural.vmfb",
@@ -40,6 +41,7 @@ iree_generated_files(
         "docs/specification.md": "--documentation={path}",
         "interpreter/conversion_test_vectors.inl": "--conversion-test-vectors={path}",
         "interpreter/data.inl": "--interpreter-data={path}",
+        "layout/data.inl": "--layout-data={path}",
         "testdata/core_execution.vmfb": "--core-execution-module-fixture={path}",
         "testdata/launch_config.vmfb": "--launch-config-module-fixture={path}",
         "testdata/structural.vmfb": "--structural-module-fixture={path}",
@@ -98,24 +100,31 @@ iree_runtime_cc_library(
     name = "verifier_data",
     srcs = ["verifier/data.c"],
     hdrs = ["verifier_data.h"],
+    deps = ["//runtime/src/iree/base:core_headers"],
+)
+
+iree_runtime_cc_library(
+    name = "layout",
+    srcs = ["layout.c"],
+    hdrs = ["layout.h"],
+    textual_hdrs = ["layout/data.inl"],
     deps = [
         ":wire",
-        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
     ],
 )
 
 iree_runtime_cc_library(
     name = "verifier",
     srcs = ["verifier.c"],
-    hdrs = [
-        "layout.h",
-        "verifier.h",
-    ],
+    hdrs = ["verifier.h"],
     textual_hdrs = [
         "verifier/instruction_cases.inl",
         "verifier/module_cases.inl",
     ],
     deps = [
+        ":layout",
         ":verifier_data",
         ":wire",
         "//runtime/src/iree/base",
@@ -172,6 +181,7 @@ iree_runtime_cc_library(
         "interpreter_integer_impl.inl",
     ],
     deps = [
+        ":layout",
         ":verifier",
         ":wire",
         "//runtime/src/iree/base",
@@ -186,6 +196,7 @@ iree_runtime_cc_benchmark(
     srcs = ["module_benchmark.cc"],
     deps = [
         ":launch_config_testdata",
+        ":layout",
         ":module",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:benchmark",
