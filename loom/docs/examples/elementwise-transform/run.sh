@@ -50,7 +50,7 @@ loom_example_run_tool loom-link "${loom_link}" \
   --library=motif.loom \
   --mode=link \
   --root=@elementwise_transform \
-  --target-profile="amdgpu:${LOOM_EXAMPLE_TARGET}" \
+  --target="amdgpu:${LOOM_EXAMPLE_TARGET}" \
   --to=text \
   --output="${output_dir}/elementwise-transform.loom"
 

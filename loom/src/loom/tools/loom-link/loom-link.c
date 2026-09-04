@@ -32,6 +32,7 @@
 #include "loom/target/entry_selection.h"
 #include "loom/target/module_specialization.h"
 #include "loom/target/provider.h"
+#include "loom/target/selection.h"
 #include "loom/tooling/cli/help.h"
 #include "loom/tooling/config/config.h"
 #include "loom/tooling/context/context.h"
@@ -39,15 +40,6 @@
 #include "loom/tools/loom-format/convert.h"
 #include "loom/util/stream.h"
 #include "loom/verify/verify.h"
-
-#ifndef LOOM_LINK_HAVE_AMDGPU
-#define LOOM_LINK_HAVE_AMDGPU 0
-#endif  // LOOM_LINK_HAVE_AMDGPU
-
-#if LOOM_LINK_HAVE_AMDGPU
-#include "loom/target/arch/amdgpu/artifact_key.h"
-#include "loom/target/arch/amdgpu/profile.h"
-#endif  // LOOM_LINK_HAVE_AMDGPU
 
 IREE_FLAG(string, mode, "auto",
           "Planning mode: auto, merge, or link. Auto selects "
@@ -91,11 +83,10 @@ IREE_FLAG_LIST_NAMED(
     string, config_file, "config-file",
     "JSON/JSONC config object file. Repeat for multiple files. Nested object "
     "keys are flattened with '.' separators.");
-IREE_FLAG_NAMED(
-    string, target_profile, "target-profile", "",
-    "Optional homogeneous target profile in family:selector form, such as "
-    "amdgpu:gfx11-generic. The profile specializes each linked analysis "
-    "module before template selection.");
+IREE_FLAG(string, target, "",
+          "Optional homogeneous target in family:selector form, such as "
+          "amdgpu:gfx11-generic. The target specializes each linked analysis "
+          "module before template selection.");
 IREE_FLAG_NAMED(bool, include_input_exports, "include-input-exports", false,
                 "In link mode, add exported input symbols as roots.");
 IREE_FLAG_NAMED(
@@ -180,15 +171,6 @@ typedef struct loom_link_cli_prepare_state_t {
   // Homogeneous target profile applied to every kernel entry, if any.
   const loom_target_profile_t* target_profile;
 } loom_link_cli_prepare_state_t;
-
-typedef struct loom_link_cli_target_profile_storage_t {
-  // Selected target-neutral profile borrowing family-specific storage below.
-  const loom_target_profile_t* profile;
-#if LOOM_LINK_HAVE_AMDGPU
-  // AMDGPU profile storage valid for the lifetime of the link invocation.
-  loom_amdgpu_target_profile_t amdgpu;
-#endif  // LOOM_LINK_HAVE_AMDGPU
-} loom_link_cli_target_profile_storage_t;
 
 static const char* loom_link_cli_mode_name(loom_link_plan_mode_t mode) {
   switch (mode) {
@@ -330,49 +312,19 @@ static iree_status_t loom_link_cli_materialize_config(
                                                 NULL);
 }
 
-static iree_status_t loom_link_cli_select_target_profile(
-    loom_link_cli_target_profile_storage_t* out_storage) {
-  *out_storage = (loom_link_cli_target_profile_storage_t){0};
-
+static iree_status_t loom_link_cli_select_target(
+    const loom_target_environment_t* environment,
+    const loom_target_profile_t** out_profile) {
+  *out_profile = NULL;
   const iree_string_view_t specification =
-      iree_string_view_trim(iree_make_cstring_view(FLAG_target_profile));
+      iree_string_view_trim(iree_make_cstring_view(FLAG_target));
   if (iree_string_view_is_empty(specification)) {
     return iree_ok_status();
   }
-  iree_string_view_t family = iree_string_view_empty();
-  iree_string_view_t selector = iree_string_view_empty();
-  if (iree_string_view_split(specification, ':', &family, &selector) < 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "--target-profile='%.*s' must use family:selector syntax",
-        (int)specification.size, specification.data);
-  }
-  family = iree_string_view_trim(family);
-  selector = iree_string_view_trim(selector);
-  if (iree_string_view_is_empty(family) ||
-      iree_string_view_is_empty(selector)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "--target-profile='%.*s' must name a non-empty family and selector",
-        (int)specification.size, specification.data);
-  }
-
-#if LOOM_LINK_HAVE_AMDGPU
-  if (iree_string_view_equal(family, IREE_SV("amdgpu"))) {
-    loom_amdgpu_target_identity_t identity = {0};
-    IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_key_parse(selector, &identity));
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_target_profile_initialize(&identity, &out_storage->amdgpu));
-    out_storage->profile = &out_storage->amdgpu.base;
-    return iree_ok_status();
-  }
-#endif  // LOOM_LINK_HAVE_AMDGPU
-
-  return iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "target profile family '%.*s' is not available in this loom-link "
-      "binary",
-      (int)family.size, family.data);
+  loom_target_specification_t target = {0};
+  IREE_RETURN_IF_ERROR(loom_target_specification_parse(specification, &target));
+  return loom_target_environment_select_profile(environment, &target,
+                                                out_profile);
 }
 
 static loom_diagnostic_sink_t loom_link_cli_materialization_diagnostic_sink(
@@ -1167,7 +1119,7 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "--print-plan\n"
       "loom-link root.loom --library=providers.loom --root=@entry \\\n"
       "  --config=model.hidden_size=4096 \\\n"
-      "  --target-profile=amdgpu:gfx11-generic \\\n"
+      "  --target=amdgpu:gfx11-generic \\\n"
       "  --require-resolved-config\n"
       "loom-link root.loom --library=provider-a.loom --root=@entry \\\n"
       "  --allow-unresolved --to=bc --output=partial.loombc\n"
@@ -1176,7 +1128,7 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "`--list-symbols` shows the indexed providers. `--print-plan` shows why\n"
       "each symbol is live before streaming modules into the linker. Config\n"
       "bindings are applied to the composed analysis module before each "
-      "dependency and template-selection step. `--target-profile` applies "
+      "dependency and template-selection step. `--target` applies "
       "structured target facts at the same boundary, so target and shape "
       "predicates can prune unreachable provider templates.\n"
       "`--allow-unresolved` preserves unresolved declarations whose libraries\n"
@@ -1190,7 +1142,7 @@ int main(int argc, char** argv) {
       "\n"
       "Usage:\n"
       "  loom-link [--mode=merge|link] [--from=auto|text|bc] "
-      "[--to=text|bc] [--target-profile=family:selector] "
+      "[--to=text|bc] [--target=family:selector] "
       "[--output=file] [file...]\n"
       "  loom-link model.loom --library=kernels.loombc --root=@entry "
       "--to=bc --output=model.loombc\n"
@@ -1231,7 +1183,7 @@ int main(int argc, char** argv) {
   bool context_initialized = false;
   loom_tooling_config_set_t config_set;
   loom_tooling_config_set_initialize(allocator, &config_set);
-  loom_link_cli_target_profile_storage_t target_profile = {0};
+  const loom_target_profile_t* target_profile = NULL;
   loom_link_cli_input_t* inputs = NULL;
   iree_host_size_t input_count = 0;
   loom_link_cli_index_t link_index = {0};
@@ -1293,7 +1245,8 @@ int main(int argc, char** argv) {
                          "--print-plan cannot be combined with --list-symbols");
   }
   if (iree_status_is_ok(status)) {
-    status = loom_link_cli_select_target_profile(&target_profile);
+    status = loom_link_cli_select_target(loom_configured_target_environment(),
+                                         &target_profile);
   }
   if (iree_status_is_ok(status)) {
     loom_context_initialize(allocator, &context);
@@ -1370,7 +1323,7 @@ int main(int argc, char** argv) {
     loom_link_cli_prepare_state_t prepare_state = {
         .config_set = &config_set,
         .target_environment = loom_configured_target_environment(),
-        .target_profile = target_profile.profile,
+        .target_profile = target_profile,
     };
     const loom_link_plan_materialization_environment_t environment = {
         .context = &context,

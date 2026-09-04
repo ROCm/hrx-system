@@ -109,7 +109,7 @@ def _declare_linked_module(
         args.add("--config=%s=%s" % (key, configs[key]))
     if target_profile:
         args.add(
-            "--target-profile=%s:%s" % (
+            "--target=%s:%s" % (
                 target_profile.family,
                 target_profile.selector,
             ),

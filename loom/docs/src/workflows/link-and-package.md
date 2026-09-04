@@ -111,7 +111,7 @@ loom-link model.loom \
   --library=motif.loom \
   --mode=link \
   --root=@elementwise_transform \
-  --target-profile=amdgpu:gfx11-generic \
+  --target=amdgpu:gfx11-generic \
   --to=bc \
   --output=elementwise-gfx11.loombc
 ```
