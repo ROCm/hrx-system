@@ -1503,8 +1503,12 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane_sequence(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     loom_low_lower_rule_emit_state_t* state, const loom_low_lower_rule_t* rule,
-    const loom_low_lower_resolved_emit_t* resolved_emits) {
-  IREE_ASSERT_GT(rule->emit_count, 1);
+    const loom_low_lower_resolved_emit_t* resolved_emits,
+    uint16_t sequence_start_ordinal) {
+  IREE_ASSERT_LT(sequence_start_ordinal, rule->emit_count);
+  const uint16_t sequence_emit_count =
+      (uint16_t)(rule->emit_count - sequence_start_ordinal);
+  IREE_ASSERT_GT(sequence_emit_count, 0);
   const uint16_t final_emit_ordinal = (uint16_t)(rule->emit_count - 1);
   const loom_low_lower_emit_t* final_emit =
       resolved_emits[final_emit_ordinal].emit;
@@ -1514,17 +1518,20 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane_sequence(
 
   loom_type_t* result_types = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
-      context, rule->emit_count, sizeof(*result_types), (void**)&result_types));
+      context, sequence_emit_count, sizeof(*result_types),
+      (void**)&result_types));
   loom_type_t* lane_result_types = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
-      context, rule->emit_count, sizeof(*lane_result_types),
+      context, sequence_emit_count, sizeof(*lane_result_types),
       (void**)&lane_result_types));
   loom_named_attr_slice_t* attrs = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
-      context, rule->emit_count, sizeof(*attrs), (void**)&attrs));
+      context, sequence_emit_count, sizeof(*attrs), (void**)&attrs));
   uint16_t max_operand_ref_count = 0;
-  for (uint16_t emit_ordinal = 0; emit_ordinal < rule->emit_count;
-       ++emit_ordinal) {
+  for (uint16_t emit_ordinal = sequence_start_ordinal;
+       emit_ordinal < rule->emit_count; ++emit_ordinal) {
+    const uint16_t sequence_ordinal =
+        (uint16_t)(emit_ordinal - sequence_start_ordinal);
     const loom_low_lower_resolved_emit_t* resolved_emit =
         &resolved_emits[emit_ordinal];
     const loom_low_lower_emit_t* emit = resolved_emit->emit;
@@ -1544,26 +1551,26 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane_sequence(
     loom_type_t* emit_result_types = NULL;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_build_result_types(
         context, rule_set, source_op, resolved_emit, &emit_result_types));
-    result_types[emit_ordinal] = emit_result_types[0];
-    IREE_ASSERT(loom_low_type_is_register(result_types[emit_ordinal]));
+    result_types[sequence_ordinal] = emit_result_types[0];
+    IREE_ASSERT(loom_low_type_is_register(result_types[sequence_ordinal]));
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_build_attrs(
-        context, rule_set, source_op, emit, NULL, &attrs[emit_ordinal]));
+        context, rule_set, source_op, emit, NULL, &attrs[sequence_ordinal]));
     max_operand_ref_count =
         iree_max(max_operand_ref_count, emit->operand_ref_count);
   }
 
-  const loom_type_t final_result_type = result_types[final_emit_ordinal];
+  const loom_type_t final_result_type = result_types[sequence_emit_count - 1];
   const uint32_t lane_count =
       loom_low_register_type_unit_count(final_result_type);
   IREE_ASSERT_GT(lane_count, 0);
-  for (uint16_t emit_ordinal = 0; emit_ordinal < rule->emit_count;
-       ++emit_ordinal) {
-    const loom_type_t result_type = result_types[emit_ordinal];
+  for (uint16_t sequence_ordinal = 0; sequence_ordinal < sequence_emit_count;
+       ++sequence_ordinal) {
+    const loom_type_t result_type = result_types[sequence_ordinal];
     const uint32_t result_unit_count =
         loom_low_register_type_unit_count(result_type);
     IREE_ASSERT(result_unit_count == 1 || result_unit_count == lane_count);
     if (!loom_low_lower_rule_try_register_type_with_unit_count(
-            result_type, 1, &lane_result_types[emit_ordinal])) {
+            result_type, 1, &lane_result_types[sequence_ordinal])) {
       return loom_low_lower_emit_register_width_relation_unsupported(
           context, source_op, result_type, 1);
     }
@@ -1580,8 +1587,10 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane_sequence(
       context, lane_count, sizeof(*lane_results), (void**)&lane_results));
 
   for (uint32_t lane_index = 0; lane_index < lane_count; ++lane_index) {
-    for (uint16_t emit_ordinal = 0; emit_ordinal < rule->emit_count;
-         ++emit_ordinal) {
+    for (uint16_t emit_ordinal = sequence_start_ordinal;
+         emit_ordinal < rule->emit_count; ++emit_ordinal) {
+      const uint16_t sequence_ordinal =
+          (uint16_t)(emit_ordinal - sequence_start_ordinal);
       const loom_low_lower_resolved_emit_t* resolved_emit =
           &resolved_emits[emit_ordinal];
       const loom_low_lower_emit_t* emit = resolved_emit->emit;
@@ -1593,8 +1602,8 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane_sequence(
           loom_low_lower_rule_emit_tied_results(rule_set, emit);
       IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
           context, &resolved_emit->descriptor, lane_operands,
-          emit->operand_ref_count, attrs[emit_ordinal],
-          &lane_result_types[emit_ordinal], 1, tied_results,
+          emit->operand_ref_count, attrs[sequence_ordinal],
+          &lane_result_types[sequence_ordinal], 1, tied_results,
           emit->tied_result_count, source_op->location, &lane_op));
       loom_low_lower_rule_bind_per_lane_sequence_result(
           rule_set, state, emit, emit_ordinal == final_emit_ordinal,
@@ -1796,22 +1805,17 @@ iree_status_t loom_low_lower_rule_set_emit_rule(
   loom_low_lower_rule_emit_state_t state = {0};
   IREE_RETURN_IF_ERROR(
       loom_low_lower_rule_emit_state_initialize(context, rule, &state));
-  if (rule->emit_count != 0 &&
-      resolved_emits[0].emit->kind ==
-          LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_PER_LANE_SEQUENCE) {
-    IREE_RETURN_IF_ERROR(
-        loom_low_lower_rule_emit_descriptor_op_per_lane_sequence(
-            context, rule_set, source_op, &state, rule, resolved_emits));
-    IREE_RETURN_IF_ERROR(
-        loom_low_lower_rule_bind_aliases(context, rule_set, source_op, rule));
-    return loom_low_lower_rule_elide_results(context, rule_set, source_op,
-                                             rule);
-  }
   for (uint16_t i = 0; i < rule->emit_count; ++i) {
     uint16_t emit_index = (uint16_t)(rule->emit_start + i);
     const loom_low_lower_emit_t* emit = &rule_set->emits[emit_index];
     const loom_low_lower_resolved_emit_t* resolved_emit = &resolved_emits[i];
     IREE_ASSERT(resolved_emit->emit == emit);
+    if (emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_PER_LANE_SEQUENCE) {
+      IREE_RETURN_IF_ERROR(
+          loom_low_lower_rule_emit_descriptor_op_per_lane_sequence(
+              context, rule_set, source_op, &state, rule, resolved_emits, i));
+      break;
+    }
     switch (emit->kind) {
       case LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP: {
         IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_descriptor_op(
@@ -1836,7 +1840,7 @@ iree_status_t loom_low_lower_rule_set_emit_rule(
       }
       case LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_PER_LANE_SEQUENCE:
         IREE_ASSERT_UNREACHABLE(
-            "per-lane sequence emits must be the whole emit program");
+            "per-lane sequence emits are handled before dispatch");
         IREE_BUILTIN_UNREACHABLE();
       case LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_ACCUMULATE_LANES: {
         IREE_RETURN_IF_ERROR(

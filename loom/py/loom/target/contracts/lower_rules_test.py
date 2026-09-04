@@ -499,7 +499,61 @@ def test_compile_lower_rule_set_compiles_per_lane_sequence_emit() -> None:
     )
 
 
-def test_descriptor_rule_rejects_mixed_per_lane_sequence_emit() -> None:
+def test_compile_lower_rule_set_compiles_setup_before_per_lane_sequence() -> None:
+    table = ContractFragment(
+        name="test.vector",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            DescriptorRule(
+                source_op=vector.vector_addi,
+                descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                guards=(
+                    Guard.value_type("lhs", Vector("i32", lanes=4)),
+                    Guard.value_type("rhs", Vector("i32", lanes=4)),
+                    Guard.value_type("result", Vector("i32", lanes=4)),
+                ),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                        results={"dst": ValueRef.temporary("bias")},
+                        result_types={"dst": Scalar("i32")},
+                        immediates={"i32_value": 7},
+                        form=DescriptorEmitForm.CONST,
+                    ),
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                        operands={
+                            "lhs": ValueRef.operand("lhs"),
+                            "rhs": ValueRef.temporary("bias"),
+                        },
+                        results={"dst": ValueRef.temporary("partial")},
+                        result_types={"dst": ValueRef.result("result")},
+                        form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+                    ),
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                        operands={
+                            "lhs": ValueRef.temporary("partial"),
+                            "rhs": ValueRef.operand("rhs"),
+                        },
+                        results={"dst": ValueRef.result("result")},
+                        form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+                    ),
+                ),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    assert tuple(emit.kind for emit in compiled.emits) == (
+        LowerEmitKind.DESCRIPTOR_CONST,
+        LowerEmitKind.DESCRIPTOR_OP_PER_LANE_SEQUENCE,
+        LowerEmitKind.DESCRIPTOR_OP_PER_LANE_SEQUENCE,
+    )
+
+
+def test_descriptor_rule_rejects_noncontiguous_per_lane_sequence_emit() -> None:
     _expect_value_error(
         lambda: DescriptorRule(
             source_op=vector.vector_addi,
@@ -526,7 +580,7 @@ def test_descriptor_rule_rejects_mixed_per_lane_sequence_emit() -> None:
                 ),
             ),
         ).validate(TEST_LOW_CORE_DESCRIPTOR_SET),
-        "per-lane-sequence emit programs cannot mix emission forms",
+        "per-lane-sequence emits must form the final contiguous emit-program tail",
     )
 
 

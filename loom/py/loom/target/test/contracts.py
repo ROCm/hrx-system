@@ -437,6 +437,43 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
                 ),
             ),
         ),
+        DescriptorRule(
+            source_op=vector.vector_muli,
+            descriptor=TEST_LOW_MUL_I32_DESCRIPTOR,
+            guards=(
+                Guard.value_type("lhs", _V2I32),
+                Guard.value_type("rhs", _V2I32),
+                Guard.value_type("result", _V2I32),
+            ),
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                    results={"dst": ValueRef.temporary("zero")},
+                    result_types={"dst": _I32},
+                    immediates={"i32_value": 0},
+                    form=DescriptorEmitForm.CONST,
+                ),
+                EmitDescriptorOp(
+                    descriptor=TEST_LOW_MUL_I32_DESCRIPTOR,
+                    operands={
+                        "lhs": ValueRef.operand("lhs"),
+                        "rhs": ValueRef.operand("rhs"),
+                    },
+                    results={"dst": ValueRef.temporary("product")},
+                    result_types={"dst": ValueRef.result("result")},
+                    form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+                ),
+                EmitDescriptorOp(
+                    descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                    operands={
+                        "lhs": ValueRef.temporary("product"),
+                        "rhs": ValueRef.temporary("zero"),
+                    },
+                    results={"dst": ValueRef.result("result")},
+                    form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+                ),
+            ),
+        ),
         _binary_rule(
             vector.vector_muli,
             TEST_LOW_MUL_I32_DESCRIPTOR,

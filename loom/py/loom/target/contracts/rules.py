@@ -122,24 +122,34 @@ class DescriptorRule:
             )
 
     def _validate_per_lane_sequence(self) -> None:
-        sequence_emit_count = sum(
-            isinstance(emit, EmitDescriptorOp)
-            and emit.form == DescriptorEmitForm.PER_LANE_SEQUENCE
-            for emit in self.emit
+        sequence_start = next(
+            (
+                emit_index
+                for emit_index, emit in enumerate(self.emit)
+                if isinstance(emit, EmitDescriptorOp)
+                and emit.form == DescriptorEmitForm.PER_LANE_SEQUENCE
+            ),
+            None,
         )
-        if sequence_emit_count == 0:
+        if sequence_start is None:
             return
-        if sequence_emit_count != len(self.emit):
+        sequence_emits = self.emit[sequence_start:]
+        if any(
+            not isinstance(emit, EmitDescriptorOp)
+            or emit.form != DescriptorEmitForm.PER_LANE_SEQUENCE
+            for emit in sequence_emits
+        ):
             raise ValueError(
-                f"{self.source_op.name}: per-lane-sequence emit programs cannot "
-                "mix emission forms"
+                f"{self.source_op.name}: per-lane-sequence emits must form the "
+                "final contiguous emit-program tail"
             )
-        if sequence_emit_count < 2:
+        if len(sequence_emits) < 2:
             raise ValueError(
                 f"{self.source_op.name}: per-lane-sequence emit programs need "
-                "at least two emits"
+                "at least two lane emits"
             )
-        for emit_index, emit in enumerate(self.emit):
+        for sequence_index, emit in enumerate(sequence_emits):
+            emit_index = sequence_start + sequence_index
             result_bindings = emit.results if emit.results is not None else {}
             result_refs = []
             for descriptor_operand in emit.descriptor.operands:
@@ -157,7 +167,7 @@ class DescriptorRule:
                     f"{emit_index} must bind exactly one result"
                 )
             result_ref = result_refs[0]
-            if emit_index + 1 == len(self.emit):
+            if sequence_index + 1 == len(sequence_emits):
                 if result_ref.kind != SourceValueKind.RESULT:
                     raise ValueError(
                         f"{self.source_op.name}: per-lane-sequence final emit "
