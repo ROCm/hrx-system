@@ -51,6 +51,7 @@ def _rules_for(
     root_kind,
     *source_ops,
     accumulator: bool = False,
+    bytewise_scalar: bool | None = None,
     volatile: bool = False,
     scalarized_vector_load: bool | None = None,
 ):
@@ -61,6 +62,15 @@ def _rules_for(
         and (".accumulator." in rule.descriptor.key) is accumulator
         and _source_memory_emit(rule).source_memory.root_kind is root_kind
         and rule.descriptor.key.endswith(".volatile") is volatile
+        and (
+            bytewise_scalar is None
+            or (
+                rule.source_op in (view.view_load, view.view_store)
+                and ".scalar.i8.indexed." in rule.descriptor.key
+                and _source_memory_emit(rule).source_memory.element_byte_count > 1
+            )
+            is bytewise_scalar
+        )
         and (
             scalarized_vector_load is None
             or (
@@ -125,7 +135,12 @@ def test_scalar_memory_rules_cover_every_address_form() -> None:
         ("i32", 4, -32, 28, ("i32", "f32", "index", "offset")),
     )
     for root_kind, memory_spaces in _MEMORY_ROOTS:
-        rules = _rules_for(root_kind, view.view_load, view.view_store)
+        rules = _rules_for(
+            root_kind,
+            view.view_load,
+            view.view_store,
+            bytewise_scalar=False,
+        )
         rule_index = 0
         for (
             descriptor_type,
@@ -170,6 +185,115 @@ def test_scalar_memory_rules_cover_every_address_form() -> None:
                         assert constraint.vector_lane_count == 1
                         assert constraint.vector_lane_byte_stride == element_byte_count
                         assert constraint.minimum_alignment == element_byte_count
+        assert rule_index == len(rules)
+
+
+def test_bytewise_scalar_memory_rules_preserve_unknown_alignment() -> None:
+    expected_shapes = (
+        (2, ("i16", "f16", "bf16")),
+        (4, ("i32", "f32", "index", "offset")),
+    )
+    for root_kind, memory_spaces in _MEMORY_ROOTS:
+        rules = _rules_for(
+            root_kind,
+            view.view_load,
+            view.view_store,
+            bytewise_scalar=True,
+        )
+        rule_index = 0
+        for element_byte_count, value_types in expected_shapes:
+            expected_static_ranges = (
+                (-8, 7 - (element_byte_count - 1), 0, 0, False),
+                (
+                    _I32_MIN,
+                    _I32_MAX - (element_byte_count - 1),
+                    0,
+                    0,
+                    False,
+                ),
+                (0, 0, None, 1, True),
+                (-64, 63, None, 1, True),
+                (
+                    _I32_MIN,
+                    _I32_MAX - (element_byte_count - 1),
+                    None,
+                    1,
+                    True,
+                ),
+            )
+            for operation in (
+                SourceMemoryOperation.LOAD,
+                SourceMemoryOperation.STORE,
+            ):
+                operation_rules = rules[rule_index : rule_index + 5]
+                rule_index += 5
+                descriptor_family = operation.name.lower()
+                assert [rule.descriptor.key for rule in operation_rules] == [
+                    f"amd.xdna.aie2p.{descriptor_family}.scalar.i8.indexed.immediate",
+                    *(
+                        (
+                            f"amd.xdna.aie2p.{descriptor_family}.scalar.i8.indexed.register",
+                        )
+                        * 4
+                    ),
+                ]
+                for address_index, rule in enumerate(operation_rules):
+                    assert rule.guards[0].type_pattern.elements == value_types
+                    memory_emits = [
+                        emit
+                        for emit in rule.emit
+                        if isinstance(emit, EmitDescriptorOp)
+                        and emit.descriptor == rule.descriptor
+                    ]
+                    assert len(memory_emits) == element_byte_count
+                    for memory_emit in memory_emits:
+                        constraint = memory_emit.source_memory
+                        assert constraint is not None
+                        assert constraint.operation is operation
+                        assert constraint.root_kind is root_kind
+                        assert (
+                            constraint.address_layout
+                            is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
+                        )
+                        assert constraint.memory_spaces == memory_spaces
+                        assert constraint.element_byte_count == element_byte_count
+                        assert constraint.vector_lane_count == 1
+                        assert constraint.vector_lane_byte_stride == element_byte_count
+                        assert constraint.minimum_alignment == 1
+                        assert (
+                            constraint.static_byte_offset_minimum,
+                            constraint.static_byte_offset_maximum,
+                            constraint.dynamic_term_count,
+                            constraint.dynamic_term_count_minimum,
+                            constraint.allow_dynamic_stride_values,
+                        ) == expected_static_ranges[address_index]
+
+                    shift_emits = [
+                        emit
+                        for emit in rule.emit
+                        if isinstance(emit, EmitDescriptorOp)
+                        and emit.descriptor.key == "amd.xdna.aie2p.lshl.i32"
+                    ]
+                    assert len(shift_emits) == element_byte_count - 1
+                    merge_emits = [
+                        emit
+                        for emit in rule.emit
+                        if isinstance(emit, EmitDescriptorOp)
+                        and emit.descriptor.key == "amd.xdna.aie2p.or.i32"
+                    ]
+                    if operation is SourceMemoryOperation.LOAD:
+                        assert len(merge_emits) == element_byte_count - 1
+                        assert merge_emits[-1].results["d0"].field == "result"
+                    else:
+                        assert not merge_emits
+
+                immediate_offsets = [
+                    emit.immediates["imm"].literal_i64
+                    for emit in operation_rules[0].emit
+                    if isinstance(emit, EmitDescriptorOp)
+                    and emit.descriptor == operation_rules[0].descriptor
+                ]
+                assert immediate_offsets == list(range(element_byte_count))
         assert rule_index == len(rules)
 
 
