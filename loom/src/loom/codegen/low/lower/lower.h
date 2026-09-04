@@ -178,6 +178,33 @@ typedef struct loom_low_lower_map_argument_callback_t {
   void* user_data;
 } loom_low_lower_map_argument_callback_t;
 
+typedef iree_status_t (*loom_low_lower_source_plan_observer_begin_fn_t)(
+    void* user_data, loom_low_lower_context_t* context,
+    void** out_observer_state);
+
+typedef void (*loom_low_lower_source_plan_observer_observe_fn_t)(
+    void* observer_state, loom_low_lower_context_t* context,
+    const loom_op_t* source_op);
+
+typedef iree_status_t (*loom_low_lower_source_plan_observer_end_fn_t)(
+    void* observer_state, loom_low_lower_context_t* context);
+
+// Observes the compiler-owned source-plan traversal without owning recursion.
+// All callbacks are required. |begin| returns function-local state passed
+// directly to every |observe| call and the final |end|. Per-op observation is
+// infallible: implementations retain any terminal error in their state and
+// return it from |end|.
+typedef struct loom_low_lower_source_plan_observer_t {
+  // Begins observation after the source value domain is available.
+  loom_low_lower_source_plan_observer_begin_fn_t begin;
+  // Observes one source operation in compiler-owned traversal order.
+  loom_low_lower_source_plan_observer_observe_fn_t observe;
+  // Ends observation before operation-plan selection begins.
+  loom_low_lower_source_plan_observer_end_fn_t end;
+  // Caller-owned immutable payload passed to |begin|.
+  void* user_data;
+} loom_low_lower_source_plan_observer_t;
+
 typedef iree_status_t (*loom_low_lower_emit_preamble_fn_t)(
     void* user_data, loom_low_lower_context_t* context);
 
@@ -784,6 +811,10 @@ typedef struct loom_low_lower_policy_t {
   const loom_target_contract_binding_t* contract_bindings;
   // Number of active contract fragments.
   uint16_t contract_binding_count;
+  // Optional observer of the compiler-owned source-plan traversal. The
+  // observer sees the current op only and must not recursively inspect the
+  // source function.
+  const loom_low_lower_source_plan_observer_t* source_plan_observer;
   // Optional target-owned descriptor-matrix projection used by generated
   // descriptor-matrix contract cases.
   loom_low_lower_descriptor_matrix_t descriptor_matrix;
