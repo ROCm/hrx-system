@@ -33,7 +33,6 @@ loom_cc_library(
     loom::target::arch::spirv::provider
     loom::target::arch::spirv::records::target_records
     loom::target::emit::spirv::module_emitter
-    loom::target::emit::spirv::product_contract
     loom::target::types
   ALWAYSLINK
   PUBLIC

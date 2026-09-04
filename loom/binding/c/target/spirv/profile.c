@@ -636,7 +636,7 @@ static void loomc_spirv_profile_deinitialize_numeric_states(
   }
 }
 
-static void loomc_spirv_target_profile_deinitialize(
+static void loomc_spirv_target_profile_destroy(
     loom_target_profile_t* target_profile, loomc_allocator_t allocator) {
   loomc_spirv_target_profile_storage_t* profile_storage =
       (loomc_spirv_target_profile_storage_t*)target_profile;
@@ -793,10 +793,10 @@ static void loomc_spirv_profile_initialize_vulkan_bda_bundle(
     const loomc_spirv_numeric_fact_state_t* limit_states,
     loom_target_bundle_storage_t* out_storage) {
   *out_storage = (loom_target_bundle_storage_t){
-      .snapshot = *loom_spirv_target_profile_bundle_vulkan1_3.snapshot,
-      .export_plan = *loom_spirv_target_profile_bundle_vulkan1_3.export_plan,
-      .config = *loom_spirv_target_profile_bundle_vulkan1_3.config,
-      .bundle = loom_spirv_target_profile_bundle_vulkan1_3,
+      .snapshot = *loom_spirv_low_target_bundle_vulkan1_3.snapshot,
+      .export_plan = *loom_spirv_low_target_bundle_vulkan1_3.export_plan,
+      .config = *loom_spirv_low_target_bundle_vulkan1_3.config,
+      .bundle = loom_spirv_low_target_bundle_vulkan1_3,
   };
   loom_target_bundle_storage_rebind(out_storage);
   out_storage->bundle.name = IREE_SV("spirv-vulkan1.3-bda-profile");
@@ -873,12 +873,12 @@ static loomc_status_t loomc_spirv_target_profile_create_from_states(
         cooperative_properties, &profile_storage->profile);
     status = loomc_target_profile_create(
         target_environment, identifier, &profile_storage->profile.base,
-        loomc_spirv_target_profile_deinitialize, allocator, out_profile);
+        loomc_spirv_target_profile_destroy, allocator, out_profile);
     profile_storage = NULL;
   }
   if (profile_storage != NULL) {
-    loomc_spirv_target_profile_deinitialize(&profile_storage->profile.base,
-                                            allocator);
+    loomc_spirv_target_profile_destroy(&profile_storage->profile.base,
+                                       allocator);
   }
   return status;
 }

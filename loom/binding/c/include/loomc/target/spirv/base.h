@@ -23,7 +23,7 @@ extern "C" {
 #endif
 
 /// SPIR-V binary artifact format.
-#define LOOMC_ARTIFACT_FORMAT_SPIRV_BINARY "spirv-binary"
+#define LOOMC_ARTIFACT_FORMAT_SPIRV "spirv"
 
 /// Creates a target environment containing the SPIR-V target package.
 ///

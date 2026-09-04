@@ -15,13 +15,10 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_registry.h"
-#include "loom/product/kernel.h"
 #include "loom/target/arch/spirv/descriptors/low_registry.h"
 #include "loom/target/arch/spirv/ops/registry.h"
 #include "loom/testing/byte_sequence.h"
 #include "loom/testing/module_ptr.h"
-#include "loom/tooling/compile/product.h"
-#include "loom/tooling/target/spirv/product_provider.h"
 
 namespace loom {
 namespace {
@@ -142,54 +139,6 @@ TEST_F(SpirvArtifactProviderTest, EmitsAuthoredRawBdaArtifact) {
   EXPECT_EQ(magic, 0x07230203u);
 
   loom_artifact_candidate_deinitialize(&candidate);
-}
-
-TEST_F(SpirvArtifactProviderTest, BuildsImmutableKernelProduct) {
-  ModulePtr module;
-  IREE_ASSERT_OK(ParseRawBdaRoundtripModule(&module));
-  ASSERT_NE(module.get(), nullptr);
-
-  loom_compile_options_t options = {};
-  loom_compile_options_initialize(&options);
-  const loom_product_build_request_t request = {
-      /*.target_environment=*/nullptr,
-      /*.low_descriptor_registry=*/&low_registry_,
-      /*.module=*/module.get(),
-      /*.target_profile=*/nullptr,
-      /*.target_key=*/{},
-      /*.artifact_identifier=*/IREE_SV("roundtrip.spv"),
-      /*.export_count=*/1,
-      /*.compile_options=*/&options,
-      /*.block_pool=*/&block_pool_,
-      /*.option_chain=*/nullptr,
-      /*.allocator=*/iree_allocator_system(),
-  };
-  loom_product_t* product = nullptr;
-  IREE_ASSERT_OK(loom_product_format_provider_build(
-      &loom_spirv_binary_product_provider, &request, &product));
-  ASSERT_NE(product, nullptr);
-  ASSERT_TRUE(loom_product_isa(product, &loom_kernel_product_descriptor));
-  EXPECT_EQ(loom_product_export_count(product), 1u);
-
-  const loom_product_artifact_t* artifact =
-      loom_kernel_product_loadable_artifact(product);
-  ASSERT_NE(artifact, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(
-      artifact->role, IREE_SV(LOOM_PRODUCT_ARTIFACT_ROLE_KERNEL)));
-  EXPECT_TRUE(iree_string_view_equal(
-      artifact->format, IREE_SV(LOOM_SPIRV_PRODUCT_FORMAT_BINARY)));
-  EXPECT_TRUE(
-      iree_string_view_equal(artifact->identifier, IREE_SV("roundtrip.spv")));
-  ASSERT_NE(artifact->contents, nullptr);
-  ByteSequenceClone executable_data(iree_allocator_system());
-  IREE_ASSERT_OK(executable_data.Clone(artifact->contents));
-  const iree_const_byte_span_t executable_contents = executable_data.contents();
-  ASSERT_GE(executable_contents.data_length, sizeof(uint32_t));
-  uint32_t magic = 0;
-  memcpy(&magic, executable_contents.data, sizeof(magic));
-  EXPECT_EQ(magic, 0x07230203u);
-
-  loom_product_release(product);
 }
 
 }  // namespace

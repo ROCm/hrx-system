@@ -31,9 +31,7 @@
 #include "loom/target/low_legality.h"
 #include "loom/target/low_packet_diagnostics.h"
 #include "loom/target/math_policy.h"
-#include "loom/target/product_contract.h"
 #include "loom/target/profile.h"
-#include "loom/target/profile_selection.h"
 #include "loom/target/reporting/artifact_manifest.h"
 #include "loom/target/reporting/report.h"
 #include "loom/target/resolved_target.h"
@@ -69,16 +67,6 @@ typedef struct loom_target_environment_t loom_target_environment_t;
 typedef iree_status_t (*loom_target_materialize_definition_fn_t)(
     loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
     loom_symbol_ref_t symbol, loom_location_id_t location);
-
-// Selects and canonicalizes one family-owned target profile.
-typedef iree_status_t (*loom_target_select_profile_fn_t)(
-    const loom_target_provider_t* provider, iree_string_view_t selector,
-    iree_allocator_t allocator, loom_target_profile_selection_t* out_selection);
-
-// Releases family-owned storage in |selection|.
-typedef void (*loom_target_release_profile_selection_fn_t)(
-    const loom_target_provider_t* provider,
-    loom_target_profile_selection_t* selection);
 
 // Target disposition for a retained low.func.call edge.
 typedef enum loom_target_low_call_policy_e {
@@ -226,10 +214,6 @@ typedef struct loom_target_emitter_t {
   // Target-neutral artifact format produced by this emitter.
   loom_target_artifact_format_t target_artifact_format;
 
-  // Product-owned lowering contract required by this emitter, or NULL when
-  // emission does not consume target-specialized function facts.
-  const loom_target_product_contract_t* product_contract;
-
   // Emission callback.
   loom_target_emit_fn_t emit;
 } loom_target_emitter_t;
@@ -323,12 +307,6 @@ struct loom_target_provider_t {
   const loom_pass_registry_t* pass_registry;
   // Optional pass-pipeline contribution callback.
   loom_target_provider_pipeline_contribution_fn_t contribute_pipeline;
-  // Optional public selector parser and profile materializer for
-  // |profile_type|.
-  loom_target_select_profile_fn_t select_profile;
-  // Releases selections returned by |select_profile|. This must be present
-  // exactly when |select_profile| is present.
-  loom_target_release_profile_selection_fn_t release_profile_selection;
   // Optional per-caller Low call policy selector. Missing permits direct Low
   // calls. A REQUIRE_INLINE result is a target emission requirement, not an
   // authored inline hint.
@@ -493,13 +471,6 @@ const loom_pass_registry_t* loom_target_environment_pass_registry(
 const loom_target_provider_t* loom_target_environment_lookup_profile_provider(
     const loom_target_environment_t* environment,
     const loom_target_profile_type_t* profile_type);
-
-// Returns the provider owning |family|, or NULL when not linked.
-//
-// Target environment initialization rejects duplicate non-empty family names,
-// so successful lookup is independent of provider registration order.
-const loom_target_provider_t* loom_target_environment_lookup_family_provider(
-    const loom_target_environment_t* environment, iree_string_view_t family);
 
 // Returns the provider owning |fact_type|, or NULL when not linked.
 //

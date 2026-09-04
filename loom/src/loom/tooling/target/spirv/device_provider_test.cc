@@ -196,12 +196,12 @@ TEST_F(SpirvDeviceProviderTest, SelectsRawBdaTarget) {
   EXPECT_TRUE(iree_string_view_equal(target_.artifact_target.target_key,
                                      IREE_SV("vulkan1.3+bda")));
   EXPECT_EQ(target_bundle->snapshot->codegen_format,
-            LOOM_TARGET_CODEGEN_FORMAT_UNKNOWN);
+            LOOM_TARGET_CODEGEN_FORMAT_SPIRV);
   EXPECT_EQ(target_bundle->snapshot->artifact_format,
-            LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN);
+            LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY);
   EXPECT_EQ(target_bundle->snapshot->default_pointer_bitwidth, 64u);
   EXPECT_EQ(target_bundle->snapshot->offset_bitwidth, 64u);
-  EXPECT_EQ(target_bundle->export_plan->abi_kind, LOOM_TARGET_ABI_UNKNOWN);
+  EXPECT_EQ(target_bundle->export_plan->abi_kind, LOOM_TARGET_ABI_HAL_KERNEL);
 }
 
 }  // namespace

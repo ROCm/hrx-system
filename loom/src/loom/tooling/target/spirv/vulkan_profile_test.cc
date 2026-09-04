@@ -395,23 +395,22 @@ TEST(VulkanProfileTest, CopiesCooperativeMatrixRowsFromDeviceSpec) {
   iree_hal_device_spec_release(device_spec);
 }
 
-TEST(VulkanProfileTest, MaterializesProductNeutralRawBdaTarget) {
+TEST(VulkanProfileTest, MaterializesRawBdaHalKernelTarget) {
   loom_spirv_vulkan_hal_profile_facts_t facts = BaselineFacts();
   loom_target_bundle_storage_t storage = {};
   IREE_ASSERT_OK(
       loom_spirv_vulkan_hal_profile_initialize_target_bundle(&facts, &storage));
 
   EXPECT_TRUE(iree_string_view_equal(storage.bundle.name,
-                                     IREE_SV("spirv-vulkan1.3-bda-profile")));
+                                     IREE_SV("spirv-vulkan1.3-bda-hal")));
   EXPECT_TRUE(iree_string_view_equal(storage.snapshot.name,
                                      IREE_SV("spirv-vulkan1.3-bda")));
   EXPECT_TRUE(storage.bundle.snapshot == &storage.snapshot);
   EXPECT_TRUE(storage.bundle.export_plan == &storage.export_plan);
   EXPECT_TRUE(storage.bundle.config == &storage.config);
-  EXPECT_EQ(storage.snapshot.codegen_format,
-            LOOM_TARGET_CODEGEN_FORMAT_UNKNOWN);
+  EXPECT_EQ(storage.snapshot.codegen_format, LOOM_TARGET_CODEGEN_FORMAT_SPIRV);
   EXPECT_EQ(storage.snapshot.artifact_format,
-            LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN);
+            LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY);
   EXPECT_EQ(storage.snapshot.default_pointer_bitwidth, 64u);
   EXPECT_EQ(storage.snapshot.index_bitwidth, 32u);
   EXPECT_EQ(storage.snapshot.offset_bitwidth, 64u);
@@ -423,9 +422,9 @@ TEST(VulkanProfileTest, MaterializesProductNeutralRawBdaTarget) {
   EXPECT_EQ(storage.snapshot.max_workgroup_count.x, 65535u);
   EXPECT_EQ(storage.snapshot.max_workgroup_count.y, 65535u);
   EXPECT_EQ(storage.snapshot.max_workgroup_count.z, 65535u);
-  EXPECT_EQ(storage.export_plan.abi_kind, LOOM_TARGET_ABI_UNKNOWN);
+  EXPECT_EQ(storage.export_plan.abi_kind, LOOM_TARGET_ABI_HAL_KERNEL);
   EXPECT_TRUE(iree_string_view_equal(storage.export_plan.name,
-                                     IREE_SV("spirv-vulkan1.3")));
+                                     IREE_SV("spirv-hal-kernel")));
   EXPECT_TRUE(iree_string_view_equal(
       storage.config.name, IREE_SV("spirv.logical.core.vulkan1.3.bda")));
   EXPECT_EQ(storage.config.contract_feature_bits,

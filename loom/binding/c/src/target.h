@@ -26,8 +26,8 @@ typedef struct loom_low_repr_environment_t loom_low_repr_environment_t;
 extern "C" {
 #endif
 
-// Releases a target-family profile owned by a public profile handle.
-typedef void (*loomc_target_profile_deinitialize_fn_t)(
+// Destroys a target-family profile owned by a public profile handle.
+typedef void (*loomc_target_profile_destroy_fn_t)(
     loom_target_profile_t* profile, loomc_allocator_t allocator);
 
 // Prepared target pass capability tables derived from a public target
@@ -94,35 +94,23 @@ loomc_target_specialization_options_validate_environment(
     const loomc_target_specialization_options_t* options,
     const loomc_target_environment_t* target_environment);
 
-// Controls internal specialization-list materialization.
-typedef uint32_t loomc_target_specialization_list_flags_t;
-enum loomc_target_specialization_list_flag_bits_e {
-  // Materializes target-only specialization rows.
-  LOOMC_TARGET_SPECIALIZATION_LIST_FLAG_NONE = 0u,
-  // Applies the unique product contract captured by each public profile.
-  LOOMC_TARGET_SPECIALIZATION_LIST_FLAG_APPLY_PRODUCT_CONTRACT = 1u << 0,
-};
-
 // Materializes internal function requests and target declaration bindings from
-// public options. |flags| selects whether compile-time product contracts are
-// included; link materialization leaves them out. Returned lists are owned by
-// |arena| until it is reset.
+// public options. Returned lists are owned by |arena| until it is reset.
 LOOMC_API_PRIVATE loomc_status_t loomc_target_specialization_options_make_lists(
     const loomc_target_specialization_options_t* options,
-    loomc_target_specialization_list_flags_t flags,
     iree_arena_allocator_t* arena,
     loom_target_specialization_request_list_t* out_requests,
     loom_target_declaration_binding_list_t* out_bindings);
 
 // Creates a public target profile from a prepared target-family profile. Takes
-// ownership of |target_profile| on entry and calls |deinitialize| on failure or
-// when the final handle reference is released. A NULL deinitializer denotes
+// ownership of |target_profile| on entry and calls |destroy| on failure or when
+// the final handle reference is released. A NULL destroy callback denotes
 // profile storage with process lifetime.
 LOOMC_API_PRIVATE loomc_status_t loomc_target_profile_create(
     loomc_target_environment_t* target_environment,
     loomc_string_view_t identifier, loom_target_profile_t* target_profile,
-    loomc_target_profile_deinitialize_fn_t deinitialize,
-    loomc_allocator_t allocator, loomc_target_profile_t** out_profile);
+    loomc_target_profile_destroy_fn_t destroy, loomc_allocator_t allocator,
+    loomc_target_profile_t** out_profile);
 
 // Returns the typed target-family profile owned by a public profile.
 LOOMC_API_PRIVATE const loom_target_profile_t*

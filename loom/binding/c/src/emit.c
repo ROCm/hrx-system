@@ -518,19 +518,28 @@ static iree_status_t loomc_emit_capture_diagnostic(
 
 static loomc_status_t loomc_emit_sidecar_artifact_metadata(
     loom_target_emit_sidecar_artifact_kind_t kind,
-    loomc_string_view_t* out_role, loomc_string_view_t* out_format) {
-  *out_role = loomc_string_view_empty();
+    loomc_artifact_kind_t* out_kind, loomc_string_view_t* out_format) {
+  *out_kind = LOOMC_ARTIFACT_KIND_REPORT;
   *out_format = loomc_string_view_empty();
   switch (kind) {
     case LOOM_TARGET_EMIT_SIDECAR_ARTIFACT_KIND_ARTIFACT_MANIFEST:
-      *out_role =
-          loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_ARTIFACT_MANIFEST);
+      *out_kind = LOOMC_ARTIFACT_KIND_REPORT;
       *out_format =
           loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_ARTIFACT_MANIFEST_JSON);
       return loomc_ok_status();
     default:
       return loomc_make_status(LOOMC_STATUS_INTERNAL,
                                "emitter returned an unknown sidecar kind");
+  }
+}
+
+static loomc_artifact_kind_t loomc_emit_primary_artifact_kind(
+    loom_target_artifact_format_t target_artifact_format) {
+  switch (target_artifact_format) {
+    case LOOM_TARGET_ARTIFACT_FORMAT_LLVMIR_TEXT:
+      return LOOMC_ARTIFACT_KIND_TEXT;
+    default:
+      return LOOMC_ARTIFACT_KIND_EXECUTABLE;
   }
 }
 
@@ -615,7 +624,7 @@ static loomc_status_t loomc_emit_add_compile_report_artifact(
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_result_add_artifact_take_contents(
-        result, loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_COMPILE_REPORT),
+        result, LOOMC_ARTIFACT_KIND_REPORT,
         loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON),
         identifier, loomc_make_byte_span(report_storage, report_length));
   }
@@ -628,11 +637,11 @@ static loomc_status_t loomc_emit_add_compile_report_artifact(
 }
 
 static loomc_status_t loomc_emit_add_byte_sequence_artifact(
-    loomc_result_t* result, loomc_string_view_t role,
+    loomc_result_t* result, loomc_artifact_kind_t kind,
     loomc_string_view_t format, loomc_string_view_t identifier,
     iree_byte_sequence_t* contents) {
   const loomc_artifact_t artifact = {
-      .role = role,
+      .kind = kind,
       .format = format,
       .identifier = identifier,
       .contents = loomc_byte_sequence_from_iree(contents),
@@ -670,8 +679,10 @@ static loomc_status_t loomc_emit_add_artifact(
   }
 
   loomc_status_t status = loomc_ok_status();
+  const loomc_artifact_kind_t artifact_kind =
+      loomc_emit_primary_artifact_kind(target_artifact->target_artifact_format);
   status = loomc_emit_add_byte_sequence_artifact(
-      result, loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_KERNEL),
+      result, artifact_kind,
       loomc_string_view_from_iree(emitter->public_artifact_format),
       loomc_emit_identifier(options, emitter), target_artifact->contents);
   for (iree_host_size_t i = 0;
@@ -682,12 +693,12 @@ static loomc_status_t loomc_emit_add_artifact(
       return loomc_make_status(LOOMC_STATUS_INTERNAL,
                                "emitter returned no sidecar contents");
     }
-    loomc_string_view_t role = loomc_string_view_empty();
+    loomc_artifact_kind_t kind = LOOMC_ARTIFACT_KIND_REPORT;
     loomc_string_view_t format = loomc_string_view_empty();
     LOOMC_RETURN_IF_ERROR(
-        loomc_emit_sidecar_artifact_metadata(sidecar->kind, &role, &format));
+        loomc_emit_sidecar_artifact_metadata(sidecar->kind, &kind, &format));
     status = loomc_emit_add_byte_sequence_artifact(
-        result, role, format, loomc_string_view_from_iree(sidecar->identifier),
+        result, kind, format, loomc_string_view_from_iree(sidecar->identifier),
         sidecar->contents);
   }
   return status;

@@ -34,32 +34,6 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    product_contract
-  HDRS
-    "product_contract.h"
-  SRCS
-    "product_contract.c"
-  DEPS
-    ::facts
-    ::types
-    iree::base
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    product_contract_test
-  SRCS
-    "product_contract_test.cc"
-  DEPS
-    ::facts_builder
-    ::product_contract
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-loom_cc_library(
-  NAME
     resolved_target
   HDRS
     "resolved_target.h"
@@ -304,7 +278,6 @@ loom_cc_library(
   DEPS
     ::facts
     ::facts_builder
-    ::product_contract
     ::types
     iree::base
     iree::base::internal::arena
@@ -415,7 +388,6 @@ loom_cc_library(
     ::facts_builder
     ::function_contract
     ::function_version
-    ::product_contract
     ::profile
     ::provider
     iree::base
@@ -671,10 +643,8 @@ loom_cc_library(
   NAME
     provider
   HDRS
-    "profile_selection.h"
     "provider.h"
   SRCS
-    "profile_selection.c"
     "provider.c"
   DEPS
     ::legalization
@@ -683,7 +653,6 @@ loom_cc_library(
     ::low_legality
     ::low_packet_diagnostics
     ::math_policy
-    ::product_contract
     ::profile
     ::resolved_target
     iree::base
@@ -785,17 +754,6 @@ loom_cc_test(
     loom::ops::pass
     loom::pass::builder
     loom::testing::module_ptr
-)
-
-loom_cc_test(
-  NAME
-    profile_selection_test
-  SRCS
-    "profile_selection_test.cc"
-  DEPS
-    ::provider
-    iree::testing::gtest
-    iree::testing::gtest_main
 )
 
 loom_cc_test(

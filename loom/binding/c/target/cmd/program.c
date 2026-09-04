@@ -25,7 +25,7 @@
 #include "loom/link/module_index.h"
 #include "loom/pass/builtin_registry.h"
 #include "loom/target/arch/cmd/artifact_builder.h"
-#include "loom/target/arch/cmd/product.h"
+#include "loom/target/arch/cmd/artifact_set.h"
 #include "loom/transforms/kernel/kernel_class_materializer.h"
 #include "loom/transforms/kernel/kernel_request_producer.h"
 #include "loomc/compile.h"
@@ -35,6 +35,38 @@ enum {
   LOOMC_CMD_PROGRAM_PRODUCT_KNOWN_FLAGS =
       LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
 };
+
+typedef struct loomc_cmd_program_product_impl_t {
+  // Generic immutable product interface exposed to callers.
+  loomc_product_t base;
+
+  // Allocator used for product-owned storage.
+  loomc_allocator_t allocator;
+
+  // Owned serialized programs and copied requirement metadata.
+  loom_cmd_program_artifact_set_t artifact_set;
+} loomc_cmd_program_product_impl_t;
+
+static void loomc_cmd_program_product_destroy(loomc_product_t* base_product) {
+  loomc_cmd_program_product_impl_t* product =
+      (loomc_cmd_program_product_impl_t*)base_product;
+  loomc_allocator_t allocator = product->allocator;
+  loom_cmd_program_artifact_set_deinitialize(&product->artifact_set);
+  loomc_allocator_free(allocator, product);
+}
+
+static const loomc_product_descriptor_t loomc_cmd_program_product_descriptor_ =
+    {
+        .destroy = loomc_cmd_program_product_destroy,
+};
+
+static const loomc_cmd_program_product_impl_t*
+loomc_cmd_program_product_const_cast(const loomc_product_t* product) {
+  if (!loomc_product_isa(product, &loomc_cmd_program_product_descriptor_)) {
+    return NULL;
+  }
+  return (const loomc_cmd_program_product_impl_t*)product;
+}
 
 typedef struct loomc_cmd_program_product_invocation_t {
   // Resources used to serialize immutable requests.
@@ -385,6 +417,50 @@ static loomc_status_t loomc_cmd_program_product_translate_plan_status(
   return loomc_status_from_iree(plan_status);
 }
 
+static loomc_status_t loomc_cmd_program_product_allocate(
+    loom_cmd_program_artifact_set_t* artifact_set, loomc_allocator_t allocator,
+    loomc_product_t** out_product) {
+  *out_product = NULL;
+  iree_host_size_t artifact_storage_size = 0;
+  iree_host_size_t allocation_size = sizeof(loomc_cmd_program_product_impl_t);
+  if (!iree_host_size_checked_mul(artifact_set->programs.count,
+                                  sizeof(loomc_artifact_t),
+                                  &artifact_storage_size) ||
+      !iree_host_size_checked_add(allocation_size, artifact_storage_size,
+                                  &allocation_size)) {
+    return loomc_make_status(LOOMC_STATUS_RESOURCE_EXHAUSTED,
+                             "command product metadata is too large");
+  }
+
+  loomc_cmd_program_product_impl_t* product = NULL;
+  LOOMC_RETURN_IF_ERROR(loomc_allocator_malloc_uninitialized(
+      allocator, allocation_size, (void**)&product));
+  memset(product, 0, sizeof(*product));
+  product->allocator = allocator;
+  product->artifact_set = *artifact_set;
+  *artifact_set = (loom_cmd_program_artifact_set_t){0};
+
+  loomc_artifact_t* artifacts = (loomc_artifact_t*)(product + 1);
+  for (iree_host_size_t i = 0; i < product->artifact_set.programs.count; ++i) {
+    const loom_cmd_program_artifact_t* program =
+        &product->artifact_set.programs.values[i];
+    const loomc_string_view_t symbol =
+        loomc_string_view_from_iree(program->symbol);
+    artifacts[i] = (loomc_artifact_t){
+        .kind = LOOMC_ARTIFACT_KIND_EXECUTABLE,
+        .format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_CMD_PROGRAM),
+        .identifier = symbol,
+        .contents = loomc_byte_sequence_from_iree(program->data),
+    };
+  }
+  loomc_product_initialize(&loomc_cmd_program_product_descriptor_, artifacts,
+                           product->artifact_set.programs.count,
+                           product->artifact_set.programs.count,
+                           product->artifact_set.entries.count, &product->base);
+  *out_product = &product->base;
+  return loomc_ok_status();
+}
+
 static loomc_status_t loomc_cmd_program_product_build_indexed(
     loomc_context_t* context, loomc_workspace_t* workspace,
     const loom_link_module_index_t* module_index,
@@ -452,12 +528,8 @@ static loomc_status_t loomc_cmd_program_product_build_indexed(
     }
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
-    loom_product_t* core_product = NULL;
-    status = loomc_status_from_iree(loom_cmd_product_create(
-        &artifact_set, iree_allocator_from_loomc(allocator), &core_product));
-    if (loomc_status_is_ok(status)) {
-      product = loomc_product_from_product(core_product);
-    }
+    status =
+        loomc_cmd_program_product_allocate(&artifact_set, allocator, &product);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     *out_product = product;
@@ -590,36 +662,32 @@ loomc_status_t loomc_cmd_program_product_build_request(
 }
 
 const loomc_product_descriptor_t* loomc_cmd_program_product_descriptor(void) {
-  return loomc_product_descriptor_from_product(&loom_cmd_product_descriptor);
+  return &loomc_cmd_program_product_descriptor_;
 }
 
 loomc_host_size_t loomc_cmd_program_product_program_count(
     const loomc_product_t* base_product) {
-  const loom_cmd_program_artifact_set_t* artifact_set =
-      loom_cmd_product_artifact_set(
-          loomc_product_to_const_product(base_product));
-  return artifact_set ? artifact_set->programs.count : 0;
+  const loomc_cmd_program_product_impl_t* product =
+      loomc_cmd_program_product_const_cast(base_product);
+  return product ? product->artifact_set.programs.count : 0;
 }
 
 bool loomc_cmd_program_product_program_at(const loomc_product_t* base_product,
                                           loomc_host_size_t ordinal,
                                           loomc_cmd_program_t* out_program) {
-  const loom_cmd_program_artifact_set_t* artifact_set =
-      loom_cmd_product_artifact_set(
-          loomc_product_to_const_product(base_product));
-  if (artifact_set == NULL || out_program == NULL ||
-      ordinal >= artifact_set->programs.count) {
+  const loomc_cmd_program_product_impl_t* product =
+      loomc_cmd_program_product_const_cast(base_product);
+  if (product == NULL || out_program == NULL ||
+      ordinal >= product->artifact_set.programs.count) {
     return false;
   }
   const loom_cmd_program_artifact_t* artifact =
-      &artifact_set->programs.values[ordinal];
-  loomc_artifact_t generic_artifact;
-  if (!loomc_product_artifact_at(base_product, ordinal, &generic_artifact)) {
-    return false;
-  }
+      &product->artifact_set.programs.values[ordinal];
+  const loomc_artifact_t* generic_artifact =
+      loomc_product_artifact_at(base_product, ordinal);
   *out_program = (loomc_cmd_program_t){
       .symbol = loomc_string_view_from_iree(artifact->symbol),
-      .artifact = generic_artifact,
+      .artifact = *generic_artifact,
       .entry_requirement_ordinals = artifact->entry_requirement_indices,
       .entry_requirement_count = artifact->entry_requirement_count,
   };
@@ -628,24 +696,22 @@ bool loomc_cmd_program_product_program_at(const loomc_product_t* base_product,
 
 loomc_host_size_t loomc_cmd_program_product_entry_requirement_count(
     const loomc_product_t* base_product) {
-  const loom_cmd_program_artifact_set_t* artifact_set =
-      loom_cmd_product_artifact_set(
-          loomc_product_to_const_product(base_product));
-  return artifact_set ? artifact_set->entries.count : 0;
+  const loomc_cmd_program_product_impl_t* product =
+      loomc_cmd_program_product_const_cast(base_product);
+  return product ? product->artifact_set.entries.count : 0;
 }
 
 bool loomc_cmd_program_product_entry_requirement_at(
     const loomc_product_t* base_product, loomc_host_size_t ordinal,
     loomc_cmd_entry_requirement_t* out_requirement) {
-  const loom_cmd_program_artifact_set_t* artifact_set =
-      loom_cmd_product_artifact_set(
-          loomc_product_to_const_product(base_product));
-  if (artifact_set == NULL || out_requirement == NULL ||
-      ordinal >= artifact_set->entries.count) {
+  const loomc_cmd_program_product_impl_t* product =
+      loomc_cmd_program_product_const_cast(base_product);
+  if (product == NULL || out_requirement == NULL ||
+      ordinal >= product->artifact_set.entries.count) {
     return false;
   }
   const loom_cmd_program_artifact_entry_t* entry =
-      &artifact_set->entries.values[ordinal];
+      &product->artifact_set.entries.values[ordinal];
   *out_requirement = (loomc_cmd_entry_requirement_t){
       .symbol = loomc_string_view_from_iree(entry->symbol),
   };

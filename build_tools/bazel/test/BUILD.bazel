@@ -79,6 +79,11 @@ iree_executable_test(
     data = [":dynamic_library_dependency.so"],
 )
 
+iree_executable_test(
+    name = "cross_package_executable_wrapper_test",
+    src = "//build_tools/bazel/test/executable_fixture:binary",
+)
+
 iree_cc_benchmark(
     name = "cc_benchmark_smoke_test_fixture",
     srcs = ["cc_benchmark_smoke_test_fixture.c"],

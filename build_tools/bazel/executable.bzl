@@ -19,6 +19,8 @@ load(
 )
 load(":runfiles.bzl", "create_runfiles_arguments_info")
 
+_WINDOWS_LAUNCH_RUNFILE_ENV = "IREE_BAZEL_EXECUTABLE_RUNFILE"
+
 IreeExecutableInfo = provider(
     doc = "Metadata for an executable alias or test wrapper.",
     fields = {
@@ -42,22 +44,69 @@ def _expand_env(ctx):
         for key, value in ctx.attr.env.items()
     }
 
+def _is_wasm_target(ctx):
+    return ctx.target_platform_has_constraint(
+        ctx.attr._wasm32_constraint[platform_common.ConstraintValueInfo],
+    )
+
+def _is_windows_target(ctx):
+    return ctx.target_platform_has_constraint(
+        ctx.attr._windows_constraint[platform_common.ConstraintValueInfo],
+    )
+
+def _runfile_path(ctx, file):
+    if file.short_path.startswith("../"):
+        return file.short_path[3:]
+    return ctx.workspace_name + "/" + file.short_path
+
+# The Windows loader resolves implicit imports beside the path used to launch
+# the image. A cross-package wrapper changes that path and can therefore strand
+# source-adjacent DLLs. Use a trampoline only for that exact case; ordinary
+# wrappers remain direct symlinks.
+def _needs_windows_launcher(ctx, output):
+    if not _is_windows_target(ctx):
+        return False
+    source_output_directory = ctx.executable.src.dirname
+    if source_output_directory == output.dirname:
+        return False
+    for file in ctx.attr.src[DefaultInfo].default_runfiles.files.to_list():
+        if (
+            file.dirname == source_output_directory and
+            file.extension.lower() == "dll"
+        ):
+            return True
+    return False
+
 def _native_executable_output(ctx):
     output_name = ctx.attr.out
     if not output_name:
         output_name = ctx.label.name
     output = ctx.actions.declare_file(output_name)
+    needs_launcher = _needs_windows_launcher(ctx, output)
     ctx.actions.symlink(
         is_executable = True,
         output = output,
-        target_file = ctx.executable.src,
+        target_file = ctx.executable._native_launcher if needs_launcher else ctx.executable.src,
     )
-    return output
+    return struct(
+        launch_environment = {
+            _WINDOWS_LAUNCH_RUNFILE_ENV: _runfile_path(ctx, ctx.executable.src),
+        } if needs_launcher else {},
+        output = output,
+        runfiles = ctx.runfiles(
+            files = [ctx.executable.src] if needs_launcher else [],
+        ),
+    )
 
-def _is_wasm_target(ctx):
-    return ctx.target_platform_has_constraint(
-        ctx.attr._wasm32_constraint[platform_common.ConstraintValueInfo],
-    )
+def _merge_launch_environment(
+        ctx,
+        environment,
+        inherited_environment,
+        launch_environment):
+    for name, value in launch_environment.items():
+        if name in environment or name in inherited_environment:
+            fail("%s reserves environment variable %s" % (ctx.label, name))
+        environment[name] = value
 
 def _wasm_entry(ctx, allow_default_test_main):
     entry = discover_wasm_entry([ctx.attr.src])
@@ -119,9 +168,12 @@ def _iree_executable_alias_impl(ctx):
         wasm_output = _wasm_executable_output(ctx, allow_default_test_main = False)
         output = wasm_output.output
         runfiles = _merge_runfiles(ctx).merge(wasm_output.runfiles)
+        launch_environment = {}
     else:
-        output = _native_executable_output(ctx)
-        runfiles = _merge_runfiles(ctx)
+        native_output = _native_executable_output(ctx)
+        output = native_output.output
+        runfiles = _merge_runfiles(ctx).merge(native_output.runfiles)
+        launch_environment = native_output.launch_environment
     providers = [
         DefaultInfo(
             executable = output,
@@ -135,11 +187,22 @@ def _iree_executable_alias_impl(ctx):
             src = ctx.attr.src.label,
         ),
     ]
+    environment = {}
+    inherited_environment = []
     if RunEnvironmentInfo in ctx.attr.src:
         source_environment = ctx.attr.src[RunEnvironmentInfo]
+        environment.update(source_environment.environment)
+        inherited_environment.extend(source_environment.inherited_environment)
+    _merge_launch_environment(
+        ctx,
+        environment,
+        inherited_environment,
+        launch_environment,
+    )
+    if environment or inherited_environment:
         providers.append(RunEnvironmentInfo(
-            environment = source_environment.environment,
-            inherited_environment = source_environment.inherited_environment,
+            environment = environment,
+            inherited_environment = inherited_environment,
         ))
     runfiles_arguments = create_runfiles_arguments_info(
         ctx,
@@ -159,9 +222,12 @@ def _iree_executable_test_impl(ctx):
         wasm_output = _wasm_executable_output(ctx, allow_default_test_main = True)
         output = wasm_output.output
         runfiles = _merge_runfiles(ctx).merge(wasm_output.runfiles)
+        launch_environment = {}
     else:
-        output = _native_executable_output(ctx)
-        runfiles = _merge_runfiles(ctx)
+        native_output = _native_executable_output(ctx)
+        output = native_output.output
+        runfiles = _merge_runfiles(ctx).merge(native_output.runfiles)
+        launch_environment = native_output.launch_environment
     expanded_env = {}
     inherited_environment = list(ctx.attr.env_inherit)
     if RunEnvironmentInfo in ctx.attr.src:
@@ -169,6 +235,13 @@ def _iree_executable_test_impl(ctx):
         expanded_env.update(source_environment.environment)
         inherited_environment.extend(source_environment.inherited_environment)
     expanded_env.update(_expand_env(ctx))
+    test_environment = dict(expanded_env)
+    _merge_launch_environment(
+        ctx,
+        test_environment,
+        inherited_environment,
+        launch_environment,
+    )
     providers = [
         DefaultInfo(
             executable = output,
@@ -182,7 +255,7 @@ def _iree_executable_test_impl(ctx):
             src = ctx.attr.src.label,
         ),
         testing.TestEnvironment(
-            environment = expanded_env,
+            environment = test_environment,
             inherited_environment = depset(inherited_environment).to_list(),
         ),
     ]
@@ -219,6 +292,11 @@ _SHARED_ATTRS = {
     "_wasm32_constraint": attr.label(
         default = "@platforms//cpu:wasm32",
     ),
+    "_native_launcher": attr.label(
+        cfg = "exec",
+        default = "//build_tools/bazel:executable_launcher",
+        executable = True,
+    ),
     "_wasm_bundler": attr.label(
         cfg = "exec",
         default = "//build_tools/wasm:wasm_binary_bundler",
@@ -231,6 +309,9 @@ _SHARED_ATTRS = {
     "_wasm_test_main": attr.label(
         allow_single_file = True,
         default = "//build_tools/wasm:wasm_test_main.mjs",
+    ),
+    "_windows_constraint": attr.label(
+        default = "@platforms//os:windows",
     ),
 }
 

@@ -31,7 +31,6 @@
 #include "loom/target/configured/provider.h"
 #include "loom/target/entry_selection.h"
 #include "loom/target/module_specialization.h"
-#include "loom/target/profile_selection.h"
 #include "loom/target/provider.h"
 #include "loom/tooling/cli/help.h"
 #include "loom/tooling/config/config.h"
@@ -40,6 +39,15 @@
 #include "loom/tools/loom-format/convert.h"
 #include "loom/util/stream.h"
 #include "loom/verify/verify.h"
+
+#ifndef LOOM_LINK_HAVE_AMDGPU
+#define LOOM_LINK_HAVE_AMDGPU 0
+#endif  // LOOM_LINK_HAVE_AMDGPU
+
+#if LOOM_LINK_HAVE_AMDGPU
+#include "loom/target/arch/amdgpu/artifact_key.h"
+#include "loom/target/arch/amdgpu/profile.h"
+#endif  // LOOM_LINK_HAVE_AMDGPU
 
 IREE_FLAG(string, mode, "auto",
           "Planning mode: auto, merge, or link. Auto selects "
@@ -172,6 +180,15 @@ typedef struct loom_link_cli_prepare_state_t {
   // Homogeneous target profile applied to every kernel entry, if any.
   const loom_target_profile_t* target_profile;
 } loom_link_cli_prepare_state_t;
+
+typedef struct loom_link_cli_target_profile_storage_t {
+  // Selected target-neutral profile borrowing family-specific storage below.
+  const loom_target_profile_t* profile;
+#if LOOM_LINK_HAVE_AMDGPU
+  // AMDGPU profile storage valid for the lifetime of the link invocation.
+  loom_amdgpu_target_profile_t amdgpu;
+#endif  // LOOM_LINK_HAVE_AMDGPU
+} loom_link_cli_target_profile_storage_t;
 
 static const char* loom_link_cli_mode_name(loom_link_plan_mode_t mode) {
   switch (mode) {
@@ -314,17 +331,48 @@ static iree_status_t loom_link_cli_materialize_config(
 }
 
 static iree_status_t loom_link_cli_select_target_profile(
-    const loom_target_environment_t* target_environment,
-    iree_allocator_t allocator,
-    loom_target_profile_selection_t* out_selection) {
-  *out_selection = (loom_target_profile_selection_t){0};
+    loom_link_cli_target_profile_storage_t* out_storage) {
+  *out_storage = (loom_link_cli_target_profile_storage_t){0};
+
   const iree_string_view_t specification =
       iree_string_view_trim(iree_make_cstring_view(FLAG_target_profile));
   if (iree_string_view_is_empty(specification)) {
     return iree_ok_status();
   }
-  return loom_target_environment_select_profile(
-      target_environment, specification, allocator, out_selection);
+  iree_string_view_t family = iree_string_view_empty();
+  iree_string_view_t selector = iree_string_view_empty();
+  if (iree_string_view_split(specification, ':', &family, &selector) < 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--target-profile='%.*s' must use family:selector syntax",
+        (int)specification.size, specification.data);
+  }
+  family = iree_string_view_trim(family);
+  selector = iree_string_view_trim(selector);
+  if (iree_string_view_is_empty(family) ||
+      iree_string_view_is_empty(selector)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--target-profile='%.*s' must name a non-empty family and selector",
+        (int)specification.size, specification.data);
+  }
+
+#if LOOM_LINK_HAVE_AMDGPU
+  if (iree_string_view_equal(family, IREE_SV("amdgpu"))) {
+    loom_amdgpu_target_identity_t identity = {0};
+    IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_key_parse(selector, &identity));
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_target_profile_initialize(&identity, &out_storage->amdgpu));
+    out_storage->profile = &out_storage->amdgpu.base;
+    return iree_ok_status();
+  }
+#endif  // LOOM_LINK_HAVE_AMDGPU
+
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "target profile family '%.*s' is not available in this loom-link "
+      "binary",
+      (int)family.size, family.data);
 }
 
 static loom_diagnostic_sink_t loom_link_cli_materialization_diagnostic_sink(
@@ -355,8 +403,8 @@ static iree_status_t loom_link_cli_prepare_linked_module(
   uint32_t error_count = 0;
   IREE_RETURN_IF_ERROR(loom_target_specialize_module_kernel_entries(
       state->target_environment, state->target_profile,
-      /*product_contract=*/NULL, loom_target_entry_emitter(&diagnostic_emitter),
-      block_pool, allocator, inout_module, &error_count));
+      loom_target_entry_emitter(&diagnostic_emitter), block_pool, allocator,
+      inout_module, &error_count));
   if (error_count != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -1183,7 +1231,7 @@ int main(int argc, char** argv) {
   bool context_initialized = false;
   loom_tooling_config_set_t config_set;
   loom_tooling_config_set_initialize(allocator, &config_set);
-  loom_target_profile_selection_t target_profile = {0};
+  loom_link_cli_target_profile_storage_t target_profile = {0};
   loom_link_cli_input_t* inputs = NULL;
   iree_host_size_t input_count = 0;
   loom_link_cli_index_t link_index = {0};
@@ -1245,8 +1293,7 @@ int main(int argc, char** argv) {
                          "--print-plan cannot be combined with --list-symbols");
   }
   if (iree_status_is_ok(status)) {
-    status = loom_link_cli_select_target_profile(
-        loom_configured_target_environment(), allocator, &target_profile);
+    status = loom_link_cli_select_target_profile(&target_profile);
   }
   if (iree_status_is_ok(status)) {
     loom_context_initialize(allocator, &context);
@@ -1388,7 +1435,6 @@ int main(int argc, char** argv) {
   if (context_initialized) {
     loom_context_deinitialize(&context);
   }
-  loom_target_profile_selection_deinitialize(&target_profile);
   iree_arena_block_pool_deinitialize(&block_pool);
 
   IREE_TRACE_ZONE_END(z0);

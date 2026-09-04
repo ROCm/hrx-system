@@ -304,18 +304,15 @@ static loomc_status_t loomc_launch_config_program_load_impl(
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "artifact must not be NULL");
   }
-  if (!loomc_launch_config_string_view_is_well_formed(artifact->role) ||
-      !loomc_launch_config_string_view_is_well_formed(artifact->format) ||
+  if (artifact->kind != LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "artifact kind is not LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG");
+  }
+  if (!loomc_launch_config_string_view_is_well_formed(artifact->format) ||
       !loomc_launch_config_string_view_is_well_formed(artifact->identifier)) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "artifact string view is malformed");
-  }
-  if (!loomc_string_view_equal(
-          artifact->role,
-          loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_LAUNCH_CONFIG))) {
-    return loomc_make_status(
-        LOOMC_STATUS_INVALID_ARGUMENT,
-        "artifact role is not '" LOOMC_ARTIFACT_ROLE_LAUNCH_CONFIG "'");
   }
   if (!loomc_string_view_equal(
           artifact->format,

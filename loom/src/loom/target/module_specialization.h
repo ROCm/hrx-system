@@ -41,13 +41,10 @@ iree_status_t loom_target_specialize_module(
 // This is the homogeneous deployment-product form of
 // loom_target_specialize_module. Request rows are derived from the verified
 // module and remain private to the call. Modules without kernel entries are
-// left unchanged. |product_contract| may be NULL to materialize target-only IR
-// without selecting a compiler representation, artifact format, ABI, or
-// linkage.
+// left unchanged.
 iree_status_t loom_target_specialize_module_kernel_entries(
     const loom_target_environment_t* environment,
     const loom_target_profile_t* target_profile,
-    const loom_target_product_contract_t* product_contract,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_module_t** inout_module, uint32_t* out_error_count);

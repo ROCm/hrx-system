@@ -168,8 +168,19 @@ class ScopedUnicodeProcessProbe {
         module_path_length >= (DWORD)module_path.size()) {
       return GetLastError();
     }
-    executable_path_ = directory_path_;
-    executable_path_.append(L"\\process_\x03C0.exe");
+    // Keep the probe beside the original image so that any adjacent runtime
+    // dependencies remain discoverable while exercising a Unicode image name.
+    executable_path_.assign(module_path.data(), (size_t)module_path_length);
+    size_t directory_separator = executable_path_.find_last_of(L"\\/");
+    if (directory_separator == std::wstring::npos) {
+      return ERROR_BAD_PATHNAME;
+    }
+    executable_path_.resize(directory_separator + 1);
+    executable_path_.append(L"process_\x03C0_");
+    executable_path_.append(std::to_wstring(GetCurrentProcessId()));
+    executable_path_.push_back(L'_');
+    executable_path_.append(std::to_wstring(GetTickCount64()));
+    executable_path_.append(L".exe");
     if (!CopyFileW(module_path.data(), executable_path_.c_str(), TRUE)) {
       return GetLastError();
     }

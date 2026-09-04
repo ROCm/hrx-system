@@ -372,10 +372,21 @@ static uint8_t loom_bytecode_instance_flags_mask(
   return (uint8_t)((1u << vtable->instance_flags_case_count) - 1u);
 }
 
-static iree_status_t loom_bytecode_body_reader_read_op(
+typedef struct loom_bytecode_body_op_record_t {
+  // Materialized operation awaiting nested regions and finalization.
+  loom_op_t* op;
+  // Source trivia retained until the operation is finalized.
+  loom_bytecode_source_trivia_t source_trivia;
+} loom_bytecode_body_op_record_t;
+
+// Decodes and materializes an operation record without descending into its
+// nested regions. Keeping the large record-decoding frame out of the recursive
+// region walk bounds stack consumption at the bytecode nesting limit.
+IREE_ATTRIBUTE_NOINLINE static iree_status_t
+loom_bytecode_body_reader_read_op_record(
     loom_bytecode_body_reader_t* body_reader,
     loom_bytecode_reader_cursor_t* cursor, loom_builder_t* builder,
-    uint32_t depth) {
+    loom_bytecode_body_op_record_t* out_record) {
   uint64_t op_offset = loom_bytecode_reader_cursor_absolute_position(cursor);
   uint64_t op_table_index_plus1 = 0;
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
@@ -720,18 +731,32 @@ static iree_status_t loom_bytecode_body_reader_read_op(
     op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
   }
   op->instance_flags = instance_flags;
-  for (uint64_t i = 0; i < region_count; ++i) {
+  *out_record = (loom_bytecode_body_op_record_t){
+      .op = op,
+      .source_trivia = source_trivia,
+  };
+  return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_body_reader_read_op(
+    loom_bytecode_body_reader_t* body_reader,
+    loom_bytecode_reader_cursor_t* cursor, loom_builder_t* builder,
+    uint32_t depth) {
+  loom_bytecode_body_op_record_t record = {0};
+  IREE_RETURN_IF_ERROR(loom_bytecode_body_reader_read_op_record(
+      body_reader, cursor, builder, &record));
+  for (uint64_t i = 0; i < record.op->region_count; ++i) {
     loom_region_t* region = NULL;
     IREE_RETURN_IF_ERROR(loom_bytecode_body_reader_read_region(
-        body_reader, cursor, builder, op, depth + 1, &region));
-    loom_op_regions(op)[i] = region;
+        body_reader, cursor, builder, record.op, depth + 1, &region));
+    loom_op_regions(record.op)[i] = region;
   }
   ++body_reader->counts.op_count;
-  IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, op));
-  if (source_trivia.comment_count > 0) {
+  IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, record.op));
+  if (record.source_trivia.comment_count > 0) {
     IREE_RETURN_IF_ERROR(loom_module_attach_op_comments(
-        body_reader->values.output_module, op, source_trivia.comments,
-        source_trivia.comment_count));
+        body_reader->values.output_module, record.op,
+        record.source_trivia.comments, record.source_trivia.comment_count));
   }
   return iree_ok_status();
 }

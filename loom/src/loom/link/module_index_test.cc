@@ -176,7 +176,6 @@ func.def @helper(%x: i32) -> (i32) {
       loom_link_module_index_lookup_global(index.get(), IREE_SV("@entry"));
   ASSERT_NE(entry, nullptr);
   EXPECT_EQ(entry->identity, LOOM_LINK_SYMBOL_IDENTITY_GLOBAL);
-  EXPECT_EQ(StringViewToString(entry->defining_op_name), "func.def");
   EXPECT_TRUE(iree_all_bits_set(entry->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT));
 
   const loom_link_module_index_module_t* indexed_module =
@@ -187,7 +186,6 @@ func.def @helper(%x: i32) -> (i32) {
                                             IREE_SV("@helper"));
   ASSERT_NE(helper, nullptr);
   EXPECT_EQ(helper->identity, LOOM_LINK_SYMBOL_IDENTITY_PRIVATE);
-  EXPECT_EQ(StringViewToString(helper->defining_op_name), "func.def");
   EXPECT_EQ(
       loom_link_module_index_lookup_global(index.get(), IREE_SV("helper")),
       nullptr);
@@ -368,7 +366,6 @@ func.def public @exported(%x: i32) -> (i32) {
       loom_link_module_index_lookup_global(index.get(), IREE_SV("@exported"));
   ASSERT_NE(symbol, nullptr);
   EXPECT_EQ(symbol->kind, LOOM_SYMBOL_FUNC_DEF);
-  EXPECT_EQ(StringViewToString(symbol->defining_op_name), "func.def");
   EXPECT_TRUE(iree_all_bits_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT));
 }
 
@@ -397,8 +394,6 @@ func.def @ordinary() {
                                               IREE_SV("ordinary"));
     ASSERT_NE(retained, nullptr);
     ASSERT_NE(ordinary, nullptr);
-    EXPECT_EQ(StringViewToString(retained->defining_op_name), "func.def");
-    EXPECT_EQ(StringViewToString(ordinary->defining_op_name), "func.def");
     EXPECT_TRUE(
         iree_all_bits_set(retained->flags, LOOM_LINK_SYMBOL_FLAG_RETAIN));
     EXPECT_FALSE(

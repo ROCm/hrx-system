@@ -206,20 +206,6 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
 loom_cc_library(
   NAME
-    product_contract
-  HDRS
-    "product_contract.h"
-  SRCS
-    "product_contract.c"
-  DEPS
-    loom::target::product_contract
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
-loom_cc_library(
-  NAME
     loom_check
   HDRS
     "check/loom_check.h"

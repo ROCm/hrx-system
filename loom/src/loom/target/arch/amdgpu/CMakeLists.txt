@@ -445,7 +445,6 @@ loom_cc_library(
   SRCS
     "provider.c"
   DEPS
-    ::artifact_key
     ::legalization
     ::low_asm_diagnostics
     ::low_verify
@@ -471,7 +470,6 @@ loom_cc_test(
   SRCS
     "provider_test.cc"
   DEPS
-    ::artifact_key
     ::profile
     ::provider
     iree::base

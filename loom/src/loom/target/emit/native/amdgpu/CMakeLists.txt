@@ -579,20 +579,6 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_cc_library(
   NAME
-    product_contract
-  HDRS
-    "product_contract.h"
-  SRCS
-    "product_contract.c"
-  DEPS
-    loom::target::product_contract
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_cc_library(
-  NAME
     hal_kernel_library
   HDRS
     "hal_kernel_library.h"
@@ -650,7 +636,6 @@ loom_cc_test(
     "hal_kernel_library_test.cc"
   DEPS
     ::hal_kernel_library
-    ::product_contract
     ::runtime_globals
     iree::base
     iree::base::internal::arena
@@ -780,7 +765,6 @@ loom_cc_test(
     "hsaco_hsa_test.cc"
   DEPS
     ::kernel_hsaco
-    ::product_contract
     iree::base
     iree::base::internal
     iree::base::internal::arena

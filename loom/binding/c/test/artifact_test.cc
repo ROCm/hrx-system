@@ -84,7 +84,7 @@ loomc_artifact_t MakeTextModuleArtifact(loomc_byte_sequence_t** out_contents) {
       loomc_make_byte_span(kContents, strlen(kContents)),
       loomc_allocator_system(), out_contents));
   return {
-      /*.role=*/loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_MODULE),
+      /*.kind=*/LOOMC_ARTIFACT_KIND_MODULE,
       /*.format=*/loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_TEXT),
       /*.identifier=*/loomc_make_cstring_view("entry.loom"),
       /*.contents=*/*out_contents,
@@ -170,7 +170,7 @@ TEST(ArtifactTest, SegmentedContentsRemainComposable) {
   ASSERT_FALSE(loomc_byte_sequence_try_get_contiguous_span(contents.get(),
                                                            &contiguous_span));
   loomc_artifact_t artifact = {
-      /*.role=*/loomc_make_cstring_view(LOOMC_ARTIFACT_ROLE_MODULE),
+      /*.kind=*/LOOMC_ARTIFACT_KIND_TEXT,
       /*.format=*/loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_TEXT),
       /*.identifier=*/loomc_make_cstring_view("segmented.loom"),
       /*.contents=*/contents.get(),

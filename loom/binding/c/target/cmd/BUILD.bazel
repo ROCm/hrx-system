@@ -29,7 +29,7 @@ loom_cc_library(
         "//loom/src/loom/link:module_index",
         "//loom/src/loom/pass:builtin_registry",
         "//loom/src/loom/target/arch/cmd:artifact_builder",
-        "//loom/src/loom/target/arch/cmd:product",
+        "//loom/src/loom/target/arch/cmd:artifact_set",
         "//loom/src/loom/transforms/kernel:kernel_class_materializer",
         "//loom/src/loom/transforms/kernel:kernel_request_producer",
         "//runtime/src/iree/base",

@@ -20,9 +20,6 @@ extern const loom_target_bundle_table_t loom_spirv_target_bundles;
 // Vulkan 1.3 SPIR-V target bundle.
 extern const loom_target_bundle_t loom_spirv_low_target_bundle_vulkan1_3;
 
-// Product-neutral Vulkan 1.3 BDA target profile bundle.
-extern const loom_target_bundle_t loom_spirv_target_profile_bundle_vulkan1_3;
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif

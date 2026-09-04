@@ -24,7 +24,6 @@
 #include "loom/target/facts_builder.h"
 #include "loom/target/function_contract.h"
 #include "loom/target/function_version.h"
-#include "loom/target/product_contract.h"
 #include "loom/target/profile.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/tooling/target/spirv/vulkan_profile.h"
@@ -35,14 +34,6 @@ namespace {
 using ::loom::testing::ModulePtr;
 
 static constexpr iree_host_size_t kSpirvHeaderWordCount = 5;
-
-static const loom_target_product_contract_t kSpirvShaderEntryContract = {
-    /*.name=*/IREE_SVL("spirv-shader-binary"),
-    /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_SPIRV,
-    /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
-    /*.abi_kind=*/LOOM_TARGET_ABI_SHADER_ENTRY_POINT,
-    /*.linkage=*/LOOM_TARGET_LINKAGE_DEFAULT,
-};
 
 static bool SpirvModuleHasCapability(const loom_spirv_module_binary_t& module,
                                      uint32_t capability) {
@@ -174,8 +165,6 @@ low.func.def target<spirv.logical.core>(@generic) abi(shader_entry_point) @kerne
   loom_target_facts_t* profile_facts = nullptr;
   IREE_ASSERT_OK(loom_target_profile_project_facts(&exact_profile.base, &arena_,
                                                    &profile_facts));
-  IREE_ASSERT_OK(loom_target_product_contract_apply(&kSpirvShaderEntryContract,
-                                                    profile_facts));
   ASSERT_TRUE(loom_target_facts_satisfy_specialization_requirement(
       profile_facts, target_facts->projection));
   loom_target_facts_builder_apply_requirement(target_facts->projection,

@@ -17,11 +17,10 @@
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/hal_kernel_library.h"
-#include "loom/target/emit/native/amdgpu/product_contract.h"
 #include "loomc/iree.h"
 #include "target.h"
 
-static void loomc_amdgpu_target_profile_deinitialize(
+static void loomc_amdgpu_target_profile_destroy(
     loom_target_profile_t* target_profile, loomc_allocator_t allocator) {
   loomc_allocator_free(allocator,
                        (loom_amdgpu_target_profile_t*)target_profile);
@@ -344,7 +343,6 @@ static const loom_target_emitter_t loomc_amdgpu_hsaco_emitter = {
                                sizeof(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO) - 1},
     .default_identifier = {"module.hsaco", 12},
     .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
-    .product_contract = &loom_amdgpu_hsaco_kernel_product_contract,
     .emit = loomc_amdgpu_emit_module_artifact,
 };
 
@@ -422,7 +420,7 @@ loomc_status_t loomc_target_profile_create_amdgpu(
                                                       : options->identifier;
   return loomc_target_profile_create(
       target_environment, identifier, &target_profile->base,
-      loomc_amdgpu_target_profile_deinitialize, allocator, out_profile);
+      loomc_amdgpu_target_profile_destroy, allocator, out_profile);
 }
 
 loomc_status_t loomc_amdgpu_target_profile_query_identity(
