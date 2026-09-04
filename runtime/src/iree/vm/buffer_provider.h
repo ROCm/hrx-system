@@ -9,6 +9,10 @@
 
 #include "iree/vm/buffer.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
 // Private representation bits sharing the public access word.
 enum iree_vm_buffer_flag_bits_e {
   // The buffer is a proper view retaining a flattened root.
@@ -74,7 +78,18 @@ static inline void iree_vm_buffer_initialize_embedded_read_only(
   out_buffer->release_callback = release_callback;
 }
 
+// Returns an exact borrowed range after checking the complete required access
+// mask, bounds, and root liveness. The output is untouched on failure.
+iree_status_t iree_vm_buffer_map_range(
+    const iree_vm_buffer_t* buffer,
+    iree_vm_buffer_access_flags_t required_access, iree_host_size_t offset,
+    iree_host_size_t length, iree_byte_span_t* out_span);
+
 // Returns the process-static provider table for the core "vm" family.
 const iree_vm_ref_type_table_t* iree_vm_buffer_provider_table(void);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
 
 #endif  // IREE_VM_BUFFER_PROVIDER_H_

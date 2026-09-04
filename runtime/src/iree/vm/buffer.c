@@ -81,11 +81,28 @@ static iree_status_t iree_vm_buffer_allocate_storage(
     iree_vm_buffer_access_flags_t access, iree_host_size_t length,
     iree_host_size_t minimum_alignment, iree_allocator_t host_allocator,
     iree_vm_buffer_t** out_buffer) {
+  if (!iree_host_size_is_valid_alignment(minimum_alignment)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "minimum alignment must be zero or a representable power of two");
+  }
+
+  // Own the complete storage-layout contract here. Callers should not need to
+  // know the object prefix or aligned-allocation overhead to determine whether
+  // a buffer request is representable.
+  const iree_host_size_t data_offset = sizeof(iree_vm_buffer_t);
+  const iree_host_size_t allocation_alignment =
+      iree_max(minimum_alignment, iree_max_align_t);
   iree_host_size_t total_size = 0;
-  iree_host_size_t data_offset = 0;
-  IREE_RETURN_IF_ERROR(
-      IREE_STRUCT_LAYOUT(sizeof(iree_vm_buffer_t), &total_size,
-                         IREE_STRUCT_FIELD(length, uint8_t, &data_offset)));
+  iree_host_size_t allocator_size = 0;
+  if (!iree_host_size_checked_add(data_offset, length, &total_size) ||
+      !iree_host_size_checked_add(sizeof(uintptr_t), total_size,
+                                  &allocator_size) ||
+      !iree_host_size_checked_add(allocator_size, allocation_alignment,
+                                  &allocator_size)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "buffer allocation size is not representable");
+  }
 
   iree_vm_buffer_t* buffer = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(
@@ -100,7 +117,7 @@ static iree_status_t iree_vm_buffer_allocate_storage(
   return iree_ok_status();
 }
 
-static iree_status_t iree_vm_buffer_map_range(
+iree_status_t iree_vm_buffer_map_range(
     const iree_vm_buffer_t* buffer,
     iree_vm_buffer_access_flags_t required_access, iree_host_size_t offset,
     iree_host_size_t length, iree_byte_span_t* out_span) {

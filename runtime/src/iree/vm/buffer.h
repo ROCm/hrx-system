@@ -118,7 +118,8 @@ iree_vm_buffer_release_callback_null(void) {
 // selects the runtime's natural maximum alignment. A nonzero alignment must be
 // a representable power of two. The result is a distinct nonnull object even
 // when |length| is zero. |out_buffer| is set null before construction and
-// remains null on failure.
+// remains null on failure. An unrepresentable complete storage request or an
+// allocation failure returns RESOURCE_EXHAUSTED.
 IREE_API_EXPORT iree_status_t iree_vm_buffer_create(
     iree_host_size_t length, iree_host_size_t minimum_alignment,
     iree_allocator_t host_allocator, iree_vm_buffer_t** out_buffer);

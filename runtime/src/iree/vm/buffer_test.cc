@@ -69,7 +69,7 @@ TEST(VMBufferTest, CreateRejectsInvalidLayoutWithoutAllocation) {
   EXPECT_EQ(allocator.allocation_count(), 0u);
 
   buffer = reinterpret_cast<iree_vm_buffer_t*>(uintptr_t{1});
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         iree_vm_buffer_create(IREE_HOST_SIZE_MAX, 0,
                                               allocator.allocator(), &buffer));
   EXPECT_EQ(buffer, nullptr);
