@@ -26,6 +26,19 @@ loom_generated_file_family(
 
 loom_cc_library(
   NAME
+    product_contract
+  HDRS
+    "product_contract.h"
+  SRCS
+    "product_contract.c"
+  DEPS
+    iree::base
+    loom::target::product_contract
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     array_facts
   HDRS
     "array/facts.h"

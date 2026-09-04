@@ -45,6 +45,35 @@ loom_generated_file_family(
 )
 
 loom_cc_library(
+    name = "target_facts",
+    srcs = ["facts.c"],
+    hdrs = ["facts.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/target:facts",
+        "//loom/src/loom/target/arch/amd/xdna:device_profile",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "target_profile",
+    srcs = ["profile.c"],
+    hdrs = ["profile.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":target_facts",
+        ":target_records",
+        "//loom/src/loom/target:profile",
+        "//loom/src/loom/target/arch/amd/xdna:array_facts",
+        "//loom/src/loom/target/arch/amd/xdna:device_profile",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/ops",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "array_descriptors",
     srcs = [":descriptors/array_descriptors.c"],
     hdrs = [":descriptors/array_descriptors.h"],
@@ -112,6 +141,7 @@ loom_cc_library(
     name = "low_registry",
     srcs = ["descriptors/low_registry.c"],
     hdrs = ["descriptors/low_registry.h"],
+    visibility = ["//loom/src/loom/tooling/target/amd/xdna:__pkg__"],
     deps = [
         ":array_descriptors",
         ":core_descriptors",
@@ -207,7 +237,7 @@ loom_cc_library(
     name = "target_records",
     srcs = ["records/target_records.c"],
     hdrs = ["records/target_records.h"],
-    visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p/ops:__pkg__"],
+    visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:__subpackages__"],
     deps = [
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
@@ -249,13 +279,14 @@ loom_cc_library(
     hdrs = ["provider.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":artifact_emitter",
         ":legalization",
         ":low_registry",
         ":low_verify",
         ":lower",
         ":math_policy",
         ":pipeline_pass",
+        ":target_facts",
+        ":target_profile",
         "//loom/src/loom/ir",
         "//loom/src/loom/pass:builder",
         "//loom/src/loom/target:provider",
@@ -485,9 +516,10 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "artifact_emitter",
-    srcs = ["emit/artifact_emitter.c"],
-    hdrs = ["emit/artifact_emitter.h"],
+    name = "artifact",
+    srcs = ["emit/artifact.c"],
+    hdrs = ["emit/artifact.h"],
+    visibility = ["//loom/src/loom/tooling/target/amd/xdna:__pkg__"],
     deps = [
         ":array_plan",
         ":array_program",
@@ -495,14 +527,15 @@ loom_cc_library(
         ":leaf_compile",
         ":tile_link",
         ":xdna_product",
+        "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:function_version",
-        "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/amd/xdna:device_profile",
         "//loom/src/loom/target/reporting:low",
+        "//loom/src/loom/target/reporting:report",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",

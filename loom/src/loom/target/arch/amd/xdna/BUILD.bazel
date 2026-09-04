@@ -33,6 +33,17 @@ loom_generated_file_family(
 )
 
 loom_cc_library(
+    name = "product_contract",
+    srcs = ["product_contract.c"],
+    hdrs = ["product_contract.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/target:product_contract",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "array_facts",
     srcs = ["array/facts.c"],
     hdrs = ["array/facts.h"],

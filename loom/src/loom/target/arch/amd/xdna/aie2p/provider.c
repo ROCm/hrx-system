@@ -9,17 +9,61 @@
 #include "loom/ir/module.h"
 #include "loom/pass/builder.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/low_registry.h"
-#include "loom/target/arch/amd/xdna/aie2p/emit/artifact_emitter.h"
+#include "loom/target/arch/amd/xdna/aie2p/facts.h"
 #include "loom/target/arch/amd/xdna/aie2p/legalization.h"
 #include "loom/target/arch/amd/xdna/aie2p/low_verify.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
 #include "loom/target/arch/amd/xdna/aie2p/math_policy.h"
 #include "loom/target/arch/amd/xdna/aie2p/ops/registry.h"
+#include "loom/target/arch/amd/xdna/aie2p/ops/target.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/pass.h"
+#include "loom/target/arch/amd/xdna/aie2p/profile.h"
+#include "loom/target/arch/amd/xdna/device/profile.h"
 
-static const loom_target_emitter_t* const kAie2pTargetEmitters[] = {
-    &loom_aie2p_xdna_emitter,
-};
+typedef struct loom_aie2p_profile_selection_storage_t {
+  // Structured AIE2P target profile.
+  loom_aie2p_target_profile_t profile;
+} loom_aie2p_profile_selection_storage_t;
+
+static iree_status_t loom_aie2p_target_provider_select_profile(
+    const loom_target_provider_t* provider, iree_string_view_t selector,
+    iree_allocator_t allocator,
+    loom_target_profile_selection_t* out_selection) {
+  (void)provider;
+  const loom_xdna_device_profile_t* device_profile =
+      loom_xdna_device_profile_lookup(selector);
+  if (device_profile == NULL ||
+      loom_xdna_device_profile_array_family(device_profile)->architecture !=
+          LOOM_XDNA_ARCHITECTURE_AIE2P) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "unsupported AIE2P target profile '%.*s'",
+                            (int)selector.size, selector.data);
+  }
+
+  loom_aie2p_profile_selection_storage_t* storage = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(allocator, sizeof(*storage), (void**)&storage));
+  *storage = (loom_aie2p_profile_selection_storage_t){0};
+  iree_status_t status =
+      loom_aie2p_target_profile_initialize(device_profile, &storage->profile);
+  if (iree_status_is_ok(status)) {
+    *out_selection = (loom_target_profile_selection_t){
+        .profile = &storage->profile.base,
+        .selector = iree_make_cstring_view(device_profile->key),
+        .storage = storage,
+    };
+  } else {
+    iree_allocator_free(allocator, storage);
+  }
+  return status;
+}
+
+static void loom_aie2p_target_provider_release_profile_selection(
+    const loom_target_provider_t* provider,
+    loom_target_profile_selection_t* selection) {
+  (void)provider;
+  iree_allocator_free(selection->allocator, selection->storage);
+}
 
 static const loom_low_verify_provider_t* const kAie2pLowVerifyProviders[] = {
     &loom_aie2p_low_verify_provider,
@@ -80,6 +124,8 @@ static iree_status_t loom_aie2p_provider_contribute_pipeline(
 }
 
 const loom_target_provider_t loom_aie2p_target_provider = {
+    .profile_type = &loom_aie2p_target_profile_type,
+    .materialize_definition = loom_aie2p_target_materialize_definition,
     .register_context = loom_aie2p_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_aie2p_low_descriptor_registry_initialize,
@@ -97,13 +143,12 @@ const loom_target_provider_t loom_aie2p_target_provider = {
             .count = IREE_ARRAYSIZE(kAie2pLowVerifyProviders),
             .values = kAie2pLowVerifyProviders,
         },
-    .emitter_list =
-        {
-            .values = kAie2pTargetEmitters,
-            .count = IREE_ARRAYSIZE(kAie2pTargetEmitters),
-        },
     .pass_registry = &loom_aie2p_pipeline_pass_registry,
     .contribute_pipeline = loom_aie2p_provider_contribute_pipeline,
+    .select_profile = loom_aie2p_target_provider_select_profile,
+    .release_profile_selection =
+        loom_aie2p_target_provider_release_profile_selection,
+    .target_fact_type = &loom_aie2p_target_fact_type,
 };
 
 static const loom_target_provider_t* const kAie2pTargetProviders[] = {

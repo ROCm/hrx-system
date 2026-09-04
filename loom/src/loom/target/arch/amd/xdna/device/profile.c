@@ -8,6 +8,19 @@
 
 #include "loom/target/arch/amd/xdna/device/profile_tables.inl"
 
+const loom_xdna_device_profile_t* loom_xdna_device_profile_lookup(
+    iree_string_view_t key) {
+  key = iree_string_view_trim(key);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kLoomXdnaDeviceProfiles);
+       ++i) {
+    const loom_xdna_device_profile_t* profile = &kLoomXdnaDeviceProfiles[i];
+    if (iree_string_view_equal(key, iree_make_cstring_view(profile->key))) {
+      return profile;
+    }
+  }
+  return NULL;
+}
+
 iree_status_t loom_xdna_device_profile_resolve_pci(
     uint16_t vendor_id, uint16_t device_id, uint8_t revision,
     const loom_xdna_device_profile_t** out_profile) {

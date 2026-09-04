@@ -76,6 +76,10 @@ typedef struct loom_xdna_device_profile_t {
   loom_xdna_device_limits_t limits;
 } loom_xdna_device_profile_t;
 
+// Finds the exact immutable profile named by |key|, or returns NULL.
+const loom_xdna_device_profile_t* loom_xdna_device_profile_lookup(
+    iree_string_view_t key);
+
 // Resolves an exact PCI identity without a device-family fallback.
 iree_status_t loom_xdna_device_profile_resolve_pci(
     uint16_t vendor_id, uint16_t device_id, uint8_t revision,

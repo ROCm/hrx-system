@@ -7,7 +7,8 @@
         "tool": "loom-compile",
         "args": [
           "{srcdir}/split_k.loom",
-          "--backend=xdna-strix-halo",
+          "--backend=xdna",
+          "--target=amd.xdna.strix_halo.17f0_11",
           "--output={tmp}/split_k.xdna",
           "--compile-report=details"
         ]
@@ -15,8 +16,8 @@
       "stderr": {
         "contains": {
           "unordered": [
-            "\"artifact_kind\":\"target-artifact\"",
-            "\"backend\":\"amd-xdna-strix-halo\"",
+            "\"artifact_kind\":\"hal-executable\"",
+            "\"backend\":\"xdna\"",
             "\"artifact_format\":\"elf\"",
             "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"entries\":{\"count\":5",

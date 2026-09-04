@@ -17,6 +17,9 @@
 #ifndef LOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY
 #define LOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY 0
 #endif  // LOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY
+#ifndef LOOM_CONFIG_PRODUCT_HAVE_XDNA
+#define LOOM_CONFIG_PRODUCT_HAVE_XDNA 0
+#endif  // LOOM_CONFIG_PRODUCT_HAVE_XDNA
 
 #if LOOM_CONFIG_PRODUCT_HAVE_AMDGPU_HSACO
 #include "loom/tooling/target/amdgpu/product_provider.h"
@@ -24,6 +27,9 @@
 #if LOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY
 #include "loom/tooling/target/spirv/product_provider.h"
 #endif  // LOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY
+#if LOOM_CONFIG_PRODUCT_HAVE_XDNA
+#include "loom/tooling/target/amd/xdna/product_provider.h"
+#endif  // LOOM_CONFIG_PRODUCT_HAVE_XDNA
 
 namespace loom {
 namespace {
@@ -48,6 +54,12 @@ TEST(ConfiguredProductRegistryTest, IsInternallyConsistent) {
                 IREE_SV(LOOM_SPIRV_PRODUCT_FORMAT_BINARY)),
             &loom_spirv_binary_product_format);
 #endif  // LOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY
+#if LOOM_CONFIG_PRODUCT_HAVE_XDNA
+  EXPECT_EQ(loom_product_registry_lookup_format(
+                registry, &loom_kernel_product_operation,
+                IREE_SV(LOOM_XDNA_PRODUCT_FORMAT)),
+            &loom_xdna_product_format);
+#endif  // LOOM_CONFIG_PRODUCT_HAVE_XDNA
   EXPECT_EQ(loom_product_registry_lookup_format(
                 registry, &loom_cmd_product_operation,
                 IREE_SV(LOOM_CMD_PRODUCT_FORMAT_LOOM_COMMAND)),

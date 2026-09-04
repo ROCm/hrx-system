@@ -4,9 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/arch/amd/xdna/aie2p/emit/artifact_emitter.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/artifact.h"
 
-#include "iree/base/byte_sequence.h"
 #include "iree/io/vec_stream.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/ir/module.h"
@@ -22,12 +21,6 @@
 #include "loom/target/function_version.h"
 #include "loom/target/reporting/low.h"
 
-enum {
-  LOOM_AIE2P_STRIX_HALO_PCI_VENDOR_ID = 0x1022,
-  LOOM_AIE2P_STRIX_HALO_PCI_DEVICE_ID = 0x17F0,
-  LOOM_AIE2P_STRIX_HALO_PCI_REVISION = 0x11,
-};
-
 static bool loom_aie2p_xdna_has_contract(const loom_module_t* module,
                                          loom_op_t* function_op,
                                          iree_string_view_t contract) {
@@ -38,8 +31,8 @@ static bool loom_aie2p_xdna_has_contract(const loom_module_t* module,
 }
 
 static iree_status_t loom_aie2p_xdna_find_array_entry(
-    const loom_target_emit_request_t* request, loom_op_t** out_function_op,
-    iree_string_view_t* out_entry_name) {
+    const loom_aie2p_xdna_artifact_request_t* request,
+    loom_op_t** out_function_op, iree_string_view_t* out_entry_name) {
   *out_function_op = NULL;
   *out_entry_name = iree_string_view_empty();
   loom_symbol_t* symbol = NULL;
@@ -77,7 +70,7 @@ static iree_status_t loom_aie2p_xdna_find_array_entry(
 }
 
 static const loom_target_facts_t* loom_aie2p_xdna_function_target_facts(
-    const loom_target_emit_request_t* request, loom_op_t* function_op) {
+    const loom_aie2p_xdna_artifact_request_t* request, loom_op_t* function_op) {
   const loom_target_function_version_t* version =
       loom_target_function_version_list_find(
           request->function_versions,
@@ -86,7 +79,7 @@ static const loom_target_facts_t* loom_aie2p_xdna_function_target_facts(
 }
 
 static iree_status_t loom_aie2p_xdna_compile_source_leaves(
-    const loom_target_emit_request_t* request,
+    const loom_aie2p_xdna_artifact_request_t* request,
     loom_aie2p_array_leaf_t** out_leaves, iree_host_size_t* out_leaf_count) {
   *out_leaves = NULL;
   *out_leaf_count = 0;
@@ -217,7 +210,7 @@ static iree_status_t loom_aie2p_xdna_plan_tile_link(
 }
 
 static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
-    const loom_target_emit_request_t* request,
+    const loom_aie2p_xdna_artifact_request_t* request,
     const loom_aie2p_array_plan_t* plan,
     const loom_aie2p_array_resident_program_t* resident_program,
     loom_aie2p_xdna_tile_t** out_tiles) {
@@ -260,8 +253,6 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
       status = iree_status_join(
           status, loom_target_compile_report_record_entry_report(
                       request->compile_report, worker_report_ptr));
-    }
-    if (worker_report_ptr != NULL) {
       loom_target_compile_report_deinitialize(worker_report_ptr);
     }
     IREE_RETURN_IF_ERROR(status);
@@ -288,16 +279,16 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
   return iree_ok_status();
 }
 
-static iree_status_t loom_aie2p_xdna_emit(
-    const loom_target_emit_request_t* request,
-    loom_target_emit_artifact_t* out_artifact) {
-  *out_artifact = (loom_target_emit_artifact_t){0};
-  if (request->artifact_manifest.mode !=
-      LOOM_TARGET_ARTIFACT_MANIFEST_MODE_NONE) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "AIE2P XDNA emission does not produce artifact manifests");
-  }
+iree_status_t loom_aie2p_xdna_artifact_emit(
+    const loom_aie2p_xdna_artifact_request_t* request,
+    iree_byte_sequence_t** out_contents) {
+  IREE_ASSERT_ARGUMENT(request);
+  IREE_ASSERT_ARGUMENT(request->module);
+  IREE_ASSERT_ARGUMENT(request->low_descriptor_registry);
+  IREE_ASSERT_ARGUMENT(request->device_profile);
+  IREE_ASSERT_ARGUMENT(request->scratch_arena);
+  IREE_ASSERT_ARGUMENT(out_contents);
+  *out_contents = NULL;
 
   loom_op_t* array_function = NULL;
   iree_string_view_t entry_name = iree_string_view_empty();
@@ -306,8 +297,6 @@ static iree_status_t loom_aie2p_xdna_emit(
   if (request->compile_report != NULL) {
     loom_target_compile_report_initialize_if_empty(request->compile_report,
                                                    request->allocator);
-    request->compile_report->artifact_kind =
-        LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
     loom_target_compile_report_record_low_kernel_workload(
         request->compile_report, array_function);
   }
@@ -330,12 +319,8 @@ static iree_status_t loom_aie2p_xdna_emit(
   IREE_RETURN_IF_ERROR(loom_aie2p_xdna_compile_resident_tiles(
       request, &array_plan, &resident_program, &tiles));
 
-  const loom_xdna_device_profile_t* device_profile = NULL;
-  IREE_RETURN_IF_ERROR(loom_xdna_device_profile_resolve_pci(
-      LOOM_AIE2P_STRIX_HALO_PCI_VENDOR_ID, LOOM_AIE2P_STRIX_HALO_PCI_DEVICE_ID,
-      LOOM_AIE2P_STRIX_HALO_PCI_REVISION, &device_profile));
   const loom_aie2p_xdna_product_t product = {
-      .device_profile = device_profile,
+      .device_profile = request->device_profile,
       .entry_name = entry_name,
       .array_plan = &array_plan,
       .array_program = &array_program,
@@ -363,26 +348,11 @@ static iree_status_t loom_aie2p_xdna_emit(
   if (iree_status_is_ok(status)) {
     status = iree_io_vec_stream_move_contents(stream, &contents);
   }
-  if (iree_status_is_ok(status) && request->compile_report != NULL) {
-    loom_target_compile_report_record_artifact_size(request->compile_report,
-                                                    (uint64_t)stream_length);
-  }
   if (iree_status_is_ok(status)) {
-    *out_artifact = (loom_target_emit_artifact_t){
-        .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
-        .contents = contents,
-    };
+    *out_contents = contents;
     contents = NULL;
   }
   iree_byte_sequence_release(contents);
   iree_io_stream_release(stream);
   return status;
 }
-
-const loom_target_emitter_t loom_aie2p_xdna_emitter = {
-    .name = IREE_SVL("amd-xdna-strix-halo"),
-    .public_artifact_format = IREE_SVL("xdna-strix-halo"),
-    .default_identifier = IREE_SVL("module.xdna"),
-    .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
-    .emit = loom_aie2p_xdna_emit,
-};

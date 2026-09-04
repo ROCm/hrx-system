@@ -94,3 +94,7 @@ const loom_target_bundle_table_t loom_aie2p_target_bundles = {
     .values = kAie2pTargetBundleValues,
     .count = IREE_ARRAYSIZE(kAie2pTargetBundleValues),
 };
+
+const loom_target_bundle_t* loom_aie2p_array_target_bundle(void) {
+  return &kAie2pArrayBundle;
+}

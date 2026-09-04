@@ -29,6 +29,12 @@ _CONFIGURED_PRODUCT_COPTS = (
             "-DLOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY=1",
         ],
         "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target:xdna_artifacts": [
+            "-DLOOM_CONFIG_PRODUCT_HAVE_XDNA=1",
+        ],
+        "//conditions:default": [],
     })
 )
 
@@ -42,6 +48,12 @@ _CONFIGURED_PRODUCT_DEPS = (
     iree_select({
         "//loom/config/target:spirv_artifacts": [
             "//loom/src/loom/tooling/target/spirv:product_provider",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target:xdna_artifacts": [
+            "//loom/src/loom/tooling/target/amd/xdna:product_provider",
         ],
         "//conditions:default": [],
     })

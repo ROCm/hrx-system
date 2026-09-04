@@ -18,6 +18,9 @@ extern "C" {
 // Target bundle rows selected by aie2p.target.
 extern const loom_target_bundle_table_t loom_aie2p_target_bundles;
 
+// Returns the AIE2P logical-array program target bundle.
+const loom_target_bundle_t* loom_aie2p_array_target_bundle(void);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

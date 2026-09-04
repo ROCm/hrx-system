@@ -16,6 +16,9 @@
 #ifndef LOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY
 #define LOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY 0
 #endif  // LOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY
+#ifndef LOOM_CONFIG_PRODUCT_HAVE_XDNA
+#define LOOM_CONFIG_PRODUCT_HAVE_XDNA 0
+#endif  // LOOM_CONFIG_PRODUCT_HAVE_XDNA
 
 #if LOOM_CONFIG_PRODUCT_HAVE_AMDGPU_HSACO
 #include "loom/tooling/target/amdgpu/product_provider.h"
@@ -23,6 +26,9 @@
 #if LOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY
 #include "loom/tooling/target/spirv/product_provider.h"
 #endif  // LOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY
+#if LOOM_CONFIG_PRODUCT_HAVE_XDNA
+#include "loom/tooling/target/amd/xdna/product_provider.h"
+#endif  // LOOM_CONFIG_PRODUCT_HAVE_XDNA
 
 static const loom_product_operation_t* const kConfiguredProductOperations[] = {
     &loom_kernel_product_operation,
@@ -36,6 +42,9 @@ static const loom_product_format_t* const kConfiguredProductFormats[] = {
 #if LOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY
     &loom_spirv_binary_product_format,
 #endif  // LOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY
+#if LOOM_CONFIG_PRODUCT_HAVE_XDNA
+    &loom_xdna_product_format,
+#endif  // LOOM_CONFIG_PRODUCT_HAVE_XDNA
     &loom_cmd_product_format,
 };
 
@@ -47,6 +56,9 @@ static const loom_product_format_provider_t* const
 #if LOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY
         &loom_spirv_binary_product_provider,
 #endif  // LOOM_CONFIG_PRODUCT_HAVE_SPIRV_BINARY
+#if LOOM_CONFIG_PRODUCT_HAVE_XDNA
+        &loom_xdna_product_provider,
+#endif  // LOOM_CONFIG_PRODUCT_HAVE_XDNA
         &loom_cmd_product_provider,
 };
 
