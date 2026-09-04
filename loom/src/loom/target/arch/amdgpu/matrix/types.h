@@ -420,6 +420,42 @@ typedef enum loom_amdgpu_matrix_fragment_layout_kind_e {
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT = 115,
 } loom_amdgpu_matrix_fragment_layout_kind_t;
 
+// Compact ID for an exact accumulator/result physical representation. Zero
+// denotes a contract without exact reusable fragment-layout facts.
+typedef uint8_t loom_amdgpu_matrix_result_representation_id_t;
+#define LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE UINT8_C(0)
+
+typedef enum loom_amdgpu_matrix_result_representation_flag_bits_e {
+  // The native fragment's M/N coordinates are exchanged at the source
+  // contract boundary.
+  LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_FLAG_TRANSPOSE_MN = 1u << 0,
+} loom_amdgpu_matrix_result_representation_flag_bits_t;
+
+// Bitset of loom_amdgpu_matrix_result_representation_flag_bits_t values.
+typedef uint8_t loom_amdgpu_matrix_result_representation_flags_t;
+
+typedef struct loom_amdgpu_matrix_result_representation_t {
+  // Fragment layout whose result role realizes this deduplicated placement;
+  // the generated catalog verifies uint8 fit.
+  uint8_t fragment_layout_kind;
+  // Coordinate interpretation applied to the native fragment layout.
+  loom_amdgpu_matrix_result_representation_flags_t flags;
+} loom_amdgpu_matrix_result_representation_t;
+
+// Sentinel used when no operand-exchanged native contract exists.
+#define LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE UINT16_MAX
+
+typedef struct loom_amdgpu_matrix_contract_realization_choices_t {
+  // Native contract ordinal used after exchanging LHS/RHS, or NONE.
+  uint16_t operand_exchanged_contract_ordinal;
+  // Exact result representation produced by the canonical contract.
+  loom_amdgpu_matrix_result_representation_id_t
+      canonical_result_representation_id;
+  // Exact result representation produced after exchanging LHS/RHS, or NONE.
+  loom_amdgpu_matrix_result_representation_id_t
+      operand_exchanged_result_representation_id;
+} loom_amdgpu_matrix_contract_realization_choices_t;
+
 typedef enum loom_amdgpu_matrix_contract_flag_bits_e {
   // Contract consumes an explicit sparse index operand.
   LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SPARSE = 1u << 0,

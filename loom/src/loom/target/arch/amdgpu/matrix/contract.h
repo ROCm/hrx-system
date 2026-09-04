@@ -76,6 +76,19 @@ iree_host_size_t loom_amdgpu_matrix_contract_descriptor_count(void);
 const loom_amdgpu_matrix_contract_descriptor_t*
 loom_amdgpu_matrix_contract_descriptor_at(iree_host_size_t index);
 
+// Returns generated physical-representation choices for a built-in matrix
+// contract ordinal, or NULL when |index| is out of range. The
+// operand-exchanged choice applies the identity
+// A*B=transpose(transpose(B)*transpose(A)).
+const loom_amdgpu_matrix_contract_realization_choices_t*
+loom_amdgpu_matrix_contract_realization_choices_at(iree_host_size_t index);
+
+// Returns an exact result representation by ID, or NULL for NONE or an ID
+// outside the generated catalog.
+const loom_amdgpu_matrix_result_representation_t*
+loom_amdgpu_matrix_result_representation_at(
+    loom_amdgpu_matrix_result_representation_id_t representation_id);
+
 // Returns a built-in descriptor with the same wait-state behavior as
 // |low_descriptor_ref|, or NULL when the descriptor ref is not a matrix
 // contract.

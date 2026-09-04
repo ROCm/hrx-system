@@ -395,6 +395,51 @@ class ExactContractionLayout:
             raise ValueError(f"unknown contraction role '{role}'") from error
 
 
+def transpose_contraction_layout(
+    layout: ExactContractionLayout,
+) -> ExactContractionLayout:
+    """Exchanges M/N and LHS/RHS without changing physical ownership.
+
+    Every physical position keeps its payload value. The two matrix axes are
+    exchanged in semantic space, and the operand roles follow the contraction
+    identity ``A * B = transpose(transpose(B) * transpose(A))``.
+    """
+
+    shape = ContractionShape(
+        block_count=layout.shape.block_count,
+        m=layout.shape.n,
+        n=layout.shape.m,
+        k=layout.shape.k,
+    )
+
+    def transpose_role(
+        source: ExactContractionRoleLayout, destination_role: str
+    ) -> ExactContractionRoleLayout:
+        coordinate_map = source.coordinate_map
+
+        def evaluate(physical_coordinate: tuple[int, ...]) -> tuple[int, ...]:
+            block, first, second = coordinate_map.evaluate(physical_coordinate)
+            return (block, second, first)
+
+        return exact_contraction_role_layout(
+            shape,
+            destination_role,
+            exact_coordinate_map(
+                source_dimensions=coordinate_map.source_dimensions,
+                destination_dimensions=shape.role_dimensions(destination_role),
+                evaluate=evaluate,
+            ),
+        )
+
+    return ExactContractionLayout(
+        shape=shape,
+        lhs=transpose_role(layout.rhs, ROLE_LHS),
+        rhs=transpose_role(layout.lhs, ROLE_RHS),
+        accumulator=transpose_role(layout.accumulator, ROLE_ACCUMULATOR),
+        result=transpose_role(layout.result, ROLE_RESULT),
+    )
+
+
 def _grouped_dot_role_layout(
     shape: ContractionShape,
     role: str,

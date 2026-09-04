@@ -33,6 +33,19 @@ const loom_amdgpu_matrix_contract_descriptor_t* FindDescriptor(
   return nullptr;
 }
 
+iree_host_size_t FindDescriptorOrdinal(const char* name) {
+  iree_string_view_t expected_name = iree_make_cstring_view(name);
+  const iree_host_size_t count = loom_amdgpu_matrix_contract_descriptor_count();
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
+        loom_amdgpu_matrix_contract_descriptor_at(i);
+    if (iree_string_view_equal(descriptor->name, expected_name)) {
+      return i;
+    }
+  }
+  return count;
+}
+
 loom_amdgpu_matrix_payload_shape_t PayloadShape(
     loom_amdgpu_matrix_numeric_type_t numeric_type) {
   loom_amdgpu_matrix_payload_shape_t payload_shape = {};
@@ -87,6 +100,69 @@ TEST(MatrixContractTest, DescriptorNamesAreUnique) {
     }
   }
   EXPECT_EQ(loom_amdgpu_matrix_contract_descriptor_at(count), nullptr);
+}
+
+TEST(MatrixContractTest, RealizationCatalogCoversEveryDescriptor) {
+  const iree_host_size_t count = loom_amdgpu_matrix_contract_descriptor_count();
+  iree_host_size_t exact_count = 0;
+  iree_host_size_t operand_exchanged_count = 0;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
+        loom_amdgpu_matrix_contract_descriptor_at(i);
+    const loom_amdgpu_matrix_contract_realization_choices_t* choices =
+        loom_amdgpu_matrix_contract_realization_choices_at(i);
+    ASSERT_NE(choices, nullptr);
+    if (descriptor->fragment_layout_kind ==
+        LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_UNKNOWN) {
+      EXPECT_EQ(choices->canonical_result_representation_id,
+                LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE);
+      EXPECT_EQ(choices->operand_exchanged_contract_ordinal,
+                LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE);
+      continue;
+    }
+    ++exact_count;
+    EXPECT_NE(loom_amdgpu_matrix_result_representation_at(
+                  choices->canonical_result_representation_id),
+              nullptr);
+    if (choices->operand_exchanged_contract_ordinal ==
+        LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE) {
+      EXPECT_EQ(choices->operand_exchanged_result_representation_id,
+                LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE);
+      continue;
+    }
+    ++operand_exchanged_count;
+    EXPECT_LT(choices->operand_exchanged_contract_ordinal, count);
+    EXPECT_NE(loom_amdgpu_matrix_result_representation_at(
+                  choices->operand_exchanged_result_representation_id),
+              nullptr);
+  }
+  EXPECT_EQ(exact_count, 217u);
+  EXPECT_EQ(operand_exchanged_count, 150u);
+  EXPECT_EQ(loom_amdgpu_matrix_contract_realization_choices_at(count), nullptr);
+  EXPECT_EQ(loom_amdgpu_matrix_result_representation_at(
+                LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE),
+            nullptr);
+}
+
+TEST(MatrixContractTest, Gfx11F16F32HasTransposedResultRealization) {
+  const iree_host_size_t contract_ordinal =
+      FindDescriptorOrdinal("wmma.f32.16x16x16.f16");
+  ASSERT_LT(contract_ordinal, loom_amdgpu_matrix_contract_descriptor_count());
+  const loom_amdgpu_matrix_contract_realization_choices_t* choices =
+      loom_amdgpu_matrix_contract_realization_choices_at(contract_ordinal);
+  ASSERT_NE(choices, nullptr);
+  EXPECT_EQ(choices->operand_exchanged_contract_ordinal, contract_ordinal);
+
+  const loom_amdgpu_matrix_result_representation_t* representation =
+      loom_amdgpu_matrix_result_representation_at(
+          choices->operand_exchanged_result_representation_id);
+  ASSERT_NE(representation, nullptr);
+  EXPECT_GT(representation->fragment_layout_kind,
+            LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_UNKNOWN);
+  EXPECT_LT(representation->fragment_layout_kind,
+            LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT);
+  EXPECT_EQ(representation->flags,
+            LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_FLAG_TRANSPOSE_MN);
 }
 
 TEST(MatrixContractTest, FeatureInfoCoversKnownFeatureBits) {

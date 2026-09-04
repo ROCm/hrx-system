@@ -242,6 +242,24 @@ loom_amdgpu_matrix_contract_descriptor_at(iree_host_size_t index) {
   return &kLoomAmdgpuMatrixContractDescriptors[index];
 }
 
+const loom_amdgpu_matrix_contract_realization_choices_t*
+loom_amdgpu_matrix_contract_realization_choices_at(iree_host_size_t index) {
+  if (index >= kLoomAmdgpuMatrixContractDescriptorCount) {
+    return NULL;
+  }
+  return &kLoomAmdgpuMatrixContractRealizationChoices[index];
+}
+
+const loom_amdgpu_matrix_result_representation_t*
+loom_amdgpu_matrix_result_representation_at(
+    loom_amdgpu_matrix_result_representation_id_t representation_id) {
+  if (representation_id == LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE ||
+      representation_id >= LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_COUNT) {
+    return NULL;
+  }
+  return &kLoomAmdgpuMatrixResultRepresentations[representation_id];
+}
+
 const loom_amdgpu_matrix_contract_descriptor_t*
 loom_amdgpu_matrix_contract_wait_state_descriptor_for_low_descriptor_ref(
     loom_amdgpu_descriptor_ref_t low_descriptor_ref) {
