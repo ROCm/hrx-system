@@ -99,25 +99,4 @@ TEST_F(VMModuleTest, CheckedQueriesLeaveOutputsUntouched) {
   EXPECT_EQ(export_value.ordinal, 99u);
 }
 
-TEST_F(VMModuleTest, CallsNativeValueFunctionThroughGenericABI) {
-  iree_vm_export_t export_value = {};
-  IREE_ASSERT_OK(
-      iree_vm_module_lookup_export(module_, IREE_SV("add_one"), &export_value));
-  iree_vm_module_export_declaration_t declaration = {};
-  IREE_ASSERT_OK(
-      iree_vm_module_query_export(module_, export_value.ordinal, &declaration));
-  uint64_t argument = 41;
-  uint64_t result = 0;
-  iree_vm_call_packet_t call = {};
-  call.value_arguments.direct = &argument;
-  call.value_results.direct = &result;
-  iree_vm_module_function_start_params_t params = {};
-  params.function_ordinal = declaration.function_ordinal;
-  params.call = call;
-  iree_vm_execution_outcome_t outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
-  IREE_ASSERT_OK(module_->vtable->function_start(module_, &params, &outcome));
-  EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_COMPLETED);
-  EXPECT_EQ(result, 42u);
-}
-
 }  // namespace

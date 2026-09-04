@@ -30,6 +30,11 @@ void CountAtomicWake(void* user_data) {
       1, std::memory_order_relaxed);
 }
 
+void ExpectVariantEqual(iree_vm_variant_t actual, iree_vm_variant_t expected) {
+  EXPECT_EQ(actual.payload, expected.payload);
+  EXPECT_EQ(actual.metadata, expected.metadata);
+}
+
 iree_vm_invocation_wake_callback_t MakeWakeCallback(int* wake_count) {
   return iree_vm_invocation_wake_callback_t{CountWake, wake_count};
 }
@@ -147,75 +152,57 @@ TEST_F(VMInvocationTest, ImmediateCallConsumesArgumentsAndPublishesResults) {
 }
 
 TEST_F(VMInvocationTest, RejectsSemanticInputsAfterConsumingArguments) {
-  iree_vm_function_t function = LookupFunction(IREE_SV("add"));
+  struct Case {
+    // Diagnostic case name.
+    const char* name;
+    // Resolved or deliberately null function under test.
+    iree_vm_function_t function;
+    // Argument storage consumed by every semantic rejection.
+    std::array<iree_vm_variant_t, 2> arguments;
+    // Number of arguments presented from |arguments|.
+    iree_host_size_t argument_count;
+    // Number of results presented from the shared result storage.
+    iree_host_size_t result_count;
+  };
+  const iree_vm_function_t add_function = LookupFunction(IREE_SV("add"));
+  Case cases[] = {
+      {"wrong argument count",
+       add_function,
+       {iree_vm_variant_from_i32(1), iree_vm_variant_empty()},
+       1,
+       1},
+      {"wrong argument type",
+       add_function,
+       {iree_vm_variant_from_i64(1), iree_vm_variant_from_i32(2)},
+       2,
+       1},
+      {"wrong result count",
+       add_function,
+       {iree_vm_variant_from_i32(1), iree_vm_variant_from_i32(2)},
+       2,
+       0},
+      {"null function",
+       iree_vm_function_null(),
+       {iree_vm_variant_from_i32(1), iree_vm_variant_from_i32(2)},
+       2,
+       1},
+  };
   const iree_vm_variant_t untouched_result =
       iree_vm_variant_from_i64(INT64_C(0x12345678));
-
-  {
-    std::array<iree_vm_variant_t, 1> arguments = {
-        iree_vm_variant_from_i32(1),
-    };
-    std::array<iree_vm_variant_t, 1> results = {untouched_result};
-    iree_vm_execution_outcome_t outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                          iree_vm_invocation_start(
-                              invocation_, function, MakeVariantSpan(arguments),
-                              MakeVariantSpan(results), {}, &outcome));
-    EXPECT_TRUE(iree_vm_variant_is_empty(arguments[0]));
-    EXPECT_EQ(results[0].payload, untouched_result.payload);
-    EXPECT_EQ(results[0].metadata, untouched_result.metadata);
-    EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
-  }
-
-  {
-    std::array<iree_vm_variant_t, 2> arguments = {
-        iree_vm_variant_from_i64(1),
-        iree_vm_variant_from_i32(2),
-    };
-    std::array<iree_vm_variant_t, 1> results = {untouched_result};
-    iree_vm_execution_outcome_t outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                          iree_vm_invocation_start(
-                              invocation_, function, MakeVariantSpan(arguments),
-                              MakeVariantSpan(results), {}, &outcome));
-    EXPECT_TRUE(iree_vm_variant_is_empty(arguments[0]));
-    EXPECT_TRUE(iree_vm_variant_is_empty(arguments[1]));
-    EXPECT_EQ(results[0].payload, untouched_result.payload);
-    EXPECT_EQ(results[0].metadata, untouched_result.metadata);
-    EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
-  }
-
-  {
-    std::array<iree_vm_variant_t, 2> arguments = {
-        iree_vm_variant_from_i32(1),
-        iree_vm_variant_from_i32(2),
-    };
-    iree_vm_execution_outcome_t outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                          iree_vm_invocation_start(
-                              invocation_, function, MakeVariantSpan(arguments),
-                              iree_vm_variant_span_empty(), {}, &outcome));
-    EXPECT_TRUE(iree_vm_variant_is_empty(arguments[0]));
-    EXPECT_TRUE(iree_vm_variant_is_empty(arguments[1]));
-    EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
-  }
-
-  {
-    std::array<iree_vm_variant_t, 2> arguments = {
-        iree_vm_variant_from_i32(1),
-        iree_vm_variant_from_i32(2),
-    };
+  for (Case& test_case : cases) {
+    SCOPED_TRACE(test_case.name);
     std::array<iree_vm_variant_t, 1> results = {untouched_result};
     iree_vm_execution_outcome_t outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
-        iree_vm_invocation_start(invocation_, iree_vm_function_null(),
-                                 MakeVariantSpan(arguments),
-                                 MakeVariantSpan(results), {}, &outcome));
-    EXPECT_TRUE(iree_vm_variant_is_empty(arguments[0]));
-    EXPECT_TRUE(iree_vm_variant_is_empty(arguments[1]));
-    EXPECT_EQ(results[0].payload, untouched_result.payload);
-    EXPECT_EQ(results[0].metadata, untouched_result.metadata);
+        iree_vm_invocation_start(
+            invocation_, test_case.function,
+            {test_case.arguments.data(), test_case.argument_count},
+            {results.data(), test_case.result_count}, {}, &outcome));
+    for (iree_host_size_t i = 0; i < test_case.argument_count; ++i) {
+      EXPECT_TRUE(iree_vm_variant_is_empty(test_case.arguments[i]));
+    }
+    ExpectVariantEqual(results[0], untouched_result);
     EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
   }
 
@@ -240,12 +227,9 @@ TEST_F(VMInvocationTest, RejectsOverlappingBoundaryWithoutTouchingStorage) {
                             invocation_, function, MakeVariantSpan(arguments),
                             MakeVariantSpan(results), {}, outcome));
 
-  EXPECT_EQ(arguments[0].payload, original_arguments[0].payload);
-  EXPECT_EQ(arguments[0].metadata, original_arguments[0].metadata);
-  EXPECT_EQ(arguments[1].payload, original_arguments[1].payload);
-  EXPECT_EQ(arguments[1].metadata, original_arguments[1].metadata);
-  EXPECT_EQ(results[0].payload, original_result.payload);
-  EXPECT_EQ(results[0].metadata, original_result.metadata);
+  ExpectVariantEqual(arguments[0], original_arguments[0]);
+  ExpectVariantEqual(arguments[1], original_arguments[1]);
+  ExpectVariantEqual(results[0], original_result);
   EXPECT_EQ(counters_.start_count, 0);
 }
 
@@ -315,8 +299,7 @@ TEST_F(VMInvocationTest, PreservesOptionalImportSemantics) {
                                MakeVariantSpan(results), {}, &outcome));
   EXPECT_TRUE(iree_vm_variant_is_empty(arguments[0]));
   EXPECT_TRUE(iree_vm_variant_is_empty(arguments[1]));
-  EXPECT_EQ(results[0].payload, original_result.payload);
-  EXPECT_EQ(results[0].metadata, original_result.metadata);
+  ExpectVariantEqual(results[0], original_result);
   EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
   EXPECT_EQ(counters_.cleanup_count, 1);
 
@@ -347,8 +330,7 @@ TEST_F(VMInvocationTest, ResumesTransactionallyAndReusesStorage) {
       MakeVariantSpan(results), MakeWakeCallback(&wake_count), &outcome));
   EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
   EXPECT_TRUE(iree_vm_variant_is_empty(arguments[0]));
-  EXPECT_EQ(results[0].payload, original_result.payload);
-  EXPECT_EQ(results[0].metadata, original_result.metadata);
+  ExpectVariantEqual(results[0], original_result);
   EXPECT_EQ(wake_count, 1);
 
   outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
@@ -365,15 +347,13 @@ TEST_F(VMInvocationTest, ResumesTransactionallyAndReusesStorage) {
       IREE_STATUS_INVALID_ARGUMENT,
       iree_vm_invocation_resume(invocation_, MakeVariantSpan(results),
                                 overlapping_outcome));
-  EXPECT_EQ(results[0].payload, original_result.payload);
-  EXPECT_EQ(results[0].metadata, original_result.metadata);
+  ExpectVariantEqual(results[0], original_result);
   EXPECT_EQ(counters_.resume_count, 0);
 
   IREE_ASSERT_OK(iree_vm_invocation_resume(invocation_,
                                            MakeVariantSpan(results), &outcome));
   EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
-  EXPECT_EQ(results[0].payload, original_result.payload);
-  EXPECT_EQ(results[0].metadata, original_result.metadata);
+  ExpectVariantEqual(results[0], original_result);
   EXPECT_EQ(wake_count, 2);
   IREE_ASSERT_OK(iree_vm_invocation_resume(invocation_,
                                            MakeVariantSpan(results), &outcome));
@@ -427,8 +407,7 @@ TEST_F(VMInvocationTest, CancellationWinsTerminalCompletion) {
                         iree_vm_invocation_resume(
                             invocation_, MakeVariantSpan(results), &outcome));
   EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
-  EXPECT_EQ(results[0].payload, original_result.payload);
-  EXPECT_EQ(results[0].metadata, original_result.metadata);
+  ExpectVariantEqual(results[0], original_result);
   EXPECT_EQ(counters_.cleanup_count, 1);
   EXPECT_EQ(destroy_count, 1);
 }
@@ -463,16 +442,14 @@ TEST_F(VMInvocationTest, CancellationRemainsStickyAcrossRepeatedSuspension) {
                                            MakeVariantSpan(results), &outcome));
   EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
   EXPECT_EQ(wake_count.load(std::memory_order_relaxed), 3);
-  EXPECT_EQ(results[0].payload, original_result.payload);
-  EXPECT_EQ(results[0].metadata, original_result.metadata);
+  ExpectVariantEqual(results[0], original_result);
 
   outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DEADLINE_EXCEEDED,
                         iree_vm_invocation_resume(
                             invocation_, MakeVariantSpan(results), &outcome));
   EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
-  EXPECT_EQ(results[0].payload, original_result.payload);
-  EXPECT_EQ(results[0].metadata, original_result.metadata);
+  ExpectVariantEqual(results[0], original_result);
   EXPECT_EQ(counters_.cleanup_count, 1);
 }
 
@@ -553,8 +530,7 @@ TEST_F(VMInvocationTest, RejectsBorrowedRefsAcrossDeclaredOrActualYield) {
           invocation_, LookupFunction(IREE_SV("bad_yield_ref")),
           MakeVariantSpan(arguments), MakeVariantSpan(results), {}, &outcome));
   EXPECT_TRUE(iree_vm_variant_is_empty(arguments[0]));
-  EXPECT_EQ(results[0].payload, original_result.payload);
-  EXPECT_EQ(results[0].metadata, original_result.metadata);
+  ExpectVariantEqual(results[0], original_result);
   EXPECT_EQ(counters_.start_count, 1);
   EXPECT_EQ(counters_.cleanup_count, 1);
   iree_vm_ref_object_release(&second_object,
@@ -582,8 +558,7 @@ TEST_F(VMInvocationTest, DiscardsInvalidProviderResultsAndFailures) {
       iree_vm_invocation_start(
           invocation_, LookupFunction(IREE_SV("bad_ref_result")),
           MakeVariantSpan(arguments), MakeVariantSpan(results), {}, &outcome));
-  EXPECT_EQ(results[0].payload, original_result.payload);
-  EXPECT_EQ(results[0].metadata, original_result.metadata);
+  ExpectVariantEqual(results[0], original_result);
   EXPECT_EQ(destroy_count, 1);
 
   std::array<iree_vm_variant_t, 2> fail_arguments = {
@@ -597,8 +572,7 @@ TEST_F(VMInvocationTest, DiscardsInvalidProviderResultsAndFailures) {
                                MakeVariantSpan(results), {}, &outcome));
   EXPECT_TRUE(iree_vm_variant_is_empty(fail_arguments[0]));
   EXPECT_TRUE(iree_vm_variant_is_empty(fail_arguments[1]));
-  EXPECT_EQ(results[0].payload, original_result.payload);
-  EXPECT_EQ(results[0].metadata, original_result.metadata);
+  ExpectVariantEqual(results[0], original_result);
 }
 
 TEST_F(VMInvocationTest, ReportsFixedFrameStorageExhaustion) {
@@ -618,8 +592,7 @@ TEST_F(VMInvocationTest, ReportsFixedFrameStorageExhaustion) {
                                MakeVariantSpan(results), {}, &outcome));
   EXPECT_TRUE(iree_vm_variant_is_empty(arguments[0]));
   EXPECT_TRUE(iree_vm_variant_is_empty(arguments[1]));
-  EXPECT_EQ(results[0].payload, original_result.payload);
-  EXPECT_EQ(results[0].metadata, original_result.metadata);
+  ExpectVariantEqual(results[0], original_result);
   EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
   EXPECT_EQ(counters_.start_count, 1);
 }
