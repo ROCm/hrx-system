@@ -220,6 +220,7 @@ loom_cc_test(
     deps = [
         ":request",
         "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/testing:context",
         "//loom/src/loom/testing:module_ptr",
