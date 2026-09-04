@@ -20,7 +20,10 @@ from iree.vm.bytecode.spec.render.c import (
     render_verifier_data,
     render_wire_assertions,
 )
-from iree.vm.bytecode.spec.render.fixture import render_structural_module_fixture
+from iree.vm.bytecode.spec.render.fixture import (
+    render_core_execution_module_fixture,
+    render_structural_module_fixture,
+)
 from iree.vm.bytecode.spec.render.markdown import render_specification
 from iree.vm.bytecode.spec.specification import SPECIFICATION
 
@@ -49,6 +52,9 @@ def generate_outputs() -> dict[str, str | bytes]:
         "verifier_source": render_verifier_data(SPECIFICATION),
         "disassembler_data": render_disassembler_data(SPECIFICATION),
         "documentation": render_specification(SPECIFICATION),
+        "core_execution_module_fixture": render_core_execution_module_fixture(
+            SPECIFICATION
+        ),
         "structural_module_fixture": render_structural_module_fixture(SPECIFICATION),
     }
 

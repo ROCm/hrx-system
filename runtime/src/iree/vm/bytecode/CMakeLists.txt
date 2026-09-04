@@ -24,6 +24,22 @@ iree_cc_library(
 
 iree_c_embed_data(
   NAME
+    execution_testdata
+  SRCS
+    "testdata/core_execution.vmfb"
+  C_FILE_OUTPUT
+    "execution_testdata.c"
+  H_FILE_OUTPUT
+    "execution_testdata.h"
+  IDENTIFIER
+    "iree_vm_bytecode_execution_testdata"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
+iree_c_embed_data(
+  NAME
     verifier_testdata
   SRCS
     "testdata/structural.vmfb"
@@ -92,6 +108,7 @@ iree_cc_test(
   SRCS
     "verifier_test.cc"
   DEPS
+    ::execution_testdata
     ::verifier
     ::verifier_data
     ::verifier_testdata
@@ -148,6 +165,7 @@ iree_py_generated_files(
   OUTPUTS
     "docs/specification.md"
     "disassembler/data.inl"
+    "testdata/core_execution.vmfb"
     "testdata/structural.vmfb"
     "verifier/data.c"
     "verifier/instruction_cases.inl"
@@ -158,6 +176,7 @@ iree_py_generated_files(
   OUTPUT_FLAGS
     "--documentation"
     "--disassembler-data"
+    "--core-execution-module-fixture"
     "--instruction-verifier-cases"
     "--module-verifier-cases"
     "--structural-module-fixture"

@@ -13,6 +13,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "iree/vm/bytecode/execution_testdata.h"
 #include "iree/vm/bytecode/verifier_data.h"
 #include "iree/vm/bytecode/verifier_testdata.h"
 #include "iree/vm/bytecode/wire/core.h"
@@ -106,6 +107,39 @@ class ModuleVerificationTest : public ::testing::Test {
   iree_const_byte_span_t contents_ = iree_const_byte_span_empty();
   iree_vm_bytecode_module_plan_t plan_ = {};
 };
+
+TEST(CoreExecutionModuleVerificationTest, MapsAndVerifies) {
+  const iree_file_toc_t* files = iree_vm_bytecode_execution_testdata_create();
+  ASSERT_EQ(iree_vm_bytecode_execution_testdata_size(), 1u);
+  const iree_const_byte_span_t contents =
+      iree_make_const_byte_span(files[0].data, files[0].size);
+  ASSERT_TRUE(iree_host_ptr_has_alignment(contents.data,
+                                          IREE_VM_BYTECODE_IMAGE_ALIGNMENT));
+
+  iree_vm_bytecode_module_plan_t plan = {};
+  IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(contents, &plan));
+  std::vector<uint32_t> block_offsets(plan.maximum_block_count);
+  IREE_ASSERT_OK(
+      iree_vm_bytecode_verify_module_instructions(&plan, block_offsets.data()));
+
+  EXPECT_EQ(plan.layout.requirements.count, 0u);
+  EXPECT_EQ(plan.layout.imports.entry_count, 0u);
+  EXPECT_EQ(plan.layout.constants.count, 0u);
+  EXPECT_EQ(plan.layout.ref_types.entry_count, 1u);
+  EXPECT_EQ(plan.layout.callable_types.count, 2u);
+  EXPECT_EQ(plan.layout.exports.count, 2u);
+  EXPECT_EQ(plan.layout.functions.count, 2u);
+  EXPECT_EQ(plan.layout.rodata.count, 1u);
+  EXPECT_EQ(plan.callable_fields.value_count, 2u);
+  EXPECT_EQ(plan.callable_fields.ref_count, 1u);
+  EXPECT_EQ(plan.callable_fields.function_count, 0u);
+  EXPECT_EQ(plan.rodata_storage.copy_length, 0u);
+  ASSERT_NE(plan.layout.globals.header, nullptr);
+  EXPECT_EQ(plan.layout.globals.header->value_count_u32, 1u);
+  EXPECT_EQ(plan.layout.globals.header->immutable_value_count_u32, 1u);
+  EXPECT_TRUE(iree_string_view_equal(
+      iree_vm_bytecode_string_at(&plan.layout.strings, 1), IREE_SV("run")));
+}
 
 TEST_F(ModuleVerificationTest, MapsCompleteCanonicalImage) {
   EXPECT_EQ(plan_.layout.image.section_count, 14u);

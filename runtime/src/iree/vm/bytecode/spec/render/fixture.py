@@ -87,6 +87,53 @@ def _strings(values: tuple[str, ...]) -> tuple[bytes, dict[str, int]]:
     return bytes(payload), {value: i for i, value in enumerate(values)}
 
 
+def _render_image(
+    specification: Specification,
+    payload_by_name: Mapping[str, bytes],
+    alignment_by_name: Mapping[str, int],
+    additional_sections: Sequence[tuple[int, int, int, bytes]] = (),
+) -> bytes:
+    """Wraps selected section payloads in one canonical image envelope."""
+
+    section_entries = [
+        (
+            section.section_type,
+            section.required_flags,
+            alignment_by_name.get(section.name, 8),
+            payload_by_name[section.name],
+        )
+        for section in specification.module_format.sections
+        if section.name in payload_by_name
+    ]
+    section_entries.extend(additional_sections)
+    section_entries.sort(key=lambda item: item[0])
+
+    image = bytearray(
+        _record(
+            records.IMAGE_HEADER,
+            core_major_u16=specification.version.major,
+            core_required_minor_u16=specification.version.minor,
+            section_count_u16=len(section_entries),
+        )
+    )
+    image.extend(
+        b"".join(
+            _record(
+                records.SECTION_DIRECTORY_ROW,
+                section_type_u16=section_type,
+                section_flags_u16=flags,
+                payload_alignment_u32=alignment,
+                byte_length_u64=len(payload),
+            )
+            for section_type, flags, alignment, payload in section_entries
+        )
+    )
+    for _, _, alignment, payload in section_entries:
+        _align(image, alignment)
+        image.extend(payload)
+    return bytes(image)
+
+
 def _valid_instruction_values(
     instruction: isa.Instruction,
 ) -> dict[str, int]:
@@ -542,38 +589,293 @@ def render_structural_module_fixture(specification: Specification) -> bytes:
         "presentation": presentation,
         "metadata": bytes(metadata),
     }
-    section_entries = [
-        (
-            section.section_type,
-            section.required_flags,
-            64 if section.name == "rodata" else 8,
-            payload_by_name[section.name],
-        )
-        for section in specification.module_format.sections
-    ]
-    section_entries.append((0xF001, 1, 8, b"extension"))
+    return _render_image(
+        specification,
+        payload_by_name,
+        {"rodata": 64},
+        ((0xF001, 1, 8, b"extension"),),
+    )
 
-    image = bytearray(
-        _record(
-            records.IMAGE_HEADER,
-            core_major_u16=specification.version.major,
-            core_required_minor_u16=specification.version.minor,
-            section_count_u16=len(section_entries),
-        )
+
+def render_core_execution_module_fixture(specification: Specification) -> bytes:
+    """Returns a Core-only module covering initialization and invocation."""
+
+    string_values = (
+        "initialize",
+        "run",
+        "vm",
+        "buffer",
+        "Initializes the immutable process bias.",
+        "Adds the process bias and returns module read-only data.",
+        "() -> ()",
+        "(i32) -> (i32, vm.ref<vm, buffer>)",
+        "value",
+        "i32",
+        "sum",
+        "payload",
+        "vm.ref<vm, buffer>",
+        "author",
+        "purpose",
     )
-    image.extend(
-        b"".join(
+    strings, string_ordinal = _strings(string_values)
+
+    signature_i32 = _number(specification, "signature_kind", "i32")
+    signature_ref = _number(specification, "signature_kind", "ref")
+    presentation_export = _number(
+        specification, "presentation_declaration_kind", "export"
+    )
+    metadata_utf8 = _number(specification, "metadata_value_type", "utf8")
+
+    ref_types = b"".join(
+        (
+            _record(records.REF_TYPES_HEADER, group_count_u32=1),
             _record(
-                records.SECTION_DIRECTORY_ROW,
-                section_type_u16=section_type,
-                section_flags_u16=flags,
-                payload_alignment_u32=alignment,
-                byte_length_u64=len(payload),
-            )
-            for section_type, flags, alignment, payload in section_entries
+                records.REF_TYPE_GROUP_ROW,
+                namespace_string_u16=string_ordinal["vm"],
+                entry_count_u32=1,
+            ),
+            _record(
+                records.REF_TYPE_ENTRY_ROW,
+                type_name_string_u16=string_ordinal["buffer"],
+            ),
         )
     )
-    for _, _, alignment, payload in section_entries:
-        _align(image, alignment)
-        image.extend(payload)
-    return bytes(image)
+    signatures = b"".join(
+        (
+            _record(records.SIGNATURES_HEADER, signature_count_u32=2),
+            _record(records.SIGNATURE_ROW, descriptor_base_u32=0),
+            _record(
+                records.SIGNATURE_ROW,
+                descriptor_base_u32=0,
+                argument_value_count_u16=1,
+                result_value_count_u16=1,
+                result_ref_count_u16=1,
+            ),
+            _record(
+                records.SIGNATURE_DESCRIPTOR_ROW,
+                kind_u16=signature_i32,
+                type_ordinal_u16=0,
+            ),
+            _record(
+                records.SIGNATURE_DESCRIPTOR_ROW,
+                kind_u16=signature_i32,
+                type_ordinal_u16=0,
+            ),
+            _record(
+                records.SIGNATURE_DESCRIPTOR_ROW,
+                kind_u16=signature_ref,
+                type_ordinal_u16=0,
+            ),
+        )
+    )
+    callable_types = b"".join(
+        (
+            _record(records.CALLABLE_TYPES_HEADER, callable_type_count_u32=2),
+            _record(
+                records.CALLABLE_TYPE_ROW,
+                signature_ordinal_u16=0,
+                nesting_depth_u16=0,
+            ),
+            _record(
+                records.CALLABLE_TYPE_ROW,
+                signature_ordinal_u16=1,
+                nesting_depth_u16=0,
+            ),
+        )
+    )
+    exports = b"".join(
+        (
+            _record(records.EXPORTS_HEADER, export_count_u32=2),
+            _record(
+                records.EXPORT_ROW,
+                name_string_u16=string_ordinal["initialize"],
+                callable_type_ordinal_u16=0,
+                function_ordinal_u16=0,
+            ),
+            _record(
+                records.EXPORT_ROW,
+                name_string_u16=string_ordinal["run"],
+                callable_type_ordinal_u16=1,
+                function_ordinal_u16=1,
+            ),
+        )
+    )
+
+    instruction_by_name = {item.mnemonic: item for item in specification.instructions}
+    initialize_bytecode = b"".join(
+        (
+            _instruction(instruction_by_name["control.block"]),
+            _instruction(
+                instruction_by_name["constant.s16"],
+                destination_v8=0,
+                immediate_i16=7,
+            ),
+            _instruction(
+                instruction_by_name["global.value.immutable.store"],
+                source_v8=0,
+                global_u16=0,
+            ),
+            _instruction(instruction_by_name["control.return"]),
+        )
+    )
+    run_bytecode = b"".join(
+        (
+            _instruction(instruction_by_name["control.block"]),
+            _instruction(
+                instruction_by_name["global.value.immutable.load"],
+                destination_v8=1,
+                global_u16=0,
+            ),
+            _instruction(
+                instruction_by_name["integer.add.i32"],
+                destination_v8=0,
+                left_v8=0,
+                right_v8=1,
+            ),
+            _instruction(
+                instruction_by_name["buffer.rodata.load"],
+                destination_r8=0,
+                rodata_u16=0,
+            ),
+            _instruction(instruction_by_name["control.return"]),
+        )
+    )
+    functions = b"".join(
+        (
+            _record(records.FUNCTIONS_HEADER, function_count_u32=2),
+            _record(
+                records.FUNCTION_ROW,
+                callable_type_ordinal_u16=0,
+                bytecode_length_u32=len(initialize_bytecode),
+                value_register_count_u16=1,
+                block_count_u32=1,
+            ),
+            _record(
+                records.FUNCTION_ROW,
+                callable_type_ordinal_u16=1,
+                bytecode_offset_u32=len(initialize_bytecode),
+                bytecode_length_u32=len(run_bytecode),
+                value_register_count_u16=2,
+                ref_register_count_u16=1,
+                block_count_u32=1,
+            ),
+            initialize_bytecode,
+            run_bytecode,
+        )
+    )
+    globals_payload = _record(
+        records.GLOBALS_HEADER,
+        value_count_u32=1,
+        immutable_value_count_u32=1,
+    )
+    rodata = bytearray(
+        b"".join(
+            (
+                _record(records.RODATA_HEADER, block_count_u32=1),
+                _record(
+                    records.RODATA_BLOCK_DESCRIPTOR,
+                    byte_length_u64=10,
+                    minimum_alignment_u32=8,
+                ),
+            )
+        )
+    )
+    _align(rodata, 8)
+    rodata.extend(b"loom-vm-v1")
+
+    presentation = b"".join(
+        (
+            _record(records.PRESENTATION_HEADER, entry_count_u32=2),
+            _record(
+                records.PRESENTATION_ENTRY_ROW,
+                declaration_ordinal_u16=0,
+                declaration_kind_u16=presentation_export,
+                documentation_string_u16=string_ordinal[
+                    "Initializes the immutable process bias."
+                ],
+                authored_type_string_u16=string_ordinal["() -> ()"],
+                field_base_u32=0,
+            ),
+            _record(
+                records.PRESENTATION_ENTRY_ROW,
+                declaration_ordinal_u16=1,
+                declaration_kind_u16=presentation_export,
+                documentation_string_u16=string_ordinal[
+                    "Adds the process bias and returns module read-only data."
+                ],
+                authored_type_string_u16=string_ordinal[
+                    "(i32) -> (i32, vm.ref<vm, buffer>)"
+                ],
+                field_base_u32=0,
+            ),
+            _record(
+                records.PRESENTATION_FIELD_ROW,
+                name_string_u16=string_ordinal["value"],
+                authored_type_string_u16=string_ordinal["i32"],
+            ),
+            _record(
+                records.PRESENTATION_FIELD_ROW,
+                name_string_u16=string_ordinal["sum"],
+                authored_type_string_u16=string_ordinal["i32"],
+            ),
+            _record(
+                records.PRESENTATION_FIELD_ROW,
+                name_string_u16=string_ordinal["payload"],
+                authored_type_string_u16=string_ordinal["vm.ref<vm, buffer>"],
+            ),
+        )
+    )
+    metadata_values = b"loomexecution-test"
+    metadata = bytearray(
+        b"".join(
+            (
+                _record(
+                    records.METADATA_HEADER,
+                    module_entry_count_u32=1,
+                    export_scope_count_u32=1,
+                    total_entry_count_u32=2,
+                ),
+                _record(
+                    records.METADATA_SCOPE_ROW,
+                    declaration_ordinal_u16=1,
+                    entry_count_u16=1,
+                    entry_base_u32=1,
+                ),
+                _record(
+                    records.METADATA_ENTRY_ROW,
+                    key_string_u16=string_ordinal["author"],
+                    value_type_u16=metadata_utf8,
+                ),
+                _record(
+                    records.METADATA_ENTRY_ROW,
+                    key_string_u16=string_ordinal["purpose"],
+                    value_type_u16=metadata_utf8,
+                ),
+            )
+        )
+    )
+    _align(metadata, 8)
+    metadata.extend(
+        b"".join(
+            _record(records.METADATA_VALUE_OFFSET, byte_offset_u64=offset)
+            for offset in (0, 4, len(metadata_values))
+        )
+    )
+    metadata.extend(metadata_values)
+
+    return _render_image(
+        specification,
+        {
+            "strings": strings,
+            "ref_types": ref_types,
+            "signatures": signatures,
+            "callable_types": callable_types,
+            "exports": exports,
+            "functions": functions,
+            "globals": globals_payload,
+            "rodata": bytes(rodata),
+            "presentation": presentation,
+            "metadata": bytes(metadata),
+        },
+        {"rodata": 8},
+    )

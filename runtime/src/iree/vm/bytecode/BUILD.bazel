@@ -23,6 +23,7 @@ iree_generated_files(
     outs = [
         "disassembler/data.inl",
         "docs/specification.md",
+        "testdata/core_execution.vmfb",
         "testdata/structural.vmfb",
         "verifier/data.c",
         "verifier/instruction_cases.inl",
@@ -34,6 +35,7 @@ iree_generated_files(
     output_args = {
         "disassembler/data.inl": "--disassembler-data={path}",
         "docs/specification.md": "--documentation={path}",
+        "testdata/core_execution.vmfb": "--core-execution-module-fixture={path}",
         "testdata/structural.vmfb": "--structural-module-fixture={path}",
         "verifier/data.c": "--verifier-source={path}",
         "verifier/instruction_cases.inl": "--instruction-verifier-cases={path}",
@@ -54,6 +56,16 @@ iree_runtime_cc_library(
         "wire/module.h",
     ],
     deps = ["//runtime/src/iree/base:core_headers"],
+)
+
+iree_c_embed_data(
+    name = "execution_testdata",
+    testonly = True,
+    srcs = ["testdata/core_execution.vmfb"],
+    c_file_output = "execution_testdata.c",
+    flatten = True,
+    h_file_output = "execution_testdata.h",
+    identifier = "iree_vm_bytecode_execution_testdata",
 )
 
 iree_c_embed_data(
@@ -111,6 +123,7 @@ iree_runtime_cc_test(
     name = "verifier_test",
     srcs = ["verifier_test.cc"],
     deps = [
+        ":execution_testdata",
         ":verifier",
         ":verifier_data",
         ":verifier_testdata",
@@ -173,6 +186,7 @@ iree_py_generated_files(
   OUTPUTS
     "docs/specification.md"
     "disassembler/data.inl"
+    "testdata/core_execution.vmfb"
     "testdata/structural.vmfb"
     "verifier/data.c"
     "verifier/instruction_cases.inl"
@@ -183,6 +197,7 @@ iree_py_generated_files(
   OUTPUT_FLAGS
     "--documentation"
     "--disassembler-data"
+    "--core-execution-module-fixture"
     "--instruction-verifier-cases"
     "--module-verifier-cases"
     "--structural-module-fixture"
