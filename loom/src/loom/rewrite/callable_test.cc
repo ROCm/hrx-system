@@ -115,6 +115,23 @@ class CallableInlineTest : public ::testing::Test {
     return func_op;
   }
 
+  loom_op_t* BuildSelfLoopFunction(loom_symbol_ref_t callee) {
+    loom_op_t* func_op = nullptr;
+    IREE_CHECK_OK(loom_func_def_build(
+        &module_builder_, 0, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(), 0,
+        loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
+        loom_named_attr_slice_empty(), callee, nullptr, 0, nullptr, 0, nullptr,
+        0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &func_op));
+    loom_func_like_t func = loom_func_like_cast(module_, func_op);
+    loom_block_t* entry_block =
+        loom_region_entry_block(loom_func_like_body(func));
+    loom_builder_t body_builder = BodyBuilder(func_op);
+    loom_op_t* loop_branch = nullptr;
+    IREE_CHECK_OK(loom_cfg_br_build(&body_builder, entry_block, nullptr, 0,
+                                    LOOM_LOCATION_UNKNOWN, &loop_branch));
+    return func_op;
+  }
+
   loom_op_t* BuildNegateTemplate(loom_symbol_ref_t callee,
                                  loom_type_t value_type) {
     const loom_symbol_ref_t family = MakeSymbol(IREE_SV("test.neg"));
@@ -319,22 +336,13 @@ TEST_F(CallableInlineTest, EmptyBodyIsNotLinear) {
       module_, loom_func_like_cast(module_, callee_op)));
 }
 
-TEST_F(CallableInlineTest, InlinesOneBlockSelfLoopThroughCfgSplice) {
+TEST_F(CallableInlineTest, AppendsLexicallyClosedCfgSplice) {
   const loom_symbol_ref_t callee_ref = MakeSymbol(IREE_SV("spin"));
   const loom_symbol_ref_t caller_ref = MakeSymbol(IREE_SV("caller"));
-  loom_op_t* callee_op = nullptr;
-  IREE_ASSERT_OK(loom_func_def_build(
-      &module_builder_, 0, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(), 0,
-      loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
-      loom_named_attr_slice_empty(), callee_ref, nullptr, 0, nullptr, 0,
-      nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &callee_op));
+  loom_op_t* callee_op = BuildSelfLoopFunction(callee_ref);
   loom_func_like_t callee = loom_func_like_cast(module_, callee_op);
   loom_block_t* callee_block =
       loom_region_entry_block(loom_func_like_body(callee));
-  loom_builder_t callee_builder = BodyBuilder(callee_op);
-  loom_op_t* loop_branch = nullptr;
-  IREE_ASSERT_OK(loom_cfg_br_build(&callee_builder, callee_block, nullptr, 0,
-                                   LOOM_LOCATION_UNKNOWN, &loop_branch));
   EXPECT_FALSE(loom_callable_body_is_linear(module_, callee));
 
   loom_op_t* caller_op = nullptr;
@@ -351,6 +359,15 @@ TEST_F(CallableInlineTest, InlinesOneBlockSelfLoopThroughCfgSplice) {
   loom_op_t* return_op = nullptr;
   IREE_ASSERT_OK(loom_func_return_build(&caller_builder, nullptr, 0,
                                         LOOM_LOCATION_UNKNOWN, &return_op));
+  loom_region_t* caller_body =
+      loom_func_like_body(loom_func_like_cast(module_, caller_op));
+  loom_block_t* preexisting_block = nullptr;
+  IREE_ASSERT_OK(
+      loom_region_append_block(module_, caller_body, &preexisting_block));
+  loom_builder_set_block(&caller_builder, preexisting_block);
+  loom_op_t* preexisting_return = nullptr;
+  IREE_ASSERT_OK(loom_func_return_build(
+      &caller_builder, nullptr, 0, LOOM_LOCATION_UNKNOWN, &preexisting_return));
 
   loom_rewriter_t rewriter = {};
   IREE_ASSERT_OK(
@@ -358,12 +375,13 @@ TEST_F(CallableInlineTest, InlinesOneBlockSelfLoopThroughCfgSplice) {
   IREE_ASSERT_OK(loom_callable_inline_direct_call(&rewriter, call_op));
   loom_rewriter_deinitialize(&rewriter);
 
-  loom_region_t* caller_body =
-      loom_func_like_body(loom_func_like_cast(module_, caller_op));
-  ASSERT_EQ(caller_body->block_count, 3u);
+  ASSERT_EQ(caller_body->block_count, 4u);
   loom_block_t* caller_entry = loom_region_block(caller_body, 0);
-  loom_block_t* cloned_loop = loom_region_block(caller_body, 1);
-  loom_block_t* continuation = loom_region_block(caller_body, 2);
+  EXPECT_EQ(loom_region_block(caller_body, 1), preexisting_block);
+  EXPECT_EQ(preexisting_block->last_op, preexisting_return);
+  loom_block_t* cloned_loop = loom_region_block(caller_body, 2);
+  loom_block_t* continuation = loom_region_block(caller_body, 3);
+  EXPECT_NE(cloned_loop, callee_block);
   ASSERT_TRUE(loom_cfg_br_isa(caller_entry->last_op));
   EXPECT_EQ(loom_cfg_br_dest(caller_entry->last_op), cloned_loop);
   ASSERT_TRUE(loom_cfg_br_isa(cloned_loop->last_op));
@@ -373,6 +391,74 @@ TEST_F(CallableInlineTest, InlinesOneBlockSelfLoopThroughCfgSplice) {
   const loom_verify_options_t verify_options = {};
   loom_verify_result_t verify_result = {};
   IREE_ASSERT_OK(loom_verify_module(module_, &verify_options, &verify_result));
+}
+
+TEST_F(CallableInlineTest, OrdersCfgSpliceBeforeExternalTailResultUse) {
+  const loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
+  const loom_symbol_ref_t callee_ref = MakeSymbol(IREE_SV("spin"));
+  const loom_symbol_ref_t caller_ref = MakeSymbol(IREE_SV("caller"));
+  loom_op_t* callee_op = BuildSelfLoopFunction(callee_ref);
+  loom_block_t* callee_block = loom_region_entry_block(
+      loom_func_like_body(loom_func_like_cast(module_, callee_op)));
+
+  loom_op_t* caller_op = nullptr;
+  IREE_ASSERT_OK(loom_func_def_build(
+      &module_builder_, 0, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(), 0,
+      loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
+      loom_named_attr_slice_empty(), caller_ref, &f32, 1, &f32, 1, nullptr, 0,
+      nullptr, 0, LOOM_LOCATION_UNKNOWN, &caller_op));
+  loom_func_like_t caller = loom_func_like_cast(module_, caller_op);
+  uint16_t caller_arg_count = 0;
+  const loom_value_id_t* caller_args =
+      loom_func_like_arg_ids(caller, &caller_arg_count);
+  ASSERT_EQ(caller_arg_count, 1u);
+  loom_region_t* caller_body = loom_func_like_body(caller);
+  loom_block_t* exit_block = nullptr;
+  IREE_ASSERT_OK(loom_region_append_block(module_, caller_body, &exit_block));
+
+  loom_builder_t caller_builder = BodyBuilder(caller_op);
+  loom_op_t* call_op = nullptr;
+  IREE_ASSERT_OK(loom_func_call_build(&caller_builder, 0, 0, 0, 0, callee_ref,
+                                      nullptr, 0, nullptr, 0, nullptr, 0,
+                                      LOOM_LOCATION_UNKNOWN, &call_op));
+  loom_op_t* neg_op = nullptr;
+  IREE_ASSERT_OK(loom_test_neg_build(&caller_builder, caller_args[0], f32,
+                                     LOOM_LOCATION_UNKNOWN, &neg_op));
+  const loom_value_id_t negated = loom_test_neg_result(neg_op);
+  loom_op_t* exit_branch = nullptr;
+  IREE_ASSERT_OK(loom_cfg_br_build(&caller_builder, exit_block, nullptr, 0,
+                                   LOOM_LOCATION_UNKNOWN, &exit_branch));
+  loom_builder_set_block(&caller_builder, exit_block);
+  loom_op_t* return_op = nullptr;
+  IREE_ASSERT_OK(loom_func_return_build(&caller_builder, &negated, 1,
+                                        LOOM_LOCATION_UNKNOWN, &return_op));
+
+  loom_rewriter_t rewriter = {};
+  IREE_ASSERT_OK(
+      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  IREE_ASSERT_OK(loom_callable_inline_direct_call(&rewriter, call_op));
+  loom_rewriter_deinitialize(&rewriter);
+
+  ASSERT_EQ(caller_body->block_count, 4u);
+  loom_block_t* caller_entry = loom_region_block(caller_body, 0);
+  loom_block_t* cloned_loop = loom_region_block(caller_body, 1);
+  loom_block_t* continuation = loom_region_block(caller_body, 2);
+  EXPECT_EQ(loom_region_block(caller_body, 3), exit_block);
+  EXPECT_NE(cloned_loop, callee_block);
+  EXPECT_EQ(loom_cfg_br_dest(caller_entry->last_op), cloned_loop);
+  EXPECT_EQ(loom_cfg_br_dest(cloned_loop->last_op), cloned_loop);
+  EXPECT_EQ(continuation->first_op, neg_op);
+  EXPECT_EQ(continuation->last_op, exit_branch);
+  EXPECT_EQ(loom_cfg_br_dest(exit_branch), exit_block);
+  EXPECT_EQ(exit_block->last_op, return_op);
+  EXPECT_EQ(loom_func_return_operands(return_op).values[0], negated);
+
+  const loom_verify_options_t verify_options = {
+      /*.sink=*/{loom_diagnostic_stderr_sink, nullptr},
+  };
+  loom_verify_result_t verify_result = {};
+  IREE_ASSERT_OK(loom_verify_module(module_, &verify_options, &verify_result));
+  EXPECT_EQ(verify_result.error_count, 0u);
 }
 
 TEST_F(CallableInlineTest,

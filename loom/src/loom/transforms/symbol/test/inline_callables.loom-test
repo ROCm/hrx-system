@@ -691,6 +691,50 @@ low.func.def public target<test.low.core>(@nested_cfg_target) @nested_cfg_entry(
 
 // RUN: pass inline-callables
 
+// A value produced after the nested call is used directly from an existing
+// later block. The nested splice must precede that block so moving the whole
+// operation tail into its continuation preserves lexical SSA scope.
+func.def inline @tail_scope_leaf(%leaf_value: i32) -> (i32) {
+  cfg.br ^leaf_exit(%leaf_value: i32)
+^leaf_exit(%leaf_forwarded: i32):
+  func.return %leaf_forwarded : i32
+}
+
+func.def inline @tail_scope_parent(%parent_value: i32) -> (i32) {
+  %child_result = func.call @tail_scope_leaf(%parent_value) : (i32) -> (i32)
+  %tail_result = test.addi %child_result, %child_result : i32
+  cfg.br ^parent_exit
+^parent_exit:
+  func.return %tail_result : i32
+}
+
+func.def public @tail_scope_entry(%entry_value: i32) -> (i32) {
+  %entry_result = func.call @tail_scope_parent(%entry_value) : (i32) -> (i32)
+  func.return %entry_result : i32
+}
+
+// ----
+func.def public @tail_scope_entry(%entry_value: i32) -> (i32) {
+  cfg.br ^_bb1(%entry_value: i32)
+^_bb1(%parent_value: i32):
+  cfg.br ^_bb2(%parent_value: i32)
+^_bb2(%leaf_value: i32):
+  cfg.br ^_bb3(%leaf_value: i32)
+^_bb3(%leaf_forwarded: i32):
+  cfg.br ^_bb4(%leaf_forwarded: i32)
+^_bb4(%child_result: i32):
+  %tail_result = test.addi %child_result, %child_result : i32
+  cfg.br ^_bb5
+^_bb5:
+  cfg.br ^_bb6(%tail_result: i32)
+^_bb6(%entry_result: i32):
+  func.return %entry_result : i32
+}
+
+// ====
+
+// RUN: pass inline-callables
+
 // A shared CFG wrapper exercises both execution dependencies. Its nested leaf
 // must be flattened before the wrapper is cloned, and the clone must complete
 // before the final use consumes and erases the wrapper definition.

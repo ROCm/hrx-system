@@ -226,11 +226,17 @@ loom_cc_benchmark(
     ::inline_callables
     iree::base::internal::arena
     iree::testing::benchmark_main
+    loom::codegen::low::text_asm
     loom::format::text::parser
     loom::ir
     loom::ops::op_defs
+    loom::pass::environment
     loom::pass::types
     loom::rewrite::module_projection
+    loom::target::function_version
+    loom::target::low_descriptor_registry_core_test
+    loom::target::pass_environment
+    loom::target::provider
     loom::testing::module_ptr
     loom::tooling::context
     loom::verify
