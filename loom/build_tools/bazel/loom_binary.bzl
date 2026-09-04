@@ -13,7 +13,6 @@ load(
 )
 load(
     ":loom_target_profile.bzl",
-    "LoomAmdgpuTargetProfileInfo",
     "LoomTargetProfileInfo",
 )
 
@@ -36,7 +35,7 @@ def _require_binary_inputs(ctx):
     if not ctx.files.srcs and not ctx.attr.deps:
         fail("%s requires at least one source across srcs and deps" % ctx.label)
 
-def _amdgpu_target_profile(ctx, product_kind):
+def _require_amdgpu_target_profile(ctx, product_kind):
     target_profile = ctx.attr.target[LoomTargetProfileInfo]
     if target_profile.family != "amdgpu":
         fail(
@@ -48,12 +47,7 @@ def _amdgpu_target_profile(ctx, product_kind):
                 product_kind,
             ),
         )
-    if LoomAmdgpuTargetProfileInfo not in ctx.attr.target:
-        fail(
-            "%s target profile claims family amdgpu without an AMDGPU identity" %
-            ctx.label,
-        )
-    return ctx.attr.target[LoomAmdgpuTargetProfileInfo]
+    return target_profile
 
 def _declare_binary_linked_module(ctx, product_kind, target_profile = None):
     dependency_infos = [dep[LoomLibraryInfo] for dep in ctx.attr.deps]
@@ -91,7 +85,7 @@ def _declare_binary_linked_module(ctx, product_kind, target_profile = None):
 def _declare_amdgpu_kernel_product(
         ctx,
         linked_module,
-        amdgpu_profile,
+        target_profile,
         output_stem,
         mnemonic,
         progress_message):
@@ -101,10 +95,9 @@ def _declare_amdgpu_kernel_product(
     args.add(linked_module)
     args.add("--product=kernel")
     args.add("--format=amdgpu-hsaco")
-    target_profile = ctx.attr.target[LoomTargetProfileInfo]
     args.add("--target=%s:%s" % (
         target_profile.family,
-        amdgpu_profile.target,
+        target_profile.selector,
     ))
     args.add("--output=%s" % artifact.path)
     args.add("--compile-report=details")
@@ -156,19 +149,16 @@ def _declare_command_product(ctx, linked_module):
 
 def _loom_kernel_binary_impl(ctx):
     _require_binary_inputs(ctx)
-    amdgpu_profile = _amdgpu_target_profile(ctx, "kernel")
+    target_profile = _require_amdgpu_target_profile(ctx, "kernel")
     linked = _declare_binary_linked_module(
         ctx,
         "kernel",
-        target_profile = struct(
-            family = "amdgpu",
-            selector = amdgpu_profile.target,
-        ),
+        target_profile = target_profile,
     )
     product = _declare_amdgpu_kernel_product(
         ctx = ctx,
         linked_module = linked.linked_module,
-        amdgpu_profile = amdgpu_profile,
+        target_profile = target_profile,
         output_stem = ctx.label.name,
         mnemonic = "LoomKernelBinary",
         progress_message = "Compiling kernel binary %s for %s" % (
@@ -235,20 +225,17 @@ loom_kernel_binary = rule(
 
 def _loom_command_binary_impl(ctx):
     _require_binary_inputs(ctx)
-    amdgpu_profile = _amdgpu_target_profile(ctx, "command")
+    target_profile = _require_amdgpu_target_profile(ctx, "command")
     linked = _declare_binary_linked_module(
         ctx,
         "command",
-        target_profile = struct(
-            family = "amdgpu",
-            selector = amdgpu_profile.target,
-        ),
+        target_profile = target_profile,
     )
     command_product = _declare_command_product(ctx, linked.linked_module)
     kernel_product = _declare_amdgpu_kernel_product(
         ctx = ctx,
         linked_module = linked.linked_module,
-        amdgpu_profile = amdgpu_profile,
+        target_profile = target_profile,
         output_stem = ctx.label.name + ".kernels",
         mnemonic = "LoomCommandKernelBinary",
         progress_message = "Compiling command kernels for %s against %s" % (
