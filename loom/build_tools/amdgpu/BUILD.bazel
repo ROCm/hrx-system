@@ -13,6 +13,8 @@ package(
     licenses = ["notice"],
 )
 
+exports_files(["target_profile.bzl"])
+
 py_library(
     name = "target_config",
     srcs = ["target_config.py"],

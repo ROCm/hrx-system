@@ -6,34 +6,70 @@
 
 """Public rules for immutable Loom target profiles."""
 
-load(
-    "//loom/build_tools/amdgpu:descriptor_sets.bzl",
-    "loom_amdgpu_descriptor_set_compatible_with",
-)
-load(
-    "//loom/build_tools/amdgpu:target_config.bzl",
-    "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET",
-)
+load(":loom_product_format.bzl", "LoomProductFormatInfo")
 
 LoomTargetProfileInfo = provider(
     doc = "Immutable Loom target identity shared by all target families.",
     fields = {
-        "family": "Target fact family, such as amdgpu or spirv.",
+        "family": "Target fact family understood by the compiler.",
         "selector": "Family-owned exact, generic, or overlay target selector.",
     },
 )
 
+LoomTargetFormatSupportInfo = provider(
+    doc = "Product formats supported by one immutable target profile.",
+    fields = {
+        "canonical_formats": "Product-name keyed canonical format targets.",
+        "formats": "Ordered compatible product format targets.",
+    },
+)
+
 def _loom_target_profile_impl(ctx):
+    canonical_formats = {}
+    for format_target in ctx.attr.canonical_formats:
+        format_info = format_target[LoomProductFormatInfo]
+        if format_info.product in canonical_formats:
+            fail(
+                "%s declares multiple canonical formats for product %r" %
+                (ctx.label, format_info.product),
+            )
+        canonical_formats[format_info.product] = format_target
+
+    formats = ctx.attr.canonical_formats + ctx.attr.formats
+    seen_formats = {}
+    for format_target in formats:
+        format_info = format_target[LoomProductFormatInfo]
+        key = "%s\n%s" % (format_info.product, format_info.format)
+        if key in seen_formats:
+            fail(
+                "%s declares product format %s/%s more than once via %s and %s" % (
+                    ctx.label,
+                    format_info.product,
+                    format_info.format,
+                    seen_formats[key].label,
+                    format_target.label,
+                ),
+            )
+        seen_formats[key] = format_target
+
     return [
         LoomTargetProfileInfo(
             family = ctx.attr.family,
             selector = ctx.attr.selector,
+        ),
+        LoomTargetFormatSupportInfo(
+            canonical_formats = canonical_formats,
+            formats = formats,
         ),
     ]
 
 _loom_target_profile = rule(
     implementation = _loom_target_profile_impl,
     attrs = {
+        "canonical_formats": attr.label_list(
+            providers = [LoomProductFormatInfo],
+            doc = "Canonical product formats, at most one for each product.",
+        ),
         "family": attr.string(
             mandatory = True,
             doc = "Target fact family accepted by the compiler.",
@@ -42,17 +78,29 @@ _loom_target_profile = rule(
             mandatory = True,
             doc = "Family-owned exact, generic, or overlay selector.",
         ),
+        "formats": attr.label_list(
+            providers = [LoomProductFormatInfo],
+            doc = "Additional noncanonical formats supported by this profile.",
+        ),
     },
     doc = "Declares one immutable Loom target identity profile.",
 )
 
-def loom_target_profile(name, family, selector, **kwargs):
+def loom_target_profile(
+        name,
+        family,
+        selector,
+        canonical_formats = [],
+        formats = [],
+        **kwargs):
     """Declares an immutable target profile understood by the compiler.
 
     Args:
       name: Bazel target name.
       family: Target fact family accepted by the compiler.
       selector: Family-owned exact, generic, or overlay selector.
+      canonical_formats: Canonical format labels, at most one for each product.
+      formats: Additional noncanonical format labels supported by this profile.
       **kwargs: Common rule attributes forwarded to the profile target.
     """
     if not family:
@@ -63,32 +111,9 @@ def loom_target_profile(name, family, selector, **kwargs):
         fail("Loom target profile selector must not be empty")
     _loom_target_profile(
         name = name,
+        canonical_formats = canonical_formats,
         family = family,
+        formats = formats,
         selector = selector,
-        **kwargs
-    )
-
-def loom_amdgpu_target_profile(name, target, **kwargs):
-    """Declares an AMDGPU profile available with its descriptor contract.
-
-    Args:
-      name: Bazel target name.
-      target: Exact, generic, or overlay AMDGPU target selector.
-      **kwargs: Common rule attributes forwarded to the profile target.
-    """
-    descriptor_set_capability = (
-        LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET.get(target)
-    )
-    if descriptor_set_capability == None:
-        fail("Unknown Loom AMDGPU target profile: %s" % target)
-    target_compatible_with = kwargs.pop("target_compatible_with", [])
-    loom_target_profile(
-        name = name,
-        family = "amdgpu",
-        selector = target,
-        target_compatible_with = target_compatible_with +
-                                 loom_amdgpu_descriptor_set_compatible_with(
-                                     descriptor_set_capability,
-                                 ),
         **kwargs
     )
