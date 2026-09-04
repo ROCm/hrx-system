@@ -27,15 +27,20 @@ typedef struct loom_amdgpu_target_profile_t {
 
   // Structured target and AMDHSA feature identity.
   loom_amdgpu_target_identity_t identity;
-
-  // Compiler-semantic projection resolved from |identity|.
-  loom_amdgpu_target_properties_t properties;
 } loom_amdgpu_target_profile_t;
 
 // Initializes an AMDGPU profile and its target-neutral bundle projection.
 iree_status_t loom_amdgpu_target_profile_initialize(
     const loom_amdgpu_target_identity_t* identity,
     loom_amdgpu_target_profile_t* out_profile);
+
+// Selects the immutable profile matching one AMDGPU target selector.
+//
+// The returned profile has process lifetime. Target names and target-ID feature
+// suffixes use the same syntax as AMDGPU artifact keys.
+iree_status_t loom_amdgpu_target_profile_select(
+    iree_string_view_t selector,
+    const loom_amdgpu_target_profile_t** out_profile);
 
 // Returns |profile| as an AMDGPU profile, or NULL for another family.
 static inline const loom_amdgpu_target_profile_t*

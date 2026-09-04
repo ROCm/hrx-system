@@ -149,6 +149,15 @@ def test_target_info_table_source_is_data_only() -> None:
     assert "loom_amdgpu_target_info_physical_target_infos[]" in source
 
 
+def test_target_info_headers_keep_address_stable_target_rows_public() -> None:
+    public_header = amdgpu_target_info._emit_header(amdgpu_target_info.sorted_descriptor_set_infos())
+    private_header = amdgpu_target_info._emit_tables_header()
+
+    assert "loom_amdgpu_target_info_target_infos[]" in public_header
+    assert "loom_amdgpu_target_info_target_infos[]" not in private_header
+    assert "loom_amdgpu_target_info_target_info_count" in private_header
+
+
 def test_overlay_and_physical_targets_generate_data_rows_only() -> None:
     descriptor_set_info = amdgpu_target_info.sorted_descriptor_set_infos()[0]
     descriptor_row = amdgpu_target_info._AmdgpuDescriptorSetRow(

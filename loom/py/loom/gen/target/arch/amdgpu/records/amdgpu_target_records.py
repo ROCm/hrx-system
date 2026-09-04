@@ -18,12 +18,21 @@ from loom.gen.support.files import write_text_file
 from loom.gen.support.generated_file import line_comment_header
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE,
+    AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC,
+    AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
     AmdgpuDescriptorSetInfo,
     AmdgpuProcessorInfo,
     AmdgpuTargetInfo,
     amdgpu_descriptor_set_ordinal,
     amdgpu_target_descriptor_set_key,
 )
+
+_TARGET_PROFILE_SUPPORTED_FEATURE_STATES = (
+    ("Any", "LOOM_AMDGPU_TARGET_FEATURE_ANY"),
+    ("Off", "LOOM_AMDGPU_TARGET_FEATURE_OFF"),
+    ("On", "LOOM_AMDGPU_TARGET_FEATURE_ON"),
+)
+_TARGET_PROFILE_UNSUPPORTED_FEATURE_STATES = (("Unsupported", "LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED"),)
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +178,13 @@ def _default_record_rows_by_ordinal(
     return {row.descriptor_set_ordinal: row for row in rows if row.info.default_for_descriptor_set}
 
 
+def _target_profile_feature_states(
+    supported_features: int,
+    feature: int,
+) -> tuple[tuple[str, str], ...]:
+    return _TARGET_PROFILE_SUPPORTED_FEATURE_STATES if supported_features & feature else _TARGET_PROFILE_UNSUPPORTED_FEATURE_STATES
+
+
 def _emit_tables(rows: Sequence[_AmdgpuTargetRecordRow]) -> str:
     descriptor_sets = _descriptor_sets_from_rows(rows)
     default_rows_by_ordinal = _default_record_rows_by_ordinal(rows)
@@ -190,6 +206,8 @@ def _emit_tables(rows: Sequence[_AmdgpuTargetRecordRow]) -> str:
         "//       wavefront_size, max_workgroup_storage_bytes)",
         "//   LOOM_AMDGPU_TARGET_RECORD_INFO(record_suffix, target_kind, target,",
         "//       descriptor_set_ordinal, bundle_suffix)",
+        "//   LOOM_AMDGPU_TARGET_PROFILE(profile_suffix, target_kind,",
+        "//       bundle_suffix, sramecc_state, xnack_state)",
         "//   LOOM_AMDGPU_TARGET_RECORD_DEFAULT(descriptor_set_ordinal, record_suffix)",
         "//   LOOM_AMDGPU_TARGET_RECORD_DEFAULT_ABSENT(descriptor_set_ordinal)",
         "",
@@ -223,6 +241,23 @@ def _emit_tables(rows: Sequence[_AmdgpuTargetRecordRow]) -> str:
         for row in rows
     )
     lines.extend(["#endif  // LOOM_AMDGPU_TARGET_RECORD_INFO", ""])
+
+    lines.append("#ifdef LOOM_AMDGPU_TARGET_PROFILE")
+    for row in rows:
+        supported_features = row.processor.target_id.supported_features
+        sramecc_states = _target_profile_feature_states(
+            supported_features,
+            AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC,
+        )
+        xnack_states = _target_profile_feature_states(
+            supported_features,
+            AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
+        )
+        for sramecc_suffix, sramecc_state in sramecc_states:
+            for xnack_suffix, xnack_state in xnack_states:
+                profile_suffix = f"{_c_symbol_suffix(row.info.target)}Sramecc{sramecc_suffix}Xnack{xnack_suffix}"
+                lines.append(f"LOOM_AMDGPU_TARGET_PROFILE({profile_suffix}, {_u32_expr(row.info.enum_value)}, {_c_symbol_suffix(row.descriptor_set.generator_target)}, {sramecc_state}, {xnack_state})")
+    lines.extend(["#endif  // LOOM_AMDGPU_TARGET_PROFILE", ""])
 
     lines.append("#if defined(LOOM_AMDGPU_TARGET_RECORD_DEFAULT) && defined(LOOM_AMDGPU_TARGET_RECORD_DEFAULT_ABSENT)")
     for descriptor_set_ordinal in range(max_descriptor_set_ordinal + 1):

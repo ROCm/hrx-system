@@ -15,6 +15,8 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
     AMDGPU_SOPP_OPCODE_INFO_RDNA,
+    AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC,
+    AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
     AmdgpuDescriptorSetInfo,
     AmdgpuDescriptorSetIsaInfo,
     AmdgpuTargetInfo,
@@ -101,6 +103,18 @@ def test_target_records_materialize_current_rows() -> None:
         assert (f'LOOM_AMDGPU_TARGET_RECORD_INFO({suffix}, UINT32_C({row.info.enum_value}), "{row.info.target}", UINT16_C({row.descriptor_set_ordinal}), {descriptor_suffix})') in source
         if row.info.default_for_descriptor_set:
             assert (f"LOOM_AMDGPU_TARGET_RECORD_DEFAULT(UINT16_C({row.descriptor_set_ordinal}), {suffix})") in source
+
+    assert "LOOM_AMDGPU_TARGET_PROFILE(Gfx942SrameccAnyXnackAny, UINT32_C(1), Cdna3, LOOM_AMDGPU_TARGET_FEATURE_ANY, LOOM_AMDGPU_TARGET_FEATURE_ANY)" in source
+    assert "LOOM_AMDGPU_TARGET_PROFILE(Gfx942SrameccOnXnackOff, UINT32_C(1), Cdna3, LOOM_AMDGPU_TARGET_FEATURE_ON, LOOM_AMDGPU_TARGET_FEATURE_OFF)" in source
+    assert "LOOM_AMDGPU_TARGET_PROFILE(Gfx1151SrameccUnsupportedXnackUnsupported, UINT32_C(15), Rdna35, LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED, LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED)" in source
+
+    expected_profile_count = 0
+    for row in rows:
+        supported_features = row.processor.target_id.supported_features
+        sramecc_state_count = 3 if supported_features & AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC else 1
+        xnack_state_count = 3 if supported_features & AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK else 1
+        expected_profile_count += sramecc_state_count * xnack_state_count
+    assert source.count("\nLOOM_AMDGPU_TARGET_PROFILE(") == expected_profile_count
 
     rows_by_target = {row.info.target: row for row in rows}
     assert rows_by_target["gfx1250"].descriptor_set.key == "amdgpu.rdna4.gfx125x.core"

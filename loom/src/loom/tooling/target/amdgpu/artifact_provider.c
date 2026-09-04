@@ -9,6 +9,7 @@
 #include "loom/target/arch/amdgpu/artifact_key.h"
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/runtime_requirements.h"
+#include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/hal_kernel_library.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
 
@@ -39,8 +40,10 @@ static iree_status_t loom_amdgpu_artifact_provider_select_target(
   IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_key_parse(target_key, &identity));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_target_profile_initialize(&identity, &profile));
-  if (!loom_amdgpu_target_properties_support_hsaco(&profile.properties) ||
-      profile.identity.target == NULL) {
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_target_processor(profile.identity.target);
+  if (processor == NULL ||
+      !loom_amdgpu_processor_properties_support_hsaco(&processor->properties)) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "AMDGPU target '%.*s' cannot be emitted as HSACO "
                             "by Loom",

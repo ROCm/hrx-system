@@ -71,8 +71,12 @@ static iree_status_t loom_amdgpu_device_provider_select_compatible_candidate(
           "AMDGPU device target '%.*s' kind does not match its target key",
           (int)candidate->target_key.size, candidate->target_key.data);
     }
-    if (!loom_amdgpu_target_properties_support_hsaco(
-            &candidate_profile.properties) ||
+    const loom_amdgpu_processor_info_t* processor =
+        loom_amdgpu_target_info_target_processor(
+            candidate_profile.identity.target);
+    if (processor == NULL ||
+        !loom_amdgpu_processor_properties_support_hsaco(
+            &processor->properties) ||
         (authored_requirement != NULL &&
          !loom_amdgpu_target_identity_satisfies_requirement(
              &candidate_profile.identity, authored_requirement))) {

@@ -6,8 +6,18 @@
 
 #include "loom/target/arch/amdgpu/profile.h"
 
+#include "loom/target/arch/amdgpu/artifact_key.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
+
+// Target bundles are defined by target_records.c and intentionally remain an
+// implementation detail shared with this generated preset table.
+#define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(                                \
+    symbol_suffix, bundle_name, snapshot_name, key, descriptor_set_flags, \
+    wavefront_size, workgroup_storage_byte_limit)                         \
+  extern const loom_target_bundle_t kAmdgpuLowTargetBundle##symbol_suffix##Core;
+#include "loom/target/arch/amdgpu/target_records_tables.inl"
+#undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET
 
 static iree_status_t loom_amdgpu_target_profile_project_facts(
     const loom_target_profile_t* base_profile, iree_arena_allocator_t* arena,
@@ -30,6 +40,38 @@ const loom_target_profile_type_t loom_amdgpu_target_profile_type = {
     .fact_type = &loom_amdgpu_target_fact_type,
     .project_facts = loom_amdgpu_target_profile_project_facts,
 };
+
+// clang-format off
+#define LOOM_AMDGPU_TARGET_PROFILE(                                      \
+    profile_suffix, target_kind_value, bundle_suffix, sramecc_state,    \
+    xnack_state)                                                        \
+  static const loom_amdgpu_target_profile_t                             \
+      kAmdgpuTargetProfile##profile_suffix = {                          \
+          .base = {                                                     \
+              .type = &loom_amdgpu_target_profile_type,                 \
+              .target_bundle = &kAmdgpuLowTargetBundle##bundle_suffix##Core, \
+          },                                                            \
+          .identity = {                                                 \
+              .target = &loom_amdgpu_target_info_target_infos[          \
+                  (target_kind_value) - UINT32_C(1)],                    \
+              .amdhsa_features = {                                      \
+                  .sramecc = sramecc_state,                             \
+                  .xnack = xnack_state,                                 \
+              },                                                        \
+          },                                                            \
+      };
+#include "loom/target/arch/amdgpu/target_records_tables.inl"
+#undef LOOM_AMDGPU_TARGET_PROFILE
+
+static const loom_amdgpu_target_profile_t* const kAmdgpuTargetProfiles[] = {
+#define LOOM_AMDGPU_TARGET_PROFILE(                                      \
+    profile_suffix, target_kind_value, bundle_suffix, sramecc_state,    \
+    xnack_state)                                                        \
+  &kAmdgpuTargetProfile##profile_suffix,
+#include "loom/target/arch/amdgpu/target_records_tables.inl"
+#undef LOOM_AMDGPU_TARGET_PROFILE
+};
+// clang-format on
 
 static iree_status_t loom_amdgpu_target_profile_normalize_feature(
     const loom_amdgpu_processor_info_t* processor, iree_string_view_t name,
@@ -106,9 +148,6 @@ iree_status_t loom_amdgpu_target_profile_initialize(
         identity->target->descriptor_set_key.data);
   }
 
-  loom_amdgpu_target_properties_t properties = {0};
-  loom_amdgpu_target_properties_resolve(&normalized_identity, target_bundle,
-                                        &properties);
   *out_profile = (loom_amdgpu_target_profile_t){
       .base =
           {
@@ -116,7 +155,27 @@ iree_status_t loom_amdgpu_target_profile_initialize(
               .target_bundle = target_bundle,
           },
       .identity = normalized_identity,
-      .properties = properties,
   };
   return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_target_profile_select(
+    iree_string_view_t selector,
+    const loom_amdgpu_target_profile_t** out_profile) {
+  IREE_ASSERT_ARGUMENT(out_profile);
+  *out_profile = NULL;
+
+  loom_amdgpu_target_identity_t identity = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_key_parse(selector, &identity));
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kAmdgpuTargetProfiles); ++i) {
+    const loom_amdgpu_target_profile_t* profile = kAmdgpuTargetProfiles[i];
+    if (loom_amdgpu_target_identity_equal(&profile->identity, &identity)) {
+      *out_profile = profile;
+      return iree_ok_status();
+    }
+  }
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "AMDGPU target selector '%.*s' has no generated profile preset",
+      (int)selector.size, selector.data);
 }
