@@ -275,15 +275,10 @@ iree_status_t loom_low_lower_representation_observer_end(
   return status;
 }
 
-iree_status_t loom_low_lower_representation_lookup(
-    loom_low_lower_context_t* context, loom_value_id_t source_value_id,
+static iree_status_t loom_low_lower_representation_state_lookup(
+    loom_low_lower_representation_observer_state_t* state,
+    loom_value_id_t source_value_id,
     loom_low_representation_id_t* out_representation) {
-  IREE_ASSERT_ARGUMENT(out_representation);
-  *out_representation = LOOM_LOW_REPRESENTATION_ID_NONE;
-  loom_low_lower_representation_observer_state_t* state = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_get_or_allocate_target_state(
-      context, &kLoomLowLowerRepresentationStateKey, sizeof(*state),
-      (void**)&state));
   if (!state->initialized || !state->solved) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "source representation plan is not available");
@@ -299,4 +294,37 @@ iree_status_t loom_low_lower_representation_lookup(
   loom_low_representation_plan_lookup(&state->plan, value_ordinal,
                                       out_representation);
   return iree_ok_status();
+}
+
+iree_status_t loom_low_lower_representation_lookup(
+    loom_low_lower_context_t* context, loom_value_id_t source_value_id,
+    loom_low_representation_id_t* out_representation) {
+  IREE_ASSERT_ARGUMENT(out_representation);
+  *out_representation = LOOM_LOW_REPRESENTATION_ID_NONE;
+  loom_low_lower_representation_observer_state_t* state = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_get_or_allocate_target_state(
+      context, &kLoomLowLowerRepresentationStateKey, sizeof(*state),
+      (void**)&state));
+  return loom_low_lower_representation_state_lookup(state, source_value_id,
+                                                    out_representation);
+}
+
+iree_status_t loom_low_lower_representation_query_lookup(
+    const loom_target_contract_query_environment_t* environment,
+    loom_value_id_t source_value_id,
+    loom_low_representation_id_t* out_representation,
+    bool* out_plan_available) {
+  IREE_ASSERT_ARGUMENT(environment);
+  IREE_ASSERT_ARGUMENT(out_representation);
+  IREE_ASSERT_ARGUMENT(out_plan_available);
+  *out_representation = LOOM_LOW_REPRESENTATION_ID_NONE;
+  *out_plan_available = false;
+  loom_low_lower_representation_observer_state_t* state = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_contract_query_get_or_allocate_target_state(
+      environment, &kLoomLowLowerRepresentationStateKey, sizeof(*state),
+      (void**)&state));
+  if (state == NULL || !state->initialized) return iree_ok_status();
+  *out_plan_available = true;
+  return loom_low_lower_representation_state_lookup(state, source_value_id,
+                                                    out_representation);
 }

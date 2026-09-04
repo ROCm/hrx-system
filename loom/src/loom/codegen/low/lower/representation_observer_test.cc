@@ -8,6 +8,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/lower/source_query.h"
 #include "loom/codegen/low/testing/source_workload.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -169,10 +170,26 @@ class LowLowerRepresentationObserverTest : public ::testing::Test {
       void* user_data, loom_low_lower_context_t* context) {
     auto* test = static_cast<LowLowerRepresentationObserverTest*>(user_data);
     test->capture_called_ = true;
+    loom_target_contract_query_environment_t query_environment = {};
+    IREE_RETURN_IF_ERROR(loom_low_lower_source_query_environment_initialize(
+        context, loom_low_lower_context_descriptor_set(context),
+        &query_environment));
     for (iree_host_size_t i = 0; i < test->captured_value_count_; ++i) {
       CapturedValue* captured = &test->captured_values_[i];
       IREE_RETURN_IF_ERROR(loom_low_lower_representation_lookup(
           context, captured->source_value_id, &captured->representation));
+      loom_low_representation_id_t query_representation =
+          LOOM_LOW_REPRESENTATION_ID_NONE;
+      bool query_plan_available = false;
+      IREE_RETURN_IF_ERROR(loom_low_lower_representation_query_lookup(
+          &query_environment, captured->source_value_id, &query_representation,
+          &query_plan_available));
+      if (!query_plan_available ||
+          query_representation != captured->representation) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "query scope did not retrieve the retained representation");
+      }
     }
     return iree_ok_status();
   }

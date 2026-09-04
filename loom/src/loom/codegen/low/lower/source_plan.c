@@ -580,7 +580,10 @@ static void loom_low_lower_count_region_plan_ops(
       if (is_structural) {
         loom_low_lower_mark_structural_storage_demands(context, op, traits);
       }
-      if (observer != NULL) {
+      if (observer != NULL &&
+          (observer->minimum_op_kind == LOOM_OP_KIND_UNKNOWN ||
+           (op->kind >= observer->minimum_op_kind &&
+            op->kind <= observer->maximum_op_kind))) {
         observer->observe(observer_state, context, op);
       }
       if (loom_low_lower_supported_structured_source_op(context, op)) {
@@ -608,6 +611,13 @@ static iree_status_t loom_low_lower_prepare_plan(
       context->policy->source_plan_observer;
   void* observer_state = NULL;
   if (observer != NULL) {
+    if ((observer->minimum_op_kind == LOOM_OP_KIND_UNKNOWN) !=
+            (observer->maximum_op_kind == LOOM_OP_KIND_UNKNOWN) ||
+        (observer->minimum_op_kind != LOOM_OP_KIND_UNKNOWN &&
+         observer->minimum_op_kind > observer->maximum_op_kind)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "invalid source plan observer operation range");
+    }
     IREE_RETURN_IF_ERROR(
         observer->begin(observer->user_data, context, &observer_state));
   }

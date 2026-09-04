@@ -126,6 +126,17 @@ iree_status_t loom_low_lower_representation_lookup(
     loom_low_lower_context_t* context, loom_value_id_t source_value_id,
     loom_low_representation_id_t* out_representation);
 
+// Returns the selected representation through a source-contract query scope,
+// or NONE when the value is unconstrained. Query scopes created from Low
+// lowering share the observer's target-state allocator and therefore retrieve
+// the same function-local plan without copying it into the query environment.
+// |out_plan_available| distinguishes an unconstrained value in a completed
+// plan from a query scope that has no representation observer.
+iree_status_t loom_low_lower_representation_query_lookup(
+    const loom_target_contract_query_environment_t* environment,
+    loom_value_id_t source_value_id,
+    loom_low_representation_id_t* out_representation, bool* out_plan_available);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

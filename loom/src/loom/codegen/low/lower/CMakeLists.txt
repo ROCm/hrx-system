@@ -267,6 +267,7 @@ loom_cc_test(
   SRCS
     "representation_observer_test.cc"
   DEPS
+    ::lower
     ::representation_observer
     iree::base::internal::arena
     iree::testing::gtest

@@ -276,6 +276,7 @@ loom_cc_test(
     name = "representation_observer_test",
     srcs = ["representation_observer_test.cc"],
     deps = [
+        ":lower",
         ":representation_observer",
         "//loom/src/loom/codegen/low/testing:source_workload",
         "//loom/src/loom/ir",
