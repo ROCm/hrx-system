@@ -485,8 +485,8 @@ test.target<low_core> @target
 low.func.def public target<test.low.core>(@target) @low_cfg_entry(%condition$4: reg<test.i32>, %arg: reg<test.i32>) -> (reg<test.i32>) {
   %prefix = low.copy %arg : reg<test.i32> -> reg<test.i32>
   low.br ^_bb1(%condition$4: reg<test.i32>, %prefix: reg<test.i32>)
-^_bb1(%condition$10: reg<test.i32>, %value: reg<test.i32>):
-  low.cond_br %condition$10, ^_bb2, ^_bb3 : reg<test.i32>
+^_bb1(%condition$0: reg<test.i32>, %value: reg<test.i32>):
+  low.cond_br %condition$0, ^_bb2, ^_bb3 : reg<test.i32>
 ^_bb2:
   low.br ^_bb5(%value: reg<test.i32>)
 ^_bb3:
@@ -575,9 +575,9 @@ low.func.def public target<test.low.core>(@target) @retain_locked(%value: reg<te
 
 // RUN: pass inline-callables
 
-// Required-inline CFG shape propagates through the complete closure. Although
-// the middle helper begins with one block, flattening its CFG leaf makes it a
-// CFG callee before the outer edge executes.
+// Required-inline CFG shape propagates through the complete closure for
+// preflight. Execution moves the single-use wrapper outward before consuming
+// its CFG leaf, so the wrapper disappears without cloning an expanded body.
 func.def inline @closure_cfg_leaf(%value: i32) -> (i32) {
   cfg.br ^exit(%value: i32)
 ^exit(%forwarded: i32):
@@ -597,16 +597,151 @@ func.def public @closure_cfg_entry(%value: i32) -> (i32) {
 // ----
 func.def public @closure_cfg_entry(%value$6: i32) -> (i32) {
   cfg.br ^_bb1(%value$6: i32)
-^_bb1(%value$12: i32):
-  cfg.br ^_bb2(%value$12: i32)
-^_bb2(%value$13: i32):
-  cfg.br ^_bb3(%value$13: i32)
-^_bb3(%forwarded: i32):
-  cfg.br ^_bb4(%forwarded: i32)
-^_bb4(%result$15: i32):
-  cfg.br ^_bb5(%result$15: i32)
-^_bb5(%result$16: i32):
-  func.return %result$16 : i32
+^_bb1(%value$0: i32):
+  cfg.br ^_bb2(%value$0: i32)
+^_bb2(%forwarded: i32):
+  cfg.br ^_bb3(%forwarded: i32)
+^_bb3(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+// A linear nested call is transferred before its CFG parent moves. This keeps
+// the topology-preserving path available and carries the producer with the
+// parent CFG instead of manufacturing another pair of blocks.
+func.def inline @nested_linear_double(%nested_value: i32) -> (i32) {
+  %nested_doubled = test.addi %nested_value, %nested_value : i32
+  func.return %nested_doubled : i32
+}
+
+func.def inline @outer_cfg_compose(%outer_value: i32) -> (i32) {
+  %outer_doubled = func.call @nested_linear_double(%outer_value) : (i32) -> (i32)
+  cfg.br ^exit(%outer_doubled: i32)
+^exit(%outer_forwarded: i32):
+  func.return %outer_forwarded : i32
+}
+
+func.def public @nested_linear_cfg_entry(%entry_value: i32) -> (i32) {
+  %entry_result = func.call @outer_cfg_compose(%entry_value) : (i32) -> (i32)
+  func.return %entry_result : i32
+}
+
+// ----
+func.def public @nested_linear_cfg_entry(%entry_value: i32) -> (i32) {
+  cfg.br ^_bb1(%entry_value: i32)
+^_bb1(%outer_value: i32):
+  %nested_doubled = test.addi %outer_value, %outer_value : i32
+  cfg.br ^_bb2(%nested_doubled: i32)
+^_bb2(%outer_forwarded: i32):
+  cfg.br ^_bb3(%outer_forwarded: i32)
+^_bb3(%entry_result: i32):
+  func.return %entry_result : i32
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+// Nested CFG blocks are inserted immediately after their call block. This
+// preserves definition-before-use ordering when a result is used directly in
+// a dominated outer block instead of being forwarded as its block argument.
+test.target<low_core> @nested_cfg_target
+
+low.func.def inline target<test.low.core>(@nested_cfg_target) @nested_cfg_child(%child_value: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.br ^child_exit(%child_value: reg<test.i32>)
+^child_exit(%child_forwarded: reg<test.i32>):
+  return %child_forwarded
+}
+
+low.func.def inline target<test.low.core>(@nested_cfg_target) @nested_cfg_parent(%parent_value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %parent_result = low.func.call @nested_cfg_child(%parent_value) : (reg<test.i32>) -> (reg<test.i32>)
+  low.br ^parent_exit
+^parent_exit:
+  return %parent_result
+}
+
+low.func.def public target<test.low.core>(@nested_cfg_target) @nested_cfg_entry(%entry_value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %entry_result = low.func.call @nested_cfg_parent(%entry_value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %entry_result
+}
+
+// ----
+test.target<low_core> @nested_cfg_target
+
+low.func.def public target<test.low.core>(@nested_cfg_target) @nested_cfg_entry(%entry_value: reg<test.i32>) -> (reg<test.i32>) {
+  low.br ^_bb1(%entry_value: reg<test.i32>)
+^_bb1(%parent_value: reg<test.i32>):
+  low.br ^_bb2(%parent_value: reg<test.i32>)
+^_bb2(%child_value: reg<test.i32>):
+  low.br ^_bb3(%child_value: reg<test.i32>)
+^_bb3(%child_forwarded: reg<test.i32>):
+  low.br ^_bb4(%child_forwarded: reg<test.i32>)
+^_bb4(%parent_result: reg<test.i32>):
+  low.br ^_bb5
+^_bb5:
+  low.br ^_bb6(%parent_result: reg<test.i32>)
+^_bb6(%entry_result: reg<test.i32>):
+  low.return %entry_result : reg<test.i32>
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+// A shared CFG wrapper exercises both execution dependencies. Its nested leaf
+// must be flattened before the wrapper is cloned, and the clone must complete
+// before the final use consumes and erases the wrapper definition.
+func.def inline @shared_cfg_leaf(%leaf_value: i32) -> (i32) {
+  cfg.br ^exit(%leaf_value: i32)
+^exit(%leaf_forwarded: i32):
+  func.return %leaf_forwarded : i32
+}
+
+func.def inline @shared_cfg_wrapper(%wrapper_value: i32) -> (i32) {
+  %wrapper_result = func.call @shared_cfg_leaf(%wrapper_value) : (i32) -> (i32)
+  func.return %wrapper_result : i32
+}
+
+func.def public @clone_cfg_wrapper(%clone_value: i32) -> (i32) {
+  %clone_result = func.call @shared_cfg_wrapper(%clone_value) : (i32) -> (i32)
+  func.return %clone_result : i32
+}
+
+func.def public @consume_cfg_wrapper(%consume_value: i32) -> (i32) {
+  %consume_result = func.call @shared_cfg_wrapper(%consume_value) : (i32) -> (i32)
+  func.return %consume_result : i32
+}
+
+// ----
+func.def public @clone_cfg_wrapper(%clone_value: i32) -> (i32) {
+  cfg.br ^_bb1(%clone_value: i32)
+^_bb1(%wrapper_value: i32):
+  cfg.br ^_bb2(%wrapper_value: i32)
+^_bb2(%leaf_value: i32):
+  cfg.br ^_bb3(%leaf_value: i32)
+^_bb3(%leaf_forwarded: i32):
+  cfg.br ^_bb4(%leaf_forwarded: i32)
+^_bb4(%wrapper_result: i32):
+  cfg.br ^_bb5(%wrapper_result: i32)
+^_bb5(%clone_result: i32):
+  func.return %clone_result : i32
+}
+
+func.def public @consume_cfg_wrapper(%consume_value: i32) -> (i32) {
+  cfg.br ^_bb1(%consume_value: i32)
+^_bb1(%wrapper_value: i32):
+  cfg.br ^_bb2(%wrapper_value: i32)
+^_bb2(%leaf_value: i32):
+  cfg.br ^_bb3(%leaf_value: i32)
+^_bb3(%leaf_forwarded: i32):
+  cfg.br ^_bb4(%leaf_forwarded: i32)
+^_bb4(%wrapper_result: i32):
+  cfg.br ^_bb5(%wrapper_result: i32)
+^_bb5(%consume_result: i32):
+  func.return %consume_result : i32
 }
 
 // ====

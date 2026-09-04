@@ -323,6 +323,24 @@ iree_status_t loom_rewriter_move_to_block_end(loom_rewriter_t* rewriter,
                                               loom_block_t* target_block,
                                               loom_op_t* target_parent_op);
 
+// Moves every block payload from |source_region| into |target_region| at
+// |target_block_index| without cloning SSA values or operations.
+//
+// The source and target regions must be owned by |source_parent_op| and
+// |target_parent_op| in the rewrite module. The source region is consumed and
+// left with one empty embedded entry block so its parent can be erased. The
+// moved entry payload is copied into one fresh block because a region's entry
+// block has inline storage; every other block and all operations retain their
+// identity. Successors targeting the old embedded entry are repaired, block
+// argument definitions and operation ancestry are reparented, region-local
+// block labels are cleared, and comments and semantic summaries are preserved.
+// All fallible allocation and ownership checks complete before payloads move.
+iree_status_t loom_rewriter_move_region_blocks(
+    loom_rewriter_t* rewriter, loom_region_t* source_region,
+    loom_op_t* source_parent_op, loom_region_t* target_region,
+    uint16_t target_block_index, loom_op_t* target_parent_op,
+    loom_block_t** out_moved_entry_block);
+
 // Replaces one operand of an op. Adds the op to the worklist.
 iree_status_t loom_rewriter_set_operand(loom_rewriter_t* rewriter,
                                         loom_op_t* op, uint16_t operand_index,

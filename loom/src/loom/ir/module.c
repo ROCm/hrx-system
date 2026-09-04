@@ -509,18 +509,20 @@ void loom_module_update_op_direct_summaries(loom_module_t* module,
   loom_module_adjust_poison_op_count(module, poison_delta);
 }
 
-static iree_status_t loom_region_blocks_ensure_capacity(loom_module_t* module,
-                                                        loom_region_t* region) {
-  if (region->block_count < region->block_capacity) return iree_ok_status();
-  if (region->block_capacity == UINT16_MAX) {
+iree_status_t loom_region_reserve_block_capacity(
+    loom_module_t* module, loom_region_t* region,
+    iree_host_size_t minimum_capacity) {
+  if (minimum_capacity <= region->block_capacity) return iree_ok_status();
+  if (minimum_capacity > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "region block count exceeds UINT16_MAX");
   }
 
   iree_host_size_t old_capacity = region->block_capacity;
-  iree_host_size_t new_capacity =
-      old_capacity > 0 ? old_capacity * 2 : (iree_host_size_t)4;
-  if (new_capacity > UINT16_MAX) new_capacity = UINT16_MAX;
+  iree_host_size_t new_capacity = old_capacity > 0 ? old_capacity : 4;
+  while (new_capacity < minimum_capacity) {
+    new_capacity = iree_min(new_capacity * 2, (iree_host_size_t)UINT16_MAX);
+  }
 
   loom_block_t** new_blocks = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&module->arena, new_capacity,
@@ -535,6 +537,16 @@ static iree_status_t loom_region_blocks_ensure_capacity(loom_module_t* module,
   region->blocks = new_blocks;
   region->block_capacity = (uint16_t)new_capacity;
   return iree_ok_status();
+}
+
+static iree_status_t loom_region_blocks_ensure_capacity(loom_module_t* module,
+                                                        loom_region_t* region) {
+  if (region->block_count == UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "region block count exceeds UINT16_MAX");
+  }
+  return loom_region_reserve_block_capacity(
+      module, region, (iree_host_size_t)region->block_count + 1);
 }
 
 //===----------------------------------------------------------------------===//

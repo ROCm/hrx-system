@@ -646,6 +646,13 @@ iree_status_t loom_module_allocate_region(loom_module_t* module,
                                           uint16_t block_count,
                                           loom_region_t** out_region);
 
+// Ensures that |region|'s block pointer table can hold at least
+// |minimum_capacity| blocks without allocating any block objects. Existing
+// block pointers and ordinals are preserved.
+iree_status_t loom_region_reserve_block_capacity(
+    loom_module_t* module, loom_region_t* region,
+    iree_host_size_t minimum_capacity);
+
 // Appends a new block to |region| and returns it in |*out_block|. Existing
 // block objects are never relocated; only the region's block pointer table may
 // grow.
