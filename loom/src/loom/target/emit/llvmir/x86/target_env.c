@@ -181,12 +181,13 @@ static bool loom_llvmir_x86_project_bundle(
       bundle->config->contract_set_key, out_profile);
 }
 
-static const loom_llvmir_target_profile_provider_t kX86TargetProfileProvider = {
-    .name = IREE_SVL("x86"),
-    .profiles = kX86TargetProfiles,
-    .profile_count = IREE_ARRAYSIZE(kX86TargetProfiles),
-    .llc_target_name = IREE_SVL("x86"),
-    .project_bundle = loom_llvmir_x86_project_bundle,
+const loom_llvmir_target_profile_provider_t
+    loom_llvmir_x86_target_profile_provider = {
+        .name = IREE_SVL("x86"),
+        .profiles = kX86TargetProfiles,
+        .profile_count = IREE_ARRAYSIZE(kX86TargetProfiles),
+        .llc_target_name = IREE_SVL("x86"),
+        .project_bundle = loom_llvmir_x86_project_bundle,
 };
 
 const loom_target_bundle_t* loom_llvmir_target_bundle_x86_64_object(void) {
@@ -211,11 +212,6 @@ const loom_llvmir_target_profile_t* loom_llvmir_target_profile_x86_64_object(
 const loom_llvmir_target_profile_t*
 loom_llvmir_target_profile_x86_64_packed_dot_object(void) {
   return &kX86PackedDotObjectProfile;
-}
-
-const loom_llvmir_target_profile_provider_t*
-loom_llvmir_x86_target_profile_provider(void) {
-  return &kX86TargetProfileProvider;
 }
 
 iree_status_t loom_llvmir_target_profile_initialize_x86_64_object(

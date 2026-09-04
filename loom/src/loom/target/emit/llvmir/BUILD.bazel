@@ -6,6 +6,7 @@
 
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
+    "iree_select",
     "loom_cc_library",
     "loom_cc_test",
     "loom_config_compatible_with",
@@ -41,6 +42,36 @@ _LLVMIR_TARGET_SCENARIOS_COMPATIBLE_WITH = loom_config_compatible_with([
 _LLVMIR_X86_TARGET_ENV_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/target/arch:x86",
 ])
+
+_CONFIGURED_TARGET_PROFILE_COPTS = (
+    iree_select({
+        "//loom/config/target:llvmir_amdgpu_target_env": [
+            "-DLOOM_CONFIG_LLVMIR_HAVE_AMDGPU_TARGET_PROFILES=1",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target:llvmir_x86_target_env": [
+            "-DLOOM_CONFIG_LLVMIR_HAVE_X86_TARGET_PROFILES=1",
+        ],
+        "//conditions:default": [],
+    })
+)
+
+_CONFIGURED_TARGET_PROFILE_DEPS = (
+    iree_select({
+        "//loom/config/target:llvmir_amdgpu_target_env": [
+            "//loom/src/loom/target/emit/llvmir/amdgpu:target_env",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target:llvmir_x86_target_env": [
+            "//loom/src/loom/target/emit/llvmir/x86:target_env",
+        ],
+        "//conditions:default": [],
+    })
+)
 
 #===------------------------------------------------------------------------===#
 # Target-neutral LLVMIR core
@@ -107,6 +138,28 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "configured_target_profiles",
+    srcs = ["configured_target_profiles.c"],
+    hdrs = ["configured_target_profiles.h"],
+    copts = _CONFIGURED_TARGET_PROFILE_COPTS,
+    deps = [
+        ":target_presets",
+        "//runtime/src/iree/base",
+    ] + _CONFIGURED_TARGET_PROFILE_DEPS,
+)
+
+loom_cc_test(
+    name = "configured_target_profiles_test",
+    srcs = ["configured_target_profiles_test.cc"],
+    copts = _CONFIGURED_TARGET_PROFILE_COPTS,
+    deps = [
+        ":configured_target_profiles",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "module_emitter",
     srcs = ["module_emitter.c"],
     hdrs = ["module_emitter.h"],
@@ -142,6 +195,7 @@ loom_cc_library(
     hdrs = ["artifact_emitter.h"],
     visibility = _LLVMIR_ARTIFACT_EMITTER_VISIBILITY,
     deps = [
+        ":configured_target_profiles",
         ":core",
         ":module_emitter",
         ":target_presets",
@@ -189,6 +243,7 @@ loom_cc_library(
     hdrs = ["check/loom_check.h"],
     visibility = _LLVMIR_LOOM_CHECK_VISIBILITY,
     deps = [
+        ":configured_target_profiles",
         ":core",
         ":module_emitter",
         ":target_env",

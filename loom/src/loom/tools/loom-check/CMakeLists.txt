@@ -337,25 +337,9 @@ loom_cc_library(
   PUBLIC
 )
 
-set(_llvmir_provider_platform_copts "")
-if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
-  list(APPEND _llvmir_provider_platform_copts "-DLOOM_CHECK_HAVE_LLVMIR_AMDGPU_TARGET_ENV=1")
-endif()
-if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
-  list(APPEND _llvmir_provider_platform_copts "-DLOOM_CHECK_HAVE_LLVMIR_X86_TARGET_ENV=1")
-endif()
-set(_llvmir_provider_platform_deps "")
-if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
-  list(APPEND _llvmir_provider_platform_deps loom::target::emit::llvmir::amdgpu::target_env)
-endif()
-if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
-  list(APPEND _llvmir_provider_platform_deps loom::target::emit::llvmir::x86::target_env)
-endif()
 loom_cc_library(
   NAME
     llvmir_provider
-  COPTS
-    ${_llvmir_provider_platform_copts}
   HDRS
     "llvmir_provider.h"
   SRCS
@@ -364,7 +348,6 @@ loom_cc_library(
     ::provider
     iree::base
     loom::target::emit::llvmir::loom_check
-    ${_llvmir_provider_platform_deps}
   PUBLIC
 )
 

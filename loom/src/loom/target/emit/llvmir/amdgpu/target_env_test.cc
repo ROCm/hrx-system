@@ -227,7 +227,7 @@ TEST(LlvmIrAmdgpuTargetEnvTest,
   };
 
   const loom_llvmir_target_profile_provider_t* provider =
-      loom_llvmir_amdgpu_target_profile_provider();
+      &loom_llvmir_amdgpu_target_profile_provider;
   const loom_llvmir_target_profile_t* profile = nullptr;
   loom_llvmir_target_profile_projection_request_t request = {
       /*.bundle=*/&kBundle,

@@ -6,9 +6,9 @@
 
 // Explicit LLVM target profile preset registries.
 //
-// Target providers own their preset rows. Developer tools and embedders
-// assemble a registry from the providers they intentionally link, keeping the
-// generic LLVMIR infrastructure free of a process-wide target catalog.
+// Target providers own their preset rows. Configured binaries assemble one
+// immutable registry from the providers selected by the build, keeping the
+// target-neutral LLVMIR representation free of a process-wide target catalog.
 
 #ifndef LOOM_TARGET_LLVMIR_TARGET_PRESETS_H_
 #define LOOM_TARGET_LLVMIR_TARGET_PRESETS_H_
