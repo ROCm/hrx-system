@@ -1,0 +1,36 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef IREE_VM_BYTECODE_VERIFIER_H_
+#define IREE_VM_BYTECODE_VERIFIER_H_
+
+#include "iree/vm/bytecode/layout.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
+// Verifies provider-independent image and declaration structure and derives
+// the exact mapped construction plan. This first stage maps function byte
+// spans and derives |out_plan->maximum_block_count| without validating their
+// instruction records. |out_plan| is untouched on failure.
+iree_status_t iree_vm_bytecode_verify_module_structure(
+    iree_const_byte_span_t contents, iree_vm_bytecode_module_plan_t* out_plan);
+
+// Verifies every instruction record in a structurally verified module plan.
+// |block_offsets| provides transient storage for
+// |plan->maximum_block_count| uint32_t entries and may be null when the count
+// is zero. On success |plan->required_atomic_carrier_bits| summarizes the
+// platform requirements module creation must compare against its capabilities
+// before publication.
+iree_status_t iree_vm_bytecode_verify_module_instructions(
+    iree_vm_bytecode_module_plan_t* plan, uint32_t* block_offsets);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
+
+#endif  // IREE_VM_BYTECODE_VERIFIER_H_

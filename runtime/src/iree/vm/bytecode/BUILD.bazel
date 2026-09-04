@@ -6,7 +6,9 @@
 
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
 load("//build_tools/bazel:generate.bzl", "iree_generated_files")
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
@@ -18,17 +20,23 @@ package(
 iree_generated_files(
     name = "projections",
     outs = [
+        "disassembler/data.inl",
         "docs/specification.md",
-        "tooling/data.inl",
-        "verification/data.c",
+        "testdata/structural.vmfb",
+        "verifier/data.c",
+        "verifier/instruction_cases.inl",
+        "verifier/module_cases.inl",
         "wire/assertions.c",
         "wire/core.h",
         "wire/module.h",
     ],
     output_args = {
+        "disassembler/data.inl": "--disassembler-data={path}",
         "docs/specification.md": "--documentation={path}",
-        "tooling/data.inl": "--tooling-data={path}",
-        "verification/data.c": "--verification-source={path}",
+        "testdata/structural.vmfb": "--structural-module-fixture={path}",
+        "verifier/data.c": "--verifier-source={path}",
+        "verifier/instruction_cases.inl": "--instruction-verifier-cases={path}",
+        "verifier/module_cases.inl": "--module-verifier-cases={path}",
         "wire/assertions.c": "--wire-assertions-source={path}",
         "wire/core.h": "--wire-core-header={path}",
         "wire/module.h": "--wire-module-header={path}",
@@ -47,10 +55,20 @@ iree_runtime_cc_library(
     deps = ["//runtime/src/iree/base:core_headers"],
 )
 
+iree_c_embed_data(
+    name = "verifier_testdata",
+    testonly = True,
+    srcs = ["testdata/structural.vmfb"],
+    c_file_output = "verifier_testdata.c",
+    flatten = True,
+    h_file_output = "verifier_testdata.h",
+    identifier = "iree_vm_bytecode_verifier_testdata",
+)
+
 iree_runtime_cc_library(
-    name = "verification",
-    srcs = ["verification/data.c"],
-    hdrs = ["verification.h"],
+    name = "verifier_data",
+    srcs = ["verifier/data.c"],
+    hdrs = ["verifier_data.h"],
     deps = [
         ":wire",
         "//runtime/src/iree/base:core_headers",
@@ -58,10 +76,30 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
-    name = "tooling",
-    srcs = ["tooling.c"],
-    hdrs = ["tooling.h"],
-    textual_hdrs = ["tooling/data.inl"],
+    name = "verifier",
+    srcs = ["verifier.c"],
+    hdrs = [
+        "layout.h",
+        "verifier.h",
+    ],
+    textual_hdrs = [
+        "verifier/instruction_cases.inl",
+        "verifier/module_cases.inl",
+    ],
+    deps = [
+        ":verifier_data",
+        ":wire",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "disassembler",
+    srcs = ["disassembler.c"],
+    hdrs = ["disassembler.h"],
+    textual_hdrs = ["disassembler/data.inl"],
     deps = [
         ":wire",
         "//runtime/src/iree/base",
@@ -69,22 +107,36 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_test(
-    name = "verification_test",
-    srcs = ["verification_test.cc"],
+    name = "verifier_test",
+    srcs = ["verifier_test.cc"],
     deps = [
-        ":verification",
+        ":verifier",
+        ":verifier_data",
+        ":verifier_testdata",
         ":wire",
-        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
-iree_runtime_cc_test(
-    name = "tooling_test",
-    srcs = ["tooling_test.cc"],
+iree_runtime_cc_benchmark(
+    name = "verifier_benchmark",
+    srcs = ["verifier_benchmark.cc"],
     deps = [
-        ":tooling",
+        ":verifier",
+        ":verifier_testdata",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:benchmark",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "disassembler_test",
+    srcs = ["disassembler_test.cc"],
+    deps = [
+        ":disassembler",
         ":wire",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
@@ -95,8 +147,8 @@ iree_runtime_cc_test(
 test_suite(
     name = "tests",
     tests = [
-        ":tooling_test",
-        ":verification_test",
+        ":disassembler_test",
+        ":verifier_test",
     ],
 )
 
@@ -109,15 +161,21 @@ iree_py_generated_files(
     iree::vm::bytecode::spec::generate
   OUTPUTS
     "docs/specification.md"
-    "tooling/data.inl"
-    "verification/data.c"
+    "disassembler/data.inl"
+    "testdata/structural.vmfb"
+    "verifier/data.c"
+    "verifier/instruction_cases.inl"
+    "verifier/module_cases.inl"
     "wire/assertions.c"
     "wire/core.h"
     "wire/module.h"
   OUTPUT_FLAGS
     "--documentation"
-    "--tooling-data"
-    "--verification-source"
+    "--disassembler-data"
+    "--instruction-verifier-cases"
+    "--module-verifier-cases"
+    "--structural-module-fixture"
+    "--verifier-source"
     "--wire-assertions-source"
     "--wire-core-header"
     "--wire-module-header"

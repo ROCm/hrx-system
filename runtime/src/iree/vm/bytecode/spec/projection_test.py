@@ -9,8 +9,6 @@
 import unittest
 
 from iree.vm.bytecode.spec.generate import generate_outputs
-from iree.vm.bytecode.spec.isa.core import INTEGER_INSTRUCTIONS
-from iree.vm.bytecode.spec.render.c import _instruction_rules
 from iree.vm.bytecode.spec.specification import SPECIFICATION
 
 
@@ -26,22 +24,29 @@ class ProjectionTest(unittest.TestCase):
         module_header = self.outputs["wire_module_header"]
         core_header = self.outputs["wire_core_header"]
         assertions = self.outputs["wire_assertions_source"]
-        tooling = self.outputs["tooling_data"]
+        disassembler = self.outputs["disassembler_data"]
         documentation = self.outputs["documentation"]
+        instruction_verifier = self.outputs["instruction_verifier_cases"]
+        module_verifier = self.outputs["module_verifier_cases"]
         self.assertNotIn("static_assert", module_header + core_header)
-        self.assertNotIn("iree_string_view_t", tooling)
+        self.assertNotIn("iree_string_view_t", disassembler)
         for record in SPECIFICATION.module_format.records:
             self.assertIn(f"typedef struct {record.c_type}", module_header)
             self.assertIn(
                 f"sizeof({record.c_type}) == {record.byte_length}u", assertions
             )
-            self.assertIn(_bstring(record.name), tooling)
+            self.assertIn(_bstring(record.name), disassembler)
+            self.assertIn(
+                f"IREE_VM_BYTECODE_MODULE_RECORD_{record.name.upper()}",
+                module_verifier,
+            )
             self.assertEqual(documentation.count(f"#### `{record.name}`"), 1)
         for instruction in SPECIFICATION.instructions:
             c_type = f"iree_vm_bytecode_{instruction.mnemonic.replace('.', '_')}_t"
             self.assertIn(f"typedef struct {c_type}", core_header)
             self.assertIn(f"sizeof({c_type}) == {instruction.byte_length}u", assertions)
-            self.assertIn(_bstring(instruction.mnemonic), tooling)
+            self.assertIn(_bstring(instruction.mnemonic), disassembler)
+            self.assertIn(instruction.mnemonic, instruction_verifier)
             self.assertEqual(documentation.count(f"#### `{instruction.mnemonic}`"), 1)
         for table in (
             SPECIFICATION.module_format.numeric_tables + SPECIFICATION.selectors
@@ -54,30 +59,27 @@ class ProjectionTest(unittest.TestCase):
         self.assertIn("#### Structural verification obligations", documentation)
         self.assertIn("#### Reference pseudocode", documentation)
 
-    def test_verification_is_data_not_control_flow(self) -> None:
-        source = self.outputs["verification_source"]
+    def test_verification_projects_direct_runtime_checks(self) -> None:
+        verifier_source = self.outputs["verifier_source"]
+        instruction_cases = self.outputs["instruction_verifier_cases"]
+        module_cases = self.outputs["module_verifier_cases"]
+        source = verifier_source + instruction_cases + module_cases
         for fragment in (
             "iree_vm_bytecode_instruction_verification[256]",
-            "VERIFICATION_RULE_SELECTOR, 3u, 1u, 2u},  // float.math.unary.f64.selector_u8",
-            "UINT32_C(0x000D0008), IREE_VM_BYTECODE_VERIFICATION_RULE_GLOBAL_ORDINAL",
-            "VERIFICATION_RULE_LOCAL_BYTES_RANGE_MEMORY_FORMAT, 2u, 4u, 0u},  // stack.load.base_u16",
-            "VERIFICATION_RULE_VALUE_REGISTER_FORMAT_RANGE, 1u, 4u, 0u},  // stack.load",
-            "VERIFICATION_RULE_PACKED_SELECTORS, 6u, 64u, 3u},  // buffer.atomic.cmpxchg.selector0_u8",
-            "VERIFICATION_RULE_PACKED_SELECTORS, 7u, 248u, 1u},  // buffer.atomic.cmpxchg.selector1_u8",
-            "VERIFICATION_RULE_ATOMIC_CARRIER_SUPPORTED, 6u, 0u, 0u},  // buffer.atomic.cmpxchg",
-            "VERIFICATION_RULE_PACKED_SELECTOR_PAIRS, 6u, 48u, 51u},  // buffer.atomic.cmpxchg",
-            "UINT32_C(0x0033001F)",
-            "UINT32_C(0x00170003)",
-            "UINT32_C(0x00001A1F)",
+            "iree_vm_bytecode_module_section_verification[]",
+            "iree_vm_bytecode_verify_control_target",
+            "iree_vm_bytecode_verify_direct_call",
+            "iree_vm_bytecode_verify_integer_bitstream_shape",
+            "iree_vm_bytecode_verify_signature_descriptor",
+            "*context->required_atomic_carrier_bits |=",
         ):
             self.assertIn(fragment, source)
-        self.assertNotIn("switch (", source)
-        self.assertNotIn("iree_status_t", source)
-        parameters = []
-        rule = _instruction_rules(INTEGER_INSTRUCTIONS[-3], parameters, {})[-1]
-        self.assertEqual(
-            (rule.kind, *rule[1:4], *parameters[rule.parameter :]),
-            ("INTEGER_BITSTREAM_SHAPE", 3, 4, 5, 6, 7, 0, 64),
+        self.assertNotIn("switch (", verifier_source)
+        self.assertNotIn("iree_status_t", verifier_source)
+        self.assertNotIn("iree_status_t", instruction_cases)
+        self.assertNotIn("VERIFICATION_RULE_", source)
+        self.assertLess(
+            instruction_cases.count("case "), len(SPECIFICATION.instructions)
         )
 
 

@@ -13,32 +13,43 @@ from pathlib import Path
 
 from iree.vm.bytecode.spec.render.c import (
     render_core_header,
+    render_disassembler_data,
+    render_instruction_verifier_cases,
     render_module_header,
-    render_tooling_data,
-    render_verification_data,
+    render_module_verifier_cases,
+    render_verifier_data,
     render_wire_assertions,
 )
+from iree.vm.bytecode.spec.render.fixture import render_structural_module_fixture
 from iree.vm.bytecode.spec.render.markdown import render_specification
 from iree.vm.bytecode.spec.specification import SPECIFICATION
 
 
-def _write_output(path: Path, contents: str) -> None:
+def _write_output(path: Path, contents: str | bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.is_file() and path.read_text(encoding="utf-8") == contents:
-        return
-    path.write_text(contents, encoding="utf-8")
+    if isinstance(contents, bytes):
+        if path.is_file() and path.read_bytes() == contents:
+            return
+        path.write_bytes(contents)
+    else:
+        if path.is_file() and path.read_text(encoding="utf-8") == contents:
+            return
+        path.write_text(contents, encoding="utf-8")
 
 
-def generate_outputs() -> dict[str, str]:
+def generate_outputs() -> dict[str, str | bytes]:
     """Returns the complete deterministic runtime projection family."""
 
     return {
         "wire_module_header": render_module_header(SPECIFICATION),
         "wire_core_header": render_core_header(SPECIFICATION),
         "wire_assertions_source": render_wire_assertions(SPECIFICATION),
-        "verification_source": render_verification_data(SPECIFICATION),
-        "tooling_data": render_tooling_data(SPECIFICATION),
+        "instruction_verifier_cases": render_instruction_verifier_cases(SPECIFICATION),
+        "module_verifier_cases": render_module_verifier_cases(SPECIFICATION),
+        "verifier_source": render_verifier_data(SPECIFICATION),
+        "disassembler_data": render_disassembler_data(SPECIFICATION),
         "documentation": render_specification(SPECIFICATION),
+        "structural_module_fixture": render_structural_module_fixture(SPECIFICATION),
     }
 
 

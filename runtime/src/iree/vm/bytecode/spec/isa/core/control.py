@@ -227,15 +227,6 @@ CONTROL_RETURN = Instruction(
         "release_remaining_frame_owners(frame);\n"
         "pop_frame_and_complete_or_resume_parent();"
     ),
-    rules=(
-        RecordRule(
-            RecordRuleKind.RETURN_SIGNATURE,
-            summary=(
-                "The function's value, ref, and function extents cover its complete "
-                "signature-derived result packet; this record has no successor."
-            ),
-        ),
-    ),
     control_flow=ControlFlow.RETURN,
     state_effects=(
         StateEffect(StateAccess.READ, StateResource.INVOCATION_RESULTS),

@@ -22,13 +22,29 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_c_embed_data(
+  NAME
+    verifier_testdata
+  SRCS
+    "testdata/structural.vmfb"
+  C_FILE_OUTPUT
+    "verifier_testdata.c"
+  H_FILE_OUTPUT
+    "verifier_testdata.h"
+  IDENTIFIER
+    "iree_vm_bytecode_verifier_testdata"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
 iree_cc_library(
   NAME
-    verification
+    verifier_data
   HDRS
-    "verification.h"
+    "verifier_data.h"
   SRCS
-    "verification/data.c"
+    "verifier/data.c"
   DEPS
     ::wire
     iree::base::core_headers
@@ -37,13 +53,33 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    tooling
+    verifier
   HDRS
-    "tooling.h"
+    "layout.h"
+    "verifier.h"
   TEXTUAL_HDRS
-    "tooling/data.inl"
+    "verifier/instruction_cases.inl"
+    "verifier/module_cases.inl"
   SRCS
-    "tooling.c"
+    "verifier.c"
+  DEPS
+    ::verifier_data
+    ::wire
+    iree::base
+    iree::base::internal::unicode
+    iree::vm
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    disassembler
+  HDRS
+    "disassembler.h"
+  TEXTUAL_HDRS
+    "disassembler/data.inl"
+  SRCS
+    "disassembler.c"
   DEPS
     ::wire
     iree::base
@@ -52,24 +88,41 @@ iree_cc_library(
 
 iree_cc_test(
   NAME
-    verification_test
+    verifier_test
   SRCS
-    "verification_test.cc"
+    "verifier_test.cc"
   DEPS
-    ::verification
+    ::verifier
+    ::verifier_data
+    ::verifier_testdata
     ::wire
-    iree::base::core_headers
+    iree::base
     iree::testing::gtest
     iree::testing::gtest_main
 )
 
+iree_cc_binary_benchmark(
+  NAME
+    verifier_benchmark
+  SRCS
+    "verifier_benchmark.cc"
+  DEPS
+    ::verifier
+    ::verifier_testdata
+    iree::base
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
 iree_cc_test(
   NAME
-    tooling_test
+    disassembler_test
   SRCS
-    "tooling_test.cc"
+    "disassembler_test.cc"
   DEPS
-    ::tooling
+    ::disassembler
     ::wire
     iree::base
     iree::testing::gtest
@@ -83,15 +136,21 @@ iree_py_generated_files(
     iree::vm::bytecode::spec::generate
   OUTPUTS
     "docs/specification.md"
-    "tooling/data.inl"
-    "verification/data.c"
+    "disassembler/data.inl"
+    "testdata/structural.vmfb"
+    "verifier/data.c"
+    "verifier/instruction_cases.inl"
+    "verifier/module_cases.inl"
     "wire/assertions.c"
     "wire/core.h"
     "wire/module.h"
   OUTPUT_FLAGS
     "--documentation"
-    "--tooling-data"
-    "--verification-source"
+    "--disassembler-data"
+    "--instruction-verifier-cases"
+    "--module-verifier-cases"
+    "--structural-module-fixture"
+    "--verifier-source"
     "--wire-assertions-source"
     "--wire-core-header"
     "--wire-module-header"

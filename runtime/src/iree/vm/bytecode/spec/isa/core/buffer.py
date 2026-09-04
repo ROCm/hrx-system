@@ -749,12 +749,12 @@ def _atomic_apply_selectors(
 
 def _atomic_carrier_rule(component: PackedSelectorComponent) -> RecordRule:
     return RecordRule(
-        RecordRuleKind.ATOMIC_CARRIER_SUPPORTED,
+        RecordRuleKind.ATOMIC_CARRIER_REQUIREMENT,
         fields=("selector0_u8",),
         data=(component,),
         summary=(
-            "The carrier component of selector0_u8 must be supported by the "
-            "selected target contract."
+            "The carrier component of selector0_u8 contributes one static "
+            "requirement checked against the selected target contract."
         ),
     )
 

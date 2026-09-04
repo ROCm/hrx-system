@@ -182,7 +182,6 @@ class FieldRule:
 class RecordRuleKind:
     CALL = RuleKind("call", field_count=3)
     CALL_INDIRECT = RuleKind("call_indirect", field_count=3)
-    RETURN_SIGNATURE = RuleKind("return_signature")
     SWITCH_TARGETS = RuleKind("switch_targets", field_count=2)
     FIELDS_DISTINCT = RuleKind("fields_distinct", field_count=2)
     FUNCTION_ADDRESS = RuleKind("function_address", field_count=3)
@@ -196,8 +195,8 @@ class RecordRuleKind:
         data_count=2,
         data_type=tuple,
     )
-    ATOMIC_CARRIER_SUPPORTED = RuleKind(
-        "atomic_carrier_supported", field_count=1, data_count=1, data_type=tuple
+    ATOMIC_CARRIER_REQUIREMENT = RuleKind(
+        "atomic_carrier_requirement", field_count=1, data_count=1, data_type=tuple
     )
     VALUE_REGISTER_RANGE = RuleKind("value_register_range", field_count=2)
     VALUE_REGISTER_FORMAT_RANGE = RuleKind(
@@ -214,7 +213,7 @@ CONTROL_CONTRACTS = {
     ControlFlow.BRANCH: (1, Suspension.NEVER, ()),
     ControlFlow.CONDITIONAL_BRANCH: (1, Suspension.NEVER, ()),
     ControlFlow.YIELD: (1, Suspension.ALWAYS, ()),
-    ControlFlow.RETURN: (0, Suspension.NEVER, (RecordRuleKind.RETURN_SIGNATURE,)),
+    ControlFlow.RETURN: (0, Suspension.NEVER, ()),
     ControlFlow.SWITCH: (0, Suspension.NEVER, (RecordRuleKind.SWITCH_TARGETS,)),
     ControlFlow.CALL: (
         0,

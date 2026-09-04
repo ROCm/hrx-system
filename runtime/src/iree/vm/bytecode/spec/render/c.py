@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import NamedTuple
 
 from iree.vm.bytecode.spec import isa, module
 from iree.vm.bytecode.spec.isa.core import rules as core_rules
@@ -283,266 +282,361 @@ def render_wire_assertions(specification: Specification) -> str:
     return "\n".join(lines)
 
 
-class _VerificationRule(NamedTuple):
-    kind: str
-    field_offset: int = 0
-    field_length: int = 0
-    auxiliary: int = 0
-    parameter: int = 0
-    label: str = ""
-
-
-_MODULE_VERSION_RULE = {
-    module_rules.FieldRule.CORE_MAJOR: "major",
-    module_rules.FieldRule.CORE_REQUIRED_MINOR: "minor",
-}
-
-
-def _intern_parameter_words(parameters: list[int], values: Iterable[int]) -> int:
-    values = list(values)
-    for base in range(len(parameters) - len(values) + 1):
-        if parameters[base : base + len(values)] == values:
-            return base
-    base = len(parameters)
-    parameters.extend(values)
-    if len(parameters) > 0xFFFFFFFF:
-        raise ValueError("verification parameter table exceeds u32")
-    return base
-
-
-def _value_parameters(values, parameters) -> tuple[int, int]:
-    if len(values) > 1:
-        return _intern_parameter_words(parameters, values), len(values)
-    return (values[0], 0) if values else (0, 0)
-
-
-def _field_offsets(fields, offsets) -> dict[str, int]:
+def _field_layouts(fields, offsets) -> dict[str, tuple[int, int]]:
     return {
-        item.field.name: offset for item, offset in zip(fields, offsets, strict=True)
+        item.field.name: (offset, item.field.byte_length)
+        for item, offset in zip(fields, offsets, strict=True)
     }
 
 
-def _packed_component_word(component) -> int:
-    values = component.allowed_values or tuple(
-        value.value for value in component.table.values
-    )
-    allowed_mask = sum(1 << value for value in values)
-    return allowed_mask | component.bit_offset << 16 | component.bit_length << 20
-
-
-def _packed_slice(component) -> int:
-    return component.bit_offset | component.bit_length << 4
-
-
-def _instruction_rules(
-    instruction: isa.Instruction, parameters, selector_parameters
-) -> list[_VerificationRule]:
-    rules = []
-    offsets_by_name = _field_offsets(instruction.fields, instruction.field_offsets)
-    for instruction_field, offset in zip(
-        instruction.fields, instruction.field_offsets, strict=True
-    ):
-        rule = instruction_field.rule
-        if rule.kind in (
-            core_rules.FieldRule.ANY_BITS,
-            core_rules.FieldRule.CONSTRAINT_MEMBER,
-            core_rules.FieldRule.LOCAL_BYTES_RANGE_LENGTH,
-            core_rules.FieldRule.LOCAL_BYTES_REPEATED_COUNT,
-        ):
-            continue
-        field_length = instruction_field.field.byte_length
-        if rule.kind == core_rules.FieldRule.SELECTOR:
-            parameter, auxiliary = selector_parameters[rule.data]
-        elif rule.kind == core_rules.FieldRule.PACKED_SELECTORS:
-            parameter = _intern_parameter_words(
-                parameters,
-                (_packed_component_word(component) for component in rule.data),
-            )
-            field_length, auxiliary = rule.values[0], len(rule.data)
-        elif rule.fields:
-            related_offsets = tuple(offsets_by_name[name] for name in rule.fields)
-            field_length, auxiliary = (*related_offsets, 0)[:2]
-            parameter = (
-                _intern_parameter_words(parameters, rule.values) if rule.values else 0
-            )
-        else:
-            parameter, auxiliary = _value_parameters(rule.values, parameters)
-        rules.append(
-            _VerificationRule(
-                _identifier(rule.kind.name),
-                offset,
-                field_length,
-                auxiliary,
-                parameter,
-                label=f"{instruction.mnemonic}.{instruction_field.field.name}",
-            )
-        )
-    for record_rule in instruction.rules:
-        offsets = tuple(offsets_by_name[name] for name in record_rule.fields)
-        inline_offsets = (*offsets, 0, 0, 0)
-        field_offset, field_length, auxiliary = inline_offsets[:3]
-        if record_rule.kind in (
-            core_rules.RecordRuleKind.PACKED_SELECTOR_PAIRS,
-            core_rules.RecordRuleKind.ATOMIC_CARRIER_SUPPORTED,
-        ):
-            if record_rule.kind == core_rules.RecordRuleKind.ATOMIC_CARRIER_SUPPORTED:
-                field_length = auxiliary = 0
-                parameter = _packed_component_word(record_rule.data[0])
-            else:
-                first, second = record_rule.data
-                pair_bits = sum(
-                    1 << (first_value | second_value << first.bit_length)
-                    for first_value, second_value in zip(
-                        record_rule.values[::2], record_rule.values[1::2], strict=True
-                    )
-                )
-                pair_mask = (
-                    (pair_bits >> bit_offset) & 0xFFFFFFFF
-                    for bit_offset in range(
-                        0, 1 << (first.bit_length + second.bit_length), 32
-                    )
-                )
-                field_length = _packed_slice(first)
-                auxiliary = _packed_slice(second)
-                parameter = _intern_parameter_words(parameters, pair_mask)
-        else:
-            tail = (*offsets[3:], *record_rule.values)
-            parameter = _intern_parameter_words(parameters, tail) if tail else 0
-        rules.append(
-            _VerificationRule(
-                _identifier(record_rule.kind.name),
-                field_offset,
-                field_length,
-                auxiliary,
-                parameter,
-                instruction.mnemonic,
-            )
-        )
-    return rules
-
-
-def _module_rules(
-    specification: Specification,
-    record: module.WireRecord,
-    parameters: list[int],
-) -> list[_VerificationRule]:
-    rules = []
-    offsets_by_name = _field_offsets(record.fields, record.field_offsets)
-    for wire_field, offset in zip(record.fields, record.field_offsets, strict=True):
-        rule = wire_field.rule
-        label = f"{record.name}.{wire_field.field.name}"
-        rule_kind = rule.kind
-        if rule_kind == module_rules.FieldRule.ANY_BITS:
-            continue
-        verification_kind = rule_kind.name.upper()
-        field_offset = offset
-        field_length = wire_field.field.byte_length
-        parameter, auxiliary = _value_parameters(rule.values, parameters)
-        if rule_kind in _MODULE_VERSION_RULE:
-            version_component = _MODULE_VERSION_RULE[rule_kind]
-            parameter = getattr(specification.version, version_component)
-        elif rule_kind == module_rules.FieldRule.EXACT_BYTES:
-            expected = rule.data
-            padded = expected + bytes((-len(expected)) % 4)
-            words = (
-                int.from_bytes(padded[index : index + 4], "little")
-                for index in range(0, len(padded), 4)
-            )
-            verification_kind = "EXACT_BYTES"
-            field_length = len(expected)
-            auxiliary = len(padded) // 4
-            parameter = _intern_parameter_words(parameters, words)
-        elif isinstance(rule.data, module_rules.OrdinalDomain):
-            auxiliary = int(rule.data)
-        elif rule_kind == module_rules.FieldRule.SIGNATURE_DESCRIPTOR:
-            field_offset = offsets_by_name[rule.fields[0]]
-            field_length = 2
-            auxiliary = offset
-        elif rule.fields or rule.data is not None:
-            raise ValueError(f"{label}: unsupported module field rule")
-        rules.append(
-            _VerificationRule(
-                verification_kind,
-                field_offset,
-                field_length,
-                auxiliary,
-                parameter,
-                label,
-            )
-        )
-    return rules
-
-
 def _instruction_descriptor(
-    instruction: isa.Instruction, rule_base: int, rule_count: int
+    instruction: isa.Instruction, verification_shape_ordinal: int
 ) -> str:
-    if rule_base > 0xFFFF or rule_count > 0xF or instruction.byte_length > 0xFF:
+    if verification_shape_ordinal > 0xFFFF or instruction.byte_length > 0xFF:
         raise ValueError(f"{instruction.mnemonic}: verification descriptor overflow")
     return (
         "    IREE_VM_BYTECODE_PACK_INSTRUCTION_VERIFICATION"
-        f"({rule_base}u, IREE_VM_BYTECODE_CONTROL_FLOW_"
-        f"{instruction.control_flow.name}, {rule_count}u, "
-        f"{instruction.byte_length}u),"
+        f"({verification_shape_ordinal}u, IREE_VM_BYTECODE_CONTROL_FLOW_"
+        f"{instruction.control_flow.name}, {instruction.byte_length}u),"
     )
 
 
-def _pack_record_descriptor(
-    record: module.WireRecord, rule_base: int, rule_count: int
-) -> int:
-    if rule_base > 0xFFFF or rule_count > 0xFF or record.byte_length > 0xFF:
-        raise ValueError(f"{record.name}: verification descriptor overflow")
-    return (rule_base << 16) | (rule_count << 8) | record.byte_length
+def _instruction_verification_shapes(specification: Specification):
+    """Returns stable deduplicated verification shapes for Core instructions."""
+
+    shape_ordinals = {}
+    shapes = []
+    instruction_shapes = []
+    for instruction in sorted(specification.instructions, key=lambda item: item.opcode):
+        checks = _instruction_checks(instruction)
+        shape_ordinal = shape_ordinals.get(checks)
+        if shape_ordinal is None:
+            shape_ordinal = len(shapes) + 1
+            shape_ordinals[checks] = shape_ordinal
+            shapes.append([checks, []])
+        shapes[shape_ordinal - 1][1].append(instruction.mnemonic)
+        instruction_shapes.append((instruction, shape_ordinal))
+    return instruction_shapes, shapes
 
 
-def render_verification_data(specification: Specification) -> str:
-    """Renders pointer-free runtime verification tables."""
+def _c_u32(value: int) -> str:
+    return f"UINT32_C(0x{value:08X})"
+
+
+def _c_load_unsigned(offset: int, byte_length: int) -> str:
+    if byte_length == 1:
+        return f"record[{offset}u]"
+    if byte_length in (2, 4, 8):
+        return f"iree_unaligned_load_le_u{byte_length * 8}(record + {offset}u)"
+    raise ValueError(f"unsupported generated verifier load width {byte_length}")
+
+
+def _allowed_values_predicate(expression: str, values: Iterable[int]) -> str:
+    values = sorted(set(values))
+    ranges = []
+    for value in values:
+        if ranges and value == ranges[-1][1] + 1:
+            ranges[-1] = (ranges[-1][0], value)
+        else:
+            ranges.append((value, value))
+    predicates = []
+    for lower, upper in ranges:
+        if lower == upper:
+            predicates.append(f"{expression} == {_c_u32(lower)}")
+        elif lower == 0:
+            predicates.append(f"{expression} <= {_c_u32(upper)}")
+        else:
+            predicates.append(
+                f"({expression} >= {_c_u32(lower)} && {expression} <= {_c_u32(upper)})"
+            )
+    return "(" + " || ".join(predicates) + ")"
+
+
+def _direct_instruction_rule_c(
+    kind,
+    field_offset: int,
+    field_byte_length: int,
+    related_layouts: tuple[tuple[int, int], ...],
+    values: tuple[int, ...],
+    data,
+) -> tuple[str | None, str | None]:
+    """Returns direct C for one rule use without an intermediate encoding."""
+
+    def related_load(index: int) -> str:
+        offset, byte_length = related_layouts[index]
+        return _c_load_unsigned(offset, byte_length)
+
+    if kind == core_rules.FieldRule.ZERO:
+        return (
+            "iree_vm_bytecode_bytes_are_zero"
+            f"(record + {field_offset}u, {field_byte_length}u)",
+            None,
+        )
+    load = _c_load_unsigned(field_offset, field_byte_length)
+    if kind == core_rules.FieldRule.REGISTER_VALUE:
+        return f"{load} < context->function->value_register_count_u16", None
+    if kind == core_rules.FieldRule.REGISTER_REF:
+        return f"{load} < context->function->ref_register_count_u16", None
+    if kind == core_rules.FieldRule.REGISTER_FUNCTION:
+        return f"{load} < context->function->function_register_count_u16", None
+    if kind in core_rules.DIRECT_TARGET_RULES:
+        signed_load = f"(int{field_byte_length * 8}_t){load}"
+        return (
+            "iree_vm_bytecode_verify_control_target"
+            f"(context, record_offset, record_length, {signed_load})",
+            None,
+        )
+    if kind == core_rules.RecordRuleKind.SWITCH_TARGETS:
+        base = related_load(0)
+        return (
+            "iree_vm_bytecode_range_fits_u32"
+            f"({base}, {load}, "
+            "context->function->switch_target_entry_count_u32)",
+            None,
+        )
+    if kind == core_rules.FieldRule.ALLOWED_RANGE:
+        return (
+            f"{load} >= {_c_u32(values[0])} && {load} <= {_c_u32(values[1])}",
+            None,
+        )
+    if kind == core_rules.FieldRule.ALLOWED_VALUES:
+        return _allowed_values_predicate(load, values), None
+    if kind == core_rules.FieldRule.SELECTOR:
+        return _allowed_values_predicate(
+            load, (value.value for value in data.values)
+        ), None
+    if kind == core_rules.FieldRule.GLOBAL_ORDINAL:
+        return (
+            "iree_vm_bytecode_verify_global_ordinal"
+            f"(context, {load}, {_c_u32(values[0])})",
+            None,
+        )
+    if kind == core_rules.FieldRule.LOCAL_BYTES_RANGE_BASE:
+        length = related_load(0)
+        return (
+            "iree_vm_bytecode_range_fits_u32"
+            f"({load}, {length}, context->function->local_byte_length_u16)",
+            None,
+        )
+    if kind == core_rules.FieldRule.ABI_SLOT:
+        count = (
+            "iree_unaligned_load_le_u16"
+            f"((const uint8_t*)context->signature + {values[0]}u)"
+        )
+        return f"{load} < iree_vm_bytecode_overflow_count({count})", None
+    if kind == core_rules.FieldRule.LOCAL_BYTES_FIXED_BASE:
+        length, alignment = values
+        return (
+            f"({load} & {_c_u32(alignment - 1)}) == 0 && "
+            "iree_vm_bytecode_range_fits_u32"
+            f"({load}, {_c_u32(length)}, "
+            "context->function->local_byte_length_u16)",
+            None,
+        )
+    if kind == core_rules.FieldRule.PACKED_SELECTORS:
+        predicates = [f"({load} & {_c_u32(values[0])}) == 0"]
+        for component in data:
+            component_value = (
+                f"(({load} >> {component.bit_offset}u) & "
+                f"{_c_u32((1 << component.bit_length) - 1)})"
+            )
+            allowed_values = component.allowed_values or tuple(
+                value.value for value in component.table.values
+            )
+            predicates.append(
+                _allowed_values_predicate(component_value, allowed_values)
+            )
+        return " && ".join(predicates), None
+    if kind == core_rules.FieldRule.REF_SLOT:
+        return f"{load} < context->function->local_ref_count_u32", None
+    if kind == core_rules.FieldRule.LOCAL_BYTES_RANGE_MEMORY_FORMAT:
+        format_value = related_load(0)
+        return (
+            "iree_vm_bytecode_verify_local_memory_format_range"
+            f"(context, {load}, {format_value})",
+            None,
+        )
+    if kind == core_rules.FieldRule.RODATA_ORDINAL:
+        return f"{load} < context->layout->rodata.count", None
+    if kind == core_rules.FieldRule.CONSTANT_POOL_ORDINAL:
+        return f"{load} < context->layout->constants.count", None
+    if kind == core_rules.FieldRule.FUNCTION_LOCAL_ORDINAL:
+        return f"{load} < context->function->local_function_count_u32", None
+    if kind == core_rules.FieldRule.LOCAL_BYTES_REPEATED_BASE:
+        count = related_load(0)
+        element_length, alignment = values
+        return (
+            f"({load} & {_c_u32(alignment - 1)}) == 0 && "
+            "iree_vm_bytecode_range_fits_u32"
+            f"({load}, {count} * {_c_u32(element_length)}, "
+            "context->function->local_byte_length_u16)",
+            None,
+        )
+    if kind == core_rules.FieldRule.IMPORT_ORDINAL_OPTIONAL:
+        return f"iree_vm_bytecode_verify_optional_import(context, {load})", None
+    if kind == core_rules.FieldRule.RODATA_OFFSET:
+        ordinal = related_load(0)
+        return (
+            f"iree_vm_bytecode_verify_rodata_offset(context, {ordinal}, {load})",
+            None,
+        )
+    if kind == core_rules.FieldRule.RODATA_STATIC_OFFSET:
+        ordinal = related_load(0)
+        length = related_load(1)
+        return (
+            "iree_vm_bytecode_verify_rodata_static_offset"
+            f"(context, {ordinal}, {load}, {length})",
+            None,
+        )
+    if kind == core_rules.RecordRuleKind.CALL:
+        return (
+            "iree_vm_bytecode_verify_direct_call"
+            f"(context, {load}, "
+            f"{related_load(0)}, {related_load(1)})",
+            None,
+        )
+    if kind == core_rules.RecordRuleKind.CALL_INDIRECT:
+        return (
+            "iree_vm_bytecode_verify_indirect_call"
+            f"(context, {related_load(0)}, {related_load(1)})",
+            None,
+        )
+    if kind == core_rules.RecordRuleKind.FIELDS_DISTINCT:
+        return f"{load} != {related_load(0)}", None
+    if kind == core_rules.RecordRuleKind.FUNCTION_ADDRESS:
+        return (
+            "iree_vm_bytecode_verify_function_address"
+            f"(context, {load}, "
+            f"{related_load(0)}, {related_load(1)})",
+            None,
+        )
+    if kind == core_rules.RecordRuleKind.INTEGER_BITSTREAM_SHAPE:
+        return (
+            "iree_vm_bytecode_verify_integer_bitstream_shape"
+            f"({load}, {related_load(0)}, {related_load(1)}, "
+            f"{related_load(2)}, {related_load(3)}, "
+            f"{str(values[0] == 0).lower()}, {_c_u32(values[1])})",
+            None,
+        )
+    if kind == core_rules.RecordRuleKind.PACKED_SELECTOR_PAIRS:
+        first, second = data
+        first_value = (
+            f"(({load} >> {first.bit_offset}u) & {_c_u32((1 << first.bit_length) - 1)})"
+        )
+        second_value = (
+            f"(({load} >> {second.bit_offset}u) & "
+            f"{_c_u32((1 << second.bit_length) - 1)})"
+        )
+        pair = f"({first_value} | ({second_value} << {first.bit_length}u))"
+        allowed_pairs = (
+            first_item | second_item << first.bit_length
+            for first_item, second_item in zip(values[::2], values[1::2], strict=True)
+        )
+        return _allowed_values_predicate(pair, allowed_pairs), None
+    if kind == core_rules.RecordRuleKind.ATOMIC_CARRIER_REQUIREMENT:
+        component = data[0]
+        allowed_values = component.allowed_values or tuple(
+            item.value for item in component.table.values
+        )
+        if any(value >= 32 for value in allowed_values):
+            raise ValueError("atomic carrier requirements exceed the u32 bitset")
+        carrier = (
+            f"(({load} >> {component.bit_offset}u) & "
+            f"{_c_u32((1 << component.bit_length) - 1)})"
+        )
+        return (
+            None,
+            f"*context->required_atomic_carrier_bits |= UINT32_C(1) << {carrier};",
+        )
+    if kind == core_rules.RecordRuleKind.VALUE_REGISTER_RANGE:
+        count = related_load(0)
+        return (
+            f"{count} != 0 && iree_vm_bytecode_range_fits_u32"
+            f"({load}, {count}, context->function->value_register_count_u16)",
+            None,
+        )
+    if kind == core_rules.RecordRuleKind.VALUE_REGISTER_FORMAT_RANGE:
+        format_value = related_load(0)
+        return (
+            "iree_vm_bytecode_verify_value_register_format_range"
+            f"(context, {load}, {format_value}, {_c_u32(values[0])})",
+            None,
+        )
+    raise ValueError(f"unhandled instruction verification rule {kind.name}")
+
+
+def _instruction_checks(
+    instruction: isa.Instruction,
+) -> tuple[tuple[str | None, str | None], ...]:
+    layouts_by_name = _field_layouts(instruction.fields, instruction.field_offsets)
+    checks = []
+    skipped_kinds = (
+        core_rules.FieldRule.ANY_BITS,
+        core_rules.FieldRule.CONSTRAINT_MEMBER,
+        core_rules.FieldRule.LOCAL_BYTES_RANGE_LENGTH,
+        core_rules.FieldRule.LOCAL_BYTES_REPEATED_COUNT,
+    )
+    for instruction_field, field_offset in zip(
+        instruction.fields, instruction.field_offsets, strict=True
+    ):
+        rule = instruction_field.rule
+        if rule.kind in skipped_kinds:
+            continue
+        checks.append(
+            _direct_instruction_rule_c(
+                rule.kind,
+                field_offset,
+                instruction_field.field.byte_length,
+                tuple(layouts_by_name[name] for name in rule.fields),
+                rule.values,
+                rule.data,
+            )
+        )
+    for rule in instruction.rules:
+        field_offset, field_byte_length = layouts_by_name[rule.fields[0]]
+        checks.append(
+            _direct_instruction_rule_c(
+                rule.kind,
+                field_offset,
+                field_byte_length,
+                tuple(layouts_by_name[name] for name in rule.fields[1:]),
+                rule.values,
+                rule.data,
+            )
+        )
+    return tuple(checks)
+
+
+def render_verifier_data(specification: Specification) -> str:
+    """Renders the dense runtime verification tables."""
 
     instruction_descriptors = ["    UINT32_C(0),"] * 256
-    rules: list[_VerificationRule] = []
-    parameters: list[int] = []
-    selector_parameters = {}
-    for table in specification.selectors:
-        values = table.values
-        words = [0] * (max(value.value for value in values) // 32 + 1)
-        for value in values:
-            words[value.value // 32] |= 1 << (value.value % 32)
-        selector_parameters[table] = (
-            _intern_parameter_words(parameters, words),
-            len(words),
-        )
-    for instruction in specification.instructions:
-        instruction_rules = _instruction_rules(
-            instruction, parameters, selector_parameters
-        )
+    instruction_shapes, _ = _instruction_verification_shapes(specification)
+    for instruction, shape_ordinal in instruction_shapes:
         instruction_descriptors[instruction.opcode] = _instruction_descriptor(
-            instruction, len(rules), len(instruction_rules)
+            instruction, shape_ordinal
         )
-        rules.extend(instruction_rules)
-
-    record_descriptors = []
-    for record in specification.module_format.records:
-        record_rules = _module_rules(specification, record, parameters)
-        record_descriptors.append(
-            _pack_record_descriptor(record, len(rules), len(record_rules))
+    section_descriptors = [0] * (
+        max(section.section_type for section in specification.module_format.sections)
+        + 1
+    )
+    for section in specification.module_format.sections:
+        section_descriptors[section.section_type] = (
+            section.since.minor << 16 | section.required_flags
         )
-        rules.extend(record_rules)
-
     lines = [
         _COPYRIGHT.rstrip(),
         "",
         _GENERATED.rstrip(),
         "",
-        '#include "iree/base/alignment.h"',
-        '#include "iree/vm/bytecode/verification.h"',
+        '#include "iree/vm/bytecode/verifier_data.h"',
         '#include "iree/vm/bytecode/wire/module.h"',
         "",
-        'static_assert(sizeof(iree_vm_bytecode_verification_rule_t) == 8u, "verification rule packing");',
-        "",
         "#define IREE_VM_BYTECODE_PACK_INSTRUCTION_VERIFICATION(\\",
-        "    rule_base, control_flow, rule_count, byte_length)       \\",
-        "  (((uint32_t)(rule_base) << 16) |                          \\",
-        "   ((uint32_t)(control_flow) << 12) |                       \\",
-        "   ((uint32_t)(rule_count) << 8) | (uint32_t)(byte_length))",
+        "    verification_shape_ordinal, control_flow, byte_length)  \\",
+        "  (((uint32_t)(verification_shape_ordinal) << 16) |         \\",
+        "   ((uint32_t)(control_flow) << 12) |                        \\",
+        "   (uint32_t)(byte_length))",
         "",
         "const uint32_t iree_vm_bytecode_instruction_verification[256] = {",
     ]
@@ -553,46 +647,192 @@ def render_verification_data(specification: Specification) -> str:
             "",
             "#undef IREE_VM_BYTECODE_PACK_INSTRUCTION_VERIFICATION",
             "",
-            "const uint32_t iree_vm_bytecode_module_record_verification[] = {",
+            "const uint32_t iree_vm_bytecode_module_section_verification[] = {",
         ]
     )
-    lines.extend(f"    UINT32_C(0x{value:08X})," for value in record_descriptors)
-    lines.extend(
-        [
-            "};",
-            "",
-            "const iree_vm_bytecode_verification_rule_t iree_vm_bytecode_verification_rules[] = {",
-        ]
-    )
-    for rule in rules:
-        lines.append(
-            "    {UINT32_C(0x%08X), IREE_VM_BYTECODE_VERIFICATION_RULE_%s, %du, %du, %du},  // %s"
-            % (
-                rule.parameter,
-                rule.kind,
-                rule.field_offset,
-                rule.field_length,
-                rule.auxiliary,
-                rule.label,
-            )
-        )
-    lines.extend(
-        [
-            "};",
-            f"const uint32_t iree_vm_bytecode_verification_rule_count = {len(rules)}u;",
-            "",
-            "const uint32_t iree_vm_bytecode_verification_parameters[] = {",
-        ]
-    )
-    lines.extend(f"    UINT32_C(0x{value:08X})," for value in parameters)
-    lines.extend(
-        [
-            "};",
-            f"const uint32_t iree_vm_bytecode_verification_parameter_count = {len(parameters)}u;",
-            "",
-        ]
-    )
+    lines.extend(f"    UINT32_C(0x{value:08X})," for value in section_descriptors)
+    lines.extend(["};", ""])
     return "\n".join(lines)
+
+
+def render_instruction_verifier_cases(specification: Specification) -> str:
+    """Renders direct deduplicated Core instruction validation cases."""
+
+    _, shapes = _instruction_verification_shapes(specification)
+    lines = [_COPYRIGHT.rstrip(), "", _GENERATED.rstrip(), ""]
+    for shape_ordinal, (checks, mnemonics) in enumerate(shapes, 1):
+        lines.append(f"case {shape_ordinal}u:  // {', '.join(mnemonics)}")
+        effects = []
+        for predicate, effect in checks:
+            if predicate:
+                lines.append(f"  if (!({predicate})) return false;")
+            if effect:
+                effects.append(effect)
+        lines.extend(f"  {effect}" for effect in effects)
+        lines.append("  return true;")
+    return "\n".join(lines) + "\n"
+
+
+_MODULE_RELATIONSHIP_RULES = (
+    module_rules.FieldRule.PAGE_MAJOR,
+    module_rules.FieldRule.PAGE_REQUIRED_MINOR,
+    module_rules.FieldRule.SECTION_BYTE_LENGTH,
+    module_rules.FieldRule.SECTION_FLAGS,
+    module_rules.FieldRule.SECTION_TYPE,
+    module_rules.FieldRule.STRING_OFFSET,
+    module_rules.FieldRule.SWITCH_TARGET,
+)
+
+
+def _module_ordinal_predicate(expression: str, domain) -> str:
+    count = {
+        module_rules.OrdinalDomain.STRING: "layout->strings.count",
+        module_rules.OrdinalDomain.STRING_NONEMPTY: "layout->strings.count",
+        module_rules.OrdinalDomain.REF_TYPE: "layout->ref_types.entry_count",
+        module_rules.OrdinalDomain.SIGNATURE: "layout->signatures.count",
+        module_rules.OrdinalDomain.CALLABLE_TYPE: "layout->callable_types.count",
+        module_rules.OrdinalDomain.FUNCTION: "layout->functions.count",
+    }[domain]
+    predicate = f"{expression} < {count}"
+    if domain == module_rules.OrdinalDomain.STRING_NONEMPTY:
+        predicate += (
+            f" && iree_vm_bytecode_string_at(&layout->strings, {expression}).size != 0"
+        )
+    return predicate
+
+
+def _module_field_check(
+    record: module.WireRecord,
+    wire_field,
+    field_offset: int,
+    layouts_by_name: dict[str, tuple[int, int]],
+) -> tuple[str, str | None] | None:
+    """Returns a direct predicate and optional specialized failure statement."""
+
+    rule = wire_field.rule
+    kind = rule.kind
+    if kind == module_rules.FieldRule.ANY_BITS or kind in _MODULE_RELATIONSHIP_RULES:
+        return None
+    field_byte_length = wire_field.field.byte_length
+    if kind == module_rules.FieldRule.ZERO:
+        return (
+            "iree_vm_bytecode_bytes_are_zero"
+            f"(record + {field_offset}u, {field_byte_length}u)",
+            None,
+        )
+    if kind == module_rules.FieldRule.EXACT_BYTES:
+        prefix = _identifier(f"{record.name}_{wire_field.field.name}")
+        return (
+            f"memcmp(record + {field_offset}u, "
+            f"IREE_VM_BYTECODE_{prefix}_BYTES, "
+            f"IREE_VM_BYTECODE_{prefix}_LENGTH) == 0",
+            None,
+        )
+
+    load = _c_load_unsigned(field_offset, field_byte_length)
+    if kind == module_rules.FieldRule.CORE_MAJOR:
+        return (
+            f"{load} == IREE_VM_BYTECODE_CORE_MAJOR",
+            "return iree_make_status("
+            'IREE_STATUS_INCOMPATIBLE, "bytecode Core major %" PRIu64 '
+            f'" is unsupported", (uint64_t){load});',
+        )
+    if kind == module_rules.FieldRule.CORE_REQUIRED_MINOR:
+        return (
+            f"{load} <= IREE_VM_BYTECODE_CORE_MINOR",
+            "return iree_make_status("
+            'IREE_STATUS_INCOMPATIBLE, "bytecode Core minor %" PRIu64 '
+            '" is newer than runtime minor %d", '
+            f"(uint64_t){load}, IREE_VM_BYTECODE_CORE_MINOR);",
+        )
+    if kind == module_rules.FieldRule.ALLOWED_RANGE:
+        return (
+            f"{load} >= {_c_u32(rule.values[0])} && {load} <= {_c_u32(rule.values[1])}",
+            None,
+        )
+    if kind == module_rules.FieldRule.ALLOWED_BITS:
+        return f"({load} & ~{_c_u32(rule.values[0])}) == 0", None
+    if kind == module_rules.FieldRule.MULTIPLE:
+        return f"{load} % {_c_u32(rule.values[0])} == 0", None
+    if kind == module_rules.FieldRule.BYTE_ALIGNMENT:
+        return (
+            f"{load} >= {_c_u32(rule.values[0])} && "
+            f"iree_host_size_is_power_of_two((iree_host_size_t){load})",
+            None,
+        )
+    if kind == module_rules.FieldRule.NONCORE_PAGE:
+        return f"{load} >= UINT32_C(0xF0) && {load} <= UINT32_C(0xFD)", None
+    if kind == module_rules.FieldRule.ORDINAL:
+        return _module_ordinal_predicate(load, rule.data), None
+    if kind == module_rules.FieldRule.ORDINAL_OR_NULL:
+        return (
+            f"{load} == {_c_u32(rule.values[0])} || "
+            f"({_module_ordinal_predicate(load, rule.data)})",
+            None,
+        )
+    if kind == module_rules.FieldRule.SIGNATURE_DESCRIPTOR:
+        kind_offset, kind_byte_length = layouts_by_name[rule.fields[0]]
+        kind_load = _c_load_unsigned(kind_offset, kind_byte_length)
+        return (
+            "iree_vm_bytecode_verify_signature_descriptor"
+            f"(layout, {kind_load}, {load})",
+            None,
+        )
+    raise ValueError(
+        f"unhandled module verification rule {record.name}."
+        f"{wire_field.field.name}: {kind.name}"
+    )
+
+
+def _module_verification_shapes(specification: Specification):
+    """Returns stable deduplicated validation shapes for module records."""
+
+    shape_ordinals = {}
+    shapes = []
+    for record in specification.module_format.records:
+        layouts_by_name = _field_layouts(record.fields, record.field_offsets)
+        checks = tuple(
+            check
+            for wire_field, field_offset in zip(
+                record.fields, record.field_offsets, strict=True
+            )
+            if (
+                check := _module_field_check(
+                    record,
+                    wire_field,
+                    field_offset,
+                    layouts_by_name,
+                )
+            )
+            is not None
+        )
+        shape_ordinal = shape_ordinals.get(checks)
+        if shape_ordinal is None:
+            shape_ordinal = len(shapes)
+            shape_ordinals[checks] = shape_ordinal
+            shapes.append([checks, []])
+        shapes[shape_ordinal][1].append(record)
+    return shapes
+
+
+def render_module_verifier_cases(specification: Specification) -> str:
+    """Renders direct deduplicated module-record validation cases."""
+
+    shapes = _module_verification_shapes(specification)
+    lines = [_COPYRIGHT.rstrip(), "", _GENERATED.rstrip(), ""]
+    for checks, records in shapes:
+        for record in records:
+            lines.append(
+                f"case IREE_VM_BYTECODE_MODULE_RECORD_{_identifier(record.name)}:"
+            )
+        lines.append(f"  // {', '.join(record.name for record in records)}")
+        for predicate, failure in checks:
+            if failure:
+                lines.append(f"  if (!({predicate})) {failure}")
+            else:
+                lines.append(f"  if (!({predicate})) break;")
+        lines.append("  return iree_ok_status();")
+    return "\n".join(lines) + "\n"
 
 
 def _c_string(value: str) -> str:
@@ -605,7 +845,7 @@ def _c_string(value: str) -> str:
     )
 
 
-def render_tooling_data(specification: Specification) -> str:
+def render_disassembler_data(specification: Specification) -> str:
     """Renders separately linked direct indices into packed BSTRING data."""
 
     strings = [""]
@@ -618,9 +858,9 @@ def render_tooling_data(specification: Specification) -> str:
             return offsets[value]
         encoded = value.encode("utf-8")
         if len(encoded) > 0xFF:
-            raise ValueError(f"tooling string exceeds BSTRING limit: {value!r}")
+            raise ValueError(f"disassembler string exceeds BSTRING limit: {value!r}")
         if byte_length + 1 + len(encoded) > 0xFFFF:
-            raise ValueError("tooling BSTRING table exceeds u16 offsets")
+            raise ValueError("disassembler BSTRING table exceeds u16 offsets")
         offset = byte_length
         offsets[value] = offset
         strings.append(value)
@@ -637,7 +877,7 @@ def render_tooling_data(specification: Specification) -> str:
     lines = [
         _GENERATED.rstrip(),
         "",
-        "static const uint8_t iree_vm_bytecode_tooling_strings[] =",
+        "static const uint8_t iree_vm_bytecode_disassembler_strings[] =",
     ]
     for value in strings:
         lines.append(f'    "\\x{len(value.encode("utf-8")):02x}" "{_c_string(value)}"')

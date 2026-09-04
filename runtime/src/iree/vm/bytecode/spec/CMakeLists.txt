@@ -38,6 +38,7 @@ iree_py_library(
     "module/validation.py"
     "render/__init__.py"
     "render/c.py"
+    "render/fixture.py"
     "render/markdown.py"
     "schema.py"
     "specification.py"
