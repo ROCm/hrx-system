@@ -316,39 +316,45 @@ iree_status_t iree_vm_invocation_preflight_root(
 }
 
 static iree_vm_call_packet_t iree_vm_invocation_make_root_packet(
-    uint8_t* storage, const iree_vm_program_root_layout_t* layout) {
+    uint8_t* storage, const iree_vm_program_callable_abi_t* callable_abi) {
+  const iree_vm_program_root_layout_t* layout = &callable_abi->root_layout;
+#define IREE_VM_ROOT_BANK(type, offset, count)                               \
+  {                                                                          \
+    (type*)(storage + (offset)),                                             \
+        (type*)(storage +                                                    \
+                ((count) > IREE_VM_CALL_DIRECT_REGISTER_COUNT                \
+                     ? (offset) +                                            \
+                           IREE_VM_CALL_DIRECT_REGISTER_COUNT * sizeof(type) \
+                     : 0))                                                   \
+  }
   const iree_vm_call_packet_t packet = {
       .value_arguments =
-          {(uint64_t*)(storage + layout->value_arguments.direct_offset),
-           (uint64_t*)(storage + layout->value_arguments.overflow_offset)},
+          IREE_VM_ROOT_BANK(uint64_t, layout->value_arguments_offset,
+                            callable_abi->argument_counts.value_count),
       .ref_arguments =
-          {(iree_vm_ref_t*)(storage + layout->ref_arguments.direct_offset),
-           (iree_vm_ref_t*)(storage + layout->ref_arguments.overflow_offset)},
+          IREE_VM_ROOT_BANK(iree_vm_ref_t, layout->ref_arguments_offset,
+                            callable_abi->argument_counts.ref_count),
       .value_results =
-          {(uint64_t*)(storage + layout->value_results.direct_offset),
-           (uint64_t*)(storage + layout->value_results.overflow_offset)},
+          IREE_VM_ROOT_BANK(uint64_t, layout->value_results_offset,
+                            callable_abi->result_counts.value_count),
       .ref_results =
-          {(iree_vm_ref_t*)(storage + layout->ref_results.direct_offset),
-           (iree_vm_ref_t*)(storage + layout->ref_results.overflow_offset)},
-      .function_arguments =
-          {(iree_vm_function_ref_t*)(storage +
-                                     layout->function_arguments.direct_offset),
-           (iree_vm_function_ref_t*)(storage + layout->function_arguments
-                                                   .overflow_offset)},
-      .function_results =
-          {(iree_vm_function_ref_t*)(storage +
-                                     layout->function_results.direct_offset),
-           (iree_vm_function_ref_t*)(storage +
-                                     layout->function_results.overflow_offset)},
+          IREE_VM_ROOT_BANK(iree_vm_ref_t, layout->ref_results_offset,
+                            callable_abi->result_counts.ref_count),
+      .function_arguments = IREE_VM_ROOT_BANK(
+          iree_vm_function_ref_t, layout->function_arguments_offset,
+          callable_abi->argument_counts.function_count),
+      .function_results = IREE_VM_ROOT_BANK(
+          iree_vm_function_ref_t, layout->function_results_offset,
+          callable_abi->result_counts.function_count),
   };
+#undef IREE_VM_ROOT_BANK
   return packet;
 }
 
 static iree_vm_call_packet_t iree_vm_invocation_root_packet(
     iree_vm_invocation_t* invocation) {
   return iree_vm_invocation_make_root_packet(
-      iree_vm_invocation_stack_base(invocation),
-      &invocation->root_callable_abi->root_layout);
+      iree_vm_invocation_stack_base(invocation), invocation->root_callable_abi);
 }
 
 static void iree_vm_invocation_initialize_root_banks(
@@ -415,7 +421,7 @@ iree_vm_call_packet_t iree_vm_invocation_commit_root(
     iree_vm_invocation_wake_callback_t wake_callback,
     bool has_external_borrowed_arguments) {
   const iree_vm_call_packet_t packet = iree_vm_invocation_make_root_packet(
-      iree_vm_invocation_stack_base(invocation), &callable_abi->root_layout);
+      iree_vm_invocation_stack_base(invocation), callable_abi);
   iree_vm_invocation_initialize_root_banks(callable_abi, &packet);
   iree_vm_invocation_stage_arguments(callable_abi, arguments, &packet);
   invocation->process = process;

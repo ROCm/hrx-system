@@ -68,29 +68,20 @@ typedef struct iree_vm_program_function_field_abi_t {
   uint32_t variant_offset;
 } iree_vm_program_function_field_abi_t;
 
-// Byte offsets for one root bank and its provider-visible overflow window. An
-// unused window holds offset zero and is never accessed by a valid signature.
-typedef struct iree_vm_program_root_bank_layout_t {
-  // First cell in the complete contiguous bank.
-  uint32_t direct_offset;
-  // Cell 16 when present, otherwise the unused offset-zero sentinel.
-  uint32_t overflow_offset;
-} iree_vm_program_root_bank_layout_t;
-
 // Precomputed placement of every root bank in invocation-owned storage.
 typedef struct iree_vm_program_root_layout_t {
-  // Value argument bank placement.
-  iree_vm_program_root_bank_layout_t value_arguments;
-  // Ref argument bank placement.
-  iree_vm_program_root_bank_layout_t ref_arguments;
-  // Value result bank placement.
-  iree_vm_program_root_bank_layout_t value_results;
-  // Ref result bank placement.
-  iree_vm_program_root_bank_layout_t ref_results;
-  // Function argument bank placement.
-  iree_vm_program_root_bank_layout_t function_arguments;
-  // Function result bank placement.
-  iree_vm_program_root_bank_layout_t function_results;
+  // First value argument cell.
+  uint32_t value_arguments_offset;
+  // First ref argument cell.
+  uint32_t ref_arguments_offset;
+  // First value result cell.
+  uint32_t value_results_offset;
+  // First ref result cell.
+  uint32_t ref_results_offset;
+  // First function argument cell.
+  uint32_t function_arguments_offset;
+  // First function result cell.
+  uint32_t function_results_offset;
   // Exact invocation-owned bytes occupied by all banks.
   uint32_t storage_size;
 } iree_vm_program_root_layout_t;
@@ -176,11 +167,11 @@ static_assert(sizeof(void*) != 8 ||
               "64-bit ref field ABIs must fit in 16 bytes");
 static_assert(sizeof(iree_vm_program_function_field_abi_t) <= 8,
               "function field ABIs must fit in eight bytes");
-static_assert(sizeof(iree_vm_program_root_layout_t) <= 52,
-              "root layouts must fit in 52 bytes");
+static_assert(sizeof(iree_vm_program_root_layout_t) <= 32,
+              "two root layouts must fit in one cache line");
 static_assert(sizeof(void*) != 8 ||
-                  sizeof(iree_vm_program_callable_abi_t) <= 112,
-              "64-bit callable ABIs must fit in 112 bytes");
+                  sizeof(iree_vm_program_callable_abi_t) <= 96,
+              "two 64-bit callable ABIs must fit in three cache lines");
 static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_initializer_t) <= 16,
               "64-bit initializer records must fit in 16 bytes");
 static_assert(sizeof(void*) != 8 || sizeof(iree_vm_program_t) <= 128,

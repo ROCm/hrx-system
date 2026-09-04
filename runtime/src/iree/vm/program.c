@@ -184,16 +184,8 @@ static void iree_vm_program_build_signature_side_abi(
 
 static void iree_vm_program_append_root_bank_layout(
     uint16_t count, uint32_t element_size, uint32_t* inout_storage_size,
-    iree_vm_program_root_bank_layout_t* out_layout) {
-  const uint32_t direct_offset = *inout_storage_size;
-  *out_layout = (iree_vm_program_root_bank_layout_t){
-      .direct_offset = count ? direct_offset : 0,
-      .overflow_offset =
-          count > IREE_VM_CALL_DIRECT_REGISTER_COUNT
-              ? direct_offset +
-                    IREE_VM_CALL_DIRECT_REGISTER_COUNT * element_size
-              : 0,
-  };
+    uint32_t* out_offset) {
+  *out_offset = count ? *inout_storage_size : 0;
   *inout_storage_size += count * element_size;
 }
 
@@ -203,22 +195,22 @@ static iree_vm_program_root_layout_t iree_vm_program_build_root_layout(
   iree_vm_program_root_layout_t layout = {0};
   iree_vm_program_append_root_bank_layout(
       argument_counts.value_count, sizeof(uint64_t), &layout.storage_size,
-      &layout.value_arguments);
+      &layout.value_arguments_offset);
   iree_vm_program_append_root_bank_layout(
       argument_counts.ref_count, sizeof(iree_vm_ref_t), &layout.storage_size,
-      &layout.ref_arguments);
+      &layout.ref_arguments_offset);
   iree_vm_program_append_root_bank_layout(
       result_counts.value_count, sizeof(uint64_t), &layout.storage_size,
-      &layout.value_results);
+      &layout.value_results_offset);
   iree_vm_program_append_root_bank_layout(
       result_counts.ref_count, sizeof(iree_vm_ref_t), &layout.storage_size,
-      &layout.ref_results);
+      &layout.ref_results_offset);
   iree_vm_program_append_root_bank_layout(
       argument_counts.function_count, sizeof(iree_vm_function_ref_t),
-      &layout.storage_size, &layout.function_arguments);
+      &layout.storage_size, &layout.function_arguments_offset);
   iree_vm_program_append_root_bank_layout(
       result_counts.function_count, sizeof(iree_vm_function_ref_t),
-      &layout.storage_size, &layout.function_results);
+      &layout.storage_size, &layout.function_results_offset);
   return layout;
 }
 
