@@ -233,6 +233,7 @@ loom_cc_library(
     loom::codegen::low::function
     loom::codegen::low::lower
     loom::codegen::low::lower::representation_observer
+    loom::codegen::low::representation_plan
     loom::codegen::low::source_memory_plan
     loom::ir
     loom::ir::facts
@@ -242,6 +243,7 @@ loom_cc_library(
     loom::ops::cfg
     loom::ops::combining
     loom::ops::encoding
+    loom::ops::func
     loom::ops::global
     loom::ops::index
     loom::ops::kernel
