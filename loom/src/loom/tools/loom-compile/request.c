@@ -7,6 +7,7 @@
 #include "loom/tools/loom-compile/request.h"
 
 #include "loom/ops/op_defs.h"
+#include "loom/ops/pipeline/ops.h"
 #include "loom/target/entry_selection.h"
 #include "loom/target/projection.h"
 #include "loom/target/selection.h"
@@ -58,6 +59,31 @@ static iree_status_t loom_compile_request_lookup_root(
 static iree_status_t loom_compile_request_classify_symbol(
     const loom_module_t* module, const loom_symbol_t* symbol,
     loom_compile_product_t* out_product) {
+  if (loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_PIPELINE)) {
+    const loom_symbol_product_carrier_t carrier =
+        loom_symbol_definition_product_carrier(symbol->definition,
+                                               symbol->defining_op);
+    switch (carrier) {
+      case LOOM_SYMBOL_PRODUCT_CARRIER_UNCLASSIFIED:
+      case 0:
+        *out_product = LOOM_COMPILE_PRODUCT_MODULE;
+        return iree_ok_status();
+      case LOOM_PIPELINE_DEF_SCOPE_KERNEL:
+        *out_product = LOOM_COMPILE_PRODUCT_KERNEL;
+        return iree_ok_status();
+      case LOOM_PIPELINE_DEF_SCOPE_COMMAND:
+        *out_product = LOOM_COMPILE_PRODUCT_COMMAND;
+        return iree_ok_status();
+      default: {
+        const iree_string_view_t symbol_name =
+            module->strings.entries[symbol->name_id];
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "pipeline root '@%.*s' has unsupported product scope %u",
+            (int)symbol_name.size, symbol_name.data, (unsigned)carrier);
+      }
+    }
+  }
   if (loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_COMMAND_PROGRAM)) {
     *out_product = LOOM_COMPILE_PRODUCT_COMMAND;
     return iree_ok_status();

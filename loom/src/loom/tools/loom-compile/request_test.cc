@@ -234,6 +234,60 @@ command.program.def public @Command123() launch() {
   EXPECT_EQ(request.target_fact_type, nullptr);
 }
 
+TEST_F(CompileRequestTest, RoutesPipelineScopesThroughProductBoundaries) {
+  ModulePtr module = Parse(R"(
+target.generic<reference> @Target789 {
+  subgroup_size = 32
+}
+pipeline.def<kernel> target(@Target789) @KernelPipeline() launch() {
+  pipeline.return
+}
+pipeline.def<command> @CommandPipeline() launch() {
+  pipeline.return
+}
+pipeline.def @GenericPipeline() launch() {
+  pipeline.return
+}
+)");
+
+  const loom_artifact_provider_t* providers[] = {&kExecutableProvider};
+
+  const iree_string_view_t kernel_roots[] = {IREE_SV("@KernelPipeline")};
+  loom_compile_request_options_t options = {
+      /*.roots=*/
+      {
+          /*.count=*/IREE_ARRAYSIZE(kernel_roots),
+          /*.values=*/kernel_roots,
+      },
+  };
+  loom_compile_request_t request =
+      Resolve(module.get(), options, providers, IREE_ARRAYSIZE(providers));
+  EXPECT_EQ(request.product, LOOM_COMPILE_PRODUCT_KERNEL);
+  EXPECT_EQ(request.producer.value.artifact_provider, &kExecutableProvider);
+  EXPECT_EQ(request.target_fact_type, &loom_target_generic_fact_type);
+
+  const iree_string_view_t command_roots[] = {IREE_SV("@CommandPipeline")};
+  options.roots = {
+      /*.count=*/IREE_ARRAYSIZE(command_roots),
+      /*.values=*/command_roots,
+  };
+  request = Resolve(module.get(), options, nullptr, 0);
+  EXPECT_EQ(request.product, LOOM_COMPILE_PRODUCT_COMMAND);
+  EXPECT_EQ(request.producer.kind, LOOM_COMPILE_PRODUCER_COMMAND);
+  EXPECT_EQ(request.target_fact_type, nullptr);
+
+  const iree_string_view_t generic_roots[] = {IREE_SV("@GenericPipeline")};
+  options.roots = {
+      /*.count=*/IREE_ARRAYSIZE(generic_roots),
+      /*.values=*/generic_roots,
+  };
+  options.format = IREE_SV("DiagnosticFormat123");
+  request = Resolve(module.get(), options, nullptr, 0);
+  EXPECT_EQ(request.product, LOOM_COMPILE_PRODUCT_MODULE);
+  EXPECT_EQ(request.producer.kind, LOOM_COMPILE_PRODUCER_TARGET_EMITTER);
+  EXPECT_EQ(request.target_fact_type, nullptr);
+}
+
 TEST_F(CompileRequestTest, RejectsMixedExplicitRootProducts) {
   ModulePtr module = Parse(R"(
 kernel.def @Kernel123() {

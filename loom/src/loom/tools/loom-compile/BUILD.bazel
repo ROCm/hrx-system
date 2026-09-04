@@ -72,6 +72,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/pipeline",
         "//loom/src/loom/target:entry_selection",
         "//loom/src/loom/target:projection",
         "//loom/src/loom/target:provider",

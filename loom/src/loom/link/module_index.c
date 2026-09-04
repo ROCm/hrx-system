@@ -771,6 +771,7 @@ static iree_status_t loom_link_index_append_module(
 static iree_status_t loom_link_index_append_symbol(
     loom_link_module_index_t* index, loom_link_module_index_module_t* module,
     iree_string_view_t name, loom_symbol_kind_t kind,
+    loom_symbol_product_carrier_t product_carrier,
     loom_link_symbol_identity_t identity, loom_link_symbol_flags_t flags,
     loom_link_symbol_facet_schema_t facet_schema) {
   iree_host_size_t symbol_ordinal = 0;
@@ -823,6 +824,7 @@ static iree_status_t loom_link_index_append_symbol(
       .module_symbol_ordinal = module->symbol_count,
       .name = name,
       .kind = kind,
+      .product_carrier = product_carrier,
       .template_family_ordinal = LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID,
       .identity = identity,
       .flags = flags,
@@ -1052,8 +1054,11 @@ static iree_status_t loom_link_index_module_materialized_symbols(
         defining_op ? loom_op_vtable(source_module, defining_op) : NULL;
     const loom_link_symbol_facet_schema_t facet_schema =
         loom_link_classify_materialized_symbol_facets(defining_op, vtable);
+    const loom_symbol_product_carrier_t product_carrier =
+        loom_symbol_definition_product_carrier(
+            vtable ? vtable->symbol_def : NULL, defining_op);
     IREE_RETURN_IF_ERROR(loom_link_index_append_symbol(
-        index, module, name, symbol->kind, identity,
+        index, module, name, symbol->kind, product_carrier, identity,
         loom_link_materialized_symbol_flags(source_module, symbol),
         facet_schema));
   }
@@ -1307,7 +1312,7 @@ static iree_status_t loom_link_index_module_bytecode_symbols(
         loom_link_classify_bytecode_symbol_facets(symbol);
     IREE_RETURN_IF_ERROR(loom_link_index_append_symbol(
         index, module, symbol->name,
-        loom_link_bytecode_symbol_kind(symbol->kind),
+        loom_link_bytecode_symbol_kind(symbol->kind), symbol->product_carrier,
         loom_link_bytecode_symbol_identity(symbol, flags), flags,
         facet_schema));
   }

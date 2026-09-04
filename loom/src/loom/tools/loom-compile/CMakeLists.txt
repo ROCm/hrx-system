@@ -65,6 +65,7 @@ loom_cc_library(
     iree::base
     loom::ir
     loom::ops::op_defs
+    loom::ops::pipeline
     loom::target::entry_selection
     loom::target::projection
     loom::target::provider
