@@ -362,9 +362,9 @@ def matrix_fragment_realization_catalog(
         else intern_representation(choices.operand_exchanged_result_representation)
         for choices in pending_choices
     )
-    if len(result_representations) > 0xFF:
+    if len(result_representations) > 63:
         raise ValueError(
-            "AMDGPU matrix result representation catalog exceeds uint8 IDs"
+            "AMDGPU matrix result representation catalog exceeds uint64 bitset IDs"
         )
 
     contract_choices = tuple(

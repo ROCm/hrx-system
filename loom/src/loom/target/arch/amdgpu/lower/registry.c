@@ -55,6 +55,7 @@
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_memory_packet.h"
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_memory_plan.h"
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_repack.h"
+#include "loom/target/arch/amdgpu/lower/matrix_representation.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/preamble.h"
 #include "loom/target/arch/amdgpu/lower/sanitizer.h"
@@ -1759,6 +1760,7 @@ static const loom_low_lower_policy_t kAmdgpuLowLowerPolicy = {
             .attrs = loom_amdgpu_descriptor_matrix_attrs,
             .user_data = NULL,
         },
+    .source_plan_observer = &loom_amdgpu_matrix_representation_observer,
     .preselect_op = {.fn = loom_amdgpu_preselect_op, .user_data = NULL},
     .select_op = {.fn = loom_amdgpu_select_op, .user_data = NULL},
     .mark_plan_storage_demands = {.fn = loom_amdgpu_mark_plan_storage_demands,

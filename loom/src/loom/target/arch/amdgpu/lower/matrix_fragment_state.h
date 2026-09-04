@@ -103,6 +103,11 @@ typedef struct loom_amdgpu_matrix_fragment_state_t {
   loom_amdgpu_fragment_memory_address_base_cache_t address_base;
   // Cached matrix contract descriptors available to this source function.
   loom_amdgpu_matrix_fragment_contract_candidates_t contract_candidates;
+  // Canonical matrix contract ordinal by source value ordinal. Allocated only
+  // when exact result-representation planning observes a matrix producer.
+  uint16_t* contract_ordinals_by_value_ordinal;
+  // Number of entries in |contract_ordinals_by_value_ordinal|.
+  loom_value_ordinal_t contract_ordinal_count;
 } loom_amdgpu_matrix_fragment_state_t;
 
 // Returns the required function-local matrix-fragment lowering state.
@@ -114,6 +119,17 @@ iree_status_t loom_amdgpu_matrix_fragment_state(
 iree_status_t loom_amdgpu_matrix_fragment_contract_candidates(
     loom_low_lower_context_t* context,
     const loom_amdgpu_matrix_fragment_contract_candidates_t** out_candidates);
+
+// Records the canonical matrix contract producing one source result value.
+iree_status_t loom_amdgpu_matrix_fragment_record_contract_ordinal(
+    loom_low_lower_context_t* context, loom_value_id_t source_value_id,
+    uint16_t contract_ordinal);
+
+// Queries a recorded canonical contract ordinal through a contract query
+// scope. Returns NONE when no producer was recorded for the value.
+iree_status_t loom_amdgpu_matrix_fragment_query_contract_ordinal(
+    const loom_target_contract_query_environment_t* environment,
+    loom_value_id_t source_value_id, uint16_t* out_contract_ordinal);
 
 // Emits or reuses the subgroup lane id for a matrix-fragment operation.
 iree_status_t loom_amdgpu_emit_matrix_fragment_lane_ids(

@@ -9,6 +9,7 @@
 #ifndef LOOM_TARGET_ARCH_AMDGPU_LOWER_MATRIX_FRAGMENT_MEMORY_PACKET_H_
 #define LOOM_TARGET_ARCH_AMDGPU_LOWER_MATRIX_FRAGMENT_MEMORY_PACKET_H_
 
+#include "loom/codegen/low/representation_plan.h"
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_memory_plan.h"
 
 #ifdef __cplusplus
@@ -42,6 +43,68 @@ bool loom_amdgpu_fragment_memory_space_supports_access(
 bool loom_amdgpu_fragment_memory_payload_form_has_descriptors(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_fragment_memory_payload_form_t payload_form);
+
+typedef enum loom_amdgpu_fragment_publication_source_flag_bits_e {
+  // No optional narrowed-result source form is available.
+  LOOM_AMDGPU_FRAGMENT_PUBLICATION_SOURCE_FLAG_NONE = 0u,
+  // A proven rounded source can be packed without slicing constraints.
+  LOOM_AMDGPU_FRAGMENT_PUBLICATION_SOURCE_FLAG_ROUNDED = 1u << 0,
+  // Each rounded source lane is scaled before narrowing.
+  LOOM_AMDGPU_FRAGMENT_PUBLICATION_SOURCE_FLAG_SCALED = 1u << 1,
+  // A packed 16-bit source is reused directly.
+  LOOM_AMDGPU_FRAGMENT_PUBLICATION_SOURCE_FLAG_PACKED = 1u << 2,
+} loom_amdgpu_fragment_publication_source_flag_bits_t;
+typedef uint8_t loom_amdgpu_fragment_publication_source_flags_t;
+
+// Static facts sufficient to compare exact narrowed-result publications
+// without constructing or retaining a complete fragment memory plan.
+typedef struct loom_amdgpu_fragment_memory_publication_query_t {
+  // Descriptor capabilities available on the selected target.
+  const loom_low_descriptor_set_t* descriptor_set;
+  // Exact native fragment layout being published.
+  const loom_amdgpu_matrix_fragment_layout_t* layout;
+  // Compiled lane/register address coefficients for the exact layout.
+  const loom_amdgpu_fragment_memory_address_layout_t* address_layout;
+  // Runtime view-axis coefficients for the exact layout.
+  const loom_amdgpu_fragment_memory_runtime_axis_t* runtime_axes;
+  // Exact byte strides for static source-view axes.
+  const uint32_t* static_axis_byte_strides;
+  // Destination memory space.
+  loom_value_fact_memory_space_t memory_space;
+  // Matrix fragment role being published.
+  loom_contract_operand_role_t role;
+  // Source-to-native coordinate interpretation for the representation.
+  loom_amdgpu_matrix_result_representation_flags_t representation_flags;
+  // Narrowed result payload form.
+  loom_amdgpu_fragment_memory_payload_form_t payload_form;
+  // Number of native result registers.
+  uint16_t register_count;
+  // Destination element byte count.
+  uint16_t element_byte_count;
+  // Destination view rank.
+  uint8_t view_rank;
+  // Optional narrowed-result source forms available to the publication.
+  loom_amdgpu_fragment_publication_source_flags_t source_flags;
+} loom_amdgpu_fragment_memory_publication_query_t;
+
+// Cheapest exact publication selected from packet capabilities and issue
+// costs.
+typedef struct loom_amdgpu_fragment_memory_publication_choice_t {
+  // Concrete result epilogue strategy.
+  loom_amdgpu_fragment_memory_epilogue_strategy_t strategy;
+  // Target cost contributed to physical representation selection.
+  loom_low_representation_cost_t cost;
+  // Cross-lane publication recipe, or NULL for direct publication.
+  const loom_matrix_fragment_packed_b16_publication_t* packed_b16_publication;
+  // Cross-lane packet flags, or zero for direct publication.
+  loom_amdgpu_fragment_memory_packet_flags_t packet_flags;
+} loom_amdgpu_fragment_memory_publication_choice_t;
+
+// Selects the cheapest exact narrowed-result publication. Returns false when
+// no target packet sequence covers the query.
+bool loom_amdgpu_fragment_memory_select_publication(
+    const loom_amdgpu_fragment_memory_publication_query_t* query,
+    loom_amdgpu_fragment_memory_publication_choice_t* out_choice);
 
 // Selects direct memory packets for an analyzed fragment memory plan. Returns
 // false and sets an optional stable constraint key when no packetization is

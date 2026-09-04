@@ -424,6 +424,9 @@ typedef enum loom_amdgpu_matrix_fragment_layout_kind_e {
 // denotes a contract without exact reusable fragment-layout facts.
 typedef uint8_t loom_amdgpu_matrix_result_representation_id_t;
 #define LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE UINT8_C(0)
+// Largest representation ID encodable in the target's compact availability
+// bitsets.
+#define LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_MAX_ID UINT8_C(63)
 
 typedef enum loom_amdgpu_matrix_result_representation_flag_bits_e {
   // The native fragment's M/N coordinates are exchanged at the source
@@ -438,9 +441,13 @@ typedef struct loom_amdgpu_matrix_result_representation_t {
   // Fragment layout whose result role realizes this deduplicated placement;
   // the generated catalog verifies uint8 fit.
   uint8_t fragment_layout_kind;
+  // Matrix numeric type carried by the result payload.
+  uint8_t numeric_type;
   // Coordinate interpretation applied to the native fragment layout.
   loom_amdgpu_matrix_result_representation_flags_t flags;
 } loom_amdgpu_matrix_result_representation_t;
+static_assert(sizeof(loom_amdgpu_matrix_result_representation_t) == 3,
+              "matrix result representations must stay compact");
 
 // Sentinel used when no operand-exchanged native contract exists.
 #define LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE UINT16_MAX

@@ -1573,6 +1573,9 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
       runtime_axes[LOOM_AMDGPU_FRAGMENT_MEMORY_VIEW_RANK_CAPACITY];
   // Rank of the typed view.
   uint8_t view_rank;
+  // Source-to-native coordinate interpretation for the selected result
+  // representation.
+  loom_amdgpu_matrix_result_representation_flags_t representation_flags;
   // Number of target fragment coordinate registers in the selected layout.
   uint16_t register_count;
   // Number of 32-bit registers used by the lowered payload storage value.

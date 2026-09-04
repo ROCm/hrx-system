@@ -41,10 +41,15 @@ typedef struct loom_amdgpu_matrix_fragment_contract_candidates_t {
   loom_amdgpu_matrix_feature_bits_t feature_bits;
   // Wave size used to filter descriptors in this list.
   uint32_t wave_size;
-  // Matrix contract descriptors available to the selected target.
-  const loom_amdgpu_matrix_contract_descriptor_t** descriptors;
-  // Number of entries in descriptors.
+  // Stable built-in ordinals of matrix contracts available to the target.
+  const uint16_t* descriptor_ordinals;
+  // Number of entries in |descriptor_ordinals|.
   iree_host_size_t descriptor_count;
+  // Exact canonical result representations available on this target.
+  uint64_t canonical_result_representation_bits;
+  // Canonical and operand-exchanged result representations available on this
+  // target.
+  uint64_t exact_result_representation_bits;
 } loom_amdgpu_matrix_fragment_contract_candidates_t;
 
 typedef struct loom_amdgpu_matrix_fragment_role_storage_t {
@@ -72,6 +77,28 @@ bool loom_amdgpu_matrix_fragment_tile_shape_matches(
 // Returns true when |role| carries a matrix accumulator or result fragment.
 bool loom_amdgpu_matrix_fragment_role_is_result_like(
     loom_contract_operand_role_t role);
+
+// Maps one native fragment axis to its physical source-view axis. Exact
+// transposed result representations exchange M/N while input roles retain
+// their source coordinates.
+uint8_t loom_amdgpu_matrix_fragment_role_view_axis(
+    loom_contract_operand_role_t role, uint8_t view_rank,
+    loom_amdgpu_matrix_result_representation_flags_t representation_flags,
+    loom_matrix_fragment_axis_t native_axis);
+
+// Returns the logical source tile shape for a native fragment
+// representation.
+loom_amdgpu_matrix_tile_shape_t loom_amdgpu_matrix_fragment_source_tile_shape(
+    const loom_amdgpu_matrix_fragment_layout_t* layout,
+    loom_contract_operand_role_t role,
+    loom_amdgpu_matrix_result_representation_flags_t representation_flags);
+
+// Returns true when one source value carries the exact shape and payload of a
+// generated result representation.
+bool loom_amdgpu_matrix_result_representation_matches_value(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t value_id,
+    loom_amdgpu_matrix_result_representation_id_t representation_id);
 
 // Returns the physical elements carried by each register in |role_layout|.
 uint16_t loom_amdgpu_matrix_fragment_payload_elements_per_register(
@@ -123,6 +150,11 @@ const loom_amdgpu_matrix_contract_descriptor_t*
 loom_amdgpu_matrix_fragment_contract_candidate_at(
     const loom_amdgpu_matrix_fragment_contract_candidates_t* candidates,
     iree_host_size_t index);
+
+// Maps one matrix numeric type to its physical scalar storage type.
+bool loom_amdgpu_matrix_fragment_scalar_type_from_numeric(
+    loom_amdgpu_matrix_numeric_type_t numeric_type,
+    loom_scalar_type_t* out_element_type);
 
 // Returns matrix feature bits for the selected AMDGPU target facts.
 loom_amdgpu_matrix_feature_bits_t loom_amdgpu_matrix_fragment_feature_bits(

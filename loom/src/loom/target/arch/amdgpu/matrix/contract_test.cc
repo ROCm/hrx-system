@@ -190,13 +190,14 @@ TEST(MatrixContractTest, MatcherDistinguishesBlockedMfmaShape) {
       LOOM_AMDGPU_MATRIX_NUMERIC_F32, LOOM_AMDGPU_MATRIX_SCALE_NONE,
       LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX908_GFX90A, 64, 0, 0);
   loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
-  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&request, &diagnostic), nullptr);
+  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&request, nullptr, &diagnostic),
+            nullptr);
   EXPECT_EQ(diagnostic.rejection_bits,
             LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_TILE_SHAPE);
 
   request.tile_shape.block_count = 16;
   const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
-      loom_amdgpu_matrix_contract_select(&request, &diagnostic);
+      loom_amdgpu_matrix_contract_select(&request, nullptr, &diagnostic);
   ASSERT_NE(descriptor, nullptr);
   EXPECT_EQ(ToString(descriptor->name), "mfma.f32.4x4x2.bf16");
   EXPECT_EQ(descriptor->tile_shape.block_count, 16);
@@ -222,7 +223,7 @@ TEST(MatrixContractTest, MatcherRejectsGfx12WmmaPayloadWithoutGfx12Feature) {
 
   loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
   const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
-      loom_amdgpu_matrix_contract_select(&request, &diagnostic);
+      loom_amdgpu_matrix_contract_select(&request, nullptr, &diagnostic);
   EXPECT_EQ(descriptor, nullptr);
   EXPECT_EQ(diagnostic.rejection_bits,
             LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_FEATURES);
@@ -236,9 +237,14 @@ TEST(MatrixContractTest, MatcherSelectsMatchingDescriptor) {
       LOOM_AMDGPU_MATRIX_SCALE_NONE, LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8,
       64, 0, 0);
   loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
+  uint16_t descriptor_ordinal = LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE;
   const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
-      loom_amdgpu_matrix_contract_select(&request, &diagnostic);
+      loom_amdgpu_matrix_contract_select(&request, &descriptor_ordinal,
+                                         &diagnostic);
   ASSERT_NE(descriptor, nullptr);
+  EXPECT_NE(descriptor_ordinal, LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE);
+  EXPECT_EQ(loom_amdgpu_matrix_contract_descriptor_at(descriptor_ordinal),
+            descriptor);
   EXPECT_EQ(descriptor->family, LOOM_AMDGPU_MATRIX_FAMILY_MFMA);
   EXPECT_EQ(descriptor->tile_shape.result_row_count, 16);
   EXPECT_EQ(descriptor->tile_shape.result_column_count, 16);
@@ -281,7 +287,7 @@ TEST(MatrixContractTest, MatcherSelectsDefinedGfx1250SparseBf16Semantics) {
 
   loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
   const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
-      loom_amdgpu_matrix_contract_select(&request, &diagnostic);
+      loom_amdgpu_matrix_contract_select(&request, nullptr, &diagnostic);
   ASSERT_NE(descriptor, nullptr);
   EXPECT_EQ(ToString(descriptor->name), "swmmac.f32.16x16x64.bf16");
   EXPECT_EQ(descriptor->low_descriptor_ref,
@@ -363,7 +369,7 @@ TEST(MatrixContractTest, MatcherSelectsRdnaIntegerWmmaLowDescriptors) {
     request.result_payload.element_count = test_case.accumulator_element_count;
     loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
     const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
-        loom_amdgpu_matrix_contract_select(&request, &diagnostic);
+        loom_amdgpu_matrix_contract_select(&request, nullptr, &diagnostic);
     ASSERT_NE(descriptor, nullptr);
     EXPECT_EQ(descriptor->family, LOOM_AMDGPU_MATRIX_FAMILY_WMMA);
     const loom_amdgpu_matrix_numeric_type_t descriptor_numeric_type =
@@ -393,7 +399,7 @@ TEST(MatrixContractTest, MatcherRejectsMissingFeatureAfterSemanticMatch) {
       scale_flags, scale_flags);
   loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
   const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
-      loom_amdgpu_matrix_contract_select(&request, &diagnostic);
+      loom_amdgpu_matrix_contract_select(&request, nullptr, &diagnostic);
   EXPECT_EQ(descriptor, nullptr);
   EXPECT_EQ(diagnostic.flag_candidate_count, 1u);
   EXPECT_EQ(diagnostic.feature_candidate_count, 0u);
@@ -409,9 +415,9 @@ TEST(MatrixContractTest, MatcherRejectsTileShapeAndPayloadMismatches) {
       LOOM_AMDGPU_MATRIX_SCALE_NONE, LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8,
       64, 0, 0);
   loom_amdgpu_matrix_contract_match_diagnostic_t shape_diagnostic = {};
-  EXPECT_EQ(
-      loom_amdgpu_matrix_contract_select(&shape_request, &shape_diagnostic),
-      nullptr);
+  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&shape_request, nullptr,
+                                               &shape_diagnostic),
+            nullptr);
   EXPECT_EQ(shape_diagnostic.rejection_bits,
             LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_TILE_SHAPE);
 
@@ -422,9 +428,9 @@ TEST(MatrixContractTest, MatcherRejectsTileShapeAndPayloadMismatches) {
       LOOM_AMDGPU_MATRIX_SCALE_NONE, LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8,
       64, 0, 0);
   loom_amdgpu_matrix_contract_match_diagnostic_t payload_diagnostic = {};
-  EXPECT_EQ(
-      loom_amdgpu_matrix_contract_select(&payload_request, &payload_diagnostic),
-      nullptr);
+  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&payload_request, nullptr,
+                                               &payload_diagnostic),
+            nullptr);
   EXPECT_EQ(payload_diagnostic.rejection_bits &
                 LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_LHS_PAYLOAD,
             LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_LHS_PAYLOAD);
@@ -445,7 +451,8 @@ TEST(MatrixContractTest, MatcherRejectsMissingMatrixFormatFacts) {
           LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4,
       64, available_flags, required_flags);
   loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
-  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&request, &diagnostic), nullptr);
+  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&request, nullptr, &diagnostic),
+            nullptr);
   EXPECT_EQ(diagnostic.rejection_bits &
                 LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_MISSING_MATRIX_FORMATS,
             LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_MISSING_MATRIX_FORMATS);
@@ -473,7 +480,7 @@ TEST(MatrixContractTest, MatcherAcceptsImplicitScaleFormatFacts) {
 
   loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
   const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
-      loom_amdgpu_matrix_contract_select(&request, &diagnostic);
+      loom_amdgpu_matrix_contract_select(&request, nullptr, &diagnostic);
   ASSERT_NE(descriptor, nullptr);
   EXPECT_EQ(descriptor->low_descriptor_ref,
             LOOM_AMDGPU_DESCRIPTOR_REF_V_MFMA_SCALE_F32_16X16X128_F8F6F4_F4_F4);
@@ -502,7 +509,8 @@ TEST(MatrixContractTest, MatcherRejectsImplicitScaleFormatMismatch) {
       1u << LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_FP8_E4M3;
 
   loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
-  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&request, &diagnostic), nullptr);
+  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&request, nullptr, &diagnostic),
+            nullptr);
   EXPECT_EQ(diagnostic.rejection_bits,
             LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_SCALE_FORMAT);
 }
@@ -517,7 +525,8 @@ TEST(MatrixContractTest, MatcherRejectsScaleKindMismatch) {
           LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4,
       64, 0, 0);
   loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
-  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&request, &diagnostic), nullptr);
+  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&request, nullptr, &diagnostic),
+            nullptr);
   EXPECT_EQ(diagnostic.rejection_bits,
             LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_SCALE_KIND);
 }
@@ -533,9 +542,9 @@ TEST(MatrixContractTest, MatcherRejectsSparseAndReuseRequirements) {
           LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_CLAMP,
       0);
   loom_amdgpu_matrix_contract_match_diagnostic_t sparse_diagnostic = {};
-  EXPECT_EQ(
-      loom_amdgpu_matrix_contract_select(&sparse_request, &sparse_diagnostic),
-      nullptr);
+  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&sparse_request, nullptr,
+                                               &sparse_diagnostic),
+            nullptr);
   EXPECT_EQ(sparse_diagnostic.rejection_bits &
                 LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_MISSING_SPARSE,
             LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_MISSING_SPARSE);
@@ -549,9 +558,9 @@ TEST(MatrixContractTest, MatcherRejectsSparseAndReuseRequirements) {
       LOOM_AMDGPU_MATRIX_NUMERIC_F32, LOOM_AMDGPU_MATRIX_SCALE_NONE,
       LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250, 32, modifier_flags, 0);
   loom_amdgpu_matrix_contract_match_diagnostic_t reuse_diagnostic = {};
-  EXPECT_EQ(
-      loom_amdgpu_matrix_contract_select(&reuse_request, &reuse_diagnostic),
-      nullptr);
+  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&reuse_request, nullptr,
+                                               &reuse_diagnostic),
+            nullptr);
   EXPECT_EQ(reuse_diagnostic.rejection_bits &
                 LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_MISSING_REUSE,
             LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_MISSING_REUSE);
@@ -566,7 +575,8 @@ TEST(MatrixContractTest, MatcherRejectsUnsupportedRequiredFlags) {
       64, LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_REUSE,
       LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_REUSE);
   loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
-  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&request, &diagnostic), nullptr);
+  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&request, nullptr, &diagnostic),
+            nullptr);
   EXPECT_EQ(diagnostic.rejection_bits &
                 LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_REQUIRED_FLAGS,
             LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_REQUIRED_FLAGS);
@@ -583,7 +593,8 @@ TEST(MatrixContractTest, MatcherRejectsUnsupportedWaveSize) {
       LOOM_AMDGPU_MATRIX_SCALE_NONE, LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8,
       48, 0, 0);
   loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
-  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&request, &diagnostic), nullptr);
+  EXPECT_EQ(loom_amdgpu_matrix_contract_select(&request, nullptr, &diagnostic),
+            nullptr);
   EXPECT_EQ(diagnostic.feature_candidate_count, 1u);
   EXPECT_EQ(diagnostic.wave_candidate_count, 0u);
   EXPECT_EQ(diagnostic.rejection_bits,
@@ -592,7 +603,11 @@ TEST(MatrixContractTest, MatcherRejectsUnsupportedWaveSize) {
 
 TEST(MatrixContractTest, MatcherRejectsInvalidRequest) {
   loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
-  EXPECT_EQ(loom_amdgpu_matrix_contract_select(nullptr, &diagnostic), nullptr);
+  uint16_t descriptor_ordinal = 0;
+  EXPECT_EQ(loom_amdgpu_matrix_contract_select(nullptr, &descriptor_ordinal,
+                                               &diagnostic),
+            nullptr);
+  EXPECT_EQ(descriptor_ordinal, LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE);
   EXPECT_EQ(diagnostic.rejection_bits,
             LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_INVALID_REQUEST);
 }

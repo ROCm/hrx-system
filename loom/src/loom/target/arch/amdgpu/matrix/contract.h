@@ -103,11 +103,13 @@ bool loom_amdgpu_matrix_contract_is_available(
     loom_amdgpu_matrix_feature_bits_t feature_bits, uint32_t wave_size);
 
 // Selects the first descriptor that satisfies a fully structural match request.
-// Returns NULL when no descriptor matches and optionally populates
-// |out_diagnostic| with the first filter that rejected all candidates.
+// Returns NULL when no descriptor matches. Optionally returns the selected
+// built-in descriptor ordinal and populates |out_diagnostic| with the first
+// filter that rejected all candidates.
 const loom_amdgpu_matrix_contract_descriptor_t*
 loom_amdgpu_matrix_contract_select(
     const loom_amdgpu_matrix_contract_match_request_t* request,
+    uint16_t* out_descriptor_ordinal,
     loom_amdgpu_matrix_contract_match_diagnostic_t* out_diagnostic);
 
 #ifdef __cplusplus

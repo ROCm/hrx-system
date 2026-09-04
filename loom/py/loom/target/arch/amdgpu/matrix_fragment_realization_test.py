@@ -169,6 +169,6 @@ def test_compact_runtime_catalog_fits_two_kibibytes() -> None:
     catalog = AMDGPU_MATRIX_FRAGMENT_REALIZATION_CATALOG
 
     contract_choice_bytes = len(catalog.contract_choices) * 4
-    result_representation_bytes = (len(catalog.result_representations) + 1) * 2
-    assert contract_choice_bytes + result_representation_bytes == 1044
+    result_representation_bytes = (len(catalog.result_representations) + 1) * 3
+    assert contract_choice_bytes + result_representation_bytes == 1096
     assert contract_choice_bytes + result_representation_bytes < 2048

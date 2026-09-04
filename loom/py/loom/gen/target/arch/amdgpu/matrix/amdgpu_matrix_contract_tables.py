@@ -982,6 +982,7 @@ def _matrix_result_representation_table_lines(
         "        LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_COUNT] = {",
         "    [LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE] = {",
         "        .fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_UNKNOWN,",
+        "        .numeric_type = LOOM_AMDGPU_MATRIX_NUMERIC_UNKNOWN,",
         "        .flags = 0,",
         "    },",
     ]
@@ -991,6 +992,7 @@ def _matrix_result_representation_table_lines(
             [
                 f"    [UINT8_C({representation_id})] = {{",
                 f"        .fragment_layout_kind = {representation.fragment_layout.c_kind},",
+                f"        .numeric_type = {_NUMERIC_TYPE_C_NAMES[representation.payload.numeric_type]},",
                 f"        .flags = {flags},",
                 "    },",
             ]
@@ -1427,7 +1429,7 @@ def _emit_source(*, public_header: str) -> str:
             "const iree_host_size_t kLoomAmdgpuMatrixContractDescriptorCount =",
             "    IREE_ARRAYSIZE(kLoomAmdgpuMatrixContractDescriptors);",
             "",
-            "static_assert(sizeof(loom_amdgpu_matrix_result_representation_t) == 2,",
+            "static_assert(sizeof(loom_amdgpu_matrix_result_representation_t) == 3,",
             '              "matrix result representation row must remain compact");',
             "static_assert(sizeof(loom_amdgpu_matrix_contract_realization_choices_t) == 4,",
             '              "matrix contract realization row must remain compact");',

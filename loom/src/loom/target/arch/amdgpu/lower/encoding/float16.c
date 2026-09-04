@@ -160,6 +160,9 @@ bool loom_amdgpu_descriptor_set_can_emit_packed_u16_lane_pair(
     return true;
   }
   return loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
+             descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
+             UINT16_MAX) &&
+         loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
              descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
              16) &&
          loom_amdgpu_descriptor_set_has_ref(

@@ -1,0 +1,87 @@
+// Compares transposed F32-result-fragment publication to F16 memory against a
+// separately computed F32 result converted elementwise. Distinct matrix
+// operands make both operand exchange and result-coordinate mapping observable.
+amdgpu.target<gfx11-generic> @fragment_result_f32_to_f16_gfx11 {subgroup_size = 32}
+
+kernel.def target(@fragment_result_f32_to_f16_gfx11) @publish_transposed_f16() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs_global = buffer.assume.memory_space<global> %lhs_buffer : buffer
+  %rhs_global = buffer.assume.memory_space<global> %rhs_buffer : buffer
+  %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
+  %transposed_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %lhs_view = buffer.view %lhs_global[%base] : buffer -> view<16x16xf16>
+  %rhs_view = buffer.view %rhs_global[%base] : buffer -> view<16x16xf16, %transposed_layout>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<16x16xf16, %transposed_layout>
+  %lhs = vector.fragment.load<lhs> %lhs_view[%fragment_origin, %fragment_origin] shape [%m, %k] : view<16x16xf16> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%k, %n] : view<16x16xf16, %transposed_layout> -> vector<16xf16>
+  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %initial = vector.fragment<init> %initial_values shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %initial : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %output_view[%fragment_origin, %fragment_origin] shape [%m, %n] : vector<8xf32>, view<16x16xf16, %transposed_layout>
+  kernel.return
+}
+
+kernel.def target(@fragment_result_f32_to_f16_gfx11) @publish_transposed_f32_reference() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs_global = buffer.assume.memory_space<global> %lhs_buffer : buffer
+  %rhs_global = buffer.assume.memory_space<global> %rhs_buffer : buffer
+  %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
+  %transposed_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %lhs_view = buffer.view %lhs_global[%base] : buffer -> view<16x16xf16>
+  %rhs_view = buffer.view %rhs_global[%base] : buffer -> view<16x16xf16, %transposed_layout>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<16x16xf32, %transposed_layout>
+  %lhs = vector.fragment.load<lhs> %lhs_view[%fragment_origin, %fragment_origin] shape [%m, %k] : view<16x16xf16> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%k, %n] : view<16x16xf16, %transposed_layout> -> vector<16xf16>
+  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %initial = vector.fragment<init> %initial_values shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %initial : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %output_view[%fragment_origin, %fragment_origin] shape [%m, %n] : vector<8xf32>, view<16x16xf32, %transposed_layout>
+  kernel.return
+}
+
+kernel.def target(@fragment_result_f32_to_f16_gfx11) @convert_f32_reference_to_f16() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %element0 = kernel.workitem.id<x> : index
+  %element = index.assume %element0 [range(%element0, 0, 255)] : index
+  %input_global = buffer.assume.memory_space<global> %input_buffer : buffer
+  %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<256xf32>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<256xf16>
+  %value = view.load %input_view[%element] : view<256xf32> -> f32
+  %converted = scalar.fptrunc %value : f32 to f16
+  view.store %converted, %output_view[%element] : f16, view<256xf16>
+  kernel.return
+}
+
+check.case public @fragment_result_f32_to_f16_publication_case {
+  %lhs = check.generate.iota offset(-0.5) step(0.00390625) : tensor<16x16xf16>
+  %rhs = check.generate.iota offset(0.25) step(0.001953125) : tensor<16x16xf16>
+  %actual = check.generate.fill value(0.0) : tensor<256xf16>
+  %reference_f32 = check.generate.fill value(0.0) : tensor<256xf32>
+  %expected = check.generate.fill value(0.0) : tensor<256xf16>
+  kernel.launch @publish_transposed_f16(%lhs, %rhs, %actual) : (tensor<16x16xf16>, tensor<16x16xf16>, tensor<256xf16>)
+  kernel.launch @publish_transposed_f32_reference(%lhs, %rhs, %reference_f32) : (tensor<16x16xf16>, tensor<16x16xf16>, tensor<256xf32>)
+  kernel.launch @convert_f32_reference_to_f16(%reference_f32, %expected) : (tensor<256xf32>, tensor<256xf16>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<256xf16>
+  check.return
+}
