@@ -525,6 +525,13 @@ def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None
                     assert not slices
                     assert not concats
                 memory_emit = _source_memory_emit(rule)
+                has_storage_continuation = any(
+                    operand.field_name == "storage"
+                    for operand in rule.descriptor.operands
+                )
+                assert memory_emit.copy_operands == (
+                    ("storage",) if has_storage_continuation else ()
+                )
                 constraint = memory_emit.source_memory
                 assert constraint is not None
                 assert constraint.operation is operation

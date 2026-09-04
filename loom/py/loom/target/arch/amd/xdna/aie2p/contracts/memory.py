@@ -384,6 +384,9 @@ def _memory_rule(
         ),
         None,
     )
+    # A tied partial write needs a uniquely owned carrier even when CSE shares
+    # its zero seed. Allocation coalesces the copy whenever no alias remains.
+    copy_operands = ("storage",) if storage_continuation is not None else ()
     padding_value = ValueRef.temporary("memory_padding")
     # Ordinary vector SSA values use a full X carrier even when memory moves
     # only one W unit. Seed the untouched storage once so partial 128-bit loads
@@ -428,6 +431,7 @@ def _memory_rule(
                 immediates={"imm": SourceMemoryProject.static_byte_offset()},
                 source_memory=source_memory,
                 form=DescriptorEmitForm.OP,
+                copy_operands=copy_operands,
             )
         )
 
@@ -445,6 +449,7 @@ def _memory_rule(
                 result_types=memory_result_types,
                 source_memory=source_memory,
                 form=DescriptorEmitForm.OP,
+                copy_operands=copy_operands,
             )
         )
     if is_load and expand_to_x_carrier:

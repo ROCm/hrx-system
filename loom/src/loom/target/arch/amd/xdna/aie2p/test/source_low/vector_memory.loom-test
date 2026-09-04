@@ -278,41 +278,45 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @add_i8x1
   %232 = vbcst.8 %231
   %233 = slice %232[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
   %234 = slice %232[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %235 = vlda.128.i8x16 %lhs_view, %233, 0
-  %lhs_value = concat(%235, %234) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %239 = slice %232[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %241 = vlda.128.i8x16 %rhs_view, %239, 0
-  %rhs_value = concat(%241, %234) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %235 = copy %233 : reg<aie2p.vec256> -> reg<aie2p.vec256>
+  %236 = vlda.128.i8x16 %lhs_view, %235, 0
+  %lhs_value = concat(%236, %234) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %242 = copy %233 : reg<aie2p.vec256> -> reg<aie2p.vec256>
+  %243 = vlda.128.i8x16 %rhs_view, %242, 0
+  %rhs_value = concat(%243, %234) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   %sum = vadd.8 %lhs_value, %rhs_value
-  %244 = slice %sum[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  vst.128.i8x16 %244, %output_view, 0
+  %246 = slice %sum[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  vst.128.i8x16 %246, %output_view, 0
   return
 }
 
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_float_vectors() asm {
   %source_f32x16_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_f32x16_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %247 = mov.short 0
-  %248 = vbcst.8 %247
-  %249 = slice %248[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %251 = vlda.128.i8x16 %source_f32x16_view, %249, 16
-  vst.128.i8x16 %251, %output_f32x16_view, 16
-  %257 = vlda.256.i8x32 %source_f32x16_view, 32
-  vst.256.i8x32 %257, %output_f32x16_view, 32
-  %261 = vbcst.16 %247
-  %262 = slice %261[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %264 = vlda.128.i16x8 %source_f32x16_view, %262, 16
-  vst.128.i16x8 %264, %output_f32x16_view, 16
+  %249 = mov.short 0
+  %250 = vbcst.8 %249
+  %251 = slice %250[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %253 = copy %251 : reg<aie2p.vec256> -> reg<aie2p.vec256>
+  %254 = vlda.128.i8x16 %source_f32x16_view, %253, 16
+  vst.128.i8x16 %254, %output_f32x16_view, 16
+  %260 = vlda.256.i8x32 %source_f32x16_view, 32
+  vst.256.i8x32 %260, %output_f32x16_view, 32
+  %264 = vbcst.16 %249
+  %265 = slice %264[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %267 = copy %265 : reg<aie2p.vec256> -> reg<aie2p.vec256>
+  %268 = vlda.128.i16x8 %source_f32x16_view, %267, 16
+  vst.128.i16x8 %268, %output_f32x16_view, 16
   %bf16x8 = vlda.128.bf16x8 %source_f32x16_view, 16
   vst.128.bf16x8 %bf16x8, %output_f32x16_view, 16
-  %269 = vbcst.32 %247
-  %270 = slice %269[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %272 = vlda.128.f32x4 %source_f32x16_view, %270, 16
-  vst.128.f32x4 %272, %output_f32x16_view, 16
-  %278 = vlda.256.bf16x16 %source_f32x16_view, 32
-  vst.256.bf16x16 %278, %output_f32x16_view, 32
-  %284 = vlda.256.f32x8 %source_f32x16_view, 32
-  vst.256.f32x8 %284, %output_f32x16_view, 32
+  %273 = vbcst.32 %249
+  %274 = slice %273[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %276 = copy %274 : reg<aie2p.vec256> -> reg<aie2p.vec256>
+  %277 = vlda.128.f32x4 %source_f32x16_view, %276, 16
+  vst.128.f32x4 %277, %output_f32x16_view, 16
+  %283 = vlda.256.bf16x16 %source_f32x16_view, 32
+  vst.256.bf16x16 %283, %output_f32x16_view, 32
+  %289 = vlda.256.f32x8 %source_f32x16_view, 32
+  vst.256.f32x8 %289, %output_f32x16_view, 32
   %bf16x32 = vlda.512.bf16x32 %source_f32x16_view, 64
   vst.512.bf16x32 %bf16x32, %output_f32x16_view, 64
   %f32x16 = vlda.512.f32x16 %source_f32x16_view, 64
@@ -328,26 +332,26 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @add_f32x
   %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
-  %302 = vlda.acc.f32x16 %lhs_view, 0
-  %303 = vlda.acc.f32x16 %lhs_view, 64
-  %304 = vlda.acc.f32x16 %lhs_view, 128
-  %305 = vlda.acc.f32x16 %lhs_view, 192
-  %lhs_value = concat(%302, %303, %304, %305) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %307 = vlda.acc.f32x16 %rhs_view, 0
-  %308 = vlda.acc.f32x16 %rhs_view, 64
-  %309 = vlda.acc.f32x16 %rhs_view, 128
-  %310 = vlda.acc.f32x16 %rhs_view, 192
-  %rhs_value = concat(%307, %308, %309, %310) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %312 = mova.i32 60
-  %sum = vadd.f32x64 %lhs_value, %rhs_value, %312
-  %314 = slice %sum[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %314, %output_view, 0
-  %315 = slice %sum[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %315, %output_view, 64
-  %316 = slice %sum[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %316, %output_view, 128
-  %317 = slice %sum[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %317, %output_view, 192
+  %307 = vlda.acc.f32x16 %lhs_view, 0
+  %308 = vlda.acc.f32x16 %lhs_view, 64
+  %309 = vlda.acc.f32x16 %lhs_view, 128
+  %310 = vlda.acc.f32x16 %lhs_view, 192
+  %lhs_value = concat(%307, %308, %309, %310) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %312 = vlda.acc.f32x16 %rhs_view, 0
+  %313 = vlda.acc.f32x16 %rhs_view, 64
+  %314 = vlda.acc.f32x16 %rhs_view, 128
+  %315 = vlda.acc.f32x16 %rhs_view, 192
+  %rhs_value = concat(%312, %313, %314, %315) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %317 = mova.i32 60
+  %sum = vadd.f32x64 %lhs_value, %rhs_value, %317
+  %319 = slice %sum[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %319, %output_view, 0
+  %320 = slice %sum[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %320, %output_view, 64
+  %321 = slice %sum[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %321, %output_view, 128
+  %322 = slice %sum[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %322, %output_view, 192
   return
 }
 
@@ -472,14 +476,15 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @roundtri
   %25 = mov.short 0
   %26 = vbcst.32 %25
   %27 = slice %26[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %29 = vlda.128.f32x4 %input_view, %27, 0
-  %31 = lda %input_view, 16
-  %32 = lda %input_view, 20
-  %33 = lda %input_view, 24
-  vst.128.f32x4 %29, %output_view, 0
-  st %31, %output_view, 16
-  st %32, %output_view, 20
-  st %33, %output_view, 24
+  %29 = copy %27 : reg<aie2p.vec256> -> reg<aie2p.vec256>
+  %30 = vlda.128.f32x4 %input_view, %29, 0
+  %32 = lda %input_view, 16
+  %33 = lda %input_view, 20
+  %34 = lda %input_view, 24
+  vst.128.f32x4 %30, %output_view, 0
+  st %32, %output_view, 16
+  st %33, %output_view, 20
+  st %34, %output_view, 24
   return
 }
 
@@ -567,20 +572,21 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @roundtri
   %25 = mov.short 0
   %26 = vbcst.8 %25
   %27 = slice %26[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %29 = vlda.128.i8x16 %input_view, %27, 0
-  %31 = mov.static-byte-offset 16
-  %32 = mov.address-index %31
-  %33 = lda.i8.index %input_view, %32
-  %34 = mov.static-byte-offset 17
-  %35 = mov.address-index %34
-  %36 = lda.i8.index %input_view, %35
-  %37 = mov.static-byte-offset 18
-  %38 = mov.address-index %37
-  %39 = lda.i8.index %input_view, %38
-  vst.128.i8x16 %29, %output_view, 0
-  st.i8.index %33, %output_view, %32
-  st.i8.index %36, %output_view, %35
-  st.i8.index %39, %output_view, %38
+  %29 = copy %27 : reg<aie2p.vec256> -> reg<aie2p.vec256>
+  %30 = vlda.128.i8x16 %input_view, %29, 0
+  %32 = mov.static-byte-offset 16
+  %33 = mov.address-index %32
+  %34 = lda.i8.index %input_view, %33
+  %35 = mov.static-byte-offset 17
+  %36 = mov.address-index %35
+  %37 = lda.i8.index %input_view, %36
+  %38 = mov.static-byte-offset 18
+  %39 = mov.address-index %38
+  %40 = lda.i8.index %input_view, %39
+  vst.128.i8x16 %30, %output_view, 0
+  st.i8.index %34, %output_view, %33
+  st.i8.index %37, %output_view, %36
+  st.i8.index %40, %output_view, %39
   return
 }
 
