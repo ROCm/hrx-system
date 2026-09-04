@@ -271,7 +271,7 @@ def _test_generated_kernel_binary_is_testonly_impl(env, target):
     action = _find_action(env, target[TestingAspectInfo].actions, "LoomKernelBinary")
     for expected_arg in [
         "--backend=amdgpu-hal",
-        "--target=gfx11-generic",
+        "--target=amdgpu:gfx11-generic",
     ]:
         if expected_arg not in action.argv:
             env.fail("expected %r in kernel binary arguments %r" % (expected_arg, action.argv))

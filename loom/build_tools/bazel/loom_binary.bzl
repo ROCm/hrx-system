@@ -100,7 +100,11 @@ def _declare_amdgpu_kernel_product(
     args = ctx.actions.args()
     args.add(linked_module)
     args.add("--backend=amdgpu-hal")
-    args.add("--target=%s" % amdgpu_profile.target)
+    target_profile = ctx.attr.target[LoomTargetProfileInfo]
+    args.add("--target=%s:%s" % (
+        target_profile.family,
+        amdgpu_profile.target,
+    ))
     args.add("--output=%s" % artifact.path)
     args.add("--compile-report=details")
     args.add("--compile-report-output=%s" % compile_report.path)

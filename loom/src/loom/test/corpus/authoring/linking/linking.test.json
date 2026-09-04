@@ -116,7 +116,7 @@
             "args": [
               "{tmp}/linked.loombc",
               "--backend=amdgpu-hal",
-              "--target=gfx1100",
+              "--target=amdgpu:gfx1100",
               "--output={tmp}/scale_i32.hal",
               "--emit-target-artifact={tmp}/scale_i32.hsaco",
               "--artifact-manifest=summary",

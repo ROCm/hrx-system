@@ -8,7 +8,7 @@
         "args": [
           "{srcdir}/wave64_reductions.loom",
           "--backend=amdgpu-hal",
-          "--target=gfx1151",
+          "--target=amdgpu:gfx1151",
           "--output={tmp}/wave64_reductions.hal",
           "--emit-target-artifact={tmp}/wave64_reductions.hsaco",
           "--artifact-manifest=summary",
@@ -57,7 +57,7 @@
         "args": [
           "{srcdir}/shared_memory_vector_tile.loom",
           "--backend=amdgpu-hal",
-          "--target=gfx11-generic",
+          "--target=amdgpu:gfx11-generic",
           "--output={tmp}/shared_memory_vector_tile.hal",
           "--emit-target-artifact={tmp}/shared_memory_vector_tile.hsaco",
           "--artifact-manifest=summary",
@@ -98,7 +98,7 @@
         "args": [
           "{srcdir}/cluster_b128_multicast.loom",
           "--backend=amdgpu-hal",
-          "--target=gfx1250",
+          "--target=amdgpu:gfx1250",
           "--output={tmp}/cluster_b128_multicast.hal",
           "--emit-target-artifact={tmp}/cluster_b128_multicast.hsaco",
           "--artifact-manifest=summary",

@@ -246,7 +246,7 @@ def capture_loom_amdgpu_artifact(
             str(loom_compile),
             str(source_path),
             "--backend=amdgpu-hal",
-            f"--target={target_text}",
+            f"--target=amdgpu:{target_text}",
             f"--output={hal_artifact_path}",
             f"--emit-target-artifact={code_object_path}",
             "--compile-report=summary",

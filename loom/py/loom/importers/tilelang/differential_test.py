@@ -173,7 +173,7 @@ def test_capture_loom_amdgpu_artifact_runs_production_compiler(
         str(tmp_path / "out" / "copy.gfx1100.loom"),
         "--backend=amdgpu-hal",
     )
-    assert "--target=gfx1100" in compile_command
+    assert "--target=amdgpu:gfx1100" in compile_command
     assert "--compile-report=summary" in compile_command
     assert "--artifact-manifest=summary" in compile_command
     assert commands[1] == (
