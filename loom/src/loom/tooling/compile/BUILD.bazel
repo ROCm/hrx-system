@@ -30,6 +30,12 @@ _CONFIGURED_COMPILE_COPTS = (
             "-DLOOM_CONFIG_COMPILE_HAVE_LLVMIR_ARTIFACTS=1",
         ],
         "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target:xdna_artifacts": [
+            "-DLOOM_CONFIG_COMPILE_HAVE_XDNA_ARTIFACTS=1",
+        ],
+        "//conditions:default": [],
     })
 )
 
@@ -49,6 +55,12 @@ _CONFIGURED_COMPILE_DEPS = (
     iree_select({
         "//loom/config/target:llvmir_artifacts": [
             "//loom/src/loom/target/emit/llvmir:artifact_emitter",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target:xdna_artifacts": [
+            "//loom/src/loom/tooling/target/amd/xdna:artifact_provider",
         ],
         "//conditions:default": [],
     })

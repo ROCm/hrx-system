@@ -9,17 +9,23 @@
 #include "loom/ir/module.h"
 #include "loom/pass/builder.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/low_registry.h"
-#include "loom/target/arch/amd/xdna/aie2p/emit/artifact_emitter.h"
+#include "loom/target/arch/amd/xdna/aie2p/facts.h"
 #include "loom/target/arch/amd/xdna/aie2p/legalization.h"
 #include "loom/target/arch/amd/xdna/aie2p/low_verify.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
 #include "loom/target/arch/amd/xdna/aie2p/math_policy.h"
 #include "loom/target/arch/amd/xdna/aie2p/ops/registry.h"
+#include "loom/target/arch/amd/xdna/aie2p/ops/target.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/pass.h"
+#include "loom/target/arch/amd/xdna/aie2p/profile.h"
 
-static const loom_target_emitter_t* const kAie2pTargetEmitters[] = {
-    &loom_aie2p_xdna_emitter,
-};
+static iree_status_t loom_aie2p_target_provider_select_profile(
+    iree_string_view_t selector, const loom_target_profile_t** out_profile) {
+  const loom_aie2p_target_profile_t* profile = NULL;
+  IREE_RETURN_IF_ERROR(loom_aie2p_target_profile_select(selector, &profile));
+  *out_profile = profile ? &profile->base : NULL;
+  return iree_ok_status();
+}
 
 static const loom_low_verify_provider_t* const kAie2pLowVerifyProviders[] = {
     &loom_aie2p_low_verify_provider,
@@ -80,6 +86,8 @@ static iree_status_t loom_aie2p_provider_contribute_pipeline(
 }
 
 const loom_target_provider_t loom_aie2p_target_provider = {
+    .profile_type = &loom_aie2p_target_profile_type,
+    .materialize_definition = loom_aie2p_target_materialize_definition,
     .register_context = loom_aie2p_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_aie2p_low_descriptor_registry_initialize,
@@ -97,13 +105,10 @@ const loom_target_provider_t loom_aie2p_target_provider = {
             .count = IREE_ARRAYSIZE(kAie2pLowVerifyProviders),
             .values = kAie2pLowVerifyProviders,
         },
-    .emitter_list =
-        {
-            .values = kAie2pTargetEmitters,
-            .count = IREE_ARRAYSIZE(kAie2pTargetEmitters),
-        },
     .pass_registry = &loom_aie2p_pipeline_pass_registry,
     .contribute_pipeline = loom_aie2p_provider_contribute_pipeline,
+    .select_profile = loom_aie2p_target_provider_select_profile,
+    .target_fact_type = &loom_aie2p_target_fact_type,
 };
 
 static const loom_target_provider_t* const kAie2pTargetProviders[] = {

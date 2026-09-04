@@ -9,14 +9,15 @@
 from loom.assembly import AttrDict, SymbolRef, TemplateParam
 from loom.dialect.target import target_record_attrs
 from loom.dsl import (
+    ATTR_TYPE_STRING,
     SYMBOL_DEFINE,
+    AttrDef,
     Dialect,
     EnumCase,
     EnumDef,
     Op,
     OpPhase,
     SymbolDefinition,
-    TargetFactSpecialization,
     TargetLikeInterface,
 )
 
@@ -52,7 +53,8 @@ aie2p_target = Op(
             symbol="symbol",
             selector="kind",
             bundle_table="loom_aie2p_target_bundles",
-            fact_specialization=TargetFactSpecialization.STRUCTURAL,
+            fact_type="loom_aie2p_target_fact_type",
+            fact_projector="loom_aie2p_target_fact_projector",
         )
     ],
     symbol_def=SymbolDefinition(
@@ -62,8 +64,16 @@ aie2p_target = Op(
         bytecode_kind="LOOM_SYMBOL_RECORD",
         fact_domain="loom_target_symbol_fact_domain",
     ),
-    attrs=target_record_attrs(Aie2pTargetKind),
-    verify="loom_target_record_verify",
+    attrs=[
+        *target_record_attrs(Aie2pTargetKind),
+        AttrDef(
+            "device_profile",
+            ATTR_TYPE_STRING,
+            optional=True,
+            doc="Exact physical XDNA deployment profile key.",
+        ),
+    ],
+    verify="loom_aie2p_target_record_verify",
     format=[TemplateParam("kind"), SymbolRef("symbol"), AttrDict()],
     examples=["aie2p.target<core> @tile", "aie2p.target<array> @array"],
 )

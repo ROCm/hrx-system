@@ -24,12 +24,15 @@ loom_generated_file_family(
         "--array-output",
         "--register-output",
         "--profile-output",
+        "--aie2p-profile-output",
     ],
     outputs = [
         "array/facts_tables.inl",
         "array/register_tables.inl",
         "device/profile_tables.inl",
+        "device/aie2p_profile_tables.inl",
     ],
+    visibility = ["//loom/src/loom/target/arch/amd/xdna:__subpackages__"],
 )
 
 loom_cc_library(

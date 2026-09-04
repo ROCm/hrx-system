@@ -14,8 +14,14 @@ package(
 
 loom_generated_cc_library(
     name = "ops",
-    srcs = ["registry.c"],
-    hdrs = ["registry.h"],
+    srcs = [
+        "registry.c",
+        "target.c",
+    ],
+    hdrs = [
+        "registry.h",
+        "target.h",
+    ],
     args = ["--dialect=aie2p"],
     generated_hdr_flags = ["--ops-header"],
     generated_hdrs = ["ops.h"],
@@ -34,7 +40,10 @@ loom_generated_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:resolved_target",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/amd/xdna:device_profile",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:target_facts",
         "//loom/src/loom/target/arch/amd/xdna/aie2p:target_records",
         "//runtime/src/iree/base",
     ],

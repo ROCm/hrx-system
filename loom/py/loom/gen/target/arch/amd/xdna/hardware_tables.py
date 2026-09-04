@@ -17,6 +17,7 @@ from loom.gen.support.c import c_string_literal
 from loom.gen.support.files import write_text_file
 from loom.gen.support.generated_file import line_comment_header
 from loom.target.arch.amd.xdna.array.model import (
+    Architecture,
     RegisterAccess,
     RegisterModule,
     StreamDirection,
@@ -344,7 +345,37 @@ def emit_device_profiles() -> str:
         )
     lines = [
         *_header(),
-        "static const loom_xdna_device_profile_t kLoomXdnaDeviceProfiles[] = {",
+        "const loom_xdna_device_profile_t loom_xdna_device_profiles[] = {",
+        *profile_lines,
+        "};",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def emit_aie2p_target_profiles() -> str:
+    """Emits immutable AIE2P compiler-profile rows over device profiles."""
+    profile_lines: list[str] = []
+    for index, profile in enumerate(DEVICE_PROFILES):
+        validate_device_profile(profile)
+        if profile.array_family.architecture is not Architecture.AIE2P:
+            continue
+        profile_lines.extend(
+            [
+                "    {",
+                "        .base = {",
+                "            .type = &loom_aie2p_target_profile_type,",
+                "            .target_bundle = &loom_aie2p_array_target_bundle,",
+                "        },",
+                f"        .device_profile = &loom_xdna_device_profiles[{index}],",
+                "    },",
+            ]
+        )
+    if not profile_lines:
+        raise ValueError("AIE2P target has no device profiles")
+    lines = [
+        *_header(),
+        "static const loom_aie2p_target_profile_t kLoomAie2pTargetProfiles[] = {",
         *profile_lines,
         "};",
         "",
@@ -357,9 +388,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--array-output", type=Path)
     parser.add_argument("--register-output", type=Path)
     parser.add_argument("--profile-output", type=Path)
+    parser.add_argument("--aie2p-profile-output", type=Path)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args(argv)
-    output_paths = (args.array_output, args.register_output, args.profile_output)
+    output_paths = (
+        args.array_output,
+        args.register_output,
+        args.profile_output,
+        args.aie2p_profile_output,
+    )
     if args.check and any(path is not None for path in output_paths):
         parser.error("--check cannot be combined with output paths")
     if not args.check and any(path is None for path in output_paths):
@@ -368,10 +405,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     array_contents = emit_array_facts()
     register_contents = emit_register_facts()
     profile_contents = emit_device_profiles()
+    aie2p_profile_contents = emit_aie2p_target_profiles()
     if args.array_output is not None:
         write_text_file(args.array_output, array_contents)
         write_text_file(args.register_output, register_contents)
         write_text_file(args.profile_output, profile_contents)
+        write_text_file(args.aie2p_profile_output, aie2p_profile_contents)
     return 0
 
 

@@ -14,6 +14,9 @@
 #ifndef LOOM_CONFIG_COMPILE_HAVE_SPIRV_ARTIFACTS
 #define LOOM_CONFIG_COMPILE_HAVE_SPIRV_ARTIFACTS 0
 #endif  // LOOM_CONFIG_COMPILE_HAVE_SPIRV_ARTIFACTS
+#ifndef LOOM_CONFIG_COMPILE_HAVE_XDNA_ARTIFACTS
+#define LOOM_CONFIG_COMPILE_HAVE_XDNA_ARTIFACTS 0
+#endif  // LOOM_CONFIG_COMPILE_HAVE_XDNA_ARTIFACTS
 
 namespace loom {
 namespace {
@@ -32,7 +35,8 @@ TEST(ConfiguredCompileTest, ReturnsStableCompleteEnvironment) {
   ASSERT_NE(artifact_registry, nullptr);
   const iree_host_size_t expected_artifact_provider_count =
       LOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS +
-      LOOM_CONFIG_COMPILE_HAVE_SPIRV_ARTIFACTS;
+      LOOM_CONFIG_COMPILE_HAVE_SPIRV_ARTIFACTS +
+      LOOM_CONFIG_COMPILE_HAVE_XDNA_ARTIFACTS;
   ASSERT_EQ(artifact_registry->provider_count,
             expected_artifact_provider_count);
   EXPECT_EQ(artifact_registry->providers == nullptr,

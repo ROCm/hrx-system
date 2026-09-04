@@ -18,10 +18,12 @@ loom_generated_file_family(
     "array/facts_tables.inl"
     "array/register_tables.inl"
     "device/profile_tables.inl"
+    "device/aie2p_profile_tables.inl"
   OUTPUT_FLAGS
     "--array-output"
     "--register-output"
     "--profile-output"
+    "--aie2p-profile-output"
 )
 
 loom_cc_library(

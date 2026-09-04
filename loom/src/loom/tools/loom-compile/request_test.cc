@@ -239,10 +239,10 @@ TEST_F(CompileRequestTest, RoutesPipelineScopesThroughProductBoundaries) {
 target.generic<reference> @Target789 {
   subgroup_size = 32
 }
-pipeline.def<kernel> target(@Target789) @KernelPipeline() launch() {
+pipeline.def<kernel> public retain target(@Target789) @KernelPipeline() launch() {
   pipeline.return
 }
-pipeline.def<command> @CommandPipeline() launch() {
+pipeline.def<command> public retain @CommandPipeline() launch() {
   pipeline.return
 }
 pipeline.def @GenericPipeline() launch() {
@@ -252,13 +252,9 @@ pipeline.def @GenericPipeline() launch() {
 
   const loom_artifact_provider_t* providers[] = {&kExecutableProvider};
 
-  const iree_string_view_t kernel_roots[] = {IREE_SV("@KernelPipeline")};
   loom_compile_request_options_t options = {
-      /*.roots=*/
-      {
-          /*.count=*/IREE_ARRAYSIZE(kernel_roots),
-          /*.values=*/kernel_roots,
-      },
+      /*.roots=*/{},
+      /*.product=*/IREE_SV("kernel"),
   };
   loom_compile_request_t request =
       Resolve(module.get(), options, providers, IREE_ARRAYSIZE(providers));
@@ -266,11 +262,7 @@ pipeline.def @GenericPipeline() launch() {
   EXPECT_EQ(request.producer.value.artifact_provider, &kExecutableProvider);
   EXPECT_EQ(request.target_fact_type, &loom_target_generic_fact_type);
 
-  const iree_string_view_t command_roots[] = {IREE_SV("@CommandPipeline")};
-  options.roots = {
-      /*.count=*/IREE_ARRAYSIZE(command_roots),
-      /*.values=*/command_roots,
-  };
+  options.product = IREE_SV("command");
   request = Resolve(module.get(), options, nullptr, 0);
   EXPECT_EQ(request.product, LOOM_COMPILE_PRODUCT_COMMAND);
   EXPECT_EQ(request.producer.kind, LOOM_COMPILE_PRODUCER_COMMAND);
@@ -281,6 +273,7 @@ pipeline.def @GenericPipeline() launch() {
       /*.count=*/IREE_ARRAYSIZE(generic_roots),
       /*.values=*/generic_roots,
   };
+  options.product = iree_string_view_empty();
   options.format = IREE_SV("DiagnosticFormat123");
   request = Resolve(module.get(), options, nullptr, 0);
   EXPECT_EQ(request.product, LOOM_COMPILE_PRODUCT_MODULE);

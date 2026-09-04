@@ -73,6 +73,12 @@ low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @unu
 // ====
 // RUN: verify
 
+// ERROR@+1: TARGET/082 {profile="amd.xdna.unavailable"}
+aie2p.target<array> @unavailable_target {device_profile = "amd.xdna.unavailable"}
+
+// ====
+// RUN: verify
+
 aie2p.target<array> @array_target
 
 low.func.def target<amd.xdna.aie2p.array>(@array_target) @wrong_entry() asm {

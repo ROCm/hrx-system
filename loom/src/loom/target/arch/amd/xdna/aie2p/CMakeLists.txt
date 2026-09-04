@@ -32,6 +32,41 @@ loom_generated_file_family(
 
 loom_cc_library(
   NAME
+    target_facts
+  HDRS
+    "facts.h"
+  SRCS
+    "facts.c"
+  DEPS
+    iree::base
+    loom::target::arch::amd::xdna::device_profile
+    loom::target::facts
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    target_profile
+  HDRS
+    "profile.h"
+  TEXTUAL_HDRS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amd/xdna/device/aie2p_profile_tables.inl"
+  SRCS
+    "profile.c"
+  DEPS
+    ::target_facts
+    ::target_records
+    iree::base
+    iree::base::internal::arena
+    loom::target::arch::amd::xdna::aie2p::ops
+    loom::target::arch::amd::xdna::array_facts
+    loom::target::arch::amd::xdna::device_profile
+    loom::target::profile
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     array_descriptors
   HDRS
     "descriptors/array_descriptors.h"
@@ -278,13 +313,14 @@ loom_cc_library(
   SRCS
     "provider.c"
   DEPS
-    ::artifact_emitter
     ::legalization
     ::low_registry
     ::low_verify
     ::lower
     ::math_policy
     ::pipeline_pass
+    ::target_facts
+    ::target_profile
     iree::base
     loom::ir
     loom::pass::builder
@@ -528,29 +564,31 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    artifact_emitter
+    artifact
   HDRS
-    "emit/artifact_emitter.h"
+    "emit/artifact.h"
   SRCS
-    "emit/artifact_emitter.c"
+    "emit/artifact.c"
   DEPS
     ::array_plan
     ::array_program
     ::array_resident
     ::leaf_compile
+    ::target_facts
     ::tile_link
     ::xdna_product
     iree::base
     iree::base::internal::arena
     iree::io::stream
+    loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
     loom::ir
     loom::ops::low
     loom::ops::op_defs
     loom::target::arch::amd::xdna::device_profile
     loom::target::function_version
-    loom::target::provider
     loom::target::reporting::low
+    loom::target::reporting::report
   PUBLIC
 )
 
