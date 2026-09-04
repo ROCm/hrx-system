@@ -70,6 +70,11 @@ class TestLogicalDevice {
 
   iree_hal_device_t* base_device() const { return base_device_; }
 
+  iree_hal_queue_t* queue() const {
+    return iree_hal_device_queue(base_device_, /*family_ordinal=*/0,
+                                 /*queue_ordinal=*/0);
+  }
+
   iree_hal_allocator_t* allocator() const {
     return iree_hal_device_allocator(base_device_);
   }

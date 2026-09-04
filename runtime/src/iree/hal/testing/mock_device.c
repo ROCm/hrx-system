@@ -596,56 +596,6 @@ static iree_status_t iree_hal_mock_device_query_queue_pool_backend(
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
 }
 
-static iree_status_t iree_hal_mock_device_queue_fill(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const void* pattern,
-    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
-}
-
-static iree_status_t iree_hal_mock_device_queue_update(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    const void* source_buffer, iree_host_size_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_update_flags_t flags) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
-}
-
-static iree_status_t iree_hal_mock_device_queue_copy(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_copy_flags_t flags) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
-}
-
-static iree_status_t iree_hal_mock_device_queue_read(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_file_t* source_file, uint64_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_read_flags_t flags) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
-}
-
-static iree_status_t iree_hal_mock_device_queue_write(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-    iree_hal_file_t* target_file, uint64_t target_offset,
-    iree_device_size_t length, iree_hal_write_flags_t flags) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
-}
-
 static iree_status_t iree_hal_mock_device_queue_host_call(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -763,11 +713,6 @@ static const iree_hal_device_vtable_t iree_hal_mock_device_vtable = {
     .query_semaphore_compatibility =
         iree_hal_mock_device_query_semaphore_compatibility,
     .query_queue_pool_backend = iree_hal_mock_device_query_queue_pool_backend,
-    .queue_fill = iree_hal_mock_device_queue_fill,
-    .queue_update = iree_hal_mock_device_queue_update,
-    .queue_copy = iree_hal_mock_device_queue_copy,
-    .queue_read = iree_hal_mock_device_queue_read,
-    .queue_write = iree_hal_mock_device_queue_write,
     .queue_host_call = iree_hal_mock_device_queue_host_call,
     .queue_dispatch = iree_hal_mock_device_queue_dispatch,
     .queue_execute = iree_hal_mock_device_queue_execute,

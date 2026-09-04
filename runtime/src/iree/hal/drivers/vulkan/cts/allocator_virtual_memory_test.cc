@@ -126,19 +126,19 @@ TEST_P(VulkanVirtualMemoryTest, ReserveMapTransferUnmap) {
   const uint32_t pattern = 0x7A6B5C4Du;
   SemaphoreList empty_wait;
   SemaphoreList fill_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_fill(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, fill_signal,
-      virtual_buffer.get(), /*target_offset=*/0, kTouchedSize, &pattern,
-      sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_fill(transfer_queue_, empty_wait, fill_signal,
+                                     virtual_buffer.get(), /*target_offset=*/0,
+                                     kTouchedSize, &pattern, sizeof(pattern),
+                                     IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       fill_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
   Ref<iree_hal_buffer_t> readback_buffer;
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(kTouchedSize, readback_buffer.out()));
   SemaphoreList copy_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_copy(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, fill_signal, copy_signal,
-      virtual_buffer.get(), /*source_offset=*/0, readback_buffer.get(),
+  IREE_ASSERT_OK(iree_hal_queue_copy(
+      transfer_queue_, fill_signal, copy_signal, virtual_buffer.get(),
+      /*source_offset=*/0, readback_buffer.get(),
       /*target_offset=*/0, kTouchedSize, IREE_HAL_COPY_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       copy_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));

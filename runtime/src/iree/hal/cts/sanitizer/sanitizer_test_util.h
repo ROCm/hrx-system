@@ -357,6 +357,12 @@ class SanitizerCachedBackendDevice {
   // Returns the cached HAL device.
   iree_hal_device_t* device() const { return device_; }
 
+  // Returns the first provisioned queue on the cached HAL device.
+  iree_hal_queue_t* queue() const {
+    return iree_hal_device_queue(device_, /*family_ordinal=*/0,
+                                 /*queue_ordinal=*/0);
+  }
+
   // Returns the cached HAL device allocator.
   iree_hal_allocator_t* allocator() const { return allocator_; }
 
@@ -402,6 +408,7 @@ inline iree_status_t SanitizerCreateDeviceBuffer(
 
 // Reads device-local data through a queue copy into host-visible memory.
 inline iree_status_t SanitizerReadBufferBytes(iree_hal_device_t* device,
+                                              iree_hal_queue_t* queue,
                                               iree_hal_allocator_t* allocator,
                                               iree_hal_buffer_t* source_buffer,
                                               iree_device_size_t source_offset,
@@ -429,10 +436,9 @@ inline iree_status_t SanitizerReadBufferBytes(iree_hal_device_t* device,
 
   SemaphoreList empty_wait;
   SemaphoreList copy_signal(device, {0}, {1});
-  IREE_RETURN_IF_ERROR(iree_hal_device_queue_copy(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, copy_signal,
-      source_buffer, source_offset, staging_buffer, /*target_offset=*/0, length,
-      IREE_HAL_COPY_FLAG_NONE));
+  IREE_RETURN_IF_ERROR(iree_hal_queue_copy(
+      queue, empty_wait, copy_signal, source_buffer, source_offset,
+      staging_buffer, /*target_offset=*/0, length, IREE_HAL_COPY_FLAG_NONE));
   IREE_RETURN_IF_ERROR(iree_hal_semaphore_list_wait(
       copy_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
   IREE_RETURN_IF_ERROR(iree_hal_buffer_map_read(
@@ -445,6 +451,7 @@ inline iree_status_t SanitizerReadBufferBytes(iree_hal_device_t* device,
 // Reads buffer contents back to host as a vector of T.
 template <typename T>
 inline iree_status_t SanitizerReadBufferData(iree_hal_device_t* device,
+                                             iree_hal_queue_t* queue,
                                              iree_hal_allocator_t* allocator,
                                              iree_hal_buffer_t* source_buffer,
                                              iree_device_size_t source_offset,
@@ -469,8 +476,9 @@ inline iree_status_t SanitizerReadBufferData(iree_hal_device_t* device,
   }
 
   std::vector<uint8_t> bytes;
-  IREE_RETURN_IF_ERROR(SanitizerReadBufferBytes(
-      device, allocator, source_buffer, source_offset, byte_length, &bytes));
+  IREE_RETURN_IF_ERROR(SanitizerReadBufferBytes(device, queue, allocator,
+                                                source_buffer, source_offset,
+                                                byte_length, &bytes));
   std::vector<T> data((iree_host_size_t)(byte_length / sizeof(T)));
   std::memcpy(data.data(), bytes.data(), (iree_host_size_t)byte_length);
   *out_data = std::move(data);
@@ -479,10 +487,11 @@ inline iree_status_t SanitizerReadBufferData(iree_hal_device_t* device,
 
 template <typename T>
 inline iree_status_t SanitizerReadBufferData(iree_hal_device_t* device,
+                                             iree_hal_queue_t* queue,
                                              iree_hal_allocator_t* allocator,
                                              iree_hal_buffer_t* source_buffer,
                                              std::vector<T>* out_data) {
-  return SanitizerReadBufferData(device, allocator, source_buffer,
+  return SanitizerReadBufferData(device, queue, allocator, source_buffer,
                                  /*source_offset=*/0, out_data);
 }
 

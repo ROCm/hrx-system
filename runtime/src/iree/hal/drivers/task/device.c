@@ -680,78 +680,6 @@ static iree_status_t iree_hal_task_device_query_queue_pool_backend(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_task_device_queue_read(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_file_t* source_file, uint64_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_read_flags_t flags) {
-  (void)flags;
-
-  // Memory file fast path: route to queue_copy via the storage buffer.
-  iree_hal_buffer_t* storage_buffer = iree_hal_file_storage_buffer(source_file);
-  if (storage_buffer) {
-    IREE_ASSERT(source_offset <= IREE_DEVICE_SIZE_MAX);
-    return iree_hal_device_queue_copy(
-        base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-        storage_buffer, (iree_device_size_t)source_offset, target_buffer,
-        target_offset, length, IREE_HAL_COPY_FLAG_NONE);
-  }
-
-  // FD file path: async proactor I/O or synchronous fallback.
-  if (!iree_hal_file_async_handle(source_file) &&
-      !iree_hal_file_supports_synchronous_io(source_file)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "file has no storage buffer, no async handle, and does not support "
-        "synchronous I/O; cannot perform read");
-  }
-
-  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  const iree_host_size_t queue_index = iree_hal_task_device_select_queue(
-      device, IREE_HAL_COMMAND_CATEGORY_ANY, queue_affinity);
-  return iree_hal_task_queue_submit_read(
-      &device->queues[queue_index], source_file, source_offset, target_buffer,
-      target_offset, length, wait_semaphore_list, signal_semaphore_list);
-}
-
-static iree_status_t iree_hal_task_device_queue_write(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-    iree_hal_file_t* target_file, uint64_t target_offset,
-    iree_device_size_t length, iree_hal_write_flags_t flags) {
-  (void)flags;
-
-  // Memory file fast path: route to queue_copy via the storage buffer.
-  iree_hal_buffer_t* storage_buffer = iree_hal_file_storage_buffer(target_file);
-  if (storage_buffer) {
-    IREE_ASSERT(target_offset <= IREE_DEVICE_SIZE_MAX);
-    return iree_hal_device_queue_copy(
-        base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-        source_buffer, source_offset, storage_buffer,
-        (iree_device_size_t)target_offset, length, IREE_HAL_COPY_FLAG_NONE);
-  }
-
-  // FD file path: async proactor I/O or synchronous fallback.
-  if (!iree_hal_file_async_handle(target_file) &&
-      !iree_hal_file_supports_synchronous_io(target_file)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "file has no storage buffer, no async handle, and does not support "
-        "synchronous I/O; cannot perform write");
-  }
-
-  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  const iree_host_size_t queue_index = iree_hal_task_device_select_queue(
-      device, IREE_HAL_COMMAND_CATEGORY_ANY, queue_affinity);
-  return iree_hal_task_queue_submit_write(
-      &device->queues[queue_index], source_buffer, source_offset, target_file,
-      target_offset, length, wait_semaphore_list, signal_semaphore_list);
-}
-
 static iree_status_t iree_hal_task_device_queue_host_call(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -968,51 +896,6 @@ static iree_status_t iree_hal_task_device_profiling_end(
   return status;
 }
 
-static iree_status_t iree_hal_task_device_queue_fill(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const void* pattern,
-    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
-  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  const iree_host_size_t queue_index = iree_hal_task_device_select_queue(
-      device, IREE_HAL_COMMAND_CATEGORY_ANY, queue_affinity);
-  return iree_hal_task_queue_submit_fill(
-      &device->queues[queue_index], target_buffer, target_offset, length,
-      pattern, pattern_length, wait_semaphore_list, signal_semaphore_list);
-}
-
-static iree_status_t iree_hal_task_device_queue_update(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    const void* source_buffer, iree_host_size_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_update_flags_t flags) {
-  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  const iree_host_size_t queue_index = iree_hal_task_device_select_queue(
-      device, IREE_HAL_COMMAND_CATEGORY_ANY, queue_affinity);
-  return iree_hal_task_queue_submit_update(
-      &device->queues[queue_index], source_buffer, source_offset, target_buffer,
-      target_offset, length, wait_semaphore_list, signal_semaphore_list);
-}
-
-static iree_status_t iree_hal_task_device_queue_copy(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_copy_flags_t flags) {
-  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  const iree_host_size_t queue_index = iree_hal_task_device_select_queue(
-      device, IREE_HAL_COMMAND_CATEGORY_ANY, queue_affinity);
-  return iree_hal_task_queue_submit_copy(
-      &device->queues[queue_index], source_buffer, source_offset, target_buffer,
-      target_offset, length, wait_semaphore_list, signal_semaphore_list);
-}
-
 static iree_status_t iree_hal_task_device_queue_dispatch(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -1053,11 +936,6 @@ static const iree_hal_device_vtable_t iree_hal_task_device_vtable = {
     .query_semaphore_compatibility =
         iree_hal_task_device_query_semaphore_compatibility,
     .query_queue_pool_backend = iree_hal_task_device_query_queue_pool_backend,
-    .queue_fill = iree_hal_task_device_queue_fill,
-    .queue_update = iree_hal_task_device_queue_update,
-    .queue_copy = iree_hal_task_device_queue_copy,
-    .queue_read = iree_hal_task_device_queue_read,
-    .queue_write = iree_hal_task_device_queue_write,
     .queue_host_call = iree_hal_task_device_queue_host_call,
     .queue_dispatch = iree_hal_task_device_queue_dispatch,
     .queue_execute = iree_hal_task_device_queue_execute,

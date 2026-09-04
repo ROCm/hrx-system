@@ -91,6 +91,11 @@ class TestLogicalDevice {
 
   iree_hal_device_t* base_device() const { return base_device_; }
 
+  iree_hal_queue_t* queue() const {
+    return iree_hal_device_queue(base_device_, /*family_ordinal=*/0,
+                                 /*queue_ordinal=*/0);
+  }
+
   iree_hal_allocator_t* allocator() const {
     return iree_hal_device_allocator(base_device_);
   }
@@ -234,10 +239,10 @@ TEST_F(HostQueueFailureTest, DeferredOperationReportsRecordedQueueFailure) {
       MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
 
   const uint32_t pattern = 0xCACE1100u;
-  IREE_ASSERT_OK(iree_hal_device_queue_fill(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
-      signal_list, target_buffer, /*target_offset=*/0, sizeof(pattern),
-      &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      test_device.queue(), wait_list, signal_list, target_buffer,
+      /*target_offset=*/0, sizeof(pattern), &pattern, sizeof(pattern),
+      IREE_HAL_FILL_FLAG_NONE));
   ASSERT_TRUE(HostQueueHasPendingOps(queue));
 
   iree_hal_amdgpu_host_queue_record_failure(
@@ -289,11 +294,11 @@ TEST_F(HostQueueFailureTest, SubmittedEntryReportsRecordedQueueFailure) {
       MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
 
   const uint32_t pattern = 0xCACE1101u;
-  IREE_ASSERT_OK(iree_hal_device_queue_fill(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal_list, target_buffer,
-      /*target_offset=*/0, sizeof(pattern), &pattern, sizeof(pattern),
-      IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(
+      iree_hal_queue_fill(test_device.queue(), iree_hal_semaphore_list_empty(),
+                          signal_list, target_buffer,
+                          /*target_offset=*/0, sizeof(pattern), &pattern,
+                          sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
   EXPECT_FALSE(HostQueueHasPendingOps(queue));
 
   iree_hal_amdgpu_host_queue_record_failure(
@@ -369,10 +374,10 @@ TEST_F(HostQueueFailureTest, SubmissionAfterQueueFailureIsRejected) {
       MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
 
   const uint32_t pattern = 0xCACE1102u;
-  IREE_ASSERT_OK(iree_hal_device_queue_fill(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
-      signal_list, target_buffer, /*target_offset=*/0, sizeof(pattern),
-      &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      test_device.queue(), wait_list, signal_list, target_buffer,
+      /*target_offset=*/0, sizeof(pattern), &pattern, sizeof(pattern),
+      IREE_HAL_FILL_FLAG_NONE));
   ASSERT_TRUE(HostQueueHasPendingOps(queue));
 
   iree_hal_amdgpu_host_queue_record_failure(
@@ -394,11 +399,10 @@ TEST_F(HostQueueFailureTest, SubmissionAfterQueueFailureIsRejected) {
       MakeSemaphoreList(&late_signal_semaphore_ptr, &late_signal_value);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_CANCELLED,
-      iree_hal_device_queue_fill(
-          test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-          iree_hal_semaphore_list_empty(), late_signal_list, target_buffer,
-          /*target_offset=*/0, sizeof(pattern), &pattern, sizeof(pattern),
-          IREE_HAL_FILL_FLAG_NONE));
+      iree_hal_queue_fill(test_device.queue(), iree_hal_semaphore_list_empty(),
+                          late_signal_list, target_buffer,
+                          /*target_offset=*/0, sizeof(pattern), &pattern,
+                          sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
 
   IREE_EXPECT_OK(
       iree_hal_semaphore_signal(wait_semaphore, wait_value, /*frontier=*/NULL));
@@ -509,11 +513,11 @@ TEST_F(HostQueueFailureTest, FailureDuringTeardownWaitReleasesIt) {
       MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
 
   const uint32_t pattern = 0xCACE1103u;
-  IREE_ASSERT_OK(iree_hal_device_queue_fill(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal_list, target_buffer,
-      /*target_offset=*/0, sizeof(pattern), &pattern, sizeof(pattern),
-      IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(
+      iree_hal_queue_fill(test_device.queue(), iree_hal_semaphore_list_empty(),
+                          signal_list, target_buffer,
+                          /*target_offset=*/0, sizeof(pattern), &pattern,
+                          sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
 
   // Teardown order: admission closes first, then the wait, with the queues
   // still able to receive a failure throughout.
@@ -630,9 +634,9 @@ TEST_F(HostQueueFailureTest, CapacityParkedOperationReportsRecordedFailure) {
     uint64_t bulk_value = i + 1;
     const iree_hal_semaphore_list_t bulk_list =
         MakeSemaphoreList(&bulk_semaphore_ptr, &bulk_value);
-    IREE_ASSERT_OK(iree_hal_device_queue_fill(
-        test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-        iree_hal_semaphore_list_empty(), bulk_list, target_buffer,
+    IREE_ASSERT_OK(iree_hal_queue_fill(
+        test_device.queue(), iree_hal_semaphore_list_empty(), bulk_list,
+        target_buffer,
         /*target_offset=*/0, sizeof(pattern), &pattern, sizeof(pattern),
         IREE_HAL_FILL_FLAG_NONE));
     parked = HostQueueHasPendingOps(queue);
@@ -649,11 +653,11 @@ TEST_F(HostQueueFailureTest, CapacityParkedOperationReportsRecordedFailure) {
   iree_hal_semaphore_t* parked_semaphore_ptr = parked_semaphore.get();
   const iree_hal_semaphore_list_t parked_list =
       MakeSemaphoreList(&parked_semaphore_ptr, &parked_value);
-  IREE_ASSERT_OK(iree_hal_device_queue_fill(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), parked_list, target_buffer,
-      /*target_offset=*/0, sizeof(pattern), &pattern, sizeof(pattern),
-      IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(
+      iree_hal_queue_fill(test_device.queue(), iree_hal_semaphore_list_empty(),
+                          parked_list, target_buffer,
+                          /*target_offset=*/0, sizeof(pattern), &pattern,
+                          sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
 
   iree_hal_amdgpu_host_queue_record_failure(
       queue, iree_make_status(kInjectedFailureCode, "injected queue failure"));
@@ -679,8 +683,6 @@ TEST_F(HostQueueFailureTest, CapacityParkedOperationReportsRecordedFailure) {
 struct RacingProducer {
   // Queue the producer submits to.
   iree_hal_amdgpu_host_queue_t* queue = NULL;
-  // Device the submission goes through.
-  iree_hal_device_t* device = NULL;
   // Buffer the submitted fill targets.
   iree_hal_buffer_t* target_buffer = NULL;
   // Action storage owned by the test for the duration of the transition.
@@ -699,11 +701,11 @@ struct RacingProducer {
 static void RacingProducerSubmit(void* user_data) {
   RacingProducer* producer = (RacingProducer*)user_data;
   const uint32_t pattern = 0xCACE1104u;
-  producer->submit_status = iree_hal_device_queue_fill(
-      producer->device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), iree_hal_semaphore_list_empty(),
-      producer->target_buffer, /*target_offset=*/0, sizeof(pattern), &pattern,
-      sizeof(pattern), IREE_HAL_FILL_FLAG_NONE);
+  producer->submit_status = iree_hal_queue_fill(
+      &producer->queue->base, iree_hal_semaphore_list_empty(),
+      iree_hal_semaphore_list_empty(), producer->target_buffer,
+      /*target_offset=*/0, sizeof(pattern), &pattern, sizeof(pattern),
+      IREE_HAL_FILL_FLAG_NONE);
   iree_atomic_store(&producer->has_run, 1, iree_memory_order_release);
   iree_notification_post(&producer->ran, IREE_ALL_WAITERS);
 }
@@ -757,15 +759,14 @@ TEST_F(HostQueueFailureTest, ProducerDuringTheFailureDrainIsRejected) {
       MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
 
   const uint32_t pattern = 0xCACE1105u;
-  IREE_ASSERT_OK(iree_hal_device_queue_fill(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal_list, target_buffer,
-      /*target_offset=*/0, sizeof(pattern), &pattern, sizeof(pattern),
-      IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(
+      iree_hal_queue_fill(test_device.queue(), iree_hal_semaphore_list_empty(),
+                          signal_list, target_buffer,
+                          /*target_offset=*/0, sizeof(pattern), &pattern,
+                          sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
 
   RacingProducer producer;
   producer.queue = queue;
-  producer.device = test_device.base_device();
   producer.target_buffer = target_buffer;
   iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
       queue, &producer.action, RacingProducerSubmit, &producer);

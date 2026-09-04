@@ -1543,6 +1543,10 @@ TEST(ReplayExecuteTest, ExecutesHostAllocationImportedBufferRecord) {
 
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
+  iree_hal_queue_t* wrapped_queue =
+      iree_hal_device_queue(wrapped_device, /*family_ordinal=*/0,
+                            /*queue_ordinal=*/0);
+  ASSERT_NE(nullptr, wrapped_queue);
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(wrapped_device);
   ASSERT_NE(nullptr, allocator);
 
@@ -1579,9 +1583,9 @@ TEST(ReplayExecuteTest, ExecutesHostAllocationImportedBufferRecord) {
       semaphores,
       &signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_copy(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal_list, imported_buffer,
+  IREE_ASSERT_OK(iree_hal_queue_copy(
+      wrapped_queue, iree_hal_semaphore_list_empty(), signal_list,
+      imported_buffer,
       /*source_offset=*/0, target_buffer, /*target_offset=*/0,
       sizeof(imported_storage), IREE_HAL_COPY_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(

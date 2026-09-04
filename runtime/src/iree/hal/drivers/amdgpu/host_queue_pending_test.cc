@@ -87,6 +87,11 @@ class TestLogicalDevice {
 
   iree_hal_device_t* base_device() const { return base_device_; }
 
+  iree_hal_queue_t* queue() const {
+    return iree_hal_device_queue(base_device_, /*family_ordinal=*/0,
+                                 /*queue_ordinal=*/0);
+  }
+
   iree_hal_allocator_t* allocator() const {
     return iree_hal_device_allocator(base_device_);
   }
@@ -501,10 +506,10 @@ TEST_F(HostQueuePendingTest, CancelPendingFillFailsSignalSemaphore) {
       MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
 
   const uint32_t pattern = 0xCACE1100u;
-  IREE_ASSERT_OK(iree_hal_device_queue_fill(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
-      signal_list, target_buffer, /*target_offset=*/0, sizeof(pattern),
-      &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      test_device.queue(), wait_list, signal_list, target_buffer,
+      /*target_offset=*/0, sizeof(pattern), &pattern, sizeof(pattern),
+      IREE_HAL_FILL_FLAG_NONE));
   ASSERT_TRUE(HostQueueHasPendingOps(queue));
 
   CancelPendingWithTestStatus(queue);
@@ -553,9 +558,9 @@ TEST_F(HostQueuePendingTest, CapacityParkedHostActionRetriesAfterPostDrain) {
   const iree_hal_semaphore_list_t pressure_signal_list =
       MakeSemaphoreList(&pressure_signal_ptr, &pressure_signal_value);
   const uint32_t pressure_pattern = 0xABCD1234u;
-  iree_status_t status = iree_hal_device_queue_fill(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), pressure_signal_list, pressure_buffer,
+  iree_status_t status = iree_hal_queue_fill(
+      test_device.queue(), iree_hal_semaphore_list_empty(),
+      pressure_signal_list, pressure_buffer,
       /*target_offset=*/0, sizeof(pressure_pattern), &pressure_pattern,
       sizeof(pressure_pattern), IREE_HAL_FILL_FLAG_NONE);
 
@@ -717,9 +722,9 @@ TEST_F(HostQueuePendingTest,
   iree_hal_semaphore_t* update_signal_ptr = update_signal.get();
   const iree_hal_semaphore_list_t update_signal_list =
       MakeSemaphoreList(&update_signal_ptr, &update_signal_value);
-  IREE_ASSERT_OK(iree_hal_device_queue_update(
-      test_device.base_device(), kQueueAffinity0, alloca1_signal_list,
-      update_signal_list, &expected_value, /*source_offset=*/0, buffer1,
+  IREE_ASSERT_OK(iree_hal_queue_update(
+      test_device.queue(), alloca1_signal_list, update_signal_list,
+      &expected_value, /*source_offset=*/0, buffer1,
       /*target_offset=*/0, sizeof(expected_value), IREE_HAL_UPDATE_FLAG_NONE));
 
   Ref<iree_hal_buffer_t> readback_buffer;
@@ -731,9 +736,9 @@ TEST_F(HostQueuePendingTest,
   iree_hal_semaphore_t* copy_signal_ptr = copy_signal.get();
   const iree_hal_semaphore_list_t copy_signal_list =
       MakeSemaphoreList(&copy_signal_ptr, &copy_signal_value);
-  IREE_ASSERT_OK(iree_hal_device_queue_copy(
-      test_device.base_device(), kQueueAffinity0, update_signal_list,
-      copy_signal_list, buffer1, /*source_offset=*/0, readback_buffer,
+  IREE_ASSERT_OK(iree_hal_queue_copy(
+      test_device.queue(), update_signal_list, copy_signal_list, buffer1,
+      /*source_offset=*/0, readback_buffer,
       /*target_offset=*/0, sizeof(expected_value), IREE_HAL_COPY_FLAG_NONE));
 
   Ref<iree_hal_semaphore_t> dealloca0_signal;

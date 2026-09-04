@@ -16,9 +16,9 @@
 typedef enum iree_hal_streaming_graph_block_type_e {
   // iree_hal_device_queue_barrier
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER = 0,
-  // iree_hal_device_queue_fill
+  // iree_hal_queue_fill
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_FILL,
-  // iree_hal_device_queue_copy
+  // iree_hal_queue_copy
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_COPY,
   // iree_hal_device_queue_host_call
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL,
@@ -2075,20 +2075,18 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
           signal_semaphores, flags);
     }
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_FILL: {
-      return iree_hal_device_queue_fill(
-          stream->context->device, stream->queue_affinity, wait_semaphores,
-          signal_semaphores, ptrs->attrs->fill.target_buffer,
-          ptrs->attrs->fill.target_offset, ptrs->attrs->fill.length,
-          &ptrs->attrs->fill.pattern, ptrs->attrs->fill.pattern_length,
-          ptrs->attrs->fill.flags);
+      return iree_hal_queue_fill(
+          stream->queue, wait_semaphores, signal_semaphores,
+          ptrs->attrs->fill.target_buffer, ptrs->attrs->fill.target_offset,
+          ptrs->attrs->fill.length, &ptrs->attrs->fill.pattern,
+          ptrs->attrs->fill.pattern_length, ptrs->attrs->fill.flags);
     }
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_COPY: {
-      return iree_hal_device_queue_copy(
-          stream->context->device, stream->queue_affinity, wait_semaphores,
-          signal_semaphores, ptrs->attrs->copy.source_buffer,
-          ptrs->attrs->copy.source_offset, ptrs->attrs->copy.target_buffer,
-          ptrs->attrs->copy.target_offset, ptrs->attrs->copy.length,
-          ptrs->attrs->copy.flags);
+      return iree_hal_queue_copy(
+          stream->queue, wait_semaphores, signal_semaphores,
+          ptrs->attrs->copy.source_buffer, ptrs->attrs->copy.source_offset,
+          ptrs->attrs->copy.target_buffer, ptrs->attrs->copy.target_offset,
+          ptrs->attrs->copy.length, ptrs->attrs->copy.flags);
     }
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_DISPATCH: {
       iree_hal_buffer_ref_list_t bindings_list = {

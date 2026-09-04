@@ -29,9 +29,6 @@ namespace {
 
 using iree::hal::cts::Ref;
 
-constexpr iree_hal_queue_affinity_t kQueueAffinity0 =
-    ((iree_hal_queue_affinity_t)1ull) << 0;
-
 constexpr iree_device_size_t kStagingSlotSize =
     IREE_HAL_AMDGPU_STAGING_SLOT_ALIGNMENT;
 constexpr iree_device_size_t kMultiSlotTransferSize =
@@ -173,6 +170,11 @@ class HostQueueStagingTest : public ::testing::Test {
 
     iree_hal_device_t* base_device() const { return base_device_; }
 
+    iree_hal_queue_t* queue() const {
+      return iree_hal_device_queue(base_device_, /*family_ordinal=*/0,
+                                   /*queue_ordinal=*/0);
+    }
+
     iree_hal_allocator_t* allocator() const {
       return iree_hal_device_allocator(base_device_);
     }
@@ -303,6 +305,7 @@ class HostQueueStagingTest : public ::testing::Test {
 
   iree_status_t CreatePatternedDeviceBuffer(iree_hal_allocator_t* allocator,
                                             iree_hal_device_t* device,
+                                            iree_hal_queue_t* queue,
                                             iree_device_size_t buffer_size,
                                             uint8_t pattern,
                                             iree_hal_buffer_t** out_buffer) {
@@ -313,8 +316,8 @@ class HostQueueStagingTest : public ::testing::Test {
         IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
     IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
         allocator, params, buffer_size, out_buffer));
-    return FillDeviceBufferRange(device, *out_buffer, /*offset=*/0, buffer_size,
-                                 pattern);
+    return FillDeviceBufferRange(device, queue, *out_buffer, /*offset=*/0,
+                                 buffer_size, pattern);
   }
 
   iree_status_t QueueAllocaHostVisibleTransientBuffer(
@@ -363,6 +366,7 @@ class HostQueueStagingTest : public ::testing::Test {
   }
 
   iree_status_t FillDeviceBufferRange(iree_hal_device_t* device,
+                                      iree_hal_queue_t* queue,
                                       iree_hal_buffer_t* buffer,
                                       iree_device_size_t offset,
                                       iree_device_size_t length,
@@ -374,16 +378,16 @@ class HostQueueStagingTest : public ::testing::Test {
     iree_hal_semaphore_t* signal_semaphore_ptr = signal_semaphore.get();
     iree_hal_semaphore_list_t signal_list =
         MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
-    IREE_RETURN_IF_ERROR(iree_hal_device_queue_fill(
-        device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-        signal_list, buffer, offset, length, &pattern, sizeof(pattern),
-        IREE_HAL_FILL_FLAG_NONE));
+    IREE_RETURN_IF_ERROR(iree_hal_queue_fill(
+        queue, iree_hal_semaphore_list_empty(), signal_list, buffer, offset,
+        length, &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
     return iree_hal_semaphore_wait(signal_semaphore, signal_value,
                                    iree_infinite_timeout(),
                                    IREE_ASYNC_WAIT_FLAG_NONE);
   }
 
   iree_status_t QueueReadAndWait(iree_hal_device_t* device,
+                                 iree_hal_queue_t* queue,
                                  iree_hal_file_t* source_file,
                                  uint64_t source_offset,
                                  iree_hal_buffer_t* target_buffer,
@@ -395,12 +399,6 @@ class HostQueueStagingTest : public ::testing::Test {
     iree_hal_semaphore_t* signal_semaphore_ptr = signal_semaphore.get();
     iree_hal_semaphore_list_t signal_list =
         MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
-    iree_hal_queue_t* queue = iree_hal_device_queue(
-        device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
-    if (!queue) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "test device has no provisioned queue");
-    }
     IREE_RETURN_IF_ERROR(
         iree_hal_queue_read(queue, iree_hal_semaphore_list_empty(), signal_list,
                             source_file, source_offset, target_buffer,
@@ -411,6 +409,7 @@ class HostQueueStagingTest : public ::testing::Test {
   }
 
   iree_status_t QueueWriteAndWait(iree_hal_device_t* device,
+                                  iree_hal_queue_t* queue,
                                   iree_hal_buffer_t* source_buffer,
                                   iree_device_size_t source_offset,
                                   iree_hal_file_t* target_file,
@@ -422,12 +421,6 @@ class HostQueueStagingTest : public ::testing::Test {
     iree_hal_semaphore_t* signal_semaphore_ptr = signal_semaphore.get();
     iree_hal_semaphore_list_t signal_list =
         MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
-    iree_hal_queue_t* queue = iree_hal_device_queue(
-        device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
-    if (!queue) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "test device has no provisioned queue");
-    }
     IREE_RETURN_IF_ERROR(iree_hal_queue_write(
         queue, iree_hal_semaphore_list_empty(), signal_list, source_buffer,
         source_offset, target_file, target_offset, length,
@@ -438,6 +431,7 @@ class HostQueueStagingTest : public ::testing::Test {
   }
 
   iree_status_t ReadBufferContents(iree_hal_device_t* device,
+                                   iree_hal_queue_t* queue,
                                    iree_hal_buffer_t* buffer,
                                    iree_device_size_t offset,
                                    iree_device_size_t length,
@@ -456,7 +450,7 @@ class HostQueueStagingTest : public ::testing::Test {
                              IREE_HAL_EXTERNAL_FILE_FLAG_NONE, file.out());
     iree_io_file_handle_release(handle);
     if (iree_status_is_ok(status)) {
-      status = QueueWriteAndWait(device, buffer, offset, file,
+      status = QueueWriteAndWait(device, queue, buffer, offset, file,
                                  /*target_offset=*/0, length);
     }
     return status;
@@ -511,17 +505,18 @@ TEST_F(HostQueueStagingTest, OneSlotLargeReadCompletesThroughSlotWaiter) {
                                   IREE_HAL_MEMORY_ACCESS_READ, file.out()));
   Ref<iree_hal_buffer_t> buffer;
   IREE_ASSERT_OK(CreatePatternedDeviceBuffer(
-      test_device.allocator(), test_device.base_device(),
+      test_device.allocator(), test_device.base_device(), test_device.queue(),
       kMultiSlotTransferSize, 0x00, buffer.out()));
 
-  IREE_ASSERT_OK(QueueReadAndWait(test_device.base_device(), file,
+  IREE_ASSERT_OK(QueueReadAndWait(test_device.base_device(),
+                                  test_device.queue(), file,
                                   /*source_offset=*/0, buffer,
                                   /*target_offset=*/0, kMultiSlotTransferSize));
 
   std::vector<uint8_t> contents;
-  IREE_ASSERT_OK(ReadBufferContents(test_device.base_device(), buffer,
-                                    /*offset=*/0, kMultiSlotTransferSize,
-                                    &contents));
+  IREE_ASSERT_OK(
+      ReadBufferContents(test_device.base_device(), test_device.queue(), buffer,
+                         /*offset=*/0, kMultiSlotTransferSize, &contents));
   ExpectByteRangeMatches(contents, file_data);
 }
 
@@ -643,13 +638,13 @@ TEST_F(HostQueueStagingTest, OneSlotLargeWriteCompletesThroughSlotWaiter) {
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, file.out()));
   Ref<iree_hal_buffer_t> buffer;
   IREE_ASSERT_OK(CreatePatternedDeviceBuffer(
-      test_device.allocator(), test_device.base_device(),
+      test_device.allocator(), test_device.base_device(), test_device.queue(),
       kMultiSlotTransferSize, 0xA7, buffer.out()));
 
-  IREE_ASSERT_OK(QueueWriteAndWait(test_device.base_device(), buffer,
-                                   /*source_offset=*/0, file,
-                                   /*target_offset=*/0,
-                                   kMultiSlotTransferSize));
+  IREE_ASSERT_OK(
+      QueueWriteAndWait(test_device.base_device(), test_device.queue(), buffer,
+                        /*source_offset=*/0, file,
+                        /*target_offset=*/0, kMultiSlotTransferSize));
 
   std::vector<uint8_t> contents;
   IREE_ASSERT_OK(ReadTempFileContents(path, &contents));
@@ -683,12 +678,12 @@ TEST_F(HostQueueStagingTest, CapacityParkedStagedWriteRetriesAfterPostDrain) {
 
   Ref<iree_hal_buffer_t> source_buffer;
   IREE_ASSERT_OK(CreatePatternedDeviceBuffer(
-      test_device.allocator(), test_device.base_device(),
+      test_device.allocator(), test_device.base_device(), test_device.queue(),
       kMultiSlotTransferSize, 0x3C, source_buffer.out()));
   Ref<iree_hal_buffer_t> pressure_buffer;
   IREE_ASSERT_OK(CreatePatternedDeviceBuffer(
-      test_device.allocator(), test_device.base_device(), sizeof(uint32_t),
-      0x00, pressure_buffer.out()));
+      test_device.allocator(), test_device.base_device(), test_device.queue(),
+      sizeof(uint32_t), 0x00, pressure_buffer.out()));
 
   hsa_signal_t blocker_signal = iree_hsa_signal_null();
   IREE_ASSERT_OK(iree_hsa_amd_signal_create(
@@ -704,9 +699,9 @@ TEST_F(HostQueueStagingTest, CapacityParkedStagedWriteRetriesAfterPostDrain) {
   iree_hal_semaphore_list_t pressure_signal_list =
       MakeSemaphoreList(&pressure_signal_ptr, &pressure_signal_value);
   const uint32_t pressure_pattern = 0xABCD1234u;
-  iree_status_t status = iree_hal_device_queue_fill(
-      test_device.base_device(), kQueueAffinity0,
-      iree_hal_semaphore_list_empty(), pressure_signal_list, pressure_buffer,
+  iree_status_t status = iree_hal_queue_fill(
+      test_device.queue(), iree_hal_semaphore_list_empty(),
+      pressure_signal_list, pressure_buffer,
       /*target_offset=*/0, sizeof(pressure_pattern), &pressure_pattern,
       sizeof(pressure_pattern), IREE_HAL_FILL_FLAG_NONE);
 
@@ -763,8 +758,8 @@ TEST_F(HostQueueStagingTest, ShortReadFailsTerminalSignal) {
                                   IREE_HAL_MEMORY_ACCESS_READ, file.out()));
   Ref<iree_hal_buffer_t> buffer;
   IREE_ASSERT_OK(CreatePatternedDeviceBuffer(
-      test_device.allocator(), test_device.base_device(), kStagingSlotSize,
-      0x00, buffer.out()));
+      test_device.allocator(), test_device.base_device(), test_device.queue(),
+      kStagingSlotSize, 0x00, buffer.out()));
 
   Ref<iree_hal_semaphore_t> wait_semaphore;
   IREE_ASSERT_OK(

@@ -309,6 +309,8 @@ iree_status_t iree_hal_streaming_stream_create(
   stream->timeline_semaphore = NULL;
   stream->pending_value = 0;
   stream->completed_value = 0;
+  stream->queue = iree_hal_device_queue(context->device, /*family_ordinal=*/0,
+                                        /*queue_ordinal=*/0);
   stream->queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   stream->memory_reuse_dependencies = NULL;
   stream->memory_reuse_dependency_count = 0;
@@ -329,10 +331,18 @@ iree_status_t iree_hal_streaming_stream_create(
   stream->host_allocator = host_allocator;
   iree_slim_mutex_initialize(&stream->mutex);
 
+  iree_status_t status = iree_ok_status();
+  if (!stream->queue) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "device has no provisioned queue");
+  }
+
   // Create timeline semaphore for synchronization.
-  iree_status_t status = iree_hal_semaphore_create(
-      context->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0ULL,
-      IREE_HAL_SEMAPHORE_FLAG_NONE, &stream->timeline_semaphore);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_create(
+        context->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0ULL,
+        IREE_HAL_SEMAPHORE_FLAG_NONE, &stream->timeline_semaphore);
+  }
 
   // Register stream with context.
   if (iree_status_is_ok(status)) {
@@ -362,7 +372,10 @@ static void iree_hal_streaming_stream_destroy(
           stream, IREE_HAL_STREAMING_CAPTURE_STATUS_NONE);
     }
     iree_slim_mutex_lock(&stream->mutex);
-    if (stream->context == context) stream->context = NULL;
+    if (stream->context == context) {
+      stream->queue = NULL;
+      stream->context = NULL;
+    }
     iree_slim_mutex_unlock(&stream->mutex);
     iree_hal_streaming_context_unregister_stream(context, stream);
   }

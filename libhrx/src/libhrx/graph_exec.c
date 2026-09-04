@@ -635,20 +635,18 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
             signal_semaphores, ptrs.attrs->barrier.flags);
         break;
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_FILL:
-        status = iree_hal_device_queue_fill(
-            hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-            signal_semaphores, ptrs.attrs->fill.target_buffer,
-            ptrs.attrs->fill.target_offset, ptrs.attrs->fill.length,
-            &ptrs.attrs->fill.pattern, ptrs.attrs->fill.pattern_length,
-            ptrs.attrs->fill.flags);
+        status = iree_hal_queue_fill(
+            exec->device->transfer_queue, wait_semaphores, signal_semaphores,
+            ptrs.attrs->fill.target_buffer, ptrs.attrs->fill.target_offset,
+            ptrs.attrs->fill.length, &ptrs.attrs->fill.pattern,
+            ptrs.attrs->fill.pattern_length, ptrs.attrs->fill.flags);
         break;
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_COPY:
-        status = iree_hal_device_queue_copy(
-            hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-            signal_semaphores, ptrs.attrs->copy.source_buffer,
-            ptrs.attrs->copy.source_offset, ptrs.attrs->copy.target_buffer,
-            ptrs.attrs->copy.target_offset, ptrs.attrs->copy.length,
-            ptrs.attrs->copy.flags);
+        status = iree_hal_queue_copy(
+            exec->device->transfer_queue, wait_semaphores, signal_semaphores,
+            ptrs.attrs->copy.source_buffer, ptrs.attrs->copy.source_offset,
+            ptrs.attrs->copy.target_buffer, ptrs.attrs->copy.target_offset,
+            ptrs.attrs->copy.length, ptrs.attrs->copy.flags);
         break;
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_DISPATCH: {
         iree_hal_buffer_ref_list_t bindings_list = {

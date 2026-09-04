@@ -68,6 +68,8 @@ class TsanExecutableTest : public ::testing::TestWithParam<BackendInfo> {
 
   iree_hal_device_t* device() const { return tsan_device_.device(); }
 
+  iree_hal_queue_t* queue() const { return tsan_device_.queue(); }
+
   iree_hal_allocator_t* allocator() const { return tsan_device_.allocator(); }
 
   SanitizerDeviceEventRecorder* recorder() const {
@@ -98,8 +100,8 @@ TEST_P(TsanExecutableTest, PublishesTsanConfigGlobal) {
   ASSERT_NE(global_buffer, nullptr);
 
   std::vector<iree_hal_amdgpu_tsan_config_t> configs;
-  IREE_ASSERT_OK(
-      SanitizerReadBufferData(device(), allocator(), global_buffer, &configs));
+  IREE_ASSERT_OK(SanitizerReadBufferData(device(), queue(), allocator(),
+                                         global_buffer, &configs));
   ASSERT_EQ(configs.size(), 1u);
   const iree_hal_amdgpu_tsan_config_t& config = configs[0];
   EXPECT_EQ(config.record_length, sizeof(config));
@@ -153,8 +155,8 @@ TEST_P(TsanExecutableTest, PublishesTsanConfigGlobal) {
       dispatch_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
   std::vector<uint64_t> output_data;
-  IREE_ASSERT_OK(SanitizerReadBufferData(device(), allocator(), output_buffer,
-                                         &output_data));
+  IREE_ASSERT_OK(SanitizerReadBufferData(device(), queue(), allocator(),
+                                         output_buffer, &output_data));
   ASSERT_EQ(output_data.size(), 12u);
   EXPECT_EQ(output_data[0], config.record_length);
   EXPECT_EQ(output_data[1], config.flags);
@@ -190,8 +192,8 @@ TEST_P(TsanExecutableTest, EnablesFeedbackConfigGlobal) {
   ASSERT_NE(global_buffer, nullptr);
 
   std::vector<iree_hal_amdgpu_feedback_config_t> configs;
-  IREE_ASSERT_OK(
-      SanitizerReadBufferData(device(), allocator(), global_buffer, &configs));
+  IREE_ASSERT_OK(SanitizerReadBufferData(device(), queue(), allocator(),
+                                         global_buffer, &configs));
   ASSERT_EQ(configs.size(), 1u);
   const iree_hal_amdgpu_feedback_config_t& config = configs[0];
   EXPECT_EQ(config.record_length, sizeof(config));
@@ -241,8 +243,8 @@ TEST_P(TsanExecutableTest, ReportsTsanPacketThroughFeedback) {
   EXPECT_EQ(recorder()->tsan_report_count(), 1u);
 
   std::vector<uint64_t> output_data;
-  IREE_ASSERT_OK(SanitizerReadBufferData(device(), allocator(), output_buffer,
-                                         &output_data));
+  IREE_ASSERT_OK(SanitizerReadBufferData(device(), queue(), allocator(),
+                                         output_buffer, &output_data));
   ASSERT_EQ(output_data.size(), 1u);
   EXPECT_EQ(output_data[0], 1u);
 

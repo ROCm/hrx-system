@@ -71,6 +71,11 @@ class TestLogicalDevice {
 
   iree_hal_device_t* base_device() const { return base_device_; }
 
+  iree_hal_queue_t* queue() const {
+    return iree_hal_device_queue(base_device_, /*family_ordinal=*/0,
+                                 /*queue_ordinal=*/0);
+  }
+
   iree_hal_amdgpu_logical_device_t* logical_device() const {
     return (iree_hal_amdgpu_logical_device_t*)base_device_;
   }
@@ -581,8 +586,8 @@ TEST_P(HostQueueTimestampTest, TickAdvancesAcrossWork) {
       device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
       TimelinePoint(timeline, &v1), tick0, /*target_offset=*/0,
       IREE_HAL_TIMESTAMP_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_device_queue_fill(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, TimelinePoint(timeline, &v1),
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      test_device.queue(), TimelinePoint(timeline, &v1),
       TimelinePoint(timeline, &v2), scratch, /*target_offset=*/0, kScratchBytes,
       &pattern, /*pattern_length=*/sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_device_queue_timestamp(

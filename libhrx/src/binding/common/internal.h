@@ -514,7 +514,12 @@ typedef struct iree_hal_streaming_stream_t {
   uint64_t pending_value;    // Last value a submission has been accepted for.
   uint64_t completed_value;  // Last value we've verified as completed
 
-  // Queue affinity.
+  // Provisioned hardware queue used by this stream. Borrowed from the device
+  // retained by |context| and valid while the context remains attached.
+  iree_hal_queue_t* queue;
+
+  // Legacy affinity used by device-level operations pending exact-queue
+  // migration.
   iree_hal_queue_affinity_t queue_affinity;
 
   // Event dependencies that establish safe cross-stream allocation reuse.

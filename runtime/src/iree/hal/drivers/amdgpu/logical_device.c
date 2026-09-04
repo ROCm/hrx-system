@@ -2998,121 +2998,6 @@ static iree_status_t iree_hal_amdgpu_logical_device_query_queue_pool_backend(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_amdgpu_logical_device_queue_fill(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const void* pattern,
-    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
-  // Match the HAL contract documented on iree_hal_command_buffer_fill_buffer
-  // (1/2/4-byte patterns only) so queue_fill and command_buffer_fill accept
-  // the same inputs across all backends. The device kernel itself supports an
-  // 8-byte pattern path via iree_hal_amdgpu_device_buffer_fill_x8, but we
-  // deliberately do not expose that here — callers writing 8-byte fills would
-  // then be portable only to amdgpu.
-  if (IREE_UNLIKELY(pattern_length != 1 && pattern_length != 2 &&
-                    pattern_length != 4)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "fill patterns must be 1, 2, or 4 bytes (got %" PRIhsz ")",
-        pattern_length);
-  }
-  if (IREE_UNLIKELY(!pattern)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "fill pattern pointer is required");
-  }
-  uint64_t pattern_bits = 0;
-  memcpy(&pattern_bits, pattern, pattern_length);
-
-  iree_hal_amdgpu_logical_device_t* logical_device =
-      iree_hal_amdgpu_logical_device_cast(base_device);
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_host_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
-      logical_device, queue_affinity, &queue));
-  return iree_hal_amdgpu_host_queue_fill(
-      queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
-      target_offset, length, pattern_bits, pattern_length, flags);
-}
-
-static iree_status_t iree_hal_amdgpu_logical_device_queue_update(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    const void* source_buffer, iree_host_size_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_update_flags_t flags) {
-  iree_hal_amdgpu_logical_device_t* logical_device =
-      iree_hal_amdgpu_logical_device_cast(base_device);
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_host_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
-      logical_device, queue_affinity, &queue));
-  return iree_hal_amdgpu_host_queue_update(
-      queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
-      source_offset, target_buffer, target_offset, length, flags);
-}
-
-static iree_status_t iree_hal_amdgpu_logical_device_queue_copy(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_copy_flags_t flags) {
-  iree_hal_amdgpu_logical_device_t* logical_device =
-      iree_hal_amdgpu_logical_device_cast(base_device);
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_host_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
-      logical_device, queue_affinity, &queue));
-  return iree_hal_amdgpu_host_queue_copy(
-      queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
-      source_offset, target_buffer, target_offset, length, flags);
-}
-
-static iree_status_t iree_hal_amdgpu_logical_device_queue_read(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_file_t* source_file, uint64_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_read_flags_t flags) {
-  iree_hal_amdgpu_logical_device_t* logical_device =
-      iree_hal_amdgpu_logical_device_cast(base_device);
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_host_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
-      logical_device, queue_affinity, &queue));
-  return iree_hal_amdgpu_host_queue_submit_read(
-      queue, wait_semaphore_list, signal_semaphore_list, source_file,
-      source_offset, target_buffer, target_offset, length, flags);
-}
-
-static iree_status_t iree_hal_amdgpu_logical_device_queue_write(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-    iree_hal_file_t* target_file, uint64_t target_offset,
-    iree_device_size_t length, iree_hal_write_flags_t flags) {
-  iree_hal_amdgpu_logical_device_t* logical_device =
-      iree_hal_amdgpu_logical_device_cast(base_device);
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_host_queue_t* queue = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
-      logical_device, queue_affinity, &queue));
-  return iree_hal_amdgpu_host_queue_submit_write(
-      queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
-      source_offset, target_file, target_offset, length, flags);
-}
-
 static iree_status_t iree_hal_amdgpu_logical_device_queue_host_call(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -3621,11 +3506,6 @@ static const iree_hal_device_vtable_t iree_hal_amdgpu_logical_device_vtable = {
         iree_hal_amdgpu_logical_device_query_semaphore_compatibility,
     .query_queue_pool_backend =
         iree_hal_amdgpu_logical_device_query_queue_pool_backend,
-    .queue_fill = iree_hal_amdgpu_logical_device_queue_fill,
-    .queue_update = iree_hal_amdgpu_logical_device_queue_update,
-    .queue_copy = iree_hal_amdgpu_logical_device_queue_copy,
-    .queue_read = iree_hal_amdgpu_logical_device_queue_read,
-    .queue_write = iree_hal_amdgpu_logical_device_queue_write,
     .queue_host_call = iree_hal_amdgpu_logical_device_queue_host_call,
     .queue_dispatch = iree_hal_amdgpu_logical_device_queue_dispatch,
     .queue_execute = iree_hal_amdgpu_logical_device_queue_execute,

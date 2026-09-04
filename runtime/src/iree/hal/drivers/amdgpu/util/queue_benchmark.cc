@@ -606,8 +606,10 @@ class QueueBenchmark : public benchmark::Fixture {
       iree_hal_semaphore_list_t wait_semaphore_list,
       iree_hal_semaphore_list_t signal_semaphore_list) {
     if (payload_kind == PayloadKind::kCopy) {
-      return iree_hal_device_queue_copy(
-          device_, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+      iree_hal_amdgpu_host_queue_t* host_queue = nullptr;
+      IREE_RETURN_IF_ERROR(LookupHostQueue(queue_affinity, &host_queue));
+      return iree_hal_queue_copy(
+          &host_queue->base, wait_semaphore_list, signal_semaphore_list,
           source_buffer_, /*source_offset=*/0, target_buffer_,
           /*target_offset=*/0, kPayloadLength, IREE_HAL_COPY_FLAG_NONE);
     }
@@ -643,8 +645,10 @@ class QueueBenchmark : public benchmark::Fixture {
       return SubmitPreResolvedDispatchWithLists(
           queue_affinity, wait_semaphore_list, signal_semaphore_list);
     }
-    return iree_hal_device_queue_fill(
-        device_, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+    iree_hal_amdgpu_host_queue_t* host_queue = nullptr;
+    IREE_RETURN_IF_ERROR(LookupHostQueue(queue_affinity, &host_queue));
+    return iree_hal_queue_fill(
+        &host_queue->base, wait_semaphore_list, signal_semaphore_list,
         target_buffer_, /*target_offset=*/0, kPayloadLength, &fill_pattern_,
         sizeof(fill_pattern_), IREE_HAL_FILL_FLAG_NONE);
   }
@@ -810,11 +814,10 @@ class QueueBenchmark : public benchmark::Fixture {
         /*semaphores=*/&signal_semaphore,
         /*payload_values=*/&payload_value,
     };
-    IREE_RETURN_IF_ERROR(iree_hal_device_queue_fill(
-        device_, kQueue0, iree_hal_semaphore_list_empty(),
-        signal_semaphore_list, target_buffer, /*target_offset=*/0,
-        kPayloadBufferAlignment, pattern, pattern_length,
-        IREE_HAL_FILL_FLAG_NONE));
+    IREE_RETURN_IF_ERROR(iree_hal_queue_fill(
+        queue0_, iree_hal_semaphore_list_empty(), signal_semaphore_list,
+        target_buffer, /*target_offset=*/0, kPayloadBufferAlignment, pattern,
+        pattern_length, IREE_HAL_FILL_FLAG_NONE));
     return Wait(completion_semaphore_, payload_value);
   }
 

@@ -947,11 +947,10 @@ TEST_P(BdaSpirvTest, CommandBufferExecutesBdaShaderWithSparseBindings) {
 
   const int32_t input_pattern = 5;
   SemaphoreList fill_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_fill(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      fill_signal, input_buffer.get(), /*target_offset=*/0,
-      4 * sizeof(input_pattern), &input_pattern, sizeof(input_pattern),
-      IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      transfer_queue_, iree_hal_semaphore_list_empty(), fill_signal,
+      input_buffer.get(), /*target_offset=*/0, 4 * sizeof(input_pattern),
+      &input_pattern, sizeof(input_pattern), IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       fill_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
@@ -976,11 +975,10 @@ TEST_P(BdaSpirvTest, CommandBufferExecutesBdaShaderWithSparseBindings) {
   IREE_ASSERT_OK(
       CreateZeroedDeviceBuffer(4 * sizeof(int32_t), readback_buffer.out()));
   SemaphoreList copy_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_copy(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      copy_signal, output_buffer.get(), /*source_offset=*/0,
-      readback_buffer.get(), /*target_offset=*/0, 4 * sizeof(int32_t),
-      IREE_HAL_COPY_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_copy(
+      transfer_queue_, iree_hal_semaphore_list_empty(), copy_signal,
+      output_buffer.get(), /*source_offset=*/0, readback_buffer.get(),
+      /*target_offset=*/0, 4 * sizeof(int32_t), IREE_HAL_COPY_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       copy_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
@@ -1060,11 +1058,10 @@ TEST_P(BdaSpirvReplayCacheTest, CommandBufferSkipsUnchangedBdaPublication) {
 
   const int32_t reset_pattern = 0;
   SemaphoreList fill_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_fill(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      fill_signal, output_buffer.get(), /*target_offset=*/0,
-      kDispatchByteLength, &reset_pattern, sizeof(reset_pattern),
-      IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      transfer_queue_, iree_hal_semaphore_list_empty(), fill_signal,
+      output_buffer.get(), /*target_offset=*/0, kDispatchByteLength,
+      &reset_pattern, sizeof(reset_pattern), IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       fill_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
   ExpectFilledOutputPrefix(output_buffer.get(), /*expected_value=*/0);
@@ -1150,11 +1147,10 @@ TEST_P(BdaSpirvReplayCacheTest, ConcurrentExecutionsForkCachedNativeReplay) {
 
   const int32_t input_pattern = 5;
   SemaphoreList fill_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_fill(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      fill_signal, input_buffer.get(), /*target_offset=*/0,
-      dispatch_byte_length, &input_pattern, sizeof(input_pattern),
-      IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      transfer_queue_, iree_hal_semaphore_list_empty(), fill_signal,
+      input_buffer.get(), /*target_offset=*/0, dispatch_byte_length,
+      &input_pattern, sizeof(input_pattern), IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       fill_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 

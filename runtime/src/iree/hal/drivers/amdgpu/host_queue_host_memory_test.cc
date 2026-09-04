@@ -21,9 +21,6 @@ namespace {
 using iree::hal::cts::Ref;
 using iree::hal::cts::SemaphoreList;
 
-constexpr iree_hal_queue_affinity_t kQueueAffinity0 =
-    ((iree_hal_queue_affinity_t)1ull) << 0;
-
 std::vector<uint8_t> MakePatternData(size_t size) {
   std::vector<uint8_t> data(size);
   for (size_t i = 0; i < size; ++i) {
@@ -55,6 +52,11 @@ class TestLogicalDevice {
   }
 
   iree_hal_device_t* device() const { return device_; }
+
+  iree_hal_queue_t* queue() const {
+    return iree_hal_device_queue(device_, /*family_ordinal=*/0,
+                                 /*queue_ordinal=*/0);
+  }
 
  private:
   // Provides the proactor pool and causal frontier tracker for the device.
@@ -111,6 +113,7 @@ class HostQueueHostMemoryTest : public ::testing::Test {
   }
 
   iree_status_t CreatePatternedDeviceBuffer(iree_hal_device_t* device,
+                                            iree_hal_queue_t* queue,
                                             iree_device_size_t buffer_size,
                                             uint8_t pattern,
                                             iree_hal_buffer_t** out_buffer) {
@@ -125,10 +128,10 @@ class HostQueueHostMemoryTest : public ::testing::Test {
         iree_hal_device_allocator(device), params, buffer_size, &buffer);
     SemaphoreList signal_list(device, {0}, {1});
     if (iree_status_is_ok(status)) {
-      status = iree_hal_device_queue_fill(
-          device, kQueueAffinity0, iree_hal_semaphore_list_empty(), signal_list,
-          buffer, /*target_offset=*/0, buffer_size, &pattern, sizeof(pattern),
-          IREE_HAL_FILL_FLAG_NONE);
+      status = iree_hal_queue_fill(queue, iree_hal_semaphore_list_empty(),
+                                   signal_list, buffer,
+                                   /*target_offset=*/0, buffer_size, &pattern,
+                                   sizeof(pattern), IREE_HAL_FILL_FLAG_NONE);
     }
     if (iree_status_is_ok(status)) {
       status = iree_hal_semaphore_list_wait(
@@ -183,17 +186,17 @@ TEST_F(HostQueueHostMemoryTest, ImportedHostCopyPublishesWritesAndOffsets) {
       IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET, target_host_buffer.out()));
 
   Ref<iree_hal_buffer_t> read_device_allocation;
-  IREE_ASSERT_OK(CreatePatternedDeviceBuffer(test_device.device(),
-                                             kDeviceAllocationSize, 0x5E,
-                                             read_device_allocation.out()));
+  IREE_ASSERT_OK(CreatePatternedDeviceBuffer(
+      test_device.device(), test_device.queue(), kDeviceAllocationSize, 0x5E,
+      read_device_allocation.out()));
   Ref<iree_hal_buffer_t> read_device_subspan;
   IREE_ASSERT_OK(iree_hal_buffer_subspan(
       read_device_allocation, kReadSubspanOffset, kDeviceSubspanLength,
       host_allocator_, read_device_subspan.out()));
   Ref<iree_hal_buffer_t> write_device_allocation;
-  IREE_ASSERT_OK(CreatePatternedDeviceBuffer(test_device.device(),
-                                             kDeviceAllocationSize, 0xA6,
-                                             write_device_allocation.out()));
+  IREE_ASSERT_OK(CreatePatternedDeviceBuffer(
+      test_device.device(), test_device.queue(), kDeviceAllocationSize, 0xA6,
+      write_device_allocation.out()));
   Ref<iree_hal_buffer_t> write_device_subspan;
   IREE_ASSERT_OK(iree_hal_buffer_subspan(
       write_device_allocation, kWriteSubspanOffset, kDeviceSubspanLength,
@@ -205,22 +208,21 @@ TEST_F(HostQueueHostMemoryTest, ImportedHostCopyPublishesWritesAndOffsets) {
               transfer_data.size());
 
   SemaphoreList read_semaphore(test_device.device(), {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_copy(
-      test_device.device(), kQueueAffinity0, iree_hal_semaphore_list_empty(),
-      read_semaphore, source_host_buffer, kSourceHostOffset,
-      read_device_subspan, kReadBufferOffset, kTransferLength,
-      IREE_HAL_COPY_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_copy(
+      test_device.queue(), iree_hal_semaphore_list_empty(), read_semaphore,
+      source_host_buffer, kSourceHostOffset, read_device_subspan,
+      kReadBufferOffset, kTransferLength, IREE_HAL_COPY_FLAG_NONE));
 
   SemaphoreList copy_semaphore(test_device.device(), {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_copy(
-      test_device.device(), kQueueAffinity0, read_semaphore, copy_semaphore,
+  IREE_ASSERT_OK(iree_hal_queue_copy(
+      test_device.queue(), read_semaphore, copy_semaphore,
       read_device_allocation, kReadSubspanOffset + kReadBufferOffset,
       write_device_allocation, kWriteSubspanOffset + kWriteBufferOffset,
       kTransferLength, IREE_HAL_COPY_FLAG_NONE));
 
   SemaphoreList write_semaphore(test_device.device(), {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_copy(
-      test_device.device(), kQueueAffinity0, copy_semaphore, write_semaphore,
+  IREE_ASSERT_OK(iree_hal_queue_copy(
+      test_device.queue(), copy_semaphore, write_semaphore,
       write_device_subspan, kWriteBufferOffset, target_host_buffer,
       kTargetHostOffset, kTransferLength, IREE_HAL_COPY_FLAG_NONE));
 

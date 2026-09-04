@@ -24,8 +24,6 @@ namespace {
 
 using iree::hal::cts::Ref;
 
-constexpr iree_hal_queue_affinity_t kQueueAffinity0 =
-    ((iree_hal_queue_affinity_t)1ull) << 0;
 constexpr iree_hal_queue_family_affinity_t kQueueFamilyAffinity0 =
     ((iree_hal_queue_family_affinity_t)1ull) << 0;
 
@@ -34,40 +32,41 @@ static void CountingReleaseCallback(void* user_data, iree_hal_buffer_t*) {
 }
 
 static iree_status_t QueueFillAndWait(iree_hal_device_t* device,
-                                      iree_hal_queue_affinity_t queue_affinity,
+                                      iree_hal_queue_t* queue,
                                       iree_hal_buffer_t* target_buffer,
                                       iree_device_size_t length,
                                       const void* pattern,
                                       iree_host_size_t pattern_length) {
   iree::hal::cts::SemaphoreList empty_wait;
   iree::hal::cts::SemaphoreList fill_signal(device, {0}, {1});
-  IREE_RETURN_IF_ERROR(iree_hal_device_queue_fill(
-      device, queue_affinity, empty_wait, fill_signal, target_buffer,
-      /*target_offset=*/0, length, pattern, pattern_length,
-      IREE_HAL_FILL_FLAG_NONE));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_queue_fill(queue, empty_wait, fill_signal, target_buffer,
+                          /*target_offset=*/0, length, pattern, pattern_length,
+                          IREE_HAL_FILL_FLAG_NONE));
   return iree_hal_semaphore_list_wait(fill_signal, iree_infinite_timeout(),
                                       IREE_ASYNC_WAIT_FLAG_NONE);
 }
 
 static iree_status_t QueueCopyAndWait(iree_hal_device_t* device,
-                                      iree_hal_queue_affinity_t queue_affinity,
+                                      iree_hal_queue_t* queue,
                                       iree_hal_buffer_t* source_buffer,
                                       iree_hal_buffer_t* target_buffer,
                                       iree_device_size_t length) {
   iree::hal::cts::SemaphoreList empty_wait;
   iree::hal::cts::SemaphoreList copy_signal(device, {0}, {1});
-  IREE_RETURN_IF_ERROR(iree_hal_device_queue_copy(
-      device, queue_affinity, empty_wait, copy_signal, source_buffer,
+  IREE_RETURN_IF_ERROR(iree_hal_queue_copy(
+      queue, empty_wait, copy_signal, source_buffer,
       /*source_offset=*/0, target_buffer, /*target_offset=*/0, length,
       IREE_HAL_COPY_FLAG_NONE));
   return iree_hal_semaphore_list_wait(copy_signal, iree_infinite_timeout(),
                                       IREE_ASYNC_WAIT_FLAG_NONE);
 }
 
-static iree_status_t QueueReadbackAndWait(
-    iree_hal_device_t* device, iree_hal_allocator_t* allocator,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t* source_buffer,
-    iree_byte_span_t target) {
+static iree_status_t QueueReadbackAndWait(iree_hal_device_t* device,
+                                          iree_hal_allocator_t* allocator,
+                                          iree_hal_queue_t* queue,
+                                          iree_hal_buffer_t* source_buffer,
+                                          iree_byte_span_t target) {
   const iree_hal_buffer_params_t readback_params = {
       /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
       /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
@@ -79,7 +78,7 @@ static iree_status_t QueueReadbackAndWait(
   Ref<iree_hal_buffer_t> readback_buffer;
   IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
       allocator, readback_params, target.data_length, readback_buffer.out()));
-  IREE_RETURN_IF_ERROR(QueueCopyAndWait(device, queue_affinity, source_buffer,
+  IREE_RETURN_IF_ERROR(QueueCopyAndWait(device, queue, source_buffer,
                                         readback_buffer, target.data_length));
 
   iree_hal_buffer_mapping_t readback_mapping;
@@ -383,6 +382,11 @@ class AllocatorTest : public ::testing::Test {
 
     iree_hal_device_t* device() const { return base_device_; }
 
+    iree_hal_queue_t* queue() const {
+      return iree_hal_device_queue(base_device_, /*family_ordinal=*/0,
+                                   /*queue_ordinal=*/0);
+    }
+
     iree_hal_amdgpu_logical_device_t* logical_device() const {
       return (iree_hal_amdgpu_logical_device_t*)base_device_;
     }
@@ -491,12 +495,13 @@ TEST_F(AllocatorTest, VirtualMemoryLifecycleUsesNativeState) {
   constexpr iree_device_size_t kTouchedSize = 256;
   ASSERT_GE(recommended_page_size, kTouchedSize);
   constexpr uint32_t kPattern = 0xA110CA7Eu;
-  IREE_ASSERT_OK(QueueFillAndWait(test_device.device(), kQueueAffinity0,
+  IREE_ASSERT_OK(QueueFillAndWait(test_device.device(), test_device.queue(),
                                   virtual_memory.get(), kTouchedSize, &kPattern,
                                   sizeof(kPattern)));
   std::array<uint32_t, kTouchedSize / sizeof(uint32_t)> observed = {};
   IREE_ASSERT_OK(QueueReadbackAndWait(
-      test_device.device(), allocator, kQueueAffinity0, virtual_memory.get(),
+      test_device.device(), allocator, test_device.queue(),
+      virtual_memory.get(),
       iree_make_byte_span(observed.data(), sizeof(observed))));
   for (uint32_t value : observed) {
     EXPECT_EQ(kPattern, value);
@@ -650,12 +655,13 @@ TEST_F(AllocatorTest,
 
   constexpr iree_device_size_t kTouchedSize = 256;
   constexpr uint32_t kPattern = 0xC2055DE1u;
-  IREE_ASSERT_OK(QueueFillAndWait(test_device.device(), kQueueAffinity0,
+  IREE_ASSERT_OK(QueueFillAndWait(test_device.device(), test_device.queue(),
                                   virtual_memory.get(), kTouchedSize, &kPattern,
                                   sizeof(kPattern)));
   std::array<uint32_t, kTouchedSize / sizeof(uint32_t)> observed = {};
   IREE_ASSERT_OK(QueueReadbackAndWait(
-      test_device.device(), allocator, kQueueAffinity0, virtual_memory.get(),
+      test_device.device(), allocator, test_device.queue(),
+      virtual_memory.get(),
       iree_make_byte_span(observed.data(), sizeof(observed))));
   for (uint32_t value : observed) {
     EXPECT_EQ(kPattern, value);
@@ -1561,8 +1567,8 @@ TEST_F(AllocatorTest, HostAllocationImportUsesFinePoolAtomicContract) {
             IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAGS_ALL);
 
   constexpr uint32_t kPattern = 0xC001CAFEu;
-  IREE_EXPECT_OK(QueueFillAndWait(test_device.device(), kQueueAffinity0, buffer,
-                                  kAllocationSize, &kPattern,
+  IREE_EXPECT_OK(QueueFillAndWait(test_device.device(), test_device.queue(),
+                                  buffer, kAllocationSize, &kPattern,
                                   sizeof(kPattern)));
   const uint32_t* values = static_cast<const uint32_t*>(host_ptr);
   for (iree_host_size_t i = 0; i < kAllocationSize / sizeof(*values); ++i) {
@@ -1772,9 +1778,9 @@ TEST_F(AllocatorTest, DeviceAllocationImportWrapsHsaAllocation) {
             external_buffer.handle.device_allocation.ptr);
 
   constexpr uint32_t kPattern = 0xACCE551u;
-  IREE_ASSERT_OK(
-      QueueFillAndWait(test_device.device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-                       buffer, kAllocationSize, &kPattern, sizeof(kPattern)));
+  IREE_ASSERT_OK(QueueFillAndWait(test_device.device(), test_device.queue(),
+                                  buffer, kAllocationSize, &kPattern,
+                                  sizeof(kPattern)));
   std::array<uint32_t, kAllocationSize / sizeof(uint32_t)> observed = {};
   IREE_ASSERT_OK(iree_hsa_memory_copy(IREE_LIBHSA(&libhsa_), observed.data(),
                                       allocation.ptr(), kAllocationSize));
@@ -2040,9 +2046,9 @@ TEST_F(AllocatorTest, DeviceAllocationExportReportsHsaPointer) {
   EXPECT_GE(pointer_info.sizeInBytes, external_buffer.size);
 
   constexpr uint32_t kPattern = 0xA110CA7Eu;
-  IREE_ASSERT_OK(QueueFillAndWait(
-      test_device.device(), IREE_HAL_QUEUE_AFFINITY_ANY, buffer,
-      external_buffer.size, &kPattern, sizeof(kPattern)));
+  IREE_ASSERT_OK(QueueFillAndWait(test_device.device(), test_device.queue(),
+                                  buffer, external_buffer.size, &kPattern,
+                                  sizeof(kPattern)));
   std::array<uint32_t, 4096 / sizeof(uint32_t)> observed = {};
   IREE_ASSERT_OK(iree_hsa_memory_copy(
       IREE_LIBHSA(&libhsa_), observed.data(),

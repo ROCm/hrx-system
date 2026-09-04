@@ -279,7 +279,10 @@ static void iree_hal_streaming_context_destroy(
   for (iree_host_size_t i = 0; i < detached_stream_count; ++i) {
     iree_hal_streaming_stream_t* stream = context->streams[i];
     iree_slim_mutex_lock(&stream->mutex);
-    if (stream->context == context) stream->context = NULL;
+    if (stream->context == context) {
+      stream->queue = NULL;
+      stream->context = NULL;
+    }
     iree_slim_mutex_unlock(&stream->mutex);
   }
   for (iree_host_size_t i = 0; i < detached_stream_count; ++i) {
