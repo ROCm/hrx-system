@@ -136,7 +136,8 @@ static bool loom_low_representation_plan_solve_component(
   loom_low_representation_id_t best_representation =
       LOOM_LOW_REPRESENTATION_ID_NONE;
   loom_low_representation_aggregate_cost_t best_cost = {UINT64_MAX, UINT64_MAX};
-  const loom_low_representation_constraint_t* first_incompatible = NULL;
+  const loom_low_representation_constraint_t* emptying_constraint = NULL;
+  iree_host_size_t latest_rejection_ordinal = 0;
   for (uint16_t i = 0; i < first->candidate_count; ++i) {
     const loom_low_representation_candidate_t* first_candidate =
         &first->candidates[i];
@@ -145,15 +146,18 @@ static bool loom_low_representation_plan_solve_component(
         .code_size = first_candidate->cost.code_size,
     };
     bool exact = true;
+    iree_host_size_t constraint_ordinal = 1;
     for (const loom_low_representation_constraint_t* constraint =
              first->next_in_component;
-         constraint != NULL; constraint = constraint->next_in_component) {
+         constraint != NULL;
+         constraint = constraint->next_in_component, ++constraint_ordinal) {
       const loom_low_representation_candidate_t* candidate =
           loom_low_representation_constraint_find_candidate(
               constraint, first_candidate->representation);
       if (candidate == NULL) {
-        if (first_incompatible == NULL) {
-          first_incompatible = constraint;
+        if (constraint_ordinal > latest_rejection_ordinal) {
+          emptying_constraint = constraint;
+          latest_rejection_ordinal = constraint_ordinal;
         }
         exact = false;
         break;
@@ -171,12 +175,12 @@ static bool loom_low_representation_plan_solve_component(
   }
 
   if (best_representation == LOOM_LOW_REPRESENTATION_ID_NONE) {
-    IREE_ASSERT(first_incompatible != NULL);
+    IREE_ASSERT(emptying_constraint != NULL);
     if (out_conflict != NULL) {
       *out_conflict = (loom_low_representation_conflict_t){
           .value_ordinal = first->value_ordinal,
           .first_owner = first->owner,
-          .incompatible_owner = first_incompatible->owner,
+          .incompatible_owner = emptying_constraint->owner,
       };
     }
     return false;

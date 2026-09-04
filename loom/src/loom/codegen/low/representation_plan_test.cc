@@ -112,26 +112,33 @@ TEST_F(RepresentationPlanTest, BreaksRuntimeTiesByCodeSizeThenIdentity) {
   EXPECT_EQ(representation, 20u);
 }
 
-TEST_F(RepresentationPlanTest, ReportsFirstIncompatibleConstraint) {
-  auto plan = MakePlan(2);
+TEST_F(RepresentationPlanTest, ReportsConstraintThatEmptiesDomain) {
+  auto plan = MakePlan(3);
   int first_owner = 0;
-  int incompatible_owner = 0;
+  int narrowing_owner = 0;
+  int emptying_owner = 0;
   const loom_low_representation_candidate_t first_candidates[] = {
-      Candidate(10, 0), Candidate(20, 0)};
-  const loom_low_representation_candidate_t incompatible_candidates[] = {
-      Candidate(30, 0)};
+      Candidate(20, 0), Candidate(10, 0)};
+  const loom_low_representation_candidate_t narrowing_candidates[] = {
+      Candidate(10, 0)};
+  const loom_low_representation_candidate_t emptying_candidates[] = {
+      Candidate(20, 0)};
   IREE_ASSERT_OK(loom_low_representation_plan_constrain(
       &plan, 0, &first_owner, first_candidates,
       IREE_ARRAYSIZE(first_candidates)));
   IREE_ASSERT_OK(loom_low_representation_plan_constrain(
-      &plan, 1, &incompatible_owner, incompatible_candidates,
-      IREE_ARRAYSIZE(incompatible_candidates)));
+      &plan, 1, &narrowing_owner, narrowing_candidates,
+      IREE_ARRAYSIZE(narrowing_candidates)));
+  IREE_ASSERT_OK(loom_low_representation_plan_constrain(
+      &plan, 2, &emptying_owner, emptying_candidates,
+      IREE_ARRAYSIZE(emptying_candidates)));
   IREE_ASSERT_OK(loom_low_representation_plan_union(&plan, 0, 1));
+  IREE_ASSERT_OK(loom_low_representation_plan_union(&plan, 1, 2));
 
   loom_low_representation_conflict_t conflict = {};
   EXPECT_FALSE(loom_low_representation_plan_solve(&plan, &conflict));
   EXPECT_EQ(conflict.first_owner, &first_owner);
-  EXPECT_EQ(conflict.incompatible_owner, &incompatible_owner);
+  EXPECT_EQ(conflict.incompatible_owner, &emptying_owner);
 }
 
 TEST_F(RepresentationPlanTest, KeepsIndependentComponentsIndependent) {

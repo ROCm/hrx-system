@@ -147,6 +147,21 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "representation_observer",
+    srcs = ["representation_observer.c"],
+    hdrs = ["representation_observer.h"],
+    visibility = _LOWER_VISIBILITY,
+    deps = [
+        ":lower",
+        "//loom/src/loom/analysis:value_relation",
+        "//loom/src/loom/codegen/low:representation_plan",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+    ],
+)
+
 loom_cc_test(
     name = "module_state_test",
     srcs = ["module_state_test.cc"],
@@ -252,6 +267,29 @@ loom_cc_test(
         "//loom/src/loom/target/test:lower",
         "//loom/src/loom/target/test:target_record_table",
         "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "representation_observer_test",
+    srcs = ["representation_observer_test.cc"],
+    deps = [
+        ":representation_observer",
+        "//loom/src/loom/codegen/low/testing:source_workload",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/target/test:low_registry",
+        "//loom/src/loom/target/test:lower",
+        "//loom/src/loom/target/test:target_record_table",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

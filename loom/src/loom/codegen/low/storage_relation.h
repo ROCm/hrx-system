@@ -16,6 +16,7 @@
 #define LOOM_CODEGEN_LOW_STORAGE_RELATION_H_
 
 #include "iree/base/api.h"
+#include "loom/analysis/value_relation.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -40,7 +41,7 @@ enum loom_low_storage_relation_cause_e {
   // Unknown or uninitialized storage relation cause.
   LOOM_LOW_STORAGE_RELATION_CAUSE_UNKNOWN = 0,
   // Semantically tied result requiring source/result storage identity.
-  // Includes descriptor ties and ordinal FactIdentity result aliases.
+  // Includes descriptor ties, FactIdentity pairs, and ValueAlias results.
   LOOM_LOW_STORAGE_RELATION_CAUSE_TIED_RESULT = 1,
   // low.copy source/result storage affinity.
   LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_COPY = 2,
@@ -104,10 +105,10 @@ typedef struct loom_low_storage_relation_iterator_t {
   const loom_module_t* module;
   // Operation whose relations are being enumerated.
   const loom_op_t* op;
-  // Next relation ordinal to return.
-  uint16_t relation_index;
-  // Total number of operation relations.
-  uint16_t relation_count;
+  // Shared structural value-relation cursor.
+  loom_value_relation_iterator_t value_relations;
+  // Next low-specific relation ordinal to return.
+  uint16_t low_relation_index;
   // Running result-unit offset for low.concat structural relations.
   uint32_t concat_destination_unit_offset;
 } loom_low_storage_relation_iterator_t;
@@ -119,16 +120,6 @@ typedef struct loom_low_storage_relation_iterator_t {
 // user-controlled runtime data.
 uint16_t loom_low_storage_relation_count(const loom_module_t* module,
                                          const loom_op_t* op);
-
-// Returns storage relation |relation_index| for |op|. Use the sequential
-// iterator when enumerating multiple relations so variable-width structural
-// relations are decoded once.
-//
-// |relation_index| must be less than loom_low_storage_relation_count(module,
-// op). Verified low IR is assumed.
-void loom_low_storage_relation_get(const loom_module_t* module,
-                                   const loom_op_t* op, uint16_t relation_index,
-                                   loom_low_storage_relation_t* out_relation);
 
 // Initializes |out_iterator| to enumerate all relations introduced by |op|.
 void loom_low_storage_relation_iterator_initialize(

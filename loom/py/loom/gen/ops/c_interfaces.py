@@ -512,9 +512,29 @@ def _validate_loop_like_interface(op: Op, iface: LoopLikeInterface, interface_na
     else:
         if iface.iv is not None:
             raise ValueError(f"{interface_name} on {op.name!r}: condition loops cannot declare an induction variable")
-        c_queries.resolve_region_index(op, iface.condition_region, interface_name)
+        condition_index = c_queries.resolve_region_index(op, iface.condition_region, interface_name)
+        condition = op.regions[condition_index]
+        if condition.variadic or condition.optional or not condition.single_block or condition.terminator is None:
+            raise ValueError(f"{interface_name} on {op.name!r}: condition region {iface.condition_region!r} must be a required single-block region with a terminator")
         if body.implicit_args:
             raise ValueError(f"{interface_name} on {op.name!r}: condition-loop carried body arguments must begin at block argument zero")
+        condition_constraints = (
+            ("BlockArgCount", (iface.condition_region, iface.iter_args)),
+            ("BlockArgsMatchTypes", (iface.condition_region, iface.iter_args)),
+            ("BlockArgCount", (iface.body, iface.iter_args)),
+            ("BlockArgsMatchTypes", (iface.body, iface.iter_args)),
+            (
+                "ConditionForwardedCountMatchesBlockArgs",
+                (iface.condition_region, iface.body, iface.iter_args),
+            ),
+            (
+                "ConditionForwardedTypesMatchBlockArgs",
+                (iface.condition_region, iface.body, iface.iter_args),
+            ),
+        )
+        for constraint_name, constraint_args in condition_constraints:
+            if not any(constraint.name == constraint_name and constraint.args == constraint_args for constraint in op.constraints):
+                raise ValueError(f"{interface_name} on {op.name!r}: requires {constraint_name}{constraint_args!r}")
 
 
 def _validate_memory_access_interface(op: Op, iface: MemoryAccessInterface, interface_name: str) -> None:

@@ -127,6 +127,23 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    representation_observer
+  HDRS
+    "representation_observer.h"
+  SRCS
+    "representation_observer.c"
+  DEPS
+    ::lower
+    iree::base
+    loom::analysis::value_relation
+    loom::codegen::low::representation_plan
+    loom::ir
+    loom::ops::op_defs
+  PUBLIC
+)
+
 loom_cc_test(
   NAME
     module_state_test
@@ -238,6 +255,30 @@ loom_cc_test(
     loom::ops::func
     loom::ops::scalar
     loom::target::low_descriptor_registry
+    loom::target::test::low_registry
+    loom::target::test::lower
+    loom::target::test::target_record_table
+    loom::util::fact_table
+)
+
+loom_cc_test(
+  NAME
+    representation_observer_test
+  SRCS
+    "representation_observer_test.cc"
+  DEPS
+    ::representation_observer
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::testing::source_workload
+    loom::ir
+    loom::ops::cfg
+    loom::ops::func
+    loom::ops::index
+    loom::ops::scalar
+    loom::ops::scf
+    loom::ops::vector
     loom::target::test::low_registry
     loom::target::test::lower
     loom::target::test::target_record_table

@@ -68,9 +68,13 @@ from loom.dsl import (
     AttrDef,
     AttrMatchesElementType,
     BitRangeWithinElementWidth,
+    BlockArgCount,
+    BlockArgsMatchTypes,
     Borrow,
     CallLikeInterface,
     CallLikeKind,
+    ConditionForwardedCountMatchesBlockArgs,
+    ConditionForwardedTypesMatchBlockArgs,
     ConditionRefinement,
     ConditionRefinementTruth,
     Constraint,
@@ -2795,6 +2799,89 @@ def test_generate_tables_rejects_counted_loop_iv_type_mismatch() -> None:
         r"must use 'type_of:lower_bound'"
     ):
         _generate_counted_loop_tables(op)
+
+
+def _make_condition_loop_op(*, constraints: list[Constraint]) -> Op:
+    return Op(
+        "test.while",
+        group=Dialect("test"),
+        operands=[Operand("iter_args", ANY, variadic=True)],
+        results=[Result("results", ANY, variadic=True)],
+        regions=[
+            RegionDef(
+                "before",
+                single_block=True,
+                terminator="test.condition",
+            ),
+            RegionDef(
+                "after",
+                single_block=True,
+                terminator="test.yield",
+                arg_source="iter_args",
+            ),
+        ],
+        interfaces=[
+            LoopLikeInterface(
+                body="after",
+                condition_region="before",
+                iter_args="iter_args",
+            )
+        ],
+        constraints=constraints,
+    )
+
+
+def _condition_loop_constraints() -> list[Constraint]:
+    return [
+        IterArgsMatchResults("iter_args", "results"),
+        BlockArgCount("before", "iter_args"),
+        BlockArgsMatchTypes("before", "iter_args"),
+        BlockArgCount("after", "iter_args"),
+        BlockArgsMatchTypes("after", "iter_args"),
+        ConditionForwardedCountMatchesBlockArgs("before", "after", "iter_args"),
+        ConditionForwardedTypesMatchBlockArgs("before", "after", "iter_args"),
+        YieldCountMatchesResults("after", "results"),
+        YieldTypesMatchResults("after", "results"),
+    ]
+
+
+def _generate_condition_loop_tables(op: Op) -> str:
+    condition_op = Op(
+        "test.condition",
+        group=Dialect("test"),
+        operands=[
+            Operand("condition", INTEGER),
+            Operand("forwarded", ANY, variadic=True),
+        ],
+        traits=[TERMINATOR],
+    )
+    yield_op = Op(
+        "test.yield",
+        group=Dialect("test"),
+        operands=[Operand("values", ANY, variadic=True)],
+        traits=[TERMINATOR],
+    )
+    return generate_tables_c("test", 0, [condition_op, yield_op, op])
+
+
+def test_generate_tables_emits_condition_loop_like_interface() -> None:
+    tables_c = _generate_condition_loop_tables(_make_condition_loop_op(constraints=_condition_loop_constraints()))
+
+    assert ".body_region_index = 1," in tables_c
+    assert ".condition_region_index = 0," in tables_c
+    assert ".iv_block_arg_index = 255," in tables_c
+
+
+def test_generate_tables_rejects_incomplete_condition_loop_contract() -> None:
+    constraints = _condition_loop_constraints()
+    constraints.pop(5)
+    op = _make_condition_loop_op(constraints=constraints)
+
+    with _raises_value_error(
+        r"LoopLikeInterface on 'test\.while': requires "
+        r"ConditionForwardedCountMatchesBlockArgs"
+    ):
+        _generate_condition_loop_tables(op)
 
 
 def test_generate_tables_memory_access_defaults_use_matching_fields() -> None:

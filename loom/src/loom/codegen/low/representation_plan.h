@@ -74,7 +74,8 @@ typedef struct loom_low_representation_plan_t {
   bool solved;
 } loom_low_representation_plan_t;
 
-// Describes the first two constraints whose exact domains do not intersect.
+// Describes the first constraint and the constraint that first empties the
+// component's running exact domain.
 typedef struct loom_low_representation_conflict_t {
   // Value ordinal named by the component's first constraint.
   loom_value_ordinal_t value_ordinal;

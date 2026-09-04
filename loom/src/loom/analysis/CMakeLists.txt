@@ -28,6 +28,37 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    value_relation
+  HDRS
+    "value_relation.h"
+  SRCS
+    "value_relation.c"
+  DEPS
+    iree::base
+    loom::ir
+    loom::ops::op_defs
+    loom::util::cfg_graph
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    value_relation_test
+  SRCS
+    "value_relation_test.cc"
+  DEPS
+    ::value_relation
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::index
+    loom::ops::scalar
+    loom::ops::scf
+)
+
 loom_cc_test(
   NAME
     control_uniformity_test
