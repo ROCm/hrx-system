@@ -1,0 +1,70 @@
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @scalar_f32_carrier(%lhs: f32, %rhs: f32) -> (f32, f32, i32) {
+  %bias = scalar.constant 1.5 : f32
+  %sum = scalar.addf %lhs, %bias : f32
+  %difference = scalar.subf %sum, %rhs : f32
+  %bits = scalar.bitcast %difference : f32 to i32
+  func.return %sum, %difference, %bits : f32, f32, i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_carrier(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %bias = mov.i32 1069547520
+  %15 = vbcst.32 %lhs
+  %16 = vbcst.32 %bias
+  %17 = acc.clear.f32x64
+  %18 = slice %17[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %19 = vmov.vector512.to.accumulator512 %15
+  %20 = concat(%19, %18, %18, %18) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %21 = vmov.vector512.to.accumulator512 %16
+  %22 = concat(%21, %18, %18, %18) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %23 = mova.i32 60
+  %24 = vadd.f32x64 %20, %22, %23
+  %25 = slice %24[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %26 = vmov.accumulator512.to.vector512 %25
+  %sum = vextract.32.imm %26, 0
+  %28 = vbcst.32 %sum
+  %29 = vbcst.32 %rhs
+  %32 = vmov.vector512.to.accumulator512 %28
+  %33 = concat(%32, %18, %18, %18) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %34 = vmov.vector512.to.accumulator512 %29
+  %35 = concat(%34, %18, %18, %18) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %37 = vsub.f32x64 %33, %35, %23
+  %38 = slice %37[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %39 = vmov.accumulator512.to.vector512 %38
+  %bits = vextract.32.imm %39, 0
+  return %sum, %bits, %bits
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @vector_f32x4_carrier(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %sum = vector.addf %lhs, %rhs : vector<4xf32>
+  %difference = vector.subf %lhs, %rhs : vector<4xf32>
+  func.return %sum, %difference : vector<4xf32>, vector<4xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f32x4_carrier(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
+  %10 = acc.clear.f32x64
+  %11 = slice %10[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %12 = vmov.vector512.to.accumulator512 %lhs
+  %13 = concat(%12, %11, %11, %11) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %14 = vmov.vector512.to.accumulator512 %rhs
+  %15 = concat(%14, %11, %11, %11) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %16 = mova.i32 60
+  %17 = vadd.f32x64 %13, %15, %16
+  %18 = slice %17[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %sum = vmov.accumulator512.to.vector512 %18
+  %23 = concat(%12, %11, %11, %11) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %25 = concat(%14, %11, %11, %11) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %27 = vsub.f32x64 %23, %25, %16
+  %28 = slice %27[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %difference = vmov.accumulator512.to.vector512 %28
+  return %sum, %difference
+}

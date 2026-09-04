@@ -2187,7 +2187,9 @@ def _derive_vector_storage_adapters(
     restricted to eWL, while VEXTBCST needs each eWL candidate encoded as its
     containing X register. VMOV's source classes include X, accumulator, FIFO,
     and state registers; the final two adapters retain only its X domain so a
-    descriptor can expose the result as ordinary VEC256 storage.
+    descriptor can expose the result as ordinary VEC256 storage. Accumulator
+    adapters expose the same instruction's native 512-bit vector/accumulator
+    transfer without admitting FIFO or state registers.
     """
 
     classes = {
@@ -2245,6 +2247,8 @@ def _derive_vector_storage_adapters(
         ),
         restrict_adapter("LOOM_mXm_OP_mMvBMXDst", "OP_mMvBMXDst", "mXm"),
         restrict_adapter("LOOM_mXm_OP_mMvBMXSrc", "OP_mMvBMXSrc", "mXm"),
+        restrict_adapter("LOOM_mBMs_OP_mMvBMXDst", "OP_mMvBMXDst", "mBMs"),
+        restrict_adapter("LOOM_mBMs_OP_mMvBMXSrc", "OP_mMvBMXSrc", "mBMs"),
     )
 
 

@@ -87,6 +87,7 @@ static iree_status_t loom_aie2p_provider_contribute_pipeline(
 
 const loom_target_provider_t loom_aie2p_target_provider = {
     .profile_type = &loom_aie2p_target_profile_type,
+    .select_low_call_policy = loom_target_select_low_call_policy_require_inline,
     .materialize_definition = loom_aie2p_target_materialize_definition,
     .register_context = loom_aie2p_ops_register_dialect,
     .initialize_low_descriptor_registry =

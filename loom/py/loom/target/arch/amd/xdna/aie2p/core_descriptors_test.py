@@ -1073,6 +1073,49 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
     ]
     assert [operand.unit_count for operand in vec256_move.operands] == [1, 1]
 
+    vector_to_accumulator_move = descriptors[
+        "amd.xdna.aie2p.move.vector512.to.accumulator512"
+    ]
+    assert [
+        operand.reg_alts[0].reg_class for operand in vector_to_accumulator_move.operands
+    ] == ["aie2p.mbms", "aie2p.vec256"]
+    assert [operand.unit_count for operand in vector_to_accumulator_move.operands] == [
+        1,
+        2,
+    ]
+
+    accumulator_to_vector_move = descriptors[
+        "amd.xdna.aie2p.move.accumulator512.to.vector512"
+    ]
+    assert [
+        operand.reg_alts[0].reg_class for operand in accumulator_to_vector_move.operands
+    ] == ["aie2p.vec256", "aie2p.mbms"]
+    assert [operand.unit_count for operand in accumulator_to_vector_move.operands] == [
+        2,
+        1,
+    ]
+
+    accumulator_move = descriptors["amd.xdna.aie2p.move.accumulator512"]
+    assert [operand.reg_alts[0].reg_class for operand in accumulator_move.operands] == [
+        "aie2p.mbms",
+        "aie2p.mbms",
+    ]
+    assert [operand.unit_count for operand in accumulator_move.operands] == [1, 1]
+
+    f32_subtract = descriptors["amd.xdna.aie2p.sub.f32x64.configured"]
+    assert [operand.reg_alts[0].reg_class for operand in f32_subtract.operands[:4]] == [
+        "aie2p.mbms",
+        "aie2p.mbms",
+        "aie2p.mbms",
+        "aie2p.er",
+    ]
+    assert [operand.unit_count for operand in f32_subtract.operands[:4]] == [
+        4,
+        4,
+        4,
+        1,
+    ]
+
     accumulator_clear = descriptors["amd.xdna.aie2p.accumulator.clear.i32x64"]
     assert accumulator_clear.operands[0].reg_alts[0].reg_class == "aie2p.mbms"
     assert accumulator_clear.operands[0].unit_count == 4

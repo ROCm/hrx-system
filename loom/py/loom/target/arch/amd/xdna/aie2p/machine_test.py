@@ -146,16 +146,18 @@ def test_vector_storage_adapters_are_derived_from_owned_register_facts() -> None
         )
         assert ewl_as_x[register_name] == xm_values[x_register.name]
 
-    for native_name, derived_name in (
-        ("OP_mMvBMXDst", "LOOM_mXm_OP_mMvBMXDst"),
-        ("OP_mMvBMXSrc", "LOOM_mXm_OP_mMvBMXSrc"),
+    for native_name, derived_name, register_class_name in (
+        ("OP_mMvBMXDst", "LOOM_mXm_OP_mMvBMXDst", "mXm"),
+        ("OP_mMvBMXSrc", "LOOM_mXm_OP_mMvBMXSrc", "mXm"),
+        ("OP_mMvBMXDst", "LOOM_mBMs_OP_mMvBMXDst", "mBMs"),
+        ("OP_mMvBMXSrc", "LOOM_mBMs_OP_mMvBMXSrc", "mBMs"),
     ):
         native_values = dict(adapters[native_name].effective_register_encodings)
         derived_values = dict(adapters[derived_name].effective_register_encodings)
-        assert tuple(derived_values) == classes["mXm"].candidates
+        assert tuple(derived_values) == classes[register_class_name].candidates
         assert all(
             derived_values[register_name] == native_values[register_name]
-            for register_name in classes["mXm"].candidates
+            for register_name in classes[register_class_name].candidates
         )
 
 

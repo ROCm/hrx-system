@@ -112,6 +112,7 @@ class _DescriptorSpec:
     memory_width_bits: int | None = None
     ordered_memory: bool = False
     effects: tuple[Effect, ...] = ()
+    allocation_move: bool = False
 
 
 _VECTOR_MEMORY_FORM_FAMILIES = (
@@ -608,6 +609,44 @@ _BASE_DESCRIPTOR_SPECS = (
         "II_VMOV_alu_mv_mv_w",
         storage_overrides=(("dst", "VEC256"), ("src", "VEC256")),
         asm_mnemonic="vmov.256",
+        allocation_move=True,
+    ),
+    _DescriptorSpec(
+        "VMOV_alu_mv_mv_x",
+        f"{_TARGET_KEY}.move.vector512.to.accumulator512",
+        "register.move.vector512.to.accumulator512",
+        "II_VMOV_alu_mv_mv_x",
+        storage_overrides=(("dst", "mBMs"), ("src", "VEC256")),
+        asm_mnemonic="vmov.vector512.to.accumulator512",
+        encoding_adapter_overrides=(
+            ("dst", "LOOM_mBMs_OP_mMvBMXDst"),
+            ("src", "LOOM_mXm_OP_mMvBMXSrc"),
+        ),
+    ),
+    _DescriptorSpec(
+        "VMOV_alu_mv_mv_x",
+        f"{_TARGET_KEY}.move.accumulator512.to.vector512",
+        "register.move.accumulator512.to.vector512",
+        "II_VMOV_alu_mv_mv_x",
+        storage_overrides=(("dst", "VEC256"), ("src", "mBMs")),
+        asm_mnemonic="vmov.accumulator512.to.vector512",
+        encoding_adapter_overrides=(
+            ("dst", "LOOM_mXm_OP_mMvBMXDst"),
+            ("src", "LOOM_mBMs_OP_mMvBMXSrc"),
+        ),
+    ),
+    _DescriptorSpec(
+        "VMOV_alu_mv_mv_x",
+        f"{_TARGET_KEY}.move.accumulator512",
+        "register.move.accumulator512",
+        "II_VMOV_alu_mv_mv_x",
+        storage_overrides=(("dst", "mBMs"), ("src", "mBMs")),
+        asm_mnemonic="vmov.accumulator512",
+        encoding_adapter_overrides=(
+            ("dst", "LOOM_mBMs_OP_mMvBMXDst"),
+            ("src", "LOOM_mBMs_OP_mMvBMXSrc"),
+        ),
+        allocation_move=True,
     ),
     _DescriptorSpec(
         "VMUL_f_vmul_bf_vmul_bf_core_Y_Y",
@@ -641,6 +680,18 @@ _BASE_DESCRIPTOR_SPECS = (
             ("acc2", "mBMs"),
         ),
         asm_mnemonic="vadd.f32x64",
+    ),
+    _DescriptorSpec(
+        "VSUB_f_vmac_cm2_add_reg",
+        f"{_TARGET_KEY}.sub.f32x64.configured",
+        "floating.sub.f32x64.configured",
+        "II_VSUB_f_vmac_cm2_add_reg",
+        storage_overrides=(
+            ("dst", "mBMs"),
+            ("acc1", "mBMs"),
+            ("acc2", "mBMs"),
+        ),
+        asm_mnemonic="vsub.f32x64",
     ),
     _DescriptorSpec(
         "VCONV_bf16_fp32_mv_x_srs_bf",
@@ -1064,6 +1115,7 @@ _BASE_DESCRIPTOR_SPECS = (
         "register.move.scalar",
         "II_MOV_alu_mv_mv_mv_scl_eR_eR",
         (("dst", "eR"), ("src", "eR")),
+        allocation_move=True,
     ),
     _DescriptorSpec(
         "MOV_alu_mv_mv_mv_scl",
@@ -2264,6 +2316,7 @@ def _effects(spec: _DescriptorSpec, form: MachineForm) -> tuple[Effect, ...]:
 
 
 def _descriptor_flags(
+    spec: _DescriptorSpec,
     form: MachineForm,
     *,
     owns_implicit_state: bool,
@@ -2292,6 +2345,8 @@ def _descriptor_flags(
         and not owns_implicit_state
     ):
         result.append(DescriptorFlag.DEAD_REMOVABLE)
+    if spec.allocation_move:
+        result.append(DescriptorFlag.ALLOCATION_MOVE)
     return tuple(result)
 
 
@@ -2464,6 +2519,7 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
         ),
         encoding_id=_INSTRUCTION_IDS[spec.form_name],
         flags=_descriptor_flags(
+            spec,
             form,
             owns_implicit_state=bool(implicit_outputs) and not register_outputs,
         ),

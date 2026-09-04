@@ -422,6 +422,7 @@ loom_check_test_suite(
     "test/source_low/index_conversion.loom-test"
     "test/source_low/matrix_multiply.loom-test"
     "test/source_low/memory_scalar_addressing.loom-test"
+    "test/source_low/numeric_f32.loom-test"
     "test/source_low/numeric_index.loom-test"
     "test/source_low/numeric_scalar_i32.loom-test"
     "test/source_low/packed_dot_integer.loom-test"
@@ -590,6 +591,18 @@ loom_cc_library(
     loom::target::reporting::low
     loom::target::reporting::report
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    provider_test
+  SRCS
+    "provider_test.cc"
+  DEPS
+    ::provider
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::provider
 )
 
 loom_cc_test(
