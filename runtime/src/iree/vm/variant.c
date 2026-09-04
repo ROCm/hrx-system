@@ -102,90 +102,44 @@ IREE_API_EXPORT iree_status_t iree_vm_scalar_bits_from_variant(
   return iree_ok_status();
 }
 
-#define IREE_VM_DEFINE_INTEGER_EXTRACTOR(name, value_type,                 \
-                                         unsigned_value_type, scalar_type) \
-  IREE_API_EXPORT iree_status_t iree_vm_##name##_from_variant(             \
-      iree_vm_variant_t variant, value_type* out_value) {                  \
-    if (!out_value) {                                                      \
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,                \
-                              "out_value is required");                    \
-    }                                                                      \
-    uint64_t bits = 0;                                                     \
-    IREE_RETURN_IF_ERROR(                                                  \
-        iree_vm_scalar_bits_from_variant(variant, scalar_type, &bits));    \
-    unsigned_value_type narrow_bits = (unsigned_value_type)bits;           \
-    memcpy(out_value, &narrow_bits, sizeof(narrow_bits));                  \
-    return iree_ok_status();                                               \
+#define IREE_VM_DEFINE_SCALAR_EXTRACTOR(function_name, value_type, bits_type, \
+                                        scalar_type)                          \
+  IREE_API_EXPORT iree_status_t function_name(iree_vm_variant_t variant,      \
+                                              value_type* out_value) {        \
+    if (!out_value) {                                                         \
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,                   \
+                              "out_value is required");                       \
+    }                                                                         \
+    uint64_t raw_bits = 0;                                                    \
+    IREE_RETURN_IF_ERROR(                                                     \
+        iree_vm_scalar_bits_from_variant(variant, scalar_type, &raw_bits));   \
+    bits_type bits = (bits_type)raw_bits;                                     \
+    memcpy(out_value, &bits, sizeof(bits));                                   \
+    return iree_ok_status();                                                  \
   }
 
-IREE_VM_DEFINE_INTEGER_EXTRACTOR(i8, int8_t, uint8_t, IREE_VM_SCALAR_TYPE_I8)
-IREE_VM_DEFINE_INTEGER_EXTRACTOR(i16, int16_t, uint16_t,
-                                 IREE_VM_SCALAR_TYPE_I16)
-IREE_VM_DEFINE_INTEGER_EXTRACTOR(i32, int32_t, uint32_t,
-                                 IREE_VM_SCALAR_TYPE_I32)
+IREE_VM_DEFINE_SCALAR_EXTRACTOR(iree_vm_i8_from_variant, int8_t, uint8_t,
+                                IREE_VM_SCALAR_TYPE_I8)
+IREE_VM_DEFINE_SCALAR_EXTRACTOR(iree_vm_i16_from_variant, int16_t, uint16_t,
+                                IREE_VM_SCALAR_TYPE_I16)
+IREE_VM_DEFINE_SCALAR_EXTRACTOR(iree_vm_i32_from_variant, int32_t, uint32_t,
+                                IREE_VM_SCALAR_TYPE_I32)
+IREE_VM_DEFINE_SCALAR_EXTRACTOR(iree_vm_i64_from_variant, int64_t, uint64_t,
+                                IREE_VM_SCALAR_TYPE_I64)
+IREE_VM_DEFINE_SCALAR_EXTRACTOR(iree_vm_f8e4m3fn_bits_from_variant, uint8_t,
+                                uint8_t, IREE_VM_SCALAR_TYPE_F8E4M3FN)
+IREE_VM_DEFINE_SCALAR_EXTRACTOR(iree_vm_f8e5m2_bits_from_variant, uint8_t,
+                                uint8_t, IREE_VM_SCALAR_TYPE_F8E5M2)
+IREE_VM_DEFINE_SCALAR_EXTRACTOR(iree_vm_f16_bits_from_variant, uint16_t,
+                                uint16_t, IREE_VM_SCALAR_TYPE_F16)
+IREE_VM_DEFINE_SCALAR_EXTRACTOR(iree_vm_bf16_bits_from_variant, uint16_t,
+                                uint16_t, IREE_VM_SCALAR_TYPE_BF16)
+IREE_VM_DEFINE_SCALAR_EXTRACTOR(iree_vm_f32_from_variant, float, uint32_t,
+                                IREE_VM_SCALAR_TYPE_F32)
+IREE_VM_DEFINE_SCALAR_EXTRACTOR(iree_vm_f64_from_variant, double, uint64_t,
+                                IREE_VM_SCALAR_TYPE_F64)
 
-#undef IREE_VM_DEFINE_INTEGER_EXTRACTOR
-
-IREE_API_EXPORT iree_status_t
-iree_vm_i64_from_variant(iree_vm_variant_t variant, int64_t* out_value) {
-  if (!out_value) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "out_value is required");
-  }
-  uint64_t bits = 0;
-  IREE_RETURN_IF_ERROR(iree_vm_scalar_bits_from_variant(
-      variant, IREE_VM_SCALAR_TYPE_I64, &bits));
-  memcpy(out_value, &bits, sizeof(bits));
-  return iree_ok_status();
-}
-
-#define IREE_VM_DEFINE_BITS_EXTRACTOR(name, value_type, scalar_type)    \
-  IREE_API_EXPORT iree_status_t iree_vm_##name##_bits_from_variant(     \
-      iree_vm_variant_t variant, value_type* out_bits) {                \
-    if (!out_bits) {                                                    \
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,             \
-                              "out_bits is required");                  \
-    }                                                                   \
-    uint64_t bits = 0;                                                  \
-    IREE_RETURN_IF_ERROR(                                               \
-        iree_vm_scalar_bits_from_variant(variant, scalar_type, &bits)); \
-    *out_bits = (value_type)bits;                                       \
-    return iree_ok_status();                                            \
-  }
-
-IREE_VM_DEFINE_BITS_EXTRACTOR(f8e4m3fn, uint8_t, IREE_VM_SCALAR_TYPE_F8E4M3FN)
-IREE_VM_DEFINE_BITS_EXTRACTOR(f8e5m2, uint8_t, IREE_VM_SCALAR_TYPE_F8E5M2)
-IREE_VM_DEFINE_BITS_EXTRACTOR(f16, uint16_t, IREE_VM_SCALAR_TYPE_F16)
-IREE_VM_DEFINE_BITS_EXTRACTOR(bf16, uint16_t, IREE_VM_SCALAR_TYPE_BF16)
-
-#undef IREE_VM_DEFINE_BITS_EXTRACTOR
-
-IREE_API_EXPORT iree_status_t
-iree_vm_f32_from_variant(iree_vm_variant_t variant, float* out_value) {
-  if (!out_value) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "out_value is required");
-  }
-  uint64_t bits = 0;
-  IREE_RETURN_IF_ERROR(iree_vm_scalar_bits_from_variant(
-      variant, IREE_VM_SCALAR_TYPE_F32, &bits));
-  uint32_t narrow_bits = (uint32_t)bits;
-  memcpy(out_value, &narrow_bits, sizeof(narrow_bits));
-  return iree_ok_status();
-}
-
-IREE_API_EXPORT iree_status_t
-iree_vm_f64_from_variant(iree_vm_variant_t variant, double* out_value) {
-  if (!out_value) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "out_value is required");
-  }
-  uint64_t bits = 0;
-  IREE_RETURN_IF_ERROR(iree_vm_scalar_bits_from_variant(
-      variant, IREE_VM_SCALAR_TYPE_F64, &bits));
-  memcpy(out_value, &bits, sizeof(bits));
-  return iree_ok_status();
-}
+#undef IREE_VM_DEFINE_SCALAR_EXTRACTOR
 
 IREE_API_EXPORT iree_vm_variant_t
 iree_vm_variant_from_ptr_borrowed(void* ptr, iree_vm_ref_type_t type) {
