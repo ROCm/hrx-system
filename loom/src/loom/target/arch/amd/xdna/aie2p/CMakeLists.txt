@@ -101,6 +101,23 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    legalization
+  HDRS
+    "legalization.h"
+  SRCS
+    "legalization.c"
+  DEPS
+    ::core_descriptors
+    iree::base
+    loom::ops::vector
+    loom::target::legalization
+    loom::transforms::vector::packet_legalization
+    loom::transforms::vector::to_scalar
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     low_registry
   HDRS
     "descriptors/low_registry.h"
@@ -262,6 +279,7 @@ loom_cc_library(
     "provider.c"
   DEPS
     ::artifact_emitter
+    ::legalization
     ::low_registry
     ::low_verify
     ::lower

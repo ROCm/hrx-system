@@ -20,7 +20,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_s
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %16 = mov.static-byte-offset 32
   %17 = mov.address-index %16
-  %loaded = lda.index %input_view, %17
+  %loaded = lda.i32.index %input_view, %17
   st %loaded, %output_view, 24
   return %loaded
 }
@@ -46,7 +46,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_d
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %15 = add %base_aligned, 8
   %16 = mov.address-index %15
-  %loaded = lda.index %input_view, %16
+  %loaded = lda.i32.index %input_view, %16
   st %loaded, %output_view, 0
   return %loaded
 }
@@ -73,10 +73,10 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_m
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %16 = add %base_aligned, 12
   %17 = mov.address-index %16
-  %loaded = lda.index %input_view, %17
+  %loaded = lda.i32.index %input_view, %17
   %19 = add %base_aligned, 16
   %20 = mov.address-index %19
-  st.index %loaded, %output_view, %20
+  st.i32.index %loaded, %output_view, %20
   return %loaded
 }
 
@@ -102,8 +102,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_d
   %15 = mov.i32 2
   %16 = lshl %element_bounded, %15
   %17 = mov.address-index %16
-  %loaded = lda.index %input_view, %17
-  st.index %loaded, %output_view, %17
+  %loaded = lda.i32.index %input_view, %17
+  st.i32.index %loaded, %output_view, %17
   return %loaded
 }
 
@@ -134,11 +134,11 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_m
   %31 = lshl %column_bounded, %30
   %32 = add.rr %29, %31
   %33 = mov.address-index %32
-  %loaded = lda.index %input_view, %33
+  %loaded = lda.i32.index %input_view, %33
   %37 = add.rr %base_aligned, %28
   %40 = add.rr %37, %31
   %41 = mov.address-index %40
-  st.index %loaded, %output_view, %41
+  st.i32.index %loaded, %output_view, %41
   return %loaded
 }
 
@@ -169,10 +169,10 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_d
   %25 = lshl %column_bounded, %22
   %26 = add.rr %23, %25
   %27 = mov.address-index %26
-  %loaded = lda.index %input_view, %27
+  %loaded = lda.i32.index %input_view, %27
   %34 = add.rr %23, %25
   %35 = mov.address-index %34
-  st.index %loaded, %output_view, %35
+  st.i32.index %loaded, %output_view, %35
   return %loaded
 }
 
@@ -204,10 +204,10 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_s
   %23 = add.rr %base_aligned, %22
   %24 = add %23, 4
   %25 = mov.address-index %24
-  %loaded = lda.index %input_refined, %25
+  %loaded = lda.i32.index %input_refined, %25
   %29 = add.rr %base_aligned, %22
   %30 = add %29, 4
   %31 = mov.address-index %30
-  st.index %loaded, %output_refined, %31
+  st.i32.index %loaded, %output_refined, %31
   return %loaded
 }

@@ -289,6 +289,100 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
     return tuple(result)
 
 
+def _scalar_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
+    """Builds exact-width scalar load and store descriptors."""
+
+    result = []
+    for (
+        element_type,
+        memory_width_bits,
+        load_immediate_form,
+        load_immediate_itinerary,
+        load_register_form,
+        load_register_itinerary,
+        store_immediate_form,
+        store_immediate_itinerary,
+        store_register_form,
+        store_register_itinerary,
+    ) in (
+        (
+            "i8",
+            8,
+            "LDA_u8_idx_imm",
+            "II_LDA_u8_idx_imm",
+            "LDA_u8_idx",
+            "II_LDA_u8_idx",
+            "ST_s8_idx_imm",
+            "II_ST_s8_idx_imm",
+            "ST_s8_idx",
+            "II_ST_s8_idx",
+        ),
+        (
+            "i16",
+            16,
+            "LDA_u16_idx_imm",
+            "II_LDA_u16_idx_imm",
+            "LDA_u16_idx",
+            "II_LDA_u16_idx",
+            "ST_s16_idx_imm",
+            "II_ST_s16_idx_imm",
+            "ST_s16_idx",
+            "II_ST_s16_idx",
+        ),
+        (
+            "i32",
+            32,
+            "LDA_dms_lda_idx_imm",
+            "II_LDA_dms_lda_idx_imm_eR",
+            "LDA_dms_lda_idx",
+            "II_LDA_dms_lda_idx_eR",
+            "ST_dms_sts_idx_imm",
+            "II_ST_dms_sts_idx_imm_eR",
+            "ST_dms_sts_idx",
+            "II_ST_dms_sts_idx_eR",
+        ),
+    ):
+        result.extend(
+            (
+                _DescriptorSpec(
+                    load_immediate_form,
+                    f"{_TARGET_KEY}.load.scalar.{element_type}.indexed.immediate",
+                    f"memory.load.indexed.{element_type}",
+                    load_immediate_itinerary,
+                    (("dst", "eR"),),
+                    memory_width_bits=memory_width_bits,
+                ),
+                _DescriptorSpec(
+                    load_register_form,
+                    f"{_TARGET_KEY}.load.scalar.{element_type}.indexed.register",
+                    f"memory.load.indexed.{element_type}",
+                    load_register_itinerary,
+                    (("dst", "eR"),),
+                    asm_mnemonic=f"lda.{element_type}.index",
+                    memory_width_bits=memory_width_bits,
+                ),
+                _DescriptorSpec(
+                    store_immediate_form,
+                    f"{_TARGET_KEY}.store.scalar.{element_type}.indexed.immediate",
+                    f"memory.store.indexed.{element_type}",
+                    store_immediate_itinerary,
+                    (("src", "eR"),),
+                    memory_width_bits=memory_width_bits,
+                ),
+                _DescriptorSpec(
+                    store_register_form,
+                    f"{_TARGET_KEY}.store.scalar.{element_type}.indexed.register",
+                    f"memory.store.indexed.{element_type}",
+                    store_register_itinerary,
+                    (("src", "eR"),),
+                    asm_mnemonic=f"st.{element_type}.index",
+                    memory_width_bits=memory_width_bits,
+                ),
+            )
+        )
+    return tuple(result)
+
+
 _BASE_DESCRIPTOR_SPECS = (
     _DescriptorSpec(
         "ADD_add_r_ri",
@@ -304,21 +398,7 @@ _BASE_DESCRIPTOR_SPECS = (
         (("d0", "eRS16"),),
         asm_mnemonic="select.mask",
     ),
-    _DescriptorSpec(
-        "LDA_dms_lda_idx_imm",
-        f"{_TARGET_KEY}.load.scalar.indexed.immediate",
-        "memory.load.indexed.i32",
-        "II_LDA_dms_lda_idx_imm_eR",
-        (("dst", "eR"),),
-    ),
-    _DescriptorSpec(
-        "LDA_dms_lda_idx",
-        f"{_TARGET_KEY}.load.scalar.indexed.register",
-        "memory.load.indexed.i32",
-        "II_LDA_dms_lda_idx_eR",
-        (("dst", "eR"),),
-        asm_mnemonic="lda.index",
-    ),
+    *_scalar_memory_descriptor_specs(),
     _DescriptorSpec(
         "MOVS",
         f"{_TARGET_KEY}.move.to.address-index",
@@ -423,21 +503,6 @@ _BASE_DESCRIPTOR_SPECS = (
         f"{_TARGET_KEY}.return",
         "control.return",
         "II_RET",
-    ),
-    _DescriptorSpec(
-        "ST_dms_sts_idx_imm",
-        f"{_TARGET_KEY}.store.scalar.indexed.immediate",
-        "memory.store.indexed.i32",
-        "II_ST_dms_sts_idx_imm_eR",
-        (("src", "eR"),),
-    ),
-    _DescriptorSpec(
-        "ST_dms_sts_idx",
-        f"{_TARGET_KEY}.store.scalar.indexed.register",
-        "memory.store.indexed.i32",
-        "II_ST_dms_sts_idx_eR",
-        (("src", "eR"),),
-        asm_mnemonic="st.index",
     ),
     _DescriptorSpec(
         "VADD_8",
@@ -1583,6 +1648,13 @@ _IMPLICIT_REGISTER_LAYOUT_OVERRIDES = {
     "lr": "mLRa",
 }
 
+_IMPLICIT_REGISTER_LAYOUTS = {
+    # Part-word stores read and rewrite their containing word. LLVM represents
+    # the resulting address-data-store dependency with a non-allocatable
+    # singleton register that has no RegisterClass or data payload.
+    "pe2_ads": RegisterLayout(1, 1, 1, 1),
+}
+
 
 def _selected_singleton_machine_class_name(register_name: str) -> str | None:
     matches = tuple(
@@ -1609,6 +1681,9 @@ def _implicit_register_layout(register_name: str) -> RegisterLayout:
     selected_class = _selected_singleton_machine_class_name(register_name)
     if selected_class is not None:
         return _MACHINE_CLASSES[selected_class].layout
+    direct_layout = _IMPLICIT_REGISTER_LAYOUTS.get(register_name)
+    if direct_layout is not None:
+        return direct_layout
     override = _IMPLICIT_REGISTER_LAYOUT_OVERRIDES.get(register_name)
     if override is not None:
         machine_class = _MACHINE_CLASSES[override]

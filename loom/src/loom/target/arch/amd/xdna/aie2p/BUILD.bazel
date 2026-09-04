@@ -95,6 +95,20 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "legalization",
+    srcs = ["legalization.c"],
+    hdrs = ["legalization.h"],
+    deps = [
+        ":core_descriptors",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/target:legalization",
+        "//loom/src/loom/transforms/vector:packet_legalization",
+        "//loom/src/loom/transforms/vector:to_scalar",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "low_registry",
     srcs = ["descriptors/low_registry.c"],
     hdrs = ["descriptors/low_registry.h"],
@@ -236,6 +250,7 @@ loom_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":artifact_emitter",
+        ":legalization",
         ":low_registry",
         ":low_verify",
         ":lower",

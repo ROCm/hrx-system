@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/arch/amdgpu/vector_packet_legalization.h"
+#include "loom/transforms/vector/packet_legalization.h"
 
 #include <string.h>
 
@@ -17,31 +17,23 @@
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
-#include "loom/target/arch/amdgpu/lower/kinds.h"
-#include "loom/target/arch/amdgpu/target_info_defs.h"
 
-static bool loom_amdgpu_vector_packet_descriptor_set_is_amdgpu(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  return descriptor_set != NULL &&
-         descriptor_set->target_stable_id == LOOM_AMDGPU_TARGET_STABLE_ID;
-}
-
-typedef struct loom_amdgpu_vector_memory_chunk_shape_t {
+typedef struct loom_vector_packet_memory_chunk_shape_t {
   // Number of logical lanes in every vector carried by the producer graph.
   uint32_t lane_count;
   // Number of matching logical lanes materialized per native memory packet.
   uint32_t chunk_lane_count;
   // Number of chunks needed to cover lane_count.
   uint32_t chunk_count;
-} loom_amdgpu_vector_memory_chunk_shape_t;
+} loom_vector_packet_memory_chunk_shape_t;
 
 // Maximum source packet operations cloned by the alias-preserving static
 // fallback. Larger producer graphs stage through one private vector so compile
 // time and emitted code remain proportional to the graph instead of the
 // product of graph size and packet count.
-#define LOOM_AMDGPU_VECTOR_PACKET_STATIC_OP_LIMIT 64u
+#define LOOM_VECTOR_PACKET_STATIC_OP_LIMIT 64u
 
-static bool loom_amdgpu_vector_static_lane_count(loom_type_t vector_type,
+static bool loom_vector_packet_static_lane_count(loom_type_t vector_type,
                                                  uint32_t* out_lane_count) {
   *out_lane_count = 0;
   if (!loom_type_is_vector(vector_type) || loom_type_rank(vector_type) != 1 ||
@@ -56,58 +48,83 @@ static bool loom_amdgpu_vector_static_lane_count(loom_type_t vector_type,
   return true;
 }
 
-static bool loom_amdgpu_vector_payload_exceeds_scalarized_limit(
-    loom_type_t vector_type, uint32_t lane_count) {
+static bool loom_vector_packet_payload_bit_count(loom_type_t vector_type,
+                                                 uint32_t lane_count,
+                                                 uint64_t* out_bit_count) {
+  *out_bit_count = 0;
   const int32_t element_bit_count =
       loom_scalar_type_bitwidth(loom_type_element_type(vector_type));
-  if (element_bit_count != 8 && element_bit_count != 16 &&
-      element_bit_count != 32) {
+  if (element_bit_count <= 0) {
     return false;
   }
-  const uint64_t payload_bit_count =
-      (uint64_t)lane_count * (uint32_t)element_bit_count;
-  const uint64_t required_32bit_lane_count = (payload_bit_count + 31u) / 32u;
-  return required_32bit_lane_count > LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES;
-}
-
-static bool loom_amdgpu_vector_memory_chunk_lane_limit(
-    loom_type_t vector_type, uint32_t* out_chunk_lane_count) {
-  *out_chunk_lane_count = 0;
-  const int32_t element_bit_count =
-      loom_scalar_type_bitwidth(loom_type_element_type(vector_type));
-  if (element_bit_count != 8 && element_bit_count != 16 &&
-      element_bit_count != 32) {
-    return false;
-  }
-  *out_chunk_lane_count =
-      (LOOM_AMDGPU_MAX_MEMORY_32BIT_LANES * 32u) / (uint32_t)element_bit_count;
+  *out_bit_count = (uint64_t)lane_count * (uint32_t)element_bit_count;
   return true;
 }
 
-static bool loom_amdgpu_vector_memory_chunk_shape(
-    loom_type_t vector_type,
-    loom_amdgpu_vector_memory_chunk_shape_t* out_shape) {
-  *out_shape = (loom_amdgpu_vector_memory_chunk_shape_t){0};
+static bool loom_vector_packet_select_native_chunk_lane_count(
+    const loom_vector_packet_policy_t* policy, loom_type_t vector_type,
+    uint32_t maximum_lane_count, uint32_t* out_chunk_lane_count) {
+  *out_chunk_lane_count = 0;
+  const int32_t element_bit_count =
+      loom_scalar_type_bitwidth(loom_type_element_type(vector_type));
+  if (element_bit_count <= 0) {
+    return false;
+  }
+  uint32_t selected_lane_count = 0;
+  for (uint8_t i = 0; i < policy->native_bit_count_count; ++i) {
+    const uint16_t packet_bit_count = policy->native_bit_counts[i];
+    if (packet_bit_count == 0 ||
+        packet_bit_count % (uint32_t)element_bit_count != 0) {
+      continue;
+    }
+    const uint32_t packet_lane_count =
+        packet_bit_count / (uint32_t)element_bit_count;
+    if (packet_lane_count <= maximum_lane_count) {
+      selected_lane_count = iree_max(selected_lane_count, packet_lane_count);
+    }
+  }
+  *out_chunk_lane_count = selected_lane_count;
+  return selected_lane_count != 0;
+}
+
+static bool loom_vector_packet_maximum_chunk_lane_count(
+    const loom_vector_packet_policy_t* policy, loom_type_t vector_type,
+    uint32_t* out_chunk_lane_count) {
+  *out_chunk_lane_count = 0;
+  const int32_t element_bit_count =
+      loom_scalar_type_bitwidth(loom_type_element_type(vector_type));
+  if (element_bit_count <= 0) {
+    return false;
+  }
+  for (uint8_t i = 0; i < policy->native_bit_count_count; ++i) {
+    const uint16_t packet_bit_count = policy->native_bit_counts[i];
+    if (packet_bit_count == 0 ||
+        packet_bit_count % (uint32_t)element_bit_count != 0) {
+      continue;
+    }
+    *out_chunk_lane_count = iree_max(
+        *out_chunk_lane_count, packet_bit_count / (uint32_t)element_bit_count);
+  }
+  return *out_chunk_lane_count != 0;
+}
+
+static bool loom_vector_packet_memory_chunk_shape(
+    const loom_vector_packet_policy_t* policy, loom_type_t vector_type,
+    loom_vector_packet_memory_chunk_shape_t* out_shape) {
+  *out_shape = (loom_vector_packet_memory_chunk_shape_t){0};
   uint32_t lane_count = 0;
   uint32_t chunk_lane_count = 0;
-  if (!loom_amdgpu_vector_static_lane_count(vector_type, &lane_count) ||
-      !loom_amdgpu_vector_memory_chunk_lane_limit(vector_type,
-                                                  &chunk_lane_count)) {
+  uint64_t payload_bit_count = 0;
+  if (!loom_vector_packet_static_lane_count(vector_type, &lane_count) ||
+      !loom_vector_packet_payload_bit_count(vector_type, lane_count,
+                                            &payload_bit_count) ||
+      payload_bit_count <= policy->maximum_unpacketized_bit_count ||
+      !loom_vector_packet_select_native_chunk_lane_count(
+          policy, vector_type, lane_count - 1u, &chunk_lane_count)) {
     return false;
   }
-
-  // Existing source-to-low memory and vector lowering owns payloads through
-  // the bounded scalarized storage limit, including specialized packed and
-  // b128 paths. This legalizer extends that boundary for oversized payloads;
-  // taking over smaller vectors would replace those established fast paths
-  // with loop control.
-  if (!loom_amdgpu_vector_payload_exceeds_scalarized_limit(vector_type,
-                                                           lane_count)) {
-    return false;
-  }
-  const uint32_t chunk_count =
-      (lane_count + chunk_lane_count - 1u) / chunk_lane_count;
-  *out_shape = (loom_amdgpu_vector_memory_chunk_shape_t){
+  const uint32_t chunk_count = (lane_count - 1u) / chunk_lane_count + 1u;
+  *out_shape = (loom_vector_packet_memory_chunk_shape_t){
       .lane_count = lane_count,
       .chunk_lane_count = chunk_lane_count,
       .chunk_count = chunk_count,
@@ -115,56 +132,58 @@ static bool loom_amdgpu_vector_memory_chunk_shape(
   return true;
 }
 
-static bool loom_amdgpu_vector_memory_chunk_shape_constrain(
-    loom_type_t vector_type,
-    loom_amdgpu_vector_memory_chunk_shape_t* inout_shape) {
+static bool loom_vector_packet_memory_chunk_shape_constrain(
+    const loom_vector_packet_policy_t* policy, loom_type_t vector_type,
+    loom_vector_packet_memory_chunk_shape_t* inout_shape) {
   uint32_t lane_count = 0;
   uint32_t chunk_lane_count = 0;
-  if (!loom_amdgpu_vector_static_lane_count(vector_type, &lane_count) ||
+  if (!loom_vector_packet_static_lane_count(vector_type, &lane_count) ||
       lane_count != inout_shape->lane_count ||
-      !loom_amdgpu_vector_memory_chunk_lane_limit(vector_type,
-                                                  &chunk_lane_count)) {
+      !loom_vector_packet_maximum_chunk_lane_count(policy, vector_type,
+                                                   &chunk_lane_count)) {
     return false;
   }
   inout_shape->chunk_lane_count =
       iree_min(inout_shape->chunk_lane_count, chunk_lane_count);
-  inout_shape->chunk_count = (lane_count + inout_shape->chunk_lane_count - 1u) /
-                             inout_shape->chunk_lane_count;
+  inout_shape->chunk_count =
+      (lane_count - 1u) / inout_shape->chunk_lane_count + 1u;
   return true;
 }
 
-static loom_type_t loom_amdgpu_vector_memory_chunk_type(loom_type_t vector_type,
+static loom_type_t loom_vector_packet_memory_chunk_type(loom_type_t vector_type,
                                                         uint32_t lane_count) {
   return loom_type_shaped_1d(
       LOOM_TYPE_VECTOR, loom_type_element_type(vector_type),
       loom_dim_pack_static(lane_count), vector_type.encoding_id);
 }
 
-typedef struct loom_amdgpu_vector_packetized_value_t {
+typedef struct loom_vector_packetized_value_t {
   // Original oversized source value represented by a native packet.
   loom_value_id_t source;
   // Original oversized source type.
   loom_type_t source_type;
   // Native packet materialized for the current physical loop iteration.
   loom_value_id_t packet;
-} loom_amdgpu_vector_packetized_value_t;
+} loom_vector_packetized_value_t;
 
-typedef struct loom_amdgpu_vector_packetization_t {
+typedef struct loom_vector_packetization_t {
   // Target legalization context that owns the rewrite.
   loom_target_legalization_context_t* context;
+  // Target-native packet widths controlling this rewrite.
+  const loom_vector_packet_policy_t* policy;
   // Function-local value domain providing direct value-to-ordinal mapping.
   const loom_local_value_domain_t* value_domain;
   // One-based compact value record index keyed directly by value ordinal.
   uint32_t* value_indices;
   // Arena-backed packetized values materialized for this root rewrite.
-  loom_amdgpu_vector_packetized_value_t* values;
+  loom_vector_packetized_value_t* values;
   // Number of populated values.
   uint32_t value_count;
   // Number of allocated value entries.
   uint32_t value_capacity;
-} loom_amdgpu_vector_packetization_t;
+} loom_vector_packetization_t;
 
-static bool loom_amdgpu_vector_memory_find_dynamic_axis_index(
+static bool loom_vector_packet_memory_find_dynamic_axis_index(
     loom_attribute_t static_indices, iree_host_size_t axis,
     iree_host_size_t* out_dynamic_index) {
   iree_host_size_t dynamic_index = 0;
@@ -181,10 +200,10 @@ static bool loom_amdgpu_vector_memory_find_dynamic_axis_index(
   return false;
 }
 
-static bool loom_amdgpu_vector_memory_can_build_chunk_origins(
+static bool loom_vector_packet_memory_can_build_chunk_origins(
     const loom_target_legalization_context_t* context,
     const loom_vector_memory_footprint_t* footprint,
-    const loom_amdgpu_vector_memory_chunk_shape_t* shape) {
+    const loom_vector_packet_memory_chunk_shape_t* shape) {
   if (shape->chunk_count <= 1) {
     return true;
   }
@@ -204,7 +223,7 @@ static bool loom_amdgpu_vector_memory_can_build_chunk_origins(
   }
 
   iree_host_size_t dynamic_index = 0;
-  if (!loom_amdgpu_vector_memory_find_dynamic_axis_index(
+  if (!loom_vector_packet_memory_find_dynamic_axis_index(
           footprint->static_indices, last_axis, &dynamic_index) ||
       dynamic_index >= footprint->dynamic_indices.count) {
     return false;
@@ -217,7 +236,7 @@ static bool loom_amdgpu_vector_memory_can_build_chunk_origins(
          loom_type_element_type(dynamic_type) == LOOM_SCALAR_TYPE_INDEX;
 }
 
-static iree_status_t loom_amdgpu_vector_memory_build_chunk_origin(
+static iree_status_t loom_vector_packet_memory_build_chunk_origin(
     loom_target_legalization_context_t* context,
     const loom_vector_memory_footprint_t* footprint, const loom_op_t* source_op,
     uint32_t chunk_lane_offset, const loom_value_id_t** out_dynamic_indices,
@@ -257,7 +276,7 @@ static iree_status_t loom_amdgpu_vector_memory_build_chunk_origin(
   }
 
   iree_host_size_t dynamic_index = 0;
-  if (!loom_amdgpu_vector_memory_find_dynamic_axis_index(
+  if (!loom_vector_packet_memory_find_dynamic_axis_index(
           footprint->static_indices, last_axis, &dynamic_index) ||
       dynamic_index >= footprint->dynamic_indices.count) {
     *out_built = false;
@@ -294,7 +313,7 @@ static iree_status_t loom_amdgpu_vector_memory_build_chunk_origin(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_vector_memory_build_dynamic_chunk_origin(
+static iree_status_t loom_vector_packet_memory_build_dynamic_chunk_origin(
     loom_target_legalization_context_t* context,
     const loom_vector_memory_footprint_t* footprint, const loom_op_t* source_op,
     loom_value_id_t lane_offset, const loom_value_id_t** out_dynamic_indices,
@@ -355,7 +374,7 @@ static iree_status_t loom_amdgpu_vector_memory_build_dynamic_chunk_origin(
          footprint->dynamic_indices.count * sizeof(*dynamic_indices));
   iree_host_size_t dynamic_index = 0;
   const bool found_dynamic_index =
-      loom_amdgpu_vector_memory_find_dynamic_axis_index(
+      loom_vector_packet_memory_find_dynamic_axis_index(
           footprint->static_indices, last_axis, &dynamic_index);
   IREE_ASSERT_TRUE(found_dynamic_index);
   (void)found_dynamic_index;
@@ -373,23 +392,25 @@ static iree_status_t loom_amdgpu_vector_memory_build_dynamic_chunk_origin(
   return iree_ok_status();
 }
 
-static const loom_fact_context_t* loom_amdgpu_vector_packet_fact_context(
+static const loom_fact_context_t* loom_vector_packet_fact_context(
     const loom_target_legalization_context_t* context) {
   return context->fact_table ? &context->fact_table->context : NULL;
 }
 
-static bool loom_amdgpu_vector_packet_type_shape_matches(
-    loom_type_t type, const loom_amdgpu_vector_memory_chunk_shape_t* shape) {
+static bool loom_vector_packet_type_shape_matches(
+    loom_type_t type, const loom_vector_packet_memory_chunk_shape_t* shape) {
   uint32_t lane_count = 0;
-  return loom_amdgpu_vector_static_lane_count(type, &lane_count) &&
+  return loom_vector_packet_static_lane_count(type, &lane_count) &&
          lane_count == shape->lane_count;
 }
 
-static iree_status_t loom_amdgpu_vector_packetization_initialize(
+static iree_status_t loom_vector_packetization_initialize(
     loom_target_legalization_context_t* context,
-    loom_amdgpu_vector_packetization_t* out_packetization) {
-  *out_packetization = (loom_amdgpu_vector_packetization_t){
+    const loom_vector_packet_policy_t* policy,
+    loom_vector_packetization_t* out_packetization) {
+  *out_packetization = (loom_vector_packetization_t){
       .context = context,
+      .policy = policy,
       .value_domain = context->value_domain,
   };
   const iree_host_size_t value_count = context->value_domain->value_count;
@@ -401,16 +422,16 @@ static iree_status_t loom_amdgpu_vector_packetization_initialize(
   return iree_ok_status();
 }
 
-static loom_amdgpu_vector_packetized_value_t* loom_amdgpu_vector_packet_find(
-    loom_amdgpu_vector_packetization_t* packetization, loom_value_id_t source) {
+static loom_vector_packetized_value_t* loom_vector_packet_find(
+    loom_vector_packetization_t* packetization, loom_value_id_t source) {
   const loom_value_ordinal_t value_ordinal =
       loom_local_value_domain_ordinal(packetization->value_domain, source);
   const uint32_t value_index = packetization->value_indices[value_ordinal];
   return value_index == 0 ? NULL : &packetization->values[value_index - 1u];
 }
 
-static iree_status_t loom_amdgpu_vector_packet_reserve(
-    loom_amdgpu_vector_packetization_t* packetization, uint32_t capacity) {
+static iree_status_t loom_vector_packet_reserve(
+    loom_vector_packetization_t* packetization, uint32_t capacity) {
   if (capacity <= packetization->value_capacity) {
     return iree_ok_status();
   }
@@ -423,7 +444,7 @@ static iree_status_t loom_amdgpu_vector_packet_reserve(
     }
     new_capacity *= 2u;
   }
-  loom_amdgpu_vector_packetized_value_t* new_values = NULL;
+  loom_vector_packetized_value_t* new_values = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(packetization->context->arena, new_capacity,
                                 sizeof(*new_values), (void**)&new_values));
@@ -436,13 +457,13 @@ static iree_status_t loom_amdgpu_vector_packet_reserve(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_vector_packet_record(
-    loom_amdgpu_vector_packetization_t* packetization, loom_value_id_t source,
+static iree_status_t loom_vector_packet_record(
+    loom_vector_packetization_t* packetization, loom_value_id_t source,
     loom_type_t source_type) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_reserve(
+  IREE_RETURN_IF_ERROR(loom_vector_packet_reserve(
       packetization, packetization->value_count + 1u));
   const uint32_t value_index = packetization->value_count++;
-  packetization->values[value_index] = (loom_amdgpu_vector_packetized_value_t){
+  packetization->values[value_index] = (loom_vector_packetized_value_t){
       .source = source,
       .source_type = source_type,
       .packet = LOOM_VALUE_ID_INVALID,
@@ -454,16 +475,17 @@ static iree_status_t loom_amdgpu_vector_packet_record(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_vector_packet_select_value_shape(
-    loom_amdgpu_vector_packetization_t* packetization, loom_value_id_t source,
-    loom_amdgpu_vector_memory_chunk_shape_t* inout_shape, bool* out_selected);
+static iree_status_t loom_vector_packet_select_value_shape(
+    loom_vector_packetization_t* packetization, loom_value_id_t source,
+    loom_vector_packet_memory_chunk_shape_t* inout_shape, bool* out_selected);
 
-static bool loom_amdgpu_vector_packet_select_memory_load_shape(
-    const loom_target_legalization_context_t* context, const loom_op_t* op,
-    loom_amdgpu_vector_memory_chunk_shape_t* inout_shape) {
+static bool loom_vector_packet_select_memory_load_shape(
+    const loom_vector_packetization_t* packetization, const loom_op_t* op,
+    loom_vector_packet_memory_chunk_shape_t* inout_shape) {
+  const loom_target_legalization_context_t* context = packetization->context;
   loom_vector_memory_footprint_t footprint = {0};
   if (!loom_vector_memory_footprint_describe(
-          loom_amdgpu_vector_packet_fact_context(context), context->module, op,
+          loom_vector_packet_fact_context(context), context->module, op,
           &footprint) ||
       footprint.kind != LOOM_VECTOR_MEMORY_FOOTPRINT_DENSE ||
       !loom_type_equal(footprint.vector_type,
@@ -474,13 +496,13 @@ static bool loom_amdgpu_vector_packet_select_memory_load_shape(
   loom_vector_memory_cache_policy_t cache_policy = {0};
   return loom_vector_memory_cache_policy_from_op(context->module, op,
                                                  &cache_policy) &&
-         loom_amdgpu_vector_memory_chunk_shape_constrain(footprint.vector_type,
-                                                         inout_shape);
+         loom_vector_packet_memory_chunk_shape_constrain(
+             packetization->policy, footprint.vector_type, inout_shape);
 }
 
-static iree_status_t loom_amdgpu_vector_packet_select_op_shape(
-    loom_amdgpu_vector_packetization_t* packetization, const loom_op_t* op,
-    loom_amdgpu_vector_memory_chunk_shape_t* inout_shape, bool* out_selected) {
+static iree_status_t loom_vector_packet_select_op_shape(
+    loom_vector_packetization_t* packetization, const loom_op_t* op,
+    loom_vector_packet_memory_chunk_shape_t* inout_shape, bool* out_selected) {
   *out_selected = false;
   const loom_target_legalization_context_t* context = packetization->context;
   const loom_trait_flags_t traits =
@@ -490,19 +512,18 @@ static iree_status_t loom_amdgpu_vector_packet_select_op_shape(
   }
   const loom_type_t result_type =
       loom_module_value_type(context->module, loom_op_results(op)[0]);
-  if (!loom_amdgpu_vector_packet_type_shape_matches(result_type, inout_shape)) {
+  if (!loom_vector_packet_type_shape_matches(result_type, inout_shape)) {
     return iree_ok_status();
   }
   const loom_value_id_t* operands = loom_op_const_operands(op);
   for (uint16_t i = 0; i < op->operand_count; ++i) {
     const loom_type_t operand_type =
         loom_module_value_type(context->module, operands[i]);
-    if (!loom_amdgpu_vector_packet_type_shape_matches(operand_type,
-                                                      inout_shape)) {
+    if (!loom_vector_packet_type_shape_matches(operand_type, inout_shape)) {
       return iree_ok_status();
     }
     bool operand_selected = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_select_value_shape(
+    IREE_RETURN_IF_ERROR(loom_vector_packet_select_value_shape(
         packetization, operands[i], inout_shape, &operand_selected));
     if (!operand_selected) {
       return iree_ok_status();
@@ -512,11 +533,11 @@ static iree_status_t loom_amdgpu_vector_packet_select_op_shape(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_vector_packet_select_value_shape(
-    loom_amdgpu_vector_packetization_t* packetization, loom_value_id_t source,
-    loom_amdgpu_vector_memory_chunk_shape_t* inout_shape, bool* out_selected) {
+static iree_status_t loom_vector_packet_select_value_shape(
+    loom_vector_packetization_t* packetization, loom_value_id_t source,
+    loom_vector_packet_memory_chunk_shape_t* inout_shape, bool* out_selected) {
   *out_selected = false;
-  if (loom_amdgpu_vector_packet_find(packetization, source) != NULL) {
+  if (loom_vector_packet_find(packetization, source) != NULL) {
     *out_selected = true;
     return iree_ok_status();
   }
@@ -527,7 +548,7 @@ static iree_status_t loom_amdgpu_vector_packet_select_value_shape(
   }
   const loom_type_t source_type =
       loom_module_value_type(context->module, source);
-  if (!loom_amdgpu_vector_packet_type_shape_matches(source_type, inout_shape)) {
+  if (!loom_vector_packet_type_shape_matches(source_type, inout_shape)) {
     return iree_ok_status();
   }
   const loom_op_t* op = loom_value_def_op(value);
@@ -535,28 +556,28 @@ static iree_status_t loom_amdgpu_vector_packet_select_value_shape(
     return iree_ok_status();
   }
   if (loom_vector_load_isa(op)) {
-    *out_selected = loom_amdgpu_vector_packet_select_memory_load_shape(
-        context, op, inout_shape);
+    *out_selected = loom_vector_packet_select_memory_load_shape(
+        packetization, op, inout_shape);
   } else if (loom_vector_constant_isa(op) || loom_vector_poison_isa(op) ||
              loom_vector_splat_isa(op)) {
     *out_selected = true;
   } else {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_select_op_shape(
+    IREE_RETURN_IF_ERROR(loom_vector_packet_select_op_shape(
         packetization, op, inout_shape, out_selected));
   }
   if (*out_selected) {
     IREE_RETURN_IF_ERROR(
-        loom_amdgpu_vector_packet_record(packetization, source, source_type));
+        loom_vector_packet_record(packetization, source, source_type));
   }
   return iree_ok_status();
 }
 
-static bool loom_amdgpu_vector_packet_can_materialize_memory_load(
+static bool loom_vector_packet_can_materialize_memory_load(
     const loom_target_legalization_context_t* context, const loom_op_t* op,
-    const loom_amdgpu_vector_memory_chunk_shape_t* shape) {
+    const loom_vector_packet_memory_chunk_shape_t* shape) {
   loom_vector_memory_footprint_t footprint = {0};
   if (!loom_vector_memory_footprint_describe(
-          loom_amdgpu_vector_packet_fact_context(context), context->module, op,
+          loom_vector_packet_fact_context(context), context->module, op,
           &footprint) ||
       footprint.kind != LOOM_VECTOR_MEMORY_FOOTPRINT_DENSE ||
       !loom_type_equal(footprint.vector_type,
@@ -567,29 +588,28 @@ static bool loom_amdgpu_vector_packet_can_materialize_memory_load(
   loom_vector_memory_cache_policy_t cache_policy = {0};
   return loom_vector_memory_cache_policy_from_op(context->module, op,
                                                  &cache_policy) &&
-         loom_amdgpu_vector_memory_can_build_chunk_origins(context, &footprint,
+         loom_vector_packet_memory_can_build_chunk_origins(context, &footprint,
                                                            shape);
 }
 
-static bool loom_amdgpu_vector_packet_can_materialize(
-    const loom_amdgpu_vector_packetization_t* packetization,
-    const loom_amdgpu_vector_memory_chunk_shape_t* shape) {
+static bool loom_vector_packet_can_materialize(
+    const loom_vector_packetization_t* packetization,
+    const loom_vector_packet_memory_chunk_shape_t* shape) {
   for (uint32_t i = 0; i < packetization->value_count; ++i) {
-    const loom_amdgpu_vector_packetized_value_t* value =
-        &packetization->values[i];
+    const loom_vector_packetized_value_t* value = &packetization->values[i];
     const loom_value_t* source_value =
         loom_module_value(packetization->context->module, value->source);
     const loom_op_t* op = loom_value_def_op(source_value);
     if (loom_vector_load_isa(op) &&
-        !loom_amdgpu_vector_packet_can_materialize_memory_load(
-            packetization->context, op, shape)) {
+        !loom_vector_packet_can_materialize_memory_load(packetization->context,
+                                                        op, shape)) {
       return false;
     }
   }
   return true;
 }
 
-static bool loom_amdgpu_vector_packet_footprints_match(
+static bool loom_vector_packet_footprints_match(
     const loom_vector_memory_footprint_t* left,
     const loom_vector_memory_footprint_t* right) {
   return left->view == right->view &&
@@ -601,7 +621,7 @@ static bool loom_amdgpu_vector_packet_footprints_match(
                  left->dynamic_indices.count * sizeof(loom_value_id_t)) == 0);
 }
 
-static bool loom_amdgpu_vector_packet_views_are_disjoint(
+static bool loom_vector_packet_views_are_disjoint(
     const loom_target_legalization_context_t* context, loom_value_id_t left,
     loom_value_id_t right) {
   loom_value_fact_view_reference_t left_reference = {0};
@@ -628,12 +648,11 @@ static bool loom_amdgpu_vector_packet_views_are_disjoint(
           left_reference.alias_scope_id != right_reference.alias_scope_id);
 }
 
-static bool loom_amdgpu_vector_packet_store_can_interleave(
-    const loom_amdgpu_vector_packetization_t* packetization,
+static bool loom_vector_packet_store_can_interleave(
+    const loom_vector_packetization_t* packetization,
     const loom_vector_memory_footprint_t* store_footprint) {
   for (uint32_t i = 0; i < packetization->value_count; ++i) {
-    const loom_amdgpu_vector_packetized_value_t* value =
-        &packetization->values[i];
+    const loom_vector_packetized_value_t* value = &packetization->values[i];
     const loom_value_t* source_value =
         loom_module_value(packetization->context->module, value->source);
     const loom_op_t* op = loom_value_def_op(source_value);
@@ -641,45 +660,45 @@ static bool loom_amdgpu_vector_packet_store_can_interleave(
 
     loom_vector_memory_footprint_t load_footprint = {0};
     const bool footprint_described = loom_vector_memory_footprint_describe(
-        loom_amdgpu_vector_packet_fact_context(packetization->context),
+        loom_vector_packet_fact_context(packetization->context),
         packetization->context->module, op, &load_footprint);
     IREE_ASSERT_TRUE(footprint_described);
-    if (!loom_amdgpu_vector_packet_footprints_match(&load_footprint,
-                                                    store_footprint) &&
-        !loom_amdgpu_vector_packet_views_are_disjoint(packetization->context,
-                                                      load_footprint.view,
-                                                      store_footprint->view)) {
+    if (!loom_vector_packet_footprints_match(&load_footprint,
+                                             store_footprint) &&
+        !loom_vector_packet_views_are_disjoint(packetization->context,
+                                               load_footprint.view,
+                                               store_footprint->view)) {
       return false;
     }
   }
   return true;
 }
 
-typedef struct loom_amdgpu_vector_packet_slice_t {
+typedef struct loom_vector_packet_slice_t {
   // Dynamic logical lane offset, or invalid when the offset is static.
   loom_value_id_t dynamic_lane_offset;
   // Static logical lane offset used when dynamic_lane_offset is invalid.
   uint32_t static_lane_offset;
   // Number of logical lanes represented by the packet.
   uint32_t lane_count;
-} loom_amdgpu_vector_packet_slice_t;
+} loom_vector_packet_slice_t;
 
-static iree_status_t loom_amdgpu_vector_packet_build_memory_origin(
+static iree_status_t loom_vector_packet_build_memory_origin(
     loom_target_legalization_context_t* context,
     const loom_vector_memory_footprint_t* footprint, const loom_op_t* source_op,
-    const loom_amdgpu_vector_packet_slice_t* slice,
+    const loom_vector_packet_slice_t* slice,
     const loom_value_id_t** out_dynamic_indices,
     iree_host_size_t* out_dynamic_index_count,
     const int64_t** out_static_indices,
     iree_host_size_t* out_static_index_count) {
   if (slice->dynamic_lane_offset != LOOM_VALUE_ID_INVALID) {
-    return loom_amdgpu_vector_memory_build_dynamic_chunk_origin(
+    return loom_vector_packet_memory_build_dynamic_chunk_origin(
         context, footprint, source_op, slice->dynamic_lane_offset,
         out_dynamic_indices, out_dynamic_index_count, out_static_indices,
         out_static_index_count);
   }
   bool origin_built = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vector_memory_build_chunk_origin(
+  IREE_RETURN_IF_ERROR(loom_vector_packet_memory_build_chunk_origin(
       context, footprint, source_op, slice->static_lane_offset,
       out_dynamic_indices, out_dynamic_index_count, out_static_indices,
       out_static_index_count, &origin_built));
@@ -687,21 +706,21 @@ static iree_status_t loom_amdgpu_vector_packet_build_memory_origin(
   return iree_ok_status();
 }
 
-static void loom_amdgpu_vector_packet_reset(
-    loom_amdgpu_vector_packetization_t* packetization) {
+static void loom_vector_packet_reset(
+    loom_vector_packetization_t* packetization) {
   for (uint32_t i = 0; i < packetization->value_count; ++i) {
     packetization->values[i].packet = LOOM_VALUE_ID_INVALID;
   }
 }
 
-static iree_status_t loom_amdgpu_vector_packet_materialize_memory_load(
-    loom_amdgpu_vector_packetization_t* packetization, loom_op_t* op,
-    const loom_amdgpu_vector_packet_slice_t* slice,
-    loom_amdgpu_vector_packetized_value_t* packetized_value) {
+static iree_status_t loom_vector_packet_materialize_memory_load(
+    loom_vector_packetization_t* packetization, loom_op_t* op,
+    const loom_vector_packet_slice_t* slice,
+    loom_vector_packetized_value_t* packetized_value) {
   loom_target_legalization_context_t* context = packetization->context;
   loom_vector_memory_footprint_t footprint = {0};
   const bool footprint_described = loom_vector_memory_footprint_describe(
-      loom_amdgpu_vector_packet_fact_context(context), context->module, op,
+      loom_vector_packet_fact_context(context), context->module, op,
       &footprint);
   IREE_ASSERT_TRUE(footprint_described);
   (void)footprint_described;
@@ -715,10 +734,10 @@ static iree_status_t loom_amdgpu_vector_packet_materialize_memory_load(
   iree_host_size_t dynamic_index_count = 0;
   const int64_t* static_indices = NULL;
   iree_host_size_t static_index_count = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_build_memory_origin(
+  IREE_RETURN_IF_ERROR(loom_vector_packet_build_memory_origin(
       context, &footprint, op, slice, &dynamic_indices, &dynamic_index_count,
       &static_indices, &static_index_count));
-  const loom_type_t packet_type = loom_amdgpu_vector_memory_chunk_type(
+  const loom_type_t packet_type = loom_vector_packet_memory_chunk_type(
       packetized_value->source_type, slice->lane_count);
   loom_op_t* packet_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_load_build(
@@ -731,10 +750,10 @@ static iree_status_t loom_amdgpu_vector_packet_materialize_memory_load(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_vector_packet_materialize_simple_op(
-    loom_amdgpu_vector_packetization_t* packetization, loom_op_t* op,
-    const loom_amdgpu_vector_packet_slice_t* slice,
-    loom_amdgpu_vector_packetized_value_t* packetized_value) {
+static iree_status_t loom_vector_packet_materialize_simple_op(
+    loom_vector_packetization_t* packetization, loom_op_t* op,
+    const loom_vector_packet_slice_t* slice,
+    loom_vector_packetized_value_t* packetized_value) {
   loom_builder_t* builder = &packetization->context->rewriter->builder;
   loom_op_t* packet_op = NULL;
   IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
@@ -745,9 +764,8 @@ static iree_status_t loom_amdgpu_vector_packet_materialize_simple_op(
   const loom_value_id_t* source_operands = loom_op_const_operands(op);
   for (uint16_t operand_index = 0; operand_index < op->operand_count;
        ++operand_index) {
-    loom_amdgpu_vector_packetized_value_t* operand =
-        loom_amdgpu_vector_packet_find(packetization,
-                                       source_operands[operand_index]);
+    loom_vector_packetized_value_t* operand =
+        loom_vector_packet_find(packetization, source_operands[operand_index]);
     IREE_ASSERT(operand != NULL);
     IREE_ASSERT(operand->packet != LOOM_VALUE_ID_INVALID);
     loom_op_operands(packet_op)[operand_index] = operand->packet;
@@ -756,7 +774,7 @@ static iree_status_t loom_amdgpu_vector_packet_materialize_simple_op(
     memcpy(loom_op_attrs(packet_op), loom_op_const_attrs(op),
            op->attribute_count * sizeof(loom_attribute_t));
   }
-  const loom_type_t packet_type = loom_amdgpu_vector_memory_chunk_type(
+  const loom_type_t packet_type = loom_vector_packet_memory_chunk_type(
       packetized_value->source_type, slice->lane_count);
   IREE_RETURN_IF_ERROR(loom_builder_define_value(builder, packet_type,
                                                  &packetized_value->packet));
@@ -765,11 +783,11 @@ static iree_status_t loom_amdgpu_vector_packet_materialize_simple_op(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_vector_packet_materialize_constant(
-    loom_amdgpu_vector_packetization_t* packetization, loom_op_t* op,
-    const loom_amdgpu_vector_packet_slice_t* slice,
-    loom_amdgpu_vector_packetized_value_t* packetized_value) {
-  const loom_type_t packet_type = loom_amdgpu_vector_memory_chunk_type(
+static iree_status_t loom_vector_packet_materialize_constant(
+    loom_vector_packetization_t* packetization, loom_op_t* op,
+    const loom_vector_packet_slice_t* slice,
+    loom_vector_packetized_value_t* packetized_value) {
+  const loom_type_t packet_type = loom_vector_packet_memory_chunk_type(
       packetized_value->source_type, slice->lane_count);
   loom_op_t* packet_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_constant_build(
@@ -779,11 +797,11 @@ static iree_status_t loom_amdgpu_vector_packet_materialize_constant(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_vector_packet_materialize_poison(
-    loom_amdgpu_vector_packetization_t* packetization, loom_op_t* op,
-    const loom_amdgpu_vector_packet_slice_t* slice,
-    loom_amdgpu_vector_packetized_value_t* packetized_value) {
-  const loom_type_t packet_type = loom_amdgpu_vector_memory_chunk_type(
+static iree_status_t loom_vector_packet_materialize_poison(
+    loom_vector_packetization_t* packetization, loom_op_t* op,
+    const loom_vector_packet_slice_t* slice,
+    loom_vector_packetized_value_t* packetized_value) {
+  const loom_type_t packet_type = loom_vector_packet_memory_chunk_type(
       packetized_value->source_type, slice->lane_count);
   loom_op_t* packet_op = NULL;
   IREE_RETURN_IF_ERROR(
@@ -793,11 +811,11 @@ static iree_status_t loom_amdgpu_vector_packet_materialize_poison(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_vector_packet_materialize_splat(
-    loom_amdgpu_vector_packetization_t* packetization, loom_op_t* op,
-    const loom_amdgpu_vector_packet_slice_t* slice,
-    loom_amdgpu_vector_packetized_value_t* packetized_value) {
-  const loom_type_t packet_type = loom_amdgpu_vector_memory_chunk_type(
+static iree_status_t loom_vector_packet_materialize_splat(
+    loom_vector_packetization_t* packetization, loom_op_t* op,
+    const loom_vector_packet_slice_t* slice,
+    loom_vector_packetized_value_t* packetized_value) {
+  const loom_type_t packet_type = loom_vector_packet_memory_chunk_type(
       packetized_value->source_type, slice->lane_count);
   loom_op_t* packet_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_splat_build(
@@ -807,57 +825,57 @@ static iree_status_t loom_amdgpu_vector_packet_materialize_splat(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_vector_packet_materialize_value(
-    loom_amdgpu_vector_packetization_t* packetization,
-    const loom_amdgpu_vector_packet_slice_t* slice,
-    loom_amdgpu_vector_packetized_value_t* packetized_value) {
+static iree_status_t loom_vector_packet_materialize_value(
+    loom_vector_packetization_t* packetization,
+    const loom_vector_packet_slice_t* slice,
+    loom_vector_packetized_value_t* packetized_value) {
   loom_target_legalization_context_t* context = packetization->context;
   const loom_value_t* value =
       loom_module_value(context->module, packetized_value->source);
   loom_op_t* op = loom_value_def_op(value);
   if (loom_vector_load_isa(op)) {
-    return loom_amdgpu_vector_packet_materialize_memory_load(
-        packetization, op, slice, packetized_value);
+    return loom_vector_packet_materialize_memory_load(packetization, op, slice,
+                                                      packetized_value);
   } else if (loom_vector_constant_isa(op)) {
-    return loom_amdgpu_vector_packet_materialize_constant(
-        packetization, op, slice, packetized_value);
+    return loom_vector_packet_materialize_constant(packetization, op, slice,
+                                                   packetized_value);
   } else if (loom_vector_poison_isa(op)) {
-    return loom_amdgpu_vector_packet_materialize_poison(
-        packetization, op, slice, packetized_value);
+    return loom_vector_packet_materialize_poison(packetization, op, slice,
+                                                 packetized_value);
   } else if (loom_vector_splat_isa(op)) {
-    return loom_amdgpu_vector_packet_materialize_splat(packetization, op, slice,
-                                                       packetized_value);
+    return loom_vector_packet_materialize_splat(packetization, op, slice,
+                                                packetized_value);
   }
-  return loom_amdgpu_vector_packet_materialize_simple_op(
-      packetization, op, slice, packetized_value);
+  return loom_vector_packet_materialize_simple_op(packetization, op, slice,
+                                                  packetized_value);
 }
 
-static iree_status_t loom_amdgpu_vector_packet_materialize(
-    loom_amdgpu_vector_packetization_t* packetization, loom_value_id_t source,
-    const loom_amdgpu_vector_packet_slice_t* slice,
-    loom_amdgpu_vector_packetized_value_t** out_value) {
-  loom_amdgpu_vector_packet_reset(packetization);
+static iree_status_t loom_vector_packet_materialize(
+    loom_vector_packetization_t* packetization, loom_value_id_t source,
+    const loom_vector_packet_slice_t* slice,
+    loom_vector_packetized_value_t** out_value) {
+  loom_vector_packet_reset(packetization);
   for (uint32_t i = 0; i < packetization->value_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_materialize_value(
+    IREE_RETURN_IF_ERROR(loom_vector_packet_materialize_value(
         packetization, slice, &packetization->values[i]));
   }
-  *out_value = loom_amdgpu_vector_packet_find(packetization, source);
+  *out_value = loom_vector_packet_find(packetization, source);
   IREE_ASSERT(*out_value != NULL);
   IREE_ASSERT((*out_value)->packet != LOOM_VALUE_ID_INVALID);
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_vector_packet_store(
-    loom_amdgpu_vector_packetization_t* packetization,
+static iree_status_t loom_vector_packet_store(
+    loom_vector_packetization_t* packetization,
     const loom_vector_memory_footprint_t* store_footprint,
-    const loom_amdgpu_vector_packet_slice_t* slice, loom_value_id_t packet,
+    const loom_vector_packet_slice_t* slice, loom_value_id_t packet,
     loom_vector_memory_cache_policy_t store_cache_policy, loom_op_t* store_op) {
   loom_target_legalization_context_t* context = packetization->context;
   const loom_value_id_t* dynamic_indices = NULL;
   iree_host_size_t dynamic_index_count = 0;
   const int64_t* static_indices = NULL;
   iree_host_size_t static_index_count = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_build_memory_origin(
+  IREE_RETURN_IF_ERROR(loom_vector_packet_build_memory_origin(
       context, store_footprint, store_op, slice, &dynamic_indices,
       &dynamic_index_count, &static_indices, &static_index_count));
   loom_op_t* packet_store_op = NULL;
@@ -870,33 +888,33 @@ static iree_status_t loom_amdgpu_vector_packet_store(
   return iree_ok_status();
 }
 
-static bool loom_amdgpu_vector_packet_static_store_is_bounded(
-    const loom_amdgpu_vector_packetization_t* packetization,
-    const loom_amdgpu_vector_memory_chunk_shape_t* shape) {
+static bool loom_vector_packet_static_store_is_bounded(
+    const loom_vector_packetization_t* packetization,
+    const loom_vector_packet_memory_chunk_shape_t* shape) {
   iree_host_size_t operations_per_chunk = 0;
   iree_host_size_t operation_count = 0;
   return iree_host_size_checked_add(packetization->value_count, 1,
                                     &operations_per_chunk) &&
          iree_host_size_checked_mul(operations_per_chunk, shape->chunk_count,
                                     &operation_count) &&
-         operation_count <= LOOM_AMDGPU_VECTOR_PACKET_STATIC_OP_LIMIT;
+         operation_count <= LOOM_VECTOR_PACKET_STATIC_OP_LIMIT;
 }
 
-static iree_status_t loom_amdgpu_vector_packet_static_store(
-    loom_amdgpu_vector_packetization_t* packetization,
+static iree_status_t loom_vector_packet_static_store(
+    loom_vector_packetization_t* packetization,
     const loom_vector_memory_footprint_t* store_footprint,
-    const loom_amdgpu_vector_memory_chunk_shape_t* shape,
+    const loom_vector_packet_memory_chunk_shape_t* shape,
     loom_vector_memory_cache_policy_t store_cache_policy, loom_op_t* store_op) {
   const iree_host_size_t packet_count =
       (iree_host_size_t)packetization->value_count * shape->chunk_count;
-  IREE_ASSERT_LE(packet_count, LOOM_AMDGPU_VECTOR_PACKET_STATIC_OP_LIMIT);
+  IREE_ASSERT_LE(packet_count, LOOM_VECTOR_PACKET_STATIC_OP_LIMIT);
   loom_value_id_t* packets = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(packetization->context->arena,
                                                  packet_count, sizeof(*packets),
                                                  (void**)&packets));
   for (uint32_t value_index = 0; value_index < packetization->value_count;
        ++value_index) {
-    loom_amdgpu_vector_packetized_value_t* packetized_value =
+    loom_vector_packetized_value_t* packetized_value =
         &packetization->values[value_index];
     const loom_value_t* value = loom_module_value(
         packetization->context->module, packetized_value->source);
@@ -907,9 +925,8 @@ static iree_status_t loom_amdgpu_vector_packet_static_store(
           loom_op_const_operands(source_op);
       for (uint16_t operand_index = 0; operand_index < source_op->operand_count;
            ++operand_index) {
-        loom_amdgpu_vector_packetized_value_t* operand =
-            loom_amdgpu_vector_packet_find(packetization,
-                                           source_operands[operand_index]);
+        loom_vector_packetized_value_t* operand = loom_vector_packet_find(
+            packetization, source_operands[operand_index]);
         if (operand == NULL) continue;
         const uint32_t operand_value_index =
             (uint32_t)(operand - packetization->values);
@@ -917,32 +934,32 @@ static iree_status_t loom_amdgpu_vector_packet_static_store(
             packets[operand_value_index * shape->chunk_count + chunk_index];
       }
       const uint32_t lane_offset = chunk_index * shape->chunk_lane_count;
-      const loom_amdgpu_vector_packet_slice_t slice = {
+      const loom_vector_packet_slice_t slice = {
           .dynamic_lane_offset = LOOM_VALUE_ID_INVALID,
           .static_lane_offset = lane_offset,
           .lane_count = iree_min(shape->lane_count - lane_offset,
                                  shape->chunk_lane_count),
       };
-      IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_materialize_value(
+      IREE_RETURN_IF_ERROR(loom_vector_packet_materialize_value(
           packetization, &slice, packetized_value));
       packets[value_index * shape->chunk_count + chunk_index] =
           packetized_value->packet;
     }
   }
-  loom_amdgpu_vector_packetized_value_t* root =
-      loom_amdgpu_vector_packet_find(packetization, store_footprint->value);
+  loom_vector_packetized_value_t* root =
+      loom_vector_packet_find(packetization, store_footprint->value);
   IREE_ASSERT(root != NULL);
   const uint32_t root_value_index = (uint32_t)(root - packetization->values);
   for (uint32_t chunk_index = 0; chunk_index < shape->chunk_count;
        ++chunk_index) {
     const uint32_t lane_offset = chunk_index * shape->chunk_lane_count;
-    const loom_amdgpu_vector_packet_slice_t slice = {
+    const loom_vector_packet_slice_t slice = {
         .dynamic_lane_offset = LOOM_VALUE_ID_INVALID,
         .static_lane_offset = lane_offset,
         .lane_count =
             iree_min(shape->lane_count - lane_offset, shape->chunk_lane_count),
     };
-    IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_store(
+    IREE_RETURN_IF_ERROR(loom_vector_packet_store(
         packetization, store_footprint, &slice,
         packets[root_value_index * shape->chunk_count + chunk_index],
         store_cache_policy, store_op));
@@ -950,10 +967,10 @@ static iree_status_t loom_amdgpu_vector_packet_static_store(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_vector_packet_build_staging_view(
-    loom_amdgpu_vector_packetization_t* packetization,
+static iree_status_t loom_vector_packet_build_staging_view(
+    loom_vector_packetization_t* packetization,
     const loom_vector_memory_footprint_t* store_footprint,
-    const loom_amdgpu_vector_memory_chunk_shape_t* shape, loom_op_t* store_op,
+    const loom_vector_packet_memory_chunk_shape_t* shape, loom_op_t* store_op,
     loom_value_id_t* out_staging_view) {
   *out_staging_view = LOOM_VALUE_ID_INVALID;
   const int32_t element_bit_count = loom_scalar_type_bitwidth(
@@ -990,10 +1007,9 @@ static iree_status_t loom_amdgpu_vector_packet_build_staging_view(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_vector_packet_staging_store(
-    loom_amdgpu_vector_packetization_t* packetization,
-    loom_value_id_t staging_view,
-    const loom_amdgpu_vector_packet_slice_t* slice, loom_value_id_t packet,
+static iree_status_t loom_vector_packet_staging_store(
+    loom_vector_packetization_t* packetization, loom_value_id_t staging_view,
+    const loom_vector_packet_slice_t* slice, loom_value_id_t packet,
     loom_op_t* store_op) {
   const loom_value_id_t* dynamic_indices = NULL;
   iree_host_size_t dynamic_index_count = 0;
@@ -1012,11 +1028,10 @@ static iree_status_t loom_amdgpu_vector_packet_staging_store(
       store_op->location, &staging_store_op);
 }
 
-static iree_status_t loom_amdgpu_vector_packet_staging_load(
-    loom_amdgpu_vector_packetization_t* packetization,
-    loom_value_id_t staging_view, loom_type_t source_type,
-    const loom_amdgpu_vector_packet_slice_t* slice, loom_op_t* store_op,
-    loom_value_id_t* out_packet) {
+static iree_status_t loom_vector_packet_staging_load(
+    loom_vector_packetization_t* packetization, loom_value_id_t staging_view,
+    loom_type_t source_type, const loom_vector_packet_slice_t* slice,
+    loom_op_t* store_op, loom_value_id_t* out_packet) {
   *out_packet = LOOM_VALUE_ID_INVALID;
   const loom_value_id_t* dynamic_indices = NULL;
   iree_host_size_t dynamic_index_count = 0;
@@ -1027,7 +1042,7 @@ static iree_status_t loom_amdgpu_vector_packet_staging_load(
     static_index = INT64_MIN;
   }
   const loom_type_t packet_type =
-      loom_amdgpu_vector_memory_chunk_type(source_type, slice->lane_count);
+      loom_vector_packet_memory_chunk_type(source_type, slice->lane_count);
   loom_op_t* staging_load_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_load_build(
       &packetization->context->rewriter->builder, /*build_flags=*/0,
@@ -1039,14 +1054,14 @@ static iree_status_t loom_amdgpu_vector_packet_staging_load(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_vector_packet_staged_store(
-    loom_amdgpu_vector_packetization_t* packetization,
+static iree_status_t loom_vector_packet_staged_store(
+    loom_vector_packetization_t* packetization,
     const loom_vector_memory_footprint_t* store_footprint,
-    const loom_amdgpu_vector_memory_chunk_shape_t* shape,
+    const loom_vector_packet_memory_chunk_shape_t* shape,
     loom_vector_memory_cache_policy_t store_cache_policy, loom_op_t* store_op) {
   loom_builder_t* builder = &packetization->context->rewriter->builder;
   loom_value_id_t staging_view = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_build_staging_view(
+  IREE_RETURN_IF_ERROR(loom_vector_packet_build_staging_view(
       packetization, store_footprint, shape, store_op, &staging_view));
 
   const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
@@ -1076,31 +1091,31 @@ static iree_status_t loom_amdgpu_vector_packet_staged_store(
       &stage_loop_op));
   loom_builder_ip_t saved_ip = loom_builder_enter_region(
       builder, stage_loop_op, loom_scf_for_body(stage_loop_op));
-  const loom_amdgpu_vector_packet_slice_t loop_slice = {
+  const loom_vector_packet_slice_t loop_slice = {
       .dynamic_lane_offset =
           loom_region_entry_arg_id(loom_scf_for_body(stage_loop_op), 0),
       .lane_count = shape->chunk_lane_count,
   };
-  loom_amdgpu_vector_packetized_value_t* packetized_value = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_materialize(
+  loom_vector_packetized_value_t* packetized_value = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_packet_materialize(
       packetization, store_footprint->value, &loop_slice, &packetized_value));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_staging_store(
-      packetization, staging_view, &loop_slice, packetized_value->packet,
-      store_op));
+  IREE_RETURN_IF_ERROR(
+      loom_vector_packet_staging_store(packetization, staging_view, &loop_slice,
+                                       packetized_value->packet, store_op));
   loom_op_t* stage_yield_op = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_yield_build(
       builder, NULL, 0, store_op->location, &stage_yield_op));
   loom_builder_restore(builder, saved_ip);
 
   if (loop_lane_count < shape->lane_count) {
-    const loom_amdgpu_vector_packet_slice_t tail_slice = {
+    const loom_vector_packet_slice_t tail_slice = {
         .dynamic_lane_offset = LOOM_VALUE_ID_INVALID,
         .static_lane_offset = loop_lane_count,
         .lane_count = shape->lane_count - loop_lane_count,
     };
-    IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_materialize(
+    IREE_RETURN_IF_ERROR(loom_vector_packet_materialize(
         packetization, store_footprint->value, &tail_slice, &packetized_value));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_staging_store(
+    IREE_RETURN_IF_ERROR(loom_vector_packet_staging_store(
         packetization, staging_view, &tail_slice, packetized_value->packet,
         store_op));
   }
@@ -1116,16 +1131,16 @@ static iree_status_t loom_amdgpu_vector_packet_staged_store(
       &commit_loop_op));
   saved_ip = loom_builder_enter_region(builder, commit_loop_op,
                                        loom_scf_for_body(commit_loop_op));
-  const loom_amdgpu_vector_packet_slice_t commit_loop_slice = {
+  const loom_vector_packet_slice_t commit_loop_slice = {
       .dynamic_lane_offset =
           loom_region_entry_arg_id(loom_scf_for_body(commit_loop_op), 0),
       .lane_count = shape->chunk_lane_count,
   };
   loom_value_id_t staged_packet = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_staging_load(
+  IREE_RETURN_IF_ERROR(loom_vector_packet_staging_load(
       packetization, staging_view, store_footprint->vector_type,
       &commit_loop_slice, store_op, &staged_packet));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_store(
+  IREE_RETURN_IF_ERROR(loom_vector_packet_store(
       packetization, store_footprint, &commit_loop_slice, staged_packet,
       store_cache_policy, store_op));
   loom_op_t* commit_yield_op = NULL;
@@ -1134,26 +1149,26 @@ static iree_status_t loom_amdgpu_vector_packet_staged_store(
   loom_builder_restore(builder, saved_ip);
 
   if (loop_lane_count < shape->lane_count) {
-    const loom_amdgpu_vector_packet_slice_t tail_slice = {
+    const loom_vector_packet_slice_t tail_slice = {
         .dynamic_lane_offset = LOOM_VALUE_ID_INVALID,
         .static_lane_offset = loop_lane_count,
         .lane_count = shape->lane_count - loop_lane_count,
     };
-    IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_staging_load(
+    IREE_RETURN_IF_ERROR(loom_vector_packet_staging_load(
         packetization, staging_view, store_footprint->vector_type, &tail_slice,
         store_op, &staged_packet));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_store(
-        packetization, store_footprint, &tail_slice, staged_packet,
-        store_cache_policy, store_op));
+    IREE_RETURN_IF_ERROR(
+        loom_vector_packet_store(packetization, store_footprint, &tail_slice,
+                                 staged_packet, store_cache_policy, store_op));
   }
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_vector_packet_erase_dead_sources(
-    loom_amdgpu_vector_packetization_t* packetization) {
+static iree_status_t loom_vector_packet_erase_dead_sources(
+    loom_vector_packetization_t* packetization) {
   loom_rewriter_t* rewriter = packetization->context->rewriter;
   for (uint32_t i = packetization->value_count; i > 0; --i) {
-    const loom_amdgpu_vector_packetized_value_t* packetized_value =
+    const loom_vector_packetized_value_t* packetized_value =
         &packetization->values[i - 1];
     const loom_value_t* value = loom_module_value(
         packetization->context->module, packetized_value->source);
@@ -1166,68 +1181,56 @@ static iree_status_t loom_amdgpu_vector_packet_erase_dead_sources(
   return iree_ok_status();
 }
 
-iree_status_t loom_amdgpu_legalize_oversized_vector_store(
-    const loom_target_legalizer_entry_t* entry,
+iree_status_t loom_vector_packet_legalize_store(
     loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_target_legalizer_result_t* out_result) {
-  (void)entry;
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
-  };
-  if (!loom_amdgpu_vector_packet_descriptor_set_is_amdgpu(
-          context->descriptor_set)) {
-    return iree_ok_status();
-  }
+    const loom_vector_packet_policy_t* policy, bool* out_rewritten) {
+  *out_rewritten = false;
 
   loom_vector_memory_footprint_t store_footprint = {0};
   if (!loom_vector_memory_footprint_describe(
-          loom_amdgpu_vector_packet_fact_context(context), context->module, op,
+          loom_vector_packet_fact_context(context), context->module, op,
           &store_footprint) ||
       store_footprint.kind != LOOM_VECTOR_MEMORY_FOOTPRINT_DENSE) {
     return iree_ok_status();
   }
-  loom_amdgpu_vector_memory_chunk_shape_t shape = {0};
-  if (!loom_amdgpu_vector_memory_chunk_shape(store_footprint.vector_type,
-                                             &shape)) {
+  loom_vector_packet_memory_chunk_shape_t shape = {0};
+  if (!loom_vector_packet_memory_chunk_shape(
+          policy, store_footprint.vector_type, &shape)) {
     return iree_ok_status();
   }
 
-  loom_amdgpu_vector_packetization_t packetization = {0};
+  loom_vector_packetization_t packetization = {0};
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_vector_packetization_initialize(context, &packetization));
+      loom_vector_packetization_initialize(context, policy, &packetization));
   bool producer_selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_select_value_shape(
+  IREE_RETURN_IF_ERROR(loom_vector_packet_select_value_shape(
       &packetization, store_footprint.value, &shape, &producer_selected));
 
   loom_vector_memory_cache_policy_t store_cache_policy = {0};
   if (!producer_selected ||
       !loom_vector_memory_cache_policy_from_op(context->module, op,
                                                &store_cache_policy) ||
-      !loom_amdgpu_vector_memory_can_build_chunk_origins(
+      !loom_vector_packet_memory_can_build_chunk_origins(
           context, &store_footprint, &shape) ||
-      !loom_amdgpu_vector_packet_can_materialize(&packetization, &shape)) {
+      !loom_vector_packet_can_materialize(&packetization, &shape)) {
     return iree_ok_status();
   }
 
   loom_rewriter_t* rewriter = context->rewriter;
   loom_builder_t* builder = &rewriter->builder;
   loom_builder_set_before(builder, op);
-  if (!loom_amdgpu_vector_packet_store_can_interleave(&packetization,
-                                                      &store_footprint)) {
-    if (loom_amdgpu_vector_packet_static_store_is_bounded(&packetization,
-                                                          &shape)) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_static_store(
+  if (!loom_vector_packet_store_can_interleave(&packetization,
+                                               &store_footprint)) {
+    if (loom_vector_packet_static_store_is_bounded(&packetization, &shape)) {
+      IREE_RETURN_IF_ERROR(loom_vector_packet_static_store(
           &packetization, &store_footprint, &shape, store_cache_policy, op));
     } else {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_staged_store(
+      IREE_RETURN_IF_ERROR(loom_vector_packet_staged_store(
           &packetization, &store_footprint, &shape, store_cache_policy, op));
     }
     IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, op));
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_vector_packet_erase_dead_sources(&packetization));
-    *out_result = (loom_target_legalizer_result_t){
-        .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
-    };
+    IREE_RETURN_IF_ERROR(loom_vector_packet_erase_dead_sources(&packetization));
+    *out_rewritten = true;
     return iree_ok_status();
   }
 
@@ -1256,15 +1259,15 @@ iree_status_t loom_amdgpu_legalize_oversized_vector_store(
 
   loom_builder_ip_t saved_ip =
       loom_builder_enter_region(builder, loop_op, loom_scf_for_body(loop_op));
-  const loom_amdgpu_vector_packet_slice_t loop_slice = {
+  const loom_vector_packet_slice_t loop_slice = {
       .dynamic_lane_offset =
           loom_region_entry_arg_id(loom_scf_for_body(loop_op), 0),
       .lane_count = shape.chunk_lane_count,
   };
-  loom_amdgpu_vector_packetized_value_t* packetized_value = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_materialize(
+  loom_vector_packetized_value_t* packetized_value = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_packet_materialize(
       &packetization, store_footprint.value, &loop_slice, &packetized_value));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_store(
+  IREE_RETURN_IF_ERROR(loom_vector_packet_store(
       &packetization, &store_footprint, &loop_slice, packetized_value->packet,
       store_cache_policy, op));
   loom_op_t* yield_op = NULL;
@@ -1273,55 +1276,44 @@ iree_status_t loom_amdgpu_legalize_oversized_vector_store(
   loom_builder_restore(builder, saved_ip);
 
   if (loop_lane_count < shape.lane_count) {
-    const loom_amdgpu_vector_packet_slice_t tail_slice = {
+    const loom_vector_packet_slice_t tail_slice = {
         .dynamic_lane_offset = LOOM_VALUE_ID_INVALID,
         .static_lane_offset = loop_lane_count,
         .lane_count = shape.lane_count - loop_lane_count,
     };
-    IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_materialize(
+    IREE_RETURN_IF_ERROR(loom_vector_packet_materialize(
         &packetization, store_footprint.value, &tail_slice, &packetized_value));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_store(
+    IREE_RETURN_IF_ERROR(loom_vector_packet_store(
         &packetization, &store_footprint, &tail_slice, packetized_value->packet,
         store_cache_policy, op));
   }
 
   IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, op));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_vector_packet_erase_dead_sources(&packetization));
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
-  };
+  IREE_RETURN_IF_ERROR(loom_vector_packet_erase_dead_sources(&packetization));
+  *out_rewritten = true;
   return iree_ok_status();
 }
 
-iree_status_t loom_amdgpu_legalize_oversized_vector_reduce(
-    const loom_target_legalizer_entry_t* entry,
+iree_status_t loom_vector_packet_legalize_reduce(
     loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_target_legalizer_result_t* out_result) {
-  (void)entry;
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
-  };
-  if (!loom_amdgpu_vector_packet_descriptor_set_is_amdgpu(
-          context->descriptor_set)) {
-    return iree_ok_status();
-  }
+    const loom_vector_packet_policy_t* policy, bool* out_rewritten) {
+  *out_rewritten = false;
 
   const loom_value_id_t input = loom_vector_reduce_input(op);
   const loom_type_t input_type = loom_module_value_type(context->module, input);
-  loom_amdgpu_vector_memory_chunk_shape_t shape = {0};
-  if (!loom_amdgpu_vector_memory_chunk_shape(input_type, &shape)) {
+  loom_vector_packet_memory_chunk_shape_t shape = {0};
+  if (!loom_vector_packet_memory_chunk_shape(policy, input_type, &shape)) {
     return iree_ok_status();
   }
 
-  loom_amdgpu_vector_packetization_t packetization = {0};
+  loom_vector_packetization_t packetization = {0};
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_vector_packetization_initialize(context, &packetization));
+      loom_vector_packetization_initialize(context, policy, &packetization));
   bool producer_selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_select_value_shape(
+  IREE_RETURN_IF_ERROR(loom_vector_packet_select_value_shape(
       &packetization, input, &shape, &producer_selected));
   if (!producer_selected ||
-      !loom_amdgpu_vector_packet_can_materialize(&packetization, &shape)) {
+      !loom_vector_packet_can_materialize(&packetization, &shape)) {
     return iree_ok_status();
   }
 
@@ -1359,13 +1351,13 @@ iree_status_t loom_amdgpu_legalize_oversized_vector_reduce(
 
   loom_builder_ip_t saved_ip =
       loom_builder_enter_region(builder, loop_op, loom_scf_for_body(loop_op));
-  const loom_amdgpu_vector_packet_slice_t loop_slice = {
+  const loom_vector_packet_slice_t loop_slice = {
       .dynamic_lane_offset =
           loom_region_entry_arg_id(loom_scf_for_body(loop_op), 0),
       .lane_count = shape.chunk_lane_count,
   };
-  loom_amdgpu_vector_packetized_value_t* packetized_input = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_materialize(
+  loom_vector_packetized_value_t* packetized_input = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_packet_materialize(
       &packetization, input, &loop_slice, &packetized_input));
   loom_op_t* packet_reduce_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_reduce_build(
@@ -1381,12 +1373,12 @@ iree_status_t loom_amdgpu_legalize_oversized_vector_reduce(
 
   loom_value_id_t accumulator = loom_scf_for_results(loop_op).values[0];
   if (loop_lane_count < shape.lane_count) {
-    const loom_amdgpu_vector_packet_slice_t tail_slice = {
+    const loom_vector_packet_slice_t tail_slice = {
         .dynamic_lane_offset = LOOM_VALUE_ID_INVALID,
         .static_lane_offset = loop_lane_count,
         .lane_count = shape.lane_count - loop_lane_count,
     };
-    IREE_RETURN_IF_ERROR(loom_amdgpu_vector_packet_materialize(
+    IREE_RETURN_IF_ERROR(loom_vector_packet_materialize(
         &packetization, input, &tail_slice, &packetized_input));
     loom_op_t* tail_reduce_op = NULL;
     IREE_RETURN_IF_ERROR(loom_vector_reduce_build(
@@ -1399,10 +1391,7 @@ iree_status_t loom_amdgpu_legalize_oversized_vector_reduce(
       rewriter, op, &accumulator, 1, value_checkpoint));
   IREE_RETURN_IF_ERROR(
       loom_rewriter_replace_all_uses_and_erase(rewriter, op, &accumulator, 1));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_vector_packet_erase_dead_sources(&packetization));
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
-  };
+  IREE_RETURN_IF_ERROR(loom_vector_packet_erase_dead_sources(&packetization));
+  *out_rewritten = true;
   return iree_ok_status();
 }

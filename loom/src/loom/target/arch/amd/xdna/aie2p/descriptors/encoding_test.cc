@@ -196,12 +196,32 @@ TEST(DescriptorEncodingTest, VolatileAliasesPreservePhysicalEncoding) {
   };
   const TestCase test_cases[] = {
       {
-          "amd.xdna.aie2p.load.scalar.indexed.immediate",
+          "amd.xdna.aie2p.load.scalar.i8.indexed.immediate",
           {"r3", "p0"},
           {4},
       },
       {
-          "amd.xdna.aie2p.store.scalar.indexed.immediate",
+          "amd.xdna.aie2p.store.scalar.i8.indexed.immediate",
+          {"r3", "p0"},
+          {4},
+      },
+      {
+          "amd.xdna.aie2p.load.scalar.i16.indexed.immediate",
+          {"r3", "p0"},
+          {4},
+      },
+      {
+          "amd.xdna.aie2p.store.scalar.i16.indexed.immediate",
+          {"r3", "p0"},
+          {4},
+      },
+      {
+          "amd.xdna.aie2p.load.scalar.i32.indexed.immediate",
+          {"r3", "p0"},
+          {4},
+      },
+      {
+          "amd.xdna.aie2p.store.scalar.i32.indexed.immediate",
           {"r3", "p0"},
           {4},
       },

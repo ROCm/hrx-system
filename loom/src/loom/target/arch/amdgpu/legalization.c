@@ -29,7 +29,7 @@
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
-#include "loom/target/arch/amdgpu/vector_packet_legalization.h"
+#include "loom/transforms/vector/packet_legalization.h"
 #include "loom/transforms/vector/to_scalar.h"
 #include "loom/transforms/view/target_legalization.h"
 
@@ -66,6 +66,59 @@ static loom_target_legalizer_action_t loom_amdgpu_defer_or_reject_final(
   return context->mode == LOOM_TARGET_LEGALIZATION_MODE_FINAL
              ? LOOM_TARGET_LEGALIZER_ACTION_REJECT_UNSUPPORTED_FINAL
              : LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+}
+
+static const uint16_t kAmdgpuVectorPacketBitCounts[] = {
+    LOOM_AMDGPU_MAX_MEMORY_32BIT_LANES * 32u,
+};
+
+static const loom_vector_packet_policy_t kAmdgpuVectorPacketPolicy = {
+    .native_bit_counts = kAmdgpuVectorPacketBitCounts,
+    .native_bit_count_count = IREE_ARRAYSIZE(kAmdgpuVectorPacketBitCounts),
+    .maximum_unpacketized_bit_count =
+        LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES * 32u,
+};
+
+static iree_status_t loom_amdgpu_legalize_oversized_vector_store(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  if (!loom_amdgpu_legalizer_descriptor_set_is_amdgpu(
+          context->descriptor_set)) {
+    return iree_ok_status();
+  }
+  bool rewritten = false;
+  IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_store(
+      context, op, &kAmdgpuVectorPacketPolicy, &rewritten));
+  if (rewritten) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_legalize_oversized_vector_reduce(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  if (!loom_amdgpu_legalizer_descriptor_set_is_amdgpu(
+          context->descriptor_set)) {
+    return iree_ok_status();
+  }
+  bool rewritten = false;
+  IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_reduce(
+      context, op, &kAmdgpuVectorPacketPolicy, &rewritten));
+  if (rewritten) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_retain_native_vector_op(

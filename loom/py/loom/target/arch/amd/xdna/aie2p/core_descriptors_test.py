@@ -194,22 +194,45 @@ def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
 
 def test_scalar_memory_forms_use_storage_specialized_itineraries() -> None:
     specifications = {spec.key: spec for spec in _DESCRIPTOR_SPECS}
-    assert {
-        key: specifications[key].itinerary
-        for key in (
-            "amd.xdna.aie2p.load.scalar.indexed.immediate",
-            "amd.xdna.aie2p.load.scalar.indexed.register",
-            "amd.xdna.aie2p.store.scalar.indexed.immediate",
-            "amd.xdna.aie2p.store.scalar.indexed.register",
-            "amd.xdna.aie2p.move.to.address-index",
-        )
-    } == {
-        "amd.xdna.aie2p.load.scalar.indexed.immediate": ("II_LDA_dms_lda_idx_imm_eR"),
-        "amd.xdna.aie2p.load.scalar.indexed.register": "II_LDA_dms_lda_idx_eR",
-        "amd.xdna.aie2p.store.scalar.indexed.immediate": ("II_ST_dms_sts_idx_imm_eR"),
-        "amd.xdna.aie2p.store.scalar.indexed.register": "II_ST_dms_sts_idx_eR",
-        "amd.xdna.aie2p.move.to.address-index": "II_MOVS_eDJ_eR",
+    expected_itineraries = {
+        "i8": (
+            "II_LDA_u8_idx_imm",
+            "II_LDA_u8_idx",
+            "II_ST_s8_idx_imm",
+            "II_ST_s8_idx",
+        ),
+        "i16": (
+            "II_LDA_u16_idx_imm",
+            "II_LDA_u16_idx",
+            "II_ST_s16_idx_imm",
+            "II_ST_s16_idx",
+        ),
+        "i32": (
+            "II_LDA_dms_lda_idx_imm_eR",
+            "II_LDA_dms_lda_idx_eR",
+            "II_ST_dms_sts_idx_imm_eR",
+            "II_ST_dms_sts_idx_eR",
+        ),
     }
+    for element_type, expected in expected_itineraries.items():
+        assert (
+            tuple(
+                specifications[
+                    f"amd.xdna.aie2p.{operation}.scalar.{element_type}.indexed.{address}"
+                ].itinerary
+                for operation, address in (
+                    ("load", "immediate"),
+                    ("load", "register"),
+                    ("store", "immediate"),
+                    ("store", "register"),
+                )
+            )
+            == expected
+        )
+    assert (
+        specifications["amd.xdna.aie2p.move.to.address-index"].itinerary
+        == "II_MOVS_eDJ_eR"
+    )
 
 
 def test_direct_branch_forms_retain_exact_control_contracts() -> None:
@@ -471,23 +494,49 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
     assert vector_register_load.asm_forms[0].mnemonic == "vlda.512.i8x64.index"
     assert vector_register_store.asm_forms[0].mnemonic == "vst.512.i8x64.index"
 
-    scalar_load = descriptors["amd.xdna.aie2p.load.scalar.indexed.immediate"]
-    assert scalar_load.effects[0].width_bits == 32
+    for element_type, memory_width_bits in (("i8", 8), ("i16", 16), ("i32", 32)):
+        scalar_load = descriptors[
+            f"amd.xdna.aie2p.load.scalar.{element_type}.indexed.immediate"
+        ]
+        scalar_store = descriptors[
+            f"amd.xdna.aie2p.store.scalar.{element_type}.indexed.immediate"
+        ]
+        assert scalar_load.effects[0].width_bits == memory_width_bits
+        assert scalar_store.effects[0].width_bits == memory_width_bits
 
-    scalar_store = descriptors["amd.xdna.aie2p.store.scalar.indexed.immediate"]
-    assert scalar_store.effects[0].width_bits == 32
+        scalar_register_load = descriptors[
+            f"amd.xdna.aie2p.load.scalar.{element_type}.indexed.register"
+        ]
+        scalar_register_store = descriptors[
+            f"amd.xdna.aie2p.store.scalar.{element_type}.indexed.register"
+        ]
+        assert [
+            operand.reg_alts[0].reg_class
+            for operand in scalar_register_load.operands
+            if OperandFlag.IMPLICIT not in operand.flags
+        ] == ["aie2p.er", "aie2p.ep", "aie2p.edj"]
+        assert [
+            operand.reg_alts[0].reg_class
+            for operand in scalar_register_store.operands
+            if OperandFlag.IMPLICIT not in operand.flags
+        ] == ["aie2p.er", "aie2p.ep", "aie2p.edj"]
+        assert [
+            operand.field_name
+            for operand in scalar_register_store.operands
+            if OperandFlag.IMPLICIT in operand.flags
+        ] == (
+            ["implicit_def_pe2_ads", "implicit_use_pe2_ads"]
+            if element_type in ("i8", "i16")
+            else []
+        )
+        assert scalar_register_load.asm_forms[0].mnemonic == (
+            f"lda.{element_type}.index"
+        )
+        assert scalar_register_store.asm_forms[0].mnemonic == (
+            f"st.{element_type}.index"
+        )
 
-    scalar_register_load = descriptors["amd.xdna.aie2p.load.scalar.indexed.register"]
-    scalar_register_store = descriptors["amd.xdna.aie2p.store.scalar.indexed.register"]
     address_index_move = descriptors["amd.xdna.aie2p.move.to.address-index"]
-    assert [
-        operand.reg_alts[0].reg_class for operand in scalar_register_load.operands
-    ] == ["aie2p.er", "aie2p.ep", "aie2p.edj"]
-    assert [
-        operand.reg_alts[0].reg_class for operand in scalar_register_store.operands
-    ] == ["aie2p.er", "aie2p.ep", "aie2p.edj"]
-    assert scalar_register_load.asm_forms[0].mnemonic == "lda.index"
-    assert scalar_register_store.asm_forms[0].mnemonic == "st.index"
     assert [
         operand.reg_alts[0].reg_class for operand in address_index_move.operands
     ] == ["aie2p.edj", "aie2p.er"]
@@ -1263,7 +1312,7 @@ def test_seed_schedule_contract_retains_endpoint_events_and_separations() -> Non
     scalar_read = next(
         row.read_event for row in scalar_add.operands if row.role is OperandRole.OPERAND
     )
-    scalar_store = descriptors["amd.xdna.aie2p.store.scalar.indexed.immediate"]
+    scalar_store = descriptors["amd.xdna.aie2p.store.scalar.i32.indexed.immediate"]
     scalar_store_read = next(
         row.read_event for row in scalar_store.operands if row.field_name == "src"
     )
