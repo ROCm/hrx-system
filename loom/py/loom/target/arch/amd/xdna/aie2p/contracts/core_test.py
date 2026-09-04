@@ -197,29 +197,77 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     vector_extract_rules = [
         rule for rule in rules if rule.source_op is vector.vector_extract
     ]
-    assert [rule.descriptor.key for rule in vector_extract_rules] == [
-        "amd.xdna.aie2p.extract.i8.immediate",
-        "amd.xdna.aie2p.extract.i8.register",
-        "amd.xdna.aie2p.extract.i16.immediate",
-        "amd.xdna.aie2p.extract.i16.register",
-        "amd.xdna.aie2p.extract.i32.immediate",
-        "amd.xdna.aie2p.extract.i32.register",
-    ]
+    expected_extract_keys = []
+    for element_type, storage in (
+        ("i8", "i8"),
+        ("f8E4M3", "i8"),
+        ("f8E5M2", "i8"),
+        ("i16", "i16"),
+        ("f16", "i16"),
+        ("bf16", "i16"),
+        ("i32", "i32"),
+        ("f32", "i32"),
+    ):
+        expected_extract_keys.extend(
+            (
+                (
+                    element_type,
+                    element_type,
+                    f"amd.xdna.aie2p.extract.{storage}.immediate",
+                ),
+                (
+                    element_type,
+                    element_type,
+                    f"amd.xdna.aie2p.extract.{storage}.register",
+                ),
+            )
+        )
+    assert [
+        (
+            rule.guards[0].type_pattern.element,
+            rule.guards[1].type_pattern.element,
+            rule.descriptor.key,
+        )
+        for rule in vector_extract_rules
+    ] == expected_extract_keys
 
     vector_insert_rules = [
         rule for rule in rules if rule.source_op is vector.vector_insert
     ]
-    assert [rule.descriptor.key for rule in vector_insert_rules] == [
-        "amd.xdna.aie2p.insert.i8.zero",
-        "amd.xdna.aie2p.insert.i8.register",
-        "amd.xdna.aie2p.insert.i8.register",
-        "amd.xdna.aie2p.insert.i16.zero",
-        "amd.xdna.aie2p.insert.i16.register",
-        "amd.xdna.aie2p.insert.i16.register",
-        "amd.xdna.aie2p.insert.i32.zero",
-        "amd.xdna.aie2p.insert.i32.register",
-        "amd.xdna.aie2p.insert.i32.register",
-    ]
+    expected_insert_rows = []
+    for element_type, storage in (
+        ("i8", "i8"),
+        ("f8E4M3", "i8"),
+        ("f8E5M2", "i8"),
+        ("i16", "i16"),
+        ("f16", "i16"),
+        ("bf16", "i16"),
+        ("i32", "i32"),
+        ("f32", "i32"),
+    ):
+        expected_insert_rows.extend(
+            (
+                (element_type, element_type, f"amd.xdna.aie2p.insert.{storage}.zero"),
+                (
+                    element_type,
+                    element_type,
+                    f"amd.xdna.aie2p.insert.{storage}.register",
+                ),
+                (
+                    element_type,
+                    element_type,
+                    f"amd.xdna.aie2p.insert.{storage}.register",
+                ),
+            )
+        )
+    assert [
+        (
+            rule.guards[0].type_pattern.element,
+            rule.guards[1].type_pattern.element,
+            rule.descriptor.key,
+        )
+        for rule in vector_insert_rules
+    ] == expected_insert_rows
     for rule in vector_insert_rules:
         expected_copy_operands = (
             ("idx",) if rule.descriptor.key.endswith(".register") else ()
@@ -508,9 +556,28 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     ]
     assert [rule.descriptor.key for rule in vector_splat_rules] == [
         "amd.xdna.aie2p.splat.i8x64",
+        "amd.xdna.aie2p.splat.i8x64",
+        "amd.xdna.aie2p.splat.i8x64",
+        "amd.xdna.aie2p.splat.i16x32",
+        "amd.xdna.aie2p.splat.i16x32",
         "amd.xdna.aie2p.splat.i16x32",
         "amd.xdna.aie2p.splat.i32x16",
+        "amd.xdna.aie2p.splat.i32x16",
         "amd.xdna.aie2p.cmp.lt.unsigned.i8x64",
+    ]
+    assert [
+        (rule.guards[0].type_pattern.element, rule.guards[1].type_pattern.element)
+        for rule in vector_splat_rules
+    ] == [
+        ("i8", "i8"),
+        ("f8E4M3", "f8E4M3"),
+        ("f8E5M2", "f8E5M2"),
+        ("i16", "i16"),
+        ("f16", "f16"),
+        ("bf16", "bf16"),
+        ("i32", "i32"),
+        ("f32", "f32"),
+        ("i1", "i1"),
     ]
     predicate_splat = vector_splat_rules[-1]
     assert [emit.descriptor.key for emit in predicate_splat.emit] == [
@@ -635,7 +702,10 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     ]
     bitcast_types = (
         Vector("i8", minimum_static_elements=1, maximum_static_elements=64),
+        Vector("f8E4M3", minimum_static_elements=1, maximum_static_elements=64),
+        Vector("f8E5M2", minimum_static_elements=1, maximum_static_elements=64),
         Vector("i16", minimum_static_elements=1, maximum_static_elements=32),
+        Vector("f16", minimum_static_elements=1, maximum_static_elements=32),
         Vector("bf16", minimum_static_elements=1, maximum_static_elements=32),
         Vector("i32", minimum_static_elements=1, maximum_static_elements=16),
         Vector("f32", minimum_static_elements=1, maximum_static_elements=16),

@@ -61,10 +61,18 @@ _I1 = Scalar("i1")
 _I8 = Scalar("i8")
 _I16 = Scalar("i16")
 _I32 = Scalar("i32")
+_F8E4M3 = Scalar("f8E4M3")
+_F8E5M2 = Scalar("f8E5M2")
+_F16 = Scalar("f16")
+_BF16 = Scalar("bf16")
+_F32 = Scalar("f32")
 _INDEX = Scalar("index")
 _OFFSET = Scalar("offset")
 _I8_VECTOR = Vector("i8", minimum_static_elements=1, maximum_static_elements=64)
+_F8E4M3_VECTOR = Vector("f8E4M3", minimum_static_elements=1, maximum_static_elements=64)
+_F8E5M2_VECTOR = Vector("f8E5M2", minimum_static_elements=1, maximum_static_elements=64)
 _I16_VECTOR = Vector("i16", minimum_static_elements=1, maximum_static_elements=32)
+_F16_VECTOR = Vector("f16", minimum_static_elements=1, maximum_static_elements=32)
 _BF16_VECTOR = Vector("bf16", minimum_static_elements=1, maximum_static_elements=32)
 _BF16X32_VECTOR = Vector("bf16", lanes=32)
 _BF16X8_VECTOR = Vector("bf16", lanes=8)
@@ -78,7 +86,10 @@ _I1_VECTOR = Vector("i1", minimum_static_elements=1, maximum_static_elements=64)
 _INTEGER_VECTOR_TYPES = (_I8_VECTOR, _I16_VECTOR, _I32_VECTOR)
 _BITCAST_VECTOR_TYPES = (
     _I8_VECTOR,
+    _F8E4M3_VECTOR,
+    _F8E5M2_VECTOR,
     _I16_VECTOR,
+    _F16_VECTOR,
     _BF16_VECTOR,
     _I32_VECTOR,
     _F32_VECTOR,
@@ -2173,6 +2184,20 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
                     "amd.xdna.aie2p.extract.i8.register",
                 ),
                 (
+                    _F8E4M3,
+                    _F8E4M3_VECTOR,
+                    63,
+                    "amd.xdna.aie2p.extract.i8.immediate",
+                    "amd.xdna.aie2p.extract.i8.register",
+                ),
+                (
+                    _F8E5M2,
+                    _F8E5M2_VECTOR,
+                    63,
+                    "amd.xdna.aie2p.extract.i8.immediate",
+                    "amd.xdna.aie2p.extract.i8.register",
+                ),
+                (
                     _I16,
                     _I16_VECTOR,
                     31,
@@ -2180,8 +2205,29 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
                     "amd.xdna.aie2p.extract.i16.register",
                 ),
                 (
+                    _F16,
+                    _F16_VECTOR,
+                    31,
+                    "amd.xdna.aie2p.extract.i16.immediate",
+                    "amd.xdna.aie2p.extract.i16.register",
+                ),
+                (
+                    _BF16,
+                    _BF16_VECTOR,
+                    31,
+                    "amd.xdna.aie2p.extract.i16.immediate",
+                    "amd.xdna.aie2p.extract.i16.register",
+                ),
+                (
                     _I32,
                     _I32_VECTOR,
+                    15,
+                    "amd.xdna.aie2p.extract.i32.immediate",
+                    "amd.xdna.aie2p.extract.i32.register",
+                ),
+                (
+                    _F32,
+                    _F32_VECTOR,
                     15,
                     "amd.xdna.aie2p.extract.i32.immediate",
                     "amd.xdna.aie2p.extract.i32.register",
@@ -2212,6 +2258,20 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
                     "amd.xdna.aie2p.insert.i8.register",
                 ),
                 (
+                    _F8E4M3,
+                    _F8E4M3_VECTOR,
+                    63,
+                    "amd.xdna.aie2p.insert.i8.zero",
+                    "amd.xdna.aie2p.insert.i8.register",
+                ),
+                (
+                    _F8E5M2,
+                    _F8E5M2_VECTOR,
+                    63,
+                    "amd.xdna.aie2p.insert.i8.zero",
+                    "amd.xdna.aie2p.insert.i8.register",
+                ),
+                (
                     _I16,
                     _I16_VECTOR,
                     31,
@@ -2219,8 +2279,29 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
                     "amd.xdna.aie2p.insert.i16.register",
                 ),
                 (
+                    _F16,
+                    _F16_VECTOR,
+                    31,
+                    "amd.xdna.aie2p.insert.i16.zero",
+                    "amd.xdna.aie2p.insert.i16.register",
+                ),
+                (
+                    _BF16,
+                    _BF16_VECTOR,
+                    31,
+                    "amd.xdna.aie2p.insert.i16.zero",
+                    "amd.xdna.aie2p.insert.i16.register",
+                ),
+                (
                     _I32,
                     _I32_VECTOR,
+                    15,
+                    "amd.xdna.aie2p.insert.i32.zero",
+                    "amd.xdna.aie2p.insert.i32.register",
+                ),
+                (
+                    _F32,
+                    _F32_VECTOR,
                     15,
                     "amd.xdna.aie2p.insert.i32.zero",
                     "amd.xdna.aie2p.insert.i32.register",
@@ -2415,8 +2496,13 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             _vector_splat_rule(scalar_type, result_type, descriptor_key)
             for scalar_type, result_type, descriptor_key in (
                 (_I8, _I8_VECTOR, "amd.xdna.aie2p.splat.i8x64"),
+                (_F8E4M3, _F8E4M3_VECTOR, "amd.xdna.aie2p.splat.i8x64"),
+                (_F8E5M2, _F8E5M2_VECTOR, "amd.xdna.aie2p.splat.i8x64"),
                 (_I16, _I16_VECTOR, "amd.xdna.aie2p.splat.i16x32"),
+                (_F16, _F16_VECTOR, "amd.xdna.aie2p.splat.i16x32"),
+                (_BF16, _BF16_VECTOR, "amd.xdna.aie2p.splat.i16x32"),
                 (_I32, _I32_VECTOR, "amd.xdna.aie2p.splat.i32x16"),
+                (_F32, _F32_VECTOR, "amd.xdna.aie2p.splat.i32x16"),
             )
         ),
         _vector_predicate_splat_rule(),

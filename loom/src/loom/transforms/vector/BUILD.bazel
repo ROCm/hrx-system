@@ -140,6 +140,23 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "packet_legalization",
+    srcs = ["packet_legalization.c"],
+    hdrs = ["packet_legalization.h"],
+    deps = [
+        "//loom/src/loom/analysis:view_regions",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:legalization",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "target_legalization",
     srcs = ["target_legalization.c"],
     hdrs = ["target_legalization.h"],

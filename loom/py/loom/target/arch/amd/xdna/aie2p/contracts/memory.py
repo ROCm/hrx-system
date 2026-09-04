@@ -13,10 +13,7 @@ from enum import Enum, unique
 from loom.dialect.vector import defs as vector
 from loom.dialect.view import defs as view
 from loom.dsl import Op
-from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
-    AIE2P_CORE_DESCRIPTOR_SET,
-    AIE2P_VECTOR_MEMORY_ELEMENT_TYPES,
-)
+from loom.target.arch.amd.xdna.aie2p.core_descriptors import AIE2P_CORE_DESCRIPTOR_SET
 from loom.target.contracts import (
     ContractEmit,
     DescriptorEmitForm,
@@ -40,8 +37,40 @@ from loom.target.contracts import (
 )
 from loom.target.low_descriptors import Descriptor
 
+_I1 = Scalar("i1")
+_I8 = Scalar("i8")
+_I16 = Scalar("i16")
 _I32 = Scalar("i32")
+_F8E4M3 = Scalar("f8E4M3")
+_F8E5M2 = Scalar("f8E5M2")
+_F16 = Scalar("f16")
+_BF16 = Scalar("bf16")
+_F32 = Scalar("f32")
+_INDEX = Scalar("index")
 _OFFSET = Scalar("offset")
+_SCALAR_MEMORY_SHAPES = (
+    (
+        "i8",
+        1,
+        -8,
+        7,
+        (_I1, _I8, _F8E4M3, _F8E5M2),
+    ),
+    (
+        "i16",
+        2,
+        -16,
+        14,
+        (_I16, _F16, _BF16),
+    ),
+    (
+        "i32",
+        4,
+        -32,
+        28,
+        (_I32, _F32, _INDEX, _OFFSET),
+    ),
+)
 _F32X64_ACCUMULATOR = Vector("f32", lanes=64)
 _ACCUMULATOR_CHUNK_BYTE_OFFSETS = (0, 64, 128, 192)
 _ZERO_X_SPLAT_BY_ELEMENT_BYTE_COUNT = {
@@ -49,16 +78,29 @@ _ZERO_X_SPLAT_BY_ELEMENT_BYTE_COUNT = {
     2: "amd.xdna.aie2p.splat.i16x32",
     4: "amd.xdna.aie2p.splat.i32x16",
 }
+_VECTOR_MEMORY_ELEMENT_TYPES = (
+    ("i8", "i8", 8),
+    ("f8E4M3", "i8", 8),
+    ("f8E5M2", "i8", 8),
+    ("i16", "i16", 16),
+    ("f16", "i16", 16),
+    ("bf16", "bf16", 16),
+    ("i32", "i32", 32),
+    ("f32", "f32", 32),
+)
 _VECTOR_MEMORY_SHAPES = tuple(
     (
         width_bits,
         element_type,
+        descriptor_element_type,
         element_bits // 8,
         width_bits // element_bits,
         Vector(element_type, lanes=width_bits // element_bits),
     )
     for width_bits in (128, 256, 512)
-    for element_type, element_bits in AIE2P_VECTOR_MEMORY_ELEMENT_TYPES
+    for element_type, descriptor_element_type, element_bits in (
+        _VECTOR_MEMORY_ELEMENT_TYPES
+    )
 )
 
 _I32_MIN = -(2**31)
@@ -547,31 +589,178 @@ def _scalar_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
             root_kind=root_kind,
             memory_spaces=memory_spaces,
             source_op=source_op,
-            value_type=_I32,
+            value_type=value_type,
             immediate_descriptor_key=immediate_descriptor_key,
             register_descriptor_key=register_descriptor_key,
-            element_byte_count=4,
+            element_byte_count=element_byte_count,
             vector_lane_count=1,
-            minimum_alignment=4,
-            immediate_offset_minimum=-32,
-            immediate_offset_maximum=28,
+            minimum_alignment=element_byte_count,
+            immediate_offset_minimum=immediate_offset_minimum,
+            immediate_offset_maximum=immediate_offset_maximum,
             volatile=volatile,
         )
         for root_kind, memory_spaces in _MEMORY_ROOTS
+        for (
+            descriptor_type,
+            element_byte_count,
+            immediate_offset_minimum,
+            immediate_offset_maximum,
+            value_types,
+        ) in _SCALAR_MEMORY_SHAPES
+        for value_type in value_types
         for operation, source_op, immediate_descriptor_key, register_descriptor_key in (
             (
                 SourceMemoryOperation.LOAD,
                 view.view_load,
-                "amd.xdna.aie2p.load.scalar.indexed.immediate",
-                "amd.xdna.aie2p.load.scalar.indexed.register",
+                f"amd.xdna.aie2p.load.scalar.{descriptor_type}.indexed.immediate",
+                f"amd.xdna.aie2p.load.scalar.{descriptor_type}.indexed.register",
             ),
             (
                 SourceMemoryOperation.STORE,
                 view.view_store,
-                "amd.xdna.aie2p.store.scalar.indexed.immediate",
-                "amd.xdna.aie2p.store.scalar.indexed.register",
+                f"amd.xdna.aie2p.store.scalar.{descriptor_type}.indexed.immediate",
+                f"amd.xdna.aie2p.store.scalar.{descriptor_type}.indexed.register",
             ),
         )
+        for address_form in _MemoryAddressForm
+    )
+
+
+def _two_lane_16bit_load_rule(
+    address_form: _MemoryAddressForm,
+    *,
+    root_kind: SourceMemoryRootKind,
+    memory_spaces: tuple[str, ...],
+    element_type: str,
+    volatile: bool,
+) -> DescriptorRule:
+    memory_descriptor_key = (
+        "amd.xdna.aie2p.load.scalar.i16.indexed.immediate"
+        if address_form is _MemoryAddressForm.IMMEDIATE
+        else "amd.xdna.aie2p.load.scalar.i16.indexed.register"
+    )
+    if volatile:
+        memory_descriptor_key = f"{memory_descriptor_key}.volatile"
+    memory_descriptor = _descriptor(memory_descriptor_key)
+    source_memory = _memory_constraint(
+        SourceMemoryOperation.LOAD,
+        address_form,
+        root_kind=root_kind,
+        memory_spaces=memory_spaces,
+        element_byte_count=2,
+        vector_lane_count=2,
+        minimum_alignment=2,
+        immediate_offset_minimum=-16,
+        immediate_offset_maximum=14,
+        maximum_additional_static_byte_offset=2,
+    )
+
+    emits: list[ContractEmit] = []
+    loaded_lanes: list[ValueRef] = []
+    for lane_index, lane_byte_offset in enumerate((0, 2)):
+        loaded_lane = ValueRef.temporary(f"lane_{lane_index}")
+        loaded_lanes.append(loaded_lane)
+        memory_operands = {"ptr": ValueRef.operand("view")}
+        if address_form is _MemoryAddressForm.IMMEDIATE:
+            static_byte_offset = (
+                SourceMemoryProject.static_byte_offset_plus(lane_byte_offset)
+                if lane_byte_offset
+                else SourceMemoryProject.static_byte_offset()
+            )
+            emits.append(
+                EmitDescriptorOp(
+                    descriptor=memory_descriptor,
+                    operands=memory_operands,
+                    results={"dst": loaded_lane},
+                    result_types={"dst": DescriptorResultType()},
+                    immediates={"imm": static_byte_offset},
+                    source_memory=source_memory,
+                    form=DescriptorEmitForm.OP,
+                )
+            )
+        else:
+            address_emits, address_index = _register_address_emits(
+                source_memory,
+                address_form,
+                additional_static_byte_offset=lane_byte_offset,
+                temporary_suffix=f"_{lane_index}",
+            )
+            emits.extend(address_emits)
+            memory_operands["dj"] = address_index
+            emits.append(
+                EmitDescriptorOp(
+                    descriptor=memory_descriptor,
+                    operands=memory_operands,
+                    results={"dst": loaded_lane},
+                    result_types={"dst": DescriptorResultType()},
+                    source_memory=source_memory,
+                    form=DescriptorEmitForm.OP,
+                )
+            )
+
+    splat = _descriptor("amd.xdna.aie2p.splat.i16x32")
+    seed = ValueRef.temporary("seed")
+    emits.append(
+        EmitDescriptorOp(
+            descriptor=splat,
+            operands={"src": loaded_lanes[0]},
+            results={"dst": seed},
+            result_types={"dst": DescriptorResultType()},
+            form=DescriptorEmitForm.OP,
+        )
+    )
+    constant = _descriptor("amd.xdna.aie2p.constant.i32.short")
+    insert_index = ValueRef.temporary("insert_index")
+    emits.append(
+        EmitDescriptorOp(
+            descriptor=constant,
+            results={"dst": insert_index},
+            result_types={"dst": DescriptorResultType()},
+            immediates={"i": 1},
+            form=DescriptorEmitForm.CONST,
+        )
+    )
+    insert = _descriptor("amd.xdna.aie2p.insert.i16.register")
+    emits.append(
+        EmitDescriptorOp(
+            descriptor=insert,
+            operands={
+                "s1": seed,
+                "idx": insert_index,
+                "src": loaded_lanes[1],
+            },
+            results={"dst": ValueRef.result("result")},
+            copy_operands=("idx",),
+            form=DescriptorEmitForm.OP,
+        )
+    )
+
+    return DescriptorRule(
+        source_op=vector.vector_load,
+        descriptor=memory_descriptor,
+        guards=(
+            *(
+                (Guard.instance_flags_has_all("memory_flags", "volatile"),)
+                if volatile
+                else ()
+            ),
+            Guard.value_type("result", Vector(element_type, lanes=2)),
+        ),
+        emit=tuple(emits),
+    )
+
+
+def _two_lane_16bit_load_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
+    return tuple(
+        _two_lane_16bit_load_rule(
+            address_form,
+            root_kind=root_kind,
+            memory_spaces=memory_spaces,
+            element_type=element_type,
+            volatile=volatile,
+        )
+        for root_kind, memory_spaces in _MEMORY_ROOTS
+        for element_type in ("i16", "f16", "bf16")
         for address_form in _MemoryAddressForm
     )
 
@@ -609,11 +798,12 @@ def _vector_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
         for (
             width_bits,
             element_type,
+            descriptor_element_type,
             element_byte_count,
             vector_lane_count,
             vector_type,
         ) in _VECTOR_MEMORY_SHAPES
-        for shape in (f"{element_type}x{vector_lane_count}",)
+        for shape in (f"{descriptor_element_type}x{vector_lane_count}",)
         for operation in (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
         for descriptor_family in (
             "load.a" if operation is SourceMemoryOperation.LOAD else "store",
@@ -639,9 +829,11 @@ def _accumulator_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
 
 AIE2P_MEMORY_RULES: tuple[DescriptorRule, ...] = (
     *_scalar_memory_rules(volatile=True),
+    *_two_lane_16bit_load_rules(volatile=True),
     *_vector_memory_rules(volatile=True),
     *_accumulator_memory_rules(volatile=True),
     *_scalar_memory_rules(volatile=False),
+    *_two_lane_16bit_load_rules(volatile=False),
     *_vector_memory_rules(volatile=False),
     *_accumulator_memory_rules(volatile=False),
 )

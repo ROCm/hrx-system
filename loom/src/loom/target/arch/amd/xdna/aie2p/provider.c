@@ -10,6 +10,7 @@
 #include "loom/pass/builder.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/low_registry.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/artifact_emitter.h"
+#include "loom/target/arch/amd/xdna/aie2p/legalization.h"
 #include "loom/target/arch/amd/xdna/aie2p/low_verify.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
 #include "loom/target/arch/amd/xdna/aie2p/math_policy.h"
@@ -22,6 +23,11 @@ static const loom_target_emitter_t* const kAie2pTargetEmitters[] = {
 
 static const loom_low_verify_provider_t* const kAie2pLowVerifyProviders[] = {
     &loom_aie2p_low_verify_provider,
+};
+
+static const loom_target_legalizer_provider_t* const
+    kAie2pLegalizerProviders[] = {
+        &loom_aie2p_target_legalizer_provider_storage,
 };
 
 static iree_status_t loom_aie2p_provider_build_string_attr(
@@ -81,6 +87,11 @@ const loom_target_provider_t loom_aie2p_target_provider = {
         loom_aie2p_low_lower_policy_registry_initialize,
     .initialize_math_policy_registry =
         loom_aie2p_math_policy_registry_initialize,
+    .legalizer_provider_list =
+        {
+            .count = IREE_ARRAYSIZE(kAie2pLegalizerProviders),
+            .values = kAie2pLegalizerProviders,
+        },
     .low_verify_provider_list =
         {
             .count = IREE_ARRAYSIZE(kAie2pLowVerifyProviders),
