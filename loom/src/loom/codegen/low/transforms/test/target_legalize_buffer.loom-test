@@ -1,4 +1,4 @@
-// RUN: pass target-legalize{mode=final,policy=reference-only}
+// RUN: pass target-legalize{mode=eager,policy=reference-only}
 
 test.target<low_core> @test_target
 
