@@ -268,6 +268,14 @@ typedef struct loom_target_pipeline_contribution_t {
 typedef iree_status_t (*loom_target_provider_pipeline_contribution_fn_t)(
     const loom_target_pipeline_contribution_t* contribution);
 
+// Selects one immutable process-lifetime profile by family-owned selector.
+//
+// The returned profile is borrowed and requires no release. Providers without
+// a finite static selector space leave this NULL while still accepting
+// embedding-owned structured profiles through |profile_type|.
+typedef iree_status_t (*loom_target_provider_select_profile_fn_t)(
+    iree_string_view_t selector, const loom_target_profile_t** out_profile);
+
 // Target-owned compiler capability contribution linked into a tool or driver.
 struct loom_target_provider_t {
   // Target-family profile representation owned by this provider, or NULL when
@@ -315,6 +323,8 @@ struct loom_target_provider_t {
   // for providers with authored target definitions but no structured profile.
   // When |profile_type| is also present, both must name the same fact type.
   const loom_target_fact_type_t* target_fact_type;
+  // Optional allocation-free named-profile selector.
+  loom_target_provider_select_profile_fn_t select_profile;
 };
 
 // Static target provider table linked into a binary or embedding.

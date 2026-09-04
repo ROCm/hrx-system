@@ -111,6 +111,14 @@ static iree_status_t loom_amdgpu_provider_contribute_pipeline(
       NULL, &where_op);
 }
 
+static iree_status_t loom_amdgpu_provider_select_profile(
+    iree_string_view_t selector, const loom_target_profile_t** out_profile) {
+  const loom_amdgpu_target_profile_t* profile = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_target_profile_select(selector, &profile));
+  *out_profile = profile ? &profile->base : NULL;
+  return iree_ok_status();
+}
+
 const loom_target_provider_t loom_amdgpu_target_provider = {
     .profile_type = &loom_amdgpu_target_profile_type,
     .materialize_definition = loom_amdgpu_target_materialize_definition,
@@ -150,6 +158,7 @@ const loom_target_provider_t loom_amdgpu_target_provider = {
     .pass_registry = &loom_amdgpu_pass_registry,
     .contribute_pipeline = loom_amdgpu_provider_contribute_pipeline,
     .target_fact_type = &loom_amdgpu_target_fact_type,
+    .select_profile = loom_amdgpu_provider_select_profile,
 };
 
 static const loom_target_provider_t* const kLoomAmdgpuTargetProviders[] = {
