@@ -15,51 +15,15 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/program_storage.h"
 #include "iree/vm/reflection.h"
+#include "iree/vm/test_allocator.h"
 #include "iree/vm/variant.h"
 
 namespace {
 
+using iree::vm::testing::CountingAllocator;
+
 std::string_view ToStringView(iree_string_view_t value) {
   return std::string_view(value.data ? value.data : "", value.size);
-}
-
-struct CountingAllocator {
-  // Allocator performing the actual memory operations.
-  iree_allocator_t delegate;
-  // Number of allocation-like commands forwarded.
-  iree_host_size_t allocation_count;
-  // Number of free commands forwarded.
-  iree_host_size_t free_count;
-  // One-based allocation command to fail, or zero to never fail.
-  iree_host_size_t fail_at_allocation;
-};
-
-iree_status_t CountingAllocatorControl(void* self,
-                                       iree_allocator_command_t command,
-                                       const void* params, void** inout_ptr) {
-  auto* allocator = static_cast<CountingAllocator*>(self);
-  switch (command) {
-    case IREE_ALLOCATOR_COMMAND_MALLOC:
-    case IREE_ALLOCATOR_COMMAND_CALLOC:
-    case IREE_ALLOCATOR_COMMAND_REALLOC:
-      ++allocator->allocation_count;
-      if (allocator->allocation_count == allocator->fail_at_allocation) {
-        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "injected allocation failure");
-      }
-      break;
-    case IREE_ALLOCATOR_COMMAND_FREE:
-      ++allocator->free_count;
-      break;
-    default:
-      break;
-  }
-  return allocator->delegate.ctl(allocator->delegate.self, command, params,
-                                 inout_ptr);
-}
-
-iree_allocator_t MakeCountingAllocator(CountingAllocator* allocator) {
-  return iree_allocator_t{allocator, CountingAllocatorControl};
 }
 
 struct TestModule {
@@ -406,20 +370,20 @@ TEST(VMProgramTest, LinksOneSlabAndPrecomputesComposition) {
   beta.Create(&kBetaDefinition);
 
   iree_vm_module_t* libraries[] = {beta.module, alpha.module};
-  CountingAllocator allocator_a = {iree_allocator_system(), 0, 0, 0};
-  CountingAllocator allocator_b = {iree_allocator_system(), 0, 0, 0};
+  CountingAllocator allocator_a;
+  CountingAllocator allocator_b;
   iree_vm_program_t* program_a = nullptr;
   iree_vm_program_t* program_b = nullptr;
   IREE_ASSERT_OK(iree_vm_program_create(
       {app.module, iree_vm_module_span_from_array(libraries)},
-      MakeCountingAllocator(&allocator_a), &program_a));
+      allocator_a.allocator(), &program_a));
   IREE_ASSERT_OK(iree_vm_program_create(
       {app.module, iree_vm_module_span_from_array(libraries)},
-      MakeCountingAllocator(&allocator_b), &program_b));
+      allocator_b.allocator(), &program_b));
   ASSERT_NE(program_a, nullptr);
   ASSERT_NE(program_b, nullptr);
-  EXPECT_EQ(allocator_a.allocation_count, 1u);
-  EXPECT_EQ(allocator_b.allocation_count, 1u);
+  EXPECT_EQ(allocator_a.allocation_count(), 1u);
+  EXPECT_EQ(allocator_b.allocation_count(), 1u);
 
   ASSERT_EQ(program_a->linked_module_count, 3u);
   EXPECT_EQ(ToStringView(program_a->linked_modules[0].module->descriptor->name),
@@ -586,10 +550,10 @@ TEST(VMProgramTest, LinksOneSlabAndPrecomputesComposition) {
   EXPECT_EQ(alpha.destruction_count, 0);
   EXPECT_EQ(beta.destruction_count, 0);
   iree_vm_program_release(program_a);
-  EXPECT_EQ(allocator_a.free_count, 1u);
+  EXPECT_EQ(allocator_a.free_count(), 1u);
   EXPECT_EQ(app.destruction_count, 0);
   iree_vm_program_release(program_b);
-  EXPECT_EQ(allocator_b.free_count, 1u);
+  EXPECT_EQ(allocator_b.free_count(), 1u);
   EXPECT_EQ(app.destruction_count, 1);
   EXPECT_EQ(alpha.destruction_count, 1);
   EXPECT_EQ(beta.destruction_count, 1);
@@ -612,14 +576,14 @@ void ExpectReverseOrderedComposition(iree_host_size_t module_count) {
   for (iree_host_size_t i = 0; i + 1 < module_count; ++i) {
     libraries[i] = modules[module_count - i - 2].module;
   }
-  CountingAllocator allocator = {iree_allocator_system(), 0, 0, 0};
+  CountingAllocator allocator;
   iree_vm_program_t* program = nullptr;
   IREE_ASSERT_OK(iree_vm_program_create(
       {modules[module_count - 1].module,
        iree_vm_module_span_from_ptr(libraries.data(), module_count - 1)},
-      MakeCountingAllocator(&allocator), &program));
+      allocator.allocator(), &program));
   ASSERT_NE(program, nullptr);
-  EXPECT_EQ(allocator.allocation_count, 1u);
+  EXPECT_EQ(allocator.allocation_count(), 1u);
   ASSERT_EQ(program->linked_module_count, module_count);
   for (iree_host_size_t i = 0; i < module_count; ++i) {
     EXPECT_EQ(ToStringView(program->linked_modules[i].module->descriptor->name),
@@ -629,7 +593,7 @@ void ExpectReverseOrderedComposition(iree_host_size_t module_count) {
   EXPECT_EQ(program->executable_module_ordinal, module_count - 1);
   EXPECT_EQ(program->process_storage_size, 0u);
   iree_vm_program_release(program);
-  EXPECT_EQ(allocator.free_count, 1u);
+  EXPECT_EQ(allocator.free_count(), 1u);
 }
 
 TEST(VMProgramTest, SortsInsertionAndHeapBoundariesWithoutTransientStorage) {
@@ -645,16 +609,16 @@ TEST(VMProgramTest, LeavesInputsUnownedWhenSlabAllocationFails) {
   alpha.Create(&kAlphaDefinition);
   beta.Create(&kBetaDefinition);
   iree_vm_module_t* libraries[] = {beta.module, alpha.module};
-  CountingAllocator allocator = {iree_allocator_system(), 0, 0, 1};
+  CountingAllocator allocator(/*fail_at_allocation=*/1);
   iree_vm_program_t* program = reinterpret_cast<iree_vm_program_t*>(1);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
       iree_vm_program_create(
           {app.module, iree_vm_module_span_from_array(libraries)},
-          MakeCountingAllocator(&allocator), &program));
+          allocator.allocator(), &program));
   EXPECT_EQ(program, nullptr);
-  EXPECT_EQ(allocator.allocation_count, 1u);
-  EXPECT_EQ(allocator.free_count, 0u);
+  EXPECT_EQ(allocator.allocation_count(), 1u);
+  EXPECT_EQ(allocator.free_count(), 0u);
   EXPECT_EQ(app.destruction_count, 0);
   EXPECT_EQ(alpha.destruction_count, 0);
   EXPECT_EQ(beta.destruction_count, 0);
@@ -820,14 +784,14 @@ TEST(VMProgramTest, RejectsInvalidCompositionAndInitializer) {
   {
     TestModule module;
     module.Create(&kNonLinkableDefinition);
-    CountingAllocator allocator = {iree_allocator_system(), 0, 0, 0};
+    CountingAllocator allocator;
     iree_vm_program_t* program = nullptr;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
         iree_vm_program_create({module.module, iree_vm_module_span_empty()},
-                               MakeCountingAllocator(&allocator), &program));
+                               allocator.allocator(), &program));
     EXPECT_EQ(program, nullptr);
-    EXPECT_EQ(allocator.allocation_count, 0u);
+    EXPECT_EQ(allocator.allocation_count(), 0u);
   }
   {
     TestModule large;
@@ -835,16 +799,16 @@ TEST(VMProgramTest, RejectsInvalidCompositionAndInitializer) {
     large.Create(&kLargeStateDefinition);
     tail.Create(&kTailStateDefinition);
     iree_vm_module_t* libraries[] = {tail.module};
-    CountingAllocator allocator = {iree_allocator_system(), 0, 0, 0};
+    CountingAllocator allocator;
     iree_vm_program_t* program = nullptr;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         iree_vm_program_create(
             {large.module, iree_vm_module_span_from_array(libraries)},
-            MakeCountingAllocator(&allocator), &program));
+            allocator.allocator(), &program));
     EXPECT_EQ(program, nullptr);
-    EXPECT_EQ(allocator.allocation_count, 1u);
-    EXPECT_EQ(allocator.free_count, 1u);
+    EXPECT_EQ(allocator.allocation_count(), 1u);
+    EXPECT_EQ(allocator.free_count(), 1u);
   }
 }
 

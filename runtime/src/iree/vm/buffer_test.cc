@@ -12,44 +12,11 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "iree/vm/test_allocator.h"
 
 namespace {
 
-struct CountingAllocator {
-  // Allocator performing the actual memory operations.
-  iree_allocator_t delegate;
-  // Number of allocation-like commands forwarded.
-  iree_host_size_t allocation_count;
-  // Number of free commands forwarded.
-  iree_host_size_t free_count;
-};
-
-iree_status_t CountingAllocatorControl(void* self,
-                                       iree_allocator_command_t command,
-                                       const void* params, void** inout_ptr) {
-  auto* allocator = static_cast<CountingAllocator*>(self);
-  switch (command) {
-    case IREE_ALLOCATOR_COMMAND_MALLOC:
-    case IREE_ALLOCATOR_COMMAND_CALLOC:
-    case IREE_ALLOCATOR_COMMAND_REALLOC:
-      ++allocator->allocation_count;
-      break;
-    case IREE_ALLOCATOR_COMMAND_FREE:
-      ++allocator->free_count;
-      break;
-    default:
-      break;
-  }
-  return allocator->delegate.ctl(allocator->delegate.self, command, params,
-                                 inout_ptr);
-}
-
-iree_allocator_t MakeCountingAllocator(CountingAllocator* allocator) {
-  return iree_allocator_t{
-      allocator,
-      CountingAllocatorControl,
-  };
-}
+using iree::vm::testing::CountingAllocator;
 
 struct ReleaseRecord {
   // Number of callback invocations.
@@ -68,16 +35,12 @@ void RecordRelease(void* user_data, iree_byte_span_t storage) {
 }
 
 TEST(VMBufferTest, CreateUsesOneAlignedSlabAndZeroesPayload) {
-  CountingAllocator allocator = {
-      iree_allocator_system(),
-      0,
-      0,
-  };
+  CountingAllocator allocator;
   iree_vm_buffer_t* buffer = nullptr;
-  IREE_ASSERT_OK(iree_vm_buffer_create(
-      257, 256, MakeCountingAllocator(&allocator), &buffer));
+  IREE_ASSERT_OK(
+      iree_vm_buffer_create(257, 256, allocator.allocator(), &buffer));
   ASSERT_NE(buffer, nullptr);
-  EXPECT_EQ(allocator.allocation_count, 1u);
+  EXPECT_EQ(allocator.allocation_count(), 1u);
   EXPECT_EQ(iree_vm_buffer_length(buffer), 257u);
   EXPECT_EQ(iree_vm_buffer_access(buffer),
             IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE);
@@ -93,29 +56,24 @@ TEST(VMBufferTest, CreateUsesOneAlignedSlabAndZeroesPayload) {
   }
 
   iree_vm_buffer_release(buffer);
-  EXPECT_EQ(allocator.free_count, 1u);
+  EXPECT_EQ(allocator.free_count(), 1u);
 }
 
 TEST(VMBufferTest, CreateRejectsInvalidLayoutWithoutAllocation) {
-  CountingAllocator allocator = {
-      iree_allocator_system(),
-      0,
-      0,
-  };
+  CountingAllocator allocator;
   iree_vm_buffer_t* buffer = reinterpret_cast<iree_vm_buffer_t*>(uintptr_t{1});
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_vm_buffer_create(16, 3, MakeCountingAllocator(&allocator), &buffer));
+      iree_vm_buffer_create(16, 3, allocator.allocator(), &buffer));
   EXPECT_EQ(buffer, nullptr);
-  EXPECT_EQ(allocator.allocation_count, 0u);
+  EXPECT_EQ(allocator.allocation_count(), 0u);
 
   buffer = reinterpret_cast<iree_vm_buffer_t*>(uintptr_t{1});
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_OUT_OF_RANGE,
-      iree_vm_buffer_create(IREE_HOST_SIZE_MAX, 0,
-                            MakeCountingAllocator(&allocator), &buffer));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_vm_buffer_create(IREE_HOST_SIZE_MAX, 0,
+                                              allocator.allocator(), &buffer));
   EXPECT_EQ(buffer, nullptr);
-  EXPECT_EQ(allocator.allocation_count, 0u);
+  EXPECT_EQ(allocator.allocation_count(), 0u);
 }
 
 TEST(VMBufferTest, ClonePreservesBytesAndExactAccess) {
@@ -203,11 +161,7 @@ TEST(VMBufferTest, ConstructionRejectsMalformedNonemptySpans) {
 }
 
 TEST(VMBufferTest, NestedViewsFlattenOwnershipToTheRoot) {
-  CountingAllocator allocator = {
-      iree_allocator_system(),
-      0,
-      0,
-  };
+  CountingAllocator allocator;
   std::array<uint8_t, 16> storage = {};
   for (iree_host_size_t i = 0; i < storage.size(); ++i) {
     storage[i] = static_cast<uint8_t>(i);
@@ -222,21 +176,21 @@ TEST(VMBufferTest, NestedViewsFlattenOwnershipToTheRoot) {
   IREE_ASSERT_OK(iree_vm_buffer_wrap(
       IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
       iree_make_byte_span(storage.data(), storage.size()), callback,
-      MakeCountingAllocator(&allocator), &root));
+      allocator.allocator(), &root));
   iree_vm_buffer_t* first_view = nullptr;
   IREE_ASSERT_OK(iree_vm_buffer_subspan(
       root, 2, 12,
       IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
-      MakeCountingAllocator(&allocator), &first_view));
+      allocator.allocator(), &first_view));
   iree_vm_buffer_t* nested_view = nullptr;
-  IREE_ASSERT_OK(
-      iree_vm_buffer_subspan(first_view, 3, 4, IREE_VM_BUFFER_ACCESS_FLAG_READ,
-                             MakeCountingAllocator(&allocator), &nested_view));
-  EXPECT_EQ(allocator.allocation_count, 3u);
+  IREE_ASSERT_OK(iree_vm_buffer_subspan(first_view, 3, 4,
+                                        IREE_VM_BUFFER_ACCESS_FLAG_READ,
+                                        allocator.allocator(), &nested_view));
+  EXPECT_EQ(allocator.allocation_count(), 3u);
 
   iree_vm_buffer_release(root);
   iree_vm_buffer_release(first_view);
-  EXPECT_EQ(allocator.free_count, 1u);
+  EXPECT_EQ(allocator.free_count(), 1u);
   EXPECT_EQ(record.call_count, 0);
 
   iree_const_byte_span_t span = iree_const_byte_span_empty();
@@ -247,31 +201,26 @@ TEST(VMBufferTest, NestedViewsFlattenOwnershipToTheRoot) {
 
   iree_vm_buffer_release(nested_view);
   EXPECT_EQ(record.call_count, 1);
-  EXPECT_EQ(allocator.free_count, 3u);
+  EXPECT_EQ(allocator.free_count(), 3u);
 }
 
 TEST(VMBufferTest, WholeRangeSameAccessRetainsIdentity) {
-  CountingAllocator allocator = {
-      iree_allocator_system(),
-      0,
-      0,
-  };
+  CountingAllocator allocator;
   iree_vm_buffer_t* buffer = nullptr;
-  IREE_ASSERT_OK(
-      iree_vm_buffer_create(8, 0, MakeCountingAllocator(&allocator), &buffer));
+  IREE_ASSERT_OK(iree_vm_buffer_create(8, 0, allocator.allocator(), &buffer));
   iree_vm_buffer_t* alias = nullptr;
   IREE_ASSERT_OK(iree_vm_buffer_subspan(
       buffer, 0, 8,
       IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
-      MakeCountingAllocator(&allocator), &alias));
+      allocator.allocator(), &alias));
   EXPECT_EQ(alias, buffer);
-  EXPECT_EQ(allocator.allocation_count, 1u);
+  EXPECT_EQ(allocator.allocation_count(), 1u);
 
   iree_vm_buffer_release(buffer);
   EXPECT_NE(iree_vm_buffer_data(alias), nullptr);
-  EXPECT_EQ(allocator.free_count, 0u);
+  EXPECT_EQ(allocator.free_count(), 0u);
   iree_vm_buffer_release(alias);
-  EXPECT_EQ(allocator.free_count, 1u);
+  EXPECT_EQ(allocator.free_count(), 1u);
 }
 
 TEST(VMBufferTest, SubspanAttenuatesAccessAndRejectsInvalidRanges) {

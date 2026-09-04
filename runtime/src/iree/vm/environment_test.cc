@@ -15,44 +15,11 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/buffer.h"
+#include "iree/vm/test_allocator.h"
 
 namespace {
 
-struct CountingAllocator {
-  // Allocator performing the actual memory operations.
-  iree_allocator_t delegate;
-  // Number of allocation-like commands forwarded.
-  iree_host_size_t allocation_count;
-  // Number of free commands forwarded.
-  iree_host_size_t free_count;
-};
-
-iree_status_t CountingAllocatorControl(void* self,
-                                       iree_allocator_command_t command,
-                                       const void* params, void** inout_ptr) {
-  auto* allocator = static_cast<CountingAllocator*>(self);
-  switch (command) {
-    case IREE_ALLOCATOR_COMMAND_MALLOC:
-    case IREE_ALLOCATOR_COMMAND_CALLOC:
-    case IREE_ALLOCATOR_COMMAND_REALLOC:
-      ++allocator->allocation_count;
-      break;
-    case IREE_ALLOCATOR_COMMAND_FREE:
-      ++allocator->free_count;
-      break;
-    default:
-      break;
-  }
-  return allocator->delegate.ctl(allocator->delegate.self, command, params,
-                                 inout_ptr);
-}
-
-iree_allocator_t MakeCountingAllocator(CountingAllocator* allocator) {
-  return iree_allocator_t{
-      allocator,
-      CountingAllocatorControl,
-  };
-}
+using iree::vm::testing::CountingAllocator;
 
 struct TestProvider {
   // Provider table published to the environment.
@@ -121,16 +88,12 @@ struct DuplicateNameProvider {
 };
 
 TEST(VMEnvironmentTest, AllocateUsesOneAllocationAndPublishesCoreTypes) {
-  CountingAllocator allocator = {
-      iree_allocator_system(),
-      0,
-      0,
-  };
+  CountingAllocator allocator;
   iree_vm_environment_t* environment = nullptr;
-  IREE_ASSERT_OK(iree_vm_environment_allocate(MakeCountingAllocator(&allocator),
-                                              &environment));
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(allocator.allocator(), &environment));
   ASSERT_NE(environment, nullptr);
-  EXPECT_EQ(allocator.allocation_count, 1u);
+  EXPECT_EQ(allocator.allocation_count(), 1u);
 
   const iree_vm_ref_type_table_t* table =
       iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm"));
@@ -142,7 +105,7 @@ TEST(VMEnvironmentTest, AllocateUsesOneAllocationAndPublishesCoreTypes) {
       iree_string_view_equal(types.buffer->type_name, IREE_SV("buffer")));
 
   iree_vm_environment_free(environment);
-  EXPECT_EQ(allocator.free_count, 1u);
+  EXPECT_EQ(allocator.free_count(), 1u);
 }
 
 TEST(VMEnvironmentTest, CoreBufferTypeSupportsTypedOwnership) {

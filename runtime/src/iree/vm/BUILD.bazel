@@ -73,10 +73,18 @@ iree_runtime_cc_library(
     deps = [":vm"],
 )
 
+iree_runtime_cc_library(
+    name = "test_allocator",
+    testonly = True,
+    hdrs = ["test_allocator.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
 iree_runtime_cc_test(
     name = "buffer_test",
     srcs = ["buffer_test.cc"],
     deps = [
+        ":test_allocator",
         ":vm",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -87,6 +95,7 @@ iree_runtime_cc_test(
     name = "environment_test",
     srcs = ["environment_test.cc"],
     deps = [
+        ":test_allocator",
         ":vm",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -151,6 +160,7 @@ iree_runtime_cc_test(
         "program_test.cc",
     ],
     deps = [
+        ":test_allocator",
         ":vm",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -161,6 +171,7 @@ iree_runtime_cc_test(
     name = "process_test",
     srcs = ["process_test.cc"],
     deps = [
+        ":test_allocator",
         ":vm",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

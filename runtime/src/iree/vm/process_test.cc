@@ -15,8 +15,11 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/reflection.h"
 #include "iree/vm/sync.h"
+#include "iree/vm/test_allocator.h"
 
 namespace {
+
+using iree::vm::testing::CountingAllocator;
 
 constexpr iree_host_size_t kInvocationStorageSize = 16 * 1024;
 
@@ -84,39 +87,6 @@ struct TestModule {
   // Number of final module-owner releases.
   int destroy_count = 0;
 };
-
-struct CountingAllocator {
-  // Allocator performing the actual memory operations.
-  iree_allocator_t delegate;
-  // Number of allocation-like commands forwarded.
-  iree_host_size_t allocation_count;
-  // Number of free commands forwarded.
-  iree_host_size_t free_count;
-};
-
-iree_status_t CountingAllocatorControl(void* self,
-                                       iree_allocator_command_t command,
-                                       const void* params, void** inout_ptr) {
-  auto* allocator = static_cast<CountingAllocator*>(self);
-  switch (command) {
-    case IREE_ALLOCATOR_COMMAND_MALLOC:
-    case IREE_ALLOCATOR_COMMAND_CALLOC:
-    case IREE_ALLOCATOR_COMMAND_REALLOC:
-      ++allocator->allocation_count;
-      break;
-    case IREE_ALLOCATOR_COMMAND_FREE:
-      ++allocator->free_count;
-      break;
-    default:
-      break;
-  }
-  return allocator->delegate.ctl(allocator->delegate.self, command, params,
-                                 inout_ptr);
-}
-
-iree_allocator_t MakeCountingAllocator(CountingAllocator* allocator) {
-  return iree_allocator_t{allocator, CountingAllocatorControl};
-}
 
 TestModule* CastTestModule(iree_vm_module_t* base_module) {
   return iree_containerof(base_module, TestModule, base);
@@ -335,15 +305,15 @@ TEST(VMProcessTest, AttachesAndSealsSortedModulesInOneSlab) {
   iree_vm_invocation_t* invocation = nullptr;
   IREE_ASSERT_OK(iree_vm_invocation_initialize(
       iree_make_byte_span(storage.data(), storage.size()), &invocation));
-  CountingAllocator allocator = {iree_allocator_system(), 0, 0};
+  CountingAllocator allocator;
   iree_vm_process_create_outcome_t outcome = {};
-  IREE_ASSERT_OK(iree_vm_process_create_start(
-      program, invocation, iree_vm_variant_span_empty(), {},
-      MakeCountingAllocator(&allocator), &outcome));
+  IREE_ASSERT_OK(iree_vm_process_create_start(program, invocation,
+                                              iree_vm_variant_span_empty(), {},
+                                              allocator.allocator(), &outcome));
   ASSERT_EQ(outcome.execution_outcome, IREE_VM_EXECUTION_OUTCOME_COMPLETED);
   ASSERT_NE(outcome.process, nullptr);
-  EXPECT_EQ(allocator.allocation_count, 1u);
-  EXPECT_EQ(allocator.free_count, 0u);
+  EXPECT_EQ(allocator.allocation_count(), 1u);
+  EXPECT_EQ(allocator.free_count(), 0u);
   EXPECT_TRUE(alpha.saw_zeroed_storage);
   EXPECT_TRUE(middle.saw_zeroed_storage);
   EXPECT_TRUE(middle.saw_canonical_empty_storage);
@@ -354,7 +324,7 @@ TEST(VMProcessTest, AttachesAndSealsSortedModulesInOneSlab) {
             MakeEvent(2, EventKind::kSeal), MakeEvent(3, EventKind::kSeal)});
 
   iree_vm_process_release(outcome.process);
-  EXPECT_EQ(allocator.free_count, 1u);
+  EXPECT_EQ(allocator.free_count(), 1u);
   ExpectEvents(
       log, {MakeEvent(1, EventKind::kAttach), MakeEvent(2, EventKind::kAttach),
             MakeEvent(3, EventKind::kAttach), MakeEvent(1, EventKind::kSeal),
@@ -393,7 +363,7 @@ TEST(VMProcessTest, DetachesOnlyCompletedAttachesAfterAttachFailure) {
   iree_vm_invocation_t* invocation = nullptr;
   IREE_ASSERT_OK(iree_vm_invocation_initialize(
       iree_make_byte_span(storage.data(), storage.size()), &invocation));
-  CountingAllocator allocator = {iree_allocator_system(), 0, 0};
+  CountingAllocator allocator;
   iree_vm_process_create_outcome_t outcome = {
       IREE_VM_EXECUTION_OUTCOME_SUSPENDED,
       reinterpret_cast<iree_vm_process_t*>(uintptr_t{1}),
@@ -401,12 +371,12 @@ TEST(VMProcessTest, DetachesOnlyCompletedAttachesAfterAttachFailure) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
                         iree_vm_process_create_start(
                             program, invocation, iree_vm_variant_span_empty(),
-                            {}, MakeCountingAllocator(&allocator), &outcome));
+                            {}, allocator.allocator(), &outcome));
   EXPECT_EQ(outcome.execution_outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
   EXPECT_EQ(outcome.process,
             reinterpret_cast<iree_vm_process_t*>(uintptr_t{1}));
-  EXPECT_EQ(allocator.allocation_count, 1u);
-  EXPECT_EQ(allocator.free_count, 1u);
+  EXPECT_EQ(allocator.allocation_count(), 1u);
+  EXPECT_EQ(allocator.free_count(), 1u);
   ExpectEvents(
       log, {MakeEvent(1, EventKind::kAttach), MakeEvent(2, EventKind::kAttach),
             MakeEvent(1, EventKind::kDetach)});
@@ -440,14 +410,14 @@ TEST(VMProcessTest, ReverseDetachesAllModulesAfterSealFailure) {
   iree_vm_invocation_t* invocation = nullptr;
   IREE_ASSERT_OK(iree_vm_invocation_initialize(
       iree_make_byte_span(storage.data(), storage.size()), &invocation));
-  CountingAllocator allocator = {iree_allocator_system(), 0, 0};
+  CountingAllocator allocator;
   iree_vm_process_create_outcome_t outcome = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
                         iree_vm_process_create_start(
                             program, invocation, iree_vm_variant_span_empty(),
-                            {}, MakeCountingAllocator(&allocator), &outcome));
-  EXPECT_EQ(allocator.allocation_count, 1u);
-  EXPECT_EQ(allocator.free_count, 1u);
+                            {}, allocator.allocator(), &outcome));
+  EXPECT_EQ(allocator.allocation_count(), 1u);
+  EXPECT_EQ(allocator.free_count(), 1u);
   ExpectEvents(
       log,
       {MakeEvent(1, EventKind::kAttach), MakeEvent(2, EventKind::kAttach),
@@ -479,12 +449,12 @@ TEST(VMProcessTest, PublishesOnlyAfterYieldingInitializerCompletes) {
       iree_vm_variant_from_i32(42),
   };
   int wake_count = 0;
-  CountingAllocator allocator = {iree_allocator_system(), 0, 0};
+  CountingAllocator allocator;
   iree_vm_process_create_outcome_t outcome = {};
   IREE_ASSERT_OK(iree_vm_process_create_start(
       program, invocation,
       iree_vm_variant_span_from_ptr(arguments.data(), arguments.size()),
-      {CountWake, &wake_count}, MakeCountingAllocator(&allocator), &outcome));
+      {CountWake, &wake_count}, allocator.allocator(), &outcome));
   EXPECT_TRUE(iree_vm_variant_is_empty(arguments[0]));
   EXPECT_EQ(outcome.execution_outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
   EXPECT_EQ(outcome.process, nullptr);
@@ -503,8 +473,8 @@ TEST(VMProcessTest, PublishesOnlyAfterYieldingInitializerCompletes) {
             MakeEvent(1, EventKind::kSeal)});
 
   iree_vm_process_release(outcome.process);
-  EXPECT_EQ(allocator.allocation_count, 1u);
-  EXPECT_EQ(allocator.free_count, 1u);
+  EXPECT_EQ(allocator.allocation_count(), 1u);
+  EXPECT_EQ(allocator.free_count(), 1u);
   iree_vm_invocation_deinitialize(invocation);
   iree_vm_program_release(program);
   ReleaseTestModules({&module});
@@ -528,25 +498,25 @@ TEST(VMProcessTest, SynchronousCreatePreservesAnEarlyInitializerWake) {
   std::array<iree_vm_variant_t, 1> arguments = {
       iree_vm_variant_from_i32(42),
   };
-  CountingAllocator allocator = {iree_allocator_system(), 0, 0};
+  CountingAllocator allocator;
   iree_vm_process_t* process = nullptr;
   IREE_ASSERT_OK(iree_vm_process_create(
       program, invocation,
       iree_vm_variant_span_from_ptr(arguments.data(), arguments.size()),
-      MakeCountingAllocator(&allocator), &process));
+      allocator.allocator(), &process));
 
   ASSERT_NE(process, nullptr);
   EXPECT_TRUE(iree_vm_variant_is_empty(arguments[0]));
   EXPECT_EQ(module.sealed_value, 42u);
-  EXPECT_EQ(allocator.allocation_count, 1u);
-  EXPECT_EQ(allocator.free_count, 0u);
+  EXPECT_EQ(allocator.allocation_count(), 1u);
+  EXPECT_EQ(allocator.free_count(), 0u);
   ExpectEvents(
       log, {MakeEvent(1, EventKind::kAttach), MakeEvent(1, EventKind::kStart),
             MakeEvent(1, EventKind::kResume), MakeEvent(1, EventKind::kCleanup),
             MakeEvent(1, EventKind::kSeal)});
 
   iree_vm_process_release(process);
-  EXPECT_EQ(allocator.free_count, 1u);
+  EXPECT_EQ(allocator.free_count(), 1u);
   iree_vm_invocation_deinitialize(invocation);
   iree_vm_program_release(program);
   ReleaseTestModules({&module});
@@ -571,12 +541,12 @@ TEST(VMProcessTest, CancellationDiscardsUnpublishedInitializedProcess) {
       iree_vm_variant_from_i32(42),
   };
   int wake_count = 0;
-  CountingAllocator allocator = {iree_allocator_system(), 0, 0};
+  CountingAllocator allocator;
   iree_vm_process_create_outcome_t outcome = {};
   IREE_ASSERT_OK(iree_vm_process_create_start(
       program, invocation,
       iree_vm_variant_span_from_ptr(arguments.data(), arguments.size()),
-      {CountWake, &wake_count}, MakeCountingAllocator(&allocator), &outcome));
+      {CountWake, &wake_count}, allocator.allocator(), &outcome));
   ASSERT_EQ(outcome.execution_outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
   ASSERT_TRUE(iree_vm_invocation_request_cancel(
       invocation, IREE_VM_CANCEL_REASON_DEADLINE_EXCEEDED));
@@ -588,8 +558,8 @@ TEST(VMProcessTest, CancellationDiscardsUnpublishedInitializedProcess) {
   EXPECT_EQ(outcome.execution_outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
   EXPECT_EQ(outcome.process,
             reinterpret_cast<iree_vm_process_t*>(uintptr_t{1}));
-  EXPECT_EQ(allocator.allocation_count, 1u);
-  EXPECT_EQ(allocator.free_count, 1u);
+  EXPECT_EQ(allocator.allocation_count(), 1u);
+  EXPECT_EQ(allocator.free_count(), 1u);
   ExpectEvents(
       log, {MakeEvent(1, EventKind::kAttach), MakeEvent(1, EventKind::kStart),
             MakeEvent(1, EventKind::kResume), MakeEvent(1, EventKind::kCleanup),
