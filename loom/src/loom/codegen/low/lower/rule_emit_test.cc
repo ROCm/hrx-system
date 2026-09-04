@@ -73,6 +73,7 @@ class LowLowerRuleEmitTest : public ::testing::Test {
         /*.symbol_id=*/symbol_id,
     };
     const loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+    const loom_type_t f32_type = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
     const loom_type_t argument_types[] = {i32_type, i32_type};
     loom_op_t* function_op = nullptr;
     IREE_ASSERT_OK(loom_func_def_build(
@@ -80,7 +81,7 @@ class LowLowerRuleEmitTest : public ::testing::Test {
         /*cc=*/0, /*purity=*/0, /*temperature=*/0, /*inline_policy=*/0,
         loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
         LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol,
-        argument_types, IREE_ARRAYSIZE(argument_types), &i32_type, 1, nullptr,
+        argument_types, IREE_ARRAYSIZE(argument_types), &f32_type, 1, nullptr,
         0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function_op));
     function_ = loom_func_like_cast(module_, function_op);
     uint16_t argument_count = 0;
@@ -97,7 +98,11 @@ class LowLowerRuleEmitTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_scalar_addi_build(&body_builder, /*overflow_flags=*/0,
                                           arguments[0], arguments[1], i32_type,
                                           LOOM_LOCATION_UNKNOWN, &add_op));
-    const loom_value_id_t result = loom_scalar_addi_result(add_op);
+    loom_op_t* bitcast_op = nullptr;
+    IREE_ASSERT_OK(loom_scalar_bitcast_build(
+        &body_builder, loom_scalar_addi_result(add_op), i32_type, f32_type,
+        LOOM_LOCATION_UNKNOWN, &bitcast_op));
+    const loom_value_id_t result = loom_scalar_bitcast_result(bitcast_op);
     loom_op_t* return_op = nullptr;
     IREE_ASSERT_OK(loom_func_return_build(&body_builder, &result, 1,
                                           LOOM_LOCATION_UNKNOWN, &return_op));
@@ -115,7 +120,7 @@ class LowLowerRuleEmitTest : public ::testing::Test {
   loom_low_lower_result_t result_ = {};
 };
 
-TEST_F(LowLowerRuleEmitTest, EmitsDescriptorOperandsAndResultBinding) {
+TEST_F(LowLowerRuleEmitTest, EmitsDescriptorAndRegisterCopyPrograms) {
   IREE_ASSERT_OK(
       loom_low_lower_function(module_, function_, &options_, &result_));
   ASSERT_EQ(result_.error_count, 0u);
@@ -129,6 +134,7 @@ TEST_F(LowLowerRuleEmitTest, EmitsDescriptorOperandsAndResultBinding) {
   ASSERT_EQ(argument_count, 2u);
 
   loom_op_t* emitted_add = nullptr;
+  loom_op_t* emitted_copy = nullptr;
   loom_op_t* emitted_return = nullptr;
   loom_op_t* op = nullptr;
   loom_block_for_each_op(
@@ -137,11 +143,15 @@ TEST_F(LowLowerRuleEmitTest, EmitsDescriptorOperandsAndResultBinding) {
                                    TEST_LOW_CORE_DESCRIPTOR_REF_TEST_ADD_I32) {
       ASSERT_EQ(emitted_add, nullptr);
       emitted_add = op;
+    } else if (loom_low_copy_isa(op)) {
+      ASSERT_EQ(emitted_copy, nullptr);
+      emitted_copy = op;
     } else if (loom_low_return_isa(op)) {
       emitted_return = op;
     }
   }
   ASSERT_NE(emitted_add, nullptr);
+  ASSERT_NE(emitted_copy, nullptr);
   ASSERT_NE(emitted_return, nullptr);
 
   const loom_value_slice_t operands = loom_low_op_operands(emitted_add);
@@ -150,10 +160,15 @@ TEST_F(LowLowerRuleEmitTest, EmitsDescriptorOperandsAndResultBinding) {
   EXPECT_EQ(operands.values[1], arguments[1]);
   const loom_value_slice_t results = loom_low_op_results(emitted_add);
   ASSERT_EQ(results.count, 1u);
+  EXPECT_EQ(loom_low_copy_source(emitted_copy), results.values[0]);
+  const loom_type_t copy_result_type =
+      loom_module_value_type(module_, loom_low_copy_result(emitted_copy));
+  EXPECT_FALSE(loom_type_equal(
+      copy_result_type, loom_module_value_type(module_, results.values[0])));
   const loom_value_slice_t return_values =
       loom_low_return_values(emitted_return);
   ASSERT_EQ(return_values.count, 1u);
-  EXPECT_EQ(return_values.values[0], results.values[0]);
+  EXPECT_EQ(return_values.values[0], loom_low_copy_result(emitted_copy));
 }
 
 }  // namespace

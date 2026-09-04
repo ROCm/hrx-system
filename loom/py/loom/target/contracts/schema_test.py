@@ -20,6 +20,7 @@ from loom.target.contracts import (
     DescriptorRule,
     EmitDescriptorOp,
     EmitRegisterConcat,
+    EmitRegisterCopy,
     EmitRegisterSlice,
     Guard,
     OrdinalValueAliasRule,
@@ -173,6 +174,25 @@ def test_structural_register_emits_validate_program_shape() -> None:
                         EmitRegisterConcat(
                             sources=(ValueRef.operand("elements"),),
                             result=ValueRef.temporary("pair"),
+                        ),
+                    ),
+                ),
+            ),
+        )
+    with pytest.raises(
+        ValueError,
+        match="temporary 'copy' needs an explicit result type binding",
+    ):
+        ContractFragment(
+            name="register.copy.invalid",
+            descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+            cases=(
+                DescriptorRule(
+                    source_op=scalar_analysis.scalar_assume,
+                    emit=(
+                        EmitRegisterCopy(
+                            source=ValueRef.operand("values"),
+                            result=ValueRef.temporary("copy"),
                         ),
                     ),
                 ),

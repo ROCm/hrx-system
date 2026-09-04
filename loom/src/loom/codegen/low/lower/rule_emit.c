@@ -1110,6 +1110,32 @@ static iree_status_t loom_low_lower_rule_emit_register_concat(
                                           emit, &low_result);
 }
 
+static iree_status_t loom_low_lower_rule_emit_register_copy(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
+    loom_low_lower_rule_emit_state_t* state,
+    const loom_low_lower_resolved_emit_t* resolved_emit) {
+  const loom_low_lower_emit_t* emit = resolved_emit->emit;
+  IREE_ASSERT_EQ(emit->descriptor_ref, LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE);
+  IREE_ASSERT_EQ(emit->operand_ref_count, 1);
+  IREE_ASSERT_EQ(emit->result_ref_count, 1);
+
+  loom_value_id_t* low_operands = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_build_low_operands(
+      context, rule_set, source_op, state, emit, NULL, NULL, &low_operands));
+  loom_type_t* result_types = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_build_result_types(
+      context, rule_set, source_op, resolved_emit, &result_types));
+
+  loom_op_t* copy_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_copy_build(
+      loom_low_lower_context_builder(context), low_operands[0], false,
+      result_types[0], source_op->location, &copy_op));
+  const loom_value_id_t low_result = loom_low_copy_result(copy_op);
+  return loom_low_lower_rule_bind_results(context, rule_set, source_op, state,
+                                          emit, &low_result);
+}
+
 static const loom_tied_result_t* loom_low_lower_rule_emit_tied_results(
     const loom_low_lower_rule_set_t* rule_set,
     const loom_low_lower_emit_t* emit) {
@@ -1824,6 +1850,11 @@ iree_status_t loom_low_lower_rule_set_emit_rule(
       }
       case LOOM_LOW_LOWER_EMIT_REGISTER_CONCAT: {
         IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_register_concat(
+            context, rule_set, source_op, &state, resolved_emit));
+        break;
+      }
+      case LOOM_LOW_LOWER_EMIT_REGISTER_COPY: {
+        IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_register_copy(
             context, rule_set, source_op, &state, resolved_emit));
         break;
       }

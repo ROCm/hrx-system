@@ -29,6 +29,7 @@ from loom.target.contracts import (
     DirectDescriptorCase,
     EmitDescriptorOp,
     EmitRegisterConcat,
+    EmitRegisterCopy,
     EmitRegisterSlice,
     Guard,
     GuardDiagnostic,
@@ -137,18 +138,35 @@ def test_compile_structural_register_emits() -> None:
                     ),
                 ),
             ),
+            DescriptorRule(
+                source_op=scalar_conversion.scalar_bitcast,
+                guards=(
+                    Guard.value_type("input", i32),
+                    Guard.value_type("result", Scalar("f32")),
+                ),
+                emit=(
+                    EmitRegisterCopy(
+                        source=ValueRef.operand("input"),
+                        result=ValueRef.result("result"),
+                    ),
+                ),
+            ),
         ),
     )
 
     compiled = compile_lower_rule_set(
         fragment,
-        dialect_ops={"vector": ALL_VECTOR_OPS},
+        dialect_ops={
+            "scalar": ALL_SCALAR_OPS,
+            "vector": ALL_VECTOR_OPS,
+        },
     )
 
     assert tuple(emit.kind for emit in compiled.emits) == (
         LowerEmitKind.REGISTER_CONCAT,
         LowerEmitKind.REGISTER_SLICE,
         LowerEmitKind.REGISTER_SLICE,
+        LowerEmitKind.REGISTER_COPY,
     )
     assert all(emit.descriptor is None for emit in compiled.emits)
     assert compiled.emits[0].operand_ref_count == 2
@@ -160,6 +178,8 @@ def test_compile_structural_register_emits() -> None:
     assert typed_slice_result.kind is SourceValueKind.TEMPORARY
     assert compiled.emits[2].operand_ref_count == 1
     assert compiled.emits[2].structural_offset == 0
+    assert compiled.emits[3].operand_ref_count == 1
+    assert compiled.emits[3].result_ref_count == 1
 
 
 def _expect_value_error(callable_obj: Callable[[], object], message: str) -> None:

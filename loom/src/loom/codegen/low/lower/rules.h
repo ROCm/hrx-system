@@ -659,6 +659,8 @@ typedef enum loom_low_lower_emit_kind_e {
   LOOM_LOW_LOWER_EMIT_REGISTER_SLICE = 7,
   // Concatenates register values with low.concat.
   LOOM_LOW_LOWER_EMIT_REGISTER_CONCAT = 8,
+  // Copies a register value into a compatible register class with low.copy.
+  LOOM_LOW_LOWER_EMIT_REGISTER_COPY = 9,
 } loom_low_lower_emit_kind_t;
 
 typedef uint16_t loom_low_lower_emit_flags_t;
