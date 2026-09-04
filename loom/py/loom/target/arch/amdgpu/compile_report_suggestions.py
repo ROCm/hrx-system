@@ -44,7 +44,7 @@ from loom.target.arch.amdgpu.target_identity import (
 class AmdgpuCompileReportSuggestionProvider:
     """Interprets AMDGPU evidence after resolving its structured target."""
 
-    target_family = "AMDGPU"
+    target_family = "amdgpu"
     provider_name = "amdgpu"
 
     def suggest(

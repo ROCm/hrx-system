@@ -57,14 +57,6 @@ def _expect_no_arg_with_suffix(env, args, prefix, suffix):
                 (prefix, suffix, args),
             )
 
-def _expect_no_arg_with_prefix(env, args, prefix):
-    for arg in args:
-        if arg.startswith(prefix):
-            env.fail(
-                "unexpected argument with prefix %r in %r" %
-                (prefix, args),
-            )
-
 def _test_kernel_binary_roots_direct_library_exports(name, **kwargs):
     analysis_test(
         name = name,
@@ -114,7 +106,7 @@ def _test_kernel_binary_roots_direct_library_exports_impl(env, target):
     compile_action = _find_action(env, actions, "LoomKernelBinary")
     for expected_arg in [
         "--backend=amdgpu-hal",
-        "--target=gfx11-generic",
+        "--target=amdgpu:gfx11-generic",
         "--compile-report=details",
     ]:
         if expected_arg not in compile_action.argv:
@@ -325,7 +317,7 @@ def _test_command_binary_emits_composite_product_impl(env, target):
     kernel_action = _find_action(env, actions, "LoomCommandKernelBinary")
     for expected_arg in [
         "--backend=amdgpu-hal",
-        "--target=gfx11-generic",
+        "--target=amdgpu:gfx11-generic",
         "--compile-report=details",
     ]:
         if expected_arg not in kernel_action.argv:

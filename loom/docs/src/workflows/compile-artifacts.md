@@ -16,9 +16,14 @@ Compile one targetless kernel for the generic GFX11 profile:
 ```shell
 loom-compile kernel.loom \
   --backend=amdgpu-hal \
-  --target=gfx11-generic \
+  --target=amdgpu:gfx11-generic \
   --output=kernel.hsaco
 ```
+
+Targets use `family:selector` syntax. The family selects one target provider
+linked into the tool, and the remainder is interpreted only by that provider.
+A build without the requested family fails instead of enabling or loading it
+implicitly.
 
 The primary output is the executable byte sequence consumed by the selected
 HAL loader. For AMDGPU that representation is currently an HSACO. The source
@@ -27,8 +32,11 @@ authoring support; the HAL backend materializes kernel entries and their
 dependency closures into the executable library.
 
 Backend availability is a property of the installed Loom tool. Target pages
-own driver setup and supported profile names; the compile workflow remains the
-same across backends.
+own supported profile names; the compile workflow remains the same across
+backends. Offline emission is independent of runtime drivers: a Loom build with
+SPIR-V targeting and emission can produce SPIR-V artifacts without the Vulkan
+HAL, while creating a device and executing those artifacts still requires the
+Vulkan driver.
 
 ## Choose generic or exact specialization
 
@@ -37,7 +45,7 @@ A generic profile retains portability within one target family:
 ```shell
 loom-compile kernel.loom \
   --backend=amdgpu-hal \
-  --target=gfx11-generic \
+  --target=amdgpu:gfx11-generic \
   --output=kernel-gfx11.hsaco
 ```
 
@@ -46,7 +54,7 @@ An exact profile exposes the features and limits of one physical target:
 ```shell
 loom-compile kernel.loom \
   --backend=amdgpu-hal \
-  --target=gfx1151 \
+  --target=amdgpu:gfx1151 \
   --output=kernel-gfx1151.hsaco
 ```
 
@@ -71,7 +79,7 @@ loom-compile catalog.loombc \
   --root=@prefill \
   --root=@decode \
   --backend=amdgpu-hal \
-  --target=gfx11-generic \
+  --target=amdgpu:gfx11-generic \
   --output=qwen-kernels.hsaco
 ```
 
@@ -92,7 +100,7 @@ Bind the `config.decl` values that describe this artifact:
 loom-compile kernel.loombc \
   --root=@decode \
   --backend=amdgpu-hal \
-  --target=gfx1151 \
+  --target=amdgpu:gfx1151 \
   --config=model.hidden_size=4096 \
   --config=model.head_count=32 \
   --output=decode.hsaco
@@ -103,7 +111,7 @@ JSON and JSONC files carry larger configuration objects:
 ```shell
 loom-compile kernel.loombc \
   --backend=amdgpu-hal \
-  --target=gfx1151 \
+  --target=amdgpu:gfx1151 \
   --config-file=model-config.jsonc \
   --output=model-kernels.hsaco
 ```
@@ -142,7 +150,7 @@ backend. For example, the first request can be compiled with:
 ```shell
 loom-compile kernel-requests/kernel-0.loombc \
   --backend=amdgpu-hal \
-  --target=gfx11-generic \
+  --target=amdgpu:gfx11-generic \
   --output=kernel-0.hsaco
 ```
 
@@ -176,7 +184,7 @@ tooling needs the native object:
 ```shell
 loom-compile kernel.loom \
   --backend=amdgpu-hal \
-  --target=gfx11-generic \
+  --target=amdgpu:gfx11-generic \
   --output=kernel.executable \
   --emit-target-artifact=kernel.hsaco
 ```
@@ -193,7 +201,7 @@ reverse-engineer it:
 ```shell
 loom-compile kernel.loom \
   --backend=amdgpu-hal \
-  --target=gfx11-generic \
+  --target=amdgpu:gfx11-generic \
   --output=kernel.hsaco \
   --artifact-manifest=summary
 ```
@@ -205,7 +213,7 @@ layout:
 ```shell
 loom-compile kernel.loom \
   --backend=amdgpu-hal \
-  --target=gfx11-generic \
+  --target=amdgpu:gfx11-generic \
   --output=kernel.hsaco \
   --artifact-manifest=details \
   --emit-artifact-manifest=kernel.manifest.json

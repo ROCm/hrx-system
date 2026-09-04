@@ -18,7 +18,7 @@ def _write_report(
     path: Path,
     *,
     code_byte_count: int = 512,
-    target_family: str = "AMDGPU",
+    target_family: str = "amdgpu",
     target_key: str = "gfx11-generic",
     target_record: str = "gfx11-generic",
     experimental_bank_conflict: bool = False,
@@ -441,7 +441,7 @@ def test_suggest_json_resolves_structured_amdgpu_target_keys(
     assert captured.err == ""
     assert view["provider"] == "amdgpu"
     assert view["status"] == "available"
-    assert view["target"] == {"family": "AMDGPU", "key": target_key}
+    assert view["target"] == {"family": "amdgpu", "key": target_key}
 
 
 def test_suggest_json_reports_unknown_target_without_guessing(

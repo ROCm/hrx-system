@@ -41,9 +41,9 @@
 #ifndef LOOM_COMPILE_HAVE_AMDGPU
 #define LOOM_COMPILE_HAVE_AMDGPU 0
 #endif  // LOOM_COMPILE_HAVE_AMDGPU
-#ifndef LOOM_COMPILE_HAVE_SPIRV_VULKAN
-#define LOOM_COMPILE_HAVE_SPIRV_VULKAN 0
-#endif  // LOOM_COMPILE_HAVE_SPIRV_VULKAN
+#ifndef LOOM_COMPILE_HAVE_SPIRV
+#define LOOM_COMPILE_HAVE_SPIRV 0
+#endif  // LOOM_COMPILE_HAVE_SPIRV
 #ifndef LOOM_COMPILE_HAVE_LLVMIR
 #define LOOM_COMPILE_HAVE_LLVMIR 0
 #endif  // LOOM_COMPILE_HAVE_LLVMIR
@@ -104,16 +104,16 @@ static iree_status_t loom_compile_diagnostic_sink(
 }
 
 #define LOOM_COMPILE_HAVE_ANY_ARTIFACT_PROVIDER \
-  (LOOM_COMPILE_HAVE_AMDGPU || LOOM_COMPILE_HAVE_SPIRV_VULKAN)
+  (LOOM_COMPILE_HAVE_AMDGPU || LOOM_COMPILE_HAVE_SPIRV)
 
 #if LOOM_COMPILE_HAVE_AMDGPU
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/tooling/target/amdgpu/artifact_provider.h"
 #endif  // LOOM_COMPILE_HAVE_AMDGPU
-#if LOOM_COMPILE_HAVE_SPIRV_VULKAN
+#if LOOM_COMPILE_HAVE_SPIRV
 #include "loom/target/arch/spirv/provider.h"
 #include "loom/tooling/target/spirv/artifact_provider.h"
-#endif  // LOOM_COMPILE_HAVE_SPIRV_VULKAN
+#endif  // LOOM_COMPILE_HAVE_SPIRV
 #if LOOM_COMPILE_HAVE_LLVMIR
 #include "loom/target/arch/llvmir/provider.h"
 #include "loom/target/emit/llvmir/artifact_emitter.h"
@@ -129,10 +129,11 @@ IREE_FLAG(string, backend, "command",
           "Compilation backend to emit, such as 'command' or a "
           "linked native backend.");
 IREE_FLAG(string, target, "",
-          "Optional artifact target key, such as 'gfx11-generic' or "
-          "'gfx1151'. When present, every materialized kernel entry is "
-          "specialized to that exact provider-owned profile before the pass "
-          "pipeline. Authored targets remain compatibility requirements.");
+          "Optional artifact target in family:selector form, such as "
+          "'amdgpu:gfx11-generic' or 'spirv:vulkan1.3+bda'. When present, "
+          "every materialized kernel entry is specialized to that exact "
+          "configured profile before the pass pipeline. Authored targets "
+          "remain compatibility requirements.");
 IREE_FLAG_LIST(string, root,
                "Root symbol to materialize before compilation. Repeat for "
                "multiple roots. When omitted, artifact providers compile every "
@@ -212,12 +213,12 @@ static const loom_run_execution_provider_t kLoomCompileCommandProvider = {
     .target_provider = &loom_cmd_target_provider,
 };
 
-#if LOOM_COMPILE_HAVE_SPIRV_VULKAN
+#if LOOM_COMPILE_HAVE_SPIRV
 static const loom_run_execution_provider_t kLoomCompileSpirvProvider = {
     .name = IREE_SVL("spirv"),
     .target_provider = &loom_spirv_target_provider,
 };
-#endif  // LOOM_COMPILE_HAVE_SPIRV_VULKAN
+#endif  // LOOM_COMPILE_HAVE_SPIRV
 
 #if LOOM_COMPILE_HAVE_LLVMIR
 static const loom_run_execution_provider_t kLoomCompileLlvmirProvider = {
@@ -237,9 +238,9 @@ static const loom_run_execution_provider_t* const kLoomCompileProviders[] = {
 #if LOOM_COMPILE_HAVE_AMDGPU
     &kLoomCompileAmdgpuProvider,
 #endif  // LOOM_COMPILE_HAVE_AMDGPU
-#if LOOM_COMPILE_HAVE_SPIRV_VULKAN
+#if LOOM_COMPILE_HAVE_SPIRV
     &kLoomCompileSpirvProvider,
-#endif  // LOOM_COMPILE_HAVE_SPIRV_VULKAN
+#endif  // LOOM_COMPILE_HAVE_SPIRV
 #if LOOM_COMPILE_HAVE_LLVMIR
     // Register the target executor and the artifact-only emitter.
     &kLoomCompileLlvmirProvider,
@@ -257,9 +258,9 @@ static const loom_artifact_provider_t* const kLoomCompileArtifactProviders[] = {
 #if LOOM_COMPILE_HAVE_AMDGPU
     &loom_amdgpu_artifact_provider,
 #endif  // LOOM_COMPILE_HAVE_AMDGPU
-#if LOOM_COMPILE_HAVE_SPIRV_VULKAN
+#if LOOM_COMPILE_HAVE_SPIRV
     &loom_spirv_vulkan_artifact_provider,
-#endif  // LOOM_COMPILE_HAVE_SPIRV_VULKAN
+#endif  // LOOM_COMPILE_HAVE_SPIRV
 };
 #endif  // LOOM_COMPILE_HAVE_ANY_ARTIFACT_PROVIDER
 
@@ -1093,22 +1094,22 @@ static iree_status_t loom_compile_validate_backend_flags(
 
 static iree_status_t loom_compile_select_explicit_artifact_target(
     const loom_artifact_provider_t* artifact_provider,
-    iree_allocator_t allocator, bool* out_target_selected,
-    loom_artifact_target_t* out_target) {
+    const loom_target_environment_t* target_environment,
+    bool* out_target_selected, loom_artifact_target_t* out_target) {
   *out_target_selected = false;
   *out_target = (loom_artifact_target_t){0};
 
-  const iree_string_view_t target_key =
+  const iree_string_view_t target_specification =
       iree_string_view_trim(iree_make_cstring_view(FLAG_target));
-  if (iree_string_view_is_empty(target_key)) {
+  if (iree_string_view_is_empty(target_specification)) {
     return iree_ok_status();
   }
   if (artifact_provider == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "--target is only valid for artifact providers");
   }
-  IREE_RETURN_IF_ERROR(loom_artifact_provider_select_target(
-      artifact_provider, target_key, allocator, out_target));
+  IREE_RETURN_IF_ERROR(loom_artifact_target_select(
+      artifact_provider, target_environment, target_specification, out_target));
   *out_target_selected = true;
   return iree_ok_status();
 }
@@ -1204,9 +1205,9 @@ static void loom_compile_print_agents_markdown(FILE* stream) {
       "  --emit-command-artifacts=commands/ \\\n"
       "  --emit-kernel-requests=kernel-requests/\n"
       "loom-compile kernel.loom --backend=amdgpu-hal \\\n"
-      "  --target=gfx11-generic --output=kernel.hsaco\n"
+      "  --target=amdgpu:gfx11-generic --output=kernel.hsaco\n"
       "loom-compile catalog.loombc --root=@entry --backend=amdgpu-hal \\\n"
-      "  --target=gfx1151 --output=entry.hsaco\n"
+      "  --target=amdgpu:gfx1151 --output=entry.hsaco\n"
       "```\n"
       "\n"
       "`--backend=command` emits portable command programs and their shared\n"
@@ -1252,7 +1253,7 @@ static void loom_compile_print_agents_markdown(FILE* stream) {
       "\n"
       "```shell\n"
       "loom-compile kernel.loom --backend=amdgpu-hal \\\n"
-      "  --target=gfx11-generic --output=kernel.hsaco \\\n"
+      "  --target=amdgpu:gfx11-generic --output=kernel.hsaco \\\n"
       "  --artifact-manifest=summary --emit-artifact-manifest=manifest.json "
       "\\\n"
       "  --compile-report=summary --compile-report-output=report.json\n"
@@ -1297,7 +1298,7 @@ int main(int argc, char** argv) {
       "--output=commands.json --emit-command-artifacts=commands/ "
       "[--emit-kernel-requests=kernels/]\n"
       "  loom-compile [file.loom] --backend=amdgpu-hal "
-      "--target=gfx11-generic --output=kernel.hsaco\n"
+      "--target=amdgpu:gfx11-generic --output=kernel.hsaco\n"
       "  loom-compile --agents_md\n"
       "\n"
       "Repeat --config=key=value to materialize compile-time config symbols "
@@ -1393,8 +1394,9 @@ int main(int argc, char** argv) {
   }
   if (iree_status_is_ok(status)) {
     status = loom_compile_select_explicit_artifact_target(
-        artifact_provider, allocator, &explicit_artifact_target_selected,
-        &explicit_artifact_target);
+        artifact_provider,
+        loom_run_execution_environment_target_environment(&environment),
+        &explicit_artifact_target_selected, &explicit_artifact_target);
   }
   if (iree_status_is_ok(status) && explicit_artifact_target_selected) {
     status = loom_compile_specialize_explicit_artifact_target(
@@ -1545,11 +1547,6 @@ int main(int argc, char** argv) {
     exit_code = 1;
   }
 
-  if (explicit_artifact_target_selected && artifact_provider != NULL &&
-      artifact_provider->deinitialize_target != NULL) {
-    artifact_provider->deinitialize_target(
-        artifact_provider, &explicit_artifact_target, allocator);
-  }
   loom_compile_pipeline_result_deinitialize(&pipeline_result);
   loom_compile_report_capture_deinitialize(&compile_report_capture);
   loom_run_module_deinitialize(&run_module);

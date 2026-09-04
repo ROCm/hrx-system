@@ -42,9 +42,22 @@ loom_cc_library(
         "//loom/src/loom/target:pipeline_options",
         "//loom/src/loom/target:profile",
         "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:selection",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/reporting:report",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "artifact_test",
+    srcs = ["artifact_test.cc"],
+    deps = [
+        ":artifact",
+        "//loom/src/loom/target:provider",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

@@ -119,7 +119,7 @@ allocation boundary rather than a contradiction.
 ```shell
 loom-compile kernel.loom \
   --backend=amdgpu-hal \
-  --target=gfx1151 \
+  --target=amdgpu:gfx1151 \
   --output=kernel.hsaco \
   --compile-report=details \
   --compile-report-output=report.details.json
@@ -533,7 +533,7 @@ was anchored on one function.
 ```shell
 loom-compile kernel.loom \
   --backend=amdgpu-hal \
-  --target=gfx11-generic \
+  --target=amdgpu:gfx11-generic \
   --output=kernel.hsaco \
   --dump-ir-after-all \
   --dump-ir-format=jsonl \

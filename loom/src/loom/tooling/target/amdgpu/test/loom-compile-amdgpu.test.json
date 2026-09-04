@@ -8,7 +8,7 @@
         "args": [
           "{srcdir}/complete_authoring_module.loom",
           "--backend=amdgpu-hal",
-          "--target=gfx1100",
+          "--target=amdgpu:gfx1100",
           "--output={tmp}/complete_authoring_module.hal",
           "--emit-target-artifact={tmp}/complete_authoring_module.hsaco"
         ]
@@ -31,7 +31,7 @@
         "args": [
           "{srcdir}/gfx1250_configured_fragment_bank.loom",
           "--backend=amdgpu-hal",
-          "--target=gfx1250",
+          "--target=amdgpu:gfx1250",
           "--config=test.fragment_bank.m_fragments=8",
           "--config=test.fragment_bank.n_fragments=4",
           "--config=test.fragment_bank.k_fragments=2",
@@ -63,7 +63,7 @@
               "{srcdir}/selected_root_amdgpu.loom",
               "--backend=amdgpu-hal",
               "--root=@selected_store_i32",
-              "--target=gfx1151",
+              "--target=amdgpu:gfx1151",
               "--output={tmp}/specialized_report.hal",
               "--emit-target-artifact={tmp}/specialized_report.hsaco",
               "--compile-report=summary",
@@ -74,7 +74,7 @@
             {
               "path": "{tmp}/specialized_report.json",
               "contains": [
-                "\"target_family\":\"AMDGPU\"",
+                "\"target_family\":\"amdgpu\"",
                 "\"target_key\":\"gfx1151\""
               ]
             }
@@ -94,7 +94,7 @@
             "contains": [
               "\"provider\":\"amdgpu\"",
               "\"status\":\"available\"",
-              "\"target\":{\"family\":\"AMDGPU\",\"key\":\"gfx1151\"}"
+              "\"target\":{\"family\":\"amdgpu\",\"key\":\"gfx1151\"}"
             ]
           }
         }

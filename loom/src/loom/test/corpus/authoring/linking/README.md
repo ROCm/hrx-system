@@ -38,7 +38,7 @@ A closed link uses the facts available at that link boundary. With
 this targetless root, it chooses `@scale_i32_fallback` and omits the target
 records and target-specific alternatives. A merge of the root and provider
 modules preserves the full explicit universe. Compiling that module with
-`--target=gfx1100`
+`--target=amdgpu:gfx1100`
 then specializes the requested kernel to a materialized or reused `@gfx1100`
 target record and resolves `template.apply<@authoring.link.scale_i32>` against
 that durable target.
@@ -148,15 +148,16 @@ Compile the merged bytecode with a function specialization target:
 ```bash
 loom-compile portable.loombc \
   --backend=amdgpu-hal \
-  --target=gfx1100 \
+  --target=amdgpu:gfx1100 \
   --output=scale_i32.hal \
   --emit-target-artifact=scale_i32.hsaco \
   --artifact-manifest=summary \
   --compile-report=summary
 ```
 
-`--target=gfx1100` does not establish a module-global target. The command-line
-driver maps the requested profile to the HAL kernel entries it is compiling,
+`--target=amdgpu:gfx1100` does not establish a module-global target. The
+command-line driver maps the requested profile to the HAL kernel entries it is
+compiling,
 materializes the exact target record once, and writes that durable target onto
 those functions before target-aware passes run. A module may still contain
 unrequested functions for other targets.
@@ -186,7 +187,7 @@ specialized function:
 ```bash
 loom-compile portable.loombc \
   --backend=amdgpu-hal \
-  --target=gfx1100 \
+  --target=amdgpu:gfx1100 \
   --output=scale_i32.hal \
   --emit-target-artifact=scale_i32.hsaco \
   --dump-ir-after=select-templates \

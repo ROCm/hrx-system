@@ -371,8 +371,8 @@ iree_status_t iree_benchmark_loom_write_hal_context_identity_fields_json(
       context->execution.device_provider->artifact_provider->name));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       object, IREE_SV("target_family"),
-      context->execution.device_provider->artifact_provider
-          ->target_family_name));
+      context->execution.device_provider->artifact_provider->target_profile_type
+          ->name));
   if (context->execution.runtime_initialized &&
       context->execution.runtime.device != NULL) {
     IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
