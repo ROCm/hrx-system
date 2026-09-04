@@ -68,3 +68,61 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f
   %difference = vmov.accumulator512.to.vector512 %28
   return %sum, %difference
 }
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @vector_f32x4_compare_select(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %true_value: vector<4xf32>, %false_value: vector<4xf32>) -> (vector<4xf32>) {
+  %mask = vector.cmpf olt, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xf32>
+  func.return %selected : vector<4xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f32x4_compare_select(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %true_value: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %39 = mov.i32 2147483647
+  %40 = vbcst.32 %39
+  %41 = vband %lhs, %40
+  %42 = vband %rhs, %40
+  %43 = mov.i32 2139095040
+  %44 = vbcst.32 %43
+  %45 = vlt.u32x16.el.low32 %44, %41
+  %46 = predicate.complete.zero.high32 %45, 0
+  %47 = vlt.u32x16.el.low32 %44, %42
+  %48 = predicate.complete.zero.high32 %47, 0
+  %49 = predicate.or.low32 %46, %48
+  %50 = predicate.or.high32 %46, %48, %49
+  %51 = mov.short 0
+  %52 = vbcst.32 %51
+  %53 = mov.i32 -2147483648
+  %54 = vbcst.32 %53
+  %55 = mov.short -1
+  %56 = vbcst.32 %55
+  %57 = vsub.32 %41, %52
+  %58 = veqz.32.el.low32 %57
+  %59 = predicate.complete.zero.high32 %58, 0
+  %60 = vsel.32.mask64 %lhs, %52, %59
+  %61 = vlt.s32x16.el.low32 %60, %52
+  %62 = predicate.complete.zero.high32 %61, 0
+  %63 = vadd.32 %60, %54
+  %64 = vsub.32 %56, %60
+  %65 = vsel.32.mask64 %63, %64, %62
+  %66 = vsub.32 %42, %52
+  %67 = veqz.32.el.low32 %66
+  %68 = predicate.complete.zero.high32 %67, 0
+  %69 = vsel.32.mask64 %rhs, %52, %68
+  %70 = vlt.s32x16.el.low32 %69, %52
+  %71 = predicate.complete.zero.high32 %70, 0
+  %72 = vadd.32 %69, %54
+  %73 = vsub.32 %56, %69
+  %74 = vsel.32.mask64 %72, %73, %71
+  %75 = vlt.u32x16.el.low32 %65, %74
+  %76 = predicate.complete.zero.high32 %75, 0
+  %77 = predicate.and.low32 %76, %50
+  %78 = predicate.and.high32 %76, %50, %77
+  %79 = predicate.xor.low32 %76, %78
+  %mask = predicate.xor.high32 %76, %78, %79
+  %selected = vsel.32.mask64 %false_value, %true_value, %mask
+  return %selected
+}
