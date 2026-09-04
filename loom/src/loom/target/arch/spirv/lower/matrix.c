@@ -100,6 +100,11 @@ loom_spirv_cooperative_matrix_operand_flags(
           contract_request->result.numeric_type)) {
     flags |= LOOM_SPIRV_COOPERATIVE_MATRIX_OPERAND_RESULT_SIGNED_COMPONENTS;
   }
+  if (iree_any_bit_set(
+          contract_request->result.encoded.required_capability_flags,
+          LOOM_CONTRACT_CAPABILITY_CLAMP)) {
+    flags |= LOOM_SPIRV_COOPERATIVE_MATRIX_OPERAND_SATURATING_ACCUMULATION;
+  }
   return flags;
 }
 

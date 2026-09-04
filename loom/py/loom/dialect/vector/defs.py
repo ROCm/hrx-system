@@ -222,6 +222,18 @@ VectorFragmentRole = EnumDef(
     ],
 )
 
+MmaFlags = EnumDef(
+    "MmaFlags",
+    [
+        EnumCase(
+            "saturate",
+            1,
+            doc="Clamp an integer accumulation result to its destination range.",
+        ),
+    ],
+    doc="Matrix multiply-accumulate semantic flags.",
+)
+
 IntegerDot4Kind = EnumDef(
     "IntegerDot4Kind",
     [
@@ -4001,7 +4013,8 @@ vector_mma = Op(
         "carried by vector.fragment facts on those operands. Lowering queries "
         "those facts to select native matrix instructions or a reference "
         "decomposition without baking target-specific witnesses into the MMA "
-        "syntax."
+        "syntax. The optional saturate flag clamps an integer accumulation "
+        "result to its destination range."
     ),
     operands=[
         Operand("lhs", VECTOR, doc="Physical lhs fragment vector."),
@@ -4009,10 +4022,12 @@ vector_mma = Op(
         Operand("init", VECTOR, doc="Physical accumulator/addend fragment vector."),
     ],
     results=[Result("result", VECTOR, doc="Updated accumulator/result fragment vector.")],
+    attrs=[AttrDef("flags", ATTR_TYPE_FLAGS, optional=True, enum_def=MmaFlags)],
     constraints=[SameType("init", "result")],
     facts="loom_vector_mma_facts",
     traits=[PURE],
     format=[
+        Flags("flags"),
         Ref("lhs"),
         COMMA,
         Ref("rhs"),
@@ -4027,6 +4042,7 @@ vector_mma = Op(
     ],
     examples=[
         "%r = vector.mma %lhs, %rhs, %init : vector<8xf16>, vector<8xf16>, vector<8xf32>",
+        "%r = vector.mma<saturate> %lhs, %rhs, %init : vector<32xi8>, vector<32xi8>, vector<8xi32>",
         "%r = vector.mma %lhs, %rhs, %init : vector<6xi32>, vector<6xi32>, vector<8xf32>",
     ],
 )
