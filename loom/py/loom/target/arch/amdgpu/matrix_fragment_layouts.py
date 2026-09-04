@@ -57,6 +57,51 @@ def _role(
     )
 
 
+def _mfma_result_axes(
+    *,
+    wave_size: int,
+    block_count: int,
+    row_count: int,
+    column_count: int,
+    group_height: int,
+) -> tuple[MatrixFragmentAxisLayout | None, ...]:
+    """Builds the ISA B_I/M_I/G factorization for MFMA result VGPRs."""
+
+    if group_height <= 0 or row_count % group_height != 0:
+        raise ValueError("MFMA output rows cannot be factored over the group height")
+    elements_per_output_plane = column_count * row_count // group_height
+    blocks_per_item = (
+        wave_size + elements_per_output_plane - 1
+    ) // elements_per_output_plane
+    if wave_size % (blocks_per_item * column_count) != 0:
+        raise ValueError("MFMA output lanes cannot be factored over blocks and columns")
+    lane_row_count = wave_size // blocks_per_item // column_count
+    if (
+        block_count % blocks_per_item != 0
+        or row_count % (group_height * lane_row_count) != 0
+    ):
+        raise ValueError("MFMA output items cannot be factored over blocks and rows")
+    row_group_count = row_count // group_height // lane_row_count
+    return _axes(
+        block=(
+            None
+            if block_count == 1
+            else _axis(
+                outer=block_count // blocks_per_item,
+                thread=blocks_per_item,
+                stride=column_count * lane_row_count,
+            )
+        ),
+        row=_axis(
+            outer=row_group_count,
+            thread=lane_row_count,
+            stride=column_count,
+            element=group_height,
+        ),
+        column=_axis(thread=column_count),
+    )
+
+
 def _single_tile_layout(
     key: str,
     *,
@@ -70,6 +115,7 @@ def _single_tile_layout(
     rhs_element_bit_count: int,
     result_payload_element_count: int,
     result_element_bit_count: int = 32,
+    mfma_result_group_height: int | None = None,
     lhs_reduction_group: MatrixFragmentReductionGroup | None = None,
     lhs_lane_replication: int = 1,
     rhs_lane_replication: int = 1,
@@ -121,13 +167,23 @@ def _single_tile_layout(
             ),
         ),
     )
-    result_axes = _axes(
-        row=_axis(
-            thread=result_column_thread_count,
-            stride=column_count,
-            element=result_payload_element_count,
-        ),
-        column=_axis(thread=column_count),
+    result_axes = (
+        _axes(
+            row=_axis(
+                thread=result_column_thread_count,
+                stride=column_count,
+                element=result_payload_element_count,
+            ),
+            column=_axis(thread=column_count),
+        )
+        if mfma_result_group_height is None
+        else _mfma_result_axes(
+            wave_size=wave_size,
+            block_count=1,
+            row_count=row_count,
+            column_count=column_count,
+            group_height=mfma_result_group_height,
+        )
     )
     return AmdgpuMatrixFragmentLayout(
         key=key,
@@ -149,34 +205,6 @@ def _single_tile_layout(
         ),
         family=family,
     )
-
-
-_BLOCKED_MFMA_RESULT_AXES = {
-    (16, 4): _axes(
-        block=_axis(thread=16, stride=4),
-        row=_axis(element=4),
-        column=_axis(thread=4),
-    ),
-    (4, 16): _axes(
-        block=_axis(element=4),
-        row=_axis(thread=4, stride=16, element=4),
-        column=_axis(thread=16),
-    ),
-    (2, 32): _axes(
-        block=_axis(outer=2),
-        row=_axis(outer=4, thread=2, stride=32, element=4),
-        column=_axis(thread=32),
-    ),
-}
-
-
-def _blocked_mfma_result_axes(
-    block_count: int, row_count: int
-) -> tuple[MatrixFragmentAxisLayout | None, ...]:
-    axes = _BLOCKED_MFMA_RESULT_AXES.get((block_count, row_count))
-    if axes is not None:
-        return axes
-    raise ValueError(f"unsupported blocked MFMA result shape {block_count}x{row_count}")
 
 
 def _blocked_mfma_layout(
@@ -210,7 +238,13 @@ def _blocked_mfma_layout(
             reduction=_axis(element=reduction_count),
         ),
     )
-    result_axes = _blocked_mfma_result_axes(block_count, row_count)
+    result_axes = _mfma_result_axes(
+        wave_size=64,
+        block_count=block_count,
+        row_count=row_count,
+        column_count=row_count,
+        group_height=1 if result_element_bit_count == 64 else 4,
+    )
     return AmdgpuMatrixFragmentLayout(
         key=key,
         wave_size=64,
@@ -253,10 +287,12 @@ def _blocked_f64_mfma_layout(key: str) -> AmdgpuMatrixFragmentLayout:
             reduction=_axis(thread=4, stride=16),
         ),
     )
-    result_axes = _axes(
-        block=_axis(thread=4, stride=4),
-        row=_axis(thread=4, stride=16),
-        column=_axis(thread=4),
+    result_axes = _mfma_result_axes(
+        wave_size=64,
+        block_count=4,
+        row_count=4,
+        column_count=4,
+        group_height=1,
     )
     return AmdgpuMatrixFragmentLayout(
         key=key,
@@ -359,6 +395,7 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
         lhs_element_bit_count=16,
         rhs_element_bit_count=16,
         result_payload_element_count=4,
+        mfma_result_group_height=4,
     ),
     _single_tile_layout(
         "cdna_mfma_f32_16x16x16_bf16",
@@ -371,6 +408,7 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
         lhs_element_bit_count=16,
         rhs_element_bit_count=16,
         result_payload_element_count=4,
+        mfma_result_group_height=4,
     ),
     _single_tile_layout(
         "cdna_mfma_f32_16x16x4_f32",
@@ -383,6 +421,7 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
         lhs_element_bit_count=32,
         rhs_element_bit_count=32,
         result_payload_element_count=4,
+        mfma_result_group_height=4,
     ),
     _single_tile_layout(
         "cdna_mfma_f64_16x16x4_f64",
@@ -396,6 +435,7 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
         rhs_element_bit_count=64,
         result_payload_element_count=4,
         result_element_bit_count=64,
+        mfma_result_group_height=1,
     ),
     *(
         _blocked_mfma_layout(
@@ -657,6 +697,7 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
             lhs_element_bit_count=source_element_bit_count,
             rhs_element_bit_count=source_element_bit_count,
             result_payload_element_count=result_payload_element_count,
+            mfma_result_group_height=4,
         )
         for (
             key,
@@ -683,6 +724,30 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     ),
     *(
         _single_tile_layout(
+            (
+                f"cdna4_mfma_f32_{row_count}x{column_count}x"
+                f"{reduction_count}_{lhs_format.token}_{rhs_format.token}"
+            ),
+            wave_size=64,
+            row_count=row_count,
+            column_count=column_count,
+            reduction_count=reduction_count,
+            lhs_payload_element_count=32,
+            rhs_payload_element_count=32,
+            lhs_element_bit_count=lhs_format.element_bit_count,
+            rhs_element_bit_count=rhs_format.element_bit_count,
+            result_payload_element_count=result_payload_element_count,
+            mfma_result_group_height=4,
+        )
+        for row_count, column_count, reduction_count, result_payload_element_count in (
+            (16, 16, 128, 4),
+            (32, 32, 64, 16),
+        )
+        for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+        for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+    ),
+    *(
+        _single_tile_layout(
             key,
             wave_size=wave_size,
             row_count=row_count,
@@ -694,6 +759,7 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
             rhs_element_bit_count=source_element_bit_count,
             result_payload_element_count=result_payload_element_count,
             result_element_bit_count=result_element_bit_count,
+            mfma_result_group_height=4 if family == "smfmac" else None,
             lhs_reduction_group=_STRUCTURED_2_TO_4_REDUCTION_GROUP,
             family=family,
         )

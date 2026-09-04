@@ -77,6 +77,7 @@ class VectorContractionMixin:
     def mma(
         self,
         *,
+        flags: str = ...,
         lhs: ValueRef,
         rhs: ValueRef,
         init: ValueRef,

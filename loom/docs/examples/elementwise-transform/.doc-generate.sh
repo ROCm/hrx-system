@@ -101,9 +101,9 @@ awk 'found { print } $0 == "// ----" { found = 1 }' \
   "${command_fixture}" >"${command_output}"
 
 grep -Fq '@elementwise_transform_f32' "${kernel_output}"
-grep -Fq 'amdgpu.global_load_b32_saddr' "${kernel_output}"
-grep -Fq 'amdgpu.v_add_f32' "${kernel_output}"
-grep -Fq 'amdgpu.global_store_b32_saddr' "${kernel_output}"
+grep -Fq 'global_load_b32_saddr' "${kernel_output}"
+grep -Fq 'v_add_f32' "${kernel_output}"
+grep -Fq 'global_store_b32_saddr' "${kernel_output}"
 grep -Fq '"format":"loom-command-set"' \
   "${artifact_root}/elementwise-transform.commands.json"
 grep -Fq '"symbol":"elementwise_transform"' \

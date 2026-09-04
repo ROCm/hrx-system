@@ -905,10 +905,19 @@ bool loom_contract_request_from_vector_mma_op(
   out_request->capability_class = options->capability_class;
   out_request->policy = options->policy;
   out_request->arithmetic = loom_contract_vector_mma_arithmetic(out_request);
-  // vector.mma has ordinary arithmetic semantics, so a target instruction's
-  // optional integer saturation control is known to be disabled.
+  const bool saturates = iree_any_bit_set(loom_vector_mma_flags(op),
+                                          LOOM_VECTOR_MMAFLAGS_SATURATE);
+  if (saturates &&
+      out_request->arithmetic != LOOM_CONTRACT_ARITHMETIC_INTEGER_DOT) {
+    return loom_contract_vector_mma_fail(LOOM_CONTRACT_REJECTION_NUMERIC,
+                                         out_diagnostic);
+  }
   out_request->result.encoded.available_capability_flags |=
       LOOM_CONTRACT_CAPABILITY_CLAMP;
+  if (saturates) {
+    out_request->result.encoded.required_capability_flags |=
+        LOOM_CONTRACT_CAPABILITY_CLAMP;
+  }
   if (!loom_contract_request_validate(out_request, out_diagnostic)) {
     return false;
   }

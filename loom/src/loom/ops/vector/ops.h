@@ -190,6 +190,9 @@ enum {
 #define LOOM_VECTOR_INTOVERFLOWFLAGS_NSW ((uint8_t)1)
 #define LOOM_VECTOR_INTOVERFLOWFLAGS_NUW ((uint8_t)2)
 
+// Matrix multiply-accumulate semantic flags.
+#define LOOM_VECTOR_MMAFLAGS_SATURATE ((uint8_t)1)
+
 typedef enum loom_vector_role_e {
   LOOM_VECTOR_ROLE_LHS = 0,
   LOOM_VECTOR_ROLE_RHS = 1,
@@ -3152,15 +3155,17 @@ iree_status_t loom_vector_dot4f8_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_MMA: Compute a matrix multiply-accumulate over target-shaped vector fragments. The op consumes only the physical lhs, rhs, and init vectors; logical M/N/K shape, fragment role, packed storage schema, scales, codebooks, sparse metadata, and other interpretation data are carried by vector.fragment facts on those operands. Lowering queries those facts to select native matrix instructions or a reference decomposition without baking target-specific witnesses into the MMA syntax.
+// LOOM_OP_VECTOR_MMA: Compute a matrix multiply-accumulate over target-shaped vector fragments. The op consumes only the physical lhs, rhs, and init vectors; logical M/N/K shape, fragment role, packed storage schema, scales, codebooks, sparse metadata, and other interpretation data are carried by vector.fragment facts on those operands. Lowering queries those facts to select native matrix instructions or a reference decomposition without baking target-specific witnesses into the MMA syntax. The optional saturate flag clamps an integer accumulation result to its destination range.
 // %r = vector.mma %lhs, %rhs, %init : vector<8xf16>, vector<8xf16>, vector<8xf32>
 LOOM_DEFINE_ISA(loom_vector_mma_isa, LOOM_OP_VECTOR_MMA)
 LOOM_DEFINE_OPERAND(loom_vector_mma_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_vector_mma_rhs, 1)
 LOOM_DEFINE_OPERAND(loom_vector_mma_init, 2)
 LOOM_DEFINE_RESULT(loom_vector_mma_result, 0)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_mma_flags)
 iree_status_t loom_vector_mma_build(
     loom_builder_t* builder,
+    uint8_t instance_flags,
     loom_may_consume loom_value_id_t lhs,
     loom_may_consume loom_value_id_t rhs,
     loom_may_consume loom_value_id_t init,

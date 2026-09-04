@@ -350,6 +350,16 @@ def test_generation_audits_cdna_dense_mfma_f32_layout_surface() -> None:
     assert missing == ()
 
 
+def test_generation_audits_cdna4_f8f6f4_fragment_layout_surface() -> None:
+    contracts = tuple(contract for contract in AMDGPU_MATRIX_CONTRACTS if contract.family == "mfma" and "matrix_formats" in contract.flags)
+
+    assert len(contracts) == 36
+    assert all(contract.fragment_layout is not None for contract in contracts)
+    assert {contract.fragment_layout for contract in contracts if contract.fragment_layout is not None} == {
+        f"cdna4_mfma_f32_{m}x{n}x{k}_{lhs}_{rhs}" for m, n, k in ((16, 16, 128), (32, 32, 64)) for lhs in ("f8", "f6", "f4") for rhs in ("f8", "f6", "f4")
+    }
+
+
 def test_generation_validates_every_referenced_fragment_layout() -> None:
     referenced_layouts = {contract.fragment_layout for contract in AMDGPU_MATRIX_CONTRACTS if contract.fragment_layout is not None}
 

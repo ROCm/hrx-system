@@ -20,10 +20,14 @@ from loom.target.arch.amdgpu.matrix_fragment_layout import (
 from loom.target.arch.amdgpu.matrix_fragment_layout_adaptation import (
     matrix_fragment_native_contraction_facts,
     matrix_fragment_packed_element_axis,
+    matrix_fragment_role_storage_coordinate_map,
 )
 from loom.target.arch.amdgpu.matrix_fragment_layout_recipes import (
     MatrixFragmentPackedB16PublicationProjection,
     matrix_fragment_packed_b16_publication_projection,
+)
+from loom.target.arch.amdgpu.matrix_fragment_layouts import (
+    AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
 )
 from loom.target.native_layout_facts import NativeLayoutEvidence
 
@@ -219,3 +223,89 @@ def test_validation_accepts_elements_that_straddle_registers() -> None:
 
     validate_matrix_fragment_layout(layout)
     assert layout.lhs.register_count == 3
+
+
+def test_cdna_dense_input_layouts_match_isa_lane_equations() -> None:
+    """Exhaustively checks the general CDNA MFMA input-layout equations."""
+
+    layouts = tuple(
+        layout
+        for key, layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY.items()
+        if key.startswith(("cdna_mfma_", "cdna4_mfma_"))
+    )
+    assert layouts
+
+    for layout in layouts:
+        block_count, row_count, column_count, reduction_count = layout.tile_shape
+        assert layout.wave_size == 64
+        for role, lane_dimension in (
+            (layout.lhs, row_count),
+            (layout.rhs, column_count),
+        ):
+            lane_group_count = layout.wave_size // (lane_dimension * block_count)
+            reduction_items_per_lane = reduction_count // lane_group_count
+            assert role.coordinate_element_count == reduction_items_per_lane
+            coordinate_map = matrix_fragment_role_storage_coordinate_map(layout, role)
+
+            for lane in range(layout.wave_size):
+                lane_group = lane // lane_dimension
+                block = lane_group % block_count
+                lane_reduction_group = lane_group // block_count
+                for item in range(reduction_items_per_lane):
+                    reduction = item + (reduction_items_per_lane * lane_reduction_group)
+                    expected = (
+                        (block, lane % row_count, reduction)
+                        if role.role == "lhs"
+                        else (block, reduction, lane % column_count)
+                    )
+                    assert coordinate_map.evaluate((lane, item)) == expected, (
+                        layout.key,
+                        role.role,
+                        lane,
+                        item,
+                    )
+
+
+def test_cdna_result_layouts_match_isa_lane_equations() -> None:
+    """Exhaustively checks the general CDNA MFMA output-layout equations."""
+
+    layouts = tuple(
+        layout
+        for key, layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY.items()
+        if key.startswith(("cdna_mfma_", "cdna4_mfma_", "cdna_smfmac_"))
+    )
+    assert layouts
+
+    for layout in layouts:
+        block_count, row_count, column_count, _ = layout.tile_shape
+        for role in (layout.accumulator, layout.result):
+            group_height = 1 if role.element_bit_count == 64 else 4
+            elements_per_output_plane = column_count * row_count // group_height
+            blocks_per_item = (
+                layout.wave_size + elements_per_output_plane - 1
+            ) // elements_per_output_plane
+            lane_row_count = layout.wave_size // blocks_per_item // column_count
+            row_group_count = row_count // group_height // lane_row_count
+            coordinate_map = matrix_fragment_role_storage_coordinate_map(layout, role)
+
+            for lane in range(layout.wave_size):
+                block_in_item = (
+                    lane // (column_count * lane_row_count)
+                ) % blocks_per_item
+                row_in_lane = (lane // column_count) % lane_row_count
+                column = lane % column_count
+                for item in range(role.coordinate_element_count):
+                    row_in_group = item % group_height
+                    outer_item = item // group_height
+                    row_group = outer_item % row_group_count
+                    block_group = outer_item // row_group_count
+                    block = block_in_item + blocks_per_item * block_group
+                    row = row_in_group + group_height * (
+                        row_in_lane + lane_row_count * row_group
+                    )
+                    assert block < block_count
+                    assert coordinate_map.evaluate((lane, item)) == (
+                        block,
+                        row,
+                        column,
+                    ), (layout.key, role.role, lane, item)

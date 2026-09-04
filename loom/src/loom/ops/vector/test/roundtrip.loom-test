@@ -463,6 +463,15 @@ func.def @matrix_fragments(%lhs: vector<6xi32>, %rhs: vector<6xi32>, %acc: vecto
 
 // ====
 
+// Saturation is source arithmetic semantics, independent of the target
+// representation eventually selected for the fragments.
+func.def @integer_matrix_mma_saturation(%lhs: vector<32xi8>, %rhs: vector<32xi8>, %init: vector<8xi32>) -> (vector<8xi32>) {
+  %result = vector.mma<saturate> %lhs, %rhs, %init : vector<32xi8>, vector<32xi8>, vector<8xi32>
+  func.return %result : vector<8xi32>
+}
+
+// ====
+
 // A leading block extent describes independent native matrices carried by one
 // physical fragment payload. The named block dimension keeps row/column guard
 // fields stable while making the rank-3 contract explicit to authors.

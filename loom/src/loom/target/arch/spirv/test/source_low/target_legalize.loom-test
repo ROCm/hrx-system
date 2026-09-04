@@ -128,6 +128,17 @@ func.def target(@target) @rejects_missing_cooperative_matrix_operand_flags(%lhs_
   func.return %result : vector<8xi32>
 }
 
+func.def target(@target) @keeps_supported_saturating_cooperative_matrix_contract(%lhs_data: vector<32xi8>, %rhs_data: vector<32xi8>, %init_data: vector<8xi32>) -> (vector<8xi32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 32 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<32xi8>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<32xi8>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xi32>
+  %result = vector.mma<saturate> %lhs, %rhs, %init : vector<32xi8>, vector<32xi8>, vector<8xi32>
+  func.return %result : vector<8xi32>
+}
+
 // ====
 // RUN: pass target-legalize{mode=final}
 
