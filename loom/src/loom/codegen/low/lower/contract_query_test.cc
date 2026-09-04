@@ -552,8 +552,8 @@ TEST_F(LowContractQuerySourceMemoryTest,
       module_, loom_func_like_body(function_), &analysis_arena_,
       &value_domain));
   loom_symbolic_expr_context_t expression_context = {};
-  loom_symbolic_expr_context_initialize(module_, &facts, &analysis_arena_,
-                                        &expression_context);
+  loom_symbolic_expr_context_initialize(module_, &value_domain, &facts,
+                                        &analysis_arena_, &expression_context);
   loom_view_region_table_t view_regions = {};
   IREE_ASSERT_OK(loom_view_region_table_initialize(
       &value_domain, &expression_context, &view_regions));

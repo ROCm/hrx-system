@@ -239,8 +239,8 @@ class ViewRegionsTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
         module_, loom_func_like_body(function_), &analysis_arena_,
         &value_domain_));
-    loom_symbolic_expr_context_initialize(module_, facts, &analysis_arena_,
-                                          &expression_context_);
+    loom_symbolic_expr_context_initialize(
+        module_, &value_domain_, facts, &analysis_arena_, &expression_context_);
     IREE_ASSERT_OK(loom_view_region_table_initialize(
         &value_domain_, &expression_context_, out_table));
     IREE_ASSERT_OK(loom_view_region_table_analyze(out_table));

@@ -718,8 +718,9 @@ static iree_status_t loom_amdgpu_collect_fragment_store_epilogue_group(
   }
 
   loom_symbolic_expr_context_t expression_context = {0};
-  loom_symbolic_expr_context_initialize(context->module, context->fact_table,
-                                        context->arena, &expression_context);
+  loom_symbolic_expr_context_initialize(context->module, context->value_domain,
+                                        context->fact_table, context->arena,
+                                        &expression_context);
   IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_rectangle_from_op(
       &expression_context, current_op, &rectangles[0], &selected));
   if (!selected) {

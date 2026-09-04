@@ -19,6 +19,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
+#include "loom/ir/local_value_domain.h"
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/rewriter.h"
 
@@ -57,6 +58,12 @@ iree_status_t loom_type_propagator_prepare_region(
 // wrapper around loom_type_propagator_prepare_region.
 iree_status_t loom_type_propagator_prepare_function(
     loom_type_propagator_t* propagator, loom_func_like_t function);
+
+// Returns the active region-local value domain. The propagator retains
+// ownership; sibling analyses may register rewrite-created values but must not
+// release the domain.
+loom_local_value_domain_t* loom_type_propagator_value_domain(
+    loom_type_propagator_t* propagator);
 
 // Returns true when applying the type propagator to |op| may commit a type
 // change. This is a cheap prefilter for pass hot paths: false means the op has

@@ -1914,7 +1914,8 @@ iree_status_t loom_vector_memory_footprint_verify_function(
       .fact_table = options->fact_table,
       .result = out_result,
   };
-  loom_symbolic_expr_context_initialize(module, state.fact_table, &arena,
+  loom_symbolic_expr_context_initialize(module, /*value_domain=*/NULL,
+                                        state.fact_table, &arena,
                                         &state.expression_context);
 
   iree_status_t status =

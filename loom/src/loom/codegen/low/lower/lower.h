@@ -980,8 +980,8 @@ const loom_low_lower_abi_argument_t* loom_low_lower_context_argument_map(
     const loom_low_lower_context_t* context, uint16_t* out_argument_count);
 
 // Returns the active function-local source value domain for this lowering run.
-const loom_local_value_domain_t* loom_low_lower_context_value_domain(
-    const loom_low_lower_context_t* context);
+loom_local_value_domain_t* loom_low_lower_context_value_domain(
+    loom_low_lower_context_t* context);
 
 // Returns the source function name used in source-to-low diagnostics.
 iree_string_view_t loom_low_lower_context_function_name(

@@ -25,6 +25,7 @@
 #include "loom/analysis/integer_relation.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/ir.h"
+#include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 #include "loom/util/fact_table.h"
 
@@ -102,18 +103,20 @@ typedef struct loom_condition_query_frame_t loom_condition_query_frame_t;
 typedef struct loom_condition_query_t {
   // Module containing every queried condition value.
   const loom_module_t* module;
+  // Optional active domain mapping module value IDs to compact local ordinals.
+  loom_local_value_domain_t* value_domain;
   // Arena retaining indexed state and worklist capacity.
   iree_arena_allocator_t* arena;
-  // Per-value visitation or memo state for the active query.
+  // Per-value visitation or memo state indexed by storage ordinal.
   uint8_t* value_states;
   // Allocated entry count in value_states.
   iree_host_size_t value_state_capacity;
-  // Value IDs whose state must be cleared when the active query completes.
-  loom_value_id_t* touched_values;
-  // Number of populated entries in touched_values.
-  iree_host_size_t touched_value_count;
-  // Allocated entry count in touched_values.
-  iree_host_size_t touched_value_capacity;
+  // Storage ordinals whose state must be cleared after the active query.
+  loom_value_ordinal_t* touched_ordinals;
+  // Number of populated entries in touched_ordinals.
+  iree_host_size_t touched_ordinal_count;
+  // Allocated entry count in touched_ordinals.
+  iree_host_size_t touched_ordinal_capacity;
   // Explicit traversal frames for the active query.
   loom_condition_query_frame_t* frames;
   // Number of active entries in frames.
@@ -123,8 +126,11 @@ typedef struct loom_condition_query_t {
 } loom_condition_query_t;
 
 // Initializes reusable query state without allocating. |module| and |arena|
-// must remain valid for the complete query lifetime.
+// must remain valid for the complete query lifetime. When provided,
+// |value_domain| must remain acquired for that lifetime and may be extended by
+// queries that encounter rewrite-created values.
 void loom_condition_query_initialize(const loom_module_t* module,
+                                     loom_local_value_domain_t* value_domain,
                                      iree_arena_allocator_t* arena,
                                      loom_condition_query_t* out_query);
 

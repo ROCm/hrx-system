@@ -311,6 +311,12 @@ iree_status_t loom_type_propagator_prepare_function(
       propagator, loom_func_like_body(function), function.op);
 }
 
+loom_local_value_domain_t* loom_type_propagator_value_domain(
+    loom_type_propagator_t* propagator) {
+  IREE_ASSERT(loom_local_value_domain_is_acquired(&propagator->value_domain));
+  return &propagator->value_domain;
+}
+
 static bool loom_type_propagator_type_has_refinement_surface(loom_type_t type) {
   if ((loom_type_is_shaped(type) || loom_type_is_pool(type)) &&
       !loom_type_is_all_static(type)) {

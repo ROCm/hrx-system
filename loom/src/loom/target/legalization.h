@@ -115,8 +115,8 @@ typedef struct loom_target_legalization_context_t {
   const loom_value_fact_table_t* fact_table;
   // Analyzed view-region table visible to legalizers.
   const loom_view_region_table_t* view_regions;
-  // Dense function-local value domain valid for the current callback.
-  const loom_local_value_domain_t* value_domain;
+  // Function-local value domain extendable during the current callback.
+  loom_local_value_domain_t* value_domain;
   // Active rewriter for mutating the function body.
   loom_rewriter_t* rewriter;
   // Current legalization phase.

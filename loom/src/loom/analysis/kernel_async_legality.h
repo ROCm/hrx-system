@@ -26,8 +26,8 @@ extern "C" {
 #endif
 
 typedef struct loom_kernel_async_legality_options_t {
-  // Active local value domain for the function being verified.
-  const loom_local_value_domain_t* value_domain;
+  // Active local value domain extended by analyses as values are discovered.
+  loom_local_value_domain_t* value_domain;
   // Borrowed function-local value facts. The analysis only reads this table.
   loom_value_fact_table_t* fact_table;
   // Structured diagnostic emitter for user legality failures.

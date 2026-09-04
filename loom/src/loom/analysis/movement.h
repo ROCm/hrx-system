@@ -256,8 +256,8 @@ typedef struct loom_movement_analysis_t {
 // The domain must remain active until the analysis is dead.
 iree_status_t loom_movement_analysis_initialize(
     const loom_value_fact_table_t* fact_table,
-    const loom_local_value_domain_t* value_domain,
-    iree_arena_allocator_t* arena, loom_movement_analysis_t* out_analysis);
+    loom_local_value_domain_t* value_domain, iree_arena_allocator_t* arena,
+    loom_movement_analysis_t* out_analysis);
 
 // Pre-analyzes all view regions reachable from the analysis value domain.
 iree_status_t loom_movement_analysis_analyze(

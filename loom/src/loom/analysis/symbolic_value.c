@@ -52,6 +52,37 @@ static iree_status_t loom_symbolic_value_ensure_condition_fact_memo_capacity(
   return iree_ok_status();
 }
 
+static iree_status_t loom_symbolic_value_resolve_value_ordinal(
+    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    loom_value_ordinal_t* out_value_ordinal) {
+  if (context->value_domain != NULL) {
+    return loom_local_value_domain_register_value(
+        context->value_domain, context->arena, value_id, out_value_ordinal);
+  }
+  *out_value_ordinal = (loom_value_ordinal_t)value_id;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_symbolic_value_touch_condition_fact_memo_ordinal(
+    loom_symbolic_expr_context_t* context, loom_value_ordinal_t value_ordinal) {
+  if (context->condition_fact_memo_entries[value_ordinal].state !=
+      LOOM_SYMBOLIC_VALUE_CONDITION_FACT_MEMO_EMPTY) {
+    return iree_ok_status();
+  }
+  if (context->touched_condition_fact_memo_ordinal_count >=
+      context->touched_condition_fact_memo_ordinal_capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        context->arena, context->touched_condition_fact_memo_ordinal_count,
+        context->touched_condition_fact_memo_ordinal_count + 1,
+        sizeof(*context->touched_condition_fact_memo_ordinals),
+        &context->touched_condition_fact_memo_ordinal_capacity,
+        (void**)&context->touched_condition_fact_memo_ordinals));
+  }
+  context->touched_condition_fact_memo_ordinals
+      [context->touched_condition_fact_memo_ordinal_count++] = value_ordinal;
+  return iree_ok_status();
+}
+
 static loom_value_facts_t loom_symbolic_value_intersect_integer_facts(
     loom_value_facts_t lhs, loom_value_facts_t rhs) {
   if (loom_value_facts_is_unknown(lhs) || loom_value_facts_is_float(lhs)) {
@@ -85,6 +116,9 @@ static bool loom_symbolic_value_constant_expression(
 typedef struct loom_symbolic_expr_condition_fact_frame_t {
   // SSA value whose facts this frame computes.
   loom_value_id_t value_id;
+
+  // Context storage ordinal for value_id.
+  loom_value_ordinal_t value_ordinal;
 
   // Remaining producer depth available to operand frames.
   uint8_t remaining_depth;
@@ -124,10 +158,13 @@ static iree_status_t loom_symbolic_expr_condition_fact_frame_begin(
                                                    out_facts);
   }
 
+  loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
+  IREE_RETURN_IF_ERROR(loom_symbolic_value_resolve_value_ordinal(
+      context, value_id, &value_ordinal));
   IREE_RETURN_IF_ERROR(loom_symbolic_value_ensure_condition_fact_memo_capacity(
-      context, value_id + 1));
+      context, (iree_host_size_t)value_ordinal + 1));
   loom_symbolic_expr_condition_fact_memo_entry_t* memo_entry =
-      &context->condition_fact_memo_entries[value_id];
+      &context->condition_fact_memo_entries[value_ordinal];
   if (memo_entry->state == LOOM_SYMBOLIC_VALUE_CONDITION_FACT_MEMO_READY &&
       memo_entry->depth >= remaining_depth) {
     *out_facts = memo_entry->facts;
@@ -144,6 +181,9 @@ static iree_status_t loom_symbolic_expr_condition_fact_frame_begin(
     *out_facts = facts;
     return iree_ok_status();
   }
+
+  IREE_RETURN_IF_ERROR(loom_symbolic_value_touch_condition_fact_memo_ordinal(
+      context, value_ordinal));
 
   const loom_value_t* value = loom_module_value(context->module, value_id);
   const loom_op_t* defining_op =
@@ -166,6 +206,7 @@ static iree_status_t loom_symbolic_expr_condition_fact_frame_begin(
 
   *out_frame = (loom_symbolic_expr_condition_fact_frame_t){
       .value_id = value_id,
+      .value_ordinal = value_ordinal,
       .remaining_depth = remaining_depth,
       .next_operand = 0,
       .defining_op = defining_op,
@@ -257,7 +298,7 @@ static iree_status_t loom_symbolic_value_lookup_condition_refined_facts_bounded(
     // Preparing operand frames can grow and move the memo table. Reacquire the
     // entry before publishing the completed facts.
     loom_symbolic_expr_condition_fact_memo_entry_t* memo_entry =
-        &context->condition_fact_memo_entries[frame->value_id];
+        &context->condition_fact_memo_entries[frame->value_ordinal];
     memo_entry->facts = *frame->out_facts;
     memo_entry->depth = frame->remaining_depth;
     memo_entry->state = LOOM_SYMBOLIC_VALUE_CONDITION_FACT_MEMO_READY;

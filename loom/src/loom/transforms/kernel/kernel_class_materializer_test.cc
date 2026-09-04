@@ -218,7 +218,8 @@ kernel.def @classified() {
   IREE_ASSERT_OK(loom_value_fact_table_compute(&kernel_facts,
                                                source_module.get(), kernel));
   loom_symbolic_expr_context_t expression_context = {};
-  loom_symbolic_expr_context_initialize(source_module.get(), &kernel_facts,
+  loom_symbolic_expr_context_initialize(source_module.get(),
+                                        /*value_domain=*/nullptr, &kernel_facts,
                                         &analysis_arena, &expression_context);
   const loom_template_applicability_target_t kernel_target = {};
   loom_kernel_class_classifier_t classifier = {};
@@ -472,7 +473,8 @@ kernel.def @classified() {
   IREE_ASSERT_OK(loom_value_fact_table_compute(&kernel_facts,
                                                source_module.get(), kernel));
   loom_symbolic_expr_context_t expression_context = {};
-  loom_symbolic_expr_context_initialize(source_module.get(), &kernel_facts,
+  loom_symbolic_expr_context_initialize(source_module.get(),
+                                        /*value_domain=*/nullptr, &kernel_facts,
                                         &analysis_arena, &expression_context);
   const loom_template_applicability_target_t kernel_target = {};
   loom_kernel_class_classifier_t classifier = {};

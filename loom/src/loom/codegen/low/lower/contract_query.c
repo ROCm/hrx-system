@@ -387,8 +387,8 @@ iree_status_t loom_low_lower_query_target_contract(
     expression_context_ptr = environment->view_regions->expression_context;
   } else if (environment->arena && environment->fact_table) {
     loom_symbolic_expr_context_initialize(
-        environment->module, environment->fact_table, environment->arena,
-        &expression_context);
+        environment->module, environment->value_domain, environment->fact_table,
+        environment->arena, &expression_context);
     expression_context_ptr = &expression_context;
   }
 

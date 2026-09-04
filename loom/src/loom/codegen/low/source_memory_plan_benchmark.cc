@@ -78,7 +78,7 @@ class SourceMemoryPlanBenchmark {
         module_, loom_func_like_body(function_), &analysis_arena,
         &value_domain));
     loom_symbolic_expr_context_t expression_context = {};
-    loom_symbolic_expr_context_initialize(module_, &fact_table_,
+    loom_symbolic_expr_context_initialize(module_, &value_domain, &fact_table_,
                                           &analysis_arena, &expression_context);
     loom_view_region_table_t view_regions = {};
     IREE_CHECK_OK(loom_view_region_table_initialize(

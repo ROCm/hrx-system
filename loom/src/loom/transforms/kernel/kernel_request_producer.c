@@ -193,8 +193,8 @@ static iree_status_t loom_kernel_request_source_prepare(
   loom_symbolic_expr_context_t expression_context = {0};
   if (iree_status_is_ok(status)) {
     loom_symbolic_expr_context_initialize(materialization.product.module,
-                                          &kernel_facts, scratch_arena,
-                                          &expression_context);
+                                          /*value_domain=*/NULL, &kernel_facts,
+                                          scratch_arena, &expression_context);
   }
   loom_template_applicability_target_t kernel_target = {0};
   if (iree_status_is_ok(status)) {

@@ -33,17 +33,21 @@ struct loom_condition_query_frame_t {
 };
 
 void loom_condition_query_initialize(const loom_module_t* module,
+                                     loom_local_value_domain_t* value_domain,
                                      iree_arena_allocator_t* arena,
                                      loom_condition_query_t* out_query) {
+  IREE_ASSERT(value_domain == NULL ||
+              (loom_local_value_domain_is_acquired(value_domain) &&
+               value_domain->module == module));
   *out_query = (loom_condition_query_t){
       .module = module,
+      .value_domain = value_domain,
       .arena = arena,
   };
 }
 
 static iree_status_t loom_condition_query_ensure_value_state_capacity(
-    loom_condition_query_t* query) {
-  const iree_host_size_t required_capacity = query->module->values.count;
+    loom_condition_query_t* query, iree_host_size_t required_capacity) {
   if (required_capacity <= query->value_state_capacity) {
     return iree_ok_status();
   }
@@ -59,16 +63,36 @@ static iree_status_t loom_condition_query_ensure_value_state_capacity(
   return iree_ok_status();
 }
 
-static iree_status_t loom_condition_query_touch_value(
-    loom_condition_query_t* query, loom_value_id_t value_id) {
-  if (query->value_states[value_id] != 0) return iree_ok_status();
-  if (query->touched_value_count >= query->touched_value_capacity) {
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        query->arena, query->touched_value_count,
-        query->touched_value_count + 1, sizeof(*query->touched_values),
-        &query->touched_value_capacity, (void**)&query->touched_values));
+static iree_status_t loom_condition_query_resolve_value_ordinal(
+    loom_condition_query_t* query, loom_value_id_t value_id,
+    loom_value_ordinal_t* out_value_ordinal) {
+  if (query->value_domain != NULL) {
+    IREE_RETURN_IF_ERROR(loom_local_value_domain_register_value(
+        query->value_domain, query->arena, value_id, out_value_ordinal));
+  } else {
+    *out_value_ordinal = (loom_value_ordinal_t)value_id;
   }
-  query->touched_values[query->touched_value_count++] = value_id;
+  return loom_condition_query_ensure_value_state_capacity(
+      query, (iree_host_size_t)*out_value_ordinal + 1);
+}
+
+static loom_value_ordinal_t loom_condition_query_value_ordinal(
+    const loom_condition_query_t* query, loom_value_id_t value_id) {
+  return query->value_domain != NULL
+             ? loom_local_value_domain_ordinal(query->value_domain, value_id)
+             : (loom_value_ordinal_t)value_id;
+}
+
+static iree_status_t loom_condition_query_touch_ordinal(
+    loom_condition_query_t* query, loom_value_ordinal_t value_ordinal) {
+  if (query->value_states[value_ordinal] != 0) return iree_ok_status();
+  if (query->touched_ordinal_count >= query->touched_ordinal_capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        query->arena, query->touched_ordinal_count,
+        query->touched_ordinal_count + 1, sizeof(*query->touched_ordinals),
+        &query->touched_ordinal_capacity, (void**)&query->touched_ordinals));
+  }
+  query->touched_ordinals[query->touched_ordinal_count++] = value_ordinal;
   return iree_ok_status();
 }
 
@@ -95,15 +119,15 @@ static iree_status_t loom_condition_query_push_frame(
 static void loom_condition_query_begin(loom_condition_query_t* query) {
   IREE_ASSERT(query->module != NULL);
   IREE_ASSERT(query->arena != NULL);
-  IREE_ASSERT_EQ(query->touched_value_count, 0);
+  IREE_ASSERT_EQ(query->touched_ordinal_count, 0);
   IREE_ASSERT_EQ(query->frame_count, 0);
 }
 
 static void loom_condition_query_end(loom_condition_query_t* query) {
-  for (iree_host_size_t i = 0; i < query->touched_value_count; ++i) {
-    query->value_states[query->touched_values[i]] = 0;
+  for (iree_host_size_t i = 0; i < query->touched_ordinal_count; ++i) {
+    query->value_states[query->touched_ordinals[i]] = 0;
   }
-  query->touched_value_count = 0;
+  query->touched_ordinal_count = 0;
   query->frame_count = 0;
 }
 
@@ -425,15 +449,18 @@ static iree_status_t loom_condition_query_push_derivation(
     loom_condition_query_t* query, loom_value_id_t value_id,
     bool assumed_truth) {
   if (value_id >= query->module->values.count) return iree_ok_status();
-  IREE_RETURN_IF_ERROR(loom_condition_query_ensure_value_state_capacity(query));
+  loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
+  IREE_RETURN_IF_ERROR(loom_condition_query_resolve_value_ordinal(
+      query, value_id, &value_ordinal));
   const uint8_t visited_bit = assumed_truth
                                   ? LOOM_CONDITION_DERIVATION_VISITED_TRUE
                                   : LOOM_CONDITION_DERIVATION_VISITED_FALSE;
-  if ((query->value_states[value_id] & visited_bit) != 0) {
+  if ((query->value_states[value_ordinal] & visited_bit) != 0) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_condition_query_touch_value(query, value_id));
-  query->value_states[value_id] |= visited_bit;
+  IREE_RETURN_IF_ERROR(
+      loom_condition_query_touch_ordinal(query, value_ordinal));
+  query->value_states[value_ordinal] |= visited_bit;
   return loom_condition_query_push_frame(
       query, value_id, LOOM_CONDITION_QUERY_FRAME_DERIVE, assumed_truth);
 }
@@ -701,7 +728,9 @@ static void loom_condition_query_finish_proof_frame(
   IREE_ASSERT_GT(query->frame_count, 0);
   const loom_value_id_t value_id =
       query->frames[query->frame_count - 1].value_id;
-  query->value_states[value_id] = (uint8_t)state;
+  const loom_value_ordinal_t value_ordinal =
+      loom_condition_query_value_ordinal(query, value_id);
+  query->value_states[value_ordinal] = (uint8_t)state;
   --query->frame_count;
 }
 
@@ -710,12 +739,15 @@ static iree_status_t loom_condition_query_push_proof(
   if (value_id >= query->module->values.count) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_condition_query_ensure_value_state_capacity(query));
-  if (query->value_states[value_id] != LOOM_CONDITION_PROOF_UNVISITED) {
+  loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
+  IREE_RETURN_IF_ERROR(loom_condition_query_resolve_value_ordinal(
+      query, value_id, &value_ordinal));
+  if (query->value_states[value_ordinal] != LOOM_CONDITION_PROOF_UNVISITED) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_condition_query_touch_value(query, value_id));
-  query->value_states[value_id] = LOOM_CONDITION_PROOF_PENDING;
+  IREE_RETURN_IF_ERROR(
+      loom_condition_query_touch_ordinal(query, value_ordinal));
+  query->value_states[value_ordinal] = LOOM_CONDITION_PROOF_PENDING;
   return loom_condition_query_push_frame(query, value_id,
                                          LOOM_CONDITION_QUERY_FRAME_PROVE_ENTER,
                                          /*assumed_truth=*/false);
@@ -833,8 +865,11 @@ static iree_status_t loom_condition_query_continue_proof_frame(
   (void)has_boolean_operands;
 
   bool lhs_value = false;
+  const loom_value_ordinal_t lhs_ordinal =
+      loom_condition_query_value_ordinal(query, lhs);
   const bool lhs_known = loom_condition_proof_state_is_known(
-      (loom_condition_proof_state_t)query->value_states[lhs], &lhs_value);
+      (loom_condition_proof_state_t)query->value_states[lhs_ordinal],
+      &lhs_value);
   if (frame->phase == LOOM_CONDITION_QUERY_FRAME_PROVE_AFTER_LEFT) {
     if ((defining_op->kind == LOOM_OP_SCALAR_ANDI && lhs_known && !lhs_value) ||
         (defining_op->kind == LOOM_OP_SCALAR_ORI && lhs_known && lhs_value)) {
@@ -848,8 +883,11 @@ static iree_status_t loom_condition_query_continue_proof_frame(
   }
 
   bool rhs_value = false;
+  const loom_value_ordinal_t rhs_ordinal =
+      loom_condition_query_value_ordinal(query, rhs);
   const bool rhs_known = loom_condition_proof_state_is_known(
-      (loom_condition_proof_state_t)query->value_states[rhs], &rhs_value);
+      (loom_condition_proof_state_t)query->value_states[rhs_ordinal],
+      &rhs_value);
   loom_condition_proof_state_t result = LOOM_CONDITION_PROOF_UNKNOWN;
   switch (defining_op->kind) {
     case LOOM_OP_SCALAR_ANDI:
@@ -909,8 +947,10 @@ iree_status_t loom_condition_fact_set_proves_condition(
   }
   if (iree_status_is_ok(status) &&
       condition_value < query->module->values.count) {
+    const loom_value_ordinal_t condition_ordinal =
+        loom_condition_query_value_ordinal(query, condition_value);
     *out_proven = loom_condition_proof_state_is_known(
-        (loom_condition_proof_state_t)query->value_states[condition_value],
+        (loom_condition_proof_state_t)query->value_states[condition_ordinal],
         out_condition);
   }
   loom_condition_query_end(query);

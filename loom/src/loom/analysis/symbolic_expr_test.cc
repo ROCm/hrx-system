@@ -45,6 +45,37 @@ TEST_F(SymbolicExprTest, UnknownValueIsMemoizedLinearTerm) {
       &expression_context_, value_id, &ready_summary));
 }
 
+TEST_F(SymbolicExprTest, LocalDomainRegistersHighIdsCreatedAfterAcquisition) {
+  for (iree_host_size_t i = 0; i < 4096; ++i) {
+    DefineIndexValue();
+  }
+
+  loom_local_value_domain_t value_domain = {};
+  IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
+      module_, module_->body, &analysis_arena_, &value_domain));
+  loom_symbolic_expr_context_initialize(module_, &value_domain, &fact_table_,
+                                        &analysis_arena_, &expression_context_);
+
+  loom_op_t* constant_op = BuildIndexConstant(42);
+  const loom_value_id_t value_id = loom_index_constant_result(constant_op);
+  ASSERT_GE(value_id, 4096u);
+
+  loom_symbolic_expr_t expression = {};
+  IREE_EXPECT_OK(loom_symbolic_expr_from_value(&expression_context_, value_id,
+                                               &expression));
+  EXPECT_TRUE(loom_symbolic_expr_is_constant(&expression));
+  EXPECT_EQ(expression.constant, 42);
+  EXPECT_NE(loom_local_value_domain_try_ordinal(&value_domain, value_id),
+            LOOM_VALUE_ORDINAL_INVALID);
+  EXPECT_LT(expression_context_.memo_capacity, 64u);
+
+  loom_symbolic_expr_context_reset(&expression_context_);
+  loom_symbolic_expr_summary_t summary = {};
+  EXPECT_FALSE(loom_symbolic_expr_context_try_lookup_summary(
+      &expression_context_, value_id, &summary));
+  loom_local_value_domain_release(&value_domain);
+}
+
 TEST_F(SymbolicExprTest, ExactIntegerFactsFoldToConstant) {
   loom_value_id_t value_id = DefineIndexValue();
   DefineFacts(value_id, loom_value_facts_exact_i64(42));

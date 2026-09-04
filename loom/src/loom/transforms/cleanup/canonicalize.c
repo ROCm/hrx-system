@@ -1816,14 +1816,16 @@ static iree_status_t loom_canonicalize_prepare_region(
     loom_func_like_t function, loom_region_t* region, loom_op_t* parent_op) {
   loom_canonicalize_rewrite_state_t* state =
       (loom_canonicalize_rewrite_state_t*)user_data;
-  loom_symbolic_expr_context_initialize(
-      driver->module, driver->rewriter.fact_table, driver->scratch_arena,
-      &state->expression_context);
-  state->expression_context_initialized = true;
   IREE_RETURN_IF_ERROR(loom_type_propagator_allocate(
       driver->module, driver->scratch_arena, &state->type_propagator));
-  return loom_type_propagator_prepare_region(state->type_propagator, region,
-                                             parent_op);
+  IREE_RETURN_IF_ERROR(loom_type_propagator_prepare_region(
+      state->type_propagator, region, parent_op));
+  loom_symbolic_expr_context_initialize(
+      driver->module, loom_type_propagator_value_domain(state->type_propagator),
+      driver->rewriter.fact_table, driver->scratch_arena,
+      &state->expression_context);
+  state->expression_context_initialized = true;
+  return iree_ok_status();
 }
 
 static void loom_canonicalize_cleanup_region(

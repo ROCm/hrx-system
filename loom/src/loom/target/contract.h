@@ -337,8 +337,8 @@ typedef struct loom_target_contract_query_environment_t {
   const loom_low_descriptor_set_t* descriptor_set;
   // Source value facts visible to the query.
   const loom_value_fact_table_t* fact_table;
-  // Optional active function-local value domain for ordinal-keyed analyses.
-  const loom_local_value_domain_t* value_domain;
+  // Optional active value domain extended by ordinal-keyed query analyses.
+  loom_local_value_domain_t* value_domain;
   // Optional function-local view-region analysis visible to the query.
   const loom_view_region_table_t* view_regions;
   // Scoped arena available for rare query-side auxiliary records.
