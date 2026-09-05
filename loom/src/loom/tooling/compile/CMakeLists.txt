@@ -129,6 +129,20 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    request_flags
+  HDRS
+    "request_flags.h"
+  SRCS
+    "request_flags.c"
+  DEPS
+    ::request
+    iree::base
+    iree::base::tooling::flags
+  PUBLIC
+)
+
 loom_cc_test(
   NAME
     request_test

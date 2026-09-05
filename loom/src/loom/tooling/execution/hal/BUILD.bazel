@@ -36,6 +36,7 @@ loom_cc_library(
     srcs = ["device_provider.c"],
     hdrs = ["device_provider.h"],
     deps = [
+        ":runtime",
         "//loom/src/loom/target:profile",
         "//loom/src/loom/tooling/compile:artifact",
         "//runtime/src/iree/base",
@@ -75,10 +76,37 @@ loom_cc_library(
     deps = [
         ":artifact",
         ":device_provider",
-        ":runtime",
         "//loom/src/loom/tooling/compile:options",
         "//loom/src/loom/tooling/execution:session",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "compile_request",
+    srcs = ["compile_request.c"],
+    hdrs = ["compile_request.h"],
+    deps = [
+        ":device_provider",
+        ":runtime",
+        "//loom/src/loom/tooling/compile:request",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "compile_request_test",
+    srcs = ["compile_request_test.cc"],
+    deps = [
+        ":compile_request",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/testing:context",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -104,6 +132,7 @@ loom_cc_library(
     deps = [
         ":artifact",
         ":candidate",
+        ":compile_request",
         ":device_provider",
         ":invocation",
         ":runtime",
@@ -171,14 +200,19 @@ loom_cc_library(
     deps = [
         ":artifact",
         ":candidate",
+        ":compile_request",
         ":device_provider",
         ":invocation",
         ":runtime",
         "//loom/src/loom/ir",
+        "//loom/src/loom/link:linker",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target:selection",
         "//loom/src/loom/tooling/compile:options",
+        "//loom/src/loom/tooling/compile:pipeline",
         "//loom/src/loom/tooling/compile:report_capture",
+        "//loom/src/loom/tooling/compile:request",
         "//loom/src/loom/tooling/execution:session",
         "//loom/src/loom/tooling/io:file",
         "//runtime/src/iree/base",

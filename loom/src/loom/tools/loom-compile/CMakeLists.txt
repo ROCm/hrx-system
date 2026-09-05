@@ -85,6 +85,7 @@ loom_cc_binary(
     loom::tooling::compile::pipeline
     loom::tooling::compile::report_capture
     loom::tooling::compile::request
+    loom::tooling::compile::request_flags
     loom::tooling::config
     loom::tooling::context
     loom::tooling::execution::session

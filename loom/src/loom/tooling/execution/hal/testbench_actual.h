@@ -21,8 +21,10 @@
 #include "loom/target/provider.h"
 #include "loom/tooling/compile/options.h"
 #include "loom/tooling/compile/pipeline.h"
+#include "loom/tooling/compile/request.h"
 #include "loom/tooling/execution/hal/artifact.h"
 #include "loom/tooling/execution/hal/candidate.h"
+#include "loom/tooling/execution/hal/compile_request.h"
 #include "loom/tooling/execution/hal/device_provider.h"
 #include "loom/tooling/execution/hal/invocation.h"
 #include "loom/tooling/execution/hal/runtime.h"
@@ -112,6 +114,8 @@ typedef struct loom_run_hal_testbench_actual_provider_options_t {
   const loom_run_module_t* run_module;
   // User-selected pass pipeline.
   iree_string_view_t pipeline;
+  // Shared product, format, and target constraints for this kernel compile.
+  loom_compile_request_options_t compile_request_options;
   // Sanitizer checks inserted by the target pipeline.
   loom_sanitizer_options_t sanitizer;
   // Config bindings materialized into the private compile copy.
@@ -142,6 +146,8 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   const loom_run_module_t* run_module;
   // User-selected pass pipeline.
   iree_string_view_t pipeline;
+  // Shared product, format, and target constraints for this kernel compile.
+  loom_compile_request_options_t compile_request_options;
   // Sanitizer checks inserted by the target pipeline.
   loom_sanitizer_options_t sanitizer;
   // Config bindings materialized into the private compile copy.
@@ -168,8 +174,8 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   int64_t* workload_arguments;
   // Backend-produced HAL executable candidate.
   loom_run_hal_candidate_t candidate;
-  // Target selected before the compile pipeline runs.
-  loom_device_target_t compile_device_target;
+  // Compile request and device target resolved before the pipeline runs.
+  loom_run_hal_compile_request_t compile_request;
   // Prepared executable retained for correctness and benchmark dispatches.
   loom_run_hal_prepared_candidate_t prepared_candidate;
   // Allocator-owned reflected logical parameter layout for the prepared
@@ -206,8 +212,8 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   bool compile_module_initialized;
   // True when |candidate| has been initialized.
   bool candidate_initialized;
-  // True when |compile_device_target| has been selected for this provider.
-  bool compile_device_target_initialized;
+  // True when |compile_request| has been resolved for this provider.
+  bool compile_request_resolved;
   // True when |prepared_candidate| has been initialized.
   bool prepared_candidate_initialized;
   // True when HAL candidate emission populated the caller's compile report.
@@ -229,6 +235,8 @@ typedef struct loom_run_hal_testbench_actual_sequence_options_t {
   const loom_run_module_t* run_module;
   // User-selected pass pipeline.
   iree_string_view_t pipeline;
+  // Shared product, format, and target constraints for every kernel compile.
+  loom_compile_request_options_t compile_request_options;
   // Sanitizer checks inserted by the target pipeline.
   loom_sanitizer_options_t sanitizer;
   // Config bindings materialized into each private compile copy.

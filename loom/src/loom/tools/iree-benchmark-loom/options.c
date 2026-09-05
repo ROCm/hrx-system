@@ -15,6 +15,7 @@
 #include "iree/base/tooling/flags.h"
 #include "loom/sanitizer/options.h"
 #include "loom/tooling/compile/report_capture.h"
+#include "loom/tooling/compile/request_flags.h"
 #include "loom/tooling/testbench/testbench.h"
 #include "loom/tools/iree-benchmark-loom/module_query.h"
 #include "loom/util/json.h"
@@ -241,6 +242,8 @@ iree_status_t iree_benchmark_loom_options_from_flags(
           iree_make_cstring_view(FLAG_benchmark));
   out_options->sample_ordinal = FLAG_sample;
   out_options->pipeline = iree_make_cstring_view(FLAG_pipeline);
+  out_options->compile_request_options =
+      loom_compile_request_options_from_flags((iree_string_view_list_t){0});
   const iree_flag_string_list_t config_assignments = FLAG_config_list();
   out_options->config_assignments = (iree_string_view_list_t){
       .count = config_assignments.count,

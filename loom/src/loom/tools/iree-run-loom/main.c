@@ -19,8 +19,8 @@
 #include "loom/ir/module.h"
 #include "loom/sanitizer/options.h"
 #include "loom/tooling/cli/help.h"
-#include "loom/tooling/compile/pipeline.h"
 #include "loom/tooling/compile/report_capture.h"
+#include "loom/tooling/compile/request_flags.h"
 #include "loom/tooling/context/context.h"
 #include "loom/tooling/execution/hal/one_shot.h"
 #include "loom/tooling/execution/session.h"
@@ -305,30 +305,6 @@ static iree_status_t iree_run_loom_sanitizer_options_initialize(
       out_options);
 }
 
-static iree_status_t iree_run_loom_run_pass_pipeline(
-    const iree_run_loom_configuration_t* configuration,
-    loom_run_session_t* session, loom_run_module_t* run_module,
-    const loom_compile_options_t* compile_options,
-    loom_compile_pipeline_result_t* out_result) {
-  loom_compile_pipeline_options_t pipeline_options = {0};
-  loom_compile_pipeline_options_initialize(&pipeline_options);
-  pipeline_options.pipeline = iree_make_cstring_view(FLAG_pipeline);
-  pipeline_options.target_pipeline_options =
-      compile_options->target_pipeline_options;
-  pipeline_options.target_environment = configuration->target_environment;
-  pipeline_options.low_descriptor_registry =
-      loom_run_session_low_descriptor_registry(session);
-  pipeline_options.source_resolver =
-      loom_run_module_source_resolver(run_module);
-  pipeline_options.report = compile_options->report;
-  pipeline_options.diagnostic_sink = (loom_diagnostic_sink_t){
-      .fn = loom_diagnostic_stderr_sink,
-  };
-  return loom_compile_run_pipeline(run_module->module, &pipeline_options,
-                                   loom_run_session_block_pool(session),
-                                   out_result);
-}
-
 static void iree_run_loom_print_agents_markdown(FILE* stream) {
   fprintf(
       stream,
@@ -413,6 +389,8 @@ int iree_run_loom_main(int argc, char** argv,
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
 
   iree_allocator_t allocator = iree_allocator_system();
+  const loom_compile_request_options_t compile_request_options =
+      loom_compile_request_options_from_flags((iree_string_view_list_t){0});
   if (FLAG_probe_hal) {
     loom_run_hal_one_shot_result_t probe_result = {0};
     loom_run_hal_one_shot_result_initialize(allocator, &probe_result);
@@ -420,8 +398,20 @@ int iree_run_loom_main(int argc, char** argv,
     iree_status_t probe_status = loom_device_provider_registry_select(
         configuration->device_provider_registry, iree_hal_device_flag_list(),
         allocator, &device_provider);
+    if (iree_status_is_ok(probe_status) &&
+        (!iree_string_view_is_empty(
+             iree_string_view_trim(compile_request_options.product)) ||
+         !iree_string_view_is_empty(
+             iree_string_view_trim(compile_request_options.format)))) {
+      probe_status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--probe-hal accepts --target but does not compile a --product or "
+          "--format");
+    }
     if (iree_status_is_ok(probe_status)) {
       const loom_run_hal_one_shot_probe_request_t probe_request = {
+          .target_environment = configuration->target_environment,
+          .target = compile_request_options.target,
           .host_allocator = allocator,
           .result = &probe_result,
       };
@@ -495,7 +485,6 @@ int iree_run_loom_main(int argc, char** argv,
   }
   loom_compile_options_t compile_options = {0};
   loom_compile_options_initialize(&compile_options);
-  loom_compile_pipeline_result_t pipeline_result = {0};
   if (iree_status_is_ok(status)) {
     status = iree_run_loom_sanitizer_options_initialize(
         &compile_options.target_pipeline_options.sanitizer);
@@ -533,17 +522,13 @@ int iree_run_loom_main(int argc, char** argv,
     compile_options.source_resolver =
         loom_run_module_source_resolver(&run_module);
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_run_loom_run_pass_pipeline(configuration, &session, &run_module,
-                                        &compile_options, &pipeline_result);
-    if (iree_status_is_ok(status) && pipeline_result.pass.error_count != 0) {
-      exit_code = 1;
-    }
-  }
   if (iree_status_is_ok(status) && exit_code == 0) {
     const loom_run_hal_one_shot_request_t run_request = {
+        .session = &session,
         .run_module = &run_module,
+        .target_environment = configuration->target_environment,
+        .compile_request_options = compile_request_options,
+        .pipeline = iree_make_cstring_view(FLAG_pipeline),
         .compile_options = &compile_options,
         .options = &one_shot_options,
         .compile_report_capture = &compile_report_capture,
@@ -569,7 +554,6 @@ int iree_run_loom_main(int argc, char** argv,
 
   loom_compile_report_capture_deinitialize(&compile_report_capture);
   loom_run_hal_one_shot_result_deinitialize(&run_result);
-  loom_compile_pipeline_result_deinitialize(&pipeline_result);
   loom_run_module_deinitialize(&run_module);
   iree_io_file_contents_free(contents);
   loom_run_session_deinitialize(&session);

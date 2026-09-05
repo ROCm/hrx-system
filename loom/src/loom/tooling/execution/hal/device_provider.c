@@ -8,6 +8,8 @@
 
 #include <inttypes.h>
 
+#include "loom/tooling/execution/hal/runtime.h"
+
 static iree_status_t loom_device_provider_validate_selected_target(
     const loom_device_provider_t* provider,
     const loom_device_target_t* target) {
@@ -77,6 +79,76 @@ iree_status_t loom_device_provider_select_compatible_target(
     status =
         loom_device_provider_validate_selected_target(provider, out_target);
   }
+  if (!iree_status_is_ok(status)) {
+    *out_target = (loom_device_target_t){0};
+  }
+  return status;
+}
+
+iree_status_t loom_device_provider_select_profile_target(
+    const loom_device_provider_t* provider,
+    const loom_run_hal_runtime_t* runtime, const loom_target_profile_t* profile,
+    iree_string_view_t target_key, loom_device_target_t* out_target) {
+  IREE_ASSERT_ARGUMENT(provider);
+  IREE_ASSERT_ARGUMENT(runtime);
+  IREE_ASSERT_ARGUMENT(profile);
+  IREE_ASSERT_ARGUMENT(out_target);
+  *out_target = (loom_device_target_t){0};
+
+  const loom_target_bundle_t* target_bundle =
+      loom_target_profile_bundle(profile);
+  if (provider->artifact_provider == NULL ||
+      provider->artifact_provider->target_profile_type == NULL ||
+      profile->type != provider->artifact_provider->target_profile_type ||
+      target_bundle == NULL || target_bundle->snapshot == NULL ||
+      target_bundle->export_plan == NULL || target_bundle->config == NULL ||
+      iree_string_view_is_empty(target_key)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "explicit target profile does not match the selected device provider");
+  }
+  if (runtime->device == NULL) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "explicit target selection requires a live HAL "
+                            "device");
+  }
+  const iree_hal_device_spec_t* device_spec =
+      iree_hal_device_spec(runtime->device);
+  if (device_spec == NULL) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "selected HAL device does not expose immutable device facts");
+  }
+
+  const iree_hal_executable_target_selection_t selection = {
+      .family = profile->type->name,
+      .target_key = target_key,
+  };
+  const iree_hal_executable_target_selection_result_t result =
+      iree_hal_device_spec_select_executable_target(device_spec, &selection);
+  if (result.outcome == IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "selected HAL device does not advertise target '%.*s:%.*s'",
+        (int)profile->type->name.size, profile->type->name.data,
+        (int)target_key.size, target_key.data);
+  }
+  if (result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "selected HAL device reports ambiguous target '%.*s:%.*s'",
+        (int)profile->type->name.size, profile->type->name.data,
+        (int)target_key.size, target_key.data);
+  }
+
+  *out_target = (loom_device_target_t){
+      .executable_target = result.target,
+  };
+  loom_target_bundle_storage_initialize_from_bundle(
+      target_bundle, &out_target->target_bundle_storage);
+  iree_status_t status =
+      loom_device_provider_validate_selected_target(provider, out_target);
   if (!iree_status_is_ok(status)) {
     *out_target = (loom_device_target_t){0};
   }

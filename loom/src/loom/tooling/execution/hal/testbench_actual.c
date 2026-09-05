@@ -246,6 +246,7 @@ void loom_run_hal_testbench_actual_provider_initialize(
       .target_environment = options->target_environment,
       .run_module = options->run_module,
       .pipeline = options->pipeline,
+      .compile_request_options = options->compile_request_options,
       .sanitizer = options->sanitizer,
       .config_set = options->config_set,
       .kernel_launch = options->kernel_launch,
@@ -621,22 +622,38 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
                             "HAL kernel launches require a target environment");
   }
 
-  if (!provider->compile_device_target_initialized) {
+  if (!provider->compile_request_resolved) {
     const loom_device_provider_t* device_provider =
         provider->context->device_provider;
     const loom_target_facts_t* target_requirement = NULL;
     IREE_RETURN_IF_ERROR(loom_run_hal_testbench_resolve_target_requirement(
         provider->compile_module.module, entry_func, &target_requirement));
-    IREE_RETURN_IF_ERROR(loom_device_provider_select_compatible_target(
-        device_provider, &provider->context->runtime, target_requirement,
-        &provider->compile_device_target));
-    provider->compile_device_target_initialized = true;
+    const iree_string_view_t roots[] = {entry_symbol};
+    loom_compile_request_options_t compile_request_options =
+        provider->compile_request_options;
+    compile_request_options.roots = (iree_string_view_list_t){
+        .count = IREE_ARRAYSIZE(roots),
+        .values = roots,
+    };
+    const loom_run_hal_compile_resolve_options_t resolve_options = {
+        .module = provider->compile_module.module,
+        .compile = compile_request_options,
+        .target_requirement = target_requirement,
+        .target_environment = provider->target_environment,
+        .device_provider = device_provider,
+        .runtime = &provider->context->runtime,
+    };
+    IREE_RETURN_IF_ERROR(loom_run_hal_compile_request_resolve(
+        &resolve_options, &provider->compile_request));
+    provider->compile_request_resolved = true;
   }
 
   loom_device_target_profile_t compile_target_profile = {0};
-  IREE_RETURN_IF_ERROR(loom_device_target_profile_initialize(
-      provider->context->device_provider, &provider->context->runtime,
-      &provider->compile_device_target, &compile_target_profile));
+  const loom_target_profile_t* specialization_profile = NULL;
+  IREE_RETURN_IF_ERROR(loom_run_hal_compile_request_target_profile(
+      &provider->compile_request, provider->context->device_provider,
+      &provider->context->runtime, &compile_target_profile,
+      &specialization_profile));
 
   const loom_diagnostic_sink_t diagnostic_sink =
       loom_run_hal_testbench_counting_diagnostic_sink(provider);
@@ -652,7 +669,7 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
   pipeline_options.target_environment = provider->target_environment;
   const loom_target_specialization_request_t specialization_request = {
       .function_name = entry_symbol,
-      .target_profile = &compile_target_profile.base,
+      .target_profile = specialization_profile,
   };
   pipeline_options.target_specializations =
       (loom_target_specialization_request_list_t){
@@ -715,9 +732,10 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
   provider->candidate_initialized = true;
   const iree_host_size_t emit_error_count = provider->diagnostic_error_count;
   iree_status_t status = loom_run_hal_candidate_emit_target(
-      provider->context->device_provider, &provider->compile_device_target,
-      &provider->compile_module, &compile_options,
-      provider->context->host_allocator, &provider->candidate);
+      provider->context->device_provider,
+      &provider->compile_request.device_target, &provider->compile_module,
+      &compile_options, provider->context->host_allocator,
+      &provider->candidate);
   provider->compile_report_available = true;
   if (!iree_status_is_ok(status)) {
     return status;
@@ -1597,6 +1615,7 @@ iree_status_t loom_run_hal_testbench_actual_sequence_initialize(
         .target_environment = options->target_environment,
         .run_module = options->run_module,
         .pipeline = options->pipeline,
+        .compile_request_options = options->compile_request_options,
         .sanitizer = options->sanitizer,
         .config_set = options->config_set,
         .kernel_launch = invocation,

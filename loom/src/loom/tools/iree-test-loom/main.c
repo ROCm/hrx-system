@@ -17,6 +17,7 @@
 #include "iree/io/stdio_stream.h"
 #include "loom/sanitizer/options.h"
 #include "loom/tooling/cli/help.h"
+#include "loom/tooling/compile/request_flags.h"
 #include "loom/tooling/config/config.h"
 #include "loom/tooling/context/context.h"
 #include "loom/tooling/execution/hal/testbench_actual.h"
@@ -316,6 +317,8 @@ static iree_status_t iree_test_loom_configure_hal_actual_sequence(
       .target_environment = configuration->target_environment,
       .run_module = run_module,
       .pipeline = iree_make_cstring_view(FLAG_pipeline),
+      .compile_request_options =
+          loom_compile_request_options_from_flags((iree_string_view_list_t){0}),
       .sanitizer = *sanitizer_options,
       .config_set = config_set,
       .case_plan = case_plan,

@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "loom/ir/module.h"
 #include "loom/tooling/compile/options.h"
+#include "loom/tooling/compile/request.h"
 #include "loom/tooling/execution/hal/device_provider.h"
 #include "loom/tooling/execution/session.h"
 
@@ -20,6 +21,7 @@ extern "C" {
 #endif
 
 typedef struct loom_compile_report_capture_t loom_compile_report_capture_t;
+typedef struct loom_target_environment_t loom_target_environment_t;
 
 enum {
   // Maximum number of dispatch constants accepted by the one-shot front door.
@@ -70,6 +72,10 @@ typedef struct loom_run_hal_one_shot_result_t {
 } loom_run_hal_one_shot_result_t;
 
 typedef struct loom_run_hal_one_shot_probe_request_t {
+  // Configured target environment used to resolve an explicit target.
+  const loom_target_environment_t* target_environment;
+  // Optional family-qualified target profile to probe.
+  iree_string_view_t target;
   // Host allocator for transient probe allocations.
   iree_allocator_t host_allocator;
   // Result receiving human-readable probe output.
@@ -77,8 +83,16 @@ typedef struct loom_run_hal_one_shot_probe_request_t {
 } loom_run_hal_one_shot_probe_request_t;
 
 typedef struct loom_run_hal_one_shot_request_t {
+  // Execution session owning compiler arenas and descriptor registries.
+  loom_run_session_t* session;
   // Parsed module to compile and invoke.
   loom_run_module_t* run_module;
+  // Configured target environment used for specialization and lowering.
+  const loom_target_environment_t* target_environment;
+  // Shared product, format, and target constraints for this kernel compile.
+  loom_compile_request_options_t compile_request_options;
+  // Pass pipeline selected by the command line.
+  iree_string_view_t pipeline;
   // Candidate compile options.
   const loom_compile_options_t* compile_options;
   // Invocation options selected by the front door.
@@ -109,7 +123,7 @@ void loom_run_hal_one_shot_result_initialize(
 void loom_run_hal_one_shot_result_deinitialize(
     loom_run_hal_one_shot_result_t* result);
 
-// Probes |device_provider|'s preferred live target.
+// Probes |device_provider|'s requested or preferred live target.
 iree_status_t loom_run_hal_one_shot_probe(
     const loom_device_provider_t* device_provider,
     const loom_run_hal_one_shot_probe_request_t* request);

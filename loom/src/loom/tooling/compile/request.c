@@ -527,6 +527,7 @@ iree_status_t loom_compile_request_resolve(
     const loom_module_t* module, const loom_compile_request_options_t* options,
     const loom_artifact_provider_registry_t* artifact_provider_registry,
     const loom_target_environment_t* target_environment,
+    const loom_target_fact_type_t* inferred_target_fact_type,
     loom_compile_request_t* out_request) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(options);
@@ -553,6 +554,15 @@ iree_status_t loom_compile_request_resolve(
                             "--target is not valid for product '%.*s'",
                             (int)product_name.size, product_name.data);
   }
+  if (inferred_target_fact_type != NULL &&
+      root_summary.product != LOOM_COMPILE_PRODUCT_KERNEL) {
+    const iree_string_view_t product_name =
+        loom_compile_product_name(root_summary.product);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "an inferred target family is not valid for product '%.*s'",
+        (int)product_name.size, product_name.data);
+  }
   if (explicit_target.target_profile != NULL &&
       root_summary.target_fact_type != NULL &&
       explicit_target.target_profile->type->fact_type !=
@@ -570,8 +580,22 @@ iree_status_t loom_compile_request_resolve(
       explicit_target.target_profile != NULL
           ? explicit_target.target_profile->type->fact_type
           : root_summary.target_fact_type;
+  if (target_fact_type != NULL && inferred_target_fact_type != NULL &&
+      target_fact_type != inferred_target_fact_type) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "target family '%.*s' is incompatible with inferred target family "
+        "'%.*s'",
+        (int)target_fact_type->name.size, target_fact_type->name.data,
+        (int)inferred_target_fact_type->name.size,
+        inferred_target_fact_type->name.data);
+  }
+  if (target_fact_type == NULL) {
+    target_fact_type = inferred_target_fact_type;
+  }
   if (root_summary.product == LOOM_COMPILE_PRODUCT_KERNEL &&
       explicit_target.target_profile == NULL &&
+      inferred_target_fact_type == NULL &&
       root_summary.untargeted_kernel_count != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,

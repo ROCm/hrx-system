@@ -53,6 +53,7 @@ iree_status_t iree_benchmark_loom_hal_actual_provider_initialize(
         .target_environment = context->configuration->target_environment,
         .run_module = run_module,
         .pipeline = pipeline,
+        .compile_request_options = context->compile_request_options,
         .sanitizer = sanitizer,
         .config_set = context->config_set,
         .kernel_launch = kernel_launch,

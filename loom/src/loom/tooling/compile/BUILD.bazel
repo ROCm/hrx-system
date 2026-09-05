@@ -134,6 +134,17 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "request_flags",
+    srcs = ["request_flags.c"],
+    hdrs = ["request_flags.h"],
+    deps = [
+        ":request",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+    ],
+)
+
 loom_cc_test(
     name = "request_test",
     srcs = ["request_test.cc"],

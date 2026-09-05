@@ -119,11 +119,15 @@ static inline bool loom_compile_request_is_command(
 // product only validates the inferred product and cannot reinterpret them. With
 // no roots, an explicit product selects that product's canonical root policy.
 // An omitted format selects the unique configured kernel artifact provider for
-// the selected target or the target-independent command format.
+// the selected target or the target-independent command format. An optional
+// |inferred_target_fact_type| supplies the target family selected by a
+// surrounding execution environment when kernel roots and --target do not.
+// It must agree with any authored or explicit target family.
 iree_status_t loom_compile_request_resolve(
     const loom_module_t* module, const loom_compile_request_options_t* options,
     const loom_artifact_provider_registry_t* artifact_provider_registry,
     const loom_target_environment_t* target_environment,
+    const loom_target_fact_type_t* inferred_target_fact_type,
     loom_compile_request_t* out_request);
 
 #ifdef __cplusplus

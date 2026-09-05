@@ -14,6 +14,7 @@
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "loom/sanitizer/options.h"
+#include "loom/tooling/compile/request.h"
 #include "loom/util/stream.h"
 
 #ifdef __cplusplus
@@ -79,6 +80,8 @@ typedef struct iree_benchmark_loom_options_t {
   iree_host_size_t max_samples_per_case;
   // Pass pipeline used before target artifact emission.
   iree_string_view_t pipeline;
+  // Shared product, format, and target constraints for kernel compilation.
+  loom_compile_request_options_t compile_request_options;
   // Sanitizer checks inserted by the target pipeline.
   loom_sanitizer_options_t sanitizer;
   // Direct config bindings parsed from repeated --config=key=value flags.

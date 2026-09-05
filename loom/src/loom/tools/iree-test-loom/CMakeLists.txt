@@ -27,6 +27,7 @@ loom_cc_library(
     loom::sanitizer::options
     loom::target::provider
     loom::tooling::cli::help
+    loom::tooling::compile::request_flags
     loom::tooling::config
     loom::tooling::context
     loom::tooling::execution::hal::device_provider

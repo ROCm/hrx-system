@@ -32,6 +32,7 @@ loom_cc_library(
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/tooling/cli:help",
+        "//loom/src/loom/tooling/compile:request_flags",
         "//loom/src/loom/tooling/config",
         "//loom/src/loom/tooling/context",
         "//loom/src/loom/tooling/execution:session",

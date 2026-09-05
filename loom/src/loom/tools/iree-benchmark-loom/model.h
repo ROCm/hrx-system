@@ -207,6 +207,8 @@ typedef struct iree_benchmark_loom_hal_context_t {
   iree_benchmark_loom_artifact_bundle_t* artifact_bundle;
   // Config bindings materialized into HAL actual candidate compile copies.
   const loom_tooling_config_set_t* config_set;
+  // Shared product, format, and target constraints for kernel compilation.
+  loom_compile_request_options_t compile_request_options;
   // Shared HAL runtime and artifact-provider state.
   loom_run_hal_testbench_context_t execution;
 } iree_benchmark_loom_hal_context_t;

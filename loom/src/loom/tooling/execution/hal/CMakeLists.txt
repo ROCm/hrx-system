@@ -28,6 +28,7 @@ loom_cc_library(
   SRCS
     "device_provider.c"
   DEPS
+    ::runtime
     iree::base
     iree::hal
     loom::target::profile
@@ -74,11 +75,42 @@ loom_cc_library(
   DEPS
     ::artifact
     ::device_provider
-    ::runtime
     iree::base
     loom::tooling::compile::options
     loom::tooling::execution::session
   PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    compile_request
+  HDRS
+    "compile_request.h"
+  SRCS
+    "compile_request.c"
+  DEPS
+    ::device_provider
+    ::runtime
+    iree::base
+    loom::tooling::compile::request
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    compile_request_test
+  SRCS
+    "compile_request_test.cc"
+  DEPS
+    ::compile_request
+    iree::base::internal::arena
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ops::target
+    loom::testing::context
+    loom::testing::module_ptr
 )
 
 loom_cc_library(
@@ -109,6 +141,7 @@ loom_cc_library(
   DEPS
     ::artifact
     ::candidate
+    ::compile_request
     ::device_provider
     ::invocation
     ::runtime
@@ -185,6 +218,7 @@ loom_cc_library(
   DEPS
     ::artifact
     ::candidate
+    ::compile_request
     ::device_provider
     ::invocation
     ::runtime
@@ -192,10 +226,14 @@ loom_cc_library(
     iree::base::core_headers
     iree::base::internal::arena
     loom::ir
+    loom::link::linker
     loom::ops::kernel
     loom::target::entry_selection
+    loom::target::selection
     loom::tooling::compile::options
+    loom::tooling::compile::pipeline
     loom::tooling::compile::report_capture
+    loom::tooling::compile::request
     loom::tooling::execution::session
     loom::tooling::io::file
   PUBLIC

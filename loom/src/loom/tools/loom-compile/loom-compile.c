@@ -29,6 +29,7 @@
 #include "loom/tooling/compile/pipeline.h"
 #include "loom/tooling/compile/report_capture.h"
 #include "loom/tooling/compile/request.h"
+#include "loom/tooling/compile/request_flags.h"
 #include "loom/tooling/config/config.h"
 #include "loom/tooling/context/context.h"
 #include "loom/tooling/execution/session.h"
@@ -87,20 +88,6 @@ static iree_status_t loom_compile_diagnostic_sink(
   return status;
 }
 
-IREE_FLAG(string, product, "",
-          "Optional product: 'kernel', 'command', or 'module'. With explicit "
-          "--root values this validates their inferred product. With no "
-          "roots this selects the product's canonical roots.");
-IREE_FLAG(string, format, "",
-          "Optional exact artifact format, such as 'amdgpu-hsaco', "
-          "'spirv-binary', 'loom-command', or 'llvmir-text'. Omit this to "
-          "select the canonical format for the inferred product and target.");
-IREE_FLAG(string, target, "",
-          "Optional compilation target in family:selector form, such as "
-          "'amdgpu:gfx11-generic' or 'spirv:vulkan1.3+bda'. When present, "
-          "every materialized kernel entry is specialized to that exact "
-          "configured profile before the pass pipeline. Authored targets "
-          "remain compatibility requirements.");
 IREE_FLAG_LIST(string, root,
                "Root symbol to materialize before compilation. Repeat for "
                "multiple roots. Roots must infer one homogeneous product. "
@@ -1073,16 +1060,13 @@ int main(int argc, char** argv) {
         &compile_report_capture, run_module.module, &config_set);
   }
   if (iree_status_is_ok(status)) {
-    const loom_compile_request_options_t request_options = {
-        .roots = FLAG_root_list(),
-        .product = iree_make_cstring_view(FLAG_product),
-        .format = iree_make_cstring_view(FLAG_format),
-        .target = iree_make_cstring_view(FLAG_target),
-    };
+    const loom_compile_request_options_t request_options =
+        loom_compile_request_options_from_flags(FLAG_root_list());
     status = loom_compile_request_resolve(
         run_module.module, &request_options,
         compile_environment->artifact_provider_registry,
-        compile_environment->target_environment, &request);
+        compile_environment->target_environment,
+        /*inferred_target_fact_type=*/NULL, &request);
     if (iree_status_is_ok(status)) {
       status = loom_compile_validate_request_flags(&request);
     }

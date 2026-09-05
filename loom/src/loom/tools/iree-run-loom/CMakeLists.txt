@@ -27,8 +27,8 @@ loom_cc_library(
     loom::sanitizer::options
     loom::tooling::cli::help
     loom::tooling::compile::options
-    loom::tooling::compile::pipeline
     loom::tooling::compile::report_capture
+    loom::tooling::compile::request_flags
     loom::tooling::context
     loom::tooling::execution::hal::one_shot
     loom::tooling::execution::session

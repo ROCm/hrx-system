@@ -122,6 +122,18 @@ iree_status_t loom_device_provider_select_compatible_target(
     const loom_target_facts_t* target_requirement,
     loom_device_target_t* out_target);
 
+// Selects the exact configured |profile| from the active device spec.
+//
+// The profile family and |target_key| must match an executable target
+// advertised by the device attached to |runtime|. On success |out_target|
+// borrows that executable target and contains a teardown-free copy of the
+// profile's target-neutral bundle. On failure it is zeroed.
+iree_status_t loom_device_provider_select_profile_target(
+    const loom_device_provider_t* provider,
+    const struct loom_run_hal_runtime_t* runtime,
+    const loom_target_profile_t* profile, iree_string_view_t target_key,
+    loom_device_target_t* out_target);
+
 // Stack-only profile adapter for one selected live-device target.
 //
 // The adapter contains only target-neutral pointers and owns no storage. It
