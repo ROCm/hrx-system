@@ -28,6 +28,7 @@
 #include "loom/tooling/compile/configured.h"
 #include "loom/tooling/compile/pipeline.h"
 #include "loom/tooling/compile/report_capture.h"
+#include "loom/tooling/compile/request.h"
 #include "loom/tooling/config/config.h"
 #include "loom/tooling/context/context.h"
 #include "loom/tooling/execution/session.h"
@@ -36,7 +37,6 @@
 #include "loom/tooling/pass/trace_cli.h"
 #include "loom/tools/loom-compile/command_backend.h"
 #include "loom/tools/loom-compile/command_manifest.h"
-#include "loom/tools/loom-compile/request.h"
 
 typedef struct loom_compile_diagnostic_sink_t {
   // Parsed module used for full type rendering.

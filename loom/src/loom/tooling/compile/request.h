@@ -4,10 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Allocation-free loom-compile product and format request resolution.
+// Allocation-free product and format request resolution.
 
-#ifndef LOOM_TOOLS_LOOM_COMPILE_REQUEST_H_
-#define LOOM_TOOLS_LOOM_COMPILE_REQUEST_H_
+#ifndef LOOM_TOOLING_COMPILE_REQUEST_H_
+#define LOOM_TOOLING_COMPILE_REQUEST_H_
 
 #include "iree/base/api.h"
 #include "loom/ir/module.h"
@@ -111,4 +111,4 @@ iree_status_t loom_compile_request_resolve(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TOOLS_LOOM_COMPILE_REQUEST_H_
+#endif  // LOOM_TOOLING_COMPILE_REQUEST_H_

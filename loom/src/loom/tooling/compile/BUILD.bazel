@@ -131,6 +131,38 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "request",
+    srcs = ["request.c"],
+    hdrs = ["request.h"],
+    deps = [
+        ":artifact",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target:projection",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:selection",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "request_test",
+    srcs = ["request_test.cc"],
+    deps = [
+        ":request",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/testing:context",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "report_capture",
     srcs = ["report_capture.c"],
     hdrs = ["report_capture.h"],

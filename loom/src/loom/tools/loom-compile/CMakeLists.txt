@@ -54,25 +54,6 @@ loom_cc_library(
   PUBLIC
 )
 
-loom_cc_library(
-  NAME
-    request
-  HDRS
-    "request.h"
-  SRCS
-    "request.c"
-  DEPS
-    iree::base
-    loom::ir
-    loom::ops::op_defs
-    loom::target::entry_selection
-    loom::target::projection
-    loom::target::provider
-    loom::target::selection
-    loom::tooling::compile::artifact
-  PUBLIC
-)
-
 loom_cc_binary(
   NAME
     loom-compile
@@ -81,7 +62,6 @@ loom_cc_binary(
   DEPS
     ::command_backend
     ::command_manifest
-    ::request
     iree::base
     iree::base::tooling::flags
     iree::io::file_handle
@@ -104,6 +84,7 @@ loom_cc_binary(
     loom::tooling::compile::options
     loom::tooling::compile::pipeline
     loom::tooling::compile::report_capture
+    loom::tooling::compile::request
     loom::tooling::config
     loom::tooling::context
     loom::tooling::execution::session
@@ -124,23 +105,6 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::target::arch::cmd::artifact_set
     loom::util::stream
-)
-
-loom_cc_test(
-  NAME
-    request_test
-  SRCS
-    "request_test.cc"
-  DEPS
-    ::request
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::format::text::parser
-    loom::ir
-    loom::ops::target
-    loom::testing::context
-    loom::testing::module_ptr
 )
 
 iree_execution_test_suite(
