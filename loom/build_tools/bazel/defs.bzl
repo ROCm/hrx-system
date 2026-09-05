@@ -27,9 +27,9 @@ load(
 )
 load(
     ":loom_target_profile.bzl",
-    _LoomAmdgpuTargetProfileInfo = "LoomAmdgpuTargetProfileInfo",
     _LoomTargetProfileInfo = "LoomTargetProfileInfo",
     _loom_amdgpu_target_profile = "loom_amdgpu_target_profile",
+    _loom_target_profile = "loom_target_profile",
 )
 load(
     ":loom_toolchain.bzl",
@@ -39,7 +39,6 @@ load(
 LoomBinaryInfo = _LoomBinaryInfo
 LoomExecutionTestInfo = _LoomExecutionTestInfo
 LoomLibraryInfo = _LoomLibraryInfo
-LoomAmdgpuTargetProfileInfo = _LoomAmdgpuTargetProfileInfo
 LoomTargetProfileInfo = _LoomTargetProfileInfo
 loom_amdgpu_target_profile = _loom_amdgpu_target_profile
 loom_command_binary = _loom_command_binary
@@ -48,5 +47,6 @@ loom_kernel_binary = _loom_kernel_binary
 loom_kernel_library = _loom_kernel_library
 loom_library = _loom_library
 loom_module = _loom_module
+loom_target_profile = _loom_target_profile
 loom_test = _loom_test
 loom_tools_toolchains = _loom_tools_toolchains

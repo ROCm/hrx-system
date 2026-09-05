@@ -15,13 +15,13 @@ load(
     "loom_kernel_library",
     "loom_library",
     "loom_module",
+    "loom_target_profile",
     "loom_test",
 )
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 load(
     ":loom_binary_rules_test.bzl",
     "loom_binary_rules_test_suite",
-    "test_target_profile",
 )
 load(":loom_check_rules_test.bzl", "loom_check_rules_test_suite")
 load(
@@ -43,9 +43,10 @@ loom_amdgpu_target_profile(
     target = "gfx942",
 )
 
-test_target_profile(
+loom_target_profile(
     name = "test_spirv_profile",
     family = "spirv",
+    selector = "vulkan1.3+bda",
 )
 
 loom_kernel_library(

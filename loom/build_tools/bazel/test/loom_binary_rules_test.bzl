@@ -17,16 +17,6 @@ load(
     "loom_kernel_binary",
 )
 
-def _test_target_profile_impl(ctx):
-    return [LoomTargetProfileInfo(family = ctx.attr.family)]
-
-test_target_profile = rule(
-    implementation = _test_target_profile_impl,
-    attrs = {
-        "family": attr.string(mandatory = True),
-    },
-)
-
 def _find_action(env, actions, mnemonic):
     for action in actions:
         if action.mnemonic == mnemonic:
@@ -79,6 +69,9 @@ def _test_kernel_binary_roots_direct_library_exports_impl(env, target):
     env.expect.that_str(
         binary.target_profiles[0][LoomTargetProfileInfo].family,
     ).equals("amdgpu")
+    env.expect.that_str(
+        binary.target_profiles[0][LoomTargetProfileInfo].selector,
+    ).equals("gfx11-generic")
 
     default_files = target[DefaultInfo].files.to_list()
     if len(default_files) != 1:
@@ -255,6 +248,9 @@ def _test_command_binary_emits_composite_product_impl(env, target):
     env.expect.that_str(
         binary.target_profiles[0][LoomTargetProfileInfo].family,
     ).equals("amdgpu")
+    env.expect.that_str(
+        binary.target_profiles[0][LoomTargetProfileInfo].selector,
+    ).equals("gfx11-generic")
 
     artifacts = binary.artifacts.to_list()
     if len(artifacts) != 3:
