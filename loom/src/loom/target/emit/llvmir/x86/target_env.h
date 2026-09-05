@@ -39,9 +39,9 @@ const loom_target_bundle_t* loom_llvmir_target_bundle_x86_64_packed_dot_object(
 iree_status_t loom_llvmir_target_profile_initialize_x86_64_object(
     loom_llvmir_target_profile_t* out_profile);
 
-// Returns the static profile provider for x86 LLVMIR target presets.
-const loom_llvmir_target_profile_provider_t*
-loom_llvmir_x86_target_profile_provider(void);
+// Static profile provider for x86 LLVMIR target presets.
+extern const loom_llvmir_target_profile_provider_t
+    loom_llvmir_x86_target_profile_provider;
 
 #ifdef __cplusplus
 }

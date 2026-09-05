@@ -8,6 +8,7 @@
 
 #include "iree/io/vec_stream.h"
 #include "loom/target/emit/llvmir/bitcode_writer.h"
+#include "loom/target/emit/llvmir/configured_target_profiles.h"
 #include "loom/target/emit/llvmir/module_emitter.h"
 #include "loom/target/emit/llvmir/text_writer.h"
 #include "loom/target/emit/llvmir/verify.h"
@@ -17,50 +18,6 @@ typedef enum loom_llvmir_artifact_emitter_format_e {
   LOOM_LLVMIR_ARTIFACT_EMITTER_FORMAT_TEXT = 0,
   LOOM_LLVMIR_ARTIFACT_EMITTER_FORMAT_BITCODE = 1,
 } loom_llvmir_artifact_emitter_format_t;
-
-typedef struct loom_llvmir_artifact_emitter_option_prefix_t {
-  // Option descriptor type.
-  uint32_t type;
-  // Size of this structure in bytes.
-  iree_host_size_t structure_size;
-  // Next emitter option descriptor.
-  const void* next;
-} loom_llvmir_artifact_emitter_option_prefix_t;
-
-void loom_llvmir_artifact_emitter_options_initialize(
-    loom_llvmir_artifact_emitter_options_t* out_options) {
-  *out_options = (loom_llvmir_artifact_emitter_options_t){
-      .type = LOOM_LLVMIR_ARTIFACT_EMITTER_OPTION_TYPE_OPTIONS,
-      .structure_size = sizeof(*out_options),
-  };
-}
-
-static iree_status_t loom_llvmir_artifact_emitter_options_resolve(
-    const void* option_chain,
-    loom_llvmir_emit_low_module_options_t* out_options) {
-  loom_llvmir_emit_low_module_options_initialize(out_options);
-  const void* node = option_chain;
-  while (node != NULL) {
-    const loom_llvmir_artifact_emitter_option_prefix_t* prefix =
-        (const loom_llvmir_artifact_emitter_option_prefix_t*)node;
-    if (prefix->type == LOOM_LLVMIR_ARTIFACT_EMITTER_OPTION_TYPE_OPTIONS) {
-      if (prefix->structure_size != 0 &&
-          prefix->structure_size <
-              sizeof(loom_llvmir_artifact_emitter_options_t)) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "LLVMIR artifact emitter options structure_size is too small");
-      }
-      const loom_llvmir_artifact_emitter_options_t* options =
-          (const loom_llvmir_artifact_emitter_options_t*)node;
-      out_options->target_profile_registry = options->target_profile_registry;
-      node = options->next;
-      continue;
-    }
-    node = prefix->next;
-  }
-  return iree_ok_status();
-}
 
 static iree_status_t loom_llvmir_artifact_write_text(
     const loom_llvmir_module_t* module, iree_allocator_t allocator,
@@ -128,8 +85,9 @@ static iree_status_t loom_llvmir_artifact_emit(
 
   loom_llvmir_module_t* module = NULL;
   loom_llvmir_emit_low_module_options_t emit_options = {0};
-  IREE_RETURN_IF_ERROR(loom_llvmir_artifact_emitter_options_resolve(
-      request->option_chain, &emit_options));
+  loom_llvmir_emit_low_module_options_initialize(&emit_options);
+  emit_options.target_profile_registry =
+      &loom_llvmir_configured_target_profile_registry;
   emit_options.function_versions = request->function_versions;
   iree_status_t status = loom_llvmir_emit_low_module(
       request->module, request->low_descriptor_registry,

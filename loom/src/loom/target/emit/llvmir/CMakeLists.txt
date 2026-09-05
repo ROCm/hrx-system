@@ -78,6 +78,63 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
+set(_configured_target_profiles_platform_copts "")
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _configured_target_profiles_platform_copts "-DLOOM_CONFIG_LLVMIR_HAVE_AMDGPU_TARGET_PROFILES=1")
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
+  list(APPEND _configured_target_profiles_platform_copts "-DLOOM_CONFIG_LLVMIR_HAVE_X86_TARGET_PROFILES=1")
+endif()
+set(_configured_target_profiles_platform_deps "")
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _configured_target_profiles_platform_deps loom::target::emit::llvmir::amdgpu::target_env)
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
+  list(APPEND _configured_target_profiles_platform_deps loom::target::emit::llvmir::x86::target_env)
+endif()
+loom_cc_library(
+  NAME
+    configured_target_profiles
+  COPTS
+    ${_configured_target_profiles_platform_copts}
+  HDRS
+    "configured_target_profiles.h"
+  SRCS
+    "configured_target_profiles.c"
+  DEPS
+    ::target_presets
+    iree::base
+    ${_configured_target_profiles_platform_deps}
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
+set(_configured_target_profiles_test_platform_copts "")
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _configured_target_profiles_test_platform_copts "-DLOOM_CONFIG_LLVMIR_HAVE_AMDGPU_TARGET_PROFILES=1")
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
+  list(APPEND _configured_target_profiles_test_platform_copts "-DLOOM_CONFIG_LLVMIR_HAVE_X86_TARGET_PROFILES=1")
+endif()
+loom_cc_test(
+  NAME
+    configured_target_profiles_test
+  SRCS
+    "configured_target_profiles_test.cc"
+  COPTS
+    ${_configured_target_profiles_test_platform_copts}
+  DEPS
+    ::configured_target_profiles
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.llvmir"
+    "iree-build-requirement=loom.emit.llvmir"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
 loom_cc_library(
   NAME
     module_emitter
@@ -121,6 +178,7 @@ loom_cc_library(
   SRCS
     "artifact_emitter.c"
   DEPS
+    ::configured_target_profiles
     ::core
     ::module_emitter
     ::target_presets
@@ -182,6 +240,7 @@ loom_cc_library(
   SRCS
     "check/loom_check.c"
   DEPS
+    ::configured_target_profiles
     ::core
     ::module_emitter
     ::target_env

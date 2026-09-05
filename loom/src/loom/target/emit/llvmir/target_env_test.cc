@@ -23,7 +23,7 @@ std::string ToString(iree_string_view_t value) {
 bool LookupRegisteredProfile(iree_string_view_t profile_name,
                              const loom_llvmir_target_profile_t** out_profile) {
   const loom_llvmir_target_profile_provider_t* providers[] = {
-      loom_llvmir_x86_target_profile_provider(),
+      &loom_llvmir_x86_target_profile_provider,
   };
   loom_llvmir_target_profile_registry_t registry = {};
   registry.default_profile = loom_llvmir_target_profile_x86_64_object();
@@ -254,7 +254,7 @@ TEST(LlvmIrTargetEnvTest, ProjectsX86ProfileByDescriptorSetKey) {
   };
 
   const loom_llvmir_target_profile_provider_t* provider =
-      loom_llvmir_x86_target_profile_provider();
+      &loom_llvmir_x86_target_profile_provider;
   const loom_llvmir_target_profile_t* profile = nullptr;
   const loom_llvmir_target_profile_projection_request_t request = {
       /*.bundle=*/&kBundle,
@@ -274,7 +274,7 @@ TEST(LlvmIrTargetEnvTest, RejectsUnknownRegisteredProfileName) {
 
 TEST(LlvmIrTargetEnvTest, RegistryOnlySeesExplicitProviders) {
   const loom_llvmir_target_profile_provider_t* providers[] = {
-      loom_llvmir_x86_target_profile_provider(),
+      &loom_llvmir_x86_target_profile_provider,
   };
   loom_llvmir_target_profile_registry_t registry = {};
   registry.default_profile = loom_llvmir_target_profile_x86_64_object();

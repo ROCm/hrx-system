@@ -54,34 +54,6 @@ _EMIT_LLVMIR_CHECK_DEPS = iree_select({
     "//conditions:default": [],
 })
 
-_LLVMIR_AMDGPU_TARGET_ENV_COPTS = iree_select({
-    "//loom/config/target:llvmir_amdgpu_target_env": [
-        "-DLOOM_CHECK_HAVE_LLVMIR_AMDGPU_TARGET_ENV=1",
-    ],
-    "//conditions:default": [],
-})
-
-_LLVMIR_AMDGPU_TARGET_ENV_DEPS = iree_select({
-    "//loom/config/target:llvmir_amdgpu_target_env": [
-        "//loom/src/loom/target/emit/llvmir/amdgpu:target_env",
-    ],
-    "//conditions:default": [],
-})
-
-_LLVMIR_X86_TARGET_ENV_COPTS = iree_select({
-    "//loom/config/target:llvmir_x86_target_env": [
-        "-DLOOM_CHECK_HAVE_LLVMIR_X86_TARGET_ENV=1",
-    ],
-    "//conditions:default": [],
-})
-
-_LLVMIR_X86_TARGET_ENV_DEPS = iree_select({
-    "//loom/config/target:llvmir_x86_target_env": [
-        "//loom/src/loom/target/emit/llvmir/x86:target_env",
-    ],
-    "//conditions:default": [],
-})
-
 _TARGET_SPIRV_CHECK_COPTS = iree_select({
     "//loom/config/target/arch:spirv": [
         "-DLOOM_CHECK_HAVE_TARGET_SPIRV=1",
@@ -473,12 +445,11 @@ loom_cc_library(
     name = "llvmir_provider",
     srcs = ["llvmir_provider.c"],
     hdrs = ["llvmir_provider.h"],
-    copts = _LLVMIR_AMDGPU_TARGET_ENV_COPTS + _LLVMIR_X86_TARGET_ENV_COPTS,
     deps = [
         ":provider",
         "//loom/src/loom/target/emit/llvmir:loom_check",
         "//runtime/src/iree/base",
-    ] + _LLVMIR_AMDGPU_TARGET_ENV_DEPS + _LLVMIR_X86_TARGET_ENV_DEPS,
+    ],
 )
 
 loom_cc_library(

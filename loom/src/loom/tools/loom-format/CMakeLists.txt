@@ -46,7 +46,7 @@ loom_cc_binary(
     loom::codegen::low::text_asm
     loom::error::diagnostic
     loom::target::arch::cmd::provider
-    loom::target::configured::provider
+    loom::target::configured::provider_set
     loom::target::provider
     loom::target::test::provider
     loom::testing::test_file_format

@@ -42,7 +42,7 @@ loom_cc_binary(
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/cmd:provider",
-        "//loom/src/loom/target/configured:provider",
+        "//loom/src/loom/target/configured:provider_set",
         "//loom/src/loom/target/test:provider",
         "//loom/src/loom/testing:test_file_format",
         "//loom/src/loom/tooling/cli:help",

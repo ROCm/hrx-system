@@ -20,17 +20,16 @@
 #include "loom/ops/op_defs.h"
 #include "loom/sanitizer/options.h"
 #include "loom/target/arch/cmd/artifact_set.h"
-#include "loom/target/arch/cmd/provider.h"
 #include "loom/target/entry_selection.h"
 #include "loom/target/module_specialization.h"
 #include "loom/target/reporting/artifact_manifest.h"
 #include "loom/tooling/cli/help.h"
 #include "loom/tooling/compile/artifact.h"
+#include "loom/tooling/compile/configured.h"
 #include "loom/tooling/compile/pipeline.h"
 #include "loom/tooling/compile/report_capture.h"
 #include "loom/tooling/config/config.h"
 #include "loom/tooling/context/context.h"
-#include "loom/tooling/execution/execution_provider.h"
 #include "loom/tooling/execution/session.h"
 #include "loom/tooling/io/file.h"
 #include "loom/tooling/io/source_path.h"
@@ -38,22 +37,6 @@
 #include "loom/tools/loom-compile/command_backend.h"
 #include "loom/tools/loom-compile/command_manifest.h"
 #include "loom/tools/loom-compile/request.h"
-
-#ifndef LOOM_COMPILE_HAVE_AMDGPU
-#define LOOM_COMPILE_HAVE_AMDGPU 0
-#endif  // LOOM_COMPILE_HAVE_AMDGPU
-#ifndef LOOM_COMPILE_HAVE_SPIRV
-#define LOOM_COMPILE_HAVE_SPIRV 0
-#endif  // LOOM_COMPILE_HAVE_SPIRV
-#ifndef LOOM_COMPILE_HAVE_LLVMIR
-#define LOOM_COMPILE_HAVE_LLVMIR 0
-#endif  // LOOM_COMPILE_HAVE_LLVMIR
-#ifndef LOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV
-#define LOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV 0
-#endif  // LOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV
-#ifndef LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
-#define LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV 0
-#endif  // LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
 
 typedef struct loom_compile_diagnostic_sink_t {
   // Parsed module used for full type rendering.
@@ -103,28 +86,6 @@ static iree_status_t loom_compile_diagnostic_sink(
   }
   return status;
 }
-
-#define LOOM_COMPILE_HAVE_ANY_ARTIFACT_PROVIDER \
-  (LOOM_COMPILE_HAVE_AMDGPU || LOOM_COMPILE_HAVE_SPIRV)
-
-#if LOOM_COMPILE_HAVE_AMDGPU
-#include "loom/target/arch/amdgpu/provider.h"
-#include "loom/tooling/target/amdgpu/artifact_provider.h"
-#endif  // LOOM_COMPILE_HAVE_AMDGPU
-#if LOOM_COMPILE_HAVE_SPIRV
-#include "loom/target/arch/spirv/provider.h"
-#include "loom/tooling/target/spirv/artifact_provider.h"
-#endif  // LOOM_COMPILE_HAVE_SPIRV
-#if LOOM_COMPILE_HAVE_LLVMIR
-#include "loom/target/arch/llvmir/provider.h"
-#include "loom/target/emit/llvmir/artifact_emitter.h"
-#if LOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV
-#include "loom/target/emit/llvmir/amdgpu/target_env.h"
-#endif  // LOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV
-#if LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
-#include "loom/target/emit/llvmir/x86/target_env.h"
-#endif  // LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
-#endif  // LOOM_COMPILE_HAVE_LLVMIR
 
 IREE_FLAG(string, product, "",
           "Optional product: 'kernel', 'command', or 'module'. With explicit "
@@ -207,101 +168,37 @@ IREE_FLAG_LIST_NAMED(
     "--source-prefix-map=old=new; entries are applied in reverse order so the\n"
     "last matching map wins. Use old= to strip a prefix.");
 
-#if LOOM_COMPILE_HAVE_AMDGPU
-static const loom_run_execution_provider_t kLoomCompileAmdgpuProvider = {
-    .name = IREE_SVL("amdgpu"),
-    .target_provider = &loom_amdgpu_target_provider,
-};
-#endif  // LOOM_COMPILE_HAVE_AMDGPU
-
-static const loom_run_execution_provider_t kLoomCompileCommandProvider = {
-    .name = IREE_SVL("command"),
-    .target_provider = &loom_cmd_target_provider,
-};
-
-#if LOOM_COMPILE_HAVE_SPIRV
-static const loom_run_execution_provider_t kLoomCompileSpirvProvider = {
-    .name = IREE_SVL("spirv"),
-    .target_provider = &loom_spirv_target_provider,
-};
-#endif  // LOOM_COMPILE_HAVE_SPIRV
-
-#if LOOM_COMPILE_HAVE_LLVMIR
-static const loom_run_execution_provider_t kLoomCompileLlvmirProvider = {
-    .name = IREE_SVL("llvmir"),
-    .target_provider = &loom_llvmir_target_provider,
-};
-
-static const loom_run_execution_provider_t
-    kLoomCompileLlvmirArtifactEmitterProvider = {
-        .name = IREE_SVL("llvmir-artifacts"),
-        .target_provider = &loom_llvmir_artifact_emitter_provider,
-};
-#endif  // LOOM_COMPILE_HAVE_LLVMIR
-
-static const loom_run_execution_provider_t* const kLoomCompileProviders[] = {
-    &kLoomCompileCommandProvider,
-#if LOOM_COMPILE_HAVE_AMDGPU
-    &kLoomCompileAmdgpuProvider,
-#endif  // LOOM_COMPILE_HAVE_AMDGPU
-#if LOOM_COMPILE_HAVE_SPIRV
-    &kLoomCompileSpirvProvider,
-#endif  // LOOM_COMPILE_HAVE_SPIRV
-#if LOOM_COMPILE_HAVE_LLVMIR
-    // Register the target executor and the artifact-only emitter.
-    &kLoomCompileLlvmirProvider,
-    &kLoomCompileLlvmirArtifactEmitterProvider,
-#endif  // LOOM_COMPILE_HAVE_LLVMIR
-};
-
-static const loom_run_execution_provider_set_t kLoomCompileProviderSet = {
-    .providers = kLoomCompileProviders,
-    .provider_count = IREE_ARRAYSIZE(kLoomCompileProviders),
-};
-
-#if LOOM_COMPILE_HAVE_ANY_ARTIFACT_PROVIDER
-static const loom_artifact_provider_t* const kLoomCompileArtifactProviders[] = {
-#if LOOM_COMPILE_HAVE_AMDGPU
-    &loom_amdgpu_artifact_provider,
-#endif  // LOOM_COMPILE_HAVE_AMDGPU
-#if LOOM_COMPILE_HAVE_SPIRV
-    &loom_spirv_vulkan_artifact_provider,
-#endif  // LOOM_COMPILE_HAVE_SPIRV
-};
-#endif  // LOOM_COMPILE_HAVE_ANY_ARTIFACT_PROVIDER
-
-static const loom_artifact_provider_registry_t
-    kLoomCompileArtifactProviderRegistry = {
-#if LOOM_COMPILE_HAVE_ANY_ARTIFACT_PROVIDER
-        .providers = kLoomCompileArtifactProviders,
-        .provider_count = IREE_ARRAYSIZE(kLoomCompileArtifactProviders),
-#else
-        .providers = NULL,
-        .provider_count = 0,
-#endif  // LOOM_COMPILE_HAVE_ANY_ARTIFACT_PROVIDER
-};
-
 static iree_status_t loom_compile_register_context(void* user_data,
                                                    loom_context_t* context) {
-  loom_run_execution_environment_t* environment =
-      (loom_run_execution_environment_t*)user_data;
+  const loom_target_environment_t* target_environment =
+      (const loom_target_environment_t*)user_data;
   return loom_tooling_context_register_tool_dialects_with_target_environment(
-      loom_run_execution_environment_target_environment(environment), context);
+      target_environment, context);
+}
+
+static iree_status_t loom_compile_initialize_low_descriptor_registry(
+    void* user_data, loom_target_low_descriptor_registry_t* out_registry) {
+  const loom_target_environment_t* target_environment =
+      (const loom_target_environment_t*)user_data;
+  return loom_target_environment_initialize_low_descriptor_registry(
+      target_environment, out_registry);
 }
 
 static iree_status_t loom_compile_initialize_session(
-    loom_run_execution_environment_t* environment, iree_allocator_t allocator,
-    loom_run_session_t* out_session) {
+    const loom_target_environment_t* target_environment,
+    iree_allocator_t allocator, loom_run_session_t* out_session) {
   loom_run_session_options_t session_options = {0};
   loom_run_session_options_initialize(&session_options);
   session_options.host_allocator = allocator;
   session_options.register_context = (loom_run_register_context_callback_t){
       .fn = loom_compile_register_context,
-      .user_data = environment,
+      .user_data = (void*)target_environment,
   };
   session_options.initialize_low_descriptor_registry =
-      loom_run_execution_environment_low_descriptor_registry_callback(
-          environment);
+      (loom_run_initialize_low_descriptor_registry_callback_t){
+          .fn = loom_compile_initialize_low_descriptor_registry,
+          .user_data = (void*)target_environment,
+      };
   return loom_run_session_initialize(&session_options, out_session);
 }
 
@@ -535,7 +432,7 @@ static iree_status_t loom_compile_artifact_manifest_options_initialize(
 }
 
 static iree_status_t loom_compile_run_pass_pipeline(
-    const loom_run_execution_environment_t* environment,
+    const loom_target_environment_t* target_environment,
     loom_run_session_t* session, loom_run_module_t* run_module,
     loom_compile_default_pipeline_t default_pipeline,
     const loom_compile_options_t* compile_options,
@@ -548,8 +445,7 @@ static iree_status_t loom_compile_run_pass_pipeline(
   pipeline_options.default_pipeline = default_pipeline;
   pipeline_options.target_pipeline_options =
       compile_options->target_pipeline_options;
-  pipeline_options.target_environment =
-      loom_run_execution_environment_target_environment(environment);
+  pipeline_options.target_environment = target_environment;
   pipeline_options.low_descriptor_registry =
       loom_run_session_low_descriptor_registry(session);
   loom_compile_diagnostic_sink_t diagnostic_sink = {
@@ -816,21 +712,8 @@ static iree_string_view_t loom_compile_target_artifact_identifier(
              : output_path;
 }
 
-#if LOOM_COMPILE_HAVE_LLVMIR
-static bool loom_compile_target_emitter_is_llvmir(
-    const loom_target_emitter_t* target_emitter) {
-  switch (target_emitter->target_artifact_format) {
-    case LOOM_TARGET_ARTIFACT_FORMAT_LLVMIR_TEXT:
-    case LOOM_TARGET_ARTIFACT_FORMAT_LLVMIR_BITCODE:
-      return true;
-    default:
-      return false;
-  }
-}
-#endif  // LOOM_COMPILE_HAVE_LLVMIR
-
 static iree_status_t loom_compile_emit_target(
-    const loom_run_execution_environment_t* environment,
+    const loom_target_environment_t* target_environment,
     loom_run_session_t* session, const loom_target_emitter_t* target_emitter,
     loom_run_module_t* run_module,
     const loom_compile_options_t* compile_options, iree_allocator_t allocator,
@@ -870,31 +753,6 @@ static iree_status_t loom_compile_emit_target(
   const iree_string_view_t output_path = iree_make_cstring_view(FLAG_output);
   const iree_string_view_t identifier =
       loom_compile_target_artifact_identifier(output_path, target_emitter);
-#if LOOM_COMPILE_HAVE_LLVMIR
-  const loom_llvmir_target_profile_provider_t*
-      llvmir_target_profile_providers[] = {
-#if LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
-          loom_llvmir_x86_target_profile_provider(),
-#endif  // LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
-#if LOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV
-          loom_llvmir_amdgpu_target_profile_provider(),
-#endif  // LOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV
-          NULL,
-      };
-  const loom_llvmir_target_profile_registry_t llvmir_target_profile_registry = {
-      .providers = llvmir_target_profile_providers,
-      .provider_count = IREE_ARRAYSIZE(llvmir_target_profile_providers) - 1,
-  };
-  loom_llvmir_artifact_emitter_options_t llvmir_options = {0};
-  const void* option_chain = NULL;
-  if (loom_compile_target_emitter_is_llvmir(target_emitter)) {
-    loom_llvmir_artifact_emitter_options_initialize(&llvmir_options);
-    llvmir_options.target_profile_registry = &llvmir_target_profile_registry;
-    option_chain = &llvmir_options;
-  }
-#else
-  const void* option_chain = NULL;
-#endif  // LOOM_COMPILE_HAVE_LLVMIR
   if (compile_options->report != NULL) {
     compile_options->report->artifact_kind =
         LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
@@ -903,13 +761,11 @@ static iree_status_t loom_compile_emit_target(
         target_emitter->target_artifact_format);
   }
   const loom_target_emit_request_t request = {
-      .target_environment =
-          loom_run_execution_environment_target_environment(environment),
+      .target_environment = target_environment,
       .low_descriptor_registry =
           &loom_run_session_low_descriptor_registry(session)->registry,
       .module = run_module->module,
       .function_versions = compile_options->function_versions,
-      .option_chain = option_chain,
       .identifier = identifier,
       .compile_report = compile_options->report,
       .diagnostic_emitter = loom_target_entry_emitter(&diagnostic_emitter),
@@ -983,7 +839,7 @@ static iree_status_t loom_compile_validate_request_flags(
 }
 
 static iree_status_t loom_compile_specialize_explicit_target(
-    const loom_run_execution_environment_t* environment,
+    const loom_target_environment_t* target_environment,
     loom_run_session_t* session, loom_run_module_t* run_module,
     const loom_artifact_target_t* target,
     loom_compile_report_capture_t* compile_report_capture,
@@ -1010,8 +866,8 @@ static iree_status_t loom_compile_specialize_explicit_target(
 
   uint32_t error_count = 0;
   IREE_RETURN_IF_ERROR(loom_target_specialize_module_kernel_entries(
-      loom_run_execution_environment_target_environment(environment),
-      target->target_profile, loom_target_entry_emitter(&diagnostic_emitter),
+      target_environment, target->target_profile,
+      loom_target_entry_emitter(&diagnostic_emitter),
       loom_run_session_block_pool(session), allocator, &run_module->module,
       &error_count));
   if (error_count != 0) {
@@ -1165,9 +1021,9 @@ int main(int argc, char** argv) {
   const loom_tooling_source_path_options_t source_path_options = {
       .prefix_maps = FLAG_source_prefix_map_list(),
   };
-  loom_run_execution_environment_t environment = {0};
-  iree_status_t status = loom_run_execution_environment_initialize(
-      &kLoomCompileProviderSet, &environment);
+  const loom_tooling_compile_environment_t* compile_environment =
+      loom_tooling_configured_compile_environment();
+  iree_status_t status = iree_ok_status();
   loom_tooling_config_set_t config_set;
   loom_tooling_config_set_initialize(allocator, &config_set);
 
@@ -1187,7 +1043,8 @@ int main(int argc, char** argv) {
   int exit_code = 0;
 
   if (iree_status_is_ok(status)) {
-    status = loom_compile_initialize_session(&environment, allocator, &session);
+    status = loom_compile_initialize_session(
+        compile_environment->target_environment, allocator, &session);
   }
   if (iree_status_is_ok(status)) {
     status = loom_compile_append_config_files(&config_set, allocator);
@@ -1224,9 +1081,8 @@ int main(int argc, char** argv) {
     };
     status = loom_compile_request_resolve(
         run_module.module, &request_options,
-        &kLoomCompileArtifactProviderRegistry,
-        loom_run_execution_environment_target_environment(&environment),
-        &request);
+        compile_environment->artifact_provider_registry,
+        compile_environment->target_environment, &request);
     if (iree_status_is_ok(status)) {
       status = loom_compile_validate_request_flags(&request);
     }
@@ -1234,8 +1090,8 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status) &&
       request.explicit_target.target_profile != NULL) {
     status = loom_compile_specialize_explicit_target(
-        &environment, &session, &run_module, &request.explicit_target,
-        &compile_report_capture, allocator);
+        compile_environment->target_environment, &session, &run_module,
+        &request.explicit_target, &compile_report_capture, allocator);
   }
   if (iree_status_is_ok(status)) {
     status =
@@ -1318,7 +1174,7 @@ int main(int argc, char** argv) {
                                   iree_make_cstring_view(FLAG_pipeline));
     if (run_pipeline) {
       status = loom_compile_run_pass_pipeline(
-          &environment, &session, &run_module,
+          compile_environment->target_environment, &session, &run_module,
           LOOM_COMPILE_DEFAULT_PIPELINE_PREPARED_LOW, &compile_options,
           &compile_report_capture, loom_tooling_pass_trace_options(&pass_trace),
           &pipeline_result);
@@ -1354,8 +1210,9 @@ int main(int argc, char** argv) {
         break;
       case LOOM_COMPILE_PRODUCER_TARGET_EMITTER:
         status = loom_compile_emit_target(
-            &environment, &session, request.producer.value.target_emitter,
-            &run_module, &compile_options, allocator, &emitted);
+            compile_environment->target_environment, &session,
+            request.producer.value.target_emitter, &run_module,
+            &compile_options, allocator, &emitted);
         break;
       case LOOM_COMPILE_PRODUCER_COMMAND:
         status = loom_compile_emit_command(
@@ -1397,7 +1254,6 @@ int main(int argc, char** argv) {
   iree_io_file_contents_free(contents);
   loom_tooling_config_set_deinitialize(&config_set);
   loom_run_session_deinitialize(&session);
-  loom_run_execution_environment_deinitialize(&environment);
   iree_allocator_free(allocator, artifact_manifest_output_path_storage);
 
   IREE_TRACE_ZONE_END(z0);

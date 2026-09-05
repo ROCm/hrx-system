@@ -7,8 +7,51 @@
 load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
+    "iree_select",
     "loom_cc_library",
     "loom_cc_test",
+)
+
+_CONFIGURED_COMPILE_COPTS = (
+    iree_select({
+        "//loom/config/target:amdgpu_artifacts": [
+            "-DLOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS=1",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target:spirv_artifacts": [
+            "-DLOOM_CONFIG_COMPILE_HAVE_SPIRV_ARTIFACTS=1",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target:llvmir_artifacts": [
+            "-DLOOM_CONFIG_COMPILE_HAVE_LLVMIR_ARTIFACTS=1",
+        ],
+        "//conditions:default": [],
+    })
+)
+
+_CONFIGURED_COMPILE_DEPS = (
+    iree_select({
+        "//loom/config/target:amdgpu_artifacts": [
+            "//loom/src/loom/tooling/target/amdgpu:artifact_provider",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target:spirv_artifacts": [
+            "//loom/src/loom/tooling/target/spirv:artifact_provider",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target:llvmir_artifacts": [
+            "//loom/src/loom/target/emit/llvmir:artifact_emitter",
+        ],
+        "//conditions:default": [],
+    })
 )
 
 package(
@@ -46,6 +89,32 @@ loom_cc_library(
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/reporting:report",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "configured",
+    srcs = ["configured.c"],
+    hdrs = ["configured.h"],
+    copts = _CONFIGURED_COMPILE_COPTS,
+    deps = [
+        ":artifact",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/cmd:provider",
+        "//loom/src/loom/target/configured:provider_set",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ] + _CONFIGURED_COMPILE_DEPS,
+)
+
+loom_cc_test(
+    name = "configured_test",
+    srcs = ["configured_test.cc"],
+    copts = _CONFIGURED_COMPILE_COPTS,
+    deps = [
+        ":configured",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

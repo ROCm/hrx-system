@@ -83,16 +83,31 @@ _CONFIGURED_TARGET_DEPS = (
 )
 
 loom_cc_library(
-    name = "provider",
-    srcs = ["provider.c"],
-    hdrs = ["provider.h"],
+    name = "provider_set",
+    srcs = ["provider_set.c"],
+    hdrs = ["provider_set.h"],
     copts = _CONFIGURED_TARGET_COPTS,
-    visibility = ["//loom/src/loom/tools:__subpackages__"],
+    visibility = [
+        "//loom/src/loom/tooling/compile:__pkg__",
+        "//loom/src/loom/tools:__subpackages__",
+    ],
     deps = [
         "//loom/src/loom/target:provider",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
     ] + _CONFIGURED_TARGET_DEPS,
+)
+
+loom_cc_library(
+    name = "provider",
+    srcs = ["provider.c"],
+    hdrs = ["provider.h"],
+    visibility = ["//loom/src/loom/tools:__subpackages__"],
+    deps = [
+        ":provider_set",
+        "//loom/src/loom/target:provider",
+        "//runtime/src/iree/base/threading",
+    ],
 )
 
 loom_cc_library(
