@@ -19,6 +19,7 @@ iree_py_library(
         "core.py",
         "data_path.py",
         "f32.py",
+        "floating.py",
         "index_conversion.py",
         "memory.py",
         "packed_dot.py",

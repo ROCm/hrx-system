@@ -1033,6 +1033,35 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
         1,
     ]
 
+    bf16_accumulate = descriptors["amd.xdna.aie2p.accumulate.bf16x32.configured"]
+    assert [operand.field_name for operand in bf16_accumulate.operands] == [
+        "dst",
+        "acc1",
+        "s1",
+        "s2",
+        "acc",
+        "implicit_def_srfpflags",
+        "implicit_use_crfpmask",
+    ]
+    assert [operand.reg_alts[0].reg_class for operand in bf16_accumulate.operands] == [
+        "aie2p.mbms",
+        "aie2p.mbms",
+        "aie2p.vec256",
+        "aie2p.vec256",
+        "aie2p.er",
+        "aie2p.state.srfpflags",
+        "aie2p.state.crfpmask",
+    ]
+    assert [operand.unit_count for operand in bf16_accumulate.operands] == [
+        4,
+        4,
+        2,
+        2,
+        1,
+        1,
+        1,
+    ]
+
     bf16_convert = descriptors["amd.xdna.aie2p.convert.f32x32.to.bf16x32"]
     assert [operand.field_name for operand in bf16_convert.operands] == [
         "dst",

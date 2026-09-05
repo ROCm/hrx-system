@@ -33,6 +33,10 @@ from loom.target.arch.amd.xdna.aie2p.contracts.data_path import (
     vector_data_path_control,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.f32 import AIE2P_F32_RULES
+from loom.target.arch.amd.xdna.aie2p.contracts.floating import (
+    AIE2P_BF16_MATRIX_RULES,
+    AIE2P_FLOATING_RULES,
+)
 from loom.target.arch.amd.xdna.aie2p.contracts.index_conversion import (
     AIE2P_INDEX_CONVERSION_RULES,
 )
@@ -52,14 +56,12 @@ from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
 from loom.target.contracts import (
     AttrProject,
     ContractCase,
-    ContractEmit,
     ContractFragment,
     DescriptorEmitForm,
     DescriptorMatrixRule,
     DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
-    EmitRegisterConcat,
     EmitRegisterSlice,
     Guard,
     RecipeRule,
@@ -94,13 +96,8 @@ _F8E5M2_VECTOR = Vector("f8E5M2", minimum_static_elements=1, maximum_static_elem
 _I16_VECTOR = Vector("i16", minimum_static_elements=1, maximum_static_elements=32)
 _F16_VECTOR = Vector("f16", minimum_static_elements=1, maximum_static_elements=32)
 _BF16_VECTOR = Vector("bf16", minimum_static_elements=1, maximum_static_elements=32)
-_BF16X32_VECTOR = Vector("bf16", lanes=32)
-_BF16X8_VECTOR = Vector("bf16", lanes=8)
-_BF16X64_VECTOR = Vector("bf16", lanes=64)
 _I32_VECTOR = Vector("i32", minimum_static_elements=1, maximum_static_elements=16)
 _F32_VECTOR = Vector("f32", minimum_static_elements=1, maximum_static_elements=16)
-_F32X32_ACCUMULATOR = Vector("f32", lanes=32)
-_F32X64_MATRIX_ACCUMULATOR = Vector("f32", lanes=64)
 _I32_MATRIX_ACCUMULATOR = Vector("i32", lanes=64)
 _I1_VECTOR = Vector("i1", minimum_static_elements=1, maximum_static_elements=64)
 _I1X2X64_VECTOR = Vector("i1", dims=(2, 64))
@@ -132,23 +129,6 @@ _I16_ELEMENTWISE_MULTIPLY_CONTROL = vector_data_path_control(
     accumulator_mode=1,
     multiplication_mode=3,
     compute_mode=2,
-)
-_BF16_ELEMENTWISE_MULTIPLY_CONTROL = vector_data_path_control(
-    sign_x=False,
-    sign_y=False,
-    accumulator_mode=2,
-    multiplication_mode=3,
-    compute_mode=1,
-)
-_BF16_CONVERSION_ROUNDING = 12
-_BF16_OUTER_PRODUCT_SHUFFLE_CONTROLS = (52, 53)
-_BF16_OUTER_PRODUCT_MULTIPLY_CONTROL = _BF16_ELEMENTWISE_MULTIPLY_CONTROL
-_F32_ACCUMULATOR_ADD_CONTROL = vector_data_path_control(
-    sign_x=False,
-    sign_y=False,
-    accumulator_mode=2,
-    multiplication_mode=3,
-    compute_mode=1,
 )
 
 
@@ -675,160 +655,6 @@ def _vector_bitunpack_i1_alias_rule() -> ValueAliasRule:
     )
 
 
-def _vector_multiply_bf16x32_rule() -> DescriptorRule:
-    config_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
-    multiply = _descriptor("amd.xdna.aie2p.multiply.bf16x32.configured")
-    set_rounding = _descriptor("amd.xdna.aie2p.state.rounding.immediate")
-    convert = _descriptor("amd.xdna.aie2p.convert.f32x32.to.bf16x32")
-    return DescriptorRule(
-        source_op=vector.vector_mulf,
-        descriptor=convert,
-        guards=_typed_guards(("lhs", "rhs", "result"), _BF16X32_VECTOR),
-        emit=(
-            _const_emit(
-                config_constant,
-                ValueRef.temporary("multiply_control"),
-                _BF16_ELEMENTWISE_MULTIPLY_CONTROL,
-                result_type=DescriptorResultType(),
-            ),
-            _op_emit(
-                multiply,
-                operands={
-                    "s1": ValueRef.operand("lhs"),
-                    "s2": ValueRef.operand("rhs"),
-                    "acc": ValueRef.temporary("multiply_control"),
-                },
-                results={"dst": ValueRef.temporary("wide_product")},
-                result_types={"dst": DescriptorResultType()},
-            ),
-            EmitRegisterSlice(
-                source=ValueRef.temporary("wide_product"),
-                result=ValueRef.temporary("product"),
-                unit_count=2,
-            ),
-            EmitDescriptorOp(
-                descriptor=set_rounding,
-                immediates={"i": _BF16_CONVERSION_ROUNDING},
-                form=DescriptorEmitForm.OP,
-            ),
-            _op_emit(
-                convert,
-                operands={"src": ValueRef.temporary("product")},
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
-def _matrix_multiply_bf16bf16_m8n8k1_rule() -> DescriptorRule:
-    config_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
-    broadcast = _descriptor("amd.xdna.aie2p.broadcast.bf16x8.to.bf16x32")
-    shuffle = _descriptor("amd.xdna.aie2p.shuffle.x.configured")
-    move = _descriptor("amd.xdna.aie2p.move.vector512")
-    multiply = _descriptor(
-        "amd.xdna.aie2p.matrix.accumulate.bf16bf16.m8n8k1.configured"
-    )
-    return DescriptorRule(
-        source_op=vector.vector_mma,
-        descriptor=multiply,
-        guards=(
-            Guard.value_type("lhs", _BF16X8_VECTOR),
-            Guard.value_type("rhs", _BF16X8_VECTOR),
-            Guard.value_type("init", _F32X64_MATRIX_ACCUMULATOR),
-            Guard.value_type("result", _F32X64_MATRIX_ACCUMULATOR),
-        ),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=broadcast,
-                operands={"s1": ValueRef.operand("lhs")},
-                results={"dst": ValueRef.temporary("lhs_broadcast")},
-                result_types={"dst": DescriptorResultType()},
-                immediates={"idx": 0},
-                form=DescriptorEmitForm.OP,
-            ),
-            _const_emit(
-                config_constant,
-                ValueRef.temporary("lhs_shuffle_even_control"),
-                _BF16_OUTER_PRODUCT_SHUFFLE_CONTROLS[0],
-                result_type=DescriptorResultType(),
-            ),
-            _op_emit(
-                shuffle,
-                operands={
-                    "s1": ValueRef.temporary("lhs_broadcast"),
-                    "s2": ValueRef.temporary("lhs_broadcast"),
-                    "mod": ValueRef.temporary("lhs_shuffle_even_control"),
-                },
-                results={"dst": ValueRef.temporary("lhs_rows_even")},
-                result_types={"dst": DescriptorResultType()},
-            ),
-            _const_emit(
-                config_constant,
-                ValueRef.temporary("lhs_shuffle_odd_control"),
-                _BF16_OUTER_PRODUCT_SHUFFLE_CONTROLS[1],
-                result_type=DescriptorResultType(),
-            ),
-            _op_emit(
-                shuffle,
-                operands={
-                    "s1": ValueRef.temporary("lhs_broadcast"),
-                    "s2": ValueRef.temporary("lhs_broadcast"),
-                    "mod": ValueRef.temporary("lhs_shuffle_odd_control"),
-                },
-                results={"dst": ValueRef.temporary("lhs_rows_odd")},
-                result_types={"dst": DescriptorResultType()},
-            ),
-            EmitRegisterConcat(
-                sources=(
-                    ValueRef.temporary("lhs_rows_even"),
-                    ValueRef.temporary("lhs_rows_odd"),
-                ),
-                result=ValueRef.temporary("lhs_rows"),
-                result_type=_BF16X64_VECTOR,
-            ),
-            EmitDescriptorOp(
-                descriptor=broadcast,
-                operands={"s1": ValueRef.operand("rhs")},
-                results={"dst": ValueRef.temporary("rhs_columns_low")},
-                result_types={"dst": DescriptorResultType()},
-                immediates={"idx": 0},
-                form=DescriptorEmitForm.OP,
-            ),
-            _op_emit(
-                move,
-                operands={"src": ValueRef.temporary("rhs_columns_low")},
-                results={"dst": ValueRef.temporary("rhs_columns_high")},
-                result_types={"dst": DescriptorResultType()},
-            ),
-            EmitRegisterConcat(
-                sources=(
-                    ValueRef.temporary("rhs_columns_low"),
-                    ValueRef.temporary("rhs_columns_high"),
-                ),
-                result=ValueRef.temporary("rhs_columns"),
-                result_type=_BF16X64_VECTOR,
-            ),
-            _const_emit(
-                config_constant,
-                ValueRef.temporary("multiply_control"),
-                _BF16_OUTER_PRODUCT_MULTIPLY_CONTROL,
-                result_type=DescriptorResultType(),
-            ),
-            _op_emit(
-                multiply,
-                operands={
-                    "acc1": ValueRef.operand("init"),
-                    "s1": ValueRef.temporary("lhs_rows"),
-                    "s2": ValueRef.temporary("rhs_columns"),
-                    "acc": ValueRef.temporary("multiply_control"),
-                },
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-        report_key="bf16bf16_m8n8k1",
-    )
-
-
 def _vector_splat_rule(
     scalar_type: TypePattern,
     result_type: TypePattern,
@@ -1193,206 +1019,6 @@ def _matrix_accumulator_zero_rule() -> DescriptorRule:
             _op_emit(
                 descriptor,
                 results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
-def _float_matrix_accumulator_zero_rule() -> DescriptorRule:
-    descriptor = _descriptor("amd.xdna.aie2p.accumulator.clear.f32x64")
-    return DescriptorRule(
-        source_op=vector.vector_constant,
-        descriptor=descriptor,
-        guards=(
-            Guard.attr_kind("value", "f64"),
-            Guard.value_type("result", _F32X64_MATRIX_ACCUMULATOR),
-            Guard.value_float_equals("result", 0.0),
-        ),
-        emit=(
-            _op_emit(
-                descriptor,
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
-def _float_matrix_accumulator_add_rule() -> DescriptorRule:
-    config_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
-    add = _descriptor("amd.xdna.aie2p.add.f32x64.configured")
-    return DescriptorRule(
-        source_op=vector.vector_addf,
-        descriptor=add,
-        guards=_typed_guards(("lhs", "rhs", "result"), _F32X64_MATRIX_ACCUMULATOR),
-        emit=(
-            _const_emit(
-                config_constant,
-                ValueRef.temporary("add_control"),
-                _F32_ACCUMULATOR_ADD_CONTROL,
-                result_type=DescriptorResultType(),
-            ),
-            _op_emit(
-                add,
-                operands={
-                    "acc1": ValueRef.operand("lhs"),
-                    "acc2": ValueRef.operand("rhs"),
-                    "acc": ValueRef.temporary("add_control"),
-                },
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
-def _float_accumulator_binary_emits(
-    lhs: ValueRef,
-    rhs: ValueRef,
-    result: ValueRef,
-    operation_descriptor_key: str,
-    *,
-    extract_scalar_result: bool,
-) -> tuple[ContractEmit, ...]:
-    clear = _descriptor("amd.xdna.aie2p.accumulator.clear.f32x64")
-    move_to_accumulator = _descriptor("amd.xdna.aie2p.move.vector512.to.accumulator512")
-    move_from_accumulator = _descriptor(
-        "amd.xdna.aie2p.move.accumulator512.to.vector512"
-    )
-    config_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
-    operation = _descriptor(operation_descriptor_key)
-    extract = _descriptor("amd.xdna.aie2p.extract.i32.immediate")
-
-    final_vector = (
-        ValueRef.temporary("result_vector") if extract_scalar_result else result
-    )
-    final_vector_result_types = (
-        {"dst": DescriptorResultType()} if extract_scalar_result else None
-    )
-    emits: list[ContractEmit] = [
-        _op_emit(
-            clear,
-            results={"dst": ValueRef.temporary("zero_accumulator")},
-            result_types={"dst": DescriptorResultType()},
-        ),
-        EmitRegisterSlice(
-            source=ValueRef.temporary("zero_accumulator"),
-            result=ValueRef.temporary("zero_accumulator_unit"),
-            unit_count=1,
-        ),
-    ]
-    for operand_name, operand in (("lhs", lhs), ("rhs", rhs)):
-        accumulator_unit = ValueRef.temporary(f"{operand_name}_accumulator_unit")
-        emits.extend(
-            (
-                _op_emit(
-                    move_to_accumulator,
-                    operands={"src": operand},
-                    results={"dst": accumulator_unit},
-                    result_types={"dst": DescriptorResultType()},
-                ),
-                EmitRegisterConcat(
-                    sources=(
-                        accumulator_unit,
-                        ValueRef.temporary("zero_accumulator_unit"),
-                        ValueRef.temporary("zero_accumulator_unit"),
-                        ValueRef.temporary("zero_accumulator_unit"),
-                    ),
-                    result=ValueRef.temporary(f"{operand_name}_accumulator"),
-                    result_type=_F32X64_MATRIX_ACCUMULATOR,
-                ),
-            )
-        )
-    emits.extend(
-        (
-            _const_emit(
-                config_constant,
-                ValueRef.temporary("arithmetic_control"),
-                _F32_ACCUMULATOR_ADD_CONTROL,
-                result_type=DescriptorResultType(),
-            ),
-            _op_emit(
-                operation,
-                operands={
-                    "acc1": ValueRef.temporary("lhs_accumulator"),
-                    "acc2": ValueRef.temporary("rhs_accumulator"),
-                    "acc": ValueRef.temporary("arithmetic_control"),
-                },
-                results={"dst": ValueRef.temporary("result_accumulator")},
-                result_types={"dst": DescriptorResultType()},
-            ),
-            EmitRegisterSlice(
-                source=ValueRef.temporary("result_accumulator"),
-                result=ValueRef.temporary("result_accumulator_unit"),
-                unit_count=1,
-            ),
-            _op_emit(
-                move_from_accumulator,
-                operands={"src": ValueRef.temporary("result_accumulator_unit")},
-                results={"dst": final_vector},
-                result_types=final_vector_result_types,
-            ),
-        )
-    )
-    if extract_scalar_result:
-        emits.append(
-            EmitDescriptorOp(
-                descriptor=extract,
-                operands={"s1": final_vector},
-                results={"dst": result},
-                immediates={"idx": 0},
-                form=DescriptorEmitForm.OP,
-            )
-        )
-    return tuple(emits)
-
-
-def _float_vector_accumulator_binary_rule(
-    source_op: Op,
-    operation_descriptor_key: str,
-) -> DescriptorRule:
-    operation = _descriptor(operation_descriptor_key)
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=operation,
-        guards=_typed_guards(("lhs", "rhs", "result"), _F32_VECTOR),
-        emit=_float_accumulator_binary_emits(
-            ValueRef.operand("lhs"),
-            ValueRef.operand("rhs"),
-            ValueRef.result("result"),
-            operation_descriptor_key,
-            extract_scalar_result=False,
-        ),
-    )
-
-
-def _float_scalar_accumulator_binary_rule(
-    source_op: Op,
-    operation_descriptor_key: str,
-) -> DescriptorRule:
-    broadcast = _descriptor("amd.xdna.aie2p.splat.i32x16")
-    operation = _descriptor(operation_descriptor_key)
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=operation,
-        guards=_typed_guards(("lhs", "rhs", "result"), _F32),
-        emit=(
-            _op_emit(
-                broadcast,
-                operands={"src": ValueRef.operand("lhs")},
-                results={"dst": ValueRef.temporary("lhs_vector")},
-                result_types={"dst": DescriptorResultType()},
-            ),
-            _op_emit(
-                broadcast,
-                operands={"src": ValueRef.operand("rhs")},
-                results={"dst": ValueRef.temporary("rhs_vector")},
-                result_types={"dst": DescriptorResultType()},
-            ),
-            *_float_accumulator_binary_emits(
-                ValueRef.temporary("lhs_vector"),
-                ValueRef.temporary("rhs_vector"),
-                ValueRef.result("result"),
-                operation_descriptor_key,
-                extract_scalar_result=True,
             ),
         ),
     )
@@ -2160,7 +1786,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             source=ValueRef.operand("source"),
             result=ValueRef.result("result"),
         ),
-        _matrix_multiply_bf16bf16_m8n8k1_rule(),
+        *AIE2P_BF16_MATRIX_RULES,
         DescriptorMatrixRule(
             source_op=vector.vector_mma,
             source="vector_mma",
@@ -2702,31 +2328,9 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             "amd.xdna.aie2p.unpack.s4x64.to.s8x64.configured",
         ),
         _vector_bitunpack_i1_alias_rule(),
-        _vector_multiply_bf16x32_rule(),
         *AIE2P_F32_RULES,
         _matrix_accumulator_zero_rule(),
-        _float_matrix_accumulator_zero_rule(),
-        _float_matrix_accumulator_add_rule(),
-        *(
-            _float_vector_accumulator_binary_rule(source_op, descriptor_key)
-            for source_op, descriptor_key in (
-                (vector.vector_addf, "amd.xdna.aie2p.add.f32x64.configured"),
-                (vector.vector_subf, "amd.xdna.aie2p.sub.f32x64.configured"),
-            )
-        ),
-        *(
-            _float_scalar_accumulator_binary_rule(source_op, descriptor_key)
-            for source_op, descriptor_key in (
-                (
-                    scalar_arithmetic.scalar_addf,
-                    "amd.xdna.aie2p.add.f32x64.configured",
-                ),
-                (
-                    scalar_arithmetic.scalar_subf,
-                    "amd.xdna.aie2p.sub.f32x64.configured",
-                ),
-            )
-        ),
+        *AIE2P_FLOATING_RULES,
         *(
             _vector_binary_rule(source_op, type_pattern, descriptor_key)
             for source_op, type_pattern, descriptor_key in (

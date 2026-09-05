@@ -16,13 +16,16 @@ from loom.dialect.scf import defs as scf
 from loom.dialect.vector import defs as vector
 from loom.dialect.view import defs as view
 from loom.target.arch.amd.xdna.aie2p.contracts.core import (
+    _I16_ELEMENTWISE_MULTIPLY_CONTROL,
+    AIE2P_CORE_CONTRACT_FRAGMENT,
+)
+from loom.target.arch.amd.xdna.aie2p.contracts.floating import (
     _BF16_CONVERSION_ROUNDING,
+    _BF16_DOT2_DEINTERLEAVE_CONTROLS,
     _BF16_ELEMENTWISE_MULTIPLY_CONTROL,
     _BF16_OUTER_PRODUCT_MULTIPLY_CONTROL,
     _BF16_OUTER_PRODUCT_SHUFFLE_CONTROLS,
     _F32_ACCUMULATOR_ADD_CONTROL,
-    _I16_ELEMENTWISE_MULTIPLY_CONTROL,
-    AIE2P_CORE_CONTRACT_FRAGMENT,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.packed_dot import (
     _DOT4_GROW_CONTROL,
@@ -595,6 +598,39 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert bf16_multiply.emit[0].immediates == {"i": _BF16_ELEMENTWISE_MULTIPLY_CONTROL}
     assert _BF16_CONVERSION_ROUNDING == 12
     assert bf16_multiply.emit[3].immediates == {"i": _BF16_CONVERSION_ROUNDING}
+
+    bf16_dot2_rules = [rule for rule in rules if rule.source_op is vector.vector_dot2f]
+    assert len(bf16_dot2_rules) == 1
+    bf16_dot2 = bf16_dot2_rules[0]
+    assert bf16_dot2.descriptor.key == ("amd.xdna.aie2p.accumulate.bf16x32.configured")
+    assert [
+        emit.descriptor.key
+        for emit in bf16_dot2.emit
+        if not isinstance(emit, (EmitRegisterConcat, EmitRegisterSlice))
+    ] == [
+        "amd.xdna.aie2p.constant.i32.mova",
+        "amd.xdna.aie2p.shuffle.x.configured",
+        "amd.xdna.aie2p.shuffle.x.configured",
+        "amd.xdna.aie2p.constant.i32.mova",
+        "amd.xdna.aie2p.shuffle.x.configured",
+        "amd.xdna.aie2p.shuffle.x.configured",
+        "amd.xdna.aie2p.accumulator.clear.f32x64",
+        "amd.xdna.aie2p.move.vector512.to.accumulator512",
+        "amd.xdna.aie2p.constant.i32.mova",
+        "amd.xdna.aie2p.accumulate.bf16x32.configured",
+        "amd.xdna.aie2p.accumulate.bf16x32.configured",
+        "amd.xdna.aie2p.move.accumulator512.to.vector512",
+    ]
+    assert [bf16_dot2.emit[index].immediates["i"] for index in (0, 3)] == list(
+        _BF16_DOT2_DEINTERLEAVE_CONTROLS
+    )
+    assert bf16_dot2.emit[12].immediates == {"i": _BF16_ELEMENTWISE_MULTIPLY_CONTROL}
+    assert sum(isinstance(emit, EmitRegisterSlice) for emit in bf16_dot2.emit) == 4
+    assert sum(isinstance(emit, EmitRegisterConcat) for emit in bf16_dot2.emit) == 1
+    assert Guard.value_type("lhs", Vector("bf16", lanes=32)) in bf16_dot2.guards
+    assert Guard.value_type("rhs", Vector("bf16", lanes=32)) in bf16_dot2.guards
+    assert Guard.value_type("acc", Vector("f32", lanes=16)) in bf16_dot2.guards
+    assert Guard.value_type("result", Vector("f32", lanes=16)) in bf16_dot2.guards
 
     bf16_outer_product_rules = [
         rule
