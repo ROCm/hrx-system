@@ -342,17 +342,6 @@ static void loom_contract_vector_populate_auxiliary_operands(
   }
 }
 
-static bool loom_contract_vector_fragment_storage_schema(
-    loom_vector_fragment_fact_t fact,
-    loom_value_fact_storage_schema_t* out_schema) {
-  *out_schema = (loom_value_fact_storage_schema_t){
-      .static_spec_encoding_id = fact.static_schema_encoding_id,
-      .encoded_operand = fact.encoded_operand,
-  };
-  return !loom_value_fact_encoded_operand_schema_is_unknown(
-      out_schema->encoded_operand);
-}
-
 static bool loom_contract_vector_operand_adapt_schema_to_typed_payload(
     const loom_module_t* module, loom_value_id_t value_id,
     loom_contract_operand_role_t role, loom_contract_operand_t* operand) {
@@ -400,12 +389,21 @@ bool loom_contract_vector_operand_from_fragment(
   *out_rejection_bits = LOOM_CONTRACT_REJECTION_NONE;
 
   if (iree_any_bit_set(fact.flags, LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA)) {
-    loom_value_fact_storage_schema_t schema = {0};
-    if (!loom_contract_vector_fragment_storage_schema(fact, &schema) ||
-        !loom_contract_operand_from_storage_schema(role, schema, out_operand)) {
+    loom_value_fact_storage_schema_t payload_schema = {0};
+    if (!loom_vector_fragment_fact_query_payload_storage_schema(
+            fact, &payload_schema) ||
+        !loom_contract_operand_from_storage_schema(role, payload_schema,
+                                                   out_operand)) {
       *out_rejection_bits = LOOM_CONTRACT_REJECTION_SCHEMA;
       return false;
     }
+    loom_value_fact_storage_schema_t source_schema = {0};
+    if (!loom_vector_fragment_fact_query_source_storage_schema(
+            module, fact, &source_schema)) {
+      *out_rejection_bits = LOOM_CONTRACT_REJECTION_SCHEMA;
+      return false;
+    }
+    out_operand->encoded.source_schema = source_schema;
     (void)loom_contract_vector_operand_adapt_schema_to_typed_payload(
         module, value_id, role, out_operand);
     loom_contract_vector_populate_auxiliary_operands(&fact.auxiliary,

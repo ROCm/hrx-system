@@ -869,6 +869,93 @@ static bool loom_vector_fragment_load_preserves_target_fragment_storage_schema(
          (uint64_t)operand.payload_register_count * 32ull;
 }
 
+static loom_value_fact_numeric_format_flags_t
+loom_vector_fragment_load_prepared_integer_format(
+    loom_value_fact_numeric_format_flags_t source_format,
+    int32_t result_element_bit_count) {
+  const bool is_unsigned =
+      loom_numeric_format_uses_unsigned_integer_semantics(source_format);
+  switch (result_element_bit_count) {
+    case 8:
+      return is_unsigned ? LOOM_VALUE_FACT_NUMERIC_FORMAT_U8
+                         : LOOM_VALUE_FACT_NUMERIC_FORMAT_I8;
+    case 16:
+      return is_unsigned ? LOOM_VALUE_FACT_NUMERIC_FORMAT_U16
+                         : LOOM_VALUE_FACT_NUMERIC_FORMAT_I16;
+    case 32:
+      return is_unsigned ? LOOM_VALUE_FACT_NUMERIC_FORMAT_U32
+                         : LOOM_VALUE_FACT_NUMERIC_FORMAT_I32;
+    default:
+      return LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
+  }
+}
+
+static bool loom_vector_fragment_load_prepare_fixed_record_schema(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_value_fact_storage_schema_t source_schema,
+    loom_value_fact_encoded_operand_schema_t* out_schema) {
+  *out_schema = (loom_value_fact_encoded_operand_schema_t){0};
+  const loom_encoding_record_layout_t* record_layout = NULL;
+  if (source_schema.static_spec_encoding_id == 0 ||
+      !loom_encoding_query_static_record_layout(
+          module, source_schema.static_spec_encoding_id, &record_layout)) {
+    return false;
+  }
+
+  const loom_numeric_format_info_t* source_format = NULL;
+  if (!loom_numeric_format_info(source_schema.encoded_operand.element_format,
+                                &source_format)) {
+    return false;
+  }
+  const loom_type_t result_type =
+      loom_module_value_type(module, loom_vector_fragment_load_result(op));
+  if (!loom_type_is_vector(result_type) ||
+      !loom_type_is_all_static(result_type)) {
+    return false;
+  }
+  uint64_t result_element_count = 0;
+  if (!loom_type_static_element_count(result_type, &result_element_count) ||
+      result_element_count == 0 || result_element_count > UINT16_MAX) {
+    return false;
+  }
+  const loom_scalar_type_t result_element_type =
+      loom_type_element_type(result_type);
+  const int32_t result_element_bit_count =
+      loom_scalar_type_bitwidth(result_element_type);
+  if (result_element_bit_count < source_format->storage_bit_count ||
+      result_element_bit_count <= 0 ||
+      result_element_count > UINT32_MAX / (uint32_t)result_element_bit_count) {
+    return false;
+  }
+  const uint32_t result_bit_count =
+      (uint32_t)result_element_count * (uint32_t)result_element_bit_count;
+  if (result_bit_count % 32u != 0 || result_bit_count / 32u > UINT16_MAX) {
+    return false;
+  }
+
+  loom_value_fact_numeric_format_flags_t result_format =
+      loom_numeric_format_from_scalar_type(result_element_type);
+  if (source_format->kind == LOOM_NUMERIC_FORMAT_KIND_SIGNED_INTEGER ||
+      source_format->kind == LOOM_NUMERIC_FORMAT_KIND_UNSIGNED_INTEGER ||
+      source_format->kind ==
+          LOOM_NUMERIC_FORMAT_KIND_QUANTIZED_SIGNED_INTEGER ||
+      source_format->kind == LOOM_NUMERIC_FORMAT_KIND_CODEBOOK_INDEX) {
+    result_format = loom_vector_fragment_load_prepared_integer_format(
+        source_schema.encoded_operand.element_format, result_element_bit_count);
+  }
+  if (result_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE) {
+    return false;
+  }
+
+  *out_schema = (loom_value_fact_encoded_operand_schema_t){
+      .element_format = result_format,
+      .payload_packing = LOOM_VALUE_FACT_PAYLOAD_PACKING_TARGET_FRAGMENT,
+      .payload_register_count = (uint16_t)(result_bit_count / 32u),
+      .payload_element_count = (uint16_t)result_element_count,
+  };
+  return true;
+}
+
 iree_status_t loom_vector_fragment_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
@@ -905,7 +992,8 @@ iree_status_t loom_vector_fragment_facts(
   }
 
   if (parameters.has_schema) {
-    fact.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA;
+    fact.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA |
+                  LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA_VALUE;
     fact.schema_value_id = parameters.schema_value_id;
 
     loom_value_fact_storage_schema_t storage_schema = {0};
@@ -1010,15 +1098,25 @@ iree_status_t loom_vector_fragment_load_facts(
           context, module, loom_module_value_type(module, view_value_id),
           &storage_schema) &&
       !loom_value_fact_encoded_operand_schema_is_unknown(
-          storage_schema.encoded_operand) &&
-      (loom_vector_fragment_load_preserves_view_element_type(module, op) ||
-       loom_vector_fragment_load_preserves_target_fragment_storage_schema(
-           module, op, storage_schema))) {
-    fact.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA;
-    fact.encoded_operand = storage_schema.encoded_operand;
-    if (storage_schema.static_spec_encoding_id != 0) {
-      fact.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_STATIC_SCHEMA;
-      fact.static_schema_encoding_id = storage_schema.static_spec_encoding_id;
+          storage_schema.encoded_operand)) {
+    loom_value_fact_encoded_operand_schema_t prepared_schema = {0};
+    if (loom_vector_fragment_load_prepare_fixed_record_schema(
+            module, op, storage_schema, &prepared_schema)) {
+      fact.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA |
+                    LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SOURCE_STATIC_SCHEMA;
+      fact.source_static_schema_encoding_id =
+          storage_schema.static_spec_encoding_id;
+      fact.encoded_operand = prepared_schema;
+    } else if (
+        loom_vector_fragment_load_preserves_view_element_type(module, op) ||
+        loom_vector_fragment_load_preserves_target_fragment_storage_schema(
+            module, op, storage_schema)) {
+      fact.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA;
+      fact.encoded_operand = storage_schema.encoded_operand;
+      if (storage_schema.static_spec_encoding_id != 0) {
+        fact.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_STATIC_SCHEMA;
+        fact.static_schema_encoding_id = storage_schema.static_spec_encoding_id;
+      }
     }
   }
   IREE_RETURN_IF_ERROR(loom_vector_fragment_fact_make_value_facts(

@@ -9,8 +9,10 @@
 // vector.fragment keeps the physical vector type intact and records how that
 // vector should be interpreted by matrix-contract lowering. The operation is a
 // fact boundary: dense fragments carry only role and logical matrix shape,
-// while encoded fragments additionally point at a schema SSA value and ordinary
+// while encoded fragments carry their current payload schema and ordinary
 // auxiliary SSA operands for scales, tables, sparse metadata, and online state.
+// Load-boundary preparation can retain an exact source schema separately from
+// the native payload schema consumed by later operations.
 
 #ifndef LOOM_OPS_VECTOR_FRAGMENT_H_
 #define LOOM_OPS_VECTOR_FRAGMENT_H_
@@ -44,12 +46,16 @@ typedef uint32_t loom_vector_fragment_role_flags_t;
 
 // Fragment fact bitset values.
 typedef enum loom_vector_fragment_fact_flag_bits_e {
-  // The fragment carries an explicit schema SSA value.
+  // The fragment carries a known current payload schema.
   LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA = 1u << 0,
-  // The schema was resolved to an exact static storage-schema encoding.
+  // The current payload schema is an exact static storage-schema encoding.
   LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_STATIC_SCHEMA = 1u << 1,
   // The payload is already in native target-fragment storage order.
   LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE = 1u << 2,
+  // The current payload schema is named by an explicit SSA value.
+  LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA_VALUE = 1u << 3,
+  // The payload was prepared from an exact static source storage schema.
+  LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SOURCE_STATIC_SCHEMA = 1u << 4,
 } loom_vector_fragment_fact_flag_bits_t;
 
 typedef uint32_t loom_vector_fragment_fact_flags_t;
@@ -64,11 +70,14 @@ typedef struct loom_vector_fragment_fact_t {
   // Bitset of loom_vector_fragment_role_flag_bits_t values.
   loom_vector_fragment_role_flags_t role_flags;
 
-  // Schema SSA value when HAS_SCHEMA is set.
+  // Schema SSA value when HAS_SCHEMA_VALUE is set.
   loom_value_id_t schema_value_id;
 
   // One-based static schema encoding ID when HAS_STATIC_SCHEMA is set.
   uint16_t static_schema_encoding_id;
+
+  // One-based source schema encoding ID when HAS_SOURCE_STATIC_SCHEMA is set.
+  uint16_t source_static_schema_encoding_id;
 
   // Number of logical matrix shape values stored in shape_value_ids.
   uint16_t shape_rank;
@@ -159,6 +168,20 @@ iree_status_t loom_vector_fragment_fact_make_value_facts(
 bool loom_vector_fragment_fact_query_value_facts(
     const loom_fact_context_t* context, loom_value_facts_t facts,
     loom_vector_fragment_fact_t* out_fact);
+
+// Queries the current payload storage schema described by |fact|. This is the
+// schema consumed by operations using the fragment after any load-boundary
+// preparation.
+bool loom_vector_fragment_fact_query_payload_storage_schema(
+    loom_vector_fragment_fact_t fact,
+    loom_value_fact_storage_schema_t* out_schema);
+
+// Queries the storage schema from which the current payload was prepared. An
+// exact source schema is resolved through |module|; otherwise this aliases the
+// current payload schema.
+bool loom_vector_fragment_fact_query_source_storage_schema(
+    const loom_module_t* module, loom_vector_fragment_fact_t fact,
+    loom_value_fact_storage_schema_t* out_schema);
 
 // Resolves vector.fragment using-dictionary metadata into schema and dense
 // auxiliary slots. Returns false and stores the unknown key spelling in

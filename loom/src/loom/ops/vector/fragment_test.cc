@@ -82,10 +82,13 @@ TEST(VectorFragmentFactsTest, PayloadRoundTripsThroughValueFacts) {
   loom_vector_fragment_fact_t fact;
   loom_vector_fragment_fact_initialize(&fact);
   fact.flags = LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA |
-               LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_STATIC_SCHEMA;
+               LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_STATIC_SCHEMA |
+               LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA_VALUE |
+               LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SOURCE_STATIC_SCHEMA;
   fact.role_flags = loom_vector_fragment_role_flag(LOOM_VECTOR_ROLE_RHS);
   fact.schema_value_id = 56;
   fact.static_schema_encoding_id = 3;
+  fact.source_static_schema_encoding_id = 4;
   fact.shape_rank = 2;
   fact.shape_value_ids[0] = 78;
   fact.shape_value_ids[1] = 90;
