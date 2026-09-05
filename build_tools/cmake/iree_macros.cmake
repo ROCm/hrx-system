@@ -190,6 +190,14 @@ function(iree_generated_output_add_consumer INPUT_PATH CONSUMER_TARGET)
     message(FATAL_ERROR
       "Generated output consumer ${CONSUMER_TARGET} was not found")
   endif()
+  if("${INPUT_PATH}" MATCHES
+     "^\\$<TARGET_PROPERTY:([^,>]+),[^>]+>$")
+    iree_register_target_dependency(
+      TARGET "${CONSUMER_TARGET}"
+      DEPENDENCY "${CMAKE_MATCH_1}"
+    )
+    return()
+  endif()
   if("${INPUT_PATH}" MATCHES "^\\$<")
     return()
   endif()
@@ -600,6 +608,15 @@ function(iree_add_data_dependencies)
       iree_package_ns(_DATA_PACKAGE_NS)
       string(REGEX REPLACE "^::" "${_DATA_PACKAGE_NS}::"
              _DATA_TARGET_NAME "${_DATA_TARGET_NAME}")
+    endif()
+
+    if("${_DATA_LABEL}" MATCHES "^\\$<")
+      list(APPEND _FILE_DATA "${_DATA_LABEL}")
+      iree_generated_output_add_consumer(
+        "${_DATA_LABEL}"
+        "${_RULE_NAME}"
+      )
+      continue()
     endif()
 
     if(TARGET "${_DATA_TARGET_NAME}" OR

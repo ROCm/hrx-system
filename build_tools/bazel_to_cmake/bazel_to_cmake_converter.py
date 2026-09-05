@@ -735,7 +735,7 @@ class BuildFileFunctions(object):
         canonical_label = self._canonical_location_label(label)
         if canonical_label in self._target_file_paths:
             path = self._target_file_paths[canonical_label]
-            if package == self._current_package():
+            if package == self._current_package() or path.startswith("$<"):
                 return [path]
             return [f"${{IREE_BINARY_DIR}}/{package}/{path}"]
         source_path = self._cmake_source_location_path(label)
@@ -1441,7 +1441,7 @@ class BuildFileFunctions(object):
         self.iree_py_test(**kwargs)
 
     def filegroup(self, name, srcs, **kwargs):
-        if not srcs:
+        if not srcs or self._should_skip_target(**kwargs):
             return
         self._filegroup_srcs[name] = list(srcs)
 

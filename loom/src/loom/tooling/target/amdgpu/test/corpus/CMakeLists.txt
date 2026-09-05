@@ -35,12 +35,12 @@ iree_native_test(
   NAME
     "generic_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/generic_test_module.loombc}}"
+    "{{$<TARGET_PROPERTY:loom_tooling_target_amdgpu_test_corpus_generic_test_module,IREE_GENERATED_FILE>}}"
     "--device=amdgpu"
   SRC
     loom::tools::iree-test-loom
   DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/generic_test_module.loombc"
+    "$<TARGET_PROPERTY:loom_tooling_target_amdgpu_test_corpus_generic_test_module,IREE_GENERATED_FILE>"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "requires-gpu-amd"
@@ -70,12 +70,12 @@ iree_native_test(
   NAME
     "gfx11_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/gfx11_test_module.loombc}}"
+    "{{$<TARGET_PROPERTY:loom_tooling_target_amdgpu_test_corpus_gfx11_test_module,IREE_GENERATED_FILE>}}"
     "--device=amdgpu"
   SRC
     loom::tools::iree-test-loom
   DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/gfx11_test_module.loombc"
+    "$<TARGET_PROPERTY:loom_tooling_target_amdgpu_test_corpus_gfx11_test_module,IREE_GENERATED_FILE>"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "requires-gpu-amd"
@@ -104,12 +104,12 @@ iree_native_test(
   NAME
     "gfx1100_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/gfx1100_test_module.loombc}}"
+    "{{$<TARGET_PROPERTY:loom_tooling_target_amdgpu_test_corpus_gfx1100_test_module,IREE_GENERATED_FILE>}}"
     "--device=amdgpu"
   SRC
     loom::tools::iree-test-loom
   DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/gfx1100_test_module.loombc"
+    "$<TARGET_PROPERTY:loom_tooling_target_amdgpu_test_corpus_gfx1100_test_module,IREE_GENERATED_FILE>"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "requires-gpu-amd"
@@ -139,12 +139,12 @@ iree_native_test(
   NAME
     "gfx9_4_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/gfx9_4_test_module.loombc}}"
+    "{{$<TARGET_PROPERTY:loom_tooling_target_amdgpu_test_corpus_gfx9_4_test_module,IREE_GENERATED_FILE>}}"
     "--device=amdgpu"
   SRC
     loom::tools::iree-test-loom
   DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/gfx9_4_test_module.loombc"
+    "$<TARGET_PROPERTY:loom_tooling_target_amdgpu_test_corpus_gfx9_4_test_module,IREE_GENERATED_FILE>"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "requires-gpu-amd"
@@ -173,12 +173,12 @@ iree_native_test(
   NAME
     "gfx1250_test"
   ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/gfx1250_test_module.loombc}}"
+    "{{$<TARGET_PROPERTY:loom_tooling_target_amdgpu_test_corpus_gfx1250_test_module,IREE_GENERATED_FILE>}}"
     "--device=amdgpu"
   SRC
     loom::tools::iree-test-loom
   DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/gfx1250_test_module.loombc"
+    "$<TARGET_PROPERTY:loom_tooling_target_amdgpu_test_corpus_gfx1250_test_module,IREE_GENERATED_FILE>"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "requires-gpu-amd"

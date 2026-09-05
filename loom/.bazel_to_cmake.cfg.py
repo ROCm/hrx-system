@@ -178,6 +178,257 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def loom_config_compatible_with(self, config_labels):
         return list(config_labels)
 
+    def _convert_loom_target_list_block(self, block_name, targets):
+        if targets is None:
+            return ""
+        converted_targets = []
+        for target in targets:
+            converted_targets.extend(self._convert_target(target))
+        return self._convert_string_list_block(
+            block_name,
+            list(filter(None, converted_targets)),
+            quote=False,
+            sort=False,
+        )
+
+    def loom_file_product_format(
+        self,
+        name,
+        product,
+        format,
+        output_extension,
+        tags=None,
+        target_compatible_with=None,
+        testonly=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        self._check_no_unhandled_kwargs("loom_file_product_format", kwargs)
+        self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += (
+            "loom_file_product_format(\n"
+            f"{self._convert_string_arg_block('NAME', name, quote=False)}"
+            f"{self._convert_string_arg_block('PRODUCT', product)}"
+            f"{self._convert_string_arg_block('FORMAT', format)}"
+            f"{self._convert_string_arg_block('OUTPUT_EXTENSION', output_extension)}"
+            ")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
+    def loom_artifact_set_product_format(
+        self,
+        name,
+        product,
+        format,
+        manifest_extension,
+        artifact_directory_extension,
+        tags=None,
+        target_compatible_with=None,
+        testonly=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        self._check_no_unhandled_kwargs("loom_artifact_set_product_format", kwargs)
+        self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += (
+            "loom_artifact_set_product_format(\n"
+            f"{self._convert_string_arg_block('NAME', name, quote=False)}"
+            f"{self._convert_string_arg_block('PRODUCT', product)}"
+            f"{self._convert_string_arg_block('FORMAT', format)}"
+            f"{self._convert_string_arg_block('MANIFEST_EXTENSION', manifest_extension)}"
+            f"{self._convert_string_arg_block('ARTIFACT_DIRECTORY_EXTENSION', artifact_directory_extension)}"
+            ")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
+    def loom_target_profile(
+        self,
+        name,
+        family,
+        selector,
+        canonical_formats=None,
+        formats=None,
+        tags=None,
+        target_compatible_with=None,
+        testonly=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        self._check_no_unhandled_kwargs("loom_target_profile", kwargs)
+        self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += (
+            "loom_target_profile(\n"
+            f"{self._convert_string_arg_block('NAME', name, quote=False)}"
+            f"{self._convert_string_arg_block('FAMILY', family)}"
+            f"{self._convert_string_arg_block('SELECTOR', selector)}"
+            f"{self._convert_loom_target_list_block('CANONICAL_FORMATS', canonical_formats)}"
+            f"{self._convert_loom_target_list_block('FORMATS', formats)}"
+            ")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
+    def loom_amdgpu_target_profile(
+        self,
+        name,
+        target,
+        canonical_formats=None,
+        formats=None,
+        tags=None,
+        target_compatible_with=None,
+        testonly=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if (
+            target
+            not in _LOOM_AMDGPU_TARGET_CONFIG[
+                "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET"
+            ]
+        ):
+            raise ValueError(f"Unknown Loom AMDGPU target profile: {target}")
+        if canonical_formats is None:
+            canonical_formats = [
+                "//loom/product/formats:amdgpu_hsaco",
+                "//loom/product/formats:loom_command",
+            ]
+        self.loom_target_profile(
+            name=name,
+            family="amdgpu",
+            selector=target,
+            canonical_formats=canonical_formats,
+            formats=formats,
+            tags=tags,
+            target_compatible_with=target_compatible_with,
+            testonly=testonly,
+            visibility=visibility,
+            **kwargs,
+        )
+
+    def _convert_loom_configs(self, configs):
+        if configs is None:
+            return ""
+        return self._convert_string_list_block(
+            "CONFIGS",
+            [f"{key}={value}" for key, value in sorted(configs.items())],
+            sort=False,
+        )
+
+    def _record_loom_generated_file_location(self, name):
+        target = self._convert_single_target(self._current_target_label(name)).replace(
+            "::", "_"
+        )
+        self._target_file_paths[self._current_target_label(name)] = (
+            f"$<TARGET_PROPERTY:{target},IREE_GENERATED_FILE>"
+        )
+
+    def loom_library(
+        self,
+        name,
+        srcs=None,
+        deps=None,
+        tags=None,
+        target_compatible_with=None,
+        testonly=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        self._check_no_unhandled_kwargs("loom_library", kwargs)
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+        self._record_loom_generated_file_location(name)
+        self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += (
+            "loom_library(\n"
+            f"{self._convert_string_arg_block('NAME', name, quote=False)}"
+            f"{self._convert_loom_module_inputs('SRCS', srcs)}"
+            f"{self._convert_loom_target_list_block('DEPS', deps)}"
+            ")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
+    def loom_kernel_binary(
+        self,
+        name,
+        target,
+        srcs=None,
+        deps=None,
+        roots=None,
+        configs=None,
+        format=None,
+        tags=None,
+        target_compatible_with=None,
+        testonly=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        self._check_no_unhandled_kwargs("loom_kernel_binary", kwargs)
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+        self._record_loom_generated_file_location(name)
+        self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += (
+            "loom_kernel_binary(\n"
+            f"{self._convert_string_arg_block('NAME', name, quote=False)}"
+            f"{self._convert_loom_module_inputs('SRCS', srcs)}"
+            f"{self._convert_loom_target_list_block('DEPS', deps)}"
+            f"{self._convert_string_list_block('ROOTS', roots, sort=False)}"
+            f"{self._convert_loom_configs(configs)}"
+            f"{self._convert_single_target_block('TARGET', target)}"
+            f"{self._convert_single_target_block('FORMAT', format) if format else ''}"
+            ")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
+    def loom_command_binary(
+        self,
+        name,
+        target,
+        srcs=None,
+        deps=None,
+        roots=None,
+        configs=None,
+        format=None,
+        kernel_format=None,
+        tags=None,
+        target_compatible_with=None,
+        testonly=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        self._check_no_unhandled_kwargs("loom_command_binary", kwargs)
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+        self._record_loom_generated_file_location(name)
+        self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += (
+            "loom_command_binary(\n"
+            f"{self._convert_string_arg_block('NAME', name, quote=False)}"
+            f"{self._convert_loom_module_inputs('SRCS', srcs)}"
+            f"{self._convert_loom_target_list_block('DEPS', deps)}"
+            f"{self._convert_string_list_block('ROOTS', roots, sort=False)}"
+            f"{self._convert_loom_configs(configs)}"
+            f"{self._convert_single_target_block('TARGET', target)}"
+            f"{self._convert_single_target_block('FORMAT', format) if format else ''}"
+            f"{self._convert_single_target_block('KERNEL_FORMAT', kernel_format) if kernel_format else ''}"
+            ")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
     def loom_module(
         self,
         name,
@@ -201,9 +452,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             target_compatible_with
         )
         output = output or (name + (".loombc" if output_format == "bc" else ".loom"))
-        self._target_file_paths[self._current_target_label(name)] = (
-            f"${{CMAKE_CURRENT_BINARY_DIR}}/{output}"
-        )
+        self._record_loom_generated_file_location(name)
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
         srcs_block = self._convert_loom_module_inputs("SRCS", srcs)
         libraries_block = self._convert_loom_module_inputs("LIBRARIES", libraries)

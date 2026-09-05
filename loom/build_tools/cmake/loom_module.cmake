@@ -126,6 +126,7 @@ function(loom_module)
   iree_package_name(_PACKAGE_NAME)
   set(_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
   add_custom_target("${_TARGET}" DEPENDS "${_OUTPUT}")
+  set_property(TARGET "${_TARGET}" PROPERTY IREE_GENERATED_FILE "${_OUTPUT}")
   set_property(TARGET "${_TARGET}" PROPERTY LOOM_MODULE_FILE "${_OUTPUT}")
   foreach(_INPUT_TARGET IN LISTS _SOURCE_TARGETS _LIBRARY_TARGETS)
     iree_register_target_dependency(

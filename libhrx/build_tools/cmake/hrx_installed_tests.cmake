@@ -459,9 +459,11 @@ function(hrx_installed_tests_install_arg_data OUT_VAR OUT_MAP_VAR)
   set(${OUT_MAP_VAR} "${_DATA_MAP}" PARENT_SCOPE)
 endfunction()
 
-# Rewrites target-file generator expressions in test arguments and environment
-# values to paths within the installed test tree.
-function(hrx_installed_tests_map_target_file_expressions OUT_VAR)
+# Resolves target-backed generator expressions in installed test values.
+# Executable and library targets map directly into the installed tree. Custom
+# target properties resolve to their declared files before ordinary test-data
+# installation maps those files into the tree.
+function(hrx_installed_tests_resolve_target_expressions OUT_VAR)
   hrx_installed_tests_is_enabled(_ENABLED)
   if(NOT _ENABLED)
     return()
@@ -482,6 +484,28 @@ function(hrx_installed_tests_map_target_file_expressions OUT_VAR)
       get_filename_component(_INSTALLED_DIR "${_INSTALLED_PATH}" DIRECTORY)
       string(REPLACE "$<TARGET_FILE_DIR:${_TARGET}>" "${_INSTALLED_DIR}"
         _MAPPED_ARG "${_MAPPED_ARG}")
+    endwhile()
+    while(_MAPPED_ARG MATCHES
+          "\\$<TARGET_PROPERTY:([^,>]+),([^>]+)>")
+      set(_TARGET "${CMAKE_MATCH_1}")
+      set(_PROPERTY "${CMAKE_MATCH_2}")
+      if(NOT TARGET "${_TARGET}")
+        message(FATAL_ERROR
+          "Installed test target property references a target that has not "
+          "been declared: ${_TARGET}")
+      endif()
+      get_target_property(_PROPERTY_VALUE "${_TARGET}" "${_PROPERTY}")
+      if(NOT _PROPERTY_VALUE OR
+         _PROPERTY_VALUE STREQUAL "_PROPERTY_VALUE-NOTFOUND")
+        message(FATAL_ERROR
+          "Installed test target ${_TARGET} has no ${_PROPERTY} property")
+      endif()
+      string(REPLACE
+        "$<TARGET_PROPERTY:${_TARGET},${_PROPERTY}>"
+        "${_PROPERTY_VALUE}"
+        _MAPPED_ARG
+        "${_MAPPED_ARG}"
+      )
     endwhile()
     if(_MAPPED_ARG MATCHES "\\$<")
       message(FATAL_ERROR
@@ -579,10 +603,11 @@ function(hrx_register_installed_test)
     message(FATAL_ERROR "hrx_register_installed_test requires TARGET or COMMAND")
   endif()
 
-  hrx_installed_tests_map_target_file_expressions(_ARGS ${_RULE_ARGS})
-  hrx_installed_tests_map_target_file_expressions(
+  hrx_installed_tests_resolve_target_expressions(_ARGS ${_RULE_ARGS})
+  hrx_installed_tests_resolve_target_expressions(
     _ENVIRONMENT ${_RULE_ENVIRONMENT})
-  hrx_installed_tests_install_data(_INSTALLED_DATA _DATA_MAP ${_RULE_DATA})
+  hrx_installed_tests_resolve_target_expressions(_DATA ${_RULE_DATA})
+  hrx_installed_tests_install_data(_INSTALLED_DATA _DATA_MAP ${_DATA})
   hrx_installed_tests_install_arg_data(_INSTALLED_ARG_DATA _ARG_DATA_MAP ${_ARGS})
   list(APPEND _INSTALLED_DATA ${_INSTALLED_ARG_DATA})
   list(APPEND _DATA_MAP ${_ARG_DATA_MAP})

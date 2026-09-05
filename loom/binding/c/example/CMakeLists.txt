@@ -113,7 +113,7 @@ iree_c_embed_data(
   NAME
     targetless_store_i32_bytecode_data
   SRCS
-    "${CMAKE_CURRENT_BINARY_DIR}/targetless_store_i32_bytecode.loombc"
+    "$<TARGET_PROPERTY:loom_binding_c_example_targetless_store_i32_bytecode,IREE_GENERATED_FILE>"
   C_FILE_OUTPUT
     "targetless_store_i32_bytecode.c"
   H_FILE_OUTPUT

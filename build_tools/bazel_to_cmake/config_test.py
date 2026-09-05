@@ -333,6 +333,25 @@ loom_module(
         self.assertIn(f'    "${{{filtered_var}}}"', cmake)
         self.assertIn('    "${_GLOB_X_LOOM}"', cmake)
 
+    def test_filegroup_skip_tag_omits_cmake_stamp(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        repo_cfg = SimpleNamespace(PROJECTS=[], REPO_MAP={"@hrx": ""})
+
+        cmake = bazel_to_cmake_converter.convert_build_file(
+            """
+filegroup(
+    name = "bazel_only_outputs",
+    srcs = [":producer"],
+    tags = ["skip-bazel_to_cmake"],
+)
+""",
+            repo_cfg,
+            str(repo_root / "build_tools/bazel_to_cmake/testdata"),
+            repo_root=str(repo_root),
+        )
+
+        self.assertNotIn("bazel_only_outputs", cmake)
+
     def test_loom_module_registers_generated_location(self):
         repo_root = Path(__file__).resolve().parents[2]
         loom = bazel_to_cmake_config.include_project(
@@ -383,9 +402,14 @@ iree_executable_test(
         self.assertIn("  INCLUDE_INPUT_EXPORTS", cmake)
         self.assertIn("  STRIP_CHECK", cmake)
         self.assertIn("  REQUIRE_RESOLVED_CONFIG", cmake)
-        self.assertIn('"{{${CMAKE_CURRENT_BINARY_DIR}/linked.loombc}}"', cmake)
         self.assertIn(
-            '  DATA\n    "${CMAKE_CURRENT_BINARY_DIR}/linked.loombc"',
+            '"{{$<TARGET_PROPERTY:'
+            'loom_target_arch_amdgpu_linked_checks,IREE_GENERATED_FILE>}}"',
+            cmake,
+        )
+        self.assertIn(
+            '  DATA\n    "$<TARGET_PROPERTY:'
+            'loom_target_arch_amdgpu_linked_checks,IREE_GENERATED_FILE>"',
             cmake,
         )
 
@@ -424,6 +448,209 @@ loom_module(
             'mxfp4_decode_bf16.loom"',
             cmake,
         )
+
+    def test_loom_product_formats_and_profiles_preserve_generic_metadata(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        loom = bazel_to_cmake_config.include_project(
+            str(repo_root / ".bazel_to_cmake.cfg.py"),
+            "loom/.bazel_to_cmake.cfg.py",
+        )
+        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@hrx": ""})
+
+        cmake = bazel_to_cmake_converter.convert_build_file(
+            """
+load(
+    "//loom/build_tools/bazel:defs.bzl",
+    "loom_artifact_set_product_format",
+    "loom_file_product_format",
+    "loom_target_profile",
+)
+
+loom_file_product_format(
+    name = "ExecutableFormat123",
+    format = "executable-format-123",
+    output_extension = ".bin123",
+    product = "kernel123",
+)
+
+loom_artifact_set_product_format(
+    name = "PackageFormat123",
+    artifact_directory_extension = ".artifacts123",
+    format = "package-format-123",
+    manifest_extension = ".manifest123",
+    product = "command123",
+)
+
+loom_target_profile(
+    name = "Target123",
+    canonical_formats = [
+        ":PackageFormat123",
+        ":ExecutableFormat123",
+    ],
+    family = "target-family-123",
+    selector = "target-selector-123",
+)
+""",
+            repo_cfg,
+            str(repo_root / "loom/target/example"),
+            repo_root=str(repo_root),
+        )
+
+        self.assertIn("loom_file_product_format(", cmake)
+        self.assertIn("    ExecutableFormat123", cmake)
+        self.assertIn('    "kernel123"', cmake)
+        self.assertIn('    "executable-format-123"', cmake)
+        self.assertIn('    ".bin123"', cmake)
+        self.assertIn("loom_artifact_set_product_format(", cmake)
+        self.assertIn("    PackageFormat123", cmake)
+        self.assertIn('    ".manifest123"', cmake)
+        self.assertIn('    ".artifacts123"', cmake)
+        self.assertIn("loom_target_profile(", cmake)
+        self.assertIn('    "target-family-123"', cmake)
+        self.assertIn('    "target-selector-123"', cmake)
+        self.assertIn("    ::ExecutableFormat123", cmake)
+        self.assertIn("    ::PackageFormat123", cmake)
+        self.assertLess(
+            cmake.index("    ::PackageFormat123"),
+            cmake.index("    ::ExecutableFormat123"),
+        )
+
+    def test_loom_amdgpu_profile_projects_inert_metadata(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        loom = bazel_to_cmake_config.include_project(
+            str(repo_root / ".bazel_to_cmake.cfg.py"),
+            "loom/.bazel_to_cmake.cfg.py",
+        )
+        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@hrx": ""})
+
+        cmake = bazel_to_cmake_converter.convert_build_file(
+            """
+load(
+    "//loom/build_tools/amdgpu:target_profile.bzl",
+    "loom_amdgpu_target_profile",
+)
+
+loom_amdgpu_target_profile(
+    name = "gfx942",
+    target = "gfx942",
+)
+""",
+            repo_cfg,
+            str(repo_root / "loom/target/amdgpu"),
+            repo_root=str(repo_root),
+        )
+
+        self.assertNotIn("if(LOOM_TARGET_AMDGPU", cmake)
+        self.assertIn("loom_target_profile(", cmake)
+        self.assertIn('    "amdgpu"', cmake)
+        self.assertIn('    "gfx942"', cmake)
+        self.assertIn("    loom::product::formats::amdgpu_hsaco", cmake)
+        self.assertIn("    loom::product::formats::loom_command", cmake)
+
+        no_formats_cmake = bazel_to_cmake_converter.convert_build_file(
+            """
+load(
+    "//loom/build_tools/amdgpu:target_profile.bzl",
+    "loom_amdgpu_target_profile",
+)
+
+loom_amdgpu_target_profile(
+    name = "gfx942_no_formats",
+    canonical_formats = [],
+    target = "gfx942",
+)
+""",
+            repo_cfg,
+            str(repo_root / "loom/target/amdgpu"),
+            repo_root=str(repo_root),
+        )
+        self.assertNotIn("amdgpu_hsaco", no_formats_cmake)
+        self.assertNotIn("loom_command", no_formats_cmake)
+
+    def test_loom_binary_rules_project_without_target_specific_policy(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        loom = bazel_to_cmake_config.include_project(
+            str(repo_root / ".bazel_to_cmake.cfg.py"),
+            "loom/.bazel_to_cmake.cfg.py",
+        )
+        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@hrx": ""})
+
+        cmake = bazel_to_cmake_converter.convert_build_file(
+            """
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load(
+    "//loom/build_tools/bazel:defs.bzl",
+    "loom_command_binary",
+    "loom_kernel_binary",
+    "loom_library",
+)
+
+loom_library(
+    name = "Library123",
+    srcs = ["library123.loom"],
+)
+
+loom_library(
+    name = "Library456",
+    srcs = ["library456.loom"],
+)
+
+loom_kernel_binary(
+    name = "Kernel123",
+    configs = {
+        "a.value": "1",
+        "z.value": "2",
+    },
+    deps = [
+        ":Library456",
+        ":Library123",
+    ],
+    format = "//loom/product/example:ExecutableFormat123",
+    roots = ["@kernel123"],
+    target = "//loom/target/example:Target123",
+)
+
+loom_command_binary(
+    name = "Command123",
+    deps = [":Library123"],
+    format = "//loom/product/example:PackageFormat123",
+    kernel_format = "//loom/product/example:ExecutableFormat123",
+    target = "//loom/target/example:Target123",
+)
+
+iree_executable_test(
+    name = "KernelConsumer123",
+    src = "//loom/src/loom/tools/loom-format",
+    args = ["$(location :Kernel123)"],
+    data = [":Kernel123"],
+)
+""",
+            repo_cfg,
+            str(repo_root / "loom/src/loom/test/example"),
+            repo_root=str(repo_root),
+        )
+
+        self.assertIn("loom_library(", cmake)
+        self.assertIn("    Library123", cmake)
+        self.assertIn("loom_kernel_binary(", cmake)
+        self.assertIn("    loom::target::example::Target123", cmake)
+        self.assertIn("    loom::product::example::ExecutableFormat123", cmake)
+        self.assertIn('    "a.value=1"', cmake)
+        self.assertIn('    "z.value=2"', cmake)
+        kernel_cmake = cmake.split("loom_kernel_binary(", 1)[1].split(")", 1)[0]
+        self.assertLess(
+            kernel_cmake.index("    ::Library456"),
+            kernel_cmake.index("    ::Library123"),
+        )
+        self.assertIn("loom_command_binary(", cmake)
+        self.assertIn("    loom::product::example::PackageFormat123", cmake)
+        self.assertIn("  KERNEL_FORMAT", cmake)
+        self.assertIn(
+            "$<TARGET_PROPERTY:loom_test_example_Kernel123,IREE_GENERATED_FILE>",
+            cmake,
+        )
+        for target_specific_term in ("amdgpu", "spirv", "hsaco", "llvmir"):
+            self.assertNotIn(target_specific_term, cmake.lower())
 
     def test_rejects_compiler_monorepo_external_targets(self):
         converter = bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""})

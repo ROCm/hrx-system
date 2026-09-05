@@ -74,6 +74,10 @@ class CMakeDataDependenciesTest(unittest.TestCase):
                 (build_dir / "generated.txt").read_text(encoding="utf-8"),
                 "fixture data\n",
             )
+            self.assertEqual(
+                (build_dir / "property-generated.txt").read_text(encoding="utf-8"),
+                "fixture data\n",
+            )
             self.assertTrue(build_dir.joinpath("tool-built.marker").is_file())
 
     def test_rejects_missing_target_with_consumer_context(self):
