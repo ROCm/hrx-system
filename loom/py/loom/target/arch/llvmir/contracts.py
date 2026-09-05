@@ -70,6 +70,7 @@ _DYNAMIC_INDEX = -(2**63)
 
 _VECTOR_LANE_COUNTS = (2, 3, 4, 8, 16)
 _STRUCTURAL_VECTOR_LANE_COUNTS = (*_VECTOR_LANE_COUNTS, 32)
+_ADDITIONAL_STRUCTURAL_EXTRACTS = (("i8", 64),)
 _VECTOR_SELECT_TYPES = ("i8", "i16", "i32", "i64", "f16", "bf16", "f32", "f64")
 _STRUCTURAL_VECTOR_TYPES = (
     "i1",
@@ -2737,6 +2738,10 @@ def _structural_vector_rules() -> tuple[DescriptorRule | ValueAliasRule, ...]:
         rules.append(_one_lane_from_elements_rule(element))
         rules.append(_one_lane_extract_rule(element))
         rules.append(_one_lane_insert_rule(element))
+    rules.extend(
+        _extract_rule(element, lane_count)
+        for element, lane_count in _ADDITIONAL_STRUCTURAL_EXTRACTS
+    )
     return tuple(rules)
 
 

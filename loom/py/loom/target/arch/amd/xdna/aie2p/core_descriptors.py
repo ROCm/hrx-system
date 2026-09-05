@@ -326,6 +326,21 @@ def _integer_matrix_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
     )
 
 
+def _packed_dot_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
+    """Selects the configured 8-bit channel multiply used by dot4i."""
+
+    return (
+        _DescriptorSpec(
+            "VMUL_vmul_cm_core_Y_X",
+            f"{_TARGET_KEY}.dot4i.i8x64.configured",
+            "integer.dot4i.i8x64.configured",
+            "II_VMUL_vmul_cm_core_Y_X",
+            storage_overrides=(("dst", "mBMs"), ("s1", "VEC256")),
+            asm_mnemonic="dot4i.i8x64",
+        ),
+    )
+
+
 def _packed_i4_unpack_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
     """Selects native 64-lane signed and unsigned 4-to-8-bit unpack forms."""
 
@@ -657,11 +672,11 @@ _BASE_DESCRIPTOR_SPECS = (
     ),
     _DescriptorSpec(
         "VMOV_alu_mv_mv_x",
-        f"{_TARGET_KEY}.move.bf16x32",
-        "floating.move.bf16x32",
+        f"{_TARGET_KEY}.move.vector512",
+        "register.move.vector512",
         "II_VMOV_alu_mv_mv_x",
         storage_overrides=(("dst", "VEC256"), ("src", "VEC256")),
-        asm_mnemonic="vmov.bf16x32",
+        asm_mnemonic="vmov.512",
         encoding_adapter_overrides=(
             ("dst", "LOOM_mXm_OP_mMvBMXDst"),
             ("src", "LOOM_mXm_OP_mMvBMXSrc"),
@@ -783,6 +798,7 @@ _BASE_DESCRIPTOR_SPECS = (
         asm_mnemonic="acc.clear.f32x64",
     ),
     *_integer_matrix_descriptor_specs(),
+    *_packed_dot_descriptor_specs(),
     *_packed_i4_unpack_descriptor_specs(),
     _DescriptorSpec(
         "VLDA_dmx_lda_bm_idx",

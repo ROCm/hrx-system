@@ -16,9 +16,11 @@ iree_py_library(
     "__init__.py"
     "conversion.py"
     "core.py"
+    "data_path.py"
     "f32.py"
     "index_conversion.py"
     "memory.py"
+    "packed_dot.py"
     "structural.py"
   DEPS
     loom::py::loom::core

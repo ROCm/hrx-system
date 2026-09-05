@@ -71,6 +71,7 @@ _ATOMIC_SCOPE_ENUM = "llvmir.atomic_scope"
 
 _VECTOR_LANE_COUNTS = (2, 3, 4, 8, 16)
 _STRUCTURAL_VECTOR_LANE_COUNTS = (*_VECTOR_LANE_COUNTS, 32)
+_ADDITIONAL_STRUCTURAL_EXTRACTS = (("i8", 64),)
 _KERNEL_DIMENSIONS = ("x", "y", "z")
 _STRUCTURAL_VECTOR_TYPES = (
     "i1",
@@ -1387,6 +1388,10 @@ def _structural_vector_descriptors() -> tuple[Descriptor, ...]:
         descriptors.append(
             _concat_descriptor(type_name, input_lane_count=4, input_count=4)
         )
+    descriptors.extend(
+        _extract_descriptor(type_name, lane_count)
+        for type_name, lane_count in _ADDITIONAL_STRUCTURAL_EXTRACTS
+    )
     return tuple(descriptors)
 
 

@@ -24,6 +24,10 @@ from loom.target.arch.amd.xdna.aie2p.contracts.core import (
     _I16_ELEMENTWISE_MULTIPLY_CONTROL,
     AIE2P_CORE_CONTRACT_FRAGMENT,
 )
+from loom.target.arch.amd.xdna.aie2p.contracts.packed_dot import (
+    _DOT4_GROW_CONTROL,
+    _DOT4_TRANSPOSE_CONTROL,
+)
 from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
     _I8_DEINTERLEAVE_CONTROLS,
 )
@@ -449,6 +453,52 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert vector_multiply.emit[4].immediates == {"i": 1}
     assert vector_multiply.emit[5].immediates == {"i": 0}
 
+    packed_dot_rules = [rule for rule in rules if rule.source_op is vector.vector_dot4i]
+    assert len(packed_dot_rules) == 4
+    assert [rule.guards[0].enum_keyword for rule in packed_dot_rules] == [
+        "u8u8",
+        "u8s8",
+        "s8u8",
+        "s8s8",
+    ]
+    assert all(
+        rule.descriptor.key == "amd.xdna.aie2p.dot4i.i8x64.configured"
+        for rule in packed_dot_rules
+    )
+    for rule, multiply_control in zip(
+        packed_dot_rules, (0x48, 0x248, 0x148, 0x348), strict=True
+    ):
+        descriptor_emits = [
+            emit
+            for emit in rule.emit
+            if not isinstance(emit, (EmitRegisterConcat, EmitRegisterSlice))
+        ]
+        assert [emit.descriptor.key for emit in descriptor_emits] == [
+            "amd.xdna.aie2p.constant.i32.mova",
+            "amd.xdna.aie2p.splat.i8x64",
+            "amd.xdna.aie2p.constant.i32.mova",
+            "amd.xdna.aie2p.constant.i32.mova",
+            "amd.xdna.aie2p.constant.i32.mova",
+            "amd.xdna.aie2p.shuffle.x.configured",
+            "amd.xdna.aie2p.shuffle.x.configured",
+            "amd.xdna.aie2p.shuffle.x.configured",
+            "amd.xdna.aie2p.move.vector512",
+            "amd.xdna.aie2p.dot4i.i8x64.configured",
+            "amd.xdna.aie2p.move.accumulator512.to.vector512",
+            "amd.xdna.aie2p.shuffle.x.configured",
+            "amd.xdna.aie2p.shuffle.x.configured",
+            "amd.xdna.aie2p.shuffle.x.configured",
+            "amd.xdna.aie2p.move.vector512",
+            "amd.xdna.aie2p.dot4i.i8x64.configured",
+            "amd.xdna.aie2p.move.accumulator512.to.vector512",
+            "amd.xdna.aie2p.add.i32x16",
+        ]
+        assert descriptor_emits[2].immediates == {"i": _DOT4_TRANSPOSE_CONTROL}
+        assert descriptor_emits[3].immediates == {"i": _DOT4_GROW_CONTROL}
+        assert descriptor_emits[4].immediates == {"i": multiply_control}
+        assert sum(isinstance(emit, EmitRegisterSlice) for emit in rule.emit) == 11
+        assert sum(isinstance(emit, EmitRegisterConcat) for emit in rule.emit) == 9
+
     bitunpack_rules = [
         rule
         for rule in rules
@@ -527,7 +577,7 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         "amd.xdna.aie2p.constant.i32.mova",
         "amd.xdna.aie2p.shuffle.x.configured",
         "amd.xdna.aie2p.broadcast.bf16x8.to.bf16x32",
-        "amd.xdna.aie2p.move.bf16x32",
+        "amd.xdna.aie2p.move.vector512",
         "amd.xdna.aie2p.constant.i32.mova",
         "amd.xdna.aie2p.matrix.accumulate.bf16bf16.m8n8k1.configured",
     ]

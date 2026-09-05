@@ -72,11 +72,6 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
           context, AIE2P_CORE_REG_CLASS_ID_AIE2P_EWL, 1, out_low_type);
     }
     if (is_rank_one && element_count == 64 &&
-        element_type == LOOM_SCALAR_TYPE_BF16) {
-      return loom_low_lower_make_register_type(
-          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_VEC256, 4, out_low_type);
-    }
-    if (is_rank_one && element_count == 64 &&
         element_type == LOOM_SCALAR_TYPE_I32) {
       return loom_low_lower_make_register_type(
           context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMS, 4, out_low_type);
@@ -96,6 +91,12 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
           context, AIE2P_CORE_REG_CLASS_ID_AIE2P_ELPREDICATE, 1, out_low_type);
     }
     const int32_t element_bits = loom_scalar_type_bitwidth(element_type);
+    if (is_rank_one && element_bits > 0 &&
+        element_count > 512 / (uint32_t)element_bits &&
+        element_count <= 1024 / (uint32_t)element_bits) {
+      return loom_low_lower_make_register_type(
+          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_VEC256, 4, out_low_type);
+    }
     if (element_bits > 0 && element_count <= 512 / (uint32_t)element_bits) {
       // Ordinary vectors retain a full X-register carrier. Narrow vector
       // memory forms address W subregisters of that carrier; choosing a W

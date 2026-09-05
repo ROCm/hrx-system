@@ -275,7 +275,7 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   %143 = vshuffle %139, %139, %142
   %144 = concat(%141, %143) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   %145 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment$137, 0
-  %146 = vmov.bf16x32 %145
+  %146 = vmov.512 %145
   %147 = concat(%145, %146) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   %148 = mova.i32 60
   %product$149 = mma.bf16bf16.m8n8k1 %accumulator_fragment$138, %144, %147, %148
@@ -308,7 +308,7 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   %167 = vshuffle %163, %163, %166
   %168 = concat(%165, %167) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   %169 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment$161, 0
-  %170 = vmov.bf16x32 %169
+  %170 = vmov.512 %169
   %171 = concat(%169, %170) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   %172 = mova.i32 60
   %product$173 = mma.bf16bf16.m8n8k1 %accumulator_fragment$162, %168, %171, %172
@@ -347,7 +347,7 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   %193 = vshuffle %189, %189, %192
   %194 = concat(%191, %193) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   %195 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment$187, 0
-  %196 = vmov.bf16x32 %195
+  %196 = vmov.512 %195
   %197 = concat(%195, %196) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   %198 = mova.i32 60
   %product$199 = mma.bf16bf16.m8n8k1 %accumulator_fragment$188, %194, %197, %198
@@ -380,7 +380,7 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   %217 = vshuffle %213, %213, %216
   %218 = concat(%215, %217) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   %219 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment$211, 0
-  %220 = vmov.bf16x32 %219
+  %220 = vmov.512 %219
   %221 = concat(%219, %220) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   %222 = mova.i32 60
   %product$223 = mma.bf16bf16.m8n8k1 %accumulator_fragment$212, %218, %221, %222

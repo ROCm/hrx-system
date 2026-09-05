@@ -424,7 +424,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @outer_pr
   %28 = vshuffle %24, %24, %27
   %29 = concat(%26, %28) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   %30 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment, 0
-  %31 = vmov.bf16x32 %30
+  %31 = vmov.512 %30
   %32 = concat(%30, %31) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   %33 = mova.i32 60
   %product = mma.bf16bf16.m8n8k1 %accumulator_fragment, %29, %32, %33

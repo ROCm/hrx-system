@@ -29,11 +29,17 @@ from loom.dsl import Op
 from loom.target.arch.amd.xdna.aie2p.contracts.conversion import (
     AIE2P_CONVERSION_RULES,
 )
+from loom.target.arch.amd.xdna.aie2p.contracts.data_path import (
+    vector_data_path_control,
+)
 from loom.target.arch.amd.xdna.aie2p.contracts.f32 import AIE2P_F32_RULES
 from loom.target.arch.amd.xdna.aie2p.contracts.index_conversion import (
     AIE2P_INDEX_CONVERSION_RULES,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.memory import AIE2P_MEMORY_RULES
+from loom.target.arch.amd.xdna.aie2p.contracts.packed_dot import (
+    AIE2P_PACKED_DOT_RULES,
+)
 from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
     AIE2P_STRUCTURAL_RULES,
 )
@@ -117,39 +123,14 @@ _SHORT_MIN = -1024
 _SHORT_MAX = 1023
 
 
-def _vector_data_path_control(
-    *,
-    sign_x: bool,
-    sign_y: bool,
-    accumulator_mode: int,
-    multiplication_mode: int,
-    compute_mode: int,
-) -> int:
-    """Encodes the common AIE2P vector data-path control word."""
-
-    if accumulator_mode < 0 or accumulator_mode > 0b11:
-        raise ValueError("AIE2P accumulator mode must fit two bits")
-    if multiplication_mode < 0 or multiplication_mode > 0b11:
-        raise ValueError("AIE2P multiplication mode must fit two bits")
-    if compute_mode < 0 or compute_mode > 0b111:
-        raise ValueError("AIE2P compute mode must fit three bits")
-    return (
-        int(sign_x) << 9
-        | int(sign_y) << 8
-        | accumulator_mode << 1
-        | multiplication_mode << 3
-        | compute_mode << 5
-    )
-
-
-_I16_ELEMENTWISE_MULTIPLY_CONTROL = _vector_data_path_control(
+_I16_ELEMENTWISE_MULTIPLY_CONTROL = vector_data_path_control(
     sign_x=True,
     sign_y=True,
     accumulator_mode=1,
     multiplication_mode=3,
     compute_mode=2,
 )
-_BF16_ELEMENTWISE_MULTIPLY_CONTROL = _vector_data_path_control(
+_BF16_ELEMENTWISE_MULTIPLY_CONTROL = vector_data_path_control(
     sign_x=False,
     sign_y=False,
     accumulator_mode=2,
@@ -159,7 +140,7 @@ _BF16_ELEMENTWISE_MULTIPLY_CONTROL = _vector_data_path_control(
 _BF16_CONVERSION_ROUNDING = 12
 _BF16_OUTER_PRODUCT_SHUFFLE_CONTROLS = (52, 53)
 _BF16_OUTER_PRODUCT_MULTIPLY_CONTROL = _BF16_ELEMENTWISE_MULTIPLY_CONTROL
-_F32_ACCUMULATOR_ADD_CONTROL = _vector_data_path_control(
+_F32_ACCUMULATOR_ADD_CONTROL = vector_data_path_control(
     sign_x=False,
     sign_y=False,
     accumulator_mode=2,
@@ -740,7 +721,7 @@ def _matrix_multiply_bf16bf16_m8n8k1_rule() -> DescriptorRule:
     config_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
     broadcast = _descriptor("amd.xdna.aie2p.broadcast.bf16x8.to.bf16x32")
     shuffle = _descriptor("amd.xdna.aie2p.shuffle.x.configured")
-    move = _descriptor("amd.xdna.aie2p.move.bf16x32")
+    move = _descriptor("amd.xdna.aie2p.move.vector512")
     multiply = _descriptor(
         "amd.xdna.aie2p.matrix.accumulate.bf16bf16.m8n8k1.configured"
     )
@@ -2182,6 +2163,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             source="vector_mma",
         ),
         _matrix_fragment_store_rule(),
+        *AIE2P_PACKED_DOT_RULES,
         *AIE2P_STRUCTURAL_RULES,
         *AIE2P_MEMORY_RULES,
         *(

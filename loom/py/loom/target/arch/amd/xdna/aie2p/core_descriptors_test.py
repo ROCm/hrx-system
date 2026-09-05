@@ -1102,6 +1102,21 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
             1,
         ]
 
+    packed_dot = descriptors["amd.xdna.aie2p.dot4i.i8x64.configured"]
+    assert [operand.field_name for operand in packed_dot.operands] == [
+        "dst",
+        "s1",
+        "s2",
+        "acc",
+    ]
+    assert [operand.reg_alts[0].reg_class for operand in packed_dot.operands] == [
+        "aie2p.mbms",
+        "aie2p.vec256",
+        "aie2p.vec256",
+        "aie2p.er",
+    ]
+    assert [operand.unit_count for operand in packed_dot.operands] == [4, 4, 2, 1]
+
     for source_kind, sign_bit in (("u", 0), ("s", 1)):
         unpack = descriptors[
             f"amd.xdna.aie2p.unpack.{source_kind}4x64.to.{source_kind}8x64.configured"
@@ -1163,12 +1178,12 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
     assert [operand.unit_count for operand in bf16_broadcast.operands] == [2, 1]
     assert bf16_broadcast.operands[1].register_part == "aie2p.ewl.low128"
 
-    bf16_move = descriptors["amd.xdna.aie2p.move.bf16x32"]
-    assert [operand.reg_alts[0].reg_class for operand in bf16_move.operands] == [
+    vector512_move = descriptors["amd.xdna.aie2p.move.vector512"]
+    assert [operand.reg_alts[0].reg_class for operand in vector512_move.operands] == [
         "aie2p.vec256",
         "aie2p.vec256",
     ]
-    assert [operand.unit_count for operand in bf16_move.operands] == [2, 2]
+    assert [operand.unit_count for operand in vector512_move.operands] == [2, 2]
 
     vec256_move = descriptors["amd.xdna.aie2p.move.vec256"]
     assert [operand.reg_alts[0].reg_class for operand in vec256_move.operands] == [
