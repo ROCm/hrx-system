@@ -331,7 +331,8 @@ iree_status_t loom_context_register_encoding_vtable(
           "storage schema",
           (int)name.size, name.data);
     }
-    const loom_encoding_record_geometry_t record = fixed_metadata->record;
+    const loom_encoding_record_geometry_t record =
+        fixed_metadata->record.geometry;
     const bool has_record = record.logical_element_count != 0 ||
                             record.storage_byte_count != 0 ||
                             record.required_alignment != 0;

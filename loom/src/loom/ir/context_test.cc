@@ -587,9 +587,12 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsMalformedFixedMetadata) {
       /*.required_auxiliary_keys=*/{},
       /*.record=*/
       {
-          /*.logical_element_count=*/32,
-          /*.storage_byte_count=*/18,
-          /*.required_alignment=*/3,
+          /*.geometry=*/
+          {
+              /*.logical_element_count=*/32,
+              /*.storage_byte_count=*/18,
+              /*.required_alignment=*/3,
+          },
       },
   };
   static const loom_encoding_family_descriptor_t kMalformedDescriptor = {

@@ -6,6 +6,9 @@
 
 #include "loom/ops/encoding/storage.h"
 
+#include <cstdint>
+#include <vector>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -20,14 +23,183 @@
 namespace loom {
 namespace {
 
+static const loom_encoding_record_field_t* FindRecordField(
+    const loom_encoding_record_layout_t* layout,
+    loom_encoding_record_field_role_t role, uint8_t hierarchy_level) {
+  for (uint8_t i = 0; i < layout->field_count; ++i) {
+    const loom_encoding_record_field_t* field = &layout->fields[i];
+    if (field->role == role && field->hierarchy_level == hierarchy_level) {
+      return field;
+    }
+  }
+  return nullptr;
+}
+
+static void ExpectRecordField(const loom_encoding_record_layout_t* layout,
+                              loom_encoding_record_field_role_t role,
+                              uint8_t hierarchy_level,
+                              loom_encoding_numeric_format_t numeric_format,
+                              const std::vector<uint8_t>& record,
+                              const std::vector<uint64_t>& expected) {
+  const loom_encoding_record_field_t* field =
+      FindRecordField(layout, role, hierarchy_level);
+  ASSERT_NE(field, nullptr);
+  EXPECT_EQ(field->numeric_format, numeric_format);
+  ASSERT_EQ(field->element_count, expected.size());
+
+  std::vector<uint64_t> actual(field->element_count, 0);
+  for (uint8_t i = 0; i < field->mapping_count; ++i) {
+    const loom_encoding_record_mapping_t* mapping =
+        &layout->mappings[field->first_mapping_index + i];
+    ASSERT_LE(mapping->bit_count, 64u);
+    ASSERT_LE(mapping->field_bit_offset + mapping->bit_count, 64u);
+    for (uint16_t element = 0; element < mapping->element_count; ++element) {
+      uint64_t mapped_bits = 0;
+      const uint32_t source_bit_offset =
+          mapping->record_bit_offset + element * mapping->record_bit_stride;
+      for (uint8_t bit = 0; bit < mapping->bit_count; ++bit) {
+        const uint32_t source_bit = source_bit_offset + bit;
+        ASSERT_LT(source_bit, record.size() * 8);
+        mapped_bits |=
+            uint64_t{(record[source_bit / 8] >> (source_bit % 8)) & 1u} << bit;
+      }
+      actual[mapping->field_element_offset + element] |=
+          mapped_bits << mapping->field_bit_offset;
+    }
+  }
+  EXPECT_EQ(actual, expected);
+}
+
+static void ExpectGgmlRecordTopology(
+    const loom_encoding_family_descriptor_t* descriptor,
+    const loom_encoding_record_layout_t* layout) {
+  std::vector<uint8_t> record(layout->geometry.storage_byte_count);
+  for (iree_host_size_t i = 0; i < record.size(); ++i) {
+    record[i] = static_cast<uint8_t>(i * 37 + 11);
+  }
+  auto u16_at = [&](iree_host_size_t byte_offset) {
+    return uint64_t{record[byte_offset]} |
+           (uint64_t{record[byte_offset + 1]} << 8);
+  };
+
+  if (descriptor == &loom_encoding_ggml_q4_0_family_descriptor) {
+    ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_SCALE, 0,
+                      LOOM_ENCODING_NUMERIC_FORMAT_F16, record, {u16_at(0)});
+    std::vector<uint64_t> payload(32);
+    for (iree_host_size_t i = 0; i < payload.size(); ++i) {
+      const uint8_t packed = record[2 + i % 16];
+      payload[i] = (packed >> (i / 16 * 4)) & 0xFu;
+    }
+    ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_PAYLOAD, 0,
+                      LOOM_ENCODING_NUMERIC_FORMAT_QUANT_I4, record, payload);
+    return;
+  }
+
+  if (descriptor == &loom_encoding_ggml_q8_0_family_descriptor) {
+    ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_SCALE, 0,
+                      LOOM_ENCODING_NUMERIC_FORMAT_F16, record, {u16_at(0)});
+    std::vector<uint64_t> payload(record.begin() + 2, record.end());
+    ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_PAYLOAD, 0,
+                      LOOM_ENCODING_NUMERIC_FORMAT_QUANT_I8, record, payload);
+    return;
+  }
+
+  auto expect_k_scale_minimum_fields = [&]() {
+    ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_SCALE, 0,
+                      LOOM_ENCODING_NUMERIC_FORMAT_F16, record, {u16_at(0)});
+    ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_MINIMUM, 0,
+                      LOOM_ENCODING_NUMERIC_FORMAT_F16, record, {u16_at(2)});
+    std::vector<uint64_t> scales(8);
+    std::vector<uint64_t> minimums(8);
+    for (iree_host_size_t i = 0; i < 4; ++i) {
+      scales[i] = record[4 + i] & 0x3Fu;
+      minimums[i] = record[8 + i] & 0x3Fu;
+      scales[4 + i] = (record[12 + i] & 0xFu) | ((record[4 + i] >> 6) << 4);
+      minimums[4 + i] = (record[12 + i] >> 4) | ((record[8 + i] >> 6) << 4);
+    }
+    ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_SCALE, 1,
+                      LOOM_ENCODING_NUMERIC_FORMAT_U6, record, scales);
+    ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_MINIMUM, 1,
+                      LOOM_ENCODING_NUMERIC_FORMAT_U6, record, minimums);
+  };
+
+  if (descriptor == &loom_encoding_ggml_q4_k_family_descriptor) {
+    expect_k_scale_minimum_fields();
+    std::vector<uint64_t> payload(256);
+    for (iree_host_size_t i = 0; i < payload.size(); ++i) {
+      const iree_host_size_t group = i / 32;
+      const uint8_t packed = record[16 + group / 2 * 32 + i % 32];
+      payload[i] = (packed >> (group % 2 * 4)) & 0xFu;
+    }
+    ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_PAYLOAD, 0,
+                      LOOM_ENCODING_NUMERIC_FORMAT_U4, record, payload);
+    return;
+  }
+
+  if (descriptor == &loom_encoding_ggml_q5_k_family_descriptor) {
+    expect_k_scale_minimum_fields();
+    std::vector<uint64_t> payload(256);
+    for (iree_host_size_t i = 0; i < payload.size(); ++i) {
+      const iree_host_size_t group = i / 32;
+      const uint8_t packed = record[48 + group / 2 * 32 + i % 32];
+      const uint8_t high_bit = (record[16 + i % 32] >> group) & 1u;
+      payload[i] = ((packed >> (group % 2 * 4)) & 0xFu) | (high_bit << 4);
+    }
+    ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_PAYLOAD, 0,
+                      LOOM_ENCODING_NUMERIC_FORMAT_U5, record, payload);
+    return;
+  }
+
+  if (descriptor == &loom_encoding_ggml_q6_k_family_descriptor) {
+    std::vector<uint64_t> payload(256);
+    for (iree_host_size_t i = 0; i < payload.size(); ++i) {
+      const iree_host_size_t half = i / 128;
+      const iree_host_size_t quarter = i % 128 / 32;
+      const iree_host_size_t lane = i % 32;
+      const uint8_t low = (record[half * 64 + quarter % 2 * 32 + lane] >>
+                           (quarter < 2 ? 0 : 4)) &
+                          0xFu;
+      const uint8_t high =
+          (record[128 + half * 32 + lane] >> (quarter * 2)) & 0x3u;
+      payload[i] = low | (high << 4);
+    }
+    ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_PAYLOAD, 0,
+                      LOOM_ENCODING_NUMERIC_FORMAT_QUANT_I6, record, payload);
+    ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_SCALE, 0,
+                      LOOM_ENCODING_NUMERIC_FORMAT_F16, record, {u16_at(208)});
+    std::vector<uint64_t> scales(record.begin() + 192, record.begin() + 208);
+    ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_SCALE, 1,
+                      LOOM_ENCODING_NUMERIC_FORMAT_I8, record, scales);
+    return;
+  }
+
+  ASSERT_EQ(descriptor, &loom_encoding_ggml_q8_1_x4_family_descriptor);
+  std::vector<uint64_t> scales(4);
+  std::vector<uint64_t> sums(4);
+  for (iree_host_size_t i = 0; i < 4; ++i) {
+    scales[i] = u16_at(i * 4);
+    sums[i] = u16_at(i * 4 + 2);
+  }
+  ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_SCALE, 0,
+                    LOOM_ENCODING_NUMERIC_FORMAT_F16, record, scales);
+  ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_SUM_CORRECTION, 0,
+                    LOOM_ENCODING_NUMERIC_FORMAT_F16, record, sums);
+  std::vector<uint64_t> payload(record.begin() + 16, record.end());
+  ExpectRecordField(layout, LOOM_ENCODING_RECORD_FIELD_PAYLOAD, 0,
+                    LOOM_ENCODING_NUMERIC_FORMAT_QUANT_I8, record, payload);
+}
+
 static const loom_encoding_family_fixed_metadata_t kFixedRecordMetadata = {
     /*.operand_summary=*/{},
     /*.required_auxiliary_keys=*/{},
     /*.record=*/
     {
-        /*.logical_element_count=*/32,
-        /*.storage_byte_count=*/18,
-        /*.required_alignment=*/2,
+        /*.geometry=*/
+        {
+            /*.logical_element_count=*/32,
+            /*.storage_byte_count=*/18,
+            /*.required_alignment=*/2,
+        },
     },
 };
 static const loom_encoding_family_descriptor_t kFixedRecordDescriptor = {
@@ -319,6 +491,12 @@ TEST_F(EncodingStorageTest, FixedGgmlSchemasExposeCanonicalContracts) {
     loom_module_t* module = Parse(expectation.source);
     ASSERT_NE(module, nullptr);
     const uint16_t encoding_id = FirstSpecId(module);
+
+    const loom_encoding_record_layout_t* layout = nullptr;
+    ASSERT_TRUE(
+        loom_encoding_query_static_record_layout(module, encoding_id, &layout));
+    ASSERT_NE(layout, nullptr);
+    ExpectGgmlRecordTopology(expectation.descriptor, layout);
 
     loom_encoding_record_geometry_t record;
     ASSERT_TRUE(loom_encoding_query_static_record_geometry(module, encoding_id,

@@ -45,6 +45,9 @@ from loom.dsl import (
     EncodingFamilyRole,
     EncodingOperandSummaryDef,
     EncodingRecordDef,
+    EncodingRecordFieldDef,
+    EncodingRecordFieldRole,
+    EncodingRecordMappingDef,
     EnumCase,
     EnumDef,
     Op,
@@ -321,6 +324,338 @@ _CANONICAL_NUMERIC_SCHEMA_FORMATS = (
     "f4e2m1",
 )
 
+
+def _record_mapping(
+    *,
+    record_byte_offset: int,
+    field_element_offset: int,
+    element_count: int,
+    bit_count: int,
+    record_byte_stride: int = 1,
+    record_bit_offset: int = 0,
+    field_bit_offset: int = 0,
+) -> EncodingRecordMappingDef:
+    """Builds one byte-addressed record projection row."""
+
+    return EncodingRecordMappingDef(
+        record_bit_offset=record_byte_offset * 8 + record_bit_offset,
+        record_bit_stride=record_byte_stride * 8,
+        field_element_offset=field_element_offset,
+        element_count=element_count,
+        field_bit_offset=field_bit_offset,
+        bit_count=bit_count,
+    )
+
+
+def _record_field(
+    role: EncodingRecordFieldRole,
+    numeric_format: str,
+    element_bit_count: int,
+    element_count: int,
+    mappings: tuple[EncodingRecordMappingDef, ...],
+    *,
+    hierarchy_level: int = 0,
+) -> EncodingRecordFieldDef:
+    """Builds one field using the encoding dialect numeric vocabulary."""
+
+    return EncodingRecordFieldDef(
+        role,
+        NumericFormat.case(numeric_format),
+        element_bit_count,
+        element_count,
+        mappings,
+        hierarchy_level=hierarchy_level,
+    )
+
+
+def _contiguous_record_field(
+    role: EncodingRecordFieldRole,
+    numeric_format: str,
+    element_bit_count: int,
+    element_count: int,
+    record_byte_offset: int,
+    *,
+    hierarchy_level: int = 0,
+) -> EncodingRecordFieldDef:
+    """Builds one byte-aligned contiguous record field."""
+
+    if element_bit_count % 8:
+        raise ValueError("contiguous record fields must contain whole bytes")
+    return _record_field(
+        role,
+        numeric_format,
+        element_bit_count,
+        element_count,
+        (
+            _record_mapping(
+                record_byte_offset=record_byte_offset,
+                record_byte_stride=element_bit_count // 8,
+                field_element_offset=0,
+                element_count=element_count,
+                bit_count=element_bit_count,
+            ),
+        ),
+        hierarchy_level=hierarchy_level,
+    )
+
+
+_GGML_K_SCALE_MINIMUM_FIELDS = (
+    _contiguous_record_field(EncodingRecordFieldRole.SCALE, "f16", 16, 1, 0),
+    _contiguous_record_field(EncodingRecordFieldRole.MINIMUM, "f16", 16, 1, 2),
+    _record_field(
+        EncodingRecordFieldRole.SCALE,
+        "u6",
+        6,
+        8,
+        (
+            _record_mapping(
+                record_byte_offset=4,
+                field_element_offset=0,
+                element_count=4,
+                bit_count=6,
+            ),
+            _record_mapping(
+                record_byte_offset=12,
+                field_element_offset=4,
+                element_count=4,
+                bit_count=4,
+            ),
+            _record_mapping(
+                record_byte_offset=4,
+                record_bit_offset=6,
+                field_element_offset=4,
+                element_count=4,
+                field_bit_offset=4,
+                bit_count=2,
+            ),
+        ),
+        hierarchy_level=1,
+    ),
+    _record_field(
+        EncodingRecordFieldRole.MINIMUM,
+        "u6",
+        6,
+        8,
+        (
+            _record_mapping(
+                record_byte_offset=8,
+                field_element_offset=0,
+                element_count=4,
+                bit_count=6,
+            ),
+            _record_mapping(
+                record_byte_offset=12,
+                record_bit_offset=4,
+                field_element_offset=4,
+                element_count=4,
+                bit_count=4,
+            ),
+            _record_mapping(
+                record_byte_offset=8,
+                record_bit_offset=6,
+                field_element_offset=4,
+                element_count=4,
+                field_bit_offset=4,
+                bit_count=2,
+            ),
+        ),
+        hierarchy_level=1,
+    ),
+)
+
+_GGML_Q4_0_RECORD = EncodingRecordDef(
+    32,
+    18,
+    required_alignment=2,
+    fields=(
+        _contiguous_record_field(EncodingRecordFieldRole.SCALE, "f16", 16, 1, 0),
+        _record_field(
+            EncodingRecordFieldRole.PAYLOAD,
+            "quant_i4",
+            4,
+            32,
+            tuple(
+                _record_mapping(
+                    record_byte_offset=2,
+                    record_bit_offset=nibble * 4,
+                    field_element_offset=nibble * 16,
+                    element_count=16,
+                    bit_count=4,
+                )
+                for nibble in range(2)
+            ),
+        ),
+    ),
+)
+
+_GGML_Q8_0_RECORD = EncodingRecordDef(
+    32,
+    34,
+    required_alignment=2,
+    fields=(
+        _contiguous_record_field(EncodingRecordFieldRole.SCALE, "f16", 16, 1, 0),
+        _contiguous_record_field(EncodingRecordFieldRole.PAYLOAD, "quant_i8", 8, 32, 2),
+    ),
+)
+
+_GGML_Q4_K_RECORD = EncodingRecordDef(
+    256,
+    144,
+    required_alignment=2,
+    fields=(
+        *_GGML_K_SCALE_MINIMUM_FIELDS,
+        _record_field(
+            EncodingRecordFieldRole.PAYLOAD,
+            "u4",
+            4,
+            256,
+            tuple(
+                _record_mapping(
+                    record_byte_offset=16 + chunk * 32,
+                    record_bit_offset=nibble * 4,
+                    field_element_offset=(chunk * 2 + nibble) * 32,
+                    element_count=32,
+                    bit_count=4,
+                )
+                for chunk in range(4)
+                for nibble in range(2)
+            ),
+        ),
+    ),
+)
+
+_GGML_Q5_K_RECORD = EncodingRecordDef(
+    256,
+    176,
+    required_alignment=2,
+    fields=(
+        *_GGML_K_SCALE_MINIMUM_FIELDS,
+        _record_field(
+            EncodingRecordFieldRole.PAYLOAD,
+            "u5",
+            5,
+            256,
+            (
+                *(
+                    _record_mapping(
+                        record_byte_offset=48 + chunk * 32,
+                        record_bit_offset=nibble * 4,
+                        field_element_offset=(chunk * 2 + nibble) * 32,
+                        element_count=32,
+                        bit_count=4,
+                    )
+                    for chunk in range(4)
+                    for nibble in range(2)
+                ),
+                *(
+                    _record_mapping(
+                        record_byte_offset=16,
+                        record_bit_offset=group,
+                        field_element_offset=group * 32,
+                        element_count=32,
+                        field_bit_offset=4,
+                        bit_count=1,
+                    )
+                    for group in range(8)
+                ),
+            ),
+        ),
+    ),
+)
+
+_GGML_Q6_K_RECORD = EncodingRecordDef(
+    256,
+    210,
+    required_alignment=2,
+    fields=(
+        _record_field(
+            EncodingRecordFieldRole.PAYLOAD,
+            "quant_i6",
+            6,
+            256,
+            (
+                *(
+                    _record_mapping(
+                        record_byte_offset=half * 64 + (quarter % 2) * 32,
+                        record_bit_offset=0 if quarter < 2 else 4,
+                        field_element_offset=half * 128 + quarter * 32,
+                        element_count=32,
+                        bit_count=4,
+                    )
+                    for half in range(2)
+                    for quarter in range(4)
+                ),
+                *(
+                    _record_mapping(
+                        record_byte_offset=128 + half * 32,
+                        record_bit_offset=quarter * 2,
+                        field_element_offset=half * 128 + quarter * 32,
+                        element_count=32,
+                        field_bit_offset=4,
+                        bit_count=2,
+                    )
+                    for half in range(2)
+                    for quarter in range(4)
+                ),
+            ),
+        ),
+        _contiguous_record_field(
+            EncodingRecordFieldRole.SCALE,
+            "f16",
+            16,
+            1,
+            208,
+        ),
+        _contiguous_record_field(
+            EncodingRecordFieldRole.SCALE,
+            "i8",
+            8,
+            16,
+            192,
+            hierarchy_level=1,
+        ),
+    ),
+)
+
+_GGML_Q8_1_X4_RECORD = EncodingRecordDef(
+    128,
+    144,
+    required_alignment=16,
+    fields=(
+        _record_field(
+            EncodingRecordFieldRole.SCALE,
+            "f16",
+            16,
+            4,
+            (
+                _record_mapping(
+                    record_byte_offset=0,
+                    record_byte_stride=4,
+                    field_element_offset=0,
+                    element_count=4,
+                    bit_count=16,
+                ),
+            ),
+        ),
+        _record_field(
+            EncodingRecordFieldRole.SUM_CORRECTION,
+            "f16",
+            16,
+            4,
+            (
+                _record_mapping(
+                    record_byte_offset=2,
+                    record_byte_stride=4,
+                    field_element_offset=0,
+                    element_count=4,
+                    bit_count=16,
+                ),
+            ),
+        ),
+        _contiguous_record_field(EncodingRecordFieldRole.PAYLOAD, "quant_i8", 8, 128, 16),
+    ),
+)
+
 ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
     EncodingFamilyDef(
         "encoding.storage",
@@ -354,7 +689,7 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         "ggml.q4_0",
         group=encoding_ops,
         role=EncodingFamilyRole.STORAGE_SCHEMA,
-        fixed_record=EncodingRecordDef(32, 18, required_alignment=2),
+        fixed_record=_GGML_Q4_0_RECORD,
         fixed_operand_summary=EncodingOperandSummaryDef(
             element_format=_enum_fact(NumericFormat, "quant_i4"),
             scale_format=_enum_fact(NumericFormat, "f16"),
@@ -373,7 +708,7 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         "ggml.q8_0",
         group=encoding_ops,
         role=EncodingFamilyRole.STORAGE_SCHEMA,
-        fixed_record=EncodingRecordDef(32, 34, required_alignment=2),
+        fixed_record=_GGML_Q8_0_RECORD,
         fixed_operand_summary=EncodingOperandSummaryDef(
             element_format=_enum_fact(NumericFormat, "quant_i8"),
             scale_format=_enum_fact(NumericFormat, "f16"),
@@ -392,7 +727,7 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         "ggml.q4_k",
         group=encoding_ops,
         role=EncodingFamilyRole.STORAGE_SCHEMA,
-        fixed_record=EncodingRecordDef(256, 144, required_alignment=2),
+        fixed_record=_GGML_Q4_K_RECORD,
         fixed_operand_summary=EncodingOperandSummaryDef(
             element_format=_enum_fact(NumericFormat, "u4"),
             scale_format=_enum_fact(NumericFormat, "f16"),
@@ -416,7 +751,7 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         "ggml.q5_k",
         group=encoding_ops,
         role=EncodingFamilyRole.STORAGE_SCHEMA,
-        fixed_record=EncodingRecordDef(256, 176, required_alignment=2),
+        fixed_record=_GGML_Q5_K_RECORD,
         fixed_operand_summary=EncodingOperandSummaryDef(
             element_format=_enum_fact(NumericFormat, "u5"),
             scale_format=_enum_fact(NumericFormat, "f16"),
@@ -440,7 +775,7 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         "ggml.q6_k",
         group=encoding_ops,
         role=EncodingFamilyRole.STORAGE_SCHEMA,
-        fixed_record=EncodingRecordDef(256, 210, required_alignment=2),
+        fixed_record=_GGML_Q6_K_RECORD,
         fixed_operand_summary=EncodingOperandSummaryDef(
             element_format=_enum_fact(NumericFormat, "quant_i6"),
             scale_format=_enum_fact(NumericFormat, "f16"),
@@ -463,7 +798,7 @@ ALL_ENCODING_FAMILIES: tuple[EncodingFamilyDef, ...] = (
         "ggml.q8_1_x4",
         group=encoding_ops,
         role=EncodingFamilyRole.STORAGE_SCHEMA,
-        fixed_record=EncodingRecordDef(128, 144, required_alignment=16),
+        fixed_record=_GGML_Q8_1_X4_RECORD,
         fixed_operand_summary=EncodingOperandSummaryDef(
             element_format=_enum_fact(NumericFormat, "quant_i8"),
             scale_format=_enum_fact(NumericFormat, "f16"),

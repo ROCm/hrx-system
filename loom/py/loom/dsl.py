@@ -254,6 +254,9 @@ __all__ = [
     "EncodingOperandSummaryDef",
     "EncodingFamilyDef",
     "EncodingFamilyRole",
+    "EncodingRecordFieldDef",
+    "EncodingRecordFieldRole",
+    "EncodingRecordMappingDef",
     "EncodingRecordDef",
     "ParameterizedAttrDef",
     # Legacy text-format migration declarations.
@@ -3292,6 +3295,145 @@ class EncodingFamilyRole(Enum):
         return str(self.value)
 
 
+@unique
+class EncodingRecordFieldRole(Enum):
+    """Semantic role of one logical field projected from a fixed record."""
+
+    PAYLOAD = "LOOM_ENCODING_RECORD_FIELD_PAYLOAD"
+    SCALE = "LOOM_ENCODING_RECORD_FIELD_SCALE"
+    MINIMUM = "LOOM_ENCODING_RECORD_FIELD_MINIMUM"
+    SUM_CORRECTION = "LOOM_ENCODING_RECORD_FIELD_SUM_CORRECTION"
+
+    @property
+    def c_name(self) -> str:
+        return str(self.value)
+
+
+@dataclass(frozen=True, slots=True)
+class EncodingRecordMappingDef:
+    """Rectangular bit projection from record storage into a logical field."""
+
+    record_bit_offset: int
+    record_bit_stride: int
+    field_element_offset: int
+    element_count: int
+    field_bit_offset: int
+    bit_count: int
+
+    def __post_init__(self) -> None:
+        limits = (
+            ("record_bit_offset", self.record_bit_offset, 0, 0xFFFFFFFF),
+            ("record_bit_stride", self.record_bit_stride, 1, 0xFFFF),
+            ("field_element_offset", self.field_element_offset, 0, 0xFFFF),
+            ("element_count", self.element_count, 1, 0xFFFF),
+            ("field_bit_offset", self.field_bit_offset, 0, 0xFF),
+            ("bit_count", self.bit_count, 1, 0xFF),
+        )
+        for field_name, value, minimum, maximum in limits:
+            if type(value) is not int or not minimum <= value <= maximum:
+                raise ValueError(
+                    f"EncodingRecordMappingDef: {field_name} must be an "
+                    f"integer in [{minimum}, {maximum}], got {value!r}"
+                )
+
+
+@dataclass(frozen=True, slots=True)
+class EncodingRecordFieldDef:
+    """One semantic field reconstructed from a fixed physical record."""
+
+    role: EncodingRecordFieldRole
+    hierarchy_level: int
+    numeric_format: EnumCase
+    element_bit_count: int
+    element_count: int
+    mappings: tuple[EncodingRecordMappingDef, ...]
+
+    def __init__(
+        self,
+        role: EncodingRecordFieldRole,
+        numeric_format: EnumCase,
+        element_bit_count: int,
+        element_count: int,
+        mappings: list[EncodingRecordMappingDef] | tuple[EncodingRecordMappingDef, ...],
+        *,
+        hierarchy_level: int = 0,
+    ) -> None:
+        if not isinstance(role, EncodingRecordFieldRole):
+            raise ValueError(
+                "EncodingRecordFieldDef: role must be an EncodingRecordFieldRole"
+            )
+        if not isinstance(numeric_format, EnumCase):
+            raise ValueError(
+                "EncodingRecordFieldDef: numeric_format must be an EnumCase"
+            )
+        if type(hierarchy_level) is not int or not 0 <= hierarchy_level <= 0xFF:
+            raise ValueError(
+                "EncodingRecordFieldDef: hierarchy_level must be an integer "
+                f"in [0, 255], got {hierarchy_level!r}"
+            )
+        for field_name, value, maximum in (
+            ("element_bit_count", element_bit_count, 0xFF),
+            ("element_count", element_count, 0xFFFF),
+        ):
+            if type(value) is not int or not 1 <= value <= maximum:
+                raise ValueError(
+                    f"EncodingRecordFieldDef: {field_name} must be an integer "
+                    f"in [1, {maximum}], got {value!r}"
+                )
+        if not 0 <= numeric_format.value <= 0xFF:
+            raise ValueError(
+                "EncodingRecordFieldDef: numeric format ordinal must fit in uint8_t"
+            )
+
+        frozen_mappings = tuple(mappings)
+        if not frozen_mappings:
+            raise ValueError(
+                "EncodingRecordFieldDef: mappings must contain at least one row"
+            )
+        if len(frozen_mappings) > 0xFF:
+            raise ValueError(
+                "EncodingRecordFieldDef: mapping count exceeds the uint8_t limit"
+            )
+        coverage = [0] * element_count
+        expected_mask = (1 << element_bit_count) - 1
+        for mapping in frozen_mappings:
+            if not isinstance(mapping, EncodingRecordMappingDef):
+                raise ValueError(
+                    "EncodingRecordFieldDef: mappings must contain "
+                    "EncodingRecordMappingDef values"
+                )
+            element_end = mapping.field_element_offset + mapping.element_count
+            if element_end > element_count:
+                raise ValueError(
+                    "EncodingRecordFieldDef: mapping exceeds the logical field "
+                    "element count"
+                )
+            bit_end = mapping.field_bit_offset + mapping.bit_count
+            if bit_end > element_bit_count:
+                raise ValueError(
+                    "EncodingRecordFieldDef: mapping exceeds the logical field "
+                    "element width"
+                )
+            mapping_mask = ((1 << mapping.bit_count) - 1) << mapping.field_bit_offset
+            for element_index in range(mapping.field_element_offset, element_end):
+                if coverage[element_index] & mapping_mask:
+                    raise ValueError(
+                        "EncodingRecordFieldDef: mappings overlap in the logical field"
+                    )
+                coverage[element_index] |= mapping_mask
+        if any(element_mask != expected_mask for element_mask in coverage):
+            raise ValueError(
+                "EncodingRecordFieldDef: mappings do not cover every logical field bit"
+            )
+
+        object.__setattr__(self, "role", role)
+        object.__setattr__(self, "hierarchy_level", hierarchy_level)
+        object.__setattr__(self, "numeric_format", numeric_format)
+        object.__setattr__(self, "element_bit_count", element_bit_count)
+        object.__setattr__(self, "element_count", element_count)
+        object.__setattr__(self, "mappings", frozen_mappings)
+
+
 @dataclass(frozen=True, slots=True)
 class EncodingRecordDef:
     """Exact physical geometry for one fixed encoding record."""
@@ -3299,6 +3441,7 @@ class EncodingRecordDef:
     logical_element_count: int
     storage_byte_count: int
     required_alignment: int = 1
+    fields: tuple[EncodingRecordFieldDef, ...] = ()
 
     def __post_init__(self) -> None:
         for field_name, value in (
@@ -3315,6 +3458,55 @@ class EncodingRecordDef:
             raise ValueError(
                 "EncodingRecordDef: required_alignment must be a power of two"
             )
+        fields = tuple(self.fields)
+        object.__setattr__(self, "fields", fields)
+        if len(fields) > 0xFF:
+            raise ValueError("EncodingRecordDef: field count exceeds the uint8_t limit")
+        mapping_count = sum(len(field.mappings) for field in fields)
+        if mapping_count > 0xFF:
+            raise ValueError(
+                "EncodingRecordDef: mapping count exceeds the uint8_t limit"
+            )
+
+        record_bit_count = self.storage_byte_count * 8
+        field_keys: set[tuple[EncodingRecordFieldRole, int]] = set()
+        mapped_record_bits: set[int] = set()
+        for field in fields:
+            if not isinstance(field, EncodingRecordFieldDef):
+                raise ValueError(
+                    "EncodingRecordDef: fields must contain "
+                    "EncodingRecordFieldDef values"
+                )
+            field_key = (field.role, field.hierarchy_level)
+            if field_key in field_keys:
+                raise ValueError(
+                    "EncodingRecordDef: duplicate field role and hierarchy level"
+                )
+            field_keys.add(field_key)
+            for mapping in field.mappings:
+                last_source_bit = (
+                    mapping.record_bit_offset
+                    + (mapping.element_count - 1) * mapping.record_bit_stride
+                    + mapping.bit_count
+                    - 1
+                )
+                if last_source_bit >= record_bit_count:
+                    raise ValueError(
+                        "EncodingRecordDef: mapping exceeds physical record storage"
+                    )
+                for element_index in range(mapping.element_count):
+                    source_bit = (
+                        mapping.record_bit_offset
+                        + element_index * mapping.record_bit_stride
+                    )
+                    for bit_index in range(mapping.bit_count):
+                        record_bit = source_bit + bit_index
+                        if record_bit in mapped_record_bits:
+                            raise ValueError(
+                                "EncodingRecordDef: mappings overlap in physical "
+                                "record storage"
+                            )
+                        mapped_record_bits.add(record_bit)
 
 
 @dataclass(frozen=True, slots=True)

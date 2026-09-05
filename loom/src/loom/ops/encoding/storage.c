@@ -289,20 +289,33 @@ bool loom_encoding_query_static_storage_schema(
              out_schema->encoded_operand);
 }
 
-bool loom_encoding_query_static_record_geometry(
+bool loom_encoding_query_static_record_layout(
     const loom_module_t* module, uint16_t encoding_id,
-    loom_encoding_record_geometry_t* out_geometry) {
-  if (!module || !out_geometry) return false;
-  *out_geometry = (loom_encoding_record_geometry_t){0};
+    const loom_encoding_record_layout_t** out_layout) {
+  if (!module || !out_layout) return false;
+  *out_layout = NULL;
   const loom_encoding_t* encoding = loom_module_encoding(module, encoding_id);
   if (!encoding || !loom_encoding_static_is_valid(encoding)) return false;
   const loom_encoding_family_descriptor_t* descriptor =
       loom_module_encoding_family_descriptor(module, encoding);
   if (!descriptor || !descriptor->fixed_metadata ||
-      descriptor->fixed_metadata->record.logical_element_count == 0) {
+      descriptor->fixed_metadata->record.geometry.logical_element_count == 0) {
     return false;
   }
-  *out_geometry = descriptor->fixed_metadata->record;
+  *out_layout = &descriptor->fixed_metadata->record;
+  return true;
+}
+
+bool loom_encoding_query_static_record_geometry(
+    const loom_module_t* module, uint16_t encoding_id,
+    loom_encoding_record_geometry_t* out_geometry) {
+  if (!out_geometry) return false;
+  *out_geometry = (loom_encoding_record_geometry_t){0};
+  const loom_encoding_record_layout_t* layout = NULL;
+  if (!loom_encoding_query_static_record_layout(module, encoding_id, &layout)) {
+    return false;
+  }
+  *out_geometry = layout->geometry;
   return true;
 }
 

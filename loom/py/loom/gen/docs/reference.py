@@ -843,6 +843,60 @@ def _render_encoding(encoding: EncodingFamilyDef) -> str:
                 "",
             ]
         )
+        if record.fields:
+            lines.extend(
+                [
+                    "### Logical fields",
+                    "",
+                    *_table(
+                        (
+                            "Role",
+                            "Level",
+                            "Format",
+                            "Elements",
+                            "Bits per element",
+                        ),
+                        (
+                            (
+                                f"`{field.role.name.lower()}`",
+                                field.hierarchy_level,
+                                f"`{field.numeric_format.keyword}`",
+                                field.element_count,
+                                field.element_bit_count,
+                            )
+                            for field in record.fields
+                        ),
+                    ),
+                    "",
+                    "### Bit projections",
+                    "",
+                    *_table(
+                        (
+                            "Field",
+                            "Record bit offset",
+                            "Record bit stride",
+                            "Field element offset",
+                            "Elements",
+                            "Field bit offset",
+                            "Bits",
+                        ),
+                        (
+                            (
+                                f"`{field.role.name.lower()}[{field.hierarchy_level}]`",
+                                mapping.record_bit_offset,
+                                mapping.record_bit_stride,
+                                mapping.field_element_offset,
+                                mapping.element_count,
+                                mapping.field_bit_offset,
+                                mapping.bit_count,
+                            )
+                            for field in record.fields
+                            for mapping in field.mappings
+                        ),
+                    ),
+                    "",
+                ]
+            )
     if encoding.required_auxiliary_keys:
         lines.extend(
             [

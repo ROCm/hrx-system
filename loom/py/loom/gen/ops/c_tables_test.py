@@ -88,6 +88,9 @@ from loom.dsl import (
     EncodingOperandSummaryDef,
     EncodingParam,
     EncodingRecordDef,
+    EncodingRecordFieldDef,
+    EncodingRecordFieldRole,
+    EncodingRecordMappingDef,
     EnumCase,
     EnumDef,
     FuncLikeInterface,
@@ -619,6 +622,15 @@ def test_generate_encoding_family_metadata() -> None:
             logical_element_count=256,
             storage_byte_count=144,
             required_alignment=16,
+            fields=[
+                EncodingRecordFieldDef(
+                    EncodingRecordFieldRole.PAYLOAD,
+                    EnumCase("u4", 17),
+                    4,
+                    256,
+                    [EncodingRecordMappingDef(128, 4, 0, 256, 0, 4)],
+                )
+            ],
         ),
         fixed_operand_summary=EncodingOperandSummaryDef(
             element_format=0x10000,
@@ -699,6 +711,20 @@ def test_generate_encoding_family_metadata() -> None:
     assert ".logical_element_count = 256" in tables_c
     assert ".storage_byte_count = 144" in tables_c
     assert ".required_alignment = 16" in tables_c
+    assert "static const loom_encoding_record_mapping_t loom_encoding_operand_record_mappings[]" in tables_c
+    assert ".record_bit_offset = UINT32_C(128)" in tables_c
+    assert ".record_bit_stride = 4" in tables_c
+    assert ".element_count = 256" in tables_c
+    assert ".bit_count = 4" in tables_c
+    assert "static const loom_encoding_record_field_t loom_encoding_operand_record_fields[]" in tables_c
+    assert ".mapping_count = 1" in tables_c
+    assert ".role = LOOM_ENCODING_RECORD_FIELD_PAYLOAD" in tables_c
+    assert ".numeric_format = 17" in tables_c
+    assert ".element_bit_count = 4" in tables_c
+    assert ".field_count = IREE_ARRAYSIZE(loom_encoding_operand_record_fields)" in tables_c
+    assert ".mapping_count = IREE_ARRAYSIZE(loom_encoding_operand_record_mappings)" in tables_c
+    assert ".fields = loom_encoding_operand_record_fields" in tables_c
+    assert ".mappings = loom_encoding_operand_record_mappings" in tables_c
     assert ".fixed_metadata = &loom_encoding_operand_fixed_metadata" in tables_c
 
 

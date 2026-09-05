@@ -114,6 +114,9 @@ from loom.dsl import (
     EncodingOperandSummaryDef,
     EncodingParam,
     EncodingRecordDef,
+    EncodingRecordFieldDef,
+    EncodingRecordFieldRole,
+    EncodingRecordMappingDef,
     EnumCase,
     EnumDef,
     FreshResult,
@@ -815,9 +818,87 @@ class TestEncodingFamilyDef:
 
 
 class TestEncodingRecordDef:
+    def test_accepts_split_bitplane_field(self) -> None:
+        field = EncodingRecordFieldDef(
+            EncodingRecordFieldRole.PAYLOAD,
+            EnumCase("u5", 15),
+            5,
+            2,
+            [
+                EncodingRecordMappingDef(0, 8, 0, 2, 0, 4),
+                EncodingRecordMappingDef(4, 8, 0, 2, 4, 1),
+            ],
+        )
+        record = EncodingRecordDef(2, 2, fields=[field])
+
+        assert record.fields == (field,)
+
     def test_rejects_non_power_of_two_alignment(self) -> None:
         with _raises(ValueError, match="must be a power of two"):
             EncodingRecordDef(16, 8, required_alignment=3)
+
+    def test_rejects_incomplete_field_mapping(self) -> None:
+        with _raises(ValueError, match="do not cover every logical field bit"):
+            EncodingRecordFieldDef(
+                EncodingRecordFieldRole.PAYLOAD,
+                EnumCase("u5", 15),
+                5,
+                2,
+                [EncodingRecordMappingDef(0, 8, 0, 2, 0, 4)],
+            )
+
+    def test_rejects_overlapping_field_mapping(self) -> None:
+        with _raises(ValueError, match="overlap in the logical field"):
+            EncodingRecordFieldDef(
+                EncodingRecordFieldRole.PAYLOAD,
+                EnumCase("u4", 17),
+                4,
+                2,
+                [
+                    EncodingRecordMappingDef(0, 8, 0, 2, 0, 4),
+                    EncodingRecordMappingDef(4, 8, 0, 2, 2, 2),
+                ],
+            )
+
+    def test_rejects_mapping_outside_record(self) -> None:
+        field = EncodingRecordFieldDef(
+            EncodingRecordFieldRole.PAYLOAD,
+            EnumCase("u4", 17),
+            4,
+            2,
+            [EncodingRecordMappingDef(8, 8, 0, 2, 0, 4)],
+        )
+        with _raises(ValueError, match="exceeds physical record storage"):
+            EncodingRecordDef(2, 2, fields=[field])
+
+    def test_rejects_physical_mapping_overlap(self) -> None:
+        payload = EncodingRecordFieldDef(
+            EncodingRecordFieldRole.PAYLOAD,
+            EnumCase("u8", 11),
+            8,
+            1,
+            [EncodingRecordMappingDef(0, 8, 0, 1, 0, 8)],
+        )
+        scale = EncodingRecordFieldDef(
+            EncodingRecordFieldRole.SCALE,
+            EnumCase("u8", 11),
+            8,
+            1,
+            [EncodingRecordMappingDef(0, 8, 0, 1, 0, 8)],
+        )
+        with _raises(ValueError, match="overlap in physical record storage"):
+            EncodingRecordDef(1, 1, fields=[payload, scale])
+
+    def test_rejects_duplicate_field_level(self) -> None:
+        field = EncodingRecordFieldDef(
+            EncodingRecordFieldRole.SCALE,
+            EnumCase("f16", 4),
+            16,
+            1,
+            [EncodingRecordMappingDef(0, 16, 0, 1, 0, 16)],
+        )
+        with _raises(ValueError, match="duplicate field role and hierarchy level"):
+            EncodingRecordDef(1, 4, fields=[field, field])
 
 
 class TestEncodingOperandSummaryDef:
