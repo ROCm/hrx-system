@@ -60,10 +60,10 @@ static inline iree_string_view_t loom_device_target_key(
 // Returns an artifact emission view over |target|.
 static inline loom_artifact_target_t loom_device_target_artifact_target(
     const loom_device_target_t* target) {
-  return (loom_artifact_target_t){
-      .target_bundle = loom_device_target_bundle(target),
-      .target_key = loom_device_target_key(target),
-  };
+  loom_artifact_target_t artifact_target = {0};
+  artifact_target.target_bundle = loom_device_target_bundle(target);
+  artifact_target.target_key = loom_device_target_key(target);
+  return artifact_target;
 }
 
 typedef iree_status_t (*loom_device_provider_select_target_fn_t)(
