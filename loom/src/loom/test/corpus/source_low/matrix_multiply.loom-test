@@ -19,3 +19,173 @@ func.def @matrix_multiply_s8s8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffe
   vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
   func.return
 }
+
+// ====
+
+func.def @matrix_multiply_u8s8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xi8>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<64xi8>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<8x8xi32>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 8 : index
+  %lhs_value = vector.load %lhs_view[0] : view<64xi8> -> vector<64xi8>
+  %rhs_value = vector.load %rhs_view[0] : view<64xi8> -> vector<64xi8>
+  %lhs_schema = encoding.define #encoding.u8<payload_elements=64, payload_packing=target_fragment, payload_registers=16> : encoding<schema>
+  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<64xi8>
+  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<64xi8>
+  %accumulator_init = vector.constant 0 : vector<64xi32>
+  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
+  vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
+  func.return
+}
+
+// ====
+
+func.def @matrix_multiply_s8u8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xi8>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<64xi8>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<8x8xi32>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 8 : index
+  %lhs_value = vector.load %lhs_view[0] : view<64xi8> -> vector<64xi8>
+  %rhs_value = vector.load %rhs_view[0] : view<64xi8> -> vector<64xi8>
+  %rhs_schema = encoding.define #encoding.u8<payload_elements=64, payload_packing=target_fragment, payload_registers=16> : encoding<schema>
+  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] : vector<64xi8>
+  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<64xi8>
+  %accumulator_init = vector.constant 0 : vector<64xi32>
+  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
+  vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
+  func.return
+}
+
+// ====
+
+func.def @matrix_multiply_u8u8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xi8>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<64xi8>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<8x8xi32>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 8 : index
+  %lhs_value = vector.load %lhs_view[0] : view<64xi8> -> vector<64xi8>
+  %rhs_value = vector.load %rhs_view[0] : view<64xi8> -> vector<64xi8>
+  %lhs_schema = encoding.define #encoding.u8<payload_elements=64, payload_packing=target_fragment, payload_registers=16> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.u8<payload_elements=64, payload_packing=target_fragment, payload_registers=16> : encoding<schema>
+  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<64xi8>
+  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<64xi8>
+  %accumulator_init = vector.constant 0 : vector<64xi32>
+  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
+  vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
+  func.return
+}
+
+// ====
+
+func.def @matrix_accumulate_u8s8_m8n8k8(%lhs: buffer, %rhs: buffer, %accumulator: vector<64xi32>, %output: buffer) {
+  %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xi8>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<64xi8>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<8x8xi32>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 8 : index
+  %lhs_value = vector.load %lhs_view[0] : view<64xi8> -> vector<64xi8>
+  %rhs_value = vector.load %rhs_view[0] : view<64xi8> -> vector<64xi8>
+  %lhs_schema = encoding.define #encoding.u8<payload_elements=64, payload_packing=target_fragment, payload_registers=16> : encoding<schema>
+  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<64xi8>
+  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<64xi8>
+  %accumulator_fragment = vector.fragment<init> %accumulator shape [%m, %n] : vector<64xi32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
+  vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
+  func.return
+}
+
+// ====
+
+func.def @matrix_multiply_packed_u4s8_m8n8k8(%packed_lhs: buffer, %rhs: buffer, %output: buffer) {
+  %packed_lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %packed_lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %packed_lhs_view = buffer.view %packed_lhs_aligned[%base] : buffer -> view<32xi8>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<64xi8>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<8x8xi32>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 8 : index
+  %packed_lhs_value = vector.load %packed_lhs_view[0] : view<32xi8> -> vector<32xi8>
+  %lhs_value = vector.bitunpacku<4> %packed_lhs_value : vector<32xi8> -> vector<64xi8>
+  %rhs_value = vector.load %rhs_view[0] : view<64xi8> -> vector<64xi8>
+  %lhs_schema = encoding.define #encoding.u8<payload_elements=64, payload_packing=target_fragment, payload_registers=16> : encoding<schema>
+  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<64xi8>
+  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<64xi8>
+  %accumulator_init = vector.constant 0 : vector<64xi32>
+  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
+  vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
+  func.return
+}
+
+// ====
+
+func.def @matrix_multiply_packed_u5s8_m8n8k8(%packed_lhs: buffer, %high_lhs: buffer, %rhs: buffer, %output: buffer) {
+  %packed_lhs_aligned, %high_lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %packed_lhs, %high_lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %packed_lhs_view = buffer.view %packed_lhs_aligned[%base] : buffer -> view<32xi8>
+  %high_lhs_view = buffer.view %high_lhs_aligned[%base] : buffer -> view<16xi8>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<64xi8>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<8x8xi32>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 8 : index
+  %packed_lhs_value = vector.load %packed_lhs_view[0] : view<32xi8> -> vector<32xi8>
+  %low_lhs_value = vector.bitunpacku<4> %packed_lhs_value : vector<32xi8> -> vector<64xi8>
+  %high_lhs_value = vector.load %high_lhs_view[0] : view<16xi8> -> vector<16xi8>
+  %high_lhs_bits = vector.bitunpacku<1> %high_lhs_value : vector<16xi8> -> vector<2x64xi1>
+  %high_lhs_mask = vector.extract %high_lhs_bits[0] : vector<2x64xi1> -> vector<64xi1>
+  %high_bit_value = vector.constant 16 : vector<64xi8>
+  %high_lhs_candidates = vector.addi %low_lhs_value, %high_bit_value : vector<64xi8>
+  %lhs_value = vector.select %high_lhs_mask, %high_lhs_candidates, %low_lhs_value : vector<64xi8>
+  %rhs_value = vector.load %rhs_view[0] : view<64xi8> -> vector<64xi8>
+  %lhs_schema = encoding.define #encoding.u8<payload_elements=64, payload_packing=target_fragment, payload_registers=16> : encoding<schema>
+  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<64xi8>
+  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<64xi8>
+  %accumulator_init = vector.constant 0 : vector<64xi32>
+  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
+  vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
+  func.return
+}
+
+// ====
+
+func.def @matrix_multiply_packed_s4s8_m8n8k8(%packed_lhs: buffer, %rhs: buffer, %output: buffer) {
+  %packed_lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %packed_lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %packed_lhs_view = buffer.view %packed_lhs_aligned[%base] : buffer -> view<32xi8>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<64xi8>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<8x8xi32>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 8 : index
+  %packed_lhs_value = vector.load %packed_lhs_view[0] : view<32xi8> -> vector<32xi8>
+  %lhs_value = vector.bitunpacks<4> %packed_lhs_value : vector<32xi8> -> vector<64xi8>
+  %rhs_value = vector.load %rhs_view[0] : view<64xi8> -> vector<64xi8>
+  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] : vector<64xi8>
+  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<64xi8>
+  %accumulator_init = vector.constant 0 : vector<64xi32>
+  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
+  vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
+  func.return
+}

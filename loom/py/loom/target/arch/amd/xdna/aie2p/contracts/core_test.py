@@ -224,6 +224,13 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
                 ),
             )
         )
+    expected_extract_keys.append(
+        (
+            "i1",
+            "i1",
+            "amd.xdna.aie2p.extract.predicate64.immediate",
+        )
+    )
     assert [
         (
             rule.guards[0].type_pattern.element,
@@ -438,6 +445,35 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert vector_multiply.emit[3].immediates == {"i": 0}
     assert vector_multiply.emit[4].immediates == {"i": 1}
     assert vector_multiply.emit[5].immediates == {"i": 0}
+
+    bitunpack_rules = [
+        rule
+        for rule in rules
+        if rule.source_op in (vector.vector_bitunpacku, vector.vector_bitunpacks)
+    ]
+    assert len(bitunpack_rules) == 2
+    for rule, source_op, source_kind in zip(
+        bitunpack_rules,
+        (vector.vector_bitunpacku, vector.vector_bitunpacks),
+        ("u", "s"),
+        strict=True,
+    ):
+        assert rule.source_op is source_op
+        assert rule.descriptor.key == (
+            f"amd.xdna.aie2p.unpack.{source_kind}4x64.to.{source_kind}8x64.configured"
+        )
+        packed_slice, set_unpack_size, unpack = rule.emit
+        assert isinstance(packed_slice, EmitRegisterSlice)
+        assert packed_slice.source.field == "source"
+        assert packed_slice.result.field == "packed_source"
+        assert packed_slice.unit_count == 1
+        assert set_unpack_size.descriptor.key == (
+            "amd.xdna.aie2p.state.unpack-size.immediate"
+        )
+        assert set_unpack_size.immediates == {"i": 0}
+        assert unpack.descriptor is rule.descriptor
+        assert unpack.operands["src"].field == "packed_source"
+        assert unpack.results["dst"].field == "result"
 
     bf16_multiply_rules = [
         rule for rule in rules if rule.source_op is vector.vector_mulf
@@ -805,6 +841,17 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for source_type in bitcast_types
         for result_type in bitcast_types
     ]
+    packed_predicate_aliases = [
+        rule for rule in alias_rules if rule.source_op is vector.vector_bitunpacku
+    ]
+    assert len(packed_predicate_aliases) == 1
+    packed_predicate_alias = packed_predicate_aliases[0]
+    assert [guard.type_pattern for guard in packed_predicate_alias.guards[:2]] == [
+        Vector("i8", lanes=16),
+        Vector("i1", dims=(2, 64)),
+    ]
+    assert packed_predicate_alias.guards[3].minimum == 1
+    assert packed_predicate_alias.guards[3].maximum == 1
     assert (
         len([rule for rule in alias_rules if rule.source_op is vector.vector_broadcast])
         == 3

@@ -290,6 +290,57 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
     return tuple(result)
 
 
+_INTEGER_MATRIX_NUMERIC_KINDS = ("s8s8", "u8s8", "s8u8", "u8u8")
+
+
+def _integer_matrix_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
+    """Selects configured 8x8x8 integer multiply and accumulate forms."""
+
+    operations = (
+        (
+            "multiply",
+            "VMUL_vmul_cm_core_X_X",
+            "II_VMUL_vmul_cm_core_X_X",
+            "mmul",
+            (("dst", "mBMs"),),
+        ),
+        (
+            "accumulate",
+            "VMAC_vmul_cm_core_X_X",
+            "II_VMAC_vmul_cm_core_X_X",
+            "mma",
+            (("dst", "mBMs"), ("acc1", "mBMs")),
+        ),
+    )
+    return tuple(
+        _DescriptorSpec(
+            form_name,
+            f"{_TARGET_KEY}.matrix.{operation}.{numeric_kind}.m8n8k8.configured",
+            f"matrix.{operation}.{numeric_kind}.m8n8k8.configured",
+            itinerary,
+            storage_overrides=storage_overrides,
+            asm_mnemonic=f"{mnemonic}.{numeric_kind}.m8n8k8",
+        )
+        for operation, form_name, itinerary, mnemonic, storage_overrides in operations
+        for numeric_kind in _INTEGER_MATRIX_NUMERIC_KINDS
+    )
+
+
+def _packed_i4_unpack_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
+    """Selects native 64-lane signed and unsigned 4-to-8-bit unpack forms."""
+
+    return tuple(
+        _DescriptorSpec(
+            f"VUNPACK_mv_unpack_w_unpackSign{sign_bit}",
+            f"{_TARGET_KEY}.unpack.{source_kind}4x64.to.{source_kind}8x64.configured",
+            f"integer.unpack.{source_kind}4x64.to.{source_kind}8x64.configured",
+            f"II_VUNPACK_mv_unpack_w_unpackSign{sign_bit}",
+            asm_mnemonic=f"vunpack.{source_kind}4.to.{source_kind}8x64",
+        )
+        for source_kind, sign_bit in (("u", 0), ("s", 1))
+    )
+
+
 def _scalar_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
     """Builds exact-width scalar load and store descriptors."""
 
@@ -724,14 +775,8 @@ _BASE_DESCRIPTOR_SPECS = (
         storage_overrides=(("dst", "mBMs"),),
         asm_mnemonic="acc.clear.f32x64",
     ),
-    _DescriptorSpec(
-        "VMUL_vmul_cm_core_X_X",
-        f"{_TARGET_KEY}.matrix.multiply.s8s8.m8n8k8.configured",
-        "matrix.multiply.s8s8.m8n8k8.configured",
-        "II_VMUL_vmul_cm_core_X_X",
-        storage_overrides=(("dst", "mBMs"),),
-        asm_mnemonic="mmul.s8s8.m8n8k8",
-    ),
+    *_integer_matrix_descriptor_specs(),
+    *_packed_i4_unpack_descriptor_specs(),
     _DescriptorSpec(
         "VLDA_dmx_lda_bm_idx",
         f"{_TARGET_KEY}.load.accumulator.f32x16.indexed.register",
@@ -1003,6 +1048,14 @@ _BASE_DESCRIPTOR_SPECS = (
         "II_VEXTRACT_32_vec_extract_r_vaddSign0",
     ),
     _DescriptorSpec(
+        "VEXTRACT_64_vec_extract_imm_vaddSign1",
+        f"{_TARGET_KEY}.extract.predicate64.immediate",
+        "integer.extract.predicate64",
+        "II_VEXTRACT_64_vec_extract_imm_vaddSign1",
+        storage_overrides=(("dst", "eLPredicate"),),
+        asm_mnemonic="vextract.predicate64",
+    ),
+    _DescriptorSpec(
         "VINSERT_8_mIdxImm0",
         f"{_TARGET_KEY}.insert.i8.zero",
         "integer.insert.i8",
@@ -1100,6 +1153,15 @@ _BASE_DESCRIPTOR_SPECS = (
         (("dst", "mCRSat"),),
         implicit_outputs=("dst",),
         asm_mnemonic="set.saturation",
+    ),
+    _DescriptorSpec(
+        "MOV_alu_mv_mv_mv_cg",
+        f"{_TARGET_KEY}.state.unpack-size.immediate",
+        "state.write.unpack-size",
+        "II_MOV_alu_mv_mv_mv_cg_mCRUnpackSize",
+        (("dst", "mCRUnpackSize"),),
+        implicit_outputs=("dst",),
+        asm_mnemonic="set.unpack-size",
     ),
     _DescriptorSpec(
         "MOVXM",

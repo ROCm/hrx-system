@@ -600,6 +600,18 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
     assert predicate_compare.operands[1].reg_alts[0].reg_class == "aie2p.vec256"
     assert predicate_compare.operands[1].unit_count == 2
 
+    predicate_extract = descriptors["amd.xdna.aie2p.extract.predicate64.immediate"]
+    assert [operand.field_name for operand in predicate_extract.operands] == [
+        "dst",
+        "s1",
+        "implicit_use_vaddsign1",
+    ]
+    assert [
+        operand.reg_alts[0].reg_class for operand in predicate_extract.operands
+    ] == ["aie2p.elpredicate", "aie2p.vec256", "aie2p.state.vaddsign1"]
+    assert [operand.unit_count for operand in predicate_extract.operands] == [1, 2, 1]
+    assert predicate_extract.asm_forms[0].mnemonic == "vextract.predicate64"
+
     byte_select = descriptors["amd.xdna.aie2p.select.i8x64"]
     word_select = descriptors["amd.xdna.aie2p.select.i32x16"]
     assert [operand.field_name for operand in byte_select.operands] == [
@@ -1015,22 +1027,75 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
     ]
     assert [operand.unit_count for operand in bf16_convert.operands] == [2, 2, 1, 1, 1]
 
-    matrix_multiply = descriptors[
-        "amd.xdna.aie2p.matrix.multiply.s8s8.m8n8k8.configured"
-    ]
-    assert [operand.field_name for operand in matrix_multiply.operands] == [
-        "dst",
-        "s1",
-        "s2",
-        "acc",
-    ]
-    assert [operand.reg_alts[0].reg_class for operand in matrix_multiply.operands] == [
-        "aie2p.mbms",
-        "aie2p.vec256",
-        "aie2p.vec256",
-        "aie2p.er",
-    ]
-    assert [operand.unit_count for operand in matrix_multiply.operands] == [4, 2, 2, 1]
+    for numeric_kind in ("s8s8", "u8s8", "s8u8", "u8u8"):
+        matrix_multiply = descriptors[
+            f"amd.xdna.aie2p.matrix.multiply.{numeric_kind}.m8n8k8.configured"
+        ]
+        assert [operand.field_name for operand in matrix_multiply.operands] == [
+            "dst",
+            "s1",
+            "s2",
+            "acc",
+        ]
+        assert [
+            operand.reg_alts[0].reg_class for operand in matrix_multiply.operands
+        ] == [
+            "aie2p.mbms",
+            "aie2p.vec256",
+            "aie2p.vec256",
+            "aie2p.er",
+        ]
+        assert [operand.unit_count for operand in matrix_multiply.operands] == [
+            4,
+            2,
+            2,
+            1,
+        ]
+
+        matrix_accumulate = descriptors[
+            f"amd.xdna.aie2p.matrix.accumulate.{numeric_kind}.m8n8k8.configured"
+        ]
+        assert [operand.field_name for operand in matrix_accumulate.operands] == [
+            "dst",
+            "acc1",
+            "s1",
+            "s2",
+            "acc",
+        ]
+        assert [
+            operand.reg_alts[0].reg_class for operand in matrix_accumulate.operands
+        ] == [
+            "aie2p.mbms",
+            "aie2p.mbms",
+            "aie2p.vec256",
+            "aie2p.vec256",
+            "aie2p.er",
+        ]
+        assert [operand.unit_count for operand in matrix_accumulate.operands] == [
+            4,
+            4,
+            2,
+            2,
+            1,
+        ]
+
+    for source_kind, sign_bit in (("u", 0), ("s", 1)):
+        unpack = descriptors[
+            f"amd.xdna.aie2p.unpack.{source_kind}4x64.to.{source_kind}8x64.configured"
+        ]
+        assert [operand.field_name for operand in unpack.operands] == [
+            "dst",
+            "src",
+            "implicit_use_crunpacksize",
+            f"implicit_use_unpacksign{sign_bit}",
+        ]
+        assert [operand.reg_alts[0].reg_class for operand in unpack.operands] == [
+            "aie2p.vec256",
+            "aie2p.vec256",
+            "aie2p.mcrunpacksize",
+            f"aie2p.state.unpacksign{sign_bit}",
+        ]
+        assert [operand.unit_count for operand in unpack.operands] == [2, 1, 1, 1]
 
     bf16_outer_product = descriptors[
         "amd.xdna.aie2p.matrix.accumulate.bf16bf16.m8n8k1.configured"
@@ -1220,6 +1285,28 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
         assert DescriptorFlag.SIDE_EFFECTING in setter.flags
         assert DescriptorFlag.DEAD_REMOVABLE not in setter.flags
         assert narrow_state_classes[state_field] == register_class
+
+    unpack_size = descriptors["amd.xdna.aie2p.state.unpack-size.immediate"]
+    assert unpack_size.asm_forms[0].results == ()
+    assert len(unpack_size.operands) == 1
+    unpack_size_write = unpack_size.operands[0]
+    assert unpack_size_write.role is OperandRole.IMPLICIT
+    assert unpack_size_write.reg_alts[0].reg_class == "aie2p.mcrunpacksize"
+    assert set(unpack_size_write.flags) == {
+        OperandFlag.IMPLICIT,
+        OperandFlag.STATE_WRITE,
+    }
+    assert unpack_size_write.encoding_field_id == 0
+    assert len(unpack_size.encoding_field_values) == 1
+    assert unpack_size.encoding_field_values[0].value == 23
+    assert DescriptorFlag.SIDE_EFFECTING in unpack_size.flags
+    assert DescriptorFlag.DEAD_REMOVABLE not in unpack_size.flags
+    unsigned_unpack = descriptors["amd.xdna.aie2p.unpack.u4x64.to.u8x64.configured"]
+    unsigned_unpack_state = {
+        operand.field_name: operand.reg_alts[0].reg_class
+        for operand in unsigned_unpack.operands[2:]
+    }
+    assert unsigned_unpack_state["implicit_use_crunpacksize"] == ("aie2p.mcrunpacksize")
 
 
 def test_implicit_registers_and_machine_ties_reach_low() -> None:

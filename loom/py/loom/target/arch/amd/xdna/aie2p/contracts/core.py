@@ -74,6 +74,9 @@ _F32 = Scalar("f32")
 _INDEX = Scalar("index")
 _OFFSET = Scalar("offset")
 _I8_VECTOR = Vector("i8", minimum_static_elements=1, maximum_static_elements=64)
+_I8X16_VECTOR = Vector("i8", lanes=16)
+_I8X32_VECTOR = Vector("i8", lanes=32)
+_I8X64_VECTOR = Vector("i8", lanes=64)
 _F8E4M3_VECTOR = Vector("f8E4M3", minimum_static_elements=1, maximum_static_elements=64)
 _F8E5M2_VECTOR = Vector("f8E5M2", minimum_static_elements=1, maximum_static_elements=64)
 _I16_VECTOR = Vector("i16", minimum_static_elements=1, maximum_static_elements=32)
@@ -88,6 +91,7 @@ _F32X32_ACCUMULATOR = Vector("f32", lanes=32)
 _F32X64_MATRIX_ACCUMULATOR = Vector("f32", lanes=64)
 _I32_MATRIX_ACCUMULATOR = Vector("i32", lanes=64)
 _I1_VECTOR = Vector("i1", minimum_static_elements=1, maximum_static_elements=64)
+_I1X2X64_VECTOR = Vector("i1", dims=(2, 64))
 _INTEGER_VECTOR_TYPES = (_I8_VECTOR, _I16_VECTOR, _I32_VECTOR)
 _BITCAST_VECTOR_TYPES = (
     _I8_VECTOR,
@@ -632,6 +636,54 @@ def _vector_multiply_i16_rule() -> DescriptorRule:
                 },
                 results={"dst": ValueRef.result("result")},
             ),
+        ),
+    )
+
+
+def _vector_bitunpack_i4_rule(source_op: Op, descriptor_key: str) -> DescriptorRule:
+    set_unpack_size = _descriptor("amd.xdna.aie2p.state.unpack-size.immediate")
+    unpack = _descriptor(descriptor_key)
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=unpack,
+        guards=(
+            Guard.value_type("source", _I8X32_VECTOR),
+            Guard.value_type("result", _I8X64_VECTOR),
+            Guard.attr_kind("width", "i64"),
+            Guard.i64_range("width", 4, 4),
+        ),
+        emit=(
+            EmitRegisterSlice(
+                source=ValueRef.operand("source"),
+                result=ValueRef.temporary("packed_source"),
+                unit_count=1,
+            ),
+            EmitDescriptorOp(
+                descriptor=set_unpack_size,
+                immediates={"i": 0},
+                form=DescriptorEmitForm.OP,
+            ),
+            _op_emit(
+                unpack,
+                operands={"src": ValueRef.temporary("packed_source")},
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _vector_bitunpack_i1_alias_rule() -> ValueAliasRule:
+    """Keeps a packed 128-bit predicate stream in its loaded X carrier."""
+
+    return ValueAliasRule(
+        source_op=vector.vector_bitunpacku,
+        source=ValueRef.operand("source"),
+        result=ValueRef.result("result"),
+        guards=(
+            Guard.value_type("source", _I8X16_VECTOR),
+            Guard.value_type("result", _I1X2X64_VECTOR),
+            Guard.attr_kind("width", "i64"),
+            Guard.i64_range("width", 1, 1),
         ),
     )
 
@@ -2447,6 +2499,12 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
                 ),
             )
         ),
+        _vector_extract_static_rule(
+            _I1X2X64_VECTOR,
+            _I1_VECTOR,
+            1,
+            "amd.xdna.aie2p.extract.predicate64.immediate",
+        ),
         *(
             rule
             for scalar_type, vector_type, maximum_index, zero_key, register_key in (
@@ -2645,6 +2703,15 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             )
         ),
         _vector_multiply_i16_rule(),
+        _vector_bitunpack_i4_rule(
+            vector.vector_bitunpacku,
+            "amd.xdna.aie2p.unpack.u4x64.to.u8x64.configured",
+        ),
+        _vector_bitunpack_i4_rule(
+            vector.vector_bitunpacks,
+            "amd.xdna.aie2p.unpack.s4x64.to.s8x64.configured",
+        ),
+        _vector_bitunpack_i1_alias_rule(),
         _vector_multiply_bf16x32_rule(),
         *AIE2P_F32_RULES,
         _matrix_accumulator_zero_rule(),
