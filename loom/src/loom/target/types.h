@@ -351,12 +351,10 @@ static inline void loom_target_bundle_storage_initialize_from_bundle(
   IREE_ASSERT_ARGUMENT(bundle->export_plan);
   IREE_ASSERT_ARGUMENT(bundle->config);
   IREE_ASSERT_ARGUMENT(out_storage);
-  *out_storage = (loom_target_bundle_storage_t){
-      .snapshot = *bundle->snapshot,
-      .export_plan = *bundle->export_plan,
-      .config = *bundle->config,
-      .bundle = *bundle,
-  };
+  out_storage->snapshot = *bundle->snapshot;
+  out_storage->export_plan = *bundle->export_plan;
+  out_storage->config = *bundle->config;
+  out_storage->bundle = *bundle;
   loom_target_bundle_storage_rebind(out_storage);
 }
 
