@@ -40,7 +40,7 @@ at `.loombc`. A JIT embedding can perform the same operations in memory through
 | Merge a reusable bytecode catalog | [Link and package modules](link-and-package.md#merge-a-reusable-catalog) |
 | Split command and kernel compilation | [Split command and kernel compilation](product-frontiers.md) |
 | Declare relocatable libraries in Bazel | [Build libraries and binaries with Bazel](build-with-bazel.md#libraries-stay-relocatable) |
-| Build kernel, command, or VM products | [Build libraries and binaries with Bazel](build-with-bazel.md#binary-roots-close-one-product) |
+| Build kernel or command products | [Build libraries and binaries with Bazel](build-with-bazel.md#binary-roots-close-deployment-products) |
 
 ## Development loops
 
@@ -76,10 +76,12 @@ performance result.
 | Task | Workflow |
 | --- | --- |
 | Execute every checked case | [Test correctness](test-correctness.md#run-every-case) |
+| Hold a test's compilation target or format fixed | [Test correctness](test-correctness.md#constrain-compilation-without-changing-the-device) |
 | Select one case or sample | [Test correctness](test-correctness.md#select-a-case-or-sample) |
 | Test a wrapper against bytecode libraries | [Test correctness](test-correctness.md#link-test-wrappers-to-libraries) |
 | Add target-pipeline sanitizers | [Test correctness](test-correctness.md#instrument-a-test-run) |
 | Inspect a benchmark plan without execution | [Benchmark checked work](benchmark.md#inspect-the-plan-first) |
+| Hold a benchmark's compilation target or format fixed | [Benchmark checked work](benchmark.md#constrain-compilation-without-changing-the-device) |
 | Measure a complete checked case | [Benchmark checked work](benchmark.md#measure-the-complete-case) |
 | Measure device dispatch completion | [Benchmark checked work](benchmark.md#measure-dispatch-completion) |
 | Compare candidates in one run | [Benchmark checked work](benchmark.md#compare-candidates-in-one-run) |
@@ -104,7 +106,8 @@ inspection.
 
 | Task | Workflow |
 | --- | --- |
-| Compile a loader-ready artifact | [Compile artifacts](compile-artifacts.md#compile-for-a-hal-loader) |
+| Compile a loader-ready artifact | [Compile artifacts](compile-artifacts.md#compile-a-loadable-kernel) |
+| Distinguish linking, compilation, and execution choices | [Compile artifacts](compile-artifacts.md#keep-linking-compilation-and-execution-choices-separate) |
 | Select roots and configuration | [Compile artifacts](compile-artifacts.md#select-roots-from-a-catalog) |
 | Describe an emitted artifact | [Compile artifacts](compile-artifacts.md#emit-an-artifact-manifest) |
 | Read one bounded report view | [Read compile reports](compile-reports.md#show-one-report) |

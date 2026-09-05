@@ -14,6 +14,59 @@ encoding; when it is omitted, the tool requires one canonical compatible
 format. Reports, manifests, and IR traces are optional evidence products, not
 boilerplate required by every compile.
 
+## Keep linking, compilation, and execution choices separate
+
+The public tools use the same target spelling without conflating these distinct
+decisions:
+
+| Choice | Tool surface | Meaning |
+| --- | --- | --- |
+| Loom IR serialization | `loom-link --to=text|bc` | Chooses text or bytecode for the linked Loom module. |
+| Compilation target | `--target=family:selector` | Selects or constrains the target facts used to specialize kernels. |
+| Deployment product | `--product=kernel|command|module` | Asserts or selects the semantic roots being emitted. |
+| Deployment format | `--format=name` | Requests one exact encoding supported by the selected product and target. |
+| Execution device | `--device=URI` | Chooses the runtime executor and, by default, supplies its compatible target. |
+
+For an ahead-of-time artifact, link a closed Loom module and then compile it:
+
+```shell
+loom-link catalog.loom \
+  --mode=link \
+  --root=@decode \
+  --target=amdgpu:gfx11-generic \
+  --to=bc \
+  --output=decode.loombc
+loom-compile decode.loombc \
+  --product=kernel \
+  --target=amdgpu:gfx11-generic \
+  --format=amdgpu-hsaco \
+  --output=decode.hsaco
+```
+
+`--to=bc` describes the intermediate Loom file, while
+`--format=amdgpu-hsaco` describes the deployment artifact. Neither selects a
+runtime device.
+
+The JIT tools perform the same compilation in memory. `--device` chooses the
+executor; `--target`, `--product`, and `--format` are optional constraints on
+the compile request and never select a different executor:
+
+```shell
+iree-run-loom decode.loom \
+  --device=amdgpu \
+  --function=decode \
+  --target=amdgpu:gfx11-generic \
+  --product=kernel \
+  --format=amdgpu-hsaco
+```
+
+With those three constraints omitted, kernel roots infer the product and the
+selected device supplies a compatible target and its canonical loadable
+format. An explicit target must be advertised by that physical device and is
+not silently refined. `iree-test-loom` and `iree-benchmark-loom` accept the same
+optional compile constraints around their `check.case` and `check.benchmark`
+workflows.
+
 ## Compile a loadable kernel
 
 Compile one targetless kernel for the generic GFX11 profile:

@@ -330,6 +330,9 @@ static void iree_run_loom_print_agents_markdown(FILE* stream) {
       "iree-run-loom kernel.loom --device=URI --emit-only \\\n"
       "  --emit-target-artifact=kernel.bin "
       "--emit-hal-executable=kernel.bin\n"
+      "iree-run-loom kernel.loom --device=vulkan --function=q8_kernel \\\n"
+      "  --target=spirv:vulkan1.3+bda --product=kernel "
+      "--format=spirv-binary\n"
       "iree-run-loom --device=URI --probe-hal\n"
       "```\n"
       "\n"
@@ -338,6 +341,11 @@ static void iree_run_loom_print_agents_markdown(FILE* stream) {
       "`--workgroup-count` overrides a static\n"
       "`kernel.launch.config` dispatch count when the test needs a different\n"
       "grid. `--emit-only` is HAL-only and stops after producing artifacts.\n"
+      "`--device` selects the executor. `--target`, `--product`, and "
+      "`--format` optionally constrain compilation without selecting a "
+      "different device. With them omitted, the kernel root infers its "
+      "product and the device supplies a compatible target and canonical "
+      "loadable format.\n"
       "\n"
       "### Debugging\n"
       "\n"
@@ -375,7 +383,9 @@ int iree_run_loom_main(int argc, char** argv,
       "  iree-run-loom --agents_md\n"
       "\n"
       "The selected HAL device determines the compiler target and executes "
-      "the resulting artifact through its production runtime path.\n");
+      "the resulting artifact through its production runtime path. Optional "
+      "--target, --product, and --format flags constrain compilation without "
+      "changing the selected --device.\n");
   for (int i = 1; i < argc; ++i) {
     if (loom_tooling_cli_is_agents_markdown_arg(argv[i])) {
       iree_run_loom_print_agents_markdown(stdout);

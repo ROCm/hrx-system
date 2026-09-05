@@ -91,9 +91,9 @@ bazel build //loom/docs/examples/elementwise-transform:model \
   --output_groups=+dependency_reports
 ```
 
-## Binary roots close one product
+## Binary roots close deployment products
 
-All three binary rules share the same composition contract:
+Both deployment binary rules share the same composition contract:
 
 | Attribute | Meaning |
 | --- | --- |
@@ -124,17 +124,17 @@ from the closed `.loombc` passed to artifact emission.
 Kernel and command binaries also require a typed `target` label. That profile
 participates in the selective link itself: target facts are projected before
 template selection, so a target-constrained provider can win before
-unreachable alternatives are discarded. The same profile then drives device
-artifact emission. VM binaries have no device `target` attribute and keep this
-link boundary targetless.
+unreachable alternatives are discarded. The same profile then advertises the
+compatible product formats used for artifact emission.
 
 ## Kernel binaries are loader-ready executables
 
 `loom_kernel_binary` specializes the selected kernel closure for one immutable
-target profile and emits `<name>.hsaco` for the current AMDGPU product. The
-example's profile label carries the typed family and the target selector
-`gfx11-generic`; it is a Bazel target, not a source file or filename-like
-configuration blob.
+target profile and emits one loader-ready file. The profile's canonical
+`kernel` format determines the output extension when `format` is omitted. The
+example's AMDGPU profile selects `amdgpu-hsaco` and therefore emits
+`elementwise_kernel.hsaco`; a SPIR-V profile selecting `spirv-binary` would emit
+an `.spv` file through the same rule.
 
 ```shell
 bazel build //loom/docs/examples/elementwise-transform:elementwise_kernel
@@ -144,17 +144,40 @@ Reusable source remains targetless. Selecting the profile at the binary
 boundary allows the same library to produce a generic GFX11 executable or an
 exact architecture-specialized executable without copying its `.loom` files.
 
+## Target and format labels are typed metadata
+
+A target profile carries a `family:selector` identity, every compatible
+product-format label, and at most one canonical format for each product. The
+binary rules consume that metadata without naming a target family or executable
+encoding:
+
+| Attribute | Meaning |
+| --- | --- |
+| `target` | Required immutable profile used by selective linking and kernel compilation. |
+| `format` | Optional exact format for the rule's primary product; omission selects the profile's canonical format. |
+| `kernel_format` | Optional exact kernel format for `loom_command_binary`; omission selects the profile's canonical kernel format. |
+
+HRX publishes built-in format labels under `@hrx//loom/product/formats:*` and
+profiles under `@hrx//loom/target/...`. A downstream module may instead declare
+its own `loom_file_product_format`, `loom_artifact_set_product_format`, and
+`loom_target_profile` labels. Those declarations are inert analysis metadata:
+they neither enable a target family nor add an emitter to `loom-compile`. The
+selected Loom compile toolchain must already implement the requested target and
+format, which lets an embedding supply both its own metadata and its own
+toolchain without changing the generic rules.
+
 ## Command binaries package schedules with their kernels
 
 `loom_command_binary` performs one selective link, lowers every selected
 command-program root to a portable artifact, and compiles the reachable kernel
-entries for its target profile:
+entries for its target profile. The command and kernel formats are resolved
+independently because they have different portability and loading contracts:
 
 ```shell
 bazel build //loom/docs/examples/elementwise-transform:elementwise_command
 ```
 
-Its default outputs are:
+The AMDGPU example's default outputs are:
 
 | Output | Consumer |
 | --- | --- |
@@ -179,19 +202,19 @@ bazel build //loom/docs/examples/elementwise-transform:elementwise_command \
 
 `linked_modules` contains the closed `.loombc` used by every emitter for that
 binary. `compile_reports` contains the command and kernel reports for a command
-binary and the corresponding single report for kernel and VM binaries. This
-makes it possible to inspect reachability or compare compiler evidence without
-changing the product graph.
+binary and the corresponding single report for a kernel binary. This makes it
+possible to inspect reachability or compare compiler evidence without changing
+the product graph.
 
 ## The CLI and in-memory APIs use the same boundaries
 
 The Bazel rules orchestrate the public tools; they do not add a second linkage
 model. `loom_library` corresponds to a strict relocatable merge. A kernel or
 command binary first performs a root-selected `loom-link --mode=link` with the
-selected `--target`, then invokes the appropriate `loom-compile`
-backend on that one closed module. A VM binary performs the same selective
-link without a device profile. The command product invokes the command and
-AMDGPU emitters over the same linked input.
+selected `--target`, then invokes `loom-compile` on that one closed module with
+the resolved `--product`, `--format`, and `--target`. A command binary emits its
+portable command product and target-specific kernel product from the same
+linked input.
 
 An embedding can construct the same explicit library universe with the
 [`loomc` API](../integration/module-composition.md), select roots, and retain or
@@ -201,4 +224,4 @@ symbol namespace or causes the compiler to search a filesystem.
 
 [Link and package modules](link-and-package.md) gives the equivalent
 command-line composition workflow. [Compile artifacts](compile-artifacts.md)
-documents the kernel, command, and VM emitters directly.
+documents kernel, command, and module products directly.

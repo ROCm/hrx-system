@@ -534,6 +534,9 @@ static void iree_test_loom_print_agents_markdown(FILE* stream) {
       "iree-test-loom module.loom --sanitizer=tsan\n"
       "iree-test-loom module.loom --sanitizer=asan "
       "--sanitizer-reporting=report-only\n"
+      "iree-test-loom module.loom --device=vulkan \\\n"
+      "  --target=spirv:vulkan1.3+bda --product=kernel "
+      "--format=spirv-binary\n"
       "```\n"
       "\n"
       "`--case=@name` selects one checked case; empty selection runs cases in\n"
@@ -550,6 +553,10 @@ static void iree_test_loom_print_agents_markdown(FILE* stream) {
       "An explicit `--device=DRIVER` is validated even when the selected cases "
       "contain no kernel launches; unavailable selections list the drivers "
       "present in this installation. "
+      "`--target`, `--product`, and `--format` optionally constrain kernel "
+      "compilation without changing the selected device. With them omitted, "
+      "the device supplies a compatible target and canonical loadable "
+      "format. "
       "`--pipeline=default|none|@symbol|pass,list` controls the HAL kernel "
       "compile pipeline. `none` disables all compiler transformations and "
       "requires emission-ready input. `--config=key=value` and "
@@ -601,8 +608,13 @@ int iree_test_loom_main(int argc, char** argv,
       "\n"
       "Usage:\n"
       "  iree-test-loom file.loom --case=@smoke\n"
+      "  iree-test-loom file.loom --device=URI "
+      "--target=family:selector --case=@kernel_smoke\n"
       "  cat module.loom | iree-test-loom -\n"
-      "  iree-test-loom --agents_md\n");
+      "  iree-test-loom --agents_md\n"
+      "\n"
+      "--device selects the executor. Optional --target, --product, and "
+      "--format flags constrain compilation without changing that device.\n");
   for (int i = 1; i < argc; ++i) {
     if (loom_tooling_cli_is_agents_markdown_arg(argv[i])) {
       iree_test_loom_print_agents_markdown(stdout);

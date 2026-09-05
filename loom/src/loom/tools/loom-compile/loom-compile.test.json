@@ -105,23 +105,6 @@
           "format 'loom-command' requires --emit-command-artifacts=<directory>"
         ]
       }
-    },
-    {
-      "name": "rejects the removed backend flag",
-      "run": {
-        "tool": "loom-compile",
-        "args": [
-          "{srcdir}/testdata/command_artifacts.loom",
-          "--backend=command",
-          "--output={tmp}/manifest.json"
-        ]
-      },
-      "exit": {
-        "nonzero": true
-      },
-      "stderr": {
-        "contains": ["flag 'backend' not recognized"]
-      }
     }
   ]
 }

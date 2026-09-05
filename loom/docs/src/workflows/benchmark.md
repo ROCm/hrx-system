@@ -33,6 +33,28 @@ jq '{summary, benchmarks, work_items}' plan.json
 `--dry-run` verifies and plans the complete module. It performs no correctness
 execution, candidate compilation, allocation, or timing.
 
+## Constrain compilation without changing the device
+
+`--device` selects the executor. The selected device normally supplies the
+compatible target and canonical loadable format used to compile each physical
+work item. A comparison that must hold compilation identity fixed can state the
+same optional constraints accepted by `loom-compile` and the other JIT tools:
+
+```shell
+iree-benchmark-loom program.loom \
+  --benchmark=@decode_4096 \
+  --device=amdgpu \
+  --target=amdgpu:gfx11-generic \
+  --product=kernel \
+  --format=amdgpu-hsaco \
+  --output=results.json
+```
+
+An explicit target must be advertised by the selected physical device and is
+not silently refined. Product and format constrain compilation only; none of
+the three flags select an executor. Omit them when the benchmark should follow
+the device's ordinary target and canonical-format selection.
+
 ## Measure the complete case
 
 The default `case_end_to_end` mode measures the executable `check.case` program

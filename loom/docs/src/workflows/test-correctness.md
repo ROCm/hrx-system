@@ -26,6 +26,27 @@ The report is a `loom.test.v0` JSON document on standard output. Its top-level
 counts summarize cases, concrete samples, failures, skipped cases, and planning
 issues. The `samples` array carries the result of each concrete case sample.
 
+## Constrain compilation without changing the device
+
+`--device` selects the executor for every kernel launch. The selected device
+normally supplies its compatible compilation target and canonical loadable
+format. Use the shared compile-request flags when a test must hold one of those
+choices fixed:
+
+```shell
+iree-test-loom program.loom \
+  --device=amdgpu \
+  --target=amdgpu:gfx11-generic \
+  --product=kernel \
+  --format=amdgpu-hsaco
+```
+
+`--target` must name an exact profile advertised by the selected device;
+forcing it never changes `--device` or silently chooses a more specialized
+profile. `--product=kernel` asserts the product inferred for each compiled
+launch, and `--format` must name a format that the selected device provider can
+load. Omitting the three constraints retains device-driven selection.
+
 ## Select a case or sample
 
 A source file can keep smoke cases, edge cases, and larger validation cases
