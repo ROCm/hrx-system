@@ -519,7 +519,7 @@ def _test_command_binary_explicit_roots_replace_exports_impl(env, target):
         "interface.loombc",
     )
 
-def _test_command_binary_uses_generic_profile_canonical_formats(name, **kwargs):
+def _test_command_binary_profile_defaults(name, **kwargs):
     subject = name + "_subject"
     util.helper_target(
         loom_command_binary,
@@ -530,12 +530,12 @@ def _test_command_binary_uses_generic_profile_canonical_formats(name, **kwargs):
     )
     analysis_test(
         name = name,
-        impl = _test_command_binary_uses_generic_profile_canonical_formats_impl,
+        impl = _test_command_binary_profile_defaults_impl,
         target = subject,
         **kwargs
     )
 
-def _test_command_binary_uses_generic_profile_canonical_formats_impl(env, target):
+def _test_command_binary_profile_defaults_impl(env, target):
     binary = target[LoomBinaryInfo]
     env.expect.that_str(binary.primary_artifact.basename).equals(
         target.label.name + ".test.commands.json",
@@ -575,7 +575,7 @@ def loom_binary_rules_test_suite(name):
             _test_command_binary_emits_composite_product,
             _test_command_binary_explicit_roots_replace_exports,
             _test_command_binary_sources_are_an_implicit_library,
-            _test_command_binary_uses_generic_profile_canonical_formats,
+            _test_command_binary_profile_defaults,
             _test_explicit_roots_replace_direct_exports,
             _test_kernel_binary_accepts_explicit_format,
             _test_kernel_binary_accepts_generic_profile,
