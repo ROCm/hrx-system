@@ -84,6 +84,9 @@ typedef enum iree_hal_amdgpu_command_buffer_dispatch_flag_bits_e {
       1u << 1,
   // The dispatch uses the AMD extended packet with |workgroup_cluster_size|.
   IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_WORKGROUP_CLUSTER = 1u << 2,
+  // Indirect workgroup counts are immutable for this command-buffer issue.
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS =
+      1u << 3,
 } iree_hal_amdgpu_command_buffer_dispatch_flag_bits_t;
 
 // Kernarg storage mode for a dispatch command.
@@ -148,10 +151,10 @@ typedef struct IREE_AMDGPU_ALIGNAS(8)
   uint32_t rodata_length;
   // Number of dispatch command records in this block.
   uint16_t dispatch_count;
-  // Number of dispatch command records using indirect parameters.
-  uint16_t indirect_dispatch_count;
-  // Number of profile marker command records in this block.
-  uint16_t profile_marker_count;
+  // Number of dispatch commands using static indirect parameters.
+  uint16_t static_indirect_dispatch_count;
+  // Reserved for future block-level dispatch metadata.
+  uint16_t reserved0;
   // Terminator opcode from iree_hal_amdgpu_command_buffer_opcode_t.
   uint8_t terminator_opcode;
   // Block flags from iree_hal_amdgpu_command_buffer_block_flag_bits_t.

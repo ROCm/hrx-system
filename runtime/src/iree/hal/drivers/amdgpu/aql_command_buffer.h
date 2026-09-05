@@ -88,6 +88,26 @@ typedef struct iree_hal_amdgpu_aql_command_buffer_dispatch_summary_t {
 const iree_hal_amdgpu_aql_program_t* iree_hal_amdgpu_aql_command_buffer_program(
     iree_hal_command_buffer_t* command_buffer);
 
+// Queue-issue strategy for static-indirect dispatch parameters.
+typedef uint8_t iree_hal_amdgpu_aql_static_indirect_replay_mode_t;
+enum iree_hal_amdgpu_aql_static_indirect_replay_mode_e {
+  // Device patch dispatches resolve workgroup counts before their targets.
+  IREE_HAL_AMDGPU_AQL_STATIC_INDIRECT_REPLAY_MODE_DEVICE_PATCH = 0u,
+  // The host snapshots workgroup counts into target packets during queue issue.
+  IREE_HAL_AMDGPU_AQL_STATIC_INDIRECT_REPLAY_MODE_HOST_RESOLVE = 1u,
+};
+
+// Selects one static-indirect replay mode for the complete command buffer.
+//
+// Direct sources are classified while recording. Dynamic sources are checked
+// only for the unique binding slots referenced by static-indirect dispatches.
+// Host resolution is selected only when every source is host-local and
+// coherent; otherwise all static-indirect dispatches use device patching.
+iree_hal_amdgpu_aql_static_indirect_replay_mode_t
+iree_hal_amdgpu_aql_command_buffer_select_static_indirect_replay_mode(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t binding_table);
+
 // Returns the physical device ordinal this command buffer was recorded for.
 iree_host_size_t iree_hal_amdgpu_aql_command_buffer_device_ordinal(
     iree_hal_command_buffer_t* command_buffer);

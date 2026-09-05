@@ -23,6 +23,9 @@ enum iree_hal_amdgpu_aql_block_processor_flag_bits_t {
   IREE_HAL_AMDGPU_AQL_BLOCK_PROCESSOR_FLAG_NONE = 0u,
   // The final recorded payload packet carries terminal signal release scope.
   IREE_HAL_AMDGPU_AQL_BLOCK_PROCESSOR_FLAG_FINAL_PAYLOAD_PACKET = 1u << 0,
+  // Static-indirect dispatches snapshot their workgroup counts on the host.
+  IREE_HAL_AMDGPU_AQL_BLOCK_PROCESSOR_FLAG_HOST_RESOLVE_STATIC_INDIRECT = 1u
+                                                                          << 1,
 };
 
 typedef uint8_t iree_hal_amdgpu_aql_block_processor_terminator_t;

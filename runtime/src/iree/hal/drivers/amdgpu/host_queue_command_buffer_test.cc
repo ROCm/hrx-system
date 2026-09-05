@@ -2078,6 +2078,143 @@ TEST_F(HostQueueCommandBufferTest, DynamicDispatchUsesBindingTableSlots) {
 }
 
 TEST_F(HostQueueCommandBufferTest,
+       StaticIndirectDispatchSnapshotsHostLocalLaunchTable) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.preallocate_pools = 0;
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+
+  iree_hal_executable_t* executable = NULL;
+  IREE_ASSERT_OK(LoadCtsExecutable(
+      test_device.base_device(),
+      iree_make_cstring_view("command_buffer_dispatch_multi_workgroup_test."
+                             "bin"),
+      &executable));
+
+  constexpr iree_host_size_t kOutputElementCount = 32;
+  constexpr uint32_t kSentinelValue = 0xCDCDCDCDu;
+  Ref<iree_hal_buffer_t> output_buffer;
+  IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
+      test_device.allocator(), kOutputElementCount * sizeof(uint32_t),
+      output_buffer.out()));
+  std::array<uint32_t, kOutputElementCount> output_values;
+  output_values.fill(kSentinelValue);
+  IREE_ASSERT_OK(iree_hal_buffer_map_write(
+      output_buffer, /*target_offset=*/0, output_values.data(),
+      output_values.size() * sizeof(output_values[0])));
+
+  Ref<iree_hal_buffer_t> launch_table;
+  IREE_ASSERT_OK(CreateHostLocalIndirectParameterBuffer(
+      test_device.allocator(), sizeof(uint32_t[3]), launch_table.out()));
+  uint32_t workgroup_count[3] = {4, 1, 1};
+  IREE_ASSERT_OK(iree_hal_buffer_map_write(launch_table, /*target_offset=*/0,
+                                           workgroup_count,
+                                           sizeof(workgroup_count)));
+
+  iree_hal_dispatch_config_t dispatch_config = {};
+  dispatch_config.workgroup_count_ref = iree_hal_make_indirect_buffer_ref(
+      /*buffer_slot=*/1, /*offset=*/0, sizeof(workgroup_count));
+  const iree_hal_buffer_ref_t output_ref = iree_hal_make_indirect_buffer_ref(
+      /*buffer_slot=*/0, /*offset=*/0,
+      output_values.size() * sizeof(output_values[0]));
+  const iree_hal_buffer_ref_list_t dispatch_bindings = {
+      /*count=*/1,
+      /*values=*/&output_ref,
+  };
+
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*binding_capacity=*/2, command_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+      command_buffer, executable, iree_hal_executable_function_from_index(0),
+      dispatch_config, iree_const_byte_span_empty(), dispatch_bindings,
+      IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+  const iree_hal_amdgpu_aql_program_t* program =
+      iree_hal_amdgpu_aql_command_buffer_program(command_buffer);
+  ASSERT_NE(program->first_block, nullptr);
+  ASSERT_EQ(program->first_block->aql_packet_count, 2u);
+  ASSERT_EQ(program->first_block->static_indirect_dispatch_count, 1u);
+
+  const std::array<iree_hal_buffer_binding_t, 2> bindings = {{
+      {
+          /*buffer=*/output_buffer.get(),
+          /*offset=*/0,
+          /*length=*/IREE_HAL_WHOLE_BUFFER,
+      },
+      {
+          /*buffer=*/launch_table.get(),
+          /*offset=*/0,
+          /*length=*/IREE_HAL_WHOLE_BUFFER,
+      },
+  }};
+  const iree_hal_buffer_binding_table_t binding_table = {
+      /*count=*/bindings.size(),
+      /*bindings=*/bindings.data(),
+  };
+  EXPECT_EQ(
+      iree_hal_amdgpu_aql_command_buffer_select_static_indirect_replay_mode(
+          command_buffer, binding_table),
+      IREE_HAL_AMDGPU_AQL_STATIC_INDIRECT_REPLAY_MODE_HOST_RESOLVE);
+
+  Ref<iree_hal_semaphore_t> signal;
+  IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(), signal.out()));
+  iree_hal_semaphore_t* signal_ptr = signal.get();
+  uint64_t signal_value = 1;
+  iree_hal_semaphore_list_t signal_list = {
+      /*count=*/1,
+      /*semaphores=*/&signal_ptr,
+      /*payload_values=*/&signal_value,
+  };
+  IREE_ASSERT_OK(iree_hal_device_queue_execute(
+      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), signal_list, command_buffer,
+      binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(signal, signal_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(
+      output_buffer, /*source_offset=*/0, output_values.data(),
+      output_values.size() * sizeof(output_values[0])));
+  for (iree_host_size_t i = 0; i < output_values.size(); ++i) {
+    EXPECT_EQ(output_values[i], i < workgroup_count[0] ? i : kSentinelValue);
+  }
+
+  output_values.fill(kSentinelValue);
+  IREE_ASSERT_OK(iree_hal_buffer_map_write(
+      output_buffer, /*target_offset=*/0, output_values.data(),
+      output_values.size() * sizeof(output_values[0])));
+  workgroup_count[0] = 7;
+  IREE_ASSERT_OK(iree_hal_buffer_map_write(launch_table, /*target_offset=*/0,
+                                           workgroup_count,
+                                           sizeof(workgroup_count)));
+  signal_value = 2;
+  IREE_ASSERT_OK(iree_hal_device_queue_execute(
+      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), signal_list, command_buffer,
+      binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(signal, signal_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(
+      output_buffer, /*source_offset=*/0, output_values.data(),
+      output_values.size() * sizeof(output_values[0])));
+  for (iree_host_size_t i = 0; i < output_values.size(); ++i) {
+    EXPECT_EQ(output_values[i], i < workgroup_count[0] ? i : kSentinelValue);
+  }
+
+  iree_hal_executable_release(executable);
+}
+
+TEST_F(HostQueueCommandBufferTest,
        CommandBufferRejectsCrossPhysicalDeviceQueue) {
   if (topology_.gpu_agent_count < 2) {
     GTEST_SKIP() << "fewer than two compatible GPU agents";

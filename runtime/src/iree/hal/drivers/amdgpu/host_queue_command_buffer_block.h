@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMDGPU_HOST_QUEUE_COMMAND_BUFFER_BLOCK_H_
 #define IREE_HAL_DRIVERS_AMDGPU_HOST_QUEUE_COMMAND_BUFFER_BLOCK_H_
 
+#include "iree/hal/drivers/amdgpu/aql_command_buffer.h"
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer.h"
 
 #ifdef __cplusplus
@@ -22,6 +23,7 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_command_buffer_block(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table, const uint64_t* binding_ptrs,
     const iree_hal_amdgpu_command_buffer_block_header_t* block,
+    iree_hal_amdgpu_aql_static_indirect_replay_mode_t static_indirect_mode,
     iree_hal_resource_set_t** inout_binding_resource_set,
     iree_hal_amdgpu_reclaim_action_t pre_signal_action,
     iree_hal_resource_t* const* operation_resources,

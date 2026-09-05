@@ -298,10 +298,10 @@ typedef struct iree_hal_dispatch_config_t {
   //   operation producing the parameters and the dispatch to ensure the proper
   //   values are observed.
   // - IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS:
-  //   Device _may_ fetch the workgroup count at any point after the command
-  //   buffer submission is issued (all wait conditions satisfied) as the
-  //   flag indicates the parameters will not change during the execution of
-  //   the command buffer.
+  //   Device _may_ fetch the workgroup count as soon as the command buffer is
+  //   issued, including before its wait conditions are satisfied. The caller
+  //   must ensure the parameters have their final values before issuing the
+  //   containing queue operation and remain unchanged during execution.
   // The workgroup count buffer must have been allocated with
   // IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS and be of
   // IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE.
@@ -345,10 +345,12 @@ enum iree_hal_dispatch_flag_bits_t {
   // ignored.
   IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS = 1ull << 0,
 
-  // Indirect parameters such as workgroup count are static at the time the
-  // command buffer is issued. This is in contrast to dynamic parameters that
-  // may be changed by dispatches within the same command buffer. Enabling when
-  // known can lead to lower dispatch overhead.
+  // Indirect parameters such as workgroup count are static when the queue
+  // operation is issued. Implementations may snapshot the parameters during
+  // the queue call before wait conditions are satisfied. This is in contrast
+  // to dynamic parameters that may be changed by preceding queue operations or
+  // commands within the same command buffer. Enabling when known can lead to
+  // lower dispatch overhead.
   IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS = 1ull << 1,
 
   // Disables HAL ABI handling. The provided constants are passed through as

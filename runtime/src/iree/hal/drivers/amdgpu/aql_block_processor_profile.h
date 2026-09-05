@@ -26,6 +26,9 @@ enum iree_hal_amdgpu_aql_block_processor_profile_flag_bits_t {
   IREE_HAL_AMDGPU_AQL_BLOCK_PROCESSOR_PROFILE_FLAG_DISPATCH_PACKETS = 1u << 0,
   // This block reserves a whole-block queue-device timestamp event.
   IREE_HAL_AMDGPU_AQL_BLOCK_PROCESSOR_PROFILE_FLAG_QUEUE_DEVICE_EVENT = 1u << 1,
+  // Static-indirect dispatches snapshot their workgroup counts on the host.
+  IREE_HAL_AMDGPU_AQL_BLOCK_PROCESSOR_PROFILE_FLAG_HOST_RESOLVE_STATIC_INDIRECT =
+      1u << 2,
 };
 
 typedef uint8_t iree_hal_amdgpu_aql_block_processor_profile_terminator_t;
