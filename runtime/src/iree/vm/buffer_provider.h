@@ -69,8 +69,8 @@ static inline void iree_vm_buffer_initialize_embedded_read_only(
     iree_vm_buffer_release_callback_t release_callback,
     iree_vm_buffer_t* out_buffer) {
   iree_vm_ref_object_initialize(&out_buffer->ref_object);
-  out_buffer->flags =
-      IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_FLAG_EXTERNAL;
+  out_buffer->flags = (iree_vm_buffer_flags_t)IREE_VM_BUFFER_ACCESS_FLAG_READ |
+                      IREE_VM_BUFFER_FLAG_EXTERNAL;
   out_buffer->length = storage.data_length;
   out_buffer->data = (uint8_t*)storage.data;
   out_buffer->root = NULL;
