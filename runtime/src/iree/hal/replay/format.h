@@ -23,7 +23,7 @@ extern "C" {
 #define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 5u
 
 // Minor version of the IREE HAL replay file format.
-#define IREE_HAL_REPLAY_FILE_VERSION_MINOR 0u
+#define IREE_HAL_REPLAY_FILE_VERSION_MINOR 1u
 
 // Session-local object identifier used by replay records.
 typedef uint64_t iree_hal_replay_object_id_t;
@@ -70,6 +70,7 @@ enum iree_hal_replay_object_type_e {
   IREE_HAL_REPLAY_OBJECT_TYPE_EXECUTABLE = 6u,
   IREE_HAL_REPLAY_OBJECT_TYPE_SEMAPHORE = 7u,
   IREE_HAL_REPLAY_OBJECT_TYPE_FILE = 8u,
+  IREE_HAL_REPLAY_OBJECT_TYPE_PHYSICAL_MEMORY = 9u,
   IREE_HAL_REPLAY_OBJECT_TYPE_CHANNEL = 10u,
   IREE_HAL_REPLAY_OBJECT_TYPE_HOST_CALL = 11u,
 };
@@ -183,6 +184,14 @@ enum iree_hal_replay_payload_type_e {
   IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT = 30u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE = 31u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW = 32u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_RESERVE = 33u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_RELEASE = 34u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_PHYSICAL_MEMORY_ALLOCATE = 35u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_PHYSICAL_MEMORY_FREE = 36u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_MAP = 37u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_UNMAP = 38u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT = 39u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_ADVISE = 40u,
 };
 
 // Bitfield specifying properties of one replay scope marker.
@@ -282,6 +291,88 @@ typedef struct iree_hal_replay_allocator_import_buffer_payload_t {
   // Captured byte length following this payload header.
   uint64_t data_length;
 } iree_hal_replay_allocator_import_buffer_payload_t;
+
+// Payload describing a virtual address reservation request.
+typedef struct iree_hal_replay_allocator_virtual_memory_reserve_payload_t {
+  // Queue affinity constraining devices that may access the reservation.
+  uint64_t queue_affinity;
+  // Requested reservation size, in bytes.
+  uint64_t size;
+} iree_hal_replay_allocator_virtual_memory_reserve_payload_t;
+
+// Payload identifying a virtual address reservation being released.
+typedef struct iree_hal_replay_allocator_virtual_memory_release_payload_t {
+  // Session-local buffer id assigned to the virtual address reservation.
+  iree_hal_replay_object_id_t virtual_buffer_id;
+} iree_hal_replay_allocator_virtual_memory_release_payload_t;
+
+// Payload describing a physical memory allocation request.
+typedef struct iree_hal_replay_allocator_physical_memory_allocate_payload_t {
+  // Canonical allocation parameters and requested physical allocation size.
+  iree_hal_replay_allocator_allocate_buffer_payload_t allocation;
+} iree_hal_replay_allocator_physical_memory_allocate_payload_t;
+
+// Payload identifying a physical memory handle being freed.
+typedef struct iree_hal_replay_allocator_physical_memory_free_payload_t {
+  // Session-local id assigned to the physical memory handle.
+  iree_hal_replay_object_id_t physical_memory_id;
+} iree_hal_replay_allocator_physical_memory_free_payload_t;
+
+// Payload describing a physical-to-virtual memory mapping.
+typedef struct iree_hal_replay_allocator_virtual_memory_map_payload_t {
+  // Session-local buffer id assigned to the virtual address reservation.
+  iree_hal_replay_object_id_t virtual_buffer_id;
+  // Session-local id assigned to the physical memory handle.
+  iree_hal_replay_object_id_t physical_memory_id;
+  // Byte offset within the virtual address reservation.
+  uint64_t virtual_offset;
+  // Byte offset within the physical memory allocation.
+  uint64_t physical_offset;
+  // Mapping size, in bytes.
+  uint64_t size;
+} iree_hal_replay_allocator_virtual_memory_map_payload_t;
+
+// Payload describing a virtual memory unmapping.
+typedef struct iree_hal_replay_allocator_virtual_memory_unmap_payload_t {
+  // Session-local buffer id assigned to the virtual address reservation.
+  iree_hal_replay_object_id_t virtual_buffer_id;
+  // Byte offset within the virtual address reservation.
+  uint64_t virtual_offset;
+  // Unmapping size, in bytes.
+  uint64_t size;
+} iree_hal_replay_allocator_virtual_memory_unmap_payload_t;
+
+// Payload describing a virtual memory protection update.
+typedef struct iree_hal_replay_allocator_virtual_memory_protect_payload_t {
+  // Session-local buffer id assigned to the virtual address reservation.
+  iree_hal_replay_object_id_t virtual_buffer_id;
+  // Byte offset within the virtual address reservation.
+  uint64_t virtual_offset;
+  // Protection range size, in bytes.
+  uint64_t size;
+  // Queue affinity selecting the topology where protection applies.
+  uint64_t queue_affinity;
+  // Host/device execution scope receiving the protection.
+  uint32_t access_scope;
+  // Reserved for future protection metadata; must be zero.
+  uint32_t reserved0;
+  // Memory protection bits applied to the range.
+  uint64_t protection;
+} iree_hal_replay_allocator_virtual_memory_protect_payload_t;
+
+// Payload describing a virtual memory usage hint.
+typedef struct iree_hal_replay_allocator_virtual_memory_advise_payload_t {
+  // Session-local buffer id assigned to the virtual address reservation.
+  iree_hal_replay_object_id_t virtual_buffer_id;
+  // Byte offset within the virtual address reservation.
+  uint64_t virtual_offset;
+  // Advised range size, in bytes.
+  uint64_t size;
+  // Queue affinity selecting the topology where the advice applies.
+  uint64_t queue_affinity;
+  // Memory advice bits applied to the range.
+  uint64_t advice;
+} iree_hal_replay_allocator_virtual_memory_advise_payload_t;
 
 // Payload describing a buffer byte range operation.
 typedef struct iree_hal_replay_buffer_range_payload_t {

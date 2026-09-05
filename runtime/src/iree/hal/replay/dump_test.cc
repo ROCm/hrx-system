@@ -419,7 +419,7 @@ TEST(ReplayDumpTest, EmitsTextSummary) {
   IREE_ASSERT_OK(
       DumpReplayToString(MakeReplayFileContents(storage), &options, &output));
 
-  EXPECT_THAT(output, HasSubstr("IREE HAL replay v5.0"));
+  EXPECT_THAT(output, HasSubstr("IREE HAL replay v5.1"));
   EXPECT_THAT(output, HasSubstr("summary:"));
   EXPECT_THAT(output, HasSubstr("hermetic: yes"));
   EXPECT_THAT(output, HasSubstr("strict_replay_supported: yes"));

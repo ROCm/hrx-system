@@ -28,10 +28,18 @@ typedef struct iree_hal_replay_executable_entry_t {
   iree_hal_executable_function_t* function_map;
 } iree_hal_replay_executable_entry_t;
 
+// Allocator-owned opaque physical memory handle reconstructed for replay.
+typedef struct iree_hal_replay_physical_memory_entry_t {
+  // Live physical memory handle owned by the enclosing entry's allocator.
+  iree_hal_physical_memory_t* handle;
+} iree_hal_replay_physical_memory_entry_t;
+
 // One retained object in the dense replay object table.
 typedef struct iree_hal_replay_object_entry_t {
   // Captured object type stored in this entry.
   iree_hal_replay_object_type_t type;
+  // Retained allocator owning a VMM buffer or physical memory handle.
+  iree_hal_allocator_t* owning_allocator;
   // Retained HAL resource or executable state selected by |type|.
   union {
     // Retained HAL device.
@@ -48,8 +56,24 @@ typedef struct iree_hal_replay_object_entry_t {
     iree_hal_semaphore_t* semaphore;
     // Retained HAL file.
     iree_hal_file_t* file;
+    // Allocator-owned opaque physical memory state.
+    iree_hal_replay_physical_memory_entry_t physical_memory;
   } value;
 } iree_hal_replay_object_entry_t;
+
+// One live virtual-to-physical memory mapping reconstructed during replay.
+typedef struct iree_hal_replay_virtual_memory_mapping_t {
+  // Borrowed allocator owning all handles in this mapping.
+  iree_hal_allocator_t* allocator;
+  // Borrowed virtual reservation containing the mapped range.
+  iree_hal_buffer_t* virtual_buffer;
+  // Borrowed physical allocation backing the mapped range.
+  iree_hal_physical_memory_t* physical_memory;
+  // Byte offset of the mapped range in |virtual_buffer|.
+  iree_device_size_t virtual_offset;
+  // Byte length of the mapped range.
+  iree_device_size_t size;
+} iree_hal_replay_virtual_memory_mapping_t;
 
 // Mutable state owned by one prepared-plan execution.
 typedef struct iree_hal_replay_executor_t {
@@ -65,6 +89,12 @@ typedef struct iree_hal_replay_executor_t {
   iree_hal_replay_object_entry_t* objects;
   // Number of entries in |objects|.
   iree_host_size_t object_capacity;
+  // Live VMM mappings that must be removed before their objects are released.
+  iree_hal_replay_virtual_memory_mapping_t* virtual_memory_mappings;
+  // Number of entries in |virtual_memory_mappings|.
+  iree_host_size_t virtual_memory_mapping_count;
+  // Allocated entry capacity of |virtual_memory_mappings|.
+  iree_host_size_t virtual_memory_mapping_capacity;
   // Next caller-provided device consumed by a device object record.
   iree_host_size_t next_device_index;
 } iree_hal_replay_executor_t;
@@ -138,7 +168,7 @@ iree_status_t iree_hal_replay_executor_initialize(
     const iree_hal_replay_execute_options_t* options,
     iree_allocator_t host_allocator);
 
-void iree_hal_replay_executor_deinitialize(
+iree_status_t iree_hal_replay_executor_deinitialize(
     iree_hal_replay_executor_t* executor);
 
 iree_status_t iree_hal_replay_executor_lookup(
@@ -150,6 +180,34 @@ iree_status_t iree_hal_replay_executor_store(
     iree_hal_replay_executor_t* executor, iree_hal_replay_object_id_t object_id,
     iree_hal_replay_object_type_t object_type,
     iree_hal_replay_object_entry_t entry);
+
+// Removes an allocator-consumed object without releasing its handle again.
+iree_status_t iree_hal_replay_executor_forget(
+    iree_hal_replay_executor_t* executor, iree_hal_replay_object_id_t object_id,
+    iree_hal_replay_object_type_t expected_type);
+
+// Maps memory and records the live range for failure-safe executor teardown.
+iree_status_t iree_hal_replay_executor_map_virtual_memory(
+    iree_hal_replay_executor_t* executor, iree_hal_allocator_t* allocator,
+    iree_hal_buffer_t* virtual_buffer, iree_device_size_t virtual_offset,
+    iree_hal_physical_memory_t* physical_memory,
+    iree_device_size_t physical_offset, iree_device_size_t size);
+
+// Unmaps memory and removes the range from the live mapping ledger.
+iree_status_t iree_hal_replay_executor_unmap_virtual_memory(
+    iree_hal_replay_executor_t* executor, iree_hal_allocator_t* allocator,
+    iree_hal_buffer_t* virtual_buffer, iree_device_size_t virtual_offset,
+    iree_device_size_t size);
+
+// Returns true when |virtual_buffer| still has live replay mappings.
+bool iree_hal_replay_executor_has_virtual_memory_mapping(
+    const iree_hal_replay_executor_t* executor,
+    const iree_hal_buffer_t* virtual_buffer);
+
+// Returns true when |physical_memory| still backs live replay mappings.
+bool iree_hal_replay_executor_has_physical_memory_mapping(
+    const iree_hal_replay_executor_t* executor,
+    const iree_hal_physical_memory_t* physical_memory);
 
 iree_status_t iree_hal_replay_executor_allocate_function_map(
     iree_hal_replay_executor_t* executor, iree_host_size_t function_count,

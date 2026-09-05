@@ -47,6 +47,8 @@ IREE_API_EXPORT const char* iree_hal_replay_object_type_string(
       return "semaphore";
     case IREE_HAL_REPLAY_OBJECT_TYPE_FILE:
       return "file";
+    case IREE_HAL_REPLAY_OBJECT_TYPE_PHYSICAL_MEMORY:
+      return "physical_memory";
     case IREE_HAL_REPLAY_OBJECT_TYPE_CHANNEL:
       return "channel";
     case IREE_HAL_REPLAY_OBJECT_TYPE_HOST_CALL:
@@ -257,6 +259,22 @@ IREE_API_EXPORT const char* iree_hal_replay_payload_type_string(
       return "device_queue_atomic_store";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW:
       return "device_queue_atomic_rmw";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_RESERVE:
+      return "allocator_virtual_memory_reserve";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_RELEASE:
+      return "allocator_virtual_memory_release";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_PHYSICAL_MEMORY_ALLOCATE:
+      return "allocator_physical_memory_allocate";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_PHYSICAL_MEMORY_FREE:
+      return "allocator_physical_memory_free";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_MAP:
+      return "allocator_virtual_memory_map";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_UNMAP:
+      return "allocator_virtual_memory_unmap";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT:
+      return "allocator_virtual_memory_protect";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_ADVISE:
+      return "allocator_virtual_memory_advise";
     default:
       return "unknown";
   }

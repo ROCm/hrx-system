@@ -159,6 +159,15 @@ iree_hal_buffer_t* iree_hal_replay_recorder_buffer_base_or_self(
              : buffer;
 }
 
+void iree_hal_replay_recorder_buffer_consume_virtual_memory(
+    iree_hal_buffer_t* buffer) {
+  if (!iree_hal_replay_recorder_buffer_isa(buffer)) return;
+  iree_hal_replay_recorder_buffer_t* replay_buffer =
+      iree_hal_replay_recorder_buffer_cast(buffer);
+  replay_buffer->base_buffer = NULL;
+  iree_hal_buffer_release(buffer);
+}
+
 iree_status_t iree_hal_replay_recorder_buffer_unwrap_for_call(
     iree_hal_buffer_t* buffer, iree_allocator_t host_allocator,
     iree_hal_buffer_t** out_base_buffer,

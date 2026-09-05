@@ -1015,6 +1015,81 @@ static iree_status_t iree_hal_replay_executor_import_buffer(
   return status;
 }
 
+static iree_status_t iree_hal_replay_executor_virtual_memory_reserve(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_file_record_t* record) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_RESERVE,
+      sizeof(iree_hal_replay_allocator_virtual_memory_reserve_payload_t)));
+  if (IREE_UNLIKELY(
+          record->payload.data_length !=
+          sizeof(iree_hal_replay_allocator_virtual_memory_reserve_payload_t))) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "replay virtual memory reserve payload length "
+                            "mismatch");
+  }
+  iree_hal_replay_allocator_virtual_memory_reserve_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+
+  iree_hal_replay_object_entry_t* allocator_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
+      executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_ALLOCATOR,
+      &allocator_entry));
+  iree_hal_buffer_t* virtual_buffer = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_allocator_virtual_memory_reserve(
+      allocator_entry->value.allocator, payload.queue_affinity, payload.size,
+      &virtual_buffer));
+
+  iree_hal_allocator_retain(allocator_entry->value.allocator);
+  iree_hal_replay_object_entry_t entry = {
+      .owning_allocator = allocator_entry->value.allocator,
+      .value.buffer = virtual_buffer,
+  };
+  return iree_hal_replay_executor_store(
+      executor, record->header.related_object_id,
+      IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER, entry);
+}
+
+static iree_status_t iree_hal_replay_executor_physical_memory_allocate(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_file_record_t* record) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_PHYSICAL_MEMORY_ALLOCATE,
+      sizeof(iree_hal_replay_allocator_physical_memory_allocate_payload_t)));
+  if (IREE_UNLIKELY(
+          record->payload.data_length !=
+          sizeof(
+              iree_hal_replay_allocator_physical_memory_allocate_payload_t))) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "replay physical memory allocation payload length "
+                            "mismatch");
+  }
+  iree_hal_replay_allocator_physical_memory_allocate_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+
+  iree_hal_replay_object_entry_t* allocator_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
+      executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_ALLOCATOR,
+      &allocator_entry));
+  iree_hal_buffer_params_t params;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_make_buffer_params(
+      &payload.allocation, &params));
+  iree_hal_physical_memory_t* physical_memory = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_allocator_physical_memory_allocate(
+      allocator_entry->value.allocator, params,
+      payload.allocation.allocation_size, executor->host_allocator,
+      &physical_memory));
+
+  iree_hal_allocator_retain(allocator_entry->value.allocator);
+  iree_hal_replay_object_entry_t entry = {
+      .owning_allocator = allocator_entry->value.allocator,
+      .value.physical_memory = {.handle = physical_memory},
+  };
+  return iree_hal_replay_executor_store(
+      executor, record->header.related_object_id,
+      IREE_HAL_REPLAY_OBJECT_TYPE_PHYSICAL_MEMORY, entry);
+}
+
 static iree_status_t iree_hal_replay_executor_replay_buffer_range_data(
     iree_hal_replay_executor_t* executor,
     const iree_hal_replay_file_record_t* record) {
@@ -1056,6 +1131,11 @@ iree_status_t iree_hal_replay_executor_replay_object_operation(
       return iree_hal_replay_executor_allocate_buffer(executor, record);
     case IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_IMPORT_BUFFER:
       return iree_hal_replay_executor_import_buffer(executor, record);
+    case IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_RESERVE:
+      return iree_hal_replay_executor_virtual_memory_reserve(executor, record);
+    case IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_PHYSICAL_MEMORY_ALLOCATE:
+      return iree_hal_replay_executor_physical_memory_allocate(executor,
+                                                               record);
     case IREE_HAL_REPLAY_OPERATION_CODE_BUFFER_FLUSH_RANGE:
     case IREE_HAL_REPLAY_OPERATION_CODE_BUFFER_UNMAP_RANGE:
       if (record->header.payload_type ==

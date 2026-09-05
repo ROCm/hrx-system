@@ -202,6 +202,23 @@ iree_runtime_cc_test(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "execute_vmm_test",
+    srcs = ["execute_vmm_test.cc"],
+    deps = [
+        ":execute",
+        ":file_reader",
+        ":recorder",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_cmake_extra_content(
     content = """
 endif()
