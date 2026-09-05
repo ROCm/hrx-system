@@ -175,22 +175,6 @@ static loomc_status_t loomc_target_specialization_validate_profile_environment(
   return loomc_ok_status();
 }
 
-static bool loomc_target_environment_supports_profile_type(
-    const loomc_target_environment_t* target_environment,
-    const loom_target_profile_type_t* profile_type) {
-  const loom_target_provider_set_t* provider_set =
-      loomc_target_environment_provider_set(target_environment);
-  if (provider_set == NULL || profile_type == NULL) {
-    return false;
-  }
-  for (iree_host_size_t i = 0; i < provider_set->provider_count; ++i) {
-    if (provider_set->providers[i]->profile_type == profile_type) {
-      return true;
-    }
-  }
-  return false;
-}
-
 static loomc_status_t loomc_target_pass_environment_initialize(
     const loomc_target_environment_t* target_environment,
     loomc_target_pass_environment_t* out_environment) {
@@ -557,13 +541,21 @@ loomc_status_t loomc_target_profile_create(
         "target_profile requires a target-family profile type");
   }
   if (loomc_status_is_ok(status) &&
-      !loomc_target_environment_supports_profile_type(
-          target_environment, pending_target_profile->type)) {
+      (pending_target_profile->type->fact_type == NULL ||
+       pending_target_profile->type->project_facts == NULL)) {
+    status = loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "target_profile requires a complete target-family profile type");
+  }
+  if (loomc_status_is_ok(status) &&
+      loom_target_environment_lookup_fact_provider(
+          &target_environment->environment,
+          pending_target_profile->type->fact_type) == NULL) {
     status = loomc_status_from_iree(iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "target environment does not support profile family '%.*s'",
-        (int)pending_target_profile->type->name.size,
-        pending_target_profile->type->name.data));
+        "target environment does not support projected fact family '%.*s'",
+        (int)pending_target_profile->type->fact_type->name.size,
+        pending_target_profile->type->fact_type->name.data));
   }
   if (loomc_status_is_ok(status)) {
     status =

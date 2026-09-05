@@ -1123,14 +1123,11 @@ static loomc_host_size_t loomc_spirv_rows_vector_row_state_count(
 
 loomc_status_t loomc_spirv_cooperative_row_fact_set_prepare_properties(
     loomc_spirv_cooperative_row_fact_set_t* row_facts,
-    const loom_spirv_feature_set_t* feature_set, loomc_allocator_t allocator,
-    const loom_spirv_cooperative_property_set_t** out_property_set) {
-  *out_property_set = NULL;
+    const loom_spirv_feature_set_t* feature_set, loomc_allocator_t allocator) {
   if (row_facts->matrix_row_count == 0 && row_facts->vector_row_count == 0) {
     loom_spirv_cooperative_property_set_prepare(
         feature_set, &row_facts->cooperative_properties);
     row_facts->prepared_properties = &row_facts->cooperative_properties;
-    *out_property_set = row_facts->prepared_properties;
     return loomc_ok_status();
   }
 
@@ -1233,7 +1230,6 @@ loomc_status_t loomc_spirv_cooperative_row_fact_set_prepare_properties(
   if (loomc_status_is_ok(status)) {
     row_facts->prepared_properties =
         &row_facts->cooperative_property_storage.set;
-    *out_property_set = row_facts->prepared_properties;
   }
   loomc_allocator_free(allocator, vector_rows);
   loomc_allocator_free(allocator, matrix_rows);

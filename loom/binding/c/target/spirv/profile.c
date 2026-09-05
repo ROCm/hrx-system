@@ -11,9 +11,10 @@
 
 #include "diagnostic.h"
 #include "loom/target/arch/spirv/cooperative_properties.h"
+#include "loom/target/arch/spirv/facts.h"
 #include "loom/target/arch/spirv/features.h"
-#include "loom/target/arch/spirv/profile.h"
 #include "loom/target/arch/spirv/records/target_records.h"
+#include "loom/target/profile.h"
 #include "loomc/iree.h"
 #include "profile_rows.h"
 #include "result.h"
@@ -39,8 +40,8 @@ typedef struct loomc_spirv_numeric_fact_state_t {
 } loomc_spirv_numeric_fact_state_t;
 
 typedef struct loomc_spirv_target_profile_storage_t {
-  // Structured SPIR-V compiler profile.
-  loom_spirv_target_profile_t profile;
+  // Target profile projected by this binding-owned representation.
+  loom_target_profile_t profile;
 
   // Prepared feature set derived from known-true feature facts.
   loom_spirv_feature_set_t feature_set;
@@ -63,6 +64,130 @@ typedef struct loomc_spirv_target_profile_storage_t {
       environment_states[LOOMC_SPIRV_ENVIRONMENT_COUNT];
 
 } loomc_spirv_target_profile_storage_t;
+
+static iree_status_t loomc_spirv_profile_allocate_fact_copy(
+    iree_arena_allocator_t* arena, const void* source,
+    iree_host_size_t byte_length, void** out_copy) {
+  *out_copy = NULL;
+  if (byte_length == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, byte_length, out_copy));
+  memcpy(*out_copy, source, byte_length);
+  return iree_ok_status();
+}
+
+static bool loomc_spirv_profile_accumulate_name_bytes(
+    iree_string_view_t name, iree_host_size_t* total_byte_length) {
+  return iree_host_size_checked_add(*total_byte_length, name.size,
+                                    total_byte_length);
+}
+
+static void loomc_spirv_profile_copy_name(iree_string_view_t source,
+                                          char** storage_cursor,
+                                          iree_string_view_t* out_name) {
+  if (iree_string_view_is_empty(source)) {
+    *out_name = iree_string_view_empty();
+    return;
+  }
+  memcpy(*storage_cursor, source.data, source.size);
+  *out_name = iree_make_string_view(*storage_cursor, source.size);
+  *storage_cursor += source.size;
+}
+
+static iree_status_t loomc_spirv_profile_copy_cooperative_properties(
+    const loom_spirv_cooperative_property_set_t* source,
+    iree_arena_allocator_t* arena,
+    loom_spirv_cooperative_property_set_t* out_properties) {
+  *out_properties = (loom_spirv_cooperative_property_set_t){
+      .feature_bits = source->feature_bits,
+      .matrix_property_count = source->matrix_property_count,
+      .matrix_shape_span_count = source->matrix_shape_span_count,
+      .vector_property_count = source->vector_property_count,
+      .vector_shape_span_count = source->vector_shape_span_count,
+  };
+
+  IREE_RETURN_IF_ERROR(loomc_spirv_profile_allocate_fact_copy(
+      arena, source->matrix_properties,
+      source->matrix_property_count * sizeof(*source->matrix_properties),
+      (void**)&out_properties->matrix_properties));
+  IREE_RETURN_IF_ERROR(loomc_spirv_profile_allocate_fact_copy(
+      arena, source->matrix_shape_spans,
+      source->matrix_shape_span_count * sizeof(*source->matrix_shape_spans),
+      (void**)&out_properties->matrix_shape_spans));
+  IREE_RETURN_IF_ERROR(loomc_spirv_profile_allocate_fact_copy(
+      arena, source->vector_properties,
+      source->vector_property_count * sizeof(*source->vector_properties),
+      (void**)&out_properties->vector_properties));
+  IREE_RETURN_IF_ERROR(loomc_spirv_profile_allocate_fact_copy(
+      arena, source->vector_shape_spans,
+      source->vector_shape_span_count * sizeof(*source->vector_shape_spans),
+      (void**)&out_properties->vector_shape_spans));
+
+  iree_host_size_t name_storage_byte_length = 0;
+  for (uint16_t i = 0; i < source->matrix_property_count; ++i) {
+    if (!loomc_spirv_profile_accumulate_name_bytes(
+            source->matrix_properties[i].name, &name_storage_byte_length)) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "SPIR-V cooperative property names exceed addressable storage");
+    }
+  }
+  for (uint16_t i = 0; i < source->vector_property_count; ++i) {
+    if (!loomc_spirv_profile_accumulate_name_bytes(
+            source->vector_properties[i].name, &name_storage_byte_length)) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "SPIR-V cooperative property names exceed addressable storage");
+    }
+  }
+  char* name_storage = NULL;
+  if (name_storage_byte_length != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, name_storage_byte_length,
+                                             (void**)&name_storage));
+  }
+  char* name_storage_cursor = name_storage;
+  loom_spirv_cooperative_matrix_property_t* matrix_properties =
+      (loom_spirv_cooperative_matrix_property_t*)
+          out_properties->matrix_properties;
+  for (uint16_t i = 0; i < out_properties->matrix_property_count; ++i) {
+    loomc_spirv_profile_copy_name(matrix_properties[i].name,
+                                  &name_storage_cursor,
+                                  &matrix_properties[i].name);
+  }
+  loom_spirv_cooperative_vector_property_t* vector_properties =
+      (loom_spirv_cooperative_vector_property_t*)
+          out_properties->vector_properties;
+  for (uint16_t i = 0; i < out_properties->vector_property_count; ++i) {
+    loomc_spirv_profile_copy_name(vector_properties[i].name,
+                                  &name_storage_cursor,
+                                  &vector_properties[i].name);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loomc_spirv_target_profile_project_facts(
+    const loom_target_profile_t* base_profile, iree_arena_allocator_t* arena,
+    loom_target_facts_t* base_facts) {
+  const loomc_spirv_target_profile_storage_t* profile_storage =
+      (const loomc_spirv_target_profile_storage_t*)base_profile;
+  const loom_spirv_cooperative_property_set_t* cooperative_properties =
+      profile_storage->cooperative_row_facts.prepared_properties;
+  if (cooperative_properties == NULL) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "SPIR-V profile properties are not prepared");
+  }
+  loom_spirv_target_facts_t* facts = (loom_spirv_target_facts_t*)base_facts;
+  facts->base.selector = LOOM_SPIRV_TARGET_KIND_VULKAN1_3;
+  return loomc_spirv_profile_copy_cooperative_properties(
+      cooperative_properties, arena, &facts->cooperative_properties);
+}
+
+static const loom_target_profile_type_t loomc_spirv_target_profile_type = {
+    .name = IREE_SVL("spirv"),
+    .fact_type = &loom_spirv_target_fact_type,
+    .project_facts = loomc_spirv_target_profile_project_facts,
+};
 
 static loomc_status_t loomc_spirv_profile_validate_string_view(
     loomc_string_view_t value) {
@@ -855,7 +980,7 @@ static loomc_status_t loomc_spirv_target_profile_create_from_states(
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_spirv_cooperative_row_fact_set_prepare_properties(
         &profile_storage->cooperative_row_facts, &profile_storage->feature_set,
-        allocator, &profile_storage->profile.cooperative_properties);
+        allocator);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     const bool has_target_bundle =
@@ -866,19 +991,18 @@ static loomc_status_t loomc_spirv_target_profile_create_from_states(
           &profile_storage->feature_set, profile_storage->limit_states,
           &profile_storage->bundle_storage);
     }
-    const loom_spirv_cooperative_property_set_t* cooperative_properties =
-        profile_storage->profile.cooperative_properties;
-    loom_spirv_target_profile_initialize(
-        has_target_bundle ? &profile_storage->bundle_storage.bundle : NULL,
-        cooperative_properties, &profile_storage->profile);
+    profile_storage->profile = (loom_target_profile_t){
+        .type = &loomc_spirv_target_profile_type,
+        .target_bundle =
+            has_target_bundle ? &profile_storage->bundle_storage.bundle : NULL,
+    };
     status = loomc_target_profile_create(
-        target_environment, identifier, &profile_storage->profile.base,
+        target_environment, identifier, &profile_storage->profile,
         loomc_spirv_target_profile_destroy, allocator, out_profile);
     profile_storage = NULL;
   }
   if (profile_storage != NULL) {
-    loomc_spirv_target_profile_destroy(&profile_storage->profile.base,
-                                       allocator);
+    loomc_spirv_target_profile_destroy(&profile_storage->profile, allocator);
   }
   return status;
 }
@@ -886,10 +1010,12 @@ static loomc_status_t loomc_spirv_target_profile_create_from_states(
 static const loomc_spirv_target_profile_storage_t*
 loomc_spirv_profile_storage_from_profile(
     const loomc_target_profile_t* profile) {
-  const loom_spirv_target_profile_t* target_profile =
-      loom_spirv_target_profile_cast(
-          loomc_target_profile_loom_target_profile(profile));
-  return (const loomc_spirv_target_profile_storage_t*)target_profile;
+  const loom_target_profile_t* target_profile =
+      loomc_target_profile_loom_target_profile(profile);
+  return target_profile != NULL &&
+                 target_profile->type == &loomc_spirv_target_profile_type
+             ? (const loomc_spirv_target_profile_storage_t*)target_profile
+             : NULL;
 }
 
 static loomc_status_t loomc_spirv_profile_validate_query(

@@ -40,10 +40,11 @@ loom_cc_library(
     deps = [
         "//loom/binding/c:loomc",
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/target:profile",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/spirv:cooperative_properties",
+        "//loom/src/loom/target/arch/spirv:facts",
         "//loom/src/loom/target/arch/spirv:features",
-        "//loom/src/loom/target/arch/spirv:profile",
         "//loom/src/loom/target/arch/spirv:provider",
         "//loom/src/loom/target/arch/spirv/records:target_records",
         "//loom/src/loom/target/emit/spirv:module_emitter",

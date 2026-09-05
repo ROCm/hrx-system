@@ -61,8 +61,7 @@ void loomc_spirv_cooperative_row_fact_set_deinitialize(
 // appended only when they are not already present in the prepared model rows.
 loomc_status_t loomc_spirv_cooperative_row_fact_set_prepare_properties(
     loomc_spirv_cooperative_row_fact_set_t* row_facts,
-    const loom_spirv_feature_set_t* feature_set, loomc_allocator_t allocator,
-    const loom_spirv_cooperative_property_set_t** out_property_set);
+    const loom_spirv_feature_set_t* feature_set, loomc_allocator_t allocator);
 
 // Returns the number of prepared true and explicit false matrix rows.
 loomc_host_size_t loomc_spirv_cooperative_row_fact_set_matrix_row_count(

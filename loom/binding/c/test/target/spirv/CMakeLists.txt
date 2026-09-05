@@ -16,11 +16,14 @@ loom_cc_test(
   SRCS
     "profile_test.cc"
   DEPS
+    iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
     loom::binding::c::loomc
     loom::binding::c::target::spirv
     loom::binding::c::test::test_util
+    loom::target::arch::spirv::facts
+    loom::target::profile
   LABELS
     "iree-build-requirement=loom.target.arch.spirv"
     "iree-build-requirement=loom.emit.spirv"

@@ -10,7 +10,11 @@
 #include <memory>
 #include <string>
 
+#include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
+#include "loom/target/arch/spirv/facts.h"
+#include "loom/target/profile.h"
 #include "loomc/result.h"
 #include "loomc/status.h"
 #include "loomc/target.h"
@@ -955,6 +959,40 @@ TEST(TargetSpirvProfileTest, AppliesExplicitCooperativeRowFacts) {
       LOOMC_SPIRV_COOPERATIVE_VECTOR_MATRIX_LAYOUT_INFERENCING_OPTIMAL_BIT);
   EXPECT_EQ(vector_row.storage_class_flags,
             LOOMC_SPIRV_STORAGE_CLASS_BIT_PHYSICAL_STORAGE_BUFFER);
+
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+  loom_target_facts_t* base_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_profile_project_facts(
+      loomc_target_profile_loom_target_profile(profile.get()), &arena,
+      &base_facts));
+  ASSERT_EQ(base_facts->fact_type, &loom_spirv_target_fact_type);
+  const loom_spirv_target_facts_t* projected_facts =
+      reinterpret_cast<const loom_spirv_target_facts_t*>(base_facts);
+  const loom_spirv_cooperative_matrix_property_t* projected_matrix_row =
+      nullptr;
+  for (uint16_t i = 0;
+       i < projected_facts->cooperative_properties.matrix_property_count; ++i) {
+    const loom_spirv_cooperative_matrix_property_t* candidate =
+        &projected_facts->cooperative_properties.matrix_properties[i];
+    if (iree_string_view_equal(
+            candidate->name, IREE_SV("probe.matrix.f16.8x8x16.f32.subgroup"))) {
+      projected_matrix_row = candidate;
+      break;
+    }
+  }
+  ASSERT_NE(projected_matrix_row, nullptr);
+  profile.reset();
+  EXPECT_TRUE(
+      iree_string_view_equal(projected_matrix_row->name,
+                             IREE_SV("probe.matrix.f16.8x8x16.f32.subgroup")));
+  EXPECT_EQ(projected_matrix_row->m_size, 8u);
+  EXPECT_EQ(projected_matrix_row->n_size, 8u);
+  EXPECT_EQ(projected_matrix_row->k_size, 16u);
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
 }
 
 TEST(TargetSpirvProfileTest, UnavailableCooperativeRowsSuppressModelRows) {

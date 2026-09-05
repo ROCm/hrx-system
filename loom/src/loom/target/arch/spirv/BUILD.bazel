@@ -213,7 +213,7 @@ loom_cc_library(
     name = "facts",
     srcs = ["facts.c"],
     hdrs = ["facts.h"],
-    visibility = _SPIRV_LOWER_VISIBILITY + _SPIRV_OPS_VISIBILITY + _SPIRV_TOOLING_VISIBILITY,
+    visibility = ["//loom/binding/c/test/target/spirv:__pkg__"] + _SPIRV_C_API_VISIBILITY + _SPIRV_LOWER_VISIBILITY + _SPIRV_OPS_VISIBILITY + _SPIRV_TOOLING_VISIBILITY,
     deps = [
         ":cooperative_properties",
         "//loom/src/loom/target:facts",
