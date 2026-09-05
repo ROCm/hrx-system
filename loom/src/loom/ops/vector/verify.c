@@ -1822,6 +1822,17 @@ iree_status_t loom_vector_fragment_load_verify(
     return loom_vector_emit_missing_auxiliary_key(module, emitter, op,
                                                   IREE_SV("scale"));
   }
+  const loom_encoding_record_layout_t* record_layout = NULL;
+  if (loom_encoding_query_type_record_layout(
+          /*context=*/NULL, module, view_type, &record_layout)) {
+    if (loom_type_element_type(view_type) != LOOM_SCALAR_TYPE_I8) {
+      return loom_vector_emit_operand_constraint(
+          emitter, op, IREE_SV("view"), view_type,
+          IREE_SV("byte-addressed i8 view for fixed-record storage"));
+    }
+    required_keys &=
+        ~loom_encoding_record_embedded_auxiliary_keys(record_layout);
+  }
   return loom_vector_verify_required_auxiliary_keys(
       module, emitter, op, auxiliary.present_keys, required_keys);
 }

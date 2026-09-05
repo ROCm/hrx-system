@@ -176,7 +176,12 @@ iree_status_t loom_encoding_define_facts(
 
   const bool has_dynamic_params =
       loom_encoding_define_has_dynamic_params(&params);
-  if (has_dynamic_params) {
+  // A parameterized schema no longer has the exact static identity of its
+  // family specification. Physical storage composition is different: its
+  // nested schema operand can still carry an exact static identity even when
+  // the enclosing layout/schema bindings are SSA values.
+  if (has_dynamic_params &&
+      vtable->descriptor->role == LOOM_ENCODING_ROLE_STORAGE_SCHEMA) {
     family_summary.encoding.storage_schema.static_spec_encoding_id = 0;
   }
   family_summary.encoding.role = role;

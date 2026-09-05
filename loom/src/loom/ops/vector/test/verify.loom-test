@@ -1088,6 +1088,27 @@ func.def @fragment_load_requires_sparse_auxiliary(%buffer: buffer, %offset: offs
 
 // ====
 
+// Fixed-record fragment loads obtain scale and affine fields from the record
+// itself instead of requiring duplicate SSA operands.
+func.def @fragment_load_uses_embedded_record_auxiliary(%buffer: buffer, %offset: offset, %row: index, %m: index, %k: index) {
+  %view = buffer.view %buffer[%offset] : buffer -> view<16x176xi8, #ggml.q5_k>
+  %lhs = vector.fragment.load<lhs> %view[%row, 0] shape [%m, %k] : view<16x176xi8, #ggml.q5_k> -> vector<64xi8>
+  func.return
+}
+
+// ====
+
+// Fixed record layouts describe bytes, so their physical shaped view uses i8
+// elements even when fragment loading converts the payload to another type.
+func.def @fragment_load_rejects_non_byte_record_view(%buffer: buffer, %offset: offset, %row: index, %m: index, %k: index) {
+  %view = buffer.view %buffer[%offset] : buffer -> view<16x88xf16, #ggml.q5_k>
+  // ERROR@+1: TYPE/003 "view" "byte-addressed i8 view for fixed-record storage"
+  %lhs = vector.fragment.load<lhs> %view[%row, 0] shape [%m, %k] : view<16x88xf16, #ggml.q5_k> -> vector<64xi8>
+  func.return
+}
+
+// ====
+
 // Fragment stores may request a target-shaped element conversion at the store
 // boundary. Target legality owns selecting or rejecting the conversion.
 func.def @fragment_store_allows_store_boundary_conversion(%buffer: buffer, %offset: offset, %row: index, %col: index, %m: index, %n: index, %value: vector<8xf16>) {

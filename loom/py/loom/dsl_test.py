@@ -837,6 +837,17 @@ class TestEncodingRecordDef:
         with _raises(ValueError, match="must be a power of two"):
             EncodingRecordDef(16, 8, required_alignment=3)
 
+    def test_rejects_unrepresentable_scale_hierarchy(self) -> None:
+        with _raises(ValueError, match="exceeds the eight-key auxiliary"):
+            EncodingRecordFieldDef(
+                EncodingRecordFieldRole.SCALE,
+                EnumCase("f16", 3),
+                16,
+                1,
+                [EncodingRecordMappingDef(0, 16, 0, 1, 0, 16)],
+                hierarchy_level=8,
+            )
+
     def test_rejects_incomplete_field_mapping(self) -> None:
         with _raises(ValueError, match="do not cover every logical field bit"):
             EncodingRecordFieldDef(

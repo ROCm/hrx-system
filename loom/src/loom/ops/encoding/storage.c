@@ -10,6 +10,7 @@
 
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
+#include "loom/ops/encoding/auxiliary.h"
 #include "loom/ops/encoding/operand.h"
 #include "loom/ops/encoding/ops.h"
 #include "loom/ops/encoding/params.h"
@@ -319,6 +320,42 @@ bool loom_encoding_query_static_record_geometry(
   return true;
 }
 
+loom_encoding_auxiliary_key_flags_t
+loom_encoding_record_embedded_auxiliary_keys(
+    const loom_encoding_record_layout_t* layout) {
+  static const loom_encoding_auxiliary_key_t scale_keys[] = {
+      LOOM_ENCODING_AUXILIARY_KEY_SCALE,
+      LOOM_ENCODING_AUXILIARY_KEY_SECONDARY_SCALE,
+      LOOM_ENCODING_AUXILIARY_KEY_SCALE2,
+      LOOM_ENCODING_AUXILIARY_KEY_SCALE3,
+      LOOM_ENCODING_AUXILIARY_KEY_SCALE4,
+      LOOM_ENCODING_AUXILIARY_KEY_SCALE5,
+      LOOM_ENCODING_AUXILIARY_KEY_SCALE6,
+      LOOM_ENCODING_AUXILIARY_KEY_SCALE7,
+  };
+  loom_encoding_auxiliary_key_flags_t keys = 0;
+  for (uint8_t i = 0; i < layout->field_count; ++i) {
+    const loom_encoding_record_field_t* field = &layout->fields[i];
+    switch (field->role) {
+      case LOOM_ENCODING_RECORD_FIELD_SCALE:
+        keys |= loom_encoding_auxiliary_key_flag(
+            scale_keys[field->hierarchy_level]);
+        break;
+      case LOOM_ENCODING_RECORD_FIELD_MINIMUM:
+        keys |= loom_encoding_auxiliary_key_flag(
+            LOOM_ENCODING_AUXILIARY_KEY_MINIMUM);
+        break;
+      case LOOM_ENCODING_RECORD_FIELD_SUM_CORRECTION:
+        keys |= loom_encoding_auxiliary_key_flag(
+            LOOM_ENCODING_AUXILIARY_KEY_SUM_CORRECTION);
+        break;
+      case LOOM_ENCODING_RECORD_FIELD_PAYLOAD:
+        break;
+    }
+  }
+  return keys;
+}
+
 static bool loom_encoding_facts_address_layout(
     const loom_fact_context_t* context, loom_value_facts_t facts,
     loom_value_fact_address_layout_t* out_layout) {
@@ -460,6 +497,21 @@ bool loom_encoding_query_type_storage_schema(
   loom_value_facts_t facts =
       loom_value_fact_table_lookup(context->table, value_id);
   return loom_encoding_value_storage_schema(context, facts, out_schema);
+}
+
+bool loom_encoding_query_type_record_layout(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_type_t type, const loom_encoding_record_layout_t** out_layout) {
+  if (!out_layout) return false;
+  *out_layout = NULL;
+  loom_value_fact_storage_schema_t storage_schema = {0};
+  if (!loom_encoding_query_type_storage_schema(context, module, type,
+                                               &storage_schema) ||
+      storage_schema.static_spec_encoding_id == 0) {
+    return false;
+  }
+  return loom_encoding_query_static_record_layout(
+      module, storage_schema.static_spec_encoding_id, out_layout);
 }
 
 bool loom_encoding_query_storage_schema_content_facts(

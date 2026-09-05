@@ -516,12 +516,34 @@ TEST_F(EncodingStorageTest, FixedGgmlSchemasExposeCanonicalContracts) {
     ASSERT_TRUE(loom_encoding_auxiliary_required_keys_from_schema(
         schema.encoded_operand, &required_auxiliary_keys, nullptr));
     EXPECT_EQ(required_auxiliary_keys, expectation.required_auxiliary_keys);
+    EXPECT_EQ(loom_encoding_record_embedded_auxiliary_keys(layout),
+              expectation.required_auxiliary_keys);
     ASSERT_NE(expectation.descriptor->fixed_metadata, nullptr);
     EXPECT_EQ(expectation.descriptor->fixed_metadata->required_auxiliary_keys,
               expectation.required_auxiliary_keys);
 
     loom_module_free(module);
   }
+}
+
+TEST_F(EncodingStorageTest, ShapedTypeResolvesFixedRecordLayout) {
+  loom_module_t* module =
+      Parse(IREE_SV("%schema = encoding.define #ggml.q5_k : "
+                    "encoding<schema>\n"));
+  ASSERT_NE(module, nullptr);
+  const uint16_t encoding_id = FirstSpecId(module);
+  const loom_type_t view_type =
+      loom_type_shaped_1d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I8,
+                          loom_dim_pack_static(256), encoding_id);
+
+  const loom_encoding_record_layout_t* layout = nullptr;
+  ASSERT_TRUE(loom_encoding_query_type_record_layout(
+      /*context=*/nullptr, module, view_type, &layout));
+  ASSERT_NE(layout, nullptr);
+  EXPECT_EQ(layout->geometry.logical_element_count, 256u);
+  EXPECT_EQ(layout->geometry.storage_byte_count, 176u);
+
+  loom_module_free(module);
 }
 
 TEST_F(EncodingStorageTest, OperandSummaryHasNoFixedGeometry) {

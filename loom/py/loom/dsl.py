@@ -3371,6 +3371,11 @@ class EncodingRecordFieldDef:
                 "EncodingRecordFieldDef: hierarchy_level must be an integer "
                 f"in [0, 255], got {hierarchy_level!r}"
             )
+        if role is EncodingRecordFieldRole.SCALE and hierarchy_level >= 8:
+            raise ValueError(
+                "EncodingRecordFieldDef: scale hierarchy level exceeds the "
+                "eight-key auxiliary scale vocabulary"
+            )
         for field_name, value, maximum in (
             ("element_bit_count", element_bit_count, 0xFF),
             ("element_count", element_count, 0xFFFF),

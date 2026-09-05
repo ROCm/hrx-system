@@ -341,6 +341,56 @@ TEST_F(VectorMemoryTest, BlockedFragmentFootprintUsesRankThreeShape) {
   EXPECT_EQ(footprint.vector_access.first_vector_axis, 0);
 }
 
+TEST_F(VectorMemoryTest, FixedRecordFragmentFootprintUsesRecordGeometry) {
+  loom_value_id_t layout = LOOM_VALUE_ID_INVALID;
+  BuildDenseLayout(&layout);
+  loom_value_id_t schema = LOOM_VALUE_ID_INVALID;
+  BuildGgmlQ4_0Schema(&schema);
+  loom_value_id_t storage = LOOM_VALUE_ID_INVALID;
+  BuildPhysicalStorage(layout, schema, &storage);
+  const loom_type_t view_type = ViewWithLayout(
+      loom_type_shaped_2d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I8,
+                          loom_dim_pack_static(8), loom_dim_pack_static(18),
+                          /*encoding_id=*/0),
+      storage);
+  loom_value_id_t view = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_module_block(module_), view_type, &view));
+  loom_value_id_t rows = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_module_block(module_),
+      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &rows));
+  loom_value_id_t columns = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_module_block(module_),
+      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &columns));
+
+  const int64_t static_indices[] = {0, 0};
+  loom_op_t* load = nullptr;
+  IREE_ASSERT_OK(loom_vector_fragment_load_build(
+      &builder_, /*build_flags=*/0, LOOM_VECTOR_ROLE_LHS, view,
+      /*indices=*/nullptr, /*indices_count=*/0, static_indices,
+      IREE_ARRAYSIZE(static_indices), LOOM_VALUE_ID_INVALID, rows, columns,
+      /*auxiliary=*/nullptr, /*auxiliary_count=*/0,
+      /*cache_scope=*/0, /*cache_temporal=*/0,
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I8,
+                          loom_dim_pack_static(32), /*encoding_id=*/0),
+      LOOM_LOCATION_UNKNOWN, &load));
+
+  loom_value_fact_table_t facts;
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&facts, &module_->arena,
+                                                  module_->values.count));
+  loom_func_like_t no_function = {};
+  IREE_ASSERT_OK(loom_value_fact_table_compute_region(
+      &facts, module_, no_function, module_->body, /*parent_op=*/nullptr));
+  loom_vector_memory_footprint_t footprint = {};
+  ASSERT_TRUE(loom_vector_memory_footprint_describe(&facts.context, module_,
+                                                    load, &footprint));
+  EXPECT_EQ(footprint.axis_scale.vector_axis, 1u);
+  EXPECT_EQ(footprint.axis_scale.storage_element_count, 18u);
+  EXPECT_EQ(footprint.axis_scale.logical_element_count, 32u);
+}
+
 TEST_F(VectorMemoryTest, OpFootprintKindClassifiesMemoryFamilies) {
   loom_value_id_t view = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(loom_builder_define_block_arg(

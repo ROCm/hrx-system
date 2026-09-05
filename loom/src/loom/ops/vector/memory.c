@@ -174,19 +174,6 @@ loom_vector_memory_fragment_footprint_axis_scale(
   loom_vector_memory_footprint_axis_scale_t scale = {
       .vector_axis = UINT8_MAX,
   };
-  loom_value_fact_storage_schema_t storage_schema = {0};
-  if (!loom_encoding_query_type_storage_schema(context, module, view_type,
-                                               &storage_schema)) {
-    return scale;
-  }
-  const loom_value_fact_encoded_operand_schema_t operand =
-      storage_schema.encoded_operand;
-  if (operand.sparsity_policy !=
-          LOOM_VALUE_FACT_SPARSITY_POLICY_N_M_STRUCTURED ||
-      !loom_value_fact_encoded_operand_schema_sparsity_is_complete(operand)) {
-    return scale;
-  }
-
   loom_vector_role_t role = LOOM_VECTOR_ROLE_COUNT_;
   bool has_blocks = false;
   switch (op->kind) {
@@ -216,6 +203,31 @@ loom_vector_memory_fragment_footprint_axis_scale(
   }
   if (has_blocks) {
     ++scale.vector_axis;
+  }
+
+  loom_value_fact_storage_schema_t storage_schema = {0};
+  if (!loom_encoding_query_type_storage_schema(context, module, view_type,
+                                               &storage_schema)) {
+    scale.vector_axis = UINT8_MAX;
+    return scale;
+  }
+
+  const loom_encoding_record_layout_t* record_layout = NULL;
+  if (storage_schema.static_spec_encoding_id != 0 &&
+      loom_encoding_query_static_record_layout(
+          module, storage_schema.static_spec_encoding_id, &record_layout)) {
+    scale.storage_element_count = record_layout->geometry.storage_byte_count;
+    scale.logical_element_count = record_layout->geometry.logical_element_count;
+    return scale;
+  }
+
+  const loom_value_fact_encoded_operand_schema_t operand =
+      storage_schema.encoded_operand;
+  if (operand.sparsity_policy !=
+          LOOM_VALUE_FACT_SPARSITY_POLICY_N_M_STRUCTURED ||
+      !loom_value_fact_encoded_operand_schema_sparsity_is_complete(operand)) {
+    scale.vector_axis = UINT8_MAX;
+    return scale;
   }
   scale.storage_element_count = operand.sparsity_group.nonzero_element_count;
   scale.logical_element_count = operand.sparsity_group.element_count;

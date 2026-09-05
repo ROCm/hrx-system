@@ -89,6 +89,14 @@ bool loom_encoding_query_static_record_geometry(
     const loom_module_t* module, uint16_t encoding_id,
     loom_encoding_record_geometry_t* out_geometry);
 
+// Returns the auxiliary operand keys physically embedded in |layout|. Scale
+// field hierarchy levels map to the corresponding scale key; affine minimum
+// and sum-correction fields map to their shared keys. The layout must come from
+// loom_encoding_query_static_record_layout().
+loom_encoding_auxiliary_key_flags_t
+loom_encoding_record_embedded_auxiliary_keys(
+    const loom_encoding_record_layout_t* layout);
+
 // Queries a shaped type's address-layout summary. An absent attachment on a
 // tile, tensor, or view is the native dense layout. Explicit static encodings
 // resolve through the module, while SSA encodings use context-owned facts. This
@@ -118,6 +126,14 @@ bool loom_encoding_query_type_address_layout_operands(
 bool loom_encoding_query_type_storage_schema(
     const loom_fact_context_t* context, const loom_module_t* module,
     loom_type_t type, loom_value_fact_storage_schema_t* out_schema);
+
+// Queries the exact fixed-record layout carried by a shaped type's resolved
+// storage schema. The returned generated table has process lifetime. Returns
+// false when the type has no resolved static schema or that schema is not a
+// fixed-record family.
+bool loom_encoding_query_type_record_layout(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_type_t type, const loom_encoding_record_layout_t** out_layout);
 
 // Queries scalar content facts implied by an encoded storage schema. This is
 // the storage-schema half of loom_encoding_query_type_storage_content_facts()

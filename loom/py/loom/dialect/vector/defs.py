@@ -1481,10 +1481,12 @@ vector_fragment_load = Op(
         "differ, the operation represents a fragment-shaped numeric conversion "
         "at the load boundary and target lowering must either select that "
         "conversion explicitly or reject it with target diagnostics."
-        " When the view storage schema requires runtime auxiliary values such "
-        "as sparse metadata, scale values, or codebooks, the optional keyed "
-        "`using` operands provide those SSA values while the view type remains "
-        "the source of truth for the storage schema."
+        " Fixed-record schemas source payload and metadata fields directly "
+        "from their record bytes. When the view storage schema instead "
+        "requires external runtime values such as sparse metadata, scale "
+        "values, or codebooks, the optional keyed `using` operands provide "
+        "those SSA values while the view type remains the source of truth for "
+        "the storage schema."
     ),
     operands=[
         Operand("view", VIEW, doc="Typed source view holding logical matrix data."),

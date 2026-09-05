@@ -715,7 +715,9 @@ static iree_status_t loom_vector_memory_footprint_scale_axis_proof(
     const loom_symbolic_expr_t* origin, const loom_symbolic_expr_t* extent,
     const loom_symbolic_expr_t* bound, loom_symbolic_expr_t* out_end,
     loom_symbolic_expr_t* out_bound,
-    loom_symbolic_expr_t* out_diagnostic_extent) {
+    loom_symbolic_expr_t* out_diagnostic_extent,
+    bool* out_end_is_view_coordinate) {
+  *out_end_is_view_coordinate = false;
   const int64_t storage_element_count =
       access->axis_scale.storage_element_count;
   const int64_t logical_element_count =
@@ -732,6 +734,7 @@ static iree_status_t loom_vector_memory_footprint_scale_axis_proof(
                            storage_element_count, &physical_extent)) {
     loom_symbolic_expr_constant(physical_extent, out_diagnostic_extent);
     *out_bound = *bound;
+    *out_end_is_view_coordinate = true;
     return loom_vector_memory_footprint_expr_add(
         state, origin, out_diagnostic_extent, out_end);
   }
@@ -798,7 +801,9 @@ static iree_status_t loom_vector_memory_footprint_check_direct_axis(
     const loom_vector_memory_footprint_access_t* access,
     const loom_vector_memory_access_t* memory_access,
     const loom_vector_memory_mask_bounds_t* mask_bounds, uint8_t view_axis,
-    loom_value_facts_t* out_exclusive_end_facts) {
+    loom_value_facts_t* out_exclusive_end_facts,
+    bool* out_end_is_view_coordinate) {
+  *out_end_is_view_coordinate = true;
   loom_symbolic_expr_t origin = {0};
   bool origin_known = false;
   IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_origin_expr(
@@ -854,8 +859,10 @@ static iree_status_t loom_vector_memory_footprint_check_direct_axis(
   if (axis_is_scaled && !has_tail_end) {
     IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_scale_axis_proof(
         state, access, memory_access, view_axis, &origin, &extent, &bound, &end,
-        &proof_bound, &diagnostic_extent));
+        &proof_bound, &diagnostic_extent, out_end_is_view_coordinate));
     end_facts = end.facts;
+  } else if (axis_is_scaled) {
+    *out_end_is_view_coordinate = false;
   }
   bool upper_proven = false;
   IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_prove_le(
@@ -905,15 +912,18 @@ static iree_status_t loom_vector_memory_footprint_check_direct(
 
   loom_value_facts_t
       axis_exclusive_end_facts[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {0};
+  bool all_ends_are_view_coordinates = true;
   for (uint8_t axis = 0; axis < memory_access.view_rank; ++axis) {
+    bool end_is_view_coordinate = false;
     IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_check_direct_axis(
         state, access, &memory_access, mask_bounds, axis,
-        &axis_exclusive_end_facts[axis]));
+        &axis_exclusive_end_facts[axis], &end_is_view_coordinate));
     if (state->current_access_failed) {
       return iree_ok_status();
     }
+    all_ends_are_view_coordinates &= end_is_view_coordinate;
   }
-  if (access->axis_scale.vector_axis == UINT8_MAX) {
+  if (all_ends_are_view_coordinates) {
     loom_value_facts_t element_end_facts = loom_value_facts_unknown();
     if (loom_vector_memory_access_linear_element_end_facts(
             &memory_access, axis_exclusive_end_facts, &element_end_facts)) {

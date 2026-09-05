@@ -211,6 +211,44 @@ func.def @sparse_rhs_fragment_load_uses_compact_physical_extent(%buffer: buffer,
 
 // ====
 
+func.def @fixed_record_lhs_fragment_load_uses_record_extent(%buffer: buffer, %base: offset) {
+  %m = index.constant 2 : index
+  %k = index.constant 256 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<2x176xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q5_k>>
+  %loaded = vector.fragment.load<lhs> %view[0, 0] shape [%m, %k] : view<2x176xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q5_k>> -> vector<64xi8>
+  test.use %loaded : vector<64xi8>
+  func.return
+}
+
+// ====
+
+func.def @fixed_record_lhs_fragment_load_rejects_physical_tail(%buffer: buffer, %base: offset) {
+  %m = index.constant 2 : index
+  %k = index.constant 256 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<2x175xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q5_k>>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.fragment.load", view_axis="1", vector_axis="1", vector_extent="176", view_bound="175", required_origin_upper_bound="-1", constraint_key="vector_footprint.full_vector_upper_bound"}
+  %loaded = vector.fragment.load<lhs> %view[0, 0] shape [%m, %k] : view<2x175xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q5_k>> -> vector<64xi8>
+  test.use %loaded : vector<64xi8>
+  func.return
+}
+
+// ====
+
+func.def @fixed_record_fragment_load_rejects_storage_root_overflow() {
+  %byte_length = index.constant 351 : offset
+  %base = index.constant 0 : offset
+  %m = index.constant 2 : index
+  %k = index.constant 256 : index
+  %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<2x176xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q5_k>>
+  // ERROR@+1: SUBRANGE/026 {op_name="vector.fragment.load", maximum_access_byte_end="352", root_byte_extent="351"}
+  %loaded = vector.fragment.load<lhs> %view[0, 0] shape [%m, %k] : view<2x176xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q5_k>> -> vector<64xi8>
+  test.use %loaded : vector<64xi8>
+  func.return
+}
+
+// ====
+
 func.def @fragment_store_in_bounds(%buffer: buffer, %base: offset, %value: vector<8xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %m = index.constant 16 : index
