@@ -72,11 +72,12 @@ typedef struct loom_compile_target_t {
 // Returns the prepared-artifact target projected by |target|.
 static inline loom_artifact_target_t loom_compile_target_artifact_target(
     const loom_compile_target_t* target) {
-  return (loom_artifact_target_t){
-      .target_bundle =
-          target ? loom_target_profile_bundle(target->target_profile) : NULL,
-      .target_key = target ? target->target_key : iree_string_view_empty(),
-  };
+  loom_artifact_target_t artifact_target = {0};
+  artifact_target.target_bundle =
+      target ? loom_target_profile_bundle(target->target_profile) : NULL;
+  artifact_target.target_key =
+      target ? target->target_key : iree_string_view_empty();
+  return artifact_target;
 }
 
 // Fully resolved compile request borrowing immutable configured state.
