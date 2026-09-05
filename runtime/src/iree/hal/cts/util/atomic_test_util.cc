@@ -104,6 +104,8 @@ bool SelectAtomicTestConfiguration(const iree_hal_device_spec_t* device_spec,
         continue;
       }
 
+      out_configuration->queue_family_ordinal =
+          (iree_hal_queue_family_ordinal_t)family_index;
       out_configuration->buffer_params = {
           /*.usage=*/requirements.buffer_usage,
           /*.access=*/requirements.memory_access,

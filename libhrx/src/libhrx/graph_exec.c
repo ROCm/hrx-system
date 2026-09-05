@@ -566,7 +566,6 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
     memcpy(new_base_values, exec->semaphore_base_values, base_values_size);
   }
 
-  iree_hal_device_t* hal_device = exec->device->hal_device;
   for (uint32_t block_index = 0;
        iree_status_is_ok(status) && block_index < exec->block_count;
        block_index++) {
@@ -655,9 +654,9 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
             .count = ptrs.attrs->dispatch.bindings.count,
             .values = ptrs.attrs->dispatch.bindings.values,
         };
-        status = iree_hal_device_queue_dispatch(
-            hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-            signal_semaphores, ptrs.attrs->dispatch.executable,
+        status = iree_hal_queue_dispatch(
+            stream->hal_queue, wait_semaphores, signal_semaphores,
+            ptrs.attrs->dispatch.executable,
             iree_hal_executable_function_from_index(
                 (uint32_t)ptrs.attrs->dispatch.entry_point),
             ptrs.attrs->dispatch.config, ptrs.attrs->dispatch.constants,
@@ -676,9 +675,8 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
             (uint64_t)(uintptr_t)ptrs.attrs->host_call.fn,
             (uint64_t)(uintptr_t)ptrs.attrs->host_call.user_data,
         };
-        status = iree_hal_device_queue_host_call(
-            hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-            signal_semaphores,
+        status = iree_hal_queue_host_call(
+            stream->hal_queue, wait_semaphores, signal_semaphores,
             iree_hal_make_host_call(hrx_graph_host_callback, NULL), call_args,
             ptrs.attrs->host_call.flags);
         break;

@@ -130,17 +130,15 @@ iree_status_t iree_hal_webgpu_queue_submit_write(
     iree_hal_file_t* target_file, uint64_t target_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags);
 
-// |device| is passed through to the host call context — the queue does not
-// retain it. The caller (device vtable) guarantees it remains valid.
-iree_status_t iree_hal_webgpu_queue_host_call(
-    iree_hal_webgpu_queue_t* queue, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity,
+// Enqueues a host callback on the exact WebGPU queue.
+iree_status_t iree_hal_webgpu_queue_submit_host_call(
+    iree_hal_webgpu_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_host_call_t call, const uint64_t args[4],
     iree_hal_host_call_flags_t flags);
 
-iree_status_t iree_hal_webgpu_queue_dispatch(
+iree_status_t iree_hal_webgpu_queue_submit_dispatch(
     iree_hal_webgpu_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,

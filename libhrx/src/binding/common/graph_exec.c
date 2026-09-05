@@ -20,13 +20,13 @@ typedef enum iree_hal_streaming_graph_block_type_e {
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_FILL,
   // iree_hal_queue_copy
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_COPY,
-  // iree_hal_device_queue_host_call
+  // iree_hal_queue_host_call
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL,
   // Event record node.
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD,
   // Event wait node.
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_WAIT,
-  // iree_hal_device_queue_dispatch
+  // iree_hal_queue_dispatch
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_DISPATCH,
   // iree_hal_queue_execute
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE,
@@ -2091,10 +2091,9 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
           .count = ptrs->attrs->dispatch.bindings.count,
           .values = ptrs->attrs->dispatch.bindings.values,
       };
-      return iree_hal_device_queue_dispatch(
-          stream->context->device,
-          iree_hal_streaming_queue_family_affinity(stream->queue),
-          wait_semaphores, signal_semaphores, ptrs->attrs->dispatch.executable,
+      return iree_hal_queue_dispatch(
+          stream->queue, wait_semaphores, signal_semaphores,
+          ptrs->attrs->dispatch.executable,
           iree_hal_executable_function_from_index(
               (uint32_t)ptrs->attrs->dispatch.entry_point),
           ptrs->attrs->dispatch.config, ptrs->attrs->dispatch.constants,
@@ -2113,10 +2112,8 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
           (uint64_t)ptrs->attrs->host_call.user_data;
       ptrs->attrs->host_call.args[2] = 0;
       ptrs->attrs->host_call.args[3] = 0;
-      return iree_hal_device_queue_host_call(
-          stream->context->device,
-          iree_hal_streaming_queue_family_affinity(stream->queue),
-          wait_semaphores, signal_semaphores,
+      return iree_hal_queue_host_call(
+          stream->queue, wait_semaphores, signal_semaphores,
           iree_hal_make_host_call(iree_hal_streaming_graph_host_callback, NULL),
           ptrs->attrs->host_call.args, ptrs->attrs->host_call.flags);
     }

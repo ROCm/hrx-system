@@ -43,8 +43,14 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
         /*.atomic_flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE |
             IREE_HAL_ATOMIC_FLAG_RELEASE,
     };
-    return SelectAtomicTestConfiguration(iree_hal_device_spec(device_),
-                                         requirements, out_configuration);
+    if (!SelectAtomicTestConfiguration(iree_hal_device_spec(device_),
+                                       requirements, out_configuration)) {
+      return false;
+    }
+    atomic_queue_ =
+        iree_hal_device_queue(device_, out_configuration->queue_family_ordinal,
+                              /*queue_ordinal=*/0);
+    return atomic_queue_ != nullptr;
   }
 
   iree_status_t AllocateAtomicBuffer(
@@ -78,9 +84,8 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
         /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE,
         /*.width=*/width,
     };
-    iree_status_t status = iree_hal_device_queue_atomic_store(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, signal, buffer,
-        kTargetOffset, params);
+    iree_status_t status = iree_hal_queue_atomic_store(
+        atomic_queue_, empty_wait, signal, buffer, kTargetOffset, params);
     if (iree_status_is_ok(status)) {
       status = iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
                                             IREE_ASYNC_WAIT_FLAG_NONE);
@@ -398,6 +403,8 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
                 static_cast<ValueType>(0x12));
     }
   }
+
+  iree_hal_queue_t* atomic_queue_ = nullptr;
 };
 
 TEST_P(CommandBufferAtomicTest, ReusableStoreAndRmw32) {

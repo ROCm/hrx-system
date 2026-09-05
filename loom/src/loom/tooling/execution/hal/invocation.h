@@ -299,7 +299,8 @@ iree_status_t loom_run_hal_prepared_candidate_prepare(
 
 // Dispatches a prepared HAL executable with |binding_list|.
 iree_status_t loom_run_hal_dispatch(
-    iree_hal_device_t* device, iree_hal_executable_t* executable,
+    iree_hal_device_t* device, iree_hal_queue_t* queue,
+    iree_hal_executable_t* executable,
     const loom_run_hal_binding_list_t* binding_list,
     const loom_run_hal_invocation_options_t* options);
 

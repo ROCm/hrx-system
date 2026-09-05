@@ -37,6 +37,9 @@ TEST_P(VulkanAtomicSubmissionTest,
                                      requirements, &configuration)) {
     GTEST_SKIP() << "Device does not advertise atomic store";
   }
+  iree_hal_queue_t* atomic_queue = iree_hal_device_queue(
+      device_, configuration.queue_family_ordinal, /*queue_ordinal=*/0);
+  ASSERT_NE(atomic_queue, nullptr);
 
   iree_hal_allocator_t* heap_allocator = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_create_heap(
@@ -73,11 +76,11 @@ TEST_P(VulkanAtomicSubmissionTest,
       /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE,
       /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
   };
-  EXPECT_THAT(Status(iree_hal_device_queue_atomic_store(
-                  device_, IREE_HAL_QUEUE_AFFINITY_ANY,
-                  iree_hal_semaphore_list_empty(), signal, target_buffer,
-                  /*target_offset=*/0, store_params)),
-              StatusIs(StatusCode::kFailedPrecondition));
+  EXPECT_THAT(
+      Status(iree_hal_queue_atomic_store(
+          atomic_queue, iree_hal_semaphore_list_empty(), signal, target_buffer,
+          /*target_offset=*/0, store_params)),
+      StatusIs(StatusCode::kFailedPrecondition));
   EXPECT_THAT(Status(iree_hal_semaphore_list_wait(
                   signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE)),
               StatusIs(StatusCode::kFailedPrecondition));

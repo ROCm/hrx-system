@@ -548,7 +548,6 @@ iree_status_t iree_hal_vulkan_queue_submit_execute(
 // Submits a queue-ordered host call.
 iree_status_t iree_hal_vulkan_queue_submit_host_call(
     iree_hal_vulkan_queue_t* queue,
-    iree_hal_queue_affinity_t routed_queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_host_call_t call, const uint64_t args[4],

@@ -114,14 +114,12 @@ static iree_status_t iree_hal_replay_dump_append_text_queue_atomic_header(
     iree_string_builder_t* builder,
     const iree_hal_replay_file_range_t* payload_range,
     const iree_hal_replay_dump_queue_payload_layout_t* layout,
-    uint64_t queue_affinity, uint64_t wait_semaphore_count,
-    uint64_t signal_semaphore_count) {
+    uint64_t wait_semaphore_count, uint64_t signal_semaphore_count) {
   return iree_string_builder_append_format(
       builder,
-      " queue_affinity=%" PRIu64 " wait_count=%" PRIu64 " signal_count=%" PRIu64
-      " wait_range=[%" PRIu64 ", +%" PRIhsz "] signal_range=[%" PRIu64
-      ", +%" PRIhsz "]",
-      queue_affinity, wait_semaphore_count, signal_semaphore_count,
+      " wait_count=%" PRIu64 " signal_count=%" PRIu64 " wait_range=[%" PRIu64
+      ", +%" PRIhsz "] signal_range=[%" PRIu64 ", +%" PRIhsz "]",
+      wait_semaphore_count, signal_semaphore_count,
       payload_range->offset + layout->wait_payloads_offset,
       layout->wait_payloads_size,
       payload_range->offset + layout->signal_payloads_offset,
@@ -421,19 +419,17 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           &signal_size, &constants_offset, &bindings_offset, &bindings_size));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
-          " executable_id=%" PRIu64 " queue_affinity=%" PRIu64
-          " function_ordinal=%" PRIu32 " flags=0x%08" PRIx32
-          " workgroup_count=[%" PRIu32 ",%" PRIu32 ",%" PRIu32
-          "] workgroup_size=[%" PRIu32 ",%" PRIu32 ",%" PRIu32
+          " executable_id=%" PRIu64 " function_ordinal=%" PRIu32
+          " flags=0x%08" PRIx32 " workgroup_count=[%" PRIu32 ",%" PRIu32
+          ",%" PRIu32 "] workgroup_size=[%" PRIu32 ",%" PRIu32 ",%" PRIu32
           "] wait_count=%" PRIu64 " signal_count=%" PRIu64
           " constants_range=[%" PRIu64 ", +%" PRIu64
           "] bindings_range=[%" PRIu64 ", +%" PRIhsz "]",
-          payload.executable_id, payload.queue_affinity,
-          payload.function_ordinal, payload.flags, payload.workgroup_count[0],
-          payload.workgroup_count[1], payload.workgroup_count[2],
-          payload.workgroup_size[0], payload.workgroup_size[1],
-          payload.workgroup_size[2], payload.wait_semaphore_count,
-          payload.signal_semaphore_count,
+          payload.executable_id, payload.function_ordinal, payload.flags,
+          payload.workgroup_count[0], payload.workgroup_count[1],
+          payload.workgroup_count[2], payload.workgroup_size[0],
+          payload.workgroup_size[1], payload.workgroup_size[2],
+          payload.wait_semaphore_count, payload.signal_semaphore_count,
           payload_range->offset + constants_offset, payload.constants_length,
           payload_range->offset + bindings_offset, bindings_size));
       return iree_hal_replay_dump_append_text_buffer_ref(
@@ -705,14 +701,13 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           (iree_host_size_t)payload.wait_semaphore_count,
           (iree_host_size_t)payload.signal_semaphore_count);
     }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT: {
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_WAIT: {
       if (record->payload.data_length <
-          sizeof(iree_hal_replay_device_queue_atomic_wait_payload_t)) {
-        return iree_make_status(
-            IREE_STATUS_DATA_LOSS,
-            "replay device queue atomic wait payload is short");
+          sizeof(iree_hal_replay_queue_atomic_wait_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay queue atomic wait payload is short");
       }
-      iree_hal_replay_device_queue_atomic_wait_payload_t payload;
+      iree_hal_replay_queue_atomic_wait_payload_t payload;
       memcpy(&payload, record->payload.data, sizeof(payload));
       iree_hal_replay_dump_queue_payload_layout_t layout;
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
@@ -720,8 +715,8 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           payload.signal_semaphore_count, /*trailing_payload_length=*/0,
           &layout));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_queue_atomic_header(
-          builder, payload_range, &layout, payload.queue_affinity,
-          payload.wait_semaphore_count, payload.signal_semaphore_count));
+          builder, payload_range, &layout, payload.wait_semaphore_count,
+          payload.signal_semaphore_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_atomic_wait_params(
           builder, &payload.params));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_buffer_ref(
@@ -731,14 +726,13 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           (iree_host_size_t)payload.wait_semaphore_count,
           (iree_host_size_t)payload.signal_semaphore_count);
     }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE: {
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_STORE: {
       if (record->payload.data_length <
-          sizeof(iree_hal_replay_device_queue_atomic_store_payload_t)) {
-        return iree_make_status(
-            IREE_STATUS_DATA_LOSS,
-            "replay device queue atomic store payload is short");
+          sizeof(iree_hal_replay_queue_atomic_store_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay queue atomic store payload is short");
       }
-      iree_hal_replay_device_queue_atomic_store_payload_t payload;
+      iree_hal_replay_queue_atomic_store_payload_t payload;
       memcpy(&payload, record->payload.data, sizeof(payload));
       iree_hal_replay_dump_queue_payload_layout_t layout;
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
@@ -746,8 +740,8 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           payload.signal_semaphore_count, /*trailing_payload_length=*/0,
           &layout));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_queue_atomic_header(
-          builder, payload_range, &layout, payload.queue_affinity,
-          payload.wait_semaphore_count, payload.signal_semaphore_count));
+          builder, payload_range, &layout, payload.wait_semaphore_count,
+          payload.signal_semaphore_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_atomic_store_params(
           builder, &payload.params));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_buffer_ref(
@@ -757,14 +751,13 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           (iree_host_size_t)payload.wait_semaphore_count,
           (iree_host_size_t)payload.signal_semaphore_count);
     }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW: {
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_RMW: {
       if (record->payload.data_length <
-          sizeof(iree_hal_replay_device_queue_atomic_rmw_payload_t)) {
-        return iree_make_status(
-            IREE_STATUS_DATA_LOSS,
-            "replay device queue atomic RMW payload is short");
+          sizeof(iree_hal_replay_queue_atomic_rmw_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay queue atomic RMW payload is short");
       }
-      iree_hal_replay_device_queue_atomic_rmw_payload_t payload;
+      iree_hal_replay_queue_atomic_rmw_payload_t payload;
       memcpy(&payload, record->payload.data, sizeof(payload));
       iree_hal_replay_dump_queue_payload_layout_t layout;
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
@@ -772,10 +765,35 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           payload.signal_semaphore_count, /*trailing_payload_length=*/0,
           &layout));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_queue_atomic_header(
-          builder, payload_range, &layout, payload.queue_affinity,
-          payload.wait_semaphore_count, payload.signal_semaphore_count));
+          builder, payload_range, &layout, payload.wait_semaphore_count,
+          payload.signal_semaphore_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_atomic_rmw_params(
           builder, &payload.params));
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_buffer_ref(
+          builder, "target_ref", &payload.target_ref));
+      return iree_hal_replay_dump_append_text_queue_semaphores(
+          builder, record, &layout,
+          (iree_host_size_t)payload.wait_semaphore_count,
+          (iree_host_size_t)payload.signal_semaphore_count);
+    }
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TIMESTAMP: {
+      if (record->payload.data_length <
+          sizeof(iree_hal_replay_queue_timestamp_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay queue timestamp payload is short");
+      }
+      iree_hal_replay_queue_timestamp_payload_t payload;
+      memcpy(&payload, record->payload.data, sizeof(payload));
+      iree_hal_replay_dump_queue_payload_layout_t layout;
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
+          record, sizeof(payload), payload.wait_semaphore_count,
+          payload.signal_semaphore_count, /*trailing_payload_length=*/0,
+          &layout));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, " flags=0x%016" PRIx64, payload.flags));
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_queue_atomic_header(
+          builder, payload_range, &layout, payload.wait_semaphore_count,
+          payload.signal_semaphore_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_buffer_ref(
           builder, "target_ref", &payload.target_ref));
       return iree_hal_replay_dump_append_text_queue_semaphores(

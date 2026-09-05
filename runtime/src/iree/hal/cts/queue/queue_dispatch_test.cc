@@ -25,6 +25,11 @@ class QueueDispatchTest : public CtsTestBase<> {
     CtsTestBase::SetUp();
     if (HasFatalFailure() || IsSkipped()) return;
 
+    dispatch_queue_ =
+        QueueForCommandCategories(IREE_HAL_COMMAND_CATEGORY_DISPATCH);
+    if (!dispatch_queue_) {
+      GTEST_SKIP() << "device has no provisioned dispatch-capable queue";
+    }
     LoadExecutableOrSkipUnsupported(
         "command_buffer_dispatch_constants_bindings_test.bin", &executable_);
   }
@@ -35,6 +40,7 @@ class QueueDispatchTest : public CtsTestBase<> {
     CtsTestBase::TearDown();
   }
 
+  iree_hal_queue_t* dispatch_queue_ = nullptr;
   iree_hal_executable_t* executable_ = nullptr;
 };
 
@@ -75,9 +81,9 @@ TEST_P(QueueDispatchTest, DispatchWithConstantsAndBindings) {
 
   SemaphoreList empty_wait;
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, empty_wait, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -116,9 +122,9 @@ TEST_P(QueueDispatchTest, DispatchWithBorrowedResourceLifetimes) {
 
   SemaphoreList empty_wait;
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, empty_wait, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -168,9 +174,9 @@ TEST_P(QueueDispatchTest, DispatchWithConstantsAndBindingsWhileProfiling) {
 
   SemaphoreList empty_wait;
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, empty_wait, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -235,9 +241,9 @@ TEST_P(QueueDispatchTest, DispatchHostQueueEventProfiling) {
 
   SemaphoreList empty_wait;
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, empty_wait, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -321,9 +327,9 @@ TEST_P(QueueDispatchTest, DispatchDeviceQueueEventProfiling) {
 
   SemaphoreList empty_wait;
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, empty_wait, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -402,9 +408,9 @@ TEST_P(QueueDispatchTest, DispatchProfileFilterCanSkipDirectDispatchEvents) {
 
   SemaphoreList empty_wait;
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, empty_wait, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -450,9 +456,9 @@ TEST_P(QueueDispatchTest, NoopDispatchSignalsAndDoesNotTouchBuffers) {
 
   SemaphoreList empty_wait;
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, empty_wait, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(0, 0, 0), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -490,9 +496,9 @@ TEST_P(QueueDispatchTest, DeferredNoopDispatch) {
 
   SemaphoreList dispatch_wait(device_, {0}, {1});
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, dispatch_wait, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, dispatch_wait, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(0, 0, 0), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
 
@@ -538,9 +544,9 @@ TEST_P(QueueDispatchTest, DeferredWaitBeforeSignalDispatch) {
 
   SemaphoreList dispatch_wait(device_, {0}, {1});
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, dispatch_wait, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, dispatch_wait, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
 
@@ -574,6 +580,11 @@ class QueueDispatchIndirectParametersTest : public CtsTestBase<> {
     CtsTestBase::SetUp();
     if (HasFatalFailure() || IsSkipped()) return;
 
+    dispatch_queue_ =
+        QueueForCommandCategories(IREE_HAL_COMMAND_CATEGORY_DISPATCH);
+    if (!dispatch_queue_) {
+      GTEST_SKIP() << "device has no dispatch-capable queue";
+    }
     LoadExecutableOrSkipUnsupported(
         "command_buffer_dispatch_multi_workgroup_test.bin", &executable_);
   }
@@ -660,9 +671,9 @@ class QueueDispatchIndirectParametersTest : public CtsTestBase<> {
         parameter_buffer, /*offset=*/0, parameter_ref_length);
 
     SemaphoreList dispatch_signal(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, update_signal, dispatch_signal,
-        executable_, iree_hal_executable_function_from_index(0), config,
+    IREE_ASSERT_OK(iree_hal_queue_dispatch(
+        dispatch_queue_, update_signal, dispatch_signal, executable_,
+        iree_hal_executable_function_from_index(0), config,
         iree_const_byte_span_empty(), bindings, flags));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
         dispatch_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -715,6 +726,7 @@ class QueueDispatchIndirectParametersTest : public CtsTestBase<> {
     ExpectQueueDeviceEventsWithinClockCorrelationRange(sink);
   }
 
+  iree_hal_queue_t* dispatch_queue_ = nullptr;
   iree_hal_executable_t* executable_ = nullptr;
 };
 

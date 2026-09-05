@@ -627,12 +627,12 @@ static iree_status_t loom_run_hal_queue_dispatch_prepare_options(
   return iree_ok_status();
 }
 
-static iree_status_t loom_run_hal_queue_dispatch_execute_on_device(
-    iree_hal_device_t* device, loom_run_hal_queue_dispatch_t* dispatch,
+static iree_status_t loom_run_hal_queue_dispatch_execute_on_queue(
+    iree_hal_queue_t* queue, loom_run_hal_queue_dispatch_t* dispatch,
     const loom_run_hal_binding_list_t* binding_list) {
-  if (device == NULL) {
+  if (queue == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "HAL device is not initialized");
+                            "HAL dispatch queue is not initialized");
   }
   if (dispatch->executable == NULL || dispatch->semaphore == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -663,10 +663,10 @@ static iree_status_t loom_run_hal_queue_dispatch_execute_on_device(
       .semaphores = &dispatch->semaphore,
       .payload_values = &signal_value,
   };
-  iree_status_t status = iree_hal_device_queue_dispatch(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores, signal_semaphores,
-      dispatch->executable, dispatch->function, dispatch->config, constants,
-      bindings, IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES);
+  iree_status_t status = iree_hal_queue_dispatch(
+      queue, wait_semaphores, signal_semaphores, dispatch->executable,
+      dispatch->function, dispatch->config, constants, bindings,
+      IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES);
   if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_wait(dispatch->semaphore, signal_value,
                                      iree_infinite_timeout(),
@@ -679,15 +679,16 @@ static iree_status_t loom_run_hal_queue_dispatch_execute_on_device(
 }
 
 iree_status_t loom_run_hal_dispatch(
-    iree_hal_device_t* device, iree_hal_executable_t* executable,
+    iree_hal_device_t* device, iree_hal_queue_t* queue,
+    iree_hal_executable_t* executable,
     const loom_run_hal_binding_list_t* binding_list,
     const loom_run_hal_invocation_options_t* options) {
   loom_run_hal_queue_dispatch_t dispatch = {0};
   iree_status_t status = loom_run_hal_queue_dispatch_prepare_options(
       device, executable, options, binding_list->count, &dispatch);
   if (iree_status_is_ok(status)) {
-    status = loom_run_hal_queue_dispatch_execute_on_device(device, &dispatch,
-                                                           binding_list);
+    status = loom_run_hal_queue_dispatch_execute_on_queue(queue, &dispatch,
+                                                          binding_list);
   }
   loom_run_hal_queue_dispatch_deinitialize(&dispatch);
   return status;
@@ -703,8 +704,8 @@ iree_status_t loom_run_hal_invocation_execute(
   iree_status_t status = loom_run_hal_prepared_candidate_prepare(
       runtime, artifact, host_allocator, &candidate);
   if (iree_status_is_ok(status)) {
-    status = loom_run_hal_dispatch(runtime->device, candidate.executable,
-                                   binding_list, options);
+    status = loom_run_hal_dispatch(runtime->device, runtime->dispatch_queue,
+                                   candidate.executable, binding_list, options);
   }
   loom_run_hal_prepared_candidate_deinitialize(&candidate);
   return status;
@@ -1130,8 +1131,8 @@ iree_status_t loom_run_hal_queue_dispatch_execute(
     const loom_run_hal_runtime_t* runtime,
     loom_run_hal_queue_dispatch_t* dispatch,
     const loom_run_hal_binding_list_t* binding_list) {
-  return loom_run_hal_queue_dispatch_execute_on_device(runtime->device,
-                                                       dispatch, binding_list);
+  return loom_run_hal_queue_dispatch_execute_on_queue(runtime->dispatch_queue,
+                                                      dispatch, binding_list);
 }
 
 iree_status_t loom_run_hal_dispatch_batch_prepare(
@@ -1680,8 +1681,8 @@ iree_status_t loom_run_hal_invocation_dispatch_plan(
         out_iteration->bindings.count, &dispatch);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_run_hal_queue_dispatch_execute_on_device(
-        runtime->device, &dispatch, &out_iteration->bindings);
+    status = loom_run_hal_queue_dispatch_execute_on_queue(
+        runtime->dispatch_queue, &dispatch, &out_iteration->bindings);
   }
   if (iree_status_is_ok(status)) {
     out_iteration->dispatch_completion.semaphore = dispatch.semaphore;

@@ -1808,8 +1808,7 @@ static iree_status_t iree_hal_task_queue_drain_host_call(
   // Execute the user function.
   if (iree_status_is_ok(status)) {
     iree_hal_host_call_context_t context = {
-        .device = operation->host_call.device,
-        .queue_affinity = operation->host_call.queue_affinity,
+        .queue = operation->host_call.queue,
         .signal_semaphore_list = is_nonblocking
                                      ? iree_hal_semaphore_list_empty()
                                      : operation->signal_semaphores,
@@ -3917,9 +3916,7 @@ iree_status_t iree_hal_task_queue_submit_commands(
 }
 
 iree_status_t iree_hal_task_queue_submit_host_call(
-    iree_hal_task_queue_t* queue, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_semaphore_list_t wait_semaphores,
+    iree_hal_task_queue_t* queue, iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores, iree_hal_host_call_t call,
     const uint64_t args[4], iree_hal_host_call_flags_t flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -3936,8 +3933,7 @@ iree_status_t iree_hal_task_queue_submit_host_call(
   iree_task_scope_begin(&queue->scope);
 
   // Store host call parameters.
-  operation->host_call.device = device;
-  operation->host_call.queue_affinity = queue_affinity;
+  operation->host_call.queue = &queue->base;
   operation->host_call.call = call;
   memcpy(operation->host_call.args, args, sizeof(operation->host_call.args));
   operation->host_call.flags = flags;
@@ -4958,6 +4954,99 @@ static iree_status_t iree_hal_task_queue_execute(
                                              /*batch_count=*/1, &batch);
 }
 
+static iree_status_t iree_hal_task_queue_host_call(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_host_call_t call, const uint64_t args[4],
+    iree_hal_host_call_flags_t flags) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+  return iree_hal_task_queue_submit_host_call(
+      (iree_hal_task_queue_t*)base_queue, wait_semaphore_list,
+      signal_semaphore_list, call, args, flags);
+}
+
+static iree_status_t iree_hal_task_queue_dispatch(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_executable_t* executable, iree_hal_executable_function_t function,
+    const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
+    const iree_hal_buffer_ref_list_t bindings,
+    iree_hal_dispatch_flags_t flags) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+  return iree_hal_task_queue_submit_dispatch(
+      (iree_hal_task_queue_t*)base_queue, executable, function, config,
+      constants, bindings.values, bindings.count, flags, wait_semaphore_list,
+      signal_semaphore_list);
+}
+
+static iree_status_t iree_hal_task_queue_check_atomic_width(
+    iree_hal_atomic_width_t width) {
+  if (IREE_UNLIKELY(!iree_hal_task_atomic_width_is_lock_free(width))) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "task queues do not support lock-based "
+                            "%u-bit atomic operations",
+                            width);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_task_queue_atomic_wait(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+  IREE_RETURN_IF_ERROR(iree_hal_task_queue_check_atomic_width(params.width));
+  return iree_hal_task_queue_submit_atomic_wait(
+      (iree_hal_task_queue_t*)base_queue, target_buffer, target_offset, params,
+      wait_semaphore_list, signal_semaphore_list);
+}
+
+static iree_status_t iree_hal_task_queue_atomic_store(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+  IREE_RETURN_IF_ERROR(iree_hal_task_queue_check_atomic_width(params.width));
+  return iree_hal_task_queue_submit_atomic_store(
+      (iree_hal_task_queue_t*)base_queue, target_buffer, target_offset, params,
+      wait_semaphore_list, signal_semaphore_list);
+}
+
+static iree_status_t iree_hal_task_queue_atomic_rmw(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+  IREE_RETURN_IF_ERROR(iree_hal_task_queue_check_atomic_width(params.width));
+  return iree_hal_task_queue_submit_atomic_rmw(
+      (iree_hal_task_queue_t*)base_queue, target_buffer, target_offset, params,
+      wait_semaphore_list, signal_semaphore_list);
+}
+
+static iree_status_t iree_hal_task_queue_timestamp(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)target_buffer;
+  (void)target_offset;
+  (void)flags;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "task device-side timestamps not implemented");
+}
+
 static iree_status_t iree_hal_task_queue_flush(iree_hal_queue_t* base_queue) {
   IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
   return iree_ok_status();
@@ -5011,6 +5100,12 @@ static const iree_hal_queue_vtable_t iree_hal_task_queue_vtable = {
     .destroy = iree_hal_task_queue_destroy,
     .barrier = iree_hal_task_queue_barrier,
     .execute = iree_hal_task_queue_execute,
+    .host_call = iree_hal_task_queue_host_call,
+    .dispatch = iree_hal_task_queue_dispatch,
+    .atomic_wait = iree_hal_task_queue_atomic_wait,
+    .atomic_store = iree_hal_task_queue_atomic_store,
+    .atomic_rmw = iree_hal_task_queue_atomic_rmw,
+    .timestamp = iree_hal_task_queue_timestamp,
     .flush = iree_hal_task_queue_flush,
     .alloca = iree_hal_task_queue_alloca,
     .dealloca = iree_hal_task_queue_dealloca,

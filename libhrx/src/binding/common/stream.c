@@ -1465,10 +1465,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
           .payload_values = &signal_value,
       };
       if (iree_status_is_ok(status)) {
-        status = iree_hal_device_queue_dispatch(
-            stream->context->device,
-            iree_hal_streaming_queue_family_affinity(stream->queue),
-            wait_semaphores, signal_semaphores, symbol->executable,
+        status = iree_hal_queue_dispatch(
+            stream->queue, wait_semaphores, signal_semaphores,
+            symbol->executable,
             iree_hal_executable_function_from_index(symbol->export_ordinal),
             config,
             iree_make_const_byte_span(arguments.constants,
@@ -1617,10 +1616,8 @@ iree_status_t iree_hal_streaming_queue_host_call(
       .payload_values = &signal_value,
   };
 
-  status = iree_hal_device_queue_host_call(
-      stream->context->device,
-      iree_hal_streaming_queue_family_affinity(stream->queue), wait_semaphores,
-      signal_semaphores, call, args, flags);
+  status = iree_hal_queue_host_call(stream->queue, wait_semaphores,
+                                    signal_semaphores, call, args, flags);
   if (iree_status_is_ok(status)) {
     stream->pending_value = signal_value;
   }

@@ -24,7 +24,6 @@
 #include "iree/hal/drivers/amdgpu/logical_device.h"
 #include "iree/hal/drivers/amdgpu/physical_device.h"
 #include "iree/hal/drivers/amdgpu/pm4_command_buffer.h"
-#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_emitter.h"
 #include "iree/io/file_contents.h"
@@ -120,8 +119,9 @@ static iree_hal_buffer_ref_list_t MakeHostcallBufferBindingList(
 }
 
 static iree_status_t DispatchHostcallBufferDirect(
-    iree_hal_device_t* device, iree_hal_executable_t* executable,
-    iree_hal_buffer_t* output_buffer, uint64_t* out_device_address) {
+    iree_hal_device_t* device, iree_hal_queue_t* queue,
+    iree_hal_executable_t* executable, iree_hal_buffer_t* output_buffer,
+    uint64_t* out_device_address) {
   Ref<iree_hal_semaphore_t> signal;
   IREE_RETURN_IF_ERROR(CreateSemaphore(device, signal.out()));
   iree_hal_semaphore_t* signal_ptr = signal.get();
@@ -132,9 +132,9 @@ static iree_status_t DispatchHostcallBufferDirect(
       /*.payload_values=*/&signal_value,
   };
   iree_hal_buffer_ref_t binding;
-  IREE_RETURN_IF_ERROR(iree_hal_device_queue_dispatch(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      signal_list, executable, iree_hal_executable_function_from_index(0),
+  IREE_RETURN_IF_ERROR(iree_hal_queue_dispatch(
+      queue, iree_hal_semaphore_list_empty(), signal_list, executable,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1),
       iree_const_byte_span_empty(),
       MakeHostcallBufferBindingList(output_buffer, &binding),
@@ -856,10 +856,10 @@ TEST_F(HostQueueCommandBufferTest,
       /*.semaphores=*/&dispatch_signal_ptr,
       /*.payload_values=*/&normal_signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), normal_signal_semaphores, executable,
-      normal_function, iree_hal_make_static_dispatch_config(1, 1, 1),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      test_device.queue(), iree_hal_semaphore_list_empty(),
+      normal_signal_semaphores, executable, normal_function,
+      iree_hal_make_static_dispatch_config(1, 1, 1),
       iree_make_const_byte_span(normal_constants, sizeof(normal_constants)),
       normal_bindings, IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(dispatch_signal, normal_signal_value,
@@ -890,10 +890,9 @@ TEST_F(HostQueueCommandBufferTest,
         /*.semaphores=*/&dispatch_signal_ptr,
         /*.payload_values=*/&signal_value,
     };
-    return iree_hal_device_queue_dispatch(
-        test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-        iree_hal_semaphore_list_empty(), signal_semaphores, executable,
-        function, iree_hal_make_static_dispatch_config(1, 1, 1),
+    return iree_hal_queue_dispatch(
+        test_device.queue(), iree_hal_semaphore_list_empty(), signal_semaphores,
+        executable, function, iree_hal_make_static_dispatch_config(1, 1, 1),
         iree_make_const_byte_span(native_arguments.data(),
                                   native_arguments.size()),
         iree_hal_buffer_ref_list_empty(),
@@ -1013,9 +1012,9 @@ TEST_F(HostQueueCommandBufferTest,
       test_device.allocator(), sizeof(uint64_t), output_buffer.out()));
 
   uint64_t null_direct_address = UINT64_MAX;
-  IREE_ASSERT_OK(DispatchHostcallBufferDirect(test_device.base_device(),
-                                              executable, output_buffer,
-                                              &null_direct_address));
+  IREE_ASSERT_OK(DispatchHostcallBufferDirect(
+      test_device.base_device(), test_device.queue(), executable, output_buffer,
+      &null_direct_address));
   EXPECT_EQ(null_direct_address, 0u);
 
   Ref<iree_hal_command_buffer_t> null_command_buffer;
@@ -1035,8 +1034,9 @@ TEST_F(HostQueueCommandBufferTest,
       test_device.logical_device()->physical_devices[0],
       kHostcallBufferAddress);
   uint64_t direct_address = 0;
-  IREE_ASSERT_OK(DispatchHostcallBufferDirect(
-      test_device.base_device(), executable, output_buffer, &direct_address));
+  IREE_ASSERT_OK(DispatchHostcallBufferDirect(test_device.base_device(),
+                                              test_device.queue(), executable,
+                                              output_buffer, &direct_address));
   EXPECT_EQ(direct_address, kHostcallBufferAddress);
 
   Ref<iree_hal_command_buffer_t> command_buffer;

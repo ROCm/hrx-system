@@ -23,6 +23,11 @@ class ExecutableTest : public CtsTestBase<> {
     CtsTestBase::SetUp();
     if (HasFatalFailure() || IsSkipped()) return;
 
+    dispatch_queue_ =
+        QueueForCommandCategories(IREE_HAL_COMMAND_CATEGORY_DISPATCH);
+    if (!dispatch_queue_) {
+      GTEST_SKIP() << "device has no dispatch-capable queue";
+    }
     LoadExecutableOrSkipUnsupported("executable_test.bin", &executable_);
   }
 
@@ -46,6 +51,7 @@ class ExecutableTest : public CtsTestBase<> {
     return info.parameter_count != 0;
   }
 
+  iree_hal_queue_t* dispatch_queue_ = nullptr;
   iree_hal_executable_t* executable_ = nullptr;
 };
 
@@ -243,9 +249,9 @@ TEST_P(ExecutableTest, GlobalBufferVisibleToDispatch) {
       iree_make_const_byte_span(constant_data, sizeof(constant_data));
 
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, update_signal, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, update_signal, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(

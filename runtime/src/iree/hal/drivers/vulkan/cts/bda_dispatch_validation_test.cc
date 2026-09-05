@@ -44,6 +44,11 @@ class BdaDispatchValidationTest : public CtsTestBase<> {
     CtsTestBase::SetUp();
     if (HasFatalFailure() || IsSkipped()) return;
 
+    dispatch_queue_ =
+        QueueForCommandCategories(IREE_HAL_COMMAND_CATEGORY_DISPATCH);
+    if (!dispatch_queue_) {
+      GTEST_SKIP() << "device has no dispatch-capable queue";
+    }
     const iree_hal_executable_target_selection_result_t target_result =
         SelectExecutableTarget(IREE_SV("spirv"), IREE_SV("vulkan1.3+bda"));
     ASSERT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
@@ -104,6 +109,7 @@ class BdaDispatchValidationTest : public CtsTestBase<> {
 
   static constexpr uint32_t constant_data_[2] = {3, 10};
 
+  iree_hal_queue_t* dispatch_queue_ = nullptr;
   const iree_hal_executable_target_t* executable_target_ = nullptr;
   iree_hal_executable_t* executable_ = nullptr;
   iree_hal_executable_t* requirement_executable_ = nullptr;
@@ -123,14 +129,13 @@ TEST_P(BdaDispatchValidationTest, QueueDispatchRejectsBindingCountMismatch) {
       /*.values=*/binding_refs,
   };
 
-  EXPECT_THAT(
-      Status(iree_hal_device_queue_dispatch(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-          iree_hal_semaphore_list_empty(), executable_,
-          iree_hal_executable_function_from_index(0),
-          iree_hal_make_static_dispatch_config(1, 1, 1), constants(), bindings,
-          IREE_HAL_DISPATCH_FLAG_NONE)),
-      StatusIs(StatusCode::kInvalidArgument));
+  EXPECT_THAT(Status(iree_hal_queue_dispatch(
+                  dispatch_queue_, iree_hal_semaphore_list_empty(),
+                  iree_hal_semaphore_list_empty(), executable_,
+                  iree_hal_executable_function_from_index(0),
+                  iree_hal_make_static_dispatch_config(1, 1, 1), constants(),
+                  bindings, IREE_HAL_DISPATCH_FLAG_NONE)),
+              StatusIs(StatusCode::kInvalidArgument));
 
   iree_hal_buffer_release(output_buffer);
   iree_hal_buffer_release(input_buffer);
@@ -184,14 +189,13 @@ TEST_P(BdaDispatchValidationTest, QueueDispatchRejectsEmptyBindingRange) {
       /*.values=*/binding_refs,
   };
 
-  EXPECT_THAT(
-      Status(iree_hal_device_queue_dispatch(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-          iree_hal_semaphore_list_empty(), executable_,
-          iree_hal_executable_function_from_index(0),
-          iree_hal_make_static_dispatch_config(1, 1, 1), constants(), bindings,
-          IREE_HAL_DISPATCH_FLAG_NONE)),
-      StatusIs(StatusCode::kInvalidArgument));
+  EXPECT_THAT(Status(iree_hal_queue_dispatch(
+                  dispatch_queue_, iree_hal_semaphore_list_empty(),
+                  iree_hal_semaphore_list_empty(), executable_,
+                  iree_hal_executable_function_from_index(0),
+                  iree_hal_make_static_dispatch_config(1, 1, 1), constants(),
+                  bindings, IREE_HAL_DISPATCH_FLAG_NONE)),
+              StatusIs(StatusCode::kInvalidArgument));
 
   iree_hal_buffer_release(output_buffer);
   iree_hal_buffer_release(input_buffer);
@@ -257,8 +261,8 @@ TEST_P(BdaDispatchValidationTest, QueueDispatchRejectsMinimumBindingLength) {
   };
 
   EXPECT_THAT(
-      Status(iree_hal_device_queue_dispatch(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+      Status(iree_hal_queue_dispatch(
+          dispatch_queue_, iree_hal_semaphore_list_empty(),
           iree_hal_semaphore_list_empty(), requirement_executable_,
           iree_hal_executable_function_from_index(0),
           iree_hal_make_static_dispatch_config(1, 1, 1),
@@ -335,8 +339,8 @@ TEST_P(BdaDispatchValidationTest, QueueDispatchRejectsMinimumBindingAlignment) {
   };
 
   EXPECT_THAT(
-      Status(iree_hal_device_queue_dispatch(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+      Status(iree_hal_queue_dispatch(
+          dispatch_queue_, iree_hal_semaphore_list_empty(),
           iree_hal_semaphore_list_empty(), requirement_executable_,
           iree_hal_executable_function_from_index(0),
           iree_hal_make_static_dispatch_config(1, 1, 1),

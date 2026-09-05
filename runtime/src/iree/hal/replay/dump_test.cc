@@ -216,11 +216,10 @@ static std::vector<uint8_t> MakeAtomicReplayFileStorage() {
                      IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_RMW),
                  command_rmw);
 
-  iree_hal_replay_device_queue_atomic_wait_payload_t queue_wait = {};
+  iree_hal_replay_queue_atomic_wait_payload_t queue_wait = {};
   queue_wait.target_ref.buffer_id = 10;
   queue_wait.target_ref.offset = 4;
   queue_wait.target_ref.length = 4;
-  queue_wait.queue_affinity = 2;
   queue_wait.wait_semaphore_count = 1;
   queue_wait.signal_semaphore_count = 1;
   queue_wait.params.value = 68;
@@ -235,19 +234,17 @@ static std::vector<uint8_t> MakeAtomicReplayFileStorage() {
   iree_hal_replay_semaphore_timepoint_payload_t queue_wait_signal = {};
   queue_wait_signal.semaphore_id = 51;
   queue_wait_signal.value = 6;
-  AppendQueueAtomicRecord(
-      &builder,
-      MakeAtomicRecordMetadata(
-          3, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
-          IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT,
-          IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_WAIT),
-      queue_wait, queue_wait_wait, queue_wait_signal);
+  AppendQueueAtomicRecord(&builder,
+                          MakeAtomicRecordMetadata(
+                              3, IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+                              IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_WAIT,
+                              IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_WAIT),
+                          queue_wait, queue_wait_wait, queue_wait_signal);
 
-  iree_hal_replay_device_queue_atomic_store_payload_t queue_store = {};
+  iree_hal_replay_queue_atomic_store_payload_t queue_store = {};
   queue_store.target_ref.buffer_id = 11;
   queue_store.target_ref.offset = 8;
   queue_store.target_ref.length = 8;
-  queue_store.queue_affinity = 4;
   queue_store.wait_semaphore_count = 1;
   queue_store.signal_semaphore_count = 1;
   queue_store.params.value = 85;
@@ -262,16 +259,15 @@ static std::vector<uint8_t> MakeAtomicReplayFileStorage() {
   AppendQueueAtomicRecord(
       &builder,
       MakeAtomicRecordMetadata(
-          4, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
-          IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE,
-          IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE),
+          4, IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+          IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_STORE,
+          IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_STORE),
       queue_store, queue_store_wait, queue_store_signal);
 
-  iree_hal_replay_device_queue_atomic_rmw_payload_t queue_rmw = {};
+  iree_hal_replay_queue_atomic_rmw_payload_t queue_rmw = {};
   queue_rmw.target_ref.buffer_id = 12;
   queue_rmw.target_ref.offset = 16;
   queue_rmw.target_ref.length = 8;
-  queue_rmw.queue_affinity = 8;
   queue_rmw.wait_semaphore_count = 1;
   queue_rmw.signal_semaphore_count = 1;
   queue_rmw.params.operand = 102;
@@ -286,10 +282,9 @@ static std::vector<uint8_t> MakeAtomicReplayFileStorage() {
   queue_rmw_signal.value = 10;
   AppendQueueAtomicRecord(
       &builder,
-      MakeAtomicRecordMetadata(
-          5, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
-          IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW,
-          IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_RMW),
+      MakeAtomicRecordMetadata(5, IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+                               IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_RMW,
+                               IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_RMW),
       queue_rmw, queue_rmw_wait, queue_rmw_signal);
 
   return builder.Finish();
@@ -1102,7 +1097,7 @@ TEST(ReplayDumpTest, EmitsAtomicOperations) {
   EXPECT_THAT(text_output,
               HasSubstr("operand=0x0000000000000033 flags=0x00000007 width=64 "
                         "operation=xor(4)"));
-  EXPECT_THAT(text_output, HasSubstr("payload=device_queue_atomic_wait"));
+  EXPECT_THAT(text_output, HasSubstr("payload=queue_atomic_wait"));
   EXPECT_THAT(text_output,
               HasSubstr("value=0x0000000000000044 mask=0x00000000000000ff "
                         "flags=0x00000007 width=32 "
@@ -1111,10 +1106,10 @@ TEST(ReplayDumpTest, EmitsAtomicOperations) {
               HasSubstr("wait_semaphores=[{semaphore_id=41 value=5}]"));
   EXPECT_THAT(text_output,
               HasSubstr("signal_semaphores=[{semaphore_id=51 value=6}]"));
-  EXPECT_THAT(text_output, HasSubstr("payload=device_queue_atomic_store"));
+  EXPECT_THAT(text_output, HasSubstr("payload=queue_atomic_store"));
   EXPECT_THAT(text_output,
               HasSubstr("value=0x0000000000000055 flags=0x00000007 width=64"));
-  EXPECT_THAT(text_output, HasSubstr("payload=device_queue_atomic_rmw"));
+  EXPECT_THAT(text_output, HasSubstr("payload=queue_atomic_rmw"));
   EXPECT_THAT(text_output,
               HasSubstr("operand=0x0000000000000066 flags=0x00000007 width=64 "
                         "operation=subtract(1)"));
@@ -1145,11 +1140,9 @@ TEST(ReplayDumpTest, EmitsAtomicOperations) {
   EXPECT_THAT(json_output,
               HasSubstr("\"operand\":51,\"flags\":7,\"width\":64,"
                         "\"operation\":4,\"operation_name\":\"xor\""));
-  EXPECT_THAT(json_output,
-              HasSubstr("\"payload_type\":\"device_queue_atomic_wait\""));
-  EXPECT_THAT(json_output,
-              HasSubstr("\"queue_affinity\":2,\"wait_semaphore_count\":1,"
-                        "\"signal_semaphore_count\":1"));
+  EXPECT_THAT(json_output, HasSubstr("\"payload_type\":\"queue_atomic_wait\""));
+  EXPECT_THAT(json_output, HasSubstr("\"wait_semaphore_count\":1,"
+                                     "\"signal_semaphore_count\":1"));
   EXPECT_THAT(json_output, HasSubstr("\"condition\":2,\"condition_name\":"
                                      "\"unsigned_greater_equal\""));
   EXPECT_THAT(json_output,
@@ -1159,13 +1152,12 @@ TEST(ReplayDumpTest, EmitsAtomicOperations) {
               HasSubstr("\"signal_semaphores\":[{\"semaphore_id\":51,"
                         "\"value\":6}]"));
   EXPECT_THAT(json_output,
-              HasSubstr("\"payload_type\":\"device_queue_atomic_store\""));
+              HasSubstr("\"payload_type\":\"queue_atomic_store\""));
   EXPECT_THAT(json_output, HasSubstr("\"value\":85,\"flags\":7,\"width\":64"));
   EXPECT_THAT(json_output,
               HasSubstr("\"target_ref\":{\"buffer_id\":11,\"offset\":8,"
                         "\"length\":8,\"buffer_slot\":0}"));
-  EXPECT_THAT(json_output,
-              HasSubstr("\"payload_type\":\"device_queue_atomic_rmw\""));
+  EXPECT_THAT(json_output, HasSubstr("\"payload_type\":\"queue_atomic_rmw\""));
   EXPECT_THAT(json_output,
               HasSubstr("\"operand\":102,\"flags\":7,\"width\":64,"
                         "\"operation\":1,\"operation_name\":\"subtract\""));
@@ -1204,14 +1196,13 @@ TEST(ReplayDumpTest, RejectsMalformedAtomicPayloadLayouts) {
                          &options, &output));
 
   ReplayFileBuilder queue_builder(/*capacity=*/4096);
-  iree_hal_replay_device_queue_atomic_wait_payload_t queue_payload = {};
+  iree_hal_replay_queue_atomic_wait_payload_t queue_payload = {};
   queue_payload.wait_semaphore_count = 1;
-  queue_builder.Append(
-      MakeAtomicRecordMetadata(
-          0, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
-          IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT,
-          IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_WAIT),
-      queue_payload);
+  queue_builder.Append(MakeAtomicRecordMetadata(
+                           0, IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+                           IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_WAIT,
+                           IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_WAIT),
+                       queue_payload);
   std::vector<uint8_t> malformed_queue_storage = queue_builder.Finish();
 
   options.format = IREE_HAL_REPLAY_DUMP_FORMAT_TEXT;

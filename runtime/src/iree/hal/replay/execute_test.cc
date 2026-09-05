@@ -1511,13 +1511,15 @@ TEST(ReplayExecuteTest, RejectsUnsupportedHostCallRecord) {
 
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
+  iree_hal_queue_t* queue = iree_hal_device_queue(
+      wrapped_device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+  ASSERT_NE(nullptr, queue);
   iree_hal_host_call_t call =
       iree_hal_make_host_call(NoopHostCall, /*user_data=*/nullptr);
   const uint64_t args[4] = {0, 0, 0, 0};
-  IREE_ASSERT_OK(iree_hal_device_queue_host_call(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), iree_hal_semaphore_list_empty(), call,
-      args, IREE_HAL_HOST_CALL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_host_call(
+      queue, iree_hal_semaphore_list_empty(), iree_hal_semaphore_list_empty(),
+      call, args, IREE_HAL_HOST_CALL_FLAG_NONE));
 
   IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
   iree_hal_device_group_release(wrapped_group);

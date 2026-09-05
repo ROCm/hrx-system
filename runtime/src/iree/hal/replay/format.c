@@ -85,18 +85,6 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "device.create_semaphore";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUERY_QUEUE_POOL_BACKEND:
       return "device.query_queue_pool_backend";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_HOST_CALL:
-      return "device.queue_host_call";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_DISPATCH:
-      return "device.queue_dispatch";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_TIMESTAMP:
-      return "device.queue_timestamp";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_WAIT:
-      return "device.queue_atomic_wait";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE:
-      return "device.queue_atomic_store";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_RMW:
-      return "device.queue_atomic_rmw";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_PROFILING_BEGIN:
       return "device.profiling_begin";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_PROFILING_FLUSH:
@@ -189,6 +177,18 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "queue.execute";
     case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_FLUSH:
       return "queue.flush";
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_HOST_CALL:
+      return "queue.host_call";
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_DISPATCH:
+      return "queue.dispatch";
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_WAIT:
+      return "queue.atomic_wait";
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_STORE:
+      return "queue.atomic_store";
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_RMW:
+      return "queue.atomic_rmw";
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TIMESTAMP:
+      return "queue.timestamp";
     default:
       return "unknown";
   }
@@ -233,12 +233,6 @@ IREE_API_EXPORT const char* iree_hal_replay_payload_type_string(
       return "command_buffer_atomic_store";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_RMW:
       return "command_buffer_atomic_rmw";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT:
-      return "device_queue_atomic_wait";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE:
-      return "device_queue_atomic_store";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW:
-      return "device_queue_atomic_rmw";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT:
       return "provisioned_queue_object";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER:
@@ -257,6 +251,14 @@ IREE_API_EXPORT const char* iree_hal_replay_payload_type_string(
       return "queue_execute";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_FAMILY_COMMAND_BUFFER_OBJECT:
       return "queue_family_command_buffer_object";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_WAIT:
+      return "queue_atomic_wait";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_STORE:
+      return "queue_atomic_store";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_RMW:
+      return "queue_atomic_rmw";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TIMESTAMP:
+      return "queue_timestamp";
     default:
       return "unknown";
   }

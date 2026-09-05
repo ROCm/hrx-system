@@ -104,12 +104,6 @@ static iree_status_t hrx_hal_semaphore_lists_initialize(
   return status;
 }
 
-static iree_hal_queue_affinity_t hrx_normalize_queue_affinity(
-    hrx_queue_affinity_t affinity) {
-  return affinity == 0 ? IREE_HAL_QUEUE_AFFINITY_ANY
-                       : (iree_hal_queue_affinity_t)affinity;
-}
-
 typedef struct hrx_host_call_thunk_t {
   hrx_host_call_fn_t callback;
   void* user_data;
@@ -253,6 +247,14 @@ hrx_status_t hrx_queue_dispatch(
       hrx_iree_dispatch_flags_from_hrx(flags, &hal_flags);
   if (!hrx_status_is_ok(flag_status)) HRX_RETURN_AND_END_ZONE(z0, flag_status);
 
+  iree_hal_queue_t* queue = NULL;
+  iree_status_t status = hrx_hal_device_select_queue(
+      device->hal_device, affinity, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
+      &queue);
+  if (!iree_status_is_ok(status)) {
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
+  }
+
   iree_hal_buffer_ref_t* hal_bindings = NULL;
   if (binding_count > 0) {
     hal_bindings = (iree_hal_buffer_ref_t*)calloc(
@@ -276,7 +278,7 @@ hrx_status_t hrx_queue_dispatch(
   }
 
   hrx_hal_semaphore_lists_t semaphore_lists;
-  iree_status_t status = hrx_hal_semaphore_lists_initialize(
+  status = hrx_hal_semaphore_lists_initialize(
       wait_semaphores, signal_semaphores, &semaphore_lists);
   if (!iree_status_is_ok(status)) {
     free(hal_bindings);
@@ -304,9 +306,8 @@ hrx_status_t hrx_queue_dispatch(
       .values = hal_bindings,
   };
 
-  status = iree_hal_device_queue_dispatch(
-      device->hal_device, hrx_normalize_queue_affinity(affinity),
-      semaphore_lists.wait.list, semaphore_lists.signal.list,
+  status = iree_hal_queue_dispatch(
+      queue, semaphore_lists.wait.list, semaphore_lists.signal.list,
       executable->hal_executable,
       iree_hal_executable_function_from_index(export_ordinal), hal_config,
       hal_constants, hal_binding_list, hal_flags);
@@ -325,6 +326,13 @@ hrx_status_t hrx_queue_host_call(hrx_device_t device,
                            "device or callback is NULL");
   }
 
+  iree_hal_queue_t* queue = NULL;
+  iree_status_t status = hrx_hal_device_select_queue(
+      device->hal_device, affinity, /*required_roles=*/0, &queue);
+  if (!iree_status_is_ok(status)) {
+    return hrx_status_from_iree(status);
+  }
+
   hrx_host_call_thunk_t* thunk =
       (hrx_host_call_thunk_t*)malloc(sizeof(hrx_host_call_thunk_t));
   if (!thunk) {
@@ -335,7 +343,7 @@ hrx_status_t hrx_queue_host_call(hrx_device_t device,
   thunk->user_data = user_data;
 
   hrx_hal_semaphore_lists_t semaphore_lists;
-  iree_status_t status = hrx_hal_semaphore_lists_initialize(
+  status = hrx_hal_semaphore_lists_initialize(
       wait_semaphores, signal_semaphores, &semaphore_lists);
   if (!iree_status_is_ok(status)) {
     free(thunk);
@@ -347,10 +355,9 @@ hrx_status_t hrx_queue_host_call(hrx_device_t device,
       .fn = hrx_queue_host_call_thunk,
       .user_data = thunk,
   };
-  status = iree_hal_device_queue_host_call(
-      device->hal_device, hrx_normalize_queue_affinity(affinity),
-      semaphore_lists.wait.list, semaphore_lists.signal.list, call, args,
-      IREE_HAL_HOST_CALL_FLAG_NONE);
+  status = iree_hal_queue_host_call(queue, semaphore_lists.wait.list,
+                                    semaphore_lists.signal.list, call, args,
+                                    IREE_HAL_HOST_CALL_FLAG_NONE);
   hrx_hal_semaphore_lists_deinitialize(&semaphore_lists);
   if (!iree_status_is_ok(status)) {
     free(thunk);

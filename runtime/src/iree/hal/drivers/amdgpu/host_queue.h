@@ -782,56 +782,6 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_write(
     iree_hal_file_t* target_file, uint64_t target_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags);
 
-// Enqueues a host callback on |queue|.
-iree_status_t iree_hal_amdgpu_host_queue_host_call(
-    iree_hal_amdgpu_host_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_host_call_t call, const uint64_t args[4],
-    iree_hal_host_call_flags_t flags);
-
-// Enqueues a direct executable dispatch on |queue|.
-iree_status_t iree_hal_amdgpu_host_queue_dispatch(
-    iree_hal_amdgpu_host_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_executable_t* executable,
-    iree_hal_executable_function_t export_ordinal,
-    const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
-    const iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags);
-
-// Enqueues an atomic wait on |queue|.
-iree_status_t iree_hal_amdgpu_host_queue_atomic_wait(
-    iree_hal_amdgpu_host_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_atomic_wait_params_t params);
-
-// Enqueues an atomic store on |queue|.
-iree_status_t iree_hal_amdgpu_host_queue_atomic_store(
-    iree_hal_amdgpu_host_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_atomic_store_params_t params);
-
-// Enqueues an atomic read-modify-write operation on |queue|.
-iree_status_t iree_hal_amdgpu_host_queue_atomic_rmw(
-    iree_hal_amdgpu_host_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_atomic_rmw_params_t params);
-
-// Enqueues a device timestamp write on |queue|.
-iree_status_t iree_hal_amdgpu_host_queue_timestamp(
-    iree_hal_amdgpu_host_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_timestamp_flags_t flags);
-
 // Initializes queue-owned TSAN state.
 //
 // This is called after queue creation when logical TSAN is enabled. The queue

@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/math.h"
+#include "iree/hal/atomic.h"
 #include "iree/hal/resource.h"
 
 #ifdef __cplusplus
@@ -18,7 +19,11 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct iree_hal_buffer_t iree_hal_buffer_t;
+typedef struct iree_hal_buffer_ref_list_t iree_hal_buffer_ref_list_t;
 typedef struct iree_hal_command_buffer_t iree_hal_command_buffer_t;
+typedef struct iree_hal_dispatch_config_t iree_hal_dispatch_config_t;
+typedef struct iree_hal_executable_function_t iree_hal_executable_function_t;
+typedef struct iree_hal_executable_t iree_hal_executable_t;
 typedef struct iree_hal_file_t iree_hal_file_t;
 typedef struct iree_hal_pool_t iree_hal_pool_t;
 typedef struct iree_hal_pool_reservation_request_t
@@ -171,6 +176,199 @@ enum iree_hal_queue_execute_flag_bits_t {
   // table entries are still captured before iree_hal_queue_execute returns.
   IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME = 1ull << 0,
 };
+
+// Bitfield specifying flags controlling a dispatch operation.
+typedef uint64_t iree_hal_dispatch_flags_t;
+enum iree_hal_dispatch_flag_bits_t {
+  IREE_HAL_DISPATCH_FLAG_NONE = 0,
+
+  // Workgroup count is loaded from a buffer binding specified as part of the
+  // dispatch configuration. The buffer must contain at least 12 bytes of data
+  // and have 4-byte alignment and represents a `uint32_t workgroup_count[3];`.
+  // Validation for maximum workgroup count on each dimension is not performed
+  // and may cause device failures or undefined behavior if out of range.
+  //
+  // The workgroup count buffer will be read immediately prior to the dispatch
+  // following the prior barrier in order to allow prior transfer or dispatch
+  // operations to produce the new parameters. If the parameters are known to
+  // be static at the time the command buffer is submitted using
+  // IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS can significantly reduce
+  // the overhead of an indirect dispatch.
+  //
+  // When defined the static workgroup_count[] in the dispatch config is
+  // ignored.
+  IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS = 1ull << 0,
+
+  // Indirect parameters such as workgroup count are static at the time the
+  // command buffer is issued. This is in contrast to dynamic parameters that
+  // may be changed by dispatches within the same command buffer. Enabling when
+  // known can lead to lower dispatch overhead.
+  IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS = 1ull << 1,
+
+  // Disables HAL ABI handling. The provided constants are passed through as
+  // the arguments to the dispatch with no additional processing. Any packing,
+  // padding, or alignment must be handled by the user, though aligning to 64
+  // byte boundaries and ensuring padding to `sizeof(iree_device_size_t)` bytes
+  // is usually sufficient.
+  //
+  // Any buffer pointers referenced from within the arguments **WILL NOT BE
+  // RETAINED**. Users are responsible for ensuring the lifetime of any
+  // referenced buffers extends beyond the completion signals of the submitted
+  // operation and behavior is undefined otherwise.
+  IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS = 1ull << 2,
+
+  // Disables HAL ABI handling. Constants will be ignored and only one binding
+  // (`binding[0]`) is allowed that provides the dispatch function arguments.
+  // The length of the binding denotes the total size of the arguments. Any
+  // packing, padding, or alignment must be handled by the user, though aligning
+  // to 64 byte boundaries and ensuring padding to `sizeof(iree_device_size_t)`
+  // bytes is usually sufficient.
+  //
+  // The argument buffer will be retained for the lifetime of the command buffer
+  // (if directly specified) or any submission executing the command buffer (if
+  // specifying via binding table). Any buffer pointers referenced from within
+  // the arguments **WILL NOT BE RETAINED**. Users are responsible for ensuring
+  // the lifetime of any referenced buffers extends beyond the completion
+  // signals of the submitted operation and behavior is undefined otherwise.
+  //
+  // If a buffer is directly referenced the command buffer may lose the ability
+  // to be concurrently executed, as if each submission mutates arguments in the
+  // same location of the same buffer the contents will be undefined. Binding
+  // table references are strongly encouraged to allow reuse.
+  IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_ARGUMENTS = 1ull << 3,
+
+  // Indirect arguments are static at the time the command buffer is issued.
+  // The device is allowed to clone the arguments immediately upon submission.
+  // When omitted the arguments are allowed to change up to the barrier
+  // preceding the dispatch consuming them.
+  IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_ARGUMENTS = 1ull << 4,
+
+  // Advisory hint that the dispatch is trivially cheap: scheduling overhead
+  // may exceed execution time. The queue may execute the dispatch inline on the
+  // submitting thread without multi-worker tile distribution. Queues are free
+  // to ignore this hint and use their normal execution path.
+  IREE_HAL_DISPATCH_FLAG_ALLOW_INLINE_EXECUTION = 1ull << 5,
+
+  // Allows queue dispatch implementations to borrow resource lifetimes instead
+  // of retaining them until the submitted work completes. Callers using this
+  // flag must keep the executable and all directly referenced buffers live and
+  // backed by stable storage until the submission's signal semaphores indicate
+  // completion. Implementations may ignore this hint and retain resources.
+  //
+  // Command buffer dispatches ignore this flag. Command buffer lifetime control
+  // is expressed by command buffer modes such as
+  // IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED.
+  IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES = 1ull << 6,
+};
+
+// Returns true if the given dispatch uses indirect workgroup parameters.
+static inline bool iree_hal_dispatch_uses_indirect_parameters(
+    iree_hal_dispatch_flags_t flags) {
+  return iree_any_bit_set(
+      flags, IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS |
+                 IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS);
+}
+
+// Returns true if the given dispatch uses custom arguments (direct/indirect).
+static inline bool iree_hal_dispatch_uses_custom_arguments(
+    iree_hal_dispatch_flags_t flags) {
+  return iree_any_bit_set(
+      flags, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS |
+                 IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_ARGUMENTS |
+                 IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_ARGUMENTS);
+}
+
+// Returns true if the given dispatch uses indirect custom arguments.
+static inline bool iree_hal_dispatch_uses_indirect_arguments(
+    iree_hal_dispatch_flags_t flags) {
+  return iree_any_bit_set(
+      flags, IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_ARGUMENTS |
+                 IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_ARGUMENTS);
+}
+
+// Bitfield specifying flags controlling a timestamp operation.
+typedef uint64_t iree_hal_timestamp_flags_t;
+enum iree_hal_timestamp_flag_bits_t {
+  IREE_HAL_TIMESTAMP_FLAG_NONE = 0u,
+};
+
+// Bitfield specifying flags controlling a host call operation.
+typedef uint64_t iree_hal_host_call_flags_t;
+enum iree_hal_host_call_flag_bits_e {
+  IREE_HAL_HOST_CALL_FLAG_NONE = 0ull,
+
+  // The call will not block the queue it is executing on. Signal semaphores are
+  // published immediately after the queue issues the call, and the callback may
+  // run out of order with later work. The application must keep all callback
+  // state live until the callback completes.
+  IREE_HAL_HOST_CALL_FLAG_NON_BLOCKING = 1ull << 0,
+
+  // Hints that the host call is expected to be very short and that the issuing
+  // queue may want to spin (possibly with backoff) until the call completes.
+  IREE_HAL_HOST_CALL_FLAG_WAIT_ACTIVE = 1ull << 1,
+
+  // Hints that the host call does not require device cache flush or invalidate
+  // operations around the callback.
+  IREE_HAL_HOST_CALL_FLAG_RELAXED = 1ull << 2,
+};
+
+// Context provided to a host call while it executes.
+typedef struct iree_hal_host_call_context_t {
+  // Exact hardware queue the call was issued on. Borrowed for the callback
+  // duration.
+  iree_hal_queue_t* queue;
+
+  // Semaphores that must be signaled once the call has completed. Omitted when
+  // IREE_HAL_HOST_CALL_FLAG_NON_BLOCKING was requested. The list storage is
+  // borrowed for the callback duration; asynchronous callbacks must clone the
+  // list and retain each semaphore.
+  iree_hal_semaphore_list_t signal_semaphore_list;
+} iree_hal_host_call_context_t;
+
+// Executes a user-requested host call in queue order. A callback returning OK
+// completes its signal semaphores and any other failure fails them. Returning
+// IREE_STATUS_DEFERRED transfers completion ownership to the callback, which
+// must later signal or fail the cloned semaphore list.
+typedef iree_status_t(IREE_API_PTR* iree_hal_host_call_fn_t)(
+    void* user_data, const uint64_t args[4],
+    iree_hal_host_call_context_t* context);
+
+// Bound host call function and user data.
+typedef struct iree_hal_host_call_t {
+  // Callback function pointer in the host program.
+  iree_hal_host_call_fn_t fn;
+
+  // User data passed to |fn|. Unowned.
+  void* user_data;
+
+  // Optional resource retaining callback state. The caller keeps its reference
+  // live until iree_hal_queue_host_call returns. Implementations retain it
+  // until |fn| returns or the queued call is cancelled before invocation.
+  iree_hal_resource_t* resource;
+} iree_hal_host_call_t;
+
+// Returns a host call bound to the given function pointer and user data.
+static inline iree_hal_host_call_t iree_hal_make_host_call(
+    iree_hal_host_call_fn_t fn, void* user_data) {
+  iree_hal_host_call_t call = {
+      /*.fn=*/fn,
+      /*.user_data=*/user_data,
+      /*.resource=*/NULL,
+  };
+  return call;
+}
+
+// Returns a host call whose callback state is retained by |resource|.
+static inline iree_hal_host_call_t iree_hal_make_host_call_with_resource(
+    iree_hal_host_call_fn_t fn, void* user_data,
+    iree_hal_resource_t* resource) {
+  iree_hal_host_call_t call = {
+      /*.fn=*/fn,
+      /*.user_data=*/user_data,
+      /*.resource=*/resource,
+  };
+  return call;
+}
 
 // Bitfield specifying flags controlling a fill operation.
 typedef uint64_t iree_hal_fill_flags_t;
@@ -454,6 +652,104 @@ iree_hal_queue_execute(iree_hal_queue_t* queue,
                        iree_hal_buffer_binding_table_t binding_table,
                        iree_hal_queue_execute_flags_t flags);
 
+// Enqueues a host callback on the exact hardware |queue|.
+//
+// The callback becomes eligible after every |wait_semaphore_list| timepoint is
+// reached. Unless IREE_HAL_HOST_CALL_FLAG_NON_BLOCKING is specified, every
+// |signal_semaphore_list| timepoint is published after the callback completes
+// or failed with the callback status. A callback returning
+// IREE_STATUS_DEFERRED assumes ownership of terminal semaphore completion.
+//
+// Host calls can be extremely expensive. Implementations that cannot execute
+// callbacks natively may require host polling and device-to-host-to-device
+// synchronization with significant latency.
+IREE_API_EXPORT iree_status_t
+iree_hal_queue_host_call(iree_hal_queue_t* queue,
+                         const iree_hal_semaphore_list_t wait_semaphore_list,
+                         const iree_hal_semaphore_list_t signal_semaphore_list,
+                         iree_hal_host_call_t call, const uint64_t args[4],
+                         iree_hal_host_call_flags_t flags);
+
+// Enqueues a direct executable dispatch on the exact hardware |queue|.
+//
+// The executable must be compatible with the family containing |queue|. The
+// constant data and binding list are captured before the call returns. By
+// default the executable, directly bound buffers, and indirect parameter buffer
+// are retained until terminal completion. Callers that already guarantee those
+// lifetimes may use IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES.
+//
+// All |bindings| must directly reference buffers and not binding table slots.
+IREE_API_EXPORT iree_status_t iree_hal_queue_dispatch(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_executable_t* executable, iree_hal_executable_function_t function,
+    const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
+    const iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags);
+
+// Enqueues an asynchronous atomic wait on the exact hardware |queue|.
+//
+// The operation becomes eligible after |wait_semaphore_list| is satisfied and
+// publishes |signal_semaphore_list| after the memory predicate is satisfied.
+// Implementations may actively poll, occupy execution resources, or stall the
+// queue until the predicate is satisfied. The producer must be placed and
+// ordered so it can make progress independently of the waiting queue.
+//
+// |target_offset| must be naturally aligned to |params.width| and the buffer
+// must permit storage reads and device reads.
+IREE_API_EXPORT iree_status_t iree_hal_queue_atomic_wait(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params);
+
+// Enqueues an asynchronous atomic store on the exact hardware |queue|.
+//
+// The operation becomes eligible after |wait_semaphore_list| is satisfied and
+// publishes |signal_semaphore_list| after the store completes.
+// |target_offset| must be naturally aligned to |params.width| and the buffer
+// must permit storage writes and device writes.
+IREE_API_EXPORT iree_status_t iree_hal_queue_atomic_store(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params);
+
+// Enqueues an asynchronous no-result atomic read-modify-write on the exact
+// hardware |queue|.
+//
+// The operation becomes eligible after |wait_semaphore_list| is satisfied and
+// publishes |signal_semaphore_list| after the update completes.
+// |target_offset| must be naturally aligned to |params.width| and the buffer
+// must permit storage reads and writes and device reads and writes.
+IREE_API_EXPORT iree_status_t iree_hal_queue_atomic_rmw(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params);
+
+// Enqueues a device-side timestamp capture on the exact hardware |queue|.
+//
+// A 64-bit tick is written into |target_buffer| at |target_offset| after every
+// wait timepoint is reached, and the signal timepoints are published after the
+// write completes. The target must be naturally aligned and permit an 8-byte
+// device write.
+//
+// The tick belongs to the timestamp domain published by |queue|'s family.
+// Ticks captured by queues in that family are comparable. HAL exposes no
+// correlation between different family domains. Convert ticks using the
+// family's timestamp_frequency_hz and timestamp_valid_bits, reducing
+// differences modulo the valid width before conversion.
+IREE_API_EXPORT iree_status_t iree_hal_queue_timestamp(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags);
+
 // Flushes locally pending submissions on the exact hardware |queue|.
 // When batching queue operations this may eagerly publish earlier submissions
 // while later submissions are still being constructed.
@@ -673,6 +969,57 @@ typedef struct iree_hal_queue_vtable_t {
       iree_hal_command_buffer_t* command_buffer,
       iree_hal_buffer_binding_table_t binding_table,
       iree_hal_queue_execute_flags_t flags);
+
+  // Enqueues a host callback.
+  iree_status_t(IREE_API_PTR* host_call)(
+      iree_hal_queue_t* queue,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_host_call_t call, const uint64_t args[4],
+      iree_hal_host_call_flags_t flags);
+
+  // Enqueues a direct executable dispatch.
+  iree_status_t(IREE_API_PTR* dispatch)(
+      iree_hal_queue_t* queue,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_executable_t* executable,
+      iree_hal_executable_function_t function,
+      const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
+      const iree_hal_buffer_ref_list_t bindings,
+      iree_hal_dispatch_flags_t flags);
+
+  // Enqueues an asynchronous atomic wait.
+  iree_status_t(IREE_API_PTR* atomic_wait)(
+      iree_hal_queue_t* queue,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+      iree_hal_atomic_wait_params_t params);
+
+  // Enqueues an asynchronous atomic store.
+  iree_status_t(IREE_API_PTR* atomic_store)(
+      iree_hal_queue_t* queue,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+      iree_hal_atomic_store_params_t params);
+
+  // Enqueues an asynchronous atomic read-modify-write.
+  iree_status_t(IREE_API_PTR* atomic_rmw)(
+      iree_hal_queue_t* queue,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+      iree_hal_atomic_rmw_params_t params);
+
+  // Enqueues a device-side timestamp capture.
+  iree_status_t(IREE_API_PTR* timestamp)(
+      iree_hal_queue_t* queue,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+      iree_hal_timestamp_flags_t flags);
 
   // Flushes locally pending submissions.
   iree_status_t(IREE_API_PTR* flush)(iree_hal_queue_t* queue);

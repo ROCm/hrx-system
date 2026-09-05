@@ -20,7 +20,7 @@ extern "C" {
 #define IREE_HAL_REPLAY_FILE_MAGIC 0x50525249u
 
 // Major version of the IREE HAL replay file format.
-#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 6u
+#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 7u
 
 // Minor version of the IREE HAL replay file format.
 #define IREE_HAL_REPLAY_FILE_VERSION_MINOR 0u
@@ -88,15 +88,9 @@ enum iree_hal_replay_operation_code_e {
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_IMPORT_FILE = 10u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_SEMAPHORE = 11u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUERY_QUEUE_POOL_BACKEND = 12u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_HOST_CALL = 20u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_DISPATCH = 21u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_PROFILING_BEGIN = 24u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_PROFILING_FLUSH = 25u,
   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_PROFILING_END = 26u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_TIMESTAMP = 29u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_WAIT = 30u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE = 31u,
-  IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_RMW = 32u,
 
   IREE_HAL_REPLAY_OPERATION_CODE_REPLAY_SCOPE_BEGIN = 50u,
   IREE_HAL_REPLAY_OPERATION_CODE_REPLAY_SCOPE_END = 51u,
@@ -149,6 +143,12 @@ enum iree_hal_replay_operation_code_e {
   IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER = 605u,
   IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_EXECUTE = 606u,
   IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_FLUSH = 607u,
+  IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_HOST_CALL = 608u,
+  IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_DISPATCH = 609u,
+  IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_WAIT = 610u,
+  IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_STORE = 611u,
+  IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_RMW = 612u,
+  IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TIMESTAMP = 613u,
 };
 
 // Producer-defined payload schema stored in record headers.
@@ -172,9 +172,6 @@ enum iree_hal_replay_payload_type_e {
   IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_WAIT = 27u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_STORE = 28u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_RMW = 29u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT = 30u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE = 31u,
-  IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW = 32u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT = 33u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER = 34u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_READ = 35u,
@@ -184,6 +181,10 @@ enum iree_hal_replay_payload_type_e {
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_BARRIER = 39u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_EXECUTE = 40u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_FAMILY_COMMAND_BUFFER_OBJECT = 41u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_WAIT = 42u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_STORE = 43u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_RMW = 44u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TIMESTAMP = 45u,
 };
 
 // Type of one operation in a captured exact-queue transfer transaction.
@@ -787,9 +788,6 @@ static_assert(sizeof(iree_hal_replay_command_buffer_atomic_rmw_payload_t) == 64,
 typedef struct iree_hal_replay_dispatch_payload_t {
   // Session-local executable object id.
   iree_hal_replay_object_id_t executable_id;
-  // Queue affinity for immediate device queue dispatches, or zero when the
-  // dispatch is recorded into a command buffer.
-  uint64_t queue_affinity;
   // Captured executable function ordinal to dispatch.
   uint32_t function_ordinal;
   // Dispatch flags.
@@ -814,54 +812,62 @@ typedef struct iree_hal_replay_dispatch_payload_t {
   uint64_t binding_count;
 } iree_hal_replay_dispatch_payload_t;
 
-// Payload describing a device queue atomic wait followed by semaphore lists.
-typedef struct iree_hal_replay_device_queue_atomic_wait_payload_t {
+// Payload describing an exact-queue atomic wait followed by semaphore lists.
+typedef struct iree_hal_replay_queue_atomic_wait_payload_t {
   // Direct target buffer reference containing the atomic value.
   iree_hal_replay_buffer_ref_payload_t target_ref;
-  // Queue affinity used for the submission.
-  uint64_t queue_affinity;
   // Number of wait semaphore timepoints following this header.
   uint64_t wait_semaphore_count;
   // Number of signal semaphore timepoints following the wait timepoints.
   uint64_t signal_semaphore_count;
   // Atomic wait parameters.
   iree_hal_replay_atomic_wait_params_payload_t params;
-} iree_hal_replay_device_queue_atomic_wait_payload_t;
-static_assert(sizeof(iree_hal_replay_device_queue_atomic_wait_payload_t) == 80,
-              "device queue atomic wait replay payload must be 80 bytes");
+} iree_hal_replay_queue_atomic_wait_payload_t;
+static_assert(sizeof(iree_hal_replay_queue_atomic_wait_payload_t) == 72,
+              "queue atomic wait replay payload must be 72 bytes");
 
-// Payload describing a device queue atomic store followed by semaphore lists.
-typedef struct iree_hal_replay_device_queue_atomic_store_payload_t {
+// Payload describing an exact-queue atomic store followed by semaphore lists.
+typedef struct iree_hal_replay_queue_atomic_store_payload_t {
   // Direct target buffer reference containing the atomic value.
   iree_hal_replay_buffer_ref_payload_t target_ref;
-  // Queue affinity used for the submission.
-  uint64_t queue_affinity;
   // Number of wait semaphore timepoints following this header.
   uint64_t wait_semaphore_count;
   // Number of signal semaphore timepoints following the wait timepoints.
   uint64_t signal_semaphore_count;
   // Atomic store parameters.
   iree_hal_replay_atomic_store_params_payload_t params;
-} iree_hal_replay_device_queue_atomic_store_payload_t;
-static_assert(sizeof(iree_hal_replay_device_queue_atomic_store_payload_t) == 72,
-              "device queue atomic store replay payload must be 72 bytes");
+} iree_hal_replay_queue_atomic_store_payload_t;
+static_assert(sizeof(iree_hal_replay_queue_atomic_store_payload_t) == 64,
+              "queue atomic store replay payload must be 64 bytes");
 
-// Payload describing a device queue atomic read-modify-write followed by
+// Payload describing an exact-queue atomic read-modify-write followed by
 // semaphore lists.
-typedef struct iree_hal_replay_device_queue_atomic_rmw_payload_t {
+typedef struct iree_hal_replay_queue_atomic_rmw_payload_t {
   // Direct target buffer reference containing the atomic value.
   iree_hal_replay_buffer_ref_payload_t target_ref;
-  // Queue affinity used for the submission.
-  uint64_t queue_affinity;
   // Number of wait semaphore timepoints following this header.
   uint64_t wait_semaphore_count;
   // Number of signal semaphore timepoints following the wait timepoints.
   uint64_t signal_semaphore_count;
   // Atomic read-modify-write parameters.
   iree_hal_replay_atomic_rmw_params_payload_t params;
-} iree_hal_replay_device_queue_atomic_rmw_payload_t;
-static_assert(sizeof(iree_hal_replay_device_queue_atomic_rmw_payload_t) == 72,
-              "device queue atomic RMW replay payload must be 72 bytes");
+} iree_hal_replay_queue_atomic_rmw_payload_t;
+static_assert(sizeof(iree_hal_replay_queue_atomic_rmw_payload_t) == 64,
+              "queue atomic RMW replay payload must be 64 bytes");
+
+// Payload describing an exact-queue timestamp followed by semaphore lists.
+typedef struct iree_hal_replay_queue_timestamp_payload_t {
+  // Direct 64-bit target buffer reference receiving the timestamp.
+  iree_hal_replay_buffer_ref_payload_t target_ref;
+  // Timestamp operation flags.
+  uint64_t flags;
+  // Number of wait semaphore timepoints following this header.
+  uint64_t wait_semaphore_count;
+  // Number of signal semaphore timepoints following the wait timepoints.
+  uint64_t signal_semaphore_count;
+} iree_hal_replay_queue_timestamp_payload_t;
+static_assert(sizeof(iree_hal_replay_queue_timestamp_payload_t) == 56,
+              "queue timestamp replay payload must be 56 bytes");
 
 // Payload describing a command buffer fill operation followed by the fill
 // pattern bytes.

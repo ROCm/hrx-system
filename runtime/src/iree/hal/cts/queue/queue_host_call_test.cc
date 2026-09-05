@@ -89,9 +89,9 @@ TEST_P(QueueHostCallTest, EnqueueBeforeSignal) {
   auto queue_call_started_future = queue_call_started.get_future();
   std::thread submitter([&]() {
     queue_call_started.set_value();
-    IREE_EXPECT_OK(iree_hal_device_queue_host_call(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphore_list,
-        signal_semaphore_list, call, args, IREE_HAL_HOST_CALL_FLAG_NONE));
+    IREE_EXPECT_OK(iree_hal_queue_host_call(
+        transfer_queue_, wait_semaphore_list, signal_semaphore_list, call, args,
+        IREE_HAL_HOST_CALL_FLAG_NONE));
   });
 
   queue_call_started_future.wait();
@@ -133,9 +133,9 @@ TEST_P(QueueHostCallTest, NoWaitSemaphores) {
   SemaphoreList signal_semaphore_list(device_, {0}, {1});
 
   uint64_t args[4] = {100, 200, 300, 400};
-  IREE_EXPECT_OK(iree_hal_device_queue_host_call(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphore_list,
-      signal_semaphore_list, call, args, IREE_HAL_HOST_CALL_FLAG_NONE));
+  IREE_EXPECT_OK(iree_hal_queue_host_call(transfer_queue_, wait_semaphore_list,
+                                          signal_semaphore_list, call, args,
+                                          IREE_HAL_HOST_CALL_FLAG_NONE));
 
   IREE_EXPECT_OK(iree_hal_semaphore_list_wait(signal_semaphore_list,
                                               iree_infinite_timeout(),
@@ -187,9 +187,9 @@ TEST_P(QueueHostCallTest, NonBlockingFlag) {
       iree_hal_semaphore_list_signal(wait_semaphore_list, /*frontier=*/NULL));
 
   uint64_t args[4] = {1, 2, 3, 4};
-  IREE_EXPECT_OK(iree_hal_device_queue_host_call(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphore_list,
-      signal_semaphore_list, call, args, IREE_HAL_HOST_CALL_FLAG_NON_BLOCKING));
+  IREE_EXPECT_OK(iree_hal_queue_host_call(
+      transfer_queue_, wait_semaphore_list, signal_semaphore_list, call, args,
+      IREE_HAL_HOST_CALL_FLAG_NON_BLOCKING));
 
   IREE_EXPECT_OK(iree_hal_semaphore_list_wait(signal_semaphore_list,
                                               iree_infinite_timeout(),
@@ -261,9 +261,9 @@ TEST_P(QueueHostCallTest, AsyncCallback) {
       iree_hal_semaphore_list_signal(wait_semaphore_list, /*frontier=*/NULL));
 
   uint64_t args[4] = {5, 6, 7, 8};
-  IREE_EXPECT_OK(iree_hal_device_queue_host_call(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphore_list,
-      signal_semaphore_list, call, args, IREE_HAL_HOST_CALL_FLAG_NONE));
+  IREE_EXPECT_OK(iree_hal_queue_host_call(transfer_queue_, wait_semaphore_list,
+                                          signal_semaphore_list, call, args,
+                                          IREE_HAL_HOST_CALL_FLAG_NONE));
 
   IREE_EXPECT_OK(iree_hal_semaphore_list_wait(signal_semaphore_list,
                                               iree_infinite_timeout(),
@@ -304,9 +304,9 @@ TEST_P(QueueHostCallTest, CallbackReturnsError) {
       iree_hal_semaphore_list_signal(wait_semaphore_list, /*frontier=*/NULL));
 
   uint64_t args[4] = {9, 10, 11, 12};
-  IREE_EXPECT_OK(iree_hal_device_queue_host_call(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphore_list,
-      signal_semaphore_list, call, args, IREE_HAL_HOST_CALL_FLAG_NONE));
+  IREE_EXPECT_OK(iree_hal_queue_host_call(transfer_queue_, wait_semaphore_list,
+                                          signal_semaphore_list, call, args,
+                                          IREE_HAL_HOST_CALL_FLAG_NONE));
 
   // multi_wait returns the actual failure code from the first failed semaphore.
   EXPECT_THAT(Status(iree_hal_semaphore_list_wait(signal_semaphore_list,
@@ -372,9 +372,9 @@ TEST_P(QueueHostCallTest, CallbackReturnsErrorAfterWait) {
   auto queue_call_started_future = queue_call_started.get_future();
   std::thread submitter([&]() {
     queue_call_started.set_value();
-    IREE_EXPECT_OK(iree_hal_device_queue_host_call(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphore_list,
-        signal_semaphore_list, call, args, IREE_HAL_HOST_CALL_FLAG_NONE));
+    IREE_EXPECT_OK(iree_hal_queue_host_call(
+        transfer_queue_, wait_semaphore_list, signal_semaphore_list, call, args,
+        IREE_HAL_HOST_CALL_FLAG_NONE));
   });
 
   queue_call_started_future.wait();
@@ -442,9 +442,9 @@ TEST_P(AsyncQueueHostCallLifetimeTest,
   SemaphoreList terminal_signal(device_, {0}, {1});
   uint64_t args[4] = {0, 0, 0, 0};
 
-  IREE_ASSERT_OK(iree_hal_device_queue_host_call(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, producer_wait, producer_signal,
-      call, args, IREE_HAL_HOST_CALL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_host_call(transfer_queue_, producer_wait,
+                                          producer_signal, call, args,
+                                          IREE_HAL_HOST_CALL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_queue_download(
       transfer_queue_, producer_signal, terminal_signal, source_buffer,
       /*source_offset=*/0, target, sizeof(target)));
@@ -476,9 +476,9 @@ TEST_P(AsyncQueueHostCallLifetimeTest, RetainsStateUntilInvocation) {
   SemaphoreList signal_semaphore_list(device_, {0}, {1});
   uint64_t args[4] = {0, 0, 0, 0};
 
-  iree_status_t status = iree_hal_device_queue_host_call(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphore_list,
-      signal_semaphore_list, call, args, IREE_HAL_HOST_CALL_FLAG_NONE);
+  iree_status_t status = iree_hal_queue_host_call(
+      transfer_queue_, wait_semaphore_list, signal_semaphore_list, call, args,
+      IREE_HAL_HOST_CALL_FLAG_NONE);
   iree_hal_resource_release(&state->resource);
   IREE_ASSERT_OK(status);
 
@@ -509,9 +509,9 @@ TEST_P(AsyncQueueHostCallLifetimeTest, ReleasesStateAfterFailedPrerequisite) {
   SemaphoreList signal_semaphore_list(device_, {0}, {1});
   uint64_t args[4] = {0, 0, 0, 0};
 
-  iree_status_t status = iree_hal_device_queue_host_call(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphore_list,
-      signal_semaphore_list, call, args, IREE_HAL_HOST_CALL_FLAG_NONE);
+  iree_status_t status = iree_hal_queue_host_call(
+      transfer_queue_, wait_semaphore_list, signal_semaphore_list, call, args,
+      IREE_HAL_HOST_CALL_FLAG_NONE);
   iree_hal_resource_release(&state->resource);
   IREE_ASSERT_OK(status);
 

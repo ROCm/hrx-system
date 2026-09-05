@@ -141,6 +141,11 @@ class BdaSpirvTest : public CtsTestBase<> {
     CtsTestBase::SetUp();
     if (HasFatalFailure() || IsSkipped()) return;
 
+    dispatch_queue_ =
+        QueueForCommandCategories(IREE_HAL_COMMAND_CATEGORY_DISPATCH);
+    if (!dispatch_queue_) {
+      GTEST_SKIP() << "device has no dispatch-capable queue";
+    }
     const iree_hal_executable_target_selection_result_t target_result =
         SelectExecutableTarget(IREE_SV("spirv"), IREE_SV("vulkan1.3+bda"));
     ASSERT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
@@ -306,6 +311,7 @@ class BdaSpirvTest : public CtsTestBase<> {
         execute_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
   }
 
+  iree_hal_queue_t* dispatch_queue_ = nullptr;
   const iree_hal_executable_target_t* executable_target_ = nullptr;
   iree_hal_executable_t* executable_ = nullptr;
 };
@@ -425,10 +431,9 @@ TEST_P(BdaSpirvTest, QueueDispatchExecutesUnverifiedBdaNoop) {
 
   iree_hal_buffer_ref_list_t bindings = iree_hal_buffer_ref_list_empty();
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      dispatch_signal, executable.get(),
-      iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, iree_hal_semaphore_list_empty(), dispatch_signal,
+      executable.get(), iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1),
       iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -513,9 +518,9 @@ TEST_P(BdaSpirvTest, QueueDispatchExecutesBdaShader) {
       MakeBindings(input_buffer, output_buffer, binding_refs);
 
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      dispatch_signal, executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, iree_hal_semaphore_list_empty(), dispatch_signal,
+      executable_, iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(4, 1, 1),
       iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -538,10 +543,9 @@ TEST_P(BdaSpirvTest, QueueDispatchExecutesBdaShaderWithMetadata) {
       MakeBindings(input_buffer, output_buffer, binding_refs);
 
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      dispatch_signal, executable.get(),
-      iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, iree_hal_semaphore_list_empty(), dispatch_signal,
+      executable.get(), iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(4, 1, 1),
       iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -570,12 +574,12 @@ TEST_P(BdaSpirvTest, QueueDispatchRejectsBdaMetadataBindingMismatch) {
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_device_queue_dispatch(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-          iree_hal_semaphore_list_empty(), executable.get(),
-          iree_hal_executable_function_from_index(0),
-          iree_hal_make_static_dispatch_config(4, 1, 1),
-          iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
+      iree_hal_queue_dispatch(dispatch_queue_, iree_hal_semaphore_list_empty(),
+                              iree_hal_semaphore_list_empty(), executable.get(),
+                              iree_hal_executable_function_from_index(0),
+                              iree_hal_make_static_dispatch_config(4, 1, 1),
+                              iree_const_byte_span_empty(), bindings,
+                              IREE_HAL_DISPATCH_FLAG_NONE));
 }
 
 TEST_P(BdaSpirvTest, QueueDispatchRejectsBdaMetadataBindingLength) {
@@ -593,12 +597,12 @@ TEST_P(BdaSpirvTest, QueueDispatchRejectsBdaMetadataBindingLength) {
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
-      iree_hal_device_queue_dispatch(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-          iree_hal_semaphore_list_empty(), executable.get(),
-          iree_hal_executable_function_from_index(0),
-          iree_hal_make_static_dispatch_config(4, 1, 1),
-          iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
+      iree_hal_queue_dispatch(dispatch_queue_, iree_hal_semaphore_list_empty(),
+                              iree_hal_semaphore_list_empty(), executable.get(),
+                              iree_hal_executable_function_from_index(0),
+                              iree_hal_make_static_dispatch_config(4, 1, 1),
+                              iree_const_byte_span_empty(), bindings,
+                              IREE_HAL_DISPATCH_FLAG_NONE));
 }
 
 TEST_P(BdaSpirvTest, QueueDispatchUsesBdaMetadataConstantLength) {
@@ -616,19 +620,18 @@ TEST_P(BdaSpirvTest, QueueDispatchUsesBdaMetadataConstantLength) {
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_device_queue_dispatch(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-          iree_hal_semaphore_list_empty(), executable.get(),
-          iree_hal_executable_function_from_index(0),
-          iree_hal_make_static_dispatch_config(4, 1, 1),
-          iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
+      iree_hal_queue_dispatch(dispatch_queue_, iree_hal_semaphore_list_empty(),
+                              iree_hal_semaphore_list_empty(), executable.get(),
+                              iree_hal_executable_function_from_index(0),
+                              iree_hal_make_static_dispatch_config(4, 1, 1),
+                              iree_const_byte_span_empty(), bindings,
+                              IREE_HAL_DISPATCH_FLAG_NONE));
 
   const uint32_t ignored_constant = 123u;
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      dispatch_signal, executable.get(),
-      iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, iree_hal_semaphore_list_empty(), dispatch_signal,
+      executable.get(), iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(4, 1, 1),
       iree_make_const_byte_span(&ignored_constant, sizeof(ignored_constant)),
       bindings, IREE_HAL_DISPATCH_FLAG_NONE));
@@ -650,9 +653,9 @@ TEST_P(BdaSpirvTest, QueueDispatchHandlesOversizedBdaPublication) {
   };
 
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      dispatch_signal, executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, iree_hal_semaphore_list_empty(), dispatch_signal,
+      executable_, iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(4, 1, 1),
       iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -752,9 +755,9 @@ TEST_P(BdaSpirvTest, TrimDropsIdleOversizedBdaPublicationBlock) {
       MakeOversizedPublicationBindings(input_buffer.get(), output_buffer.get());
 
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      dispatch_signal, executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, iree_hal_semaphore_list_empty(), dispatch_signal,
+      executable_, iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1),
       iree_const_byte_span_empty(),
       iree_hal_buffer_ref_list_t{

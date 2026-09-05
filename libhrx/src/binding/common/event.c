@@ -229,10 +229,8 @@ iree_status_t iree_hal_streaming_event_enqueue_record(
   }
 
   const iree_status_t status =
-      slot ? iree_hal_device_queue_timestamp(
-                 context->device,
-                 iree_hal_streaming_queue_family_affinity(stream->queue),
-                 wait_semaphores, signal_semaphores,
+      slot ? iree_hal_queue_timestamp(
+                 stream->queue, wait_semaphores, signal_semaphores,
                  iree_hal_streaming_event_timestamp_slot_buffer(slot),
                  iree_hal_streaming_event_timestamp_slot_offset(slot),
                  IREE_HAL_TIMESTAMP_FLAG_NONE)

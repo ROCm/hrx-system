@@ -184,10 +184,16 @@ struct iree_hal_task_queue_op_t {
       iree_hal_buffer_binding_table_t binding_table;
     } commands;
     struct {
-      iree_hal_device_t* device;
-      iree_hal_queue_affinity_t queue_affinity;
+      // Exact hardware queue reported to the callback.
+      iree_hal_queue_t* queue;
+
+      // User callback and state.
       iree_hal_host_call_t call;
+
+      // User-defined callback arguments.
       uint64_t args[4];
+
+      // Flags controlling callback ordering and completion.
       iree_hal_host_call_flags_t flags;
     } host_call;
     struct {
@@ -642,9 +648,7 @@ iree_status_t iree_hal_task_queue_submit_commands(
     const iree_hal_task_submission_batch_t* batches);
 
 iree_status_t iree_hal_task_queue_submit_host_call(
-    iree_hal_task_queue_t* queue, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_semaphore_list_t wait_semaphores,
+    iree_hal_task_queue_t* queue, iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores, iree_hal_host_call_t call,
     const uint64_t args[4], iree_hal_host_call_flags_t flags);
 

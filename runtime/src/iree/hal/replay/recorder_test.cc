@@ -382,7 +382,7 @@ static ReplayRecordSummary ParseReplayRecordSummary(
                    IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_EXPORT_BUFFER) {
           ++summary.unsupported_export_buffer_record_count;
         } else if (record.header.operation_code ==
-                   IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_HOST_CALL) {
+                   IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_HOST_CALL) {
           ++summary.unsupported_host_call_record_count;
         } else if (record.header.operation_code ==
                    IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TRANSFER) {
@@ -732,6 +732,9 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsHostCallAsUnsupported) {
 
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
+  iree_hal_queue_t* queue = iree_hal_device_queue(
+      wrapped_device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+  ASSERT_NE(nullptr, queue);
   int call_count = 0;
   iree_hal_host_call_t call =
       iree_hal_make_host_call(CountHostCall, &call_count);
@@ -746,9 +749,8 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsHostCallAsUnsupported) {
       /*.payload_values=*/&signal_value,
   };
   const uint64_t args[4] = {0, 1, 2, 3};
-  IREE_ASSERT_OK(iree_hal_device_queue_host_call(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal_semaphore_list, call, args,
+  IREE_ASSERT_OK(iree_hal_queue_host_call(
+      queue, iree_hal_semaphore_list_empty(), signal_semaphore_list, call, args,
       IREE_HAL_HOST_CALL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(signal_semaphore, signal_value,
                                          iree_infinite_timeout(),
@@ -1261,7 +1263,7 @@ TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
   iree_hal_device_group_release(replay_group);
 }
 
-TEST(ReplayRecorderTest, RecordsDeviceQueueAtomicOperations) {
+TEST(ReplayRecorderTest, RecordsExactQueueAtomicOperations) {
   std::vector<uint8_t> storage(65536, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
@@ -1271,6 +1273,9 @@ TEST(ReplayRecorderTest, RecordsDeviceQueueAtomicOperations) {
       recorder, source_group, iree_allocator_system(), &wrapped_group));
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
+  iree_hal_queue_t* queue = iree_hal_device_queue(
+      wrapped_device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+  ASSERT_NE(nullptr, queue);
 
   const iree_hal_buffer_params_t buffer_params = {
       /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE |
@@ -1343,19 +1348,19 @@ TEST(ReplayRecorderTest, RecordsDeviceQueueAtomicOperations) {
       /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
   };
 
-  IREE_ASSERT_OK(iree_hal_device_queue_atomic_wait(
-      wrapped_device, /*queue_affinity=*/1, wait_list, wait_signal_list, buffer,
-      /*target_offset=*/8, wait_params));
+  IREE_ASSERT_OK(iree_hal_queue_atomic_wait(queue, wait_list, wait_signal_list,
+                                            buffer, /*target_offset=*/8,
+                                            wait_params));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       wait_signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_device_queue_atomic_store(
-      wrapped_device, /*queue_affinity=*/1, wait_list, store_signal_list,
-      buffer, /*target_offset=*/16, store_params));
+  IREE_ASSERT_OK(
+      iree_hal_queue_atomic_store(queue, wait_list, store_signal_list, buffer,
+                                  /*target_offset=*/16, store_params));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       store_signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_device_queue_atomic_rmw(
-      wrapped_device, /*queue_affinity=*/1, wait_list, rmw_signal_list, buffer,
-      /*target_offset=*/24, rmw_params));
+  IREE_ASSERT_OK(iree_hal_queue_atomic_rmw(queue, wait_list, rmw_signal_list,
+                                           buffer, /*target_offset=*/24,
+                                           rmw_params));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       rmw_signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
@@ -1369,12 +1374,13 @@ TEST(ReplayRecorderTest, RecordsDeviceQueueAtomicOperations) {
 
   const auto records = ParseOperationRecords(storage);
   const auto* wait_record = FindOperationRecord(
-      records, IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_WAIT);
+      records, IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_WAIT);
   ASSERT_NE(nullptr, wait_record);
-  EXPECT_EQ(IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT,
+  EXPECT_EQ(IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_WAIT,
             wait_record->header.payload_type);
+  EXPECT_EQ(IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE, wait_record->header.object_type);
   EXPECT_EQ((uint32_t)IREE_STATUS_OK, wait_record->header.status_code);
-  iree_hal_replay_device_queue_atomic_wait_payload_t wait_payload;
+  iree_hal_replay_queue_atomic_wait_payload_t wait_payload;
   ASSERT_GE(wait_record->payload.data_length, sizeof(wait_payload));
   memcpy(&wait_payload, wait_record->payload.data, sizeof(wait_payload));
   EXPECT_NE(IREE_HAL_REPLAY_OBJECT_ID_NONE, wait_payload.target_ref.buffer_id);
@@ -1382,7 +1388,6 @@ TEST(ReplayRecorderTest, RecordsDeviceQueueAtomicOperations) {
             wait_record->header.related_object_id);
   EXPECT_EQ(8u, wait_payload.target_ref.offset);
   EXPECT_EQ(8u, wait_payload.target_ref.length);
-  EXPECT_EQ(1u, wait_payload.queue_affinity);
   EXPECT_EQ(1u, wait_payload.wait_semaphore_count);
   EXPECT_EQ(1u, wait_payload.signal_semaphore_count);
   EXPECT_EQ(wait_params.value, wait_payload.params.value);
@@ -1402,12 +1407,14 @@ TEST(ReplayRecorderTest, RecordsDeviceQueueAtomicOperations) {
   EXPECT_EQ(9u, signal_timepoint.value);
 
   const auto* store_record = FindOperationRecord(
-      records, IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE);
+      records, IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_STORE);
   ASSERT_NE(nullptr, store_record);
-  EXPECT_EQ(IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE,
+  EXPECT_EQ(IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_STORE,
             store_record->header.payload_type);
+  EXPECT_EQ(IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+            store_record->header.object_type);
   EXPECT_EQ((uint32_t)IREE_STATUS_OK, store_record->header.status_code);
-  iree_hal_replay_device_queue_atomic_store_payload_t store_payload;
+  iree_hal_replay_queue_atomic_store_payload_t store_payload;
   ASSERT_GE(store_record->payload.data_length, sizeof(store_payload));
   memcpy(&store_payload, store_record->payload.data, sizeof(store_payload));
   EXPECT_EQ(wait_payload.target_ref.buffer_id,
@@ -1416,7 +1423,6 @@ TEST(ReplayRecorderTest, RecordsDeviceQueueAtomicOperations) {
             store_record->header.related_object_id);
   EXPECT_EQ(16u, store_payload.target_ref.offset);
   EXPECT_EQ(4u, store_payload.target_ref.length);
-  EXPECT_EQ(1u, store_payload.queue_affinity);
   EXPECT_EQ(1u, store_payload.wait_semaphore_count);
   EXPECT_EQ(1u, store_payload.signal_semaphore_count);
   EXPECT_EQ(store_params.value, store_payload.params.value);
@@ -1434,12 +1440,13 @@ TEST(ReplayRecorderTest, RecordsDeviceQueueAtomicOperations) {
   EXPECT_EQ(10u, store_signal_timepoint.value);
 
   const auto* rmw_record = FindOperationRecord(
-      records, IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_RMW);
+      records, IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_RMW);
   ASSERT_NE(nullptr, rmw_record);
-  EXPECT_EQ(IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW,
+  EXPECT_EQ(IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_RMW,
             rmw_record->header.payload_type);
+  EXPECT_EQ(IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE, rmw_record->header.object_type);
   EXPECT_EQ((uint32_t)IREE_STATUS_OK, rmw_record->header.status_code);
-  iree_hal_replay_device_queue_atomic_rmw_payload_t rmw_payload;
+  iree_hal_replay_queue_atomic_rmw_payload_t rmw_payload;
   ASSERT_GE(rmw_record->payload.data_length, sizeof(rmw_payload));
   memcpy(&rmw_payload, rmw_record->payload.data, sizeof(rmw_payload));
   EXPECT_EQ(wait_payload.target_ref.buffer_id,
@@ -1448,7 +1455,6 @@ TEST(ReplayRecorderTest, RecordsDeviceQueueAtomicOperations) {
             rmw_record->header.related_object_id);
   EXPECT_EQ(24u, rmw_payload.target_ref.offset);
   EXPECT_EQ(8u, rmw_payload.target_ref.length);
-  EXPECT_EQ(1u, rmw_payload.queue_affinity);
   EXPECT_EQ(1u, rmw_payload.wait_semaphore_count);
   EXPECT_EQ(1u, rmw_payload.signal_semaphore_count);
   EXPECT_EQ(rmw_params.operand, rmw_payload.params.operand);

@@ -474,9 +474,6 @@ struct iree_hal_vulkan_queue_pending_submission_t {
       // Host callback and user data captured from queue_host_call.
       iree_hal_host_call_t call;
 
-      // Legacy device-facade affinity route used for this host call.
-      iree_hal_queue_affinity_t routed_queue_affinity;
-
       // User arguments copied from queue_host_call.
       uint64_t args[4];
 
@@ -4101,8 +4098,7 @@ static void iree_hal_vulkan_queue_execute_host_call(
   }
 
   iree_hal_host_call_context_t context = {
-      .device = (iree_hal_device_t*)queue->device,
-      .queue_affinity = submission->host_call.routed_queue_affinity,
+      .queue = &queue->base,
       .signal_semaphore_list = is_nonblocking ? iree_hal_semaphore_list_empty()
                                               : signal_semaphore_list,
   };
@@ -10117,7 +10113,6 @@ iree_status_t iree_hal_vulkan_queue_submit_execute(
 
 iree_status_t iree_hal_vulkan_queue_submit_host_call(
     iree_hal_vulkan_queue_t* queue,
-    iree_hal_queue_affinity_t routed_queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_host_call_t call, const uint64_t args[4],
@@ -10147,9 +10142,6 @@ iree_status_t iree_hal_vulkan_queue_submit_host_call(
         IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_HOST_CALL, call, args, flags,
         /*payload_storage_length=*/0, /*out_payload_storage=*/NULL,
         &submission);
-  }
-  if (iree_status_is_ok(status)) {
-    submission->host_call.routed_queue_affinity = routed_queue_affinity;
   }
   if (iree_status_is_ok(status)) {
     status =
@@ -10341,6 +10333,108 @@ static iree_status_t iree_hal_vulkan_queue_barrier(
       signal_semaphore_list);
 }
 
+static iree_status_t iree_hal_vulkan_queue_host_call(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_host_call_t call, const uint64_t args[4],
+    iree_hal_host_call_flags_t flags) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_vulkan_queue_vtable);
+  return iree_hal_vulkan_queue_submit_host_call(
+      (iree_hal_vulkan_queue_t*)base_queue, wait_semaphore_list,
+      signal_semaphore_list, call, args, flags);
+}
+
+static iree_status_t iree_hal_vulkan_queue_dispatch(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_executable_t* executable, iree_hal_executable_function_t function,
+    const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
+    const iree_hal_buffer_ref_list_t bindings,
+    iree_hal_dispatch_flags_t flags) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_vulkan_queue_vtable);
+  iree_hal_vulkan_queue_t* queue = (iree_hal_vulkan_queue_t*)base_queue;
+  if (IREE_UNLIKELY(
+          !iree_all_bits_set(queue->queue_flags, VK_QUEUE_COMPUTE_BIT))) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "Vulkan queue family %u does not support executable dispatch",
+        queue->queue_family_index);
+  }
+  if (IREE_UNLIKELY(bindings.count != 0 && !bindings.values)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "queue dispatch bindings have no value storage");
+  }
+  for (iree_host_size_t i = 0; i < bindings.count; ++i) {
+    if (IREE_UNLIKELY(!bindings.values[i].buffer)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "queue dispatch binding %" PRIhsz
+          " is indirect; direct queue dispatch has no binding table",
+          i);
+    }
+  }
+  return iree_hal_vulkan_queue_submit_dispatch(
+      queue, wait_semaphore_list, signal_semaphore_list, executable, function,
+      config, constants, bindings, flags);
+}
+
+static iree_status_t iree_hal_vulkan_queue_atomic_wait(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_vulkan_queue_vtable);
+  return iree_hal_vulkan_queue_submit_atomic(
+      (iree_hal_vulkan_queue_t*)base_queue, wait_semaphore_list,
+      signal_semaphore_list, target_buffer, target_offset,
+      iree_hal_vulkan_atomic_params_from_wait(params));
+}
+
+static iree_status_t iree_hal_vulkan_queue_atomic_store(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_vulkan_queue_vtable);
+  return iree_hal_vulkan_queue_submit_atomic(
+      (iree_hal_vulkan_queue_t*)base_queue, wait_semaphore_list,
+      signal_semaphore_list, target_buffer, target_offset,
+      iree_hal_vulkan_atomic_params_from_store(params));
+}
+
+static iree_status_t iree_hal_vulkan_queue_atomic_rmw(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_vulkan_queue_vtable);
+  return iree_hal_vulkan_queue_submit_atomic(
+      (iree_hal_vulkan_queue_t*)base_queue, wait_semaphore_list,
+      signal_semaphore_list, target_buffer, target_offset,
+      iree_hal_vulkan_atomic_params_from_rmw(params));
+}
+
+static iree_status_t iree_hal_vulkan_queue_timestamp(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_vulkan_queue_vtable);
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)target_buffer;
+  (void)target_offset;
+  (void)flags;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "Vulkan device-side timestamps not implemented");
+}
+
 static iree_status_t iree_hal_vulkan_queue_execute(
     iree_hal_queue_t* base_queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -10369,6 +10463,12 @@ static const iree_hal_queue_vtable_t iree_hal_vulkan_queue_vtable = {
     .destroy = iree_hal_vulkan_queue_destroy,
     .barrier = iree_hal_vulkan_queue_barrier,
     .execute = iree_hal_vulkan_queue_execute,
+    .host_call = iree_hal_vulkan_queue_host_call,
+    .dispatch = iree_hal_vulkan_queue_dispatch,
+    .atomic_wait = iree_hal_vulkan_queue_atomic_wait,
+    .atomic_store = iree_hal_vulkan_queue_atomic_store,
+    .atomic_rmw = iree_hal_vulkan_queue_atomic_rmw,
+    .timestamp = iree_hal_vulkan_queue_timestamp,
     .flush = iree_hal_vulkan_queue_flush,
     .alloca = iree_hal_vulkan_queue_alloca,
     .dealloca = iree_hal_vulkan_queue_dealloca,

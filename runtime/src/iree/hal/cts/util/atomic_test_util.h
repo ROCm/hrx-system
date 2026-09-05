@@ -33,6 +33,9 @@ struct AtomicTestRequirements {
 
 // Queue and allocation parameters satisfying an atomic test requirement.
 struct AtomicTestConfiguration {
+  // Queue family providing the requested atomic operations.
+  iree_hal_queue_family_ordinal_t queue_family_ordinal = 0;
+
   // Allocation parameters selecting a matching memory type.
   iree_hal_buffer_params_t buffer_params = {};
 };

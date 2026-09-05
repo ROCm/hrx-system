@@ -135,9 +135,9 @@ TEST_P(AsanExecutableTest, PublishesConfigGlobal) {
 
   SemaphoreList empty_wait;
   SemaphoreList dispatch_signal(device(), {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device(), IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      queue(), empty_wait, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -209,9 +209,9 @@ TEST_P(AsanExecutableTest, PublishesFeedbackConfigGlobal) {
 
   SemaphoreList empty_wait;
   SemaphoreList dispatch_signal(device(), {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device(), IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      queue(), empty_wait, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -254,9 +254,9 @@ TEST_P(AsanExecutableTest, ReportsAsanPacketThroughFeedback) {
   recorder()->Reset();
   SemaphoreList empty_wait;
   SemaphoreList dispatch_signal(device(), {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device(), IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      queue(), empty_wait, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(

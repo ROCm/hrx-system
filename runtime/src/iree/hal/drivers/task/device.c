@@ -563,20 +563,6 @@ static iree_status_t iree_hal_task_device_assign_topology_info(
   return status;
 }
 
-// Returns the queue index to submit work to based on the |queue_affinity|.
-//
-// If we wanted to have dedicated transfer queues we'd fork off based on
-// command_categories. For now all queues are general purpose.
-static iree_host_size_t iree_hal_task_device_select_queue(
-    iree_hal_task_device_t* device,
-    iree_hal_command_category_t command_categories,
-    iree_hal_queue_affinity_t queue_affinity) {
-  // TODO(benvanik): evaluate if we want to obscure this mapping a bit so that
-  // affinity really means "equivalent affinities map to equivalent queues" and
-  // not a specific queue index.
-  return queue_affinity % device->queue_count;
-}
-
 static iree_status_t iree_hal_task_device_create_channel(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     iree_hal_channel_params_t params, iree_hal_channel_t** out_channel) {
@@ -679,86 +665,6 @@ static iree_status_t iree_hal_task_device_query_queue_pool_backend(
       .user_data = device,
   };
   return iree_ok_status();
-}
-
-static iree_status_t iree_hal_task_device_queue_host_call(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_host_call_t call, const uint64_t args[4],
-    iree_hal_host_call_flags_t flags) {
-  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  const iree_host_size_t queue_index = iree_hal_task_device_select_queue(
-      device, IREE_HAL_COMMAND_CATEGORY_ANY, queue_affinity);
-  return iree_hal_task_queue_submit_host_call(
-      &device->queues[queue_index], base_device, 1ull << queue_index,
-      wait_semaphore_list, signal_semaphore_list, call, args, flags);
-}
-
-static iree_status_t iree_hal_task_device_check_atomic_width(
-    iree_hal_atomic_width_t width) {
-  if (IREE_UNLIKELY(!iree_hal_task_atomic_width_is_lock_free(width))) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "task devices do not support lock-based "
-                            "%u-bit atomic operations",
-                            width);
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_task_device_queue_atomic_wait(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_atomic_wait_params_t params) {
-  IREE_RETURN_IF_ERROR(iree_hal_task_device_check_atomic_width(params.width));
-  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  const iree_host_size_t queue_index = iree_hal_task_device_select_queue(
-      device, IREE_HAL_COMMAND_CATEGORY_ATOMIC, queue_affinity);
-  return iree_hal_task_queue_submit_atomic_wait(
-      &device->queues[queue_index], target_buffer, target_offset, params,
-      wait_semaphore_list, signal_semaphore_list);
-}
-
-static iree_status_t iree_hal_task_device_queue_atomic_store(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_atomic_store_params_t params) {
-  IREE_RETURN_IF_ERROR(iree_hal_task_device_check_atomic_width(params.width));
-  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  const iree_host_size_t queue_index = iree_hal_task_device_select_queue(
-      device, IREE_HAL_COMMAND_CATEGORY_ATOMIC, queue_affinity);
-  return iree_hal_task_queue_submit_atomic_store(
-      &device->queues[queue_index], target_buffer, target_offset, params,
-      wait_semaphore_list, signal_semaphore_list);
-}
-
-static iree_status_t iree_hal_task_device_queue_atomic_rmw(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_atomic_rmw_params_t params) {
-  IREE_RETURN_IF_ERROR(iree_hal_task_device_check_atomic_width(params.width));
-  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  const iree_host_size_t queue_index = iree_hal_task_device_select_queue(
-      device, IREE_HAL_COMMAND_CATEGORY_ATOMIC, queue_affinity);
-  return iree_hal_task_queue_submit_atomic_rmw(
-      &device->queues[queue_index], target_buffer, target_offset, params,
-      wait_semaphore_list, signal_semaphore_list);
-}
-
-static iree_status_t iree_hal_task_device_queue_timestamp(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_timestamp_flags_t flags) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "task device-side timestamps not implemented");
 }
 
 static uint32_t iree_hal_task_device_profile_count(iree_host_size_t count) {
@@ -864,24 +770,6 @@ static iree_status_t iree_hal_task_device_profiling_end(
   return status;
 }
 
-static iree_status_t iree_hal_task_device_queue_dispatch(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_executable_t* executable,
-    iree_hal_executable_function_t export_ordinal,
-    const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
-    const iree_hal_buffer_ref_list_t bindings,
-    iree_hal_dispatch_flags_t flags) {
-  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  const iree_host_size_t queue_index = iree_hal_task_device_select_queue(
-      device, IREE_HAL_COMMAND_CATEGORY_ANY, queue_affinity);
-  return iree_hal_task_queue_submit_dispatch(
-      &device->queues[queue_index], executable, export_ordinal, config,
-      constants, bindings.values, bindings.count, flags, wait_semaphore_list,
-      signal_semaphore_list);
-}
-
 static const iree_hal_device_vtable_t iree_hal_task_device_vtable = {
     .destroy = iree_hal_task_device_destroy,
     .id = iree_hal_task_device_id,
@@ -904,12 +792,6 @@ static const iree_hal_device_vtable_t iree_hal_task_device_vtable = {
     .query_semaphore_compatibility =
         iree_hal_task_device_query_semaphore_compatibility,
     .query_queue_pool_backend = iree_hal_task_device_query_queue_pool_backend,
-    .queue_host_call = iree_hal_task_device_queue_host_call,
-    .queue_dispatch = iree_hal_task_device_queue_dispatch,
-    .queue_atomic_wait = iree_hal_task_device_queue_atomic_wait,
-    .queue_atomic_store = iree_hal_task_device_queue_atomic_store,
-    .queue_atomic_rmw = iree_hal_task_device_queue_atomic_rmw,
-    .queue_timestamp = iree_hal_task_device_queue_timestamp,
     .profiling_begin = iree_hal_task_device_profiling_begin,
     .profiling_flush = iree_hal_task_device_profiling_flush,
     .profiling_end = iree_hal_task_device_profiling_end,
