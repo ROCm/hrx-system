@@ -89,8 +89,9 @@ typedef struct loom_low_allocation_resolved_reserved_range_t {
 // Target-validated fixed value prepared for allocation.
 //
 // |assignment| contains the propagated sparse and per-unit storage lifetime
-// used by conflict searches and is copied directly into the final allocation
-// table when selected.
+// used by conflict searches. Explicit preassignments are copied directly into
+// the final allocation table; target-implied locations reserve their storage
+// until the ordinary interval assignment path selects them.
 typedef struct loom_low_allocation_resolved_fixed_value_t {
   // Complete assignment at the required target-visible location.
   loom_low_allocation_assignment_t assignment;
@@ -133,9 +134,13 @@ typedef struct loom_low_allocation_target_constraints_t {
   loom_low_allocation_resolved_budget_t* budgets;
   // Number of entries in |budgets|.
   iree_host_size_t budget_count;
-  // Resolved fixed SSA value locations.
+  // Resolved fixed SSA value locations. Explicit preassignments occupy the
+  // leading |preassigned_fixed_value_count| entries and are followed by
+  // target-implied mandatory locations.
   loom_low_allocation_resolved_fixed_value_t* fixed_values;
-  // Number of entries in |fixed_values|.
+  // Number of explicit fixed values that must be preassigned.
+  iree_host_size_t preassigned_fixed_value_count;
+  // Total number of entries in |fixed_values|.
   iree_host_size_t fixed_value_count;
   // Resolved whole-function target-owned location ranges.
   loom_low_allocation_resolved_reserved_range_t* reserved_ranges;
@@ -217,6 +222,13 @@ iree_status_t loom_low_allocation_target_constraints_emit_failure(
 // fixed.
 const loom_low_allocation_resolved_fixed_value_t*
 loom_low_allocation_target_constraints_fixed_value_for_value(
+    const loom_low_allocation_target_constraints_t* constraints,
+    loom_value_id_t value_id);
+
+// Returns the explicit fixed value that must be preassigned for |value_id|, or
+// NULL when the value has no explicit fixed-location request.
+const loom_low_allocation_resolved_fixed_value_t*
+loom_low_allocation_target_constraints_preassigned_fixed_value_for_value(
     const loom_low_allocation_target_constraints_t* constraints,
     loom_value_id_t value_id);
 

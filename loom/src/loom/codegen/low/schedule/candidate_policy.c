@@ -16,7 +16,7 @@
 typedef enum loom_low_schedule_candidate_compare_mode_e {
   LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT = 0,
   LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF = 1,
-  LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_MODE_COUNT = 2,
+  LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION = 2,
 } loom_low_schedule_candidate_compare_mode_t;
 
 enum loom_low_schedule_recovery_policy_flag_bits_e {
@@ -26,34 +26,103 @@ enum loom_low_schedule_recovery_policy_flag_bits_e {
 
 typedef struct loom_low_schedule_recovery_policy_t {
   // Ready views contributing additional recovery nominees.
-  loom_low_schedule_ready_view_t ready_views[2];
+  loom_low_schedule_ready_view_t ready_views[3];
   // Number of populated entries in ready_views.
   uint8_t ready_view_count;
   // loom_low_schedule_recovery_policy_flag_bits_e bits.
   uint8_t flags;
 } loom_low_schedule_recovery_policy_t;
 
-static const loom_low_schedule_recovery_policy_t kLoomLowScheduleRecoveryPolicies
-    [LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_MODE_COUNT] = {
-        [LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT] =
+enum {
+  LOOM_LOW_SCHEDULE_RECOVERY_POLICY_DEFAULT = 0,
+  LOOM_LOW_SCHEDULE_RECOVERY_POLICY_PRESSURE = 1,
+  LOOM_LOW_SCHEDULE_RECOVERY_POLICY_COUNT = 2,
+};
+
+static const loom_low_schedule_recovery_policy_t
+    kLoomLowScheduleRecoveryPolicies[LOOM_LOW_SCHEDULE_RECOVERY_POLICY_COUNT] = {
+        [LOOM_LOW_SCHEDULE_RECOVERY_POLICY_DEFAULT] =
             {
                 .ready_views = {LOOM_LOW_SCHEDULE_READY_VIEW_SCHEDULE},
                 .ready_view_count = 1,
                 .flags =
                     LOOM_LOW_SCHEDULE_RECOVERY_POLICY_FLAG_REJECT_PRESSURE_DEBT,
             },
-        [LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF] =
+        [LOOM_LOW_SCHEDULE_RECOVERY_POLICY_PRESSURE] =
             {
                 .ready_views =
                     {
                         LOOM_LOW_SCHEDULE_READY_VIEW_PRESSURE,
                         LOOM_LOW_SCHEDULE_READY_VIEW_STORAGE,
+                        LOOM_LOW_SCHEDULE_READY_VIEW_SCHEDULE,
                     },
-                .ready_view_count = 2,
+                .ready_view_count = 3,
                 .flags =
                     LOOM_LOW_SCHEDULE_RECOVERY_POLICY_FLAG_REQUIRE_PRESSURE_PROGRESS,
             },
 };
+
+// Returns true when |score| establishes a new live storage value without
+// reducing total live units or exposing the next storage step or descriptor.
+// Scheduling such setup early only transfers or grows liveness in its
+// destination register class and can hold scarce physical locations across
+// unrelated work. Alias establishment and storage compaction produce no value
+// or reduce live units, respectively, and remain immediately actionable.
+static bool loom_low_schedule_candidate_defers_storage_setup(
+    const loom_low_schedule_candidate_score_t* score) {
+  const uint16_t actionable_flags =
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR |
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE;
+  return score->produced_live_value_count != 0 &&
+         score->killed_live_units <= score->produced_live_units &&
+         iree_any_bit_set(score->flags,
+                          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_STORAGE_SETUP) &&
+         !iree_any_bit_set(score->flags, actionable_flags);
+}
+
+// Defers operand-free materializations while recovering identified pressure.
+// Closing an opened consumer chain before another leaf can preserve the
+// pressure reduction from allocation repair. Without pressure risk,
+// rematerializability alone cannot outweigh pair affinity or stall costs.
+static bool loom_low_schedule_candidate_defers_rematerializable_leaf(
+    loom_low_schedule_candidate_compare_mode_t compare_mode,
+    const loom_low_schedule_candidate_score_t* score) {
+  if (compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT) {
+    return false;
+  }
+  const uint16_t actionable_flags =
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE |
+      (compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION
+           ? LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXACT_PACKING_COMPLETION
+           : 0);
+  return score->produced_live_value_count != 0 &&
+         score->killed_live_units == 0 &&
+         iree_any_bit_set(
+             score->flags,
+             LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_REMATERIALIZABLE_LEAF) &&
+         !iree_any_bit_set(score->flags, actionable_flags);
+}
+
+static bool loom_low_schedule_candidate_defers_materialization(
+    loom_low_schedule_candidate_compare_mode_t compare_mode,
+    const loom_low_schedule_candidate_score_t* score) {
+  return loom_low_schedule_candidate_defers_storage_setup(score) ||
+         loom_low_schedule_candidate_defers_rematerializable_leaf(compare_mode,
+                                                                  score);
+}
+
+static bool loom_low_schedule_candidate_unlocks_descriptor(
+    const loom_low_schedule_candidate_score_t* score) {
+  return iree_any_bit_set(score->flags,
+                          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR);
+}
+
+static bool loom_low_schedule_candidate_exceeds_unspillable_capacity(
+    const loom_low_schedule_candidate_score_t* score) {
+  return iree_any_bit_set(
+      score->flags,
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY);
+}
 
 static int loom_low_schedule_compare_candidate_pressure(
     const loom_low_schedule_candidate_score_t* lhs,
@@ -163,15 +232,19 @@ loom_low_schedule_choose_candidate_compare_mode(
     const loom_low_schedule_candidate_score_t* scores,
     iree_host_size_t score_count,
     uint32_t current_persistent_pressure_penalty) {
-  if (current_persistent_pressure_penalty != 0) {
-    return LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF;
-  }
+  bool has_pressure_risk = current_persistent_pressure_penalty != 0;
   for (iree_host_size_t i = 0; i < score_count; ++i) {
+    if (iree_any_bit_set(
+            scores[i].flags,
+            LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_NEEDS_COMPLETION_RECOVERY)) {
+      return LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION;
+    }
     if (scores[i].pressure_risk != LOOM_LOW_SCHEDULE_PRESSURE_RISK_NONE) {
-      return LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF;
+      has_pressure_risk = true;
     }
   }
-  return LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT;
+  return has_pressure_risk ? LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF
+                           : LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT;
 }
 
 static bool loom_low_schedule_candidate_score_less(
@@ -179,6 +252,62 @@ static bool loom_low_schedule_candidate_score_less(
     loom_low_schedule_candidate_compare_mode_t compare_mode,
     const loom_low_schedule_candidate_score_t* lhs,
     const loom_low_schedule_candidate_score_t* rhs) {
+  const bool lhs_defers_materialization =
+      loom_low_schedule_candidate_defers_materialization(compare_mode, lhs);
+  const bool rhs_defers_materialization =
+      loom_low_schedule_candidate_defers_materialization(compare_mode, rhs);
+  const bool lhs_exceeds_unspillable_capacity =
+      loom_low_schedule_candidate_exceeds_unspillable_capacity(lhs);
+  const bool rhs_exceeds_unspillable_capacity =
+      loom_low_schedule_candidate_exceeds_unspillable_capacity(rhs);
+  if (lhs_exceeds_unspillable_capacity != rhs_exceeds_unspillable_capacity) {
+    return !lhs_exceeds_unspillable_capacity;
+  }
+  // When both candidates exceed unspillable capacity, advance the tighter
+  // active completion. Otherwise a full register alone does not justify
+  // overriding pressure reduction in another storage class.
+  if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
+      lhs_exceeds_unspillable_capacity &&
+      compare_mode != LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT &&
+      lhs->active_unspillable_completion_capacity !=
+          rhs->active_unspillable_completion_capacity) {
+    return lhs->active_unspillable_completion_capacity <
+           rhs->active_unspillable_completion_capacity;
+  }
+  if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
+      compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION &&
+      lhs->active_register_packing_completion_capacity !=
+          rhs->active_register_packing_completion_capacity) {
+    return lhs->active_register_packing_completion_capacity <
+           rhs->active_register_packing_completion_capacity;
+  }
+  if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
+      compare_mode != LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT &&
+      iree_any_bit_set(
+          lhs->flags,
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_CONSTRAINED_COMPLETION) &&
+      iree_any_bit_set(
+          rhs->flags,
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_CONSTRAINED_COMPLETION) &&
+      lhs->source_ordinal != rhs->source_ordinal) {
+    return lhs->source_ordinal < rhs->source_ordinal;
+  }
+  if (lhs_defers_materialization != rhs_defers_materialization) {
+    return !lhs_defers_materialization;
+  }
+  if (lhs_defers_materialization) {
+    const bool lhs_unlocks_descriptor =
+        loom_low_schedule_candidate_unlocks_descriptor(lhs);
+    const bool rhs_unlocks_descriptor =
+        loom_low_schedule_candidate_unlocks_descriptor(rhs);
+    if (lhs_unlocks_descriptor != rhs_unlocks_descriptor) {
+      return lhs_unlocks_descriptor;
+    }
+  }
+  if (lhs_defers_materialization &&
+      lhs->pressure_cliff_penalty != rhs->pressure_cliff_penalty) {
+    return lhs->pressure_cliff_penalty < rhs->pressure_cliff_penalty;
+  }
   const int pressure_order =
       loom_low_schedule_compare_candidate_pressure(lhs, rhs);
   const int pressure_efficiency_order =
@@ -186,7 +315,7 @@ static bool loom_low_schedule_candidate_score_less(
   const int live_value_order =
       loom_low_schedule_compare_candidate_live_values(lhs, rhs);
   if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
-    if (compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF) {
+    if (compare_mode != LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT) {
       const bool lhs_makes_pressure_progress =
           lhs->pressure_progress_kind !=
           LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE;
@@ -481,7 +610,11 @@ void loom_low_schedule_candidate_policy_select(
   }
 
   const bool recover_pressure =
-      compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF;
+      compare_mode != LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT;
+  const bool recover_deferred_materialization =
+      loom_low_schedule_candidate_defers_materialization(
+          compare_mode, &out_selection->chosen_score) &&
+      ready_candidate_count > nominee_count;
   // Keep zero-stall selection on the bounded source-order path unless its best
   // candidate would consume a longer-latency result while ready work remains
   // outside that window. The existing recovery views can then preserve the
@@ -494,7 +627,7 @@ void loom_low_schedule_candidate_policy_select(
       ready_candidate_count > nominee_count;
   if (!recover_pressure &&
       out_selection->chosen_score.effective_stall_cycles == 0 &&
-      !recover_latency_window) {
+      !recover_latency_window && !recover_deferred_materialization) {
     return;
   }
   const uint8_t source_nominee_count = nominee_count;
@@ -503,7 +636,10 @@ void loom_low_schedule_candidate_policy_select(
           ? out_selection->chosen_score.dependency_latency_cycles
           : 0;
   const loom_low_schedule_recovery_policy_t* recovery_policy =
-      &kLoomLowScheduleRecoveryPolicies[compare_mode];
+      &kLoomLowScheduleRecoveryPolicies
+          [compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT
+               ? LOOM_LOW_SCHEDULE_RECOVERY_POLICY_DEFAULT
+               : LOOM_LOW_SCHEDULE_RECOVERY_POLICY_PRESSURE];
   loom_low_schedule_collect_recovery_nominees(
       state, ready_policy, recovery_policy, nominees, &nominee_count);
   for (uint8_t i = source_nominee_count; i < nominee_count; ++i) {
@@ -534,7 +670,13 @@ void loom_low_schedule_candidate_policy_select(
             recovery_policy->flags,
             LOOM_LOW_SCHEDULE_RECOVERY_POLICY_FLAG_REQUIRE_PRESSURE_PROGRESS) &&
         nominee_scores[i].pressure_progress_kind ==
-            LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE) {
+            LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE &&
+        !loom_low_schedule_candidate_defers_materialization(
+            compare_mode, &out_selection->chosen_score) &&
+        !(loom_low_schedule_candidate_exceeds_unspillable_capacity(
+              &out_selection->chosen_score) &&
+          !loom_low_schedule_candidate_exceeds_unspillable_capacity(
+              &nominee_scores[i]))) {
       continue;
     }
     if (loom_low_schedule_candidate_score_less(state, compare_mode,

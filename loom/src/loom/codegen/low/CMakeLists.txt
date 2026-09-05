@@ -541,6 +541,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::analysis::availability
+    loom::codegen::low::allocation::live_range
     loom::error::emitter
     loom::error::error_defs
     loom::ir

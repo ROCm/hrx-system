@@ -186,6 +186,10 @@ typedef struct loom_low_schedule_alias_pressure_limit_t {
   uint32_t live_unit_limit;
   // Representative descriptor register class used by diagnostics.
   uint16_t representative_reg_class_id;
+  // Dense bounded-unspillable completion domain, or UINT16_MAX when absent.
+  uint16_t unspillable_completion_domain_id;
+  // True when every register class sharing the limit is unspillable.
+  uint8_t all_classes_unspillable;
 } loom_low_schedule_alias_pressure_limit_t;
 
 typedef struct loom_low_schedule_build_state_t {
@@ -269,6 +273,9 @@ typedef struct loom_low_schedule_build_state_t {
   // Earliest downstream packing-resource exit in source order, indexed by
   // schedule node then register-packing resource.
   uint32_t* node_register_packing_completion_sinks;
+  // Downstream-consumer reachability signatures for each bounded unspillable
+  // completion domain, indexed by schedule node then dense domain ID.
+  uint32_t* node_unspillable_completion_signatures;
   // Most recent producer state for each minimum-distance hazard key.
   loom_low_schedule_hazard_state_t* hazard_states;
   // Descriptor register-class state read/write bits, dense by register class.
@@ -282,6 +289,12 @@ typedef struct loom_low_schedule_build_state_t {
     loom_low_schedule_alias_pressure_limit_t* alias_sets;
     // Highest dense one-based alias-set ID, or zero when none are present.
     uint16_t alias_set_count;
+    // Hard live-unit capacities indexed by completion-domain ID.
+    uint32_t* unspillable_completion_capacities;
+    // Completion-domain IDs indexed by descriptor register-class ID.
+    uint16_t* unspillable_completion_domain_ids_by_reg_class;
+    // Number of bounded-unspillable completion domains.
+    uint16_t unspillable_completion_domain_count;
   } pressure_limits;
   // Most recent architectural-state writer, dense by register class.
   loom_low_schedule_state_access_t* state_last_writes;

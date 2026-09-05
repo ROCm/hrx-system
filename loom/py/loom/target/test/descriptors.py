@@ -71,6 +71,7 @@ _REG_ALIAS64 = "test.alias64"
 _REG_PRESSURE_ALIAS32 = "test.pressure.alias32"
 _REG_PRESSURE_ALIAS64 = "test.pressure.alias64"
 _REG_EXPLICIT32 = "test.explicit32"
+_REG_FIXED_R0 = "test.fixed.r0"
 _REG_PACKED_NARROW = "test.packed.narrow"
 _REG_PACKED_WIDE = "test.packed.wide"
 
@@ -118,6 +119,7 @@ _I32_I64_ALT = (RegClassAlt(_REG_I32), RegClassAlt(_REG_I64))
 _PTR_ALT = (RegClassAlt(_REG_PTR),)
 _PHYS_ALT = (RegClassAlt(_REG_PHYS),)
 _SPECIAL_ALT = (RegClassAlt(_REG_SPECIAL),)
+_FIXED_R0_ALT = (RegClassAlt(_REG_FIXED_R0),)
 _SCHEDULE_STATE_ALT = (RegClassAlt(_REG_SCHEDULE_STATE),)
 _PRESSURE_ALIAS32_ALT = (RegClassAlt(_REG_PRESSURE_ALIAS32),)
 _PACKED_NARROW_ALT = (RegClassAlt(_REG_PACKED_NARROW),)
@@ -319,6 +321,10 @@ def _special_state_operand(field_name: str) -> Operand:
     )
 
 
+def _fixed_r0_operand(field_name: str) -> Operand:
+    return Operand(field_name, OperandRole.OPERAND, _FIXED_R0_ALT)
+
+
 def _special_state_read(field_name: str = "state_in") -> Operand:
     return Operand(
         field_name,
@@ -480,6 +486,20 @@ TEST_LOW_CONST_ZERO_I32_DESCRIPTOR = Descriptor(
     operands=(_i32_result(),),
     op_kind=DescriptorOpKind.CONST,
     asm_forms=_asm(results=("dst",)),
+    schedule_class=_SCHEDULE_CONST,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    instruction_classes=(InstructionClass.OTHER,),
+)
+
+TEST_LOW_CONST_PACKED_NARROW_DESCRIPTOR = Descriptor(
+    key="test.const.packed.narrow",
+    mnemonic="test.const.packed.narrow",
+    semantic_tag="test.const.packed.narrow",
+    operands=(_packed_narrow_result(),),
+    op_kind=DescriptorOpKind.CONST,
+    immediates=(_I32_VALUE_IMMEDIATE,),
+    constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
+    asm_forms=_asm(results=("dst",), immediates=("i32_value",)),
     schedule_class=_SCHEDULE_CONST,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
     instruction_classes=(InstructionClass.OTHER,),
@@ -739,6 +759,24 @@ TEST_LOW_SELECT_I32_DESCRIPTOR = Descriptor(
     asm_forms=_asm(
         results=("dst",),
         operands=("condition", "true_value", "false_value"),
+    ),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_FIXED_SELECT_I32_DESCRIPTOR = Descriptor(
+    key="test.fixed.select.i32",
+    mnemonic="test.fixed.select.i32",
+    semantic_tag="integer.select.i32",
+    operands=(
+        _i32_result(),
+        _i32_operand("true_value"),
+        _i32_operand("false_value"),
+        _fixed_r0_operand("condition"),
+    ),
+    asm_forms=_asm(
+        results=("dst",),
+        operands=("true_value", "false_value", "condition"),
     ),
     schedule_class=_SCHEDULE_SCALAR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -1095,6 +1133,24 @@ TEST_LOW_PACKING_EXPAND_DESCRIPTOR = Descriptor(
     semantic_tag="test.register.packing.expand",
     operands=(_packed_wide_result(), _packed_narrow_operand("src")),
     asm_forms=_asm(results=("dst",), operands=("src",)),
+    schedule_class=_SCHEDULE_VECTOR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_PACKING_CONFIGURED_EXPAND_DESCRIPTOR = Descriptor(
+    key="test.packing.configured.expand",
+    mnemonic="test.packing.configured.expand",
+    semantic_tag="test.register.packing.configured_expand",
+    operands=(
+        _packed_wide_result("lhs_dst"),
+        _packed_wide_result("rhs_dst"),
+        _packed_narrow_operand("src"),
+        _i32_operand("config"),
+    ),
+    asm_forms=_asm(
+        results=("lhs_dst", "rhs_dst"),
+        operands=("src", "config"),
+    ),
     schedule_class=_SCHEDULE_VECTOR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
@@ -1610,6 +1666,17 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             ),
         ),
         RegClass(
+            _REG_FIXED_R0,
+            32,
+            SpillSlotSpace.PRIVATE,
+            flags=(
+                RegClassFlag.PHYSICAL,
+                RegClassFlag.UNSPILLABLE,
+                RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
+            ),
+            physical_registers=("test.r0",),
+        ),
+        RegClass(
             _REG_PACKED_NARROW,
             32,
             SpillSlotSpace.PRIVATE,
@@ -1908,6 +1975,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
     descriptors=(
         TEST_LOW_CONST_I32_DESCRIPTOR,
         TEST_LOW_CONST_ZERO_I32_DESCRIPTOR,
+        TEST_LOW_CONST_PACKED_NARROW_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
         TEST_LOW_ADD_I32_DESCRIPTOR,
         TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
@@ -1935,6 +2003,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_SPV_OP_IADD_I32_DESCRIPTOR,
         TEST_LOW_CMP_EQ_I32_DESCRIPTOR,
         TEST_LOW_SELECT_I32_DESCRIPTOR,
+        TEST_LOW_FIXED_SELECT_I32_DESCRIPTOR,
         TEST_LOW_ADD_V4I32_DESCRIPTOR,
         TEST_LOW_EARLY_CLOBBER_V4I32_DESCRIPTOR,
         TEST_LOW_MIXED_EARLY_CLOBBER_V4I32_DESCRIPTOR,
@@ -1950,6 +2019,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_ADD_PHYS_DESCRIPTOR,
         TEST_LOW_PACKING_CREATE_DESCRIPTOR,
         TEST_LOW_PACKING_EXPAND_DESCRIPTOR,
+        TEST_LOW_PACKING_CONFIGURED_EXPAND_DESCRIPTOR,
         TEST_LOW_PACKING_RETIRE_DESCRIPTOR,
         TEST_LOW_MOVE_TO_PRESSURE_ALIAS32_DESCRIPTOR,
         TEST_LOW_MOVE_FROM_PRESSURE_ALIAS32_X5_DESCRIPTOR,

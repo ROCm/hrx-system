@@ -349,6 +349,206 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_forwards_storag
 }
 
 // ====
+// RUN: emit low-schedule-json @resource_stall_defers_non_actionable_storage_setup strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_defers_non_actionable_storage_setup(%source: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %copy = copy %source : reg<test.i32> -> reg<test.i32>
+  // The copy cannot expose its consumer until the delayed operand is ready, so
+  // opening its destination live range now would only hold storage early.
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.mul.i32", rejected_packet="low.copy"}
+  %delay0 = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.i32", rejected_packet="low.copy", chosen_data_ready_stall_cycles="1", rejected_data_ready_stall_cycles="0"}
+  %delay1 = test.add.i32 %delay0, %rhs
+  %result = test.add.i32 %copy, %delay1
+  return %result
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_closes_unspillable_storage_before_reopening strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_closes_unspillable_storage_before_reopening(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  // The first fixed-register setup cannot expose its consumer until the
+  // multiply is scheduled.
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.mul.i32", rejected_packet="low.copy"}
+  %prepared = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="low.copy", rejected_packet="low.copy"}
+  %fixed0 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // Completing the open unspillable value must beat a zero-stall setup that
+  // would require a second physical register in a one-register class.
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.fixed.select.i32", rejected_packet="low.copy"}
+  %select0 = test.fixed.select.i32 %prepared, %rhs, %fixed0
+  %fixed1 = copy %prepared : reg<test.i32> -> reg<test.fixed.r0>
+  %select1 = test.fixed.select.i32 %lhs, %rhs, %fixed1
+  return %select0, %select1
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_advances_smallest_active_unspillable_completion strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_advances_smallest_active_unspillable_completion(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>, %packed0: reg<test.packed.narrow>, %packed1: reg<test.packed.narrow>) -> (reg<test.i32>, reg<test.i32>, reg<test.packed.narrow>, reg<test.packed.narrow>) asm {
+  %fixed0 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  low.schedule.fence
+  // Both ready candidates would exceed a full unspillable class: %fixed1
+  // opens a second value in a singleton class, while %prepared_narrow opens a
+  // third value in a two-register class. The latter is a prerequisite of the
+  // sole consumer that releases %fixed0, so the tighter active transaction
+  // must determine the order instead of either candidate's local debt.
+  %fixed1 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.const.packed.narrow", rejected_packet="low.copy"}
+  %prepared_narrow = test.const.packed.narrow 1
+  // REMARK@+1: BACKEND/015
+  %prepared = copy %prepared_narrow : reg<test.packed.narrow> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015
+  %select0 = test.fixed.select.i32 %prepared, %rhs, %fixed0
+  %select1 = test.fixed.select.i32 %lhs, %rhs, %fixed1
+  return %select0, %select1, %packed0, %packed1
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_recovers_beyond_deferred_setup_window strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_recovers_beyond_deferred_setup_window(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  // These fill the bounded source-order nominee window. None is actionable
+  // until %prepared is available, and every destination is the same physical
+  // register, so issuing any copy first would create avoidable storage debt.
+  // REMARK@+1: BACKEND/015
+  %fixed0 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015
+  %fixed1 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015
+  %fixed2 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015
+  %fixed3 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015
+  %fixed4 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015
+  %fixed5 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015
+  %fixed6 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015
+  %fixed7 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015
+  %fixed8 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015
+  %fixed9 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015
+  %fixed10 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015
+  %fixed11 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015
+  %fixed12 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015
+  %fixed13 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015
+  %fixed14 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed15 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", ready_candidate_count="17", scored_candidate_count="17", chosen_packet="test.const.i32", rejected_packet="low.copy"}
+  %constant = test.const.i32 1
+  // The rematerializable leaf sits beyond the bounded source-order window but
+  // is the only safe way to expose the consumer shared by every fixed setup.
+  // REMARK@+1: BACKEND/015
+  %prepared = test.add.i32 %lhs, %constant
+  // REMARK@+1: BACKEND/015
+  %select0 = test.fixed.select.i32 %prepared, %rhs, %fixed0
+  // REMARK@+1: BACKEND/015
+  %select1 = test.fixed.select.i32 %prepared, %rhs, %fixed1
+  // REMARK@+1: BACKEND/015
+  %select2 = test.fixed.select.i32 %prepared, %rhs, %fixed2
+  // REMARK@+1: BACKEND/015
+  %select3 = test.fixed.select.i32 %prepared, %rhs, %fixed3
+  // REMARK@+1: BACKEND/015
+  %select4 = test.fixed.select.i32 %prepared, %rhs, %fixed4
+  // REMARK@+1: BACKEND/015
+  %select5 = test.fixed.select.i32 %prepared, %rhs, %fixed5
+  // REMARK@+1: BACKEND/015
+  %select6 = test.fixed.select.i32 %prepared, %rhs, %fixed6
+  // REMARK@+1: BACKEND/015
+  %select7 = test.fixed.select.i32 %prepared, %rhs, %fixed7
+  // REMARK@+1: BACKEND/015
+  %select8 = test.fixed.select.i32 %prepared, %rhs, %fixed8
+  // REMARK@+1: BACKEND/015
+  %select9 = test.fixed.select.i32 %prepared, %rhs, %fixed9
+  // REMARK@+1: BACKEND/015
+  %select10 = test.fixed.select.i32 %prepared, %rhs, %fixed10
+  // REMARK@+1: BACKEND/015
+  %select11 = test.fixed.select.i32 %prepared, %rhs, %fixed11
+  // REMARK@+1: BACKEND/015
+  %select12 = test.fixed.select.i32 %prepared, %rhs, %fixed12
+  // REMARK@+1: BACKEND/015
+  %select13 = test.fixed.select.i32 %prepared, %rhs, %fixed13
+  // REMARK@+1: BACKEND/015
+  %select14 = test.fixed.select.i32 %prepared, %rhs, %fixed14
+  %select15 = test.fixed.select.i32 %prepared, %rhs, %fixed15
+  return %select15
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_preserves_unconstrained_leaf_order strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_unconstrained_leaf_order() -> (reg<test.i32>) asm {
+  // Both leaves use virtual-only registers without a physical pressure limit.
+  // Rematerializability does not change their otherwise-equal source order.
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.const.i32", rejected_packet="test.const.zero.i32"}
+  %constant = test.const.i32 1
+  %ordinary = test.const.zero.i32
+  %result = test.add.i32 %constant, %ordinary
+  return %result
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_prefers_actionable_rematerialization strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_prefers_actionable_rematerialization(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  // Neither fixed-register setup can expose its consumer until %prepared is
+  // available. Materializing %constant first immediately exposes that work and
+  // avoids occupying the singleton register while the arithmetic chain runs.
+  // REMARK@+1: BACKEND/015
+  %fixed0 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed1 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.const.i32", rejected_packet="low.copy"}
+  %constant = test.const.i32 1
+  // REMARK@+1: BACKEND/015
+  %prepared = test.add.i32 %lhs, %constant
+  // REMARK@+1: BACKEND/015
+  %select0 = test.fixed.select.i32 %prepared, %rhs, %fixed0
+  %select1 = test.fixed.select.i32 %select0, %rhs, %fixed1
+  return %select1
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_fills_unconstrained_issue_gap strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_fills_unconstrained_issue_gap(%lhs0: reg<test.i32>, %rhs0: reg<test.i32>, %lhs1: reg<test.i32>, %rhs1: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  // REMARK@+1: BACKEND/015
+  %prepared0 = test.mul.i32 %lhs0, %rhs0
+  %prepared1 = test.mul.i32 %lhs1, %rhs1
+  // REMARK@+1: BACKEND/015
+  %constant0 = test.const.i32 1
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="test.add.i32", rejected_packet="test.mul.i32"}
+  %result0 = test.add.i32 %prepared0, %constant0
+  // With no physical pressure limit, issue the ready constant while the
+  // first result waits on its multiply instead of introducing a data stall.
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.const.i32", rejected_packet="test.add.i32", chosen_data_ready_stall_cycles="0", rejected_data_ready_stall_cycles="1"}
+  %constant1 = test.const.i32 2
+  %result1 = test.add.i32 %prepared1, %constant1
+  return %result0, %result1
+}
+
+// ====
 // RUN: emit low-schedule-json @barrier_schedule_fence strategy=resource-stall
 
 test.target<low_core> @test_target
@@ -777,7 +977,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_co
   %load = test.load.v4i32 %ptr
   %load1 = test.add.v4i32 %load, %scale
   %load2 = test.add.v4i32 %load1, %scale
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="3", rejected_pressure_cliff_penalty="11", chosen_projected_live_units="25", rejected_projected_live_units="32"}
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="2", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="3", rejected_pressure_cliff_penalty="15", chosen_projected_live_units="25", rejected_projected_live_units="32"}
   %shared = test.add.v4i32 %lhs, %rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", scored_candidate_count="3", chosen_packet="test.add.v4i32", rejected_packet="test.add.v4i32", chosen_projected_live_units="25", chosen_killed_live_units="4", chosen_produced_live_units="4"}
   %result0 = test.add.v4i32 %shared, %tail0
@@ -987,7 +1187,7 @@ test.target<low_core> @test_target
 low.func.def target<test.low.core>(@test_target) @resource_stall_opens_pressure_releasing_frontier(%payload_lhs: reg<test.i32 x4>, %payload_rhs: reg<test.i32 x4>, %frontier_lhs: reg<test.i32 x4>, %frontier_rhs: reg<test.i32 x4>, %independent_lhs: reg<test.i32 x4>, %independent_rhs: reg<test.i32 x4>) -> (reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32 x4>) asm {
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.add.v4i32", rejected_packet="test.add.v4i32"}
   %payload = test.add.v4i32 %payload_lhs, %payload_rhs
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.v4i32", rejected_packet="test.add.v4i32", chosen_pressure_cliff_penalty="4", rejected_pressure_cliff_penalty="4"}
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.v4i32", rejected_packet="test.add.v4i32", chosen_pressure_cliff_penalty="4", rejected_pressure_cliff_penalty="8"}
   %frontier = test.add.v4i32 %frontier_lhs, %frontier_rhs
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.add.v4i32", rejected_packet="test.add.v4i32"}
   %combined = test.add.v4i32 %payload, %frontier
@@ -997,7 +1197,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_opens_pressure_
   %lane1 = test.extract_lane.i32 %combined, 1
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", chosen_packet="test.extract_lane.i32", rejected_packet="test.extract_lane.i32"}
   %lane2 = test.extract_lane.i32 %combined, 2
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="6", chosen_packet="test.extract_lane.i32", rejected_packet="test.add.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="7"}
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="6", chosen_packet="test.extract_lane.i32", rejected_packet="test.add.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="11"}
   %lane3 = test.extract_lane.i32 %combined, 3
   %independent = test.add.v4i32 %independent_lhs, %independent_rhs
   %independent1 = test.add.v4i32 %independent, %independent_rhs
@@ -1320,4 +1520,37 @@ low.func.def target<test.low.core>(@test_target) @register_packing_avoids_fragme
   %result0 = test.packing.retire %lhs_wide0, %rhs_wide0
   %result1 = test.packing.retire %lhs_wide1, %rhs_wide1
   return %result0, %result1
+}
+
+// ====
+// RUN: emit low-schedule-json @register_packing_materializes_active_completion strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @register_packing_materializes_active_completion(%source0: reg<test.i32>, %source1: reg<test.i32>, %source2: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  // Two independent narrow values fill the aggregate packing resource. The
+  // otherwise-deferred configuration for the first transaction must then
+  // become actionable before the third transaction opens.
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.packing.create", rejected_packet="test.packing.create"}
+  %narrow0 = test.packing.create %source0
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.const.i32", rejected_packet="test.const.i32"}
+  %config0 = test.const.i32 0
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="test.packing.configured.expand", rejected_packet="test.const.i32"}
+  %lhs_wide0, %rhs_wide0 = test.packing.configured.expand %narrow0, %config0
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", chosen_packet="test.packing.retire", rejected_packet="test.packing.create"}
+  %result0 = test.packing.retire %lhs_wide0, %rhs_wide0
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.packing.create", rejected_packet="test.packing.create"}
+  %narrow1 = test.packing.create %source1
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="6", chosen_packet="test.const.i32", rejected_packet="test.const.i32"}
+  %config1 = test.const.i32 1
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="7", chosen_packet="test.packing.configured.expand", rejected_packet="test.const.i32"}
+  %lhs_wide1, %rhs_wide1 = test.packing.configured.expand %narrow1, %config1
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="8", chosen_packet="test.packing.retire", rejected_packet="test.const.i32"}
+  %result1 = test.packing.retire %lhs_wide1, %rhs_wide1
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", chosen_packet="test.packing.create", rejected_packet="test.const.i32"}
+  %narrow2 = test.packing.create %source2
+  %config2 = test.const.i32 2
+  %lhs_wide2, %rhs_wide2 = test.packing.configured.expand %narrow2, %config2
+  %result2 = test.packing.retire %lhs_wide2, %rhs_wide2
+  return %result0, %result1, %result2
 }

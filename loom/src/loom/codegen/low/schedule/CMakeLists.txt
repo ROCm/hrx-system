@@ -100,6 +100,7 @@ loom_cc_library(
     "pressure.h"
     "pressure_alias.c"
     "pressure_alias.h"
+    "pressure_priority.c"
     "ready_policy.c"
     "ready_policy.h"
     "run.c"
@@ -120,6 +121,7 @@ loom_cc_library(
     loom::analysis::liveness_json
     loom::codegen::low::allocation::storage
     loom::codegen::low::allocation::target_constraints
+    loom::codegen::low::descriptor_traits
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
     loom::codegen::low::function

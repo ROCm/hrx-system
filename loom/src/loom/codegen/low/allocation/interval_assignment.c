@@ -764,7 +764,7 @@ loom_low_allocation_interval_assignment_assign_fixed_interval(
     const loom_liveness_interval_t* interval, bool* out_assigned) {
   *out_assigned = false;
   const loom_low_allocation_resolved_fixed_value_t* fixed_value =
-      loom_low_allocation_target_constraints_fixed_value_for_value(
+      loom_low_allocation_target_constraints_preassigned_fixed_value_for_value(
           state->context->target_constraints, interval->value_id);
   if (!fixed_value) {
     return iree_ok_status();

@@ -348,6 +348,25 @@ static void loom_low_schedule_record_pressure_limit(uint32_t* existing_limit,
   }
 }
 
+// Returns the hard capacity owned by an unspillable register storage domain,
+// or UINT32_MAX when values in the class may spill or have no finite limit.
+static uint32_t loom_low_schedule_unspillable_completion_capacity(
+    const loom_low_schedule_build_state_t* state, uint16_t reg_class_id) {
+  const loom_low_reg_class_t* reg_class =
+      &state->target.descriptor_set->reg_classes[reg_class_id];
+  if (!iree_all_bits_set(reg_class->flags,
+                         LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE)) {
+    return UINT32_MAX;
+  }
+  if (reg_class->alias_set_id == 0) {
+    return state->pressure_limits.by_reg_class[reg_class_id];
+  }
+  const loom_low_schedule_alias_pressure_limit_t* alias_limit =
+      &state->pressure_limits.alias_sets[reg_class->alias_set_id];
+  return alias_limit->all_classes_unspillable ? alias_limit->live_unit_limit
+                                              : UINT32_MAX;
+}
+
 static iree_status_t loom_low_schedule_initialize_pressure_limits(
     loom_low_schedule_build_state_t* state) {
   const bool uses_pressure_strategy =
@@ -396,6 +415,11 @@ static iree_status_t loom_low_schedule_initialize_pressure_limits(
                                   (void**)&state->pressure_limits.alias_sets));
     memset(state->pressure_limits.alias_sets, 0xFF,
            alias_set_slot_count * sizeof(*state->pressure_limits.alias_sets));
+    for (uint16_t alias_set_id = 1; alias_set_id <= alias_set_count;
+         ++alias_set_id) {
+      state->pressure_limits.alias_sets[alias_set_id].all_classes_unspillable =
+          1;
+    }
   }
 
   for (uint32_t reg_class_id = 0;
@@ -403,6 +427,11 @@ static iree_status_t loom_low_schedule_initialize_pressure_limits(
     const loom_low_reg_class_t* reg_class =
         &descriptor_set->reg_classes[reg_class_id];
     const uint16_t alias_set_id = reg_class->alias_set_id;
+    if (alias_set_id != 0) {
+      state->pressure_limits.alias_sets[alias_set_id].all_classes_unspillable &=
+          iree_all_bits_set(reg_class->flags,
+                            LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE);
+    }
     if (alias_set_id != 0 &&
         state->pressure_limits.alias_sets[alias_set_id]
                 .representative_reg_class_id == LOOM_LOW_REG_CLASS_NONE) {
@@ -450,6 +479,87 @@ static iree_status_t loom_low_schedule_initialize_pressure_limits(
           budget->max_units);
     }
   }
+
+  if (state->options->strategy != LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
+    return iree_ok_status();
+  }
+
+  // Build domains from register classes the function can make live. The
+  // domain-ID table doubles as a used-class marker until the class scan below
+  // replaces each marker with its final dense ID.
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->arena, descriptor_set->reg_class_count,
+      sizeof(*state->pressure_limits
+                  .unspillable_completion_domain_ids_by_reg_class),
+      (void**)&state->pressure_limits
+          .unspillable_completion_domain_ids_by_reg_class));
+  memset(state->pressure_limits.unspillable_completion_domain_ids_by_reg_class,
+         0xFF,
+         descriptor_set->reg_class_count *
+             sizeof(*state->pressure_limits
+                         .unspillable_completion_domain_ids_by_reg_class));
+  for (loom_value_ordinal_t value_ordinal = 0;
+       value_ordinal < state->value_domain->value_count; ++value_ordinal) {
+    const uint16_t reg_class_id =
+        state->values[value_ordinal].register_class_id;
+    if (reg_class_id != LOOM_LOW_REG_CLASS_NONE) {
+      state->pressure_limits
+          .unspillable_completion_domain_ids_by_reg_class[reg_class_id] = 0;
+    }
+  }
+
+  uint32_t completion_domain_count = 0;
+  for (uint32_t reg_class_id = 0;
+       reg_class_id < descriptor_set->reg_class_count; ++reg_class_id) {
+    uint16_t* completion_domain_id =
+        &state->pressure_limits
+             .unspillable_completion_domain_ids_by_reg_class[reg_class_id];
+    if (*completion_domain_id == UINT16_MAX) continue;
+    const uint32_t capacity = loom_low_schedule_unspillable_completion_capacity(
+        state, (uint16_t)reg_class_id);
+    if (capacity == UINT32_MAX) {
+      *completion_domain_id = UINT16_MAX;
+      continue;
+    }
+    const uint16_t alias_set_id =
+        descriptor_set->reg_classes[reg_class_id].alias_set_id;
+    if (alias_set_id == 0) {
+      *completion_domain_id = (uint16_t)completion_domain_count++;
+      continue;
+    }
+    loom_low_schedule_alias_pressure_limit_t* alias_limit =
+        &state->pressure_limits.alias_sets[alias_set_id];
+    if (alias_limit->unspillable_completion_domain_id == UINT16_MAX) {
+      alias_limit->unspillable_completion_domain_id =
+          (uint16_t)completion_domain_count++;
+    }
+    *completion_domain_id = alias_limit->unspillable_completion_domain_id;
+  }
+  if (completion_domain_count >= UINT16_MAX) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "low schedule bounded unspillable storage domain count exceeds "
+        "uint16_t capacity");
+  }
+  if (completion_domain_count == 0) return iree_ok_status();
+
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->arena, completion_domain_count,
+      sizeof(*state->pressure_limits.unspillable_completion_capacities),
+      (void**)&state->pressure_limits.unspillable_completion_capacities));
+  for (uint32_t reg_class_id = 0;
+       reg_class_id < descriptor_set->reg_class_count; ++reg_class_id) {
+    const uint16_t completion_domain_id =
+        state->pressure_limits
+            .unspillable_completion_domain_ids_by_reg_class[reg_class_id];
+    if (completion_domain_id == UINT16_MAX) continue;
+    state->pressure_limits
+        .unspillable_completion_capacities[completion_domain_id] =
+        loom_low_schedule_unspillable_completion_capacity(
+            state, (uint16_t)reg_class_id);
+  }
+  state->pressure_limits.unspillable_completion_domain_count =
+      (uint16_t)completion_domain_count;
   return iree_ok_status();
 }
 
@@ -1229,6 +1339,25 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
           (void**)&state->node_pressure_activation_units));
       memset(state->node_pressure_activation_units, 0,
              node_count * sizeof(*state->node_pressure_activation_units));
+      const uint16_t unspillable_completion_domain_count =
+          state->pressure_limits.unspillable_completion_domain_count;
+      if (unspillable_completion_domain_count != 0) {
+        iree_host_size_t completion_entry_count = 0;
+        if (!iree_host_size_checked_mul(node_count,
+                                        unspillable_completion_domain_count,
+                                        &completion_entry_count)) {
+          return iree_make_status(
+              IREE_STATUS_RESOURCE_EXHAUSTED,
+              "low schedule unspillable completion table size overflow");
+        }
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            state->arena, completion_entry_count,
+            sizeof(*state->node_unspillable_completion_signatures),
+            (void**)&state->node_unspillable_completion_signatures));
+        memset(state->node_unspillable_completion_signatures, 0xFF,
+               completion_entry_count *
+                   sizeof(*state->node_unspillable_completion_signatures));
+      }
       if (state->target.descriptor_set->register_packing_resource_count != 0) {
         iree_host_size_t packing_entry_count = 0;
         if (!iree_host_size_checked_mul(

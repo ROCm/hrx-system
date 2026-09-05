@@ -20,7 +20,7 @@ extern "C" {
 #define LOOM_LOW_SCHEDULE_READY_NODE_NONE UINT32_MAX
 
 // Maximum number of ordered nodes copied from one ready view at a time.
-#define LOOM_LOW_SCHEDULE_READY_COPY_CAPACITY 16u
+#define LOOM_LOW_SCHEDULE_READY_COPY_CAPACITY 24u
 
 typedef enum loom_low_schedule_ready_view_e {
   // Stable source-order fallback.

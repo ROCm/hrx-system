@@ -239,6 +239,27 @@ low.func.def target<test.low.core>(@test_target) @unsupported_stack_spill_space(
 
 // ====
 
+// RUN: with-low-asm pass low-materialize-allocation{diagnostics=spills}
+
+test.target<low_core> @test_target
+
+// REMARK@+1: BACKEND/045 {function_name="rematerialize_live_frontier", value_name="literal", value_class="test.packed.narrow", trigger_kind="allocation-failure", cloned_packet_count="2", rewritten_operand_count="2", reason_key="descriptor-rematerializable"}
+low.func.def target<test.low.core>(@test_target) @rematerialize_live_frontier(%blocker: reg<test.packed.narrow>) -> (reg<test.i32>) asm {
+  %literal = test.const.packed.narrow 7
+  %seed = copy %literal : reg<test.packed.narrow> -> reg<test.i32>
+  %failed = copy %seed : reg<test.i32> -> reg<test.packed.narrow>
+  %blocker_value = copy %blocker : reg<test.packed.narrow> -> reg<test.i32>
+  %failed_value = copy %failed : reg<test.packed.narrow> -> reg<test.i32>
+  %literal_value = copy %literal : reg<test.packed.narrow> -> reg<test.i32>
+  %partial = test.add.i32 %blocker_value, %failed_value
+  %result = test.add.i32 %partial, %literal_value
+  return %result
+}
+
+// ----
+
+// ====
+
 // RUN: pass low-materialize-allocation{budgets=test.i32=3}
 
 test.target<low_core> @test_target

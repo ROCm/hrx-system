@@ -510,6 +510,7 @@ loom_cc_library(
         ":diagnostics",
         ":target_binding",
         "//loom/src/loom/analysis:availability",
+        "//loom/src/loom/codegen/low/allocation:live_range",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
