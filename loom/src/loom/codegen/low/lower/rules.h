@@ -79,9 +79,9 @@ typedef struct loom_low_lower_type_pattern_t {
 typedef enum loom_low_lower_value_ref_kind_e {
   // Invalid or uninitialized value reference.
   LOOM_LOW_LOWER_VALUE_REF_INVALID = 0,
-  // Source op operand at |index|.
+  // Source op operand field |index|, element |element_index|.
   LOOM_LOW_LOWER_VALUE_REF_OPERAND = 1,
-  // Source op result at |index|.
+  // Source op result field |index|, element |element_index|.
   LOOM_LOW_LOWER_VALUE_REF_RESULT = 2,
   // Rule-local temporary low value at |index|.
   LOOM_LOW_LOWER_VALUE_REF_TEMPORARY = 3,
@@ -125,10 +125,11 @@ static_assert(sizeof(loom_low_lower_rule_descriptor_ref_t) == 4,
 typedef struct loom_low_lower_value_ref_t {
   // Source value namespace being referenced.
   loom_low_lower_value_ref_kind_t kind;
-  // Ordinal within the namespace selected by |kind|. For operand refs this is
-  // the source operand field index; |element_index| selects within that field.
+  // Ordinal within the namespace selected by |kind|. For operand and result
+  // refs this is the source field index; |element_index| selects within that
+  // field.
   uint16_t index;
-  // Element ordinal within the operand field selected by |index|.
+  // Element ordinal within the operand or result field selected by |index|.
   uint16_t element_index;
   // One-based materializer table row used when this source ref is consumed as a
   // low operand. Zero means direct source-to-low value lookup.

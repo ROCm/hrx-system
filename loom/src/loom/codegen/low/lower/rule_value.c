@@ -89,9 +89,13 @@ loom_value_id_t loom_low_lower_rule_source_value(
       IREE_ASSERT_LT(value_ref->element_index, span.count);
       return span.values[value_ref->element_index];
     }
-    case LOOM_LOW_LOWER_VALUE_REF_RESULT:
-      IREE_ASSERT_LT(value_ref->index, source_op->result_count);
-      return loom_op_const_results(source_op)[value_ref->index];
+    case LOOM_LOW_LOWER_VALUE_REF_RESULT: {
+      const loom_op_vtable_t* vtable = loom_op_vtable(module, source_op);
+      loom_value_slice_t span =
+          loom_op_result_field_span(vtable, source_op, value_ref->index);
+      IREE_ASSERT_LT(value_ref->element_index, span.count);
+      return span.values[value_ref->element_index];
+    }
     case LOOM_LOW_LOWER_VALUE_REF_TEMPORARY:
       IREE_ASSERT_UNREACHABLE("temporary value ref has no source value");
       IREE_BUILTIN_UNREACHABLE();

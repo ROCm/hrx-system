@@ -182,6 +182,43 @@ def test_compile_structural_register_emits() -> None:
     assert compiled.emits[3].result_ref_count == 1
 
 
+def test_compile_variadic_result_element_refs() -> None:
+    fragment = ContractFragment(
+        name="test.variadic-result-elements",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=(
+            DescriptorRule(
+                source_op=vector.vector_deinterleave,
+                emit=(
+                    EmitRegisterCopy(
+                        source=ValueRef.operand("source"),
+                        result=ValueRef.result("results", element=0),
+                    ),
+                    EmitRegisterCopy(
+                        source=ValueRef.operand("source"),
+                        result=ValueRef.result("results", element=1),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    compiled = compile_lower_rule_set(
+        fragment,
+        dialect_ops={"vector": ALL_VECTOR_OPS},
+    )
+
+    result_refs = tuple(
+        compiled.value_refs[emit.result_bind_ref_start] for emit in compiled.emits
+    )
+    assert tuple(ref.kind for ref in result_refs) == (
+        SourceValueKind.RESULT,
+        SourceValueKind.RESULT,
+    )
+    assert tuple(ref.index for ref in result_refs) == (0, 0)
+    assert tuple(ref.element_index for ref in result_refs) == (0, 1)
+
+
 def _expect_value_error(callable_obj: Callable[[], object], message: str) -> None:
     error: ValueError | None = None
     try:

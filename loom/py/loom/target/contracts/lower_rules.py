@@ -2217,7 +2217,9 @@ def _lower_value_ref(
         kind=value_ref.kind,
         index=_source_value_index(source_op, value_ref, temporary_ordinals),
         element_index=(
-            value_ref.element if value_ref.kind == SourceValueKind.OPERAND else 0
+            value_ref.element
+            if value_ref.kind in (SourceValueKind.OPERAND, SourceValueKind.RESULT)
+            else 0
         ),
         materializer_index=materializer_index,
     )

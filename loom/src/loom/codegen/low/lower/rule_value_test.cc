@@ -81,6 +81,12 @@ class LowLowerRuleValueTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_scalar_addi_build(
         &body_builder, /*overflow_flags=*/0, arguments_[0], arguments_[1],
         i32_type, LOOM_LOCATION_UNKNOWN, &addi_op_));
+    const loom_type_t assume_result_types[] = {i32_type, i32_type};
+    IREE_ASSERT_OK(loom_scalar_assume_build(
+        &body_builder, arguments_, 2, /*predicates=*/nullptr,
+        /*predicates_count=*/0, assume_result_types,
+        IREE_ARRAYSIZE(assume_result_types), LOOM_LOCATION_UNKNOWN,
+        &variadic_result_op_));
     IREE_ASSERT_OK(loom_scalar_constant_build(
         &body_builder, loom_attr_i64(7), loom_type_scalar(LOOM_SCALAR_TYPE_I64),
         LOOM_LOCATION_UNKNOWN, &integer_constant_op_));
@@ -101,6 +107,7 @@ class LowLowerRuleValueTest : public ::testing::Test {
   loom_func_like_t function_ = {};
   const loom_value_id_t* arguments_ = nullptr;
   loom_op_t* addi_op_ = nullptr;
+  loom_op_t* variadic_result_op_ = nullptr;
   loom_op_t* integer_constant_op_ = nullptr;
   loom_op_t* float_constant_op_ = nullptr;
   loom_value_fact_table_t fact_table_ = {};
@@ -133,6 +140,36 @@ TEST_F(LowLowerRuleValueTest, ResolvesSourceValueReferencesAndFields) {
       loom_low_lower_rule_value_ref_field_span(module_, &rule_set, addi_op_, 2);
   ASSERT_EQ(result_field.count, 1u);
   EXPECT_EQ(result_field.values[0], loom_scalar_addi_result(addi_op_));
+}
+
+TEST_F(LowLowerRuleValueTest, ResolvesVariadicResultElements) {
+  loom_low_lower_value_ref_t value_refs[2] = {};
+  value_refs[0].kind = LOOM_LOW_LOWER_VALUE_REF_RESULT;
+  value_refs[0].index = 0;
+  value_refs[0].element_index = 0;
+  value_refs[1].kind = LOOM_LOW_LOWER_VALUE_REF_RESULT;
+  value_refs[1].index = 0;
+  value_refs[1].element_index = 1;
+  loom_low_lower_rule_set_t rule_set = {};
+  rule_set.value_refs = value_refs;
+  rule_set.value_ref_count = IREE_ARRAYSIZE(value_refs);
+
+  const loom_value_slice_t results =
+      loom_scalar_assume_results(variadic_result_op_);
+  ASSERT_EQ(results.count, 2u);
+  EXPECT_EQ(loom_low_lower_rule_source_value(module_, &rule_set,
+                                             variadic_result_op_, 0),
+            results.values[0]);
+  EXPECT_EQ(loom_low_lower_rule_source_value(module_, &rule_set,
+                                             variadic_result_op_, 1),
+            results.values[1]);
+
+  const loom_value_slice_t result_field =
+      loom_low_lower_rule_value_ref_field_span(module_, &rule_set,
+                                               variadic_result_op_, 1);
+  ASSERT_EQ(result_field.count, 2u);
+  EXPECT_EQ(result_field.values[0], results.values[0]);
+  EXPECT_EQ(result_field.values[1], results.values[1]);
 }
 
 TEST_F(LowLowerRuleValueTest, ProjectsExactScalarFacts) {

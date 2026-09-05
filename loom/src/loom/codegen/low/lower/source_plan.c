@@ -197,10 +197,15 @@ static bool loom_low_lower_rule_value_ref_source_value(
       *out_source_value_id = span.values[value_ref->element_index];
       return true;
     }
-    case LOOM_LOW_LOWER_VALUE_REF_RESULT:
-      IREE_ASSERT_LT(value_ref->index, source_op->result_count);
-      *out_source_value_id = loom_op_const_results(source_op)[value_ref->index];
+    case LOOM_LOW_LOWER_VALUE_REF_RESULT: {
+      const loom_op_vtable_t* vtable =
+          loom_op_vtable(context->module, source_op);
+      const loom_value_slice_t span =
+          loom_op_result_field_span(vtable, source_op, value_ref->index);
+      IREE_ASSERT_LT(value_ref->element_index, span.count);
+      *out_source_value_id = span.values[value_ref->element_index];
       return true;
+    }
     case LOOM_LOW_LOWER_VALUE_REF_TEMPORARY:
     case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_TERM:
     case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET:

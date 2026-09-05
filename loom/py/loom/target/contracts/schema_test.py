@@ -751,6 +751,26 @@ def test_descriptor_rule_rejects_negative_variadic_operand_element() -> None:
         )
 
 
+def test_result_ref_rejects_element_on_fixed_result() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"scalar.addi: test result result field 'result' is not variadic",
+    ):
+        ValueRef.result("result", element=1).validate(
+            scalar_arithmetic.scalar_addi, "test result"
+        )
+
+
+def test_result_ref_rejects_negative_variadic_element() -> None:
+    with pytest.raises(
+        ValueError,
+        match=(r"vector.deinterleave: test result result element must be non-negative"),
+    ):
+        ValueRef.result("results", element=-1).validate(
+            vector.vector_deinterleave, "test result"
+        )
+
+
 def test_descriptor_rule_rejects_unbound_required_immediate() -> None:
     descriptor = TEST_LOW_EXTRACT_LANE_I32_DESCRIPTOR
 
