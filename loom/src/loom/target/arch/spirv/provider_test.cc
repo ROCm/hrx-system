@@ -211,8 +211,7 @@ TEST_F(SpirvProviderTest, ProjectedProfileSatisfiesStructuredRequirements) {
   live_storage.config.contract_feature_bits |= LOOM_SPIRV_FEATURE_FLOAT16;
 
   loom_spirv_target_profile_t profile = {};
-  loom_spirv_target_profile_initialize(
-      &live_storage.bundle, /*cooperative_properties=*/nullptr, &profile);
+  loom_spirv_target_profile_initialize(&live_storage.bundle, &profile);
   loom_target_facts_t* effective = nullptr;
   IREE_ASSERT_OK(loom_target_profile_project_facts(
       &profile.base, &analysis_arena_, &effective));

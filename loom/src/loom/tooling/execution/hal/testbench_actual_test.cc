@@ -127,50 +127,33 @@ static loom_testbench_value_t F64Value(double value) {
   return result;
 }
 
-static const loom_target_profile_type_t kFakeTargetProfileType = {
-    /*.name=*/IREE_SVL("fake"),
-};
-static const loom_target_profile_t kFakeTargetProfile = {
-    /*.type=*/&kFakeTargetProfileType,
-    /*.target_bundle=*/nullptr,
-};
-
 static iree_status_t FakeHalSelectDeviceTarget(
     const loom_device_provider_t* provider,
-    const loom_run_hal_runtime_t* runtime, iree_allocator_t allocator,
-    loom_device_target_t* out_target) {
+    const loom_run_hal_runtime_t* runtime, loom_device_target_t* out_target) {
   (void)provider;
   (void)runtime;
-  (void)allocator;
-  *out_target = (loom_device_target_t){
-      /*.executable_target=*/nullptr,
-      /*.target_profile=*/&kFakeTargetProfile,
-      /*.artifact_target=*/
-      {
-          /*.target_bundle=*/kFakeTargetProfile.target_bundle,
-          /*.target_key=*/IREE_SVL("fake"),
-      },
-  };
-  return iree_ok_status();
+  *out_target = (loom_device_target_t){0};
+  return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                          "injected device target selection failure");
 }
 
 static iree_status_t FakeHalSelectCompatibleDeviceTarget(
     const loom_device_provider_t* provider,
     const loom_run_hal_runtime_t* runtime,
-    const loom_target_facts_t* target_requirement, iree_allocator_t allocator,
+    const loom_target_facts_t* target_requirement,
     loom_device_target_t* out_target) {
   if (target_requirement != nullptr) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "fake HAL provider requires targetless input");
   }
-  return FakeHalSelectDeviceTarget(provider, runtime, allocator, out_target);
+  return FakeHalSelectDeviceTarget(provider, runtime, out_target);
 }
 
 static const loom_artifact_provider_t kFakeArtifactProvider = {
     /*.name=*/IREE_SVL("fake-hal"),
     /*.public_artifact_format=*/IREE_SVL("FakeExecutableFormat123"),
     /*.flags=*/LOOM_ARTIFACT_PROVIDER_FLAG_CANONICAL,
-    /*.target_profile_type=*/&kFakeTargetProfileType,
+    /*.target_profile_type=*/{},
     /*.artifact_kind=*/LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_EXECUTABLE,
     /*.default_pipeline_options=*/{},
 };
@@ -568,9 +551,8 @@ func.def inline @linked_identity(%value: index) -> (index) {
 
   loom_run_hal_testbench_context_t context = {};
   context.device_provider = &kFakeDeviceProvider;
-  // Provider compile only needs target selection before the fake artifact
-  // provider rejects this source; avoid requiring a real HAL device for a
-  // rooted-link contract test.
+  // The injected target-selection failure occurs after the rooted input has
+  // been linked and avoids requiring a real HAL device for this contract test.
   context.runtime_initialized = true;
   context.host_allocator = iree_allocator_system();
 

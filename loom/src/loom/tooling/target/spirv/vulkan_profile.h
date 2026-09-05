@@ -122,42 +122,23 @@ typedef struct loom_spirv_vulkan_hal_profile_facts_t {
   loom_target_workgroup_count_limit_t max_compute_workgroup_count;
 } loom_spirv_vulkan_hal_profile_facts_t;
 
-typedef struct loom_spirv_vulkan_hal_target_profile_storage_t {
-  // Structured SPIR-V target profile. This remains first so the owning storage
-  // can be recovered from its target-neutral base pointer.
-  loom_spirv_target_profile_t profile;
-  // Target-neutral bundle projected by profile.
-  loom_target_bundle_storage_t target_bundle_storage;
-  // Cooperative property storage owned by this target profile.
-  loom_spirv_cooperative_property_storage_t cooperative_properties;
-} loom_spirv_vulkan_hal_target_profile_storage_t;
-
 // Queries Vulkan/SPIR-V profile facts from |device|.
 iree_status_t loom_spirv_vulkan_hal_profile_query(
     iree_hal_device_t* device,
     loom_spirv_vulkan_hal_profile_facts_t* out_facts);
 
-// Queries active Vulkan cooperative matrix rows into caller-owned storage.
-iree_status_t loom_spirv_vulkan_hal_query_cooperative_matrix_properties(
-    iree_hal_device_t* device, iree_allocator_t allocator,
-    iree_hal_vulkan_cooperative_matrix_property_t** out_properties,
-    iree_host_size_t* out_property_count);
+// Projects exact live-device cooperative-operation facts into |out_facts|.
+//
+// |out_facts| must already be initialized from the target bundle selected for
+// |device|. Nested immutable row and index storage is allocated from |arena|.
+iree_status_t loom_spirv_vulkan_hal_profile_project_target_facts(
+    iree_hal_device_t* device, iree_arena_allocator_t* arena,
+    loom_spirv_target_facts_t* out_facts);
 
-// Initializes target-local SPIR-V profile storage from exact Vulkan
-// cooperative matrix property rows.
-iree_status_t loom_spirv_vulkan_hal_target_profile_storage_initialize(
-    const loom_spirv_vulkan_hal_profile_facts_t* facts,
-    const iree_hal_vulkan_cooperative_matrix_property_t*
-        cooperative_matrix_properties,
-    iree_host_size_t cooperative_matrix_property_count,
-    iree_allocator_t allocator,
-    loom_spirv_vulkan_hal_target_profile_storage_t* out_storage);
-
-// Releases storage allocated by
-// loom_spirv_vulkan_hal_target_profile_storage_initialize.
-void loom_spirv_vulkan_hal_target_profile_storage_deinitialize(
-    loom_spirv_vulkan_hal_target_profile_storage_t* storage,
-    iree_allocator_t allocator);
+// Returns whether |device| supports the named modeled cooperative matrix row.
+iree_status_t loom_spirv_vulkan_hal_profile_supports_cooperative_matrix_row(
+    iree_hal_device_t* device, iree_string_view_t row_name,
+    bool* out_supported);
 
 // Materializes a HAL-kernel Vulkan 1.3 raw-BDA SPIR-V target bundle.
 //

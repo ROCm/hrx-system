@@ -79,19 +79,21 @@ static iree_status_t loom_target_specialization_resolve_profile(
     const loom_target_provider_t** out_target_provider) {
   *out_target_provider = NULL;
   if (target_profile == NULL || target_profile->type == NULL ||
+      target_profile->type->fact_type == NULL ||
       target_profile->target_bundle == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "%s %" PRIhsz " has no complete target profile",
                             request_kind, request_ordinal);
   }
   const loom_target_provider_t* target_provider =
-      loom_target_environment_lookup_profile_provider(environment,
-                                                      target_profile->type);
+      loom_target_environment_lookup_fact_provider(
+          environment, target_profile->type->fact_type);
   if (target_provider == NULL) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "%s %" PRIhsz
-        " uses profile family '%.*s' not linked into the target environment",
+        " projects target fact family '%.*s' not linked into the target "
+        "environment",
         request_kind, request_ordinal, (int)target_profile->type->name.size,
         target_profile->type->name.data);
   }

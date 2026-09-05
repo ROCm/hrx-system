@@ -476,8 +476,9 @@ const loom_pass_registry_t* loom_target_environment_pass_registry(
 // Returns the provider owning |profile_type|, or NULL when not linked.
 //
 // This is a cold external-input boundary check used before accepting a
-// structured profile for specialization. Callers retain the returned provider
-// with projected facts instead of resolving the family again downstream.
+// structured configured profile. Alternate profile representations that
+// project the same fact type resolve through
+// |loom_target_environment_lookup_fact_provider|.
 const loom_target_provider_t* loom_target_environment_lookup_profile_provider(
     const loom_target_environment_t* environment,
     const loom_target_profile_type_t* profile_type);

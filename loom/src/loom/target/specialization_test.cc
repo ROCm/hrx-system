@@ -634,15 +634,48 @@ func.def public @otherwise_compatible() {
       Function(module.get(), IREE_SV("otherwise_compatible")))));
 }
 
-TEST_F(TargetSpecializationTest, RejectsUnlinkedProfileFamily) {
+TEST_F(TargetSpecializationTest, AcceptsAlternateProfileRepresentation) {
   ModulePtr module = Parse(R"(
 func.def public @entry() {
   func.return
 }
 )");
+  static const loom_target_profile_type_t kAlternateProfileType = {
+      /*.name=*/IREE_SVL("specialization-test-alternate"),
+      /*.fact_type=*/&loom_test_target_fact_type,
+      /*.project_facts=*/ProjectTestProfileFacts,
+  };
+  TestTargetProfile profile = MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  profile.base.type = &kAlternateProfileType;
+  const loom_target_specialization_request_t request = {
+      /*.function_name=*/IREE_SV("entry"),
+      /*.target_profile=*/&profile.base,
+  };
+  loom_target_specialization_result_t result = {};
+
+  IREE_ASSERT_OK(loom_target_specialize_functions(
+      &environment_, module.get(),
+      {
+          /*.values=*/&request,
+          /*.count=*/1,
+      },
+      /*.bindings=*/{}, /*diagnostic_emitter=*/{}, &arena_, &result));
+  EXPECT_EQ(result.function_versions.list.count, 1u);
+}
+
+TEST_F(TargetSpecializationTest, RejectsUnlinkedProfileFactFamily) {
+  ModulePtr module = Parse(R"(
+func.def public @entry() {
+  func.return
+}
+)");
+  static const loom_target_fact_type_t kUnlinkedFactType = {
+      /*.name=*/IREE_SVL("unlinked"),
+      /*.storage_size=*/sizeof(loom_target_facts_t),
+  };
   static const loom_target_profile_type_t kUnlinkedProfileType = {
       /*.name=*/IREE_SVL("unlinked"),
-      /*.fact_type=*/&loom_test_target_fact_type,
+      /*.fact_type=*/&kUnlinkedFactType,
       /*.project_facts=*/ProjectTestProfileFacts,
   };
   TestTargetProfile profile = MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);

@@ -100,7 +100,7 @@ struct loom_artifact_provider_t {
   iree_string_view_t public_artifact_format;
   // Format selection flags.
   loom_artifact_provider_flags_t flags;
-  // Required target-family profile representation.
+  // Configured profile type defining this provider's target fact family.
   const loom_target_profile_type_t* target_profile_type;
   // Artifact kind recorded in structured compile reports.
   loom_target_compile_artifact_kind_t artifact_kind;

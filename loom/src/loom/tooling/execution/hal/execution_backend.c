@@ -113,8 +113,8 @@ iree_status_t loom_run_hal_execution_backend_probe(
   iree_status_t status = loom_run_hal_runtime_initialize(
       &runtime_options, request->host_allocator, &runtime);
   if (iree_status_is_ok(status)) {
-    status = device_provider->select_target(device_provider, &runtime,
-                                            request->host_allocator, &target);
+    status =
+        loom_device_provider_select_target(device_provider, &runtime, &target);
   }
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_format(
@@ -127,16 +127,11 @@ iree_status_t loom_run_hal_execution_backend_probe(
         device_provider->driver_name.data);
   }
   if (iree_status_is_ok(status) &&
-      !iree_string_view_is_empty(target.artifact_target.target_key)) {
+      !iree_string_view_is_empty(loom_device_target_key(&target))) {
+    const iree_string_view_t target_key = loom_device_target_key(&target);
     status = iree_string_builder_append_format(
         &request->result->output, "device target key: %.*s\n",
-        (int)target.artifact_target.target_key.size,
-        target.artifact_target.target_key.data);
-  }
-
-  if (device_provider->deinitialize_target != NULL) {
-    device_provider->deinitialize_target(device_provider, &target,
-                                         request->host_allocator);
+        (int)target_key.size, target_key.data);
   }
   loom_run_hal_runtime_deinitialize(&runtime);
   return status;

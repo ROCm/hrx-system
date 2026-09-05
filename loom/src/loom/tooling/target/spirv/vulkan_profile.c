@@ -241,6 +241,27 @@ static void loom_spirv_vulkan_hal_profile_project_feature_flag(
   }
 }
 
+static iree_status_t loom_spirv_vulkan_hal_profile_decode_device_spec(
+    iree_hal_device_t* device, const iree_hal_device_spec_t** out_device_spec,
+    iree_hal_vulkan_device_spec_t* out_vulkan_spec) {
+  *out_device_spec = iree_hal_device_spec(device);
+  *out_vulkan_spec = (iree_hal_vulkan_device_spec_t){0};
+  if (*out_device_spec == NULL) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "HAL device does not expose immutable device facts");
+  }
+  const iree_hal_device_spec_facet_t* vulkan_facet =
+      iree_hal_vulkan_device_spec_find_facet(*out_device_spec);
+  if (vulkan_facet == NULL) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "HAL device spec does not expose Vulkan device facts");
+  }
+  return iree_hal_vulkan_device_spec_decode_facet(vulkan_facet,
+                                                  out_vulkan_spec);
+}
+
 iree_status_t loom_spirv_vulkan_hal_profile_query(
     iree_hal_device_t* device,
     loom_spirv_vulkan_hal_profile_facts_t* out_facts) {
@@ -248,12 +269,10 @@ iree_status_t loom_spirv_vulkan_hal_profile_query(
   IREE_ASSERT_ARGUMENT(out_facts);
 
   *out_facts = (loom_spirv_vulkan_hal_profile_facts_t){0};
-  const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(device);
-  if (device_spec == NULL) {
-    return iree_make_status(
-        IREE_STATUS_UNAVAILABLE,
-        "HAL device does not expose immutable device facts");
-  }
+  const iree_hal_device_spec_t* device_spec = NULL;
+  iree_hal_vulkan_device_spec_t vulkan_spec = {0};
+  IREE_RETURN_IF_ERROR(loom_spirv_vulkan_hal_profile_decode_device_spec(
+      device, &device_spec, &vulkan_spec));
   const iree_hal_executable_target_selection_t target_selection = {
       .family = IREE_SV("spirv"),
       .target_key = IREE_SV("vulkan1.3+bda"),
@@ -278,17 +297,6 @@ iree_status_t loom_spirv_vulkan_hal_profile_query(
         IREE_STATUS_UNAVAILABLE,
         "HAL device spec does not expose dispatch capability facts");
   }
-  const iree_hal_device_spec_facet_t* vulkan_facet =
-      iree_hal_vulkan_device_spec_find_facet(device_spec);
-  if (vulkan_facet == NULL) {
-    return iree_make_status(
-        IREE_STATUS_UNAVAILABLE,
-        "HAL device spec does not expose Vulkan device facts");
-  }
-  iree_hal_vulkan_device_spec_t vulkan_spec = {0};
-  IREE_RETURN_IF_ERROR(
-      iree_hal_vulkan_device_spec_decode_facet(vulkan_facet, &vulkan_spec));
-
   out_facts->api_version = vulkan_spec.api_version;
   out_facts->subgroup_size = dispatch->subgroup.default_size;
   out_facts->max_compute_workgroup_invocations =
@@ -311,53 +319,6 @@ iree_status_t loom_spirv_vulkan_hal_profile_query(
         &vulkan_spec, &kVulkanFeatureRows[i], out_facts);
   }
 
-  return iree_ok_status();
-}
-
-iree_status_t loom_spirv_vulkan_hal_query_cooperative_matrix_properties(
-    iree_hal_device_t* device, iree_allocator_t allocator,
-    iree_hal_vulkan_cooperative_matrix_property_t** out_properties,
-    iree_host_size_t* out_property_count) {
-  IREE_ASSERT_ARGUMENT(device);
-  IREE_ASSERT_ARGUMENT(out_properties);
-  IREE_ASSERT_ARGUMENT(out_property_count);
-
-  *out_properties = NULL;
-  *out_property_count = 0;
-
-  const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(device);
-  if (device_spec == NULL) {
-    return iree_make_status(
-        IREE_STATUS_UNAVAILABLE,
-        "HAL device does not expose immutable device facts");
-  }
-  const iree_hal_device_spec_facet_t* vulkan_facet =
-      iree_hal_vulkan_device_spec_find_facet(device_spec);
-  if (vulkan_facet == NULL) {
-    return iree_make_status(
-        IREE_STATUS_UNAVAILABLE,
-        "HAL device spec does not expose Vulkan device facts");
-  }
-  iree_hal_vulkan_device_spec_t vulkan_spec = {0};
-  IREE_RETURN_IF_ERROR(
-      iree_hal_vulkan_device_spec_decode_facet(vulkan_facet, &vulkan_spec));
-
-  const iree_host_size_t property_count = vulkan_spec.cooperative_matrix.count;
-  if (property_count == 0) {
-    return iree_ok_status();
-  }
-  iree_hal_vulkan_cooperative_matrix_property_t* properties = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      allocator, property_count, sizeof(*properties), (void**)&properties));
-  for (iree_host_size_t i = 0; i < property_count; ++i) {
-    const bool property_read =
-        iree_hal_vulkan_device_spec_read_cooperative_matrix_property(
-            &vulkan_spec, i, &properties[i]);
-    IREE_ASSERT_TRUE(property_read);
-    (void)property_read;
-  }
-  *out_properties = properties;
-  *out_property_count = property_count;
   return iree_ok_status();
 }
 
@@ -443,108 +404,144 @@ static bool loom_spirv_vulkan_hal_profile_model_row_matches_device_row(
 
 static bool loom_spirv_vulkan_hal_profile_model_row_supported(
     const loom_spirv_cooperative_matrix_property_t* model_row,
-    const iree_hal_vulkan_cooperative_matrix_property_t* device_rows,
-    iree_host_size_t device_row_count) {
-  for (iree_host_size_t i = 0; i < device_row_count; ++i) {
+    const iree_hal_vulkan_device_spec_t* vulkan_spec) {
+  for (iree_host_size_t i = 0; i < vulkan_spec->cooperative_matrix.count; ++i) {
+    iree_hal_vulkan_cooperative_matrix_property_t device_row = {0};
+    const bool row_read =
+        iree_hal_vulkan_device_spec_read_cooperative_matrix_property(
+            vulkan_spec, i, &device_row);
+    IREE_ASSERT_TRUE(row_read);
     if (loom_spirv_vulkan_hal_profile_model_row_matches_device_row(
-            model_row, &device_rows[i])) {
+            model_row, &device_row)) {
       return true;
     }
   }
   return false;
 }
 
-static iree_status_t
-loom_spirv_vulkan_hal_target_profile_storage_filter_matrix_rows(
-    const iree_hal_vulkan_cooperative_matrix_property_t* device_rows,
-    iree_host_size_t device_row_count, iree_allocator_t allocator,
-    loom_spirv_cooperative_matrix_property_t** out_rows,
-    iree_host_size_t* out_row_count) {
-  *out_rows = NULL;
-  *out_row_count = 0;
+static const loom_spirv_cooperative_matrix_property_t*
+loom_spirv_vulkan_hal_profile_find_model_row(iree_string_view_t row_name) {
   iree_host_size_t model_row_count = 0;
   const loom_spirv_cooperative_matrix_property_t* model_rows =
       loom_spirv_cooperative_matrix_model_properties(&model_row_count);
-  if (model_row_count == 0 || device_row_count == 0) {
+  for (iree_host_size_t i = 0; i < model_row_count; ++i) {
+    if (iree_string_view_equal(model_rows[i].name, row_name)) {
+      return &model_rows[i];
+    }
+  }
+  return NULL;
+}
+
+iree_status_t loom_spirv_vulkan_hal_profile_project_target_facts(
+    iree_hal_device_t* device, iree_arena_allocator_t* arena,
+    loom_spirv_target_facts_t* out_facts) {
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(arena);
+  IREE_ASSERT_ARGUMENT(out_facts);
+
+  out_facts->base.selector = LOOM_SPIRV_TARGET_KIND_VULKAN1_3;
+  loom_spirv_cooperative_property_set_t* property_set =
+      &out_facts->cooperative_properties;
+  property_set->feature_bits =
+      out_facts->base.storage.config.contract_feature_bits;
+  if (!iree_any_bit_set(property_set->feature_bits,
+                        LOOM_SPIRV_FEATURE_COOPERATIVE_MATRIX_KHR)) {
     return iree_ok_status();
   }
-  loom_spirv_cooperative_matrix_property_t* rows = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      allocator, model_row_count * sizeof(*rows), (void**)&rows));
-  iree_host_size_t row_count = 0;
+
+  const iree_hal_device_spec_t* device_spec = NULL;
+  iree_hal_vulkan_device_spec_t vulkan_spec = {0};
+  IREE_RETURN_IF_ERROR(loom_spirv_vulkan_hal_profile_decode_device_spec(
+      device, &device_spec, &vulkan_spec));
+  (void)device_spec;
+
+  iree_host_size_t model_row_count = 0;
+  const loom_spirv_cooperative_matrix_property_t* model_rows =
+      loom_spirv_cooperative_matrix_model_properties(&model_row_count);
+  if (model_row_count > UINT16_MAX) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "SPIR-V cooperative matrix model exceeds uint16_t capacity");
+  }
+
+  iree_host_size_t selected_row_count = 0;
   for (iree_host_size_t i = 0; i < model_row_count; ++i) {
-    if (!loom_spirv_vulkan_hal_profile_model_row_supported(
-            &model_rows[i], device_rows, device_row_count)) {
+    if (loom_spirv_vulkan_hal_profile_model_row_supported(&model_rows[i],
+                                                          &vulkan_spec)) {
+      ++selected_row_count;
+    }
+  }
+  if (selected_row_count == 0) {
+    return iree_ok_status();
+  }
+
+  loom_spirv_cooperative_matrix_property_t* selected_rows = NULL;
+  loom_spirv_cooperative_property_span_t* shape_spans = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, selected_row_count,
+                                                 sizeof(*selected_rows),
+                                                 (void**)&selected_rows));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, selected_row_count, sizeof(*shape_spans), (void**)&shape_spans));
+
+  uint64_t previous_shape_key = 0;
+  uint16_t row_ordinal = 0;
+  uint16_t shape_span_count = 0;
+  for (iree_host_size_t i = 0; i < model_row_count; ++i) {
+    const loom_spirv_cooperative_matrix_property_t* model_row = &model_rows[i];
+    if (!loom_spirv_vulkan_hal_profile_model_row_supported(model_row,
+                                                           &vulkan_spec)) {
       continue;
     }
-    rows[row_count++] = model_rows[i];
-  }
-  *out_rows = rows;
-  *out_row_count = row_count;
-  return iree_ok_status();
-}
-
-iree_status_t loom_spirv_vulkan_hal_target_profile_storage_initialize(
-    const loom_spirv_vulkan_hal_profile_facts_t* facts,
-    const iree_hal_vulkan_cooperative_matrix_property_t*
-        cooperative_matrix_properties,
-    iree_host_size_t cooperative_matrix_property_count,
-    iree_allocator_t allocator,
-    loom_spirv_vulkan_hal_target_profile_storage_t* out_storage) {
-  IREE_ASSERT_ARGUMENT(facts);
-  IREE_ASSERT_ARGUMENT(out_storage);
-  if (cooperative_matrix_property_count != 0) {
-    IREE_ASSERT_ARGUMENT(cooperative_matrix_properties);
-  }
-  *out_storage = (loom_spirv_vulkan_hal_target_profile_storage_t){0};
-
-  loom_spirv_feature_bits_t feature_bits =
-      loom_spirv_vulkan_hal_profile_feature_bits(facts);
-  const bool has_cooperative_matrix_khr = iree_any_bit_set(
-      facts->flags, LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_COOPERATIVE_MATRIX_KHR);
-
-  loom_spirv_cooperative_matrix_property_t* matrix_rows = NULL;
-  iree_host_size_t matrix_row_count = 0;
-  iree_status_t status = iree_ok_status();
-  if (has_cooperative_matrix_khr) {
-    status = loom_spirv_vulkan_hal_target_profile_storage_filter_matrix_rows(
-        cooperative_matrix_properties, cooperative_matrix_property_count,
-        allocator, &matrix_rows, &matrix_row_count);
-  }
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < matrix_row_count; ++i) {
-      feature_bits |= matrix_rows[i].required_feature_bits;
+    selected_rows[row_ordinal] = *model_row;
+    property_set->feature_bits |= model_row->required_feature_bits;
+    const uint64_t shape_key = loom_spirv_cooperative_matrix_shape_key(
+        model_row->m_size, model_row->n_size, model_row->k_size);
+    if (row_ordinal == 0 || shape_key != previous_shape_key) {
+      shape_spans[shape_span_count++] =
+          (loom_spirv_cooperative_property_span_t){
+              .shape_key = shape_key,
+              .start = row_ordinal,
+              .count = 1,
+          };
+    } else {
+      ++shape_spans[shape_span_count - 1].count;
     }
-    status = loom_spirv_cooperative_property_storage_initialize(
-        feature_bits, matrix_rows, matrix_row_count,
-        /*vector_properties=*/NULL, /*vector_property_count=*/0, allocator,
-        &out_storage->cooperative_properties);
+    previous_shape_key = shape_key;
+    ++row_ordinal;
   }
-  if (iree_status_is_ok(status)) {
-    status = loom_spirv_vulkan_hal_profile_initialize_target_bundle(
-        facts, &out_storage->target_bundle_storage);
-  }
-  iree_allocator_free(allocator, matrix_rows);
-  if (!iree_status_is_ok(status)) {
-    loom_spirv_vulkan_hal_target_profile_storage_deinitialize(out_storage,
-                                                              allocator);
-    return status;
-  }
-  loom_spirv_target_profile_initialize(
-      &out_storage->target_bundle_storage.bundle,
-      &out_storage->cooperative_properties.set, &out_storage->profile);
+  IREE_ASSERT(row_ordinal == selected_row_count);
+
+  property_set->matrix_properties = selected_rows;
+  property_set->matrix_property_count = row_ordinal;
+  property_set->matrix_shape_spans = shape_spans;
+  property_set->matrix_shape_span_count = shape_span_count;
   return iree_ok_status();
 }
 
-void loom_spirv_vulkan_hal_target_profile_storage_deinitialize(
-    loom_spirv_vulkan_hal_target_profile_storage_t* storage,
-    iree_allocator_t allocator) {
-  if (storage == NULL) {
-    return;
+iree_status_t loom_spirv_vulkan_hal_profile_supports_cooperative_matrix_row(
+    iree_hal_device_t* device, iree_string_view_t row_name,
+    bool* out_supported) {
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(out_supported);
+  *out_supported = false;
+
+  const loom_spirv_cooperative_matrix_property_t* model_row =
+      loom_spirv_vulkan_hal_profile_find_model_row(row_name);
+  if (model_row == NULL) {
+    return iree_ok_status();
   }
-  loom_spirv_cooperative_property_storage_deinitialize(
-      &storage->cooperative_properties, allocator);
-  *storage = (loom_spirv_vulkan_hal_target_profile_storage_t){0};
+  const iree_hal_device_spec_t* device_spec = NULL;
+  iree_hal_vulkan_device_spec_t vulkan_spec = {0};
+  IREE_RETURN_IF_ERROR(loom_spirv_vulkan_hal_profile_decode_device_spec(
+      device, &device_spec, &vulkan_spec));
+  (void)device_spec;
+  if (!iree_all_bits_set(vulkan_spec.enabled_features.general,
+                         IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX)) {
+    return iree_ok_status();
+  }
+  *out_supported = loom_spirv_vulkan_hal_profile_model_row_supported(
+      model_row, &vulkan_spec);
+  return iree_ok_status();
 }
 
 iree_status_t loom_spirv_vulkan_hal_profile_initialize_target_bundle(

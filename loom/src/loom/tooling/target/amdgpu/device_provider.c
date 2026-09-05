@@ -130,13 +130,9 @@ static iree_status_t loom_amdgpu_device_provider_try_select_target(
 
   *out_target = (loom_device_target_t){
       .executable_target = result.target,
-      .target_profile = &profile->base,
-      .artifact_target =
-          {
-              .target_bundle = profile->base.target_bundle,
-              .target_key = result.target->target_key,
-          },
   };
+  loom_target_bundle_storage_initialize_from_bundle(
+      profile->base.target_bundle, &out_target->target_bundle_storage);
   *out_selected = true;
   return iree_ok_status();
 }
@@ -145,12 +141,10 @@ static iree_status_t loom_amdgpu_device_provider_select_compatible_target(
     const loom_device_provider_t* provider,
     const loom_run_hal_runtime_t* runtime,
     const loom_amdgpu_target_identity_t* authored_requirement,
-    iree_allocator_t allocator, loom_device_target_t* out_target) {
+    loom_device_target_t* out_target) {
   IREE_ASSERT_ARGUMENT(provider);
   IREE_ASSERT_ARGUMENT(runtime);
   IREE_ASSERT_ARGUMENT(out_target);
-  (void)allocator;
-
   *out_target = (loom_device_target_t){0};
 
   iree_status_t status = iree_ok_status();
@@ -164,7 +158,7 @@ static iree_status_t loom_amdgpu_device_provider_select_compatible_target(
         IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC, &selected, out_target);
   }
 
-  if (iree_status_is_ok(status) && out_target->target_profile == NULL) {
+  if (iree_status_is_ok(status) && !selected) {
     if (authored_requirement != NULL) {
       status = iree_make_status(
           IREE_STATUS_UNAVAILABLE,
@@ -187,17 +181,16 @@ static iree_status_t loom_amdgpu_device_provider_select_compatible_target(
 
 static iree_status_t loom_amdgpu_device_provider_select_target(
     const loom_device_provider_t* provider,
-    const loom_run_hal_runtime_t* runtime, iree_allocator_t allocator,
-    loom_device_target_t* out_target) {
+    const loom_run_hal_runtime_t* runtime, loom_device_target_t* out_target) {
   return loom_amdgpu_device_provider_select_compatible_target(
-      provider, runtime, /*authored_requirement=*/NULL, allocator, out_target);
+      provider, runtime, /*authored_requirement=*/NULL, out_target);
 }
 
 static iree_status_t
 loom_amdgpu_device_provider_select_compatible_target_from_facts(
     const loom_device_provider_t* provider,
     const loom_run_hal_runtime_t* runtime,
-    const loom_target_facts_t* target_requirement, iree_allocator_t allocator,
+    const loom_target_facts_t* target_requirement,
     loom_device_target_t* out_target) {
   IREE_ASSERT_ARGUMENT(provider);
   IREE_ASSERT_ARGUMENT(runtime);
@@ -217,7 +210,20 @@ loom_amdgpu_device_provider_select_compatible_target_from_facts(
   const loom_amdgpu_target_identity_t* authored_requirement =
       amdgpu_requirement != NULL ? &amdgpu_requirement->identity : NULL;
   return loom_amdgpu_device_provider_select_compatible_target(
-      provider, runtime, authored_requirement, allocator, out_target);
+      provider, runtime, authored_requirement, out_target);
+}
+
+static iree_status_t loom_amdgpu_device_provider_project_target_facts(
+    const loom_device_provider_t* provider,
+    const loom_run_hal_runtime_t* runtime, const loom_device_target_t* target,
+    iree_arena_allocator_t* arena, loom_target_facts_t* out_facts) {
+  (void)provider;
+  (void)runtime;
+  const loom_amdgpu_target_profile_t* profile = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_target_profile_select(
+      loom_device_target_key(target), &profile));
+  return loom_target_profile_project_facts_into(&profile->base, arena,
+                                                out_facts);
 }
 
 const loom_device_provider_t loom_amdgpu_device_provider = {
@@ -226,4 +232,5 @@ const loom_device_provider_t loom_amdgpu_device_provider = {
     .select_target = loom_amdgpu_device_provider_select_target,
     .select_compatible_target =
         loom_amdgpu_device_provider_select_compatible_target_from_facts,
+    .project_target_facts = loom_amdgpu_device_provider_project_target_facts,
 };

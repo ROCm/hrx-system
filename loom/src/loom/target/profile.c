@@ -16,12 +16,10 @@ static bool loom_target_profile_bundle_is_complete(
          bundle->export_plan != NULL && bundle->config != NULL;
 }
 
-iree_status_t loom_target_profile_project_facts(
-    const loom_target_profile_t* profile, iree_arena_allocator_t* arena,
-    loom_target_facts_t** out_facts) {
-  IREE_ASSERT_ARGUMENT(arena);
-  IREE_ASSERT_ARGUMENT(out_facts);
-  *out_facts = NULL;
+static iree_status_t loom_target_profile_validate(
+    const loom_target_profile_t* profile,
+    const loom_target_profile_type_t** out_profile_type) {
+  *out_profile_type = NULL;
   if (profile == NULL || profile->type == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "target profile has no family type");
@@ -41,6 +39,18 @@ iree_status_t loom_target_profile_project_facts(
         "target profile family '%.*s' has no typed fact projector",
         (int)profile_type->name.size, profile_type->name.data);
   }
+  *out_profile_type = profile_type;
+  return iree_ok_status();
+}
+
+iree_status_t loom_target_profile_project_facts(
+    const loom_target_profile_t* profile, iree_arena_allocator_t* arena,
+    loom_target_facts_t** out_facts) {
+  IREE_ASSERT_ARGUMENT(arena);
+  IREE_ASSERT_ARGUMENT(out_facts);
+  *out_facts = NULL;
+  const loom_target_profile_type_t* profile_type = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_profile_validate(profile, &profile_type));
 
   loom_target_facts_t* facts = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(
@@ -48,7 +58,26 @@ iree_status_t loom_target_profile_project_facts(
   memset(facts, 0, profile_type->fact_type->storage_size);
   loom_target_facts_builder_initialize(profile_type->fact_type,
                                        profile->target_bundle, facts);
-  IREE_RETURN_IF_ERROR(profile_type->project_facts(profile, arena, facts));
+  IREE_RETURN_IF_ERROR(
+      loom_target_profile_project_facts_into(profile, arena, facts));
   *out_facts = facts;
   return iree_ok_status();
+}
+
+iree_status_t loom_target_profile_project_facts_into(
+    const loom_target_profile_t* profile, iree_arena_allocator_t* arena,
+    loom_target_facts_t* out_facts) {
+  IREE_ASSERT_ARGUMENT(arena);
+  IREE_ASSERT_ARGUMENT(out_facts);
+  const loom_target_profile_type_t* profile_type = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_profile_validate(profile, &profile_type));
+  if (out_facts->fact_type != profile_type->fact_type) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "target profile family '%.*s' cannot project into fact family '%.*s'",
+        (int)profile_type->name.size, profile_type->name.data,
+        out_facts->fact_type ? (int)out_facts->fact_type->name.size : 0,
+        out_facts->fact_type ? out_facts->fact_type->name.data : "");
+  }
+  return profile_type->project_facts(profile, arena, out_facts);
 }

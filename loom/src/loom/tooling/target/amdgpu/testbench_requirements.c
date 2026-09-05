@@ -44,26 +44,20 @@ static iree_status_t loom_amdgpu_hal_testbench_query_descriptor_set_requirement(
   }
 
   loom_device_target_t target = {0};
-  IREE_RETURN_IF_ERROR(context->device_provider->select_target(
-      context->device_provider, &context->runtime, context->host_allocator,
-      &target));
-  const loom_amdgpu_target_profile_t* target_profile =
-      loom_amdgpu_target_profile_cast(target.target_profile);
-  const bool satisfied =
-      target_profile != NULL &&
-      iree_string_view_equal(
-          target_profile->identity.target->descriptor_set_key,
-          required_descriptor_set);
+  IREE_RETURN_IF_ERROR(loom_device_provider_select_target(
+      context->device_provider, &context->runtime, &target));
+  const loom_amdgpu_target_profile_t* target_profile = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_target_profile_select(
+      loom_device_target_key(&target), &target_profile));
+  const bool satisfied = iree_string_view_equal(
+      target_profile->identity.target->descriptor_set_key,
+      required_descriptor_set);
   out_result->state =
       satisfied ? LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_SATISFIED
                 : LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNSATISFIED;
   if (satisfied) {
     out_result->provider_code = iree_string_view_empty();
     out_result->display_message = iree_string_view_empty();
-  }
-  if (context->device_provider->deinitialize_target != NULL) {
-    context->device_provider->deinitialize_target(
-        context->device_provider, &target, context->host_allocator);
   }
   return iree_ok_status();
 }

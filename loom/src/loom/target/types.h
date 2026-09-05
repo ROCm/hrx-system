@@ -341,6 +341,25 @@ static inline void loom_target_bundle_storage_rebind(
   storage->bundle.config = &storage->config;
 }
 
+// Initializes |out_storage| with an independent by-value copy of |bundle|.
+// The source bundle and each of its payloads must be present.
+static inline void loom_target_bundle_storage_initialize_from_bundle(
+    const loom_target_bundle_t* bundle,
+    loom_target_bundle_storage_t* out_storage) {
+  IREE_ASSERT_ARGUMENT(bundle);
+  IREE_ASSERT_ARGUMENT(bundle->snapshot);
+  IREE_ASSERT_ARGUMENT(bundle->export_plan);
+  IREE_ASSERT_ARGUMENT(bundle->config);
+  IREE_ASSERT_ARGUMENT(out_storage);
+  *out_storage = (loom_target_bundle_storage_t){
+      .snapshot = *bundle->snapshot,
+      .export_plan = *bundle->export_plan,
+      .config = *bundle->config,
+      .bundle = *bundle,
+  };
+  loom_target_bundle_storage_rebind(out_storage);
+}
+
 #ifdef __cplusplus
 }
 #endif

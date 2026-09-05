@@ -100,6 +100,7 @@ loom_cc_library(
     "vulkan_profile.c"
   DEPS
     iree::base
+    iree::base::internal::arena
     iree::hal
     iree::hal::drivers::vulkan
     iree::hal::drivers::vulkan::api
@@ -149,6 +150,7 @@ loom_cc_test(
     ::device_provider
     ::vulkan_profile
     iree::base
+    iree::base::internal::arena
     iree::hal
     iree::hal::drivers::vulkan::device_spec
     iree::hal::utils::device_spec_builder
@@ -216,6 +218,7 @@ loom_cc_test(
     loom::target::arch::spirv::cooperative_properties
     loom::target::arch::spirv::features
     loom::target::arch::spirv::profile
+    loom::target::facts_builder
     loom::target::types
   LABELS
     "iree-build-requirement=loom.target.arch.spirv"

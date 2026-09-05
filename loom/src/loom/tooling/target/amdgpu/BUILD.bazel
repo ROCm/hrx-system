@@ -49,6 +49,7 @@ loom_cc_library(
         "//loom/src/loom/tooling/execution/hal:device_provider",
         "//loom/src/loom/tooling/execution/hal:runtime",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/hal",
     ],
 )
@@ -118,6 +119,7 @@ loom_cc_test(
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/tooling/execution/hal:runtime",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

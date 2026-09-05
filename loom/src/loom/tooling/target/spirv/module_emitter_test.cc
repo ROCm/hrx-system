@@ -159,9 +159,7 @@ low.func.def target<spirv.logical.core>(@generic) abi(shader_entry_point) @kerne
   IREE_ASSERT_OK(loom_spirv_vulkan_hal_profile_initialize_target_bundle(
       &device_facts, &exact_target));
   loom_spirv_target_profile_t exact_profile = {};
-  loom_spirv_target_profile_initialize(&exact_target.bundle,
-                                       /*cooperative_properties=*/nullptr,
-                                       &exact_profile);
+  loom_spirv_target_profile_initialize(&exact_target.bundle, &exact_profile);
   loom_target_facts_t* profile_facts = nullptr;
   IREE_ASSERT_OK(loom_target_profile_project_facts(&exact_profile.base, &arena_,
                                                    &profile_facts));

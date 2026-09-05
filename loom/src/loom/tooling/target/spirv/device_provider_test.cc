@@ -156,19 +156,13 @@ static iree_status_t CreateBaselineDeviceSpec(DeviceSpecPtr* out_device_spec) {
 
 class SpirvDeviceProviderTest : public ::testing::Test {
  protected:
-  void TearDown() override {
-    loom_spirv_vulkan_device_provider.deinitialize_target(
-        &loom_spirv_vulkan_device_provider, &target_, iree_allocator_system());
-  }
-
   iree_status_t SelectBaselineTarget() {
     IREE_RETURN_IF_ERROR(CreateBaselineDeviceSpec(&device_spec_));
     device_.device_spec = device_spec_.get();
     iree_hal_resource_initialize(&kFakeHalDeviceVtable, &device_.resource);
     runtime_.device = reinterpret_cast<iree_hal_device_t*>(&device_);
-    return loom_spirv_vulkan_device_provider.select_target(
-        &loom_spirv_vulkan_device_provider, &runtime_, iree_allocator_system(),
-        &target_);
+    return loom_device_provider_select_target(
+        &loom_spirv_vulkan_device_provider, &runtime_, &target_);
   }
 
   // Immutable device-spec storage used by |device_|.
@@ -180,20 +174,17 @@ class SpirvDeviceProviderTest : public ::testing::Test {
   // Runtime view passed through the production device-provider contract.
   loom_run_hal_runtime_t runtime_ = {};
 
-  // Device target selected and owned by the provider.
+  // Self-contained device target selected by the provider.
   loom_device_target_t target_ = {};
 };
 
 TEST_F(SpirvDeviceProviderTest, SelectsRawBdaTarget) {
   IREE_ASSERT_OK(SelectBaselineTarget());
 
-  const loom_spirv_target_profile_t* target_profile =
-      loom_spirv_target_profile_cast(target_.target_profile);
-  ASSERT_NE(target_profile, nullptr);
   const loom_target_bundle_t* target_bundle =
       loom_device_target_bundle(&target_);
   ASSERT_NE(target_bundle, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(target_.artifact_target.target_key,
+  EXPECT_TRUE(iree_string_view_equal(loom_device_target_key(&target_),
                                      IREE_SV("vulkan1.3+bda")));
   EXPECT_EQ(target_bundle->snapshot->codegen_format,
             LOOM_TARGET_CODEGEN_FORMAT_SPIRV);
@@ -202,6 +193,25 @@ TEST_F(SpirvDeviceProviderTest, SelectsRawBdaTarget) {
   EXPECT_EQ(target_bundle->snapshot->default_pointer_bitwidth, 64u);
   EXPECT_EQ(target_bundle->snapshot->offset_bitwidth, 64u);
   EXPECT_EQ(target_bundle->export_plan->abi_kind, LOOM_TARGET_ABI_HAL_KERNEL);
+
+  loom_device_target_profile_t device_profile = {};
+  IREE_ASSERT_OK(loom_device_target_profile_initialize(
+      &loom_spirv_vulkan_device_provider, &runtime_, &target_,
+      &device_profile));
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+  loom_target_facts_t* base_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_profile_project_facts(&device_profile.base, &arena,
+                                                   &base_facts));
+  const loom_spirv_target_facts_t* facts =
+      loom_spirv_target_facts_cast(base_facts);
+  ASSERT_NE(facts, nullptr);
+  EXPECT_EQ(facts->base.selector, LOOM_SPIRV_TARGET_KIND_VULKAN1_3);
+  EXPECT_EQ(facts->cooperative_properties.matrix_property_count, 0u);
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
 }
 
 }  // namespace

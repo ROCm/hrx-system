@@ -21,15 +21,7 @@ extern "C" {
 #endif
 
 typedef struct loom_run_hal_candidate_t {
-  // Host allocator used for owned candidate storage.
-  iree_allocator_t host_allocator;
-  // Device provider that selected |device_target|.
-  const loom_device_provider_t* provider;
-  // Device target selected during candidate compilation.
-  loom_device_target_t device_target;
-  // True when |device_target| storage is owned by this candidate.
-  bool owns_device_target;
-  // Offline compiler candidate emitted through |provider|.
+  // Offline compiler artifact candidate.
   loom_artifact_candidate_t artifact_candidate;
   // Device-loadable view of |artifact_candidate|.
   loom_device_artifact_t device_artifact;
@@ -47,8 +39,7 @@ iree_status_t loom_run_hal_candidate_compile(
     loom_run_hal_candidate_t* out_candidate);
 
 // Emits |run_module| to a HAL artifact candidate using |target| as the
-// selected target overlay. The caller retains ownership of |target| storage and
-// must keep it live until |out_candidate| is deinitialized.
+// selected target overlay. The target is borrowed only for this call.
 iree_status_t loom_run_hal_candidate_emit_target(
     const loom_device_provider_t* provider, const loom_device_target_t* target,
     loom_run_module_t* run_module, const loom_compile_options_t* options,

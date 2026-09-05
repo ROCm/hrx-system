@@ -341,13 +341,6 @@ void loom_run_hal_testbench_actual_provider_deinitialize(
   if (provider->candidate_initialized) {
     loom_run_hal_candidate_deinitialize(&provider->candidate);
   }
-  if (provider->compile_device_target_initialized &&
-      provider->context != NULL && provider->context->device_provider != NULL &&
-      provider->context->device_provider->deinitialize_target != NULL) {
-    provider->context->device_provider->deinitialize_target(
-        provider->context->device_provider, &provider->compile_device_target,
-        provider->context->host_allocator);
-  }
   loom_compile_pipeline_result_deinitialize(&provider->pipeline_result);
   loom_compile_pipeline_result_deinitialize(
       &provider->launch_config_pipeline_result);
@@ -708,9 +701,14 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
         provider->compile_module.module, entry_func, &target_requirement));
     IREE_RETURN_IF_ERROR(loom_device_provider_select_compatible_target(
         device_provider, &provider->context->runtime, target_requirement,
-        provider->context->host_allocator, &provider->compile_device_target));
+        &provider->compile_device_target));
     provider->compile_device_target_initialized = true;
   }
+
+  loom_device_target_profile_t compile_target_profile = {0};
+  IREE_RETURN_IF_ERROR(loom_device_target_profile_initialize(
+      provider->context->device_provider, &provider->context->runtime,
+      &provider->compile_device_target, &compile_target_profile));
 
   const loom_diagnostic_sink_t diagnostic_sink =
       loom_run_hal_testbench_counting_diagnostic_sink(provider);
@@ -726,7 +724,7 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
   pipeline_options.target_environment = provider->target_environment;
   const loom_target_specialization_request_t specialization_request = {
       .function_name = entry_symbol,
-      .target_profile = provider->compile_device_target.target_profile,
+      .target_profile = &compile_target_profile.base,
   };
   pipeline_options.target_specializations =
       (loom_target_specialization_request_list_t){

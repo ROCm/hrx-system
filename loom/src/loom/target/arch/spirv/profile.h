@@ -23,23 +23,18 @@ extern const loom_target_profile_type_t loom_spirv_target_profile_type;
 typedef struct loom_spirv_target_profile_t {
   // Target-neutral family identity and bundle projection.
   loom_target_profile_t base;
-
-  // Cooperative operation rows selected for the active target, or NULL to use
-  // the static modeled rows implied by the target feature set.
-  const loom_spirv_cooperative_property_set_t* cooperative_properties;
 } loom_spirv_target_profile_t;
 
 // Initializes an immutable SPIR-V target profile.
 void loom_spirv_target_profile_initialize(
     const loom_target_bundle_t* target_bundle,
-    const loom_spirv_cooperative_property_set_t* cooperative_properties,
     loom_spirv_target_profile_t* out_profile);
 
 // Selects the immutable profile matching one SPIR-V target selector.
 //
-// The returned profile has process lifetime. Named profiles model static API
-// environments; device-discovered profiles may additionally carry dynamic
-// cooperative operation rows through |loom_spirv_target_profile_initialize|.
+// The returned profile has process lifetime and models a static API
+// environment. Live devices project their exact properties through their
+// device provider without manufacturing a retained profile.
 iree_status_t loom_spirv_target_profile_select(
     iree_string_view_t selector,
     const loom_spirv_target_profile_t** out_profile);

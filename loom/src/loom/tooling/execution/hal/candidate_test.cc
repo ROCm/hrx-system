@@ -62,19 +62,27 @@ static const loom_target_export_plan_t kFakeExportPlan = {
     /*.export_symbol=*/{},
     /*.abi_kind=*/LOOM_TARGET_ABI_HAL_KERNEL,
 };
+static const loom_target_config_t kFakeTargetConfig = {
+    /*.name=*/IREE_SVL("fake-config"),
+};
 static const loom_target_bundle_t kFakeTargetBundle = {
     /*.name=*/IREE_SVL("fake-bundle"),
     /*.snapshot=*/&kFakeSnapshot,
     /*.export_plan=*/&kFakeExportPlan,
+    /*.config=*/&kFakeTargetConfig,
 };
 static const loom_target_profile_type_t kFakeTargetProfileType = {
     /*.name=*/IREE_SVL("fake"),
 };
-static const loom_target_profile_t kFakeTargetProfile = {
-    /*.type=*/&kFakeTargetProfileType,
-    /*.target_bundle=*/&kFakeTargetBundle,
-};
 static const loom_target_facts_t kFakeTargetRequirement = {};
+static const iree_hal_executable_target_t kFakeExecutableTarget = {
+    /*.family=*/IREE_SVL("fake"),
+    /*.target_key=*/IREE_SVL("fake-target-123"),
+    /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
+    /*.priority=*/100,
+    /*.physical_device_affinity=*/1,
+    /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+};
 
 typedef struct fake_hal_artifact_storage_t {
   // Immutable target-native artifact contents.
@@ -102,30 +110,25 @@ const loom_run_hal_runtime_t* FakeHalRuntime() {
 
 iree_status_t FakeHalSelectDeviceTarget(const loom_device_provider_t* provider,
                                         const loom_run_hal_runtime_t* runtime,
-                                        iree_allocator_t allocator,
                                         loom_device_target_t* out_target) {
   (void)provider;
   (void)runtime;
-  (void)allocator;
   *out_target = (loom_device_target_t){
-      /*.executable_target=*/nullptr,
-      /*.target_profile=*/&kFakeTargetProfile,
-      /*.artifact_target=*/
-      {
-          /*.target_bundle=*/&kFakeTargetBundle,
-          /*.target_key=*/IREE_SVL("fake-hal"),
-      },
+      /*.executable_target=*/&kFakeExecutableTarget,
+      /*.target_bundle_storage=*/{},
   };
+  loom_target_bundle_storage_initialize_from_bundle(
+      &kFakeTargetBundle, &out_target->target_bundle_storage);
   return iree_ok_status();
 }
 
 iree_status_t FakeHalSelectCompatibleDeviceTarget(
     const loom_device_provider_t* provider,
     const loom_run_hal_runtime_t* runtime,
-    const loom_target_facts_t* target_requirement, iree_allocator_t allocator,
+    const loom_target_facts_t* target_requirement,
     loom_device_target_t* out_target) {
   g_fake_hal_selected_target_requirement = target_requirement;
-  return FakeHalSelectDeviceTarget(provider, runtime, allocator, out_target);
+  return FakeHalSelectDeviceTarget(provider, runtime, out_target);
 }
 
 iree_status_t FakeHalEmitArtifact(const loom_artifact_provider_t* provider,
@@ -142,9 +145,15 @@ iree_status_t FakeHalEmitArtifact(const loom_artifact_provider_t* provider,
   g_fake_hal_emit_source_to_low_max_errors =
       options->target_pipeline_options.source_to_low_max_errors;
   *out_emitted = false;
-  if (target->target_bundle != &kFakeTargetBundle) {
+  if (!iree_string_view_equal(target->target_bundle->name,
+                              kFakeTargetBundle.name)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unexpected fake HAL target bundle");
+  }
+  if (!iree_string_view_equal(target->target_key,
+                              kFakeExecutableTarget.target_key)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unexpected fake HAL target key");
   }
   fake_hal_artifact_storage_t* storage = nullptr;
   IREE_RETURN_IF_ERROR(
@@ -167,7 +176,7 @@ iree_status_t FakeHalEmitArtifact(const loom_artifact_provider_t* provider,
     return status;
   }
   *out_artifact = (loom_artifact_t){
-      /*.target_key=*/IREE_SVL("fake-hal-target"),
+      /*.target_key=*/target->target_key,
       /*.target_bundle=*/&kFakeTargetBundle,
       /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
       /*.target_artifact_data=*/storage->target_artifact,
@@ -211,7 +220,6 @@ const loom_device_provider_t kFakeDeviceProvider = {
     /*.driver_name=*/IREE_SVL("fake"),
     /*.select_target=*/FakeHalSelectDeviceTarget,
     /*.select_compatible_target=*/FakeHalSelectCompatibleDeviceTarget,
-    /*.deinitialize_target=*/{},
 };
 
 class HalCandidateTest : public ::testing::Test {
@@ -278,17 +286,14 @@ TEST_F(HalCandidateTest, CompileHalExecutableCandidate) {
             &candidate.artifact_candidate.compile_report);
   EXPECT_EQ(g_fake_hal_emit_function_versions, &function_versions);
   EXPECT_EQ(g_fake_hal_emit_source_to_low_max_errors, 73u);
-  EXPECT_EQ(candidate.provider, &kFakeDeviceProvider);
-  EXPECT_EQ(candidate.device_target.target_profile, &kFakeTargetProfile);
-  EXPECT_EQ(loom_device_target_bundle(&candidate.device_target),
-            &kFakeTargetBundle);
-  EXPECT_EQ(candidate.device_artifact.executable_target, nullptr);
+  EXPECT_EQ(candidate.device_artifact.executable_target,
+            &kFakeExecutableTarget);
   EXPECT_EQ(candidate.device_artifact.artifact,
             &candidate.artifact_candidate.artifact);
   const loom_artifact_t& artifact = candidate.artifact_candidate.artifact;
   EXPECT_EQ(artifact.target_bundle, &kFakeTargetBundle);
-  EXPECT_TRUE(
-      iree_string_view_equal(artifact.target_key, IREE_SV("fake-hal-target")));
+  EXPECT_TRUE(iree_string_view_equal(artifact.target_key,
+                                     kFakeExecutableTarget.target_key));
   EXPECT_EQ(artifact.target_artifact_format, LOOM_TARGET_ARTIFACT_FORMAT_ELF);
   ASSERT_NE(artifact.target_artifact_data, nullptr);
   testing::ByteSequenceClone target_artifact(iree_allocator_system());
@@ -314,7 +319,7 @@ TEST_F(HalCandidateTest, CompileHalExecutableCandidate) {
       IREE_SV("fake-hal")));
   EXPECT_TRUE(iree_string_view_equal(
       candidate.artifact_candidate.compile_report.target_key,
-      IREE_SV("fake-hal-target")));
+      kFakeExecutableTarget.target_key));
   EXPECT_TRUE(iree_string_view_equal(
       candidate.artifact_candidate.compile_report.artifact_format,
       IREE_SV("elf")));
@@ -324,7 +329,7 @@ TEST_F(HalCandidateTest, CompileHalExecutableCandidate) {
             candidate.artifact_candidate.compile_report.artifact_size);
 
   loom_run_hal_candidate_deinitialize(&candidate);
-  EXPECT_EQ(candidate.provider, nullptr);
+  EXPECT_EQ(candidate.artifact_candidate.provider, nullptr);
   loom_run_module_deinitialize(&run_module);
 }
 
@@ -369,7 +374,7 @@ TEST_F(HalCandidateTest, CompileHalRequiresHooks) {
       loom_run_hal_candidate_compile(&provider, FakeHalRuntime(), &run_module,
                                      /*target_requirement=*/nullptr, &options,
                                      iree_allocator_system(), &candidate));
-  EXPECT_EQ(candidate.provider, nullptr);
+  EXPECT_EQ(candidate.artifact_candidate.provider, nullptr);
 
   loom_run_module_deinitialize(&run_module);
 }

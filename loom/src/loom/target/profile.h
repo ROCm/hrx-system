@@ -82,6 +82,15 @@ iree_status_t loom_target_profile_project_facts(
     const loom_target_profile_t* profile, iree_arena_allocator_t* arena,
     loom_target_facts_t** out_facts);
 
+// Projects |profile| into an initialized construction object.
+//
+// |out_facts| must have the fact type declared by |profile| and must already
+// be initialized from the effective target bundle. This form lets embedding
+// adapters reuse a family projector while retaining their own bundle storage.
+iree_status_t loom_target_profile_project_facts_into(
+    const loom_target_profile_t* profile, iree_arena_allocator_t* arena,
+    loom_target_facts_t* out_facts);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -210,7 +210,7 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   bool compile_module_initialized;
   // True when |candidate| has been initialized.
   bool candidate_initialized;
-  // True when |compile_device_target| owns provider-selected target storage.
+  // True when |compile_device_target| has been selected for this provider.
   bool compile_device_target_initialized;
   // True when |prepared_candidate| has been initialized.
   bool prepared_candidate_initialized;

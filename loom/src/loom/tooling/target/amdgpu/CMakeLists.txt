@@ -40,6 +40,7 @@ loom_cc_library(
   DEPS
     ::artifact_provider
     iree::base
+    iree::base::internal::arena
     iree::hal
     loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::profile
@@ -127,6 +128,7 @@ loom_cc_test(
   DEPS
     ::device_provider
     iree::base
+    iree::base::internal::arena
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main

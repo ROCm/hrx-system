@@ -13,8 +13,7 @@
 
 static iree_status_t loom_spirv_device_provider_select_target(
     const loom_device_provider_t* provider,
-    const loom_run_hal_runtime_t* runtime, iree_allocator_t allocator,
-    loom_device_target_t* out_target) {
+    const loom_run_hal_runtime_t* runtime, loom_device_target_t* out_target) {
   IREE_ASSERT_ARGUMENT(provider);
   IREE_ASSERT_ARGUMENT(runtime);
   IREE_ASSERT_ARGUMENT(out_target);
@@ -51,36 +50,10 @@ static iree_status_t loom_spirv_device_provider_select_target(
   loom_spirv_vulkan_hal_profile_facts_t facts = {0};
   IREE_RETURN_IF_ERROR(
       loom_spirv_vulkan_hal_profile_query(runtime->device, &facts));
-
-  iree_hal_vulkan_cooperative_matrix_property_t* matrix_rows = NULL;
-  iree_host_size_t matrix_row_count = 0;
-  iree_status_t status = iree_ok_status();
-  if (iree_any_bit_set(
-          facts.flags,
-          LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_COOPERATIVE_MATRIX_KHR)) {
-    status = loom_spirv_vulkan_hal_query_cooperative_matrix_properties(
-        runtime->device, allocator, &matrix_rows, &matrix_row_count);
-  }
-  loom_spirv_vulkan_hal_target_profile_storage_t* profile_storage = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(allocator, sizeof(*profile_storage),
-                                   (void**)&profile_storage);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_spirv_vulkan_hal_target_profile_storage_initialize(
-        &facts, matrix_rows, matrix_row_count, allocator, profile_storage);
-  }
-  iree_allocator_free(allocator, matrix_rows);
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(allocator, profile_storage);
-    return status;
-  }
+  IREE_RETURN_IF_ERROR(loom_spirv_vulkan_hal_profile_initialize_target_bundle(
+      &facts, &out_target->target_bundle_storage));
 
   out_target->executable_target = target_result.target;
-  out_target->target_profile = &profile_storage->profile.base;
-  out_target->artifact_target.target_bundle =
-      profile_storage->profile.base.target_bundle;
-  out_target->artifact_target.target_key = target_result.target->target_key;
   return iree_ok_status();
 }
 
@@ -88,7 +61,7 @@ static iree_status_t
 loom_spirv_device_provider_select_compatible_target_from_facts(
     const loom_device_provider_t* provider,
     const loom_run_hal_runtime_t* runtime,
-    const loom_target_facts_t* target_requirement, iree_allocator_t allocator,
+    const loom_target_facts_t* target_requirement,
     loom_device_target_t* out_target) {
   if (target_requirement != NULL &&
       loom_spirv_target_facts_cast(target_requirement) == NULL) {
@@ -98,25 +71,20 @@ loom_spirv_device_provider_select_compatible_target_from_facts(
         (int)target_requirement->fact_type->name.size,
         target_requirement->fact_type->name.data);
   }
-  return loom_spirv_device_provider_select_target(provider, runtime, allocator,
+  return loom_spirv_device_provider_select_target(provider, runtime,
                                                   out_target);
 }
 
-static void loom_spirv_device_provider_deinitialize_target(
-    const loom_device_provider_t* provider, loom_device_target_t* target,
-    iree_allocator_t allocator) {
+static iree_status_t loom_spirv_device_provider_project_target_facts(
+    const loom_device_provider_t* provider,
+    const loom_run_hal_runtime_t* runtime, const loom_device_target_t* target,
+    iree_arena_allocator_t* arena, loom_target_facts_t* out_facts) {
   (void)provider;
-  if (target == NULL) {
-    return;
-  }
-  if (target->target_profile != NULL) {
-    loom_spirv_vulkan_hal_target_profile_storage_t* storage =
-        (loom_spirv_vulkan_hal_target_profile_storage_t*)target->target_profile;
-    loom_spirv_vulkan_hal_target_profile_storage_deinitialize(storage,
-                                                              allocator);
-    iree_allocator_free(allocator, storage);
-  }
-  *target = (loom_device_target_t){0};
+  (void)target;
+  loom_spirv_target_facts_t* spirv_facts =
+      (loom_spirv_target_facts_t*)out_facts;
+  return loom_spirv_vulkan_hal_profile_project_target_facts(runtime->device,
+                                                            arena, spirv_facts);
 }
 
 const loom_device_provider_t loom_spirv_vulkan_device_provider = {
@@ -125,5 +93,5 @@ const loom_device_provider_t loom_spirv_vulkan_device_provider = {
     .select_target = loom_spirv_device_provider_select_target,
     .select_compatible_target =
         loom_spirv_device_provider_select_compatible_target_from_facts,
-    .deinitialize_target = loom_spirv_device_provider_deinitialize_target,
+    .project_target_facts = loom_spirv_device_provider_project_target_facts,
 };

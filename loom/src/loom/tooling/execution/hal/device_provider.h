@@ -26,36 +26,67 @@ extern "C" {
 typedef struct loom_device_provider_t loom_device_provider_t;
 struct loom_run_hal_runtime_t;
 
-// Artifact target selected from one active HAL device.
+// Teardown-free compiler target selected from one live HAL device.
+//
+// The target bundle is stored by value and requires no teardown. The
+// executable target row is borrowed from the immutable device spec and
+// remains valid while the runtime device is live.
 typedef struct loom_device_target_t {
   // Exact executable target row borrowed from the active device spec.
   const iree_hal_executable_target_t* executable_target;
-  // Structured compiler profile projected from the device.
-  const loom_target_profile_t* target_profile;
-  // Prepared-artifact target projected from the device.
-  loom_artifact_target_t artifact_target;
+  // Self-contained target-neutral bundle projected from the device.
+  loom_target_bundle_storage_t target_bundle_storage;
 } loom_device_target_t;
 
 // Returns the target-neutral bundle projected by |target|, or NULL.
 static inline const loom_target_bundle_t* loom_device_target_bundle(
     const loom_device_target_t* target) {
-  return target ? loom_artifact_target_bundle(&target->artifact_target) : NULL;
+  if (target == NULL || target->target_bundle_storage.bundle.snapshot == NULL ||
+      target->target_bundle_storage.bundle.export_plan == NULL ||
+      target->target_bundle_storage.bundle.config == NULL) {
+    return NULL;
+  }
+  return &target->target_bundle_storage.bundle;
+}
+
+// Returns the family-owned target selector projected by |target|.
+static inline iree_string_view_t loom_device_target_key(
+    const loom_device_target_t* target) {
+  return target != NULL && target->executable_target != NULL
+             ? target->executable_target->target_key
+             : iree_string_view_empty();
+}
+
+// Returns an artifact emission view over |target|.
+static inline loom_artifact_target_t loom_device_target_artifact_target(
+    const loom_device_target_t* target) {
+  return (loom_artifact_target_t){
+      .target_bundle = loom_device_target_bundle(target),
+      .target_key = loom_device_target_key(target),
+  };
 }
 
 typedef iree_status_t (*loom_device_provider_select_target_fn_t)(
     const loom_device_provider_t* provider,
-    const struct loom_run_hal_runtime_t* runtime, iree_allocator_t allocator,
+    const struct loom_run_hal_runtime_t* runtime,
     loom_device_target_t* out_target);
 
 typedef iree_status_t (*loom_device_provider_select_compatible_target_fn_t)(
     const loom_device_provider_t* provider,
     const struct loom_run_hal_runtime_t* runtime,
-    const loom_target_facts_t* target_requirement, iree_allocator_t allocator,
+    const loom_target_facts_t* target_requirement,
     loom_device_target_t* out_target);
 
-typedef void (*loom_device_provider_deinitialize_target_fn_t)(
-    const loom_device_provider_t* provider, loom_device_target_t* target,
-    iree_allocator_t allocator);
+// Projects one selected device target into compiler-owned family facts.
+//
+// |out_facts| has already been initialized from |target|'s bundle using the
+// fact type declared by |provider|'s artifact provider. Implementations may
+// allocate nested immutable facts from |arena| but retain no storage.
+typedef iree_status_t (*loom_device_provider_project_target_facts_fn_t)(
+    const loom_device_provider_t* provider,
+    const struct loom_run_hal_runtime_t* runtime,
+    const loom_device_target_t* target, iree_arena_allocator_t* arena,
+    loom_target_facts_t* out_facts);
 
 // Live device adapter for one offline artifact provider and HAL driver.
 struct loom_device_provider_t {
@@ -69,18 +100,52 @@ struct loom_device_provider_t {
   // target requirement. NULL represents target-independent code. Facts are
   // borrowed only for the duration of the call and must not be retained.
   loom_device_provider_select_compatible_target_fn_t select_compatible_target;
-  // Releases storage owned by a target returned from a selection hook.
-  loom_device_provider_deinitialize_target_fn_t deinitialize_target;
+  // Projects the selected target into compiler-owned family facts.
+  loom_device_provider_project_target_facts_fn_t project_target_facts;
 };
+
+// Asks |provider| to select its preferred executable target from |runtime|.
+// On success |out_target| is complete and requires no teardown. On failure it
+// is zeroed.
+iree_status_t loom_device_provider_select_target(
+    const loom_device_provider_t* provider,
+    const struct loom_run_hal_runtime_t* runtime,
+    loom_device_target_t* out_target);
 
 // Asks |provider| to select a target from |runtime| satisfying
 // |target_requirement|. NULL represents target-independent code. The caller
-// retains the immutable requirement for the duration of the call.
+// retains the immutable requirement for the duration of the call. On success
+// |out_target| is complete and requires no teardown. On failure it is zeroed.
 iree_status_t loom_device_provider_select_compatible_target(
     const loom_device_provider_t* provider,
     const struct loom_run_hal_runtime_t* runtime,
-    const loom_target_facts_t* target_requirement, iree_allocator_t allocator,
+    const loom_target_facts_t* target_requirement,
     loom_device_target_t* out_target);
+
+// Stack-only profile adapter for one selected live-device target.
+//
+// The adapter contains only target-neutral pointers and owns no storage. It
+// and every referenced object must remain live while the compiler projects
+// the profile.
+typedef struct loom_device_target_profile_t {
+  // Generic profile interface consumed by target specialization.
+  loom_target_profile_t base;
+  // Per-instance profile representation descriptor.
+  loom_target_profile_type_t type;
+  // Device provider owning the family-specific fact projector.
+  const loom_device_provider_t* provider;
+  // Active runtime exposing immutable device facts.
+  const struct loom_run_hal_runtime_t* runtime;
+  // Selected target supplying the target-neutral bundle and target key.
+  const loom_device_target_t* target;
+} loom_device_target_profile_t;
+
+// Initializes a borrowed compiler profile adapter for |target|.
+iree_status_t loom_device_target_profile_initialize(
+    const loom_device_provider_t* provider,
+    const struct loom_run_hal_runtime_t* runtime,
+    const loom_device_target_t* target,
+    loom_device_target_profile_t* out_profile);
 
 // A registry of device providers linked into a runner binary.
 typedef struct loom_device_provider_registry_t {
