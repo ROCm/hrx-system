@@ -147,6 +147,121 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot8i4_u
 
 llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
 
+func.def target(@target) @dot4i_u8s8_128(%lhs: vector<16xi8>, %rhs: vector<16xi8>, %acc: vector<4xi32>) -> (vector<4xi32>) {
+  %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<16xi8>, vector<16xi8>, vector<4xi32>
+  func.return %dot : vector<4xi32>
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4i_u8s8_128(%lhs: reg<llvmir.i8 x16>, %rhs: reg<llvmir.i8 x16>, %acc: reg<llvmir.i32 x4>) -> (reg<llvmir.i32 x4>) asm {
+  %110 = extract.v4i32 %acc, 0
+  %111 = extract.v16i8 %lhs, 0
+  %112 = extract.v16i8 %rhs, 0
+  %113 = zext.i8.i32 %111
+  %114 = sext.i8.i32 %112
+  %115 = mul.i32 %113, %114
+  %116 = add.i32 %110, %115
+  %117 = extract.v16i8 %lhs, 1
+  %118 = extract.v16i8 %rhs, 1
+  %119 = zext.i8.i32 %117
+  %120 = sext.i8.i32 %118
+  %121 = mul.i32 %119, %120
+  %122 = add.i32 %116, %121
+  %123 = extract.v16i8 %lhs, 2
+  %124 = extract.v16i8 %rhs, 2
+  %125 = zext.i8.i32 %123
+  %126 = sext.i8.i32 %124
+  %127 = mul.i32 %125, %126
+  %128 = add.i32 %122, %127
+  %129 = extract.v16i8 %lhs, 3
+  %130 = extract.v16i8 %rhs, 3
+  %131 = zext.i8.i32 %129
+  %132 = sext.i8.i32 %130
+  %133 = mul.i32 %131, %132
+  %134 = add.i32 %128, %133
+  %135 = extract.v4i32 %acc, 1
+  %136 = extract.v16i8 %lhs, 4
+  %137 = extract.v16i8 %rhs, 4
+  %138 = zext.i8.i32 %136
+  %139 = sext.i8.i32 %137
+  %140 = mul.i32 %138, %139
+  %141 = add.i32 %135, %140
+  %142 = extract.v16i8 %lhs, 5
+  %143 = extract.v16i8 %rhs, 5
+  %144 = zext.i8.i32 %142
+  %145 = sext.i8.i32 %143
+  %146 = mul.i32 %144, %145
+  %147 = add.i32 %141, %146
+  %148 = extract.v16i8 %lhs, 6
+  %149 = extract.v16i8 %rhs, 6
+  %150 = zext.i8.i32 %148
+  %151 = sext.i8.i32 %149
+  %152 = mul.i32 %150, %151
+  %153 = add.i32 %147, %152
+  %154 = extract.v16i8 %lhs, 7
+  %155 = extract.v16i8 %rhs, 7
+  %156 = zext.i8.i32 %154
+  %157 = sext.i8.i32 %155
+  %158 = mul.i32 %156, %157
+  %159 = add.i32 %153, %158
+  %160 = extract.v4i32 %acc, 2
+  %161 = extract.v16i8 %lhs, 8
+  %162 = extract.v16i8 %rhs, 8
+  %163 = zext.i8.i32 %161
+  %164 = sext.i8.i32 %162
+  %165 = mul.i32 %163, %164
+  %166 = add.i32 %160, %165
+  %167 = extract.v16i8 %lhs, 9
+  %168 = extract.v16i8 %rhs, 9
+  %169 = zext.i8.i32 %167
+  %170 = sext.i8.i32 %168
+  %171 = mul.i32 %169, %170
+  %172 = add.i32 %166, %171
+  %173 = extract.v16i8 %lhs, 10
+  %174 = extract.v16i8 %rhs, 10
+  %175 = zext.i8.i32 %173
+  %176 = sext.i8.i32 %174
+  %177 = mul.i32 %175, %176
+  %178 = add.i32 %172, %177
+  %179 = extract.v16i8 %lhs, 11
+  %180 = extract.v16i8 %rhs, 11
+  %181 = zext.i8.i32 %179
+  %182 = sext.i8.i32 %180
+  %183 = mul.i32 %181, %182
+  %184 = add.i32 %178, %183
+  %185 = extract.v4i32 %acc, 3
+  %186 = extract.v16i8 %lhs, 12
+  %187 = extract.v16i8 %rhs, 12
+  %188 = zext.i8.i32 %186
+  %189 = sext.i8.i32 %187
+  %190 = mul.i32 %188, %189
+  %191 = add.i32 %185, %190
+  %192 = extract.v16i8 %lhs, 13
+  %193 = extract.v16i8 %rhs, 13
+  %194 = zext.i8.i32 %192
+  %195 = sext.i8.i32 %193
+  %196 = mul.i32 %194, %195
+  %197 = add.i32 %191, %196
+  %198 = extract.v16i8 %lhs, 14
+  %199 = extract.v16i8 %rhs, 14
+  %200 = zext.i8.i32 %198
+  %201 = sext.i8.i32 %199
+  %202 = mul.i32 %200, %201
+  %203 = add.i32 %197, %202
+  %204 = extract.v16i8 %lhs, 15
+  %205 = extract.v16i8 %rhs, 15
+  %206 = zext.i8.i32 %204
+  %207 = sext.i8.i32 %205
+  %208 = mul.i32 %206, %207
+  %209 = add.i32 %203, %208
+  %dot = from_elements.v4i32 %134, %159, %184, %209
+  return %dot
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @dot4i_u8s8(%lhs: vector<64xi8>, %rhs: vector<64xi8>, %acc: vector<16xi32>) -> (vector<16xi32>) {
   %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<64xi8>, vector<64xi8>, vector<16xi32>
   func.return %dot : vector<16xi32>

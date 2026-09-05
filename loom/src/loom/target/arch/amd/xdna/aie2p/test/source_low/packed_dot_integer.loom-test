@@ -10,32 +10,29 @@ func.def target(@target) @dot4i_s8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %ac
 
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_s8s8(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %36 = vextract.32.imm %acc, 0
-  %37 = vextract.8.imm %lhs, 0
-  %38 = vextract.8.imm %rhs, 0
-  %39 = extend.s8 %37
-  %40 = extend.s8 %38
-  %41 = mul %39, %40
-  %42 = add.rr %36, %41
-  %43 = vextract.8.imm %lhs, 1
-  %44 = vextract.8.imm %rhs, 1
-  %45 = extend.s8 %43
-  %46 = extend.s8 %44
-  %47 = mul %45, %46
-  %48 = add.rr %42, %47
-  %49 = vextract.8.imm %lhs, 2
-  %50 = vextract.8.imm %rhs, 2
-  %51 = extend.s8 %49
-  %52 = extend.s8 %50
-  %53 = mul %51, %52
-  %54 = add.rr %48, %53
-  %55 = vextract.8.imm %lhs, 3
-  %56 = vextract.8.imm %rhs, 3
-  %57 = extend.s8 %55
-  %58 = extend.s8 %56
-  %59 = mul %57, %58
-  %60 = add.rr %54, %59
-  %dot = vbcst.32 %60
+  %9 = mova.i32 0
+  %10 = vbcst.8 %9
+  %11 = slice %10[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %12 = mova.i32 46
+  %13 = mova.i32 10
+  %14 = mova.i32 840
+  %15 = slice %lhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %16 = concat(%15, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %17 = vshuffle %16, %10, %12
+  %18 = slice %rhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %19 = concat(%18, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %20 = vshuffle %19, %10, %12
+  %21 = slice %17[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %22 = concat(%21, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %23 = vshuffle %20, %20, %13
+  %24 = vmov.512 %23
+  %25 = concat(%23, %24) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %26 = dot4i.i8x64 %25, %22, %14
+  %27 = slice %26[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %28 = vmov.accumulator512.to.vector512 %27
+  %29 = slice %28[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %30 = concat(%29, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %dot = vadd.32 %30, %acc
   return %dot
 }
 
@@ -50,32 +47,29 @@ func.def target(@target) @dot4i_u8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %ac
 
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_u8u8(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %36 = vextract.32.imm %acc, 0
-  %37 = vextract.8.imm %lhs, 0
-  %38 = vextract.8.imm %rhs, 0
-  %39 = extend.u8 %37
-  %40 = extend.u8 %38
-  %41 = mul %39, %40
-  %42 = add.rr %36, %41
-  %43 = vextract.8.imm %lhs, 1
-  %44 = vextract.8.imm %rhs, 1
-  %45 = extend.u8 %43
-  %46 = extend.u8 %44
-  %47 = mul %45, %46
-  %48 = add.rr %42, %47
-  %49 = vextract.8.imm %lhs, 2
-  %50 = vextract.8.imm %rhs, 2
-  %51 = extend.u8 %49
-  %52 = extend.u8 %50
-  %53 = mul %51, %52
-  %54 = add.rr %48, %53
-  %55 = vextract.8.imm %lhs, 3
-  %56 = vextract.8.imm %rhs, 3
-  %57 = extend.u8 %55
-  %58 = extend.u8 %56
-  %59 = mul %57, %58
-  %60 = add.rr %54, %59
-  %dot = vbcst.32 %60
+  %9 = mova.i32 0
+  %10 = vbcst.8 %9
+  %11 = slice %10[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %12 = mova.i32 46
+  %13 = mova.i32 10
+  %14 = mova.i32 72
+  %15 = slice %lhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %16 = concat(%15, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %17 = vshuffle %16, %10, %12
+  %18 = slice %rhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %19 = concat(%18, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %20 = vshuffle %19, %10, %12
+  %21 = slice %17[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %22 = concat(%21, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %23 = vshuffle %20, %20, %13
+  %24 = vmov.512 %23
+  %25 = concat(%23, %24) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %26 = dot4i.i8x64 %25, %22, %14
+  %27 = slice %26[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %28 = vmov.accumulator512.to.vector512 %27
+  %29 = slice %28[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %30 = concat(%29, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %dot = vadd.32 %30, %acc
   return %dot
 }
 
@@ -170,6 +164,43 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_u
 
 aie2p.target<core> @target
 
+func.def target(@target) @dot4i_u8s8_128(%lhs: vector<16xi8>, %rhs: vector<16xi8>, %acc: vector<4xi32>) -> (vector<4xi32>) {
+  %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<16xi8>, vector<16xi8>, vector<4xi32>
+  func.return %dot : vector<4xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_u8s8_128(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %9 = mova.i32 0
+  %10 = vbcst.8 %9
+  %11 = slice %10[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %12 = mova.i32 46
+  %13 = mova.i32 10
+  %14 = mova.i32 584
+  %15 = slice %lhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %16 = concat(%15, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %17 = vshuffle %16, %10, %12
+  %18 = slice %rhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %19 = concat(%18, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %20 = vshuffle %19, %10, %12
+  %21 = slice %17[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %22 = concat(%21, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %23 = vshuffle %20, %20, %13
+  %24 = vmov.512 %23
+  %25 = concat(%23, %24) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %26 = dot4i.i8x64 %25, %22, %14
+  %27 = slice %26[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %28 = vmov.accumulator512.to.vector512 %27
+  %29 = slice %28[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %30 = concat(%29, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %dot = vadd.32 %30, %acc
+  return %dot
+}
+
+// ====
+
+aie2p.target<core> @target
+
 func.def target(@target) @dot4i_u8s8(%lhs: vector<64xi8>, %rhs: vector<64xi8>, %acc: vector<16xi32>) -> (vector<16xi32>) {
   %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<64xi8>, vector<64xi8>, vector<16xi32>
   func.return %dot : vector<16xi32>
@@ -229,32 +260,29 @@ func.def target(@target) @dot4i_s8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %ac
 
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_s8u8(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %36 = vextract.32.imm %acc, 0
-  %37 = vextract.8.imm %lhs, 0
-  %38 = vextract.8.imm %rhs, 0
-  %39 = extend.s8 %37
-  %40 = extend.u8 %38
-  %41 = mul %39, %40
-  %42 = add.rr %36, %41
-  %43 = vextract.8.imm %lhs, 1
-  %44 = vextract.8.imm %rhs, 1
-  %45 = extend.s8 %43
-  %46 = extend.u8 %44
-  %47 = mul %45, %46
-  %48 = add.rr %42, %47
-  %49 = vextract.8.imm %lhs, 2
-  %50 = vextract.8.imm %rhs, 2
-  %51 = extend.s8 %49
-  %52 = extend.u8 %50
-  %53 = mul %51, %52
-  %54 = add.rr %48, %53
-  %55 = vextract.8.imm %lhs, 3
-  %56 = vextract.8.imm %rhs, 3
-  %57 = extend.s8 %55
-  %58 = extend.u8 %56
-  %59 = mul %57, %58
-  %60 = add.rr %54, %59
-  %dot = vbcst.32 %60
+  %9 = mova.i32 0
+  %10 = vbcst.8 %9
+  %11 = slice %10[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %12 = mova.i32 46
+  %13 = mova.i32 10
+  %14 = mova.i32 328
+  %15 = slice %lhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %16 = concat(%15, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %17 = vshuffle %16, %10, %12
+  %18 = slice %rhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %19 = concat(%18, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %20 = vshuffle %19, %10, %12
+  %21 = slice %17[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %22 = concat(%21, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %23 = vshuffle %20, %20, %13
+  %24 = vmov.512 %23
+  %25 = concat(%23, %24) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %26 = dot4i.i8x64 %25, %22, %14
+  %27 = slice %26[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %28 = vmov.accumulator512.to.vector512 %27
+  %29 = slice %28[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %30 = concat(%29, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %dot = vadd.32 %30, %acc
   return %dot
 }
 
@@ -743,49 +771,32 @@ func.def target(@target) @dot4i_s8s8_q6_offset_binary(%codes: vector<1xi32>, %rh
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_s8s8_q6_offset_binary(%codes: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %65 = vextract.32.imm %acc, 0
-  %66 = vextract.32.imm %codes, 0
-  %67 = mov.short 255
-  %68 = and %66, %67
-  %69 = mov.short -32
-  %70 = add.rr %68, %69
-  %71 = vextract.8.imm %rhs, 0
-  %72 = extend.s8 %70
-  %73 = extend.s8 %71
-  %74 = mul %72, %73
-  %75 = add.rr %65, %74
-  %76 = mov.short 8
-  %77 = mov.short 0
-  %78 = sub %77, %76
-  %79 = lshl %66, %78
-  %80 = and %79, %67
-  %81 = add.rr %80, %69
-  %82 = vextract.8.imm %rhs, 1
-  %83 = extend.s8 %81
-  %84 = extend.s8 %82
-  %85 = mul %83, %84
-  %86 = add.rr %75, %85
-  %87 = mov.short 16
-  %89 = sub %77, %87
-  %90 = lshl %66, %89
-  %91 = and %90, %67
-  %92 = add.rr %91, %69
-  %93 = vextract.8.imm %rhs, 2
-  %94 = extend.s8 %92
-  %95 = extend.s8 %93
-  %96 = mul %94, %95
-  %97 = add.rr %86, %96
-  %98 = mov.short 24
-  %100 = sub %77, %98
-  %101 = lshl %66, %100
-  %102 = and %101, %67
-  %103 = add.rr %102, %69
-  %104 = vextract.8.imm %rhs, 3
-  %105 = extend.s8 %103
-  %106 = extend.s8 %104
-  %107 = mul %105, %106
-  %108 = add.rr %97, %107
-  %dot = vbcst.32 %108
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_s8s8_q6_offset_binary(%bytes: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %12 = mov.short -32
+  %offset_to_signed_bias = vbcst.8 %12
+  %signed_bytes = vadd.8 %bytes, %offset_to_signed_bias
+  %15 = mova.i32 0
+  %16 = vbcst.8 %15
+  %17 = slice %16[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %18 = mova.i32 46
+  %19 = mova.i32 10
+  %20 = mova.i32 840
+  %21 = slice %signed_bytes[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %22 = concat(%21, %17) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %23 = vshuffle %22, %16, %18
+  %24 = slice %rhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %25 = concat(%24, %17) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %26 = vshuffle %25, %16, %18
+  %27 = slice %23[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %28 = concat(%27, %17) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %29 = vshuffle %26, %26, %19
+  %30 = vmov.512 %29
+  %31 = concat(%29, %30) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %32 = dot4i.i8x64 %31, %28, %20
+  %33 = slice %32[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %34 = vmov.accumulator512.to.vector512 %33
+  %35 = slice %34[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %36 = concat(%35, %17) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %dot = vadd.32 %36, %acc
   return %dot
 }

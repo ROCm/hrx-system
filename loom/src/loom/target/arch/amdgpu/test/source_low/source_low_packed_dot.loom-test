@@ -48,6 +48,37 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot8i4_
 
 amdgpu.target<gfx11-generic> @target
 
+func.def target(@target) @dot4i_u8s8_128(%lhs: vector<16xi8>, %rhs: vector<16xi8>, %acc: vector<4xi32>) -> (vector<4xi32>) {
+  %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<16xi8>, vector<16xi8>, vector<4xi32>
+  func.return %dot : vector<4xi32>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot4i_u8s8_128(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+  %9 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %10 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %11 = slice %acc[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %12 = v_dot4_i32_iu8_u8s8 %9, %10, %11
+  %13 = slice %lhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %14 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %15 = slice %acc[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = v_dot4_i32_iu8_u8s8 %13, %14, %15
+  %17 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %18 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = slice %acc[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %20 = v_dot4_i32_iu8_u8s8 %17, %18, %19
+  %21 = slice %lhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %22 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %23 = slice %acc[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %24 = v_dot4_i32_iu8_u8s8 %21, %22, %23
+  %dot = concat(%12, %16, %20, %24) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @dot4i_u8s8(%lhs: vector<64xi8>, %rhs: vector<64xi8>, %acc: vector<16xi32>) -> (vector<16xi32>) {
   %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<64xi8>, vector<64xi8>, vector<16xi32>
   func.return %dot : vector<16xi32>

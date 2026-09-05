@@ -22,6 +22,7 @@ from loom.target.contracts import (
     EmitRegisterConcat,
     EmitRegisterSlice,
     Guard,
+    TypePattern,
     ValueRef,
     Vector,
     descriptor_by_key,
@@ -30,6 +31,21 @@ from loom.target.low_descriptors import Descriptor
 
 _I8X64_VECTOR = Vector("i8", lanes=64)
 _I8X128_VECTOR = Vector("i8", lanes=128)
+# Each 256-bit chunk feeds eight independent four-lane channels. The source op
+# verifier requires complete groups of four, so physical padding can affect only
+# discarded result channels when a logical vector occupies part of a chunk.
+_I8_DOT4_LOW_VECTOR = Vector(
+    "i8", minimum_static_elements=4, maximum_static_elements=32
+)
+_I8_DOT4_HIGH_VECTOR = Vector(
+    "i8", minimum_static_elements=36, maximum_static_elements=64
+)
+_I32_DOT4_LOW_VECTOR = Vector(
+    "i32", minimum_static_elements=1, maximum_static_elements=8
+)
+_I32_DOT4_HIGH_VECTOR = Vector(
+    "i32", minimum_static_elements=9, maximum_static_elements=16
+)
 _I32X16_VECTOR = Vector("i32", lanes=16)
 
 # Transposes eight consecutive four-byte rows into four eight-byte channel
@@ -199,8 +215,14 @@ def _dot4_chunk_emits(
     return tuple(emits)
 
 
-def _dot4i_i8x64_rule(
-    kind: str, *, lhs_signed: bool, rhs_signed: bool
+def _dot4i_i8_rule(
+    kind: str,
+    input_type: TypePattern,
+    result_type: TypePattern,
+    chunk_count: int,
+    *,
+    lhs_signed: bool,
+    rhs_signed: bool,
 ) -> DescriptorRule:
     constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
     splat = _descriptor("amd.xdna.aie2p.splat.i8x64")
@@ -236,7 +258,7 @@ def _dot4i_i8x64_rule(
         _constant_emit(constant, grow_control, _DOT4_GROW_CONTROL),
         _constant_emit(constant, multiply_control, multiply_control_value),
     ]
-    for chunk_index in range(2):
+    for chunk_index in range(chunk_count):
         emits.extend(
             _dot4_chunk_emits(
                 chunk_index,
@@ -247,13 +269,16 @@ def _dot4i_i8x64_rule(
                 multiply_control=multiply_control,
             )
         )
+    product_chunks = tuple(
+        ValueRef.temporary(f"product_{'low' if chunk_index == 0 else 'high'}_chunk")
+        for chunk_index in range(chunk_count)
+    )
+    if chunk_count == 1:
+        product_chunks += (zero_vector_unit,)
     emits.extend(
         (
             EmitRegisterConcat(
-                sources=(
-                    ValueRef.temporary("product_low_chunk"),
-                    ValueRef.temporary("product_high_chunk"),
-                ),
+                sources=product_chunks,
                 result=ValueRef.temporary("product"),
                 result_type=_I32X16_VECTOR,
             ),
@@ -273,21 +298,33 @@ def _dot4i_i8x64_rule(
         descriptor=_descriptor("amd.xdna.aie2p.dot4i.i8x64.configured"),
         guards=(
             Guard.enum_attr_equals("kind", kind),
-            Guard.value_type("lhs", _I8X64_VECTOR),
-            Guard.value_type("rhs", _I8X64_VECTOR),
-            Guard.value_type("acc", _I32X16_VECTOR),
-            Guard.value_type("result", _I32X16_VECTOR),
+            Guard.value_type("lhs", input_type),
+            Guard.value_type("rhs", input_type),
+            Guard.value_type("acc", result_type),
+            Guard.value_type("result", result_type),
         ),
         emit=tuple(emits),
+        report_key=f"dot4i_{kind}_{chunk_count}x256",
     )
 
 
 AIE2P_PACKED_DOT_RULES = tuple(
-    _dot4i_i8x64_rule(kind, lhs_signed=lhs_signed, rhs_signed=rhs_signed)
+    _dot4i_i8_rule(
+        kind,
+        input_type,
+        result_type,
+        chunk_count,
+        lhs_signed=lhs_signed,
+        rhs_signed=rhs_signed,
+    )
     for kind, lhs_signed, rhs_signed in (
         ("u8u8", False, False),
         ("u8s8", False, True),
         ("s8u8", True, False),
         ("s8s8", True, True),
+    )
+    for input_type, result_type, chunk_count in (
+        (_I8_DOT4_LOW_VECTOR, _I32_DOT4_LOW_VECTOR, 1),
+        (_I8_DOT4_HIGH_VECTOR, _I32_DOT4_HIGH_VECTOR, 2),
     )
 )

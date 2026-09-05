@@ -462,50 +462,88 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert vector_multiply.emit[5].immediates == {"i": 0}
 
     packed_dot_rules = [rule for rule in rules if rule.source_op is vector.vector_dot4i]
-    assert len(packed_dot_rules) == 4
+    assert len(packed_dot_rules) == 8
     assert [rule.guards[0].enum_keyword for rule in packed_dot_rules] == [
         "u8u8",
+        "u8u8",
+        "u8s8",
         "u8s8",
         "s8u8",
+        "s8u8",
+        "s8s8",
         "s8s8",
     ]
     assert all(
         rule.descriptor.key == "amd.xdna.aie2p.dot4i.i8x64.configured"
         for rule in packed_dot_rules
     )
-    for rule, multiply_control in zip(
-        packed_dot_rules, (0x48, 0x248, 0x148, 0x348), strict=True
+    dot4_chunk_descriptors = [
+        "amd.xdna.aie2p.shuffle.x.configured",
+        "amd.xdna.aie2p.shuffle.x.configured",
+        "amd.xdna.aie2p.shuffle.x.configured",
+        "amd.xdna.aie2p.move.vector512",
+        "amd.xdna.aie2p.dot4i.i8x64.configured",
+        "amd.xdna.aie2p.move.accumulator512.to.vector512",
+    ]
+    for kind_index, (kind, multiply_control) in enumerate(
+        (("u8u8", 0x48), ("u8s8", 0x248), ("s8u8", 0x148), ("s8s8", 0x348))
     ):
-        descriptor_emits = [
-            emit
-            for emit in rule.emit
-            if not isinstance(emit, (EmitRegisterConcat, EmitRegisterSlice))
-        ]
-        assert [emit.descriptor.key for emit in descriptor_emits] == [
-            "amd.xdna.aie2p.constant.i32.mova",
-            "amd.xdna.aie2p.splat.i8x64",
-            "amd.xdna.aie2p.constant.i32.mova",
-            "amd.xdna.aie2p.constant.i32.mova",
-            "amd.xdna.aie2p.constant.i32.mova",
-            "amd.xdna.aie2p.shuffle.x.configured",
-            "amd.xdna.aie2p.shuffle.x.configured",
-            "amd.xdna.aie2p.shuffle.x.configured",
-            "amd.xdna.aie2p.move.vector512",
-            "amd.xdna.aie2p.dot4i.i8x64.configured",
-            "amd.xdna.aie2p.move.accumulator512.to.vector512",
-            "amd.xdna.aie2p.shuffle.x.configured",
-            "amd.xdna.aie2p.shuffle.x.configured",
-            "amd.xdna.aie2p.shuffle.x.configured",
-            "amd.xdna.aie2p.move.vector512",
-            "amd.xdna.aie2p.dot4i.i8x64.configured",
-            "amd.xdna.aie2p.move.accumulator512.to.vector512",
-            "amd.xdna.aie2p.add.i32x16",
-        ]
-        assert descriptor_emits[2].immediates == {"i": _DOT4_TRANSPOSE_CONTROL}
-        assert descriptor_emits[3].immediates == {"i": _DOT4_GROW_CONTROL}
-        assert descriptor_emits[4].immediates == {"i": multiply_control}
-        assert sum(isinstance(emit, EmitRegisterSlice) for emit in rule.emit) == 11
-        assert sum(isinstance(emit, EmitRegisterConcat) for emit in rule.emit) == 9
+        low_rule, high_rule = packed_dot_rules[kind_index * 2 : kind_index * 2 + 2]
+        assert (
+            Guard.value_type(
+                "lhs",
+                Vector("i8", minimum_static_elements=4, maximum_static_elements=32),
+            )
+            in low_rule.guards
+        )
+        assert (
+            Guard.value_type(
+                "acc",
+                Vector("i32", minimum_static_elements=1, maximum_static_elements=8),
+            )
+            in low_rule.guards
+        )
+        assert (
+            Guard.value_type(
+                "lhs",
+                Vector("i8", minimum_static_elements=36, maximum_static_elements=64),
+            )
+            in high_rule.guards
+        )
+        assert (
+            Guard.value_type(
+                "acc",
+                Vector("i32", minimum_static_elements=9, maximum_static_elements=16),
+            )
+            in high_rule.guards
+        )
+        for rule, chunk_count in ((low_rule, 1), (high_rule, 2)):
+            assert rule.report_key == f"dot4i_{kind}_{chunk_count}x256"
+            descriptor_emits = [
+                emit
+                for emit in rule.emit
+                if not isinstance(emit, (EmitRegisterConcat, EmitRegisterSlice))
+            ]
+            assert [emit.descriptor.key for emit in descriptor_emits] == [
+                "amd.xdna.aie2p.constant.i32.mova",
+                "amd.xdna.aie2p.splat.i8x64",
+                "amd.xdna.aie2p.constant.i32.mova",
+                "amd.xdna.aie2p.constant.i32.mova",
+                "amd.xdna.aie2p.constant.i32.mova",
+                *dot4_chunk_descriptors * chunk_count,
+                "amd.xdna.aie2p.add.i32x16",
+            ]
+            assert descriptor_emits[2].immediates == {"i": _DOT4_TRANSPOSE_CONTROL}
+            assert descriptor_emits[3].immediates == {"i": _DOT4_GROW_CONTROL}
+            assert descriptor_emits[4].immediates == {"i": multiply_control}
+            assert (
+                sum(isinstance(emit, EmitRegisterSlice) for emit in rule.emit)
+                == 1 + 5 * chunk_count
+            )
+            assert (
+                sum(isinstance(emit, EmitRegisterConcat) for emit in rule.emit)
+                == 1 + 4 * chunk_count
+            )
 
     reduction_rules = [rule for rule in rules if rule.source_op is vector.vector_reduce]
     for lane_count, controls in _I32_REDUCTION_CONTROLS:
