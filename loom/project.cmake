@@ -10,6 +10,7 @@ list(APPEND CMAKE_MODULE_PATH
 )
 
 include(loom_amdgpu_selectors)
+include(loom_product)
 
 if(NOT DEFINED LOOM_BUILD)
   option(LOOM_BUILD

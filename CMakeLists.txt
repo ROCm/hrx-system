@@ -196,6 +196,8 @@ add_subdirectory(runtime/src)
 
 if(LOOM_BUILD)
   add_subdirectory(loom/py/loom)
+  add_subdirectory(loom/product)
+  add_subdirectory(loom/target)
   add_subdirectory(loom/src)
   add_subdirectory(loom/binding/c)
   hrx_installed_tests_install_source_tree(

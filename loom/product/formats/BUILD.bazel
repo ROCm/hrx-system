@@ -3,8 +3,6 @@
 # Licensed under the Apache License v2.0 with LLVM Exceptions.
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-# bazel-to-cmake: skip
-
 load(
     "//loom/build_tools/bazel:loom_product_format.bzl",
     "loom_artifact_set_product_format",
