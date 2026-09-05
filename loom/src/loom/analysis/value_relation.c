@@ -6,33 +6,33 @@
 
 #include "loom/analysis/value_relation.h"
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/context.h"
 #include "loom/util/cfg_graph.h"
 
 typedef enum loom_value_relation_iterator_phase_e {
-  LOOM_VALUE_RELATION_PHASE_TIED_RESULT = 0,
-  LOOM_VALUE_RELATION_PHASE_FACT_IDENTITY = 1,
-  LOOM_VALUE_RELATION_PHASE_VALUE_ALIAS = 2,
-  LOOM_VALUE_RELATION_PHASE_SELECT_PAYLOAD = 3,
-  LOOM_VALUE_RELATION_PHASE_ELEMENTWISE = 4,
-  LOOM_VALUE_RELATION_PHASE_CFG_ARGUMENT = 5,
-  LOOM_VALUE_RELATION_PHASE_LOOP_ENTRY = 6,
-  LOOM_VALUE_RELATION_PHASE_LOOP_BYPASS = 7,
+  LOOM_VALUE_RELATION_PHASE_TIED_RESULT = LOOM_VALUE_RELATION_TIED_RESULT - 1,
+  LOOM_VALUE_RELATION_PHASE_FACT_IDENTITY =
+      LOOM_VALUE_RELATION_FACT_IDENTITY - 1,
+  LOOM_VALUE_RELATION_PHASE_VALUE_ALIAS = LOOM_VALUE_RELATION_VALUE_ALIAS - 1,
+  LOOM_VALUE_RELATION_PHASE_SELECT_PAYLOAD =
+      LOOM_VALUE_RELATION_SELECT_PAYLOAD - 1,
+  LOOM_VALUE_RELATION_PHASE_ELEMENTWISE = LOOM_VALUE_RELATION_ELEMENTWISE - 1,
+  LOOM_VALUE_RELATION_PHASE_CFG_ARGUMENT = LOOM_VALUE_RELATION_CFG_ARGUMENT - 1,
+  LOOM_VALUE_RELATION_PHASE_LOOP_ENTRY = LOOM_VALUE_RELATION_LOOP_CARRIED - 1,
+  LOOM_VALUE_RELATION_PHASE_LOOP_BYPASS = LOOM_VALUE_RELATION_LOOP_BYPASS - 1,
   LOOM_VALUE_RELATION_PHASE_LOOP_TERMINATOR = 8,
   LOOM_VALUE_RELATION_PHASE_REGION_TERMINATOR = 9,
   LOOM_VALUE_RELATION_PHASE_END = 10,
 } loom_value_relation_iterator_phase_t;
+static_assert(LOOM_VALUE_RELATION_PHASE_END <= 16,
+              "value relation phases must fit the iterator bitset");
 
-static bool loom_value_relation_kind_enabled(
-    const loom_value_relation_iterator_t* iterator,
-    loom_value_relation_kind_t kind) {
-  return iree_any_bit_set(iterator->relation_mask,
-                          LOOM_VALUE_RELATION_MASK(kind));
-}
+#define LOOM_VALUE_RELATION_PHASE_BIT(phase) ((uint16_t)1u << (phase))
 
-static void loom_value_relation_advance_phase(
+static void loom_value_relation_finish_phase(
     loom_value_relation_iterator_t* iterator) {
-  ++iterator->phase;
+  iterator->phase_bits &= iterator->phase_bits - 1u;
   iterator->outer_index = 0;
   iterator->inner_index = 0;
   iterator->select_payload_ordinal = 0;
@@ -55,10 +55,6 @@ static bool loom_value_relation_emit(loom_value_id_t source_value_id,
 static bool loom_value_relation_next_tied_result(
     loom_value_relation_iterator_t* iterator,
     loom_value_relation_t* out_relation) {
-  if (!loom_value_relation_kind_enabled(iterator,
-                                        LOOM_VALUE_RELATION_TIED_RESULT)) {
-    return false;
-  }
   const loom_op_t* op = iterator->op;
   if (iterator->outer_index >= op->tied_result_count) return false;
   const loom_tied_result_t tied =
@@ -80,11 +76,6 @@ static bool loom_value_relation_next_fact_identity(
     loom_value_relation_iterator_t* iterator,
     loom_value_relation_t* out_relation) {
   const loom_op_t* op = iterator->op;
-  if (!loom_value_relation_kind_enabled(iterator,
-                                        LOOM_VALUE_RELATION_FACT_IDENTITY) ||
-      !loom_traits_are_fact_identity(op->traits)) {
-    return false;
-  }
   IREE_ASSERT_EQ(op->operand_count, op->result_count,
                  "verified fact identity fields must have equal arity");
   if (iterator->outer_index >= op->result_count) return false;
@@ -98,9 +89,7 @@ static bool loom_value_relation_next_value_alias(
     loom_value_relation_iterator_t* iterator,
     loom_value_relation_t* out_relation) {
   const loom_op_t* op = iterator->op;
-  if (!loom_value_relation_kind_enabled(iterator,
-                                        LOOM_VALUE_RELATION_VALUE_ALIAS) ||
-      !loom_traits_are_value_alias(op->traits) || iterator->outer_index != 0) {
+  if (iterator->outer_index != 0) {
     return false;
   }
   IREE_ASSERT(op->operand_count >= 1 && op->result_count == 1,
@@ -115,13 +104,6 @@ static bool loom_value_relation_next_select_payload(
     loom_value_relation_iterator_t* iterator,
     loom_value_relation_t* out_relation) {
   const loom_op_t* op = iterator->op;
-  if (!loom_value_relation_kind_enabled(iterator,
-                                        LOOM_VALUE_RELATION_SELECT_PAYLOAD) ||
-      iterator->vtable == NULL || op->result_count == 0 ||
-      !iree_any_bit_set(iterator->vtable->operand_role_mask,
-                        LOOM_OPERAND_ROLE_MASK_SELECT_PAYLOAD)) {
-    return false;
-  }
   while (iterator->outer_index < op->operand_count) {
     const uint16_t operand_index = iterator->outer_index++;
     if (loom_op_operand_role_at(iterator->vtable, op, operand_index) !=
@@ -151,12 +133,6 @@ static bool loom_value_relation_next_elementwise(
     loom_value_relation_iterator_t* iterator,
     loom_value_relation_t* out_relation) {
   const loom_op_t* op = iterator->op;
-  if (!loom_value_relation_kind_enabled(iterator,
-                                        LOOM_VALUE_RELATION_ELEMENTWISE) ||
-      !iree_any_bit_set(op->traits, LOOM_TRAIT_ELEMENTWISE) ||
-      op->result_count == 0) {
-    return false;
-  }
   while (iterator->outer_index < op->operand_count) {
     if (!loom_value_relation_elementwise_operand_is_data(
             iterator, iterator->outer_index)) {
@@ -182,10 +158,6 @@ static bool loom_value_relation_next_cfg_argument(
     loom_value_relation_iterator_t* iterator,
     loom_value_relation_t* out_relation) {
   const loom_op_t* op = iterator->op;
-  if (!loom_value_relation_kind_enabled(iterator,
-                                        LOOM_VALUE_RELATION_CFG_ARGUMENT)) {
-    return false;
-  }
   while (iterator->outer_index < op->successor_count) {
     const loom_block_t* successor =
         loom_op_const_successors(op)[iterator->outer_index];
@@ -218,11 +190,6 @@ static bool loom_value_relation_next_cfg_argument(
 static bool loom_value_relation_next_loop_entry(
     loom_value_relation_iterator_t* iterator,
     loom_value_relation_t* out_relation) {
-  if (!loom_value_relation_kind_enabled(iterator,
-                                        LOOM_VALUE_RELATION_LOOP_CARRIED) ||
-      iterator->vtable == NULL || iterator->vtable->loop_like == NULL) {
-    return false;
-  }
   const loom_op_t* op = iterator->op;
   const loom_loop_like_t loop = {
       .op = (loom_op_t*)op,
@@ -260,17 +227,11 @@ static bool loom_value_relation_next_loop_entry(
 static bool loom_value_relation_next_loop_bypass(
     loom_value_relation_iterator_t* iterator,
     loom_value_relation_t* out_relation) {
-  if (!loom_value_relation_kind_enabled(iterator,
-                                        LOOM_VALUE_RELATION_LOOP_BYPASS) ||
-      iterator->vtable == NULL || iterator->vtable->loop_like == NULL) {
-    return false;
-  }
   const loom_op_t* op = iterator->op;
   const loom_loop_like_t loop = {
       .op = (loom_op_t*)op,
       .vtable = iterator->vtable->loop_like,
   };
-  if (loom_loop_like_condition_region(loop) != NULL) return false;
   const loom_value_slice_t iter_args = loom_loop_like_iter_args(loop);
   IREE_ASSERT_EQ(iter_args.count, op->result_count,
                  "verified counted-loop state must match result arity");
@@ -296,16 +257,10 @@ static bool loom_value_relation_is_direct_region_terminator(
 static bool loom_value_relation_next_loop_terminator(
     loom_value_relation_iterator_t* iterator,
     loom_value_relation_t* out_relation) {
-  if (!loom_value_relation_kind_enabled(iterator,
-                                        LOOM_VALUE_RELATION_LOOP_CARRIED)) {
-    return false;
-  }
   const loom_op_t* op = iterator->op;
   loom_op_t* parent_op = op->parent_op;
-  if (parent_op == NULL) return false;
   const loom_op_vtable_t* parent_vtable =
       loom_op_vtable(iterator->module, parent_op);
-  if (parent_vtable == NULL || parent_vtable->loop_like == NULL) return false;
   const loom_loop_like_t loop = {
       .op = parent_op,
       .vtable = parent_vtable->loop_like,
@@ -316,7 +271,8 @@ static bool loom_value_relation_next_loop_terminator(
       loom_value_relation_is_direct_region_terminator(op, body);
   const bool is_condition =
       loom_value_relation_is_direct_region_terminator(op, condition);
-  if (!is_body && !is_condition) return false;
+  IREE_ASSERT(is_body || is_condition,
+              "selected loop terminator phase must belong to the loop");
 
   const uint16_t state_count = parent_op->result_count;
   IREE_ASSERT_EQ(loom_loop_like_iter_args(loop).count, state_count,
@@ -380,20 +336,8 @@ static bool loom_value_relation_next_loop_terminator(
 static bool loom_value_relation_next_region_terminator(
     loom_value_relation_iterator_t* iterator,
     loom_value_relation_t* out_relation) {
-  if (!loom_value_relation_kind_enabled(iterator,
-                                        LOOM_VALUE_RELATION_REGION_RESULT)) {
-    return false;
-  }
   const loom_op_t* op = iterator->op;
   loom_op_t* parent_op = op->parent_op;
-  if (parent_op == NULL) return false;
-  const loom_op_vtable_t* parent_vtable =
-      loom_op_vtable(iterator->module, parent_op);
-  if (parent_vtable == NULL || parent_vtable->region_branch == NULL ||
-      op->parent_block == NULL || op->parent_block->parent_region == NULL ||
-      op->parent_block->last_op != op) {
-    return false;
-  }
   IREE_ASSERT_EQ(op->operand_count, parent_op->result_count,
                  "verified region yield must match parent results");
   if (iterator->outer_index >= op->operand_count) return false;
@@ -412,55 +356,95 @@ void loom_value_relation_iterator_initialize(
   IREE_ASSERT_ARGUMENT(op);
   IREE_ASSERT_ARGUMENT(out_iterator);
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
-  loom_value_relation_mask_t possible_mask = 0;
+  uint16_t requested_phase_bits =
+      relation_mask & (LOOM_VALUE_RELATION_PHASE_BIT(
+                           LOOM_VALUE_RELATION_PHASE_LOOP_TERMINATOR) -
+                       1u);
+  if (iree_any_bit_set(relation_mask, LOOM_VALUE_RELATION_MASK(
+                                          LOOM_VALUE_RELATION_LOOP_CARRIED))) {
+    requested_phase_bits |= LOOM_VALUE_RELATION_PHASE_BIT(
+        LOOM_VALUE_RELATION_PHASE_LOOP_TERMINATOR);
+  }
+  if (iree_any_bit_set(relation_mask, LOOM_VALUE_RELATION_MASK(
+                                          LOOM_VALUE_RELATION_REGION_RESULT))) {
+    requested_phase_bits |= LOOM_VALUE_RELATION_PHASE_BIT(
+        LOOM_VALUE_RELATION_PHASE_REGION_TERMINATOR);
+  }
+  uint16_t phase_bits = 0;
   if (op->tied_result_count != 0) {
-    possible_mask |= LOOM_VALUE_RELATION_MASK(LOOM_VALUE_RELATION_TIED_RESULT);
+    phase_bits |=
+        LOOM_VALUE_RELATION_PHASE_BIT(LOOM_VALUE_RELATION_PHASE_TIED_RESULT);
   }
   if (loom_traits_are_fact_identity(op->traits)) {
-    possible_mask |=
-        LOOM_VALUE_RELATION_MASK(LOOM_VALUE_RELATION_FACT_IDENTITY);
+    phase_bits |=
+        LOOM_VALUE_RELATION_PHASE_BIT(LOOM_VALUE_RELATION_PHASE_FACT_IDENTITY);
   }
   if (loom_traits_are_value_alias(op->traits)) {
-    possible_mask |= LOOM_VALUE_RELATION_MASK(LOOM_VALUE_RELATION_VALUE_ALIAS);
+    phase_bits |=
+        LOOM_VALUE_RELATION_PHASE_BIT(LOOM_VALUE_RELATION_PHASE_VALUE_ALIAS);
   }
-  if (vtable != NULL &&
+  if (op->result_count != 0 && vtable != NULL &&
       iree_any_bit_set(vtable->operand_role_mask,
                        LOOM_OPERAND_ROLE_MASK_SELECT_PAYLOAD)) {
-    possible_mask |=
-        LOOM_VALUE_RELATION_MASK(LOOM_VALUE_RELATION_SELECT_PAYLOAD);
+    phase_bits |=
+        LOOM_VALUE_RELATION_PHASE_BIT(LOOM_VALUE_RELATION_PHASE_SELECT_PAYLOAD);
   }
-  if (iree_any_bit_set(op->traits, LOOM_TRAIT_ELEMENTWISE)) {
-    possible_mask |= LOOM_VALUE_RELATION_MASK(LOOM_VALUE_RELATION_ELEMENTWISE);
+  if (op->result_count != 0 &&
+      iree_any_bit_set(op->traits, LOOM_TRAIT_ELEMENTWISE)) {
+    phase_bits |=
+        LOOM_VALUE_RELATION_PHASE_BIT(LOOM_VALUE_RELATION_PHASE_ELEMENTWISE);
   }
   if (op->successor_count != 0) {
-    possible_mask |= LOOM_VALUE_RELATION_MASK(LOOM_VALUE_RELATION_CFG_ARGUMENT);
+    phase_bits |=
+        LOOM_VALUE_RELATION_PHASE_BIT(LOOM_VALUE_RELATION_PHASE_CFG_ARGUMENT);
   }
   if (vtable != NULL && vtable->loop_like != NULL) {
-    possible_mask |= LOOM_VALUE_RELATION_MASK(LOOM_VALUE_RELATION_LOOP_CARRIED);
+    phase_bits |=
+        LOOM_VALUE_RELATION_PHASE_BIT(LOOM_VALUE_RELATION_PHASE_LOOP_ENTRY);
     if (vtable->loop_like->condition_region_index == LOOM_REGION_INDEX_NONE) {
-      possible_mask |=
-          LOOM_VALUE_RELATION_MASK(LOOM_VALUE_RELATION_LOOP_BYPASS);
+      phase_bits |=
+          LOOM_VALUE_RELATION_PHASE_BIT(LOOM_VALUE_RELATION_PHASE_LOOP_BYPASS);
     }
   }
-  if (op->parent_op != NULL && op->parent_block != NULL &&
-      op->parent_block->last_op == op) {
+  const uint16_t requested_terminator_phase_bits =
+      requested_phase_bits & (LOOM_VALUE_RELATION_PHASE_BIT(
+                                  LOOM_VALUE_RELATION_PHASE_LOOP_TERMINATOR) |
+                              LOOM_VALUE_RELATION_PHASE_BIT(
+                                  LOOM_VALUE_RELATION_PHASE_REGION_TERMINATOR));
+  if (requested_terminator_phase_bits != 0 && op->parent_op != NULL &&
+      op->parent_block != NULL && op->parent_block->last_op == op) {
     const loom_op_vtable_t* parent_vtable =
         loom_op_vtable(module, op->parent_op);
-    if (parent_vtable != NULL && parent_vtable->loop_like != NULL) {
-      possible_mask |=
-          LOOM_VALUE_RELATION_MASK(LOOM_VALUE_RELATION_LOOP_CARRIED);
+    if (parent_vtable != NULL && parent_vtable->loop_like != NULL &&
+        iree_any_bit_set(requested_phase_bits,
+                         LOOM_VALUE_RELATION_PHASE_BIT(
+                             LOOM_VALUE_RELATION_PHASE_LOOP_TERMINATOR))) {
+      const loom_loop_like_t loop = {
+          .op = op->parent_op,
+          .vtable = parent_vtable->loop_like,
+      };
+      if (loom_value_relation_is_direct_region_terminator(
+              op, loom_loop_like_body(loop)) ||
+          loom_value_relation_is_direct_region_terminator(
+              op, loom_loop_like_condition_region(loop))) {
+        phase_bits |= LOOM_VALUE_RELATION_PHASE_BIT(
+            LOOM_VALUE_RELATION_PHASE_LOOP_TERMINATOR);
+      }
     }
-    if (parent_vtable != NULL && parent_vtable->region_branch != NULL) {
-      possible_mask |=
-          LOOM_VALUE_RELATION_MASK(LOOM_VALUE_RELATION_REGION_RESULT);
+    if (parent_vtable != NULL && parent_vtable->region_branch != NULL &&
+        op->parent_block->parent_region != NULL &&
+        iree_any_bit_set(requested_phase_bits,
+                         LOOM_VALUE_RELATION_PHASE_BIT(
+                             LOOM_VALUE_RELATION_PHASE_REGION_TERMINATOR))) {
+      phase_bits |= LOOM_VALUE_RELATION_PHASE_BIT(
+          LOOM_VALUE_RELATION_PHASE_REGION_TERMINATOR);
     }
   }
   *out_iterator = (loom_value_relation_iterator_t){
       .module = module,
       .op = op,
       .vtable = vtable,
-      .relation_mask =
-          relation_mask & possible_mask & LOOM_VALUE_RELATION_MASK_ALL,
+      .phase_bits = phase_bits & requested_phase_bits,
   };
 }
 
@@ -470,10 +454,12 @@ bool loom_value_relation_iterator_next(loom_value_relation_iterator_t* iterator,
   IREE_ASSERT_ARGUMENT(iterator->module);
   IREE_ASSERT_ARGUMENT(iterator->op);
   IREE_ASSERT_ARGUMENT(out_relation);
-  if (iterator->relation_mask == 0) return false;
-  while (iterator->phase < LOOM_VALUE_RELATION_PHASE_END) {
+  while (iterator->phase_bits != 0) {
+    const loom_value_relation_iterator_phase_t phase =
+        (loom_value_relation_iterator_phase_t)
+            iree_math_count_trailing_zeros_u32(iterator->phase_bits);
     bool found = false;
-    switch ((loom_value_relation_iterator_phase_t)iterator->phase) {
+    switch (phase) {
       case LOOM_VALUE_RELATION_PHASE_TIED_RESULT:
         found = loom_value_relation_next_tied_result(iterator, out_relation);
         break;
@@ -510,7 +496,9 @@ bool loom_value_relation_iterator_next(loom_value_relation_iterator_t* iterator,
         break;
     }
     if (found) return true;
-    loom_value_relation_advance_phase(iterator);
+    loom_value_relation_finish_phase(iterator);
   }
   return false;
 }
+
+#undef LOOM_VALUE_RELATION_PHASE_BIT

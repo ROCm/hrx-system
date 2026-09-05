@@ -40,8 +40,6 @@ typedef struct loom_low_representation_cost_t {
 typedef struct loom_low_representation_candidate_t {
   // Physical representation identity in the active target policy's namespace.
   loom_low_representation_id_t representation;
-  // Reserved for compact future candidate flags; must be zero.
-  uint16_t reserved;
   // Target cost incurred when this alternative is selected.
   loom_low_representation_cost_t cost;
 } loom_low_representation_candidate_t;
@@ -66,23 +64,14 @@ typedef struct loom_low_representation_plan_t {
   uint32_t node_count;
   // Allocated sparse-node capacity.
   iree_host_size_t node_capacity;
-  // First operation-local representation constraint.
-  loom_low_representation_constraint_t* constraint_head;
-  // Last operation-local representation constraint.
-  loom_low_representation_constraint_t* constraint_tail;
   // Whether the plan has completed selection.
   bool solved;
 } loom_low_representation_plan_t;
 
-// Describes the first constraint and the constraint that first empties the
-// component's running exact domain.
+// Describes a component whose exact candidate intersection is empty.
 typedef struct loom_low_representation_conflict_t {
-  // Value ordinal named by the component's first constraint.
+  // Representative value ordinal from the conflicting component.
   loom_value_ordinal_t value_ordinal;
-  // Caller-owned identity for the component's first constraint.
-  const void* first_owner;
-  // Caller-owned identity for the constraint that emptied the domain.
-  const void* incompatible_owner;
 } loom_low_representation_conflict_t;
 
 // Initializes an empty representation plan. Storage is allocated lazily when a
@@ -97,10 +86,9 @@ iree_status_t loom_low_representation_plan_union(
     loom_value_ordinal_t right);
 
 // Adds one operation-local exact representation domain and its target costs.
-// |owner| is retained opaquely for conflict reporting and must outlive |plan|.
 iree_status_t loom_low_representation_plan_constrain(
     loom_low_representation_plan_t* plan, loom_value_ordinal_t value_ordinal,
-    const void* owner, const loom_low_representation_candidate_t* candidates,
+    const loom_low_representation_candidate_t* candidates,
     iree_host_size_t candidate_count);
 
 // Returns whether |value_ordinal|'s current component has received at least

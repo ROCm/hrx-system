@@ -18,23 +18,15 @@ struct loom_low_representation_node_t {
   uint16_t rank;
   // Selected physical representation, or NONE when unconstrained.
   loom_low_representation_id_t selected_representation;
-  // Whether this component has received an exact candidate constraint.
-  bool has_constraint;
-  // Constraints attached to this component after union-find is finalized.
+  // First exact candidate constraint attached to this component.
   loom_low_representation_constraint_t* constraint_head;
   // Last constraint attached to this component.
   loom_low_representation_constraint_t* constraint_tail;
 };
 
 struct loom_low_representation_constraint_t {
-  // Next constraint in source registration order.
+  // Next constraint attached to the same component.
   loom_low_representation_constraint_t* next;
-  // Next constraint attached to the same finalized component.
-  loom_low_representation_constraint_t* next_in_component;
-  // Caller-owned identity retained for conflict reporting.
-  const void* owner;
-  // Value ordinal named when the constraint was registered.
-  loom_value_ordinal_t value_ordinal;
   // Number of exact candidates stored inline.
   uint16_t candidate_count;
   // Inline copied exact candidates.
@@ -87,7 +79,7 @@ static iree_status_t loom_low_representation_plan_node(
   return iree_ok_status();
 }
 
-static uint32_t loom_low_representation_plan_find_root(
+IREE_ATTRIBUTE_NOINLINE static uint32_t loom_low_representation_plan_find_root(
     loom_low_representation_plan_t* plan, uint32_t node_ordinal) {
   loom_low_representation_node_t* node = &plan->nodes[node_ordinal];
   uint32_t root_ordinal = node_ordinal;
@@ -140,8 +132,6 @@ static bool loom_low_representation_plan_solve_component(
   loom_low_representation_id_t best_representation =
       LOOM_LOW_REPRESENTATION_ID_NONE;
   loom_low_representation_aggregate_cost_t best_cost = {UINT64_MAX, UINT64_MAX};
-  const loom_low_representation_constraint_t* emptying_constraint = NULL;
-  iree_host_size_t latest_rejection_ordinal = 0;
   for (uint16_t i = 0; i < first->candidate_count; ++i) {
     const loom_low_representation_candidate_t* first_candidate =
         &first->candidates[i];
@@ -150,19 +140,12 @@ static bool loom_low_representation_plan_solve_component(
         .code_size = first_candidate->cost.code_size,
     };
     bool exact = true;
-    iree_host_size_t constraint_ordinal = 1;
-    for (const loom_low_representation_constraint_t* constraint =
-             first->next_in_component;
-         constraint != NULL;
-         constraint = constraint->next_in_component, ++constraint_ordinal) {
+    for (const loom_low_representation_constraint_t* constraint = first->next;
+         constraint != NULL; constraint = constraint->next) {
       const loom_low_representation_candidate_t* candidate =
           loom_low_representation_constraint_find_candidate(
               constraint, first_candidate->representation);
       if (candidate == NULL) {
-        if (constraint_ordinal > latest_rejection_ordinal) {
-          emptying_constraint = constraint;
-          latest_rejection_ordinal = constraint_ordinal;
-        }
         exact = false;
         break;
       }
@@ -179,12 +162,9 @@ static bool loom_low_representation_plan_solve_component(
   }
 
   if (best_representation == LOOM_LOW_REPRESENTATION_ID_NONE) {
-    IREE_ASSERT(emptying_constraint != NULL);
     if (out_conflict != NULL) {
       *out_conflict = (loom_low_representation_conflict_t){
-          .value_ordinal = first->value_ordinal,
-          .first_owner = first->owner,
-          .incompatible_owner = emptying_constraint->owner,
+          .value_ordinal = root->value_ordinal,
       };
     }
     return false;
@@ -223,23 +203,30 @@ iree_status_t loom_low_representation_plan_union(
     return iree_ok_status();
   }
   if (plan->nodes[left_root].rank < plan->nodes[right_root].rank) {
-    plan->nodes[left_root].parent = right_root;
-    plan->nodes[right_root].has_constraint |=
-        plan->nodes[left_root].has_constraint;
+    const uint32_t temporary_root = left_root;
+    left_root = right_root;
+    right_root = temporary_root;
+  }
+  loom_low_representation_node_t* root = &plan->nodes[left_root];
+  loom_low_representation_node_t* merged = &plan->nodes[right_root];
+  merged->parent = left_root;
+  if (root->rank == merged->rank) {
+    ++root->rank;
+  }
+  if (root->constraint_tail != NULL) {
+    root->constraint_tail->next = merged->constraint_head;
   } else {
-    plan->nodes[right_root].parent = left_root;
-    plan->nodes[left_root].has_constraint |=
-        plan->nodes[right_root].has_constraint;
-    if (plan->nodes[left_root].rank == plan->nodes[right_root].rank) {
-      ++plan->nodes[left_root].rank;
-    }
+    root->constraint_head = merged->constraint_head;
+  }
+  if (merged->constraint_tail != NULL) {
+    root->constraint_tail = merged->constraint_tail;
   }
   return iree_ok_status();
 }
 
 iree_status_t loom_low_representation_plan_constrain(
     loom_low_representation_plan_t* plan, loom_value_ordinal_t value_ordinal,
-    const void* owner, const loom_low_representation_candidate_t* candidates,
+    const loom_low_representation_candidate_t* candidates,
     iree_host_size_t candidate_count) {
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT(!plan->solved);
@@ -249,7 +236,6 @@ iree_status_t loom_low_representation_plan_constrain(
   for (iree_host_size_t i = 0; i < candidate_count; ++i) {
     IREE_ASSERT_NE(candidates[i].representation,
                    LOOM_LOW_REPRESENTATION_ID_NONE);
-    IREE_ASSERT_EQ(candidates[i].reserved, 0u);
     for (iree_host_size_t j = 0; j < i; ++j) {
       IREE_ASSERT_NE(candidates[i].representation,
                      candidates[j].representation);
@@ -261,7 +247,7 @@ iree_status_t loom_low_representation_plan_constrain(
       loom_low_representation_plan_node(plan, value_ordinal, &node_ordinal));
   const uint32_t root_ordinal =
       loom_low_representation_plan_find_root(plan, node_ordinal);
-  plan->nodes[root_ordinal].has_constraint = true;
+  loom_low_representation_node_t* root = &plan->nodes[root_ordinal];
   const iree_host_size_t allocation_size =
       offsetof(loom_low_representation_constraint_t, candidates) +
       candidate_count * sizeof(*candidates);
@@ -269,18 +255,15 @@ iree_status_t loom_low_representation_plan_constrain(
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(plan->arena, allocation_size, (void**)&constraint));
   constraint->next = NULL;
-  constraint->next_in_component = NULL;
-  constraint->owner = owner;
-  constraint->value_ordinal = value_ordinal;
   constraint->candidate_count = (uint16_t)candidate_count;
   memcpy(constraint->candidates, candidates,
          candidate_count * sizeof(*candidates));
-  if (plan->constraint_tail != NULL) {
-    plan->constraint_tail->next = constraint;
+  if (root->constraint_tail != NULL) {
+    root->constraint_tail->next = constraint;
   } else {
-    plan->constraint_head = constraint;
+    root->constraint_head = constraint;
   }
-  plan->constraint_tail = constraint;
+  root->constraint_tail = constraint;
   return iree_ok_status();
 }
 
@@ -293,7 +276,7 @@ bool loom_low_representation_plan_component_is_constrained(
   if (node_ordinal == UINT32_MAX) return false;
   const uint32_t root_ordinal =
       loom_low_representation_plan_find_root(plan, node_ordinal);
-  return plan->nodes[root_ordinal].has_constraint;
+  return plan->nodes[root_ordinal].constraint_head != NULL;
 }
 
 bool loom_low_representation_plan_solve(
@@ -305,21 +288,6 @@ bool loom_low_representation_plan_solve(
     *out_conflict = (loom_low_representation_conflict_t){
         .value_ordinal = LOOM_VALUE_ORDINAL_INVALID,
     };
-  }
-  for (loom_low_representation_constraint_t* constraint = plan->constraint_head;
-       constraint != NULL; constraint = constraint->next) {
-    const uint32_t node_ordinal =
-        plan->node_ordinals[constraint->value_ordinal];
-    IREE_ASSERT_NE(node_ordinal, UINT32_MAX);
-    const uint32_t root_ordinal =
-        loom_low_representation_plan_find_root(plan, node_ordinal);
-    loom_low_representation_node_t* root = &plan->nodes[root_ordinal];
-    if (root->constraint_tail != NULL) {
-      root->constraint_tail->next_in_component = constraint;
-    } else {
-      root->constraint_head = constraint;
-    }
-    root->constraint_tail = constraint;
   }
   plan->solved = true;
   for (uint32_t i = 0; i < plan->node_count; ++i) {

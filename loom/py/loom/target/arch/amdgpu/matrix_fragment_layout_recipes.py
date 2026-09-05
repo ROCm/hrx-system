@@ -392,7 +392,7 @@ def matrix_fragment_packed_b16_publication_projection(
 ) -> MatrixFragmentPackedB16PublicationProjection | None:
     """Compiles exact adjacent-axis owners into a packed publication recipe.
 
-    The supported executable projection lets one participant bit predicate
+    The supported executable projection uses a participant-bit predicate to
     publish pairs. The publisher owns the low coordinate and the paired
     participant owns the adjacent high coordinate at the same local payload
     position. Exhaustive exact-map evaluation proves that the pairs cover the

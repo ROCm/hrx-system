@@ -16,6 +16,19 @@
 extern "C" {
 #endif
 
+enum {
+  // Maximum number of 32-bit registers carried by one fragment memory packet.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_MAX_PACKET_REGISTERS = 4,
+  // Bits reserved for a publication packet's result-register count.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PUBLICATION_PACKET_COUNT_BITS = 4,
+  // Mask selecting a publication packet's result-register count.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PUBLICATION_PACKET_COUNT_MASK =
+      (1u << LOOM_AMDGPU_FRAGMENT_MEMORY_PUBLICATION_PACKET_COUNT_BITS) - 1u,
+};
+static_assert(2u * LOOM_AMDGPU_FRAGMENT_MEMORY_MAX_PACKET_REGISTERS <=
+                  LOOM_AMDGPU_FRAGMENT_MEMORY_PUBLICATION_PACKET_COUNT_MASK,
+              "publication packet widths must fit their compact encoding");
+
 // Returns true when |payload_form| loads FP8 into packed 16-bit registers.
 bool loom_amdgpu_fragment_memory_payload_form_is_load_fp8_to_16bit(
     loom_amdgpu_fragment_memory_payload_form_t payload_form);
@@ -37,11 +50,6 @@ bool loom_amdgpu_fragment_memory_space_supports_access(
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_fact_memory_space_t memory_space,
     loom_amdgpu_fragment_memory_packetization_t packetization,
-    loom_amdgpu_fragment_memory_payload_form_t payload_form);
-
-// Returns true when the descriptor set can materialize |payload_form|.
-bool loom_amdgpu_fragment_memory_payload_form_has_descriptors(
-    const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_fragment_memory_payload_form_t payload_form);
 
 typedef enum loom_amdgpu_fragment_publication_source_flag_bits_e {
@@ -87,31 +95,78 @@ typedef struct loom_amdgpu_fragment_memory_publication_query_t {
   loom_amdgpu_fragment_publication_source_flags_t source_flags;
 } loom_amdgpu_fragment_memory_publication_query_t;
 
+// Packed exact descriptor reference and result-register count retained by
+// publication selection. Register indices, repetition, and packet flags are
+// derived from sequence position and the selected strategy during plan
+// materialization.
+typedef uint16_t loom_amdgpu_fragment_memory_publication_packet_t;
+static_assert(LOOM_AMDGPU_DESCRIPTOR_REF_COUNT <=
+                  (UINT16_MAX >>
+                   LOOM_AMDGPU_FRAGMENT_MEMORY_PUBLICATION_PACKET_COUNT_BITS) +
+                      1u,
+              "descriptor references must fit compact publication packets");
+
+static inline loom_amdgpu_fragment_memory_publication_packet_t
+loom_amdgpu_fragment_memory_publication_packet_make(
+    loom_amdgpu_descriptor_ref_t descriptor_ref,
+    uint16_t result_register_count) {
+  return (
+      loom_amdgpu_fragment_memory_publication_packet_t)((descriptor_ref
+                                                         << LOOM_AMDGPU_FRAGMENT_MEMORY_PUBLICATION_PACKET_COUNT_BITS) |
+                                                        result_register_count);
+}
+
+static inline loom_amdgpu_descriptor_ref_t
+loom_amdgpu_fragment_memory_publication_packet_descriptor_ref(
+    loom_amdgpu_fragment_memory_publication_packet_t packet) {
+  return (
+      loom_amdgpu_descriptor_ref_t)(packet >>
+                                    LOOM_AMDGPU_FRAGMENT_MEMORY_PUBLICATION_PACKET_COUNT_BITS);
+}
+
+static inline uint16_t
+loom_amdgpu_fragment_memory_publication_packet_result_register_count(
+    loom_amdgpu_fragment_memory_publication_packet_t packet) {
+  return packet & LOOM_AMDGPU_FRAGMENT_MEMORY_PUBLICATION_PACKET_COUNT_MASK;
+}
+
 // Cheapest exact publication selected from packet capabilities and issue
 // costs.
 typedef struct loom_amdgpu_fragment_memory_publication_choice_t {
-  // Concrete result epilogue strategy.
-  loom_amdgpu_fragment_memory_epilogue_strategy_t strategy;
-  // Target cost contributed to physical representation selection.
-  loom_low_representation_cost_t cost;
   // Cross-lane publication recipe, or NULL for direct publication.
   const loom_matrix_fragment_packed_b16_publication_t* packed_b16_publication;
-  // Cross-lane packet flags, or zero for direct publication.
-  loom_amdgpu_fragment_memory_packet_flags_t packet_flags;
+  // Target cost contributed to physical representation selection.
+  loom_low_representation_cost_t cost;
+  // Register starts where a wider direct packet was rejected because the
+  // fragment coordinates were not contiguous in memory.
+  uint32_t wider_noncontiguous_register_bits;
+  // Exact compact packet sequence, or the repeated packet for scalar and
+  // cross-lane strategies, consumed by fragment memory planning.
+  loom_amdgpu_fragment_memory_publication_packet_t
+      packets[LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS];
+  // Concrete result epilogue strategy.
+  loom_amdgpu_fragment_memory_epilogue_strategy_t strategy;
+  // Number of direct packets, or one repeated scalar/cross-lane packet.
+  uint8_t packet_count;
 } loom_amdgpu_fragment_memory_publication_choice_t;
+static_assert(sizeof(loom_amdgpu_fragment_memory_publication_choice_t) <= 88,
+              "publication choices must stay compact");
 
-// Selects the cheapest exact narrowed-result publication. Returns false when
+// Selects the cheapest exact narrowed-result publication. |query| must
+// describe a validated narrowed f32-to-16-bit store plan. Returns false when
 // no target packet sequence covers the query.
 bool loom_amdgpu_fragment_memory_select_publication(
     const loom_amdgpu_fragment_memory_publication_query_t* query,
     loom_amdgpu_fragment_memory_publication_choice_t* out_choice);
 
-// Selects direct memory packets for an analyzed fragment memory plan. Returns
-// false and sets an optional stable constraint key when no packetization is
-// available.
+// Materializes direct memory packets for an analyzed fragment memory plan.
+// |publication_choice| must be the exact choice selected for a narrowed
+// f32-to-16-bit store and is ignored for other payload forms. Returns false and
+// sets an optional stable constraint key when no packetization is available.
 bool loom_amdgpu_fragment_memory_plan_packets(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_matrix_fragment_layout_t* layout,
+    const loom_amdgpu_fragment_memory_publication_choice_t* publication_choice,
     loom_amdgpu_fragment_memory_plan_t* plan,
     iree_string_view_t* out_constraint_key);
 
@@ -143,7 +198,6 @@ typedef struct loom_amdgpu_fragment_memory_packet_report_t {
 
 // Queries cold-path report classification for one selected memory packet.
 void loom_amdgpu_fragment_memory_query_packet_report(
-    const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_fragment_memory_plan_t* plan,
     const loom_amdgpu_fragment_memory_packet_plan_t* packet,
     loom_amdgpu_fragment_memory_packet_report_t* out_report);

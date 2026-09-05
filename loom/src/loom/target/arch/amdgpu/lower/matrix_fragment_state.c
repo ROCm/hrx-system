@@ -70,7 +70,7 @@ iree_status_t loom_amdgpu_matrix_fragment_contract_candidates(
     IREE_ASSERT_LE(i, UINT16_MAX);
     descriptor_ordinals[candidate_count++] = (uint16_t)i;
     const loom_amdgpu_matrix_contract_realization_choices_t* choices =
-        loom_amdgpu_matrix_contract_realization_choices_at(i);
+        &descriptor->realization;
     if (choices->canonical_result_representation_id !=
         LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE) {
       canonical_result_representation_bits |=
@@ -115,10 +115,7 @@ iree_status_t loom_amdgpu_matrix_fragment_record_contract_ordinal(
       loom_low_lower_context_value_domain(context);
   const loom_value_ordinal_t value_ordinal =
       loom_local_value_domain_try_ordinal(value_domain, source_value_id);
-  if (value_ordinal == LOOM_VALUE_ORDINAL_INVALID) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "matrix result is outside the source value domain");
-  }
+  IREE_ASSERT_NE(value_ordinal, LOOM_VALUE_ORDINAL_INVALID);
   if (state->contract_ordinals_by_value_ordinal == NULL) {
     IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
         context, value_domain->value_count,
@@ -132,11 +129,8 @@ iree_status_t loom_amdgpu_matrix_fragment_record_contract_ordinal(
   IREE_ASSERT_EQ(state->contract_ordinal_count, value_domain->value_count);
   uint16_t* recorded_ordinal =
       &state->contract_ordinals_by_value_ordinal[value_ordinal];
-  if (*recorded_ordinal != LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE &&
-      *recorded_ordinal != contract_ordinal) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "matrix result has conflicting source contracts");
-  }
+  IREE_ASSERT(*recorded_ordinal == LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE ||
+              *recorded_ordinal == contract_ordinal);
   *recorded_ordinal = contract_ordinal;
   return iree_ok_status();
 }

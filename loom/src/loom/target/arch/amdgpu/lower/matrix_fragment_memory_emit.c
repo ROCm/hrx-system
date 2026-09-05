@@ -124,6 +124,7 @@ loom_amdgpu_emit_fragment_memory_packed_16bit_result_load_packet(
       {0};
   for (uint16_t i = 0; i < packet->result_register_count; ++i) {
     const loom_amdgpu_fragment_memory_packet_plan_t element_packet = {
+        .flags = packet->flags,
         .register_index = (uint16_t)(packet->register_index + i),
         .result_register_count = 1,
         .packet_register_count = packet->packet_register_count,

@@ -436,47 +436,43 @@ iree_status_t loom_amdgpu_descriptor_matrix_query(
   loom_target_contract_descriptor_matrix_transform_flags_t transform_flags = 0;
   loom_low_representation_id_t selected_representation =
       LOOM_LOW_REPRESENTATION_ID_NONE;
-  bool representation_plan_available = false;
   IREE_RETURN_IF_ERROR(loom_low_lower_representation_query_lookup(
-      environment, loom_vector_mma_result(source_op), &selected_representation,
-      &representation_plan_available));
+      environment, loom_vector_mma_result(source_op),
+      &selected_representation));
   if (selected_representation != LOOM_LOW_REPRESENTATION_ID_NONE) {
     uint16_t canonical_contract_ordinal =
         LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE;
     IREE_RETURN_IF_ERROR(loom_amdgpu_matrix_fragment_query_contract_ordinal(
         environment, loom_vector_mma_result(source_op),
         &canonical_contract_ordinal));
+    const loom_amdgpu_matrix_contract_descriptor_t* canonical_descriptor =
+        loom_amdgpu_matrix_contract_descriptor_at(canonical_contract_ordinal);
+    IREE_ASSERT(canonical_descriptor != NULL,
+                "retained matrix contract ordinal must name a descriptor");
     const loom_amdgpu_matrix_contract_realization_choices_t* choices =
-        loom_amdgpu_matrix_contract_realization_choices_at(
-            canonical_contract_ordinal);
+        &canonical_descriptor->realization;
     uint16_t selected_contract_ordinal = canonical_contract_ordinal;
-    if (choices == NULL) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "selected matrix representation has no retained source contract");
-    } else if (selected_representation ==
-               choices->canonical_result_representation_id) {
+    if (selected_representation ==
+        choices->canonical_result_representation_id) {
       // Keep the canonical contract.
-    } else if (selected_representation ==
-                   choices->operand_exchanged_result_representation_id &&
-               choices->operand_exchanged_contract_ordinal !=
-                   LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE) {
+    } else {
+      IREE_ASSERT(
+          selected_representation ==
+                  choices->operand_exchanged_result_representation_id &&
+              choices->operand_exchanged_contract_ordinal !=
+                  LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE,
+          "selected matrix representation must realize its source contract");
       selected_contract_ordinal = choices->operand_exchanged_contract_ordinal;
       transform_flags =
           LOOM_TARGET_CONTRACT_DESCRIPTOR_MATRIX_TRANSFORM_TRANSPOSE_MN;
-    } else {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "selected matrix representation is not an exact realization of "
-          "the retained source contract");
     }
     contract_descriptor =
-        loom_amdgpu_matrix_contract_descriptor_at(selected_contract_ordinal);
-    if (contract_descriptor == NULL) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "selected matrix representation names an invalid target contract");
-    }
+        selected_contract_ordinal == canonical_contract_ordinal
+            ? canonical_descriptor
+            : loom_amdgpu_matrix_contract_descriptor_at(
+                  selected_contract_ordinal);
+    IREE_ASSERT(contract_descriptor != NULL,
+                "selected matrix contract ordinal must name a descriptor");
   } else {
     if (!loom_amdgpu_matrix_select_contract(
             contract_request, &configuration, &contract_descriptor,

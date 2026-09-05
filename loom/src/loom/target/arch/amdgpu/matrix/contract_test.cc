@@ -109,9 +109,9 @@ TEST(MatrixContractTest, RealizationCatalogCoversEveryDescriptor) {
   for (iree_host_size_t i = 0; i < count; ++i) {
     const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
         loom_amdgpu_matrix_contract_descriptor_at(i);
+    ASSERT_NE(descriptor, nullptr);
     const loom_amdgpu_matrix_contract_realization_choices_t* choices =
-        loom_amdgpu_matrix_contract_realization_choices_at(i);
-    ASSERT_NE(choices, nullptr);
+        &descriptor->realization;
     if (descriptor->fragment_layout_kind ==
         LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_UNKNOWN) {
       EXPECT_EQ(choices->canonical_result_representation_id,
@@ -138,7 +138,6 @@ TEST(MatrixContractTest, RealizationCatalogCoversEveryDescriptor) {
   }
   EXPECT_EQ(exact_count, 217u);
   EXPECT_EQ(operand_exchanged_count, 150u);
-  EXPECT_EQ(loom_amdgpu_matrix_contract_realization_choices_at(count), nullptr);
   EXPECT_EQ(loom_amdgpu_matrix_result_representation_at(
                 LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE),
             nullptr);
@@ -148,9 +147,11 @@ TEST(MatrixContractTest, Gfx11F16F32HasTransposedResultRealization) {
   const iree_host_size_t contract_ordinal =
       FindDescriptorOrdinal("wmma.f32.16x16x16.f16");
   ASSERT_LT(contract_ordinal, loom_amdgpu_matrix_contract_descriptor_count());
+  const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
+      loom_amdgpu_matrix_contract_descriptor_at(contract_ordinal);
+  ASSERT_NE(descriptor, nullptr);
   const loom_amdgpu_matrix_contract_realization_choices_t* choices =
-      loom_amdgpu_matrix_contract_realization_choices_at(contract_ordinal);
-  ASSERT_NE(choices, nullptr);
+      &descriptor->realization;
   EXPECT_EQ(choices->operand_exchanged_contract_ordinal, contract_ordinal);
 
   const loom_amdgpu_matrix_result_representation_t* representation =

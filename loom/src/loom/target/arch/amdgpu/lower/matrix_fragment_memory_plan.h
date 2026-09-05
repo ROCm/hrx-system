@@ -18,13 +18,12 @@ extern "C" {
 #endif
 
 // Enumerates exact target result representations with costed publication
-// choices for one source store. Stores outside the costed publication domain
-// return an empty list so their values remain in the canonical representation.
-// The caller supplies storage for the complete target representation catalog.
-iree_status_t loom_amdgpu_query_vector_fragment_store_representations(
+// choices for an accumulator RESULT store. The caller validates the operation
+// and supplies storage for the complete target representation catalog.
+iree_status_t loom_amdgpu_query_accumulator_fragment_store_representations(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_representation_candidate_t* out_candidates,
-    iree_host_size_t candidate_capacity, iree_host_size_t* out_candidate_count);
+    iree_host_size_t* out_candidate_count);
 
 // Selects an AMDGPU matrix-fragment load plan.
 iree_status_t loom_amdgpu_select_vector_fragment_load_plan(

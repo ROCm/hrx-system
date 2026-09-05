@@ -263,19 +263,5 @@ TEST_F(LowLowerSourcePlanTest, PropagatesObserverEndFailureBeforeSelection) {
   EXPECT_EQ(observer_.plan_count, 0u);
 }
 
-TEST_F(LowLowerSourcePlanTest, FiltersObservedOperationKindRange) {
-  source_plan_observer_.minimum_op_kind = LOOM_OP_FUNC_RETURN;
-  source_plan_observer_.maximum_op_kind = LOOM_OP_FUNC_RETURN;
-
-  IREE_ASSERT_OK(
-      loom_low_lower_function(module_, function_, &options_, &result_));
-  ASSERT_EQ(result_.error_count, 0u);
-  EXPECT_EQ(observer_.source_plan.phase, 2u);
-  EXPECT_FALSE(observer_.source_plan.invalid_lifecycle);
-  EXPECT_FALSE(observer_.source_plan.selection_started);
-  ASSERT_EQ(observer_.source_plan.op_count, 1u);
-  EXPECT_EQ(observer_.source_plan.op_kinds[0], LOOM_OP_FUNC_RETURN);
-}
-
 }  // namespace
 }  // namespace loom

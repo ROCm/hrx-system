@@ -530,6 +530,8 @@ typedef struct loom_amdgpu_matrix_contract_descriptor_t {
   iree_string_view_t name;
   // Stable target-low descriptor ref selected by this descriptor, or NONE.
   loom_amdgpu_descriptor_ref_t low_descriptor_ref;
+  // Exact physical result realizations derived for this contract.
+  loom_amdgpu_matrix_contract_realization_choices_t realization;
   // LLVM AMDGPU intrinsic name selected by this descriptor for LLVM lowering.
   iree_string_view_t llvm_intrinsic_name;
   // AMDGPU instruction family used by this descriptor.

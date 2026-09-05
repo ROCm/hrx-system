@@ -24,6 +24,19 @@
 extern "C" {
 #endif
 
+enum loom_low_lower_representation_boundary_flag_bits_e {
+  // No source operation ports participate in the target action.
+  LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_NONE = 0,
+  // The complete source operand slice participates in the target action.
+  LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_OPERANDS = 1u << 0,
+  // The complete source result slice participates in the target action.
+  LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS = 1u << 1,
+  LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_ALL =
+      LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_OPERANDS |
+      LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS,
+};
+typedef uint8_t loom_low_lower_representation_boundary_flags_t;
+
 // One target boundary observed for an exact source operation kind. The source
 // function op is observed during begin; body ops are observed during the
 // compiler-owned source-plan traversal. Tables must be strictly increasing by
@@ -33,7 +46,9 @@ typedef struct loom_low_lower_representation_boundary_t {
   // Exact source operation kind that invokes the target observer.
   loom_op_kind_t op_kind;
   // Target-defined compact action passed to the target observer.
-  uint16_t action;
+  uint8_t action;
+  // Operation ports offered to the target observer.
+  loom_low_lower_representation_boundary_flags_t flags;
 } loom_low_lower_representation_boundary_t;
 static_assert(sizeof(loom_low_lower_representation_boundary_t) == 4,
               "representation boundaries must stay compact");
@@ -41,29 +56,15 @@ static_assert(sizeof(loom_low_lower_representation_boundary_t) == 4,
 typedef struct loom_low_lower_representation_recorder_t
     loom_low_lower_representation_recorder_t;
 
-// Source-level representation conflict reported after all constraints have
-// been observed.
-typedef struct loom_low_lower_representation_conflict_t {
-  // Source value whose component first received a finite domain.
-  loom_value_id_t source_value_id;
-  // First source operation that constrained the component.
-  const loom_op_t* first_source_op;
-  // Source operation whose domain made the component inconsistent.
-  const loom_op_t* incompatible_source_op;
-} loom_low_lower_representation_conflict_t;
-
 typedef bool (*loom_low_lower_representation_relation_fn_t)(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_op, const loom_value_relation_t* relation);
 
 typedef void (*loom_low_lower_representation_boundary_fn_t)(
-    void* user_data, uint16_t action, loom_low_lower_context_t* context,
-    const loom_op_t* source_op,
+    void* user_data, uint8_t action,
+    loom_low_lower_representation_boundary_flags_t flags,
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_representation_recorder_t* recorder);
-
-typedef iree_status_t (*loom_low_lower_representation_conflict_fn_t)(
-    void* user_data, loom_low_lower_context_t* context,
-    const loom_low_lower_representation_conflict_t* conflict);
 
 // Target policy for one function-local physical-representation plan.
 typedef struct loom_low_lower_representation_provider_t {
@@ -71,12 +72,10 @@ typedef struct loom_low_lower_representation_provider_t {
   // values to use one target representation. This callback is infallible and
   // must not walk source IR.
   loom_low_lower_representation_relation_fn_t relation;
-  // Observes operation boundaries selected by |boundaries|. Failures and exact
-  // alternatives are recorded through |recorder|.
+  // Observes operation boundaries selected by |boundaries|. |flags| identifies
+  // the source operation ports relevant to the target action. Failures and
+  // exact alternatives are recorded through |recorder|.
   loom_low_lower_representation_boundary_fn_t observe_boundary;
-  // Optionally returns a target-specific failure for an empty component
-  // intersection. The callback must not return OK.
-  loom_low_lower_representation_conflict_fn_t report_conflict;
   // Strictly increasing source operation boundary table.
   const loom_low_lower_representation_boundary_t* boundaries;
   // Number of rows in |boundaries|.
@@ -137,12 +136,10 @@ iree_status_t loom_low_lower_representation_lookup(
 // or NONE when the value is unconstrained. Query scopes created from Low
 // lowering share the observer's target-state allocator and therefore retrieve
 // the same function-local plan without copying it into the query environment.
-// |out_plan_available| distinguishes an unconstrained value in a completed
-// plan from a query scope that has no representation observer.
 iree_status_t loom_low_lower_representation_query_lookup(
     const loom_target_contract_query_environment_t* environment,
     loom_value_id_t source_value_id,
-    loom_low_representation_id_t* out_representation, bool* out_plan_available);
+    loom_low_representation_id_t* out_representation);
 
 #ifdef __cplusplus
 }  // extern "C"

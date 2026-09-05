@@ -76,11 +76,6 @@ bool loom_amdgpu_bf16_descriptor_set_can_emit_f32_pair_to_packed_bf16(
 bool loom_amdgpu_f16_descriptor_set_can_emit_f32_to_f16_lane(
     const loom_low_descriptor_set_t* descriptor_set);
 
-// Returns true when |descriptor_set| can convert and pack two f32 lanes into
-// one packed F16 register with round-to-nearest-even semantics.
-bool loom_amdgpu_f16_descriptor_set_can_emit_f32_pair_to_packed_f16(
-    const loom_low_descriptor_set_t* descriptor_set);
-
 // Emits round-to-nearest-even conversion from one f32 lane to one BF16 lane.
 // The result is held in the low 16 bits of a one-unit VGPR.
 iree_status_t loom_amdgpu_emit_f32_to_bf16_lane(

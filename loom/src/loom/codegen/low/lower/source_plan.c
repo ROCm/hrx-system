@@ -565,7 +565,7 @@ static void loom_low_lower_analyze_storage_demands(
   }
 }
 
-static void loom_low_lower_count_region_plan_ops(
+static void loom_low_lower_visit_region_plan_ops(
     loom_low_lower_context_t* context, loom_region_t* source_region,
     const loom_low_lower_source_plan_observer_t* observer, void* observer_state,
     iree_host_size_t* inout_plan_capacity) {
@@ -580,17 +580,14 @@ static void loom_low_lower_count_region_plan_ops(
       if (is_structural) {
         loom_low_lower_mark_structural_storage_demands(context, op, traits);
       }
-      if (observer != NULL &&
-          (observer->minimum_op_kind == LOOM_OP_KIND_UNKNOWN ||
-           (op->kind >= observer->minimum_op_kind &&
-            op->kind <= observer->maximum_op_kind))) {
+      if (observer != NULL) {
         observer->observe(observer_state, context, op);
       }
       if (loom_low_lower_supported_structured_source_op(context, op)) {
         loom_region_t* const* regions = loom_op_regions(op);
         for (uint8_t i = 0; i < op->region_count; ++i) {
           if (regions[i] != NULL) {
-            loom_low_lower_count_region_plan_ops(context, regions[i], observer,
+            loom_low_lower_visit_region_plan_ops(context, regions[i], observer,
                                                  observer_state,
                                                  inout_plan_capacity);
           }
@@ -611,18 +608,11 @@ static iree_status_t loom_low_lower_prepare_plan(
       context->policy->source_plan_observer;
   void* observer_state = NULL;
   if (observer != NULL) {
-    if ((observer->minimum_op_kind == LOOM_OP_KIND_UNKNOWN) !=
-            (observer->maximum_op_kind == LOOM_OP_KIND_UNKNOWN) ||
-        (observer->minimum_op_kind != LOOM_OP_KIND_UNKNOWN &&
-         observer->minimum_op_kind > observer->maximum_op_kind)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "invalid source plan observer operation range");
-    }
     IREE_RETURN_IF_ERROR(
         observer->begin(observer->user_data, context, &observer_state));
   }
   iree_host_size_t plan_capacity = 0;
-  loom_low_lower_count_region_plan_ops(context, source_body, observer,
+  loom_low_lower_visit_region_plan_ops(context, source_body, observer,
                                        observer_state, &plan_capacity);
   if (observer != NULL) {
     IREE_RETURN_IF_ERROR(observer->end(observer_state, context));

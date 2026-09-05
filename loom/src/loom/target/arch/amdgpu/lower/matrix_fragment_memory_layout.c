@@ -64,6 +64,8 @@ static bool loom_amdgpu_fragment_memory_append_lane_term(
           .byte_stride = byte_stride,
       };
   ++address_layout->lane_term_count;
+  address_layout->lane_address_cost +=
+      (uint8_t)(2u + (divisor > 1 ? 1u : 0u) + (modulus > 1 ? 1u : 0u));
   return true;
 }
 
@@ -229,6 +231,7 @@ bool loom_amdgpu_fragment_memory_compile_address_layout(
       runtime_axis->lane_divisor = term->source_divisor;
       runtime_axis->lane_modulus = term->source_modulus;
       runtime_axis->lane_coordinate_scale = term->destination_multiplier;
+      out_address_layout->lane_address_cost += 2;
       continue;
     }
     uint32_t lane_byte_stride = 0;
@@ -248,6 +251,9 @@ bool loom_amdgpu_fragment_memory_compile_address_layout(
           out_address_layout, out_runtime_axes, view_rank);
   out_address_layout->linear_lane_byte_stride =
       loom_amdgpu_fragment_memory_linear_lane_byte_stride(out_address_layout);
+  if (out_address_layout->linear_lane_byte_stride != 0) {
+    out_address_layout->lane_address_cost = 1;
+  }
 
   for (uint16_t register_index = 0;
        register_index < role_layout->register_count; ++register_index) {

@@ -191,16 +191,10 @@ typedef iree_status_t (*loom_low_lower_source_plan_observer_end_fn_t)(
 
 // Observes the compiler-owned source-plan traversal without owning recursion.
 // All callbacks are required. |begin| returns function-local state passed
-// directly to every selected |observe| call and the final |end|. Per-op
+// directly to every |observe| call and the final |end|. Per-op
 // observation is infallible: implementations retain any terminal error in
 // their state and return it from |end|.
 typedef struct loom_low_lower_source_plan_observer_t {
-  // Lowest operation kind that may require observation. UNKNOWN together with
-  // an UNKNOWN maximum observes every operation.
-  loom_op_kind_t minimum_op_kind;
-  // Highest operation kind that may require observation. UNKNOWN together with
-  // an UNKNOWN minimum observes every operation.
-  loom_op_kind_t maximum_op_kind;
   // Begins observation after the source value domain is available.
   loom_low_lower_source_plan_observer_begin_fn_t begin;
   // Observes one source operation in compiler-owned traversal order.

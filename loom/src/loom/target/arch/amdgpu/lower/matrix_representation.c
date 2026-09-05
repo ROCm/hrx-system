@@ -20,16 +20,14 @@
 
 typedef enum loom_amdgpu_matrix_representation_action_e {
   LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_FUNCTION_BOUNDARY = 0,
-  LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_CALL_BOUNDARY = 1,
-  LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_RETURN_BOUNDARY = 2,
-  LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_STORE = 3,
-  LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_MMA = 4,
-  LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_FRAGMENT = 5,
-  LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_REPACK = 6,
-  LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_LOAD = 7,
+  LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_PIN_VALUE = 1,
+  LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_STORE = 2,
+  LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_MMA = 3,
+  LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_FRAGMENT = 4,
 } loom_amdgpu_matrix_representation_action_t;
 
-static bool loom_amdgpu_matrix_representation_accumulator_fact(
+IREE_ATTRIBUTE_NOINLINE static bool
+loom_amdgpu_matrix_representation_accumulator_fact(
     loom_low_lower_context_t* context, loom_value_id_t value_id,
     loom_vector_fragment_fact_t* out_fragment) {
   loom_vector_fragment_fact_initialize(out_fragment);
@@ -43,28 +41,59 @@ static bool loom_amdgpu_matrix_representation_accumulator_fact(
          loom_vector_fragment_fact_is_accumulator_like(*out_fragment);
 }
 
+static bool loom_amdgpu_matrix_representation_matches_fragment(
+    const loom_value_fact_table_t* fact_table, loom_type_t payload_type,
+    loom_vector_fragment_fact_t fragment,
+    loom_amdgpu_matrix_result_representation_id_t representation_id) {
+  const loom_amdgpu_matrix_result_representation_t* representation =
+      loom_amdgpu_matrix_result_representation_at(representation_id);
+  if (representation == NULL || fact_table == NULL) return false;
+  const loom_amdgpu_matrix_fragment_layout_t* layout =
+      loom_amdgpu_matrix_fragment_layout_for_kind(
+          (loom_amdgpu_matrix_fragment_layout_kind_t)
+              representation->fragment_layout_kind);
+  if (layout == NULL) return false;
+  const loom_matrix_fragment_role_layout_t* role_layout =
+      loom_matrix_fragment_role_layout(layout,
+                                       LOOM_CONTRACT_OPERAND_ROLE_RESULT);
+  loom_scalar_type_t element_type = LOOM_SCALAR_TYPE_NONE;
+  if (role_layout == NULL ||
+      !loom_amdgpu_matrix_fragment_scalar_type_from_numeric(
+          (loom_amdgpu_matrix_numeric_type_t)representation->numeric_type,
+          &element_type) ||
+      !loom_amdgpu_matrix_fragment_payload_matches_role_storage(
+          payload_type, element_type, role_layout)) {
+    return false;
+  }
+  return loom_amdgpu_matrix_fragment_tile_shape_matches(
+      fact_table,
+      loom_amdgpu_matrix_fragment_source_tile_shape(
+          layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, representation->flags),
+      LOOM_CONTRACT_OPERAND_ROLE_RESULT,
+      loom_vector_fragment_fact_block_value(fragment),
+      loom_vector_fragment_fact_row_value(fragment),
+      loom_vector_fragment_fact_column_value(fragment));
+}
+
 static void loom_amdgpu_matrix_representation_record_available(
     loom_low_lower_context_t* context, loom_value_id_t value_id,
-    uint64_t available_bits,
+    loom_vector_fragment_fact_t fragment, uint64_t available_bits,
     loom_low_lower_representation_recorder_t* recorder) {
-  loom_vector_fragment_fact_t fragment;
-  if (!loom_amdgpu_matrix_representation_accumulator_fact(context, value_id,
-                                                          &fragment)) {
-    return;
-  }
   loom_low_representation_candidate_t
       candidates[LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_MAX_ID];
   iree_host_size_t candidate_count = 0;
+  const loom_value_fact_table_t* fact_table =
+      loom_low_lower_context_fact_table(context);
+  const loom_type_t payload_type =
+      loom_module_value_type(loom_low_lower_context_module(context), value_id);
   available_bits &= ~UINT64_C(1);
   while (available_bits != 0) {
     const loom_amdgpu_matrix_result_representation_id_t representation_id =
         (loom_amdgpu_matrix_result_representation_id_t)
             iree_math_count_trailing_zeros_u64(available_bits);
     available_bits &= available_bits - 1u;
-    if (!loom_amdgpu_matrix_result_representation_matches_value(
-            loom_low_lower_context_module(context),
-            loom_low_lower_context_fact_table(context), value_id,
-            representation_id)) {
+    if (!loom_amdgpu_matrix_representation_matches_fragment(
+            fact_table, payload_type, fragment, representation_id)) {
       continue;
     }
     candidates[candidate_count++] = (loom_low_representation_candidate_t){
@@ -77,8 +106,9 @@ static void loom_amdgpu_matrix_representation_record_available(
   }
 }
 
-static void loom_amdgpu_matrix_representation_pin_value(
+static void loom_amdgpu_matrix_representation_constrain_canonical(
     loom_low_lower_context_t* context, loom_value_id_t value_id,
+    loom_vector_fragment_fact_t fragment,
     loom_low_lower_representation_recorder_t* recorder) {
   const loom_amdgpu_matrix_fragment_contract_candidates_t* contracts = NULL;
   iree_status_t status =
@@ -89,12 +119,24 @@ static void loom_amdgpu_matrix_representation_pin_value(
   }
   if (contracts != NULL) {
     loom_amdgpu_matrix_representation_record_available(
-        context, value_id, contracts->canonical_result_representation_bits,
-        recorder);
+        context, value_id, fragment,
+        contracts->canonical_result_representation_bits, recorder);
   }
 }
 
-static void loom_amdgpu_matrix_representation_pin_values(
+static void loom_amdgpu_matrix_representation_pin_value(
+    loom_low_lower_context_t* context, loom_value_id_t value_id,
+    loom_low_lower_representation_recorder_t* recorder) {
+  loom_vector_fragment_fact_t fragment;
+  if (loom_amdgpu_matrix_representation_accumulator_fact(context, value_id,
+                                                         &fragment)) {
+    loom_amdgpu_matrix_representation_constrain_canonical(context, value_id,
+                                                          fragment, recorder);
+  }
+}
+
+IREE_ATTRIBUTE_NOINLINE static void
+loom_amdgpu_matrix_representation_pin_values(
     loom_low_lower_context_t* context, const loom_value_id_t* value_ids,
     iree_host_size_t value_count,
     loom_low_lower_representation_recorder_t* recorder) {
@@ -166,9 +208,9 @@ static void loom_amdgpu_matrix_representation_observe_mma(
     return;
   }
   const loom_amdgpu_matrix_contract_realization_choices_t* choices =
-      loom_amdgpu_matrix_contract_realization_choices_at(descriptor_ordinal);
-  if (choices == NULL || choices->canonical_result_representation_id ==
-                             LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE) {
+      &descriptor->realization;
+  if (choices->canonical_result_representation_id ==
+      LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE) {
     return;
   }
 
@@ -198,10 +240,11 @@ static void loom_amdgpu_matrix_representation_observe_mma(
                                                   candidate_count);
   loom_low_lower_representation_record_union(
       recorder, loom_vector_mma_init(source_op), result);
-  loom_low_lower_representation_record_failure(
-      recorder, loom_amdgpu_matrix_fragment_record_contract_ordinal(
-                    context, result, descriptor_ordinal));
-  (void)descriptor;
+  status = loom_amdgpu_matrix_fragment_record_contract_ordinal(
+      context, result, descriptor_ordinal);
+  if (!iree_status_is_ok(status)) {
+    loom_low_lower_representation_record_failure(recorder, status);
+  }
 }
 
 static void loom_amdgpu_matrix_representation_observe_fragment(
@@ -249,13 +292,17 @@ static void loom_amdgpu_matrix_representation_observe_store(
                                                           &fragment)) {
     return;
   }
+  if (loom_vector_fragment_store_role(source_op) != LOOM_VECTOR_ROLE_RESULT) {
+    loom_amdgpu_matrix_representation_constrain_canonical(context, payload,
+                                                          fragment, recorder);
+    return;
+  }
   loom_low_representation_candidate_t
       candidates[LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_MAX_ID];
   iree_host_size_t candidate_count = 0;
   iree_status_t status =
-      loom_amdgpu_query_vector_fragment_store_representations(
-          context, source_op, candidates, IREE_ARRAYSIZE(candidates),
-          &candidate_count);
+      loom_amdgpu_query_accumulator_fragment_store_representations(
+          context, source_op, candidates, &candidate_count);
   if (!iree_status_is_ok(status)) {
     loom_low_lower_representation_record_failure(recorder, status);
     return;
@@ -264,13 +311,15 @@ static void loom_amdgpu_matrix_representation_observe_store(
     loom_low_lower_representation_record_candidates(
         recorder, payload, candidates, candidate_count);
   } else {
-    loom_amdgpu_matrix_representation_pin_value(context, payload, recorder);
+    loom_amdgpu_matrix_representation_constrain_canonical(context, payload,
+                                                          fragment, recorder);
   }
 }
 
 static void loom_amdgpu_matrix_representation_observe_boundary(
-    void* user_data, uint16_t action, loom_low_lower_context_t* context,
-    const loom_op_t* source_op,
+    void* user_data, uint8_t action,
+    loom_low_lower_representation_boundary_flags_t flags,
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_representation_recorder_t* recorder) {
   (void)user_data;
   switch ((loom_amdgpu_matrix_representation_action_t)action) {
@@ -284,18 +333,19 @@ static void loom_amdgpu_matrix_representation_observe_boundary(
                                                    argument_count, recorder);
       return;
     }
-    case LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_CALL_BOUNDARY:
-      loom_amdgpu_matrix_representation_pin_values(
-          context, loom_op_operands(source_op), source_op->operand_count,
-          recorder);
-      loom_amdgpu_matrix_representation_pin_values(
-          context, loom_op_results(source_op), source_op->result_count,
-          recorder);
-      return;
-    case LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_RETURN_BOUNDARY:
-      loom_amdgpu_matrix_representation_pin_values(
-          context, loom_op_operands(source_op), source_op->operand_count,
-          recorder);
+    case LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_PIN_VALUE:
+      if (iree_any_bit_set(
+              flags, LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_OPERANDS)) {
+        loom_amdgpu_matrix_representation_pin_values(
+            context, loom_op_operands(source_op), source_op->operand_count,
+            recorder);
+      }
+      if (iree_any_bit_set(
+              flags, LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS)) {
+        loom_amdgpu_matrix_representation_pin_values(
+            context, loom_op_results(source_op), source_op->result_count,
+            recorder);
+      }
       return;
     case LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_STORE:
       loom_amdgpu_matrix_representation_observe_store(context, source_op,
@@ -309,16 +359,6 @@ static void loom_amdgpu_matrix_representation_observe_boundary(
       loom_amdgpu_matrix_representation_observe_fragment(context, source_op,
                                                          recorder);
       return;
-    case LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_REPACK:
-      loom_amdgpu_matrix_representation_pin_value(
-          context, loom_vector_fragment_repack_source(source_op), recorder);
-      loom_amdgpu_matrix_representation_pin_value(
-          context, loom_vector_fragment_repack_result(source_op), recorder);
-      return;
-    case LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_LOAD:
-      loom_amdgpu_matrix_representation_pin_value(
-          context, loom_vector_fragment_load_result(source_op), recorder);
-      return;
   }
   IREE_ASSERT_UNREACHABLE("unknown AMDGPU matrix representation action");
 }
@@ -326,32 +366,49 @@ static void loom_amdgpu_matrix_representation_observe_boundary(
 static const loom_low_lower_representation_boundary_t
     kAmdgpuMatrixRepresentationBoundaries[] = {
         {LOOM_OP_FUNC_DEF,
-         LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_FUNCTION_BOUNDARY},
-        {LOOM_OP_FUNC_CALL,
-         LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_CALL_BOUNDARY},
+         LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_FUNCTION_BOUNDARY,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_NONE},
+        {LOOM_OP_FUNC_CALL, LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_PIN_VALUE,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_OPERANDS |
+             LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
         {LOOM_OP_FUNC_RETURN,
-         LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_RETURN_BOUNDARY},
+         LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_PIN_VALUE,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_OPERANDS},
         {LOOM_OP_VECTOR_FRAGMENT_LOAD,
-         LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_LOAD},
+         LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_PIN_VALUE,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
         {LOOM_OP_VECTOR_FRAGMENT_STORE,
-         LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_STORE},
-        {LOOM_OP_VECTOR_MMA, LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_MMA},
+         LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_STORE,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_NONE},
+        {LOOM_OP_VECTOR_MMA, LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_MMA,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_NONE},
         {LOOM_OP_VECTOR_FRAGMENT,
-         LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_FRAGMENT},
+         LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_FRAGMENT,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_NONE},
         {LOOM_OP_VECTOR_FRAGMENT_REPACK,
-         LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_REPACK},
+         LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_PIN_VALUE,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_OPERANDS |
+             LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
         {LOOM_OP_KERNEL_DEF,
-         LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_FUNCTION_BOUNDARY},
+         LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_FUNCTION_BOUNDARY,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_NONE},
 };
-static_assert(LOOM_OP_FUNC_DEF < LOOM_OP_FUNC_CALL &&
-                  LOOM_OP_FUNC_CALL < LOOM_OP_FUNC_RETURN &&
-                  LOOM_OP_FUNC_RETURN < LOOM_OP_VECTOR_FRAGMENT_LOAD &&
-                  LOOM_OP_VECTOR_FRAGMENT_LOAD <
-                      LOOM_OP_VECTOR_FRAGMENT_STORE &&
-                  LOOM_OP_VECTOR_FRAGMENT_STORE < LOOM_OP_VECTOR_MMA &&
-                  LOOM_OP_VECTOR_MMA < LOOM_OP_VECTOR_FRAGMENT &&
-                  LOOM_OP_VECTOR_FRAGMENT < LOOM_OP_VECTOR_FRAGMENT_REPACK &&
-                  LOOM_OP_VECTOR_FRAGMENT_REPACK < LOOM_OP_KERNEL_DEF,
+static_assert((loom_op_kind_t)LOOM_OP_FUNC_DEF <
+                      (loom_op_kind_t)LOOM_OP_FUNC_CALL &&
+                  (loom_op_kind_t)LOOM_OP_FUNC_CALL <
+                      (loom_op_kind_t)LOOM_OP_FUNC_RETURN &&
+                  (loom_op_kind_t)LOOM_OP_FUNC_RETURN <
+                      (loom_op_kind_t)LOOM_OP_VECTOR_FRAGMENT_LOAD &&
+                  (loom_op_kind_t)LOOM_OP_VECTOR_FRAGMENT_LOAD <
+                      (loom_op_kind_t)LOOM_OP_VECTOR_FRAGMENT_STORE &&
+                  (loom_op_kind_t)LOOM_OP_VECTOR_FRAGMENT_STORE <
+                      (loom_op_kind_t)LOOM_OP_VECTOR_MMA &&
+                  (loom_op_kind_t)LOOM_OP_VECTOR_MMA <
+                      (loom_op_kind_t)LOOM_OP_VECTOR_FRAGMENT &&
+                  (loom_op_kind_t)LOOM_OP_VECTOR_FRAGMENT <
+                      (loom_op_kind_t)LOOM_OP_VECTOR_FRAGMENT_REPACK &&
+                  (loom_op_kind_t)LOOM_OP_VECTOR_FRAGMENT_REPACK <
+                      (loom_op_kind_t)LOOM_OP_KERNEL_DEF,
               "matrix representation boundaries must remain ordered");
 
 static const loom_low_lower_representation_provider_t
@@ -365,8 +422,6 @@ static const loom_low_lower_representation_provider_t
 
 const loom_low_lower_source_plan_observer_t
     loom_amdgpu_matrix_representation_observer = {
-        .minimum_op_kind = LOOM_OP_KIND_UNKNOWN,
-        .maximum_op_kind = LOOM_OP_KIND_UNKNOWN,
         .begin = loom_low_lower_representation_observer_begin,
         .observe = loom_low_lower_representation_observer_observe,
         .end = loom_low_lower_representation_observer_end,

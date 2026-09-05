@@ -37,6 +37,7 @@ loom_cc_library(
     "value_relation.c"
   DEPS
     iree::base
+    iree::base::internal
     loom::ir
     loom::ops::op_defs
     loom::util::cfg_graph

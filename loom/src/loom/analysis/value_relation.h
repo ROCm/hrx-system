@@ -97,10 +97,8 @@ typedef struct loom_value_relation_iterator_t {
   const loom_op_t* op;
   // Generated descriptor for |op|, or NULL for an unregistered operation.
   const loom_op_vtable_t* vtable;
-  // Relation kinds requested by the consumer.
-  loom_value_relation_mask_t relation_mask;
-  // Internal relation-family cursor.
-  uint8_t phase;
+  // Remaining structurally possible relation-family phases.
+  uint16_t phase_bits;
   // Primary ordinal within the active relation family.
   uint16_t outer_index;
   // Secondary ordinal within the active relation family.

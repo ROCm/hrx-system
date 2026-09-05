@@ -17,19 +17,13 @@ typedef struct loom_low_lower_representation_observer_state_t {
   const loom_local_value_domain_t* value_domain;
   // Sparse equality and exact-candidate selection state.
   loom_low_representation_plan_t plan;
-  // First or joined infallible-observation failure.
+  // First or joined boundary-observation failure.
   iree_status_t terminal_status;
-  // True after observer begin initializes this state.
-  bool initialized;
-  // True after observer end attempts exact selection.
-  bool solved;
 } loom_low_lower_representation_observer_state_t;
 
 struct loom_low_lower_representation_recorder_t {
   // Active function-local representation state.
   loom_low_lower_representation_observer_state_t* state;
-  // Active source operation owning recorded boundary constraints.
-  const loom_op_t* source_op;
 };
 
 static const uint8_t kLoomLowLowerRepresentationStateKey;
@@ -41,26 +35,24 @@ static iree_status_t loom_low_lower_representation_take_status(
   return status;
 }
 
-void loom_low_lower_representation_record_failure(
+IREE_ATTRIBUTE_NOINLINE void loom_low_lower_representation_record_failure(
     loom_low_lower_representation_recorder_t* recorder, iree_status_t status) {
   IREE_ASSERT_ARGUMENT(recorder);
   recorder->state->terminal_status =
       iree_status_join(recorder->state->terminal_status, status);
 }
 
-static bool loom_low_lower_representation_try_ordinal(
+IREE_ATTRIBUTE_NOINLINE static loom_value_ordinal_t
+loom_low_lower_representation_ordinal(
     loom_low_lower_representation_recorder_t* recorder,
-    loom_value_id_t source_value_id, loom_value_ordinal_t* out_ordinal) {
-  *out_ordinal = loom_local_value_domain_try_ordinal(
-      recorder->state->value_domain, source_value_id);
-  if (*out_ordinal != LOOM_VALUE_ORDINAL_INVALID) return true;
-  loom_low_lower_representation_record_failure(
-      recorder,
-      iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                       "representation relation refers to source value %u "
-                       "outside the active function domain",
-                       (unsigned)source_value_id));
-  return false;
+    loom_value_id_t source_value_id) {
+  const loom_value_ordinal_t value_ordinal =
+      loom_local_value_domain_try_ordinal(recorder->state->value_domain,
+                                          source_value_id);
+  IREE_ASSERT_NE(value_ordinal, LOOM_VALUE_ORDINAL_INVALID,
+                 "representation relation values must belong to the active "
+                 "function domain");
+  return value_ordinal;
 }
 
 void loom_low_lower_representation_record_union(
@@ -68,17 +60,15 @@ void loom_low_lower_representation_record_union(
     loom_value_id_t left_value_id, loom_value_id_t right_value_id) {
   IREE_ASSERT_ARGUMENT(recorder);
   if (!iree_status_is_ok(recorder->state->terminal_status)) return;
-  loom_value_ordinal_t left_ordinal = LOOM_VALUE_ORDINAL_INVALID;
-  loom_value_ordinal_t right_ordinal = LOOM_VALUE_ORDINAL_INVALID;
-  if (!loom_low_lower_representation_try_ordinal(recorder, left_value_id,
-                                                 &left_ordinal) ||
-      !loom_low_lower_representation_try_ordinal(recorder, right_value_id,
-                                                 &right_ordinal)) {
-    return;
+  const loom_value_ordinal_t left_ordinal =
+      loom_low_lower_representation_ordinal(recorder, left_value_id);
+  const loom_value_ordinal_t right_ordinal =
+      loom_low_lower_representation_ordinal(recorder, right_value_id);
+  iree_status_t status = loom_low_representation_plan_union(
+      &recorder->state->plan, left_ordinal, right_ordinal);
+  if (!iree_status_is_ok(status)) {
+    loom_low_lower_representation_record_failure(recorder, status);
   }
-  loom_low_lower_representation_record_failure(
-      recorder, loom_low_representation_plan_union(
-                    &recorder->state->plan, left_ordinal, right_ordinal));
 }
 
 void loom_low_lower_representation_record_candidates(
@@ -88,22 +78,15 @@ void loom_low_lower_representation_record_candidates(
     iree_host_size_t candidate_count) {
   IREE_ASSERT_ARGUMENT(recorder);
   if (!iree_status_is_ok(recorder->state->terminal_status)) return;
-  if (candidates == NULL || candidate_count == 0) {
-    loom_low_lower_representation_record_failure(
-        recorder,
-        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                         "representation boundary supplied an empty domain"));
-    return;
+  IREE_ASSERT_ARGUMENT(candidates);
+  IREE_ASSERT_GT(candidate_count, 0u);
+  const loom_value_ordinal_t value_ordinal =
+      loom_low_lower_representation_ordinal(recorder, source_value_id);
+  iree_status_t status = loom_low_representation_plan_constrain(
+      &recorder->state->plan, value_ordinal, candidates, candidate_count);
+  if (!iree_status_is_ok(status)) {
+    loom_low_lower_representation_record_failure(recorder, status);
   }
-  loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
-  if (!loom_low_lower_representation_try_ordinal(recorder, source_value_id,
-                                                 &value_ordinal)) {
-    return;
-  }
-  loom_low_lower_representation_record_failure(
-      recorder, loom_low_representation_plan_constrain(
-                    &recorder->state->plan, value_ordinal, recorder->source_op,
-                    candidates, candidate_count));
 }
 
 bool loom_low_lower_representation_component_is_constrained(
@@ -111,18 +94,16 @@ bool loom_low_lower_representation_component_is_constrained(
     loom_value_id_t source_value_id) {
   IREE_ASSERT_ARGUMENT(recorder);
   if (!iree_status_is_ok(recorder->state->terminal_status)) return false;
-  loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
-  if (!loom_low_lower_representation_try_ordinal(recorder, source_value_id,
-                                                 &value_ordinal)) {
-    return false;
-  }
+  const loom_value_ordinal_t value_ordinal =
+      loom_low_lower_representation_ordinal(recorder, source_value_id);
   return loom_low_representation_plan_component_is_constrained(
       &recorder->state->plan, value_ordinal);
 }
 
 static void loom_low_lower_representation_try_relation(
     loom_low_lower_representation_recorder_t* recorder,
-    loom_low_lower_context_t* context, const loom_value_relation_t* relation) {
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_value_relation_t* relation) {
   if (relation->source_value_id == LOOM_VALUE_ID_INVALID ||
       relation->destination_value_id == LOOM_VALUE_ID_INVALID ||
       !iree_status_is_ok(recorder->state->terminal_status)) {
@@ -130,8 +111,7 @@ static void loom_low_lower_representation_try_relation(
   }
   const loom_low_lower_representation_provider_t* provider =
       recorder->state->provider;
-  if (provider->relation(provider->user_data, context, recorder->source_op,
-                         relation)) {
+  if (provider->relation(provider->user_data, context, source_op, relation)) {
     loom_low_lower_representation_record_union(
         recorder, relation->source_value_id, relation->destination_value_id);
   }
@@ -171,34 +151,29 @@ iree_status_t loom_low_lower_representation_observer_begin(
   *out_observer_state = NULL;
   const loom_low_lower_representation_provider_t* provider =
       (const loom_low_lower_representation_provider_t*)user_data;
-  if (provider == NULL ||
-      (provider->relation_mask != 0) != (provider->relation != NULL) ||
-      (provider->relation_mask & ~LOOM_VALUE_RELATION_MASK_ALL) != 0 ||
-      (provider->boundary_count != 0 &&
-       (provider->boundaries == NULL || provider->observe_boundary == NULL))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "invalid source representation provider");
-  }
+  IREE_ASSERT(
+      provider != NULL &&
+          (provider->relation_mask != 0) == (provider->relation != NULL) &&
+          (provider->relation_mask & ~LOOM_VALUE_RELATION_MASK_ALL) == 0 &&
+          (provider->boundary_count == 0 ||
+           (provider->boundaries != NULL &&
+            provider->observe_boundary != NULL)),
+      "source representation provider must be internally valid");
   loom_low_lower_representation_observer_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_get_or_allocate_target_state(
       context, &kLoomLowLowerRepresentationStateKey, sizeof(*state),
       (void**)&state));
-  if (state->initialized) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "source representation observer began twice");
-  }
+  IREE_ASSERT(state->provider == NULL,
+              "source representation observer must begin exactly once");
   const loom_local_value_domain_t* value_domain =
       loom_low_lower_context_value_domain(context);
-  if (value_domain == NULL ||
-      !loom_local_value_domain_is_acquired(value_domain)) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "source value domain is not available");
-  }
+  IREE_ASSERT(
+      value_domain != NULL && loom_local_value_domain_is_acquired(value_domain),
+      "source representation observation requires the value domain");
   *state = (loom_low_lower_representation_observer_state_t){
       .provider = provider,
       .value_domain = value_domain,
       .terminal_status = iree_ok_status(),
-      .initialized = true,
   };
   loom_low_representation_plan_initialize(
       value_domain->value_count, loom_low_lower_context_function_arena(context),
@@ -219,11 +194,10 @@ void loom_low_lower_representation_observer_observe(
   loom_low_lower_representation_observer_state_t* state =
       (loom_low_lower_representation_observer_state_t*)observer_state;
   IREE_ASSERT_ARGUMENT(state);
-  IREE_ASSERT(state->initialized);
-  IREE_ASSERT(!state->solved);
+  IREE_ASSERT(state->provider != NULL);
+  IREE_ASSERT(!state->plan.solved);
   loom_low_lower_representation_recorder_t recorder = {
       .state = state,
-      .source_op = source_op,
   };
   if (!iree_status_is_ok(state->terminal_status)) return;
 
@@ -234,7 +208,8 @@ void loom_low_lower_representation_observer_observe(
         state->provider->relation_mask, &relation_iterator);
     loom_value_relation_t relation;
     while (loom_value_relation_iterator_next(&relation_iterator, &relation)) {
-      loom_low_lower_representation_try_relation(&recorder, context, &relation);
+      loom_low_lower_representation_try_relation(&recorder, context, source_op,
+                                                 &relation);
     }
   }
   if (!iree_status_is_ok(state->terminal_status)) return;
@@ -243,19 +218,22 @@ void loom_low_lower_representation_observer_observe(
       loom_low_lower_representation_find_boundary(state->provider,
                                                   source_op->kind);
   if (boundary != NULL) {
+    IREE_ASSERT((boundary->flags &
+                 ~LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_ALL) == 0);
     state->provider->observe_boundary(state->provider->user_data,
-                                      boundary->action, context, source_op,
-                                      &recorder);
+                                      boundary->action, boundary->flags,
+                                      context, source_op, &recorder);
   }
 }
 
 iree_status_t loom_low_lower_representation_observer_end(
     void* observer_state, loom_low_lower_context_t* context) {
+  (void)context;
   loom_low_lower_representation_observer_state_t* state =
       (loom_low_lower_representation_observer_state_t*)observer_state;
   IREE_ASSERT_ARGUMENT(state);
-  IREE_ASSERT(state->initialized);
-  IREE_ASSERT(!state->solved);
+  IREE_ASSERT(state->provider != NULL);
+  IREE_ASSERT(!state->plan.solved);
   if (!iree_status_is_ok(state->terminal_status)) {
     return loom_low_lower_representation_take_status(state);
   }
@@ -263,51 +241,27 @@ iree_status_t loom_low_lower_representation_observer_end(
   loom_low_representation_conflict_t plan_conflict;
   const bool exact =
       loom_low_representation_plan_solve(&state->plan, &plan_conflict);
-  state->solved = true;
   if (exact) return iree_ok_status();
 
-  const loom_low_lower_representation_conflict_t conflict = {
-      .source_value_id =
-          state->value_domain->value_ids[plan_conflict.value_ordinal],
-      .first_source_op = (const loom_op_t*)plan_conflict.first_owner,
-      .incompatible_source_op =
-          (const loom_op_t*)plan_conflict.incompatible_owner,
-  };
-  if (state->provider->report_conflict == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "source value %u has incompatible physical representation domains",
-        (unsigned)conflict.source_value_id);
-  }
-  iree_status_t status = state->provider->report_conflict(
-      state->provider->user_data, context, &conflict);
-  if (iree_status_is_ok(status)) {
-    status = iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "representation conflict reporter returned without a failure");
-  }
-  return status;
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "source value %u has incompatible physical representation domains",
+      (unsigned)state->value_domain->value_ids[plan_conflict.value_ordinal]);
 }
 
-static iree_status_t loom_low_lower_representation_state_lookup(
+IREE_ATTRIBUTE_NOINLINE static void loom_low_lower_representation_state_lookup(
     loom_low_lower_representation_observer_state_t* state,
     loom_value_id_t source_value_id,
     loom_low_representation_id_t* out_representation) {
-  if (!state->initialized || !state->solved) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "source representation plan is not available");
-  }
+  IREE_ASSERT(state->provider != NULL && state->plan.solved,
+              "source representation lookup requires a solved plan");
   const loom_value_ordinal_t value_ordinal =
       loom_local_value_domain_try_ordinal(state->value_domain, source_value_id);
-  if (value_ordinal == LOOM_VALUE_ORDINAL_INVALID) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "source value %u is outside the active function domain",
-        (unsigned)source_value_id);
-  }
+  IREE_ASSERT_NE(value_ordinal, LOOM_VALUE_ORDINAL_INVALID,
+                 "representation query values must belong to the active "
+                 "function domain");
   loom_low_representation_plan_lookup(&state->plan, value_ordinal,
                                       out_representation);
-  return iree_ok_status();
 }
 
 iree_status_t loom_low_lower_representation_lookup(
@@ -319,26 +273,24 @@ iree_status_t loom_low_lower_representation_lookup(
   IREE_RETURN_IF_ERROR(loom_low_lower_get_or_allocate_target_state(
       context, &kLoomLowLowerRepresentationStateKey, sizeof(*state),
       (void**)&state));
-  return loom_low_lower_representation_state_lookup(state, source_value_id,
-                                                    out_representation);
+  loom_low_lower_representation_state_lookup(state, source_value_id,
+                                             out_representation);
+  return iree_ok_status();
 }
 
 iree_status_t loom_low_lower_representation_query_lookup(
     const loom_target_contract_query_environment_t* environment,
     loom_value_id_t source_value_id,
-    loom_low_representation_id_t* out_representation,
-    bool* out_plan_available) {
+    loom_low_representation_id_t* out_representation) {
   IREE_ASSERT_ARGUMENT(environment);
   IREE_ASSERT_ARGUMENT(out_representation);
-  IREE_ASSERT_ARGUMENT(out_plan_available);
   *out_representation = LOOM_LOW_REPRESENTATION_ID_NONE;
-  *out_plan_available = false;
   loom_low_lower_representation_observer_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_target_contract_query_get_or_allocate_target_state(
       environment, &kLoomLowLowerRepresentationStateKey, sizeof(*state),
       (void**)&state));
-  if (state == NULL || !state->initialized) return iree_ok_status();
-  *out_plan_available = true;
-  return loom_low_lower_representation_state_lookup(state, source_value_id,
-                                                    out_representation);
+  if (state == NULL || state->provider == NULL) return iree_ok_status();
+  loom_low_lower_representation_state_lookup(state, source_value_id,
+                                             out_representation);
+  return iree_ok_status();
 }

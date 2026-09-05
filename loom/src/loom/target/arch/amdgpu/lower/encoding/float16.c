@@ -187,16 +187,6 @@ bool loom_amdgpu_f16_descriptor_set_can_emit_f32_to_f16_lane(
       descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F16_F32);
 }
 
-bool loom_amdgpu_f16_descriptor_set_can_emit_f32_pair_to_packed_f16(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  return loom_amdgpu_f16_descriptor_set_can_emit_f32_to_f16_lane(
-             descriptor_set) &&
-         (loom_amdgpu_descriptor_set_has_ref(
-              descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_PACK_B32_F16) ||
-          loom_amdgpu_descriptor_set_can_emit_packed_u16_lane_pair(
-              descriptor_set));
-}
-
 iree_status_t loom_amdgpu_emit_f32_to_bf16_lane(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_lane, loom_type_t lane_type,

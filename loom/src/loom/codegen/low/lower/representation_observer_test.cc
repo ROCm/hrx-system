@@ -32,7 +32,7 @@ enum TestRepresentation : loom_low_representation_id_t {
   kRepresentationConflict = 2,
 };
 
-enum TestBoundaryAction : uint16_t {
+enum TestBoundaryAction : uint8_t {
   kBoundaryScalarConstant = 0,
   kBoundaryScalarAssume = 1,
   kBoundaryFunction = 2,
@@ -43,13 +43,20 @@ enum TestBoundaryAction : uint16_t {
 };
 
 static constexpr loom_low_lower_representation_boundary_t kBoundaries[] = {
-    {LOOM_OP_SCALAR_CONSTANT, kBoundaryScalarConstant},
-    {LOOM_OP_SCALAR_ASSUME, kBoundaryScalarAssume},
-    {LOOM_OP_FUNC_DEF, kBoundaryFunction},
-    {LOOM_OP_VECTOR_EXTRACT, kBoundaryVectorExtract},
-    {LOOM_OP_VECTOR_ADDI, kBoundaryVectorAdd},
-    {LOOM_OP_VECTOR_SUBI, kBoundaryVectorSubtract},
-    {LOOM_OP_VECTOR_MULI, kBoundaryVectorMultiply},
+    {LOOM_OP_SCALAR_CONSTANT, kBoundaryScalarConstant,
+     LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
+    {LOOM_OP_SCALAR_ASSUME, kBoundaryScalarAssume,
+     LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
+    {LOOM_OP_FUNC_DEF, kBoundaryFunction,
+     LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_NONE},
+    {LOOM_OP_VECTOR_EXTRACT, kBoundaryVectorExtract,
+     LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_NONE},
+    {LOOM_OP_VECTOR_ADDI, kBoundaryVectorAdd,
+     LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
+    {LOOM_OP_VECTOR_SUBI, kBoundaryVectorSubtract,
+     LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
+    {LOOM_OP_VECTOR_MULI, kBoundaryVectorMultiply,
+     LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
 };
 static_assert(LOOM_OP_SCALAR_CONSTANT < LOOM_OP_SCALAR_ASSUME);
 static_assert(LOOM_OP_SCALAR_ASSUME < LOOM_OP_FUNC_DEF);
@@ -59,22 +66,22 @@ static_assert(LOOM_OP_VECTOR_ADDI < LOOM_OP_VECTOR_SUBI);
 static_assert(LOOM_OP_VECTOR_SUBI < LOOM_OP_VECTOR_MULI);
 
 static constexpr loom_low_representation_candidate_t kTieCandidates[] = {
-    {kRepresentationFirst, 0, {0, 0}},
-    {kRepresentationSecond, 0, {0, 0}},
+    {kRepresentationFirst, {0, 0}},
+    {kRepresentationSecond, {0, 0}},
 };
 
 static constexpr loom_low_representation_candidate_t kAddCandidates[] = {
-    {kRepresentationFirst, 0, {0, 0}},
-    {kRepresentationSecond, 0, {4, 4}},
+    {kRepresentationFirst, {0, 0}},
+    {kRepresentationSecond, {4, 4}},
 };
 
 static constexpr loom_low_representation_candidate_t kMultiplyCandidates[] = {
-    {kRepresentationFirst, 0, {7, 7}},
-    {kRepresentationSecond, 0, {0, 0}},
+    {kRepresentationFirst, {7, 7}},
+    {kRepresentationSecond, {0, 0}},
 };
 
 static constexpr loom_low_representation_candidate_t kConflictCandidates[] = {
-    {kRepresentationConflict, 0, {0, 0}},
+    {kRepresentationConflict, {0, 0}},
 };
 
 class LowLowerRepresentationObserverTest : public ::testing::Test {
@@ -113,47 +120,45 @@ class LowLowerRepresentationObserverTest : public ::testing::Test {
   }
 
   static void ObserveBoundary(
-      void* user_data, uint16_t action, loom_low_lower_context_t* context,
-      const loom_op_t* source_op,
+      void* user_data, uint8_t action,
+      loom_low_lower_representation_boundary_flags_t flags,
+      loom_low_lower_context_t* context, const loom_op_t* source_op,
       loom_low_lower_representation_recorder_t* recorder) {
     auto* test = static_cast<LowLowerRepresentationObserverTest*>(user_data);
     (void)context;
     const loom_low_representation_candidate_t* candidates = nullptr;
     iree_host_size_t candidate_count = 0;
-    loom_value_id_t source_value_id = LOOM_VALUE_ID_INVALID;
     switch (action) {
       case kBoundaryScalarConstant:
         candidates = kAddCandidates;
         candidate_count = IREE_ARRAYSIZE(kAddCandidates);
-        source_value_id = loom_op_const_results(source_op)[0];
         break;
       case kBoundaryScalarAssume:
         candidates = kMultiplyCandidates;
         candidate_count = IREE_ARRAYSIZE(kMultiplyCandidates);
-        source_value_id = loom_op_const_results(source_op)[0];
         break;
       case kBoundaryFunction:
         ++test->source_function_boundary_count_;
         return;
-      case kBoundaryVectorExtract:
-        candidates = kTieCandidates;
-        candidate_count = IREE_ARRAYSIZE(kTieCandidates);
-        source_value_id = loom_vector_extract_source(source_op);
-        break;
+      case kBoundaryVectorExtract: {
+        const loom_value_id_t source_value_id =
+            loom_vector_extract_source(source_op);
+        loom_low_lower_representation_record_candidates(
+            recorder, source_value_id, kTieCandidates,
+            IREE_ARRAYSIZE(kTieCandidates));
+        return;
+      }
       case kBoundaryVectorAdd:
         candidates = kAddCandidates;
         candidate_count = IREE_ARRAYSIZE(kAddCandidates);
-        source_value_id = loom_vector_addi_result(source_op);
         break;
       case kBoundaryVectorSubtract:
         candidates = kConflictCandidates;
         candidate_count = IREE_ARRAYSIZE(kConflictCandidates);
-        source_value_id = loom_vector_subi_result(source_op);
         break;
       case kBoundaryVectorMultiply:
         candidates = kMultiplyCandidates;
         candidate_count = IREE_ARRAYSIZE(kMultiplyCandidates);
-        source_value_id = loom_vector_muli_result(source_op);
         break;
       default:
         loom_low_lower_representation_record_failure(
@@ -162,8 +167,22 @@ class LowLowerRepresentationObserverTest : public ::testing::Test {
                              "unknown test representation boundary action"));
         return;
     }
-    loom_low_lower_representation_record_candidates(
-        recorder, source_value_id, candidates, candidate_count);
+    if (iree_any_bit_set(
+            flags, LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_OPERANDS)) {
+      for (uint16_t i = 0; i < source_op->operand_count; ++i) {
+        loom_low_lower_representation_record_candidates(
+            recorder, loom_op_operands(source_op)[i], candidates,
+            candidate_count);
+      }
+    }
+    if (iree_any_bit_set(flags,
+                         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS)) {
+      for (uint16_t i = 0; i < source_op->result_count; ++i) {
+        loom_low_lower_representation_record_candidates(
+            recorder, loom_op_results(source_op)[i], candidates,
+            candidate_count);
+      }
+    }
   }
 
   static iree_status_t CaptureRepresentations(
@@ -180,12 +199,10 @@ class LowLowerRepresentationObserverTest : public ::testing::Test {
           context, captured->source_value_id, &captured->representation));
       loom_low_representation_id_t query_representation =
           LOOM_LOW_REPRESENTATION_ID_NONE;
-      bool query_plan_available = false;
       IREE_RETURN_IF_ERROR(loom_low_lower_representation_query_lookup(
-          &query_environment, captured->source_value_id, &query_representation,
-          &query_plan_available));
-      if (!query_plan_available ||
-          query_representation != captured->representation) {
+          &query_environment, captured->source_value_id,
+          &query_representation));
+      if (query_representation != captured->representation) {
         return iree_make_status(
             IREE_STATUS_FAILED_PRECONDITION,
             "query scope did not retrieve the retained representation");

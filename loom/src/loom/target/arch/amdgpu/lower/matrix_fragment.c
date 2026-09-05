@@ -126,48 +126,6 @@ loom_amdgpu_matrix_tile_shape_t loom_amdgpu_matrix_fragment_source_tile_shape(
   return source_shape;
 }
 
-bool loom_amdgpu_matrix_result_representation_matches_value(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_value_id_t value_id,
-    loom_amdgpu_matrix_result_representation_id_t representation_id) {
-  const loom_amdgpu_matrix_result_representation_t* representation =
-      loom_amdgpu_matrix_result_representation_at(representation_id);
-  if (representation == NULL || fact_table == NULL) return false;
-  const loom_amdgpu_matrix_fragment_layout_t* layout =
-      loom_amdgpu_matrix_fragment_layout_for_kind(
-          (loom_amdgpu_matrix_fragment_layout_kind_t)
-              representation->fragment_layout_kind);
-  if (layout == NULL) return false;
-  const loom_matrix_fragment_role_layout_t* role_layout =
-      loom_matrix_fragment_role_layout(layout,
-                                       LOOM_CONTRACT_OPERAND_ROLE_RESULT);
-  loom_scalar_type_t element_type = LOOM_SCALAR_TYPE_NONE;
-  if (role_layout == NULL ||
-      !loom_amdgpu_matrix_fragment_scalar_type_from_numeric(
-          (loom_amdgpu_matrix_numeric_type_t)representation->numeric_type,
-          &element_type) ||
-      !loom_amdgpu_matrix_fragment_payload_matches_role_storage(
-          loom_module_value_type(module, value_id), element_type,
-          role_layout)) {
-    return false;
-  }
-  loom_vector_fragment_fact_t fragment;
-  if (!loom_vector_fragment_fact_query_value_facts(
-          &fact_table->context,
-          loom_value_fact_table_lookup(fact_table, value_id), &fragment) ||
-      !loom_vector_fragment_fact_is_accumulator_like(fragment)) {
-    return false;
-  }
-  return loom_amdgpu_matrix_fragment_tile_shape_matches(
-      fact_table,
-      loom_amdgpu_matrix_fragment_source_tile_shape(
-          layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, representation->flags),
-      LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-      loom_vector_fragment_fact_block_value(fragment),
-      loom_vector_fragment_fact_row_value(fragment),
-      loom_vector_fragment_fact_column_value(fragment));
-}
-
 bool loom_amdgpu_matrix_fragment_role_layout_uses_low_subword(
     const loom_matrix_fragment_role_layout_t* role_layout) {
   return role_layout != NULL && role_layout->coordinate_element_stride > 1;

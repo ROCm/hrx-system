@@ -19,7 +19,7 @@ extern "C" {
 // false when any descriptor required by the recipe is unavailable or malformed.
 bool loom_amdgpu_fragment_publication_cost_direct(
     const loom_amdgpu_fragment_memory_publication_query_t* query,
-    const loom_amdgpu_fragment_memory_packet_plan_t* packets,
+    const loom_amdgpu_fragment_memory_publication_packet_t* packets,
     uint16_t packet_count, loom_low_representation_cost_t* out_cost);
 
 // Costs the candidate-specific cross-lane packed descriptor recipe. Returns

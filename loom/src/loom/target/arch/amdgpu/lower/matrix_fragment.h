@@ -93,13 +93,6 @@ loom_amdgpu_matrix_tile_shape_t loom_amdgpu_matrix_fragment_source_tile_shape(
     loom_contract_operand_role_t role,
     loom_amdgpu_matrix_result_representation_flags_t representation_flags);
 
-// Returns true when one source value carries the exact shape and payload of a
-// generated result representation.
-bool loom_amdgpu_matrix_result_representation_matches_value(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_value_id_t value_id,
-    loom_amdgpu_matrix_result_representation_id_t representation_id);
-
 // Returns the physical elements carried by each register in |role_layout|.
 uint16_t loom_amdgpu_matrix_fragment_payload_elements_per_register(
     const loom_matrix_fragment_role_layout_t* role_layout);
