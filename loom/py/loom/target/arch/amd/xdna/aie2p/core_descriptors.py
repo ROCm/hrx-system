@@ -392,6 +392,13 @@ _BASE_DESCRIPTOR_SPECS = (
         "II_ADD_add_r_ri",
     ),
     _DescriptorSpec(
+        "MOV_alu_mv_alu_fx2flt",
+        f"{_TARGET_KEY}.convert.signed.i32.to.f32",
+        "conversion.signed.i32.to.f32",
+        "II_MOV_alu_mv_alu_fx2flt",
+        asm_mnemonic="convert.signed.i32.to.f32",
+    ),
+    _DescriptorSpec(
         "ADD_add_r_ri",
         f"{_TARGET_KEY}.select.mask.i32",
         "integer.select.mask.i32",
@@ -1057,6 +1064,15 @@ _BASE_DESCRIPTOR_SPECS = (
         (("dst", "eS"),),
         DescriptorOpKind.CONST,
         asm_mnemonic="mov.shift",
+    ),
+    _DescriptorSpec(
+        "MOV_alu_mv_mv_mv_cg",
+        f"{_TARGET_KEY}.constant.i32.fx2flt-scale",
+        "conversion.scale.signed.i32.to.f32",
+        "II_MOV_alu_mv_mv_mv_cg_eS",
+        (("dst", "mS2"),),
+        DescriptorOpKind.CONST,
+        asm_mnemonic="mov.fx2flt-scale",
     ),
     _DescriptorSpec(
         "MOV_alu_mv_mv_mv_cg",
