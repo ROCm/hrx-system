@@ -600,8 +600,17 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert bf16_multiply.emit[3].immediates == {"i": _BF16_CONVERSION_ROUNDING}
 
     bf16_dot2_rules = [rule for rule in rules if rule.source_op is vector.vector_dot2f]
-    assert len(bf16_dot2_rules) == 1
-    bf16_dot2 = bf16_dot2_rules[0]
+    assert len(bf16_dot2_rules) == 2
+    bf16_dot2_x8, bf16_dot2 = bf16_dot2_rules
+    assert bf16_dot2_x8.report_key == "bf16_dot2_x8_broadcast"
+    assert bf16_dot2.report_key == "bf16_dot2"
+    assert Guard.value_type("lhs", Vector("bf16", lanes=8)) in bf16_dot2_x8.guards
+    assert Guard.value_type("acc", Vector("f32", lanes=4)) in bf16_dot2_x8.guards
+    assert [emit.descriptor.key for emit in bf16_dot2_x8.emit[:2]] == [
+        "amd.xdna.aie2p.broadcast.bf16x8.to.bf16x32",
+        "amd.xdna.aie2p.broadcast.bf16x8.to.bf16x32",
+    ]
+    assert all(emit.immediates == {"idx": 0} for emit in bf16_dot2_x8.emit[:2])
     assert bf16_dot2.descriptor.key == ("amd.xdna.aie2p.accumulate.bf16x32.configured")
     assert [
         emit.descriptor.key
@@ -627,10 +636,16 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert bf16_dot2.emit[12].immediates == {"i": _BF16_ELEMENTWISE_MULTIPLY_CONTROL}
     assert sum(isinstance(emit, EmitRegisterSlice) for emit in bf16_dot2.emit) == 4
     assert sum(isinstance(emit, EmitRegisterConcat) for emit in bf16_dot2.emit) == 1
-    assert Guard.value_type("lhs", Vector("bf16", lanes=32)) in bf16_dot2.guards
-    assert Guard.value_type("rhs", Vector("bf16", lanes=32)) in bf16_dot2.guards
-    assert Guard.value_type("acc", Vector("f32", lanes=16)) in bf16_dot2.guards
-    assert Guard.value_type("result", Vector("f32", lanes=16)) in bf16_dot2.guards
+    bf16_dot2_input = Vector(
+        "bf16", minimum_static_elements=2, maximum_static_elements=32
+    )
+    bf16_dot2_result = Vector(
+        "f32", minimum_static_elements=1, maximum_static_elements=16
+    )
+    assert Guard.value_type("lhs", bf16_dot2_input) in bf16_dot2.guards
+    assert Guard.value_type("rhs", bf16_dot2_input) in bf16_dot2.guards
+    assert Guard.value_type("acc", bf16_dot2_result) in bf16_dot2.guards
+    assert Guard.value_type("result", bf16_dot2_result) in bf16_dot2.guards
 
     bf16_outer_product_rules = [
         rule
