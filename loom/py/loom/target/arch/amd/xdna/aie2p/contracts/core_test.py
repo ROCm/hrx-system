@@ -28,14 +28,19 @@ from loom.target.arch.amd.xdna.aie2p.contracts.packed_dot import (
     _DOT4_GROW_CONTROL,
     _DOT4_TRANSPOSE_CONTROL,
 )
+from loom.target.arch.amd.xdna.aie2p.contracts.reduction import (
+    _I32_REDUCTION_CONTROLS,
+)
 from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
     _I8_DEINTERLEAVE_CONTROLS,
+    _I32_SLICE_HIGH_BYTE_OFFSET,
 )
 from loom.target.contracts import (
     DescriptorResultType,
     DescriptorRule,
     EmitRegisterConcat,
     EmitRegisterSlice,
+    Guard,
     Scalar,
     ValueAliasRule,
     Vector,
@@ -499,6 +504,41 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         assert sum(isinstance(emit, EmitRegisterSlice) for emit in rule.emit) == 11
         assert sum(isinstance(emit, EmitRegisterConcat) for emit in rule.emit) == 9
 
+    reduction_rules = [rule for rule in rules if rule.source_op is vector.vector_reduce]
+    for lane_count, controls in _I32_REDUCTION_CONTROLS:
+        lane_rules = [
+            rule
+            for rule in reduction_rules
+            if Guard.enum_attr_equals("kind", "addi") in rule.guards
+            and Guard.value_type("input", Vector("i32", lanes=lane_count))
+            in rule.guards
+        ]
+        zero_guard = Guard.value_i64_range("init", 0, 0)
+        zero_rule = next(rule for rule in lane_rules if zero_guard in rule.guards)
+        general_rule = next(
+            rule for rule in lane_rules if zero_guard not in rule.guards
+        )
+        assert reduction_rules.index(zero_rule) < reduction_rules.index(general_rule)
+        for rule, zero_init in ((zero_rule, True), (general_rule, False)):
+            assert [
+                emit.immediates["i"]
+                for emit in rule.emit
+                if emit.descriptor.key == "amd.xdna.aie2p.constant.i32.mova"
+            ] == list(controls)
+            expected_keys = [
+                key
+                for _ in controls
+                for key in (
+                    "amd.xdna.aie2p.constant.i32.mova",
+                    "amd.xdna.aie2p.shuffle.x.configured",
+                    "amd.xdna.aie2p.add.i32x16",
+                )
+            ]
+            expected_keys.append("amd.xdna.aie2p.extract.i32.immediate")
+            if not zero_init:
+                expected_keys.append("amd.xdna.aie2p.add.i32")
+            assert [emit.descriptor.key for emit in rule.emit] == expected_keys
+
     bitunpack_rules = [
         rule
         for rule in rules
@@ -627,6 +667,44 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         )
         == _I8_DEINTERLEAVE_CONTROLS
     )
+
+    high_slice = next(
+        rule
+        for rule in rules
+        if rule.source_op is vector.vector_slice
+        and Guard.value_type("source", Vector("i32", lanes=16)) in rule.guards
+        and Guard.value_type("result", Vector("i32", lanes=8)) in rule.guards
+        and Guard.i64_array_element_range(
+            "static_offsets", element=0, minimum=8, maximum=8
+        )
+        in rule.guards
+    )
+    assert high_slice.descriptor.key == "amd.xdna.aie2p.shift.bytes.x.configured"
+    assert [emit.descriptor.key for emit in high_slice.emit] == [
+        "amd.xdna.aie2p.constant.i32.mova",
+        "amd.xdna.aie2p.shift.bytes.x.configured",
+    ]
+    assert high_slice.emit[0].immediates == {"i": _I32_SLICE_HIGH_BYTE_OFFSET}
+    assert high_slice.emit[1].operands["s1"].field == "source"
+    assert high_slice.emit[1].operands["s2"].field == "source"
+    assert high_slice.emit[1].results["d"].field == "result"
+
+    concat = next(
+        rule
+        for rule in rules
+        if rule.source_op is vector.vector_concat
+        and Guard.i64_range("axis", 0, 0) in rule.guards
+        and Guard.value_type("inputs", Vector("i8", lanes=32)) in rule.guards
+        and Guard.value_type("result", Vector("i8", lanes=64)) in rule.guards
+    )
+    assert concat.descriptor is None
+    assert len(concat.emit) == 3
+    assert all(isinstance(emit, EmitRegisterSlice) for emit in concat.emit[:2])
+    assert isinstance(concat.emit[2], EmitRegisterConcat)
+    assert [emit.source.element for emit in concat.emit[:2]] == [0, 1]
+    assert all(emit.unit_count == 1 for emit in concat.emit[:2])
+    assert [source.field for source in concat.emit[2].sources] == ["low", "high"]
+    assert concat.emit[2].result.field == "result"
 
     f32_add_rules = [rule for rule in rules if rule.source_op is vector.vector_addf]
     assert len(f32_add_rules) == 2
@@ -925,6 +1003,16 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for source_type in bitcast_types
         for result_type in bitcast_types
     ]
+    assert any(
+        rule.source_op is vector.vector_slice
+        and Guard.value_type("source", Vector("i32", lanes=16)) in rule.guards
+        and Guard.value_type("result", Vector("i32", lanes=8)) in rule.guards
+        and Guard.i64_array_element_range(
+            "static_offsets", element=0, minimum=0, maximum=0
+        )
+        in rule.guards
+        for rule in alias_rules
+    )
     packed_predicate_aliases = [
         rule for rule in alias_rules if rule.source_op is vector.vector_bitunpacku
     ]

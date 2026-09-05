@@ -15,3 +15,131 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x64_de
   %odd = vshuffle %packed, %packed, %10
   return %even, %odd
 }
+
+// ====
+
+aie2p.target<core> @target
+
+// Models the integer contraction boundary shared by adjacent Q5_K groups.
+// Narrow operands are joined into one logical dot, then its partial sums are
+// split back into group-local reductions without scalar lane traffic.
+func.def target(@target) @i8x32_pair_dot_split_reduce(%lhs_low: vector<32xi8>, %lhs_high: vector<32xi8>, %rhs_low: vector<32xi8>, %rhs_high: vector<32xi8>) -> (i32, i32) {
+  %reduction_identity = scalar.constant 0 : i32
+  %zero_partial = vector.constant 0 : vector<16xi32>
+  %lhs = vector.concat<0> %lhs_low, %lhs_high : vector<32xi8>, vector<32xi8> -> vector<64xi8>
+  %rhs = vector.concat<0> %rhs_low, %rhs_high : vector<32xi8>, vector<32xi8> -> vector<64xi8>
+  %partials = vector.dot4i<u8s8> %lhs, %rhs, %zero_partial : vector<64xi8>, vector<64xi8>, vector<16xi32>
+  %partial_low = vector.slice %partials[0] : vector<16xi32> -> vector<8xi32>
+  %partial_high = vector.slice %partials[8] : vector<16xi32> -> vector<8xi32>
+  %sum_low = vector.reduce<addi> %partial_low, %reduction_identity : vector<8xi32>, i32
+  %sum_high = vector.reduce<addi> %partial_high, %reduction_identity : vector<8xi32>, i32
+  func.return %sum_low, %sum_high : i32, i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x32_pair_dot_split_reduce(%lhs_low: reg<aie2p.vec256 x2>, %lhs_high: reg<aie2p.vec256 x2>, %rhs_low: reg<aie2p.vec256 x2>, %rhs_high: reg<aie2p.vec256 x2>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+  %21 = mov.short 0
+  %zero_partial = vbcst.32 %21
+  %23 = slice %lhs_low[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %24 = slice %lhs_high[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %26 = slice %rhs_low[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %27 = slice %rhs_high[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %29 = mova.i32 0
+  %30 = vbcst.8 %29
+  %31 = slice %30[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %32 = mova.i32 46
+  %33 = mova.i32 10
+  %34 = mova.i32 584
+  %36 = concat(%23, %31) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %37 = vshuffle %36, %30, %32
+  %39 = concat(%26, %31) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %40 = vshuffle %39, %30, %32
+  %41 = slice %37[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %42 = concat(%41, %31) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %43 = vshuffle %40, %40, %33
+  %44 = vmov.512 %43
+  %45 = concat(%43, %44) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %46 = dot4i.i8x64 %45, %42, %34
+  %47 = slice %46[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %48 = vmov.accumulator512.to.vector512 %47
+  %49 = slice %48[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %51 = concat(%24, %31) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %52 = vshuffle %51, %30, %32
+  %54 = concat(%27, %31) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %55 = vshuffle %54, %30, %32
+  %56 = slice %52[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %57 = concat(%56, %31) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %58 = vshuffle %55, %55, %33
+  %59 = vmov.512 %58
+  %60 = concat(%58, %59) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %61 = dot4i.i8x64 %60, %57, %34
+  %62 = slice %61[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %63 = vmov.accumulator512.to.vector512 %62
+  %64 = slice %63[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %65 = concat(%49, %64) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %partial_low = vadd.32 %65, %zero_partial
+  %67 = mova.i32 32
+  %partial_high = vshift %partial_low, %partial_low, %67
+  %69 = mova.i32 9
+  %70 = vshuffle %partial_low, %partial_low, %69
+  %71 = vadd.32 %partial_low, %70
+  %72 = mova.i32 7
+  %73 = vshuffle %71, %71, %72
+  %74 = vadd.32 %71, %73
+  %75 = mova.i32 5
+  %76 = vshuffle %74, %74, %75
+  %77 = vadd.32 %74, %76
+  %sum_low = vextract.32.imm %77, 0
+  %80 = vshuffle %partial_high, %partial_high, %69
+  %81 = vadd.32 %partial_high, %80
+  %83 = vshuffle %81, %81, %72
+  %84 = vadd.32 %81, %83
+  %86 = vshuffle %84, %84, %75
+  %87 = vadd.32 %84, %86
+  %sum_high = vextract.32.imm %87, 0
+  return %sum_low, %sum_high
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @reduce_add_i32_widths(%v4: vector<4xi32>, %v8: vector<8xi32>, %v16: vector<16xi32>, %init: i32) -> (i32, i32, i32) {
+  %sum4 = vector.reduce<addi> %v4, %init : vector<4xi32>, i32
+  %sum8 = vector.reduce<addi> %v8, %init : vector<8xi32>, i32
+  %sum16 = vector.reduce<addi> %v16, %init : vector<16xi32>, i32
+  func.return %sum4, %sum8, %sum16 : i32, i32, i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @reduce_add_i32_widths(%v4: reg<aie2p.vec256 x2>, %v8: reg<aie2p.vec256 x2>, %v16: reg<aie2p.vec256 x2>, %init: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %17 = mova.i32 7
+  %18 = vshuffle %v4, %v4, %17
+  %19 = vadd.32 %v4, %18
+  %20 = mova.i32 5
+  %21 = vshuffle %19, %19, %20
+  %22 = vadd.32 %19, %21
+  %23 = vextract.32.imm %22, 0
+  %sum4 = add.rr %init, %23
+  %25 = mova.i32 9
+  %26 = vshuffle %v8, %v8, %25
+  %27 = vadd.32 %v8, %26
+  %29 = vshuffle %27, %27, %17
+  %30 = vadd.32 %27, %29
+  %32 = vshuffle %30, %30, %20
+  %33 = vadd.32 %30, %32
+  %34 = vextract.32.imm %33, 0
+  %sum8 = add.rr %init, %34
+  %36 = mova.i32 11
+  %37 = vshuffle %v16, %v16, %36
+  %38 = vadd.32 %v16, %37
+  %40 = vshuffle %38, %38, %25
+  %41 = vadd.32 %38, %40
+  %43 = vshuffle %41, %41, %17
+  %44 = vadd.32 %41, %43
+  %46 = vshuffle %44, %44, %20
+  %47 = vadd.32 %44, %46
+  %48 = vextract.32.imm %47, 0
+  %sum16 = add.rr %init, %48
+  return %sum4, %sum8, %sum16
+}

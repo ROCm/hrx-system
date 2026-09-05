@@ -40,6 +40,9 @@ from loom.target.arch.amd.xdna.aie2p.contracts.memory import AIE2P_MEMORY_RULES
 from loom.target.arch.amd.xdna.aie2p.contracts.packed_dot import (
     AIE2P_PACKED_DOT_RULES,
 )
+from loom.target.arch.amd.xdna.aie2p.contracts.reduction import (
+    AIE2P_REDUCTION_RULES,
+)
 from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
     AIE2P_STRUCTURAL_RULES,
 )
@@ -2164,6 +2167,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
         ),
         _matrix_fragment_store_rule(),
         *AIE2P_PACKED_DOT_RULES,
+        *AIE2P_REDUCTION_RULES,
         *AIE2P_STRUCTURAL_RULES,
         *AIE2P_MEMORY_RULES,
         *(

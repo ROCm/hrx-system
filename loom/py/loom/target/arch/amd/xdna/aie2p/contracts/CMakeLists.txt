@@ -21,6 +21,7 @@ iree_py_library(
     "index_conversion.py"
     "memory.py"
     "packed_dot.py"
+    "reduction.py"
     "structural.py"
   DEPS
     loom::py::loom::core
