@@ -35,6 +35,7 @@ from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
     DescriptorFlag,
+    DescriptorOpKind,
     Effect,
     EffectFlag,
     EffectKind,
@@ -628,6 +629,28 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
     ]
     assert all(operand.unit_count == 2 for operand in byte_select.operands[:3])
     assert word_select.operands[-1].reg_alts[0].reg_class == "aie2p.ers16"
+
+    byte_shift = descriptors["amd.xdna.aie2p.shift.bytes.x.configured"]
+    assert [operand.field_name for operand in byte_shift.operands] == [
+        "d",
+        "s1",
+        "s2",
+        "shift",
+    ]
+    assert [operand.reg_alts[0].reg_class for operand in byte_shift.operands] == [
+        "aie2p.vec256",
+        "aie2p.vec256",
+        "aie2p.vec256",
+        "aie2p.er",
+    ]
+    assert [operand.unit_count for operand in byte_shift.operands] == [2, 2, 2, 1]
+    assert byte_shift.asm_forms[0].mnemonic == "vshift"
+
+    select_constant = descriptors["amd.xdna.aie2p.constant.i32.select"]
+    assert select_constant.op_kind is DescriptorOpKind.CONST
+    assert select_constant.operands[0].field_name == "dst"
+    assert select_constant.operands[0].reg_alts[0].reg_class == "aie2p.ers16"
+    assert select_constant.asm_forms[0].mnemonic == "mov.select"
 
     scalar_selector = descriptors["amd.xdna.aie2p.select.mask.i32"]
     assert scalar_selector.operands[0].field_name == "d0"

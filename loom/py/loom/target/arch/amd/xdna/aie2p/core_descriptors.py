@@ -649,6 +649,13 @@ _BASE_DESCRIPTOR_SPECS = (
         asm_mnemonic="vshuffle",
     ),
     _DescriptorSpec(
+        "VSHIFT",
+        f"{_TARGET_KEY}.shift.bytes.x.configured",
+        "register.shift.bytes.x.configured",
+        "II_VSHIFT",
+        asm_mnemonic="vshift",
+    ),
+    _DescriptorSpec(
         "VMOV_alu_mv_mv_x",
         f"{_TARGET_KEY}.move.bf16x32",
         "floating.move.bf16x32",
@@ -1100,6 +1107,15 @@ _BASE_DESCRIPTOR_SPECS = (
         (("dst", "eR"),),
         DescriptorOpKind.CONST,
         asm_mnemonic="mova.i32",
+    ),
+    _DescriptorSpec(
+        "MOVA",
+        f"{_TARGET_KEY}.constant.i32.select",
+        "integer.const.i32",
+        "II_MOVA_eR",
+        (("dst", "eRS16"),),
+        DescriptorOpKind.CONST,
+        asm_mnemonic="mov.select",
     ),
     _DescriptorSpec(
         "MOV_alu_mv_mv_mv_cg",

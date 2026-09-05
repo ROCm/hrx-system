@@ -664,3 +664,35 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @reduce_p
   %minimum = sel.nez %52, %53, %54
   return %minimum
 }
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @load_i8x32_aligned16(%source: buffer) -> (vector<32xi8>) {
+  %source_aligned = buffer.assume.alignment %source {minimum_alignment = 16} : buffer
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<32xi8>
+  %value = vector.load %source_view[0] : view<32xi8> -> vector<32xi8>
+  func.return %value : vector<32xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @load_i8x32_aligned16() -> (reg<aie2p.vec256 x2>) asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %8 = mov.short 0
+  %9 = vbcst.8 %8
+  %10 = slice %9[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %11 = slice %9[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %12 = copy %10 : reg<aie2p.vec256> -> reg<aie2p.vec256>
+  %13 = vlda.128.i8x16 %source_view, %12, 0
+  %14 = concat(%13, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %15 = copy %10 : reg<aie2p.vec256> -> reg<aie2p.vec256>
+  %16 = vlda.128.i8x16 %source_view, %15, 16
+  %17 = concat(%16, %11) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %18 = mova.i32 48
+  %19 = vshift %9, %17, %18
+  %20 = mov.select 15
+  %value = vsel.32 %19, %14, %20
+  return %value
+}

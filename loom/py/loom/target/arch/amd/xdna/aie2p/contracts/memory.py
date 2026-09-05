@@ -107,6 +107,15 @@ _VECTOR_MEMORY_SHAPES = tuple(
     )
 )
 
+# Source types grouped by the physical byte shape of a 256-bit value. The
+# alignment fallback below performs raw 128-bit moves, so all types with the
+# same element width share one recipe and one physical memory descriptor.
+_SPLIT_256BIT_VECTOR_LOAD_SHAPES = (
+    (1, 32, Vector(("i8", "f8E4M3", "f8E5M2"), lanes=32)),
+    (2, 16, Vector(("i16", "f16", "bf16"), lanes=16)),
+    (4, 8, Vector(("i32", "f32"), lanes=8)),
+)
+
 _I32_MIN = -(2**31)
 _I32_MAX = (2**31) - 1
 
@@ -1024,6 +1033,190 @@ def _vector_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
     )
 
 
+def _split_256bit_vector_load_rule(
+    address_form: _MemoryAddressForm,
+    *,
+    root_kind: SourceMemoryRootKind,
+    memory_spaces: tuple[str, ...],
+    element_byte_count: int,
+    vector_lane_count: int,
+    value_type: TypePattern,
+    volatile: bool,
+) -> DescriptorRule:
+    """Builds a 16-byte-aligned 256-bit load from native 128-bit moves."""
+
+    immediate_memory = address_form is _MemoryAddressForm.IMMEDIATE
+    descriptor_suffix = "immediate" if immediate_memory else "register"
+    memory_descriptor_key = f"amd.xdna.aie2p.load.a.i8x16.indexed.{descriptor_suffix}"
+    if volatile:
+        memory_descriptor_key = f"{memory_descriptor_key}.volatile"
+    memory_descriptor = _descriptor(memory_descriptor_key)
+    source_memory = _memory_constraint(
+        SourceMemoryOperation.LOAD,
+        address_form,
+        root_kind=root_kind,
+        memory_spaces=memory_spaces,
+        element_byte_count=element_byte_count,
+        vector_lane_count=vector_lane_count,
+        minimum_alignment=16,
+        immediate_offset_minimum=-128,
+        immediate_offset_maximum=112,
+        maximum_additional_static_byte_offset=16,
+    )
+
+    zero = ValueRef.temporary("vector_zero")
+    storage = ValueRef.temporary("split_storage")
+    padding = ValueRef.temporary("split_padding")
+    emits: list[ContractEmit] = [
+        *_zero_x_emits(1),
+        EmitRegisterSlice(source=zero, result=storage, unit_count=1),
+        EmitRegisterSlice(
+            source=zero,
+            result=padding,
+            unit_offset=1,
+            unit_count=1,
+        ),
+    ]
+
+    chunk_x_values = []
+    for chunk_index, chunk_byte_offset in enumerate((0, 16)):
+        chunk = ValueRef.temporary(f"split_chunk_{chunk_index}")
+        chunk_x = ValueRef.temporary(f"split_chunk_x_{chunk_index}")
+        memory_operands = {
+            "ptr": ValueRef.operand("view"),
+            "storage": storage,
+        }
+        if immediate_memory:
+            emits.append(
+                EmitDescriptorOp(
+                    descriptor=memory_descriptor,
+                    operands=memory_operands,
+                    results={"dst": chunk},
+                    result_types={"dst": DescriptorResultType()},
+                    immediates={
+                        "imm": (
+                            SourceMemoryProject.static_byte_offset_plus(
+                                chunk_byte_offset
+                            )
+                            if chunk_byte_offset
+                            else SourceMemoryProject.static_byte_offset()
+                        )
+                    },
+                    source_memory=source_memory,
+                    form=DescriptorEmitForm.OP,
+                    copy_operands=("storage",),
+                )
+            )
+        else:
+            address_emits, address_index = _register_address_emits(
+                source_memory,
+                address_form,
+                additional_static_byte_offset=chunk_byte_offset,
+                temporary_suffix=f"_{chunk_index}",
+            )
+            emits.extend(address_emits)
+            memory_operands["dj"] = address_index
+            emits.append(
+                EmitDescriptorOp(
+                    descriptor=memory_descriptor,
+                    operands=memory_operands,
+                    results={"dst": chunk},
+                    result_types={"dst": DescriptorResultType()},
+                    source_memory=source_memory,
+                    form=DescriptorEmitForm.OP,
+                    copy_operands=("storage",),
+                )
+            )
+        emits.append(
+            EmitRegisterConcat(
+                sources=(chunk, padding),
+                result=chunk_x,
+                result_type=ValueRef.result("result"),
+            )
+        )
+        chunk_x_values.append(chunk_x)
+
+    shift_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
+    select_constant = _descriptor("amd.xdna.aie2p.constant.i32.select")
+    shift = _descriptor("amd.xdna.aie2p.shift.bytes.x.configured")
+    select = _descriptor("amd.xdna.aie2p.select.i32x16")
+    shift_control = ValueRef.temporary("split_shift_control")
+    shifted_high = ValueRef.temporary("split_shifted_high")
+    select_control = ValueRef.temporary("split_select_control")
+    emits.extend(
+        (
+            EmitDescriptorOp(
+                descriptor=shift_constant,
+                results={"dst": shift_control},
+                result_types={"dst": DescriptorResultType()},
+                immediates={"i": 48},
+                form=DescriptorEmitForm.CONST,
+            ),
+            EmitDescriptorOp(
+                descriptor=shift,
+                operands={
+                    "s1": zero,
+                    "s2": chunk_x_values[1],
+                    "shift": shift_control,
+                },
+                results={"d": shifted_high},
+                result_types={"d": DescriptorResultType()},
+                form=DescriptorEmitForm.OP,
+            ),
+            EmitDescriptorOp(
+                descriptor=select_constant,
+                results={"dst": select_control},
+                result_types={"dst": DescriptorResultType()},
+                immediates={"i": 15},
+                form=DescriptorEmitForm.CONST,
+            ),
+            EmitDescriptorOp(
+                descriptor=select,
+                operands={
+                    "s1": shifted_high,
+                    "s2": chunk_x_values[0],
+                    "sel": select_control,
+                },
+                results={"d": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
+            ),
+        )
+    )
+
+    return DescriptorRule(
+        source_op=vector.vector_load,
+        descriptor=memory_descriptor,
+        guards=(
+            *(
+                (Guard.instance_flags_has_all("memory_flags", "volatile"),)
+                if volatile
+                else ()
+            ),
+            Guard.value_type("result", value_type),
+        ),
+        emit=tuple(emits),
+    )
+
+
+def _split_256bit_vector_load_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
+    return tuple(
+        _split_256bit_vector_load_rule(
+            address_form,
+            root_kind=root_kind,
+            memory_spaces=memory_spaces,
+            element_byte_count=element_byte_count,
+            vector_lane_count=vector_lane_count,
+            value_type=value_type,
+            volatile=volatile,
+        )
+        for root_kind, memory_spaces in _MEMORY_ROOTS
+        for element_byte_count, vector_lane_count, value_type in (
+            _SPLIT_256BIT_VECTOR_LOAD_SHAPES
+        )
+        for address_form in _MemoryAddressForm
+    )
+
+
 def _accumulator_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
     return tuple(
         _accumulator_memory_rule(
@@ -1044,10 +1237,12 @@ AIE2P_MEMORY_RULES: tuple[DescriptorRule, ...] = (
     *_bytewise_scalar_memory_rules(volatile=True),
     *_two_lane_16bit_load_rules(volatile=True),
     *_vector_memory_rules(volatile=True),
+    *_split_256bit_vector_load_rules(volatile=True),
     *_accumulator_memory_rules(volatile=True),
     *_scalar_memory_rules(volatile=False),
     *_bytewise_scalar_memory_rules(volatile=False),
     *_two_lane_16bit_load_rules(volatile=False),
     *_vector_memory_rules(volatile=False),
+    *_split_256bit_vector_load_rules(volatile=False),
     *_accumulator_memory_rules(volatile=False),
 )

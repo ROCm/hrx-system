@@ -47,6 +47,13 @@ def _source_memory_emit(rule) -> EmitDescriptorOp:
     )
 
 
+def _primary_descriptor_emit_count(rule) -> int:
+    return sum(
+        isinstance(emit, EmitDescriptorOp) and emit.descriptor == rule.descriptor
+        for emit in rule.emit
+    )
+
+
 def _rules_for(
     root_kind,
     *source_ops,
@@ -54,6 +61,7 @@ def _rules_for(
     bytewise_scalar: bool | None = None,
     volatile: bool = False,
     scalarized_vector_load: bool | None = None,
+    split_vector_load: bool | None = None,
 ):
     return [
         rule
@@ -78,6 +86,14 @@ def _rules_for(
                 and ".load.scalar." in rule.descriptor.key
             )
             is scalarized_vector_load
+        )
+        and (
+            split_vector_load is None
+            or (
+                rule.source_op is vector.vector_load
+                and _primary_descriptor_emit_count(rule) == 2
+            )
+            is split_vector_load
         )
     ]
 
@@ -452,6 +468,7 @@ def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None
             vector.vector_load,
             vector.vector_store,
             scalarized_vector_load=False,
+            split_vector_load=False,
         )
         expected_descriptor_keys = []
         for (
@@ -545,6 +562,105 @@ def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None
                 assert constraint.vector_lane_count == vector_lane_count
                 assert constraint.vector_lane_byte_stride == element_byte_count
                 assert constraint.minimum_alignment == width_bits // 8
+
+
+def test_256bit_vector_loads_split_at_16_byte_alignment() -> None:
+    expected_shapes = (
+        (("i8", "f8E4M3", "f8E5M2"), 1, 32),
+        (("i16", "f16", "bf16"), 2, 16),
+        (("i32", "f32"), 4, 8),
+    )
+    expected_static_ranges = (
+        (-128, 96, 0, 0, False),
+        (_I32_MIN, _I32_MAX - 16, 0, 0, False),
+        (0, 0, None, 1, True),
+        (-64, 63, None, 1, True),
+        (_I32_MIN, _I32_MAX - 16, None, 1, True),
+    )
+
+    for root_kind, memory_spaces in _MEMORY_ROOTS:
+        rules = _rules_for(
+            root_kind,
+            vector.vector_load,
+            scalarized_vector_load=False,
+            split_vector_load=True,
+        )
+        assert len(rules) == len(expected_shapes) * 5
+        for shape_index, (
+            element_types,
+            element_byte_count,
+            vector_lane_count,
+        ) in enumerate(expected_shapes):
+            shape_rules = rules[shape_index * 5 : shape_index * 5 + 5]
+            assert [rule.descriptor.key for rule in shape_rules] == [
+                "amd.xdna.aie2p.load.a.i8x16.indexed.immediate",
+                *("amd.xdna.aie2p.load.a.i8x16.indexed.register",) * 4,
+            ]
+            for address_index, rule in enumerate(shape_rules):
+                assert rule.guards[-1].type_pattern.elements == element_types
+                assert rule.guards[-1].type_pattern.lanes == vector_lane_count
+                constraint = _source_memory_emit(rule).source_memory
+                assert constraint is not None
+                assert constraint.operation is SourceMemoryOperation.LOAD
+                assert constraint.root_kind is root_kind
+                assert constraint.memory_spaces == memory_spaces
+                assert constraint.element_byte_count == element_byte_count
+                assert constraint.vector_lane_count == vector_lane_count
+                assert constraint.vector_lane_byte_stride == element_byte_count
+                assert constraint.minimum_alignment == 16
+                assert (
+                    constraint.static_byte_offset_minimum,
+                    constraint.static_byte_offset_maximum,
+                    constraint.dynamic_term_count,
+                    constraint.dynamic_term_count_minimum,
+                    constraint.allow_dynamic_stride_values,
+                ) == expected_static_ranges[address_index]
+
+                memory_emits = [
+                    emit
+                    for emit in rule.emit
+                    if isinstance(emit, EmitDescriptorOp)
+                    and emit.descriptor == rule.descriptor
+                ]
+                assert len(memory_emits) == 2
+                assert all(emit.copy_operands == ("storage",) for emit in memory_emits)
+                concats = [
+                    emit for emit in rule.emit if isinstance(emit, EmitRegisterConcat)
+                ]
+                assert len(concats) == 2
+                assert all(
+                    concat.sources[1].field == "split_padding" for concat in concats
+                )
+
+                descriptor_tail = [
+                    emit.descriptor.key
+                    for emit in rule.emit[-4:]
+                    if isinstance(emit, EmitDescriptorOp)
+                ]
+                assert descriptor_tail == [
+                    "amd.xdna.aie2p.constant.i32.mova",
+                    "amd.xdna.aie2p.shift.bytes.x.configured",
+                    "amd.xdna.aie2p.constant.i32.select",
+                    "amd.xdna.aie2p.select.i32x16",
+                ]
+                final_select = rule.emit[-1]
+                assert isinstance(final_select, EmitDescriptorOp)
+                assert final_select.results["d"].field == "result"
+
+            immediate_projects = [
+                emit.immediates["imm"]
+                for emit in shape_rules[0].emit
+                if isinstance(emit, EmitDescriptorOp)
+                and emit.descriptor == shape_rules[0].descriptor
+            ]
+            assert tuple(project.kind for project in immediate_projects) == (
+                SourceMemoryProjectKind.STATIC_BYTE_OFFSET,
+                SourceMemoryProjectKind.STATIC_BYTE_OFFSET_PLUS_LITERAL,
+            )
+            assert tuple(project.literal_i64 for project in immediate_projects) == (
+                0,
+                16,
+            )
 
 
 def test_f32_accumulator_memory_rules_decompose_into_native_chunks() -> None:
