@@ -1,0 +1,148 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load(
+    "//loom/build_tools/amdgpu:descriptor_sets.bzl",
+    "loom_amdgpu_descriptor_set_compatible_with",
+)
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_binary",
+    "loom_config_compatible_with",
+)
+load(
+    "//loom/build_tools/bazel:defs.bzl",
+    "loom_command_binary",
+    "loom_kernel_binary",
+    "loom_library",
+)
+
+package(default_visibility = ["//visibility:private"])
+
+_AMDGPU_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target/arch:amdgpu",
+    "//loom/config/emit:amdgpu",
+]) + loom_amdgpu_descriptor_set_compatible_with(
+    "descriptor_set_gfx11_generic_core",
+)
+
+_SPIRV_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target/arch:spirv",
+    "//loom/config/emit:spirv",
+])
+
+loom_library(
+    name = "kernel",
+    srcs = ["kernel.loom"],
+)
+
+loom_library(
+    name = "kernel_bundle",
+    deps = [":kernel"],
+)
+
+loom_library(
+    name = "command",
+    srcs = ["command.loom"],
+    deps = [
+        ":kernel",
+        ":kernel_bundle",
+    ],
+)
+
+loom_kernel_binary(
+    name = "amdgpu_kernel",
+    target = "//loom/target/amdgpu:gfx11-generic",
+    target_compatible_with = _AMDGPU_COMPATIBLE_WITH,
+    deps = [":command"],
+)
+
+loom_kernel_binary(
+    name = "spirv_kernel",
+    srcs = ["kernel.loom"],
+    format = "//loom/product/formats:spirv_binary",
+    target = "//loom/target/spirv:vulkan1.3+bda",
+    target_compatible_with = _SPIRV_COMPATIBLE_WITH,
+)
+
+loom_command_binary(
+    name = "spirv_command",
+    target = "//loom/target/spirv:vulkan1.3+bda",
+    target_compatible_with = _SPIRV_COMPATIBLE_WITH,
+    deps = [":command"],
+)
+
+loom_cc_binary(
+    name = "product_test",
+    srcs = ["product_test.cc"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+    ],
+)
+
+filegroup(
+    name = "spirv_command_manifest",
+    srcs = [":spirv_command"],
+    output_group = "command_manifests",
+    tags = ["skip-bazel_to_cmake"],
+)
+
+filegroup(
+    name = "spirv_command_artifacts",
+    srcs = [":spirv_command"],
+    output_group = "command_artifacts",
+    tags = ["skip-bazel_to_cmake"],
+)
+
+filegroup(
+    name = "spirv_command_kernel",
+    srcs = [":spirv_command"],
+    output_group = "kernel_artifacts",
+    tags = ["skip-bazel_to_cmake"],
+)
+
+iree_executable_test(
+    name = "amdgpu_kernel_test",
+    src = ":product_test",
+    args = [
+        "--primary=$(rootpath :amdgpu_kernel)",
+        "--primary_magic=7f454c46",
+    ],
+    data = [":amdgpu_kernel"],
+    target_compatible_with = _AMDGPU_COMPATIBLE_WITH,
+)
+
+iree_executable_test(
+    name = "spirv_kernel_test",
+    src = ":product_test",
+    args = [
+        "--primary=$(rootpath :spirv_kernel)",
+        "--primary_magic=03022307",
+    ],
+    data = [":spirv_kernel"],
+    target_compatible_with = _SPIRV_COMPATIBLE_WITH,
+)
+
+iree_executable_test(
+    name = "spirv_command_test",
+    src = ":product_test",
+    args = [
+        "--artifacts=$(rootpath :spirv_command_artifacts)",
+        "--kernel=$(rootpath :spirv_command_kernel)",
+        "--kernel_magic=03022307",
+        "--manifest=$(rootpath :spirv_command_manifest)",
+        "--primary=$(rootpath :spirv_command_manifest)",
+    ],
+    data = [
+        ":spirv_command_artifacts",
+        ":spirv_command_kernel",
+        ":spirv_command_manifest",
+    ],
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = _SPIRV_COMPATIBLE_WITH,
+)

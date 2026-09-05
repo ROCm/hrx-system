@@ -1,0 +1,6 @@
+kernel.decl @product_kernel() launch(%storage: buffer)
+
+command.program.def public @product_command() launch(%storage: buffer) {
+  kernel.launch @product_kernel(%storage) : (buffer)
+  command.return
+}

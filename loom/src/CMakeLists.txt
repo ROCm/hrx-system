@@ -24,6 +24,8 @@ include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_check.cmake")
 include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_low_descriptor.cmake")
 include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_generated.cmake")
 include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_module.cmake")
+include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_library.cmake")
+include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_binary.cmake")
 
 iree_add_all_subdirs()
 
