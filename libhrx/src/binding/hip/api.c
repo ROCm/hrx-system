@@ -12054,7 +12054,17 @@ HIPAPI hipError_t hipEventElapsedTime(float* ms, hipEvent_t start,
 // See also: hipModuleLoadData, hipModuleUnload, hipModuleGetFunction.
 HIPAPI hipError_t hipModuleLoad(hipModule_t* module, const char* fname) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  if (!module || !fname) {
+  if (!module) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // Establish the failure invariant before validating any other argument: every
+  // error path below (including the invalid-argument paths) leaves *module NULL
+  // so a caller that unconditionally unloads on a failed load cannot
+  // dereference an uninitialized handle. The success path overwrites it.
+  *module = NULL;
+  if (!fname) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -12174,7 +12184,17 @@ HIPAPI hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image,
       "[HIP_API] hipModuleLoadDataEx(module=%p, image=%p, numOptions=%u) "
       "ENTRY\n",
       (void*)module, image, numOptions);
-  if (!module || !image) {
+  if (!module) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // Establish the failure invariant before validating any other argument: every
+  // error path below (including the invalid-argument paths) leaves *module NULL
+  // so a caller that unconditionally unloads on a failed load cannot
+  // dereference an uninitialized handle. The success path overwrites it.
+  *module = NULL;
+  if (!image) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }

@@ -64,6 +64,12 @@ using HipGraphKernelNodeGetParamsFn = hipError_t (*)(hipGraphNode_t node,
                                                      void* params);
 using HipGraphKernelNodeSetParamsFn = hipError_t (*)(hipGraphNode_t node,
                                                      const void* params);
+using HipModuleLoadDataExFn = hipError_t (*)(hipModule_t* module,
+                                             const void* image,
+                                             unsigned int num_options,
+                                             hipJitOption* options,
+                                             void** option_values);
+using HipModuleUnloadFn = hipError_t (*)(hipModule_t module);
 
 // Owns an RTLD_LOCAL HIP runtime instance and the entry points exercised by
 // this test. All calls use the loaded library instead of a link-time runtime.
@@ -488,6 +494,35 @@ TEST_F(HipLaunchValidationApiTest,
                                        &short_prepacked_params));
   EXPECT_EQ(reinterpret_cast<hipGraphNode_t>(uintptr_t{1}), rejected_node);
   EXPECT_EQ(hipSuccess, api_.graph_destroy(graph));
+}
+
+// A failed module load must leave the caller's out-handle NULL. Callers
+// commonly follow the HIP idiom of unconditionally calling hipModuleUnload
+// after a failed load; if hipModuleLoadDataEx returned an error without writing
+// *module, that unload would dereference an uninitialized handle. The
+// out-handle is seeded with a non-NULL sentinel here so the test proves the API
+// actively wrote NULL rather than leaving the sentinel untouched, and
+// hipModuleUnload(NULL) reports hipErrorInvalidResourceHandle instead of
+// succeeding, so the whole failed-load-then-unload sequence is well-defined.
+TEST_F(HipLaunchValidationApiTest, ModuleLoadFailureNullsOutHandleForUnload) {
+  auto module_load_data_ex = ResolveHipSymbol<HipModuleLoadDataExFn>(
+      api_.library, "hipModuleLoadDataEx");
+  auto module_unload =
+      ResolveHipSymbol<HipModuleUnloadFn>(api_.library, "hipModuleUnload");
+  ASSERT_NE(nullptr, module_load_data_ex);
+  ASSERT_NE(nullptr, module_unload);
+
+  // A small all-0xFF buffer carries no valid code-object magic, so the loader
+  // rejects it with an invalid-argument error before creating any module.
+  const uint8_t invalid_image[16] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                     0xFF, 0xFF, 0xFF, 0xFF};
+  hipModule_t module = reinterpret_cast<hipModule_t>(uintptr_t{1});
+  EXPECT_NE(hipSuccess, module_load_data_ex(
+                            &module, invalid_image, /*num_options=*/0,
+                            /*options=*/nullptr, /*option_values=*/nullptr));
+  EXPECT_EQ(nullptr, module);
+  EXPECT_EQ(hipErrorInvalidResourceHandle, module_unload(module));
 }
 
 }  // namespace
