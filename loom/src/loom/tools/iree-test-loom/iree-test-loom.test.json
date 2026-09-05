@@ -104,7 +104,7 @@
       "stderr": {
         "contains": [
           "--device=loom-unavailable",
-          "not available in this Loom installation",
+          "has no linked Loom device provider",
           "available --device drivers:"
         ]
       }
