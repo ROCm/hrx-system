@@ -18,30 +18,27 @@ static iree_status_t QuerySyntheticRequirement(
   (void)user_data;
   (void)module;
   (void)attrs;
-  *out_result = (loom_testbench_requirement_provider_result_t){
-      .state = LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_SATISFIED,
-  };
+  *out_result = {};
+  out_result->state = LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_SATISFIED;
   return iree_ok_status();
 }
 
 static void InitializeSyntheticRequirementAlpha(
     loom_run_hal_testbench_context_t* context,
     loom_testbench_requirement_provider_t* out_provider) {
-  *out_provider = (loom_testbench_requirement_provider_t){
-      .name = IREE_SVL("synthetic.alpha"),
-      .user_data = context,
-      .query = QuerySyntheticRequirement,
-  };
+  *out_provider = {};
+  out_provider->name = IREE_SV("synthetic.alpha");
+  out_provider->user_data = context;
+  out_provider->query = QuerySyntheticRequirement;
 }
 
 static void InitializeSyntheticRequirementBeta(
     loom_run_hal_testbench_context_t* context,
     loom_testbench_requirement_provider_t* out_provider) {
-  *out_provider = (loom_testbench_requirement_provider_t){
-      .name = IREE_SVL("synthetic.beta"),
-      .user_data = context,
-      .query = QuerySyntheticRequirement,
-  };
+  *out_provider = {};
+  out_provider->name = IREE_SV("synthetic.beta");
+  out_provider->user_data = context;
+  out_provider->query = QuerySyntheticRequirement;
 }
 
 TEST(TestbenchRequirementProviderTest, PopulatesInInitializerOrder) {
@@ -50,10 +47,9 @@ TEST(TestbenchRequirementProviderTest, PopulatesInInitializerOrder) {
           InitializeSyntheticRequirementAlpha,
           InitializeSyntheticRequirementBeta,
       };
-  const loom_run_hal_testbench_requirement_initializer_set_t initializer_set = {
-      .initializers = initializers,
-      .initializer_count = IREE_ARRAYSIZE(initializers),
-  };
+  loom_run_hal_testbench_requirement_initializer_set_t initializer_set = {};
+  initializer_set.initializers = initializers;
+  initializer_set.initializer_count = IREE_ARRAYSIZE(initializers);
   int synthetic_context_storage = 0;
   auto* context = reinterpret_cast<loom_run_hal_testbench_context_t*>(
       &synthetic_context_storage);
@@ -71,8 +67,8 @@ TEST(TestbenchRequirementProviderTest, PopulatesInInitializerOrder) {
       iree_string_view_equal(providers[1].name, IREE_SV("synthetic.beta")));
   EXPECT_EQ(providers[0].user_data, context);
   EXPECT_EQ(providers[1].user_data, context);
-  EXPECT_EQ(providers[0].query, QuerySyntheticRequirement);
-  EXPECT_EQ(providers[1].query, QuerySyntheticRequirement);
+  EXPECT_EQ(providers[0].query, &QuerySyntheticRequirement);
+  EXPECT_EQ(providers[1].query, &QuerySyntheticRequirement);
 }
 
 TEST(TestbenchRequirementProviderTest, RejectsInsufficientCapacityAtomically) {
@@ -81,16 +77,14 @@ TEST(TestbenchRequirementProviderTest, RejectsInsufficientCapacityAtomically) {
           InitializeSyntheticRequirementAlpha,
           InitializeSyntheticRequirementBeta,
       };
-  const loom_run_hal_testbench_requirement_initializer_set_t initializer_set = {
-      .initializers = initializers,
-      .initializer_count = IREE_ARRAYSIZE(initializers),
-  };
+  loom_run_hal_testbench_requirement_initializer_set_t initializer_set = {};
+  initializer_set.initializers = initializers;
+  initializer_set.initializer_count = IREE_ARRAYSIZE(initializers);
   int synthetic_context_storage = 0;
   auto* context = reinterpret_cast<loom_run_hal_testbench_context_t*>(
       &synthetic_context_storage);
-  loom_testbench_requirement_provider_t provider = {
-      .name = IREE_SVL("synthetic.sentinel"),
-  };
+  loom_testbench_requirement_provider_t provider = {};
+  provider.name = IREE_SV("synthetic.sentinel");
   iree_host_size_t provider_count = 99;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
