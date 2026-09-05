@@ -345,16 +345,11 @@ static iree_status_t iree_test_loom_run_case_samples(
   loom_testbench_requirement_provider_t
       requirement_providers[IREE_TEST_LOOM_MAX_REQUIREMENT_PROVIDERS] = {0};
   iree_host_size_t requirement_provider_count = 0;
-  if (configuration->populate_requirement_providers.fn != NULL) {
-    IREE_RETURN_IF_ERROR(configuration->populate_requirement_providers.fn(
-        configuration->populate_requirement_providers.user_data, hal_context,
+  if (configuration->requirement_provider_initializers != NULL) {
+    IREE_RETURN_IF_ERROR(loom_run_hal_testbench_requirement_providers_populate(
+        configuration->requirement_provider_initializers, hal_context,
         IREE_ARRAYSIZE(requirement_providers), requirement_providers,
         &requirement_provider_count));
-  }
-  if (requirement_provider_count > IREE_ARRAYSIZE(requirement_providers)) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "iree-test-loom requirement provider capacity exceeded");
   }
   loom_testbench_requirement_provider_registry_t requirement_registry = {0};
   loom_testbench_requirement_provider_registry_initialize(

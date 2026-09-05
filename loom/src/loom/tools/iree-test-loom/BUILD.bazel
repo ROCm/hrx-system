@@ -7,7 +7,6 @@
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
-    "iree_select",
     "loom_cc_binary",
     "loom_cc_library",
 )
@@ -16,46 +15,6 @@ package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
-)
-
-_AMDGPU_TARGET_COPTS = iree_select({
-    "//loom/config/execute:amdgpu_hal": [
-        "-DIREE_TEST_LOOM_HAVE_AMDGPU=1",
-    ],
-    "//conditions:default": [],
-})
-
-_AMDGPU_TARGET_DEPS = iree_select({
-    "//loom/config/execute:amdgpu_hal": [
-        "//loom/src/loom/target/arch/amdgpu:provider",
-        "//loom/src/loom/tooling/target/amdgpu:device_provider",
-        "//loom/src/loom/tooling/target/amdgpu:testbench_requirements",
-    ],
-    "//conditions:default": [],
-})
-
-_SPIRV_VULKAN_TARGET_COPTS = iree_select({
-    "//loom/config/execute:spirv_vulkan_hal": [
-        "-DIREE_TEST_LOOM_HAVE_SPIRV=1",
-    ],
-    "//conditions:default": [],
-})
-
-_SPIRV_VULKAN_TARGET_DEPS = iree_select({
-    "//loom/config/execute:spirv_vulkan_hal": [
-        "//loom/src/loom/target/arch/spirv:provider",
-        "//loom/src/loom/tooling/target/spirv:device_provider",
-        "//loom/src/loom/tooling/target/spirv:testbench_requirements",
-    ],
-    "//conditions:default": [],
-})
-
-_IREE_TEST_LOOM_TARGET_COPTS = (
-    _AMDGPU_TARGET_COPTS + _SPIRV_VULKAN_TARGET_COPTS
-)
-
-_IREE_TEST_LOOM_TARGET_DEPS = (
-    _AMDGPU_TARGET_DEPS + _SPIRV_VULKAN_TARGET_DEPS
 )
 
 loom_cc_library(
@@ -78,6 +37,7 @@ loom_cc_library(
         "//loom/src/loom/tooling/execution:session",
         "//loom/src/loom/tooling/execution/hal:device_provider",
         "//loom/src/loom/tooling/execution/hal:testbench_actual",
+        "//loom/src/loom/tooling/execution/hal:testbench_requirement_provider",
         "//loom/src/loom/tooling/io:file",
         "//loom/src/loom/tooling/testbench:device_event",
         "//loom/src/loom/tooling/testbench:executor",
@@ -97,12 +57,13 @@ loom_cc_library(
 loom_cc_binary(
     name = "iree-test-loom",
     srcs = ["iree-test-loom.c"],
-    copts = _IREE_TEST_LOOM_TARGET_COPTS,
     deps = [
         ":main",
+        "//loom/src/loom/tooling/execution:configured",
+        "//loom/src/loom/tooling/execution:configured_testbench",
         "//loom/src/loom/tooling/execution:execution_provider",
         "//runtime/src/iree/base",
-    ] + _IREE_TEST_LOOM_TARGET_DEPS,
+    ],
 )
 
 iree_execution_test_suite(

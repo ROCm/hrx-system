@@ -6,54 +6,18 @@
 
 // iree-run-loom binary with build-selected execution providers.
 
-#include <stddef.h>
 #include <stdio.h>
 
+#include "loom/tooling/execution/configured.h"
 #include "loom/tooling/execution/execution_provider.h"
 #include "loom/tools/iree-run-loom/main.h"
 
-#ifndef IREE_RUN_LOOM_HAVE_AMDGPU
-#define IREE_RUN_LOOM_HAVE_AMDGPU 0
-#endif  // IREE_RUN_LOOM_HAVE_AMDGPU
-#ifndef IREE_RUN_LOOM_HAVE_SPIRV
-#define IREE_RUN_LOOM_HAVE_SPIRV 0
-#endif  // IREE_RUN_LOOM_HAVE_SPIRV
-
-#define IREE_RUN_LOOM_HAVE_ANY_PROVIDER \
-  (IREE_RUN_LOOM_HAVE_AMDGPU || IREE_RUN_LOOM_HAVE_SPIRV)
-
-#if IREE_RUN_LOOM_HAVE_AMDGPU
-#include "loom/tooling/target/amdgpu/execution_provider.h"
-#endif  // IREE_RUN_LOOM_HAVE_AMDGPU
-#if IREE_RUN_LOOM_HAVE_SPIRV
-#include "loom/tooling/target/spirv/execution_provider.h"
-#endif  // IREE_RUN_LOOM_HAVE_SPIRV
-
-#if IREE_RUN_LOOM_HAVE_ANY_PROVIDER
-static const loom_run_execution_provider_t* const kIreeRunLoomProviders[] = {
-#if IREE_RUN_LOOM_HAVE_AMDGPU
-    &loom_amdgpu_execution_provider,
-#endif  // IREE_RUN_LOOM_HAVE_AMDGPU
-#if IREE_RUN_LOOM_HAVE_SPIRV
-    &loom_spirv_vulkan_execution_provider,
-#endif  // IREE_RUN_LOOM_HAVE_SPIRV
-};
-#endif  // IREE_RUN_LOOM_HAVE_ANY_PROVIDER
-
-static const loom_run_execution_provider_set_t kIreeRunLoomProviderSet = {
-#if IREE_RUN_LOOM_HAVE_ANY_PROVIDER
-    .providers = kIreeRunLoomProviders,
-    .provider_count = IREE_ARRAYSIZE(kIreeRunLoomProviders),
-#else
-    .providers = NULL,
-    .provider_count = 0,
-#endif  // IREE_RUN_LOOM_HAVE_ANY_PROVIDER
-};
-
 int main(int argc, char** argv) {
+  const loom_tooling_execution_providers_t* configured_providers =
+      loom_tooling_configured_execution_providers();
   loom_run_execution_environment_t environment;
   iree_status_t status = loom_run_execution_environment_initialize(
-      &kIreeRunLoomProviderSet, &environment);
+      &configured_providers->execution_provider_set, &environment);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

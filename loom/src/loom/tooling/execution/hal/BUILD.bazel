@@ -129,6 +129,16 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "testbench_requirement_provider",
+    srcs = ["testbench_requirement_provider.c"],
+    hdrs = ["testbench_requirement_provider.h"],
+    deps = [
+        "//loom/src/loom/tooling/testbench:requirements",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "benchmark",
     srcs = ["benchmark.c"],
     hdrs = ["benchmark.h"],
@@ -228,6 +238,16 @@ loom_cc_test(
         "//loom/src/loom/tooling/testbench",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "testbench_requirement_provider_test",
+    srcs = ["testbench_requirement_provider_test.cc"],
+    deps = [
+        ":testbench_requirement_provider",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

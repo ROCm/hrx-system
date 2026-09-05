@@ -36,32 +36,16 @@ loom_cc_library(
   PUBLIC
 )
 
-set(_iree_run_loom_platform_copts "")
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-  list(APPEND _iree_run_loom_platform_copts "-DIREE_RUN_LOOM_HAVE_AMDGPU=1")
-endif()
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
-  list(APPEND _iree_run_loom_platform_copts "-DIREE_RUN_LOOM_HAVE_SPIRV=1")
-endif()
-set(_iree_run_loom_platform_deps "")
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-  list(APPEND _iree_run_loom_platform_deps loom::tooling::target::amdgpu::execution_provider)
-endif()
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
-  list(APPEND _iree_run_loom_platform_deps loom::tooling::target::spirv::execution_provider)
-endif()
 loom_cc_binary(
   NAME
     iree-run-loom
   SRCS
     "iree-run-loom.c"
-  COPTS
-    ${_iree_run_loom_platform_copts}
   DEPS
     ::main
     iree::base
+    loom::tooling::execution::configured
     loom::tooling::execution::execution_provider
-    ${_iree_run_loom_platform_deps}
 )
 
 iree_execution_test_suite(

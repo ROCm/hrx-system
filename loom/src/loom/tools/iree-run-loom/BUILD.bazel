@@ -7,7 +7,6 @@
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
-    "iree_select",
     "loom_cc_binary",
     "loom_cc_library",
 )
@@ -16,42 +15,6 @@ package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
-)
-
-_AMDGPU_EXECUTE_COPTS = iree_select({
-    "//loom/config/execute:amdgpu_hal": [
-        "-DIREE_RUN_LOOM_HAVE_AMDGPU=1",
-    ],
-    "//conditions:default": [],
-})
-
-_AMDGPU_EXECUTE_DEPS = iree_select({
-    "//loom/config/execute:amdgpu_hal": [
-        "//loom/src/loom/tooling/target/amdgpu:execution_provider",
-    ],
-    "//conditions:default": [],
-})
-
-_SPIRV_VULKAN_EXECUTE_COPTS = iree_select({
-    "//loom/config/execute:spirv_vulkan_hal": [
-        "-DIREE_RUN_LOOM_HAVE_SPIRV=1",
-    ],
-    "//conditions:default": [],
-})
-
-_SPIRV_VULKAN_EXECUTE_DEPS = iree_select({
-    "//loom/config/execute:spirv_vulkan_hal": [
-        "//loom/src/loom/tooling/target/spirv:execution_provider",
-    ],
-    "//conditions:default": [],
-})
-
-_IREE_RUN_LOOM_EXECUTE_COPTS = (
-    _AMDGPU_EXECUTE_COPTS + _SPIRV_VULKAN_EXECUTE_COPTS
-)
-
-_IREE_RUN_LOOM_EXECUTE_DEPS = (
-    _AMDGPU_EXECUTE_DEPS + _SPIRV_VULKAN_EXECUTE_DEPS
 )
 
 loom_cc_library(
@@ -85,12 +48,12 @@ loom_cc_library(
 loom_cc_binary(
     name = "iree-run-loom",
     srcs = ["iree-run-loom.c"],
-    copts = _IREE_RUN_LOOM_EXECUTE_COPTS,
     deps = [
         ":main",
+        "//loom/src/loom/tooling/execution:configured",
         "//loom/src/loom/tooling/execution:execution_provider",
         "//runtime/src/iree/base",
-    ] + _IREE_RUN_LOOM_EXECUTE_DEPS,
+    ],
 )
 
 iree_execution_test_suite(

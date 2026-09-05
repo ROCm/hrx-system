@@ -12,29 +12,12 @@
 #include "iree/base/api.h"
 #include "loom/target/provider.h"
 #include "loom/tooling/execution/hal/device_provider.h"
+#include "loom/tooling/execution/hal/testbench_requirement_provider.h"
 #include "loom/tooling/execution/session.h"
-#include "loom/tooling/testbench/requirements.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-typedef struct loom_run_hal_testbench_context_t
-    loom_run_hal_testbench_context_t;
-
-// Appends target-linked requirement providers to |providers|.
-typedef iree_status_t (*iree_test_loom_populate_requirement_providers_fn_t)(
-    void* user_data, loom_run_hal_testbench_context_t* hal_context,
-    iree_host_size_t provider_capacity,
-    loom_testbench_requirement_provider_t* providers,
-    iree_host_size_t* inout_provider_count);
-
-typedef struct iree_test_loom_populate_requirement_providers_callback_t {
-  // Callback implementation, or NULL when no extra providers are linked.
-  iree_test_loom_populate_requirement_providers_fn_t fn;
-  // Opaque callback state passed to |fn|.
-  void* user_data;
-} iree_test_loom_populate_requirement_providers_callback_t;
 
 typedef struct iree_test_loom_configuration_t {
   // Null-terminated executable name used in help and diagnostics.
@@ -45,9 +28,9 @@ typedef struct iree_test_loom_configuration_t {
   const loom_target_environment_t* target_environment;
   // Linked device providers available to kernel launches.
   const loom_device_provider_registry_t* device_provider_registry;
-  // Appends target-specific requirement providers linked into this runner.
-  iree_test_loom_populate_requirement_providers_callback_t
-      populate_requirement_providers;
+  // Target-specific requirement provider initializers linked into this runner.
+  const loom_run_hal_testbench_requirement_initializer_set_t*
+      requirement_provider_initializers;
   // Target-low descriptor registry package linked into this runner.
   loom_run_initialize_low_descriptor_registry_callback_t
       initialize_low_descriptor_registry;

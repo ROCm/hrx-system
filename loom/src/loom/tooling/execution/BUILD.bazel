@@ -6,8 +6,56 @@
 
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
+    "iree_select",
     "loom_cc_library",
     "loom_cc_test",
+)
+
+_CONFIGURED_EXECUTION_COPTS = (
+    iree_select({
+        "//loom/config/execute:amdgpu_hal": [
+            "-DLOOM_CONFIG_EXECUTION_HAVE_AMDGPU=1",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/execute:spirv_vulkan_hal": [
+            "-DLOOM_CONFIG_EXECUTION_HAVE_SPIRV=1",
+        ],
+        "//conditions:default": [],
+    })
+)
+
+_CONFIGURED_EXECUTION_DEPS = (
+    iree_select({
+        "//loom/config/execute:amdgpu_hal": [
+            "//loom/src/loom/tooling/target/amdgpu:device_provider",
+            "//loom/src/loom/tooling/target/amdgpu:execution_provider",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/execute:spirv_vulkan_hal": [
+            "//loom/src/loom/tooling/target/spirv:device_provider",
+            "//loom/src/loom/tooling/target/spirv:execution_provider",
+        ],
+        "//conditions:default": [],
+    })
+)
+
+_CONFIGURED_TESTBENCH_DEPS = (
+    iree_select({
+        "//loom/config/execute:amdgpu_hal": [
+            "//loom/src/loom/tooling/target/amdgpu:testbench_requirements",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/execute:spirv_vulkan_hal": [
+            "//loom/src/loom/tooling/target/spirv:testbench_requirements",
+        ],
+        "//conditions:default": [],
+    })
 )
 
 package(
@@ -34,6 +82,51 @@ loom_cc_library(
         ":session",
         "//loom/src/loom/target:provider",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "configured",
+    srcs = ["configured.c"],
+    hdrs = ["configured.h"],
+    copts = _CONFIGURED_EXECUTION_COPTS,
+    deps = [
+        ":execution_provider",
+        "//loom/src/loom/tooling/execution/hal:device_provider",
+        "//runtime/src/iree/base",
+    ] + _CONFIGURED_EXECUTION_DEPS,
+)
+
+loom_cc_test(
+    name = "configured_test",
+    srcs = ["configured_test.cc"],
+    copts = _CONFIGURED_EXECUTION_COPTS,
+    deps = [
+        ":configured",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "configured_testbench",
+    srcs = ["configured_testbench.c"],
+    hdrs = ["configured_testbench.h"],
+    copts = _CONFIGURED_EXECUTION_COPTS,
+    deps = [
+        "//loom/src/loom/tooling/execution/hal:testbench_requirement_provider",
+        "//runtime/src/iree/base",
+    ] + _CONFIGURED_TESTBENCH_DEPS,
+)
+
+loom_cc_test(
+    name = "configured_testbench_test",
+    srcs = ["configured_testbench_test.cc"],
+    copts = _CONFIGURED_EXECUTION_COPTS,
+    deps = [
+        ":configured_testbench",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

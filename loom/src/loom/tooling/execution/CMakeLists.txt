@@ -36,6 +36,109 @@ loom_cc_library(
   PUBLIC
 )
 
+set(_configured_platform_copts "")
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+  list(APPEND _configured_platform_copts "-DLOOM_CONFIG_EXECUTION_HAVE_AMDGPU=1")
+endif()
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
+  list(APPEND _configured_platform_copts "-DLOOM_CONFIG_EXECUTION_HAVE_SPIRV=1")
+endif()
+set(_configured_platform_deps "")
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+  list(APPEND _configured_platform_deps loom::tooling::target::amdgpu::device_provider)
+  list(APPEND _configured_platform_deps loom::tooling::target::amdgpu::execution_provider)
+endif()
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
+  list(APPEND _configured_platform_deps loom::tooling::target::spirv::device_provider)
+  list(APPEND _configured_platform_deps loom::tooling::target::spirv::execution_provider)
+endif()
+loom_cc_library(
+  NAME
+    configured
+  COPTS
+    ${_configured_platform_copts}
+  HDRS
+    "configured.h"
+  SRCS
+    "configured.c"
+  DEPS
+    ::execution_provider
+    iree::base
+    loom::tooling::execution::hal::device_provider
+    ${_configured_platform_deps}
+  PUBLIC
+)
+
+set(_configured_test_platform_copts "")
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+  list(APPEND _configured_test_platform_copts "-DLOOM_CONFIG_EXECUTION_HAVE_AMDGPU=1")
+endif()
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
+  list(APPEND _configured_test_platform_copts "-DLOOM_CONFIG_EXECUTION_HAVE_SPIRV=1")
+endif()
+loom_cc_test(
+  NAME
+    configured_test
+  SRCS
+    "configured_test.cc"
+  COPTS
+    ${_configured_test_platform_copts}
+  DEPS
+    ::configured
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+set(_configured_testbench_platform_copts "")
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+  list(APPEND _configured_testbench_platform_copts "-DLOOM_CONFIG_EXECUTION_HAVE_AMDGPU=1")
+endif()
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
+  list(APPEND _configured_testbench_platform_copts "-DLOOM_CONFIG_EXECUTION_HAVE_SPIRV=1")
+endif()
+set(_configured_testbench_platform_deps "")
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+  list(APPEND _configured_testbench_platform_deps loom::tooling::target::amdgpu::testbench_requirements)
+endif()
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
+  list(APPEND _configured_testbench_platform_deps loom::tooling::target::spirv::testbench_requirements)
+endif()
+loom_cc_library(
+  NAME
+    configured_testbench
+  COPTS
+    ${_configured_testbench_platform_copts}
+  HDRS
+    "configured_testbench.h"
+  SRCS
+    "configured_testbench.c"
+  DEPS
+    iree::base
+    loom::tooling::execution::hal::testbench_requirement_provider
+    ${_configured_testbench_platform_deps}
+  PUBLIC
+)
+
+set(_configured_testbench_test_platform_copts "")
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+  list(APPEND _configured_testbench_test_platform_copts "-DLOOM_CONFIG_EXECUTION_HAVE_AMDGPU=1")
+endif()
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
+  list(APPEND _configured_testbench_test_platform_copts "-DLOOM_CONFIG_EXECUTION_HAVE_SPIRV=1")
+endif()
+loom_cc_test(
+  NAME
+    configured_testbench_test
+  SRCS
+    "configured_testbench_test.cc"
+  COPTS
+    ${_configured_testbench_test_platform_copts}
+  DEPS
+    ::configured_testbench
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_library(
   NAME
     execution_backend

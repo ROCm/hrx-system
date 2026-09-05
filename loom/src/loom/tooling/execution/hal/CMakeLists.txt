@@ -134,6 +134,19 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    testbench_requirement_provider
+  HDRS
+    "testbench_requirement_provider.h"
+  SRCS
+    "testbench_requirement_provider.c"
+  DEPS
+    iree::base
+    loom::tooling::testbench::requirements
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     benchmark
   HDRS
     "benchmark.h"
@@ -245,6 +258,17 @@ loom_cc_test(
     loom::testing::module_ptr
     loom::tooling::execution::session
     loom::tooling::testbench
+)
+
+loom_cc_test(
+  NAME
+    testbench_requirement_provider_test
+  SRCS
+    "testbench_requirement_provider_test.cc"
+  DEPS
+    ::testbench_requirement_provider
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
