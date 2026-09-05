@@ -100,7 +100,7 @@ typedef uint64_t loom_value_fact_numeric_format_bits_t;
 
 typedef uint64_t loom_value_fact_numeric_format_flags_t;
 
-typedef enum loom_numeric_format_kind_e {
+enum loom_numeric_format_kind_e {
   // Unknown or uninitialized numeric format.
   LOOM_NUMERIC_FORMAT_KIND_UNKNOWN = 0,
   // Signed integer payload.
@@ -117,9 +117,10 @@ typedef enum loom_numeric_format_kind_e {
   LOOM_NUMERIC_FORMAT_KIND_TERNARY = 6,
   // Sign-only payload.
   LOOM_NUMERIC_FORMAT_KIND_SIGN_BIT = 7,
-} loom_numeric_format_kind_t;
+};
+typedef uint8_t loom_numeric_format_kind_t;
 
-typedef enum loom_numeric_float_family_e {
+enum loom_numeric_float_family_e {
   // Not a floating-point format.
   LOOM_NUMERIC_FLOAT_FAMILY_NONE = 0,
   // IEEE-like binary floating-point format.
@@ -138,9 +139,10 @@ typedef enum loom_numeric_float_family_e {
   LOOM_NUMERIC_FLOAT_FAMILY_BF6 = 7,
   // FP4-style floating-point format.
   LOOM_NUMERIC_FLOAT_FAMILY_FP4 = 8,
-} loom_numeric_float_family_t;
+};
+typedef uint8_t loom_numeric_float_family_t;
 
-typedef enum loom_numeric_format_flag_bits_e {
+enum loom_numeric_format_flag_bits_e {
   // The format encodes a sign bit.
   LOOM_NUMERIC_FORMAT_FLAG_SIGNED = 1u << 0,
   // The format has at least one NaN encoding.
@@ -154,10 +156,14 @@ typedef enum loom_numeric_format_flag_bits_e {
   // Matrix/packed-dot contracts need payload format selector facts for this
   // encoded element format.
   LOOM_NUMERIC_FORMAT_FLAG_ENCODED_PAYLOAD_SELECTOR = 1u << 5,
-} loom_numeric_format_flag_bits_t;
+  // Stored integer bits are an unsigned code centered by
+  // |integer_decode_bias| instead of a two's-complement value.
+  LOOM_NUMERIC_FORMAT_FLAG_OFFSET_BINARY = 1u << 6,
+};
+typedef uint8_t loom_numeric_format_flag_bits_t;
 
 // Bitset of loom_numeric_format_flag_bits_t values.
-typedef uint32_t loom_numeric_format_flags_t;
+typedef uint8_t loom_numeric_format_flags_t;
 
 typedef struct loom_numeric_format_info_t {
   // Single-bit numeric-format fact represented by this row.
@@ -180,6 +186,10 @@ typedef struct loom_numeric_format_info_t {
 
   // Direct Loom scalar carrier, or LOOM_SCALAR_TYPE_NONE when none exists.
   loom_scalar_type_t direct_scalar_type;
+
+  // Integer constant added to an unsigned stored code before arithmetic.
+  // Only OFFSET_BINARY formats have a nonzero bias.
+  int8_t integer_decode_bias;
 
   // Special-value and contract behavior flags.
   loom_numeric_format_flags_t flags;

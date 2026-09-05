@@ -722,7 +722,6 @@ def test_generate_encoding_family_metadata() -> None:
     assert ".numeric_format = 17" in tables_c
     assert ".element_bit_count = 4" in tables_c
     assert ".field_count = IREE_ARRAYSIZE(loom_encoding_operand_record_fields)" in tables_c
-    assert ".mapping_count = IREE_ARRAYSIZE(loom_encoding_operand_record_mappings)" in tables_c
     assert ".fields = loom_encoding_operand_record_fields" in tables_c
     assert ".mappings = loom_encoding_operand_record_mappings" in tables_c
     assert ".fixed_metadata = &loom_encoding_operand_fixed_metadata" in tables_c

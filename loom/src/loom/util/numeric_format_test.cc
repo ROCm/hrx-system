@@ -165,6 +165,36 @@ TEST(NumericFormatTest, MapsNumericFormatsToDirectScalarTypes) {
       LOOM_VALUE_FACT_NUMERIC_FORMAT_UNKNOWN, &type));
 }
 
+TEST(NumericFormatTest, DescribesOffsetBinaryQuantizedIntegers) {
+  const loom_numeric_format_info_t* q4 = nullptr;
+  ASSERT_TRUE(
+      loom_numeric_format_info(LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I4, &q4));
+  EXPECT_EQ(q4->kind, LOOM_NUMERIC_FORMAT_KIND_QUANTIZED_SIGNED_INTEGER);
+  EXPECT_EQ(q4->storage_bit_count, 4);
+  EXPECT_EQ(q4->integer_decode_bias, -8);
+  EXPECT_TRUE(
+      iree_all_bits_set(q4->flags, LOOM_NUMERIC_FORMAT_FLAG_SIGNED |
+                                       LOOM_NUMERIC_FORMAT_FLAG_OFFSET_BINARY));
+  EXPECT_FALSE(loom_numeric_format_uses_unsigned_integer_semantics(q4->format));
+
+  const loom_numeric_format_info_t* q6 = nullptr;
+  ASSERT_TRUE(
+      loom_numeric_format_info(LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I6, &q6));
+  EXPECT_EQ(q6->storage_bit_count, 6);
+  EXPECT_EQ(q6->integer_decode_bias, -32);
+  EXPECT_TRUE(
+      iree_any_bit_set(q6->flags, LOOM_NUMERIC_FORMAT_FLAG_OFFSET_BINARY));
+  EXPECT_FALSE(loom_numeric_format_uses_unsigned_integer_semantics(q6->format));
+
+  const loom_numeric_format_info_t* q8 = nullptr;
+  ASSERT_TRUE(
+      loom_numeric_format_info(LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I8, &q8));
+  EXPECT_EQ(q8->integer_decode_bias, 0);
+  EXPECT_FALSE(
+      iree_any_bit_set(q8->flags, LOOM_NUMERIC_FORMAT_FLAG_OFFSET_BINARY));
+  EXPECT_FALSE(loom_numeric_format_uses_unsigned_integer_semantics(q8->format));
+}
+
 TEST(NumericFormatTest, DescribesUnsignedIntegerSemantics) {
   EXPECT_TRUE(loom_numeric_format_uses_unsigned_integer_semantics(
       LOOM_VALUE_FACT_NUMERIC_FORMAT_U8));

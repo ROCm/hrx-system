@@ -36,19 +36,34 @@ enum {
   (LOOM_NUMERIC_FORMAT_FINITE_NAN_UNSIGNED_ZERO_FLAGS |             \
    LOOM_NUMERIC_FORMAT_FLAG_ENCODED_PAYLOAD_SELECTOR)
 
+#define LOOM_NUMERIC_FORMAT_INFO(index_, format_, kind_, family_, storage_,    \
+                                 exponent_, mantissa_, scalar_, bias_, flags_) \
+  [index_] = {                                                                 \
+      .format = format_,                                                       \
+      .kind = kind_,                                                           \
+      .float_family = family_,                                                 \
+      .storage_bit_count = storage_,                                           \
+      .exponent_bit_count = exponent_,                                         \
+      .mantissa_bit_count = mantissa_,                                         \
+      .direct_scalar_type = scalar_,                                           \
+      .integer_decode_bias = bias_,                                            \
+      .flags = flags_,                                                         \
+  }
+
 #define LOOM_NUMERIC_FORMAT_INFO_ROW(index_, format_, kind_, family_,         \
                                      storage_, exponent_, mantissa_, scalar_, \
                                      flags_)                                  \
-  [index_] = {                                                                \
-      .format = format_,                                                      \
-      .kind = kind_,                                                          \
-      .float_family = family_,                                                \
-      .storage_bit_count = storage_,                                          \
-      .exponent_bit_count = exponent_,                                        \
-      .mantissa_bit_count = mantissa_,                                        \
-      .direct_scalar_type = scalar_,                                          \
-      .flags = flags_,                                                        \
-  }
+  LOOM_NUMERIC_FORMAT_INFO(index_, format_, kind_, family_, storage_,         \
+                           exponent_, mantissa_, scalar_, 0, flags_)
+
+#define LOOM_NUMERIC_FORMAT_OFFSET_BINARY_ROW(index_, format_, storage_,      \
+                                              bias_)                          \
+  LOOM_NUMERIC_FORMAT_INFO(index_, format_,                                   \
+                           LOOM_NUMERIC_FORMAT_KIND_QUANTIZED_SIGNED_INTEGER, \
+                           LOOM_NUMERIC_FLOAT_FAMILY_NONE, storage_, 0, 0,    \
+                           LOOM_SCALAR_TYPE_NONE, bias_,                      \
+                           LOOM_NUMERIC_FORMAT_FLAG_SIGNED |                  \
+                               LOOM_NUMERIC_FORMAT_FLAG_OFFSET_BINARY)
 
 static const loom_numeric_format_info_t
     kLoomNumericFormatInfos[LOOM_NUMERIC_FORMAT_INFO_COUNT] = {
@@ -229,19 +244,13 @@ static const loom_numeric_format_info_t
             LOOM_NUMERIC_FORMAT_KIND_QUANTIZED_SIGNED_INTEGER,
             LOOM_NUMERIC_FLOAT_FAMILY_NONE, 8, 0, 0, LOOM_SCALAR_TYPE_I8,
             LOOM_NUMERIC_FORMAT_FLAG_SIGNED),
-        LOOM_NUMERIC_FORMAT_INFO_ROW(
-            38, LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I6,
-            LOOM_NUMERIC_FORMAT_KIND_QUANTIZED_SIGNED_INTEGER,
-            LOOM_NUMERIC_FLOAT_FAMILY_NONE, 6, 0, 0, LOOM_SCALAR_TYPE_NONE,
-            LOOM_NUMERIC_FORMAT_FLAG_SIGNED),
-        LOOM_NUMERIC_FORMAT_INFO_ROW(
-            39, LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I4,
-            LOOM_NUMERIC_FORMAT_KIND_QUANTIZED_SIGNED_INTEGER,
-            LOOM_NUMERIC_FLOAT_FAMILY_NONE, 4, 0, 0, LOOM_SCALAR_TYPE_NONE,
-            LOOM_NUMERIC_FORMAT_FLAG_SIGNED),
+        LOOM_NUMERIC_FORMAT_OFFSET_BINARY_ROW(
+            38, LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I6, 6, -32),
+        LOOM_NUMERIC_FORMAT_OFFSET_BINARY_ROW(
+            39, LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I4, 4, -8),
 };
-static_assert(sizeof(loom_numeric_format_info_t) == 24,
-              "direct scalar types must reuse numeric format table padding");
+static_assert(sizeof(loom_numeric_format_info_t) == 16,
+              "numeric format rows must remain padding-free");
 
 static const loom_value_fact_numeric_format_flags_t
     kLoomNumericFormatsByScalarType[LOOM_SCALAR_TYPE_COUNT_] = {
@@ -335,3 +344,6 @@ loom_value_fact_numeric_format_flags_t loom_numeric_format_from_scalar_type(
 #undef LOOM_NUMERIC_FORMAT_FINITE_NAN_UNSIGNED_ZERO_FLAGS
 #undef LOOM_NUMERIC_FORMAT_FINITE_NAN_FLAGS
 #undef LOOM_NUMERIC_FORMAT_FLOAT_FLAGS
+#undef LOOM_NUMERIC_FORMAT_OFFSET_BINARY_ROW
+#undef LOOM_NUMERIC_FORMAT_INFO
+#undef LOOM_NUMERIC_FORMAT_INFO_ROW

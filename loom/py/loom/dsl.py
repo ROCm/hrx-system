@@ -3441,7 +3441,14 @@ class EncodingRecordFieldDef:
 
 @dataclass(frozen=True, slots=True)
 class EncodingRecordDef:
-    """Exact physical geometry for one fixed encoding record."""
+    """Exact physical and numerical layout for one fixed encoding record.
+
+    Every field element applies to one uniform consecutive group of logical
+    record elements. The payload code is multiplied by every applicable SCALE
+    hierarchy level, then the product of every applicable MINIMUM hierarchy
+    level is subtracted. Numeric formats define code interpretation, including
+    offset-binary quantized integers.
+    """
 
     logical_element_count: int
     storage_byte_count: int
@@ -3512,6 +3519,41 @@ class EncodingRecordDef:
                                 "record storage"
                             )
                         mapped_record_bits.add(record_bit)
+
+        if not fields:
+            return
+
+        payload_fields = [
+            field for field in fields if field.role is EncodingRecordFieldRole.PAYLOAD
+        ]
+        if len(payload_fields) != 1:
+            raise ValueError("EncodingRecordDef: exactly one payload field is required")
+        payload_field = payload_fields[0]
+        if payload_field.hierarchy_level != 0:
+            raise ValueError(
+                "EncodingRecordDef: payload field must use hierarchy level zero"
+            )
+        if payload_field.element_count != self.logical_element_count:
+            raise ValueError(
+                "EncodingRecordDef: payload field must cover every logical element"
+            )
+
+        for field in fields:
+            if self.logical_element_count % field.element_count:
+                raise ValueError(
+                    "EncodingRecordDef: field element count must divide the "
+                    "logical element count"
+                )
+
+        for role in EncodingRecordFieldRole:
+            hierarchy_levels = sorted(
+                field.hierarchy_level for field in fields if field.role is role
+            )
+            if hierarchy_levels != list(range(len(hierarchy_levels))):
+                raise ValueError(
+                    "EncodingRecordDef: field hierarchy levels must be contiguous "
+                    "from zero"
+                )
 
 
 @dataclass(frozen=True, slots=True)

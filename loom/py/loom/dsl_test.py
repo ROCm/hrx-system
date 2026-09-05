@@ -911,6 +911,65 @@ class TestEncodingRecordDef:
         with _raises(ValueError, match="duplicate field role and hierarchy level"):
             EncodingRecordDef(1, 4, fields=[field, field])
 
+    def test_rejects_record_fields_without_one_payload(self) -> None:
+        scale = EncodingRecordFieldDef(
+            EncodingRecordFieldRole.SCALE,
+            EnumCase("f16", 4),
+            16,
+            1,
+            [EncodingRecordMappingDef(0, 16, 0, 1, 0, 16)],
+        )
+        with _raises(ValueError, match="exactly one payload field"):
+            EncodingRecordDef(1, 2, fields=[scale])
+
+    def test_rejects_partial_payload_field(self) -> None:
+        payload = EncodingRecordFieldDef(
+            EncodingRecordFieldRole.PAYLOAD,
+            EnumCase("u4", 17),
+            4,
+            2,
+            [EncodingRecordMappingDef(0, 4, 0, 2, 0, 4)],
+        )
+        with _raises(ValueError, match="must cover every logical element"):
+            EncodingRecordDef(4, 1, fields=[payload])
+
+    def test_rejects_nonuniform_field_groups(self) -> None:
+        payload = EncodingRecordFieldDef(
+            EncodingRecordFieldRole.PAYLOAD,
+            EnumCase("u4", 17),
+            4,
+            6,
+            [EncodingRecordMappingDef(0, 4, 0, 6, 0, 4)],
+        )
+        scale = EncodingRecordFieldDef(
+            EncodingRecordFieldRole.SCALE,
+            EnumCase("u4", 17),
+            4,
+            4,
+            [EncodingRecordMappingDef(24, 4, 0, 4, 0, 4)],
+        )
+        with _raises(ValueError, match="must divide the logical element count"):
+            EncodingRecordDef(6, 5, fields=[payload, scale])
+
+    def test_rejects_sparse_field_hierarchy(self) -> None:
+        payload = EncodingRecordFieldDef(
+            EncodingRecordFieldRole.PAYLOAD,
+            EnumCase("u4", 17),
+            4,
+            2,
+            [EncodingRecordMappingDef(0, 4, 0, 2, 0, 4)],
+        )
+        scale = EncodingRecordFieldDef(
+            EncodingRecordFieldRole.SCALE,
+            EnumCase("u4", 17),
+            4,
+            1,
+            [EncodingRecordMappingDef(8, 4, 0, 1, 0, 4)],
+            hierarchy_level=1,
+        )
+        with _raises(ValueError, match="hierarchy levels must be contiguous"):
+            EncodingRecordDef(2, 2, fields=[payload, scale])
+
 
 class TestEncodingOperandSummaryDef:
     def test_canonicalizes_scale_group_element_count(self) -> None:

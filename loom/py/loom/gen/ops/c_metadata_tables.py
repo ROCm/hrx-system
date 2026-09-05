@@ -584,7 +584,6 @@ def _emit_encoding_family_fixed_metadata(lines: list[str], family: EncodingFamil
         if record_tables is not None:
             field_table_name, mapping_table_name = record_tables
             lines.append(f"        .field_count = IREE_ARRAYSIZE({field_table_name}),")
-            lines.append(f"        .mapping_count = IREE_ARRAYSIZE({mapping_table_name}),")
             lines.append(f"        .fields = {field_table_name},")
             lines.append(f"        .mappings = {mapping_table_name},")
         lines.append("    },")
