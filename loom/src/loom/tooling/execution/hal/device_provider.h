@@ -161,9 +161,13 @@ void loom_device_provider_registry_initialize_from_entries(
     iree_host_size_t provider_count,
     loom_device_provider_registry_t* out_registry);
 
-// Looks up a device provider by its artifact provider name.
-const loom_device_provider_t* loom_device_provider_registry_lookup(
-    const loom_device_provider_registry_t* registry, iree_string_view_t name);
+// Selects the device provider matching exactly one standard --device= URI.
+// Selection compares the URI driver name with each provider's |driver_name|.
+// The success path borrows the provider and performs no allocation.
+iree_status_t loom_device_provider_registry_select(
+    const loom_device_provider_registry_t* registry,
+    iree_string_view_list_t device_uris, iree_allocator_t host_allocator,
+    const loom_device_provider_t** out_provider);
 
 // Appends the comma-separated --device driver names accepted by |registry|.
 iree_status_t loom_device_provider_registry_format_driver_names(

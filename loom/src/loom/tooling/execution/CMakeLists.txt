@@ -29,10 +29,10 @@ loom_cc_library(
   SRCS
     "execution_provider.c"
   DEPS
-    ::execution_backend
     ::session
     iree::base
     loom::target::provider
+    loom::tooling::execution::hal::device_provider
   PUBLIC
 )
 
@@ -45,11 +45,9 @@ if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE
 endif()
 set(_configured_platform_deps "")
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-  list(APPEND _configured_platform_deps loom::tooling::target::amdgpu::device_provider)
   list(APPEND _configured_platform_deps loom::tooling::target::amdgpu::execution_provider)
 endif()
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
-  list(APPEND _configured_platform_deps loom::tooling::target::spirv::device_provider)
   list(APPEND _configured_platform_deps loom::tooling::target::spirv::execution_provider)
 endif()
 loom_cc_library(
@@ -64,7 +62,6 @@ loom_cc_library(
   DEPS
     ::execution_provider
     iree::base
-    loom::tooling::execution::hal::device_provider
     ${_configured_platform_deps}
   PUBLIC
 )
@@ -141,18 +138,6 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
-    execution_backend
-  HDRS
-    "execution_backend.h"
-  SRCS
-    "execution_backend.c"
-  DEPS
-    iree::base
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
     measurement
   HDRS
     "measurement.h"
@@ -160,22 +145,6 @@ loom_cc_library(
     "measurement.c"
   DEPS
     iree::base
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    one_shot
-  HDRS
-    "one_shot.h"
-  SRCS
-    "one_shot.c"
-  DEPS
-    ::session
-    iree::base
-    loom::ir
-    loom::ops::kernel
-    loom::tooling::compile::options
   PUBLIC
 )
 
@@ -212,21 +181,6 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::util::stream
-)
-
-loom_cc_test(
-  NAME
-    one_shot_test
-  SRCS
-    "one_shot_test.cc"
-  DEPS
-    ::one_shot
-    ::session
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::ops::op_registry
-    loom::target::low_descriptor_registry_core_test
 )
 
 loom_cc_test(

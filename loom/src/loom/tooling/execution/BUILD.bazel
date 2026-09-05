@@ -29,14 +29,12 @@ _CONFIGURED_EXECUTION_COPTS = (
 _CONFIGURED_EXECUTION_DEPS = (
     iree_select({
         "//loom/config/execute:amdgpu_hal": [
-            "//loom/src/loom/tooling/target/amdgpu:device_provider",
             "//loom/src/loom/tooling/target/amdgpu:execution_provider",
         ],
         "//conditions:default": [],
     }) +
     iree_select({
         "//loom/config/execute:spirv_vulkan_hal": [
-            "//loom/src/loom/tooling/target/spirv:device_provider",
             "//loom/src/loom/tooling/target/spirv:execution_provider",
         ],
         "//conditions:default": [],
@@ -78,9 +76,9 @@ loom_cc_library(
     srcs = ["execution_provider.c"],
     hdrs = ["execution_provider.h"],
     deps = [
-        ":execution_backend",
         ":session",
         "//loom/src/loom/target:provider",
+        "//loom/src/loom/tooling/execution/hal:device_provider",
         "//runtime/src/iree/base",
     ],
 )
@@ -92,7 +90,6 @@ loom_cc_library(
     copts = _CONFIGURED_EXECUTION_COPTS,
     deps = [
         ":execution_provider",
-        "//loom/src/loom/tooling/execution/hal:device_provider",
         "//runtime/src/iree/base",
     ] + _CONFIGURED_EXECUTION_DEPS,
 )
@@ -131,32 +128,10 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "execution_backend",
-    srcs = ["execution_backend.c"],
-    hdrs = ["execution_backend.h"],
-    deps = [
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
     name = "measurement",
     srcs = ["measurement.c"],
     hdrs = ["measurement.h"],
     deps = [
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
-    name = "one_shot",
-    srcs = ["one_shot.c"],
-    hdrs = ["one_shot.h"],
-    deps = [
-        ":session",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/kernel",
-        "//loom/src/loom/tooling/compile:options",
         "//runtime/src/iree/base",
     ],
 )
@@ -186,20 +161,6 @@ loom_cc_test(
     deps = [
         ":benchmark",
         "//loom/src/loom/util:stream",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_test(
-    name = "one_shot_test",
-    srcs = ["one_shot_test.cc"],
-    deps = [
-        ":one_shot",
-        ":session",
-        "//loom/src/loom/ops:op_registry",
-        "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

@@ -20,6 +20,7 @@ loom_cc_library(
     iree::base
     iree::base::tooling::flags
     iree::io::file_handle
+    iree::tooling::device_util
     iree::tooling::value_io
     loom::error::diagnostic
     loom::ir
@@ -29,8 +30,7 @@ loom_cc_library(
     loom::tooling::compile::pipeline
     loom::tooling::compile::report_capture
     loom::tooling::context
-    loom::tooling::execution::execution_backend
-    loom::tooling::execution::one_shot
+    loom::tooling::execution::hal::one_shot
     loom::tooling::execution::session
     loom::tooling::io::file
   PUBLIC

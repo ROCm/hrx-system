@@ -22,18 +22,19 @@ static iree_status_t loom_run_execution_environment_append_target_provider(
   return iree_ok_status();
 }
 
-static iree_status_t loom_run_execution_environment_append_execution_backends(
+static iree_status_t loom_run_execution_environment_append_device_provider(
     loom_run_execution_environment_t* environment,
     const loom_run_execution_provider_t* provider) {
-  if (environment->execution_backend_count + provider->execution_backend_count >
-      IREE_ARRAYSIZE(environment->execution_backends)) {
+  if (provider->device_provider == NULL) {
+    return iree_ok_status();
+  }
+  if (environment->device_provider_count >=
+      IREE_ARRAYSIZE(environment->device_providers)) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "loom execution backend capacity exceeded");
+                            "loom HAL device provider capacity exceeded");
   }
-  for (iree_host_size_t i = 0; i < provider->execution_backend_count; ++i) {
-    environment->execution_backends[environment->execution_backend_count++] =
-        provider->execution_backends[i];
-  }
+  environment->device_providers[environment->device_provider_count++] =
+      provider->device_provider;
   return iree_ok_status();
 }
 
@@ -48,9 +49,8 @@ iree_status_t loom_run_execution_environment_initialize(
     const loom_run_execution_provider_t* provider = provider_set->providers[i];
     IREE_RETURN_IF_ERROR(loom_run_execution_environment_append_target_provider(
         out_environment, provider));
-    IREE_RETURN_IF_ERROR(
-        loom_run_execution_environment_append_execution_backends(
-            out_environment, provider));
+    IREE_RETURN_IF_ERROR(loom_run_execution_environment_append_device_provider(
+        out_environment, provider));
   }
   out_environment->target_provider_set =
       loom_target_provider_set_make(out_environment->target_providers,
@@ -58,10 +58,9 @@ iree_status_t loom_run_execution_environment_initialize(
   IREE_RETURN_IF_ERROR(
       loom_target_environment_initialize(&out_environment->target_provider_set,
                                          &out_environment->target_environment));
-  loom_run_execution_backend_registry_initialize_from_entries(
-      out_environment->execution_backends,
-      out_environment->execution_backend_count,
-      &out_environment->execution_backend_registry);
+  loom_device_provider_registry_initialize_from_entries(
+      out_environment->device_providers, out_environment->device_provider_count,
+      &out_environment->device_provider_registry);
   return iree_ok_status();
 }
 
@@ -114,8 +113,8 @@ loom_run_execution_environment_target_environment(
   return &environment->target_environment;
 }
 
-const loom_run_execution_backend_registry_t*
-loom_run_execution_environment_execution_backend_registry(
+const loom_device_provider_registry_t*
+loom_run_execution_environment_device_provider_registry(
     const loom_run_execution_environment_t* environment) {
-  return &environment->execution_backend_registry;
+  return &environment->device_provider_registry;
 }

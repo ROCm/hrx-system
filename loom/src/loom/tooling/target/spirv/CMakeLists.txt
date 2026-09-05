@@ -67,7 +67,6 @@ loom_cc_library(
     iree::base
     loom::target::arch::spirv::provider
     loom::tooling::execution::execution_provider
-    loom::tooling::execution::hal::execution_backend
   PUBLIC
 )
 endif()

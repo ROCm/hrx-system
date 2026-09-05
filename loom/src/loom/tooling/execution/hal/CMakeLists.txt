@@ -35,6 +35,17 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    device_provider_test
+  SRCS
+    "device_provider_test.cc"
+  DEPS
+    ::device_provider
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_library(
   NAME
     runtime
@@ -166,11 +177,11 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    execution_backend
+    one_shot
   HDRS
-    "execution_backend.h"
+    "one_shot.h"
   SRCS
-    "execution_backend.c"
+    "one_shot.c"
   DEPS
     ::artifact
     ::candidate
@@ -180,12 +191,26 @@ loom_cc_library(
     iree::base
     iree::base::core_headers
     iree::base::internal::arena
+    loom::ops::kernel
     loom::target::entry_selection
     loom::tooling::compile::report_capture
-    loom::tooling::execution::execution_backend
-    loom::tooling::execution::one_shot
+    loom::tooling::execution::session
     loom::tooling::io::file
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    one_shot_test
+  SRCS
+    "one_shot_test.cc"
+  DEPS
+    ::one_shot
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ops::op_registry
+    loom::target::low_descriptor_registry_core_test
+    loom::tooling::execution::session
 )
 
 loom_cc_test(

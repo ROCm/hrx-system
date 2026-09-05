@@ -52,28 +52,24 @@ Use `amdgpu` to specify devices at runtime:
 
 ```sh
 # Single logical device with all available physical devices:
-iree-run-loom --backend=amdgpu-hal --device=amdgpu --probe-hal
+iree-run-loom --device=amdgpu --probe-hal
 # Device ordinal 0 (danger, this may change across reboots):
-iree-run-loom --backend=amdgpu-hal --device=amdgpu:0 --probe-hal
+iree-run-loom --device=amdgpu:0 --probe-hal
 # Device with a stable UUID for a device:
-iree-run-loom --backend=amdgpu-hal \
+iree-run-loom \
   --device=amdgpu://GPU-0e12865a3bf5b7ab --probe-hal
 # Single logical device with the two devices given by their UUIDs:
-iree-run-loom --backend=amdgpu-hal \
+iree-run-loom \
   --device=amdgpu://GPU-0e12865a3bf5b7ab,GPU-89e8bdf59a10cf6d --probe-hal
 # Single logical device with physical devices with ordinals 2 and 3:
 ROCR_VISIBLE_DEVICES=2,3 iree-run-loom \
-  --backend=amdgpu-hal --device=amdgpu --probe-hal
-# Two logical devices with two physical devices each:
-iree-run-loom --backend=amdgpu-hal \
-  --device=amdgpu://0,1 --device=amdgpu://2,3 --probe-hal
+  --device=amdgpu --probe-hal
 ```
 
 Compile and run a Loom kernel with the AMDGPU HAL driver:
 
 ```sh
 iree-run-loom /tmp/kernel.loom \
-  --backend=amdgpu-hal \
   --device=amdgpu \
   --function=main \
   --kernel-input-buffer=1024xf32=0
@@ -97,7 +93,6 @@ IREE_TRACY_CAPTURE=/path/to/tracy-capture \
   --//runtime/src/iree/hal/drivers/amdgpu:targets=gfx1100 \
   -- \
   /tmp/kernel.loom \
-  --backend=amdgpu-hal \
   --device=amdgpu \
   --function=main \
   --kernel-input-buffer=1024xf32=0

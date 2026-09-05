@@ -11,7 +11,7 @@
 
 #include "iree/base/api.h"
 #include "loom/target/provider.h"
-#include "loom/tooling/execution/execution_backend.h"
+#include "loom/tooling/execution/hal/device_provider.h"
 #include "loom/tooling/execution/session.h"
 
 #ifdef __cplusplus
@@ -24,10 +24,8 @@ typedef struct loom_run_execution_provider_t {
   iree_string_view_t name;
   // Optional target provider contribution reused by compile and check tools.
   const loom_target_provider_t* target_provider;
-  // Optional execution backend table contributed by this provider.
-  const loom_run_execution_backend_t* const* execution_backends;
-  // Number of entries in |execution_backends|.
-  iree_host_size_t execution_backend_count;
+  // Optional live HAL device adapter used by execution tools.
+  const loom_device_provider_t* device_provider;
 } loom_run_execution_provider_t;
 
 // Static provider table linked into a run/benchmark/tune binary or embedding.
@@ -40,7 +38,7 @@ typedef struct loom_run_execution_provider_set_t {
 
 enum {
   LOOM_RUN_EXECUTION_PROVIDER_TARGET_PROVIDER_CAPACITY = 64,
-  LOOM_RUN_EXECUTION_PROVIDER_EXECUTION_BACKEND_CAPACITY = 64,
+  LOOM_RUN_EXECUTION_PROVIDER_DEVICE_PROVIDER_CAPACITY = 64,
 };
 
 // Composed execution environment derived from a provider set.
@@ -56,13 +54,13 @@ typedef struct loom_run_execution_environment_t {
   loom_target_provider_set_t target_provider_set;
   // Core target environment composed from |target_providers|.
   loom_target_environment_t target_environment;
-  // Execution backend table assembled once for the environment.
-  const loom_run_execution_backend_t* execution_backends
-      [LOOM_RUN_EXECUTION_PROVIDER_EXECUTION_BACKEND_CAPACITY];
-  // Number of entries in |execution_backends|.
-  iree_host_size_t execution_backend_count;
-  // Execution backend registry view over |execution_backends|.
-  loom_run_execution_backend_registry_t execution_backend_registry;
+  // HAL device provider table assembled once for the environment.
+  const loom_device_provider_t*
+      device_providers[LOOM_RUN_EXECUTION_PROVIDER_DEVICE_PROVIDER_CAPACITY];
+  // Number of entries in |device_providers|.
+  iree_host_size_t device_provider_count;
+  // Registry view over |device_providers|.
+  loom_device_provider_registry_t device_provider_registry;
 } loom_run_execution_environment_t;
 
 // Initializes |out_environment| from |provider_set|.
@@ -91,10 +89,10 @@ const loom_target_environment_t*
 loom_run_execution_environment_target_environment(
     const loom_run_execution_environment_t* environment);
 
-// Returns the execution backend registry composed from |environment|'s
+// Returns the HAL device provider registry composed from |environment|'s
 // providers.
-const loom_run_execution_backend_registry_t*
-loom_run_execution_environment_execution_backend_registry(
+const loom_device_provider_registry_t*
+loom_run_execution_environment_device_provider_registry(
     const loom_run_execution_environment_t* environment);
 
 #ifdef __cplusplus

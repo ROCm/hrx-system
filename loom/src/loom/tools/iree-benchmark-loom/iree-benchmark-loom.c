@@ -14,11 +14,11 @@
 #include "loom/tools/iree-benchmark-loom/main.h"
 
 int main(int argc, char** argv) {
-  const loom_tooling_execution_providers_t* configured_providers =
+  const loom_run_execution_provider_set_t* configured_providers =
       loom_tooling_configured_execution_providers();
   loom_run_execution_environment_t environment;
   iree_status_t status = loom_run_execution_environment_initialize(
-      &configured_providers->execution_provider_set, &environment);
+      configured_providers, &environment);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);
@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
       .target_environment =
           loom_run_execution_environment_target_environment(&environment),
       .device_provider_registry =
-          &configured_providers->device_provider_registry,
+          loom_run_execution_environment_device_provider_registry(&environment),
       .requirement_provider_initializers =
           loom_tooling_configured_testbench_requirement_initializers(),
       .initialize_low_descriptor_registry =

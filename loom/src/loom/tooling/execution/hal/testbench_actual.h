@@ -86,10 +86,6 @@ iree_status_t loom_run_hal_testbench_context_validate_explicit_device(
 iree_status_t loom_run_hal_testbench_context_ensure_runtime(
     loom_run_hal_testbench_context_t* context);
 
-// Returns the driver component of an IREE --device= URI.
-iree_string_view_t loom_run_hal_testbench_device_uri_driver_name(
-    iree_string_view_t device_uri);
-
 // Returns host-visible buffer parameters suitable for correctness execution.
 iree_hal_buffer_params_t loom_run_hal_testbench_host_visible_buffer_params(
     void);

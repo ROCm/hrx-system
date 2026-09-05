@@ -14,35 +14,58 @@
 namespace loom {
 namespace {
 
-iree_status_t FakeExecutionBackendRunOneShot(
-    const loom_run_execution_backend_t* backend,
-    const loom_run_one_shot_request_t* request) {
-  (void)backend;
-  (void)request;
+iree_status_t FakeSelectTarget(const loom_device_provider_t* provider,
+                               const loom_run_hal_runtime_t* runtime,
+                               loom_device_target_t* out_target) {
+  (void)provider;
+  (void)runtime;
+  (void)out_target;
   return iree_ok_status();
 }
 
-const loom_run_execution_backend_t kFakeExecutionBackend = {
-    /*.name=*/IREE_SVL("fake-execution"),
-    /*.flags=*/0,
-    /*.probe=*/{},
-    /*.run_one_shot=*/FakeExecutionBackendRunOneShot,
+iree_status_t FakeSelectCompatibleTarget(
+    const loom_device_provider_t* provider,
+    const loom_run_hal_runtime_t* runtime,
+    const loom_target_facts_t* target_requirement,
+    loom_device_target_t* out_target) {
+  (void)provider;
+  (void)runtime;
+  (void)target_requirement;
+  (void)out_target;
+  return iree_ok_status();
+}
+
+iree_status_t FakeProjectTargetFacts(const loom_device_provider_t* provider,
+                                     const loom_run_hal_runtime_t* runtime,
+                                     const loom_device_target_t* target,
+                                     iree_arena_allocator_t* arena,
+                                     loom_target_facts_t* out_facts) {
+  (void)provider;
+  (void)runtime;
+  (void)target;
+  (void)arena;
+  (void)out_facts;
+  return iree_ok_status();
+}
+
+const loom_artifact_provider_t kFakeArtifactProvider = {
+    /*.name=*/IREE_SVL("fake-artifact"),
 };
 
-const loom_run_execution_backend_t kDuplicateFakeExecutionBackend = {
-    /*.name=*/IREE_SVL("fake-execution"),
-    /*.flags=*/0,
-    /*.probe=*/{},
-    /*.run_one_shot=*/FakeExecutionBackendRunOneShot,
+const loom_device_provider_t kFakeDeviceProvider = {
+    /*.artifact_provider=*/&kFakeArtifactProvider,
+    /*.driver_name=*/IREE_SVL("fake"),
+    /*.select_target=*/FakeSelectTarget,
+    /*.select_compatible_target=*/FakeSelectCompatibleTarget,
+    /*.project_target_facts=*/FakeProjectTargetFacts,
 };
 
-const loom_run_execution_backend_t* const kFakeExecutionBackends[] = {
-    &kFakeExecutionBackend,
-};
-
-const loom_run_execution_backend_t* const kDuplicateFakeExecutionBackends[] = {
-    &kFakeExecutionBackend,
-    &kDuplicateFakeExecutionBackend,
+const loom_device_provider_t kDuplicateFakeDeviceProvider = {
+    /*.artifact_provider=*/&kFakeArtifactProvider,
+    /*.driver_name=*/IREE_SVL("fake"),
+    /*.select_target=*/FakeSelectTarget,
+    /*.select_compatible_target=*/FakeSelectCompatibleTarget,
+    /*.project_target_facts=*/FakeProjectTargetFacts,
 };
 
 const loom_target_provider_t kCoreTestTargetProvider = {
@@ -56,23 +79,21 @@ const loom_target_provider_t kCoreTestTargetProvider = {
 const loom_run_execution_provider_t kCoreTestProvider = {
     /*.name=*/IREE_SVL("core-test"),
     /*.target_provider=*/&kCoreTestTargetProvider,
-    /*.execution_backends=*/kFakeExecutionBackends,
-    /*.execution_backend_count=*/IREE_ARRAYSIZE(kFakeExecutionBackends),
+    /*.device_provider=*/&kFakeDeviceProvider,
 };
 
 const loom_run_execution_provider_t kDuplicateCoreTestProvider = {
     /*.name=*/IREE_SVL("core-test"),
+    /*.target_provider=*/&kCoreTestTargetProvider,
 };
 
 const loom_run_execution_provider_t kDuplicateExecutionProvider = {
     /*.name=*/IREE_SVL("duplicate-execution"),
-    /*.target_provider=*/{},
-    /*.execution_backends=*/kDuplicateFakeExecutionBackends,
-    /*.execution_backend_count=*/
-    IREE_ARRAYSIZE(kDuplicateFakeExecutionBackends),
+    /*.target_provider=*/&kCoreTestTargetProvider,
+    /*.device_provider=*/&kDuplicateFakeDeviceProvider,
 };
 
-TEST(ExecutionProviderTest, ComposesDescriptorRegistryAndExecutionBackends) {
+TEST(ExecutionProviderTest, ComposesDescriptorAndDeviceProviderRegistries) {
   const loom_run_execution_provider_t* providers[] = {
       &kCoreTestProvider,
   };
@@ -86,13 +107,11 @@ TEST(ExecutionProviderTest, ComposesDescriptorRegistryAndExecutionBackends) {
   IREE_ASSERT_OK(
       loom_run_execution_environment_initialize(&provider_set, &environment));
 
-  const loom_run_execution_backend_registry_t* execution_backend_registry =
-      loom_run_execution_environment_execution_backend_registry(&environment);
-  ASSERT_NE(execution_backend_registry, nullptr);
-  EXPECT_EQ(execution_backend_registry->backend_count, 1u);
-  EXPECT_EQ(loom_run_execution_backend_registry_lookup(
-                execution_backend_registry, IREE_SV("fake-execution")),
-            &kFakeExecutionBackend);
+  const loom_device_provider_registry_t* device_provider_registry =
+      loom_run_execution_environment_device_provider_registry(&environment);
+  ASSERT_NE(device_provider_registry, nullptr);
+  ASSERT_EQ(device_provider_registry->provider_count, 1u);
+  EXPECT_EQ(device_provider_registry->providers[0], &kFakeDeviceProvider);
 
   loom_target_low_descriptor_registry_t low_registry = {};
   const loom_run_initialize_low_descriptor_registry_callback_t callback =
@@ -120,8 +139,9 @@ TEST(ExecutionProviderTest, RejectsDuplicateProviderNames) {
                         loom_run_execution_provider_set_verify(&provider_set));
 }
 
-TEST(ExecutionProviderTest, RejectsDuplicateExecutionBackendNames) {
+TEST(ExecutionProviderTest, RejectsDuplicateDeviceDriverNames) {
   const loom_run_execution_provider_t* providers[] = {
+      &kCoreTestProvider,
       &kDuplicateExecutionProvider,
   };
   const loom_run_execution_provider_set_t provider_set = {

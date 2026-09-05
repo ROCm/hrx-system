@@ -6,6 +6,8 @@
 
 #include "loom/tooling/execution/hal/device_provider.h"
 
+#include <inttypes.h>
+
 static iree_status_t loom_device_provider_validate_selected_target(
     const loom_device_provider_t* provider,
     const loom_device_target_t* target) {
@@ -140,21 +142,9 @@ void loom_device_provider_registry_initialize_from_entries(
     loom_device_provider_registry_t* out_registry) {
   IREE_ASSERT_ARGUMENT(out_registry);
   *out_registry = (loom_device_provider_registry_t){
-      .providers = providers,
+      .providers = provider_count != 0 ? providers : NULL,
       .provider_count = provider_count,
   };
-}
-
-const loom_device_provider_t* loom_device_provider_registry_lookup(
-    const loom_device_provider_registry_t* registry, iree_string_view_t name) {
-  IREE_ASSERT_ARGUMENT(registry);
-  for (iree_host_size_t i = 0; i < registry->provider_count; ++i) {
-    const loom_device_provider_t* provider = registry->providers[i];
-    if (iree_string_view_equal(provider->artifact_provider->name, name)) {
-      return provider;
-    }
-  }
-  return NULL;
 }
 
 iree_status_t loom_device_provider_registry_format_driver_names(
@@ -170,4 +160,91 @@ iree_status_t loom_device_provider_registry_format_driver_names(
         output, registry->providers[i]->driver_name));
   }
   return iree_ok_status();
+}
+
+static iree_string_view_t loom_device_uri_driver_name(
+    iree_string_view_t device_uri) {
+  iree_string_view_t driver_name = iree_string_view_empty();
+  iree_string_view_split(device_uri, ':', &driver_name, NULL);
+  return driver_name;
+}
+
+iree_status_t loom_device_provider_registry_select(
+    const loom_device_provider_registry_t* registry,
+    iree_string_view_list_t device_uris, iree_allocator_t host_allocator,
+    const loom_device_provider_t** out_provider) {
+  IREE_ASSERT_ARGUMENT(out_provider);
+  *out_provider = NULL;
+
+  if (device_uris.count > 1) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Loom execution supports exactly one --device= "
+                            "URI; got %" PRIhsz,
+                            device_uris.count);
+  }
+  if (device_uris.count == 1) {
+    const iree_string_view_t driver_name =
+        loom_device_uri_driver_name(device_uris.values[0]);
+    if (registry != NULL) {
+      for (iree_host_size_t i = 0; i < registry->provider_count; ++i) {
+        const loom_device_provider_t* provider = registry->providers[i];
+        if (provider != NULL &&
+            iree_string_view_equal(provider->driver_name, driver_name)) {
+          if (*out_provider != NULL) {
+            *out_provider = NULL;
+            return iree_make_status(
+                IREE_STATUS_FAILED_PRECONDITION,
+                "multiple Loom device providers claim HAL driver '%.*s'",
+                (int)driver_name.size, driver_name.data);
+          }
+          *out_provider = provider;
+        }
+      }
+    }
+    if (*out_provider != NULL) {
+      return iree_ok_status();
+    }
+
+    iree_string_builder_t driver_names;
+    iree_string_builder_initialize(host_allocator, &driver_names);
+    iree_status_t status = iree_ok_status();
+    if (registry != NULL && registry->provider_count != 0) {
+      status = loom_device_provider_registry_format_driver_names(registry,
+                                                                 &driver_names);
+    } else {
+      status = iree_string_builder_append_cstring(&driver_names, "none");
+    }
+    if (iree_status_is_ok(status)) {
+      const iree_string_view_t names = iree_string_builder_view(&driver_names);
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--device=%.*s selects HAL driver '%.*s', which has no linked Loom "
+          "device provider; available --device drivers: [%.*s]",
+          (int)device_uris.values[0].size, device_uris.values[0].data,
+          (int)driver_name.size, driver_name.data, (int)names.size, names.data);
+    }
+    iree_string_builder_deinitialize(&driver_names);
+    return status;
+  }
+
+  if (registry == NULL || registry->provider_count == 0) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "Loom execution is not available in this installation");
+  }
+
+  iree_string_builder_t driver_names;
+  iree_string_builder_initialize(host_allocator, &driver_names);
+  iree_status_t status = loom_device_provider_registry_format_driver_names(
+      registry, &driver_names);
+  if (iree_status_is_ok(status)) {
+    const iree_string_view_t names = iree_string_builder_view(&driver_names);
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Loom execution requires an explicit --device= URI; available "
+        "--device drivers: [%.*s]",
+        (int)names.size, names.data);
+  }
+  iree_string_builder_deinitialize(&driver_names);
+  return status;
 }

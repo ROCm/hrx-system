@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/tooling/execution/one_shot.h"
+#include "loom/tooling/execution/hal/one_shot.h"
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -26,7 +26,7 @@ iree_status_t InitializeLowDescriptorRegistry(
   return iree_ok_status();
 }
 
-class OneShotTest : public ::testing::Test {
+class HalOneShotTest : public ::testing::Test {
  protected:
   void SetUp() override {
     loom_run_session_options_t options = {};
@@ -55,7 +55,7 @@ class OneShotTest : public ::testing::Test {
   loom_run_session_t session_ = {};
 };
 
-TEST_F(OneShotTest, AppliesStaticHalWorkgroupCountFromSingleKernel) {
+TEST_F(HalOneShotTest, AppliesStaticWorkgroupCountFromSingleKernel) {
   static const char kSource[] =
       "kernel.def @entry() {\n"
       "  %workgroups_z = index.constant 4 : index\n"
@@ -74,18 +74,18 @@ TEST_F(OneShotTest, AppliesStaticHalWorkgroupCountFromSingleKernel) {
   loom_run_module_t module = {};
   IREE_ASSERT_OK(Parse(IREE_SV(kSource), &module));
 
-  loom_run_one_shot_options_t options = {};
-  loom_run_one_shot_options_initialize(&options);
-  EXPECT_TRUE(loom_run_one_shot_options_apply_static_hal_workgroup_count(
+  loom_run_hal_one_shot_options_t options = {};
+  loom_run_hal_one_shot_options_initialize(&options);
+  EXPECT_TRUE(loom_run_hal_one_shot_options_apply_static_workgroup_count(
       module.module, iree_string_view_empty(), &options));
-  EXPECT_EQ(options.hal_workgroup_count[0], 2u);
-  EXPECT_EQ(options.hal_workgroup_count[1], 3u);
-  EXPECT_EQ(options.hal_workgroup_count[2], 4u);
+  EXPECT_EQ(options.workgroup_count[0], 2u);
+  EXPECT_EQ(options.workgroup_count[1], 3u);
+  EXPECT_EQ(options.workgroup_count[2], 4u);
 
   loom_run_module_deinitialize(&module);
 }
 
-TEST_F(OneShotTest, AppliesStaticHalWorkgroupCountFromNamedKernel) {
+TEST_F(HalOneShotTest, AppliesStaticWorkgroupCountFromNamedKernel) {
   static const char kSource[] =
       "kernel.def @first() {\n"
       "  %unit = index.constant 1 : index\n"
@@ -109,18 +109,18 @@ TEST_F(OneShotTest, AppliesStaticHalWorkgroupCountFromNamedKernel) {
   loom_run_module_t module = {};
   IREE_ASSERT_OK(Parse(IREE_SV(kSource), &module));
 
-  loom_run_one_shot_options_t options = {};
-  loom_run_one_shot_options_initialize(&options);
-  EXPECT_TRUE(loom_run_one_shot_options_apply_static_hal_workgroup_count(
+  loom_run_hal_one_shot_options_t options = {};
+  loom_run_hal_one_shot_options_initialize(&options);
+  EXPECT_TRUE(loom_run_hal_one_shot_options_apply_static_workgroup_count(
       module.module, IREE_SV("@second"), &options));
-  EXPECT_EQ(options.hal_workgroup_count[0], 7u);
-  EXPECT_EQ(options.hal_workgroup_count[1], 8u);
-  EXPECT_EQ(options.hal_workgroup_count[2], 9u);
+  EXPECT_EQ(options.workgroup_count[0], 7u);
+  EXPECT_EQ(options.workgroup_count[1], 8u);
+  EXPECT_EQ(options.workgroup_count[2], 9u);
 
   loom_run_module_deinitialize(&module);
 }
 
-TEST_F(OneShotTest, LeavesDefaultForAmbiguousImplicitKernel) {
+TEST_F(HalOneShotTest, LeavesDefaultForAmbiguousImplicitKernel) {
   static const char kSource[] =
       "kernel.def @first() {\n"
       "  %unit = index.constant 1 : index\n"
@@ -141,13 +141,13 @@ TEST_F(OneShotTest, LeavesDefaultForAmbiguousImplicitKernel) {
   loom_run_module_t module = {};
   IREE_ASSERT_OK(Parse(IREE_SV(kSource), &module));
 
-  loom_run_one_shot_options_t options = {};
-  loom_run_one_shot_options_initialize(&options);
-  EXPECT_FALSE(loom_run_one_shot_options_apply_static_hal_workgroup_count(
+  loom_run_hal_one_shot_options_t options = {};
+  loom_run_hal_one_shot_options_initialize(&options);
+  EXPECT_FALSE(loom_run_hal_one_shot_options_apply_static_workgroup_count(
       module.module, iree_string_view_empty(), &options));
-  EXPECT_EQ(options.hal_workgroup_count[0], 1u);
-  EXPECT_EQ(options.hal_workgroup_count[1], 1u);
-  EXPECT_EQ(options.hal_workgroup_count[2], 1u);
+  EXPECT_EQ(options.workgroup_count[0], 1u);
+  EXPECT_EQ(options.workgroup_count[1], 1u);
+  EXPECT_EQ(options.workgroup_count[2], 1u);
 
   loom_run_module_deinitialize(&module);
 }

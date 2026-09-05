@@ -43,6 +43,16 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "device_provider_test",
+    srcs = ["device_provider_test.cc"],
+    deps = [
+        ":device_provider",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "runtime",
     srcs = ["runtime.c"],
@@ -155,23 +165,36 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "execution_backend",
-    srcs = ["execution_backend.c"],
-    hdrs = ["execution_backend.h"],
+    name = "one_shot",
+    srcs = ["one_shot.c"],
+    hdrs = ["one_shot.h"],
     deps = [
         ":artifact",
         ":candidate",
         ":device_provider",
         ":invocation",
         ":runtime",
+        "//loom/src/loom/ops/kernel",
         "//loom/src/loom/target:entry_selection",
         "//loom/src/loom/tooling/compile:report_capture",
-        "//loom/src/loom/tooling/execution:execution_backend",
-        "//loom/src/loom/tooling/execution:one_shot",
+        "//loom/src/loom/tooling/execution:session",
         "//loom/src/loom/tooling/io:file",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "one_shot_test",
+    srcs = ["one_shot_test.cc"],
+    deps = [
+        ":one_shot",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/target:low_descriptor_registry_core_test",
+        "//loom/src/loom/tooling/execution:session",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

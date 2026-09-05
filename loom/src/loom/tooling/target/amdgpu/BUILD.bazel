@@ -63,7 +63,6 @@ loom_cc_library(
         ":device_provider",
         "//loom/src/loom/target/arch/amdgpu:provider",
         "//loom/src/loom/tooling/execution:execution_provider",
-        "//loom/src/loom/tooling/execution/hal:execution_backend",
         "//runtime/src/iree/base",
     ],
 )

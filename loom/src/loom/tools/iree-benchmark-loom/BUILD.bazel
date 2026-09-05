@@ -97,7 +97,6 @@ loom_cc_library(
         "//loom/src/loom/tooling/config",
         "//loom/src/loom/tooling/context",
         "//loom/src/loom/tooling/execution:benchmark",
-        "//loom/src/loom/tooling/execution:one_shot",
         "//loom/src/loom/tooling/execution:session",
         "//loom/src/loom/tooling/execution/hal:artifact",
         "//loom/src/loom/tooling/execution/hal:benchmark",

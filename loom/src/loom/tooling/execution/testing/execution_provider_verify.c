@@ -21,34 +21,31 @@ static iree_status_t loom_run_execution_provider_verify(
                             "loom execution provider %" PRIhsz " has no name",
                             provider_index);
   }
-  if (provider->execution_backend_count != 0 &&
-      provider->execution_backends == NULL) {
+  const loom_device_provider_t* device_provider = provider->device_provider;
+  if (device_provider == NULL) {
+    return iree_ok_status();
+  }
+  if (device_provider->artifact_provider == NULL) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "loom execution provider '%.*s' has no execution backend table",
+        "loom execution provider '%.*s' has a device provider without an "
+        "artifact provider",
         (int)provider->name.size, provider->name.data);
   }
-  for (iree_host_size_t i = 0; i < provider->execution_backend_count; ++i) {
-    const loom_run_execution_backend_t* backend =
-        provider->execution_backends[i];
-    if (backend == NULL) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "loom execution provider '%.*s' has null execution backend %" PRIhsz,
-          (int)provider->name.size, provider->name.data, i);
-    }
-    if (iree_string_view_is_empty(iree_string_view_trim(backend->name))) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "loom execution provider '%.*s' has unnamed "
-                              "execution backend %" PRIhsz,
-                              (int)provider->name.size, provider->name.data, i);
-    }
-    if (backend->run_one_shot == NULL) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "loom execution backend '%.*s' has no one-shot "
-                              "run hook",
-                              (int)backend->name.size, backend->name.data);
-    }
+  if (iree_string_view_is_empty(
+          iree_string_view_trim(device_provider->driver_name))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "loom execution provider '%.*s' has an unnamed HAL driver",
+        (int)provider->name.size, provider->name.data);
+  }
+  if (device_provider->select_target == NULL ||
+      device_provider->select_compatible_target == NULL ||
+      device_provider->project_target_facts == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "loom execution provider '%.*s' has an incomplete device provider",
+        (int)provider->name.size, provider->name.data);
   }
   return iree_ok_status();
 }
@@ -69,25 +66,25 @@ static iree_status_t loom_run_execution_provider_verify_unique_name(
   return iree_ok_status();
 }
 
-static iree_status_t
-loom_run_execution_provider_verify_unique_execution_backend_name(
+static iree_status_t loom_run_execution_provider_verify_unique_driver_name(
     const loom_run_execution_provider_set_t* provider_set,
-    iree_host_size_t provider_index, iree_host_size_t backend_index) {
-  const loom_run_execution_backend_t* backend =
-      provider_set->providers[provider_index]
-          ->execution_backends[backend_index];
-  for (iree_host_size_t i = 0; i <= provider_index; ++i) {
-    const loom_run_execution_provider_t* provider = provider_set->providers[i];
-    const iree_host_size_t end =
-        i == provider_index ? backend_index : provider->execution_backend_count;
-    for (iree_host_size_t j = 0; j < end; ++j) {
-      const loom_run_execution_backend_t* existing =
-          provider->execution_backends[j];
-      if (iree_string_view_equal(existing->name, backend->name)) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "duplicate loom execution backend '%.*s'",
-                                (int)backend->name.size, backend->name.data);
-      }
+    iree_host_size_t provider_index) {
+  const loom_device_provider_t* device_provider =
+      provider_set->providers[provider_index]->device_provider;
+  if (device_provider == NULL) {
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = 0; i < provider_index; ++i) {
+    const loom_device_provider_t* existing =
+        provider_set->providers[i]->device_provider;
+    if (existing != NULL &&
+        iree_string_view_equal(existing->driver_name,
+                               device_provider->driver_name)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "duplicate Loom device provider for HAL driver '%.*s'",
+          (int)device_provider->driver_name.size,
+          device_provider->driver_name.data);
     }
   }
   return iree_ok_status();
@@ -108,11 +105,8 @@ iree_status_t loom_run_execution_provider_set_verify(
     IREE_RETURN_IF_ERROR(loom_run_execution_provider_verify(provider, i));
     IREE_RETURN_IF_ERROR(
         loom_run_execution_provider_verify_unique_name(provider_set, i));
-    for (iree_host_size_t j = 0; j < provider->execution_backend_count; ++j) {
-      IREE_RETURN_IF_ERROR(
-          loom_run_execution_provider_verify_unique_execution_backend_name(
-              provider_set, i, j));
-    }
+    IREE_RETURN_IF_ERROR(
+        loom_run_execution_provider_verify_unique_driver_name(provider_set, i));
   }
   return iree_ok_status();
 }

@@ -10,7 +10,6 @@
 #define LOOM_TOOLS_IREE_RUN_LOOM_MAIN_H_
 
 #include "iree/base/api.h"
-#include "loom/tooling/execution/execution_backend.h"
 #include "loom/tooling/execution/session.h"
 
 #ifdef __cplusplus
@@ -18,6 +17,7 @@ extern "C" {
 #endif
 
 typedef struct loom_target_environment_t loom_target_environment_t;
+typedef struct loom_device_provider_registry_t loom_device_provider_registry_t;
 
 typedef struct iree_run_loom_configuration_t {
   // Null-terminated executable name used in help and diagnostics.
@@ -29,8 +29,8 @@ typedef struct iree_run_loom_configuration_t {
       initialize_low_descriptor_registry;
   // Target environment linked into this runner and used for pass pipelines.
   const loom_target_environment_t* target_environment;
-  // Execution backends linked into this runner.
-  loom_run_execution_backend_registry_t execution_backend_registry;
+  // HAL device providers linked into this runner.
+  const loom_device_provider_registry_t* device_provider_registry;
 } iree_run_loom_configuration_t;
 
 // Runs the configured iree-run-loom command-line tool.

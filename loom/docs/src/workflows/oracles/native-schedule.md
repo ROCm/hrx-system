@@ -35,7 +35,7 @@ it through Loom rather than loading its artifact through an unrelated runtime:
 
 ```shell
 iree-run-loom oracle.loom \
-  --backend=amdgpu-hal \
+  --device=amdgpu \
   --function=kernel \
   --pipeline=none \
   --kernel-input-buffer=64xf32=0 \

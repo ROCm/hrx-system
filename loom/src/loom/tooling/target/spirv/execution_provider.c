@@ -7,28 +7,10 @@
 #include "loom/tooling/target/spirv/execution_provider.h"
 
 #include "loom/target/arch/spirv/provider.h"
-#include "loom/tooling/execution/hal/execution_backend.h"
 #include "loom/tooling/target/spirv/device_provider.h"
-
-static const loom_run_hal_execution_backend_t kLoomSpirvHalExecutionBackend = {
-    .base =
-        {
-            .name = IREE_SVL("spirv-vulkan-hal"),
-            .flags = LOOM_RUN_EXECUTION_BACKEND_FLAG_HAL_OPTIONS,
-            .probe = loom_run_hal_execution_backend_probe,
-            .run_one_shot = loom_run_hal_execution_backend_run_one_shot,
-        },
-    .device_provider = &loom_spirv_vulkan_device_provider,
-};
-
-static const loom_run_execution_backend_t* const kLoomSpirvExecutionBackends[] =
-    {
-        &kLoomSpirvHalExecutionBackend.base,
-};
 
 const loom_run_execution_provider_t loom_spirv_vulkan_execution_provider = {
     .name = IREE_SVL("spirv"),
     .target_provider = &loom_spirv_target_provider,
-    .execution_backends = kLoomSpirvExecutionBackends,
-    .execution_backend_count = IREE_ARRAYSIZE(kLoomSpirvExecutionBackends),
+    .device_provider = &loom_spirv_vulkan_device_provider,
 };

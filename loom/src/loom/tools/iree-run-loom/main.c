@@ -13,6 +13,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/tooling/device_util.h"
 #include "iree/tooling/value_io.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/module.h"
@@ -21,18 +22,15 @@
 #include "loom/tooling/compile/pipeline.h"
 #include "loom/tooling/compile/report_capture.h"
 #include "loom/tooling/context/context.h"
-#include "loom/tooling/execution/execution_backend.h"
-#include "loom/tooling/execution/one_shot.h"
+#include "loom/tooling/execution/hal/one_shot.h"
 #include "loom/tooling/execution/session.h"
 #include "loom/tooling/io/file.h"
 
-IREE_FLAG(string, backend, "",
-          "Registered compilation and execution backend to run.");
 IREE_FLAG(string, pipeline, "default",
           "Pass pipeline to run before execution. Use 'default' or empty for "
           "the comprehensive prepared-low pipeline. 'none' disables all "
           "compiler transformations and passes the input directly to the "
-          "selected backend. Use '@symbol' to run a module-local pass.pipeline "
+          "selected target. Use '@symbol' to run a module-local pass.pipeline "
           "or a comma-separated pass list such as 'canonicalize,cse'.");
 IREE_FLAG(string, sanitizer, "none",
           "Sanitizer checks to insert in the default target pipeline: none, "
@@ -53,29 +51,29 @@ IREE_FLAG_NAMED(
     "JSON, 'text-summary'/'text-details' for human-readable text, or "
     "empty/'none'.");
 IREE_FLAG_NAMED(string, emit_target_artifact, "emit-target-artifact", "",
-                "Optional output path for the selected HAL backend's "
-                "target-native artifact, such as AMDGPU HSACO.");
+                "Optional output path for the selected device target's "
+                "native artifact.");
 IREE_FLAG_NAMED(string, emit_hal_executable, "emit-hal-executable", "",
                 "Optional output path for the executable artifact passed to "
                 "the HAL runtime loader.");
 IREE_FLAG_NAMED(bool, emit_only, "emit-only", false,
                 "Stops after HAL executable emission without dispatching.");
 IREE_FLAG_NAMED(bool, probe_hal, "probe-hal", false,
-                "Runs the selected backend's target probe, prints the result, "
-                "and exits. Not all backends support probing.");
+                "Probes the selected --device target, prints the result, and "
+                "exits.");
 
 typedef struct iree_run_loom_hal_flag_state_t {
   // Dispatch constants in HAL ABI order.
-  uint32_t constants[LOOM_RUN_ONE_SHOT_HAL_MAX_CONSTANT_COUNT];
+  uint32_t constants[LOOM_RUN_HAL_ONE_SHOT_MAX_CONSTANT_COUNT];
   // Number of populated entries in |constants|.
   iree_host_size_t constant_count;
   // Binding specs in HAL binding ordinal order.
-  iree_string_view_t binding_specs[LOOM_RUN_ONE_SHOT_HAL_MAX_BINDING_COUNT];
+  iree_string_view_t binding_specs[LOOM_RUN_HAL_ONE_SHOT_MAX_BINDING_COUNT];
   // Number of populated entries in |binding_specs|.
   iree_host_size_t binding_count;
   // Expected binding specs in HAL binding ordinal order.
   iree_string_view_t
-      expected_binding_specs[LOOM_RUN_ONE_SHOT_HAL_MAX_BINDING_COUNT];
+      expected_binding_specs[LOOM_RUN_HAL_ONE_SHOT_MAX_BINDING_COUNT];
   // Number of populated entries in |expected_binding_specs|.
   iree_host_size_t expected_binding_count;
 } iree_run_loom_hal_flag_state_t;
@@ -91,7 +89,7 @@ static iree_status_t iree_run_loom_parse_kernel_input_value_flag(
   iree_host_size_t word_count = 0;
   IREE_RETURN_IF_ERROR(iree_tooling_value_write_abi_words(
       &parsed_value,
-      LOOM_RUN_ONE_SHOT_HAL_MAX_CONSTANT_COUNT -
+      LOOM_RUN_HAL_ONE_SHOT_MAX_CONSTANT_COUNT -
           iree_run_loom_hal_flags.constant_count,
       &iree_run_loom_hal_flags
            .constants[iree_run_loom_hal_flags.constant_count],
@@ -126,10 +124,10 @@ static iree_status_t iree_run_loom_parse_kernel_input_buffer_flag(
   (void)flag_name;
   (void)storage;
   if (iree_run_loom_hal_flags.binding_count >=
-      LOOM_RUN_ONE_SHOT_HAL_MAX_BINDING_COUNT) {
+      LOOM_RUN_HAL_ONE_SHOT_MAX_BINDING_COUNT) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "too many HAL bindings; maximum is %d",
-                            LOOM_RUN_ONE_SHOT_HAL_MAX_BINDING_COUNT);
+                            LOOM_RUN_HAL_ONE_SHOT_MAX_BINDING_COUNT);
   }
   const iree_host_size_t index = iree_run_loom_hal_flags.binding_count++;
   iree_run_loom_hal_flags.binding_specs[index] = value;
@@ -163,10 +161,10 @@ static iree_status_t iree_run_loom_parse_expected_kernel_buffer_flag(
   (void)flag_name;
   (void)storage;
   if (iree_run_loom_hal_flags.expected_binding_count >=
-      LOOM_RUN_ONE_SHOT_HAL_MAX_BINDING_COUNT) {
+      LOOM_RUN_HAL_ONE_SHOT_MAX_BINDING_COUNT) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "too many expected HAL bindings; maximum is %d",
-                            LOOM_RUN_ONE_SHOT_HAL_MAX_BINDING_COUNT);
+                            LOOM_RUN_HAL_ONE_SHOT_MAX_BINDING_COUNT);
   }
   const iree_host_size_t index =
       iree_run_loom_hal_flags.expected_binding_count++;
@@ -244,9 +242,8 @@ static iree_status_t iree_run_loom_validate_artifact_output_path(
 }
 
 static iree_status_t iree_run_loom_one_shot_options_initialize(
-    const loom_run_execution_backend_t* backend,
-    loom_run_one_shot_options_t* out_options) {
-  loom_run_one_shot_options_initialize(out_options);
+    loom_run_hal_one_shot_options_t* out_options) {
+  loom_run_hal_one_shot_options_initialize(out_options);
 
   const iree_string_view_t target_artifact_output_path =
       iree_make_cstring_view(FLAG_emit_target_artifact);
@@ -263,44 +260,33 @@ static iree_status_t iree_run_loom_one_shot_options_initialize(
         (int)FLAG_output_max_element_count);
   }
 
-  if (iree_any_bit_set(backend->flags,
-                       LOOM_RUN_EXECUTION_BACKEND_FLAG_HAL_OPTIONS)) {
-    const iree_string_view_t function_name =
-        iree_make_cstring_view(FLAG_function);
-    out_options->hal_function_name = !iree_string_view_is_empty(function_name)
-                                         ? function_name
-                                         : iree_string_view_empty();
-    const iree_string_view_t workgroup_count =
-        iree_make_cstring_view(FLAG_workgroup_count);
-    if (!iree_string_view_is_empty(workgroup_count)) {
-      IREE_RETURN_IF_ERROR(iree_run_loom_parse_workgroup_count(
-          workgroup_count, out_options->hal_workgroup_count));
-    }
-    out_options->hal_constant_count = iree_run_loom_hal_flags.constant_count;
-    memcpy(out_options->hal_constants, iree_run_loom_hal_flags.constants,
-           out_options->hal_constant_count *
-               sizeof(out_options->hal_constants[0]));
-    out_options->hal_bindings = (loom_run_one_shot_binding_specs_t){
-        .values = iree_run_loom_hal_flags.binding_specs,
-        .count = iree_run_loom_hal_flags.binding_count,
-    };
-    out_options->hal_expected_bindings = (loom_run_one_shot_binding_specs_t){
-        .values = iree_run_loom_hal_flags.expected_binding_specs,
-        .count = iree_run_loom_hal_flags.expected_binding_count,
-    };
-    out_options->hal_target_artifact_output_path = target_artifact_output_path;
-    out_options->hal_executable_output_path = hal_executable_output_path;
-    out_options->hal_emit_only = FLAG_emit_only;
-    out_options->hal_max_output_element_count =
-        (iree_host_size_t)FLAG_output_max_element_count;
-  } else if (!iree_string_view_is_empty(target_artifact_output_path) ||
-             !iree_string_view_is_empty(hal_executable_output_path) ||
-             FLAG_emit_only) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "--emit-target-artifact, --emit-hal-executable, and --emit-only "
-        "require a HAL backend");
+  const iree_string_view_t function_name =
+      iree_make_cstring_view(FLAG_function);
+  out_options->function_name = !iree_string_view_is_empty(function_name)
+                                   ? function_name
+                                   : iree_string_view_empty();
+  const iree_string_view_t workgroup_count =
+      iree_make_cstring_view(FLAG_workgroup_count);
+  if (!iree_string_view_is_empty(workgroup_count)) {
+    IREE_RETURN_IF_ERROR(iree_run_loom_parse_workgroup_count(
+        workgroup_count, out_options->workgroup_count));
   }
+  out_options->constant_count = iree_run_loom_hal_flags.constant_count;
+  memcpy(out_options->constants, iree_run_loom_hal_flags.constants,
+         out_options->constant_count * sizeof(out_options->constants[0]));
+  out_options->bindings = (loom_run_hal_one_shot_binding_specs_t){
+      .values = iree_run_loom_hal_flags.binding_specs,
+      .count = iree_run_loom_hal_flags.binding_count,
+  };
+  out_options->expected_bindings = (loom_run_hal_one_shot_binding_specs_t){
+      .values = iree_run_loom_hal_flags.expected_binding_specs,
+      .count = iree_run_loom_hal_flags.expected_binding_count,
+  };
+  out_options->target_artifact_output_path = target_artifact_output_path;
+  out_options->executable_output_path = hal_executable_output_path;
+  out_options->emit_only = FLAG_emit_only;
+  out_options->max_output_element_count =
+      (iree_host_size_t)FLAG_output_max_element_count;
   return iree_ok_status();
 }
 
@@ -343,28 +329,6 @@ static iree_status_t iree_run_loom_run_pass_pipeline(
                                    out_result);
 }
 
-static iree_status_t iree_run_loom_make_unknown_backend_status(
-    iree_string_view_t backend_name,
-    const loom_run_execution_backend_registry_t* backend_registry,
-    iree_allocator_t allocator) {
-  iree_string_builder_t backend_names;
-  iree_string_builder_initialize(allocator, &backend_names);
-  iree_status_t status = loom_run_execution_backend_registry_format_names(
-      backend_registry, &backend_names);
-  if (!iree_status_is_ok(status)) {
-    iree_string_builder_deinitialize(&backend_names);
-    return status;
-  }
-  status = iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "unknown --backend='%.*s'; expected registered backend in [%.*s]",
-      (int)backend_name.size, backend_name.data,
-      (int)iree_string_builder_size(&backend_names),
-      iree_string_builder_buffer(&backend_names));
-  iree_string_builder_deinitialize(&backend_names);
-  return status;
-}
-
 static void iree_run_loom_print_agents_markdown(FILE* stream) {
   fprintf(
       stream,
@@ -379,18 +343,18 @@ static void iree_run_loom_print_agents_markdown(FILE* stream) {
       "### HAL flow\n"
       "\n"
       "```shell\n"
-      "iree-run-loom kernel.loom --backend=amdgpu-hal --function=q8_kernel "
+      "iree-run-loom kernel.loom --device=URI --function=q8_kernel "
       "\\\n"
       "  --kernel-input-buffer=64xf32=0 "
       "--expected-kernel-buffer=64xf32=0\n"
-      "iree-run-loom kernel.loom --backend=amdgpu-hal --function=q8_kernel "
+      "iree-run-loom kernel.loom --device=URI --function=q8_kernel "
       "\\\n"
       "  --workgroup-count=64,8,1 --kernel-input-value=i32=512 \\\n"
       "  --kernel-input-buffer=4096xf32=0\n"
-      "iree-run-loom kernel.loom --backend=amdgpu-hal --emit-only \\\n"
-      "  --emit-target-artifact=kernel.hsaco "
+      "iree-run-loom kernel.loom --device=URI --emit-only \\\n"
+      "  --emit-target-artifact=kernel.bin "
       "--emit-hal-executable=kernel.bin\n"
-      "iree-run-loom --backend=amdgpu-hal --probe-hal\n"
+      "iree-run-loom --device=URI --probe-hal\n"
       "```\n"
       "\n"
       "`--kernel-input-buffer` and `--expected-kernel-buffer` use the same "
@@ -403,14 +367,14 @@ static void iree_run_loom_print_agents_markdown(FILE* stream) {
       "\n"
       "```shell\n"
       "iree-run-loom module.loom --compile-report=summary\n"
-      "iree-run-loom prepared-low.loom --backend=amdgpu-hal \\\n"
+      "iree-run-loom prepared-low.loom --device=URI \\\n"
       "  --function=kernel --pipeline=none\n"
       "iree-run-loom module.loom --pipeline=@my_pipeline\n"
       "```\n"
       "\n"
       "`--pipeline=none` disables all compiler transformations. The input "
       "must\n"
-      "already satisfy the selected backend's complete emission contract.\n"
+      "already satisfy the selected target's complete emission contract.\n"
       "\n"
       "`--compile-report=summary|details` prints the same structured compile\n"
       "report family as `loom-compile`. Use `iree-test-loom` once the "
@@ -428,14 +392,14 @@ int iree_run_loom_main(int argc, char** argv,
       "export.\n"
       "\n"
       "Usage:\n"
-      "  iree-run-loom [file.loom] --backend=name --function=name "
+      "  iree-run-loom [file.loom] --device=URI --function=name "
       "--binding=...\n"
-      "  cat module.loom | iree-run-loom - --backend=name "
+      "  cat module.loom | iree-run-loom - --device=URI "
       "--function=name\n"
       "  iree-run-loom --agents_md\n"
       "\n"
-      "Execution backends compile target-low kernels into runtime artifacts "
-      "and dispatch them through their production runtime path.\n");
+      "The selected HAL device determines the compiler target and executes "
+      "the resulting artifact through its production runtime path.\n");
   for (int i = 1; i < argc; ++i) {
     if (loom_tooling_cli_is_agents_markdown_arg(argv[i])) {
       iree_run_loom_print_agents_markdown(stdout);
@@ -449,29 +413,20 @@ int iree_run_loom_main(int argc, char** argv,
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
 
   iree_allocator_t allocator = iree_allocator_system();
-  const loom_run_execution_backend_registry_t* backend_registry =
-      &configuration->execution_backend_registry;
-  const iree_string_view_t backend_name = iree_make_cstring_view(FLAG_backend);
-  const loom_run_execution_backend_t* backend =
-      loom_run_execution_backend_registry_lookup(backend_registry,
-                                                 backend_name);
   if (FLAG_probe_hal) {
-    loom_run_one_shot_result_t probe_result = {0};
-    loom_run_one_shot_result_initialize(allocator, &probe_result);
-    iree_status_t probe_status = iree_ok_status();
-    if (backend == NULL) {
-      probe_status = iree_run_loom_make_unknown_backend_status(
-          backend_name, backend_registry, allocator);
-    } else if (backend->probe == NULL) {
-      probe_status = iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "--probe-hal requires --backend to name a probeable backend");
-    } else {
-      const loom_run_one_shot_probe_request_t probe_request = {
+    loom_run_hal_one_shot_result_t probe_result = {0};
+    loom_run_hal_one_shot_result_initialize(allocator, &probe_result);
+    const loom_device_provider_t* device_provider = NULL;
+    iree_status_t probe_status = loom_device_provider_registry_select(
+        configuration->device_provider_registry, iree_hal_device_flag_list(),
+        allocator, &device_provider);
+    if (iree_status_is_ok(probe_status)) {
+      const loom_run_hal_one_shot_probe_request_t probe_request = {
           .host_allocator = allocator,
           .result = &probe_result,
       };
-      probe_status = backend->probe(backend, &probe_request);
+      probe_status =
+          loom_run_hal_one_shot_probe(device_provider, &probe_request);
     }
     if (iree_status_is_ok(probe_status)) {
       probe_status = loom_tooling_write_stdout(
@@ -483,7 +438,7 @@ int iree_run_loom_main(int argc, char** argv,
       iree_status_free(probe_status);
       probe_exit_code = 1;
     }
-    loom_run_one_shot_result_deinitialize(&probe_result);
+    loom_run_hal_one_shot_result_deinitialize(&probe_result);
     IREE_TRACE_ZONE_END(z0);
     IREE_TRACE_APP_EXIT(probe_exit_code);
     return probe_exit_code;
@@ -493,8 +448,9 @@ int iree_run_loom_main(int argc, char** argv,
   loom_run_session_t session = {0};
   loom_run_module_t run_module = {0};
   loom_compile_report_capture_t compile_report_capture = {0};
-  loom_run_one_shot_result_t run_result = {0};
-  loom_run_one_shot_result_initialize(allocator, &run_result);
+  loom_run_hal_one_shot_result_t run_result = {0};
+  loom_run_hal_one_shot_result_initialize(allocator, &run_result);
+  const loom_device_provider_t* device_provider = NULL;
   int exit_code = 0;
 
   iree_status_t status = iree_ok_status();
@@ -505,9 +461,10 @@ int iree_run_loom_main(int argc, char** argv,
         "inputs",
         argc - 1);
   }
-  if (iree_status_is_ok(status) && backend == NULL) {
-    status = iree_run_loom_make_unknown_backend_status(
-        backend_name, backend_registry, allocator);
+  if (iree_status_is_ok(status)) {
+    status = loom_device_provider_registry_select(
+        configuration->device_provider_registry, iree_hal_device_flag_list(),
+        allocator, &device_provider);
   }
 
   if (iree_status_is_ok(status)) {
@@ -556,10 +513,9 @@ int iree_run_loom_main(int argc, char** argv,
     loom_compile_report_capture_configure_compile_options(
         &compile_report_capture, &compile_options);
   }
-  loom_run_one_shot_options_t one_shot_options = {0};
+  loom_run_hal_one_shot_options_t one_shot_options = {0};
   if (iree_status_is_ok(status)) {
-    status =
-        iree_run_loom_one_shot_options_initialize(backend, &one_shot_options);
+    status = iree_run_loom_one_shot_options_initialize(&one_shot_options);
   }
   if (iree_status_is_ok(status)) {
     loom_run_module_parse_options_t parse_options = {0};
@@ -569,12 +525,9 @@ int iree_run_loom_main(int argc, char** argv,
     status = loom_run_module_parse(&session, &parse_options, &run_module);
   }
   if (iree_status_is_ok(status) &&
-      iree_any_bit_set(backend->flags,
-                       LOOM_RUN_EXECUTION_BACKEND_FLAG_HAL_OPTIONS) &&
       iree_string_view_is_empty(iree_make_cstring_view(FLAG_workgroup_count))) {
-    loom_run_one_shot_options_apply_static_hal_workgroup_count(
-        run_module.module, one_shot_options.hal_function_name,
-        &one_shot_options);
+    loom_run_hal_one_shot_options_apply_static_workgroup_count(
+        run_module.module, one_shot_options.function_name, &one_shot_options);
   }
   if (iree_status_is_ok(status)) {
     compile_options.source_resolver =
@@ -589,7 +542,7 @@ int iree_run_loom_main(int argc, char** argv,
     }
   }
   if (iree_status_is_ok(status) && exit_code == 0) {
-    const loom_run_one_shot_request_t run_request = {
+    const loom_run_hal_one_shot_request_t run_request = {
         .run_module = &run_module,
         .compile_options = &compile_options,
         .options = &one_shot_options,
@@ -597,7 +550,7 @@ int iree_run_loom_main(int argc, char** argv,
         .host_allocator = allocator,
         .result = &run_result,
     };
-    status = backend->run_one_shot(backend, &run_request);
+    status = loom_run_hal_one_shot_run(device_provider, &run_request);
   }
   if (iree_status_is_ok(status)) {
     status =
@@ -615,7 +568,7 @@ int iree_run_loom_main(int argc, char** argv,
   }
 
   loom_compile_report_capture_deinitialize(&compile_report_capture);
-  loom_run_one_shot_result_deinitialize(&run_result);
+  loom_run_hal_one_shot_result_deinitialize(&run_result);
   loom_compile_pipeline_result_deinitialize(&pipeline_result);
   loom_run_module_deinitialize(&run_module);
   iree_io_file_contents_free(contents);

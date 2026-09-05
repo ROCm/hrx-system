@@ -105,7 +105,6 @@ loom_cc_library(
     loom::tooling::execution::hal::runtime
     loom::tooling::execution::hal::testbench_actual
     loom::tooling::execution::hal::testbench_requirement_provider
-    loom::tooling::execution::one_shot
     loom::tooling::execution::session
     loom::tooling::io::file
     loom::tooling::testbench

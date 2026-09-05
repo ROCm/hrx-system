@@ -13,11 +13,11 @@
 #include "loom/tools/iree-run-loom/main.h"
 
 int main(int argc, char** argv) {
-  const loom_tooling_execution_providers_t* configured_providers =
+  const loom_run_execution_provider_set_t* configured_providers =
       loom_tooling_configured_execution_providers();
   loom_run_execution_environment_t environment;
   iree_status_t status = loom_run_execution_environment_initialize(
-      &configured_providers->execution_provider_set, &environment);
+      configured_providers, &environment);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);
@@ -34,9 +34,8 @@ int main(int argc, char** argv) {
               &environment),
       .target_environment =
           loom_run_execution_environment_target_environment(&environment),
-      .execution_backend_registry =
-          *loom_run_execution_environment_execution_backend_registry(
-              &environment),
+      .device_provider_registry =
+          loom_run_execution_environment_device_provider_registry(&environment),
   };
   int exit_code = iree_run_loom_main(argc, argv, &configuration);
   loom_run_execution_environment_deinitialize(&environment);
