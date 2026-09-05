@@ -1861,7 +1861,7 @@ def _physical_register_views() -> tuple[PhysicalRegisterView, ...]:
 
 
 def _register_packing_resources() -> tuple[RegisterPackingResource, ...]:
-    """Describes aggregate X-register capacity shared by W storage classes."""
+    """Describes instantaneous capacity shared across register classes."""
 
     x_register_count = len(_MACHINE_CLASSES["mXm"].candidates)
     if len(_MACHINE_CLASSES["VEC256"].candidates) != x_register_count * 2:
@@ -1870,6 +1870,35 @@ def _register_packing_resources() -> tuple[RegisterPackingResource, ...]:
         )
     if len(_MACHINE_CLASSES["eWL"].candidates) != x_register_count:
         raise ValueError("AIE2P eWL does not cover one W half of every X register")
+
+    physical_registers = {
+        register.name: register for register in CORE_MACHINE_TABLE.physical_registers
+    }
+    scalar_atomic_units = frozenset(
+        atomic_unit
+        for register_name in _MACHINE_CLASSES["eR"].candidates
+        for atomic_unit in physical_registers[register_name].atomic_units
+    )
+    scalar_members: list[RegisterPackingResourceMember] = []
+    for machine_class_name in _EXPLICIT_STORAGE_MACHINE_CLASS_NAMES:
+        machine_class = _MACHINE_CLASSES[machine_class_name]
+        candidate_atomic_unit_counts = {
+            len(physical_registers[register_name].atomic_units)
+            for register_name in machine_class.candidates
+        }
+        if len(candidate_atomic_unit_counts) != 1 or not all(
+            set(physical_registers[register_name].atomic_units) <= scalar_atomic_units
+            for register_name in machine_class.candidates
+        ):
+            continue
+        scalar_members.append(
+            RegisterPackingResourceMember(
+                _low_register_class_name(machine_class_name),
+                resource_unit_count=next(iter(candidate_atomic_unit_counts)),
+            )
+        )
+    if not scalar_members:
+        raise ValueError("AIE2P scalar register packing resource has no members")
     return (
         RegisterPackingResource(
             name=f"{_TARGET_KEY}.register.x.pairs",
@@ -1881,6 +1910,11 @@ def _register_packing_resources() -> tuple[RegisterPackingResource, ...]:
                     register_unit_count=2,
                 ),
             ),
+        ),
+        RegisterPackingResource(
+            name=f"{_TARGET_KEY}.register.scalar.units",
+            capacity=len(scalar_atomic_units),
+            members=tuple(scalar_members),
         ),
     )
 
@@ -2505,6 +2539,11 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
         effects=_effects(spec, form),
         constraints=(
             *_constraints(form, explicit_register_operands),
+            *(
+                (Constraint(ConstraintKind.REMATERIALIZABLE, 0),)
+                if spec.op_kind is DescriptorOpKind.CONST
+                else ()
+            ),
             *(
                 (
                     Constraint(

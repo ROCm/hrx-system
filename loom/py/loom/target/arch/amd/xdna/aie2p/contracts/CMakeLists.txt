@@ -15,6 +15,7 @@ iree_py_library(
   SRCS
     "__init__.py"
     "core.py"
+    "f32.py"
     "index_conversion.py"
     "memory.py"
   DEPS
@@ -27,6 +28,26 @@ iree_py_library(
     loom::py::loom::dialect::view::view
     loom::py::loom::target::arch::amd::xdna::aie2p::descriptors
     loom::py::loom::target::contracts::contracts
+)
+
+iree_py_test(
+  NAME
+    f32_test
+  MAIN
+    "../../../../../../tools/pytest_style_runner.py"
+  SRCS
+    "f32_test.py"
+    "../../../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.amd.xdna.aie2p.contracts.f32_test"
+  DEPS
+    loom::py::loom::target::arch::amd::xdna::aie2p::contracts::contracts
+    loom::py::loom::dialect::scalar::scalar
+    loom::py::loom::target::contracts::contracts
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 iree_py_test(

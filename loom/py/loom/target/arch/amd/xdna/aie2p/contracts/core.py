@@ -26,6 +26,7 @@ from loom.dialect.vector import defs as vector
 from loom.dialect.view import ALL_VIEW_OPS
 from loom.dialect.view import defs as view
 from loom.dsl import Op
+from loom.target.arch.amd.xdna.aie2p.contracts.f32 import AIE2P_F32_RULES
 from loom.target.arch.amd.xdna.aie2p.contracts.index_conversion import (
     AIE2P_INDEX_CONVERSION_RULES,
 )
@@ -2641,6 +2642,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
         ),
         _vector_multiply_i16_rule(),
         _vector_multiply_bf16x32_rule(),
+        *AIE2P_F32_RULES,
         _matrix_accumulator_zero_rule(),
         _float_matrix_accumulator_zero_rule(),
         _float_matrix_accumulator_add_rule(),

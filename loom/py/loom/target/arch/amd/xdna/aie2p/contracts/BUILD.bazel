@@ -16,6 +16,7 @@ iree_py_library(
     srcs = [
         "__init__.py",
         "core.py",
+        "f32.py",
         "index_conversion.py",
         "memory.py",
     ],
@@ -29,6 +30,21 @@ iree_py_library(
         "//loom/py/loom/dialect/vector",
         "//loom/py/loom/dialect/view",
         "//loom/py/loom/target/arch/amd/xdna/aie2p:descriptors",
+        "//loom/py/loom/target/contracts",
+    ],
+)
+
+iree_py_test(
+    name = "f32_test",
+    srcs = [
+        "f32_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amd.xdna.aie2p.contracts.f32_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":contracts",
+        "//loom/py/loom/dialect/scalar",
         "//loom/py/loom/target/contracts",
     ],
 )

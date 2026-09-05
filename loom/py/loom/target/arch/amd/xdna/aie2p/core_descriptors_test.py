@@ -124,7 +124,22 @@ def test_core_descriptor_closure_is_complete() -> None:
                 ("aie2p.ewl", 1, 1),
                 ("aie2p.vec256", 2, 1),
             ),
-        )
+        ),
+        (
+            "amd.xdna.aie2p.register.scalar.units",
+            32,
+            (
+                ("aie2p.elpredicate", 1, 2),
+                ("aie2p.er", 1, 1),
+                ("aie2p.ers16", 1, 1),
+                ("aie2p.ml8m", 1, 2),
+                ("aie2p.mr16_vcompare", 1, 1),
+                ("aie2p.mr26_lock", 1, 1),
+                ("aie2p.mr27_select", 1, 1),
+                ("aie2p.mr29_insert", 1, 1),
+                ("aie2p.mr31_divs", 1, 1),
+            ),
+        ),
     ]
 
 
@@ -562,6 +577,7 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
         assert descriptor.operands[0].reg_alts[0].reg_class == "aie2p.er"
         assert descriptor.operands[0].encoding_adapter_id != 0
         assert descriptor.operands[0].ready_stage == 1
+        assert Constraint(ConstraintKind.REMATERIALIZABLE, 0) in descriptor.constraints
 
     scalar_move = descriptors["amd.xdna.aie2p.move.scalar"]
     assert [operand.field_name for operand in scalar_move.operands] == [

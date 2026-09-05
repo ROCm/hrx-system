@@ -389,6 +389,10 @@ static const loom_target_legalizer_rule_t kVectorLegalizerRules[] = {
         .legalize = loom_vector_legalize_descriptor,
     },
     {
+        .root_kind = LOOM_OP_VECTOR_MULF,
+        .legalize = loom_vector_legalize_descriptor,
+    },
+    {
         .root_kind = LOOM_OP_VECTOR_SHLI,
         .legalize = loom_vector_legalize_descriptor,
     },
