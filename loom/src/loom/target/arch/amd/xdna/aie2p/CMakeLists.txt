@@ -430,6 +430,7 @@ loom_check_test_suite(
     "test/source_low/packed_integer_arithmetic.loom-test"
     "test/source_low/vector_memory.loom-test"
     "test/source_low/vector_predicate.loom-test"
+    "test/source_low/vector_structural.loom-test"
   RUNNER
     ::loom-check
   DATA

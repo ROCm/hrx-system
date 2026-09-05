@@ -19,6 +19,7 @@ iree_py_library(
     "f32.py"
     "index_conversion.py"
     "memory.py"
+    "structural.py"
   DEPS
     loom::py::loom::core
     loom::py::loom::dialect::buffer::buffer

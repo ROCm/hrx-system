@@ -270,9 +270,9 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   %accumulator_fragment$138 = acc.clear.f32x64
   %139 = vbroadcast.bf16x8.to.bf16x32 %lhs_fragment$136, 0
   %140 = mova.i32 52
-  %141 = vshuffle.bf16x32 %139, %139, %140
+  %141 = vshuffle %139, %139, %140
   %142 = mova.i32 53
-  %143 = vshuffle.bf16x32 %139, %139, %142
+  %143 = vshuffle %139, %139, %142
   %144 = concat(%141, %143) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   %145 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment$137, 0
   %146 = vmov.bf16x32 %145
@@ -303,9 +303,9 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   %accumulator_fragment$162 = acc.clear.f32x64
   %163 = vbroadcast.bf16x8.to.bf16x32 %lhs_fragment$160, 0
   %164 = mova.i32 52
-  %165 = vshuffle.bf16x32 %163, %163, %164
+  %165 = vshuffle %163, %163, %164
   %166 = mova.i32 53
-  %167 = vshuffle.bf16x32 %163, %163, %166
+  %167 = vshuffle %163, %163, %166
   %168 = concat(%165, %167) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   %169 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment$161, 0
   %170 = vmov.bf16x32 %169
@@ -342,9 +342,9 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   %accumulator_fragment$188 = acc.clear.f32x64
   %189 = vbroadcast.bf16x8.to.bf16x32 %lhs_fragment$186, 0
   %190 = mova.i32 52
-  %191 = vshuffle.bf16x32 %189, %189, %190
+  %191 = vshuffle %189, %189, %190
   %192 = mova.i32 53
-  %193 = vshuffle.bf16x32 %189, %189, %192
+  %193 = vshuffle %189, %189, %192
   %194 = concat(%191, %193) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   %195 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment$187, 0
   %196 = vmov.bf16x32 %195
@@ -375,9 +375,9 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   %accumulator_fragment$212 = acc.clear.f32x64
   %213 = vbroadcast.bf16x8.to.bf16x32 %lhs_fragment$210, 0
   %214 = mova.i32 52
-  %215 = vshuffle.bf16x32 %213, %213, %214
+  %215 = vshuffle %213, %213, %214
   %216 = mova.i32 53
-  %217 = vshuffle.bf16x32 %213, %213, %216
+  %217 = vshuffle %213, %213, %216
   %218 = concat(%215, %217) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   %219 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment$211, 0
   %220 = vmov.bf16x32 %219

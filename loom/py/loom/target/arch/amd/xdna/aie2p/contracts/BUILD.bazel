@@ -20,6 +20,7 @@ iree_py_library(
         "f32.py",
         "index_conversion.py",
         "memory.py",
+        "structural.py",
     ],
     visibility = ["//loom/py/loom/gen/target/contracts:__pkg__"],
     deps = [

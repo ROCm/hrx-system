@@ -34,6 +34,9 @@ from loom.target.arch.amd.xdna.aie2p.contracts.index_conversion import (
     AIE2P_INDEX_CONVERSION_RULES,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.memory import AIE2P_MEMORY_RULES
+from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
+    AIE2P_STRUCTURAL_RULES,
+)
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
 )
@@ -736,7 +739,7 @@ def _vector_multiply_bf16x32_rule() -> DescriptorRule:
 def _matrix_multiply_bf16bf16_m8n8k1_rule() -> DescriptorRule:
     config_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
     broadcast = _descriptor("amd.xdna.aie2p.broadcast.bf16x8.to.bf16x32")
-    shuffle = _descriptor("amd.xdna.aie2p.shuffle.bf16x32.configured")
+    shuffle = _descriptor("amd.xdna.aie2p.shuffle.x.configured")
     move = _descriptor("amd.xdna.aie2p.move.bf16x32")
     multiply = _descriptor(
         "amd.xdna.aie2p.matrix.accumulate.bf16bf16.m8n8k1.configured"
@@ -2179,6 +2182,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             source="vector_mma",
         ),
         _matrix_fragment_store_rule(),
+        *AIE2P_STRUCTURAL_RULES,
         *AIE2P_MEMORY_RULES,
         *(
             _address_constant_rule(

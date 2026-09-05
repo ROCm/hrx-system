@@ -1,0 +1,17 @@
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @i8x64_deinterleave(%packed: vector<64xi8>) -> (vector<32xi8>, vector<32xi8>) {
+  %even, %odd = vector.deinterleave<0> %packed : vector<64xi8> -> vector<32xi8>, vector<32xi8>
+  func.return %even, %odd : vector<32xi8>, vector<32xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x64_deinterleave(%packed: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
+  %8 = mova.i32 0
+  %even = vshuffle %packed, %packed, %8
+  %10 = mova.i32 1
+  %odd = vshuffle %packed, %packed, %10
+  return %even, %odd
+}

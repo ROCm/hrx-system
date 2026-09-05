@@ -642,11 +642,11 @@ _BASE_DESCRIPTOR_SPECS = (
     ),
     _DescriptorSpec(
         "VSHUFFLE_vec_shuffle_x",
-        f"{_TARGET_KEY}.shuffle.bf16x32.configured",
-        "floating.shuffle.bf16x32.configured",
+        f"{_TARGET_KEY}.shuffle.x.configured",
+        "register.shuffle.x.configured",
         "II_VSHUFFLE_vec_shuffle_x",
         storage_overrides=(("dst", "VEC256"),),
-        asm_mnemonic="vshuffle.bf16x32",
+        asm_mnemonic="vshuffle",
     ),
     _DescriptorSpec(
         "VMOV_alu_mv_mv_x",
