@@ -4990,6 +4990,7 @@ static void iree_hal_vulkan_queue_fail_unsubmitted_submission(
     iree_status_t status) {
   IREE_ASSERT(!iree_status_is_ok(status),
               "unsubmitted queue failure status must be non-OK");
+  iree_status_t completion_status = iree_status_clone(status);
   switch (submission->kind) {
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_ALLOCA:
       iree_hal_vulkan_queue_profile_record_alloca_memory_events(
@@ -5032,6 +5033,9 @@ static void iree_hal_vulkan_queue_fail_unsubmitted_submission(
                                              status);
       break;
   }
+  iree_hal_vulkan_queue_consume_completion_action(submission,
+                                                  completion_status);
+  iree_status_free(completion_status);
   iree_hal_vulkan_queue_pending_submission_destroy(queue, submission);
 }
 

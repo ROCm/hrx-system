@@ -411,6 +411,54 @@ TEST_P(QueueHostCallTest, CallbackReturnsErrorAfterWait) {
               StatusIs(StatusCode::kPermissionDenied));
 }
 
+// Proves that failure of a queued prerequisite reaches the terminal signal of
+// a transfer transaction accepted before that failure occurred.
+TEST_P(AsyncQueueHostCallLifetimeTest,
+       TransferTransactionPropagatesFailedPrerequisite) {
+  IREE_TRACE_SCOPE();
+
+  struct state_t {
+    std::atomic<int> did_call;
+  } state = {0};
+  auto call = iree_hal_make_host_call(
+      +[](void* user_data, const uint64_t args[4],
+          iree_hal_host_call_context_t* context) {
+        (void)args;
+        (void)context;
+        auto* state = static_cast<state_t*>(user_data);
+        ++state->did_call;
+        return iree_make_status(IREE_STATUS_PERMISSION_DENIED,
+                                "test producer callback failed");
+      },
+      &state);
+
+  Ref<iree_hal_buffer_t> source_buffer;
+  IREE_ASSERT_OK(
+      CreateUninitializedDeviceBuffer(/*buffer_size=*/4, source_buffer.out()));
+  uint8_t target[4] = {0};
+
+  SemaphoreList producer_wait(device_, {0}, {1});
+  SemaphoreList producer_signal(device_, {0}, {1});
+  SemaphoreList terminal_signal(device_, {0}, {1});
+  uint64_t args[4] = {0, 0, 0, 0};
+
+  IREE_ASSERT_OK(iree_hal_device_queue_host_call(
+      device_, IREE_HAL_QUEUE_AFFINITY_ANY, producer_wait, producer_signal,
+      call, args, IREE_HAL_HOST_CALL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_download(
+      transfer_queue_, producer_signal, terminal_signal, source_buffer,
+      /*source_offset=*/0, target, sizeof(target)));
+
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_list_signal(producer_wait, /*frontier=*/NULL));
+
+  EXPECT_THAT(
+      Status(iree_hal_semaphore_list_wait(
+          terminal_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE)),
+      StatusIs(StatusCode::kPermissionDenied));
+  EXPECT_EQ(state.did_call, 1);
+}
+
 // Proves that asynchronous queues retain callback state after queue submission
 // returns and until the delayed callback has completed.
 TEST_P(AsyncQueueHostCallLifetimeTest, RetainsStateUntilInvocation) {
