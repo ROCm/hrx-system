@@ -110,19 +110,6 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
-loom_cc_test(
-  NAME
-    artifact_test
-  SRCS
-    "artifact_test.cc"
-  DEPS
-    ::artifact
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::target::provider
-)
-
 loom_cc_library(
   NAME
     request

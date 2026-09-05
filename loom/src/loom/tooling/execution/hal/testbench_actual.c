@@ -726,8 +726,7 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
   pipeline_options.target_environment = provider->target_environment;
   const loom_target_specialization_request_t specialization_request = {
       .function_name = entry_symbol,
-      .target_profile =
-          provider->compile_device_target.artifact_target.target_profile,
+      .target_profile = provider->compile_device_target.target_profile,
   };
   pipeline_options.target_specializations =
       (loom_target_specialization_request_list_t){

@@ -300,8 +300,8 @@ static iree_status_t loom_compile_request_select_roots(
 static iree_status_t loom_compile_request_select_explicit_target(
     iree_string_view_t target_value,
     const loom_target_environment_t* target_environment,
-    loom_artifact_target_t* out_target) {
-  *out_target = (loom_artifact_target_t){0};
+    loom_compile_target_t* out_target) {
+  *out_target = (loom_compile_target_t){0};
   target_value = iree_string_view_trim(target_value);
   if (iree_string_view_is_empty(target_value)) {
     return iree_ok_status();
@@ -312,7 +312,7 @@ static iree_status_t loom_compile_request_select_explicit_target(
   const loom_target_profile_t* profile = NULL;
   IREE_RETURN_IF_ERROR(loom_target_environment_select_profile(
       target_environment, &specification, &profile));
-  *out_target = (loom_artifact_target_t){
+  *out_target = (loom_compile_target_t){
       .target_profile = profile,
       .target_key = specification.selector,
   };
@@ -542,7 +542,7 @@ iree_status_t loom_compile_request_resolve(
   IREE_RETURN_IF_ERROR(loom_compile_request_select_roots(
       module, options->roots, explicit_product, &root_summary));
 
-  loom_artifact_target_t explicit_target = {0};
+  loom_compile_target_t explicit_target = {0};
   IREE_RETURN_IF_ERROR(loom_compile_request_select_explicit_target(
       options->target, target_environment, &explicit_target));
   if (explicit_target.target_profile != NULL &&

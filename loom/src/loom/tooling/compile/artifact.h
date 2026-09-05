@@ -37,11 +37,11 @@ enum loom_artifact_provider_flag_bits_e {
   LOOM_ARTIFACT_PROVIDER_FLAG_CANONICAL = 1u << 0,
 };
 
-// Borrowed concrete compiler target selected independently of a runtime device.
+// Borrowed concrete target for emitting already-prepared target-low IR.
 typedef struct loom_artifact_target_t {
-  // Immutable structured target profile. NULL requests the module's authored
-  // target records.
-  const loom_target_profile_t* target_profile;
+  // Target-neutral bundle used to select compatible prepared entries. NULL
+  // requests the module's authored target records.
+  const loom_target_bundle_t* target_bundle;
   // Family-owned target selector used for diagnostics and artifact metadata.
   iree_string_view_t target_key;
 } loom_artifact_target_t;
@@ -49,7 +49,7 @@ typedef struct loom_artifact_target_t {
 // Returns the target-neutral bundle projected by |target|, or NULL.
 static inline const loom_target_bundle_t* loom_artifact_target_bundle(
     const loom_artifact_target_t* target) {
-  return target ? loom_target_profile_bundle(target->target_profile) : NULL;
+  return target ? target->target_bundle : NULL;
 }
 
 // Compiler artifact bytes produced without creating or querying a device.
@@ -76,8 +76,9 @@ typedef struct loom_artifact_t {
   void* storage;
 } loom_artifact_t;
 
-// Emits a compiler artifact. When |out_emitted| is true the artifact has a
-// target bundle, non-empty target-native and executable contents, and a valid
+// Emits already-prepared target-low IR to a compiler artifact. This does not
+// specialize source IR. When |out_emitted| is true the artifact has a target
+// bundle, non-empty target-native and executable contents, and a valid
 // descriptor and contents for every sidecar. Returning OK with |out_emitted|
 // false is reserved for product diagnostics emitted through |diagnostic_sink|;
 // infrastructure failures return a non-OK status.
@@ -111,19 +112,6 @@ struct loom_artifact_provider_t {
   loom_artifact_provider_deinitialize_artifact_fn_t deinitialize_artifact;
 };
 
-// Selects a borrowed offline artifact target from |target_environment|.
-//
-// |target_specification| must use `family:selector` syntax and select the
-// target family required by |provider|. The returned profile has process
-// lifetime and |out_target->target_key| borrows the selector portion of
-// |target_specification|. Selection performs no allocation and requires no
-// teardown. On failure |out_target| remains empty.
-iree_status_t loom_artifact_target_select(
-    const loom_artifact_provider_t* provider,
-    const loom_target_environment_t* target_environment,
-    iree_string_view_t target_specification,
-    loom_artifact_target_t* out_target);
-
 // A registry of artifact providers linked into a compiler binary.
 typedef struct loom_artifact_provider_registry_t {
   // Linked artifact provider table; entries are non-NULL when count is nonzero.
@@ -146,7 +134,7 @@ typedef struct loom_artifact_candidate_t {
   loom_artifact_t artifact;
 } loom_artifact_candidate_t;
 
-// Emits |module| using a caller-owned explicit target.
+// Emits prepared target-low |module| using a caller-owned explicit target.
 iree_status_t loom_artifact_candidate_emit_target(
     const loom_artifact_provider_t* provider,
     const loom_artifact_target_t* target, loom_module_t* module,

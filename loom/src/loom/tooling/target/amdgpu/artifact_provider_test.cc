@@ -184,7 +184,7 @@ TEST_F(AmdgpuArtifactProviderTest, RecordsDetailedReportRows) {
       loom_amdgpu_target_profile_initialize(&identity, &target_profile));
 
   loom_artifact_target_t target = {
-      /*.target_profile=*/&target_profile.base,
+      /*.target_bundle=*/target_profile.base.target_bundle,
       /*.target_key=*/target_info->name,
   };
   loom_compile_options_t options = {};
@@ -234,7 +234,7 @@ TEST_F(AmdgpuArtifactProviderTest,
       loom_amdgpu_target_profile_initialize(&identity, &target_profile));
 
   const loom_artifact_target_t target = {
-      /*.target_profile=*/&target_profile.base,
+      /*.target_bundle=*/target_profile.base.target_bundle,
       /*.target_key=*/target_info->name,
   };
   const loom_target_pipeline_options_t target_pipeline_options = {

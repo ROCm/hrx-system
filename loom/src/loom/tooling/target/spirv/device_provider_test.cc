@@ -188,7 +188,7 @@ TEST_F(SpirvDeviceProviderTest, SelectsRawBdaTarget) {
   IREE_ASSERT_OK(SelectBaselineTarget());
 
   const loom_spirv_target_profile_t* target_profile =
-      loom_spirv_target_profile_cast(target_.artifact_target.target_profile);
+      loom_spirv_target_profile_cast(target_.target_profile);
   ASSERT_NE(target_profile, nullptr);
   const loom_target_bundle_t* target_bundle =
       loom_device_target_bundle(&target_);

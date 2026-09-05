@@ -130,9 +130,10 @@ static iree_status_t loom_amdgpu_device_provider_try_select_target(
 
   *out_target = (loom_device_target_t){
       .executable_target = result.target,
+      .target_profile = &profile->base,
       .artifact_target =
           {
-              .target_profile = &profile->base,
+              .target_bundle = profile->base.target_bundle,
               .target_key = result.target->target_key,
           },
   };
@@ -163,8 +164,7 @@ static iree_status_t loom_amdgpu_device_provider_select_compatible_target(
         IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC, &selected, out_target);
   }
 
-  if (iree_status_is_ok(status) &&
-      out_target->artifact_target.target_profile == NULL) {
+  if (iree_status_is_ok(status) && out_target->target_profile == NULL) {
     if (authored_requirement != NULL) {
       status = iree_make_status(
           IREE_STATUS_UNAVAILABLE,

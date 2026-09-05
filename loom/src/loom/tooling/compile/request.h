@@ -61,6 +61,24 @@ typedef struct loom_compile_request_options_t {
   iree_string_view_t target;
 } loom_compile_request_options_t;
 
+// Borrowed target selected for source specialization and artifact emission.
+typedef struct loom_compile_target_t {
+  // Immutable structured profile used to specialize source IR.
+  const loom_target_profile_t* target_profile;
+  // Family-owned selector used for diagnostics and artifact metadata.
+  iree_string_view_t target_key;
+} loom_compile_target_t;
+
+// Returns the prepared-artifact target projected by |target|.
+static inline loom_artifact_target_t loom_compile_target_artifact_target(
+    const loom_compile_target_t* target) {
+  return (loom_artifact_target_t){
+      .target_bundle =
+          target ? loom_target_profile_bundle(target->target_profile) : NULL,
+      .target_key = target ? target->target_key : iree_string_view_empty(),
+  };
+}
+
 // Fully resolved compile request borrowing immutable configured state.
 typedef struct loom_compile_request_t {
   // Product inferred from selected roots.
@@ -72,7 +90,7 @@ typedef struct loom_compile_request_t {
   // Producer implementing |format| for |product|.
   loom_compile_producer_t producer;
   // Explicit target selected by --target, or empty for authored targets.
-  loom_artifact_target_t explicit_target;
+  loom_compile_target_t explicit_target;
   // Effective target fact type, or NULL for target-independent products.
   const loom_target_fact_type_t* target_fact_type;
 } loom_compile_request_t;

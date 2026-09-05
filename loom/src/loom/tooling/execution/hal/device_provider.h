@@ -30,7 +30,9 @@ struct loom_run_hal_runtime_t;
 typedef struct loom_device_target_t {
   // Exact executable target row borrowed from the active device spec.
   const iree_hal_executable_target_t* executable_target;
-  // Offline artifact target projected from the device.
+  // Structured compiler profile projected from the device.
+  const loom_target_profile_t* target_profile;
+  // Prepared-artifact target projected from the device.
   loom_artifact_target_t artifact_target;
 } loom_device_target_t;
 

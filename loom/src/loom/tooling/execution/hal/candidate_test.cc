@@ -109,9 +109,10 @@ iree_status_t FakeHalSelectDeviceTarget(const loom_device_provider_t* provider,
   (void)allocator;
   *out_target = (loom_device_target_t){
       /*.executable_target=*/nullptr,
+      /*.target_profile=*/&kFakeTargetProfile,
       /*.artifact_target=*/
       {
-          /*.target_profile=*/&kFakeTargetProfile,
+          /*.target_bundle=*/&kFakeTargetBundle,
           /*.target_key=*/IREE_SVL("fake-hal"),
       },
   };
@@ -141,9 +142,9 @@ iree_status_t FakeHalEmitArtifact(const loom_artifact_provider_t* provider,
   g_fake_hal_emit_source_to_low_max_errors =
       options->target_pipeline_options.source_to_low_max_errors;
   *out_emitted = false;
-  if (target->target_profile != &kFakeTargetProfile) {
+  if (target->target_bundle != &kFakeTargetBundle) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unexpected fake HAL target profile");
+                            "unexpected fake HAL target bundle");
   }
   fake_hal_artifact_storage_t* storage = nullptr;
   IREE_RETURN_IF_ERROR(
@@ -278,8 +279,7 @@ TEST_F(HalCandidateTest, CompileHalExecutableCandidate) {
   EXPECT_EQ(g_fake_hal_emit_function_versions, &function_versions);
   EXPECT_EQ(g_fake_hal_emit_source_to_low_max_errors, 73u);
   EXPECT_EQ(candidate.provider, &kFakeDeviceProvider);
-  EXPECT_EQ(candidate.device_target.artifact_target.target_profile,
-            &kFakeTargetProfile);
+  EXPECT_EQ(candidate.device_target.target_profile, &kFakeTargetProfile);
   EXPECT_EQ(loom_device_target_bundle(&candidate.device_target),
             &kFakeTargetBundle);
   EXPECT_EQ(candidate.device_artifact.executable_target, nullptr);

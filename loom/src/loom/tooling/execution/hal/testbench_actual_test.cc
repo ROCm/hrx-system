@@ -144,9 +144,10 @@ static iree_status_t FakeHalSelectDeviceTarget(
   (void)allocator;
   *out_target = (loom_device_target_t){
       /*.executable_target=*/nullptr,
+      /*.target_profile=*/&kFakeTargetProfile,
       /*.artifact_target=*/
       {
-          /*.target_profile=*/&kFakeTargetProfile,
+          /*.target_bundle=*/kFakeTargetProfile.target_bundle,
           /*.target_key=*/IREE_SVL("fake"),
       },
   };

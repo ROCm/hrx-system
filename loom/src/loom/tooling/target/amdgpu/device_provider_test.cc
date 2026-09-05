@@ -163,7 +163,7 @@ static void ExpectSelectedTarget(
     iree_hal_executable_target_kind_t expected_kind,
     iree_string_view_t expected_target_key) {
   const loom_amdgpu_target_profile_t* target_profile =
-      loom_amdgpu_target_profile_cast(target.artifact_target.target_profile);
+      loom_amdgpu_target_profile_cast(target.target_profile);
   ASSERT_NE(target_profile, nullptr);
   ASSERT_NE(target.executable_target, nullptr);
   EXPECT_NE(loom_device_target_bundle(&target), nullptr);
@@ -281,7 +281,7 @@ TEST_F(AmdgpuDeviceProviderTest, PreservesTargetOverlay) {
   ExpectSelectedTarget(target, IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
                        IREE_SV("gfx1250-a0"));
   const loom_amdgpu_target_profile_t* profile =
-      loom_amdgpu_target_profile_cast(target.artifact_target.target_profile);
+      loom_amdgpu_target_profile_cast(target.target_profile);
   ASSERT_NE(profile, nullptr);
   EXPECT_EQ(profile->identity.target, target_info);
 }
@@ -294,7 +294,7 @@ TEST_F(AmdgpuDeviceProviderTest, RejectsTargetOverlayMismatch) {
   loom_device_target_t target = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
                         SelectCompatibleTarget(requirement, &target));
-  EXPECT_EQ(target.artifact_target.target_profile, nullptr);
+  EXPECT_EQ(target.target_profile, nullptr);
   EXPECT_EQ(target.executable_target, nullptr);
 }
 
@@ -305,7 +305,7 @@ TEST_F(AmdgpuDeviceProviderTest, RejectsIncompatibleAuthoredExactTarget) {
   loom_device_target_t target = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
                         SelectCompatibleTarget(requirement, &target));
-  EXPECT_EQ(target.artifact_target.target_profile, nullptr);
+  EXPECT_EQ(target.target_profile, nullptr);
   EXPECT_EQ(target.executable_target, nullptr);
 }
 
@@ -317,7 +317,7 @@ TEST_F(AmdgpuDeviceProviderTest, RejectsTargetKindKeyMismatch) {
                         loom_amdgpu_device_provider.select_target(
                             &loom_amdgpu_device_provider, &runtime_,
                             iree_allocator_system(), &target));
-  EXPECT_EQ(target.artifact_target.target_profile, nullptr);
+  EXPECT_EQ(target.target_profile, nullptr);
   EXPECT_EQ(target.executable_target, nullptr);
 }
 
@@ -339,7 +339,7 @@ TEST_F(AmdgpuDeviceProviderTest, RejectsOnlyUnknownTarget) {
                         loom_amdgpu_device_provider.select_target(
                             &loom_amdgpu_device_provider, &runtime_,
                             iree_allocator_system(), &target));
-  EXPECT_EQ(target.artifact_target.target_profile, nullptr);
+  EXPECT_EQ(target.target_profile, nullptr);
   EXPECT_EQ(target.executable_target, nullptr);
 }
 

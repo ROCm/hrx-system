@@ -77,7 +77,9 @@ static iree_status_t loom_spirv_device_provider_select_target(
   }
 
   out_target->executable_target = target_result.target;
-  out_target->artifact_target.target_profile = &profile_storage->profile.base;
+  out_target->target_profile = &profile_storage->profile.base;
+  out_target->artifact_target.target_bundle =
+      profile_storage->profile.base.target_bundle;
   out_target->artifact_target.target_key = target_result.target->target_key;
   return iree_ok_status();
 }
@@ -107,10 +109,9 @@ static void loom_spirv_device_provider_deinitialize_target(
   if (target == NULL) {
     return;
   }
-  if (target->artifact_target.target_profile != NULL) {
+  if (target->target_profile != NULL) {
     loom_spirv_vulkan_hal_target_profile_storage_t* storage =
-        (loom_spirv_vulkan_hal_target_profile_storage_t*)
-            target->artifact_target.target_profile;
+        (loom_spirv_vulkan_hal_target_profile_storage_t*)target->target_profile;
     loom_spirv_vulkan_hal_target_profile_storage_deinitialize(storage,
                                                               allocator);
     iree_allocator_free(allocator, storage);

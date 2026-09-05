@@ -48,7 +48,7 @@ static iree_status_t loom_amdgpu_hal_testbench_query_descriptor_set_requirement(
       context->device_provider, &context->runtime, context->host_allocator,
       &target));
   const loom_amdgpu_target_profile_t* target_profile =
-      loom_amdgpu_target_profile_cast(target.artifact_target.target_profile);
+      loom_amdgpu_target_profile_cast(target.target_profile);
   const bool satisfied =
       target_profile != NULL &&
       iree_string_view_equal(

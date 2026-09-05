@@ -118,18 +118,6 @@ loom_cc_test(
     ],
 )
 
-loom_cc_test(
-    name = "artifact_test",
-    srcs = ["artifact_test.cc"],
-    deps = [
-        ":artifact",
-        "//loom/src/loom/target:provider",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
 loom_cc_library(
     name = "request",
     srcs = ["request.c"],

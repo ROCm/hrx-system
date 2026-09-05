@@ -841,7 +841,7 @@ static iree_status_t loom_compile_validate_request_flags(
 static iree_status_t loom_compile_specialize_explicit_target(
     const loom_target_environment_t* target_environment,
     loom_run_session_t* session, loom_run_module_t* run_module,
-    const loom_artifact_target_t* target,
+    const loom_compile_target_t* target,
     loom_compile_report_capture_t* compile_report_capture,
     iree_allocator_t allocator) {
   loom_compile_diagnostic_sink_t compile_diagnostic_sink = {
@@ -1197,12 +1197,14 @@ int main(int argc, char** argv) {
   }
 
   if (iree_status_is_ok(status) && exit_code == 0) {
+    const loom_artifact_target_t explicit_artifact_target =
+        loom_compile_target_artifact_target(&request.explicit_target);
     switch (request.producer.kind) {
       case LOOM_COMPILE_PRODUCER_ARTIFACT:
         status = loom_compile_emit_artifact(
             request.producer.value.artifact_provider,
             request.explicit_target.target_profile != NULL
-                ? &request.explicit_target
+                ? &explicit_artifact_target
                 : NULL,
             &run_module, &compile_options, &compile_report_capture,
             artifact_manifest_output_path, allocator, &emitted,
