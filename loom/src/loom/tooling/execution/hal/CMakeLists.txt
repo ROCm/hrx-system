@@ -191,8 +191,10 @@ loom_cc_library(
     iree::base
     iree::base::core_headers
     iree::base::internal::arena
+    loom::ir
     loom::ops::kernel
     loom::target::entry_selection
+    loom::tooling::compile::options
     loom::tooling::compile::report_capture
     loom::tooling::execution::session
     loom::tooling::io::file
