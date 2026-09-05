@@ -99,7 +99,8 @@ def _declare_amdgpu_kernel_product(
     compile_report = ctx.actions.declare_file(output_stem + ".compile.json")
     args = ctx.actions.args()
     args.add(linked_module)
-    args.add("--backend=amdgpu-hal")
+    args.add("--product=kernel")
+    args.add("--format=amdgpu-hsaco")
     target_profile = ctx.attr.target[LoomTargetProfileInfo]
     args.add("--target=%s:%s" % (
         target_profile.family,
@@ -131,7 +132,8 @@ def _declare_command_product(ctx, linked_module):
     )
     args = ctx.actions.args()
     args.add(linked_module)
-    args.add("--backend=command")
+    args.add("--product=command")
+    args.add("--format=loom-command")
     args.add("--output=%s" % manifest.path)
     args.add("--emit-command-artifacts=%s" % artifacts.path)
     args.add("--compile-report=details")

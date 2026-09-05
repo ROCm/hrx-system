@@ -98,7 +98,7 @@ sidecar when validating target lowering and packaging:
 ```bash
 loom-compile \
   loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
   --output=/tmp/loom-q6q8.hal \
   --emit-target-artifact=/tmp/loom-q6q8.hsaco \
@@ -209,7 +209,7 @@ snapshots around those boundaries:
 ```bash
 loom-compile \
   loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
   --output=/tmp/loom-q6q8.hal \
   --emit-target-artifact=/tmp/loom-q6q8.hsaco \
@@ -480,7 +480,7 @@ padding, swizzling, vectorization, or imported kernel staging choices:
 
 ```bash
 loom-compile loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
   --output=/tmp/shared-memory-vector-tile.hal \
   --compile-report=json-details \
@@ -520,7 +520,7 @@ greppable report is more convenient:
 
 ```bash
 loom-compile loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
   --output=/tmp/shared-memory-vector-tile.hal \
   --compile-report=text-details \

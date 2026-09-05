@@ -258,10 +258,10 @@ can be launched with other counts by other roots:
 
 !!! info "Command deployment products"
 
-    `loom-compile --backend=command` materializes each selected command root as
-    a portable `.loomcmd` and writes the shared executable-entry manifest. The
-    target-specific kernel executable remains a separate artifact so an
-    embedding can cache, replace, or prebuild it independently.
+    `loom-compile --format=loom-command` materializes each selected command
+    root as a portable `.loomcmd` and writes the shared executable-entry
+    manifest. The target-specific kernel executable remains a separate
+    artifact so an embedding can cache, replace, or prebuild it independently.
 
 The generated [`command` dialect
 reference](../reference/dialects/command/index.md) documents the source

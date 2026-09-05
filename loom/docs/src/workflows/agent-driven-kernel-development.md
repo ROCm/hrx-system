@@ -256,7 +256,7 @@ configuration, backend, and target identity:
 ```shell
 loom-compile kernel.loom \
   --root=@production_cut \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx1151 \
   --output=candidate.hsaco \
   --compile-report=summary \

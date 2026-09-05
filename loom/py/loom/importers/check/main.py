@@ -216,7 +216,7 @@ TileLang/TVM generated artifacts. `--oracle=source` asks TileLang for generated
 device source, `--oracle=code-object` additionally compiles, unbundles, and
 externally disassembles a code object when the ROCm tools are available, and
 `--oracle=differential` also compiles the imported Loom IR through
-`loom-compile --backend=amdgpu-hal` for side-by-side disassembly-family
+`loom-compile --format=amdgpu-hsaco` for side-by-side disassembly-family
 comparison. This metadata is sidecar validation evidence: the checked stdout
 remains imported Loom IR. Use `--oracle-output-dir` or `--dump-temp-dir` to
 retain the generated source, bundled HSACO, unbundled code object, Loom HSACO,

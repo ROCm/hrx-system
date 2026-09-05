@@ -17,7 +17,8 @@
         "tool": "loom-compile",
         "args": [
           "{srcdir}/testdata/command_artifacts.loom",
-          "--backend=command",
+          "--product=command",
+          "--format=loom-command",
           "--output={tmp}/manifest.json",
           "--emit-command-artifacts={tmp}/commands"
         ]
@@ -43,7 +44,8 @@
         "tool": "loom-compile",
         "args": [
           "{srcdir}/testdata/command_kernel_requests.loom",
-          "--backend=command",
+          "--product=command",
+          "--format=loom-command",
           "--output={tmp}/manifest.json",
           "--emit-command-artifacts={tmp}/commands",
           "--emit-kernel-requests={tmp}/requests"
@@ -66,7 +68,8 @@
         "tool": "loom-compile",
         "args": [
           "{srcdir}/testdata/command_artifacts.loom",
-          "--backend=command",
+          "--product=command",
+          "--format=loom-command",
           "--root=@increment_then_double",
           "--output={tmp}/manifest.json",
           "--emit-command-artifacts={tmp}/commands"
@@ -89,7 +92,8 @@
         "tool": "loom-compile",
         "args": [
           "{srcdir}/testdata/command_artifacts.loom",
-          "--backend=command",
+          "--product=command",
+          "--format=loom-command",
           "--output={tmp}/manifest.json"
         ]
       },
@@ -98,8 +102,25 @@
       },
       "stderr": {
         "contains": [
-          "--backend=command requires --emit-command-artifacts=<directory>"
+          "format 'loom-command' requires --emit-command-artifacts=<directory>"
         ]
+      }
+    },
+    {
+      "name": "rejects the removed backend flag",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/testdata/command_artifacts.loom",
+          "--backend=command",
+          "--output={tmp}/manifest.json"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": ["flag 'backend' not recognized"]
       }
     }
   ]

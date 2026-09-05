@@ -21,7 +21,7 @@ Request a structured summary beside the emitted artifact:
 
 ```shell
 loom-compile kernel.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
   --output=kernel.hsaco \
   --compile-report=summary \
@@ -246,7 +246,7 @@ specific question whose answer needs row-level provenance:
 
 ```shell
 loom-compile kernel.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx1151 \
   --output=kernel.hsaco \
   --compile-report=details \

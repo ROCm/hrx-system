@@ -53,7 +53,7 @@ artifact construction rather than execution:
 
 ```shell
 loom-compile oracle.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --pipeline=none \
   --output=oracle.hsaco
 ```

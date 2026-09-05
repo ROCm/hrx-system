@@ -1,21 +1,25 @@
 # Compile artifacts
 
 `loom-compile` specializes one verified `.loom` or `.loombc` module and emits an
-artifact for a selected backend. It is the offline form of the same parse,
-link, configure, specialize, lower, and emit operations available through the
-`loomc` API.
+artifact for selected roots. It is the offline form of the same parse, link,
+configure, specialize, lower, and emit operations available through the `loomc`
+API.
 
-The shortest useful invocation names the input, backend, target profile, and
-artifact path. Reports, manifests, and IR traces are optional evidence products,
-not boilerplate required by every compile.
+Selected roots infer exactly one product: `kernel`, `command`, or `module`.
+With explicit `--root` values, `--product` is an optional assertion on that
+result and never reinterprets the roots. With no roots, an explicit product
+selects its canonical root set. `--target=family:selector` supplies a target
+when the roots do not already name one. `--format` requests an exact output
+encoding; when it is omitted, the tool requires one canonical compatible
+format. Reports, manifests, and IR traces are optional evidence products, not
+boilerplate required by every compile.
 
-## Compile for a HAL loader
+## Compile a loadable kernel
 
 Compile one targetless kernel for the generic GFX11 profile:
 
 ```shell
 loom-compile kernel.loom \
-  --backend=amdgpu-hal \
   --target=amdgpu:gfx11-generic \
   --output=kernel.hsaco
 ```
@@ -25,18 +29,20 @@ linked into the tool, and the remainder is interpreted only by that provider.
 A build without the requested family fails instead of enabling or loading it
 implicitly.
 
-The primary output is the executable byte sequence consumed by the selected
-HAL loader. For AMDGPU that representation is currently an HSACO. The source
-module can contain checks, reference functions, template providers, and other
-authoring support; the HAL backend materializes kernel entries and their
-dependency closures into the executable library.
+The kernel roots and AMDGPU target select the canonical `amdgpu-hsaco` format.
+Pass `--format=amdgpu-hsaco` when the exact encoding is part of the invocation's
+contract. The primary output is the executable byte sequence consumed by the
+selected HAL loader. The source module can contain checks, reference functions,
+template providers, and other authoring support; the selected format
+materializes kernel entries and their dependency closures into the executable
+library.
 
-Backend availability is a property of the installed Loom tool. Target pages
-own supported profile names; the compile workflow remains the same across
-backends. Offline emission is independent of runtime drivers: a Loom build with
-SPIR-V targeting and emission can produce SPIR-V artifacts without the Vulkan
-HAL, while creating a device and executing those artifacts still requires the
-Vulkan driver.
+Format and target availability are properties of the installed Loom tool.
+Target pages own supported profile names; the compile workflow remains the same
+across target families and formats. Offline emission is independent of runtime
+drivers: a Loom build with SPIR-V targeting and emission can produce SPIR-V
+artifacts without the Vulkan HAL, while creating a device and executing those
+artifacts still requires the Vulkan driver.
 
 ## Choose generic or exact specialization
 
@@ -44,7 +50,6 @@ A generic profile retains portability within one target family:
 
 ```shell
 loom-compile kernel.loom \
-  --backend=amdgpu-hal \
   --target=amdgpu:gfx11-generic \
   --output=kernel-gfx11.hsaco
 ```
@@ -53,7 +58,6 @@ An exact profile exposes the features and limits of one physical target:
 
 ```shell
 loom-compile kernel.loom \
-  --backend=amdgpu-hal \
   --target=amdgpu:gfx1151 \
   --output=kernel-gfx1151.hsaco
 ```
@@ -61,7 +65,7 @@ loom-compile kernel.loom \
 `--target` specializes every materialized kernel entry before the compile
 pipeline. An authored target remains a compatibility requirement: a generic
 GFX11 entry can specialize to `gfx1151`, while an entry constrained to an
-incompatible family fails. A HAL compile only needs `--target` when a
+incompatible family fails. A kernel compile only needs `--target` when a
 materialized root does not already carry an authored target.
 
 Reusable libraries generally omit authored targets. Their source can then
@@ -70,22 +74,24 @@ build rather than fragmenting into target-specific copies.
 
 ## Select roots from a catalog
 
-When `--root` is omitted, a HAL backend compiles every kernel entry and its
-dependency closure. Select one or more entries from a catalog by repeating the
-flag:
+When `--root` is omitted, public or retained command programs take precedence;
+otherwise the tool selects every kernel entry, or the whole module when neither
+kind exists. Select one or more entries from a catalog by repeating the flag.
+Every selected root must infer the same product:
 
 ```shell
 loom-compile catalog.loombc \
   --root=@prefill \
   --root=@decode \
-  --backend=amdgpu-hal \
   --target=amdgpu:gfx11-generic \
   --output=qwen-kernels.hsaco
 ```
 
 Root selection is reachability, not name filtering after compilation. Unused
 functions, providers, configurations, checks, and kernels are absent from the
-materialized compile module.
+materialized compile module. In a mixed command-and-kernel catalog, name the
+kernel roots explicitly or pass `--product=kernel` without roots to select all
+kernel entries. A product never changes the meaning of explicit roots.
 
 Use [`loom-link`](link-and-package.md#link-transitive-dependencies-incrementally)
 first when several independently shipped modules must be composed. Use
@@ -99,7 +105,6 @@ Bind the `config.decl` values that describe this artifact:
 ```shell
 loom-compile kernel.loombc \
   --root=@decode \
-  --backend=amdgpu-hal \
   --target=amdgpu:gfx1151 \
   --config=model.hidden_size=4096 \
   --config=model.head_count=32 \
@@ -110,7 +115,6 @@ JSON and JSONC files carry larger configuration objects:
 
 ```shell
 loom-compile kernel.loombc \
-  --backend=amdgpu-hal \
   --target=amdgpu:gfx1151 \
   --config-file=model-config.jsonc \
   --output=model-kernels.hsaco
@@ -123,13 +127,14 @@ separators; explicit bindings not referenced by the module are ignored.
 
 ## Emit portable command programs
 
-The command backend prepares selected command-program roots and emits one
-portable artifact per root:
+The command product prepares selected command-program roots and emits one
+portable artifact per root. Command roots select the canonical `loom-command`
+format, which may also be stated explicitly:
 
 ```shell
 loom-compile model.loombc \
   --root=@elementwise_transform \
-  --backend=command \
+  --format=loom-command \
   --output=commands.json \
   --emit-command-artifacts=commands/ \
   --emit-kernel-requests=kernel-requests/
@@ -144,12 +149,11 @@ partitioned only by decisions that change their generated kernels, so repeated
 sites and separate command roots share a request when their semantic class is
 the same. External bodyless entries remain plain binding requirements.
 
-Compile each manifest-listed source request independently through the target
-backend. For example, the first request can be compiled with:
+Compile each manifest-listed source request independently for its target. For
+example, the first request can be compiled with:
 
 ```shell
 loom-compile kernel-requests/kernel-0.loombc \
-  --backend=amdgpu-hal \
   --target=amdgpu:gfx11-generic \
   --output=kernel-0.hsaco
 ```
@@ -171,26 +175,26 @@ For example, an installation with the LLVM IR emitter can write textual or
 bitcode artifacts:
 
 ```shell
-loom-compile kernel.loom --backend=llvmir-text --output=kernel.ll
-loom-compile kernel.loom --backend=llvmir-bitcode --output=kernel.bc
+loom-compile kernel.loom --format=llvmir-text --output=kernel.ll
+loom-compile kernel.loom --format=llvmir-bitcode --output=kernel.bc
 ```
 
 ## Emit a target-native sidecar
 
-A HAL backend may have both a loader-ready representation and a target-native
-artifact. Request both when an integration needs the primary loader product and
-tooling needs the native object:
+A loadable kernel format may have both a loader-ready representation and a
+target-native artifact. Request both when an integration needs the primary
+loader product and tooling needs the native object:
 
 ```shell
 loom-compile kernel.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
   --output=kernel.executable \
   --emit-target-artifact=kernel.hsaco
 ```
 
 The two byte sequences may be identical. AMDGPU currently uses HSACO for both;
-the separate output contract still matters for backends whose loader container
+the separate output contract still matters for formats whose loader container
 and native artifact differ.
 
 ## Emit an artifact manifest
@@ -200,7 +204,7 @@ reverse-engineer it:
 
 ```shell
 loom-compile kernel.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
   --output=kernel.hsaco \
   --artifact-manifest=summary
@@ -212,7 +216,7 @@ layout:
 
 ```shell
 loom-compile kernel.loom \
-  --backend=amdgpu-hal \
+  --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
   --output=kernel.hsaco \
   --artifact-manifest=details \

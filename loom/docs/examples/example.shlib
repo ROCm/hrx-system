@@ -10,7 +10,7 @@ loom_example_configure_target() {
   LOOM_EXAMPLE_TARGET="$1"
   case "${LOOM_EXAMPLE_TARGET}" in
     gfx11-generic)
-      LOOM_EXAMPLE_BACKEND="amdgpu-hal"
+      LOOM_EXAMPLE_FORMAT="amdgpu-hsaco"
       ;;
     *)
       printf 'unsupported example target: %s\n' "${LOOM_EXAMPLE_TARGET}" >&2

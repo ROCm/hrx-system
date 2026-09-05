@@ -48,19 +48,6 @@ iree_status_t loom_artifact_target_select(
   return iree_ok_status();
 }
 
-const loom_artifact_provider_t* loom_artifact_provider_registry_lookup(
-    const loom_artifact_provider_registry_t* registry,
-    iree_string_view_t name) {
-  IREE_ASSERT_ARGUMENT(registry);
-  for (iree_host_size_t i = 0; i < registry->provider_count; ++i) {
-    const loom_artifact_provider_t* provider = registry->providers[i];
-    if (iree_string_view_equal(provider->name, name)) {
-      return provider;
-    }
-  }
-  return NULL;
-}
-
 static iree_status_t loom_artifact_candidate_publish_report(
     const loom_compile_options_t* options,
     const loom_artifact_candidate_t* candidate) {

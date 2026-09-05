@@ -61,7 +61,7 @@ loom_example_run_tool iree-benchmark-loom "${iree_benchmark_loom}" \
 loom_example_section "Compile the deployment kernel for ${target}"
 loom_example_run_tool loom-compile "${loom_compile}" \
   saxpy.loom \
-  --backend="${LOOM_EXAMPLE_BACKEND}" \
+  --format="${LOOM_EXAMPLE_FORMAT}" \
   --target="amdgpu:${LOOM_EXAMPLE_TARGET}" \
   --root=@saxpy_f32 \
   --output="${output_dir}/saxpy.hsaco"
