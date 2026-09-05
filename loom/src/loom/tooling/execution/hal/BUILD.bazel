@@ -154,6 +154,7 @@ loom_cc_library(
         "//loom/src/loom/tooling/compile:options",
         "//loom/src/loom/tooling/compile:pipeline",
         "//loom/src/loom/tooling/compile:report_capture",
+        "//loom/src/loom/tooling/compile:request",
         "//loom/src/loom/tooling/config",
         "//loom/src/loom/tooling/execution:session",
         "//loom/src/loom/tooling/testbench",

@@ -166,6 +166,7 @@ loom_cc_library(
     loom::tooling::compile::options
     loom::tooling::compile::pipeline
     loom::tooling::compile::report_capture
+    loom::tooling::compile::request
     loom::tooling::config
     loom::tooling::execution::session
     loom::tooling::testbench
