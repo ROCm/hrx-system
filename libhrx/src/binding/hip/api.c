@@ -4588,30 +4588,42 @@ static hipError_t iree_hip_lookup_managed_range(
     iree_hal_streaming_context_t* context, const void* dev_ptr, size_t count,
     iree_hal_streaming_context_t** out_owner_context,
     iree_hal_streaming_buffer_ref_t* out_buffer_ref) {
-  hipError_t result = iree_hip_lookup_streaming_range_with_owner(
-      context, dev_ptr, count, out_owner_context, out_buffer_ref);
-  if (result != hipSuccess) return result;
-  if (out_buffer_ref->buffer->is_managed) return hipSuccess;
-  iree_hal_streaming_context_release(*out_owner_context);
   *out_owner_context = NULL;
-  return hipErrorInvalidValue;
+  memset(out_buffer_ref, 0, sizeof(*out_buffer_ref));
+  iree_hal_streaming_context_t* owner_context = NULL;
+  iree_hal_streaming_buffer_ref_t buffer_ref = {0};
+  hipError_t result = iree_hip_lookup_streaming_range_with_owner(
+      context, dev_ptr, count, &owner_context, &buffer_ref);
+  if (result != hipSuccess) return result;
+  if (!buffer_ref.buffer->is_managed) {
+    iree_hal_streaming_context_release(owner_context);
+    return hipErrorInvalidValue;
+  }
+  *out_owner_context = owner_context;
+  *out_buffer_ref = buffer_ref;
+  return hipSuccess;
 }
 
 static hipError_t iree_hip_lookup_advisable_range(
     iree_hal_streaming_context_t* context, const void* dev_ptr, size_t count,
     iree_hal_streaming_context_t** out_owner_context,
     iree_hal_streaming_buffer_ref_t* out_buffer_ref) {
-  hipError_t result = iree_hip_lookup_streaming_range_with_owner(
-      context, dev_ptr, count, out_owner_context, out_buffer_ref);
-  if (result != hipSuccess) return result;
-  if ((out_buffer_ref->buffer->is_managed ||
-       out_buffer_ref->buffer->imported_host_allocation) &&
-      out_buffer_ref->buffer->managed_page_count) {
-    return hipSuccess;
-  }
-  iree_hal_streaming_context_release(*out_owner_context);
   *out_owner_context = NULL;
-  return hipErrorInvalidValue;
+  memset(out_buffer_ref, 0, sizeof(*out_buffer_ref));
+  iree_hal_streaming_context_t* owner_context = NULL;
+  iree_hal_streaming_buffer_ref_t buffer_ref = {0};
+  hipError_t result = iree_hip_lookup_streaming_range_with_owner(
+      context, dev_ptr, count, &owner_context, &buffer_ref);
+  if (result != hipSuccess) return result;
+  if ((!buffer_ref.buffer->is_managed &&
+       !buffer_ref.buffer->imported_host_allocation) ||
+      !buffer_ref.buffer->managed_page_count) {
+    iree_hal_streaming_context_release(owner_context);
+    return hipErrorInvalidValue;
+  }
+  *out_owner_context = owner_context;
+  *out_buffer_ref = buffer_ref;
+  return hipSuccess;
 }
 
 static uint64_t iree_hip_managed_common_accessed_by_mask(
