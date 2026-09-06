@@ -409,9 +409,18 @@ static void iree_hal_amdgpu_transfer_child_completion_post_drain(
 static void iree_hal_amdgpu_transfer_child_complete(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
     const iree_status_t status) {
-  (void)entry;
   iree_hal_amdgpu_transfer_child_t* child =
       (iree_hal_amdgpu_transfer_child_t*)user_data;
+  // Staging transfers complete outside notification-ring drain and identify
+  // that context with a NULL entry. Finish them directly so terminal signal
+  // publication does not wait for another drain that may never occur.
+  if (!entry) {
+    iree_hal_amdgpu_transfer_child_finish(
+        child, iree_status_is_ok(status) ? iree_ok_status()
+                                         : iree_status_clone(status));
+    return;
+  }
+
   child->completion_status =
       iree_status_is_ok(status) ? iree_ok_status() : iree_status_clone(status);
   iree_hal_resource_retain(&child->transaction->resource);
