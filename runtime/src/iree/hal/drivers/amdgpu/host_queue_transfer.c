@@ -25,6 +25,8 @@ typedef struct iree_hal_amdgpu_transfer_child_t {
   iree_host_size_t operation_index;
   // Prepared staging transfer for upload/download operations.
   iree_hal_amdgpu_staging_transfer_t* staging_transfer;
+  // Owned synchronous submission failure consumed after the queue lock exits.
+  iree_status_t submission_status;
   // Owned completion status transferred to |completion_post_drain|.
   iree_status_t completion_status;
   // Continuation that aggregates hardware or staging completion.
@@ -91,6 +93,7 @@ static void iree_hal_amdgpu_transfer_transaction_destroy(
     for (iree_host_size_t i = 0; i < transaction->operation_count; ++i) {
       iree_hal_amdgpu_staging_transfer_release(
           transaction->children[i].staging_transfer);
+      iree_status_free(transaction->children[i].submission_status);
       iree_status_free(transaction->children[i].completion_status);
     }
   }
@@ -539,7 +542,7 @@ static iree_status_t iree_hal_amdgpu_transfer_start(
     iree_status_t status =
         iree_hal_amdgpu_transfer_try_submit_native_under_lock(child, &ready);
     if (!iree_status_is_ok(status)) {
-      child->completion_status = status;
+      child->submission_status = status;
     } else if (!ready) {
       iree_hal_amdgpu_transfer_enqueue_capacity_retry(child);
     }
@@ -548,9 +551,9 @@ static iree_status_t iree_hal_amdgpu_transfer_start(
 
   for (iree_host_size_t i = 0; i < transaction->operation_count; ++i) {
     iree_hal_amdgpu_transfer_child_t* child = &transaction->children[i];
-    if (!iree_status_is_ok(child->completion_status)) {
-      iree_status_t status = child->completion_status;
-      child->completion_status = iree_ok_status();
+    if (!iree_status_is_ok(child->submission_status)) {
+      iree_status_t status = child->submission_status;
+      child->submission_status = iree_ok_status();
       iree_hal_amdgpu_transfer_child_finish(child, status);
     }
   }

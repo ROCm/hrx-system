@@ -7,8 +7,6 @@
 #ifndef IREE_HAL_DRIVERS_AMDGPU_SEMAPHORE_H_
 #define IREE_HAL_DRIVERS_AMDGPU_SEMAPHORE_H_
 
-#include <string.h>
-
 #include "iree/async/semaphore.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/atomics.h"
@@ -44,38 +42,43 @@ enum iree_hal_amdgpu_last_signal_flag_bits_e {
 // elision and direct producer-epoch cross-queue barriers) and by the
 // host-wait fast path.
 //
-// The seqlock ensures torn reads across the payload fields are detected and
-// retried. Writers increment the sequence counter to an odd value before the
-// update and to an even value after. Readers retry if the sequence is odd
-// (write in progress) or changed between the start and end of the read.
+// The seqlock ensures torn snapshots across the payload fields are detected
+// and retried. The payload fields remain atomic because retrying a seqlock does
+// not make concurrent non-atomic C accesses data-race-free. Writers are
+// serialized by the semaphore mutex or the single-producer stream contract and
+// increment the sequence counter to an odd value before the update and to an
+// even value after. Readers retry if the sequence is odd (write in progress) or
+// changed between the start and end of the read.
 typedef struct iree_hal_amdgpu_last_signal_t {
   // Seqlock sequence counter; odd means a writer is updating payload fields.
   iree_atomic_int32_t sequence;
   // Cached signal validity and producer-frontier precision flags.
-  iree_hal_amdgpu_last_signal_flags_t flags;
-  // Reserved bytes kept zero so the payload stays naturally aligned.
-  uint8_t reserved[3];
+  iree_atomic_int32_t flags;
   // Producer queue axis that submitted the last cached signal.
-  iree_async_axis_t producer_axis;
+  iree_atomic_int64_t producer_axis;
   // Producer queue epoch associated with the last cached signal.
-  uint64_t epoch;
+  iree_atomic_int64_t epoch;
   // Semaphore payload value signaled at |producer_axis|/|epoch|.
-  uint64_t value;
+  iree_atomic_int64_t value;
 } iree_hal_amdgpu_last_signal_t;
 
-// Stores a new last-signal snapshot. Thread-safe (seqlock writer).
+// Stores a new last-signal snapshot. Callers must serialize writers; readers
+// may concurrently load the cache.
 static inline void iree_hal_amdgpu_last_signal_store(
     iree_hal_amdgpu_last_signal_t* cache,
     iree_hal_amdgpu_last_signal_flags_t flags, iree_async_axis_t producer_axis,
     uint64_t epoch, uint64_t value) {
-  // Increment to odd: signals write in progress.
-  iree_atomic_fetch_add(&cache->sequence, 1, iree_memory_order_acquire);
-  cache->flags = flags;
-  memset(cache->reserved, 0, sizeof(cache->reserved));
-  cache->producer_axis = producer_axis;
-  cache->epoch = epoch;
-  cache->value = value;
-  // Increment to even: signals write complete.
+  // Publish the odd sequence before any payload field. The release fence pairs
+  // with a reader that observes a concurrent payload store and forces its
+  // closing sequence load to observe this write in progress.
+  iree_atomic_fetch_add(&cache->sequence, 1, iree_memory_order_relaxed);
+  iree_atomic_thread_fence(iree_memory_order_release);
+  iree_atomic_store(&cache->flags, (int32_t)flags, iree_memory_order_relaxed);
+  iree_atomic_store(&cache->producer_axis, (int64_t)producer_axis,
+                    iree_memory_order_relaxed);
+  iree_atomic_store(&cache->epoch, (int64_t)epoch, iree_memory_order_relaxed);
+  iree_atomic_store(&cache->value, (int64_t)value, iree_memory_order_relaxed);
+  // Publish the completed payload to readers beginning a new snapshot.
   iree_atomic_fetch_add(&cache->sequence, 1, iree_memory_order_release);
 }
 
@@ -90,13 +93,21 @@ static inline bool iree_hal_amdgpu_last_signal_load(
   do {
     sequence = iree_atomic_load(&cache->sequence, iree_memory_order_acquire);
     if (IREE_UNLIKELY(sequence & 1)) continue;  // writer in progress
-    *out_flags = cache->flags;
-    *out_producer_axis = cache->producer_axis;
-    *out_epoch = cache->epoch;
-    *out_value = cache->value;
+    *out_flags = (iree_hal_amdgpu_last_signal_flags_t)iree_atomic_load(
+        &cache->flags, iree_memory_order_relaxed);
+    *out_producer_axis = (iree_async_axis_t)iree_atomic_load(
+        &cache->producer_axis, iree_memory_order_relaxed);
+    *out_epoch =
+        (uint64_t)iree_atomic_load(&cache->epoch, iree_memory_order_relaxed);
+    *out_value =
+        (uint64_t)iree_atomic_load(&cache->value, iree_memory_order_relaxed);
+    // Keep payload reads ahead of the closing sequence check. If any read
+    // observed a concurrent writer this fence pairs with the writer's opening
+    // release fence and the closing check must observe its odd sequence.
+    iree_atomic_thread_fence(iree_memory_order_acquire);
   } while (
       IREE_UNLIKELY(iree_atomic_load(&cache->sequence,
-                                     iree_memory_order_acquire) != sequence));
+                                     iree_memory_order_relaxed) != sequence));
   return (*out_flags & IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_VALID) != 0;
 }
 

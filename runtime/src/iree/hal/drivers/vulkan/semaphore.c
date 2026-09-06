@@ -18,12 +18,13 @@ void iree_hal_vulkan_last_signal_store(
     iree_hal_vulkan_last_signal_t* cache,
     iree_hal_vulkan_last_signal_flags_t flags, iree_async_axis_t producer_axis,
     uint64_t epoch, uint64_t value) {
-  iree_atomic_fetch_add(&cache->sequence, 1, iree_memory_order_acquire);
-  cache->flags = flags;
-  memset(cache->reserved, 0, sizeof(cache->reserved));
-  cache->producer_axis = producer_axis;
-  cache->epoch = epoch;
-  cache->value = value;
+  iree_atomic_fetch_add(&cache->sequence, 1, iree_memory_order_relaxed);
+  iree_atomic_thread_fence(iree_memory_order_release);
+  iree_atomic_store(&cache->flags, (int32_t)flags, iree_memory_order_relaxed);
+  iree_atomic_store(&cache->producer_axis, (int64_t)producer_axis,
+                    iree_memory_order_relaxed);
+  iree_atomic_store(&cache->epoch, (int64_t)epoch, iree_memory_order_relaxed);
+  iree_atomic_store(&cache->value, (int64_t)value, iree_memory_order_relaxed);
   iree_atomic_fetch_add(&cache->sequence, 1, iree_memory_order_release);
 }
 
@@ -36,13 +37,18 @@ bool iree_hal_vulkan_last_signal_load(
   do {
     sequence = iree_atomic_load(&cache->sequence, iree_memory_order_acquire);
     if (IREE_UNLIKELY(sequence & 1)) continue;
-    *out_flags = cache->flags;
-    *out_producer_axis = cache->producer_axis;
-    *out_epoch = cache->epoch;
-    *out_value = cache->value;
+    *out_flags = (iree_hal_vulkan_last_signal_flags_t)iree_atomic_load(
+        &cache->flags, iree_memory_order_relaxed);
+    *out_producer_axis = (iree_async_axis_t)iree_atomic_load(
+        &cache->producer_axis, iree_memory_order_relaxed);
+    *out_epoch =
+        (uint64_t)iree_atomic_load(&cache->epoch, iree_memory_order_relaxed);
+    *out_value =
+        (uint64_t)iree_atomic_load(&cache->value, iree_memory_order_relaxed);
+    iree_atomic_thread_fence(iree_memory_order_acquire);
   } while (
       IREE_UNLIKELY(iree_atomic_load(&cache->sequence,
-                                     iree_memory_order_acquire) != sequence));
+                                     iree_memory_order_relaxed) != sequence));
   return (*out_flags & IREE_HAL_VULKAN_LAST_SIGNAL_FLAG_VALID) != 0;
 }
 
