@@ -44,6 +44,9 @@ typedef struct loom_aie2p_pipeline_placement_t {
   // Physical coordinate selected for each resident instance.
   loom_xdna_tile_coordinate_t* instance_coordinates;
 
+  // Candidate coordinate order scratch for each recursive placement depth.
+  uint32_t* candidate_order;
+
   // Scratch arena owning placement storage.
   iree_arena_allocator_t* arena;
 } loom_aie2p_pipeline_placement_t;
@@ -106,6 +109,16 @@ static iree_status_t loom_aie2p_pipeline_placement_initialize(
   IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_allocate_array(
       arena, plan->instance_count, sizeof(*placement->instance_coordinates),
       (void**)&placement->instance_coordinates));
+  iree_host_size_t candidate_order_count = 0;
+  if (!iree_host_size_checked_mul(plan->instance_count,
+                                  placement->compute_coordinate_count,
+                                  &candidate_order_count)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "AIE2P placement scratch is too large");
+  }
+  IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_allocate_array(
+      arena, candidate_order_count, sizeof(*placement->candidate_order),
+      (void**)&placement->candidate_order));
   for (uint32_t i = 0; i < plan->instance_count; ++i) {
     placement->instance_coordinates[i] = (loom_xdna_tile_coordinate_t){
         .column = UINT16_MAX,
@@ -148,7 +161,7 @@ static uint32_t loom_aie2p_pipeline_instance_degree(
 
 static bool loom_aie2p_pipeline_coordinate_compatible(
     const loom_aie2p_pipeline_placement_t* placement, uint32_t instance_index,
-    loom_xdna_tile_coordinate_t coordinate) {
+    loom_xdna_tile_coordinate_t coordinate, bool require_adjacency) {
   for (uint32_t i = 0; i < placement->plan->edge_count; ++i) {
     const loom_pipeline_plan_edge_t* edge = &placement->plan->edges[i];
     if (!loom_aie2p_pipeline_edge_is_internal(edge)) continue;
@@ -163,7 +176,7 @@ static bool loom_aie2p_pipeline_coordinate_compatible(
     if (other_index == instance_index) return false;
     const loom_xdna_tile_coordinate_t other =
         placement->instance_coordinates[other_index];
-    if (other.column == UINT16_MAX) continue;
+    if (other.column == UINT16_MAX || !require_adjacency) continue;
     const int row_delta = (int)coordinate.row - (int)other.row;
     if (coordinate.column != other.column ||
         (row_delta != -1 && row_delta != 1)) {
@@ -173,9 +186,60 @@ static bool loom_aie2p_pipeline_coordinate_compatible(
   return true;
 }
 
+static void loom_aie2p_pipeline_candidate_affinity(
+    const loom_aie2p_pipeline_placement_t* placement, uint32_t instance_index,
+    loom_xdna_tile_coordinate_t coordinate, uint32_t* out_adjacent_count,
+    uint32_t* out_distance_sum) {
+  uint32_t adjacent_count = 0;
+  uint32_t distance_sum = 0;
+  for (uint32_t i = 0; i < placement->plan->edge_count; ++i) {
+    const loom_pipeline_plan_edge_t* edge = &placement->plan->edges[i];
+    if (!loom_aie2p_pipeline_edge_is_internal(edge)) continue;
+    uint32_t other_index = UINT32_MAX;
+    if (edge->source_index == instance_index) {
+      other_index = edge->target_index;
+    } else if (edge->target_index == instance_index) {
+      other_index = edge->source_index;
+    } else {
+      continue;
+    }
+    const loom_xdna_tile_coordinate_t other =
+        placement->instance_coordinates[other_index];
+    if (other.column == UINT16_MAX) continue;
+    const uint32_t column_distance = coordinate.column > other.column
+                                         ? coordinate.column - other.column
+                                         : other.column - coordinate.column;
+    const uint32_t row_distance = coordinate.row > other.row
+                                      ? coordinate.row - other.row
+                                      : other.row - coordinate.row;
+    distance_sum += column_distance + row_distance;
+    if (column_distance == 0 && row_distance == 1) ++adjacent_count;
+  }
+  *out_adjacent_count = adjacent_count;
+  *out_distance_sum = distance_sum;
+}
+
+static bool loom_aie2p_pipeline_candidate_precedes(
+    const loom_aie2p_pipeline_placement_t* placement, uint32_t instance_index,
+    uint32_t lhs_index, uint32_t rhs_index) {
+  uint32_t lhs_adjacent = 0;
+  uint32_t lhs_distance = 0;
+  loom_aie2p_pipeline_candidate_affinity(
+      placement, instance_index, placement->compute_coordinates[lhs_index],
+      &lhs_adjacent, &lhs_distance);
+  uint32_t rhs_adjacent = 0;
+  uint32_t rhs_distance = 0;
+  loom_aie2p_pipeline_candidate_affinity(
+      placement, instance_index, placement->compute_coordinates[rhs_index],
+      &rhs_adjacent, &rhs_distance);
+  if (lhs_adjacent != rhs_adjacent) return lhs_adjacent > rhs_adjacent;
+  if (lhs_distance != rhs_distance) return lhs_distance < rhs_distance;
+  return lhs_index < rhs_index;
+}
+
 static bool loom_aie2p_pipeline_place_next(
     loom_aie2p_pipeline_placement_t* placement, bool* coordinate_used,
-    uint32_t placed_count) {
+    uint32_t placed_count, bool require_adjacency) {
   if (placed_count == placement->plan->instance_count) return true;
 
   uint32_t selected_instance = UINT32_MAX;
@@ -200,20 +264,40 @@ static bool loom_aie2p_pipeline_place_next(
   }
   IREE_ASSERT_NE(selected_instance, UINT32_MAX);
 
+  uint32_t* candidate_order =
+      placement->candidate_order +
+      (iree_host_size_t)placed_count * placement->compute_coordinate_count;
+  uint32_t candidate_count = 0;
   for (uint32_t coordinate_index = 0;
        coordinate_index < placement->compute_coordinate_count;
        ++coordinate_index) {
     if (coordinate_used[coordinate_index]) continue;
     const loom_xdna_tile_coordinate_t coordinate =
         placement->compute_coordinates[coordinate_index];
-    if (!loom_aie2p_pipeline_coordinate_compatible(placement, selected_instance,
-                                                   coordinate)) {
+    if (!loom_aie2p_pipeline_coordinate_compatible(
+            placement, selected_instance, coordinate, require_adjacency)) {
       continue;
     }
+    uint32_t insertion = candidate_count;
+    while (insertion > 0 && loom_aie2p_pipeline_candidate_precedes(
+                                placement, selected_instance, coordinate_index,
+                                candidate_order[insertion - 1])) {
+      candidate_order[insertion] = candidate_order[insertion - 1];
+      --insertion;
+    }
+    candidate_order[insertion] = coordinate_index;
+    ++candidate_count;
+  }
+
+  for (uint32_t candidate_index = 0; candidate_index < candidate_count;
+       ++candidate_index) {
+    const uint32_t coordinate_index = candidate_order[candidate_index];
+    const loom_xdna_tile_coordinate_t coordinate =
+        placement->compute_coordinates[coordinate_index];
     coordinate_used[coordinate_index] = true;
     placement->instance_coordinates[selected_instance] = coordinate;
     if (loom_aie2p_pipeline_place_next(placement, coordinate_used,
-                                       placed_count + 1)) {
+                                       placed_count + 1, require_adjacency)) {
       return true;
     }
     placement->instance_coordinates[selected_instance] =
@@ -226,6 +310,19 @@ static bool loom_aie2p_pipeline_place_next(
   return false;
 }
 
+static bool loom_aie2p_pipeline_may_embed_with_neighbor_memory(
+    const loom_aie2p_pipeline_placement_t* placement) {
+  for (uint32_t instance_index = 0;
+       instance_index < placement->plan->instance_count; ++instance_index) {
+    uint32_t assigned_neighbor_count = 0;
+    if (loom_aie2p_pipeline_instance_degree(placement, instance_index,
+                                            &assigned_neighbor_count) > 2) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static iree_status_t loom_aie2p_pipeline_place_instances(
     loom_aie2p_pipeline_placement_t* placement) {
   bool* coordinate_used = NULL;
@@ -234,10 +331,24 @@ static iree_status_t loom_aie2p_pipeline_place_instances(
       sizeof(*coordinate_used), (void**)&coordinate_used));
   memset(coordinate_used, 0,
          placement->compute_coordinate_count * sizeof(*coordinate_used));
-  if (!loom_aie2p_pipeline_place_next(placement, coordinate_used, 0)) {
+  if (loom_aie2p_pipeline_may_embed_with_neighbor_memory(placement) &&
+      loom_aie2p_pipeline_place_next(placement, coordinate_used, 0,
+                                     /*require_adjacency=*/true)) {
+    return iree_ok_status();
+  }
+  memset(coordinate_used, 0,
+         placement->compute_coordinate_count * sizeof(*coordinate_used));
+  for (uint32_t i = 0; i < placement->plan->instance_count; ++i) {
+    placement->instance_coordinates[i] = (loom_xdna_tile_coordinate_t){
+        .column = UINT16_MAX,
+        .row = UINT16_MAX,
+    };
+  }
+  if (!loom_aie2p_pipeline_place_next(placement, coordinate_used, 0,
+                                      /*require_adjacency=*/false)) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
-        "AIE2P pipeline graph cannot be embedded in adjacent compute tiles");
+        "AIE2P pipeline graph cannot be placed on distinct compute tiles");
   }
   return iree_ok_status();
 }

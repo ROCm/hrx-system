@@ -59,7 +59,7 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array
 
   constrain.location %product0, %array_column, %product0_row
   constrain.location %reducer, %array_column, %reducer_row
-  constrain.location %product1, %array_column, %product1_row
+  constrain.location %product1, %product1_lane, %product1_row
   return
 }
 
@@ -100,13 +100,13 @@ func.def target(@core_target) @reduce_bias_f32(%partial0: buffer, %partial1: buf
 }
 
 // ----
-array @split_k_array family=amd.xdna.npu2 groups=2 workers=3 bindings=4 channels=8 slots=16 locks=16 dma=12 routes=34
+array @split_k_array family=amd.xdna.npu2 groups=2 workers=3 bindings=4 channels=8 slots=16 locks=18 dma=14 routes=35
 binding index=0 ordinal=0 access=read
 binding index=1 ordinal=1 access=read
 binding index=2 ordinal=2 access=read
 binding index=3 ordinal=3 access=write
 worker index=0 group=0 lane=0 entry=@product_branch_bf16 tile=(0,2) code-bytes=110 resources=3 storage-domains=0
-worker index=1 group=0 lane=1 entry=@product_branch_bf16 tile=(0,4) code-bytes=110 resources=3 storage-domains=0
+worker index=1 group=0 lane=1 entry=@product_branch_bf16 tile=(1,4) code-bytes=110 resources=3 storage-domains=0
 worker index=2 group=1 lane=0 entry=@reduce_bias_f32 tile=(0,3) code-bytes=100 resources=4 storage-domains=0
 channel index=0 transport=external-dma record-bytes=16 capacity=2 sender=binding[0]:0 partition=0/2 receiver=worker[0]:0
 channel index=1 transport=external-dma record-bytes=16 capacity=2 sender=binding[1]:0 partition=0/2 receiver=worker[0]:1
@@ -115,7 +115,7 @@ channel index=3 transport=external-dma record-bytes=16 capacity=2 sender=binding
 channel index=4 transport=external-dma record-bytes=256 capacity=2 sender=binding[2]:0 receiver=worker[2]:2
 channel index=5 transport=external-dma record-bytes=256 capacity=2 sender=worker[2]:3 receiver=binding[3]:0
 channel index=6 transport=neighbor-memory record-bytes=256 capacity=2 sender=worker[0]:2 receiver=worker[2]:0
-channel index=7 transport=neighbor-memory record-bytes=256 capacity=2 sender=worker[1]:2 receiver=worker[2]:1
+channel index=7 transport=routed-dma record-bytes=256 capacity=2 sender=worker[1]:2 receiver=worker[2]:1
 worker-port worker=0 port=0 direction=receive channel=0 first-slot=0
 worker-port worker=0 port=1 direction=receive channel=1 first-slot=2
 worker-port worker=1 port=0 direction=receive channel=2 first-slot=4
@@ -130,46 +130,50 @@ slot channel=0 index=0 owner=(0,2) offset=0x00000 bytes=16 sender=external recei
 slot channel=0 index=1 owner=(0,2) offset=0x04000 bytes=16 sender=external receiver=0x74000
 slot channel=1 index=0 owner=(0,2) offset=0x08000 bytes=16 sender=external receiver=0x78000
 slot channel=1 index=1 owner=(0,2) offset=0x0c000 bytes=16 sender=external receiver=0x7c000
-slot channel=2 index=0 owner=(0,4) offset=0x00000 bytes=16 sender=external receiver=0x70000
-slot channel=2 index=1 owner=(0,4) offset=0x04000 bytes=16 sender=external receiver=0x74000
-slot channel=3 index=0 owner=(0,4) offset=0x08000 bytes=16 sender=external receiver=0x78000
-slot channel=3 index=1 owner=(0,4) offset=0x0c000 bytes=16 sender=external receiver=0x7c000
+slot channel=2 index=0 owner=(1,4) offset=0x00000 bytes=16 sender=external receiver=0x70000
+slot channel=2 index=1 owner=(1,4) offset=0x04000 bytes=16 sender=external receiver=0x74000
+slot channel=3 index=0 owner=(1,4) offset=0x08000 bytes=16 sender=external receiver=0x78000
+slot channel=3 index=1 owner=(1,4) offset=0x0c000 bytes=16 sender=external receiver=0x7c000
 slot channel=4 index=0 owner=(0,3) offset=0x00000 bytes=256 sender=external receiver=0x70000
 slot channel=4 index=1 owner=(0,3) offset=0x04000 bytes=256 sender=external receiver=0x74000
 slot channel=5 index=0 owner=(0,3) offset=0x08000 bytes=256 sender=0x78000 receiver=external
 slot channel=5 index=1 owner=(0,3) offset=0x0c000 bytes=256 sender=0x7c000 receiver=external
 slot channel=6 index=0 owner=(0,2) offset=0x00040 bytes=256 sender=0x70040 receiver=0x40040
 slot channel=6 index=1 owner=(0,2) offset=0x04040 bytes=256 sender=0x74040 receiver=0x44040
-slot channel=7 index=0 owner=(0,4) offset=0x00040 bytes=256 sender=0x70040 receiver=0x60040
-slot channel=7 index=1 owner=(0,4) offset=0x04040 bytes=256 sender=0x74040 receiver=0x64040
-lock channel=0 tile=(0,2) id=0 role=credit initial=2
-lock channel=0 tile=(0,2) id=1 role=ready initial=0
-lock channel=1 tile=(0,2) id=2 role=credit initial=2
-lock channel=1 tile=(0,2) id=3 role=ready initial=0
-lock channel=2 tile=(0,4) id=0 role=credit initial=2
-lock channel=2 tile=(0,4) id=1 role=ready initial=0
-lock channel=3 tile=(0,4) id=2 role=credit initial=2
-lock channel=3 tile=(0,4) id=3 role=ready initial=0
-lock channel=4 tile=(0,3) id=0 role=credit initial=2
-lock channel=4 tile=(0,3) id=1 role=ready initial=0
-lock channel=5 tile=(0,3) id=2 role=credit initial=2
-lock channel=5 tile=(0,3) id=3 role=ready initial=0
-lock channel=6 tile=(0,2) id=4 role=credit initial=2
-lock channel=6 tile=(0,2) id=5 role=ready initial=0
-lock channel=7 tile=(0,4) id=4 role=credit initial=2
-lock channel=7 tile=(0,4) id=5 role=ready initial=0
+slot channel=7 index=0 bytes=256 sender-owner=(1,4) sender-offset=0x00040 sender=0x70040 receiver-owner=(0,3) receiver-offset=0x00100 receiver=0x70100
+slot channel=7 index=1 bytes=256 sender-owner=(1,4) sender-offset=0x04040 sender=0x74040 receiver-owner=(0,3) receiver-offset=0x04100 receiver=0x74100
+lock channel=0 tile=(0,2) id=0 ring=receive role=credit initial=2
+lock channel=0 tile=(0,2) id=1 ring=receive role=ready initial=0
+lock channel=1 tile=(0,2) id=2 ring=receive role=credit initial=2
+lock channel=1 tile=(0,2) id=3 ring=receive role=ready initial=0
+lock channel=2 tile=(1,4) id=0 ring=receive role=credit initial=2
+lock channel=2 tile=(1,4) id=1 ring=receive role=ready initial=0
+lock channel=3 tile=(1,4) id=2 ring=receive role=credit initial=2
+lock channel=3 tile=(1,4) id=3 ring=receive role=ready initial=0
+lock channel=4 tile=(0,3) id=0 ring=receive role=credit initial=2
+lock channel=4 tile=(0,3) id=1 ring=receive role=ready initial=0
+lock channel=5 tile=(0,3) id=2 ring=send role=credit initial=2
+lock channel=5 tile=(0,3) id=3 ring=send role=ready initial=0
+lock channel=6 tile=(0,2) id=4 ring=send role=credit initial=2
+lock channel=6 tile=(0,2) id=5 ring=send role=ready initial=0
+lock channel=7 tile=(1,4) id=4 ring=send role=credit initial=2
+lock channel=7 tile=(1,4) id=5 ring=send role=ready initial=0
+lock channel=7 tile=(0,3) id=4 ring=receive role=credit initial=2
+lock channel=7 tile=(0,3) id=5 ring=receive role=ready initial=0
 dma channel=0 tile=(0,2) side=compute direction=stream-to-memory engine-channel=0 bd-start=0 bd-count=2
 dma channel=0 tile=(0,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=1
 dma channel=1 tile=(0,2) side=compute direction=stream-to-memory engine-channel=1 bd-start=2 bd-count=2
 dma channel=1 tile=(0,0) side=shim direction=memory-to-stream engine-channel=1 bd-start=1 bd-count=1
-dma channel=2 tile=(0,4) side=compute direction=stream-to-memory engine-channel=0 bd-start=0 bd-count=2
+dma channel=2 tile=(1,4) side=compute direction=stream-to-memory engine-channel=0 bd-start=0 bd-count=2
 dma channel=2 tile=(1,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=1
-dma channel=3 tile=(0,4) side=compute direction=stream-to-memory engine-channel=1 bd-start=2 bd-count=2
+dma channel=3 tile=(1,4) side=compute direction=stream-to-memory engine-channel=1 bd-start=2 bd-count=2
 dma channel=3 tile=(1,0) side=shim direction=memory-to-stream engine-channel=1 bd-start=1 bd-count=1
 dma channel=4 tile=(0,3) side=compute direction=stream-to-memory engine-channel=0 bd-start=0 bd-count=2
 dma channel=4 tile=(2,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=1
 dma channel=5 tile=(0,3) side=compute direction=memory-to-stream engine-channel=0 bd-start=2 bd-count=2
 dma channel=5 tile=(0,0) side=shim direction=stream-to-memory engine-channel=0 bd-start=2 bd-count=1
+dma channel=7 tile=(1,4) side=compute direction=memory-to-stream engine-channel=0 bd-start=4 bd-count=2
+dma channel=7 tile=(0,3) side=compute direction=stream-to-memory engine-channel=1 bd-start=4 bd-count=2
 route channel=0 tile=(0,0) kind=shim-mux source=dma[0] destination=north[3]
 route channel=0 tile=(0,0) kind=switch source=south[3] destination=north[0]
 route channel=0 tile=(0,1) kind=switch source=south[0] destination=north[0]
@@ -179,31 +183,32 @@ route channel=1 tile=(0,0) kind=switch source=south[7] destination=north[1]
 route channel=1 tile=(0,1) kind=switch source=south[1] destination=north[1]
 route channel=1 tile=(0,2) kind=switch source=south[1] destination=dma[1]
 route channel=2 tile=(1,0) kind=shim-mux source=dma[0] destination=north[3]
-route channel=2 tile=(1,0) kind=switch source=south[3] destination=west[0]
-route channel=2 tile=(0,0) kind=switch source=east[0] destination=north[2]
-route channel=2 tile=(0,1) kind=switch source=south[2] destination=north[2]
-route channel=2 tile=(0,2) kind=switch source=south[2] destination=north[0]
-route channel=2 tile=(0,3) kind=switch source=south[0] destination=north[0]
-route channel=2 tile=(0,4) kind=switch source=south[0] destination=dma[0]
+route channel=2 tile=(1,0) kind=switch source=south[3] destination=north[0]
+route channel=2 tile=(1,1) kind=switch source=south[0] destination=north[0]
+route channel=2 tile=(1,2) kind=switch source=south[0] destination=north[0]
+route channel=2 tile=(1,3) kind=switch source=south[0] destination=north[0]
+route channel=2 tile=(1,4) kind=switch source=south[0] destination=dma[0]
 route channel=3 tile=(1,0) kind=shim-mux source=dma[1] destination=north[7]
-route channel=3 tile=(1,0) kind=switch source=south[7] destination=west[1]
-route channel=3 tile=(0,0) kind=switch source=east[1] destination=north[3]
-route channel=3 tile=(0,1) kind=switch source=south[3] destination=north[3]
-route channel=3 tile=(0,2) kind=switch source=south[3] destination=north[1]
-route channel=3 tile=(0,3) kind=switch source=south[1] destination=north[1]
-route channel=3 tile=(0,4) kind=switch source=south[1] destination=dma[1]
+route channel=3 tile=(1,0) kind=switch source=south[7] destination=north[1]
+route channel=3 tile=(1,1) kind=switch source=south[1] destination=north[1]
+route channel=3 tile=(1,2) kind=switch source=south[1] destination=north[1]
+route channel=3 tile=(1,3) kind=switch source=south[1] destination=north[1]
+route channel=3 tile=(1,4) kind=switch source=south[1] destination=dma[1]
 route channel=4 tile=(2,0) kind=shim-mux source=dma[0] destination=north[3]
 route channel=4 tile=(2,0) kind=switch source=south[3] destination=west[0]
-route channel=4 tile=(1,0) kind=switch source=east[0] destination=west[2]
-route channel=4 tile=(0,0) kind=switch source=east[2] destination=north[4]
-route channel=4 tile=(0,1) kind=switch source=south[4] destination=north[4]
-route channel=4 tile=(0,2) kind=switch source=south[4] destination=north[2]
-route channel=4 tile=(0,3) kind=switch source=south[2] destination=dma[0]
+route channel=4 tile=(1,0) kind=switch source=east[0] destination=west[0]
+route channel=4 tile=(0,0) kind=switch source=east[0] destination=north[2]
+route channel=4 tile=(0,1) kind=switch source=south[2] destination=north[2]
+route channel=4 tile=(0,2) kind=switch source=south[2] destination=north[0]
+route channel=4 tile=(0,3) kind=switch source=south[0] destination=dma[0]
 route channel=5 tile=(0,3) kind=switch source=dma[0] destination=south[0]
 route channel=5 tile=(0,2) kind=switch source=north[0] destination=south[0]
 route channel=5 tile=(0,1) kind=switch source=north[0] destination=south[0]
 route channel=5 tile=(0,0) kind=switch source=north[0] destination=south[2]
 route channel=5 tile=(0,0) kind=shim-mux source=north[2] destination=dma[0]
+route channel=7 tile=(1,4) kind=switch source=dma[0] destination=west[0]
+route channel=7 tile=(0,4) kind=switch source=east[0] destination=south[0]
+route channel=7 tile=(0,3) kind=switch source=north[0] destination=dma[1]
 binding-patch ordinal=0 channel=0 shim=(0,0) direction=memory-to-stream dma-channel=0 partition=0/2
 binding-patch ordinal=1 channel=1 shim=(0,0) direction=memory-to-stream dma-channel=1 partition=0/2
 binding-patch ordinal=0 channel=2 shim=(1,0) direction=memory-to-stream dma-channel=0 partition=1/2
@@ -211,22 +216,26 @@ binding-patch ordinal=1 channel=3 shim=(1,0) direction=memory-to-stream dma-chan
 binding-patch ordinal=2 channel=4 shim=(2,0) direction=memory-to-stream dma-channel=0 partition=0/1
 binding-patch ordinal=3 channel=5 shim=(0,0) direction=stream-to-memory dma-channel=0 partition=0/1
 
-array-program records=106 payload-bytes=2056 writes=78 masked-writes=13 block-writes=12 tile-loads=3 waits=0
-array-block record=79 address=0x0021d000 words=[0x00000004,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
-array-block record=80 address=0x0021d020 words=[0x04000004,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
-array-block record=82 address=0x0021d040 words=[0x08000004,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
-array-block record=83 address=0x0021d060 words=[0x0c000004,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
-array-block record=85 address=0x0041d000 words=[0x00000004,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
-array-block record=86 address=0x0041d020 words=[0x04000004,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
-array-block record=88 address=0x0041d040 words=[0x08000004,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
-array-block record=89 address=0x0041d060 words=[0x0c000004,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
-array-block record=91 address=0x0031d000 words=[0x00000040,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
-array-block record=92 address=0x0031d020 words=[0x04000040,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
-array-block record=94 address=0x0031d040 words=[0x08000040,0x00000000,0x00000000,0x00000000,0x00000000,0x1e045fe3]
-array-block record=95 address=0x0031d060 words=[0x0c000040,0x00000000,0x00000000,0x00000000,0x00000000,0x16045fe3]
-array-tile-load record=97 tile-program=0
-array-tile-load record=98 tile-program=1
-array-tile-load record=99 tile-program=2
+array-program records=116 payload-bytes=2312 writes=84 masked-writes=13 block-writes=16 tile-loads=3 waits=0
+array-block record=83 address=0x0021d000 words=[0x00000004,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=84 address=0x0021d020 words=[0x04000004,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=86 address=0x0021d040 words=[0x08000004,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
+array-block record=87 address=0x0021d060 words=[0x0c000004,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
+array-block record=89 address=0x0241d000 words=[0x00000004,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=90 address=0x0241d020 words=[0x04000004,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=92 address=0x0241d040 words=[0x08000004,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
+array-block record=93 address=0x0241d060 words=[0x0c000004,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
+array-block record=95 address=0x0031d000 words=[0x00000040,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=96 address=0x0031d020 words=[0x04000040,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=98 address=0x0031d040 words=[0x08000040,0x00000000,0x00000000,0x00000000,0x00000000,0x1e045fe3]
+array-block record=99 address=0x0031d060 words=[0x0c000040,0x00000000,0x00000000,0x00000000,0x00000000,0x16045fe3]
+array-block record=101 address=0x0241d080 words=[0x00040040,0x00000000,0x00000000,0x00000000,0x00000000,0x2e049fe5]
+array-block record=102 address=0x0241d0a0 words=[0x04040040,0x00000000,0x00000000,0x00000000,0x00000000,0x26049fe5]
+array-block record=104 address=0x0031d080 words=[0x00100040,0x00000000,0x00000000,0x00000000,0x00000000,0x2e04bfe4]
+array-block record=105 address=0x0031d0a0 words=[0x04100040,0x00000000,0x00000000,0x00000000,0x00000000,0x2604bfe4]
+array-tile-load record=107 tile-program=0
+array-tile-load record=108 tile-program=1
+array-tile-load record=109 tile-program=2
 control-program records=14 payload-bytes=444 writes=6 masked-writes=1 block-writes=6 tile-loads=0 waits=1 relocations=6
 control-block record=0 address=0x0001d000 words=[0x00000004,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
 control-write record=1 address=0x0001d214 value=0x00000000
@@ -251,7 +260,7 @@ control-relocation index=5 record=10 word=1 payload-offset=364 binding=3 addend=
 
 resident-program workers=3
 resident worker=0 entry=@split_k_array$worker$0 tile=(0,2) phases=2 code-bytes=382 resources=0 fixups=1
-resident worker=1 entry=@split_k_array$worker$1 tile=(0,4) phases=2 code-bytes=382 resources=0 fixups=1
+resident worker=1 entry=@split_k_array$worker$1 tile=(1,4) phases=2 code-bytes=382 resources=0 fixups=1
 resident worker=2 entry=@split_k_array$worker$2 tile=(0,3) phases=2 code-bytes=414 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$worker$0() asm {
@@ -404,12 +413,12 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   low.br ^_bb1
 ^_bb1:
   %partial0_view$259 = mov.local-address 262208
-  %partial1_view$260 = mov.local-address 393280
+  %partial1_view$260 = mov.local-address 459008
   %bias_view$261 = mov.local-address 458752
   %output_view$262 = mov.local-address 491520
   acq %acquire_delta, 49
   acq %acquire_delta, 5
-  acq %acquire_delta, 37
+  acq %acquire_delta, 53
   acq %acquire_delta, 50
   %237 = vlda.acc.f32x16 %partial0_view$259, 0
   %238 = vlda.acc.f32x16 %partial0_view$259, 64
@@ -440,16 +449,16 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   rel %release_delta, 51
   rel %release_delta, 48
   rel %release_delta, 4
-  rel %release_delta, 36
+  rel %release_delta, 52
   low.br ^_bb2
 ^_bb2:
   %partial0_view$289 = mov.local-address 278592
-  %partial1_view$290 = mov.local-address 409664
+  %partial1_view$290 = mov.local-address 475392
   %bias_view$291 = mov.local-address 475136
   %output_view$292 = mov.local-address 507904
   acq %acquire_delta, 49
   acq %acquire_delta, 5
-  acq %acquire_delta, 37
+  acq %acquire_delta, 53
   acq %acquire_delta, 50
   %267 = vlda.acc.f32x16 %partial0_view$289, 0
   %268 = vlda.acc.f32x16 %partial0_view$289, 64
@@ -480,6 +489,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   rel %release_delta, 51
   rel %release_delta, 48
   rel %release_delta, 4
-  rel %release_delta, 36
+  rel %release_delta, 52
   low.br ^_bb1
 }

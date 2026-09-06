@@ -146,9 +146,16 @@ static const char* loom_aie2p_array_plan_check_dma_direction_name(
 
 static const char* loom_aie2p_array_plan_check_transport_name(
     loom_aie2p_array_channel_transport_t transport) {
-  return transport == LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA
-             ? "external-dma"
-             : "neighbor-memory";
+  switch (transport) {
+    case LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA:
+      return "external-dma";
+    case LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_NEIGHBOR_MEMORY:
+      return "neighbor-memory";
+    case LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_ROUTED_DMA:
+      return "routed-dma";
+  }
+  IREE_ASSERT_UNREACHABLE("validated channel transport");
+  return "unknown";
 }
 
 static const char* loom_aie2p_array_plan_check_switch_name(
@@ -289,26 +296,56 @@ static iree_status_t loom_aie2p_array_plan_check_format(
   }
   for (iree_host_size_t i = 0; i < plan->channel_slot_count; ++i) {
     const loom_aie2p_array_channel_slot_t* slot = &plan->channel_slots[i];
+    const bool has_sender_storage =
+        slot->sender_storage.owner.column != UINT16_MAX;
+    const bool has_receiver_storage =
+        slot->receiver_storage.owner.column != UINT16_MAX;
+    const bool has_distinct_storage =
+        has_sender_storage && has_receiver_storage &&
+        (slot->sender_storage.owner.column !=
+             slot->receiver_storage.owner.column ||
+         slot->sender_storage.owner.row != slot->receiver_storage.owner.row ||
+         slot->sender_storage.owner_offset !=
+             slot->receiver_storage.owner_offset);
+    if (has_distinct_storage) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "slot channel=%" PRIu32 " index=%" PRIu32 " bytes=%" PRIu32
+          " sender-owner=(%u,%u) sender-offset=0x%05" PRIx32
+          " sender=0x%05" PRIx32
+          " receiver-owner=(%u,%u) receiver-offset=0x%05" PRIx32
+          " receiver=0x%05" PRIx32 "\n",
+          slot->channel_index, slot->slot, slot->byte_length,
+          slot->sender_storage.owner.column, slot->sender_storage.owner.row,
+          slot->sender_storage.owner_offset, slot->sender_storage.load_address,
+          slot->receiver_storage.owner.column, slot->receiver_storage.owner.row,
+          slot->receiver_storage.owner_offset,
+          slot->receiver_storage.load_address));
+      continue;
+    }
+    const loom_aie2p_array_channel_storage_plan_t* storage =
+        has_sender_storage ? &slot->sender_storage : &slot->receiver_storage;
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         "slot channel=%" PRIu32 " index=%" PRIu32
         " owner=(%u,%u)"
         " offset=0x%05" PRIx32 " bytes=%" PRIu32,
-        slot->channel_index, slot->slot, slot->owner.column, slot->owner.row,
-        slot->owner_offset, slot->byte_length));
-    if (slot->sender_load_address == UINT32_MAX) {
+        slot->channel_index, slot->slot, storage->owner.column,
+        storage->owner.row, storage->owner_offset, slot->byte_length));
+    if (!has_sender_storage) {
       IREE_RETURN_IF_ERROR(
           iree_string_builder_append_cstring(builder, " sender=external"));
     } else {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          builder, " sender=0x%05" PRIx32, slot->sender_load_address));
+          builder, " sender=0x%05" PRIx32, slot->sender_storage.load_address));
     }
-    if (slot->receiver_load_address == UINT32_MAX) {
+    if (!has_receiver_storage) {
       IREE_RETURN_IF_ERROR(
           iree_string_builder_append_cstring(builder, " receiver=external"));
     } else {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          builder, " receiver=0x%05" PRIx32, slot->receiver_load_address));
+          builder, " receiver=0x%05" PRIx32,
+          slot->receiver_storage.load_address));
     }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
   }
@@ -316,10 +353,13 @@ static iree_status_t loom_aie2p_array_plan_check_format(
     const loom_aie2p_array_lock_plan_t* lock = &plan->locks[i];
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
-        "lock channel=%" PRIu32 " tile=(%u,%u) id=%u role=%s initial=%d\n",
+        "lock channel=%" PRIu32
+        " tile=(%u,%u) id=%u ring=%s role=%s initial=%d\n",
         lock->channel_index, lock->coordinate.column, lock->coordinate.row,
-        lock->lock_id, lock->consumer_ready ? "ready" : "credit",
-        lock->initial_value));
+        lock->lock_id,
+        loom_aie2p_array_plan_check_direction_name(
+            lock->ring_endpoint_direction),
+        lock->consumer_ready ? "ready" : "credit", lock->initial_value));
   }
   for (iree_host_size_t i = 0; i < plan->dma_channel_count; ++i) {
     const loom_aie2p_array_dma_plan_t* dma = &plan->dma_channels[i];

@@ -44,6 +44,8 @@ typedef enum loom_aie2p_array_channel_transport_e {
   LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA = 1,
   // Adjacent workers communicating through a shared local-memory window.
   LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_NEIGHBOR_MEMORY = 2,
+  // Non-adjacent workers communicating through compute DMA and stream routes.
+  LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_ROUTED_DMA = 3,
 } loom_aie2p_array_channel_transport_t;
 
 // DMA transfer direction relative to local memory.
@@ -174,22 +176,29 @@ typedef struct loom_aie2p_array_worker_port_plan_t {
   uint32_t first_channel_slot;
 } loom_aie2p_array_worker_port_plan_t;
 
-// One record slot allocated in canonical compute-tile local storage.
+// One endpoint's physical view of a channel record.
+typedef struct loom_aie2p_array_channel_storage_plan_t {
+  // Compute tile owning the record storage, or an invalid coordinate when the
+  // endpoint is an external binding.
+  loom_xdna_tile_coordinate_t owner;
+  // Byte offset in the owner's local data memory.
+  uint32_t owner_offset;
+  // Endpoint-visible load address, or UINT32_MAX for an external binding.
+  uint32_t load_address;
+} loom_aie2p_array_channel_storage_plan_t;
+
+// One logical record slot and its endpoint-local physical storage.
 typedef struct loom_aie2p_array_channel_slot_t {
   // Index of the logical channel owning this record slot.
   uint32_t channel_index;
   // Ring position within the logical channel.
   uint32_t slot;
-  // Compute tile owning the canonical storage.
-  loom_xdna_tile_coordinate_t owner;
-  // Byte offset in the owner's local data memory.
-  uint32_t owner_offset;
-  // Number of bytes occupied by the record.
+  // Number of bytes occupied by each materialized endpoint record.
   uint32_t byte_length;
-  // Sender-visible load address, or UINT32_MAX for an external sender.
-  uint32_t sender_load_address;
-  // Receiver-visible load address, or UINT32_MAX for an external receiver.
-  uint32_t receiver_load_address;
+  // Producer-side storage view.
+  loom_aie2p_array_channel_storage_plan_t sender_storage;
+  // Consumer-side storage view. Neighbor-memory channels alias sender storage.
+  loom_aie2p_array_channel_storage_plan_t receiver_storage;
 } loom_aie2p_array_channel_slot_t;
 
 // One hardware lock allocated to channel ring synchronization.
@@ -202,6 +211,8 @@ typedef struct loom_aie2p_array_lock_plan_t {
   uint8_t lock_id;
   // Initial signed lock value.
   int8_t initial_value;
+  // Logical endpoint whose local ring is synchronized by the lock.
+  loom_aie2p_array_endpoint_direction_t ring_endpoint_direction;
   // Zero for the producer-credit lock and one for the consumer-ready lock.
   uint8_t consumer_ready;
 } loom_aie2p_array_lock_plan_t;
@@ -302,9 +313,9 @@ typedef struct loom_aie2p_array_plan_t {
   const loom_aie2p_array_worker_port_plan_t* worker_ports;
   // Number of worker ABI port bindings.
   iree_host_size_t worker_port_count;
-  // Canonical local-memory ring slots.
+  // Logical channel slots with endpoint-local storage views.
   const loom_aie2p_array_channel_slot_t* channel_slots;
-  // Number of canonical ring slots.
+  // Number of logical channel slots.
   iree_host_size_t channel_slot_count;
   // Hardware lock allocations.
   const loom_aie2p_array_lock_plan_t* locks;
@@ -328,9 +339,9 @@ typedef struct loom_aie2p_array_plan_t {
 //
 // Exact SSA facts drive all resource cardinalities and placement coordinates.
 // Every worker entry must have one matching detached leaf in |leaves|. The
-// planner maps external binding channels through DMA and vertically
-// adjacent worker channels through neighbor-visible memory. All other
-// transports fail before any output is emitted.
+// planner maps external binding channels through shim DMA, vertically adjacent
+// workers through neighbor-visible memory, and all other worker channels
+// through compute DMA and the stream network.
 iree_status_t loom_aie2p_array_plan_build(const loom_module_t* module,
                                           const loom_op_t* function_op,
                                           const loom_aie2p_array_leaf_t* leaves,

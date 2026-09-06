@@ -99,7 +99,13 @@ static iree_status_t loom_aie2p_xdna_measure_partition(
     LOOM_AIE2P_XDNA_ACCUMULATE_COORDINATE(plan->worker_plans[i].coordinate);
   }
   for (iree_host_size_t i = 0; i < plan->channel_slot_count; ++i) {
-    LOOM_AIE2P_XDNA_ACCUMULATE_COORDINATE(plan->channel_slots[i].owner);
+    const loom_aie2p_array_channel_slot_t* slot = &plan->channel_slots[i];
+    if (slot->sender_storage.owner.column != UINT16_MAX) {
+      LOOM_AIE2P_XDNA_ACCUMULATE_COORDINATE(slot->sender_storage.owner);
+    }
+    if (slot->receiver_storage.owner.column != UINT16_MAX) {
+      LOOM_AIE2P_XDNA_ACCUMULATE_COORDINATE(slot->receiver_storage.owner);
+    }
   }
   for (iree_host_size_t i = 0; i < plan->lock_count; ++i) {
     LOOM_AIE2P_XDNA_ACCUMULATE_COORDINATE(plan->locks[i].coordinate);

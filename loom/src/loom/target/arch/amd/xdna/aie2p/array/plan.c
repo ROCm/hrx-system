@@ -821,15 +821,12 @@ static iree_status_t loom_aie2p_array_validate_topology(
           &builder->workers[receiver->owner_index];
       const int row_delta = (int)sender_worker->coordinate.row -
                             (int)receiver_worker->coordinate.row;
-      if (sender_worker->coordinate.column !=
-              receiver_worker->coordinate.column ||
-          (row_delta != -1 && row_delta != 1)) {
-        return iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "AIE2P neighbor-memory channels require vertically adjacent "
-            "worker tiles");
-      }
-      channel->transport = LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_NEIGHBOR_MEMORY;
+      channel->transport =
+          sender_worker->coordinate.column ==
+                      receiver_worker->coordinate.column &&
+                  (row_delta == -1 || row_delta == 1)
+              ? LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_NEIGHBOR_MEMORY
+              : LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_ROUTED_DMA;
     } else {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "unsupported AIE2P channel ownership");
@@ -937,7 +934,9 @@ static iree_status_t loom_aie2p_array_allocate_tile_storage(
 
 static iree_status_t loom_aie2p_array_allocate_lock_pair(
     loom_aie2p_array_plan_builder_t* builder, uint32_t channel_index,
-    loom_xdna_tile_coordinate_t coordinate, int8_t credit_count) {
+    loom_xdna_tile_coordinate_t coordinate,
+    loom_aie2p_array_endpoint_direction_t ring_endpoint_direction,
+    int8_t credit_count) {
   loom_aie2p_array_tile_state_t* state =
       loom_aie2p_array_tile_state(builder, coordinate);
   if ((uint32_t)state->next_lock + 2u > state->facts->lock_count ||
@@ -953,6 +952,7 @@ static iree_status_t loom_aie2p_array_allocate_lock_pair(
       .coordinate = coordinate,
       .lock_id = credit_lock,
       .initial_value = credit_count,
+      .ring_endpoint_direction = ring_endpoint_direction,
       .consumer_ready = 0,
   };
   builder->locks[builder->lock_cursor++] = (loom_aie2p_array_lock_plan_t){
@@ -960,6 +960,7 @@ static iree_status_t loom_aie2p_array_allocate_lock_pair(
       .coordinate = coordinate,
       .lock_id = ready_lock,
       .initial_value = 0,
+      .ring_endpoint_direction = ring_endpoint_direction,
       .consumer_ready = 1,
   };
   return iree_ok_status();
@@ -1164,6 +1165,98 @@ static iree_host_size_t loom_aie2p_array_horizontal_link_index(
   return (iree_host_size_t)row * builder->family->column_count + lower_column;
 }
 
+static iree_status_t loom_aie2p_array_plan_horizontal_route_segment(
+    loom_aie2p_array_plan_builder_t* builder, uint32_t channel_index,
+    uint16_t target_column, loom_xdna_tile_coordinate_t* inout_coordinate,
+    loom_xdna_stream_port_t* inout_incoming_port,
+    uint8_t* inout_stream_channel) {
+  while (inout_coordinate->column != target_column) {
+    const bool move_west = inout_coordinate->column > target_column;
+    const uint16_t next_column =
+        move_west ? (uint16_t)(inout_coordinate->column - 1u)
+                  : (uint16_t)(inout_coordinate->column + 1u);
+    const uint16_t lower_column = inout_coordinate->column < next_column
+                                      ? inout_coordinate->column
+                                      : next_column;
+    const iree_host_size_t link_index = loom_aie2p_array_horizontal_link_index(
+        builder, lower_column, inout_coordinate->row);
+    uint8_t* next_channel =
+        move_west ? &builder->westward_link_next_channel[link_index]
+                  : &builder->eastward_link_next_channel[link_index];
+    const loom_xdna_stream_port_t outgoing_port =
+        move_west ? LOOM_XDNA_STREAM_PORT_WEST : LOOM_XDNA_STREAM_PORT_EAST;
+    const loom_xdna_stream_port_t next_incoming_port =
+        move_west ? LOOM_XDNA_STREAM_PORT_EAST : LOOM_XDNA_STREAM_PORT_WEST;
+    const loom_xdna_tile_coordinate_t next_coordinate = {
+        next_column,
+        inout_coordinate->row,
+    };
+    uint8_t link_channel = 0;
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_physical_link(
+        builder, *inout_coordinate, outgoing_port, next_coordinate,
+        next_incoming_port, next_channel, &link_channel));
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_append_route(
+        builder, channel_index, *inout_coordinate,
+        LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH, *inout_incoming_port,
+        *inout_stream_channel, outgoing_port, link_channel));
+    *inout_coordinate = next_coordinate;
+    *inout_incoming_port = next_incoming_port;
+    *inout_stream_channel = link_channel;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_array_plan_vertical_route_segment(
+    loom_aie2p_array_plan_builder_t* builder, uint32_t channel_index,
+    uint16_t target_row, loom_xdna_tile_coordinate_t* inout_coordinate,
+    loom_xdna_stream_port_t* inout_incoming_port,
+    uint8_t* inout_stream_channel) {
+  while (inout_coordinate->row != target_row) {
+    const bool move_north = inout_coordinate->row < target_row;
+    const uint16_t next_row = move_north
+                                  ? (uint16_t)(inout_coordinate->row + 1u)
+                                  : (uint16_t)(inout_coordinate->row - 1u);
+    const uint16_t lower_row =
+        inout_coordinate->row < next_row ? inout_coordinate->row : next_row;
+    const iree_host_size_t link_index = loom_aie2p_array_vertical_link_index(
+        builder, inout_coordinate->column, lower_row);
+    uint8_t* next_channel =
+        move_north ? &builder->upward_link_next_channel[link_index]
+                   : &builder->downward_link_next_channel[link_index];
+    const loom_xdna_stream_port_t outgoing_port =
+        move_north ? LOOM_XDNA_STREAM_PORT_NORTH : LOOM_XDNA_STREAM_PORT_SOUTH;
+    const loom_xdna_stream_port_t next_incoming_port =
+        move_north ? LOOM_XDNA_STREAM_PORT_SOUTH : LOOM_XDNA_STREAM_PORT_NORTH;
+    const loom_xdna_tile_coordinate_t next_coordinate = {
+        inout_coordinate->column,
+        next_row,
+    };
+    uint8_t link_channel = 0;
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_physical_link(
+        builder, *inout_coordinate, outgoing_port, next_coordinate,
+        next_incoming_port, next_channel, &link_channel));
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_append_route(
+        builder, channel_index, *inout_coordinate,
+        LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH, *inout_incoming_port,
+        *inout_stream_channel, outgoing_port, link_channel));
+    *inout_coordinate = next_coordinate;
+    *inout_incoming_port = next_incoming_port;
+    *inout_stream_channel = link_channel;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_array_plan_route_destination(
+    loom_aie2p_array_plan_builder_t* builder, uint32_t channel_index,
+    loom_xdna_tile_coordinate_t coordinate,
+    loom_xdna_stream_port_t incoming_port, uint8_t incoming_channel,
+    loom_xdna_stream_port_t destination_port, uint8_t destination_channel) {
+  return loom_aie2p_array_append_route(
+      builder, channel_index, coordinate,
+      LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH, incoming_port,
+      incoming_channel, destination_port, destination_channel);
+}
+
 static iree_status_t loom_aie2p_array_plan_ingress_route(
     loom_aie2p_array_plan_builder_t* builder, uint32_t channel_index,
     loom_xdna_tile_coordinate_t shim_coordinate, uint8_t shim_dma_channel,
@@ -1177,132 +1270,43 @@ static iree_status_t loom_aie2p_array_plan_ingress_route(
       LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX, LOOM_XDNA_STREAM_PORT_DMA,
       shim_dma_channel, LOOM_XDNA_STREAM_PORT_NORTH, current_channel));
 
-  uint16_t column = shim_coordinate.column;
+  loom_xdna_tile_coordinate_t coordinate = shim_coordinate;
   loom_xdna_stream_port_t incoming_port = LOOM_XDNA_STREAM_PORT_SOUTH;
-  while (column != worker_coordinate.column) {
-    const bool move_west = column > worker_coordinate.column;
-    const uint16_t next_column =
-        move_west ? (uint16_t)(column - 1u) : (uint16_t)(column + 1u);
-    const uint16_t lower_column = column < next_column ? column : next_column;
-    const iree_host_size_t link_index =
-        loom_aie2p_array_horizontal_link_index(builder, lower_column, 0);
-    uint8_t* next_channel =
-        move_west ? &builder->westward_link_next_channel[link_index]
-                  : &builder->eastward_link_next_channel[link_index];
-    const loom_xdna_stream_port_t outgoing_port =
-        move_west ? LOOM_XDNA_STREAM_PORT_WEST : LOOM_XDNA_STREAM_PORT_EAST;
-    const loom_xdna_stream_port_t next_incoming_port =
-        move_west ? LOOM_XDNA_STREAM_PORT_EAST : LOOM_XDNA_STREAM_PORT_WEST;
-    uint8_t link_channel = 0;
-    IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_physical_link(
-        builder, (loom_xdna_tile_coordinate_t){column, 0}, outgoing_port,
-        (loom_xdna_tile_coordinate_t){next_column, 0}, next_incoming_port,
-        next_channel, &link_channel));
-    IREE_RETURN_IF_ERROR(loom_aie2p_array_append_route(
-        builder, channel_index, (loom_xdna_tile_coordinate_t){column, 0},
-        LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH, incoming_port,
-        current_channel, outgoing_port, link_channel));
-    column = next_column;
-    incoming_port = next_incoming_port;
-    current_channel = link_channel;
-  }
-
-  for (uint16_t row = 0; row <= worker_coordinate.row; ++row) {
-    const loom_xdna_tile_coordinate_t coordinate = {column, row};
-    if (row == worker_coordinate.row) {
-      IREE_RETURN_IF_ERROR(loom_aie2p_array_append_route(
-          builder, channel_index, coordinate,
-          LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH,
-          LOOM_XDNA_STREAM_PORT_SOUTH, current_channel,
-          LOOM_XDNA_STREAM_PORT_DMA, worker_dma_channel));
-      break;
-    }
-    const loom_xdna_tile_coordinate_t next_coordinate = {
-        column,
-        (uint16_t)(row + 1u),
-    };
-    const iree_host_size_t link_index =
-        loom_aie2p_array_vertical_link_index(builder, column, row);
-    uint8_t link_channel = 0;
-    IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_physical_link(
-        builder, coordinate, LOOM_XDNA_STREAM_PORT_NORTH, next_coordinate,
-        LOOM_XDNA_STREAM_PORT_SOUTH,
-        &builder->upward_link_next_channel[link_index], &link_channel));
-    IREE_RETURN_IF_ERROR(loom_aie2p_array_append_route(
-        builder, channel_index, coordinate,
-        LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH, incoming_port,
-        current_channel, LOOM_XDNA_STREAM_PORT_NORTH, link_channel));
-    incoming_port = LOOM_XDNA_STREAM_PORT_SOUTH;
-    current_channel = link_channel;
-  }
-  return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_horizontal_route_segment(
+      builder, channel_index, worker_coordinate.column, &coordinate,
+      &incoming_port, &current_channel));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_vertical_route_segment(
+      builder, channel_index, worker_coordinate.row, &coordinate,
+      &incoming_port, &current_channel));
+  return loom_aie2p_array_plan_route_destination(
+      builder, channel_index, coordinate, incoming_port, current_channel,
+      LOOM_XDNA_STREAM_PORT_DMA, worker_dma_channel);
 }
 
 static iree_status_t loom_aie2p_array_plan_egress_route(
     loom_aie2p_array_plan_builder_t* builder, uint32_t channel_index,
     loom_xdna_tile_coordinate_t worker_coordinate, uint8_t worker_dma_channel,
     loom_xdna_tile_coordinate_t shim_coordinate, uint8_t shim_dma_channel) {
-  uint16_t row = worker_coordinate.row;
-  uint16_t column = worker_coordinate.column;
+  loom_xdna_tile_coordinate_t coordinate = worker_coordinate;
   uint8_t current_channel = 0;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_dma_stream_channel(
+      builder, worker_coordinate,
+      LOOM_AIE2P_ARRAY_DMA_DIRECTION_MEMORY_TO_STREAM, worker_dma_channel,
+      &current_channel));
   loom_xdna_stream_port_t incoming_port = LOOM_XDNA_STREAM_PORT_DMA;
-  while (row > 0) {
-    const loom_xdna_tile_coordinate_t coordinate = {column, row};
-    const loom_xdna_tile_coordinate_t next_coordinate = {
-        column,
-        (uint16_t)(row - 1u),
-    };
-    const iree_host_size_t link_index = loom_aie2p_array_vertical_link_index(
-        builder, column, (uint16_t)(row - 1u));
-    uint8_t link_channel = 0;
-    IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_physical_link(
-        builder, coordinate, LOOM_XDNA_STREAM_PORT_SOUTH, next_coordinate,
-        LOOM_XDNA_STREAM_PORT_NORTH,
-        &builder->downward_link_next_channel[link_index], &link_channel));
-    IREE_RETURN_IF_ERROR(loom_aie2p_array_append_route(
-        builder, channel_index, coordinate,
-        LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH, incoming_port,
-        row == worker_coordinate.row ? worker_dma_channel : current_channel,
-        LOOM_XDNA_STREAM_PORT_SOUTH, link_channel));
-    --row;
-    incoming_port = LOOM_XDNA_STREAM_PORT_NORTH;
-    current_channel = link_channel;
-  }
-
-  while (column != shim_coordinate.column) {
-    const bool move_west = column > shim_coordinate.column;
-    const uint16_t next_column =
-        move_west ? (uint16_t)(column - 1u) : (uint16_t)(column + 1u);
-    const uint16_t lower_column = column < next_column ? column : next_column;
-    const iree_host_size_t link_index =
-        loom_aie2p_array_horizontal_link_index(builder, lower_column, 0);
-    uint8_t* next_channel =
-        move_west ? &builder->westward_link_next_channel[link_index]
-                  : &builder->eastward_link_next_channel[link_index];
-    const loom_xdna_stream_port_t outgoing_port =
-        move_west ? LOOM_XDNA_STREAM_PORT_WEST : LOOM_XDNA_STREAM_PORT_EAST;
-    const loom_xdna_stream_port_t next_incoming_port =
-        move_west ? LOOM_XDNA_STREAM_PORT_EAST : LOOM_XDNA_STREAM_PORT_WEST;
-    uint8_t link_channel = 0;
-    IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_physical_link(
-        builder, (loom_xdna_tile_coordinate_t){column, 0}, outgoing_port,
-        (loom_xdna_tile_coordinate_t){next_column, 0}, next_incoming_port,
-        next_channel, &link_channel));
-    IREE_RETURN_IF_ERROR(loom_aie2p_array_append_route(
-        builder, channel_index, (loom_xdna_tile_coordinate_t){column, 0},
-        LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH, incoming_port,
-        current_channel, outgoing_port, link_channel));
-    column = next_column;
-    incoming_port = next_incoming_port;
-    current_channel = link_channel;
-  }
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_vertical_route_segment(
+      builder, channel_index, shim_coordinate.row, &coordinate, &incoming_port,
+      &current_channel));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_horizontal_route_segment(
+      builder, channel_index, shim_coordinate.column, &coordinate,
+      &incoming_port, &current_channel));
 
   uint8_t shim_link_channel = 0;
   IREE_RETURN_IF_ERROR(loom_aie2p_array_dma_stream_channel(
       builder, shim_coordinate, LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY,
       shim_dma_channel, &shim_link_channel));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_append_route(
-      builder, channel_index, shim_coordinate,
+      builder, channel_index, coordinate,
       LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH, incoming_port,
       current_channel, LOOM_XDNA_STREAM_PORT_SOUTH, shim_link_channel));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_append_route(
@@ -1310,6 +1314,34 @@ static iree_status_t loom_aie2p_array_plan_egress_route(
       LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX, LOOM_XDNA_STREAM_PORT_NORTH,
       shim_link_channel, LOOM_XDNA_STREAM_PORT_DMA, shim_dma_channel));
   return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_array_plan_worker_route(
+    loom_aie2p_array_plan_builder_t* builder, uint32_t channel_index,
+    loom_xdna_tile_coordinate_t sender_coordinate, uint8_t sender_dma_channel,
+    loom_xdna_tile_coordinate_t receiver_coordinate,
+    uint8_t receiver_dma_channel) {
+  loom_xdna_tile_coordinate_t coordinate = sender_coordinate;
+  loom_xdna_stream_port_t incoming_port = LOOM_XDNA_STREAM_PORT_DMA;
+  uint8_t current_channel = 0;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_dma_stream_channel(
+      builder, sender_coordinate,
+      LOOM_AIE2P_ARRAY_DMA_DIRECTION_MEMORY_TO_STREAM, sender_dma_channel,
+      &current_channel));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_horizontal_route_segment(
+      builder, channel_index, receiver_coordinate.column, &coordinate,
+      &incoming_port, &current_channel));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_vertical_route_segment(
+      builder, channel_index, receiver_coordinate.row, &coordinate,
+      &incoming_port, &current_channel));
+  uint8_t receiver_stream_channel = 0;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_dma_stream_channel(
+      builder, receiver_coordinate,
+      LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY, receiver_dma_channel,
+      &receiver_stream_channel));
+  return loom_aie2p_array_plan_route_destination(
+      builder, channel_index, coordinate, incoming_port, current_channel,
+      LOOM_XDNA_STREAM_PORT_DMA, receiver_stream_channel);
 }
 
 static iree_status_t loom_aie2p_array_validate_worker_leaf(
@@ -1476,41 +1508,69 @@ static iree_status_t loom_aie2p_array_append_worker_port(
 
 static iree_status_t loom_aie2p_array_plan_channel_slots(
     loom_aie2p_array_plan_builder_t* builder, uint32_t channel_index,
-    loom_xdna_tile_coordinate_t owner,
     const loom_aie2p_array_endpoint_t* sender,
     const loom_aie2p_array_endpoint_t* receiver) {
   const loom_aie2p_array_channel_t* channel = &builder->channels[channel_index];
-  loom_aie2p_array_tile_state_t* owner_state =
-      loom_aie2p_array_tile_state(builder, owner);
   for (uint32_t slot = 0; slot < channel->capacity; ++slot) {
-    uint32_t owner_offset = 0;
-    IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_tile_storage(
-        owner_state, channel->record_byte_length,
-        LOOM_AIE2P_ARRAY_CHANNEL_ALIGNMENT, &owner_offset));
-    uint32_t sender_address = UINT32_MAX;
-    uint32_t receiver_address = UINT32_MAX;
+    loom_aie2p_array_channel_slot_t* channel_slot =
+        &builder->channel_slots[builder->channel_slot_cursor++];
+    *channel_slot = (loom_aie2p_array_channel_slot_t){
+        .channel_index = channel_index,
+        .slot = slot,
+        .byte_length = channel->record_byte_length,
+        .sender_storage =
+            {
+                .owner = {UINT16_MAX, UINT16_MAX},
+                .owner_offset = UINT32_MAX,
+                .load_address = UINT32_MAX,
+            },
+        .receiver_storage =
+            {
+                .owner = {UINT16_MAX, UINT16_MAX},
+                .owner_offset = UINT32_MAX,
+                .load_address = UINT32_MAX,
+            },
+    };
+
     if (sender->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER) {
+      const loom_xdna_tile_coordinate_t owner =
+          builder->workers[sender->owner_index].coordinate;
+      loom_aie2p_array_tile_state_t* owner_state =
+          loom_aie2p_array_tile_state(builder, owner);
+      uint32_t owner_offset = 0;
+      IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_tile_storage(
+          owner_state, channel->record_byte_length,
+          LOOM_AIE2P_ARRAY_CHANNEL_ALIGNMENT, &owner_offset));
+      channel_slot->sender_storage.owner = owner;
+      channel_slot->sender_storage.owner_offset = owner_offset;
       IREE_RETURN_IF_ERROR(loom_xdna_array_form_load_address(
-          builder->family, builder->workers[sender->owner_index].coordinate,
-          LOOM_XDNA_MEMORY_SPACE_DATA, owner, owner_offset,
-          channel->record_byte_length, &sender_address));
+          builder->family, owner, LOOM_XDNA_MEMORY_SPACE_DATA, owner,
+          owner_offset, channel->record_byte_length,
+          &channel_slot->sender_storage.load_address));
     }
     if (receiver->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER) {
+      const bool aliases_sender =
+          channel->transport ==
+          LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_NEIGHBOR_MEMORY;
+      const loom_xdna_tile_coordinate_t owner =
+          aliases_sender ? channel_slot->sender_storage.owner
+                         : builder->workers[receiver->owner_index].coordinate;
+      uint32_t owner_offset = channel_slot->sender_storage.owner_offset;
+      if (!aliases_sender) {
+        loom_aie2p_array_tile_state_t* owner_state =
+            loom_aie2p_array_tile_state(builder, owner);
+        IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_tile_storage(
+            owner_state, channel->record_byte_length,
+            LOOM_AIE2P_ARRAY_CHANNEL_ALIGNMENT, &owner_offset));
+      }
+      channel_slot->receiver_storage.owner = owner;
+      channel_slot->receiver_storage.owner_offset = owner_offset;
       IREE_RETURN_IF_ERROR(loom_xdna_array_form_load_address(
           builder->family, builder->workers[receiver->owner_index].coordinate,
           LOOM_XDNA_MEMORY_SPACE_DATA, owner, owner_offset,
-          channel->record_byte_length, &receiver_address));
+          channel->record_byte_length,
+          &channel_slot->receiver_storage.load_address));
     }
-    builder->channel_slots[builder->channel_slot_cursor++] =
-        (loom_aie2p_array_channel_slot_t){
-            .channel_index = channel_index,
-            .slot = slot,
-            .owner = owner,
-            .owner_offset = owner_offset,
-            .byte_length = channel->record_byte_length,
-            .sender_load_address = sender_address,
-            .receiver_load_address = receiver_address,
-        };
   }
   return iree_ok_status();
 }
@@ -1553,7 +1613,8 @@ static iree_status_t loom_aie2p_array_plan_external_channel(
                             "AIE2P channel capacity exceeds lock range");
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_lock_pair(
-      builder, channel_index, worker->coordinate, (int8_t)channel->capacity));
+      builder, channel_index, worker->coordinate, worker_endpoint->direction,
+      (int8_t)channel->capacity));
 
   if (ingress) {
     IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_ingress_route(
@@ -1592,7 +1653,48 @@ static iree_status_t loom_aie2p_array_plan_neighbor_channel(
                             "AIE2P channel capacity exceeds lock range");
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_lock_pair(
-      builder, channel_index, owner, (int8_t)channel->capacity));
+      builder, channel_index, owner, LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND,
+      (int8_t)channel->capacity));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_append_worker_port(
+      builder, sender, channel_index, first_slot));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_append_worker_port(
+      builder, receiver, channel_index, first_slot));
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_array_plan_routed_channel(
+    loom_aie2p_array_plan_builder_t* builder, uint32_t channel_index,
+    const loom_aie2p_array_endpoint_t* sender,
+    const loom_aie2p_array_endpoint_t* receiver, uint32_t first_slot) {
+  const loom_aie2p_array_channel_t* channel = &builder->channels[channel_index];
+  const loom_aie2p_array_worker_t* sender_worker =
+      &builder->workers[sender->owner_index];
+  const loom_aie2p_array_worker_t* receiver_worker =
+      &builder->workers[receiver->owner_index];
+  uint8_t sender_dma_channel = 0;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_dma(
+      builder, channel_index, sender_worker->coordinate,
+      LOOM_AIE2P_ARRAY_DMA_DIRECTION_MEMORY_TO_STREAM, channel->capacity,
+      /*shim_side=*/false, &sender_dma_channel));
+  uint8_t receiver_dma_channel = 0;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_dma(
+      builder, channel_index, receiver_worker->coordinate,
+      LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY, channel->capacity,
+      /*shim_side=*/false, &receiver_dma_channel));
+
+  if (channel->capacity > INT8_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "AIE2P channel capacity exceeds lock range");
+  }
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_lock_pair(
+      builder, channel_index, sender_worker->coordinate,
+      LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND, (int8_t)channel->capacity));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_lock_pair(
+      builder, channel_index, receiver_worker->coordinate,
+      LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE, (int8_t)channel->capacity));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_worker_route(
+      builder, channel_index, sender_worker->coordinate, sender_dma_channel,
+      receiver_worker->coordinate, receiver_dma_channel));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_append_worker_port(
       builder, sender, channel_index, first_slot));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_append_worker_port(
@@ -1609,24 +1711,27 @@ static iree_status_t loom_aie2p_array_plan_channels(
     const loom_aie2p_array_endpoint_t* receiver =
         &builder->endpoints[channel->receiver_endpoint_index];
     const uint32_t first_slot = (uint32_t)builder->channel_slot_cursor;
-    loom_xdna_tile_coordinate_t owner = {0};
-    if (channel->transport == LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA) {
-      const loom_aie2p_array_endpoint_t* worker_endpoint =
-          sender->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER
-              ? sender
-              : receiver;
-      owner = builder->workers[worker_endpoint->owner_index].coordinate;
-    } else {
-      owner = builder->workers[sender->owner_index].coordinate;
-    }
     IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_channel_slots(
-        builder, (uint32_t)i, owner, sender, receiver));
-    if (channel->transport == LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA) {
-      IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_external_channel(
-          builder, (uint32_t)i, sender, receiver, first_slot));
-    } else {
-      IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_neighbor_channel(
-          builder, (uint32_t)i, sender, receiver, first_slot));
+        builder, (uint32_t)i, sender, receiver));
+    switch (channel->transport) {
+      case LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA: {
+        IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_external_channel(
+            builder, (uint32_t)i, sender, receiver, first_slot));
+        break;
+      }
+      case LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_NEIGHBOR_MEMORY: {
+        IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_neighbor_channel(
+            builder, (uint32_t)i, sender, receiver, first_slot));
+        break;
+      }
+      case LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_ROUTED_DMA: {
+        IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_routed_channel(
+            builder, (uint32_t)i, sender, receiver, first_slot));
+        break;
+      }
+      default:
+        IREE_ASSERT_UNREACHABLE("validated AIE2P channel transport");
+        break;
     }
   }
   return iree_ok_status();
@@ -1681,6 +1786,7 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
   uint64_t channel_slot_count = 0;
   iree_host_size_t external_channel_count = 0;
   iree_host_size_t neighbor_channel_count = 0;
+  iree_host_size_t routed_channel_count = 0;
   for (iree_host_size_t i = 0; i < builder->plan->channel_count; ++i) {
     if (!iree_checked_add_u64(channel_slot_count, builder->channels[i].capacity,
                               &channel_slot_count)) {
@@ -1690,8 +1796,11 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
     if (builder->channels[i].transport ==
         LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA) {
       ++external_channel_count;
-    } else {
+    } else if (builder->channels[i].transport ==
+               LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_NEIGHBOR_MEMORY) {
       ++neighbor_channel_count;
+    } else {
+      ++routed_channel_count;
     }
   }
   if (channel_slot_count > IREE_HOST_SIZE_MAX) {
@@ -1714,12 +1823,17 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
   uint64_t lock_count = 0;
   uint64_t dma_channel_count = 0;
   uint64_t route_count = 0;
-  if (!iree_checked_add_u64(external_channel_count, neighbor_channel_count,
-                            &lock_count) ||
+  if (!iree_checked_mul_u64(routed_channel_count, 2u, &lock_count) ||
+      !iree_checked_add_u64(lock_count, external_channel_count, &lock_count) ||
+      !iree_checked_add_u64(lock_count, neighbor_channel_count, &lock_count) ||
       !iree_checked_mul_u64(lock_count, 2u, &lock_count) ||
-      !iree_checked_mul_u64(external_channel_count, 2u, &dma_channel_count) ||
+      !iree_checked_add_u64(external_channel_count, routed_channel_count,
+                            &dma_channel_count) ||
+      !iree_checked_mul_u64(dma_channel_count, 2u, &dma_channel_count) ||
+      !iree_checked_add_u64(external_channel_count, routed_channel_count,
+                            &route_count) ||
       !iree_checked_mul_u64(
-          external_channel_count,
+          route_count,
           (uint64_t)builder->family->column_count + builder->family->row_count,
           &route_count) ||
       worker_storage_count > IREE_HOST_SIZE_MAX ||

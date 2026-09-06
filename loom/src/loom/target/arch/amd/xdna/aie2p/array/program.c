@@ -545,10 +545,12 @@ loom_aie2p_program_find_channel_slot(const loom_aie2p_array_plan_t* plan,
 
 static const loom_aie2p_array_lock_plan_t* loom_aie2p_program_find_channel_lock(
     const loom_aie2p_array_plan_t* plan, uint32_t channel_index,
+    loom_aie2p_array_endpoint_direction_t ring_endpoint_direction,
     bool consumer_ready) {
   for (iree_host_size_t i = 0; i < plan->lock_count; ++i) {
     const loom_aie2p_array_lock_plan_t* candidate = &plan->locks[i];
     if (candidate->channel_index == channel_index &&
+        candidate->ring_endpoint_direction == ring_endpoint_direction &&
         candidate->consumer_ready == consumer_ready) {
       return candidate;
     }
@@ -590,10 +592,16 @@ static iree_status_t loom_aie2p_program_build_compute_dma_descriptor(
   const loom_aie2p_array_channel_slot_t* slot =
       loom_aie2p_program_find_channel_slot(plan, dma->channel_index,
                                            slot_ordinal);
+  const loom_aie2p_array_endpoint_direction_t ring_endpoint_direction =
+      dma->direction == LOOM_AIE2P_ARRAY_DMA_DIRECTION_MEMORY_TO_STREAM
+          ? LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND
+          : LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE;
   const loom_aie2p_array_lock_plan_t* credit_lock =
-      loom_aie2p_program_find_channel_lock(plan, dma->channel_index, false);
+      loom_aie2p_program_find_channel_lock(plan, dma->channel_index,
+                                           ring_endpoint_direction, false);
   const loom_aie2p_array_lock_plan_t* ready_lock =
-      loom_aie2p_program_find_channel_lock(plan, dma->channel_index, true);
+      loom_aie2p_program_find_channel_lock(plan, dma->channel_index,
+                                           ring_endpoint_direction, true);
   const loom_aie2p_array_lock_plan_t* acquire_lock =
       dma->direction == LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY
           ? credit_lock
@@ -605,9 +613,13 @@ static iree_status_t loom_aie2p_program_build_compute_dma_descriptor(
   // Compute DMA descriptors address the engine tile's own local memory. Core
   // loads use the separately planned tile aperture (for example 0x70000 for
   // self-memory), which is not a valid DMA descriptor address.
-  IREE_ASSERT_EQ(slot->owner.column, dma->coordinate.column);
-  IREE_ASSERT_EQ(slot->owner.row, dma->coordinate.row);
-  const uint32_t local_address = slot->owner_offset;
+  const loom_aie2p_array_channel_storage_plan_t* storage =
+      ring_endpoint_direction == LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND
+          ? &slot->sender_storage
+          : &slot->receiver_storage;
+  IREE_ASSERT_EQ(storage->owner.column, dma->coordinate.column);
+  IREE_ASSERT_EQ(storage->owner.row, dma->coordinate.row);
+  const uint32_t local_address = storage->owner_offset;
   const loom_xdna_tile_facts_t* tile = NULL;
   IREE_RETURN_IF_ERROR(
       loom_xdna_array_tile_facts(plan->family, dma->coordinate, &tile));
