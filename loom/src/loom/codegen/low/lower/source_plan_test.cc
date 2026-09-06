@@ -90,10 +90,10 @@ class LowLowerSourcePlanTest : public ::testing::Test {
 
   inline static const loom_low_lower_source_plan_observer_t
       kSourcePlanObserver = {
-          .begin = BeginSourcePlanObservation,
-          .observe = ObserveSourcePlanOp,
-          .end = EndSourcePlanObservation,
-          .user_data = nullptr,
+          /*.begin=*/BeginSourcePlanObservation,
+          /*.observe=*/ObserveSourcePlanOp,
+          /*.end=*/EndSourcePlanObservation,
+          /*.user_data=*/nullptr,
       };
 
   static iree_status_t ObservePlan(void* user_data,

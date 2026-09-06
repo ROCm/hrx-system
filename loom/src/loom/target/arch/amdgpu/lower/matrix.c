@@ -439,12 +439,17 @@ iree_status_t loom_amdgpu_descriptor_matrix_query(
   IREE_RETURN_IF_ERROR(loom_low_lower_representation_query_lookup(
       environment, loom_vector_mma_result(source_op),
       &selected_representation));
-  if (selected_representation != LOOM_LOW_REPRESENTATION_ID_NONE) {
-    uint16_t canonical_contract_ordinal =
-        LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_matrix_fragment_query_contract_ordinal(
-        environment, loom_vector_mma_result(source_op),
-        &canonical_contract_ordinal));
+  uint16_t canonical_contract_ordinal =
+      LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_matrix_fragment_query_contract_ordinal(
+      environment, loom_vector_mma_result(source_op),
+      &canonical_contract_ordinal));
+  // A function boundary may constrain an opaque fragment without proving an
+  // exact realization for its producer. The retained producer contract is the
+  // participation proof for representation-dependent descriptor selection.
+  if (canonical_contract_ordinal != LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE) {
+    IREE_ASSERT(selected_representation != LOOM_LOW_REPRESENTATION_ID_NONE,
+                "recorded matrix contract must select a representation");
     const loom_amdgpu_matrix_contract_descriptor_t* canonical_descriptor =
         loom_amdgpu_matrix_contract_descriptor_at(canonical_contract_ordinal);
     IREE_ASSERT(canonical_descriptor != NULL,

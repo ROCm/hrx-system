@@ -34,10 +34,8 @@ class RepresentationPlanTest : public ::testing::Test {
   static loom_low_representation_candidate_t Candidate(
       loom_low_representation_id_t representation, uint32_t runtime,
       uint32_t code_size = 0) {
-    return {
-        .representation = representation,
-        .cost = {.runtime = runtime, .code_size = code_size},
-    };
+    return {/*.representation=*/representation,
+            /*.cost=*/{/*.runtime=*/runtime, /*.code_size=*/code_size}};
   }
 
   iree_arena_block_pool_t block_pool_;

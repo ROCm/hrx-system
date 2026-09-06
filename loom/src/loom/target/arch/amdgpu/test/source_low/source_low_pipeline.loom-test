@@ -417,48 +417,48 @@ kernel.def target(@target) @target_legalization_precedes_cfg_finalization() {
 
 // ----
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @target_legalization_precedes_cfg_finalization() asm {
-  %299 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %34 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 2048} : reg<amdgpu.sgpr x2>
-  %301 = v_mov_b32 16256
-  %302 = v_lshrrev_b32_lit %299, 4
-  %304 = v_mov_b32 15
-  %305 = v_and_b32 %299, %304
-  %306 = v_lshl_add_u32_shift_imm %302, %305, 6
-  %307 = v_lshlrev_b32_src0_inline %306, 1
-  global_store_short_saddr %307, %301, %output_view
-  %308 = v_mov_b32 16512
-  global_store_short_saddr %307, %308, %output_view {offset = 32}
-  %311 = v_mov_b32 16656
-  global_store_short_saddr %307, %311, %output_view {offset = 64}
-  %314 = v_mov_b32 16768
-  global_store_short_saddr %307, %314, %output_view {offset = 96}
-  global_store_short_saddr %307, %301, %output_view {offset = 256}
-  global_store_short_saddr %307, %308, %output_view {offset = 288}
-  global_store_short_saddr %307, %311, %output_view {offset = 320}
-  global_store_short_saddr %307, %314, %output_view {offset = 352}
-  global_store_short_saddr %307, %301, %output_view {offset = 512}
-  global_store_short_saddr %307, %308, %output_view {offset = 544}
-  global_store_short_saddr %307, %311, %output_view {offset = 576}
-  global_store_short_saddr %307, %314, %output_view {offset = 608}
-  global_store_short_saddr %307, %301, %output_view {offset = 768}
-  global_store_short_saddr %307, %308, %output_view {offset = 800}
-  global_store_short_saddr %307, %311, %output_view {offset = 832}
-  global_store_short_saddr %307, %314, %output_view {offset = 864}
-  global_store_short_saddr %307, %301, %output_view {offset = 1024}
-  global_store_short_saddr %307, %308, %output_view {offset = 1056}
-  global_store_short_saddr %307, %311, %output_view {offset = 1088}
-  global_store_short_saddr %307, %314, %output_view {offset = 1120}
-  global_store_short_saddr %307, %301, %output_view {offset = 1280}
-  global_store_short_saddr %307, %308, %output_view {offset = 1312}
-  global_store_short_saddr %307, %311, %output_view {offset = 1344}
-  global_store_short_saddr %307, %314, %output_view {offset = 1376}
-  global_store_short_saddr %307, %301, %output_view {offset = 1536}
-  global_store_short_saddr %307, %308, %output_view {offset = 1568}
-  global_store_short_saddr %307, %311, %output_view {offset = 1600}
-  global_store_short_saddr %307, %314, %output_view {offset = 1632}
-  global_store_short_saddr %307, %301, %output_view {offset = 1792}
-  global_store_short_saddr %307, %308, %output_view {offset = 1824}
-  global_store_short_saddr %307, %311, %output_view {offset = 1856}
-  global_store_short_saddr %307, %314, %output_view {offset = 1888}
+  %72 = v_and_b32_src0_inline %34, 15
+  %73 = v_lshlrev_b32_src0_inline %72, 1
+  %74 = v_lshrrev_b32_src0_inline %34, 4
+  %75 = v_lshlrev_b32_src0_inline %74, 7
+  %76 = v_add_u32 %73, %75
+  %77 = v_mov_b32 16256
+  global_store_short_saddr %76, %77, %output_view
+  global_store_short_saddr %76, %77, %output_view {offset = 256}
+  global_store_short_saddr %76, %77, %output_view {offset = 512}
+  global_store_short_saddr %76, %77, %output_view {offset = 768}
+  global_store_short_saddr %76, %77, %output_view {offset = 1024}
+  global_store_short_saddr %76, %77, %output_view {offset = 1280}
+  global_store_short_saddr %76, %77, %output_view {offset = 1536}
+  global_store_short_saddr %76, %77, %output_view {offset = 1792}
+  %85 = v_mov_b32 16512
+  global_store_short_saddr %76, %85, %output_view {offset = 32}
+  global_store_short_saddr %76, %85, %output_view {offset = 288}
+  global_store_short_saddr %76, %85, %output_view {offset = 544}
+  global_store_short_saddr %76, %85, %output_view {offset = 800}
+  global_store_short_saddr %76, %85, %output_view {offset = 1056}
+  global_store_short_saddr %76, %85, %output_view {offset = 1312}
+  global_store_short_saddr %76, %85, %output_view {offset = 1568}
+  global_store_short_saddr %76, %85, %output_view {offset = 1824}
+  %93 = v_mov_b32 16656
+  global_store_short_saddr %76, %93, %output_view {offset = 64}
+  global_store_short_saddr %76, %93, %output_view {offset = 320}
+  global_store_short_saddr %76, %93, %output_view {offset = 576}
+  global_store_short_saddr %76, %93, %output_view {offset = 832}
+  global_store_short_saddr %76, %93, %output_view {offset = 1088}
+  global_store_short_saddr %76, %93, %output_view {offset = 1344}
+  global_store_short_saddr %76, %93, %output_view {offset = 1600}
+  global_store_short_saddr %76, %93, %output_view {offset = 1856}
+  %101 = v_mov_b32 16768
+  global_store_short_saddr %76, %101, %output_view {offset = 96}
+  global_store_short_saddr %76, %101, %output_view {offset = 352}
+  global_store_short_saddr %76, %101, %output_view {offset = 608}
+  global_store_short_saddr %76, %101, %output_view {offset = 864}
+  global_store_short_saddr %76, %101, %output_view {offset = 1120}
+  global_store_short_saddr %76, %101, %output_view {offset = 1376}
+  global_store_short_saddr %76, %101, %output_view {offset = 1632}
+  global_store_short_saddr %76, %101, %output_view {offset = 1888}
   return
 }
