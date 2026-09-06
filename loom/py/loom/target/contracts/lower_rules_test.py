@@ -821,6 +821,77 @@ def test_compile_lower_rule_set_offsets_variadic_operand_elements() -> None:
     assert tuple(value_ref.element_index for value_ref in value_refs) == (0, 1, 2, 3)
 
 
+def test_compile_lower_rule_set_orders_variadic_arity_before_value_guards() -> None:
+    table = ContractFragment(
+        name="test.variadic-guard-order",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            RecipeRule(
+                source_op=vector.vector_extract,
+                guards=(
+                    Guard.value_type("source", Vector("i32")),
+                    Guard.value_type("indices", Scalar("index")),
+                    Guard.operand_segment_count("indices", 1),
+                ),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    assert tuple(guard.kind for guard in compiled.guards) == (
+        GuardKind.VALUE_TYPE,
+        GuardKind.OPERAND_SEGMENT_COUNT,
+        GuardKind.VALUE_TYPE,
+    )
+
+
+def test_compile_lower_rule_set_rejects_unguarded_variadic_operand_ref() -> None:
+    table = ContractFragment(
+        name="test.unguarded-variadic-ref",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            RecipeRule(
+                source_op=vector.vector_extract,
+                guards=(Guard.value_type("indices", Scalar("index")),),
+            )
+        ],
+    )
+
+    _expect_value_error(
+        lambda: compile_lower_rule_set(
+            table,
+            dialect_ops={"vector": ALL_VECTOR_OPS},
+        ),
+        "vector.extract: variadic operand reference 'indices[0]' needs an "
+        "operand_segment_count guard",
+    )
+
+
+def test_compile_lower_rule_set_rejects_variadic_ref_beyond_guarded_count() -> None:
+    table = ContractFragment(
+        name="test.out-of-range-variadic-ref",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            ValueAliasRule(
+                source_op=vector.vector_concat,
+                source=ValueRef.operand("inputs", element=1),
+                result=ValueRef.result("result"),
+                guards=(Guard.operand_segment_count("inputs", 1),),
+            )
+        ],
+    )
+
+    _expect_value_error(
+        lambda: compile_lower_rule_set(
+            table,
+            dialect_ops={"vector": ALL_VECTOR_OPS},
+        ),
+        "vector.concat: variadic operand reference 'inputs[1]' exceeds guarded "
+        "segment count 1",
+    )
+
+
 def test_compile_lower_rule_set_compiles_source_memory_dynamic_term_operand() -> None:
     table = ContractFragment(
         name="test.source-memory-term",
@@ -978,6 +1049,20 @@ def test_source_memory_constraint_accepts_any_dynamic_stride_value_terms() -> No
     assert constraint.dynamic_term_count is None
     assert constraint.dynamic_term_count_minimum == 1
     assert constraint.allow_dynamic_stride_values
+
+
+def test_source_memory_constraint_accepts_any_cache_policy() -> None:
+    constraint = SourceMemoryConstraint(
+        operation=SourceMemoryOperation.LOAD,
+        memory_spaces=("global",),
+        element_byte_count=4,
+        vector_lane_count=1,
+        vector_lane_byte_stride=4,
+        static_byte_offset=0,
+        cache_policy_build_flags=None,
+    )
+
+    assert constraint.cache_policy_build_flags is None
 
 
 def test_source_memory_constraint_rejects_stride_values_without_dynamic_terms() -> None:
@@ -1628,6 +1713,51 @@ def test_compile_lower_rule_set_compiles_i64_bit_mask_attr_projection() -> None:
     )
 
 
+def test_compile_lower_rule_set_compiles_i64_array_element_offset_projection() -> None:
+    table = ContractFragment(
+        name="test.array-element-offset",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=(
+            DescriptorRule(
+                source_op=vector.vector_extract,
+                descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                guards=(
+                    Guard.value_type("source", Vector("i32", lanes=32)),
+                    Guard.value_type("result", Scalar("i32")),
+                    Guard.i64_array_element_range("static_indices", 0, 16, 31),
+                ),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                        results={"dst": ValueRef.result("result")},
+                        immediates={
+                            "i32_value": AttrProject.i64_array_element_plus_literal(
+                                "static_indices", element=0, literal=-16
+                            )
+                        },
+                        form=DescriptorEmitForm.CONST,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    attr_copy = compiled.attr_copies[0]
+    assert attr_copy.kind == LowerAttrCopyKind.I64_ARRAY_ELEMENT_PLUS_LITERAL
+    assert attr_copy.source_attr_index == 0
+    assert attr_copy.source_element_index == 0
+    assert attr_copy.literal_i64 == -16
+
+    _expect_value_error(
+        lambda: AttrProject.i64_array_element_plus_literal(
+            "static_indices", element=0, literal=2**63
+        ),
+        "literal must fit signed i64",
+    )
+
+
 def test_compile_lower_rule_set_validates_enum_immediate_literal() -> None:
     immediate = Immediate(
         "mode",
@@ -2008,6 +2138,172 @@ def test_compile_lower_rule_set_compiles_value_fact_immediate_emit() -> None:
     assert len(compiled.attr_copies) == 1
     assert compiled.attr_copies[0].kind == LowerAttrCopyKind.VALUE_I32_AS_U32_BITS
     value_ref = compiled.value_refs[compiled.attr_copies[0].value_ref_index]
+    assert value_ref.index == 0
+
+
+def test_compile_lower_rule_set_compiles_exact_i64_i32_word() -> None:
+    table = ContractFragment(
+        name="test.value-i64-word-immediate",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            DescriptorRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                guards=(Guard.value_type("result", Scalar("i32")),),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                        results={"dst": ValueRef.result("result")},
+                        immediates={
+                            "i32_value": ValueProject.exact_i64_i32_word(
+                                "lhs", word_index=1
+                            ),
+                        },
+                    ),
+                ),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
+
+    assert len(compiled.attr_copies) == 1
+    attr_copy = compiled.attr_copies[0]
+    assert attr_copy.kind == LowerAttrCopyKind.VALUE_EXACT_I64_I32_WORD
+    assert attr_copy.source_element_index == 1
+    value_ref = compiled.value_refs[attr_copy.value_ref_index]
+    assert value_ref.index == 0
+
+
+def test_exact_i64_i32_word_rejects_non_word_projection() -> None:
+    _expect_value_error(
+        lambda: ValueProject.exact_i64_i32_word("lhs", word_index=2),
+        "word index must be zero or one",
+    )
+    _expect_value_error(
+        lambda: replace(
+            ValueProject.exact_i64_i32_word("lhs", word_index=0),
+            target_bit_offset=1,
+        ),
+        "projection must not use target bit offset",
+    )
+
+
+def test_exact_i64_i32_word_requires_signed_i32_immediate() -> None:
+    unsigned_descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        immediates=(
+            Immediate(
+                "i32_value",
+                ImmediateKind.UNSIGNED,
+                bit_width=32,
+                unsigned_max=(2**32) - 1,
+            ),
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=tuple(
+            unsigned_descriptor
+            if descriptor == TEST_LOW_CONST_I32_DESCRIPTOR
+            else descriptor
+            for descriptor in TEST_LOW_CORE_DESCRIPTOR_SET.descriptors
+        ),
+    )
+
+    def compile_unsigned_immediate() -> None:
+        table = ContractFragment(
+            name="test.value-i64-word-unsigned-immediate",
+            descriptor_set=descriptor_set,
+            cases=[
+                DescriptorRule(
+                    source_op=scalar_arithmetic.scalar_addi,
+                    descriptor=unsigned_descriptor,
+                    guards=(Guard.value_type("result", Scalar("i32")),),
+                    emit=(
+                        EmitDescriptorOp(
+                            descriptor=unsigned_descriptor,
+                            results={"dst": ValueRef.result("result")},
+                            immediates={
+                                "i32_value": ValueProject.exact_i64_i32_word(
+                                    "lhs", word_index=0
+                                ),
+                            },
+                        ),
+                    ),
+                )
+            ],
+        )
+        compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
+
+    _expect_value_error(
+        compile_unsigned_immediate,
+        "must be a signed 32-bit immediate",
+    )
+
+
+def test_compile_lower_rule_set_compiles_f64_i32_word() -> None:
+    table = ContractFragment(
+        name="test.value-f64-word-immediate",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            DescriptorRule(
+                source_op=scalar_arithmetic.scalar_addf,
+                descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                guards=(Guard.value_type("result", Scalar("f32")),),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                        results={"dst": ValueRef.result("result")},
+                        immediates={
+                            "i32_value": ValueProject.float_as_f64_i32_word(
+                                "lhs", word_index=1
+                            ),
+                        },
+                    ),
+                ),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
+
+    assert len(compiled.attr_copies) == 1
+    attr_copy = compiled.attr_copies[0]
+    assert attr_copy.kind == LowerAttrCopyKind.VALUE_FLOAT_AS_F64_I32_WORD
+    assert attr_copy.source_element_index == 1
+    value_ref = compiled.value_refs[attr_copy.value_ref_index]
+    assert value_ref.index == 0
+
+
+def test_compile_lower_rule_set_compiles_f32_i32() -> None:
+    table = ContractFragment(
+        name="test.value-f32-i32-immediate",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            DescriptorRule(
+                source_op=scalar_arithmetic.scalar_addf,
+                descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                guards=(Guard.value_type("result", Scalar("f32")),),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                        results={"dst": ValueRef.result("result")},
+                        immediates={
+                            "i32_value": ValueProject.float_as_f32_i32("lhs"),
+                        },
+                    ),
+                ),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
+
+    assert len(compiled.attr_copies) == 1
+    attr_copy = compiled.attr_copies[0]
+    assert attr_copy.kind == LowerAttrCopyKind.VALUE_FLOAT_AS_F32_I32
+    value_ref = compiled.value_refs[attr_copy.value_ref_index]
     assert value_ref.index == 0
 
 

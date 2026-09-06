@@ -651,10 +651,11 @@ def _validate_c_table_shape(
             f"{row_subject} dynamic-offset diagnostic index",
             "diagnostic",
         )
-        _require_u32(
-            constraint.cache_policy_build_flags,
-            f"{row_subject} cache policy build flags",
-        )
+        if constraint.cache_policy_build_flags is not None:
+            _require_u32(
+                constraint.cache_policy_build_flags,
+                f"{row_subject} cache policy build flags",
+            )
         _require_u16(row.diagnostic_index, f"{row_subject} diagnostic index")
         _require_optional_table_index(
             row.diagnostic_index,
@@ -758,7 +759,7 @@ def _validate_c_table_shape(
 
     for index, row in enumerate(table.emits):
         row_subject = f"{subject} emit {index}"
-        _require_u16(row.flags, f"{row_subject} flags")
+        _require_u8(row.flags, f"{row_subject} flags")
         _require_u16(row.operand_ref_start, f"{row_subject} operand-ref start")
         _require_u16(row.operand_ref_count, f"{row_subject} operand-ref count")
         _require_table_range(

@@ -104,10 +104,12 @@ class LowerAttrCopyKind(Enum):
     DIRECT = "direct"
     ENUM_ORDINAL = "enum_ordinal"
     I64_ARRAY_ELEMENT = "i64_array_element"
+    I64_ARRAY_ELEMENT_PLUS_LITERAL = "i64_array_element_plus_literal"
     I64_ARRAY_PACK_ELEMENTS = "i64_array_pack_elements"
     I64_ATTRS_PACK_CONSECUTIVE = "i64_attrs_pack_consecutive"
     I64_LITERAL = "i64_literal"
     VALUE_EXACT_I64 = "value_exact_i64"
+    VALUE_EXACT_I64_I32_WORD = "value_exact_i64_i32_word"
     VALUE_EXACT_I64_NEGATE = "value_exact_i64_negate"
     VALUE_EXACT_I64_LOG2 = "value_exact_i64_log2"
     VALUE_EXACT_I64_MINUS_ONE = "value_exact_i64_minus_one"
@@ -117,7 +119,9 @@ class LowerAttrCopyKind(Enum):
     VALUE_FLOAT_AS_F16_BITS = "value_float_as_f16_bits"
     VALUE_FLOAT_AS_BF16_BITS = "value_float_as_bf16_bits"
     VALUE_FLOAT_AS_F32_BITS = "value_float_as_f32_bits"
+    VALUE_FLOAT_AS_F32_I32 = "value_float_as_f32_i32"
     VALUE_FLOAT_AS_F64_BITS = "value_float_as_f64_bits"
+    VALUE_FLOAT_AS_F64_I32_WORD = "value_float_as_f64_i32_word"
     I64_ARRAY_LANE_BYTE = "i64_array_lane_byte"
     SOURCE_MEMORY_STATIC_BYTE_OFFSET = "source_memory_static_byte_offset"
     SOURCE_MEMORY_STATIC_BYTE_OFFSET_PLUS_LITERAL = (
@@ -385,6 +389,7 @@ class _LowerRuleSetCompiler:
             materializer.name: index + 1
             for index, materializer in enumerate(table.materializers)
         }
+        self._operand_segment_counts: dict[str, int] = {}
 
     def compile(self) -> CompiledLowerRuleSet:
         for authored_case_index, contract_case in enumerate(self._table.cases):
@@ -456,8 +461,7 @@ class _LowerRuleSetCompiler:
             )
         guard_start = len(self._guards)
         type_patterns_by_field: dict[str, TypePattern] = {}
-        for guard in rule.guards:
-            self._append_guard(rule.source_op, guard, type_patterns_by_field)
+        self._append_guards(rule.source_op, rule.guards, type_patterns_by_field)
 
         emit_start = len(self._emits)
         temporary_ordinals: dict[str, int] = {}
@@ -493,12 +497,22 @@ class _LowerRuleSetCompiler:
     ) -> None:
         guard_start = len(self._guards)
         type_patterns_by_field: dict[str, TypePattern] = {}
-        for guard in guards:
-            self._append_guard(source_op, guard, type_patterns_by_field)
+        self._append_guards(source_op, guards, type_patterns_by_field)
+        is_ordinal_alias = bool(flags & LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS)
         alias_ref_start = self._append_value_ref_sequence(
             (
-                self._lower_value_ref(source_op, source, {}),
-                self._lower_value_ref(source_op, result, {}),
+                self._lower_value_ref(
+                    source_op,
+                    source,
+                    {},
+                    allow_variadic_span=is_ordinal_alias,
+                ),
+                self._lower_value_ref(
+                    source_op,
+                    result,
+                    {},
+                    allow_variadic_span=is_ordinal_alias,
+                ),
             )
         )
         self._rules.append(
@@ -523,8 +537,7 @@ class _LowerRuleSetCompiler:
     ) -> None:
         guard_start = len(self._guards)
         type_patterns_by_field: dict[str, TypePattern] = {}
-        for guard in rule.guards:
-            self._append_guard(rule.source_op, guard, type_patterns_by_field)
+        self._append_guards(rule.source_op, rule.guards, type_patterns_by_field)
         elide_ref_start = self._append_value_ref_sequence(
             tuple(
                 self._lower_value_ref(rule.source_op, value, {})
@@ -552,8 +565,7 @@ class _LowerRuleSetCompiler:
     ) -> None:
         guard_start = len(self._guards)
         type_patterns_by_field: dict[str, TypePattern] = {}
-        for guard in rule.guards:
-            self._append_guard(rule.source_op, guard, type_patterns_by_field)
+        self._append_guards(rule.source_op, rule.guards, type_patterns_by_field)
         self._rules.append(
             LowerRule(
                 source_op=rule.source_op,
@@ -566,6 +578,16 @@ class _LowerRuleSetCompiler:
             )
         )
         self._authored_case_indices.append(authored_case_index)
+
+    def _append_guards(
+        self,
+        source_op: Op,
+        guards: Sequence[Guard],
+        type_patterns_by_field: dict[str, TypePattern],
+    ) -> None:
+        self._operand_segment_counts = _operand_segment_counts(source_op, guards)
+        for guard in _order_operand_segment_guards(source_op, guards):
+            self._append_guard(source_op, guard, type_patterns_by_field)
 
     def _append_guard(
         self,
@@ -1693,7 +1715,25 @@ class _LowerRuleSetCompiler:
         source_op: Op,
         value_ref: ValueRef,
         temporary_ordinals: Mapping[str, int],
+        *,
+        allow_variadic_span: bool = False,
     ) -> LowerValueRef:
+        if value_ref.kind == SourceValueKind.OPERAND and not allow_variadic_span:
+            operand = source_op.operand(value_ref.field)
+            if operand is not None and operand.variadic:
+                expected_count = self._operand_segment_counts.get(value_ref.field)
+                if expected_count is None:
+                    raise ValueError(
+                        f"{source_op.name}: variadic operand reference "
+                        f"'{value_ref.field}[{value_ref.element}]' needs an "
+                        "operand_segment_count guard"
+                    )
+                if value_ref.element >= expected_count:
+                    raise ValueError(
+                        f"{source_op.name}: variadic operand reference "
+                        f"'{value_ref.field}[{value_ref.element}]' exceeds guarded "
+                        f"segment count {expected_count}"
+                    )
         return _lower_value_ref(
             source_op,
             value_ref,
@@ -1784,6 +1824,19 @@ class _LowerRuleSetCompiler:
                 source_attr_index=source_attr_index,
                 source_element_index=project.element,
                 target_bit_offset=project.target_bit_offset,
+            )
+        if project.kind == AttrProjectKind.I64_ARRAY_ELEMENT_PLUS_LITERAL:
+            if project.element is None:
+                raise ValueError(
+                    f"{source_op.name}: i64-array element-plus-literal "
+                    "projection needs an element"
+                )
+            return LowerAttrCopy(
+                kind=LowerAttrCopyKind.I64_ARRAY_ELEMENT_PLUS_LITERAL,
+                target_name=target_name,
+                source_attr_index=source_attr_index,
+                source_element_index=project.element,
+                literal_i64=project.literal_i64,
             )
         if project.kind == AttrProjectKind.I64_ARRAY_PACK_ELEMENTS:
             if (
@@ -1908,6 +1961,8 @@ class _LowerRuleSetCompiler:
     ) -> LowerAttrCopy:
         if project.kind == ValueProjectKind.EXACT_I64:
             kind = LowerAttrCopyKind.VALUE_EXACT_I64
+        elif project.kind == ValueProjectKind.EXACT_I64_I32_WORD:
+            kind = LowerAttrCopyKind.VALUE_EXACT_I64_I32_WORD
         elif project.kind == ValueProjectKind.EXACT_I64_NEGATE:
             kind = LowerAttrCopyKind.VALUE_EXACT_I64_NEGATE
         elif project.kind == ValueProjectKind.EXACT_I64_LOG2:
@@ -1926,8 +1981,12 @@ class _LowerRuleSetCompiler:
             kind = LowerAttrCopyKind.VALUE_FLOAT_AS_BF16_BITS
         elif project.kind == ValueProjectKind.FLOAT_AS_F32_BITS:
             kind = LowerAttrCopyKind.VALUE_FLOAT_AS_F32_BITS
+        elif project.kind == ValueProjectKind.FLOAT_AS_F32_I32:
+            kind = LowerAttrCopyKind.VALUE_FLOAT_AS_F32_I32
         elif project.kind == ValueProjectKind.FLOAT_AS_F64_BITS:
             kind = LowerAttrCopyKind.VALUE_FLOAT_AS_F64_BITS
+        elif project.kind == ValueProjectKind.FLOAT_AS_F64_I32_WORD:
+            kind = LowerAttrCopyKind.VALUE_FLOAT_AS_F64_I32_WORD
         else:
             raise ValueError(
                 f"{source_op.name}: immediate projection '{project.kind.value}' is "
@@ -1941,6 +2000,7 @@ class _LowerRuleSetCompiler:
                 _value_ref_for_source_field(source_op, project.source_value),
             ),
             target_bit_offset=project.target_bit_offset,
+            source_element_index=project.word_index,
         )
 
     def _lower_source_memory_project(
@@ -2263,6 +2323,63 @@ def _source_operand_index(source_op: Op, field: str) -> int:
     if operand is None:
         raise ValueError(f"{source_op.name}: source field '{field}' is not an operand")
     return source_op.operands.index(operand)
+
+
+def _operand_segment_counts(
+    source_op: Op,
+    guards: Sequence[Guard],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for guard in guards:
+        if guard.kind != GuardKind.OPERAND_SEGMENT_COUNT:
+            continue
+        if guard.count is None:
+            raise ValueError(
+                f"{source_op.name}: operand-segment-count guard needs a count"
+            )
+        previous_count = counts.get(guard.field)
+        if previous_count is not None:
+            raise ValueError(
+                f"{source_op.name}: variadic operand '{guard.field}' has "
+                "multiple operand_segment_count guards"
+            )
+        counts[guard.field] = guard.count
+    return counts
+
+
+def _order_operand_segment_guards(
+    source_op: Op,
+    guards: Sequence[Guard],
+) -> tuple[Guard, ...]:
+    """Orders each variadic arity guard before its first dereference."""
+    ordered_guards = list(guards)
+    for segment_guard in guards:
+        if segment_guard.kind != GuardKind.OPERAND_SEGMENT_COUNT:
+            continue
+        segment_guard_index = next(
+            index
+            for index, candidate in enumerate(ordered_guards)
+            if candidate is segment_guard
+        )
+        first_reference_index = next(
+            (
+                index
+                for index, candidate in enumerate(ordered_guards)
+                if candidate.kind != GuardKind.OPERAND_SEGMENT_COUNT
+                and any(
+                    field == segment_guard.field
+                    for field in (candidate.field, candidate.other_field)
+                )
+            ),
+            None,
+        )
+        if (
+            first_reference_index is not None
+            and first_reference_index < segment_guard_index
+        ):
+            ordered_guards.pop(segment_guard_index)
+            ordered_guards.insert(first_reference_index, segment_guard)
+    return tuple(ordered_guards)
 
 
 def _type_pattern_text(type_pattern: TypePattern) -> str:

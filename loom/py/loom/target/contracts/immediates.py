@@ -29,6 +29,7 @@ class AttrProjectKind(Enum):
     DIRECT = "direct"
     ENUM_ORDINAL = "enum_ordinal"
     I64_ARRAY_ELEMENT = "i64_array_element"
+    I64_ARRAY_ELEMENT_PLUS_LITERAL = "i64_array_element_plus_literal"
     I64_ARRAY_PACK_ELEMENTS = "i64_array_pack_elements"
     I64_ATTRS_PACK_CONSECUTIVE = "i64_attrs_pack_consecutive"
     I64_LOW_BIT_MASK = "i64_low_bit_mask"
@@ -45,6 +46,7 @@ class ValueProjectKind(Enum):
     """Projection from source value facts to descriptor immediates."""
 
     EXACT_I64 = "exact_i64"
+    EXACT_I64_I32_WORD = "exact_i64_i32_word"
     EXACT_I64_NEGATE = "exact_i64_negate"
     EXACT_I64_LOG2 = "exact_i64_log2"
     EXACT_I64_MINUS_ONE = "exact_i64_minus_one"
@@ -54,7 +56,20 @@ class ValueProjectKind(Enum):
     FLOAT_AS_F16_BITS = "float_as_f16_bits"
     FLOAT_AS_BF16_BITS = "float_as_bf16_bits"
     FLOAT_AS_F32_BITS = "float_as_f32_bits"
+    FLOAT_AS_F32_I32 = "float_as_f32_i32"
     FLOAT_AS_F64_BITS = "float_as_f64_bits"
+    FLOAT_AS_F64_I32_WORD = "float_as_f64_i32_word"
+
+
+_I32_WORD_VALUE_PROJECT_KINDS = (
+    ValueProjectKind.EXACT_I64_I32_WORD,
+    ValueProjectKind.FLOAT_AS_F64_I32_WORD,
+)
+
+_SIGNED_I32_VALUE_PROJECT_KINDS = (
+    *_I32_WORD_VALUE_PROJECT_KINDS,
+    ValueProjectKind.FLOAT_AS_F32_I32,
+)
 
 
 @unique
@@ -112,6 +127,21 @@ class AttrProject:
             source_attr=source_attr,
             element=element,
             target_bit_offset=target_bit_offset,
+        )
+
+    @classmethod
+    def i64_array_element_plus_literal(
+        cls,
+        source_attr: str,
+        *,
+        element: int,
+        literal: int,
+    ) -> Self:
+        return cls(
+            kind=AttrProjectKind.I64_ARRAY_ELEMENT_PLUS_LITERAL,
+            source_attr=source_attr,
+            element=element,
+            literal_i64=literal,
         )
 
     @classmethod
@@ -243,12 +273,15 @@ class AttrProject:
                 f"{self.kind.value} projection must not name another source attr"
             )
         literal_kinds = (
+            AttrProjectKind.I64_ARRAY_ELEMENT_PLUS_LITERAL,
             AttrProjectKind.I64_LITERAL_MINUS_ATTR,
             AttrProjectKind.I64_LITERAL_MINUS_ATTRS,
             AttrProjectKind.I64_ATTR_MINUS_LITERAL,
         )
         if self.kind not in literal_kinds and self.literal_i64 != 0:
             raise ValueError(f"{self.kind.value} projection must not name a literal")
+        if self.kind in literal_kinds and not _I64_MIN <= self.literal_i64 <= _I64_MAX:
+            raise ValueError(f"{self.kind.value} literal must fit signed i64")
         if self.element is not None and self.element < 0:
             raise ValueError(f"{self.kind.value} element must be non-negative")
         if self.count is not None and self.count <= 0:
@@ -371,7 +404,10 @@ class AttrProject:
                 f"{source_op.name}: {subject} source attr '{self.source_attr}' "
                 "must be an i64_array attr"
             )
-        if self.kind == AttrProjectKind.I64_ARRAY_ELEMENT:
+        if self.kind in (
+            AttrProjectKind.I64_ARRAY_ELEMENT,
+            AttrProjectKind.I64_ARRAY_ELEMENT_PLUS_LITERAL,
+        ):
             if bound_immediate_name is None:
                 raise ValueError(
                     f"{source_op.name}: {subject} must bind one descriptor immediate"
@@ -486,6 +522,7 @@ class ValueProject:
     kind: ValueProjectKind
     source_value: str
     target_bit_offset: int = 0
+    word_index: int = 0
 
     @classmethod
     def exact_i64(cls, source_value: str, *, target_bit_offset: int = 0) -> Self:
@@ -493,6 +530,15 @@ class ValueProject:
             kind=ValueProjectKind.EXACT_I64,
             source_value=source_value,
             target_bit_offset=target_bit_offset,
+        )
+
+    @classmethod
+    def exact_i64_i32_word(cls, source_value: str, *, word_index: int) -> Self:
+        """Projects one signed i32 word from an exact i64 bit pattern."""
+        return cls(
+            kind=ValueProjectKind.EXACT_I64_I32_WORD,
+            source_value=source_value,
+            word_index=word_index,
         )
 
     @classmethod
@@ -580,6 +626,14 @@ class ValueProject:
         )
 
     @classmethod
+    def float_as_f32_i32(cls, source_value: str) -> Self:
+        """Projects exact f32 bits reinterpreted as a signed i32."""
+        return cls(
+            kind=ValueProjectKind.FLOAT_AS_F32_I32,
+            source_value=source_value,
+        )
+
+    @classmethod
     def float_as_f64_bits(
         cls, source_value: str, *, target_bit_offset: int = 0
     ) -> Self:
@@ -589,6 +643,15 @@ class ValueProject:
             target_bit_offset=target_bit_offset,
         )
 
+    @classmethod
+    def float_as_f64_i32_word(cls, source_value: str, *, word_index: int) -> Self:
+        """Projects one signed i32 word from an exact f64 bit pattern."""
+        return cls(
+            kind=ValueProjectKind.FLOAT_AS_F64_I32_WORD,
+            source_value=source_value,
+            word_index=word_index,
+        )
+
     def __post_init__(self) -> None:
         if not self.source_value:
             raise ValueError(f"{self.kind.value} projection requires a source value")
@@ -596,6 +659,15 @@ class ValueProject:
             raise ValueError(
                 f"{self.kind.value} target bit offset must be non-negative"
             )
+        if self.kind in _I32_WORD_VALUE_PROJECT_KINDS:
+            if self.word_index not in (0, 1):
+                raise ValueError(f"{self.kind.value} word index must be zero or one")
+            if self.target_bit_offset != 0:
+                raise ValueError(
+                    f"{self.kind.value} projection must not use target bit offset"
+                )
+        elif self.word_index != 0:
+            raise ValueError(f"{self.kind.value} projection must not name an i32 word")
 
     def validate(
         self,
@@ -609,7 +681,14 @@ class ValueProject:
             raise ValueError(
                 f"{source_op.name}: {subject} must bind one descriptor immediate"
             )
-        _require_immediate(descriptor, bound_immediate_name, subject)
+        immediate = _require_immediate(descriptor, bound_immediate_name, subject)
+        if self.kind in _SIGNED_I32_VALUE_PROJECT_KINDS and (
+            immediate.kind != ImmediateKind.SIGNED or immediate.bit_width != 32
+        ):
+            raise ValueError(
+                f"{source_op.name}: {subject} descriptor immediate "
+                f"'{bound_immediate_name}' must be a signed 32-bit immediate"
+            )
 
 
 @dataclass(frozen=True, slots=True)

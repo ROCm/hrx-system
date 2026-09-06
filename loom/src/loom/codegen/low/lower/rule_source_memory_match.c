@@ -339,8 +339,10 @@ bool loom_low_lower_rule_source_memory_matches(
       access->static_byte_offset > source_memory->static_byte_offset_maximum ||
       (source_memory->minimum_alignment != 0 &&
        access->minimum_alignment < source_memory->minimum_alignment) ||
-      access->cache_policy.build_flags !=
-          source_memory->cache_policy_build_flags ||
+      (!iree_any_bit_set(source_memory->flags,
+                         LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_CACHE_POLICY_ANY) &&
+       access->cache_policy.build_flags !=
+           source_memory->cache_policy_build_flags) ||
       (iree_any_bit_set(
            source_memory->flags,
            LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_PRESERVE_SOURCE_INDEX) &&

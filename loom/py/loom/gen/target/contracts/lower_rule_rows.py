@@ -82,6 +82,7 @@ _GUARD_OTHER_VALUE_REF_KINDS = frozenset(
 _ATTR_COPY_VALUE_REF_KINDS = frozenset(
     (
         LowerAttrCopyKind.VALUE_EXACT_I64,
+        LowerAttrCopyKind.VALUE_EXACT_I64_I32_WORD,
         LowerAttrCopyKind.VALUE_EXACT_I64_NEGATE,
         LowerAttrCopyKind.VALUE_EXACT_I64_LOG2,
         LowerAttrCopyKind.VALUE_EXACT_I64_MINUS_ONE,
@@ -91,7 +92,9 @@ _ATTR_COPY_VALUE_REF_KINDS = frozenset(
         LowerAttrCopyKind.VALUE_FLOAT_AS_F16_BITS,
         LowerAttrCopyKind.VALUE_FLOAT_AS_BF16_BITS,
         LowerAttrCopyKind.VALUE_FLOAT_AS_F32_BITS,
+        LowerAttrCopyKind.VALUE_FLOAT_AS_F32_I32,
         LowerAttrCopyKind.VALUE_FLOAT_AS_F64_BITS,
+        LowerAttrCopyKind.VALUE_FLOAT_AS_F64_I32_WORD,
     )
 )
 
@@ -200,6 +203,8 @@ def source_memory_row(
         flags.append("LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_STRIDE_VALUES")
     if constraint.preserve_source_index:
         flags.append("LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_PRESERVE_SOURCE_INDEX")
+    if constraint.cache_policy_build_flags is None:
+        flags.append("LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_CACHE_POLICY_ANY")
     if flags:
         _append_field(fields, "flags", " | ".join(flags))
     _append_field(
@@ -302,11 +307,12 @@ def source_memory_row(
         lower_rule_spelling.diagnostic_index(row.address_layout_diagnostic_index),
         always=True,
     )
-    _append_field(
-        fields,
-        "cache_policy_build_flags",
-        constraint.cache_policy_build_flags,
-    )
+    if constraint.cache_policy_build_flags is not None:
+        _append_field(
+            fields,
+            "cache_policy_build_flags",
+            constraint.cache_policy_build_flags,
+        )
     _append_field(
         fields,
         "diagnostic_index",
@@ -633,6 +639,7 @@ def attr_copy_row(
         LowerAttrCopyKind.DIRECT,
         LowerAttrCopyKind.ENUM_ORDINAL,
         LowerAttrCopyKind.I64_ARRAY_ELEMENT,
+        LowerAttrCopyKind.I64_ARRAY_ELEMENT_PLUS_LITERAL,
         LowerAttrCopyKind.I64_ARRAY_PACK_ELEMENTS,
         LowerAttrCopyKind.I64_ATTRS_PACK_CONSECUTIVE,
         LowerAttrCopyKind.I64_ARRAY_LANE_BYTE,
@@ -657,8 +664,11 @@ def attr_copy_row(
         )
     if row.kind in (
         LowerAttrCopyKind.I64_ARRAY_ELEMENT,
+        LowerAttrCopyKind.I64_ARRAY_ELEMENT_PLUS_LITERAL,
         LowerAttrCopyKind.I64_ARRAY_PACK_ELEMENTS,
         LowerAttrCopyKind.I64_ARRAY_LANE_BYTE,
+        LowerAttrCopyKind.VALUE_EXACT_I64_I32_WORD,
+        LowerAttrCopyKind.VALUE_FLOAT_AS_F64_I32_WORD,
     ):
         _append_field(
             fields,
@@ -692,6 +702,7 @@ def attr_copy_row(
         _append_field(fields, "value_ref_index", row.value_ref_index, always=True)
     if row.kind in (
         LowerAttrCopyKind.I64_LITERAL,
+        LowerAttrCopyKind.I64_ARRAY_ELEMENT_PLUS_LITERAL,
         LowerAttrCopyKind.I64_ARRAY_LANE_BYTE,
         LowerAttrCopyKind.I64_LITERAL_MINUS_ATTR,
         LowerAttrCopyKind.I64_LITERAL_MINUS_ATTRS,

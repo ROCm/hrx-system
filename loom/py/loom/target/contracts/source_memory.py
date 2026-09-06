@@ -183,7 +183,7 @@ class SourceMemoryConstraint:
     dynamic_offset_unsigned_bit_count: int = 0
     dynamic_offset_diagnostic: GuardDiagnostic | None = None
     address_layout_diagnostic: GuardDiagnostic | None = None
-    cache_policy_build_flags: int = 0
+    cache_policy_build_flags: int | None = 0
     diagnostic: GuardDiagnostic | None = None
 
     def __init__(
@@ -212,7 +212,7 @@ class SourceMemoryConstraint:
         dynamic_offset_unsigned_bit_count: int = 0,
         dynamic_offset_diagnostic: GuardDiagnostic | None = None,
         address_layout_diagnostic: GuardDiagnostic | None = None,
-        cache_policy_build_flags: int = 0,
+        cache_policy_build_flags: int | None = 0,
         diagnostic: GuardDiagnostic | None = None,
     ) -> None:
         object.__setattr__(self, "operation", operation)
@@ -375,7 +375,9 @@ class SourceMemoryConstraint:
             raise ValueError(
                 "source memory dynamic offset unsigned bit count must fit in u8"
             )
-        if not 0 <= self.cache_policy_build_flags <= _U32_MAX:
+        if self.cache_policy_build_flags is not None and not (
+            0 <= self.cache_policy_build_flags <= _U32_MAX
+        ):
             raise ValueError("source memory cache policy flags must fit in u32")
 
     def validate(self, source_op: Op) -> None:
