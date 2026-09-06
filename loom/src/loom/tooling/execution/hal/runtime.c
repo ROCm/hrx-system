@@ -99,6 +99,14 @@ iree_status_t loom_run_hal_runtime_initialize(
   }
   iree_async_proactor_pool_release(proactor_pool);
   if (iree_status_is_ok(status)) {
+    // Group assignment establishes the device frontier and materializes its
+    // configured hardware queues, so queue lookup must follow finalization.
+    status = iree_hal_device_group_create_from_device(
+        out_runtime->device, frontier_tracker, allocator,
+        &out_runtime->device_group);
+  }
+  iree_async_frontier_tracker_release(frontier_tracker);
+  if (iree_status_is_ok(status)) {
     status = loom_run_hal_runtime_select_queue(
         out_runtime->device, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
         "dispatch", &out_runtime->dispatch_queue);
@@ -113,12 +121,6 @@ iree_status_t loom_run_hal_runtime_initialize(
         out_runtime->device, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
         "transfer", &out_runtime->transfer_queue);
   }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_device_group_create_from_device(
-        out_runtime->device, frontier_tracker, allocator,
-        &out_runtime->device_group);
-  }
-  iree_async_frontier_tracker_release(frontier_tracker);
   if (!iree_status_is_ok(status)) {
     loom_run_hal_runtime_deinitialize(out_runtime);
   }
