@@ -622,6 +622,117 @@ kernel.def target(@target) @f32_configured_width_square_reduce() {
 
 aie2p.target<core> @target
 
+config.def @runtime.vector_width = 4 : index
+
+func.def target(@target) @i32_configured_width_sum(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %vector_width = config.get @runtime.vector_width : index
+  %vector_width_bounded = index.assume %vector_width [range(%vector_width, 2, 4)] : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
+  %loaded = vector.load %input_view[0] : view<4xi32> -> vector<[%vector_width_bounded]xi32>
+  %initial_sum = scalar.constant 0 : i32
+  %sum = vector.reduce<addi> %loaded, %initial_sum : vector<[%vector_width_bounded]xi32>, i32
+  %stored = vector.from_elements %sum : vector<1xi32>
+  vector.store %stored, %output_view[0] : vector<1xi32>, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32_configured_width_sum() asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %24 = lda.u8 %input_view, 0
+  %25 = lda.u8 %input_view, 1
+  %26 = lda.u8 %input_view, 2
+  %27 = lda.u8 %input_view, 3
+  %28 = mov.short 8
+  %29 = lshl %25, %28
+  %30 = mov.short 16
+  %31 = lshl %26, %30
+  %32 = mov.short 24
+  %33 = lshl %27, %32
+  %34 = or %24, %29
+  %35 = or %31, %33
+  %36 = or %34, %35
+  %37 = lda.u8 %input_view, 4
+  %38 = lda.u8 %input_view, 5
+  %39 = lda.u8 %input_view, 6
+  %40 = lda.u8 %input_view, 7
+  %42 = lshl %38, %28
+  %44 = lshl %39, %30
+  %46 = lshl %40, %32
+  %47 = or %37, %42
+  %48 = or %44, %46
+  %49 = or %47, %48
+  %50 = mov.static-byte-offset 8
+  %51 = mov.address-index %50
+  %52 = lda.i8.index %input_view, %51
+  %53 = mov.static-byte-offset 9
+  %54 = mov.address-index %53
+  %55 = lda.i8.index %input_view, %54
+  %56 = mov.static-byte-offset 10
+  %57 = mov.address-index %56
+  %58 = lda.i8.index %input_view, %57
+  %59 = mov.static-byte-offset 11
+  %60 = mov.address-index %59
+  %61 = lda.i8.index %input_view, %60
+  %63 = lshl %55, %28
+  %65 = lshl %58, %30
+  %67 = lshl %61, %32
+  %68 = or %52, %63
+  %69 = or %65, %67
+  %70 = or %68, %69
+  %71 = mov.static-byte-offset 12
+  %72 = mov.address-index %71
+  %73 = lda.i8.index %input_view, %72
+  %74 = mov.static-byte-offset 13
+  %75 = mov.address-index %74
+  %76 = lda.i8.index %input_view, %75
+  %77 = mov.static-byte-offset 14
+  %78 = mov.address-index %77
+  %79 = lda.i8.index %input_view, %78
+  %80 = mov.static-byte-offset 15
+  %81 = mov.address-index %80
+  %82 = lda.i8.index %input_view, %81
+  %84 = lshl %76, %28
+  %86 = lshl %79, %30
+  %88 = lshl %82, %32
+  %89 = or %73, %84
+  %90 = or %86, %88
+  %91 = or %89, %90
+  %92 = vbcst.32 %36
+  %93 = mov.short 1
+  %94 = copy %93 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %95 = vinsert.32.reg %92, %94, %49
+  %96 = mov.short 2
+  %97 = copy %96 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %98 = vinsert.32.reg %95, %97, %70
+  %99 = mov.short 3
+  %100 = copy %99 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %loaded = vinsert.32.reg %98, %100, %91
+  %102 = mova.i32 7
+  %103 = vshuffle %loaded, %loaded, %102
+  %104 = vadd.32 %loaded, %103
+  %105 = mova.i32 5
+  %106 = vshuffle %104, %104, %105
+  %107 = vadd.32 %104, %106
+  %sum = vextract.32.imm %107, 0
+  %109 = mov.short -8
+  st.s8 %sum, %output_view, 0
+  %110 = lshl %sum, %109
+  st.s8 %110, %output_view, 1
+  %111 = lshl %110, %109
+  st.s8 %111, %output_view, 2
+  %112 = lshl %111, %109
+  st.s8 %112, %output_view, 3
+  return
+}
+
+// ====
+
+aie2p.target<core> @target
+
 func.def target(@target) @i32_reduce_minui_select_sentinel(%values: vector<4xi32>) -> (i32) {
   %empty_value = scalar.constant 0 : i32
   %zeros = vector.splat %empty_value : vector<4xi32>

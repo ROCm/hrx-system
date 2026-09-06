@@ -288,6 +288,39 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
 
 llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
 
+config.def @runtime.vector_width = 4 : index
+
+func.def target(@target) @i32_configured_width_sum(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %vector_width = config.get @runtime.vector_width : index
+  %vector_width_bounded = index.assume %vector_width [range(%vector_width, 2, 4)] : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
+  %loaded = vector.load %input_view[0] : view<4xi32> -> vector<[%vector_width_bounded]xi32>
+  %initial_sum = scalar.constant 0 : i32
+  %sum = vector.reduce<addi> %loaded, %initial_sum : vector<[%vector_width_bounded]xi32>, i32
+  %stored = vector.from_elements %sum : vector<1xi32>
+  vector.store %stored, %output_view[0] : vector<1xi32>, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_configured_width_sum(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
+  %23 = load.i32 %input_view, 0
+  %24 = load.i32 %input_view, 4
+  %25 = add.i32 %23, %24
+  %26 = load.i32 %input_view, 8
+  %27 = add.i32 %25, %26
+  %28 = load.i32 %input_view, 12
+  %stored = add.i32 %27, %28
+  store.i32 %stored, %output_view, 0
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
 func.def target(@target) @i32_reduce_minui_select_sentinel(%values: vector<4xi32>) -> (i32) {
   %empty_value = scalar.constant 0 : i32
   %zeros = vector.splat %empty_value : vector<4xi32>
