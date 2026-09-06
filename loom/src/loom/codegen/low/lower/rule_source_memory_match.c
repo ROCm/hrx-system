@@ -393,7 +393,7 @@ loom_low_lower_rule_source_memory_emits_match(
   const loom_low_source_memory_access_plan_t* source_memory_access = NULL;
   bool all_constraints_compatible = true;
   for (uint16_t i = 0; i < rule->emit_count; ++i) {
-    const uint16_t emit_ref_index = (uint16_t)(rule->emit_start + i);
+    const uint16_t emit_ref_index = (uint16_t)(rule->action.emit_start + i);
     const loom_low_lower_emit_t* emit =
         loom_low_lower_rule_set_emit_at(rule_set, emit_ref_index);
     if (emit->source_memory_ordinal == 0) continue;

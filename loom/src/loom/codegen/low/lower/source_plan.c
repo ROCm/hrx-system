@@ -327,7 +327,8 @@ static void loom_low_lower_mark_rule_storage_demands(
   IREE_ASSERT(rule != NULL);
   for (uint16_t emit_ordinal = 0; emit_ordinal < rule->emit_count;
        ++emit_ordinal) {
-    const uint16_t emit_ref_index = (uint16_t)(rule->emit_start + emit_ordinal);
+    const uint16_t emit_ref_index =
+        (uint16_t)(rule->action.emit_start + emit_ordinal);
     const loom_low_lower_emit_t* emit =
         loom_low_lower_rule_set_emit_at(rule_set, emit_ref_index);
     for (uint16_t operand_ordinal = 0;
@@ -364,7 +365,7 @@ static void loom_low_lower_mark_rule_storage_demands(
     const loom_value_slice_t source_span =
         loom_low_lower_rule_value_ref_field_span(context->module, rule_set,
                                                  selected_plan->source_op,
-                                                 rule->alias_ref_start);
+                                                 rule->action.alias_ref_start);
     for (iree_host_size_t i = 0; i < source_span.count; ++i) {
       loom_low_lower_mark_value_storage_required(context,
                                                  source_span.values[i]);
@@ -373,7 +374,7 @@ static void loom_low_lower_mark_rule_storage_demands(
     for (uint16_t alias_ordinal = 0; alias_ordinal < rule->alias_ref_count;
          ++alias_ordinal) {
       const uint16_t value_ref_index =
-          (uint16_t)(rule->alias_ref_start + alias_ordinal * 2);
+          (uint16_t)(rule->action.alias_ref_start + alias_ordinal * 2);
       loom_value_id_t source_value_id = LOOM_VALUE_ID_INVALID;
       if (loom_low_lower_rule_value_ref_source_value(
               context, rule_set, selected_plan->source_op, value_ref_index,

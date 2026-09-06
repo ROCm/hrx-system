@@ -306,7 +306,7 @@ iree_status_t loom_low_lower_rule_set_resolve_emit_program(
       &match_context);
   match_context.policy_rule_set_ordinal = (uint16_t)(rule_set_index + 1u);
   for (uint16_t i = 0; i < rule->emit_count; ++i) {
-    const uint16_t emit_ref_index = (uint16_t)(rule->emit_start + i);
+    const uint16_t emit_ref_index = (uint16_t)(rule->action.emit_start + i);
     const loom_low_lower_emit_t* emit =
         loom_low_lower_rule_set_emit_at(rule_set, emit_ref_index);
     resolved_emits[i].emit = emit;
@@ -945,7 +945,8 @@ static iree_status_t loom_low_lower_rule_elide_results(
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_rule_t* rule) {
   for (uint16_t i = 0; i < rule->elide_ref_count; ++i) {
-    const uint16_t value_ref_index = (uint16_t)(rule->elide_ref_start + i);
+    const uint16_t value_ref_index =
+        (uint16_t)(rule->action.elide_ref_start + i);
     const loom_low_lower_value_ref_t* value_ref =
         &rule_set->value_refs[value_ref_index];
     IREE_ASSERT_EQ(value_ref->kind, LOOM_LOW_LOWER_VALUE_REF_RESULT);
@@ -963,7 +964,7 @@ static iree_status_t loom_low_lower_rule_bind_aliases(
   if (iree_all_bits_set(rule->flags,
                         LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS)) {
     IREE_ASSERT_EQ(rule->alias_ref_count, 1);
-    const uint16_t source_ref_index = rule->alias_ref_start;
+    const uint16_t source_ref_index = rule->action.alias_ref_start;
     const uint16_t result_ref_index = (uint16_t)(source_ref_index + 1);
     const loom_low_lower_value_ref_t* source_ref =
         &rule_set->value_refs[source_ref_index];
@@ -985,7 +986,8 @@ static iree_status_t loom_low_lower_rule_bind_aliases(
     return iree_ok_status();
   }
   for (uint16_t i = 0; i < rule->alias_ref_count; ++i) {
-    const uint16_t source_ref_index = (uint16_t)(rule->alias_ref_start + i * 2);
+    const uint16_t source_ref_index =
+        (uint16_t)(rule->action.alias_ref_start + i * 2);
     const uint16_t result_ref_index = (uint16_t)(source_ref_index + 1);
     const loom_low_lower_value_ref_t* source_ref =
         &rule_set->value_refs[source_ref_index];
@@ -1859,7 +1861,7 @@ iree_status_t loom_low_lower_rule_set_emit_rule(
   IREE_RETURN_IF_ERROR(
       loom_low_lower_rule_emit_state_initialize(context, rule, &state));
   for (uint16_t i = 0; i < rule->emit_count; ++i) {
-    const uint16_t emit_ref_index = (uint16_t)(rule->emit_start + i);
+    const uint16_t emit_ref_index = (uint16_t)(rule->action.emit_start + i);
     const loom_low_lower_emit_t* emit =
         loom_low_lower_rule_set_emit_at(rule_set, emit_ref_index);
     const loom_low_lower_resolved_emit_t* resolved_emit = &resolved_emits[i];

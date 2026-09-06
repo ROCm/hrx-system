@@ -764,13 +764,23 @@ def rule_row(
         _append_field(fields, "guard_start", row.guard_start, always=True)
         _append_field(fields, "guard_count", row.guard_count, always=True)
     if row.emit_count:
-        _append_field(fields, "emit_start", row.emit_start, always=True)
+        _append_field(fields, "action.emit_start", row.emit_start, always=True)
         _append_field(fields, "emit_count", row.emit_count, always=True)
     if row.alias_ref_count:
-        _append_field(fields, "alias_ref_start", row.alias_ref_start, always=True)
+        _append_field(
+            fields,
+            "action.alias_ref_start",
+            row.alias_ref_start,
+            always=True,
+        )
         _append_field(fields, "alias_ref_count", row.alias_ref_count, always=True)
     if row.elide_ref_count:
-        _append_field(fields, "elide_ref_start", row.elide_ref_start, always=True)
+        _append_field(
+            fields,
+            "action.elide_ref_start",
+            row.elide_ref_start,
+            always=True,
+        )
         _append_field(fields, "elide_ref_count", row.elide_ref_count, always=True)
     return fields
 

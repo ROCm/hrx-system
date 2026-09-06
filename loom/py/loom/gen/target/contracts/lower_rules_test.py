@@ -22,6 +22,7 @@ from loom.gen.target.contracts.lower_rule_rows import (
     diagnostic_stored_params,
     emit_row,
     guard_row,
+    rule_row,
     source_memory_address_materializer_row,
     source_memory_byte_offset_materializer_row,
     source_memory_row,
@@ -189,6 +190,87 @@ def test_validate_c_table_shape_rejects_oversized_rule_field() -> None:
         lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
         "lower-rule set 'test.low.generated_c_shape' rule 0 temporary count exceeds uint16_t",
     )
+
+
+def test_validate_c_table_shape_rejects_multiple_rule_action_ranges() -> None:
+    table = _compiled_lower_rule_set(
+        rules=(
+            LowerRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                temporary_count=0,
+                guard_start=0,
+                guard_count=0,
+                emit_start=0,
+                emit_count=1,
+                alias_ref_start=0,
+                alias_ref_count=1,
+            ),
+        ),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "lower-rule set 'test.low.generated_c_shape' rule 0 cannot carry more than one action range",
+    )
+
+
+def test_validate_c_table_shape_rejects_oversized_alias_count() -> None:
+    table = _compiled_lower_rule_set(
+        rules=(
+            LowerRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                temporary_count=0,
+                guard_start=0,
+                guard_count=0,
+                emit_start=0,
+                emit_count=0,
+                alias_ref_start=0,
+                alias_ref_count=256,
+            ),
+        ),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "lower-rule set 'test.low.generated_c_shape' rule 0 alias-ref count exceeds uint8_t",
+    )
+
+
+def test_rule_row_overlays_action_range_starts() -> None:
+    common = {
+        "source_op": scalar_arithmetic.scalar_addi,
+        "temporary_count": 0,
+        "guard_start": 0,
+        "guard_count": 0,
+    }
+    emit_fields = rule_row(
+        LowerRule(**common, emit_start=2, emit_count=3),
+        {},
+    )
+    alias_fields = rule_row(
+        LowerRule(
+            **common,
+            emit_start=0,
+            emit_count=0,
+            alias_ref_start=4,
+            alias_ref_count=1,
+        ),
+        {},
+    )
+    elide_fields = rule_row(
+        LowerRule(
+            **common,
+            emit_start=0,
+            emit_count=0,
+            elide_ref_start=5,
+            elide_ref_count=1,
+        ),
+        {},
+    )
+
+    assert ".action.emit_start = 2" in emit_fields
+    assert ".action.alias_ref_start = 4" in alias_fields
+    assert ".action.elide_ref_start = 5" in elide_fields
 
 
 def test_validate_c_table_shape_rejects_oversized_type_payload() -> None:

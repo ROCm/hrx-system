@@ -965,6 +965,15 @@ def _validate_c_table_shape(
 
     for index, row in enumerate(table.rules):
         row_subject = f"{subject} rule {index}"
+        action_range_count = int(row.emit_count != 0) + int(row.alias_ref_count != 0) + int(row.elide_ref_count != 0)
+        if action_range_count > 1:
+            raise ValueError(f"{row_subject} cannot carry more than one action range")
+        if row.emit_count == 0 and row.emit_start != 0:
+            raise ValueError(f"{row_subject} inactive emit range has a nonzero start")
+        if row.alias_ref_count == 0 and row.alias_ref_start != 0:
+            raise ValueError(f"{row_subject} inactive alias-ref range has a nonzero start")
+        if row.elide_ref_count == 0 and row.elide_ref_start != 0:
+            raise ValueError(f"{row_subject} inactive elide-ref range has a nonzero start")
         if row.report_key:
             _require_report_key(row.report_key, f"{row_subject} report key")
         _require_u16(row.temporary_count, f"{row_subject} temporary count")
@@ -987,7 +996,7 @@ def _validate_c_table_shape(
             "emit",
         )
         _require_u16(row.alias_ref_start, f"{row_subject} alias-ref start")
-        _require_u16(row.alias_ref_count, f"{row_subject} alias-ref count")
+        _require_u8(row.alias_ref_count, f"{row_subject} alias-ref count")
         _require_table_range(
             row.alias_ref_start,
             row.alias_ref_count * 2,
@@ -996,7 +1005,7 @@ def _validate_c_table_shape(
             "value-ref",
         )
         _require_u16(row.elide_ref_start, f"{row_subject} elide-ref start")
-        _require_u16(row.elide_ref_count, f"{row_subject} elide-ref count")
+        _require_u8(row.elide_ref_count, f"{row_subject} elide-ref count")
         _require_table_range(
             row.elide_ref_start,
             row.elide_ref_count,

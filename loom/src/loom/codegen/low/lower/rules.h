@@ -819,19 +819,24 @@ typedef struct loom_low_lower_rule_t {
   uint16_t guard_start;
   // Number of guard refs for this rule.
   uint16_t guard_count;
-  // First emit-reference row for this rule's program.
-  uint16_t emit_start;
+  // Rule action range selected by its nonzero count.
+  union {
+    // First emit-reference row for this rule's program.
+    uint16_t emit_start;
+    // First value-ref pair whose source operand aliases a source result.
+    uint16_t alias_ref_start;
+    // First value-ref table row whose source result is intentionally erased.
+    uint16_t elide_ref_start;
+  } action;
   // Number of emit-reference rows for this rule's program.
   uint16_t emit_count;
-  // First value-ref pair whose source operand aliases a source result.
-  uint16_t alias_ref_start;
   // Number of operand/result alias pairs consumed by this rule.
-  uint16_t alias_ref_count;
-  // First value-ref table row whose source result is intentionally erased.
-  uint16_t elide_ref_start;
+  uint8_t alias_ref_count;
   // Number of source result refs erased by this rule.
-  uint16_t elide_ref_count;
+  uint8_t elide_ref_count;
 } loom_low_lower_rule_t;
+static_assert(sizeof(loom_low_lower_rule_t) == 18,
+              "loom_low_lower_rule_t must be 18 bytes");
 
 typedef struct loom_low_lower_rule_span_t {
   // Source op kind covered by this contiguous rule range.
