@@ -366,7 +366,7 @@ static std::vector<uint8_t> MakeExecutableLoadReplayFileStorage() {
   function_metadata.workgroup_size[2] = 1;
   function_metadata.name_length = sizeof(function_name) - 1;
   iree_hal_replay_executable_load_payload_t payload = {};
-  payload.queue_affinity = 0x1234;
+  payload.queue_family_ordinal = 0;
   payload.target_physical_device_affinity = 1;
   payload.executable_data_length = sizeof(executable_data);
   payload.constant_count = IREE_ARRAYSIZE(constants);

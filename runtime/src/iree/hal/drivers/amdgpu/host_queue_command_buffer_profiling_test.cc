@@ -1622,7 +1622,7 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
       &executable));
@@ -1750,7 +1750,7 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
       &executable));

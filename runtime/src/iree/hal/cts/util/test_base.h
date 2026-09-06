@@ -242,28 +242,26 @@ inline std::map<std::string, CachedBackendResources>& GetBackendCache() {
   return cache;
 }
 
-// Returns the affinity covering every physical device in |device_spec|.
-inline iree_hal_physical_device_affinity_t GetAllPhysicalDeviceAffinity(
-    const iree_hal_device_spec_t* device_spec) {
-  iree_hal_physical_device_affinity_t physical_device_affinity = 0;
-  const iree_hal_device_identity_spec_t* identity =
-      iree_hal_device_spec_identity(device_spec);
-  for (iree_host_size_t i = 0; i < identity->physical_device_count; ++i) {
-    physical_device_affinity |=
-        identity->physical_devices[i].physical_device_affinity;
-  }
-  return physical_device_affinity;
-}
-
-// Selects the executable target attached to |backend| from |device|.
+// Selects the executable target attached to |backend| for |queue_family|.
 inline iree_status_t SelectBackendExecutableTarget(
-    iree_hal_device_t* device, const BackendInfo& backend,
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
+    const BackendInfo& backend,
     iree_hal_executable_target_selection_result_t* out_result) {
   const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(device);
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(device_spec);
+  const iree_hal_queue_family_ordinal_t queue_family_ordinal =
+      iree_hal_queue_family_ordinal(queue_family);
+  if (queue_family_ordinal >= queue_spec->family_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "queue family ordinal %u is out of range",
+                            queue_family_ordinal);
+  }
   return backend.executable_target_selector(
       device_spec, iree_make_cstring_view(backend.executable_target_family),
       iree_make_cstring_view(backend.executable_target_key),
-      GetAllPhysicalDeviceAffinity(device_spec), out_result);
+      queue_spec->families[queue_family_ordinal].physical_device_affinity,
+      out_result);
 }
 
 // GTest environment that releases all cached backend resources at program exit.
@@ -489,14 +487,17 @@ class CtsTestBase : public BaseType {
         iree_hal_device_spec(device_), &selection);
   }
 
-  // Selects the current CTS executable parameterization from the device.
+  // Selects the current CTS executable parameterization for |queue_family|.
   iree_status_t SelectExecutableTarget(
+      const iree_hal_queue_family_t* queue_family,
       iree_hal_executable_target_selection_result_t* out_result) const {
-    return SelectBackendExecutableTarget(device_, this->GetParam(), out_result);
+    return SelectBackendExecutableTarget(device_, queue_family,
+                                         this->GetParam(), out_result);
   }
 
   // Loads native executable data for a borrowed target of the current device.
-  iree_status_t LoadExecutable(const iree_hal_executable_target_t* target,
+  iree_status_t LoadExecutable(const iree_hal_queue_family_t* queue_family,
+                               const iree_hal_executable_target_t* target,
                                iree_hal_executable_load_flags_t flags,
                                iree_const_byte_span_t executable_data,
                                iree_hal_executable_t** out_executable) const {
@@ -504,9 +505,8 @@ class CtsTestBase : public BaseType {
     iree_hal_executable_load_params_initialize(&load_params);
     load_params.flags = flags;
     load_params.executable_data = executable_data;
-    return iree_hal_device_load_executable(device_, IREE_HAL_QUEUE_AFFINITY_ANY,
-                                           target, &load_params,
-                                           out_executable);
+    return iree_hal_device_load_executable(device_, queue_family, target,
+                                           &load_params, out_executable);
   }
 
   // Loads |file_name| for the current test executable target.
@@ -517,10 +517,15 @@ class CtsTestBase : public BaseType {
   // loading. Once a target is selected, all native loader errors are failures.
   void LoadExecutableOrSkipUnsupported(const char* file_name,
                                        iree_hal_executable_t** out_executable) {
-    *out_executable = nullptr;
+    iree_hal_queue_t* dispatch_queue =
+        QueueForCommandCategories(IREE_HAL_COMMAND_CATEGORY_DISPATCH);
+    if (!dispatch_queue) {
+      GTEST_SKIP() << "device has no dispatch-capable queue";
+    }
 
     iree_hal_executable_target_selection_result_t result;
-    IREE_ASSERT_OK(SelectExecutableTarget(&result));
+    IREE_ASSERT_OK(
+        SelectExecutableTarget(iree_hal_queue_family(dispatch_queue), &result));
     if (result.outcome ==
         IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
       GTEST_SKIP() << "Executable target '" << executable_target_family() << ":"
@@ -537,7 +542,8 @@ class CtsTestBase : public BaseType {
     }
 
     IREE_ASSERT_OK(LoadExecutable(
-        result.target, IREE_HAL_EXECUTABLE_LOAD_FLAG_NONE,
+        iree_hal_queue_family(dispatch_queue), result.target,
+        IREE_HAL_EXECUTABLE_LOAD_FLAG_NONE,
         executable_data(iree_make_cstring_view(file_name)), out_executable));
   }
 

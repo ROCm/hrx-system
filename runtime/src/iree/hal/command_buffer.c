@@ -482,6 +482,17 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_dispatch(
     return iree_ok_status();
   }
 
+  if (IREE_UNLIKELY(iree_hal_executable_queue_family(executable) !=
+                    command_buffer->queue_family)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "executable queue family %u does not match command buffer queue "
+        "family %u",
+        iree_hal_queue_family_ordinal(
+            iree_hal_executable_queue_family(executable)),
+        iree_hal_queue_family_ordinal(command_buffer->queue_family));
+  }
+
   IREE_TRACE_ZONE_BEGIN(z0);
 #if IREE_HAL_VERBOSE_TRACING_ENABLE
   // TODO(benvanik): add a tracing.h helper that does the snprintf directly

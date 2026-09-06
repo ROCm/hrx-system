@@ -584,34 +584,18 @@ static iree_status_t iree_hal_task_device_create_command_buffer(
 }
 
 static iree_status_t iree_hal_task_device_load_executable(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device, const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* load_params,
     iree_hal_executable_t** out_executable) {
   iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  const iree_hal_device_identity_spec_t* identity =
-      iree_hal_device_spec_identity(device->device_spec);
-  IREE_ASSERT_EQ(identity->physical_device_count, 1);
-  const iree_hal_physical_device_affinity_t physical_device_affinity =
-      identity->physical_devices[0].physical_device_affinity;
-  if (!iree_all_bits_set(target->physical_device_affinity,
-                         physical_device_affinity)) {
-    return iree_make_status(
-        IREE_STATUS_INCOMPATIBLE,
-        "task executable target `%.*s:%.*s` affinity 0x%016" PRIx64
-        " does not cover physical-device affinity 0x%016" PRIx64,
-        (int)target->family.size, target->family.data,
-        (int)target->target_key.size, target->target_key.data,
-        target->physical_device_affinity, physical_device_affinity);
-  }
-
   iree_host_size_t worker_capacity = 0;
   for (iree_host_size_t i = 0; i < device->queue_count; ++i) {
     worker_capacity +=
         iree_task_executor_worker_count(device->queues[i].executor);
   }
   return iree_hal_executable_loader_select_and_load(
-      device->loader_count, device->loaders, target, load_params,
+      device->loader_count, device->loaders, queue_family, target, load_params,
       worker_capacity, out_executable);
 }
 

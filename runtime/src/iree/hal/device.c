@@ -238,20 +238,58 @@ IREE_API_EXPORT iree_status_t iree_hal_device_query_queue_pool_backend(
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_device_load_executable(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* params,
     iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(queue_family);
+  IREE_ASSERT_ARGUMENT(target);
   IREE_ASSERT_ARGUMENT(params);
   IREE_ASSERT_ARGUMENT(out_executable);
-  *out_executable = NULL;
+  const iree_hal_queue_family_ordinal_t queue_family_ordinal =
+      iree_hal_queue_family_ordinal(queue_family);
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  if (IREE_UNLIKELY(queue_family_ordinal >= queue_spec->family_count)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "executable queue family ordinal %u is invalid",
+                            queue_family_ordinal);
+  }
+  if (IREE_UNLIKELY(iree_hal_device_queue_family(
+                        device, queue_family_ordinal) != queue_family)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "executable queue family %u must be borrowed from the device",
+        queue_family_ordinal);
+  }
+  if (IREE_UNLIKELY(!iree_any_bit_set(
+          queue_spec->families[queue_family_ordinal].role_flags,
+          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "queue family %u cannot load dispatch executables",
+                            queue_family_ordinal);
+  }
   if (IREE_UNLIKELY(iree_hal_device_spec_executable_target_ordinal(
                         iree_hal_device_spec(device), target) ==
                     IREE_HOST_SIZE_MAX)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "executable target must be borrowed from the device spec");
+  }
+  const iree_hal_queue_family_spec_t* queue_family_spec =
+      &queue_spec->families[queue_family_ordinal];
+  if (IREE_UNLIKELY(
+          !iree_all_bits_set(target->physical_device_affinity,
+                             queue_family_spec->physical_device_affinity))) {
+    return iree_make_status(
+        IREE_STATUS_INCOMPATIBLE,
+        "executable target `%.*s:%.*s` physical-device affinity 0x%016" PRIx64
+        " does not cover queue family %u affinity 0x%016" PRIx64,
+        (int)target->family.size, target->family.data,
+        (int)target->target_key.size, target->target_key.data,
+        target->physical_device_affinity, queue_family_ordinal,
+        queue_family_spec->physical_device_affinity);
   }
   if (IREE_UNLIKELY(iree_const_byte_span_is_empty(params->executable_data))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -267,8 +305,23 @@ IREE_API_EXPORT iree_status_t iree_hal_device_load_executable(
         "executable constants are required when constant count is nonzero");
   }
   IREE_TRACE_ZONE_BEGIN(z0);
+  iree_hal_executable_t* executable = NULL;
   iree_status_t status = _VTABLE_DISPATCH(device, load_executable)(
-      device, queue_affinity, target, params, out_executable);
+      device, queue_family, target, params, &executable);
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(!executable || iree_hal_executable_queue_family(
+                                       executable) != queue_family)) {
+    status = iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "device executable loader did not return an executable for queue "
+        "family %u",
+        queue_family_ordinal);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_executable = executable;
+  } else {
+    iree_hal_executable_release(executable);
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

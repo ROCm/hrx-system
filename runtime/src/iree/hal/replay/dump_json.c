@@ -402,13 +402,14 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           record, &payload, &ranges));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
-          ",\"payload\":{\"queue_affinity\":%" PRIu64 ",\"load_flags\":%" PRIu32
-          ",\"target_kind\":%" PRIu32 ",\"target_flags\":%" PRIu32
+          ",\"payload\":{\"queue_family_ordinal\":%" PRIu32
+          ",\"load_flags\":%" PRIu32 ",\"target_kind\":%" PRIu32
+          ",\"target_flags\":%" PRIu32
           ",\"target_physical_device_affinity\":%" PRIu64
           ",\"target_family_length\":%" PRIu32 ",\"target_key_length\":%" PRIu32
           ",\"executable_data_length\":%" PRIu64 ",\"constant_count\":%" PRIu64
           ",\"executable_metadata_length\":%" PRIu32,
-          payload.queue_affinity, payload.load_flags, payload.target_kind,
+          payload.queue_family_ordinal, payload.load_flags, payload.target_kind,
           payload.target_flags, payload.target_physical_device_affinity,
           payload.target_family_length, payload.target_key_length,
           payload.executable_data_length, payload.constant_count,

@@ -26,6 +26,7 @@ static iree_status_t loom_amdgpu_device_provider_select_compatible_candidate(
     iree_hal_executable_target_kind_flags_t kind_flags,
     iree_hal_executable_target_selection_result_t* out_result,
     const loom_amdgpu_target_profile_t** out_profile) {
+  IREE_ASSERT_ARGUMENT(runtime->dispatch_queue);
   *out_result = (iree_hal_executable_target_selection_result_t){
       .outcome = IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH,
       .target = NULL,
@@ -40,6 +41,13 @@ static iree_status_t loom_amdgpu_device_provider_select_compatible_candidate(
 
   const iree_hal_device_executable_spec_t* executable_spec =
       iree_hal_device_spec_executables(device_spec);
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(device_spec);
+  const iree_hal_queue_family_ordinal_t dispatch_family_ordinal =
+      iree_hal_queue_family_ordinal(
+          iree_hal_queue_family(runtime->dispatch_queue));
+  const iree_hal_physical_device_affinity_t physical_device_affinity =
+      queue_spec->families[dispatch_family_ordinal].physical_device_affinity;
   const iree_hal_executable_target_t* selected_target = NULL;
   const loom_amdgpu_target_profile_t* selected_profile = NULL;
   iree_host_size_t selected_ordinal = IREE_HOST_SIZE_MAX;
@@ -50,6 +58,10 @@ static iree_status_t loom_amdgpu_device_provider_select_compatible_candidate(
         1u << candidate->kind;
     if (!iree_string_view_equal(candidate->family, IREE_SV("amdgpu")) ||
         !iree_any_bit_set(kind_flags, candidate_kind_flag)) {
+      continue;
+    }
+    if (!iree_all_bits_set(candidate->physical_device_affinity,
+                           physical_device_affinity)) {
       continue;
     }
     if (!loom_amdgpu_device_provider_supports_artifact_key(

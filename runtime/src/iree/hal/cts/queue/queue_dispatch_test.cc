@@ -612,13 +612,15 @@ class QueueDispatchIndirectParametersTest : public CtsTestBase<> {
                                  source_data.data + source_data.data_length);
 
     iree_hal_executable_target_selection_result_t target_result;
-    IREE_ASSERT_OK(SelectExecutableTarget(&target_result));
+    IREE_ASSERT_OK(SelectExecutableTarget(
+        iree_hal_queue_family(dispatch_queue_), &target_result));
     ASSERT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
               target_result.outcome);
 
     iree_hal_executable_t* replacement_executable = nullptr;
     IREE_ASSERT_OK(LoadExecutable(
-        target_result.target, IREE_HAL_EXECUTABLE_LOAD_FLAG_NONE,
+        iree_hal_queue_family(dispatch_queue_), target_result.target,
+        IREE_HAL_EXECUTABLE_LOAD_FLAG_NONE,
         iree_make_const_byte_span(storage.data(), storage.size()),
         &replacement_executable));
     ASSERT_NE(replacement_executable, nullptr);

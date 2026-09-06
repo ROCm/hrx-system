@@ -103,9 +103,10 @@ class ScopedHostcallBufferAddress {
 };
 
 static iree_status_t LoadHostcallBufferExecutable(
-    iree_hal_device_t* device, iree_hal_executable_t** out_executable) {
-  return LoadCtsExecutable(device, IREE_SV("hostcall_buffer_test.bin"),
-                           out_executable);
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
+    iree_hal_executable_t** out_executable) {
+  return LoadCtsExecutable(device, queue_family,
+                           IREE_SV("hostcall_buffer_test.bin"), out_executable);
 }
 
 static iree_hal_buffer_ref_list_t MakeHostcallBufferBindingList(
@@ -331,7 +332,7 @@ TEST_F(HostQueueCommandBufferTest,
 
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       iree_make_cstring_view("tsan_executable_test.bin"), &executable));
 
   Ref<iree_hal_buffer_t> input_buffer;
@@ -531,7 +532,7 @@ TEST_F(HostQueueCommandBufferTest, DirectDispatchUsesPrepublishedKernargs) {
 
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
       &executable));
@@ -708,7 +709,7 @@ TEST_F(HostQueueCommandBufferTest,
 
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
       &executable));
@@ -1005,8 +1006,9 @@ TEST_F(HostQueueCommandBufferTest,
   IREE_ASSERT_OK(
       test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
   Ref<iree_hal_executable_t> executable;
-  IREE_ASSERT_OK(LoadHostcallBufferExecutable(test_device.base_device(),
-                                              executable.out()));
+  IREE_ASSERT_OK(LoadHostcallBufferExecutable(
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
+      executable.out()));
   Ref<iree_hal_buffer_t> output_buffer;
   IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
       test_device.allocator(), sizeof(uint64_t), output_buffer.out()));
@@ -1071,8 +1073,9 @@ TEST_F(HostQueueCommandBufferTest, HostcallAddressIsBakedIntoPm4Dispatches) {
                     "physical device";
   }
   Ref<iree_hal_executable_t> executable;
-  IREE_ASSERT_OK(LoadHostcallBufferExecutable(test_device.base_device(),
-                                              executable.out()));
+  IREE_ASSERT_OK(LoadHostcallBufferExecutable(
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
+      executable.out()));
   Ref<iree_hal_buffer_t> output_buffer;
   IREE_ASSERT_OK(CreateHostVisibleDispatchBuffer(
       test_device.allocator(), sizeof(uint64_t), output_buffer.out()));
@@ -1189,7 +1192,7 @@ TEST_F(HostQueueCommandBufferTest,
 
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       iree_make_cstring_view("command_buffer_dispatch_multi_workgroup_test."
                              "bin"),
       &executable));
@@ -1563,7 +1566,7 @@ TEST_F(HostQueueCommandBufferTest,
 
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
       &executable));
@@ -1700,7 +1703,7 @@ TEST_F(HostQueueCommandBufferTest, Pm4DynamicDispatchUsesDefaultUploadRing) {
 
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
       &executable));
@@ -1814,7 +1817,7 @@ TEST_F(HostQueueCommandBufferTest,
 
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
       &executable));
@@ -1965,7 +1968,7 @@ TEST_F(HostQueueCommandBufferTest, DynamicDispatchUsesBindingTableSlots) {
 
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
       &executable));
@@ -2440,7 +2443,7 @@ TEST_F(HostQueueCommandBufferTest,
 
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
       &executable));

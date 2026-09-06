@@ -16,6 +16,23 @@
 
 IREE_HAL_API_RETAIN_RELEASE(executable);
 
+IREE_API_EXPORT const iree_hal_queue_family_t* iree_hal_executable_queue_family(
+    const iree_hal_executable_t* executable) {
+  IREE_ASSERT_ARGUMENT(executable);
+  return executable->queue_family;
+}
+
+IREE_API_EXPORT void iree_hal_executable_initialize(
+    const iree_hal_queue_family_t* queue_family,
+    const iree_hal_executable_vtable_t* vtable,
+    iree_hal_executable_t* out_executable) {
+  IREE_ASSERT_ARGUMENT(queue_family);
+  IREE_ASSERT_ARGUMENT(vtable);
+  IREE_ASSERT_ARGUMENT(out_executable);
+  iree_hal_resource_initialize(vtable, &out_executable->resource);
+  out_executable->queue_family = queue_family;
+}
+
 IREE_API_EXPORT void iree_hal_executable_load_params_initialize(
     iree_hal_executable_load_params_t* out_params) {
   IREE_ASSERT_ARGUMENT(out_params);
@@ -108,11 +125,14 @@ IREE_API_EXPORT iree_status_t iree_hal_executable_global_info(
 
 IREE_API_EXPORT iree_status_t iree_hal_executable_global_buffer(
     iree_hal_executable_t* executable, iree_hal_executable_global_t global,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+    iree_hal_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(executable);
   IREE_ASSERT_ARGUMENT(out_buffer);
-  *out_buffer = NULL;
-  iree_status_t status = _VTABLE_DISPATCH(executable, global_buffer)(
-      executable, global, queue_affinity, out_buffer);
+  iree_hal_buffer_t* buffer = NULL;
+  iree_status_t status =
+      _VTABLE_DISPATCH(executable, global_buffer)(executable, global, &buffer);
+  if (iree_status_is_ok(status)) {
+    *out_buffer = buffer;
+  }
   return status;
 }

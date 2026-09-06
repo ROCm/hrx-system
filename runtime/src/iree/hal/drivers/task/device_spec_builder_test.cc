@@ -58,10 +58,12 @@ static bool test_executable_loader_claims_executable(
 
 static iree_status_t test_executable_loader_load(
     iree_hal_executable_loader_t* base_executable_loader,
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* load_params,
     iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable) {
-  *out_executable = NULL;
+  (void)queue_family;
+  (void)out_executable;
   return iree_make_status(IREE_STATUS_INTERNAL);
 }
 

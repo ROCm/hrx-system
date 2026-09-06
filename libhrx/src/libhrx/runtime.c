@@ -249,12 +249,18 @@ hrx_status_t hrx_ensure_shared_state(void) {
 }
 
 #ifdef HRX_HAS_IREE_AMDGPU_DRIVER
-static iree_status_t hrx_set_gpu_architecture_from_hal(
-    iree_hal_device_t* hal_device, hrx_device_s* dev) {
-  const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(hal_device);
+static iree_status_t hrx_set_gpu_architecture_from_hal(hrx_device_s* dev) {
+  const iree_hal_device_spec_t* device_spec =
+      iree_hal_device_spec(dev->hal_device);
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(device_spec);
+  const iree_hal_queue_family_ordinal_t dispatch_family_ordinal =
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(dev->dispatch_queue));
   iree_hal_executable_target_selection_t selection = {
       .family = IREE_SV("amdgpu"),
       .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+      .physical_device_affinity = queue_spec->families[dispatch_family_ordinal]
+                                      .physical_device_affinity,
   };
   const iree_hal_executable_target_selection_result_t result =
       iree_hal_device_spec_select_executable_target(device_spec, &selection);
@@ -1023,7 +1029,7 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
     memcpy(dev->name, device_infos[info_index].name.data, name_len);
     dev->name[name_len] = '\0';
 
-    iree_status = hrx_set_gpu_architecture_from_hal(hal_device, dev);
+    iree_status = hrx_set_gpu_architecture_from_hal(dev);
     if (!iree_status_is_ok(iree_status)) {
       hrx_device_release(dev);
       hrx_gpu_release_created_devices(created_count);

@@ -1399,15 +1399,13 @@ class QueueBenchmark : public benchmark::Fixture {
 
   iree_status_t LoadExecutableFromData(iree_const_byte_span_t executable_data,
                                        iree_hal_executable_t** out_executable) {
-    *out_executable = nullptr;
-
-    iree_hal_physical_device_affinity_t physical_device_affinity = 0;
-    const iree_hal_device_identity_spec_t* identity =
-        iree_hal_device_spec_identity(iree_hal_device_spec(device_));
-    for (iree_host_size_t i = 0; i < identity->physical_device_count; ++i) {
-      physical_device_affinity |=
-          identity->physical_devices[i].physical_device_affinity;
-    }
+    const iree_hal_queue_family_t* queue_family =
+        iree_hal_queue_family(queue0_);
+    const iree_hal_device_queue_spec_t* queue_spec =
+        iree_hal_device_spec_queues(iree_hal_device_spec(device_));
+    const iree_hal_physical_device_affinity_t physical_device_affinity =
+        queue_spec->families[iree_hal_queue_family_ordinal(queue_family)]
+            .physical_device_affinity;
 
     iree_hal_executable_target_selection_t selection = {};
     selection.family = IREE_SV("amdgpu");
@@ -1434,7 +1432,7 @@ class QueueBenchmark : public benchmark::Fixture {
     iree_hal_executable_load_params_t load_params;
     iree_hal_executable_load_params_initialize(&load_params);
     load_params.executable_data = executable_data;
-    return iree_hal_device_load_executable(device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+    return iree_hal_device_load_executable(device_, queue_family,
                                            target_result.target, &load_params,
                                            out_executable);
   }
@@ -1442,10 +1440,15 @@ class QueueBenchmark : public benchmark::Fixture {
   iree_status_t LoadExecutableFromRegisteredData(
       iree_string_view_t target_name_prefix, iree_string_view_t file_name,
       iree_hal_executable_t** out_executable) {
-    *out_executable = nullptr;
-
     const auto targets =
         iree::hal::cts::CtsRegistry::ListExecutableTargets("amdgpu");
+    const iree_hal_queue_family_t* queue_family =
+        iree_hal_queue_family(queue0_);
+    const iree_hal_device_queue_spec_t* queue_spec =
+        iree_hal_device_spec_queues(iree_hal_device_spec(device_));
+    const iree_hal_physical_device_affinity_t physical_device_affinity =
+        queue_spec->families[iree_hal_queue_family_ordinal(queue_family)]
+            .physical_device_affinity;
     bool found_target = false;
     bool found_executable_data = false;
     for (const auto& target : targets) {
@@ -1466,8 +1469,8 @@ class QueueBenchmark : public benchmark::Fixture {
       iree_hal_executable_target_selection_result_t target_result;
       IREE_RETURN_IF_ERROR(iree_hal_amdgpu_device_spec_select_executable_target(
           iree_hal_device_spec(device_),
-          iree_make_cstring_view(target.target_key),
-          /*physical_device_affinity=*/0, &target_result));
+          iree_make_cstring_view(target.target_key), physical_device_affinity,
+          &target_result));
       if (target_result.outcome ==
           IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
         continue;
@@ -1483,9 +1486,9 @@ class QueueBenchmark : public benchmark::Fixture {
       iree_hal_executable_load_params_t load_params;
       iree_hal_executable_load_params_initialize(&load_params);
       load_params.executable_data = executable_data;
-      return iree_hal_device_load_executable(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target,
-          &load_params, out_executable);
+      return iree_hal_device_load_executable(device_, queue_family,
+                                             target_result.target, &load_params,
+                                             out_executable);
     }
     if (!found_target) {
       return iree_make_status(IREE_STATUS_NOT_FOUND,

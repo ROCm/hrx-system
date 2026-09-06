@@ -175,13 +175,16 @@ static bool IsAmdgpuCtsExecutableTarget(
       IREE_SV("amdgpu_"));
 }
 
-static iree_status_t LoadCtsExecutable(iree_hal_device_t* device,
-                                       iree_string_view_t file_name,
-                                       iree_hal_executable_t** out_executable) {
-  *out_executable = NULL;
-
+static iree_status_t LoadCtsExecutable(
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
+    iree_string_view_t file_name, iree_hal_executable_t** out_executable) {
   const auto targets =
       iree::hal::cts::CtsRegistry::ListExecutableTargets("amdgpu");
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  const iree_hal_physical_device_affinity_t physical_device_affinity =
+      queue_spec->families[iree_hal_queue_family_ordinal(queue_family)]
+          .physical_device_affinity;
   bool found_target = false;
   bool found_executable_data = false;
   for (const auto& target : targets) {
@@ -194,7 +197,7 @@ static iree_status_t LoadCtsExecutable(iree_hal_device_t* device,
     iree_hal_executable_target_selection_result_t target_result;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_device_spec_select_executable_target(
         iree_hal_device_spec(device), iree_make_cstring_view(target.target_key),
-        /*physical_device_affinity=*/0, &target_result));
+        physical_device_affinity, &target_result));
     if (target_result.outcome ==
         IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
       continue;
@@ -209,7 +212,7 @@ static iree_status_t LoadCtsExecutable(iree_hal_device_t* device,
     iree_hal_executable_load_params_t load_params;
     iree_hal_executable_load_params_initialize(&load_params);
     load_params.executable_data = executable_data;
-    return iree_hal_device_load_executable(device, IREE_HAL_QUEUE_AFFINITY_ANY,
+    return iree_hal_device_load_executable(device, queue_family,
                                            target_result.target, &load_params,
                                            out_executable);
   }
@@ -316,7 +319,7 @@ struct TwoDispatchCommandBuffer {
 static iree_status_t InitializeTwoDispatchCommandBufferResources(
     TestLogicalDevice* test_device, TwoDispatchCommandBuffer* out_fixture) {
   IREE_RETURN_IF_ERROR(LoadCtsExecutable(
-      test_device->base_device(),
+      test_device->base_device(), iree_hal_queue_family(test_device->queue()),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
       &out_fixture->executable));

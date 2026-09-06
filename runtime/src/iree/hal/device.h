@@ -638,20 +638,20 @@ IREE_API_EXPORT iree_status_t iree_hal_device_query_queue_pool_backend(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     iree_hal_queue_pool_backend_t* out_backend);
 
-// Loads a native executable artifact for |target| on |queue_affinity|.
+// Loads a native executable artifact for |target| on |queue_family|.
 //
+// |queue_family| must be the exact family identity borrowed from |device| and
 // |target| must be an exact borrowed row from iree_hal_device_spec(device).
-// The backend resolves |queue_affinity| to physical devices and requires every
-// selected physical device to be present in |target->physical_device_affinity|.
-// An ANY queue affinity therefore requires a target valid for every physical
-// device selected by the backend.
+// |target| must support every physical device serviced by |queue_family|.
+// The returned executable may only be used with command buffers and direct
+// dispatches targeting |queue_family|.
 //
 // The executable data and constants are borrowed only for the duration of the
 // call. Implementations must finish consuming or copy any retained data before
 // returning. Loading is a cold path and implementations may parse, verify,
 // link, or optimize the native artifact before returning.
 IREE_API_EXPORT iree_status_t iree_hal_device_load_executable(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* params,
     iree_hal_executable_t** out_executable);
@@ -811,7 +811,7 @@ typedef struct iree_hal_device_vtable_t {
       iree_hal_command_buffer_t** out_command_buffer);
 
   iree_status_t(IREE_API_PTR* load_executable)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
       const iree_hal_executable_target_t* target,
       const iree_hal_executable_load_params_t* params,
       iree_hal_executable_t** out_executable);

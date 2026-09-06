@@ -211,7 +211,6 @@ iree_status_t loom_run_hal_artifact_prepare(
     const loom_run_hal_runtime_t* runtime,
     const loom_device_artifact_t* artifact, iree_allocator_t host_allocator,
     iree_hal_executable_t** out_hal_executable) {
-  *out_hal_executable = NULL;
   if (runtime->device == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "HAL runtime is not initialized");
@@ -236,7 +235,7 @@ iree_status_t loom_run_hal_artifact_prepare(
     iree_hal_executable_load_params_initialize(&load_params);
     load_params.executable_data = iree_const_cast_byte_span(executable_data);
     status = iree_hal_device_load_executable(
-        runtime->device, IREE_HAL_QUEUE_AFFINITY_ANY,
+        runtime->device, iree_hal_queue_family(runtime->dispatch_queue),
         artifact->executable_target, &load_params, out_hal_executable);
   }
   iree_allocator_free(host_allocator, executable_data.data);

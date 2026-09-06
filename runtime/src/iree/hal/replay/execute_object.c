@@ -422,7 +422,8 @@ static iree_status_t iree_hal_replay_executor_load_executable(
   iree_host_size_t metadata_offset = 0;
   iree_host_size_t expected_length = 0;
   if (IREE_UNLIKELY(
-          payload.reserved0 != 0 || payload.reserved1 != 0 ||
+          payload.reserved_queue_family != 0 || payload.reserved0 != 0 ||
+          payload.reserved1 != 0 ||
           payload.target_kind > IREE_HAL_EXECUTABLE_TARGET_KIND_COMPOSITE ||
           payload.target_family_length == 0 || payload.target_key_length == 0 ||
           payload.executable_data_length > IREE_HOST_SIZE_MAX ||
@@ -452,6 +453,14 @@ static iree_status_t iree_hal_replay_executor_load_executable(
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
       executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
       &device_entry));
+  const iree_hal_queue_family_t* queue_family = iree_hal_device_queue_family(
+      device_entry->value.device, payload.queue_family_ordinal);
+  if (IREE_UNLIKELY(!queue_family)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "replay device does not provide captured queue family %u",
+        payload.queue_family_ordinal);
+  }
   iree_hal_executable_target_selection_t target_selection = {
       .family = iree_make_string_view(
           (const char*)record->payload.data + sizeof(payload),
@@ -536,9 +545,8 @@ static iree_status_t iree_hal_replay_executor_load_executable(
         device_entry->value.device, &target_selection, required_flags, &target);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_device_load_executable(device_entry->value.device,
-                                             payload.queue_affinity, target,
-                                             &params, &executable);
+    status = iree_hal_device_load_executable(
+        device_entry->value.device, queue_family, target, &params, &executable);
     if (!iree_status_is_ok(status) && substituted) {
       status = iree_status_annotate_f(
           status,

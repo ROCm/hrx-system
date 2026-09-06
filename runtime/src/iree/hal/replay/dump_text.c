@@ -308,14 +308,14 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           record, &payload, &ranges));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
-          " queue_affinity=%" PRIu64 " load_flags=0x%08" PRIx32
+          " queue_family_ordinal=%" PRIu32 " load_flags=0x%08" PRIx32
           " target_kind=%" PRIu32 " target_flags=0x%08" PRIx32
           " target_affinity=%" PRIu64 " family_range=[%" PRIu64 ", +%" PRIu32
           "]"
           " key_range=[%" PRIu64 ", +%" PRIu32 "] data_range=[%" PRIu64
           ", +%" PRIu64 "] constants_range=[%" PRIu64 ", +%" PRIhsz
           "] metadata_range=[%" PRIu64 ", +%" PRIu32 "]",
-          payload.queue_affinity, payload.load_flags, payload.target_kind,
+          payload.queue_family_ordinal, payload.load_flags, payload.target_kind,
           payload.target_flags, payload.target_physical_device_affinity,
           payload_range->offset + ranges.target_family_offset,
           payload.target_family_length,

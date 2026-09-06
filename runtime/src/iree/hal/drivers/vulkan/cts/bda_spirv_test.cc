@@ -166,7 +166,8 @@ class BdaSpirvTest : public CtsTestBase<> {
   iree_status_t PrepareBdaExecutable(iree_const_byte_span_t executable_data,
                                      iree_hal_executable_load_flags_t flags,
                                      iree_hal_executable_t** out_executable) {
-    return LoadExecutable(executable_target_, flags, executable_data,
+    return LoadExecutable(iree_hal_queue_family(dispatch_queue_),
+                          executable_target_, flags, executable_data,
                           out_executable);
   }
 

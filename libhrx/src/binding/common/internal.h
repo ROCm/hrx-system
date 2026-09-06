@@ -553,13 +553,6 @@ typedef struct iree_hal_streaming_stream_t {
   iree_allocator_t host_allocator;
 } iree_hal_streaming_stream_t;
 
-// Returns the stable family-affinity bit identifying |queue|'s family.
-static inline iree_hal_queue_family_affinity_t
-iree_hal_streaming_queue_family_affinity(const iree_hal_queue_t* queue) {
-  return iree_hal_make_queue_family_affinity(
-      iree_hal_queue_family_ordinal(iree_hal_queue_family(queue)));
-}
-
 // Reserves the next value on |stream|'s timeline for one submission. Callers
 // must hold |stream->mutex| and publish |*out_signal_value| to
 // |stream->pending_value| only once the submission is accepted, so a rejected

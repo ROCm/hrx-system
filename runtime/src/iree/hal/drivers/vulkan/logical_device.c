@@ -1085,7 +1085,7 @@ static iree_status_t iree_hal_vulkan_logical_device_create_command_buffer(
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_load_executable(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device, const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* load_params,
     iree_hal_executable_t** out_executable) {
@@ -1099,35 +1099,9 @@ static iree_status_t iree_hal_vulkan_logical_device_load_executable(
         "Vulkan executable target must be 'spirv:vulkan1.3+bda'");
   }
 
-  const iree_hal_queue_affinity_t dispatch_affinity =
-      device->queues.compute.selection.affinity;
-  if (!iree_hal_queue_affinity_is_empty(queue_affinity) &&
-      !iree_hal_queue_affinity_is_any(queue_affinity) &&
-      (queue_affinity & ~dispatch_affinity) != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Vulkan executable queue affinity 0x%" PRIx64
-        " selects queues outside dispatch affinity 0x%" PRIx64,
-        queue_affinity, dispatch_affinity);
-  }
-
-  const iree_hal_device_identity_spec_t* identity =
-      iree_hal_device_spec_identity(device->device_spec);
-  IREE_ASSERT_EQ(identity->physical_device_count, 1);
-  const iree_hal_physical_device_affinity_t physical_device_affinity =
-      identity->physical_devices[0].physical_device_affinity;
-  if (IREE_UNLIKELY((physical_device_affinity &
-                     ~target->physical_device_affinity) != 0)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Vulkan executable target physical affinity 0x%" PRIx64
-        " does not include selected physical affinity 0x%" PRIx64,
-        target->physical_device_affinity, physical_device_affinity);
-  }
-
   return iree_hal_vulkan_executable_create(
       &device->syms, device->logical_device, device->executable_pipeline_cache,
-      load_params, device->host_allocator, out_executable);
+      queue_family, load_params, device->host_allocator, out_executable);
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_import_file(

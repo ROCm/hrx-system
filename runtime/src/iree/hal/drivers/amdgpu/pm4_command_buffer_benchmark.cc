@@ -347,6 +347,13 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
   static iree_status_t LoadExecutable(DeviceBundle* bundle) {
     const auto targets =
         iree::hal::cts::CtsRegistry::ListExecutableTargets("amdgpu");
+    const iree_hal_queue_family_t* queue_family =
+        iree_hal_queue_family(bundle->queue);
+    const iree_hal_device_queue_spec_t* queue_spec =
+        iree_hal_device_spec_queues(iree_hal_device_spec(bundle->device));
+    const iree_hal_physical_device_affinity_t physical_device_affinity =
+        queue_spec->families[iree_hal_queue_family_ordinal(queue_family)]
+            .physical_device_affinity;
     bool found_executable_data = false;
     for (const auto& target : targets) {
       if (target.family == nullptr || target.target_key == nullptr ||
@@ -365,8 +372,8 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
       iree_hal_executable_target_selection_result_t target_result;
       IREE_RETURN_IF_ERROR(iree_hal_amdgpu_device_spec_select_executable_target(
           iree_hal_device_spec(bundle->device),
-          iree_make_cstring_view(target.target_key),
-          /*physical_device_affinity=*/0, &target_result));
+          iree_make_cstring_view(target.target_key), physical_device_affinity,
+          &target_result));
       if (target_result.outcome ==
           IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
         continue;
@@ -383,8 +390,8 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
       iree_hal_executable_load_params_initialize(&load_params);
       load_params.executable_data = executable_data;
       IREE_RETURN_IF_ERROR(iree_hal_device_load_executable(
-          bundle->device, IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target,
-          &load_params, &bundle->executable));
+          bundle->device, queue_family, target_result.target, &load_params,
+          &bundle->executable));
       IREE_RETURN_IF_ERROR(iree_hal_executable_lookup_function_by_name(
           bundle->executable, IREE_SV("model_a"), &bundle->model_a));
       return iree_hal_executable_lookup_function_by_name(

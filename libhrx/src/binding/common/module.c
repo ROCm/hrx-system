@@ -53,19 +53,27 @@ static iree_status_t iree_hal_streaming_fat_binary_target_append_unique(
 }
 
 static iree_status_t iree_hal_streaming_fat_binary_targets_from_device(
-    iree_hal_device_t* device, iree_host_size_t target_capacity,
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
+    iree_host_size_t target_capacity,
     iree_hal_streaming_fat_binary_target_t* targets,
     iree_host_size_t* out_target_count) {
   IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(queue_family);
   IREE_ASSERT_ARGUMENT(targets);
   IREE_ASSERT_ARGUMENT(out_target_count);
 
   iree_host_size_t target_count = 0;
   const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(device);
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(device_spec);
+  const iree_hal_physical_device_affinity_t physical_device_affinity =
+      queue_spec->families[iree_hal_queue_family_ordinal(queue_family)]
+          .physical_device_affinity;
 
   iree_hal_executable_target_selection_t selection = {
       .family = IREE_SV("amdgpu"),
       .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+      .physical_device_affinity = physical_device_affinity,
   };
   iree_hal_executable_target_selection_result_t result =
       iree_hal_device_spec_select_executable_target(device_spec, &selection);
@@ -586,8 +594,8 @@ static iree_status_t iree_hal_streaming_module_load_executable(
   load_params.flags = load_flags;
   load_params.executable_data = executable_data;
   return iree_hal_device_load_executable(
-      context->device, iree_hal_streaming_queue_family_affinity(context->queue),
-      executable_target, &load_params, out_executable);
+      context->device, iree_hal_queue_family(context->queue), executable_target,
+      &load_params, out_executable);
 }
 
 iree_status_t iree_hal_streaming_module_create_from_memory(
@@ -624,7 +632,8 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
     iree_hal_streaming_fat_binary_target_t targets[2] = {0};
     iree_host_size_t target_count = 0;
     status = iree_hal_streaming_fat_binary_targets_from_device(
-        context->device_entry->hal_device, IREE_ARRAYSIZE(targets), targets,
+        context->device_entry->hal_device,
+        iree_hal_queue_family(context->queue), IREE_ARRAYSIZE(targets), targets,
         &target_count);
     if (iree_status_is_ok(status)) {
       status = iree_hal_streaming_fat_binary_extract_for_targets(
@@ -867,7 +876,7 @@ static iree_status_t iree_hal_streaming_module_create_global_symbol_locked(
 
   iree_hal_buffer_t* global_buffer = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_executable_global_buffer(
-      executable, global_handle, IREE_HAL_QUEUE_AFFINITY_ANY, &global_buffer));
+      executable, global_handle, &global_buffer));
 
   iree_hal_streaming_buffer_t* streaming_buffer = NULL;
   iree_status_t status = iree_hal_streaming_memory_wrap_buffer(

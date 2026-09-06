@@ -9,6 +9,7 @@
 #include "iree/hal/buffer.h"
 #include "iree/hal/command_buffer.h"
 #include "iree/hal/detail.h"
+#include "iree/hal/executable.h"
 #include "iree/hal/file.h"
 #include "iree/hal/pool.h"
 #include "iree/hal/semaphore.h"
@@ -231,6 +232,14 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_dispatch(
   } else if (IREE_UNLIKELY(!executable)) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "dispatch executable is null");
+  } else if (IREE_UNLIKELY(iree_hal_executable_queue_family(executable) !=
+                           iree_hal_queue_family(queue))) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "executable queue family %u does not match dispatch queue family %u",
+        iree_hal_queue_family_ordinal(
+            iree_hal_executable_queue_family(executable)),
+        iree_hal_queue_family_ordinal(iree_hal_queue_family(queue)));
   }
   if (iree_status_is_ok(status)) {
     status =

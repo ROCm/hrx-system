@@ -349,8 +349,10 @@ static_assert(
 
 // Payload describing one device executable load request.
 typedef struct iree_hal_replay_executable_load_payload_t {
-  // Queue affinity passed to the device load operation.
-  uint64_t queue_affinity;
+  // Canonical queue family ordinal selected for the executable.
+  uint32_t queue_family_ordinal;
+  // Reserved for future queue-family metadata; must be zero.
+  uint32_t reserved_queue_family;
   // Physical-device affinity advertised by the captured target.
   uint64_t target_physical_device_affinity;
   // Byte length of executable data following the target key bytes.

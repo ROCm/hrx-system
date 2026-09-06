@@ -37,8 +37,8 @@ class TsanExecutableTest : public ::testing::TestWithParam<BackendInfo> {
     IREE_ASSERT_OK(status);
 
     iree_hal_executable_target_selection_result_t target_result;
-    IREE_ASSERT_OK(
-        SelectBackendExecutableTarget(device(), GetParam(), &target_result));
+    IREE_ASSERT_OK(SelectBackendExecutableTarget(
+        device(), iree_hal_queue_family(queue()), GetParam(), &target_result));
     if (target_result.outcome ==
         IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
       GTEST_SKIP() << "Executable target '"
@@ -55,7 +55,7 @@ class TsanExecutableTest : public ::testing::TestWithParam<BackendInfo> {
     load_params.executable_data = GetParam().executable_data(
         iree_make_cstring_view("tsan_executable_test.bin"));
     IREE_ASSERT_OK(iree_hal_device_load_executable(
-        device(), IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target,
+        device(), iree_hal_queue_family(queue()), target_result.target,
         &load_params, executable_.out()));
   }
 
@@ -94,8 +94,8 @@ TEST_P(TsanExecutableTest, PublishesTsanConfigGlobal) {
   ASSERT_EQ(info.byte_length, sizeof(iree_hal_amdgpu_tsan_config_t));
 
   iree_hal_buffer_t* global_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_global_buffer(
-      executable_, global, IREE_HAL_QUEUE_AFFINITY_ANY, &global_buffer));
+  IREE_ASSERT_OK(
+      iree_hal_executable_global_buffer(executable_, global, &global_buffer));
   ASSERT_NE(global_buffer, nullptr);
 
   std::vector<iree_hal_amdgpu_tsan_config_t> configs;
@@ -186,8 +186,8 @@ TEST_P(TsanExecutableTest, EnablesFeedbackConfigGlobal) {
   ASSERT_EQ(info.byte_length, sizeof(iree_hal_amdgpu_feedback_config_t));
 
   iree_hal_buffer_t* global_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_global_buffer(
-      executable_, global, IREE_HAL_QUEUE_AFFINITY_ANY, &global_buffer));
+  IREE_ASSERT_OK(
+      iree_hal_executable_global_buffer(executable_, global, &global_buffer));
   ASSERT_NE(global_buffer, nullptr);
 
   std::vector<iree_hal_amdgpu_feedback_config_t> configs;

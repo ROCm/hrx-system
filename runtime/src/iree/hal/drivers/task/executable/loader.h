@@ -92,6 +92,7 @@ bool iree_hal_executable_loader_claims_executable(
 // loader. Callers must establish target support and byte ownership first.
 iree_status_t iree_hal_executable_loader_load(
     iree_hal_executable_loader_t* executable_loader,
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* load_params,
     iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable);
@@ -103,6 +104,7 @@ iree_status_t iree_hal_executable_loader_load(
 // is returned directly without trying another loader.
 iree_status_t iree_hal_executable_loader_select_and_load(
     iree_host_size_t loader_count, iree_hal_executable_loader_t** loaders,
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* load_params,
     iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable);
@@ -129,6 +131,7 @@ typedef struct iree_hal_executable_loader_vtable_t {
 
   iree_status_t(IREE_API_PTR* load)(
       iree_hal_executable_loader_t* executable_loader,
+      const iree_hal_queue_family_t* queue_family,
       const iree_hal_executable_target_t* target,
       const iree_hal_executable_load_params_t* load_params,
       iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable);

@@ -13,10 +13,12 @@ static iree_atomic_int64_t iree_hal_task_executable_next_profile_id =
     IREE_ATOMIC_VAR_INIT(1);
 
 void iree_hal_task_executable_initialize(
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_task_executable_vtable_t* vtable,
     iree_allocator_t host_allocator,
     iree_hal_task_executable_t* out_base_executable) {
-  iree_hal_resource_initialize(vtable, &out_base_executable->resource);
+  iree_hal_executable_initialize(queue_family, &vtable->base,
+                                 &out_base_executable->base);
   out_base_executable->host_allocator = host_allocator;
 
   // Function attributes and pointers are populated by the parent type.
@@ -69,7 +71,8 @@ iree_status_t iree_hal_task_executable_issue_call(
   IREE_ASSERT_ARGUMENT(executable);
   IREE_ASSERT_ARGUMENT(dispatch_state);
   IREE_ASSERT_ARGUMENT(workgroup_state);
-  return ((const iree_hal_task_executable_vtable_t*)executable->resource.vtable)
+  return ((const iree_hal_task_executable_vtable_t*)
+              executable->base.resource.vtable)
       ->issue_call(executable, ordinal, dispatch_state, workgroup_state,
                    worker_id);
 }

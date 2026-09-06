@@ -672,11 +672,12 @@ iree_hal_queue_host_call(iree_hal_queue_t* queue,
 
 // Enqueues a direct executable dispatch on the exact hardware |queue|.
 //
-// The executable must be compatible with the family containing |queue|. The
-// constant data and binding list are captured before the call returns. By
-// default the executable, directly bound buffers, and indirect parameter buffer
-// are retained until terminal completion. Callers that already guarantee those
-// lifetimes may use IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES.
+// The executable must have been loaded for the exact family containing
+// |queue|. The constant data and binding list are captured before the call
+// returns. By default the executable, directly bound buffers, and indirect
+// parameter buffer are retained until terminal completion. Callers that already
+// guarantee those lifetimes may use
+// IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES.
 //
 // All |bindings| must directly reference buffers and not binding table slots.
 IREE_API_EXPORT iree_status_t iree_hal_queue_dispatch(

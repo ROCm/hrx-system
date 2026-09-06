@@ -306,13 +306,13 @@ static iree_status_t iree_hal_replay_device_create_command_buffer(
 }
 
 static iree_status_t iree_hal_replay_device_load_executable(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device, const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* params,
     iree_hal_executable_t** out_executable) {
   iree_hal_replay_device_t* device = iree_hal_replay_device_cast(base_device);
   return iree_hal_replay_recorder_device_load_executable(
-      device->recorder, device->device_id, device->base_device, queue_affinity,
+      device->recorder, device->device_id, device->base_device, queue_family,
       target, params, device->host_allocator, out_executable);
 }
 

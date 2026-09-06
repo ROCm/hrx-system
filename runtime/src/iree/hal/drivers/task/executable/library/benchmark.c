@@ -178,10 +178,14 @@ static iree_status_t iree_hal_executable_library_run(
 
   // Perform the load, which will fail if the executable cannot be loaded or
   // there was an issue with the layouts.
+  static const iree_hal_queue_family_t queue_family = {
+      .ordinal = 0,
+  };
   iree_hal_executable_t* executable = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_executable_loader_select_and_load(
-      /*loader_count=*/1, &executable_loader, target_result.target,
-      &executable_params, /*worker_capacity=*/1, &executable));
+      /*loader_count=*/1, &executable_loader, &queue_family,
+      target_result.target, &executable_params, /*worker_capacity=*/1,
+      &executable));
   iree_hal_task_executable_t* task_executable =
       iree_hal_task_executable_cast(executable);
 

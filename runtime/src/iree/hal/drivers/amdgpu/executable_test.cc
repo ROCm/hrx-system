@@ -66,7 +66,7 @@ TEST_F(ExecutableTest, PublishesAndEnforcesResourceLimits) {
 
   Ref<iree_hal_executable_t> executable;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       IREE_SV("command_buffer_dispatch_multi_workgroup_test.bin"),
       executable.out()));
   const iree_hal_executable_function_t function =

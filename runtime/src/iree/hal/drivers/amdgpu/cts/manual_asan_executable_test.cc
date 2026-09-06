@@ -266,8 +266,9 @@ TEST_P(ManualAsanExecutableTest, ReportsCompatibleHooksThroughFeedback) {
   ASSERT_FALSE(iree_const_byte_span_is_empty(executable_data));
 
   iree_hal_executable_target_selection_result_t target_result;
-  IREE_ASSERT_OK(SelectBackendExecutableTarget(asan_device.device(), GetParam(),
-                                               &target_result));
+  IREE_ASSERT_OK(SelectBackendExecutableTarget(
+      asan_device.device(), iree_hal_queue_family(asan_device.queue()),
+      GetParam(), &target_result));
   if (target_result.outcome ==
       IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
     GTEST_SKIP() << "Executable target '" << GetParam().executable_target_family
@@ -283,8 +284,8 @@ TEST_P(ManualAsanExecutableTest, ReportsCompatibleHooksThroughFeedback) {
   iree_hal_executable_load_params_initialize(&load_params);
   load_params.executable_data = executable_data;
   IREE_ASSERT_OK(iree_hal_device_load_executable(
-      asan_device.device(), IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target,
-      &load_params, executable.out()));
+      asan_device.device(), iree_hal_queue_family(asan_device.queue()),
+      target_result.target, &load_params, executable.out()));
 
   Ref<iree_hal_buffer_t> output_buffer;
   IREE_ASSERT_OK(SanitizerCreateDeviceBuffer(

@@ -76,7 +76,7 @@ class PM4CommandDispatchTest : public ::testing::Test {
     }
 
     IREE_ASSERT_OK(LoadCtsExecutable(
-        test_device_.base_device(),
+        test_device_.base_device(), iree_hal_queue_family(test_device_.queue()),
         IREE_SV("command_buffer_dispatch_multi_workgroup_test.bin"),
         workgroup_id_executable_.out()));
     const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor = NULL;
@@ -313,7 +313,7 @@ TEST_F(PM4CommandDispatchTest, DynamicBindingFixupSupportsReusableExecution) {
 TEST_F(PM4CommandDispatchTest, DynamicParametersObservePriorDispatch) {
   Ref<iree_hal_executable_t> parameter_producer_executable;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device_.base_device(),
+      test_device_.base_device(), iree_hal_queue_family(test_device_.queue()),
       IREE_SV("command_buffer_dispatch_indirect_parameters_test.bin"),
       parameter_producer_executable.out()));
   Ref<iree_hal_buffer_t> output_buffer;
@@ -494,9 +494,9 @@ TEST_F(PM4CommandDispatchTest,
 
 TEST_F(PM4CommandDispatchTest, RejectsImplicitBlockCountKernargs) {
   Ref<iree_hal_executable_t> executable;
-  IREE_ASSERT_OK(LoadCtsExecutable(test_device_.base_device(),
-                                   IREE_SV("hostcall_buffer_test.bin"),
-                                   executable.out()));
+  IREE_ASSERT_OK(LoadCtsExecutable(
+      test_device_.base_device(), iree_hal_queue_family(test_device_.queue()),
+      IREE_SV("hostcall_buffer_test.bin"), executable.out()));
   const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor = NULL;
   IREE_ASSERT_OK(
       iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_device(

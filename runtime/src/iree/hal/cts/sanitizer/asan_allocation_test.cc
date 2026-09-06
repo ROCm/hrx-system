@@ -156,8 +156,8 @@ class AsanAllocationTest : public ::testing::TestWithParam<BackendInfo> {
     }
 
     iree_hal_executable_target_selection_result_t result;
-    IREE_ASSERT_OK(
-        SelectBackendExecutableTarget(device(), GetParam(), &result));
+    IREE_ASSERT_OK(SelectBackendExecutableTarget(
+        device(), iree_hal_queue_family(queue()), GetParam(), &result));
     if (result.outcome ==
         IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
       GTEST_SKIP() << "Executable target '"
@@ -173,7 +173,7 @@ class AsanAllocationTest : public ::testing::TestWithParam<BackendInfo> {
     iree_hal_executable_load_params_initialize(&load_params);
     load_params.executable_data = executable_data;
     IREE_ASSERT_OK(iree_hal_device_load_executable(
-        device(), IREE_HAL_QUEUE_AFFINITY_ANY, result.target, &load_params,
+        device(), iree_hal_queue_family(queue()), result.target, &load_params,
         executable_.out()));
   }
 

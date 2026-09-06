@@ -18,7 +18,7 @@ extern "C" {
 
 iree_status_t iree_hal_replay_recorder_device_load_executable(
     iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device, const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);

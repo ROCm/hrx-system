@@ -665,6 +665,9 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_copy_buffer(
 // configuration is not supported by the device or function. Some
 // implementations cannot verify statically and may fail asynchronously during
 // execution.
+//
+// |executable| must have been loaded for the command buffer's exact queue
+// family.
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_dispatch(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_executable_t* executable, iree_hal_executable_function_t function,

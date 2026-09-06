@@ -285,8 +285,8 @@ static void CaptureMockExecutableLoad(iree_const_byte_span_t executable_data,
 
   iree_hal_executable_t* executable = nullptr;
   IREE_ASSERT_OK(iree_hal_device_load_executable(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target,
-      &load_params, &executable));
+      wrapped_device, iree_hal_device_queue_family(wrapped_device, 0),
+      target_result.target, &load_params, &executable));
 
   iree_hal_executable_release(executable);
 

@@ -2882,31 +2882,25 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_command_buffer(
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_load_executable(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device, const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* load_params,
     iree_hal_executable_t** out_executable) {
   iree_hal_amdgpu_logical_device_t* logical_device =
       iree_hal_amdgpu_logical_device_cast(base_device);
 
-  iree_host_size_t queue_scope_count = 0;
-  for (iree_host_size_t i = 0; i < logical_device->physical_device_count; ++i) {
-    queue_scope_count += logical_device->physical_devices[i]->host_queue_count;
-  }
+  const iree_hal_queue_family_ordinal_t queue_family_ordinal =
+      iree_hal_queue_family_ordinal(queue_family);
+  iree_hal_amdgpu_physical_device_t* physical_device =
+      logical_device->physical_devices[queue_family_ordinal];
+  const iree_host_size_t queue_scope_count = physical_device->host_queue_count;
   iree_hal_amdgpu_queue_scope_t* queue_scopes = NULL;
   if (queue_scope_count != 0) {
     queue_scopes = (iree_hal_amdgpu_queue_scope_t*)iree_alloca(
         queue_scope_count * sizeof(queue_scopes[0]));
-    iree_host_size_t queue_scope_ordinal = 0;
-    for (iree_host_size_t i = 0; i < logical_device->physical_device_count;
-         ++i) {
-      iree_hal_amdgpu_physical_device_t* physical_device =
-          logical_device->physical_devices[i];
-      for (iree_host_size_t j = 0; j < physical_device->host_queue_count; ++j) {
-        iree_hal_amdgpu_host_queue_query_scope(
-            &physical_device->host_queues[j],
-            &queue_scopes[queue_scope_ordinal++]);
-      }
+    for (iree_host_size_t i = 0; i < physical_device->host_queue_count; ++i) {
+      iree_hal_amdgpu_host_queue_query_scope(&physical_device->host_queues[i],
+                                             &queue_scopes[i]);
     }
   }
 
@@ -2914,12 +2908,11 @@ static iree_status_t iree_hal_amdgpu_logical_device_load_executable(
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_allocate_executable_id(
       base_device, &executable_id));
   return iree_hal_amdgpu_executable_create(
-      base_device, &logical_device->system->libhsa,
-      &logical_device->system->topology, queue_affinity, target, load_params,
-      executable_id, &logical_device->feedback, &logical_device->asan,
-      &logical_device->tsan, logical_device->physical_device_count,
-      logical_device->physical_devices, queue_scope_count, queue_scopes,
-      &logical_device->profile_metadata,
+      base_device, queue_family, &logical_device->system->libhsa,
+      &logical_device->system->topology, target, load_params, executable_id,
+      &logical_device->feedback, &logical_device->asan, &logical_device->tsan,
+      logical_device->physical_device_count, logical_device->physical_devices,
+      queue_scope_count, queue_scopes, &logical_device->profile_metadata,
       iree_hal_device_host_allocator(base_device), out_executable);
 }
 

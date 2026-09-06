@@ -227,10 +227,19 @@ loomc_status_t CreateSource(const IreeHalKernelExecutionTarget& target,
   return status;
 }
 
+iree_hal_physical_device_affinity_t QueueFamilyPhysicalDeviceAffinity(
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family) {
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  return queue_spec->families[iree_hal_queue_family_ordinal(queue_family)]
+      .physical_device_affinity;
+}
+
 loomc_status_t CreateHalTargetProfile(
     const IreeHalKernelExecutionTarget& target,
     loomc_target_environment_t* target_environment, iree_hal_device_t* device,
-    TargetProfilePtr* out_profile, ResultPtr* out_result) {
+    const iree_hal_queue_family_t* queue_family, TargetProfilePtr* out_profile,
+    ResultPtr* out_result) {
   loomc_iree_hal_profile_options_t profile_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_PROFILE_OPTIONS,
       /*.structure_size=*/sizeof(profile_options),
@@ -238,7 +247,8 @@ loomc_status_t CreateHalTargetProfile(
       /*.identifier=*/target.target_profile_identifier,
       /*.device=*/device,
       /*.physical_device_affinity=*/
-      target.executable_target_selection.physical_device_affinity,
+      target.executable_target_selection.physical_device_affinity |
+          QueueFamilyPhysicalDeviceAffinity(device, queue_family),
       /*.providers=*/target.profile_providers,
       /*.provider_count=*/target.profile_provider_count,
   };
@@ -360,11 +370,16 @@ iree_status_t AllocateStorageBuffer(iree_hal_device_t* device,
 
 iree_status_t PrepareExecutableFromArtifact(
     const IreeHalKernelExecutionTarget& target, iree_hal_device_t* device,
-    const loomc_artifact_t* artifact, iree_hal_executable_t** out_executable) {
-  *out_executable = nullptr;
+    iree_hal_queue_t* dispatch_queue, const loomc_artifact_t* artifact,
+    iree_hal_executable_t** out_executable) {
+  iree_hal_executable_target_selection_t target_selection =
+      target.executable_target_selection;
+  target_selection.physical_device_affinity |=
+      QueueFamilyPhysicalDeviceAffinity(device,
+                                        iree_hal_queue_family(dispatch_queue));
   const iree_hal_executable_target_selection_result_t target_result =
       iree_hal_device_spec_select_executable_target(
-          iree_hal_device_spec(device), &target.executable_target_selection);
+          iree_hal_device_spec(device), &target_selection);
   if (target_result.outcome ==
       IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
@@ -383,8 +398,8 @@ iree_status_t PrepareExecutableFromArtifact(
   load_params.executable_data = iree_make_const_byte_span(
       executable_data.data, executable_data.data_length);
   iree_status_t status = iree_hal_device_load_executable(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target, &load_params,
-      out_executable);
+      device, iree_hal_queue_family(dispatch_queue), target_result.target,
+      &load_params, out_executable);
   loomc_allocator_free(loomc_allocator_system(), (void*)executable_data.data);
   return status;
 }
@@ -496,9 +511,9 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
 
   TargetProfilePtr target_profile;
   ResultPtr result;
-  LOOMC_ASSERT_OK(CreateHalTargetProfile(target, target_environment.get(),
-                                         device.get(), &target_profile,
-                                         &result));
+  LOOMC_ASSERT_OK(CreateHalTargetProfile(
+      target, target_environment.get(), device.get(),
+      iree_hal_queue_family(dispatch_queue), &target_profile, &result));
   if (!ResultSucceeded(result.get(), "IREE HAL target profile creation")) {
     GTEST_SKIP() << target.label << " did not produce a usable target profile";
   }
@@ -576,8 +591,8 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
   ASSERT_GE(loomc_byte_sequence_length(artifact->contents), sizeof(uint32_t));
 
   iree_hal_executable_t* executable = nullptr;
-  IREE_ASSERT_OK(PrepareExecutableFromArtifact(target, device.get(), artifact,
-                                               &executable));
+  IREE_ASSERT_OK(PrepareExecutableFromArtifact(
+      target, device.get(), dispatch_queue, artifact, &executable));
   ExecutablePtr executable_ptr(executable);
 
   std::array<int32_t, 2> input = {7, 10};

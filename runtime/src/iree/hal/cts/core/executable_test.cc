@@ -185,8 +185,8 @@ TEST_P(ExecutableTest, LookupGlobalByName) {
   ASSERT_EQ(info.byte_length, sizeof(uint64_t));
 
   iree_hal_buffer_t* global_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_global_buffer(
-      executable_, global, IREE_HAL_QUEUE_AFFINITY_ANY, &global_buffer));
+  IREE_ASSERT_OK(
+      iree_hal_executable_global_buffer(executable_, global, &global_buffer));
   ASSERT_NE(global_buffer, nullptr);
   EXPECT_EQ(iree_hal_buffer_byte_length(global_buffer), sizeof(uint64_t));
 
@@ -213,8 +213,8 @@ TEST_P(ExecutableTest, GlobalBufferVisibleToDispatch) {
   if (!found) GTEST_SKIP() << "executable testdata has no globals";
 
   iree_hal_buffer_t* global_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_global_buffer(
-      executable_, global, IREE_HAL_QUEUE_AFFINITY_ANY, &global_buffer));
+  IREE_ASSERT_OK(
+      iree_hal_executable_global_buffer(executable_, global, &global_buffer));
   ASSERT_NE(global_buffer, nullptr);
 
   const uint64_t expected_value = 0xBADDEC0DEFEED123ull;
