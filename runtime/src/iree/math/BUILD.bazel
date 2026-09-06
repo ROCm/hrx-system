@@ -1,0 +1,84 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0 with LLVM Exceptions and MIT
+)
+
+iree_runtime_cc_library(
+    name = "math",
+    srcs = [
+        "exponential.c",
+        "float_bits.h",
+        "roots.c",
+        "trigonometry.c",
+    ],
+    hdrs = [
+        "exponential.h",
+        "roots.h",
+        "trigonometry.h",
+    ],
+    # Each exported operation freezes one exact result mapping. Prevent an
+    # embedding application's fast-math flags from changing that mapping while
+    # still permitting contraction proven bit-invariant by exhaustive tests.
+    copts = select({
+        "//build_tools/bazel:cc_compiler_clang": [
+            "-fno-fast-math",
+            "-fno-math-errno",
+            "-ffp-contract=fast",
+        ],
+        "//build_tools/bazel:cc_compiler_clang_cl": [
+            "/fp:precise",
+            "/fp:contract",
+        ],
+        "//build_tools/bazel:cc_compiler_gcc": [
+            "-fno-fast-math",
+            "-fno-math-errno",
+            "-ffp-contract=fast",
+        ],
+        "//build_tools/bazel:cc_compiler_msvc": [
+            "/fp:precise",
+            "/fp:contract",
+        ],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "//runtime/src/iree/base:core_headers",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "math_test",
+    srcs = [
+        "elementary_test_util.h",
+        "exponential_test.cc",
+        "roots_test.cc",
+        "trigonometry_test.cc",
+    ],
+    deps = [
+        ":math",
+        "//runtime/src/iree/base/internal:fpu_state",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "math_benchmark",
+    srcs = ["math_benchmark.cc"],
+    deps = [
+        ":math",
+        "//runtime/src/iree/base/internal:fpu_state",
+        "//runtime/src/iree/testing:benchmark",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
