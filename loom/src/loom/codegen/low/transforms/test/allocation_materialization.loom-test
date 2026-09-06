@@ -428,3 +428,45 @@ low.func.def target<test.low.core>(@test_target) @dense_slice_reloads_per_cfg_bl
   %right_sum6 = low.op<test.add.i32>(%right_sum5, %right7) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   low.return %right_sum6 : reg<test.i32>
 }
+
+// ====
+// RUN: with-low-asm pass low-materialize-allocation{spill-storage-spaces=none}
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @rematerialize_overlapping_view() -> (reg<test.packed.wide x2>, reg<test.i32>) asm {
+  %block0 = test.const.explicit32 0
+  %block1 = test.const.explicit32 1
+  %block2 = test.const.explicit32 2
+  %block3 = test.const.explicit32 3
+  %seed = test.const.packed.narrow 4
+  %wide = test.packing.expand %seed
+  %use0 = copy %block0 : reg<test.explicit32> -> reg<test.i32>
+  %use1 = copy %block1 : reg<test.explicit32> -> reg<test.i32>
+  %use2 = copy %block2 : reg<test.explicit32> -> reg<test.i32>
+  %use3 = copy %block3 : reg<test.explicit32> -> reg<test.i32>
+  %sum01 = test.add.i32 %use0, %use1
+  %sum23 = test.add.i32 %use2, %use3
+  %sum = test.add.i32 %sum01, %sum23
+  return %wide, %sum
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @rematerialize_overlapping_view() -> (reg<test.packed.wide x2>, reg<test.i32>) asm {
+  %block0 = test.const.explicit32 0
+  %seed = test.const.packed.narrow 4
+  %wide = test.packing.expand %seed
+  %use0 = copy %block0 : reg<test.explicit32> -> reg<test.i32>
+  %block1_remat = test.const.explicit32 1
+  %use1 = copy %block1_remat : reg<test.explicit32> -> reg<test.i32>
+  %block2_remat = test.const.explicit32 2
+  %use2 = copy %block2_remat : reg<test.explicit32> -> reg<test.i32>
+  %block3_remat = test.const.explicit32 3
+  %use3 = copy %block3_remat : reg<test.explicit32> -> reg<test.i32>
+  %sum01 = test.add.i32 %use0, %use1
+  %sum23 = test.add.i32 %use2, %use3
+  %sum = test.add.i32 %sum01, %sum23
+  return %wide, %sum
+}

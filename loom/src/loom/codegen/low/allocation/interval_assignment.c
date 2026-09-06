@@ -1025,7 +1025,9 @@ iree_status_t loom_low_allocation_interval_assignment_build(
                           interval->value_id)) ||
         loom_low_allocation_spill_traffic_interval_requires_register_location(
             context->module, interval);
-    if (!assigned && (capacity.is_spillable || requires_register)) {
+    const bool interval_requires_register =
+        !capacity.is_spillable || requires_register;
+    if (!assigned) {
       IREE_RETURN_IF_ERROR(
           loom_low_allocation_interval_assignment_initialize_spill_traffic_cache(
               &state));
@@ -1034,7 +1036,7 @@ iree_status_t loom_low_allocation_interval_assignment_build(
       loom_low_allocation_search_spill_victim_set_t victim_set = {0};
       IREE_RETURN_IF_ERROR(
           loom_low_allocation_search_find_active_spill_victim_set(
-              &search_context, interval, &capacity, requires_register,
+              &search_context, interval, &capacity, interval_requires_register,
               context->arena, &victim_set));
       if (victim_set.found) {
         IREE_RETURN_IF_ERROR(

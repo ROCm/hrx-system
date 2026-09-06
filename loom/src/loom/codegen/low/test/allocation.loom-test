@@ -530,6 +530,38 @@ low.func.def target<test.low.core>(@test_target) @unspillable_active_conflict_re
 
 // ====
 
+// RUN: emit low-allocation @unspillable_evicts_spillable_physical_blocker
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @unspillable_evicts_spillable_physical_blocker(%block0: reg<test.spillable.explicit32>, %block1: reg<test.spillable.explicit32>, %block2: reg<test.spillable.explicit32>, %block3: reg<test.spillable.explicit32>, %condition: reg<test.i32>) -> (reg<test.explicit32>, reg<test.i32>) asm {
+  %protected = copy %condition : reg<test.i32> -> reg<test.explicit32>
+  %use0 = copy %block0 : reg<test.spillable.explicit32> -> reg<test.i32>
+  %use1 = copy %block1 : reg<test.spillable.explicit32> -> reg<test.i32>
+  %use2 = copy %block2 : reg<test.spillable.explicit32> -> reg<test.i32>
+  %use3 = copy %block3 : reg<test.spillable.explicit32> -> reg<test.i32>
+  %sum01 = test.add.i32 %use0, %use1
+  %sum23 = test.add.i32 %use2, %use3
+  %sum = test.add.i32 %sum01, %sum23
+  return %protected, %sum
+}
+
+// ----
+low-allocation @unspillable_evicts_spillable_physical_blocker
+target: test_target
+descriptor_set: test.low.core
+mode: virtual
+assignments: 13
+remarks: 1
+spills: 1
+copies: coalesced=0 materialized=5
+classes:
+  test.i32: assignments=8 units=8 target_ids=4 physical=0 spill_slots=0 unassigned=0
+  test.explicit32: assignments=1 units=1 target_ids=0 physical=4 spill_slots=0 unassigned=0
+  test.spillable.explicit32: assignments=4 units=4 target_ids=0 physical=3 spill_slots=1 unassigned=0
+
+// ====
+
 // RUN: emit low-allocation-json @dead_result_clobber_window
 
 test.target<low_core> @test_target

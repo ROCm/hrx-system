@@ -71,6 +71,7 @@ _REG_ALIAS64 = "test.alias64"
 _REG_PRESSURE_ALIAS32 = "test.pressure.alias32"
 _REG_PRESSURE_ALIAS64 = "test.pressure.alias64"
 _REG_EXPLICIT32 = "test.explicit32"
+_REG_SPILLABLE_EXPLICIT32 = "test.spillable.explicit32"
 _REG_FIXED_R0 = "test.fixed.r0"
 _REG_PACKED_NARROW = "test.packed.narrow"
 _REG_PACKED_WIDE = "test.packed.wide"
@@ -119,6 +120,7 @@ _I32_I64_ALT = (RegClassAlt(_REG_I32), RegClassAlt(_REG_I64))
 _PTR_ALT = (RegClassAlt(_REG_PTR),)
 _PHYS_ALT = (RegClassAlt(_REG_PHYS),)
 _SPECIAL_ALT = (RegClassAlt(_REG_SPECIAL),)
+_EXPLICIT32_ALT = (RegClassAlt(_REG_EXPLICIT32),)
 _FIXED_R0_ALT = (RegClassAlt(_REG_FIXED_R0),)
 _SCHEDULE_STATE_ALT = (RegClassAlt(_REG_SCHEDULE_STATE),)
 _PRESSURE_ALIAS32_ALT = (RegClassAlt(_REG_PRESSURE_ALIAS32),)
@@ -226,6 +228,10 @@ def _phys_result(field_name: str = "dst") -> Operand:
 
 def _phys_operand(field_name: str) -> Operand:
     return Operand(field_name, OperandRole.OPERAND, _PHYS_ALT)
+
+
+def _explicit32_result(field_name: str = "dst") -> Operand:
+    return Operand(field_name, OperandRole.RESULT, _EXPLICIT32_ALT)
 
 
 def _packed_narrow_result(field_name: str = "dst") -> Operand:
@@ -496,6 +502,20 @@ TEST_LOW_CONST_PACKED_NARROW_DESCRIPTOR = Descriptor(
     mnemonic="test.const.packed.narrow",
     semantic_tag="test.const.packed.narrow",
     operands=(_packed_narrow_result(),),
+    op_kind=DescriptorOpKind.CONST,
+    immediates=(_I32_VALUE_IMMEDIATE,),
+    constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
+    asm_forms=_asm(results=("dst",), immediates=("i32_value",)),
+    schedule_class=_SCHEDULE_CONST,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    instruction_classes=(InstructionClass.OTHER,),
+)
+
+TEST_LOW_CONST_EXPLICIT32_DESCRIPTOR = Descriptor(
+    key="test.const.explicit32",
+    mnemonic="test.const.explicit32",
+    semantic_tag="test.const.explicit32",
+    operands=(_explicit32_result(),),
     op_kind=DescriptorOpKind.CONST,
     immediates=(_I32_VALUE_IMMEDIATE,),
     constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
@@ -1666,6 +1686,21 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             ),
         ),
         RegClass(
+            _REG_SPILLABLE_EXPLICIT32,
+            32,
+            SpillSlotSpace.STACK,
+            flags=(
+                RegClassFlag.PHYSICAL,
+                RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
+            ),
+            physical_registers=(
+                "test.r0",
+                "test.r1",
+                "test.r2",
+                "test.r3",
+            ),
+        ),
+        RegClass(
             _REG_FIXED_R0,
             32,
             SpillSlotSpace.PRIVATE,
@@ -1976,6 +2011,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_CONST_I32_DESCRIPTOR,
         TEST_LOW_CONST_ZERO_I32_DESCRIPTOR,
         TEST_LOW_CONST_PACKED_NARROW_DESCRIPTOR,
+        TEST_LOW_CONST_EXPLICIT32_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
         TEST_LOW_ADD_I32_DESCRIPTOR,
         TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
