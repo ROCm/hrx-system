@@ -159,6 +159,13 @@ static bool HostQueueHasPendingOps(iree_hal_amdgpu_host_queue_t* queue) {
   return has_pending_ops;
 }
 
+static bool HostQueueHasPostDrainAction(iree_hal_amdgpu_host_queue_t* queue) {
+  iree_slim_mutex_lock(&queue->locks.post_drain_mutex);
+  const bool has_action = queue->post_drain.head != NULL;
+  iree_slim_mutex_unlock(&queue->locks.post_drain_mutex);
+  return has_action;
+}
+
 static iree_status_code_t HostQueueErrorStatusCode(
     iree_hal_amdgpu_host_queue_t* queue) {
   return iree_status_code((iree_status_t)iree_atomic_load(
@@ -639,7 +646,7 @@ TEST_F(HostQueueFailureTest, CapacityParkedOperationReportsRecordedFailure) {
         target_buffer,
         /*target_offset=*/0, sizeof(pattern), &pattern, sizeof(pattern),
         IREE_HAL_FILL_FLAG_NONE));
-    parked = HostQueueHasPendingOps(queue);
+    parked = HostQueueHasPostDrainAction(queue);
   }
   ASSERT_TRUE(parked) << "no submission ran out of capacity";
 

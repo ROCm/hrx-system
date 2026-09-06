@@ -481,8 +481,14 @@ static void iree_hal_amdgpu_transfer_child_capacity_post_drain(
   iree_hal_amdgpu_transfer_transaction_t* transaction = child->transaction;
   iree_slim_mutex_lock(&transaction->queue->locks.submission_mutex);
   bool ready = false;
+  // A recorded failure outranks the closed admission observed by a capacity
+  // retry resumed from the terminal transition's post-drain flush.
   iree_status_t status =
-      iree_hal_amdgpu_transfer_try_submit_native_under_lock(child, &ready);
+      iree_hal_amdgpu_host_queue_clone_error_status(transaction->queue);
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_amdgpu_transfer_try_submit_native_under_lock(child, &ready);
+  }
   if (iree_status_is_ok(status) && !ready) {
     iree_hal_resource_retain(&transaction->resource);
     iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
@@ -504,18 +510,13 @@ static void iree_hal_amdgpu_transfer_enqueue_capacity_retry(
       iree_hal_amdgpu_transfer_child_capacity_post_drain, child);
 }
 
-static void iree_hal_amdgpu_transfer_start(
+static iree_status_t iree_hal_amdgpu_transfer_start(
     iree_hal_amdgpu_transfer_transaction_t* transaction) {
-  iree_status_t queue_status =
-      iree_hal_amdgpu_host_queue_clone_error_status(transaction->queue);
-  if (!iree_status_is_ok(queue_status)) {
-    transaction->remaining_child_count = 0;
-    transaction->failure_status = queue_status;
-    iree_hal_amdgpu_transfer_publish_signals(transaction);
-    return;
-  }
-
   iree_slim_mutex_lock(&transaction->queue->locks.submission_mutex);
+  if (IREE_UNLIKELY(transaction->queue->is_shutting_down)) {
+    iree_slim_mutex_unlock(&transaction->queue->locks.submission_mutex);
+    return iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
+  }
   for (iree_host_size_t i = 0; i < transaction->operation_count; ++i) {
     iree_hal_amdgpu_transfer_child_t* child = &transaction->children[i];
     const iree_hal_transfer_operation_t* operation =
@@ -563,6 +564,7 @@ static void iree_hal_amdgpu_transfer_start(
       iree_hal_amdgpu_transfer_child_finish(child, status);
     }
   }
+  return iree_ok_status();
 }
 
 static void iree_hal_amdgpu_transfer_start_post_drain(void* user_data) {
@@ -571,8 +573,15 @@ static void iree_hal_amdgpu_transfer_start_post_drain(void* user_data) {
   iree_status_t status = transaction->start_status;
   transaction->start_status = iree_ok_status();
   if (iree_status_is_ok(status)) {
-    iree_hal_amdgpu_transfer_start(transaction);
-  } else {
+    // Accepted transfers resumed by a terminal failure report the recorded
+    // cause, while a new call made after admission closes is rejected by
+    // |transfer_start| with CANCELLED.
+    status = iree_hal_amdgpu_host_queue_clone_error_status(transaction->queue);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_transfer_start(transaction);
+  }
+  if (!iree_status_is_ok(status)) {
     transaction->remaining_child_count = 0;
     transaction->failure_status = status;
     iree_hal_amdgpu_transfer_publish_signals(transaction);
@@ -626,9 +635,9 @@ iree_status_t iree_hal_amdgpu_host_queue_enqueue_transfer(
       operations, &transaction));
 
   if (wait_semaphore_list.count == 0) {
-    iree_hal_amdgpu_transfer_start(transaction);
+    iree_status_t status = iree_hal_amdgpu_transfer_start(transaction);
     iree_hal_resource_release(&transaction->resource);
-    return iree_ok_status();
+    return status;
   }
 
   iree_hal_resource_t* resources[1] = {&transaction->resource};
