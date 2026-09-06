@@ -254,6 +254,28 @@ def test_validate_c_table_shape_rejects_emit_source_memory_ordinal_oob() -> None
     )
 
 
+def test_validate_c_table_shape_rejects_oversized_emit_count_field() -> None:
+    attr_copy = LowerAttrCopy(
+        kind=LowerAttrCopyKind.I64_LITERAL,
+        target_name="value",
+    )
+    table = _compiled_lower_rule_set(
+        attr_copies=(attr_copy,) * 256,
+        emits=(
+            LowerEmit(
+                kind=LowerEmitKind.DESCRIPTOR_CONST,
+                descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                attr_copy_count=256,
+            ),
+        ),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "lower-rule set 'test.low.generated_c_shape' emit 0 attr-copy count exceeds uint8_t",
+    )
+
+
 def test_validate_c_table_shape_rejects_span_rule_range_mismatch() -> None:
     table = _compiled_lower_rule_set(
         rules=(
@@ -448,6 +470,9 @@ def test_generate_lower_rule_set_emits_report_key_ordinals() -> None:
     assert ".report_key_ordinal = 1," in generated.source
     assert ".report_key_string_offsets = " in generated.source
     assert ".report_key_count = IREE_ARRAYSIZE(" in generated.source
+    assert "static const loom_low_lower_emit_ref_t" in generated.source
+    assert ".emit_refs = " in generated.source
+    assert ".emit_ref_count = IREE_ARRAYSIZE(" in generated.source
 
 
 def test_validate_c_table_shape_rejects_invalid_report_key() -> None:
@@ -703,6 +728,24 @@ def test_generated_tables_intern_guards_and_diagnostic_params() -> None:
     unique_guards, guard_refs = _intern_rows(guards)
     assert unique_guards == (guards[0], guards[2])
     assert guard_refs == (0, 0, 1)
+
+    emits = (
+        LowerEmit(
+            kind=LowerEmitKind.DESCRIPTOR_OP,
+            descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+        ),
+        LowerEmit(
+            kind=LowerEmitKind.DESCRIPTOR_OP,
+            descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+        ),
+        LowerEmit(
+            kind=LowerEmitKind.DESCRIPTOR_OP,
+            descriptor=TEST_LOW_MUL_I32_DESCRIPTOR,
+        ),
+    )
+    unique_emits, emit_refs = _intern_rows(emits)
+    assert unique_emits == (emits[0], emits[2])
+    assert emit_refs == (0, 0, 1)
 
     params = (
         LowerDiagnosticParam(

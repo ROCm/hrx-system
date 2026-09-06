@@ -871,7 +871,10 @@ def rule_set_row(
     guard_refs_name: str,
     attr_copies_name: str,
     tied_results_name: str,
+    emit_rows: tuple[LowerEmit, ...],
     emits_name: str,
+    emit_refs: tuple[int, ...],
+    emit_refs_name: str,
     diagnostics_name: str,
 ) -> list[str]:
     fields: list[str] = []
@@ -928,7 +931,8 @@ def rule_set_row(
     _append_table_fields(fields, "guard_refs", guard_refs, guard_refs_name)
     _append_table_fields(fields, "attr_copies", table.attr_copies, attr_copies_name)
     _append_table_fields(fields, "tied_results", table.tied_results, tied_results_name)
-    _append_table_fields(fields, "emits", table.emits, emits_name)
+    _append_table_fields(fields, "emit_refs", emit_refs, emit_refs_name)
+    _append_table_fields(fields, "emits", emit_rows, emits_name)
     _append_table_fields(fields, "diagnostics", table.diagnostics, diagnostics_name)
     return fields
 

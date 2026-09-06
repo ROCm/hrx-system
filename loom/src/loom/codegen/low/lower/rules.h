@@ -723,16 +723,11 @@ typedef struct loom_low_lower_emit_t {
   loom_low_lower_descriptor_ref_t descriptor_ref;
   // First value-ref table row copied as a low operand.
   uint16_t operand_ref_start;
-  // Number of low operands to copy from value-ref rows.
-  uint16_t operand_ref_count;
   // Bitmask of emitted low operand ordinals copied through low.copy before the
   // descriptor op consumes them. The copy uses the descriptor operand's
   // concrete register class, supporting destructive/tied operands and fixed
   // physical-register constraints without changing source SSA values.
   uint16_t copy_operand_mask;
-  // Operand ordinal that carries the threaded scalar accumulator for
-  // DESCRIPTOR_OP_ACCUMULATE_LANES.
-  uint16_t accumulator_operand_index;
   // First value-ref table row mapped as a low result.
   //
   // Result type refs must address source results. When
@@ -742,19 +737,13 @@ typedef struct loom_low_lower_emit_t {
   // First exact type-pattern table row mapped as a low result type when
   // RESULT_TYPE_PATTERN is set.
   uint16_t result_type_pattern_start;
-  // Number of low results to map and bind.
-  uint16_t result_ref_count;
   // First value-ref table row receiving emitted low results when
   // BIND_RESULTS_TO_REFS is set.
   uint16_t result_bind_ref_start;
   // First attr-copy table row emitted onto the low packet.
   uint16_t attr_copy_start;
-  // Number of attributes copied onto the low packet.
-  uint16_t attr_copy_count;
   // First tied-result table row forwarded to the low packet builder.
   uint16_t tied_result_start;
-  // Number of tied-result rows forwarded to the low packet builder.
-  uint16_t tied_result_count;
   // One-based source-memory row recorded by this descriptor emit. Zero means
   // the emit is not a source memory access.
   uint16_t source_memory_ordinal;
@@ -763,9 +752,23 @@ typedef struct loom_low_lower_emit_t {
   // Explicit result register-unit count consumed by REGISTER_SLICE. Zero maps
   // the result type through the normal result reference or type pattern.
   uint16_t structural_unit_count;
+  // Number of low operands to copy from value-ref rows.
+  uint8_t operand_ref_count;
+  // Operand ordinal that carries the threaded scalar accumulator for
+  // DESCRIPTOR_OP_ACCUMULATE_LANES.
+  uint8_t accumulator_operand_index;
+  // Number of low results to map and bind.
+  uint8_t result_ref_count;
+  // Number of attributes copied onto the low packet.
+  uint8_t attr_copy_count;
+  // Number of tied-result rows forwarded to the low packet builder.
+  uint8_t tied_result_count;
 } loom_low_lower_emit_t;
-static_assert(sizeof(loom_low_lower_emit_t) == 34,
-              "loom_low_lower_emit_t must be 34 bytes");
+static_assert(sizeof(loom_low_lower_emit_t) == 30,
+              "loom_low_lower_emit_t must be 30 bytes");
+
+// Ordinal into a rule set's interned emit table.
+typedef uint16_t loom_low_lower_emit_ref_t;
 
 typedef uint16_t loom_low_lower_rule_flags_t;
 
@@ -796,9 +799,9 @@ typedef struct loom_low_lower_rule_t {
   uint16_t guard_start;
   // Number of guard refs for this rule.
   uint16_t guard_count;
-  // First emit-program table row for this rule.
+  // First emit-reference row for this rule's program.
   uint16_t emit_start;
-  // Number of emit-program rows for this rule.
+  // Number of emit-reference rows for this rule's program.
   uint16_t emit_count;
   // First value-ref pair whose source operand aliases a source result.
   uint16_t alias_ref_start;
@@ -888,7 +891,11 @@ typedef struct loom_low_lower_rule_set_t {
   const loom_tied_result_t* tied_results;
   // Number of rows in tied_results.
   uint16_t tied_result_count;
-  // Emit-program rows referenced by rules.
+  // Emit refs addressed by rule emit-program spans.
+  const loom_low_lower_emit_ref_t* emit_refs;
+  // Number of rows in emit_refs.
+  uint16_t emit_ref_count;
+  // Interned emit rows referenced by emit_refs.
   const loom_low_lower_emit_t* emits;
   // Number of rows in emits.
   uint16_t emit_count;
@@ -897,6 +904,12 @@ typedef struct loom_low_lower_rule_set_t {
   // Number of rows in diagnostics.
   uint16_t diagnostic_count;
 } loom_low_lower_rule_set_t;
+
+// Resolves one emit-program position to its interned emit row.
+static inline const loom_low_lower_emit_t* loom_low_lower_rule_set_emit_at(
+    const loom_low_lower_rule_set_t* rule_set, uint16_t emit_ref_index) {
+  return &rule_set->emits[rule_set->emit_refs[emit_ref_index]];
+}
 
 // Returns the trusted rule-set B-string at |string_offset|.
 static inline iree_string_view_t loom_low_lower_rule_set_string(

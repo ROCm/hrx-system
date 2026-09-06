@@ -315,6 +315,7 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
   loom_low_lower_emit_t emit = {};
   emit.kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP;
   emit.descriptor_ref = 0;
+  const loom_low_lower_emit_ref_t emit_ref = 0;
   loom_low_lower_rule_t rule = {};
   rule.source_op_kind = kSourceOpKind;
   rule.emit_count = 1;
@@ -324,6 +325,8 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
   rule_set.rule_count = 1;
   rule_set.descriptor_refs = &descriptor_ref;
   rule_set.descriptor_ref_count = 1;
+  rule_set.emit_refs = &emit_ref;
+  rule_set.emit_ref_count = 1;
   rule_set.emits = &emit;
   rule_set.emit_count = 1;
   const loom_low_lower_rule_set_t* rule_sets[] = {&rule_set};
@@ -577,24 +580,11 @@ TEST_F(LowContractQuerySourceMemoryTest,
   source_memory.dynamic_index_source =
       LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE;
   source_memory.dynamic_byte_stride = 4;
-  const loom_low_lower_emit_t emit = {
-      /*.kind=*/LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP,
-      /*.flags=*/0,
-      /*.descriptor_ref=*/LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE,
-      /*.operand_ref_start=*/0,
-      /*.operand_ref_count=*/0,
-      /*.copy_operand_mask=*/0,
-      /*.accumulator_operand_index=*/0,
-      /*.result_ref_start=*/0,
-      /*.result_type_pattern_start=*/0,
-      /*.result_ref_count=*/0,
-      /*.result_bind_ref_start=*/0,
-      /*.attr_copy_start=*/0,
-      /*.attr_copy_count=*/0,
-      /*.tied_result_start=*/0,
-      /*.tied_result_count=*/0,
-      /*.source_memory_ordinal=*/1,
-  };
+  loom_low_lower_emit_t emit = {};
+  emit.kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP;
+  emit.descriptor_ref = LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE;
+  emit.source_memory_ordinal = 1;
+  const loom_low_lower_emit_ref_t emit_ref = 0;
   loom_low_lower_rule_t rule = {};
   rule.source_op_kind = LOOM_OP_VECTOR_LOAD;
   rule.emit_count = 1;
@@ -604,6 +594,8 @@ TEST_F(LowContractQuerySourceMemoryTest,
   rule_set.rule_count = 1;
   rule_set.source_memories = &source_memory;
   rule_set.source_memory_count = 1;
+  rule_set.emit_refs = &emit_ref;
+  rule_set.emit_ref_count = 1;
   rule_set.emits = &emit;
   rule_set.emit_count = 1;
   const loom_low_lower_rule_set_t* rule_sets[] = {&rule_set};

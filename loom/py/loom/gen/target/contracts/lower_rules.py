@@ -385,12 +385,22 @@ def _generate_source(
         )
     )
 
+    unique_emits, emit_refs = _intern_rows(table.emits)
     emits_name = f"k{c_table_prefix}Emits"
     lines.extend(
         lower_rule_rows.emit_optional_array(
             emits_name,
             "loom_low_lower_emit_t",
-            [lower_rule_rows.emit_row(descriptor_refs, row) for row in table.emits],
+            [lower_rule_rows.emit_row(descriptor_refs, row) for row in unique_emits],
+        )
+    )
+
+    emit_refs_name = f"k{c_table_prefix}EmitRefs"
+    lines.extend(
+        lower_rule_rows.emit_optional_value_array(
+            emit_refs_name,
+            "loom_low_lower_emit_ref_t",
+            [str(ref) for ref in emit_refs],
         )
     )
 
@@ -449,7 +459,10 @@ def _generate_source(
             guard_refs_name=guard_refs_name,
             attr_copies_name=attr_copies_name,
             tied_results_name=tied_results_name,
+            emit_rows=unique_emits,
             emits_name=emits_name,
+            emit_refs=emit_refs,
+            emit_refs_name=emit_refs_name,
             diagnostics_name=diagnostics_name,
         )
     )
@@ -761,7 +774,7 @@ def _validate_c_table_shape(
         row_subject = f"{subject} emit {index}"
         _require_u8(row.flags, f"{row_subject} flags")
         _require_u16(row.operand_ref_start, f"{row_subject} operand-ref start")
-        _require_u16(row.operand_ref_count, f"{row_subject} operand-ref count")
+        _require_u8(row.operand_ref_count, f"{row_subject} operand-ref count")
         _require_table_range(
             row.operand_ref_start,
             row.operand_ref_count,
@@ -774,7 +787,7 @@ def _validate_c_table_shape(
             allowed_operand_mask = (1 << row.operand_ref_count) - 1
             if row.copy_operand_mask & ~allowed_operand_mask:
                 raise ValueError(f"{row_subject} copy operand mask references an operand outside operand-ref range: {row.copy_operand_mask}")
-        _require_u16(
+        _require_u8(
             row.accumulator_operand_index,
             f"{row_subject} accumulator operand index",
         )
@@ -785,7 +798,7 @@ def _validate_c_table_shape(
             row.result_type_pattern_start,
             f"{row_subject} result type-pattern start",
         )
-        _require_u16(row.result_ref_count, f"{row_subject} result-ref count")
+        _require_u8(row.result_ref_count, f"{row_subject} result-ref count")
         if row.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN and row.flags & LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE:
             raise ValueError(f"{row_subject} cannot use both result type-pattern and descriptor result-type flags")
         if row.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN:
@@ -817,7 +830,7 @@ def _validate_c_table_shape(
                 "value-ref",
             )
         _require_u16(row.attr_copy_start, f"{row_subject} attr-copy start")
-        _require_u16(row.attr_copy_count, f"{row_subject} attr-copy count")
+        _require_u8(row.attr_copy_count, f"{row_subject} attr-copy count")
         _require_table_range(
             row.attr_copy_start,
             row.attr_copy_count,
@@ -826,7 +839,7 @@ def _validate_c_table_shape(
             "attr-copy",
         )
         _require_u16(row.tied_result_start, f"{row_subject} tied-result start")
-        _require_u16(row.tied_result_count, f"{row_subject} tied-result count")
+        _require_u8(row.tied_result_count, f"{row_subject} tied-result count")
         _require_table_range(
             row.tied_result_start,
             row.tied_result_count,

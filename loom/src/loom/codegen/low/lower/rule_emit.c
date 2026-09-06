@@ -306,8 +306,9 @@ iree_status_t loom_low_lower_rule_set_resolve_emit_program(
       &match_context);
   match_context.policy_rule_set_ordinal = (uint16_t)(rule_set_index + 1u);
   for (uint16_t i = 0; i < rule->emit_count; ++i) {
-    const uint16_t emit_index = (uint16_t)(rule->emit_start + i);
-    const loom_low_lower_emit_t* emit = &rule_set->emits[emit_index];
+    const uint16_t emit_ref_index = (uint16_t)(rule->emit_start + i);
+    const loom_low_lower_emit_t* emit =
+        loom_low_lower_rule_set_emit_at(rule_set, emit_ref_index);
     resolved_emits[i].emit = emit;
     resolved_emits[i].descriptor = (loom_low_lower_resolved_descriptor_t){0};
     if (emit->descriptor_ref == LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
@@ -1854,8 +1855,9 @@ iree_status_t loom_low_lower_rule_set_emit_rule(
   IREE_RETURN_IF_ERROR(
       loom_low_lower_rule_emit_state_initialize(context, rule, &state));
   for (uint16_t i = 0; i < rule->emit_count; ++i) {
-    uint16_t emit_index = (uint16_t)(rule->emit_start + i);
-    const loom_low_lower_emit_t* emit = &rule_set->emits[emit_index];
+    const uint16_t emit_ref_index = (uint16_t)(rule->emit_start + i);
+    const loom_low_lower_emit_t* emit =
+        loom_low_lower_rule_set_emit_at(rule_set, emit_ref_index);
     const loom_low_lower_resolved_emit_t* resolved_emit = &resolved_emits[i];
     IREE_ASSERT(resolved_emit->emit == emit);
     if (emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_PER_LANE_SEQUENCE) {

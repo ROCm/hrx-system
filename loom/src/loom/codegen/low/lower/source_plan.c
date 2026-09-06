@@ -334,8 +334,9 @@ static void loom_low_lower_mark_rule_storage_demands(
   IREE_ASSERT(rule != NULL);
   for (uint16_t emit_ordinal = 0; emit_ordinal < rule->emit_count;
        ++emit_ordinal) {
-    const uint16_t emit_index = (uint16_t)(rule->emit_start + emit_ordinal);
-    const loom_low_lower_emit_t* emit = &rule_set->emits[emit_index];
+    const uint16_t emit_ref_index = (uint16_t)(rule->emit_start + emit_ordinal);
+    const loom_low_lower_emit_t* emit =
+        loom_low_lower_rule_set_emit_at(rule_set, emit_ref_index);
     for (uint16_t operand_ordinal = 0;
          operand_ordinal < emit->operand_ref_count; ++operand_ordinal) {
       const uint16_t value_ref_index =
