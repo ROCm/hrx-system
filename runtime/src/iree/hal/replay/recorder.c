@@ -353,7 +353,8 @@ iree_status_t iree_hal_replay_recorder_end_operation_with_payload(
   iree_hal_replay_recorder_fail_locked(recorder,
                                        iree_status_code(record_status));
   iree_slim_mutex_unlock(&recorder->mutex);
-  return iree_status_join(record_status, operation_status);
+  iree_status_free(record_status);
+  return operation_status;
 }
 
 iree_status_t iree_hal_replay_recorder_end_operation(
@@ -410,7 +411,8 @@ iree_status_t iree_hal_replay_recorder_end_creation_operation_list(
   iree_hal_replay_recorder_fail_locked(recorder,
                                        iree_status_code(record_status));
   iree_slim_mutex_unlock(&recorder->mutex);
-  return iree_status_join(record_status, operation_status);
+  iree_status_free(record_status);
+  return operation_status;
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_replay_recorder_create(

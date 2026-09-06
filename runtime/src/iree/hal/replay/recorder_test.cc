@@ -16,6 +16,7 @@
 #include "iree/hal/drivers/task/registration/driver_module.h"
 #include "iree/hal/replay/execute.h"
 #include "iree/hal/replay/file_reader.h"
+#include "iree/hal/replay/recorder_record.h"
 #include "iree/hal/testing/mock_device.h"
 #include "iree/io/file_contents.h"
 #include "iree/testing/gtest.h"
@@ -489,6 +490,27 @@ TEST(ReplayRecorderTest, RecordsNamedScopes) {
   EXPECT_EQ(1u, summary.scope.begin_record_count);
   EXPECT_EQ(1u, summary.scope.end_record_count);
   EXPECT_EQ("execute", summary.scope.last_name);
+}
+
+TEST(ReplayRecorderTest, RecordingFailurePreservesOperationStatus) {
+  std::vector<uint8_t> storage(1024, 0);
+  iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
+
+  iree_hal_replay_pending_record_t pending_record = {};
+  IREE_ASSERT_OK(iree_hal_replay_recorder_begin_operation(
+      recorder, IREE_HAL_REPLAY_OBJECT_ID_NONE, IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      IREE_HAL_REPLAY_OBJECT_ID_NONE, IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER,
+      IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_BARRIER, &pending_record));
+  std::vector<uint8_t> oversized_payload(storage.size() * 2, 0);
+  const iree_const_byte_span_t payload = iree_make_const_byte_span(
+      oversized_payload.data(), oversized_payload.size());
+  IREE_EXPECT_OK(iree_hal_replay_recorder_end_operation_with_payload(
+      &pending_record, iree_ok_status(), /*iovec_count=*/1, &payload));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_hal_replay_recorder_close(recorder));
+  iree_hal_replay_recorder_release(recorder);
 }
 
 TEST(ReplayRecorderTest, WrapDeviceGroupRecordsOrderedDeviceOperations) {

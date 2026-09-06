@@ -95,15 +95,25 @@ iree_hal_replay_object_id_t iree_hal_replay_recorder_semaphore_id_or_none(
 void iree_hal_replay_recorder_mark_unsupported(
     iree_hal_replay_pending_record_t* pending_record);
 
+// Completes |pending_record| and returns |operation_status| unchanged.
+// Record write failures become terminal recorder failures reported by
+// iree_hal_replay_recorder_close.
 iree_status_t iree_hal_replay_recorder_end_operation(
     iree_hal_replay_pending_record_t* pending_record,
     iree_status_t operation_status);
 
+// Completes |pending_record| with |iovecs| and returns |operation_status|
+// unchanged. Record write failures become terminal recorder failures reported
+// by iree_hal_replay_recorder_close.
 iree_status_t iree_hal_replay_recorder_end_operation_with_payload(
     iree_hal_replay_pending_record_t* pending_record,
     iree_status_t operation_status, iree_host_size_t iovec_count,
     const iree_const_byte_span_t* iovecs);
 
+// Completes a creation operation and atomically appends its successfully
+// created object record before releasing the recorder mutex. Returns
+// |operation_status| unchanged; record write failures become terminal recorder
+// failures reported by iree_hal_replay_recorder_close.
 iree_status_t iree_hal_replay_recorder_end_creation_operation(
     iree_hal_replay_pending_record_t* pending_record,
     iree_status_t operation_status, iree_host_size_t operation_iovec_count,
@@ -115,7 +125,9 @@ iree_status_t iree_hal_replay_recorder_end_creation_operation(
     const iree_const_byte_span_t* object_iovecs);
 
 // Completes a creation operation and atomically appends all successfully
-// created object records before releasing the recorder mutex.
+// created object records before releasing the recorder mutex. Returns
+// |operation_status| unchanged; record write failures become terminal recorder
+// failures reported by iree_hal_replay_recorder_close.
 iree_status_t iree_hal_replay_recorder_end_creation_operation_list(
     iree_hal_replay_pending_record_t* pending_record,
     iree_status_t operation_status, iree_host_size_t operation_iovec_count,
