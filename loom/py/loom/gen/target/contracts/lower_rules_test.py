@@ -1067,8 +1067,8 @@ def test_generate_lower_rule_set_emits_static_element_count_type_pattern() -> No
     type_pattern_start = generated.source.index("LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_ELEMENT_COUNT_RANGE")
     type_pattern_end = generated.source.index("},", type_pattern_start)
     type_pattern_text = generated.source[type_pattern_start:type_pattern_end]
-    assert ".static_element_count_min = 1," in type_pattern_text
-    assert ".static_element_count_max = 8," in type_pattern_text
+    assert ".shape.static_element_count_range.minimum = 1," in type_pattern_text
+    assert ".shape.static_element_count_range.maximum = 8," in type_pattern_text
 
     guard_start = generated.source.index("LOOM_LOW_LOWER_GUARD_VECTOR_EXTRACT_SHAPE")
     guard_end = generated.source.index("},", guard_start)
@@ -1098,8 +1098,8 @@ def test_generate_lower_rule_set_emits_exact_view_shape_type_pattern() -> None:
     type_pattern_text = generated.source[type_pattern_start:type_pattern_end]
     assert ".type_kind = LOOM_TYPE_VIEW," in type_pattern_text
     assert ".rank = 2," in type_pattern_text
-    assert ".static_dim0 = 4," in type_pattern_text
-    assert ".static_dim1 = 8," in type_pattern_text
+    assert ".shape.exact.dim0 = 4," in type_pattern_text
+    assert ".shape.exact.dim1 = 8," in type_pattern_text
 
 
 def test_generate_lower_rule_set_emits_source_instance_flags_projection() -> None:

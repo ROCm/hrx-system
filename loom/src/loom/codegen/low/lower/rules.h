@@ -40,14 +40,14 @@ typedef uint16_t loom_low_lower_type_pattern_flags_t;
 #define LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_ELEMENT ((uint16_t)1u << 1)
 // Shaped rank must match rank.
 #define LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_RANK ((uint16_t)1u << 2)
-// First shaped dimension must be statically equal to static_dim0.
+// First shaped dimension must equal shape.exact.dim0.
 #define LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM0 ((uint16_t)1u << 3)
-// First shaped dimension must be inside [static_dim0_min, static_dim0_max].
+// First shaped dimension must be inside shape.dim0_range.
 #define LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM0_RANGE ((uint16_t)1u << 4)
-// Second shaped dimension must be statically equal to static_dim1.
+// Second shaped dimension must equal shape.exact.dim1.
 #define LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM1 ((uint16_t)1u << 5)
 // Total static shaped element count must be inside
-// [static_element_count_min, static_element_count_max].
+// shape.static_element_count_range.
 #define LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_ELEMENT_COUNT_RANGE \
   ((uint16_t)1u << 6)
 
@@ -56,25 +56,39 @@ typedef struct loom_low_lower_type_pattern_t {
   loom_low_lower_type_pattern_flags_t flags;
   // Required type kind when the KIND flag is set.
   loom_type_kind_t type_kind;
-  // Allowed element scalar types when the ELEMENT flag is set.
-  uint64_t element_type_mask;
   // Required rank when the RANK flag is set.
   uint8_t rank;
-  // Required static dimension 0 when the STATIC_DIM0 flag is set.
-  int64_t static_dim0;
-  // Inclusive minimum static dimension 0 when STATIC_DIM0_RANGE is set.
-  int64_t static_dim0_min;
-  // Inclusive maximum static dimension 0 when STATIC_DIM0_RANGE is set.
-  int64_t static_dim0_max;
-  // Required static dimension 1 when the STATIC_DIM1 flag is set.
-  int64_t static_dim1;
-  // Inclusive minimum total static element count when
-  // STATIC_ELEMENT_COUNT_RANGE is set.
-  uint64_t static_element_count_min;
-  // Inclusive maximum total static element count when
-  // STATIC_ELEMENT_COUNT_RANGE is set.
-  uint64_t static_element_count_max;
+  // Allowed element scalar types when the ELEMENT flag is set.
+  uint64_t element_type_mask;
+  // Shape constraint selected by the static-shape flags. Python generation
+  // proves that exact dimensions, a dimension range, and a total-element range
+  // are mutually exclusive.
+  union {
+    // Exact static dimensions used by STATIC_DIM0 and STATIC_DIM1.
+    struct {
+      // Required first static dimension.
+      int64_t dim0;
+      // Required second static dimension.
+      int64_t dim1;
+    } exact;
+    // Inclusive first-dimension range used by STATIC_DIM0_RANGE.
+    struct {
+      // Inclusive minimum first dimension.
+      int64_t minimum;
+      // Inclusive maximum first dimension.
+      int64_t maximum;
+    } dim0_range;
+    // Inclusive total-element range used by STATIC_ELEMENT_COUNT_RANGE.
+    struct {
+      // Inclusive minimum total static element count.
+      uint64_t minimum;
+      // Inclusive maximum total static element count.
+      uint64_t maximum;
+    } static_element_count_range;
+  } shape;
 } loom_low_lower_type_pattern_t;
+static_assert(sizeof(loom_low_lower_type_pattern_t) == 32,
+              "lower type-pattern rows must remain compact");
 
 typedef uint8_t loom_low_lower_value_ref_kind_t;
 

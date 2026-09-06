@@ -139,19 +139,20 @@ static loom_type_t loom_low_lower_rule_type_pattern_exact_type(
   IREE_ASSERT(iree_all_bits_set(
       pattern->flags, LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_RANK |
                           LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM0));
-  IREE_ASSERT_GE(pattern->static_dim0, 0);
+  IREE_ASSERT_GE(pattern->shape.exact.dim0, 0);
   if (pattern->rank == 2) {
     IREE_ASSERT(iree_all_bits_set(
         pattern->flags, LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM1));
-    IREE_ASSERT_GE(pattern->static_dim1, 0);
+    IREE_ASSERT_GE(pattern->shape.exact.dim1, 0);
     return loom_type_shaped_2d(pattern->type_kind, element_type,
-                               loom_dim_pack_static(pattern->static_dim0),
-                               loom_dim_pack_static(pattern->static_dim1),
+                               loom_dim_pack_static(pattern->shape.exact.dim0),
+                               loom_dim_pack_static(pattern->shape.exact.dim1),
                                /*encoding_id=*/0);
   }
   IREE_ASSERT_EQ(pattern->rank, 1);
   return loom_type_shaped_1d(pattern->type_kind, element_type,
-                             loom_dim_pack_static(pattern->static_dim0), 0);
+                             loom_dim_pack_static(pattern->shape.exact.dim0),
+                             0);
 }
 
 static double loom_low_lower_rule_attr_copy_exact_float(

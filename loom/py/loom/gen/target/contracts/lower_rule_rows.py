@@ -1003,33 +1003,33 @@ def type_pattern_row(type_pattern: TypePattern) -> list[str]:
         row.extend(
             [
                 f".rank = {len(type_pattern.dims)}",
-                f".static_dim0 = {lower_rule_spelling.c_expression(type_pattern.dims[0])}",
+                f".shape.exact.dim0 = {lower_rule_spelling.c_expression(type_pattern.dims[0])}",
             ]
         )
         row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM0"
         if len(type_pattern.dims) >= 2:
             row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM1"
-            row.append(f".static_dim1 = {lower_rule_spelling.c_expression(type_pattern.dims[1])}")
+            row.append(f".shape.exact.dim1 = {lower_rule_spelling.c_expression(type_pattern.dims[1])}")
     elif type_pattern.kind == "vector":
         if type_pattern.lanes is not None:
             row.append(".rank = 1")
             row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_RANK | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM0"
-            row.append(f".static_dim0 = {lower_rule_spelling.c_expression(type_pattern.lanes)}")
+            row.append(f".shape.exact.dim0 = {lower_rule_spelling.c_expression(type_pattern.lanes)}")
         elif type_pattern.minimum_lanes is not None and type_pattern.maximum_lanes is not None:
             row.append(".rank = 1")
             row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_RANK | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM0_RANGE"
             row.extend(
                 [
-                    f".static_dim0_min = {lower_rule_spelling.c_expression(type_pattern.minimum_lanes)}",
-                    f".static_dim0_max = {lower_rule_spelling.c_expression(type_pattern.maximum_lanes)}",
+                    f".shape.dim0_range.minimum = {lower_rule_spelling.c_expression(type_pattern.minimum_lanes)}",
+                    f".shape.dim0_range.maximum = {lower_rule_spelling.c_expression(type_pattern.maximum_lanes)}",
                 ]
             )
         elif type_pattern.minimum_static_elements is not None and type_pattern.maximum_static_elements is not None:
             row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_ELEMENT_COUNT_RANGE"
             row.extend(
                 [
-                    f".static_element_count_min = {lower_rule_spelling.c_expression(type_pattern.minimum_static_elements)}",
-                    f".static_element_count_max = {lower_rule_spelling.c_expression(type_pattern.maximum_static_elements)}",
+                    f".shape.static_element_count_range.minimum = {lower_rule_spelling.c_expression(type_pattern.minimum_static_elements)}",
+                    f".shape.static_element_count_range.maximum = {lower_rule_spelling.c_expression(type_pattern.maximum_static_elements)}",
                 ]
             )
         else:

@@ -193,7 +193,7 @@ static bool loom_low_lower_rule_type_matches(
     if (loom_type_rank(type) == 0 || loom_type_dim_is_dynamic_at(type, 0)) {
       return false;
     }
-    if (loom_type_dim_static_size_at(type, 0) != pattern->static_dim0) {
+    if (loom_type_dim_static_size_at(type, 0) != pattern->shape.exact.dim0) {
       return false;
     }
   }
@@ -203,8 +203,8 @@ static bool loom_low_lower_rule_type_matches(
       return false;
     }
     const int64_t static_dim0 = loom_type_dim_static_size_at(type, 0);
-    if (static_dim0 < pattern->static_dim0_min ||
-        static_dim0 > pattern->static_dim0_max) {
+    if (static_dim0 < pattern->shape.dim0_range.minimum ||
+        static_dim0 > pattern->shape.dim0_range.maximum) {
       return false;
     }
   }
@@ -213,7 +213,7 @@ static bool loom_low_lower_rule_type_matches(
     if (loom_type_rank(type) < 2 || loom_type_dim_is_dynamic_at(type, 1)) {
       return false;
     }
-    if (loom_type_dim_static_size_at(type, 1) != pattern->static_dim1) {
+    if (loom_type_dim_static_size_at(type, 1) != pattern->shape.exact.dim1) {
       return false;
     }
   }
@@ -224,8 +224,10 @@ static bool loom_low_lower_rule_type_matches(
     if (!loom_type_static_element_count(type, &static_element_count)) {
       return false;
     }
-    if (static_element_count < pattern->static_element_count_min ||
-        static_element_count > pattern->static_element_count_max) {
+    if (static_element_count <
+            pattern->shape.static_element_count_range.minimum ||
+        static_element_count >
+            pattern->shape.static_element_count_range.maximum) {
       return false;
     }
   }
