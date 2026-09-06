@@ -8,12 +8,10 @@
 
 #include <stdint.h>
 
-#include "loom/ir/float_facts.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/encoding/fp8.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
-#include "loom/util/fact_table.h"
 
 IREE_ATTRIBUTE_NOINLINE static iree_status_t
 loom_amdgpu_build_fragment_memory_packet(loom_low_lower_context_t* context,
@@ -30,31 +28,12 @@ loom_amdgpu_build_fragment_memory_packet(loom_low_lower_context_t* context,
 }
 
 IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
-loom_amdgpu_try_emit_fragment_memory_uniform_narrowed_16bit_packet(
+loom_amdgpu_emit_fragment_memory_uniform_narrowed_16bit_packet(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fragment_memory_plan_t* plan,
-    uint16_t result_register_count, uint16_t packet_register_count,
-    loom_type_t vgpr_type, loom_value_id_t* out_packet) {
-  const loom_scalar_type_t result_type =
-      plan->payload_form ==
-              LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16
-          ? LOOM_SCALAR_TYPE_BF16
-          : LOOM_SCALAR_TYPE_F16;
-  const loom_value_fact_table_t* fact_table =
-      loom_low_lower_context_fact_table(context);
-  loom_value_facts_t element_facts;
-  uint64_t bit_pattern;
-  if (fact_table == NULL ||
-      !loom_value_facts_query_all_equal_element(
-          &fact_table->context,
-          loom_value_fact_table_lookup(fact_table,
-                                       plan->narrowed_result_round_source),
-          &element_facts) ||
-      !loom_value_facts_as_exact_float_bits(result_type, element_facts,
-                                            &bit_pattern)) {
-    return iree_ok_status();
-  }
-  uint32_t packed_bit_pattern = (uint16_t)bit_pattern;
+    uint16_t bit_pattern, uint16_t result_register_count,
+    uint16_t packet_register_count, loom_type_t vgpr_type,
+    loom_value_id_t* out_packet) {
+  uint32_t packed_bit_pattern = bit_pattern;
   if (result_register_count > 1) {
     packed_bit_pattern |= packed_bit_pattern << 16;
   }
@@ -194,16 +173,14 @@ iree_status_t loom_amdgpu_emit_fragment_memory_packed_16bit_packet(
     uint16_t packet_register_count, loom_value_id_t low_scale,
     loom_type_t vgpr_type, loom_value_id_t* out_packet) {
   *out_packet = LOOM_VALUE_ID_INVALID;
-  if (low_scale == LOOM_VALUE_ID_INVALID &&
-      plan->narrowed_result_round_source != LOOM_VALUE_ID_INVALID) {
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_try_emit_fragment_memory_uniform_narrowed_16bit_packet(
-            context, source_op, plan, result_register_count,
-            packet_register_count, vgpr_type, out_packet));
-    if (*out_packet != LOOM_VALUE_ID_INVALID) return iree_ok_status();
+  if (plan->narrowed_result.uniform_bit_pattern !=
+      LOOM_AMDGPU_FRAGMENT_MEMORY_UNIFORM_BIT_PATTERN_INVALID) {
+    return loom_amdgpu_emit_fragment_memory_uniform_narrowed_16bit_packet(
+        context, source_op, (uint16_t)plan->narrowed_result.uniform_bit_pattern,
+        result_register_count, packet_register_count, vgpr_type, out_packet);
   }
   if (result_register_count == 1) {
-    if (plan->narrowed_result_round_source != LOOM_VALUE_ID_INVALID) {
+    if (plan->narrowed_result.round_source != LOOM_VALUE_ID_INVALID) {
       return loom_amdgpu_emit_fragment_memory_f32_to_16bit_lane(
           context, source_op, plan->payload_form, float16_pack_descriptors,
           low_payload, plan->register_count, register_index, low_scale,
@@ -214,7 +191,7 @@ iree_status_t loom_amdgpu_emit_fragment_memory_packed_16bit_packet(
         register_index, vgpr_type, out_packet);
   }
 
-  if (plan->narrowed_result_round_source == LOOM_VALUE_ID_INVALID) {
+  if (plan->narrowed_result.round_source == LOOM_VALUE_ID_INVALID) {
     loom_type_t packet_type = vgpr_type;
     IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_packet_type(
         context, packet_register_count, vgpr_type, &packet_type));

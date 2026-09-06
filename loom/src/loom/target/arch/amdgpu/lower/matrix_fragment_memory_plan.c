@@ -13,6 +13,7 @@
 #include "loom/codegen/low/lower/representation_observer.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
+#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ir/types.h"
@@ -745,6 +746,32 @@ loom_amdgpu_fragment_memory_narrowed_result_sources(
     sources.scale_source = scale_origin.scale_value_id;
   }
   return sources;
+}
+
+IREE_ATTRIBUTE_NOINLINE static void
+loom_amdgpu_fragment_memory_retain_uniform_narrowed_result(
+    const loom_value_fact_table_t* fact_table, loom_scalar_type_t result_type,
+    loom_amdgpu_fragment_memory_epilogue_strategy_t epilogue_strategy,
+    loom_amdgpu_fragment_memory_narrowed_result_plan_t* narrowed_result) {
+  if (fact_table == NULL ||
+      narrowed_result->round_source == LOOM_VALUE_ID_INVALID ||
+      narrowed_result->scale_source != LOOM_VALUE_ID_INVALID ||
+      loom_amdgpu_fragment_memory_epilogue_strategy_is_crosslane_packed_b16(
+          epilogue_strategy)) {
+    return;
+  }
+  loom_value_facts_t result_facts;
+  loom_value_facts_t element_facts;
+  uint64_t bit_pattern;
+  if (!loom_value_fact_table_try_lookup(
+          fact_table, narrowed_result->round_source, &result_facts) ||
+      !loom_value_facts_query_all_equal_element(&fact_table->context,
+                                                result_facts, &element_facts) ||
+      !loom_value_facts_as_exact_float_bits(result_type, element_facts,
+                                            &bit_pattern)) {
+    return;
+  }
+  narrowed_result->uniform_bit_pattern = (uint16_t)bit_pattern;
 }
 
 static loom_amdgpu_fragment_memory_layout_match_t
@@ -1513,6 +1540,19 @@ static bool loom_amdgpu_fragment_memory_evaluate_prepared(
   }
 
   if (out_plan != NULL) {
+    loom_amdgpu_fragment_memory_narrowed_result_plan_t narrowed_result = {
+        .round_source = narrowed_result_sources.round_source,
+        .scale_source = narrowed_result_sources.scale_source,
+        .packed_source = narrowed_result_sources.packed_source,
+        .uniform_bit_pattern =
+            LOOM_AMDGPU_FRAGMENT_MEMORY_UNIFORM_BIT_PATTERN_INVALID,
+    };
+    loom_amdgpu_fragment_memory_retain_uniform_narrowed_result(
+        environment->fact_table, prepared->view_element_type,
+        publication_choice != NULL
+            ? publication_choice->strategy
+            : LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_NONE,
+        &narrowed_result);
     *out_plan = (loom_amdgpu_fragment_memory_plan_t){
         .operation_kind = operation_kind,
         .role = prepared->role,
@@ -1535,9 +1575,7 @@ static bool loom_amdgpu_fragment_memory_evaluate_prepared(
         .address_layout = address_layout,
         .payload_form = payload_form,
         .packetization = packetization,
-        .narrowed_result_round_source = narrowed_result_sources.round_source,
-        .narrowed_result_scale_source = narrowed_result_sources.scale_source,
-        .narrowed_result_packed_source = narrowed_result_sources.packed_source,
+        .narrowed_result = narrowed_result,
     };
     for (uint8_t axis = 0; axis < prepared->access.view_rank; ++axis) {
       out_plan->static_axis_byte_strides[axis] =

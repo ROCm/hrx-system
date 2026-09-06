@@ -1552,6 +1552,22 @@ typedef struct loom_amdgpu_fragment_memory_runtime_axis_t {
       register_coordinates[LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS];
 } loom_amdgpu_fragment_memory_runtime_axis_t;
 
+#define LOOM_AMDGPU_FRAGMENT_MEMORY_UNIFORM_BIT_PATTERN_INVALID UINT32_MAX
+
+typedef struct loom_amdgpu_fragment_memory_narrowed_result_plan_t {
+  // Optional f32 fragment source to round directly for narrowed stores.
+  loom_value_id_t round_source;
+  // Optional scalar scale applied before narrowed f32-to-16-bit stores.
+  loom_value_id_t scale_source;
+  // Optional packed 16-bit fragment source copied directly for narrowed stores.
+  loom_value_id_t packed_source;
+  // Exact 16-bit pattern shared by every rounded result lane, or
+  // LOOM_AMDGPU_FRAGMENT_MEMORY_UNIFORM_BIT_PATTERN_INVALID.
+  uint32_t uniform_bit_pattern;
+} loom_amdgpu_fragment_memory_narrowed_result_plan_t;
+static_assert(sizeof(loom_amdgpu_fragment_memory_narrowed_result_plan_t) == 16,
+              "narrowed-result plans must stay compact");
+
 typedef struct loom_amdgpu_fragment_memory_plan_t {
   // Direction of the fragment memory movement.
   loom_low_source_memory_operation_kind_t operation_kind;
@@ -1612,12 +1628,8 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   loom_amdgpu_fragment_memory_epilogue_strategy_t epilogue_strategy;
   // Exact cross-lane packed-B16 publication selected for the memory axis.
   const loom_matrix_fragment_packed_b16_publication_t* packed_b16_publication;
-  // Optional f32 fragment source to round directly for narrowed stores.
-  loom_value_id_t narrowed_result_round_source;
-  // Optional scalar scale applied before narrowed f32-to-16-bit stores.
-  loom_value_id_t narrowed_result_scale_source;
-  // Optional packed 16-bit fragment source copied directly for narrowed stores.
-  loom_value_id_t narrowed_result_packed_source;
+  // Proven source forms and facts retained for narrowed-result emission.
+  loom_amdgpu_fragment_memory_narrowed_result_plan_t narrowed_result;
 } loom_amdgpu_fragment_memory_plan_t;
 
 typedef enum loom_amdgpu_fragment_repack_strategy_e {
