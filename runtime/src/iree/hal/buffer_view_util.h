@@ -51,20 +51,21 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_compute_view_range(
 // Buffer view allocation and generation
 //===----------------------------------------------------------------------===//
 
-// Allocates an uninitialized buffer from |allocator| using |buffer_params| and
-// wraps it in a buffer view. On success, |out_buffer_view| is assigned one
-// owning reference. It is unchanged on failure.
-IREE_API_EXPORT iree_status_t iree_hal_buffer_view_allocate(
+// Creates a buffer view over an uninitialized buffer allocated from |allocator|
+// using |buffer_params|. On success, |out_buffer_view| is assigned one owning
+// reference. It is unchanged on failure.
+IREE_API_EXPORT iree_status_t iree_hal_buffer_view_create_uninitialized(
     iree_hal_allocator_t* allocator, iree_hal_buffer_params_t buffer_params,
     iree_host_size_t shape_rank, const iree_hal_dim_t* shape,
     iree_hal_element_type_t element_type,
     iree_hal_encoding_type_t encoding_type,
     iree_hal_buffer_view_t** out_buffer_view);
 
-// Allocates an uninitialized buffer view with the same shape, element type, and
-// encoding as |source_buffer_view|. On success, |out_buffer_view| is assigned
-// one owning reference. It is unchanged on failure.
-IREE_API_EXPORT iree_status_t iree_hal_buffer_view_allocate_like(
+// Creates a buffer view over an uninitialized buffer with the same shape,
+// element type, and encoding as |source_buffer_view|. On success,
+// |out_buffer_view| is assigned one owning reference. It is unchanged on
+// failure.
+IREE_API_EXPORT iree_status_t iree_hal_buffer_view_create_uninitialized_like(
     iree_hal_allocator_t* allocator, iree_hal_buffer_params_t buffer_params,
     const iree_hal_buffer_view_t* source_buffer_view,
     iree_hal_buffer_view_t** out_buffer_view);

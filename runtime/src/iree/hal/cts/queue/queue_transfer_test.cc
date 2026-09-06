@@ -197,7 +197,7 @@ TEST_P(QueueTransferTest, BufferViewStagingRoundTrip) {
       /*.queue_family_affinity=*/transfer_family_affinity,
   };
   Ref<iree_hal_buffer_view_t> device_view;
-  IREE_ASSERT_OK(iree_hal_buffer_view_allocate_like(
+  IREE_ASSERT_OK(iree_hal_buffer_view_create_uninitialized_like(
       device_allocator_, device_params, staging_view, device_view.out()));
 
   SemaphoreList empty_wait;

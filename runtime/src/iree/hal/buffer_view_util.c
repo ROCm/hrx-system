@@ -167,7 +167,7 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_compute_view_range(
 // Buffer view allocation and generation
 //===----------------------------------------------------------------------===//
 
-IREE_API_EXPORT iree_status_t iree_hal_buffer_view_allocate(
+IREE_API_EXPORT iree_status_t iree_hal_buffer_view_create_uninitialized(
     iree_hal_allocator_t* allocator, iree_hal_buffer_params_t buffer_params,
     iree_host_size_t shape_rank, const iree_hal_dim_t* shape,
     iree_hal_element_type_t element_type,
@@ -205,12 +205,12 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_view_allocate(
   return status;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_buffer_view_allocate_like(
+IREE_API_EXPORT iree_status_t iree_hal_buffer_view_create_uninitialized_like(
     iree_hal_allocator_t* allocator, iree_hal_buffer_params_t buffer_params,
     const iree_hal_buffer_view_t* source_buffer_view,
     iree_hal_buffer_view_t** out_buffer_view) {
   IREE_ASSERT_ARGUMENT(source_buffer_view);
-  return iree_hal_buffer_view_allocate(
+  return iree_hal_buffer_view_create_uninitialized(
       allocator, buffer_params,
       iree_hal_buffer_view_shape_rank(source_buffer_view),
       iree_hal_buffer_view_shape_dims(source_buffer_view),
@@ -237,9 +237,9 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_view_generate(
                          IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE;
 
   iree_hal_buffer_view_t* buffer_view = NULL;
-  iree_status_t status =
-      iree_hal_buffer_view_allocate(allocator, buffer_params, shape_rank, shape,
-                                    element_type, encoding_type, &buffer_view);
+  iree_status_t status = iree_hal_buffer_view_create_uninitialized(
+      allocator, buffer_params, shape_rank, shape, element_type, encoding_type,
+      &buffer_view);
 
   iree_hal_buffer_mapping_t mapping = {{0}};
   if (iree_status_is_ok(status)) {

@@ -767,7 +767,7 @@ static iree_status_t loom_run_hal_transfer_bindings(
     iree_tooling_buffer_binding_t* target = &staged_bindings[i];
     target->kind = source->kind;
     if (source->buffer_view != NULL) {
-      status = iree_hal_buffer_view_allocate_like(
+      status = iree_hal_buffer_view_create_uninitialized_like(
           device_allocator, target_buffer_params, source->buffer_view,
           &target->buffer_view);
       if (iree_status_is_ok(status)) {
