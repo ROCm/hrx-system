@@ -79,7 +79,7 @@ typedef struct loom_pipeline_plan_flow_t {
   // Tile record type transferred by the flow.
   loom_type_t tile_type;
 
-  // Scheduling group whose lanes produce or consume records pointwise.
+  // Scheduling group defining the flow lane cardinality.
   uint32_t group_index;
 
   // Minimum record capacity required by authored buffering.

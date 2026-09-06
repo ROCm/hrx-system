@@ -177,6 +177,56 @@ pipeline.def<kernel> @split_k() launch(%lhs: buffer, %rhs: buffer, %bias: buffer
                                &analysis_arena_, &undersized_plan));
 }
 
+TEST_F(PipelinePlanTest, ConnectsEqualCardinalityStageGroupsPointwise) {
+  ModulePtr module = Parse(R"(
+func.def @first(%input: buffer, %intermediate: buffer) {
+  func.return
+}
+
+func.def @second(%intermediate: buffer, %output: buffer) {
+  func.return
+}
+
+pipeline.def<kernel> @chain() launch(%input: buffer, %output: buffer) {
+  %lane_count = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %first_group = group.create %lane_count : index -> group
+  %second_group = group.create %lane_count : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %input_flow = pipeline.read %input_view on %first_group : view<16xi8>, group -> pipeline.flow<tile<16xi8>>
+  %intermediate_flow = pipeline.stage @first on %first_group(%input_flow) : (group, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
+  %output_flow = pipeline.stage @second on %second_group(%intermediate_flow) : (group, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
+  pipeline.write %output_flow to %output_view : pipeline.flow<tile<16xi8>>, view<16xi8>
+  pipeline.return
+}
+)");
+
+  const loom_func_like_t pipeline =
+      FindPipeline(module.get(), IREE_SV("chain"));
+  loom_value_fact_table_t facts = {};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&facts, &analysis_arena_,
+                                                  module->values.count));
+  IREE_ASSERT_OK(loom_value_fact_table_compute(&facts, module.get(), pipeline));
+
+  loom_pipeline_plan_t plan = {};
+  IREE_ASSERT_OK(loom_pipeline_plan_build(module.get(), pipeline, &facts,
+                                          (loom_pipeline_plan_limits_t){
+                                              /*.instance_count=*/16,
+                                          },
+                                          &analysis_arena_, &plan));
+
+  ASSERT_EQ(plan.instance_count, 2u);
+  ASSERT_EQ(plan.edge_count, 3u);
+  const loom_pipeline_plan_edge_t& stage_edge = plan.edges[1];
+  EXPECT_EQ(stage_edge.source_kind, LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE);
+  EXPECT_EQ(stage_edge.source_index, 0u);
+  EXPECT_EQ(stage_edge.source_port, 1u);
+  EXPECT_EQ(stage_edge.target_kind, LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE);
+  EXPECT_EQ(stage_edge.target_index, 1u);
+  EXPECT_EQ(stage_edge.target_port, 0u);
+}
+
 TEST_F(PipelinePlanTest, RejectsUnresolvedCardinalityAtConcreteBoundary) {
   ModulePtr module = Parse(R"(
 func.def @stage() {
