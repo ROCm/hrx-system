@@ -915,12 +915,12 @@ TEST_P(BdaSpirvTest, CommandBufferExecutesBdaShaderWithSparseBindings) {
 
   BdaSparseVirtualBufferRef input_buffer(device_allocator_);
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_reserve(
-      device_allocator_, IREE_HAL_QUEUE_AFFINITY_ANY, recommended_page_size,
-      input_buffer.out()));
+      device_allocator_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      recommended_page_size, input_buffer.out()));
   BdaSparseVirtualBufferRef output_buffer(device_allocator_);
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_reserve(
-      device_allocator_, IREE_HAL_QUEUE_AFFINITY_ANY, recommended_page_size,
-      output_buffer.out()));
+      device_allocator_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      recommended_page_size, output_buffer.out()));
 
   BdaSparsePhysicalMemoryRef input_memory(device_allocator_);
   IREE_ASSERT_OK(iree_hal_allocator_physical_memory_allocate(
@@ -939,11 +939,11 @@ TEST_P(BdaSpirvTest, CommandBufferExecutesBdaShaderWithSparseBindings) {
       output_memory.get(), /*physical_offset=*/0, recommended_page_size));
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_protect(
       device_allocator_, input_buffer.get(), /*virtual_offset=*/0,
-      recommended_page_size, IREE_HAL_QUEUE_AFFINITY_ANY,
+      recommended_page_size, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_protect(
       device_allocator_, output_buffer.get(), /*virtual_offset=*/0,
-      recommended_page_size, IREE_HAL_QUEUE_AFFINITY_ANY,
+      recommended_page_size, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
 
   const int32_t input_pattern = 5;

@@ -13,7 +13,6 @@
 #include "iree/hal/drivers/amdgpu/abi/signal.h"
 #include "iree/hal/drivers/amdgpu/hostcall_provider.h"
 #include "iree/hal/drivers/amdgpu/pm4_command_buffer.h"
-#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/slab_provider.h"
 #include "iree/hal/drivers/amdgpu/system.h"
 #include "iree/hal/drivers/amdgpu/system_event.h"
@@ -1224,11 +1223,6 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
   iree_hal_amdgpu_libhsa_t* libhsa = &system->libhsa;
   iree_status_t status = iree_hal_amdgpu_physical_device_create_default_pools(
       physical_device, epoch_signal_table, host_allocator);
-  const iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain = {
-      .supported_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
-      .physical_device_count = system->topology.gpu_agent_count,
-      .queue_count_per_physical_device = physical_device->host_queue_capacity,
-  };
   iree_hal_amdgpu_physical_device_kernarg_ring_memory_t kernarg_ring_memory;
   iree_hal_amdgpu_physical_device_select_kernarg_ring_memory(
       physical_device, host_memory_pools, &kernarg_ring_memory);
@@ -1274,12 +1268,10 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
     const iree_host_size_t logical_queue_ordinal =
         physical_device->device_ordinal * physical_device->host_queue_capacity +
         queue_ordinal;
-    iree_hal_amdgpu_queue_affinity_resolved_t resolved;
-    iree_async_axis_t queue_axis = 0;
-    status = iree_hal_amdgpu_queue_affinity_make_axis(
-        queue_affinity_domain, base_axis, logical_queue_ordinal, &resolved,
-        &queue_axis);
-    if (!iree_status_is_ok(status)) break;
+    const iree_async_axis_t queue_axis = iree_async_axis_make_queue(
+        iree_async_axis_session(base_axis), iree_async_axis_machine(base_axis),
+        iree_async_axis_device_index(base_axis),
+        (uint8_t)logical_queue_ordinal);
     iree_thread_affinity_t completion_thread_affinity;
     iree_thread_affinity_set_group_any(physical_device->host_numa_node,
                                        &completion_thread_affinity);
@@ -1288,9 +1280,8 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
         iree_hal_amdgpu_physical_device_hostcall_buffer(physical_device),
         proactor, physical_device->device_agent,
         &kernarg_ring_memory.descriptor, host_memory_pools->fine_pool,
-        frontier_tracker, queue_axis, resolved.queue_affinity,
-        logical_queue_ordinal, queue_ordinal, completion_thread_affinity,
-        physical_device->aql_queue_execution_mode,
+        frontier_tracker, queue_axis, (iree_hal_queue_ordinal_t)queue_ordinal,
+        completion_thread_affinity, physical_device->aql_queue_execution_mode,
         physical_device->wait_barrier_strategy,
         physical_device->vendor_packet_capabilities,
         physical_device->pm4_timestamp_strategy, epoch_signal_table,

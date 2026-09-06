@@ -22,22 +22,6 @@ bool iree_hal_vulkan_queue_assignment_has_sparse_binding(
          IREE_HAL_VULKAN_QUEUE_FAMILY_INVALID;
 }
 
-iree_status_t iree_hal_vulkan_queue_affinity_normalize(
-    iree_hal_queue_affinity_t supported_affinity,
-    iree_hal_queue_affinity_t requested_affinity,
-    iree_hal_queue_affinity_t* out_normalized_affinity) {
-  iree_hal_queue_affinity_t normalized_affinity =
-      iree_hal_queue_affinity_is_any(requested_affinity) ? supported_affinity
-                                                         : requested_affinity;
-  iree_hal_queue_affinity_and_into(normalized_affinity, supported_affinity);
-  if (iree_hal_queue_affinity_is_empty(normalized_affinity)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "no valid Vulkan queue affinity bits specified");
-  }
-  *out_normalized_affinity = normalized_affinity;
-  return iree_ok_status();
-}
-
 static void iree_hal_vulkan_device_plan_initialize_empty(
     iree_allocator_t host_allocator, iree_hal_vulkan_device_plan_t* out_plan) {
   memset(out_plan, 0, sizeof(*out_plan));
@@ -203,7 +187,6 @@ static iree_status_t iree_hal_vulkan_select_queue_assignment(
     transfer_queue_index = 1;
   }
 
-  // Route the legacy device facade through compute and transfer affinity bits.
   // Exact queue identity is assigned after the canonical inventory is built.
   out_queue_assignment->compute = (iree_hal_vulkan_queue_selection_t){
       .family_index = compute_family_index,
@@ -211,7 +194,6 @@ static iree_status_t iree_hal_vulkan_select_queue_assignment(
       .flags =
           iree_hal_vulkan_effective_queue_flags(compute_family->queueFlags),
       .timestamp_valid_bits = compute_family->timestampValidBits,
-      .affinity = 1ull << 0,
   };
   out_queue_assignment->transfer = (iree_hal_vulkan_queue_selection_t){
       .family_index = transfer_family_index,
@@ -219,7 +201,6 @@ static iree_status_t iree_hal_vulkan_select_queue_assignment(
       .flags =
           iree_hal_vulkan_effective_queue_flags(transfer_family->queueFlags),
       .timestamp_valid_bits = transfer_family->timestampValidBits,
-      .affinity = 1ull << 1,
   };
   if (sparse_family_index != IREE_HAL_VULKAN_QUEUE_FAMILY_INVALID) {
     const VkQueueFamilyProperties* sparse_family =
@@ -230,7 +211,6 @@ static iree_status_t iree_hal_vulkan_select_queue_assignment(
         .flags =
             iree_hal_vulkan_effective_queue_flags(sparse_family->queueFlags),
         .timestamp_valid_bits = sparse_family->timestampValidBits,
-        .affinity = 0,
     };
   }
   return iree_ok_status();
@@ -1293,8 +1273,7 @@ static uint32_t iree_hal_vulkan_first_queue_index(uint64_t queue_indices) {
 static iree_status_t iree_hal_vulkan_select_external_queue(
     const iree_hal_vulkan_physical_device_snapshot_t* snapshot,
     const iree_hal_vulkan_queue_set_t* queue_set, VkQueueFlags required_flags,
-    iree_hal_queue_affinity_t affinity, iree_string_view_t role,
-    iree_hal_vulkan_queue_selection_t* out_queue) {
+    iree_string_view_t role, iree_hal_vulkan_queue_selection_t* out_queue) {
   memset(out_queue, 0, sizeof(*out_queue));
   if (!queue_set->queue_indices) {
     return iree_make_status(
@@ -1340,7 +1319,6 @@ static iree_status_t iree_hal_vulkan_select_external_queue(
           iree_hal_vulkan_first_queue_index(queue_set->queue_indices),
       .flags = iree_hal_vulkan_effective_queue_flags(queue_family->queueFlags),
       .timestamp_valid_bits = queue_family->timestampValidBits,
-      .affinity = affinity,
   };
   return iree_ok_status();
 }
@@ -1354,7 +1332,7 @@ static iree_status_t iree_hal_vulkan_select_external_queue_assignment(
       IREE_HAL_VULKAN_QUEUE_FAMILY_INVALID;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_select_external_queue(
       snapshot, &external_device_params->compute_queue_set,
-      VK_QUEUE_COMPUTE_BIT, 1ull << 0, IREE_SV("compute"),
+      VK_QUEUE_COMPUTE_BIT, IREE_SV("compute"),
       &out_queue_assignment->compute));
 
   if (!external_device_params->transfer_queue_set.queue_indices) {
@@ -1366,26 +1344,23 @@ static iree_status_t iree_hal_vulkan_select_external_queue_assignment(
           "the selected compute queue family does not report transfer support");
     }
     out_queue_assignment->transfer = out_queue_assignment->compute;
-    out_queue_assignment->transfer.affinity = 1ull << 1;
   } else {
     IREE_RETURN_IF_ERROR(iree_hal_vulkan_select_external_queue(
         snapshot, &external_device_params->transfer_queue_set,
-        VK_QUEUE_TRANSFER_BIT, 1ull << 1, IREE_SV("transfer"),
+        VK_QUEUE_TRANSFER_BIT, IREE_SV("transfer"),
         &out_queue_assignment->transfer));
   }
   if (external_device_params->sparse_binding_queue_set.queue_indices) {
     IREE_RETURN_IF_ERROR(iree_hal_vulkan_select_external_queue(
         snapshot, &external_device_params->sparse_binding_queue_set,
-        VK_QUEUE_SPARSE_BINDING_BIT, 0, IREE_SV("sparse binding"),
+        VK_QUEUE_SPARSE_BINDING_BIT, IREE_SV("sparse binding"),
         &out_queue_assignment->sparse_binding));
   } else if (iree_all_bits_set(out_queue_assignment->compute.flags,
                                VK_QUEUE_SPARSE_BINDING_BIT)) {
     out_queue_assignment->sparse_binding = out_queue_assignment->compute;
-    out_queue_assignment->sparse_binding.affinity = 0;
   } else if (iree_all_bits_set(out_queue_assignment->transfer.flags,
                                VK_QUEUE_SPARSE_BINDING_BIT)) {
     out_queue_assignment->sparse_binding = out_queue_assignment->transfer;
-    out_queue_assignment->sparse_binding.affinity = 0;
   }
   return iree_ok_status();
 }

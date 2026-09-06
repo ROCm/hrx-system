@@ -18,7 +18,6 @@
 #include "iree/hal/drivers/amdgpu/device/blit.h"
 #include "iree/hal/drivers/amdgpu/device/dispatch.h"
 #include "iree/hal/drivers/amdgpu/executable.h"
-#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/transient_buffer.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
 #include "iree/hal/drivers/amdgpu/util/kernarg_ring.h"
@@ -153,7 +152,7 @@ typedef struct iree_hal_amdgpu_aql_command_buffer_t {
     // Block pool used for retained HAL resource sets.
     iree_arena_block_pool_t* resource_set;
   } block_pools;
-  // Physical device ordinal selected from the command buffer's queue affinity.
+  // Physical device ordinal selected by the command buffer's queue family.
   uint32_t device_ordinal;
   // Number of physical queues on |device_ordinal|.
   uint32_t queue_count_per_physical_device;
@@ -2007,21 +2006,11 @@ iree_hal_amdgpu_aql_command_buffer_record_queue_kernel_objects(
            command_buffer->queue_count_per_physical_device &&
        iree_status_is_ok(status);
        ++physical_queue_ordinal) {
-    iree_hal_queue_affinity_t queue_affinity = 0;
-    status = iree_hal_amdgpu_queue_affinity_for_physical_queue(
-        (iree_hal_amdgpu_queue_affinity_domain_t){
-            .supported_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
-            .physical_device_count = command_buffer->device_ordinal + 1,
-            .queue_count_per_physical_device =
-                command_buffer->queue_count_per_physical_device,
-        },
-        command_buffer->device_ordinal, physical_queue_ordinal,
-        &queue_affinity);
-    if (!iree_status_is_ok(status)) break;
     const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor = NULL;
-    status = iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue(
-        inputs->executable, inputs->export_ordinal, queue_affinity,
-        &descriptor);
+    status =
+        iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue_ordinal(
+            inputs->executable, inputs->export_ordinal, physical_queue_ordinal,
+            &descriptor);
     if (iree_status_is_ok(status)) {
       queue_kernel_objects[physical_queue_ordinal] =
           descriptor->kernel_args.kernel_object;

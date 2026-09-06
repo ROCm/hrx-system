@@ -16,6 +16,10 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Number of physical queues addressable by the PM4 eligible-queue bitmap.
+#define IREE_HAL_AMDGPU_PM4_PHYSICAL_QUEUE_CAPACITY \
+  ((iree_host_size_t)(sizeof(uint64_t) * 8))
+
 // Device-resident command-buffer storage and dynamic fixup records owned by a
 // finalized PM4 command buffer.
 typedef struct iree_hal_amdgpu_pm4_command_buffer_fixup_plan_t {

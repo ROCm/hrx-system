@@ -86,10 +86,8 @@ static bool iree_hal_amdgpu_global_table_benchmark_try_parse_name(
 }
 
 static iree_status_t iree_hal_amdgpu_global_table_benchmark_try_verify(
-    void* user_data, iree_string_view_t name,
-    iree_host_size_t verification_physical_device_ordinal, bool* out_found,
+    void* user_data, iree_string_view_t name, bool* out_found,
     iree_device_size_t* out_byte_length) {
-  (void)verification_physical_device_ordinal;
   *out_found = false;
   *out_byte_length = 0;
 
@@ -108,12 +106,8 @@ static iree_status_t iree_hal_amdgpu_global_table_benchmark_try_verify(
 
 static iree_status_t iree_hal_amdgpu_global_table_benchmark_create_buffer(
     void* user_data, iree_string_view_t name,
-    iree_device_size_t expected_byte_length,
-    iree_hal_queue_affinity_t selected_queue_affinity,
-    iree_host_size_t physical_device_ordinal, iree_hal_buffer_t** out_buffer) {
+    iree_device_size_t expected_byte_length, iree_hal_buffer_t** out_buffer) {
   (void)expected_byte_length;
-  (void)selected_queue_affinity;
-  (void)physical_device_ordinal;
   iree_hal_amdgpu_global_table_benchmark_resolver_t* resolver =
       (iree_hal_amdgpu_global_table_benchmark_resolver_t*)user_data;
 
@@ -127,15 +121,6 @@ static iree_status_t iree_hal_amdgpu_global_table_benchmark_create_buffer(
   iree_hal_buffer_retain(resolver->buffer);
   *out_buffer = resolver->buffer;
   return iree_ok_status();
-}
-
-static iree_hal_amdgpu_queue_affinity_domain_t
-iree_hal_amdgpu_global_table_benchmark_domain(void) {
-  return (iree_hal_amdgpu_queue_affinity_domain_t){
-      /*.supported_affinity=*/0x1ull,
-      /*.physical_device_count=*/1,
-      /*.queue_count_per_physical_device=*/1,
-  };
 }
 
 static void iree_hal_amdgpu_global_table_benchmark_buffer_release(
@@ -254,10 +239,6 @@ static iree_status_t iree_hal_amdgpu_global_table_benchmark_fixture_initialize(
 
   const iree_hal_amdgpu_global_table_params_t params = {
       /*.host_allocator=*/iree_allocator_system(),
-      /*.queue_affinity_domain=*/
-      iree_hal_amdgpu_global_table_benchmark_domain(),
-      /*.loaded_physical_device_mask=*/0x1ull,
-      /*.physical_device_count=*/1,
       /*.resolver=*/
       {
           /*.user_data=*/&out_fixture->resolver,
@@ -321,8 +302,8 @@ static iree_status_t iree_hal_amdgpu_global_table_benchmark_run_buffer(
   while (iree_status_is_ok(status) &&
          iree_benchmark_keep_running(benchmark_state, 1)) {
     iree_hal_buffer_t* cached_buffer = NULL;
-    status = iree_hal_amdgpu_global_table_buffer(
-        &fixture->table, global, IREE_HAL_QUEUE_AFFINITY_ANY, &cached_buffer);
+    status = iree_hal_amdgpu_global_table_buffer(&fixture->table, global,
+                                                 &cached_buffer);
     iree_optimization_barrier(cached_buffer);
   }
   return status;
@@ -352,7 +333,6 @@ static iree_status_t iree_hal_amdgpu_global_table_benchmark_run(
       config->mode == IREE_HAL_AMDGPU_GLOBAL_TABLE_BENCHMARK_BUFFER_CACHED) {
     iree_hal_buffer_t* cached_buffer = NULL;
     status = iree_hal_amdgpu_global_table_buffer(&fixture.table, buffer_global,
-                                                 IREE_HAL_QUEUE_AFFINITY_ANY,
                                                  &cached_buffer);
     iree_optimization_barrier(cached_buffer);
   }

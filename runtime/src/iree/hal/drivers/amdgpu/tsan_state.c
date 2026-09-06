@@ -161,12 +161,8 @@ iree_status_t iree_hal_amdgpu_tsan_state_assign_queues(
     for (iree_host_size_t j = 0;
          j < physical_device->host_queue_count && iree_status_is_ok(status);
          ++j) {
-      const iree_host_size_t queue_ordinal =
-          physical_device->device_ordinal *
-              physical_device->host_queue_capacity +
-          j;
       status = iree_hal_amdgpu_host_queue_initialize_tsan_state(
-          &physical_device->host_queues[j], &memory_policy, queue_ordinal, j,
+          &physical_device->host_queues[j], &memory_policy,
           config->workgroup_shadow_stride, config->dispatch_shadow_stride,
           config->workgroup_capacity, config->shadow_entry_size,
           config->memory_granule_shift, config->shadow_slot_count);

@@ -10,7 +10,6 @@
 #include "iree/base/api.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,35 +23,22 @@ typedef struct iree_hal_amdgpu_global_table_resolver_t {
   void* user_data;
 
   // Tries to verify that |name| resolves to an executable variable and returns
-  // its byte length when found. The table calls this on the first loaded
-  // physical device only.
-  iree_status_t (*try_verify)(
-      void* user_data, iree_string_view_t name,
-      iree_host_size_t verification_physical_device_ordinal, bool* out_found,
-      iree_device_size_t* out_byte_length);
+  // its byte length when found.
+  iree_status_t (*try_verify)(void* user_data, iree_string_view_t name,
+                              bool* out_found,
+                              iree_device_size_t* out_byte_length);
 
-  // Creates an executable-owned buffer alias for |name| on one physical device.
-  iree_status_t (*create_buffer)(
-      void* user_data, iree_string_view_t name,
-      iree_device_size_t expected_byte_length,
-      iree_hal_queue_affinity_t selected_queue_affinity,
-      iree_host_size_t physical_device_ordinal, iree_hal_buffer_t** out_buffer);
+  // Creates an executable-owned buffer alias for |name|.
+  iree_status_t (*create_buffer)(void* user_data, iree_string_view_t name,
+                                 iree_device_size_t expected_byte_length,
+                                 iree_hal_buffer_t** out_buffer);
 } iree_hal_amdgpu_global_table_resolver_t;
 
 typedef struct iree_hal_amdgpu_global_table_params_t {
   // Host allocator used for table storage.
   iree_allocator_t host_allocator;
 
-  // Queue affinity domain of the owning AMDGPU logical device.
-  iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain;
-
-  // Bitmask of physical device ordinals this executable was loaded on.
-  uint64_t loaded_physical_device_mask;
-
-  // Number of physical devices in the owning AMDGPU logical device.
-  iree_host_size_t physical_device_count;
-
-  // Backend resolver used for symbol verification and buffer creation.
+  // Resolver used for symbol verification and buffer creation.
   // Callback state must remain valid until the table is deinitialized.
   iree_hal_amdgpu_global_table_resolver_t resolver;
 } iree_hal_amdgpu_global_table_params_t;
@@ -64,16 +50,7 @@ typedef struct iree_hal_amdgpu_global_table_t {
   // Host allocator used for all table-owned allocations.
   iree_allocator_t host_allocator;
 
-  // Queue affinity domain of the owning logical device.
-  iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain;
-
-  // Bitmask of physical device ordinals with loaded code objects.
-  uint64_t loaded_physical_device_mask;
-
-  // Number of physical devices in the owning logical device.
-  iree_host_size_t physical_device_count;
-
-  // Backend resolver used for symbol verification and buffer creation.
+  // Resolver used for symbol verification and buffer creation.
   // Callback state must remain valid until the table is deinitialized.
   iree_hal_amdgpu_global_table_resolver_t resolver;
 
@@ -114,10 +91,10 @@ iree_status_t iree_hal_amdgpu_global_table_info(
     iree_hal_amdgpu_global_table_t* table, iree_hal_executable_global_t global,
     iree_hal_executable_global_info_t* out_info);
 
-// Returns an executable-owned buffer alias for |global| on the selected device.
+// Returns an executable-owned buffer alias for |global|.
 iree_status_t iree_hal_amdgpu_global_table_buffer(
     iree_hal_amdgpu_global_table_t* table, iree_hal_executable_global_t global,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer);
+    iree_hal_buffer_t** out_buffer);
 
 #ifdef __cplusplus
 }  // extern "C"

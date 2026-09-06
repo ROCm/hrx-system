@@ -158,9 +158,6 @@ struct iree_hal_vulkan_allocator_t {
   // Device extension bits enabled on the logical device.
   iree_hal_vulkan_device_extensions_t enabled_extensions;
 
-  // Queue affinity bits supported by this logical device.
-  iree_hal_queue_affinity_t queue_affinity_mask;
-
   // Queue family affinity bits supported by this logical device.
   iree_hal_queue_family_affinity_t queue_family_affinity_mask;
 
@@ -280,7 +277,6 @@ iree_status_t iree_hal_vulkan_allocator_create(
     const iree_hal_vulkan_physical_device_snapshot_t* physical_device,
     iree_hal_vulkan_features_t enabled_features,
     iree_hal_vulkan_device_extensions_t enabled_extensions,
-    iree_hal_queue_affinity_t queue_affinity_mask,
     iree_host_size_t queue_family_count,
     const iree_hal_vulkan_allocator_queue_family_t* queue_families,
     iree_hal_vulkan_queue_t* sparse_binding_queue,
@@ -319,7 +315,6 @@ iree_status_t iree_hal_vulkan_allocator_create(
   allocator->memory_properties2 = physical_device->memory_properties2;
   allocator->enabled_features = enabled_features;
   allocator->enabled_extensions = enabled_extensions;
-  allocator->queue_affinity_mask = queue_affinity_mask;
   allocator->queue_family_affinity_mask =
       queue_family_count == IREE_HAL_MAX_QUEUE_FAMILIES
           ? IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY

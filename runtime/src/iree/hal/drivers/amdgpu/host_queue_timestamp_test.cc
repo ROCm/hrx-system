@@ -808,8 +808,8 @@ TEST_P(HostQueueTimestampTest, DefersUntilWaitSignaled) {
 // The PM4 strategy copies the command processor's GPU clock counter while the
 // builtin capture dispatch reads the shader-visible steady counter. On one
 // agent both must share an epoch and a rate or their ticks are not comparable.
-// IREE_HAL_QUEUE_AFFINITY_ANY collapses to the first selected queue, so every
-// capture below lands on one agent even on a box with several GPUs.
+// Both captures below use the same exact queue and land on one agent even on a
+// box with several GPUs.
 TEST_P(HostQueueTimestampTest, CaptureStrategiesAgreeOnTickOrderAndRate) {
   if (GetParam() != CaptureStrategy::kPm4Packet) {
     GTEST_SKIP() << "the cross-strategy comparison builds both devices itself "

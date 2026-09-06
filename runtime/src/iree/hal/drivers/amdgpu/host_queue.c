@@ -145,7 +145,6 @@ static iree_status_t iree_hal_amdgpu_host_queue_allocate_pm4_ib_slots(
 iree_status_t iree_hal_amdgpu_host_queue_initialize_tsan_state(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_amdgpu_tsan_memory_policy_t* memory_policy,
-    iree_host_size_t queue_ordinal, iree_host_size_t physical_queue_ordinal,
     iree_device_size_t workgroup_shadow_stride,
     iree_device_size_t dispatch_shadow_stride, uint32_t workgroup_capacity,
     uint32_t shadow_entry_size, uint32_t memory_granule_shift,
@@ -159,9 +158,7 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize_tsan_state(
                              "AMDGPU host queue TSAN state is already "
                              "initialized"));
   }
-  if (IREE_UNLIKELY(queue_ordinal > UINT32_MAX ||
-                    queue->device_ordinal > UINT32_MAX ||
-                    physical_queue_ordinal > UINT32_MAX)) {
+  if (IREE_UNLIKELY(queue->device_ordinal > UINT32_MAX)) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                              "AMDGPU TSAN queue ordinals exceed device ABI "
@@ -224,9 +221,9 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize_tsan_state(
         .record_length = sizeof(iree_hal_amdgpu_tsan_queue_state_t),
         .abi_version = IREE_HAL_AMDGPU_TSAN_QUEUE_STATE_ABI_VERSION_0,
         .flags = IREE_HAL_AMDGPU_TSAN_QUEUE_STATE_FLAG_NONE,
-        .queue_ordinal = (uint32_t)queue_ordinal,
+        .queue_ordinal = iree_async_axis_queue_index(queue->axis),
         .physical_device_ordinal = (uint32_t)queue->device_ordinal,
-        .physical_queue_ordinal = (uint32_t)physical_queue_ordinal,
+        .physical_queue_ordinal = queue->physical_queue_ordinal,
         .reserved0 = 0,
         .shadow_slot_count = shadow_slot_count,
         .aql_ring_base = (uint64_t)(uintptr_t)queue->aql_ring.base,
@@ -391,8 +388,6 @@ void iree_hal_amdgpu_host_queue_query_scope(
   IREE_ASSERT_ARGUMENT(out_scope);
 
   *out_scope = (iree_hal_amdgpu_queue_scope_t){
-      .queue_affinity = queue->queue_affinity,
-      .queue_ordinal = queue->queue_ordinal,
       .physical_device_ordinal = queue->device_ordinal,
       .physical_queue_ordinal = queue->physical_queue_ordinal,
       .aql_ring_base = (uint64_t)(uintptr_t)queue->aql_ring.base,
@@ -812,8 +807,7 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
     const iree_hal_amdgpu_kernarg_ring_memory_t* kernarg_memory,
     hsa_amd_memory_pool_t pm4_ib_pool,
     iree_async_frontier_tracker_t* frontier_tracker, iree_async_axis_t axis,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t queue_ordinal,
-    iree_host_size_t physical_queue_ordinal,
+    iree_hal_queue_ordinal_t physical_queue_ordinal,
     iree_thread_affinity_t completion_thread_affinity,
     iree_hal_amdgpu_aql_queue_execution_mode_t aql_queue_execution_mode,
     iree_hal_amdgpu_wait_barrier_strategy_t wait_barrier_strategy,
@@ -884,8 +878,6 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
   out_queue->wait_barrier_strategy = wait_barrier_strategy;
   out_queue->vendor_packet_capabilities = vendor_packet_capabilities;
   out_queue->pm4_timestamp_strategy = pm4_timestamp_strategy;
-  out_queue->queue_affinity = queue_affinity;
-  out_queue->queue_ordinal = queue_ordinal;
   out_queue->physical_queue_ordinal = physical_queue_ordinal;
   out_queue->last_signal.semaphore = NULL;
   out_queue->last_signal.epoch = 0;

@@ -28,9 +28,6 @@ namespace {
 
 using iree::hal::cts::Ref;
 
-constexpr iree_hal_queue_affinity_t kQueueAffinity0 =
-    ((iree_hal_queue_affinity_t)1ull) << 0;
-
 class HostQueuePendingTest : public ::testing::Test {
  protected:
   static void SetUpTestSuite() {

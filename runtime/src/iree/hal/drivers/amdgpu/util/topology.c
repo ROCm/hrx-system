@@ -419,24 +419,18 @@ iree_hal_amdgpu_topology_verify(const iree_hal_amdgpu_topology_t* topology,
                             expected_all_agent_count);
   }
 
-  if (topology->gpu_agent_queue_count > UINT8_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "gpu_agent_queue_count=%" PRIhsz
-                            " exceeds the queue-axis encoding limit (%u)",
-                            topology->gpu_agent_queue_count, UINT8_MAX);
-  }
   iree_host_size_t total_queue_count = 0;
   if (!iree_host_size_checked_mul(topology->gpu_agent_count,
                                   topology->gpu_agent_queue_count,
                                   &total_queue_count) ||
-      total_queue_count > IREE_HAL_MAX_QUEUES) {
+      total_queue_count > IREE_HAL_AMDGPU_MAX_QUEUE_AXIS_COUNT) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
-        "topology queue space does not fit in iree_hal_queue_affinity_t "
+        "topology queue space does not fit in the async queue axis "
         "(gpu_agent_count=%" PRIhsz ", gpu_agent_queue_count=%" PRIhsz
         ", max_total_queues=%" PRIhsz ")",
         topology->gpu_agent_count, topology->gpu_agent_queue_count,
-        (iree_host_size_t)IREE_HAL_MAX_QUEUES);
+        IREE_HAL_AMDGPU_MAX_QUEUE_AXIS_COUNT);
   }
 
   for (iree_host_size_t i = 0; i < topology->gpu_agent_count; ++i) {

@@ -77,8 +77,8 @@ TEST_F(ExecutableTest, PublishesAndEnforcesResourceLimits) {
 
   const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor = nullptr;
   IREE_ASSERT_OK(
-      iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue(
-          executable, function, IREE_HAL_QUEUE_AFFINITY_ANY, &descriptor));
+      iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue_ordinal(
+          executable, function, /*queue_ordinal=*/0, &descriptor));
   ASSERT_NE(descriptor, nullptr);
   EXPECT_EQ(function_info.maximum_workgroup_invocations,
             descriptor->limits.maximum_workgroup_invocations);

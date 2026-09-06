@@ -14,15 +14,17 @@
 #include "iree/hal/memory/cpu_slab_provider.h"
 #include "iree/hal/utils/device_spec_builder.h"
 
+#define IREE_HAL_TASK_QUEUE_AXIS_CAPACITY ((iree_host_size_t)UINT8_MAX + 1)
+
 static iree_status_t iree_hal_task_device_spec_verify_params(
     const iree_hal_task_device_spec_params_t* params) {
   IREE_ASSERT_ARGUMENT(params);
   if (IREE_UNLIKELY(params->queue_count == 0 ||
-                    params->queue_count > IREE_HAL_MAX_QUEUES)) {
+                    params->queue_count > IREE_HAL_TASK_QUEUE_AXIS_CAPACITY)) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "task device queue count must be in [1, %" PRIhsz "] (got %" PRIhsz ")",
-        (iree_host_size_t)IREE_HAL_MAX_QUEUES, params->queue_count);
+        IREE_HAL_TASK_QUEUE_AXIS_CAPACITY, params->queue_count);
   }
   if (IREE_UNLIKELY(params->default_queue_worker_count > UINT32_MAX)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,

@@ -226,7 +226,7 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           (uint64_t)sizeof(iree_hal_replay_allocator_import_buffer_payload_t);
       return iree_string_builder_append_format(
           builder,
-          " allocation_size=%" PRIu64 " queue_affinity=%" PRIu64
+          " allocation_size=%" PRIu64 " queue_family_affinity=%" PRIu64
           " min_alignment=%" PRIu64 " usage=0x%08" PRIx32 " type=0x%08" PRIx32
           " access=0x%04" PRIx16 " external_type=%" PRIu32
           " external_flags=0x%08" PRIx32 " data_range=[%" PRIu64 ", +%" PRIu64

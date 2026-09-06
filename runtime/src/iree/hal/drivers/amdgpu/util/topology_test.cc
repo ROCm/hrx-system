@@ -89,7 +89,7 @@ TEST(TopologyStructureTest, VerifyRejectsAllAgentCountMismatch) {
 
 TEST(TopologyStructureTest, VerifyRejectsQueueSpaceOverflow) {
   iree_hal_amdgpu_topology_t topology = MakeStructurallyValidTopology();
-  topology.gpu_agent_queue_count = IREE_HAL_MAX_QUEUES + 1;
+  topology.gpu_agent_queue_count = IREE_HAL_AMDGPU_MAX_QUEUE_AXIS_COUNT + 1;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
       iree_hal_amdgpu_topology_verify(&topology, FakeLibHsa()));

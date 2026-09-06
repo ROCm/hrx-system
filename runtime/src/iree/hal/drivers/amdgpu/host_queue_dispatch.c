@@ -68,8 +68,9 @@ static iree_status_t iree_hal_amdgpu_host_queue_lookup_dispatch_descriptor(
     iree_hal_executable_t* executable,
     iree_hal_executable_function_t export_ordinal,
     const iree_hal_amdgpu_executable_dispatch_descriptor_t** out_descriptor) {
-  return iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue(
-      executable, export_ordinal, queue->queue_affinity, out_descriptor);
+  return iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue_ordinal(
+      executable, export_ordinal, queue->physical_queue_ordinal,
+      out_descriptor);
 }
 
 static bool iree_hal_amdgpu_dispatch_config_has_workgroup_size_override(

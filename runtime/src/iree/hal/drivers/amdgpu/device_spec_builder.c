@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/hal/drivers/amdgpu/target/selection.h"
+#include "iree/hal/drivers/amdgpu/util/topology.h"
 
 static iree_status_t iree_hal_amdgpu_device_spec_verify_params(
     const iree_hal_amdgpu_device_spec_params_t* params) {
@@ -37,12 +38,12 @@ static iree_status_t iree_hal_amdgpu_device_spec_verify_params(
                     !iree_host_size_checked_mul(params->physical_device_count,
                                                 queue_count,
                                                 &total_queue_count) ||
-                    total_queue_count > IREE_HAL_MAX_QUEUES)) {
+                    total_queue_count > IREE_HAL_AMDGPU_MAX_QUEUE_AXIS_COUNT)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AMDGPU logical queue count must be in [1, %" PRIhsz
                             "] (physical_devices=%" PRIhsz
                             ", queues_per_device=%" PRIhsz ")",
-                            (iree_host_size_t)IREE_HAL_MAX_QUEUES,
+                            IREE_HAL_AMDGPU_MAX_QUEUE_AXIS_COUNT,
                             params->physical_device_count, queue_count);
   }
   for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {

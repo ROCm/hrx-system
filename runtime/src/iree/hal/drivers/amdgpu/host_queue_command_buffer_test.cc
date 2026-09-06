@@ -1199,9 +1199,9 @@ TEST_F(HostQueueCommandBufferTest,
 
   const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor = nullptr;
   IREE_ASSERT_OK(
-      iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue(
+      iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue_ordinal(
           executable, iree_hal_executable_function_from_index(0),
-          IREE_HAL_QUEUE_AFFINITY_ANY, &descriptor));
+          /*queue_ordinal=*/0, &descriptor));
   ASSERT_NE(descriptor, nullptr);
 
   Ref<iree_hal_buffer_t> output_buffer;

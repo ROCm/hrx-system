@@ -455,9 +455,6 @@ struct iree_hal_task_queue_t {
   // Parent device used to validate queue operation resources. Borrowed.
   iree_hal_device_t* device;
 
-  // Affinity mask this queue processes.
-  iree_hal_queue_affinity_t affinity;
-
   // Shared executor that the queue submits processes to.
   iree_task_executor_t* executor;
 
@@ -612,8 +609,8 @@ struct iree_hal_task_queue_t {
 iree_status_t iree_hal_task_queue_initialize(
     iree_string_view_t identifier, iree_hal_device_t* device,
     const iree_hal_queue_family_t* queue_family,
-    iree_hal_queue_affinity_t affinity, iree_task_scope_flags_t scope_flags,
-    iree_task_executor_t* executor, iree_async_proactor_t* proactor,
+    iree_task_scope_flags_t scope_flags, iree_task_executor_t* executor,
+    iree_async_proactor_t* proactor,
     iree_device_size_t inline_transfer_threshold,
     iree_arena_block_pool_t* small_block_pool,
     iree_arena_block_pool_t* large_block_pool,

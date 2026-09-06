@@ -472,14 +472,8 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   // profiling enable reads it unlocked, so writes must precede both.
   iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy;
 
-  // One-bit logical queue affinity routing device operations to this queue.
-  iree_hal_queue_affinity_t queue_affinity;
-
-  // Flattened logical queue ordinal in the owning HAL device.
-  iree_host_size_t queue_ordinal;
-
   // Queue ordinal relative to |device_ordinal|.
-  iree_host_size_t physical_queue_ordinal;
+  iree_hal_queue_ordinal_t physical_queue_ordinal;
 
   // Logical-device epoch signal table for cross-queue barrier emission (tier 2
   // wait resolution). Maps flattened queue indices to hsa_signal_t values for
@@ -714,8 +708,7 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
     const iree_hal_amdgpu_kernarg_ring_memory_t* kernarg_memory,
     hsa_amd_memory_pool_t pm4_ib_pool,
     iree_async_frontier_tracker_t* frontier_tracker, iree_async_axis_t axis,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t queue_ordinal,
-    iree_host_size_t physical_queue_ordinal,
+    iree_hal_queue_ordinal_t physical_queue_ordinal,
     iree_thread_affinity_t completion_thread_affinity,
     iree_hal_amdgpu_aql_queue_execution_mode_t aql_queue_execution_mode,
     iree_hal_amdgpu_wait_barrier_strategy_t wait_barrier_strategy,
@@ -789,7 +782,6 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_write(
 iree_status_t iree_hal_amdgpu_host_queue_initialize_tsan_state(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_amdgpu_tsan_memory_policy_t* memory_policy,
-    iree_host_size_t queue_ordinal, iree_host_size_t physical_queue_ordinal,
     iree_device_size_t workgroup_shadow_stride,
     iree_device_size_t dispatch_shadow_stride, uint32_t workgroup_capacity,
     uint32_t shadow_entry_size, uint32_t memory_granule_shift,

@@ -25,7 +25,6 @@
 #include "iree/hal/drivers/amdgpu/host_queue_dispatch.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
 #include "iree/hal/drivers/amdgpu/physical_device.h"
-#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/registration/driver_module.h"
 #include "iree/hal/drivers/amdgpu/semaphore.h"
 #include "iree/hal/drivers/amdgpu/target/selection.h"
@@ -56,10 +55,8 @@ constexpr iree_host_size_t kDispatchBindingBenchmarkVariantCapacity =
 constexpr int64_t kProfileGuardrailBindingCount = 1;
 constexpr int64_t kProfileGuardrailIterations = 200;
 constexpr int64_t kProfileGuardrailOperationCount = 20;
-constexpr iree_hal_queue_affinity_t kQueue0 = ((iree_hal_queue_affinity_t)1ull)
-                                              << 0;
-constexpr iree_hal_queue_affinity_t kQueue1 = ((iree_hal_queue_affinity_t)1ull)
-                                              << 1;
+constexpr iree_hal_queue_ordinal_t kQueue0 = 0;
+constexpr iree_hal_queue_ordinal_t kQueue1 = 1;
 
 enum class PayloadKind {
   kCopy,
@@ -321,25 +318,25 @@ class QueueBenchmark : public benchmark::Fixture {
     uint64_t payload_value;
   };
 
-  static iree_hal_queue_affinity_t CrossQueuePingPongFinalQueue(
+  static iree_hal_queue_ordinal_t CrossQueuePingPongFinalQueue(
       int64_t handoff_count) {
     return (handoff_count & 1) ? kQueue1 : kQueue0;
   }
 
   bool EnsureQueueAvailable(benchmark::State& state,
-                            iree_hal_queue_affinity_t queue_affinity) {
-    if (queue_affinity == kQueue1 && !EnsurePrivateStreamQueuePair(state)) {
+                            iree_hal_queue_ordinal_t queue_ordinal) {
+    if (queue_ordinal == kQueue1 && !EnsurePrivateStreamQueuePair(state)) {
       // Cross-queue rows are same-physical-agent measurements; skip instead
       // of silently turning them into cross-device/system-scope rows.
       return false;
     }
     iree_hal_amdgpu_host_queue_t* host_queue = nullptr;
-    if (!HandleStatus(state, LookupHostQueue(queue_affinity, &host_queue),
-                      "queue affinity not available")) {
+    if (!HandleStatus(state, LookupHostQueue(queue_ordinal, &host_queue),
+                      "queue not available")) {
       return false;
     }
     return HandleStatus(state, iree_hal_queue_flush(&host_queue->base),
-                        "queue affinity not available");
+                        "queue not available");
   }
 
   bool BeginProfileSession(benchmark::State& state, ProfileGuardrailMode mode) {
@@ -438,30 +435,16 @@ class QueueBenchmark : public benchmark::Fixture {
     EndProfileSession(state, end_message);
   }
 
-  iree_status_t LookupHostQueue(iree_hal_queue_affinity_t queue_affinity,
+  iree_status_t LookupHostQueue(iree_hal_queue_ordinal_t queue_ordinal,
                                 iree_hal_amdgpu_host_queue_t** out_host_queue) {
     *out_host_queue = nullptr;
-    auto* logical_device =
-        reinterpret_cast<iree_hal_amdgpu_logical_device_t*>(device_);
-    const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-        /*.supported_affinity=*/logical_device->queue_affinity_mask,
-        /*.physical_device_count=*/logical_device->physical_device_count,
-        /*.queue_count_per_physical_device=*/
-        logical_device->system->topology.gpu_agent_queue_count,
-    };
-    iree_hal_amdgpu_queue_affinity_resolved_t resolved;
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_resolve(
-        domain, queue_affinity, &resolved));
-    iree_hal_amdgpu_physical_device_t* physical_device =
-        logical_device->physical_devices[resolved.physical_device_ordinal];
-    if (IREE_UNLIKELY(resolved.physical_queue_ordinal >=
-                      physical_device->host_queue_count)) {
+    iree_hal_queue_t* queue =
+        iree_hal_device_queue(device_, /*family_ordinal=*/0, queue_ordinal);
+    if (IREE_UNLIKELY(!queue)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "queue ordinal has no initialized host queue");
     }
-
-    *out_host_queue =
-        &physical_device->host_queues[resolved.physical_queue_ordinal];
+    *out_host_queue = reinterpret_cast<iree_hal_amdgpu_host_queue_t*>(queue);
     return iree_ok_status();
   }
 
@@ -476,28 +459,27 @@ class QueueBenchmark : public benchmark::Fixture {
 
     auto* logical_device =
         reinterpret_cast<iree_hal_amdgpu_logical_device_t*>(device_);
-    const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-        /*.supported_affinity=*/logical_device->queue_affinity_mask,
-        /*.physical_device_count=*/logical_device->physical_device_count,
-        /*.queue_count_per_physical_device=*/
-        logical_device->system->topology.gpu_agent_queue_count,
-    };
-    iree_hal_amdgpu_queue_affinity_resolved_t resolved;
-    if (IREE_UNLIKELY(!iree_hal_amdgpu_queue_affinity_try_resolve_axis(
-            domain, logical_device->axis, axis, &resolved))) {
+    if (IREE_UNLIKELY((axis >> 32) != (logical_device->axis >> 32))) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "producer axis is not local to this device");
     }
-    iree_hal_amdgpu_physical_device_t* physical_device =
-        logical_device->physical_devices[resolved.physical_device_ordinal];
-    if (IREE_UNLIKELY(resolved.physical_queue_ordinal >=
-                      physical_device->host_queue_count)) {
+    const iree_host_size_t queue_count_per_physical_device =
+        logical_device->system->topology.gpu_agent_queue_count;
+    const iree_host_size_t flattened_queue_ordinal =
+        iree_async_axis_queue_index(axis);
+    const iree_hal_queue_family_ordinal_t family_ordinal =
+        (iree_hal_queue_family_ordinal_t)(flattened_queue_ordinal /
+                                          queue_count_per_physical_device);
+    const iree_hal_queue_ordinal_t queue_ordinal =
+        (iree_hal_queue_ordinal_t)(flattened_queue_ordinal %
+                                   queue_count_per_physical_device);
+    iree_hal_queue_t* queue =
+        iree_hal_device_queue(device_, family_ordinal, queue_ordinal);
+    if (IREE_UNLIKELY(!queue)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "producer axis has no initialized host queue");
     }
-
-    *out_host_queue =
-        &physical_device->host_queues[resolved.physical_queue_ordinal];
+    *out_host_queue = reinterpret_cast<iree_hal_amdgpu_host_queue_t*>(queue);
     return iree_ok_status();
   }
 
@@ -597,23 +579,23 @@ class QueueBenchmark : public benchmark::Fixture {
   }
 
   iree_status_t SubmitBarrierWithLists(
-      iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_queue_ordinal_t queue_ordinal,
       iree_hal_semaphore_list_t wait_semaphore_list,
       iree_hal_semaphore_list_t signal_semaphore_list) {
     iree_hal_amdgpu_host_queue_t* host_queue = nullptr;
-    IREE_RETURN_IF_ERROR(LookupHostQueue(queue_affinity, &host_queue));
+    IREE_RETURN_IF_ERROR(LookupHostQueue(queue_ordinal, &host_queue));
     return iree_hal_queue_barrier(&host_queue->base, wait_semaphore_list,
                                   signal_semaphore_list,
                                   IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
   }
 
   iree_status_t SubmitPayloadWithLists(
-      PayloadKind payload_kind, iree_hal_queue_affinity_t queue_affinity,
+      PayloadKind payload_kind, iree_hal_queue_ordinal_t queue_ordinal,
       iree_hal_semaphore_list_t wait_semaphore_list,
       iree_hal_semaphore_list_t signal_semaphore_list) {
     if (payload_kind == PayloadKind::kCopy) {
       iree_hal_amdgpu_host_queue_t* host_queue = nullptr;
-      IREE_RETURN_IF_ERROR(LookupHostQueue(queue_affinity, &host_queue));
+      IREE_RETURN_IF_ERROR(LookupHostQueue(queue_ordinal, &host_queue));
       return iree_hal_queue_copy(
           &host_queue->base, wait_semaphore_list, signal_semaphore_list,
           source_buffer_, /*source_offset=*/0, target_buffer_,
@@ -621,7 +603,7 @@ class QueueBenchmark : public benchmark::Fixture {
     }
     if (payload_kind == PayloadKind::kDispatch) {
       iree_hal_amdgpu_host_queue_t* host_queue = nullptr;
-      IREE_RETURN_IF_ERROR(LookupHostQueue(queue_affinity, &host_queue));
+      IREE_RETURN_IF_ERROR(LookupHostQueue(queue_ordinal, &host_queue));
       const uint32_t constant_data[] = {3, 10};
       iree_const_byte_span_t constants =
           iree_make_const_byte_span(constant_data, sizeof(constant_data));
@@ -643,7 +625,7 @@ class QueueBenchmark : public benchmark::Fixture {
     }
     if (payload_kind == PayloadKind::kNoopDispatch) {
       iree_hal_amdgpu_host_queue_t* host_queue = nullptr;
-      IREE_RETURN_IF_ERROR(LookupHostQueue(queue_affinity, &host_queue));
+      IREE_RETURN_IF_ERROR(LookupHostQueue(queue_ordinal, &host_queue));
       return iree_hal_queue_dispatch(
           &host_queue->base, wait_semaphore_list, signal_semaphore_list,
           dispatch_executable_, iree_hal_executable_function_from_index(0),
@@ -653,17 +635,17 @@ class QueueBenchmark : public benchmark::Fixture {
     }
     if (payload_kind == PayloadKind::kPreResolvedDispatch) {
       return SubmitPreResolvedDispatchWithLists(
-          queue_affinity, wait_semaphore_list, signal_semaphore_list);
+          queue_ordinal, wait_semaphore_list, signal_semaphore_list);
     }
     iree_hal_amdgpu_host_queue_t* host_queue = nullptr;
-    IREE_RETURN_IF_ERROR(LookupHostQueue(queue_affinity, &host_queue));
+    IREE_RETURN_IF_ERROR(LookupHostQueue(queue_ordinal, &host_queue));
     return iree_hal_queue_fill(
         &host_queue->base, wait_semaphore_list, signal_semaphore_list,
         target_buffer_, /*target_offset=*/0, kPayloadLength, &fill_pattern_,
         sizeof(fill_pattern_), IREE_HAL_FILL_FLAG_NONE);
   }
 
-  iree_status_t SubmitBarrier(iree_hal_queue_affinity_t queue_affinity,
+  iree_status_t SubmitBarrier(iree_hal_queue_ordinal_t queue_ordinal,
                               iree_hal_semaphore_t* wait_semaphore,
                               uint64_t wait_payload_value,
                               iree_hal_semaphore_t* signal_semaphore,
@@ -688,12 +670,12 @@ class QueueBenchmark : public benchmark::Fixture {
           /*payload_values=*/&signal_payload_value,
       };
     }
-    return SubmitBarrierWithLists(queue_affinity, wait_semaphore_list,
+    return SubmitBarrierWithLists(queue_ordinal, wait_semaphore_list,
                                   signal_semaphore_list);
   }
 
   iree_status_t SubmitBarrierWithWaitList(
-      iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_queue_ordinal_t queue_ordinal,
       iree_hal_semaphore_list_t wait_semaphore_list,
       iree_hal_semaphore_t* signal_semaphore, uint64_t signal_payload_value) {
     iree_hal_semaphore_t* signal_semaphore_storage = signal_semaphore;
@@ -706,12 +688,12 @@ class QueueBenchmark : public benchmark::Fixture {
           /*payload_values=*/&signal_payload_value,
       };
     }
-    return SubmitBarrierWithLists(queue_affinity, wait_semaphore_list,
+    return SubmitBarrierWithLists(queue_ordinal, wait_semaphore_list,
                                   signal_semaphore_list);
   }
 
   iree_status_t SubmitBarrierWithSingleWaitAndSignalList(
-      iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_queue_ordinal_t queue_ordinal,
       iree_hal_semaphore_t* wait_semaphore, uint64_t wait_payload_value,
       iree_hal_semaphore_list_t signal_semaphore_list) {
     iree_hal_semaphore_t* wait_semaphore_storage = wait_semaphore;
@@ -720,7 +702,7 @@ class QueueBenchmark : public benchmark::Fixture {
         /*semaphores=*/&wait_semaphore_storage,
         /*payload_values=*/&wait_payload_value,
     };
-    return SubmitBarrierWithLists(queue_affinity, wait_semaphore_list,
+    return SubmitBarrierWithLists(queue_ordinal, wait_semaphore_list,
                                   signal_semaphore_list);
   }
 
@@ -1678,11 +1660,11 @@ class QueueBenchmark : public benchmark::Fixture {
   }
 
   iree_status_t SubmitPreResolvedDispatchWithLists(
-      iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_queue_ordinal_t queue_ordinal,
       iree_hal_semaphore_list_t wait_semaphore_list,
       iree_hal_semaphore_list_t signal_semaphore_list) {
     iree_hal_amdgpu_host_queue_t* host_queue = nullptr;
-    IREE_RETURN_IF_ERROR(LookupHostQueue(queue_affinity, &host_queue));
+    IREE_RETURN_IF_ERROR(LookupHostQueue(queue_ordinal, &host_queue));
 
     iree_slim_mutex_lock(&host_queue->locks.submission_mutex);
     iree_hal_amdgpu_wait_resolution_t resolution;
@@ -1845,7 +1827,7 @@ class QueueBenchmark : public benchmark::Fixture {
   }
 
   iree_status_t SubmitBindingCountDispatchWithLists(
-      iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_queue_ordinal_t queue_ordinal,
       iree_hal_semaphore_list_t wait_semaphore_list,
       iree_hal_semaphore_list_t signal_semaphore_list, int64_t binding_count) {
     iree_hal_executable_function_t export_ordinal =
@@ -1855,7 +1837,7 @@ class QueueBenchmark : public benchmark::Fixture {
     iree_hal_dispatch_config_t dispatch_config;
     IREE_RETURN_IF_ERROR(BindingCountDispatchConfig(&dispatch_config));
     iree_hal_amdgpu_host_queue_t* host_queue = nullptr;
-    IREE_RETURN_IF_ERROR(LookupHostQueue(queue_affinity, &host_queue));
+    IREE_RETURN_IF_ERROR(LookupHostQueue(queue_ordinal, &host_queue));
     return iree_hal_queue_dispatch(
         &host_queue->base, wait_semaphore_list, signal_semaphore_list,
         binding_count_executable_, export_ordinal, dispatch_config,

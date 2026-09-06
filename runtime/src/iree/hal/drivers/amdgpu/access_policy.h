@@ -9,7 +9,6 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 
@@ -34,17 +33,6 @@ typedef struct iree_hal_amdgpu_access_agent_list_t {
   hsa_agent_t
       values[IREE_HAL_AMDGPU_MAX_CPU_AGENT + IREE_HAL_AMDGPU_MAX_GPU_AGENT];
 } iree_hal_amdgpu_access_agent_list_t;
-
-// Resolves the GPU agents selected by |queue_affinity|.
-//
-// The resulting list contains each selected GPU agent and no CPU agents. This
-// is used for operations whose contract grants access to device queues rather
-// than to every host and device participant in a memory placement.
-iree_status_t iree_hal_amdgpu_access_agent_list_resolve_queue_agents(
-    const iree_hal_amdgpu_topology_t* topology,
-    iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain,
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_amdgpu_access_agent_list_t* out_agent_list);
 
 // Resolves the GPU agents selected by |queue_family_affinity|.
 //

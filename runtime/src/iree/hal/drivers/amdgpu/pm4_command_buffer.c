@@ -2044,11 +2044,12 @@ iree_status_t iree_hal_amdgpu_pm4_command_buffer_create(
                             device_ordinal);
   }
   if (IREE_UNLIKELY(physical_queue_count == 0 ||
-                    physical_queue_count > IREE_HAL_MAX_QUEUES)) {
+                    physical_queue_count >
+                        IREE_HAL_AMDGPU_PM4_PHYSICAL_QUEUE_CAPACITY)) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "PM4 physical queue count %" PRIhsz " must be in [1, %" PRIhsz "]",
-        physical_queue_count, (iree_host_size_t)IREE_HAL_MAX_QUEUES);
+        physical_queue_count, IREE_HAL_AMDGPU_PM4_PHYSICAL_QUEUE_CAPACITY);
   }
 
   iree_host_size_t total_size = 0;

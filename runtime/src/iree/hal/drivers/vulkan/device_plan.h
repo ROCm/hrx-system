@@ -19,14 +19,6 @@ extern "C" {
 // Invalid Vulkan queue family index used for absent optional queue roles.
 #define IREE_HAL_VULKAN_QUEUE_FAMILY_INVALID UINT32_MAX
 
-// Legacy queue-affinity bits routed by the Vulkan device facade.
-//
-// Exact hardware queue identity comes from the canonical queue inventory. The
-// device facade maps its compute and transfer entry points through these bits
-// independently of that identity.
-#define IREE_HAL_VULKAN_QUEUE_ROLE_AFFINITY_MASK \
-  ((iree_hal_queue_affinity_t)0x3)
-
 // Maximum recognized device extension names enabled during VkDevice creation.
 #define IREE_HAL_VULKAN_MAX_DEVICE_EXTENSION_NAMES 11
 
@@ -52,8 +44,6 @@ typedef struct iree_hal_vulkan_queue_selection_t {
   // Valid timestamp bits reported by the selected queue family.
   uint32_t timestamp_valid_bits;
 
-  // Current public HAL queue affinity bit that maps to this role.
-  iree_hal_queue_affinity_t affinity;
 } iree_hal_vulkan_queue_selection_t;
 
 // Queue role assignment for a logical device plan.
@@ -179,12 +169,6 @@ bool iree_hal_vulkan_queue_selection_is_same(
 // Returns true if the queue assignment has a sparse-binding queue role.
 bool iree_hal_vulkan_queue_assignment_has_sparse_binding(
     const iree_hal_vulkan_queue_assignment_t* queue_assignment);
-
-// Normalizes a public HAL queue affinity against the supported queue mask.
-iree_status_t iree_hal_vulkan_queue_affinity_normalize(
-    iree_hal_queue_affinity_t supported_affinity,
-    iree_hal_queue_affinity_t requested_affinity,
-    iree_hal_queue_affinity_t* out_normalized_affinity);
 
 // Initializes |out_plan| for a driver-owned VkDevice created from |snapshot|.
 // The caller must deinitialize |out_plan| after any return.

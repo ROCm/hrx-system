@@ -42,11 +42,6 @@
 
 #define IREE_HAL_VULKAN_COMMAND_BUFFER_BLOCK_SIZE (64 * 1024)
 
-typedef enum iree_hal_vulkan_queue_role_e {
-  IREE_HAL_VULKAN_QUEUE_ROLE_COMPUTE = 0,
-  IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER = 1,
-} iree_hal_vulkan_queue_role_t;
-
 typedef struct iree_hal_vulkan_queue_family_t {
   // Canonical HAL queue-family identity. Must be at offset zero.
   iree_hal_queue_family_t base;
@@ -137,7 +132,7 @@ struct iree_hal_vulkan_logical_device_t {
   // Device-owned built-in pipelines used by queue command polyfills.
   iree_hal_vulkan_builtins_t builtins;
 
-  // Canonical queue inventory and legacy device-facade routes.
+  // Canonical queue inventory and selected queue roles.
   struct {
     // Number of canonical queue-family records.
     iree_host_size_t family_count;
@@ -154,17 +149,14 @@ struct iree_hal_vulkan_logical_device_t {
     // Device-owned exact queue objects grouped by canonical family.
     iree_hal_vulkan_queue_t* objects;
 
-    // Selected compute-capable device-facade route.
+    // Selected compute-capable queue role.
     iree_hal_vulkan_queue_route_t compute;
 
-    // Selected transfer-capable device-facade route.
+    // Selected transfer-capable queue role.
     iree_hal_vulkan_queue_route_t transfer;
 
-    // Internal sparse-binding device-facade route, when available.
+    // Internal sparse-binding queue role, when available.
     iree_hal_vulkan_queue_route_t sparse_binding;
-
-    // Legacy queue-affinity bits accepted by the device facade.
-    iree_hal_queue_affinity_t affinity_mask;
   } queues;
 
   // Maximum cached native BDA replay instances retained per active queue.
@@ -952,32 +944,6 @@ static iree_status_t iree_hal_vulkan_logical_device_create_channel(
   return iree_hal_vulkan_unimplemented(IREE_SV("collective channels"));
 }
 
-static iree_status_t iree_hal_vulkan_logical_device_queue_route_for_role(
-    iree_hal_vulkan_logical_device_t* device, iree_hal_vulkan_queue_role_t role,
-    iree_hal_vulkan_queue_route_t** out_route) {
-  IREE_ASSERT_ARGUMENT(out_route);
-  switch (role) {
-    case IREE_HAL_VULKAN_QUEUE_ROLE_COMPUTE:
-      *out_route = &device->queues.compute;
-      return iree_ok_status();
-    case IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER:
-      *out_route = &device->queues.transfer;
-      return iree_ok_status();
-  }
-  *out_route = NULL;
-  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                          "unrecognized Vulkan queue role %u", (uint32_t)role);
-}
-
-static bool iree_hal_vulkan_queue_route_matches_affinity(
-    const iree_hal_vulkan_queue_route_t* route,
-    iree_hal_queue_affinity_t queue_affinity, VkQueueFlags required_flags) {
-  return route->queue &&
-         !iree_hal_queue_affinity_is_empty(route->selection.affinity) &&
-         iree_any_bit_set(queue_affinity, route->selection.affinity) &&
-         iree_all_bits_set(route->queue->queue_flags, required_flags);
-}
-
 static VkQueueFlags
 iree_hal_vulkan_logical_device_required_queue_flags_for_command_categories(
     iree_hal_command_category_t command_categories) {
@@ -992,68 +958,6 @@ iree_hal_vulkan_logical_device_required_queue_flags_for_command_categories(
     queue_flags |= VK_QUEUE_TRANSFER_BIT;
   }
   return queue_flags;
-}
-
-static iree_status_t
-iree_hal_vulkan_logical_device_select_queue_route_from_normalized_affinity(
-    iree_hal_vulkan_logical_device_t* device,
-    iree_hal_vulkan_queue_role_t preferred_role, VkQueueFlags required_flags,
-    iree_hal_queue_affinity_t normalized_queue_affinity,
-    iree_hal_vulkan_queue_route_t** out_route) {
-  IREE_ASSERT_ARGUMENT(out_route);
-  *out_route = NULL;
-
-  iree_hal_vulkan_queue_route_t* preferred_route = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_queue_route_for_role(
-      device, preferred_role, &preferred_route));
-  if (iree_hal_vulkan_queue_route_matches_affinity(
-          preferred_route, normalized_queue_affinity, required_flags)) {
-    *out_route = preferred_route;
-    return iree_ok_status();
-  }
-
-  iree_hal_vulkan_queue_route_t* fallback_routes[] = {
-      &device->queues.compute,
-      &device->queues.transfer,
-  };
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(fallback_routes); ++i) {
-    iree_hal_vulkan_queue_route_t* route = fallback_routes[i];
-    if (route != preferred_route &&
-        iree_hal_vulkan_queue_route_matches_affinity(
-            route, normalized_queue_affinity, required_flags)) {
-      *out_route = route;
-      return iree_ok_status();
-    }
-  }
-  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                          "no Vulkan queue route matches affinity 0x%016" PRIx64
-                          " with required queue flags 0x%08x",
-                          normalized_queue_affinity, required_flags);
-}
-
-static iree_status_t iree_hal_vulkan_logical_device_select_queue_route(
-    iree_hal_vulkan_logical_device_t* device,
-    iree_hal_vulkan_queue_role_t preferred_role, VkQueueFlags required_flags,
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_vulkan_queue_route_t** out_route) {
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_affinity_normalize(
-      device->queues.affinity_mask, queue_affinity, &queue_affinity));
-  return iree_hal_vulkan_logical_device_select_queue_route_from_normalized_affinity(
-      device, preferred_role, required_flags, queue_affinity, out_route);
-}
-
-static iree_status_t iree_hal_vulkan_logical_device_select_queue(
-    iree_hal_vulkan_logical_device_t* device,
-    iree_hal_vulkan_queue_role_t preferred_role, VkQueueFlags required_flags,
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_vulkan_queue_t** out_queue) {
-  IREE_ASSERT_ARGUMENT(out_queue);
-  *out_queue = NULL;
-  iree_hal_vulkan_queue_route_t* route = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_route(
-      device, preferred_role, required_flags, queue_affinity, &route));
-  *out_queue = route->queue;
-  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_create_command_buffer(
@@ -1446,8 +1350,7 @@ static iree_status_t iree_hal_vulkan_logical_device_initialize_allocator(
   return iree_hal_vulkan_allocator_create(
       (iree_hal_device_t*)device, &device->syms, device->logical_device,
       &device->physical_device, device->enabled_features,
-      device->enabled_extensions, device->queues.affinity_mask,
-      device->queues.family_count, queue_families,
+      device->enabled_extensions, device->queues.family_count, queue_families,
       device->queues.sparse_binding.queue, device->proactor,
       device->host_allocator, &device->device_allocator);
 }
@@ -1517,15 +1420,6 @@ static iree_status_t iree_hal_vulkan_logical_device_resolve_queue_assignment(
     IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_resolve_queue_route(
         device, &queue_assignment->sparse_binding,
         &device->queues.sparse_binding));
-  }
-  device->queues.affinity_mask = device->queues.compute.selection.affinity |
-                                 device->queues.transfer.selection.affinity;
-  if (device->queues.affinity_mask !=
-      IREE_HAL_VULKAN_QUEUE_ROLE_AFFINITY_MASK) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "Vulkan device-facade queue routes produced "
-                            "affinity mask 0x%016" PRIx64,
-                            device->queues.affinity_mask);
   }
   return iree_ok_status();
 }

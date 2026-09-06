@@ -23,7 +23,6 @@
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer_packet.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
 #include "iree/hal/drivers/amdgpu/physical_device.h"
-#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/system.h"
 #include "iree/hal/drivers/amdgpu/target/selection.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
@@ -102,22 +101,6 @@ class TestLogicalDevice {
   // Device group that owns the topology assigned to |base_device_|.
   iree_hal_device_group_t* device_group_ = NULL;
 };
-
-static iree_status_t QueueAffinityForPhysicalDevice(
-    const TestLogicalDevice& test_device,
-    iree_host_size_t physical_device_ordinal,
-    iree_hal_queue_affinity_t* out_queue_affinity) {
-  iree_hal_amdgpu_logical_device_t* logical_device =
-      test_device.logical_device();
-  const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-      /*.supported_affinity=*/logical_device->queue_affinity_mask,
-      /*.physical_device_count=*/logical_device->physical_device_count,
-      /*.queue_count_per_physical_device=*/
-      logical_device->system->topology.gpu_agent_queue_count,
-  };
-  return iree_hal_amdgpu_queue_affinity_for_physical_device(
-      domain, physical_device_ordinal, out_queue_affinity);
-}
 
 static iree_status_t CreateHostVisibleTransferBuffer(
     iree_hal_allocator_t* allocator, iree_device_size_t buffer_size,

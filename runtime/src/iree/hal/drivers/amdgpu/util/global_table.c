@@ -6,8 +6,6 @@
 
 #include "iree/hal/drivers/amdgpu/util/global_table.h"
 
-#include "iree/base/internal/math.h"
-
 typedef struct iree_hal_amdgpu_global_table_entry_t {
   // Executable-local handle value assigned when the entry is interned.
   uint64_t handle_value;
@@ -15,47 +13,16 @@ typedef struct iree_hal_amdgpu_global_table_entry_t {
   // Persistent table-owned name storage.
   iree_string_view_t name;
 
-  // Byte length verified from the first loaded physical device.
+  // Byte length verified by the executable-specific resolver.
   iree_device_size_t byte_length;
 
-  // One executable-owned buffer alias per physical device.
-  iree_hal_buffer_t** device_buffers;
+  // Lazily materialized executable-owned buffer alias.
+  iree_hal_buffer_t* buffer;
 } iree_hal_amdgpu_global_table_entry_t;
 
 static iree_status_t iree_hal_amdgpu_global_table_validate_params(
     const iree_hal_amdgpu_global_table_params_t* params) {
   IREE_ASSERT_ARGUMENT(params);
-
-  if (IREE_UNLIKELY(params->physical_device_count == 0)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU global table requires at least one "
-                            "physical device");
-  }
-  if (IREE_UNLIKELY(params->physical_device_count > IREE_HAL_MAX_QUEUES)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU global table physical device count %" PRIhsz
-                            " exceeds queue affinity capacity %" PRIhsz,
-                            params->physical_device_count,
-                            (iree_host_size_t)IREE_HAL_MAX_QUEUES);
-  }
-  if (IREE_UNLIKELY(params->loaded_physical_device_mask == 0)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU global table requires a loaded device");
-  }
-
-  uint64_t valid_physical_device_mask = UINT64_MAX;
-  if (params->physical_device_count < 64) {
-    valid_physical_device_mask =
-        (((uint64_t)1) << params->physical_device_count) - 1;
-  }
-  if (IREE_UNLIKELY(params->loaded_physical_device_mask &
-                    ~valid_physical_device_mask)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU global table loaded device mask 0x%" PRIx64
-                            " exceeds physical device count %" PRIhsz,
-                            params->loaded_physical_device_mask,
-                            params->physical_device_count);
-  }
 
   if (IREE_UNLIKELY(!params->resolver.try_verify ||
                     !params->resolver.create_buffer)) {
@@ -63,19 +30,6 @@ static iree_status_t iree_hal_amdgpu_global_table_validate_params(
                             "AMDGPU global table resolver is incomplete");
   }
 
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_amdgpu_global_table_first_loaded_device(
-    const iree_hal_amdgpu_global_table_t* table,
-    iree_host_size_t* out_physical_device_ordinal) {
-  if (IREE_UNLIKELY(table->loaded_physical_device_mask == 0)) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU global table has no loaded devices");
-  }
-  *out_physical_device_ordinal =
-      (iree_host_size_t)iree_math_count_trailing_zeros_u64(
-          table->loaded_physical_device_mask);
   return iree_ok_status();
 }
 
@@ -137,12 +91,9 @@ static iree_status_t iree_hal_amdgpu_global_table_entry_allocate(
   }
 
   iree_host_size_t total_size = 0;
-  iree_host_size_t device_buffers_offset = 0;
   iree_host_size_t name_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amdgpu_global_table_entry_t), &total_size,
-      IREE_STRUCT_FIELD(table->physical_device_count, iree_hal_buffer_t*,
-                        &device_buffers_offset),
       IREE_STRUCT_FIELD(name_storage_size, char, &name_offset)));
 
   iree_hal_amdgpu_global_table_entry_t* entry = NULL;
@@ -152,8 +103,6 @@ static iree_status_t iree_hal_amdgpu_global_table_entry_allocate(
 
   entry->handle_value = IREE_HAL_EXECUTABLE_GLOBAL_INVALID_VALUE;
   entry->byte_length = byte_length;
-  entry->device_buffers =
-      (iree_hal_buffer_t**)((uint8_t*)entry + device_buffers_offset);
 
   char* name_storage = (char*)entry + name_offset;
   memcpy(name_storage, name.data, name.size);
@@ -168,9 +117,7 @@ static void iree_hal_amdgpu_global_table_entry_free(
     iree_hal_amdgpu_global_table_t* table,
     iree_hal_amdgpu_global_table_entry_t* entry) {
   if (!entry) return;
-  for (iree_host_size_t i = 0; i < table->physical_device_count; ++i) {
-    iree_hal_buffer_release(entry->device_buffers[i]);
-  }
+  iree_hal_buffer_release(entry->buffer);
   iree_allocator_free(table->host_allocator, entry);
 }
 
@@ -183,9 +130,6 @@ iree_status_t iree_hal_amdgpu_global_table_initialize(
   memset(out_table, 0, sizeof(*out_table));
   out_table->initialized = true;
   out_table->host_allocator = params->host_allocator;
-  out_table->queue_affinity_domain = params->queue_affinity_domain;
-  out_table->loaded_physical_device_mask = params->loaded_physical_device_mask;
-  out_table->physical_device_count = params->physical_device_count;
   out_table->resolver = params->resolver;
   iree_slim_mutex_initialize(&out_table->mutex);
   return iree_ok_status();
@@ -227,15 +171,10 @@ iree_status_t iree_hal_amdgpu_global_table_try_lookup(
   }
   iree_slim_mutex_unlock(&table->mutex);
 
-  iree_host_size_t verification_physical_device_ordinal = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_global_table_first_loaded_device(
-      table, &verification_physical_device_ordinal));
-
   iree_device_size_t byte_length = 0;
   bool resolved = false;
   IREE_RETURN_IF_ERROR(table->resolver.try_verify(
-      table->resolver.user_data, name, verification_physical_device_ordinal,
-      &resolved, &byte_length));
+      table->resolver.user_data, name, &resolved, &byte_length));
   if (!resolved) return iree_ok_status();
 
   iree_hal_amdgpu_global_table_entry_t* new_entry = NULL;
@@ -307,30 +246,10 @@ iree_status_t iree_hal_amdgpu_global_table_info(
 
 iree_status_t iree_hal_amdgpu_global_table_buffer(
     iree_hal_amdgpu_global_table_t* table, iree_hal_executable_global_t global,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+    iree_hal_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(table);
   IREE_ASSERT_ARGUMENT(out_buffer);
   *out_buffer = NULL;
-
-  iree_hal_queue_affinity_t requested_queue_affinity = queue_affinity;
-  if (iree_hal_queue_affinity_is_empty(requested_queue_affinity)) {
-    requested_queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
-  }
-
-  iree_hal_queue_affinity_t selected_queue_affinity = 0;
-  iree_host_size_t physical_device_ordinal = 0;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_queue_affinity_normalize_for_physical_device(
-          table->queue_affinity_domain, requested_queue_affinity,
-          &selected_queue_affinity, &physical_device_ordinal));
-
-  if (IREE_UNLIKELY(((((uint64_t)1) << physical_device_ordinal) &
-                     table->loaded_physical_device_mask) == 0)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU executable global buffer requested on unloaded device %" PRIhsz,
-        physical_device_ordinal);
-  }
 
   iree_slim_mutex_lock(&table->mutex);
   iree_hal_amdgpu_global_table_entry_t* entry =
@@ -340,8 +259,7 @@ iree_status_t iree_hal_amdgpu_global_table_buffer(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "invalid AMDGPU executable global handle");
   }
-  iree_hal_buffer_t* cached_buffer =
-      entry->device_buffers[physical_device_ordinal];
+  iree_hal_buffer_t* cached_buffer = entry->buffer;
   if (cached_buffer) {
     *out_buffer = cached_buffer;
     iree_slim_mutex_unlock(&table->mutex);
@@ -353,8 +271,7 @@ iree_status_t iree_hal_amdgpu_global_table_buffer(
 
   iree_hal_buffer_t* new_buffer = NULL;
   IREE_RETURN_IF_ERROR(table->resolver.create_buffer(
-      table->resolver.user_data, name, byte_length, selected_queue_affinity,
-      physical_device_ordinal, &new_buffer));
+      table->resolver.user_data, name, byte_length, &new_buffer));
 
   iree_slim_mutex_lock(&table->mutex);
   entry = iree_hal_amdgpu_global_table_entry_from_handle_locked(table, global);
@@ -364,13 +281,13 @@ iree_status_t iree_hal_amdgpu_global_table_buffer(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "invalid AMDGPU executable global handle");
   }
-  cached_buffer = entry->device_buffers[physical_device_ordinal];
+  cached_buffer = entry->buffer;
   if (cached_buffer) {
     *out_buffer = cached_buffer;
     iree_slim_mutex_unlock(&table->mutex);
     iree_hal_buffer_release(new_buffer);
   } else {
-    entry->device_buffers[physical_device_ordinal] = new_buffer;
+    entry->buffer = new_buffer;
     *out_buffer = new_buffer;
     iree_slim_mutex_unlock(&table->mutex);
   }

@@ -72,13 +72,11 @@ iree_hsa_fence_scope_t iree_hal_amdgpu_host_queue_axis_acquire_scope(
   }
   const iree_hal_amdgpu_logical_device_t* logical_device =
       (const iree_hal_amdgpu_logical_device_t*)queue->logical_device;
-  const iree_host_size_t first_physical_queue_ordinal =
-      queue->queue_ordinal - queue->physical_queue_ordinal;
-  const iree_host_size_t candidate_queue_ordinal =
-      iree_async_axis_queue_index(axis);
-  return candidate_queue_ordinal >= first_physical_queue_ordinal &&
-                 candidate_queue_ordinal - first_physical_queue_ordinal <
-                     logical_device->system->topology.gpu_agent_queue_count
+  const iree_host_size_t queue_count_per_physical_device =
+      logical_device->system->topology.gpu_agent_queue_count;
+  const iree_host_size_t candidate_device_ordinal =
+      iree_async_axis_queue_index(axis) / queue_count_per_physical_device;
+  return candidate_device_ordinal == queue->device_ordinal
              ? IREE_HSA_FENCE_SCOPE_AGENT
              : IREE_HSA_FENCE_SCOPE_SYSTEM;
 }

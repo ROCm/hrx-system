@@ -145,9 +145,6 @@ typedef struct iree_hal_amdgpu_logical_device_t {
   // deregistered by each host queue before this table is freed.
   iree_hal_amdgpu_epoch_signal_table_t* host_queue_epoch_table;
 
-  // Mask indicating which queue affinities are valid.
-  iree_hal_queue_affinity_t queue_affinity_mask;
-
   // Selected command-buffer recording and replay implementation.
   iree_hal_amdgpu_command_buffer_mode_t command_buffer_mode;
 

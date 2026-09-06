@@ -299,8 +299,8 @@ iree_status_t iree_hal_task_device_create(
   device->event_sink = create_params->event_sink;
   iree_async_proactor_pool_retain(device->proactor_pool);
 
-  // Select the device-level default proactor from the first queue's executor
-  // NUMA node. Used for operations without specific queue affinity.
+  // Select the device-level proactor from the first queue's executor NUMA
+  // node. Used for device-owned pools, files, and semaphores.
   iree_task_topology_node_id_t default_node_id =
       iree_task_executor_node_id(queue_executors[0]);
   iree_status_t status = iree_async_proactor_pool_get_for_node(
@@ -349,7 +349,6 @@ iree_status_t iree_hal_task_device_create(
 
     device->queue_count = 0;
     for (iree_host_size_t i = 0; i < queue_count; ++i) {
-      iree_hal_queue_affinity_t queue_affinity = 1ull << i;
       // Select a NUMA-correct proactor for this queue based on its executor's
       // node assignment. Falls back to the first proactor in the pool if the
       // executor's node doesn't have a dedicated proactor.
@@ -362,10 +361,10 @@ iree_status_t iree_hal_task_device_create(
 
       status = iree_hal_task_queue_initialize(
           device->identifier, (iree_hal_device_t*)device, &device->queue_family,
-          queue_affinity, params->queue_scope_flags, queue_executors[i],
-          queue_proactor, params->inline_transfer_threshold,
-          &device->small_block_pool, &device->large_block_pool,
-          device->device_allocator, &device->queues[i]);
+          params->queue_scope_flags, queue_executors[i], queue_proactor,
+          params->inline_transfer_threshold, &device->small_block_pool,
+          &device->large_block_pool, device->device_allocator,
+          &device->queues[i]);
       if (!iree_status_is_ok(status)) break;
       ++device->queue_count;
     }

@@ -14,7 +14,7 @@
 static iree_status_t
 iree_hal_amdgpu_executable_global_resolver_try_get_symbol_by_name(
     const iree_hal_amdgpu_executable_global_resolver_t* resolver,
-    iree_string_view_t name, hsa_agent_t device_agent, bool* out_found,
+    iree_string_view_t name, bool* out_found,
     hsa_executable_symbol_t* out_symbol) {
   *out_found = false;
   memset(out_symbol, 0, sizeof(*out_symbol));
@@ -34,8 +34,8 @@ iree_hal_amdgpu_executable_global_resolver_try_get_symbol_by_name(
   memcpy(name_storage, name.data, name.size);
   name_storage[name.size] = 0;
   hsa_status_t hsa_status = iree_hsa_executable_get_symbol_by_name_raw(
-      resolver->libhsa, resolver->executable, name_storage, &device_agent,
-      out_symbol);
+      resolver->libhsa, resolver->executable, name_storage,
+      &resolver->device_agent, out_symbol);
   if (hsa_status == HSA_STATUS_SUCCESS) {
     *out_found = true;
     return iree_ok_status();
@@ -83,7 +83,6 @@ iree_hal_amdgpu_executable_global_resolver_try_query_variable(
 static iree_status_t iree_hal_amdgpu_executable_global_resolver_query_variable(
     const iree_hal_amdgpu_executable_global_resolver_t* resolver,
     hsa_executable_symbol_t symbol, iree_string_view_t name,
-    iree_host_size_t physical_device_ordinal,
     iree_status_code_t wrong_kind_status_code, uint64_t* out_address,
     iree_device_size_t* out_byte_length) {
   bool found = false;
@@ -94,35 +93,24 @@ static iree_status_t iree_hal_amdgpu_executable_global_resolver_query_variable(
     return iree_make_status(wrong_kind_status_code,
                             "executable global `%.*s` is not a variable on "
                             "physical device %" PRIhsz,
-                            (int)name.size, name.data, physical_device_ordinal);
+                            (int)name.size, name.data,
+                            resolver->physical_device_ordinal);
   }
   return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amdgpu_executable_global_resolver_try_verify(
-    void* user_data, iree_string_view_t name,
-    iree_host_size_t verification_physical_device_ordinal, bool* out_found,
+    void* user_data, iree_string_view_t name, bool* out_found,
     iree_device_size_t* out_byte_length) {
   iree_hal_amdgpu_executable_global_resolver_t* resolver =
       (iree_hal_amdgpu_executable_global_resolver_t*)user_data;
   *out_found = false;
   *out_byte_length = 0;
 
-  if (IREE_UNLIKELY(verification_physical_device_ordinal >=
-                    resolver->device_agent_count)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "global verification physical device ordinal %" PRIhsz
-        " exceeds device count %" PRIhsz,
-        verification_physical_device_ordinal, resolver->device_agent_count);
-  }
-
   hsa_executable_symbol_t symbol = {0};
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_executable_global_resolver_try_get_symbol_by_name(
-          resolver, name,
-          resolver->device_agents[verification_physical_device_ordinal],
-          out_found, &symbol));
+          resolver, name, out_found, &symbol));
   if (!*out_found) return iree_ok_status();
 
   return iree_hal_amdgpu_executable_global_resolver_try_query_variable(
@@ -137,54 +125,43 @@ static void iree_hal_amdgpu_executable_global_resolver_release_buffer(
 
 static iree_status_t iree_hal_amdgpu_executable_global_resolver_create_buffer(
     void* user_data, iree_string_view_t name,
-    iree_device_size_t expected_byte_length,
-    iree_hal_queue_affinity_t selected_queue_affinity,
-    iree_host_size_t physical_device_ordinal, iree_hal_buffer_t** out_buffer) {
-  (void)selected_queue_affinity;
+    iree_device_size_t expected_byte_length, iree_hal_buffer_t** out_buffer) {
   iree_hal_amdgpu_executable_global_resolver_t* resolver =
       (iree_hal_amdgpu_executable_global_resolver_t*)user_data;
   *out_buffer = NULL;
-
-  if (IREE_UNLIKELY(physical_device_ordinal >= resolver->device_agent_count)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "global buffer physical device ordinal %" PRIhsz
-                            " exceeds device count %" PRIhsz,
-                            physical_device_ordinal,
-                            resolver->device_agent_count);
-  }
 
   hsa_executable_symbol_t symbol = {0};
   bool found = false;
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_executable_global_resolver_try_get_symbol_by_name(
-          resolver, name, resolver->device_agents[physical_device_ordinal],
-          &found, &symbol));
+          resolver, name, &found, &symbol));
   if (IREE_UNLIKELY(!found)) {
     return iree_make_status(IREE_STATUS_INTERNAL,
                             "verified executable global `%.*s` disappeared on "
                             "physical device %" PRIhsz,
-                            (int)name.size, name.data, physical_device_ordinal);
+                            (int)name.size, name.data,
+                            resolver->physical_device_ordinal);
   }
 
   uint64_t variable_address = 0;
   iree_device_size_t byte_length = 0;
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_executable_global_resolver_query_variable(
-          resolver, symbol, name, physical_device_ordinal, IREE_STATUS_INTERNAL,
-          &variable_address, &byte_length));
+          resolver, symbol, name, IREE_STATUS_INTERNAL, &variable_address,
+          &byte_length));
   if (IREE_UNLIKELY(byte_length != expected_byte_length)) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
         "verified executable global `%.*s` changed size on physical device "
         "%" PRIhsz " from %" PRIu64 " to %" PRIu64,
-        (int)name.size, name.data, physical_device_ordinal,
+        (int)name.size, name.data, resolver->physical_device_ordinal,
         (uint64_t)expected_byte_length, (uint64_t)byte_length);
   }
 
   iree_hal_buffer_placement_t placement = {
       .device = resolver->device,
       .queue_family_affinity = iree_hal_make_queue_family_affinity(
-          (iree_hal_queue_family_ordinal_t)physical_device_ordinal),
+          (iree_hal_queue_family_ordinal_t)resolver->physical_device_ordinal),
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
   iree_hal_buffer_release_callback_t release_callback = {
@@ -205,9 +182,6 @@ iree_status_t iree_hal_amdgpu_executable_global_resolver_initialize_table(
     iree_hal_amdgpu_global_table_t* out_table) {
   const iree_hal_amdgpu_global_table_params_t table_params = {
       .host_allocator = resolver->host_allocator,
-      .queue_affinity_domain = resolver->queue_affinity_domain,
-      .loaded_physical_device_mask = resolver->loaded_physical_device_mask,
-      .physical_device_count = resolver->device_agent_count,
       .resolver =
           {
               .user_data = resolver,

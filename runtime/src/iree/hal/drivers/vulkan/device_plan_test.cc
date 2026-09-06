@@ -807,7 +807,6 @@ TEST(DevicePlanTest, WrapInfersImplicitTransferFromCompute) {
   EXPECT_EQ(0u, plan.queue_assignment.compute.queue_index);
   EXPECT_EQ(0u, plan.queue_assignment.transfer.family_index);
   EXPECT_EQ(0u, plan.queue_assignment.transfer.queue_index);
-  EXPECT_EQ(1ull << 1, plan.queue_assignment.transfer.affinity);
 }
 
 TEST(DevicePlanTest, WrapCarriesRequestFlags) {

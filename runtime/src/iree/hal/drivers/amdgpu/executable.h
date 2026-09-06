@@ -185,15 +185,16 @@ iree_status_t iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_device(
     const iree_hal_amdgpu_executable_dispatch_descriptor_t** out_descriptor);
 
 // Returns host-resident dispatch metadata for an exported kernel function on a
-// queue.
+// provisioned queue ordinal in the executable's exact queue family.
 //
 // Queue-scoped executable variants require this lookup so the selected kernel
 // object and executable globals match the queue that will receive the dispatch.
 // Non-queue-scoped executables collapse this to the existing per-device lookup.
-iree_status_t iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue(
+iree_status_t
+iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue_ordinal(
     iree_hal_executable_t* executable,
     iree_hal_executable_function_t export_ordinal,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_ordinal_t queue_ordinal,
     const iree_hal_amdgpu_executable_dispatch_descriptor_t** out_descriptor);
 
 // Returns true when dispatches must select executable metadata by queue.

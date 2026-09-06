@@ -95,8 +95,8 @@ TEST_P(VulkanVirtualMemoryTest, ReserveMapTransferUnmap) {
 
   VirtualBufferRef virtual_buffer(device_allocator_);
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_reserve(
-      device_allocator_, IREE_HAL_QUEUE_AFFINITY_ANY, recommended_page_size,
-      virtual_buffer.out()));
+      device_allocator_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      recommended_page_size, virtual_buffer.out()));
   ASSERT_TRUE(virtual_buffer.get());
   EXPECT_EQ(recommended_page_size,
             iree_hal_buffer_byte_length(virtual_buffer.get()));
@@ -109,7 +109,7 @@ TEST_P(VulkanVirtualMemoryTest, ReserveMapTransferUnmap) {
 
   iree_status_t protect_status = iree_hal_allocator_virtual_memory_protect(
       device_allocator_, virtual_buffer.get(), /*virtual_offset=*/0,
-      recommended_page_size, IREE_HAL_QUEUE_AFFINITY_ANY,
+      recommended_page_size, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       IREE_HAL_MEMORY_PROTECTION_READ_WRITE);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION, protect_status);
 
@@ -118,7 +118,7 @@ TEST_P(VulkanVirtualMemoryTest, ReserveMapTransferUnmap) {
       physical_memory.get(), /*physical_offset=*/0, recommended_page_size));
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_protect(
       device_allocator_, virtual_buffer.get(), /*virtual_offset=*/0,
-      recommended_page_size, IREE_HAL_QUEUE_AFFINITY_ANY,
+      recommended_page_size, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
 
   constexpr iree_device_size_t kTouchedSize = 256;
@@ -173,7 +173,7 @@ TEST_P(VulkanVirtualMemoryTest, MappingsMustBeUnmappedBeforeReleaseOrFree) {
 
   VirtualBufferRef virtual_buffer(device_allocator_);
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_reserve(
-      device_allocator_, IREE_HAL_QUEUE_AFFINITY_ANY, reservation_size,
+      device_allocator_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, reservation_size,
       virtual_buffer.out()));
   ASSERT_TRUE(virtual_buffer.get());
 

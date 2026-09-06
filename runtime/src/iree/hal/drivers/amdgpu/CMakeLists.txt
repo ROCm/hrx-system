@@ -23,23 +23,8 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::target::identity
     iree::hal::drivers::amdgpu::target::selection
     iree::hal::drivers::amdgpu::util::packet
+    iree::hal::drivers::amdgpu::util::topology
     iree::hal::utils::device_spec_builder
-  PUBLIC
-)
-endif()
-
-if(IREE_HAL_DRIVER_AMDGPU)
-iree_cc_library(
-  NAME
-    queue_affinity
-  HDRS
-    "queue_affinity.h"
-  SRCS
-    "queue_affinity.c"
-  DEPS
-    iree::async
-    iree::base
-    iree::hal
   PUBLIC
 )
 endif()
@@ -92,7 +77,6 @@ iree_cc_library(
     "executable_global_resolver.c"
   DEPS
     ::buffer
-    ::queue_affinity
     iree::base
     iree::hal
     iree::hal::drivers::amdgpu::util::global_table
@@ -110,7 +94,6 @@ iree_cc_library(
   SRCS
     "access_policy.c"
   DEPS
-    ::queue_affinity
     iree::base
     iree::hal
     iree::hal::drivers::amdgpu::util::libhsa
@@ -345,7 +328,6 @@ iree_cc_library(
     ::executable_metadata_hsaco
     ::kernarg_layout
     ::profile_events
-    ::queue_affinity
     ::source_context
     iree::async
     iree::async::util::proactor_pool
@@ -461,7 +443,6 @@ iree_cc_library(
     "virtual_memory.h"
   DEPS
     ::profile_events
-    ::queue_affinity
     iree::base
     iree::base::internal
     iree::base::internal::arena
@@ -583,34 +564,12 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
-    queue_affinity_test
-  SRCS
-    "queue_affinity_test.cc"
-  DEPS
-    ::queue_affinity
-    iree::base
-    iree::hal
-    iree::testing::gtest
-    iree::testing::gtest_main
-  LABELS
-    "iree-build-requirement=runtime.hal.amdgpu"
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "runtime-resource=amd-gpu"
-  RESOURCE_GROUP
-    iree-hal-drivers-amdgpu-tests
-)
-endif()
-
-if(IREE_HAL_DRIVER_AMDGPU)
-iree_cc_test(
-  NAME
     allocator_test
   SRCS
     "allocator_test.cc"
   DEPS
     ::amdgpu
     ::headers
-    ::queue_affinity
     iree::base
     iree::hal
     iree::hal::cts::util::test_base
@@ -758,7 +717,6 @@ iree_cc_test(
     ::amdgpu
     ::atomic_memory
     ::headers
-    ::queue_affinity
     iree::base
     iree::hal
     iree::hal::cts::util::registry
@@ -905,7 +863,6 @@ iree_cc_test(
   DEPS
     ::amdgpu
     ::headers
-    ::queue_affinity
     iree::base
     iree::hal
     iree::hal::cts::util::registry
@@ -936,7 +893,6 @@ iree_cc_test(
   DEPS
     ::amdgpu
     ::headers
-    ::queue_affinity
     iree::base
     iree::hal
     iree::hal::cts::util::registry
@@ -970,7 +926,6 @@ iree_cc_test(
   DEPS
     ::amdgpu
     ::headers
-    ::queue_affinity
     iree::base
     iree::hal
     iree::hal::cts::util::registry
@@ -1001,7 +956,6 @@ iree_cc_test(
   DEPS
     ::amdgpu
     ::headers
-    ::queue_affinity
     iree::base
     iree::hal
     iree::hal::cts::util::registry
@@ -1267,7 +1221,6 @@ iree_cc_test(
   DEPS
     ::amdgpu
     ::headers
-    ::queue_affinity
     iree::base
     iree::hal
     iree::hal::cts::util::test_base
