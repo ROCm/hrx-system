@@ -104,7 +104,8 @@ typedef std::atomic<uint32_t> iree_atomic_uint32_t;
 typedef std::atomic<uint64_t> iree_atomic_uint64_t;
 typedef std::atomic<intptr_t> iree_atomic_intptr_t;
 
-#define iree_atomic_thread_fence(order) std::atomic_thread_fence(order)
+#define iree_atomic_thread_fence(order) \
+  std::atomic_thread_fence((std::memory_order)(order))
 
 #define iree_atomic_load(object, order) \
   std::atomic_load_explicit((object), (std::memory_order)(order))
