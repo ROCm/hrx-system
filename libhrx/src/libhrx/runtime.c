@@ -360,15 +360,27 @@ iree_status_t hrx_hal_queue_affinity_to_family_affinity(
 }
 
 // Selects the first exact provisioned queue identified by the HRX affinity
-// whose family provides every |required_roles|. Queue-family facts and the
-// provisioned queue table are two views of the same immutable device inventory;
-// disagreement is a malformed device rather than a queue-selection fallback
-// case.
+// whose family provides every |required_roles| and, when specified, matches
+// |required_family|. Queue-family facts and the provisioned queue table are two
+// views of the same immutable device inventory; disagreement is a malformed
+// device rather than a queue-selection fallback case.
 iree_status_t hrx_hal_device_select_queue(
     iree_hal_device_t* device, hrx_queue_affinity_t affinity,
     iree_hal_queue_family_role_flags_t required_roles,
+    const iree_hal_queue_family_t* required_family,
     iree_hal_queue_t** out_queue) {
-  *out_queue = NULL;
+  iree_hal_queue_family_ordinal_t required_family_ordinal = 0;
+  if (required_family) {
+    required_family_ordinal = iree_hal_queue_family_ordinal(required_family);
+    if (iree_hal_device_queue_family(device, required_family_ordinal) !=
+        required_family) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "required queue family %u must be borrowed from the device",
+          required_family_ordinal);
+    }
+  }
+
   const iree_hal_device_queue_spec_t* queue_spec =
       iree_hal_device_spec_queues(iree_hal_device_spec(device));
   iree_host_size_t flat_queue_ordinal = 0;
@@ -378,10 +390,12 @@ iree_status_t hrx_hal_device_select_queue(
         &queue_spec->families[family_ordinal];
     const bool family_has_required_roles =
         iree_all_bits_set(family->role_flags, required_roles);
+    const bool family_matches =
+        !required_family || family_ordinal == required_family_ordinal;
     for (iree_hal_queue_ordinal_t queue_ordinal = 0;
          queue_ordinal < family->provisioned_queue_count;
          ++queue_ordinal, ++flat_queue_ordinal) {
-      if (!family_has_required_roles ||
+      if (!family_has_required_roles || !family_matches ||
           !hrx_queue_affinity_selects_provisioned_queue(affinity,
                                                         flat_queue_ordinal)) {
         continue;
@@ -745,7 +759,7 @@ hrx_status_t hrx_cpu_initialize(uint32_t flags) {
       hrx_hal_device_select_queue(hal_device, /*affinity=*/0,
                                   IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
                                       IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
-                                  &dispatch_queue);
+                                  /*required_family=*/NULL, &dispatch_queue);
   if (!iree_status_is_ok(iree_status)) {
     iree_hal_device_group_release(device_group);
     iree_hal_device_release(hal_device);
@@ -757,7 +771,7 @@ hrx_status_t hrx_cpu_initialize(uint32_t flags) {
   iree_hal_queue_t* transfer_queue = NULL;
   iree_status = hrx_hal_device_select_queue(
       hal_device, /*affinity=*/0, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
-      &transfer_queue);
+      /*required_family=*/NULL, &transfer_queue);
   if (!iree_status_is_ok(iree_status)) {
     iree_hal_device_group_release(device_group);
     iree_hal_device_release(hal_device);
@@ -980,7 +994,7 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
         hal_device, /*affinity=*/0,
         IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
             IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
-        &dispatch_queue);
+        /*required_family=*/NULL, &dispatch_queue);
     if (!iree_status_is_ok(iree_status)) {
       iree_hal_device_group_release(device_group);
       iree_hal_device_release(hal_device);
@@ -995,7 +1009,7 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
     iree_hal_queue_t* transfer_queue = NULL;
     iree_status = hrx_hal_device_select_queue(
         hal_device, /*affinity=*/0, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
-        &transfer_queue);
+        /*required_family=*/NULL, &transfer_queue);
     if (!iree_status_is_ok(iree_status)) {
       iree_hal_device_group_release(device_group);
       iree_hal_device_release(hal_device);

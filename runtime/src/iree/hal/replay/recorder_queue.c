@@ -506,7 +506,6 @@ static const iree_hal_resource_vtable_t
 static iree_status_t iree_hal_replay_recorder_host_call_state_create(
     iree_hal_replay_recorder_queue_t* queue, iree_hal_host_call_t call,
     iree_hal_replay_recorder_host_call_state_t** out_state) {
-  *out_state = NULL;
   iree_hal_replay_recorder_host_call_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(queue->host_allocator,
                                              sizeof(*state), (void**)&state));

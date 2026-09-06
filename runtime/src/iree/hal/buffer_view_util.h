@@ -52,7 +52,8 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_compute_view_range(
 //===----------------------------------------------------------------------===//
 
 // Allocates an uninitialized buffer from |allocator| using |buffer_params| and
-// wraps it in a buffer view.
+// wraps it in a buffer view. On success, |out_buffer_view| is assigned one
+// owning reference. It is unchanged on failure.
 IREE_API_EXPORT iree_status_t iree_hal_buffer_view_allocate(
     iree_hal_allocator_t* allocator, iree_hal_buffer_params_t buffer_params,
     iree_host_size_t shape_rank, const iree_hal_dim_t* shape,
@@ -61,7 +62,8 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_view_allocate(
     iree_hal_buffer_view_t** out_buffer_view);
 
 // Allocates an uninitialized buffer view with the same shape, element type, and
-// encoding as |source_buffer_view|.
+// encoding as |source_buffer_view|. On success, |out_buffer_view| is assigned
+// one owning reference. It is unchanged on failure.
 IREE_API_EXPORT iree_status_t iree_hal_buffer_view_allocate_like(
     iree_hal_allocator_t* allocator, iree_hal_buffer_params_t buffer_params,
     const iree_hal_buffer_view_t* source_buffer_view,
@@ -83,6 +85,8 @@ typedef iree_status_t(IREE_API_PTR* iree_hal_buffer_view_generator_fn_t)(
 // IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE are added to
 // |buffer_params|. Non-coherent host writes are flushed before returning.
 // No device queue operations or staging transfers are performed.
+// On success, |out_buffer_view| is assigned one owning reference. It is
+// unchanged on failure.
 IREE_API_EXPORT iree_status_t iree_hal_buffer_view_generate(
     iree_hal_allocator_t* allocator, iree_hal_buffer_params_t buffer_params,
     iree_host_size_t shape_rank, const iree_hal_dim_t* shape,
@@ -98,7 +102,8 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_view_generate(
 // Parses a serialized set of buffer elements in the canonical tensor format
 // (the same as produced by iree_hal_buffer_view_format). The underlying buffer
 // is allocated with |allocator| and |buffer_params| as by
-// iree_hal_buffer_view_generate.
+// iree_hal_buffer_view_generate. On success, |out_buffer_view| is assigned one
+// owning reference. It is unchanged on failure.
 IREE_API_EXPORT iree_status_t iree_hal_buffer_view_parse(
     iree_string_view_t value, iree_hal_allocator_t* allocator,
     iree_hal_buffer_params_t buffer_params,

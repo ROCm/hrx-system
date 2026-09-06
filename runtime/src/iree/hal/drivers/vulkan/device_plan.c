@@ -9,6 +9,8 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "iree/base/internal/math.h"
+
 bool iree_hal_vulkan_queue_selection_is_same(
     const iree_hal_vulkan_queue_selection_t* lhs,
     const iree_hal_vulkan_queue_selection_t* rhs) {

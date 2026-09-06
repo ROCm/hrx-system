@@ -654,6 +654,9 @@ IREE_API_EXPORT iree_status_t iree_hal_device_query_queue_pool_backend(
 // call. Implementations must finish consuming or copy any retained data before
 // returning. Loading is a cold path and implementations may parse, verify,
 // link, or optimize the native artifact before returning.
+//
+// On success, |out_executable| is assigned one owning reference. It is
+// unchanged on failure.
 IREE_API_EXPORT iree_status_t iree_hal_device_load_executable(
     iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,

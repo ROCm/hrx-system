@@ -16,7 +16,6 @@ static iree_status_t loom_run_hal_runtime_select_queue(
     iree_hal_device_t* device,
     iree_hal_queue_family_role_flags_t required_roles, const char* role_name,
     iree_hal_queue_t** out_queue) {
-  *out_queue = NULL;
   const iree_hal_device_queue_spec_t* queue_spec =
       iree_hal_device_spec_queues(iree_hal_device_spec(device));
   for (iree_host_size_t i = 0; i < queue_spec->family_count; ++i) {

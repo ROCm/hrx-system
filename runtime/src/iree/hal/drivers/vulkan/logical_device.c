@@ -1363,7 +1363,6 @@ static iree_status_t iree_hal_vulkan_logical_device_resolve_queue(
     iree_hal_vulkan_logical_device_t* device,
     const iree_hal_vulkan_queue_selection_t* selection,
     iree_hal_vulkan_queue_t** out_queue) {
-  *out_queue = NULL;
   if (selection->family_ordinal >= device->queues.family_count) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,

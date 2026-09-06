@@ -89,7 +89,6 @@ static iree_status_t iree_hal_webgpu_device_spec_create(
     iree_string_view_t identifier, iree_allocator_t host_allocator,
     iree_hal_device_spec_t** out_device_spec) {
   IREE_ASSERT_ARGUMENT(out_device_spec);
-  *out_device_spec = NULL;
 
   iree_hal_physical_device_spec_t physical_device = {
       .identity =

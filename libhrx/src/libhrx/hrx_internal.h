@@ -655,11 +655,13 @@ iree_status_t hrx_hal_queue_affinity_to_family_affinity(
     iree_hal_device_t* device, hrx_queue_affinity_t affinity,
     iree_hal_queue_family_affinity_t* out_family_affinity);
 
-// Selects a provisioned queue matching an HRX flattened queue-affinity mask and
-// all required HAL queue-family roles. An affinity of zero selects any queue.
+// Selects a provisioned queue matching an HRX flattened queue-affinity mask,
+// all required HAL queue-family roles, and optional exact |required_family|.
+// An affinity of zero selects any queue.
 iree_status_t hrx_hal_device_select_queue(
     iree_hal_device_t* device, hrx_queue_affinity_t affinity,
     iree_hal_queue_family_role_flags_t required_roles,
+    const iree_hal_queue_family_t* required_family,
     iree_hal_queue_t** out_queue);
 
 // Convert iree_status_t to hrx_status_t.

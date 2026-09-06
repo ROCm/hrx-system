@@ -89,7 +89,6 @@ iree_hal_streaming_timestamp_domain_t iree_hal_streaming_query_timestamp_domain(
 
 static iree_status_t iree_hal_streaming_context_select_queue(
     iree_hal_device_t* device, iree_hal_queue_t** out_queue) {
-  *out_queue = NULL;
   const iree_hal_queue_family_role_flags_t required_roles =
       IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
       IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH;

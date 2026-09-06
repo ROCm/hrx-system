@@ -435,7 +435,6 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
   iree_status_t BeginAbabaCommandBuffer(
       CommandBufferPath path, BenchmarkSpec spec,
       iree_hal_command_buffer_t** out_command_buffer) {
-    *out_command_buffer = nullptr;
     if (spec.operation_count <= 0) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "operation count must be positive");
@@ -521,7 +520,6 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
   iree_status_t RecordAbabaCommandBuffer(
       CommandBufferPath path, BenchmarkSpec spec,
       iree_hal_command_buffer_t** out_command_buffer) {
-    *out_command_buffer = nullptr;
     iree_hal_command_buffer_t* command_buffer = nullptr;
     iree_status_t status = BeginAbabaCommandBuffer(path, spec, &command_buffer);
     if (iree_status_is_ok(status)) {

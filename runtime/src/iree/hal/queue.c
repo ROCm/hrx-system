@@ -97,30 +97,22 @@ iree_hal_queue_barrier(iree_hal_queue_t* queue,
                        const iree_hal_semaphore_list_t signal_semaphore_list,
                        iree_hal_queue_barrier_flags_t flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!queue)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null"));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_queue_validate_semaphore_list(
+                                            "signal", signal_semaphore_list));
+  if (IREE_UNLIKELY(flags != IREE_HAL_QUEUE_BARRIER_FLAG_NONE)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "unsupported queue barrier flags: 0x%016" PRIx64,
+                             flags));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
-  }
-  if (iree_status_is_ok(status) &&
-      IREE_UNLIKELY(flags != IREE_HAL_QUEUE_BARRIER_FLAG_NONE)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unsupported queue barrier flags: 0x%016" PRIx64,
-                              flags);
-  }
-  if (iree_status_is_ok(status)) {
-    status = _VTABLE_DISPATCH(queue, barrier)(queue, wait_semaphore_list,
-                                              signal_semaphore_list, flags);
-  }
-
+  iree_status_t status = _VTABLE_DISPATCH(queue, barrier)(
+      queue, wait_semaphore_list, signal_semaphore_list, flags);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -133,50 +125,42 @@ iree_hal_queue_execute(iree_hal_queue_t* queue,
                        iree_hal_buffer_binding_table_t binding_table,
                        iree_hal_queue_execute_flags_t flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
-
   const iree_hal_queue_execute_flags_t known_flags =
       IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME;
-  iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!queue)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null"));
   } else if (IREE_UNLIKELY(!command_buffer)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "command buffer is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "command buffer is null"));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_queue_validate_semaphore_list(
+                                            "signal", signal_semaphore_list));
+  if (IREE_UNLIKELY(iree_any_bit_set(flags, ~known_flags))) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "unsupported queue execute flags: 0x%016" PRIx64,
+                             flags));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
-  }
-  if (iree_status_is_ok(status) &&
-      IREE_UNLIKELY(iree_any_bit_set(flags, ~known_flags))) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unsupported queue execute flags: 0x%016" PRIx64,
-                              flags);
-  }
-  if (iree_status_is_ok(status) &&
-      IREE_UNLIKELY(iree_hal_command_buffer_queue_family(command_buffer) !=
+  if (IREE_UNLIKELY(iree_hal_command_buffer_queue_family(command_buffer) !=
                     iree_hal_queue_family(queue))) {
-    status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "command buffer family %u does not match queue family %u",
-        iree_hal_queue_family_ordinal(
-            iree_hal_command_buffer_queue_family(command_buffer)),
-        iree_hal_queue_family_ordinal(iree_hal_queue_family(queue)));
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(
+                IREE_STATUS_INVALID_ARGUMENT,
+                "command buffer family %u does not match queue family %u",
+                iree_hal_queue_family_ordinal(
+                    iree_hal_command_buffer_queue_family(command_buffer)),
+                iree_hal_queue_family_ordinal(iree_hal_queue_family(queue))));
   }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_validate_submission(command_buffer,
-                                                         binding_table);
-  }
-  if (iree_status_is_ok(status)) {
-    status = _VTABLE_DISPATCH(queue, execute)(
-        queue, wait_semaphore_list, signal_semaphore_list, command_buffer,
-        binding_table, flags);
-  }
-
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_command_buffer_validate_submission(command_buffer,
+                                                      binding_table));
+  iree_status_t status = _VTABLE_DISPATCH(queue, execute)(
+      queue, wait_semaphore_list, signal_semaphore_list, command_buffer,
+      binding_table, flags);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -188,39 +172,33 @@ iree_hal_queue_host_call(iree_hal_queue_t* queue,
                          iree_hal_host_call_t call, const uint64_t args[4],
                          iree_hal_host_call_flags_t flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
-
   const iree_hal_host_call_flags_t known_flags =
       IREE_HAL_HOST_CALL_FLAG_NON_BLOCKING |
       IREE_HAL_HOST_CALL_FLAG_WAIT_ACTIVE | IREE_HAL_HOST_CALL_FLAG_RELAXED;
-  iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!queue)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null"));
   } else if (IREE_UNLIKELY(!call.fn)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "host call function is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "host call function is null"));
   } else if (IREE_UNLIKELY(!args)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "host call arguments are null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "host call arguments are null"));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
-  }
-  if (iree_status_is_ok(status) &&
-      IREE_UNLIKELY(iree_any_bit_set(flags, ~known_flags))) {
-    status =
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_queue_validate_semaphore_list(
+                                            "signal", signal_semaphore_list));
+  if (IREE_UNLIKELY(iree_any_bit_set(flags, ~known_flags))) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                         "unsupported host call flags: 0x%016" PRIx64, flags);
+                         "unsupported host call flags: 0x%016" PRIx64, flags));
   }
-  if (iree_status_is_ok(status)) {
-    status = _VTABLE_DISPATCH(queue, host_call)(
-        queue, wait_semaphore_list, signal_semaphore_list, call, args, flags);
-  }
-
+  iree_status_t status = _VTABLE_DISPATCH(queue, host_call)(
+      queue, wait_semaphore_list, signal_semaphore_list, call, args, flags);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -234,7 +212,6 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_dispatch(
     const iree_hal_buffer_ref_list_t bindings,
     iree_hal_dispatch_flags_t flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
-
   const iree_hal_dispatch_flags_t known_flags =
       IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS |
       IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS |
@@ -243,47 +220,45 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_dispatch(
       IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_ARGUMENTS |
       IREE_HAL_DISPATCH_FLAG_ALLOW_INLINE_EXECUTION |
       IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES;
-  iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!queue)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null"));
   } else if (IREE_UNLIKELY(!executable)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "dispatch executable is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "dispatch executable is null"));
   } else if (IREE_UNLIKELY(iree_hal_executable_queue_family(executable) !=
                            iree_hal_queue_family(queue))) {
-    status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "executable queue family %u does not match dispatch queue family %u",
-        iree_hal_queue_family_ordinal(
-            iree_hal_executable_queue_family(executable)),
-        iree_hal_queue_family_ordinal(iree_hal_queue_family(queue)));
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(
+                IREE_STATUS_INVALID_ARGUMENT,
+                "executable queue family %u does not match dispatch queue "
+                "family %u",
+                iree_hal_queue_family_ordinal(
+                    iree_hal_executable_queue_family(executable)),
+                iree_hal_queue_family_ordinal(iree_hal_queue_family(queue))));
   } else if (IREE_UNLIKELY(constants.data_length && !constants.data)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "dispatch constant storage is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "dispatch constant storage is null"));
   } else if (IREE_UNLIKELY(bindings.count && !bindings.values)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "dispatch binding storage is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "dispatch binding storage is null"));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
-  }
-  if (iree_status_is_ok(status) &&
-      IREE_UNLIKELY(iree_any_bit_set(flags, ~known_flags))) {
-    status =
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_queue_validate_semaphore_list(
+                                            "signal", signal_semaphore_list));
+  if (IREE_UNLIKELY(iree_any_bit_set(flags, ~known_flags))) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                         "unsupported dispatch flags: 0x%016" PRIx64, flags);
+                         "unsupported dispatch flags: 0x%016" PRIx64, flags));
   }
-  if (iree_status_is_ok(status)) {
-    status = _VTABLE_DISPATCH(queue, dispatch)(
-        queue, wait_semaphore_list, signal_semaphore_list, executable, function,
-        config, constants, bindings, flags);
-  }
-
+  iree_status_t status = _VTABLE_DISPATCH(queue, dispatch)(
+      queue, wait_semaphore_list, signal_semaphore_list, executable, function,
+      config, constants, bindings, flags);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -334,36 +309,27 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_atomic_wait(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_atomic_wait_params_t params) {
   IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!queue)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null"));
   } else if (IREE_UNLIKELY(!target_buffer)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "atomic target buffer is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "atomic target buffer is null"));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_atomic_wait_params_validate(params);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_queue_validate_atomic_target(
-        queue, target_buffer, target_offset, params.width,
-        IREE_HAL_BUFFER_USAGE_STORAGE_READ, IREE_HAL_MEMORY_ACCESS_READ);
-  }
-  if (iree_status_is_ok(status)) {
-    status = _VTABLE_DISPATCH(queue, atomic_wait)(
-        queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
-        target_offset, params);
-  }
-
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_queue_validate_semaphore_list(
+                                            "signal", signal_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_atomic_wait_params_validate(params));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_queue_validate_atomic_target(
+              queue, target_buffer, target_offset, params.width,
+              IREE_HAL_BUFFER_USAGE_STORAGE_READ, IREE_HAL_MEMORY_ACCESS_READ));
+  iree_status_t status = _VTABLE_DISPATCH(queue, atomic_wait)(
+      queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
+      target_offset, params);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -375,36 +341,28 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_atomic_store(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_atomic_store_params_t params) {
   IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!queue)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null"));
   } else if (IREE_UNLIKELY(!target_buffer)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "atomic target buffer is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "atomic target buffer is null"));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_atomic_store_params_validate(params);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_queue_validate_atomic_target(
-        queue, target_buffer, target_offset, params.width,
-        IREE_HAL_BUFFER_USAGE_STORAGE_WRITE, IREE_HAL_MEMORY_ACCESS_WRITE);
-  }
-  if (iree_status_is_ok(status)) {
-    status = _VTABLE_DISPATCH(queue, atomic_store)(
-        queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
-        target_offset, params);
-  }
-
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_queue_validate_semaphore_list(
+                                            "signal", signal_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_atomic_store_params_validate(params));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_queue_validate_atomic_target(
+          queue, target_buffer, target_offset, params.width,
+          IREE_HAL_BUFFER_USAGE_STORAGE_WRITE, IREE_HAL_MEMORY_ACCESS_WRITE));
+  iree_status_t status = _VTABLE_DISPATCH(queue, atomic_store)(
+      queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
+      target_offset, params);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -416,37 +374,28 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_atomic_rmw(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_atomic_rmw_params_t params) {
   IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!queue)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null"));
   } else if (IREE_UNLIKELY(!target_buffer)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "atomic target buffer is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "atomic target buffer is null"));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_atomic_rmw_params_validate(params);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_queue_validate_atomic_target(
-        queue, target_buffer, target_offset, params.width,
-        IREE_HAL_BUFFER_USAGE_STORAGE,
-        IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE);
-  }
-  if (iree_status_is_ok(status)) {
-    status = _VTABLE_DISPATCH(queue, atomic_rmw)(
-        queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
-        target_offset, params);
-  }
-
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_queue_validate_semaphore_list(
+                                            "signal", signal_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_atomic_rmw_params_validate(params));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_queue_validate_atomic_target(
+              queue, target_buffer, target_offset, params.width,
+              IREE_HAL_BUFFER_USAGE_STORAGE,
+              IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE));
+  iree_status_t status = _VTABLE_DISPATCH(queue, atomic_rmw)(
+      queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
+      target_offset, params);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -458,42 +407,37 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_timestamp(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_timestamp_flags_t flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!queue)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null"));
   } else if (IREE_UNLIKELY(!target_buffer)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "timestamp target buffer is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "timestamp target buffer is null"));
   } else if (IREE_UNLIKELY(flags != IREE_HAL_TIMESTAMP_FLAG_NONE)) {
-    status =
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                         "unsupported timestamp flags: 0x%016" PRIx64, flags);
+                         "unsupported timestamp flags: 0x%016" PRIx64, flags));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
-  }
-  if (iree_status_is_ok(status)) {
-    status = _VTABLE_DISPATCH(queue, timestamp)(
-        queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
-        target_offset, flags);
-  }
-
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_queue_validate_semaphore_list(
+                                            "signal", signal_semaphore_list));
+  iree_status_t status = _VTABLE_DISPATCH(queue, timestamp)(
+      queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
+      target_offset, flags);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_queue_flush(iree_hal_queue_t* queue) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status =
-      IREE_UNLIKELY(!queue)
-          ? iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null")
-          : _VTABLE_DISPATCH(queue, flush)(queue);
+  if (IREE_UNLIKELY(!queue)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null"));
+  }
+  iree_status_t status = _VTABLE_DISPATCH(queue, flush)(queue);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -507,59 +451,57 @@ iree_hal_queue_alloca(iree_hal_queue_t* queue,
                       iree_hal_buffer_t** IREE_RESTRICT out_buffers) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)request_count);
-
-  iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!queue)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null"));
   } else if (IREE_UNLIKELY(!pool)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "pool is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "pool is null"));
   } else if (IREE_UNLIKELY(request_count == 0)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "allocation transaction is empty");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "allocation transaction is empty"));
   } else if (IREE_UNLIKELY(!requests)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "allocation request storage is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "allocation request storage is null"));
   } else if (IREE_UNLIKELY(!out_buffers)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "allocation output storage is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "allocation output storage is null"));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_queue_validate_semaphore_list(
+                                            "signal", signal_semaphore_list));
+  if (signal_semaphore_list.count == 0) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(
+                IREE_STATUS_INVALID_ARGUMENT,
+                "queue allocations require a readiness signal semaphore"));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
-  }
-  if (iree_status_is_ok(status) && signal_semaphore_list.count == 0) {
-    status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "queue allocations require a readiness signal semaphore");
-  }
-  for (iree_host_size_t i = 0; i < request_count && iree_status_is_ok(status);
-       ++i) {
+  for (iree_host_size_t i = 0; i < request_count; ++i) {
     if (IREE_UNLIKELY(requests[i].allocation_size == 0)) {
-      status = iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "allocation request %" PRIhsz " has a zero allocation size", i);
-    } else {
-      const iree_hal_queue_family_affinity_t request_affinity =
-          requests[i].params.queue_family_affinity
-              ? requests[i].params.queue_family_affinity
-              : IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
-      status = iree_hal_queue_validate_family_access(queue, request_affinity);
-      if (!iree_status_is_ok(status)) {
-        status =
-            iree_status_annotate_f(status, "allocation request %" PRIhsz, i);
-      }
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                               "allocation request %" PRIhsz
+                               " has a zero allocation size",
+                               i));
+    }
+    const iree_hal_queue_family_affinity_t request_affinity =
+        requests[i].params.queue_family_affinity
+            ? requests[i].params.queue_family_affinity
+            : IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
+    iree_status_t status =
+        iree_hal_queue_validate_family_access(queue, request_affinity);
+    if (!iree_status_is_ok(status)) {
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_status_annotate_f(status, "allocation request %" PRIhsz, i));
     }
   }
-  if (iree_status_is_ok(status)) {
-    status = _VTABLE_DISPATCH(queue, alloca)(
-        queue, wait_semaphore_list, signal_semaphore_list, pool, request_count,
-        requests, out_buffers);
-  }
-
+  iree_status_t status = _VTABLE_DISPATCH(queue, alloca)(
+      queue, wait_semaphore_list, signal_semaphore_list, pool, request_count,
+      requests, out_buffers);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -571,52 +513,47 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_dealloca(
     iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)buffer_count);
-
-  iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!queue)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null"));
   } else if (IREE_UNLIKELY(buffer_count == 0)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "deallocation transaction is empty");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "deallocation transaction is empty"));
   } else if (IREE_UNLIKELY(!buffers)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "deallocation buffer storage is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "deallocation buffer storage is null"));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
-  }
-  for (iree_host_size_t i = 0; i < buffer_count && iree_status_is_ok(status);
-       ++i) {
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_queue_validate_semaphore_list(
+                                            "signal", signal_semaphore_list));
+  for (iree_host_size_t i = 0; i < buffer_count; ++i) {
     if (IREE_UNLIKELY(!buffers[i])) {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "deallocation buffer %" PRIhsz " is null", i);
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                               "deallocation buffer %" PRIhsz " is null", i));
     } else if (IREE_UNLIKELY(iree_hal_buffer_allocated_buffer(buffers[i]) !=
                              buffers[i])) {
-      status = iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "deallocation buffer %" PRIhsz " is not an allocation root", i);
-    } else {
-      const iree_hal_buffer_placement_t placement =
-          iree_hal_buffer_allocation_placement(buffers[i]);
-      status = iree_hal_queue_validate_family_access(
-          queue, placement.queue_family_affinity);
-      if (!iree_status_is_ok(status)) {
-        status =
-            iree_status_annotate_f(status, "deallocation buffer %" PRIhsz, i);
-      }
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                               "deallocation buffer %" PRIhsz
+                               " is not an allocation root",
+                               i));
+    }
+    const iree_hal_buffer_placement_t placement =
+        iree_hal_buffer_allocation_placement(buffers[i]);
+    iree_status_t status = iree_hal_queue_validate_family_access(
+        queue, placement.queue_family_affinity);
+    if (!iree_status_is_ok(status)) {
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0,
+          iree_status_annotate_f(status, "deallocation buffer %" PRIhsz, i));
     }
   }
-  if (iree_status_is_ok(status)) {
-    status = _VTABLE_DISPATCH(queue, dealloca)(queue, wait_semaphore_list,
-                                               signal_semaphore_list,
-                                               buffer_count, buffers);
-  }
-
+  iree_status_t status = _VTABLE_DISPATCH(queue, dealloca)(
+      queue, wait_semaphore_list, signal_semaphore_list, buffer_count, buffers);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -806,45 +743,37 @@ iree_hal_queue_transfer(iree_hal_queue_t* queue,
                         const iree_hal_transfer_operation_t* operations) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)operation_count);
-
-  iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!queue)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null"));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
-  }
-  if (iree_status_is_ok(status) &&
-      IREE_UNLIKELY(operation_count && !operations)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "transfer operation storage is null");
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_queue_validate_semaphore_list(
+                                            "signal", signal_semaphore_list));
+  if (IREE_UNLIKELY(operation_count && !operations)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "transfer operation storage is null"));
   }
 
   bool has_borrowed_host_range = false;
-  for (iree_host_size_t i = 0; i < operation_count && iree_status_is_ok(status);
-       ++i) {
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
     bool operation_has_borrowed_host_range = false;
-    status = iree_hal_queue_validate_transfer_operation(
-        queue, i, &operations[i], &operation_has_borrowed_host_range);
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_queue_validate_transfer_operation(
+                queue, i, &operations[i], &operation_has_borrowed_host_range));
     has_borrowed_host_range |= operation_has_borrowed_host_range;
   }
-  if (iree_status_is_ok(status) && has_borrowed_host_range &&
-      signal_semaphore_list.count == 0) {
-    status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "transfers borrowing host memory require a signal semaphore");
+  if (has_borrowed_host_range && signal_semaphore_list.count == 0) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(
+                IREE_STATUS_INVALID_ARGUMENT,
+                "transfers borrowing host memory require a signal semaphore"));
   }
-  if (iree_status_is_ok(status)) {
-    status = _VTABLE_DISPATCH(queue, transfer)(queue, wait_semaphore_list,
-                                               signal_semaphore_list,
-                                               operation_count, operations);
-  }
-
+  iree_status_t status = _VTABLE_DISPATCH(queue, transfer)(
+      queue, wait_semaphore_list, signal_semaphore_list, operation_count,
+      operations);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -967,62 +896,57 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_read(
     iree_device_size_t length, iree_hal_read_flags_t flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)length);
-
-  iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!queue)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null"));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
-  }
-  if (iree_status_is_ok(status) && length == 0) {
-    status = _VTABLE_DISPATCH(queue, transfer)(
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_queue_validate_semaphore_list(
+                                            "signal", signal_semaphore_list));
+  if (length == 0) {
+    iree_status_t status = _VTABLE_DISPATCH(queue, transfer)(
         queue, wait_semaphore_list, signal_semaphore_list,
         /*operation_count=*/0, /*operations=*/NULL);
-  } else if (iree_status_is_ok(status)) {
-    if (IREE_UNLIKELY(flags != IREE_HAL_READ_FLAG_NONE)) {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "unsupported queue read flags: 0x%016" PRIx64,
-                                flags);
-    } else if (IREE_UNLIKELY(!source_file)) {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "read source file is null");
-    }
+    IREE_TRACE_ZONE_END(z0);
+    return status;
   }
-  if (iree_status_is_ok(status) && length != 0) {
-    status =
-        iree_hal_file_validate_access(source_file, IREE_HAL_MEMORY_ACCESS_READ);
+  if (IREE_UNLIKELY(flags != IREE_HAL_READ_FLAG_NONE)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "unsupported queue read flags: 0x%016" PRIx64, flags));
+  } else if (IREE_UNLIKELY(!source_file)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "read source file is null"));
   }
-  if (iree_status_is_ok(status) && length != 0) {
-    status = iree_hal_file_validate_range(source_file, source_offset, length);
-  }
-  if (iree_status_is_ok(status) && length != 0) {
-    status = iree_hal_queue_validate_transfer_buffer(
-        queue, target_buffer, target_offset, length,
-        IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET, IREE_HAL_MEMORY_ACCESS_WRITE);
-  }
-  if (iree_status_is_ok(status) && length != 0) {
-    iree_hal_buffer_t* source_storage_buffer =
-        iree_hal_file_storage_buffer(source_file);
-    if (source_storage_buffer &&
-        iree_all_bits_set(iree_hal_buffer_memory_type(source_storage_buffer),
-                          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
-      status = iree_hal_queue_copy(
-          queue, wait_semaphore_list, signal_semaphore_list,
-          source_storage_buffer, (iree_device_size_t)source_offset,
-          target_buffer, target_offset, length, IREE_HAL_COPY_FLAG_NONE);
-    } else {
-      status = _VTABLE_DISPATCH(queue, read)(
-          queue, wait_semaphore_list, signal_semaphore_list, source_file,
-          source_offset, target_buffer, target_offset, length, flags);
-    }
-  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_file_validate_access(source_file, IREE_HAL_MEMORY_ACCESS_READ));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_file_validate_range(source_file, source_offset, length));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_queue_validate_transfer_buffer(
+          queue, target_buffer, target_offset, length,
+          IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET, IREE_HAL_MEMORY_ACCESS_WRITE));
 
+  iree_hal_buffer_t* source_storage_buffer =
+      iree_hal_file_storage_buffer(source_file);
+  iree_status_t status;
+  if (source_storage_buffer &&
+      iree_all_bits_set(iree_hal_buffer_memory_type(source_storage_buffer),
+                        IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
+    status = iree_hal_queue_copy(
+        queue, wait_semaphore_list, signal_semaphore_list,
+        source_storage_buffer, (iree_device_size_t)source_offset, target_buffer,
+        target_offset, length, IREE_HAL_COPY_FLAG_NONE);
+  } else {
+    status = _VTABLE_DISPATCH(queue, read)(
+        queue, wait_semaphore_list, signal_semaphore_list, source_file,
+        source_offset, target_buffer, target_offset, length, flags);
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -1036,62 +960,57 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_write(
     iree_device_size_t length, iree_hal_write_flags_t flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)length);
-
-  iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!queue)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null"));
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
-  }
-  if (iree_status_is_ok(status) && length == 0) {
-    status = _VTABLE_DISPATCH(queue, transfer)(
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_queue_validate_semaphore_list("wait", wait_semaphore_list));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_queue_validate_semaphore_list(
+                                            "signal", signal_semaphore_list));
+  if (length == 0) {
+    iree_status_t status = _VTABLE_DISPATCH(queue, transfer)(
         queue, wait_semaphore_list, signal_semaphore_list,
         /*operation_count=*/0, /*operations=*/NULL);
-  } else if (iree_status_is_ok(status)) {
-    if (IREE_UNLIKELY(flags != IREE_HAL_WRITE_FLAG_NONE)) {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "unsupported queue write flags: 0x%016" PRIx64,
-                                flags);
-    } else if (IREE_UNLIKELY(!target_file)) {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "write target file is null");
-    }
+    IREE_TRACE_ZONE_END(z0);
+    return status;
   }
-  if (iree_status_is_ok(status) && length != 0) {
-    status = iree_hal_queue_validate_transfer_buffer(
-        queue, source_buffer, source_offset, length,
-        IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE, IREE_HAL_MEMORY_ACCESS_READ);
+  if (IREE_UNLIKELY(flags != IREE_HAL_WRITE_FLAG_NONE)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "unsupported queue write flags: 0x%016" PRIx64,
+                             flags));
+  } else if (IREE_UNLIKELY(!target_file)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "write target file is null"));
   }
-  if (iree_status_is_ok(status) && length != 0) {
-    status = iree_hal_file_validate_access(target_file,
-                                           IREE_HAL_MEMORY_ACCESS_WRITE);
-  }
-  if (iree_status_is_ok(status) && length != 0) {
-    status = iree_hal_file_validate_range(target_file, target_offset, length);
-  }
-  if (iree_status_is_ok(status) && length != 0) {
-    iree_hal_buffer_t* target_storage_buffer =
-        iree_hal_file_storage_buffer(target_file);
-    if (target_storage_buffer &&
-        iree_all_bits_set(iree_hal_buffer_memory_type(target_storage_buffer),
-                          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
-      status = iree_hal_queue_copy(
-          queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
-          source_offset, target_storage_buffer,
-          (iree_device_size_t)target_offset, length, IREE_HAL_COPY_FLAG_NONE);
-    } else {
-      status = _VTABLE_DISPATCH(queue, write)(
-          queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
-          source_offset, target_file, target_offset, length, flags);
-    }
-  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_queue_validate_transfer_buffer(
+          queue, source_buffer, source_offset, length,
+          IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE, IREE_HAL_MEMORY_ACCESS_READ));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_file_validate_access(target_file, IREE_HAL_MEMORY_ACCESS_WRITE));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_file_validate_range(target_file, target_offset, length));
 
+  iree_hal_buffer_t* target_storage_buffer =
+      iree_hal_file_storage_buffer(target_file);
+  iree_status_t status;
+  if (target_storage_buffer &&
+      iree_all_bits_set(iree_hal_buffer_memory_type(target_storage_buffer),
+                        IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
+    status = iree_hal_queue_copy(
+        queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
+        source_offset, target_storage_buffer, (iree_device_size_t)target_offset,
+        length, IREE_HAL_COPY_FLAG_NONE);
+  } else {
+    status = _VTABLE_DISPATCH(queue, write)(
+        queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
+        source_offset, target_file, target_offset, length, flags);
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

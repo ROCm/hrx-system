@@ -10,7 +10,6 @@
 #include <stdint.h>
 
 #include "iree/base/api.h"
-#include "iree/base/internal/math.h"
 #include "iree/hal/atomic.h"
 #include "iree/hal/resource.h"
 

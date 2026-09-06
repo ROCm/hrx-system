@@ -136,7 +136,7 @@ hrx_status_t hrx_queue_fill(hrx_device_t device, hrx_queue_affinity_t affinity,
   iree_hal_queue_t* queue = NULL;
   iree_status_t status = hrx_hal_device_select_queue(
       device->hal_device, affinity, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
-      &queue);
+      /*required_family=*/NULL, &queue);
   if (!iree_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
@@ -171,7 +171,7 @@ hrx_status_t hrx_queue_copy(hrx_device_t device, hrx_queue_affinity_t affinity,
   iree_hal_queue_t* queue = NULL;
   iree_status_t status = hrx_hal_device_select_queue(
       device->hal_device, affinity, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
-      &queue);
+      /*required_family=*/NULL, &queue);
   if (!iree_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
@@ -204,7 +204,8 @@ hrx_status_t hrx_queue_barrier(hrx_device_t device,
 
   iree_hal_queue_t* queue = NULL;
   iree_status_t status = hrx_hal_device_select_queue(
-      device->hal_device, affinity, /*required_roles=*/0, &queue);
+      device->hal_device, affinity, /*required_roles=*/0,
+      /*required_family=*/NULL, &queue);
   if (!iree_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
@@ -241,6 +242,11 @@ hrx_status_t hrx_queue_dispatch(
             HRX_STATUS_INVALID_ARGUMENT,
             "device, executable, config, constants, or bindings are invalid"));
   }
+  if (executable->device != device) {
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                            "executable was loaded by another device"));
+  }
 
   iree_hal_dispatch_flags_t hal_flags = IREE_HAL_DISPATCH_FLAG_NONE;
   hrx_status_t flag_status =
@@ -250,7 +256,7 @@ hrx_status_t hrx_queue_dispatch(
   iree_hal_queue_t* queue = NULL;
   iree_status_t status = hrx_hal_device_select_queue(
       device->hal_device, affinity, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
-      &queue);
+      iree_hal_executable_queue_family(executable->hal_executable), &queue);
   if (!iree_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
@@ -328,7 +334,8 @@ hrx_status_t hrx_queue_host_call(hrx_device_t device,
 
   iree_hal_queue_t* queue = NULL;
   iree_status_t status = hrx_hal_device_select_queue(
-      device->hal_device, affinity, /*required_roles=*/0, &queue);
+      device->hal_device, affinity, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL,
+      /*required_family=*/NULL, &queue);
   if (!iree_status_is_ok(status)) {
     return hrx_status_from_iree(status);
   }

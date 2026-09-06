@@ -232,7 +232,6 @@ static iree_status_t iree_hal_replay_device_create_channel(
     iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_channel_params_t params, iree_hal_channel_t** out_channel) {
   iree_hal_replay_device_t* device = iree_hal_replay_device_cast(base_device);
-  *out_channel = NULL;
   iree_hal_replay_pending_record_t pending_record;
   IREE_RETURN_IF_ERROR(iree_hal_replay_device_begin_operation(
       device, IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_CHANNEL,

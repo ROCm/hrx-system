@@ -681,8 +681,6 @@ hrx_queue_barrier(hrx_device_t device, hrx_queue_affinity_t affinity,
                   const hrx_semaphore_list_t* wait_semaphores,
                   const hrx_semaphore_list_t* signal_semaphores);
 
-// TODO(hrx): Stubs — declared for streaming rebase, not yet implemented.
-
 // Dispatch config for kernel launch.
 typedef struct hrx_dispatch_config_t {
   uint32_t workgroup_count[3];

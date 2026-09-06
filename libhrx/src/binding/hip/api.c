@@ -4588,8 +4588,6 @@ static hipError_t iree_hip_lookup_managed_range(
     iree_hal_streaming_context_t* context, const void* dev_ptr, size_t count,
     iree_hal_streaming_context_t** out_owner_context,
     iree_hal_streaming_buffer_ref_t* out_buffer_ref) {
-  *out_owner_context = NULL;
-  memset(out_buffer_ref, 0, sizeof(*out_buffer_ref));
   iree_hal_streaming_context_t* owner_context = NULL;
   iree_hal_streaming_buffer_ref_t buffer_ref = {0};
   hipError_t result = iree_hip_lookup_streaming_range_with_owner(
@@ -4608,8 +4606,6 @@ static hipError_t iree_hip_lookup_advisable_range(
     iree_hal_streaming_context_t* context, const void* dev_ptr, size_t count,
     iree_hal_streaming_context_t** out_owner_context,
     iree_hal_streaming_buffer_ref_t* out_buffer_ref) {
-  *out_owner_context = NULL;
-  memset(out_buffer_ref, 0, sizeof(*out_buffer_ref));
   iree_hal_streaming_context_t* owner_context = NULL;
   iree_hal_streaming_buffer_ref_t buffer_ref = {0};
   hipError_t result = iree_hip_lookup_streaming_range_with_owner(

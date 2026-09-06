@@ -589,7 +589,7 @@ iree_status_t iree_hal_streaming_memory_allocate_device_from_pool(
       .type = (hrx_memory_type_t)params.type,
       .access = (hrx_memory_access_t)params.access,
       .usage = (hrx_buffer_usage_t)params.usage,
-      .queue_affinity = (hrx_queue_affinity_t)params.queue_family_affinity,
+      .queue_affinity = 0,
   };
 
   hrx_buffer_t hrx_buffer = NULL;

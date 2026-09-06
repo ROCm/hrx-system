@@ -175,7 +175,6 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_view_allocate(
     iree_hal_buffer_view_t** out_buffer_view) {
   IREE_ASSERT_ARGUMENT(allocator);
   IREE_ASSERT_ARGUMENT(out_buffer_view);
-  *out_buffer_view = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_hal_buffer_params_canonicalize(&buffer_params);
 
@@ -189,13 +188,19 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_view_allocate(
                                                 allocation_size, &buffer);
   }
 
+  iree_hal_buffer_view_t* buffer_view = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_hal_buffer_view_create(
         buffer, shape_rank, shape, element_type, encoding_type,
-        iree_hal_allocator_host_allocator(allocator), out_buffer_view);
+        iree_hal_allocator_host_allocator(allocator), &buffer_view);
   }
 
   iree_hal_buffer_release(buffer);
+  if (iree_status_is_ok(status)) {
+    *out_buffer_view = buffer_view;
+  } else {
+    iree_hal_buffer_view_release(buffer_view);
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -223,7 +228,6 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_view_generate(
   IREE_ASSERT_ARGUMENT(allocator);
   IREE_ASSERT_ARGUMENT(generator);
   IREE_ASSERT_ARGUMENT(out_buffer_view);
-  *out_buffer_view = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_buffer_params_canonicalize(&buffer_params);
@@ -366,7 +370,6 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_view_parse(
     iree_hal_buffer_view_t** out_buffer_view) {
   IREE_ASSERT_ARGUMENT(allocator);
   IREE_ASSERT_ARGUMENT(out_buffer_view);
-  *out_buffer_view = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status = iree_hal_buffer_view_parse_impl(
       value, allocator, buffer_params, out_buffer_view);

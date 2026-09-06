@@ -70,7 +70,7 @@ enum iree_hal_command_buffer_mode_bits_t {
 };
 typedef uint32_t iree_hal_command_buffer_mode_t;
 
-// A bitfield specifying the category of commands in a command queue.
+// A bitfield specifying the categories of commands in a command buffer.
 enum iree_hal_command_category_bits_t {
   // Command is considered a transfer operation (memcpy, etc).
   IREE_HAL_COMMAND_CATEGORY_TRANSFER = 1u << 0,

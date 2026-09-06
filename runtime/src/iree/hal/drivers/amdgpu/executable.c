@@ -1951,7 +1951,6 @@ iree_status_t iree_hal_amdgpu_executable_create(
   IREE_ASSERT_ARGUMENT(load_params);
   IREE_ASSERT_ARGUMENT(profile_metadata);
   IREE_ASSERT_ARGUMENT(out_executable);
-  *out_executable = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   if (IREE_UNLIKELY(executable_id == 0)) {
