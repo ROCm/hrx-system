@@ -572,7 +572,8 @@ static iree_status_t iree_hal_mock_device_trim(iree_hal_device_t* base_device) {
 }
 
 static iree_status_t iree_hal_mock_device_create_channel(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_channel_params_t params, iree_hal_channel_t** out_channel) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
 }

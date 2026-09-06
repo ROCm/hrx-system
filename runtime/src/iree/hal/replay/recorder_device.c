@@ -228,7 +228,8 @@ static iree_status_t iree_hal_replay_device_assign_topology_info(
 }
 
 static iree_status_t iree_hal_replay_device_create_channel(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_channel_params_t params, iree_hal_channel_t** out_channel) {
   iree_hal_replay_device_t* device = iree_hal_replay_device_cast(base_device);
   *out_channel = NULL;
@@ -239,7 +240,7 @@ static iree_status_t iree_hal_replay_device_create_channel(
   iree_hal_replay_recorder_mark_unsupported(&pending_record);
   iree_hal_channel_t* channel = NULL;
   iree_status_t status = iree_hal_channel_create(
-      device->base_device, queue_affinity, params, &channel);
+      device->base_device, queue_family_affinity, params, &channel);
   status = iree_hal_replay_device_complete_operation(&pending_record, status);
   if (iree_status_is_ok(status)) {
     *out_channel = channel;

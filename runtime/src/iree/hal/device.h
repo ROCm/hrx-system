@@ -800,7 +800,8 @@ typedef struct iree_hal_device_vtable_t {
       const iree_hal_device_topology_info_t* topology_info);
 
   iree_status_t(IREE_API_PTR* create_channel)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_device_t* device,
+      iree_hal_queue_family_affinity_t queue_family_affinity,
       iree_hal_channel_params_t params, iree_hal_channel_t** out_channel);
 
   iree_status_t(IREE_API_PTR* create_command_buffer)(

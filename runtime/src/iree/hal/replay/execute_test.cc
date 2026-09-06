@@ -1622,10 +1622,10 @@ TEST(ReplayExecuteTest, SkipsFailedOperationRecords) {
       iree_hal_device_group_device_at(wrapped_group, 0);
   iree_hal_channel_params_t channel_params = {};
   iree_hal_channel_t* channel = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_UNIMPLEMENTED,
-      iree_hal_channel_create(wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-                              channel_params, &channel));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                        iree_hal_channel_create(
+                            wrapped_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+                            channel_params, &channel));
   EXPECT_EQ(nullptr, channel);
 
   IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));

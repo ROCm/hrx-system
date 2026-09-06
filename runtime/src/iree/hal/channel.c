@@ -21,16 +21,59 @@
 
 IREE_HAL_API_RETAIN_RELEASE(channel);
 
+static iree_status_t iree_hal_channel_validate_queue_family_affinity(
+    iree_hal_device_t* device,
+    iree_hal_queue_family_affinity_t queue_family_affinity) {
+  if (iree_hal_queue_family_affinity_is_any(queue_family_affinity)) {
+    return iree_ok_status();
+  }
+
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  if (IREE_UNLIKELY(queue_spec->family_count > IREE_HAL_MAX_QUEUE_FAMILIES)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "device queue family count %" PRIhsz
+                            " exceeds channel affinity capacity %" PRIhsz,
+                            queue_spec->family_count,
+                            (iree_host_size_t)IREE_HAL_MAX_QUEUE_FAMILIES);
+  }
+  const iree_hal_queue_family_affinity_t supported_affinity =
+      queue_spec->family_count == IREE_HAL_MAX_QUEUE_FAMILIES
+          ? IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY
+          : (((iree_hal_queue_family_affinity_t)1 << queue_spec->family_count) -
+             1);
+  if (IREE_UNLIKELY(
+          iree_hal_queue_family_affinity_is_empty(queue_family_affinity) ||
+          !iree_all_bits_set(supported_affinity, queue_family_affinity))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "channel queue family affinity 0x%016" PRIx64
+        " is not a non-empty subset of device affinity 0x%016" PRIx64,
+        queue_family_affinity, supported_affinity);
+  }
+  return iree_ok_status();
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_channel_create(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_channel_params_t params, iree_hal_channel_t** out_channel) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(out_channel);
   *out_channel = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status =
-      IREE_HAL_VTABLE_DISPATCH(device, iree_hal_device, create_channel)(
-          device, queue_affinity, params, out_channel);
+  iree_status_t status = iree_hal_channel_validate_queue_family_affinity(
+      device, queue_family_affinity);
+  iree_hal_channel_t* channel = NULL;
+  if (iree_status_is_ok(status)) {
+    status = IREE_HAL_VTABLE_DISPATCH(device, iree_hal_device, create_channel)(
+        device, queue_family_affinity, params, &channel);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_channel = channel;
+  } else {
+    iree_hal_channel_release(channel);
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -45,8 +88,14 @@ IREE_API_EXPORT iree_status_t iree_hal_channel_split(
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, color);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, key);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, flags);
+  iree_hal_channel_t* split_channel = NULL;
   iree_status_t status = _VTABLE_DISPATCH(base_channel, split)(
-      base_channel, color, key, flags, out_split_channel);
+      base_channel, color, key, flags, &split_channel);
+  if (iree_status_is_ok(status)) {
+    *out_split_channel = split_channel;
+  } else {
+    iree_hal_channel_release(split_channel);
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
