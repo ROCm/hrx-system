@@ -227,6 +227,61 @@ pipeline.def<kernel> @chain() launch(%input: buffer, %output: buffer) {
   EXPECT_EQ(stage_edge.target_port, 0u);
 }
 
+TEST_F(PipelinePlanTest, ExpandsFlowFanoutWithoutCloningProducer) {
+  ModulePtr module = Parse(R"(
+func.def @producer(%input: buffer, %intermediate: buffer) {
+  func.return
+}
+
+func.def @consumer(%intermediate: buffer, %output: buffer) {
+  func.return
+}
+
+pipeline.def<kernel> @fanout() launch(%input: buffer, %output0: buffer, %output1: buffer) {
+  %lane_count = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %producers = group.create %lane_count : index -> group
+  %consumers0 = group.create %lane_count : index -> group
+  %consumers1 = group.create %lane_count : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi8>
+  %output_view0 = buffer.view %output0[%base] : buffer -> view<16xi8>
+  %output_view1 = buffer.view %output1[%base] : buffer -> view<16xi8>
+  %input_flow = pipeline.read %input_view on %producers : view<16xi8>, group -> pipeline.flow<tile<16xi8>>
+  %shared_flow = pipeline.stage @producer on %producers(%input_flow) : (group, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
+  %output_flow0 = pipeline.stage @consumer on %consumers0(%shared_flow) : (group, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
+  %output_flow1 = pipeline.stage @consumer on %consumers1(%shared_flow) : (group, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
+  pipeline.write %output_flow0 to %output_view0 : pipeline.flow<tile<16xi8>>, view<16xi8>
+  pipeline.write %output_flow1 to %output_view1 : pipeline.flow<tile<16xi8>>, view<16xi8>
+  pipeline.return
+}
+)");
+
+  const loom_func_like_t pipeline =
+      FindPipeline(module.get(), IREE_SV("fanout"));
+  loom_value_fact_table_t facts = {};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&facts, &analysis_arena_,
+                                                  module->values.count));
+  IREE_ASSERT_OK(loom_value_fact_table_compute(&facts, module.get(), pipeline));
+
+  loom_pipeline_plan_t plan = {};
+  IREE_ASSERT_OK(loom_pipeline_plan_build(module.get(), pipeline, &facts,
+                                          (loom_pipeline_plan_limits_t){
+                                              /*.instance_count=*/16,
+                                          },
+                                          &analysis_arena_, &plan));
+
+  ASSERT_EQ(plan.instance_count, 3u);
+  ASSERT_EQ(plan.edge_count, 5u);
+  EXPECT_EQ(plan.edges[1].flow_index, plan.edges[2].flow_index);
+  EXPECT_EQ(plan.edges[1].source_kind, LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE);
+  EXPECT_EQ(plan.edges[1].source_index, 0u);
+  EXPECT_EQ(plan.edges[2].source_index, 0u);
+  EXPECT_EQ(plan.edges[1].source_port, 1u);
+  EXPECT_EQ(plan.edges[2].source_port, 1u);
+  EXPECT_EQ(plan.edges[1].target_index, 1u);
+  EXPECT_EQ(plan.edges[2].target_index, 2u);
+}
+
 TEST_F(PipelinePlanTest, RejectsUnresolvedCardinalityAtConcreteBoundary) {
   ModulePtr module = Parse(R"(
 func.def @stage() {

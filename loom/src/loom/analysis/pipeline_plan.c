@@ -82,8 +82,8 @@ typedef struct loom_pipeline_plan_builder_t {
   // Maximum logical flows allocated.
   uint32_t flow_capacity;
 
-  // Whether each flow version has acquired its physical consumer.
-  bool* flow_consumed;
+  // Whether each flow version has at least one physical consumer.
+  bool* flow_used;
 
   // Concrete point-to-point edge table.
   loom_pipeline_plan_edge_t* edges;
@@ -232,17 +232,12 @@ static void loom_pipeline_plan_define_flow(
   if (out_index != NULL) *out_index = index;
 }
 
-static iree_status_t loom_pipeline_plan_claim_flow(
+static iree_status_t loom_pipeline_plan_use_flow(
     loom_pipeline_plan_builder_t* builder, loom_value_id_t value_id,
     uint32_t* out_index) {
   IREE_RETURN_IF_ERROR(
       loom_pipeline_plan_lookup_flow(builder, value_id, out_index));
-  if (builder->flow_consumed[*out_index]) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "pipeline flow has more than one physical consumer");
-  }
-  builder->flow_consumed[*out_index] = true;
+  builder->flow_used[*out_index] = true;
   return iree_ok_status();
 }
 
@@ -423,7 +418,7 @@ static iree_status_t loom_pipeline_plan_connect_pointwise_flow(
     uint32_t target_port) {
   uint32_t flow_index = 0;
   IREE_RETURN_IF_ERROR(
-      loom_pipeline_plan_claim_flow(builder, flow_value, &flow_index));
+      loom_pipeline_plan_use_flow(builder, flow_value, &flow_index));
   const loom_pipeline_plan_flow_t* flow = &builder->flows[flow_index];
   const loom_pipeline_plan_group_t* group =
       &builder->groups[target_group_index];
@@ -568,7 +563,7 @@ static iree_status_t loom_pipeline_plan_parse_reduce(
   uint32_t target_port = 0;
   for (uint16_t i = 0; i < source_inputs.count; ++i) {
     uint32_t flow_index = 0;
-    IREE_RETURN_IF_ERROR(loom_pipeline_plan_claim_flow(
+    IREE_RETURN_IF_ERROR(loom_pipeline_plan_use_flow(
         builder, source_inputs.values[i], &flow_index));
     const loom_pipeline_plan_flow_t* flow = &builder->flows[flow_index];
     if (flow->group_index != source_group_index ||
@@ -603,7 +598,7 @@ static iree_status_t loom_pipeline_plan_parse_reduce(
 static iree_status_t loom_pipeline_plan_parse_buffer(
     loom_pipeline_plan_builder_t* builder, const loom_op_t* op) {
   uint32_t source_flow_index = 0;
-  IREE_RETURN_IF_ERROR(loom_pipeline_plan_claim_flow(
+  IREE_RETURN_IF_ERROR(loom_pipeline_plan_use_flow(
       builder, loom_pipeline_buffer_source(op), &source_flow_index));
   uint32_t capacity = 0;
   IREE_RETURN_IF_ERROR(
@@ -623,7 +618,7 @@ static iree_status_t loom_pipeline_plan_parse_buffer(
 static iree_status_t loom_pipeline_plan_parse_write(
     loom_pipeline_plan_builder_t* builder, const loom_op_t* op) {
   uint32_t flow_index = 0;
-  IREE_RETURN_IF_ERROR(loom_pipeline_plan_claim_flow(
+  IREE_RETURN_IF_ERROR(loom_pipeline_plan_use_flow(
       builder, loom_pipeline_write_source(op), &flow_index));
   const loom_pipeline_plan_flow_t* flow = &builder->flows[flow_index];
   if (flow->producer_kind != LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE ||
@@ -729,7 +724,7 @@ static iree_status_t loom_pipeline_plan_parse_graph(
     }
   }
   for (uint32_t i = 0; i < builder->flow_count; ++i) {
-    if (!builder->flow_consumed[i]) {
+    if (!builder->flow_used[i]) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "pipeline contains a flow with no physical consumer");
@@ -827,7 +822,7 @@ static iree_status_t loom_pipeline_plan_builder_initialize(
   LOOM_PIPELINE_PLAN_ALLOCATE(group_materialized, builder->group_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(instances, builder->instance_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(flows, builder->flow_capacity);
-  LOOM_PIPELINE_PLAN_ALLOCATE(flow_consumed, builder->flow_capacity);
+  LOOM_PIPELINE_PLAN_ALLOCATE(flow_used, builder->flow_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(edges, builder->edge_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(view_bindings, builder->view_binding_capacity);
 #undef LOOM_PIPELINE_PLAN_ALLOCATE
@@ -843,8 +838,8 @@ static iree_status_t loom_pipeline_plan_builder_initialize(
            builder->group_capacity * sizeof(*builder->group_materialized));
   }
   if (builder->flow_capacity != 0) {
-    memset(builder->flow_consumed, 0,
-           builder->flow_capacity * sizeof(*builder->flow_consumed));
+    memset(builder->flow_used, 0,
+           builder->flow_capacity * sizeof(*builder->flow_used));
   }
   return iree_ok_status();
 }

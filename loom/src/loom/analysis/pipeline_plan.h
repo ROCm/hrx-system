@@ -8,7 +8,8 @@
 //
 // This analysis resolves specialized group cardinalities and buffer capacities,
 // expands group lanes into callable instances, and records the point-to-point
-// flow graph once. Target materializers consume the immutable result without
+// flow graph once. Multiple uses of one flow become edges sharing the same
+// producer endpoint. Target materializers consume the immutable result without
 // rescanning pipeline IR or rediscovering SSA relationships.
 
 #ifndef LOOM_ANALYSIS_PIPELINE_PLAN_H_
