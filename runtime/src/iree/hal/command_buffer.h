@@ -258,7 +258,7 @@ typedef uint64_t iree_hal_memory_advise_flags_t;
 enum iree_hal_memory_advise_flag_bits_t {
   IREE_HAL_MEMORY_ADVISE_FLAG_NONE = 0,
   // TODO(benvanik): cache control operations (invalidate/flush). arg0/arg1
-  // could source/target queue affinities.
+  // could identify source/target queue families.
   // TODO(benvanik): prefetch and access type hints.
   // TODO(benvanik): ASAN hints (protect/unprotect).
 };
