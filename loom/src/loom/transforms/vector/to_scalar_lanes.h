@@ -105,6 +105,12 @@ iree_status_t loom_vector_to_scalar_build_single_bit_extract(
     loom_type_t lane_type, loom_vector_to_scalar_index_term_t bit_shift,
     loom_value_id_t one_mask, loom_value_id_t* out_bit);
 
+// Builds a terminal vector.extract without attempting producer
+// rematerialization.
+iree_status_t loom_vector_to_scalar_build_terminal_extract(
+    loom_vector_to_scalar_state_t* state, loom_value_id_t vector_value,
+    loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane);
+
 iree_status_t loom_vector_to_scalar_build_lane(
     loom_vector_to_scalar_state_t* state,
     loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane);

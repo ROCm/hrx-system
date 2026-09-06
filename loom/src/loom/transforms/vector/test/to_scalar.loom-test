@@ -1193,3 +1193,23 @@ func.def @scalarizes_batched_block_2d_scaled_f8_mma(%lhs_data: vector<2x1x1xf8E4
   %result = vector.fragment<result> %39 shape [blocks(%blocks), %m, %n] : vector<2x1x1xf32>
   func.return %result : vector<2x1x1xf32>
 }
+
+// ====
+
+func.def @folds_full_width_bitfields(%field: vector<1xi32>, %base: vector<1xi32>) -> (vector<1xi32>, vector<1xi32>, vector<1xi32>) {
+  %unsigned = vector.bitfield.extractu %field {offset = 0, width = 32} : vector<1xi32> -> vector<1xi32>
+  %signed = vector.bitfield.extracts %field {offset = 0, width = 32} : vector<1xi32> -> vector<1xi32>
+  %inserted = vector.bitfield.insert %field into %base {offset = 0, width = 32} : vector<1xi32>, vector<1xi32>
+  func.return %unsigned, %signed, %inserted : vector<1xi32>, vector<1xi32>, vector<1xi32>
+}
+
+// ----
+func.def @folds_full_width_bitfields(%field: vector<1xi32>, %base: vector<1xi32>) -> (vector<1xi32>, vector<1xi32>, vector<1xi32>) {
+  %12 = vector.extract %field[0] : vector<1xi32> -> i32
+  %unsigned = vector.splat %12 : vector<1xi32>
+  %10 = vector.extract %field[0] : vector<1xi32> -> i32
+  %signed = vector.splat %10 : vector<1xi32>
+  %8 = vector.extract %field[0] : vector<1xi32> -> i32
+  %inserted = vector.splat %8 : vector<1xi32>
+  func.return %unsigned, %signed, %inserted : vector<1xi32>, vector<1xi32>, vector<1xi32>
+}

@@ -43,7 +43,9 @@ iree_status_t loom_vector_to_scalar_build_bitfield_extract_lane(
       state, source, indices, &source_lane));
 
   loom_value_id_t extracted = LOOM_VALUE_ID_INVALID;
-  if (signed_extract) {
+  if (offset == 0 && width == source_width) {
+    extracted = source_lane;
+  } else if (signed_extract) {
     loom_value_id_t shifted_left = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_scalar_shift(
         state, LOOM_OP_SCALAR_SHLI, source_lane, source_scalar_type,
@@ -86,14 +88,19 @@ iree_status_t loom_vector_to_scalar_build_bitfield_insert_lane(
   loom_value_id_t field_lane = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_lane(
       state, field, indices, &field_lane));
-  loom_value_id_t base_lane = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_vector_to_scalar_materialize_lane(state, base, indices, &base_lane));
 
   loom_value_id_t field_in_base_type = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_cast_integer_lane(
       state, field_lane, field_scalar_type, base_scalar_type,
       /*signed_extend=*/false, &field_in_base_type));
+  if (offset == 0 && width == base_width) {
+    *out_lane = field_in_base_type;
+    return iree_ok_status();
+  }
+
+  loom_value_id_t base_lane = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_vector_to_scalar_materialize_lane(state, base, indices, &base_lane));
 
   loom_value_id_t field_mask = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_integer_mask(

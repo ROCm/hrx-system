@@ -460,7 +460,7 @@ iree_status_t loom_vector_to_scalar_build_single_bit_extract(
       state, LOOM_OP_SCALAR_ANDI, shifted_lane, one_mask, lane_type, out_bit);
 }
 
-static iree_status_t loom_vector_to_scalar_extract_lane(
+iree_status_t loom_vector_to_scalar_build_terminal_extract(
     loom_vector_to_scalar_state_t* state, loom_value_id_t vector_value,
     loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane) {
   loom_type_t vector_type =
@@ -1105,5 +1105,6 @@ iree_status_t loom_vector_to_scalar_materialize_lane(
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_try_materialize_def_lane(
       state, value, type, indices, &materialized, out_lane));
   if (materialized) return iree_ok_status();
-  return loom_vector_to_scalar_extract_lane(state, value, indices, out_lane);
+  return loom_vector_to_scalar_build_terminal_extract(state, value, indices,
+                                                      out_lane);
 }

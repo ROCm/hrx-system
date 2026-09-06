@@ -106,38 +106,34 @@ static iree_status_t loom_vector_legalize_descriptor(
   return iree_ok_status();
 }
 
-// Expands a variadic vector constructor into the fixed-arity structural ops
-// that targets commonly select for linear register vectors. Splatting the first
-// lane provides a defined seed without requiring a target-level poison or zero
-// materialization. Higher-rank constructors remain intact so the target can
-// diagnose or lower their multidimensional representation directly.
-static iree_status_t loom_vector_legalize_from_elements(
-    const loom_target_legalizer_entry_t* entry,
-    loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_target_legalizer_result_t* out_result) {
-  (void)entry;
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
-  };
-
+iree_status_t loom_vector_from_elements_linearize_rewrite_op(
+    loom_rewriter_t* rewriter, loom_op_t* op, bool* out_rewritten) {
+  *out_rewritten = false;
+  if (!loom_vector_from_elements_isa(op)) return iree_ok_status();
   const loom_value_slice_t elements = loom_vector_from_elements_elements(op);
   if (elements.count == 0) return iree_ok_status();
   const loom_type_t result_type = loom_module_value_type(
-      context->module, loom_vector_from_elements_result(op));
+      rewriter->module, loom_vector_from_elements_result(op));
   if (!loom_type_is_vector(result_type) ||
-      !loom_type_is_all_static(result_type) ||
-      loom_type_rank(result_type) != 1) {
+      !loom_type_is_all_static(result_type)) {
     return iree_ok_status();
   }
 
-  loom_rewriter_t* rewriter = context->rewriter;
+  const bool restore_shape = loom_type_rank(result_type) != 1;
+  const loom_type_t construction_type =
+      restore_shape ? loom_type_shaped_1d(
+                          LOOM_TYPE_VECTOR, loom_type_element_type(result_type),
+                          loom_dim_pack_static((int64_t)elements.count),
+                          /*encoding_id=*/0)
+                    : result_type;
+
   loom_builder_set_before(&rewriter->builder, op);
   const loom_value_id_t value_checkpoint =
       loom_rewriter_value_checkpoint(rewriter);
   loom_op_t* splat_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_splat_build(&rewriter->builder,
-                                               elements.values[0], result_type,
-                                               op->location, &splat_op));
+  IREE_RETURN_IF_ERROR(
+      loom_vector_splat_build(&rewriter->builder, elements.values[0],
+                              construction_type, op->location, &splat_op));
   loom_value_id_t replacement = loom_vector_splat_result(splat_op);
 
   for (iree_host_size_t element_index = 1; element_index < elements.count;
@@ -146,17 +142,48 @@ static iree_status_t loom_vector_legalize_from_elements(
     loom_op_t* insert_op = NULL;
     IREE_RETURN_IF_ERROR(loom_vector_insert_build(
         &rewriter->builder, elements.values[element_index], replacement, NULL,
-        0, &static_index, 1, result_type, op->location, &insert_op));
+        0, &static_index, 1, construction_type, op->location, &insert_op));
     replacement = loom_vector_insert_result(insert_op);
+  }
+
+  if (restore_shape) {
+    loom_op_t* bitcast_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
+        &rewriter->builder, replacement, construction_type, result_type,
+        op->location, &bitcast_op));
+    replacement = loom_vector_bitcast_result(bitcast_op);
   }
 
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, value_checkpoint));
   IREE_RETURN_IF_ERROR(
       loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement, 1));
+  *out_rewritten = true;
+  return iree_ok_status();
+}
+
+// Expands a variadic rank-one vector constructor into the fixed-arity
+// structural ops that targets commonly select for linear register vectors.
+// Splatting the first lane provides a defined seed without requiring a
+// target-level poison or zero materialization.
+static iree_status_t loom_vector_legalize_from_elements(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
   *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
+  const loom_type_t result_type = loom_module_value_type(
+      context->module, loom_vector_from_elements_result(op));
+  if (loom_type_rank(result_type) != 1) return iree_ok_status();
+
+  bool rewritten = false;
+  IREE_RETURN_IF_ERROR(loom_vector_from_elements_linearize_rewrite_op(
+      context->rewriter, op, &rewritten));
+  if (rewritten) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
+  }
   return iree_ok_status();
 }
 
