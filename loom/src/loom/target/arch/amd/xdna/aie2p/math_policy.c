@@ -55,6 +55,58 @@ typedef struct loom_aie2p_math_form_t {
 
 static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     {
+        .math_op = LOOM_TARGET_MATH_OP_LOGISTICF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_logistic"),
+        .form_constraint_key = IREE_SVL("math.recipe.logistic_exp2_f32"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN |
+                                   LOOM_TARGET_MATH_FASTMATH_FLAG_ARCP,
+        .permission_constraint_key = IREE_SVL("math.logistic.exact_f32"),
+        .recipe = LOOM_TARGET_MATH_RECIPE_LOGISTIC_EXP2_F32,
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_LOGISTICF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 16,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_logistic"),
+        .form_constraint_key = IREE_SVL("math.recipe.logistic_exp2_f32"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN |
+                                   LOOM_TARGET_MATH_FASTMATH_FLAG_ARCP,
+        .permission_constraint_key = IREE_SVL("math.logistic.exact_f32"),
+        .recipe = LOOM_TARGET_MATH_RECIPE_LOGISTIC_EXP2_F32,
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_SILUF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_silu"),
+        .form_constraint_key = IREE_SVL("math.recipe.silu_logistic_f32"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN |
+                                   LOOM_TARGET_MATH_FASTMATH_FLAG_ARCP,
+        .permission_constraint_key = IREE_SVL("math.silu.exact_f32"),
+        .recipe = LOOM_TARGET_MATH_RECIPE_SILU_LOGISTIC_F32,
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_SILUF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 16,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_silu"),
+        .form_constraint_key = IREE_SVL("math.recipe.silu_logistic_f32"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN |
+                                   LOOM_TARGET_MATH_FASTMATH_FLAG_ARCP,
+        .permission_constraint_key = IREE_SVL("math.silu.exact_f32"),
+        .recipe = LOOM_TARGET_MATH_RECIPE_SILU_LOGISTIC_F32,
+    },
+    {
         .math_op = LOOM_TARGET_MATH_OP_SINF,
         .element_type = LOOM_SCALAR_TYPE_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,

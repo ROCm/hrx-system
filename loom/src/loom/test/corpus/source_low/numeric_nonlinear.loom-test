@@ -81,3 +81,31 @@ func.def @scalar_f32_cos_turns(%input: f32) -> (f32) {
   %result = scalar.costurnsf<afn> %input : f32
   func.return %result : f32
 }
+
+// ====
+
+func.def @scalar_f32_silu(%input: f32) -> (f32) {
+  %result = scalar.siluf<arcp|afn> %input : f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @vector_f32_silu(%input: vector<2xf32>) -> (vector<2xf32>) {
+  %result = vector.siluf<arcp|afn> %input : vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// ====
+
+func.def @scalar_f32_logistic_requires_approximation(%input: f32) -> (f32) {
+  %result = scalar.logisticf %input : f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @scalar_f32_silu_requires_approximation(%input: f32) -> (f32) {
+  %result = scalar.siluf %input : f32
+  func.return %result : f32
+}
