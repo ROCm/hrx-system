@@ -1117,6 +1117,24 @@ PACKAGE_POLICIES = [
         )
         self.assertIn('"iree::third_party::spirv_dis"', converter.body)
 
+    def test_execution_test_suite_maps_size_to_timeout(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
+            build_dir="/repo/pkg",
+            repo_root="/repo",
+        )
+
+        functions.iree_execution_test_suite(
+            name="execution_test",
+            manifests=["test.json"],
+            tools={"runner": "//tools:runner"},
+            size="small",
+        )
+
+        self.assertIn("  TIMEOUT\n    60\n", converter.body)
+
     def test_execution_test_suite_preserves_glob_data(self):
         repo_root = Path(__file__).resolve().parents[2]
         repo_cfg = SimpleNamespace(PROJECTS=[], REPO_MAP={"@hrx": ""})
