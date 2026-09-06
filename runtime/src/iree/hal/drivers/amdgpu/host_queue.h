@@ -490,8 +490,10 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   // when emitting AQL barrier-value packets for multi-axis dependencies.
   //
   // Borrowed from the logical device and valid for the lifetime of the queue.
-  // This queue's own epoch signal is registered at init and deregistered at
-  // deinit. Read-only during normal operation.
+  // This queue's own epoch signal is published at init and withdrawn at deinit.
+  // Ordinary queue signals predate device publication and use plain lookup
+  // loads; one release/acquire mask publishes lazily materialized private
+  // queues without mutating the table's identity or storage.
   iree_hal_amdgpu_epoch_signal_table_t* epoch_table;
 
   // Last semaphore pushed to the notification ring and its epoch. Used to
@@ -653,6 +655,17 @@ void iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
     iree_hal_amdgpu_host_queue_post_drain_action_t* action,
     iree_hal_amdgpu_host_queue_post_drain_fn_t fn, void* user_data);
 
+// Immutable native attributes applied while creating one host queue.
+typedef struct iree_hal_amdgpu_host_queue_create_options_t {
+  // Number of bits in |compute_unit_mask|. Zero selects ordinary legacy queue
+  // creation without an explicit mask.
+  uint32_t compute_unit_mask_bit_count;
+  // Complete native CU mask applied before the new queue is published to any
+  // submission path. NULL exactly when |compute_unit_mask_bit_count| is zero.
+  // Borrowed for the duration of queue initialization.
+  const uint32_t* compute_unit_mask;
+} iree_hal_amdgpu_host_queue_create_options_t;
+
 // Initializes a host queue in caller-provided memory.
 // The caller must allocate at least sizeof(iree_hal_amdgpu_host_queue_t).
 //
@@ -660,13 +673,20 @@ void iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
 // it, allocates a kernarg ring from |kernarg_memory|, creates the epoch signal
 // and notification ring, and starts the completion thread.
 //
+// |create_options| optionally applies a CU mask immediately after ordinary HSA
+// queue creation and before any queue-owned submission resource is published.
+// A failed mask operation destroys the native queue and fails initialization.
+//
 // |axis| is this queue's identity in the causal graph. Its device index is the
 // topology-assigned HAL logical device index and its queue index is the
 // flattened logical queue ordinal within that device.
 //
-// |epoch_table| is the logical-device epoch signal table for cross-queue
-// barrier emission. This queue registers its epoch signal in the table at init
-// and deregisters at deinit. The table must outlive the queue.
+// |frontier_tracker| must already contain |axis|; physical-device topology
+// setup permanently reserves every possible queue axis before concurrent
+// tracker lookups begin. |epoch_table| is the logical-device epoch signal table
+// for cross-queue barrier emission. This queue publishes its epoch signal after
+// full initialization and deregisters it at deinit. The table must outlive the
+// queue.
 //
 // |feedback_state| is borrowed from the logical device. When enabled, queue
 // retirement drains the physical-device feedback channel before releasing
@@ -713,6 +733,7 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa, iree_hal_device_t* logical_device,
     void* hostcall_buffer, iree_async_proactor_t* proactor,
     hsa_agent_t gpu_agent,
+    const iree_hal_amdgpu_host_queue_create_options_t* create_options,
     const iree_hal_amdgpu_kernarg_ring_memory_t* kernarg_memory,
     hsa_amd_memory_pool_t pm4_ib_pool,
     iree_async_frontier_tracker_t* frontier_tracker, iree_async_axis_t axis,

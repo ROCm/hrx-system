@@ -440,6 +440,31 @@ TEST_F(SystemEventTest, MatchedEventFailsPublishedQueues) {
   iree_hal_amdgpu_system_event_unregister_device(registration);
 }
 
+// Caller-selected private queues may leave holes in the fixed-capacity queue
+// array. Fault delivery visits exactly the initialized slots and must never
+// touch storage that does not hold a live queue.
+TEST_F(SystemEventTest, PublicationTargetsSparseLiveQueueMask) {
+  const uint64_t agent_handles[] = {kAgentHandleA};
+  FakeLogicalDevice device;
+  device.Initialize(agent_handles, IREE_ARRAYSIZE(agent_handles));
+  FakeHostQueues queues(3);
+  iree_hal_amdgpu_system_event_registration_t* registration = Register(device);
+  iree_hal_amdgpu_system_event_agent_target_t* target =
+      iree_hal_amdgpu_system_event_registration_lookup_agent(
+          registration, MakeAgent(kAgentHandleA));
+  constexpr uint64_t kLiveQueueMask = (UINT64_C(1) << 0) | (UINT64_C(1) << 2);
+  iree_hal_amdgpu_system_event_publish_queue_target_mask(
+      target, queues.queues(), queues.count(), kLiveQueueMask);
+
+  EXPECT_EQ(DispatchMemoryFault(kAgentHandleA, kFaultAddress),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(queues.ErrorStatusCode(0), IREE_STATUS_ABORTED);
+  EXPECT_EQ(queues.ErrorStatusCode(1), IREE_STATUS_OK);
+  EXPECT_EQ(queues.ErrorStatusCode(2), IREE_STATUS_ABORTED);
+
+  iree_hal_amdgpu_system_event_unregister_device(registration);
+}
+
 // A registration created before frontier assignment has no queue targets. It
 // still claims the event, because the device's sticky status can observe it.
 TEST_F(SystemEventTest, UnpublishedRegistrationClaimsWithoutFailingQueues) {

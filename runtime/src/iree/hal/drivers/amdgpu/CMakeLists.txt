@@ -203,6 +203,23 @@ iree_cc_library(
 endif()
 
 if(IREE_HAL_DRIVER_AMDGPU)
+add_library(iree_hal_drivers_amdgpu_api_experimental INTERFACE)
+target_sources(iree_hal_drivers_amdgpu_api_experimental
+  INTERFACE
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/api_experimental.h>"
+)
+target_link_libraries(iree_hal_drivers_amdgpu_api_experimental
+  INTERFACE
+    iree::base
+    iree::hal
+)
+iree_add_alias_library(
+  iree::hal::drivers::amdgpu::api_experimental
+  iree_hal_drivers_amdgpu_api_experimental
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
     amdgpu
@@ -211,6 +228,7 @@ iree_cc_library(
   SRCS
     "allocator.c"
     "allocator.h"
+    "api_experimental.h"
     "aql_atomic.c"
     "aql_atomic.h"
     "aql_block_processor.c"
@@ -780,6 +798,34 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
+    api_experimental_test
+  SRCS
+    "api_experimental_test.cc"
+  DEPS
+    ::amdgpu
+    ::api_experimental
+    ::headers
+    ::queue_affinity
+    iree::base
+    iree::hal
+    iree::hal::cts::util::profile_test_util
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::amdgpu::util::queue_primitives
+    iree::hal::testing::mock_device
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
     driver_options_test
   SRCS
     "driver_options_test.cc"
@@ -904,6 +950,7 @@ iree_cc_test(
     "host_queue_command_buffer_test_util.h"
   DEPS
     ::amdgpu
+    ::api_experimental
     ::headers
     ::queue_affinity
     iree::base

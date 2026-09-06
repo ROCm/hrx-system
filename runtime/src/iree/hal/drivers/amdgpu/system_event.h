@@ -174,13 +174,25 @@ iree_hal_amdgpu_system_event_registration_lookup_agent(
 // Publishes the first |live_queue_count| entries of |host_queues| as the
 // failure targets for |target|'s agent. No-op when |target| is NULL.
 //
-// Called as the last step of physical-device frontier assignment, so a
-// partially assigned physical device never has published targets. Takes the
-// registry mutex internally; the caller must not hold it.
+// Called as the last step of physical-device frontier assignment. A partially
+// assigned physical device is never published, and a callback cannot observe
+// an uninitialized queue. Sparse queue additions use the mask form below.
+// Takes the registry mutex internally; the caller must not hold it.
 void iree_hal_amdgpu_system_event_publish_queue_targets(
     iree_hal_amdgpu_system_event_agent_target_t* target,
     iree_hal_amdgpu_host_queue_t* host_queues,
     iree_host_size_t live_queue_count);
+
+// Publishes the entries selected by |live_queue_mask| from the first
+// |queue_capacity| entries of |host_queues| as failure targets for |target|'s
+// agent. This is the sparse-slot form used when caller-selected private queues
+// are materialized out of ordinal order. No-op when |target| is NULL.
+//
+// Takes the registry mutex internally; the caller must not hold it.
+void iree_hal_amdgpu_system_event_publish_queue_target_mask(
+    iree_hal_amdgpu_system_event_agent_target_t* target,
+    iree_hal_amdgpu_host_queue_t* host_queues, iree_host_size_t queue_capacity,
+    uint64_t live_queue_mask);
 
 // Retires queue failure delivery for |target|'s agent. Idempotent, and a no-op
 // when |target| is NULL. Returns once no callback can be inside |target|'s

@@ -112,6 +112,10 @@ enum iree_hal_amdgpu_libhsa_flag_bits_e {
 typedef struct iree_hal_amdgpu_libhsa_t {
   // True if hsa_init was called and hsa_shut_down must be called.
   bool initialized;
+  // True when IREE observed an uninitialized ROCr runtime with no HSA_CU_MASK
+  // immediately before its successful hsa_init call. Only this state can
+  // support an exact per-queue CU-mask contract.
+  bool exact_queue_cu_mask_supported;
 
 #if !IREE_HAL_AMDGPU_LIBHSA_STATIC
 

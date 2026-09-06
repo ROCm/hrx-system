@@ -40,6 +40,46 @@ TEST(AmdgpuDriverOptionsTest, LogicalDeviceParamsAreRejectedUntilDefined) {
                                       }));
 }
 
+TEST(AmdgpuDriverOptionsTest, LogicalDeviceDefaultsDisableExecutionQueues) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+
+  EXPECT_EQ(options.host_queues.experimental_execution_queue_count, 0u);
+}
+
+TEST(AmdgpuDriverOptionsTest, ParsesExperimentalExecutionQueueCount) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  const iree_string_pair_t pair =
+      iree_make_cstring_pair("experimental_execution_queue_count", "3");
+
+  IREE_EXPECT_OK(iree_hal_amdgpu_logical_device_options_parse(
+      &options, (iree_string_pair_list_t){
+                    /*.count=*/1,
+                    /*.pairs=*/&pair,
+                }));
+  EXPECT_EQ(options.host_queues.experimental_execution_queue_count, 3u);
+}
+
+TEST(AmdgpuDriverOptionsTest, RejectsInvalidExperimentalExecutionQueueCount) {
+  constexpr const char* kInvalidValues[] = {
+      "-1", "not-a-count", "4294967296", "12garbage", "",
+  };
+  for (const char* invalid_value : kInvalidValues) {
+    iree_hal_amdgpu_logical_device_options_t options;
+    iree_hal_amdgpu_logical_device_options_initialize(&options);
+    const iree_string_pair_t pair = iree_make_cstring_pair(
+        "experimental_execution_queue_count", invalid_value);
+
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          iree_hal_amdgpu_logical_device_options_parse(
+                              &options, (iree_string_pair_list_t){
+                                            /*.count=*/1,
+                                            /*.pairs=*/&pair,
+                                        }));
+  }
+}
+
 TEST(AmdgpuDriverOptionsTest, LogicalDeviceDefaultsUseHostCopyPm4Publication) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);

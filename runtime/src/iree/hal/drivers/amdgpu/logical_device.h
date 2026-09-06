@@ -145,8 +145,20 @@ typedef struct iree_hal_amdgpu_logical_device_t {
   // deregistered by each host queue before this table is freed.
   iree_hal_amdgpu_epoch_signal_table_t* host_queue_epoch_table;
 
-  // Mask indicating which queue affinities are valid.
+  // Mask indicating every physical queue affinity owned by this device.
   iree_hal_queue_affinity_t queue_affinity_mask;
+
+  // Queue affinities available to ordinary generic HAL ANY routing.
+  iree_hal_queue_affinity_t ordinary_queue_affinity_mask;
+
+  // Private queue affinities whose immutable masks were configured.
+  iree_atomic_uint64_t configured_execution_queue_affinity;
+
+  // Non-zero while profiling excludes new private queue configuration.
+  iree_atomic_int32_t execution_queue_configuration_frozen;
+
+  // Serializes one-shot private queue construction.
+  iree_slim_mutex_t execution_queue_configuration_mutex;
 
   // Selected command-buffer recording and replay implementation.
   iree_hal_amdgpu_command_buffer_mode_t command_buffer_mode;

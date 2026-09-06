@@ -159,8 +159,12 @@ iree_status_t iree_hal_amdgpu_tsan_state_assign_queues(
     status = iree_hal_amdgpu_tsan_state_select_memory_policy(physical_device,
                                                              &memory_policy);
     for (iree_host_size_t j = 0;
-         j < physical_device->host_queue_count && iree_status_is_ok(status);
+         j < physical_device->host_queue_capacity && iree_status_is_ok(status);
          ++j) {
+      if (!iree_hal_amdgpu_physical_device_host_queue_is_initialized(
+              physical_device, j)) {
+        continue;
+      }
       const iree_host_size_t queue_ordinal =
           physical_device->device_ordinal *
               physical_device->host_queue_capacity +

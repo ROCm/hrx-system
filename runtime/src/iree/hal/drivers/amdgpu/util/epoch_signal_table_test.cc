@@ -6,6 +6,8 @@
 
 #include "iree/hal/drivers/amdgpu/util/epoch_signal_table.h"
 
+#include <atomic>
+#include <thread>
 #include <vector>
 
 #include "iree/testing/gtest.h"
@@ -15,12 +17,14 @@ namespace {
 class EpochSignalTable {
  public:
   EpochSignalTable(uint8_t session_epoch, uint8_t machine_index,
-                   uint8_t device_index, uint16_t queue_count) {
+                   uint8_t device_index, uint16_t queue_count,
+                   uint64_t ordinary_queue_mask = 0) {
     storage_.resize(iree_hal_amdgpu_epoch_signal_table_size(queue_count));
     table_ = reinterpret_cast<iree_hal_amdgpu_epoch_signal_table_t*>(
         storage_.data());
     iree_hal_amdgpu_epoch_signal_table_initialize(
-        table_, session_epoch, machine_index, device_index, queue_count);
+        table_, session_epoch, machine_index, device_index, queue_count,
+        ordinary_queue_mask);
   }
 
   iree_hal_amdgpu_epoch_signal_table_t* get() { return table_; }
@@ -96,6 +100,44 @@ TEST(EpochSignalTable, DeregisterRemovesQueue) {
   iree_hal_amdgpu_epoch_signal_table_deregister(table.get(), 1);
   EXPECT_FALSE(
       iree_hal_amdgpu_epoch_signal_table_lookup(table.get(), axis, &signal));
+}
+
+TEST(EpochSignalTable, ConcurrentRegistrationPublishesSignal) {
+  EpochSignalTable table(/*session_epoch=*/1, /*machine_index=*/0,
+                         /*device_index=*/4, /*queue_count=*/1);
+  const iree_async_axis_t axis = iree_async_axis_make_queue(1, 0, 4, 0);
+  std::atomic<bool> reader_started = false;
+  hsa_signal_t observed_signal = MakeSignal(0);
+  std::thread reader([&]() {
+    reader_started.store(true, std::memory_order_release);
+    while (!iree_hal_amdgpu_epoch_signal_table_lookup(table.get(), axis,
+                                                      &observed_signal)) {
+      std::this_thread::yield();
+    }
+  });
+  while (!reader_started.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+
+  iree_hal_amdgpu_epoch_signal_table_register(table.get(), 0, MakeSignal(123));
+  reader.join();
+  EXPECT_EQ(observed_signal.handle, 123u);
+}
+
+TEST(EpochSignalTable, OrdinaryLookupSkipsDynamicPublicationMask) {
+  EpochSignalTable table(/*session_epoch=*/1, /*machine_index=*/0,
+                         /*device_index=*/4, /*queue_count=*/2,
+                         /*ordinary_queue_mask=*/UINT64_C(1));
+  iree_hal_amdgpu_epoch_signal_table_register(table.get(), 0, MakeSignal(123));
+  iree_atomic_store(&table.get()->registered_queue_mask, 0,
+                    iree_memory_order_relaxed);
+
+  hsa_signal_t signal = MakeSignal(0);
+  EXPECT_TRUE(iree_hal_amdgpu_epoch_signal_table_lookup(
+      table.get(), iree_async_axis_make_queue(1, 0, 4, 0), &signal));
+  EXPECT_EQ(signal.handle, 123u);
+  EXPECT_FALSE(iree_hal_amdgpu_epoch_signal_table_lookup(
+      table.get(), iree_async_axis_make_queue(1, 0, 4, 1), &signal));
 }
 
 }  // namespace

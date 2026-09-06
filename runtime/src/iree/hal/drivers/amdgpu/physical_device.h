@@ -138,8 +138,10 @@ typedef struct iree_hal_amdgpu_physical_device_options_t {
   // Initial block count preallocated for the host block pool.
   iree_host_size_t host_block_pool_initial_capacity;
 
-  // Number of host queues created for this physical device.
+  // Maximum number of host queues available for this physical device.
   iree_host_size_t host_queue_count;
+  // Number of leading host queues used for ordinary generic HAL routing.
+  iree_host_size_t host_queue_ordinary_count;
   // Per-host-queue HSA AQL ring capacity in packets.
   uint32_t host_queue_aql_capacity;
   // Per-host-queue completion/reclaim ring capacity.
@@ -308,6 +310,8 @@ typedef struct iree_hal_amdgpu_physical_device_t {
 
   // Total number of host queue slots allocated in |host_queues|.
   iree_host_size_t host_queue_capacity;
+  // Number of leading host queues used for ordinary generic HAL routing.
+  iree_host_size_t host_queue_ordinary_count;
   // Per-host-queue HSA AQL ring capacity in packets.
   uint32_t host_queue_aql_capacity;
   // Per-host-queue completion/reclaim ring capacity.
@@ -331,17 +335,43 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   // registration, which outlives frontier assignment.
   iree_hal_amdgpu_system_event_agent_target_t* system_event_target;
 
-  // Number of host queues in |host_queues| that have been initialized and not
-  // yet destroyed.
-  //
-  // Between the phases of deassignment this names queues in three conditions -
-  // still admitting work, closed but not yet destroyed, and destroyed - so it
-  // is not a safe bound for anything that must only touch usable queues.
-  // Asynchronous failure delivery is bounded by |system_event_target| instead.
+  // Frontier tracker borrowing every permanently reserved queue axis during
+  // one topology assignment.
+  iree_async_frontier_tracker_t* frontier_tracker;
+  // Topology-assigned base axis used to derive the reserved queue axes.
+  iree_async_axis_t frontier_base_axis;
+  // Number of leading physical queue axes registered in |frontier_tracker|.
+  iree_host_size_t registered_host_queue_axis_count;
+
+  // Bit i is set exactly while |host_queues[i]| is fully initialized. Ordinary
+  // queues form a leading prefix; caller-selected private queues may be sparse.
+  // Release publication lets concurrent cold-path readers safely inspect a
+  // newly materialized queue.
+  iree_atomic_uint64_t host_queue_initialized_mask;
+  // Number of set bits in |host_queue_initialized_mask|.
   iree_host_size_t host_queue_count;
-  // One or more host queues mapped to HSA queues on this physical device.
-  iree_hal_amdgpu_host_queue_t host_queues[/*host_queue_count*/];
+  // Fixed-capacity queue slot storage. Only entries selected by
+  // |host_queue_initialized_mask| contain live queue objects.
+  iree_hal_amdgpu_host_queue_t host_queues[/*host_queue_capacity*/];
 } iree_hal_amdgpu_physical_device_t;
+
+// Returns an acquire snapshot of every fully initialized host queue slot.
+static inline uint64_t
+iree_hal_amdgpu_physical_device_host_queue_initialized_mask(
+    const iree_hal_amdgpu_physical_device_t* physical_device) {
+  return (uint64_t)iree_atomic_load(
+      &physical_device->host_queue_initialized_mask, iree_memory_order_acquire);
+}
+
+// Returns true if |queue_ordinal| names a fully initialized host queue.
+static inline bool iree_hal_amdgpu_physical_device_host_queue_is_initialized(
+    const iree_hal_amdgpu_physical_device_t* physical_device,
+    iree_host_size_t queue_ordinal) {
+  if (queue_ordinal >= physical_device->host_queue_capacity) return false;
+  return (iree_hal_amdgpu_physical_device_host_queue_initialized_mask(
+              physical_device) &
+          (UINT64_C(1) << queue_ordinal)) != 0;
+}
 
 // Returns the aligned heap size in bytes required to store the physical device
 // data structure. Requires that the options have been verified.
@@ -379,6 +409,21 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
     iree_hal_amdgpu_feedback_state_t* feedback_state,
     const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
     iree_hal_amdgpu_system_event_agent_target_t* system_event_target,
+    iree_allocator_t host_allocator,
+    iree_hal_amdgpu_physical_device_t* physical_device);
+
+// Initializes exactly |queue_ordinal| with immutable |create_options|. Other
+// reserved slots are untouched. The caller must serialize this with other
+// queue activation and device teardown operations.
+iree_status_t iree_hal_amdgpu_physical_device_ensure_host_queue(
+    iree_hal_device_t* logical_device, iree_hal_amdgpu_system_t* system,
+    iree_async_proactor_t* proactor,
+    iree_async_frontier_tracker_t* frontier_tracker,
+    iree_async_axis_t base_axis,
+    iree_hal_amdgpu_epoch_signal_table_t* epoch_signal_table,
+    iree_hal_amdgpu_feedback_state_t* feedback_state,
+    iree_host_size_t queue_ordinal,
+    const iree_hal_amdgpu_host_queue_create_options_t* create_options,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_physical_device_t* physical_device);
 

@@ -55,6 +55,7 @@ static iree_hal_amdgpu_device_spec_params_t MakeDeviceSpecParams(
       /*.display_name=*/IREE_SV("AMDGPU test device"),
       /*.physical_device_count=*/physical_device_count,
       /*.physical_devices=*/physical_devices,
+      /*.queue_affinity_stride=*/2,
       /*.device_memory_capacity_bytes=*/64ull * 1024ull * 1024ull * 1024ull,
       /*.device_allocator=*/allocator,
       /*.sanitizer=*/{},
@@ -202,6 +203,44 @@ TEST(DeviceSpecBuilderTest, QueueFamiliesReportPerPhysicalDeviceFrequency) {
   iree_hal_allocator_release(allocator);
 }
 
+// Reserved private queues consume affinity lanes without appearing as public
+// queue-family members. Later physical devices retain their runtime affinity
+// positions instead of being compacted across those reserved lanes.
+TEST(DeviceSpecBuilderTest, QueueFamiliesPreserveSparseRuntimeAffinities) {
+  iree_hal_allocator_t* allocator = NULL;
+  IREE_ASSERT_OK(
+      iree_hal_allocator_create_heap(IREE_SV("test"), iree_allocator_system(),
+                                     iree_allocator_system(), &allocator));
+
+  iree_hal_amdgpu_device_spec_physical_device_params_t physical_devices[2];
+  MakePhysicalDeviceParams(IREE_SV("gfx942"), kAgentTimestampFrequencyHz,
+                           /*physical_ordinal=*/0, &physical_devices[0]);
+  MakePhysicalDeviceParams(IREE_SV("gfx942"), kAgentTimestampFrequencyHz,
+                           /*physical_ordinal=*/1, &physical_devices[1]);
+  physical_devices[0].queue_count = 1;
+  physical_devices[1].queue_count = 1;
+  iree_hal_amdgpu_device_spec_params_t params = MakeDeviceSpecParams(
+      physical_devices, IREE_ARRAYSIZE(physical_devices), allocator);
+  params.queue_affinity_stride = 2;
+
+  iree_hal_device_spec_t* device_spec = NULL;
+  IREE_ASSERT_OK(iree_hal_amdgpu_device_spec_create(
+      &params, iree_allocator_system(), &device_spec));
+  const iree_hal_device_queue_spec_t* queues =
+      iree_hal_device_spec_queues(device_spec);
+  ASSERT_NE(queues, nullptr);
+  ASSERT_EQ(queues->family_count, IREE_ARRAYSIZE(physical_devices));
+  EXPECT_EQ(queues->families[0].queue_count, 1u);
+  EXPECT_EQ(queues->families[0].queue_affinity, 0x1u);
+  EXPECT_EQ(queues->families[0].physical_device_affinity, 0x1u);
+  EXPECT_EQ(queues->families[1].queue_count, 1u);
+  EXPECT_EQ(queues->families[1].queue_affinity, 0x4u);
+  EXPECT_EQ(queues->families[1].physical_device_affinity, 0x2u);
+
+  iree_hal_device_spec_release(device_spec);
+  iree_hal_allocator_release(allocator);
+}
+
 // Functional atomics are backed by target-compiled kernels on every physical
 // device, while native packet capabilities independently describe which queue
 // families can execute waits and stores without occupying compute resources.
@@ -335,6 +374,51 @@ TEST(DeviceSpecBuilderTest, ZeroTimestampFrequencyOnSecondDeviceIsRejected) {
                         CreateTwoDeviceSpec(kAgentTimestampFrequencyHz,
                                             /*second_timestamp_frequency_hz=*/0,
                                             allocator, &device_spec));
+  EXPECT_EQ(device_spec, nullptr);
+
+  iree_hal_allocator_release(allocator);
+}
+
+TEST(DeviceSpecBuilderTest,
+     QueueAffinityStrideSmallerThanQueueCountIsRejected) {
+  iree_hal_allocator_t* allocator = NULL;
+  IREE_ASSERT_OK(
+      iree_hal_allocator_create_heap(IREE_SV("test"), iree_allocator_system(),
+                                     iree_allocator_system(), &allocator));
+
+  iree_hal_amdgpu_device_spec_physical_device_params_t physical_device;
+  MakePhysicalDeviceParams(IREE_SV("gfx942"), kAgentTimestampFrequencyHz,
+                           /*physical_ordinal=*/0, &physical_device);
+  iree_hal_amdgpu_device_spec_params_t params =
+      MakeDeviceSpecParams(&physical_device, 1, allocator);
+  params.queue_affinity_stride = physical_device.queue_count - 1;
+  iree_hal_device_spec_t* device_spec = NULL;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_hal_amdgpu_device_spec_create(
+                            &params, iree_allocator_system(), &device_spec));
+  EXPECT_EQ(device_spec, nullptr);
+
+  iree_hal_allocator_release(allocator);
+}
+
+TEST(DeviceSpecBuilderTest, QueueAffinitySpanBeyondDomainIsRejected) {
+  iree_hal_allocator_t* allocator = NULL;
+  IREE_ASSERT_OK(
+      iree_hal_allocator_create_heap(IREE_SV("test"), iree_allocator_system(),
+                                     iree_allocator_system(), &allocator));
+
+  iree_hal_amdgpu_device_spec_physical_device_params_t physical_devices[2];
+  MakePhysicalDeviceParams(IREE_SV("gfx942"), kAgentTimestampFrequencyHz,
+                           /*physical_ordinal=*/0, &physical_devices[0]);
+  MakePhysicalDeviceParams(IREE_SV("gfx942"), kAgentTimestampFrequencyHz,
+                           /*physical_ordinal=*/1, &physical_devices[1]);
+  iree_hal_amdgpu_device_spec_params_t params = MakeDeviceSpecParams(
+      physical_devices, IREE_ARRAYSIZE(physical_devices), allocator);
+  params.queue_affinity_stride = IREE_HAL_MAX_QUEUES / 2 + 1;
+  iree_hal_device_spec_t* device_spec = NULL;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_hal_amdgpu_device_spec_create(
+                            &params, iree_allocator_system(), &device_spec));
   EXPECT_EQ(device_spec, nullptr);
 
   iree_hal_allocator_release(allocator);
