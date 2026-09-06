@@ -1059,6 +1059,7 @@ void iree_hal_amdgpu_host_queue_cancel_pending(
     if (iree_status_is_ok(op_status)) {
       op_status = iree_status_clone(failure_status);
     }
+    iree_hal_amdgpu_pending_op_fail_host_action(op, op_status);
     iree_hal_semaphore_list_fail(op->signal_semaphore_list, op_status);
     iree_hal_amdgpu_pending_op_abort_unsubmitted_dealloca(op);
     iree_hal_amdgpu_pending_op_release_alloca_memory_wait(op);

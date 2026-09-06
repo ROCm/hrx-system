@@ -583,9 +583,18 @@ static void iree_hal_amdgpu_transfer_start_post_drain(void* user_data) {
 static void iree_hal_amdgpu_transfer_waits_complete(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
     const iree_status_t status) {
-  (void)entry;
   iree_hal_amdgpu_transfer_transaction_t* transaction =
       (iree_hal_amdgpu_transfer_transaction_t*)user_data;
+  // A NULL entry identifies failure of a deferred host action before it was
+  // submitted. This callback is then outside notification-ring drain and must
+  // terminate the transaction directly; no later drain is guaranteed to run
+  // a queued continuation on a failed or shutting-down queue.
+  if (!entry) {
+    transaction->remaining_child_count = 0;
+    transaction->failure_status = iree_status_clone(status);
+    iree_hal_amdgpu_transfer_publish_signals(transaction);
+    return;
+  }
   transaction->start_status =
       iree_status_is_ok(status) ? iree_ok_status() : iree_status_clone(status);
   iree_hal_resource_retain(&transaction->resource);
