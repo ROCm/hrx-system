@@ -28,6 +28,8 @@ from loom.target.contracts import (
     GuardKind,
     LowerDiagnosticParam,
     LowerEmitKind,
+    SourceMemoryAddressMaterializer,
+    SourceMemoryByteOffsetMaterializer,
     TypePattern,
     compile_lower_rule_set,
 )
@@ -62,6 +64,27 @@ def _intern_rows[RowT: Hashable](
         ordinal = row_ordinals.get(row)
         if ordinal is None:
             ordinal = len(unique_rows)
+            row_ordinals[row] = ordinal
+            unique_rows.append(row)
+        row_refs.append(ordinal)
+    return tuple(unique_rows), tuple(row_refs)
+
+
+def _intern_optional_rows[RowT: Hashable](
+    rows: Sequence[RowT | None],
+) -> tuple[tuple[RowT, ...], tuple[int, ...]]:
+    """Interns optional rows and returns one-based refs with zero for none."""
+
+    unique_rows: list[RowT] = []
+    row_refs: list[int] = []
+    row_ordinals: dict[RowT, int] = {}
+    for row in rows:
+        if row is None:
+            row_refs.append(0)
+            continue
+        ordinal = row_ordinals.get(row)
+        if ordinal is None:
+            ordinal = len(unique_rows) + 1
             row_ordinals[row] = ordinal
             unique_rows.append(row)
         row_refs.append(ordinal)
@@ -220,6 +243,14 @@ def _generate_source(
 
     descriptor_ref_keys = lower_rule_rows.descriptor_ref_keys(table, source_contract)
     report_keys = _collect_report_keys(table)
+    (
+        source_memory_byte_offset_materializers,
+        byte_offset_materializer_ordinals,
+    ) = _intern_optional_rows(tuple(row.byte_offset_materializer for row in table.source_memories))
+    (
+        source_memory_address_materializers,
+        address_materializer_ordinals,
+    ) = _intern_optional_rows(tuple(row.address_materializer for row in table.source_memories))
     _validate_c_table_shape(table, source_contract, descriptor_ref_keys)
     descriptor_refs = {key: index for index, key in enumerate(descriptor_ref_keys)}
     report_key_ordinals = {key: index + 1 for index, key in enumerate(report_keys)}
@@ -227,6 +258,8 @@ def _generate_source(
         table,
         descriptor_ref_keys=descriptor_ref_keys,
         report_keys=report_keys,
+        source_memory_byte_offset_materializers=source_memory_byte_offset_materializers,
+        source_memory_address_materializers=source_memory_address_materializers,
         c_enum_prefix=f"{_c_identifier(table.name).upper()}_LOWER",
     )
     string_data_name = f"k{c_table_prefix}StringData"
@@ -277,6 +310,38 @@ def _generate_source(
         )
     )
 
+    source_memory_byte_offset_materializers_name = f"k{c_table_prefix}SourceMemoryByteOffsetMaterializers"
+    lines.extend(
+        lower_rule_rows.emit_optional_array(
+            source_memory_byte_offset_materializers_name,
+            "loom_low_lower_source_memory_byte_offset_materializer_t",
+            [
+                lower_rule_rows.source_memory_byte_offset_materializer_row(
+                    descriptor_refs,
+                    row,
+                    immediate_string_offset=string_pool.ref(_source_memory_byte_offset_string_label(index)),
+                )
+                for index, row in enumerate(source_memory_byte_offset_materializers)
+            ],
+        )
+    )
+
+    source_memory_address_materializers_name = f"k{c_table_prefix}SourceMemoryAddressMaterializers"
+    lines.extend(
+        lower_rule_rows.emit_optional_array(
+            source_memory_address_materializers_name,
+            "loom_low_lower_source_memory_address_materializer_t",
+            [
+                lower_rule_rows.source_memory_address_materializer_row(
+                    descriptor_refs,
+                    row,
+                    immediate_string_offset=string_pool.ref(_source_memory_address_string_label(index)),
+                )
+                for index, row in enumerate(source_memory_address_materializers)
+            ],
+        )
+    )
+
     source_memories_name = f"k{c_table_prefix}SourceMemories"
     lines.extend(
         lower_rule_rows.emit_optional_array(
@@ -284,12 +349,16 @@ def _generate_source(
             "loom_low_lower_source_memory_t",
             [
                 lower_rule_rows.source_memory_row(
-                    descriptor_refs,
                     row,
-                    byte_offset_immediate_string_offset=(string_pool.ref(_source_memory_byte_offset_string_label(index)) if row.byte_offset_materializer is not None else None),
-                    address_immediate_string_offset=(string_pool.ref(_source_memory_address_string_label(index)) if row.address_materializer is not None else None),
+                    byte_offset_materializer_ordinal=byte_offset_ordinal,
+                    address_materializer_ordinal=address_ordinal,
                 )
-                for index, row in enumerate(table.source_memories)
+                for row, byte_offset_ordinal, address_ordinal in zip(
+                    table.source_memories,
+                    byte_offset_materializer_ordinals,
+                    address_materializer_ordinals,
+                    strict=True,
+                )
             ],
         )
     )
@@ -447,6 +516,10 @@ def _generate_source(
             value_refs_name=value_refs_name,
             materializers_name=materializers_name,
             source_memories_name=source_memories_name,
+            source_memory_byte_offset_materializers=(source_memory_byte_offset_materializers),
+            source_memory_byte_offset_materializers_name=(source_memory_byte_offset_materializers_name),
+            source_memory_address_materializers=(source_memory_address_materializers),
+            source_memory_address_materializers_name=(source_memory_address_materializers_name),
             descriptor_ref_keys=descriptor_ref_keys,
             descriptor_refs_name=descriptor_refs_name,
             diagnostic_param_rows=unique_diagnostic_params,
@@ -475,11 +548,11 @@ def _descriptor_ref_string_label(index: int) -> str:
 
 
 def _source_memory_byte_offset_string_label(index: int) -> str:
-    return f"source_memory_{index}_byte_offset_immediate"
+    return f"source_memory_byte_offset_materializer_{index}_immediate"
 
 
 def _source_memory_address_string_label(index: int) -> str:
-    return f"source_memory_{index}_address_immediate"
+    return f"source_memory_address_materializer_{index}_immediate"
 
 
 def _diagnostic_param_string_label(index: int) -> str:
@@ -499,22 +572,23 @@ def _build_string_pool(
     *,
     descriptor_ref_keys: tuple[str, ...],
     report_keys: tuple[str, ...],
+    source_memory_byte_offset_materializers: tuple[SourceMemoryByteOffsetMaterializer, ...],
+    source_memory_address_materializers: tuple[SourceMemoryAddressMaterializer, ...],
     c_enum_prefix: str,
 ) -> CStringPool:
     pool = CStringPool(c_enum_prefix)
     for index, key in enumerate(descriptor_ref_keys):
         pool.intern(_descriptor_ref_string_label(index), key)
-    for index, row in enumerate(table.source_memories):
-        if row.byte_offset_materializer is not None:
-            pool.intern(
-                _source_memory_byte_offset_string_label(index),
-                row.byte_offset_materializer.const_i64_immediate,
-            )
-        if row.address_materializer is not None:
-            pool.intern(
-                _source_memory_address_string_label(index),
-                row.address_materializer.const_coordinate_immediate,
-            )
+    for index, row in enumerate(source_memory_byte_offset_materializers):
+        pool.intern(
+            _source_memory_byte_offset_string_label(index),
+            row.const_i64_immediate,
+        )
+    for index, row in enumerate(source_memory_address_materializers):
+        pool.intern(
+            _source_memory_address_string_label(index),
+            row.const_coordinate_immediate,
+        )
     diagnostic_param_index = 0
     for diagnostic in table.diagnostics:
         for param in lower_rule_rows.diagnostic_stored_params(diagnostic):
@@ -549,6 +623,16 @@ def _validate_c_table_shape(
         f"{subject} materializer count",
     )
     _require_u16(len(table.source_memories), f"{subject} source-memory count")
+    source_memory_byte_offset_materializers, _ = _intern_optional_rows(tuple(row.byte_offset_materializer for row in table.source_memories))
+    source_memory_address_materializers, _ = _intern_optional_rows(tuple(row.address_materializer for row in table.source_memories))
+    _require_u8(
+        len(source_memory_byte_offset_materializers),
+        f"{subject} source-memory byte-offset materializer count",
+    )
+    _require_u8(
+        len(source_memory_address_materializers),
+        f"{subject} source-memory address materializer count",
+    )
     _require_u16(len(descriptor_ref_keys), f"{subject} descriptor-ref count")
     _require_u16(len(table.guards), f"{subject} guard count")
     _require_u16(len(table.attr_copies), f"{subject} attr-copy count")

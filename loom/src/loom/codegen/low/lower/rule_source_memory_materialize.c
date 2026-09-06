@@ -67,21 +67,20 @@ static iree_status_t
 loom_low_lower_rule_source_memory_emit_dynamic_byte_offset_const(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set,
-    const loom_low_lower_source_memory_t* source_memory, int64_t value,
-    loom_location_id_t location, loom_value_id_t* out_value_id) {
+    const loom_low_lower_source_memory_byte_offset_materializer_t* materializer,
+    int64_t value, loom_location_id_t location, loom_value_id_t* out_value_id) {
   loom_low_lower_resolved_descriptor_t descriptor = {0};
   IREE_RETURN_IF_ERROR(
       loom_low_lower_rule_source_memory_resolve_materializer_descriptor(
-          context, rule_set,
-          source_memory->byte_offset_const_i64_descriptor_ref, &descriptor));
+          context, rule_set, materializer->const_i64_descriptor_ref,
+          &descriptor));
   loom_type_t result_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_descriptor_result_type(
       context, descriptor.descriptor, 0, &result_type));
   return loom_low_lower_rule_source_memory_emit_resolved_integer_const(
       context, &descriptor,
       loom_low_lower_rule_set_string(
-          rule_set,
-          source_memory->byte_offset_const_i64_immediate_string_offset),
+          rule_set, materializer->const_i64_immediate_string_offset),
       value, result_type, location, out_value_id);
 }
 
@@ -89,19 +88,19 @@ static iree_status_t
 loom_low_lower_rule_source_memory_emit_address_coordinate_const(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    const loom_low_lower_source_memory_t* source_memory, int64_t value,
-    loom_value_id_t* out_value_id) {
+    const loom_low_lower_source_memory_address_materializer_t* materializer,
+    int64_t value, loom_value_id_t* out_value_id) {
   loom_low_lower_resolved_descriptor_t descriptor = {0};
   IREE_RETURN_IF_ERROR(
       loom_low_lower_rule_source_memory_resolve_materializer_descriptor(
-          context, rule_set,
-          source_memory->address_const_coordinate_descriptor_ref, &descriptor));
+          context, rule_set, materializer->const_coordinate_descriptor_ref,
+          &descriptor));
   loom_scalar_type_t source_scalar_type = LOOM_SCALAR_TYPE_OFFSET;
-  if (source_memory->address_coordinate_type ==
+  if (materializer->coordinate_type ==
       LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_INDEX) {
     source_scalar_type = LOOM_SCALAR_TYPE_INDEX;
   } else {
-    IREE_ASSERT_EQ(source_memory->address_coordinate_type,
+    IREE_ASSERT_EQ(materializer->coordinate_type,
                    LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_OFFSET);
   }
   loom_type_t result_type = loom_type_none();
@@ -110,8 +109,7 @@ loom_low_lower_rule_source_memory_emit_address_coordinate_const(
   return loom_low_lower_rule_source_memory_emit_resolved_integer_const(
       context, &descriptor,
       loom_low_lower_rule_set_string(
-          rule_set,
-          source_memory->address_const_coordinate_immediate_string_offset),
+          rule_set, materializer->const_coordinate_immediate_string_offset),
       value, result_type, source_op->location, out_value_id);
 }
 
@@ -286,7 +284,7 @@ static iree_status_t loom_low_lower_rule_source_memory_emit_unary_op(
 static iree_status_t loom_low_lower_rule_materialize_source_memory_term(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    const loom_low_lower_source_memory_t* source_memory,
+    const loom_low_lower_source_memory_byte_offset_materializer_t* materializer,
     const loom_low_source_memory_dynamic_term_t* term,
     loom_value_id_t* out_value_id) {
   *out_value_id = LOOM_VALUE_ID_INVALID;
@@ -300,8 +298,8 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_term(
     IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
         context, term->stride_values[i], &stride_value));
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_emit_binary_op(
-        context, rule_set, source_memory->byte_offset_mul_i64_descriptor_ref,
-        accumulator, stride_value, source_op->location, &accumulator));
+        context, rule_set, materializer->mul_i64_descriptor_ref, accumulator,
+        stride_value, source_op->location, &accumulator));
   }
 
   if (term->byte_stride == 1) {
@@ -310,26 +308,26 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_term(
   }
 
   if (term->byte_shift != LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE &&
-      source_memory->byte_offset_shl_i64_descriptor_ref !=
+      materializer->shl_i64_descriptor_ref !=
           LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
     loom_value_id_t shift = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(
         loom_low_lower_rule_source_memory_emit_dynamic_byte_offset_const(
-            context, rule_set, source_memory, term->byte_shift,
+            context, rule_set, materializer, term->byte_shift,
             source_op->location, &shift));
     return loom_low_lower_rule_source_memory_emit_binary_op(
-        context, rule_set, source_memory->byte_offset_shl_i64_descriptor_ref,
-        accumulator, shift, source_op->location, out_value_id);
+        context, rule_set, materializer->shl_i64_descriptor_ref, accumulator,
+        shift, source_op->location, out_value_id);
   }
 
   loom_value_id_t stride = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_rule_source_memory_emit_dynamic_byte_offset_const(
-          context, rule_set, source_memory, term->byte_stride,
+          context, rule_set, materializer, term->byte_stride,
           source_op->location, &stride));
   return loom_low_lower_rule_source_memory_emit_binary_op(
-      context, rule_set, source_memory->byte_offset_mul_i64_descriptor_ref,
-      accumulator, stride, source_op->location, out_value_id);
+      context, rule_set, materializer->mul_i64_descriptor_ref, accumulator,
+      stride, source_op->location, out_value_id);
 }
 
 iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
@@ -341,6 +339,9 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
   *out_value_id = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT(source_memory_access != NULL);
   IREE_ASSERT_GT(source_memory_access->dynamic_term_count, 0);
+  const loom_low_lower_source_memory_byte_offset_materializer_t* materializer =
+      loom_low_lower_rule_set_source_memory_byte_offset_materializer(
+          rule_set, source_memory);
 
   if (loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
           source_memory_access) &&
@@ -371,13 +372,13 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
     }
     loom_value_id_t term_value = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_materialize_source_memory_term(
-        context, rule_set, source_op, source_memory, term, &term_value));
+        context, rule_set, source_op, materializer, term, &term_value));
     if (accumulator == LOOM_VALUE_ID_INVALID) {
       accumulator = term_value;
     } else {
       IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_emit_binary_op(
-          context, rule_set, source_memory->byte_offset_add_i64_descriptor_ref,
-          accumulator, term_value, source_op->location, &accumulator));
+          context, rule_set, materializer->add_i64_descriptor_ref, accumulator,
+          term_value, source_op->location, &accumulator));
     }
     term_ordinal = (uint8_t)(term_ordinal + consumed_term_count);
   }
@@ -391,7 +392,7 @@ static iree_status_t
 loom_low_lower_rule_materialize_source_memory_address_coordinate_value(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    const loom_low_lower_source_memory_t* source_memory,
+    const loom_low_lower_source_memory_address_materializer_t* materializer,
     loom_value_id_t source_value_id, loom_value_id_t* out_value_id) {
   const loom_module_t* module = loom_low_lower_context_module(context);
   const loom_type_t source_type =
@@ -399,7 +400,7 @@ loom_low_lower_rule_materialize_source_memory_address_coordinate_value(
   loom_value_id_t low_value_id = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_lookup_value(context, source_value_id, &low_value_id));
-  if (source_memory->address_coordinate_type ==
+  if (materializer->coordinate_type ==
       LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_INDEX) {
     IREE_ASSERT(
         loom_type_equal(source_type, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX)));
@@ -407,7 +408,7 @@ loom_low_lower_rule_materialize_source_memory_address_coordinate_value(
     return iree_ok_status();
   }
 
-  IREE_ASSERT_EQ(source_memory->address_coordinate_type,
+  IREE_ASSERT_EQ(materializer->coordinate_type,
                  LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_OFFSET);
   if (loom_type_equal(source_type, loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET))) {
     *out_value_id = low_value_id;
@@ -416,43 +417,41 @@ loom_low_lower_rule_materialize_source_memory_address_coordinate_value(
 
   IREE_ASSERT(
       loom_type_equal(source_type, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX)));
-  if (source_memory->address_index_to_coordinate_input_descriptor_ref !=
+  if (materializer->index_to_coordinate_input_descriptor_ref !=
       LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_emit_unary_op(
         context, rule_set,
-        source_memory->address_index_to_coordinate_input_descriptor_ref,
-        low_value_id, source_op->location, &low_value_id));
+        materializer->index_to_coordinate_input_descriptor_ref, low_value_id,
+        source_op->location, &low_value_id));
   }
   return loom_low_lower_rule_source_memory_emit_unary_op(
-      context, rule_set,
-      source_memory->address_index_to_coordinate_descriptor_ref, low_value_id,
-      source_op->location, out_value_id);
+      context, rule_set, materializer->index_to_coordinate_descriptor_ref,
+      low_value_id, source_op->location, out_value_id);
 }
 
 static iree_status_t loom_low_lower_rule_materialize_source_memory_address_term(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    const loom_low_lower_source_memory_t* source_memory,
+    const loom_low_lower_source_memory_address_materializer_t* materializer,
     const loom_low_source_memory_dynamic_term_t* term,
     loom_value_id_t* out_value_id) {
   loom_value_id_t accumulator = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_rule_materialize_source_memory_address_coordinate_value(
-          context, rule_set, source_op, source_memory, term->index,
+          context, rule_set, source_op, materializer, term->index,
           &accumulator));
   for (uint8_t i = 0; i < term->stride_value_count; ++i) {
     loom_value_id_t stride_value = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(
         loom_low_lower_rule_materialize_source_memory_address_coordinate_value(
-            context, rule_set, source_op, source_memory, term->stride_values[i],
+            context, rule_set, source_op, materializer, term->stride_values[i],
             &stride_value));
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_emit_binary_op(
-        context, rule_set, source_memory->address_mul_coordinate_descriptor_ref,
+        context, rule_set, materializer->mul_coordinate_descriptor_ref,
         accumulator, stride_value, source_op->location, &accumulator));
   }
 
-  const int64_t unit_byte_count =
-      source_memory->address_coordinate_unit_byte_count;
+  const int64_t unit_byte_count = materializer->coordinate_unit_byte_count;
   IREE_ASSERT_GT(unit_byte_count, 0);
   IREE_ASSERT_EQ(term->byte_stride % unit_byte_count, 0);
   const int64_t coordinate_stride = term->byte_stride / unit_byte_count;
@@ -463,26 +462,26 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_address_term(
 
   if (coordinate_stride > 0 &&
       iree_math_is_power_of_two_i64(coordinate_stride) &&
-      source_memory->address_shl_coordinate_descriptor_ref !=
+      materializer->shl_coordinate_descriptor_ref !=
           LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
     loom_value_id_t shift = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(
         loom_low_lower_rule_source_memory_emit_address_coordinate_const(
-            context, rule_set, source_op, source_memory,
+            context, rule_set, source_op, materializer,
             iree_math_count_trailing_zeros_u64((uint64_t)coordinate_stride),
             &shift));
     return loom_low_lower_rule_source_memory_emit_binary_op(
-        context, rule_set, source_memory->address_shl_coordinate_descriptor_ref,
+        context, rule_set, materializer->shl_coordinate_descriptor_ref,
         accumulator, shift, source_op->location, out_value_id);
   }
 
   loom_value_id_t stride = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_rule_source_memory_emit_address_coordinate_const(
-          context, rule_set, source_op, source_memory, coordinate_stride,
+          context, rule_set, source_op, materializer, coordinate_stride,
           &stride));
   return loom_low_lower_rule_source_memory_emit_binary_op(
-      context, rule_set, source_memory->address_mul_coordinate_descriptor_ref,
+      context, rule_set, materializer->mul_coordinate_descriptor_ref,
       accumulator, stride, source_op->location, out_value_id);
 }
 
@@ -490,14 +489,14 @@ static iree_status_t
 loom_low_lower_rule_materialize_source_memory_complete_coordinate(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    const loom_low_lower_source_memory_t* source_memory,
+    const loom_low_lower_source_memory_address_materializer_t* materializer,
     const loom_low_source_memory_access_plan_t* source_memory_access,
     loom_value_id_t* out_value_id) {
   loom_value_id_t accumulator = LOOM_VALUE_ID_INVALID;
   uint8_t first_canonical_term = 0;
   int64_t static_byte_offset = source_memory_access->static_byte_offset;
-  if (source_memory->address_coordinate_unit_byte_count == 1 &&
-      source_memory->address_coordinate_type ==
+  if (materializer->coordinate_unit_byte_count == 1 &&
+      materializer->coordinate_type ==
           LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_OFFSET &&
       source_memory_access->dynamic_view_base_term_count != 0 &&
       source_memory_access->dynamic_view_base_value_id !=
@@ -520,20 +519,18 @@ loom_low_lower_rule_materialize_source_memory_complete_coordinate(
     loom_value_id_t term_value = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(
         loom_low_lower_rule_materialize_source_memory_address_term(
-            context, rule_set, source_op, source_memory,
+            context, rule_set, source_op, materializer,
             &source_memory_access->dynamic_terms[term_ordinal], &term_value));
     if (accumulator == LOOM_VALUE_ID_INVALID) {
       accumulator = term_value;
     } else {
       IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_emit_binary_op(
-          context, rule_set,
-          source_memory->address_add_coordinate_descriptor_ref, accumulator,
-          term_value, source_op->location, &accumulator));
+          context, rule_set, materializer->add_coordinate_descriptor_ref,
+          accumulator, term_value, source_op->location, &accumulator));
     }
   }
 
-  const int64_t unit_byte_count =
-      source_memory->address_coordinate_unit_byte_count;
+  const int64_t unit_byte_count = materializer->coordinate_unit_byte_count;
   IREE_ASSERT_GT(unit_byte_count, 0);
   IREE_ASSERT_EQ(static_byte_offset % unit_byte_count, 0);
   const int64_t static_coordinate = static_byte_offset / unit_byte_count;
@@ -541,15 +538,14 @@ loom_low_lower_rule_materialize_source_memory_complete_coordinate(
     loom_value_id_t static_value = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(
         loom_low_lower_rule_source_memory_emit_address_coordinate_const(
-            context, rule_set, source_op, source_memory, static_coordinate,
+            context, rule_set, source_op, materializer, static_coordinate,
             &static_value));
     if (accumulator == LOOM_VALUE_ID_INVALID) {
       accumulator = static_value;
     } else {
       IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_emit_binary_op(
-          context, rule_set,
-          source_memory->address_add_coordinate_descriptor_ref, accumulator,
-          static_value, source_op->location, &accumulator));
+          context, rule_set, materializer->add_coordinate_descriptor_ref,
+          accumulator, static_value, source_op->location, &accumulator));
     }
   }
 
@@ -563,10 +559,12 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_address(
     const loom_low_lower_source_memory_t* source_memory,
     const loom_low_source_memory_access_plan_t* source_memory_access,
     loom_value_id_t* out_value_id) {
+  const loom_low_lower_source_memory_address_materializer_t* materializer =
+      loom_low_lower_rule_set_source_memory_address_materializer(rule_set,
+                                                                 source_memory);
   loom_value_id_t base = LOOM_VALUE_ID_INVALID;
   const loom_value_id_t source_base =
-      source_memory->address_base_kind ==
-              LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_VIEW
+      materializer->base_kind == LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_VIEW
           ? loom_low_source_memory_access_base_view_value_id(
                 source_memory_access)
           : source_memory_access->root_value_id;
@@ -575,13 +573,13 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_address(
   loom_value_id_t coordinate = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_rule_materialize_source_memory_complete_coordinate(
-          context, rule_set, source_op, source_memory, source_memory_access,
+          context, rule_set, source_op, materializer, source_memory_access,
           &coordinate));
 
   loom_low_lower_resolved_descriptor_t descriptor = {0};
   IREE_RETURN_IF_ERROR(
       loom_low_lower_rule_source_memory_resolve_materializer_descriptor(
-          context, rule_set, source_memory->address_descriptor_ref,
+          context, rule_set, materializer->address_descriptor_ref,
           &descriptor));
   loom_value_id_t operands[2] = {base, coordinate};
   const loom_tied_result_t* tied_results = NULL;

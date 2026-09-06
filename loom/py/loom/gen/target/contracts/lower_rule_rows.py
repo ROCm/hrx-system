@@ -34,6 +34,8 @@ from loom.target.contracts import (
     LowerSourceMemory,
     LowerTiedResult,
     LowerValueRef,
+    SourceMemoryAddressMaterializer,
+    SourceMemoryByteOffsetMaterializer,
     TypePattern,
 )
 from loom.target.contracts.diagnostics import DiagnosticParamKind
@@ -184,16 +186,15 @@ def value_ref_row(row: LowerValueRef) -> list[str]:
 
 
 def source_memory_row(
-    descriptor_refs: Mapping[str, int],
     row: LowerSourceMemory,
     *,
-    byte_offset_immediate_string_offset: str | None = None,
-    address_immediate_string_offset: str | None = None,
+    byte_offset_materializer_ordinal: int,
+    address_materializer_ordinal: int,
 ) -> list[str]:
-    if row.byte_offset_materializer is not None and byte_offset_immediate_string_offset is None:
-        raise ValueError("source-memory byte-offset materializer is missing its string offset")
-    if row.address_materializer is not None and address_immediate_string_offset is None:
-        raise ValueError("source-memory address materializer is missing its string offset")
+    if (row.byte_offset_materializer is None) != (byte_offset_materializer_ordinal == 0):
+        raise ValueError("source-memory byte-offset materializer ordinal disagrees with its row")
+    if (row.address_materializer is None) != (address_materializer_ordinal == 0):
+        raise ValueError("source-memory address materializer ordinal disagrees with its row")
     constraint = row.constraint
     fields: list[str] = []
     flags: list[str] = []
@@ -297,6 +298,16 @@ def source_memory_row(
     )
     _append_field(
         fields,
+        "byte_offset_materializer_ordinal",
+        byte_offset_materializer_ordinal,
+    )
+    _append_field(
+        fields,
+        "address_materializer_ordinal",
+        address_materializer_ordinal,
+    )
+    _append_field(
+        fields,
         "dynamic_offset_diagnostic_index",
         lower_rule_spelling.diagnostic_index(row.dynamic_offset_diagnostic_index),
         always=True,
@@ -325,133 +336,45 @@ def source_memory_row(
         lower_rule_spelling.diagnostic_index(row.address_diagnostic_index),
         always=True,
     )
-    if row.byte_offset_materializer is not None:
-        materializer = row.byte_offset_materializer
-        _append_field(
-            fields,
-            "byte_offset_const_i64_descriptor_ref",
-            _descriptor_ref_index(descriptor_refs, materializer.const_i64),
-            always=True,
-            default="0xFFFF",
-        )
-        _append_field(
-            fields,
-            "byte_offset_const_i64_immediate_string_offset",
-            byte_offset_immediate_string_offset,
-            always=True,
-        )
-        _append_field(
-            fields,
-            "byte_offset_add_i64_descriptor_ref",
-            _descriptor_ref_index(descriptor_refs, materializer.add_i64),
-            always=True,
-            default="0xFFFF",
-        )
-        _append_field(
-            fields,
-            "byte_offset_mul_i64_descriptor_ref",
-            _descriptor_ref_index(descriptor_refs, materializer.mul_i64),
-            always=True,
-            default="0xFFFF",
-        )
-        _append_field(
-            fields,
-            "byte_offset_shl_i64_descriptor_ref",
-            _descriptor_ref_index(descriptor_refs, materializer.shl_i64),
-            always=True,
-            default="0xFFFF",
-        )
-    if row.address_materializer is not None:
-        materializer = row.address_materializer
-        _append_field(
-            fields,
-            "address_base_kind",
-            lower_rule_spelling.SOURCE_MEMORY_ADDRESS_BASE_C_NAMES[materializer.base],
-            always=True,
-        )
-        _append_field(
-            fields,
-            "address_coordinate_type",
-            lower_rule_spelling.SOURCE_MEMORY_ADDRESS_COORDINATE_TYPE_C_NAMES[materializer.coordinate_type],
-            always=True,
-        )
-        _append_field(
-            fields,
-            "address_coordinate_unit_byte_count",
-            materializer.coordinate_unit_byte_count,
-            always=True,
-        )
-        _append_field(
-            fields,
-            "address_coordinate_minimum",
-            _c_i64_literal(materializer.coordinate_minimum),
-            always=True,
-        )
-        _append_field(
-            fields,
-            "address_coordinate_maximum",
-            _c_i64_literal(materializer.coordinate_maximum),
-            always=True,
-        )
-        _append_field(
-            fields,
-            "address_const_coordinate_descriptor_ref",
-            _descriptor_ref_index(descriptor_refs, materializer.const_coordinate),
-            always=True,
-            default="0xFFFF",
-        )
-        _append_field(
-            fields,
-            "address_const_coordinate_immediate_string_offset",
-            address_immediate_string_offset,
-            always=True,
-        )
-        _append_field(
-            fields,
-            "address_add_coordinate_descriptor_ref",
-            _descriptor_ref_index(descriptor_refs, materializer.add_coordinate),
-            always=True,
-            default="0xFFFF",
-        )
-        _append_field(
-            fields,
-            "address_mul_coordinate_descriptor_ref",
-            _descriptor_ref_index(descriptor_refs, materializer.mul_coordinate),
-            always=True,
-            default="0xFFFF",
-        )
-        _append_field(
-            fields,
-            "address_shl_coordinate_descriptor_ref",
-            _descriptor_ref_index(descriptor_refs, materializer.shl_coordinate),
-            always=True,
-            default="0xFFFF",
-        )
-        _append_field(
-            fields,
-            "address_index_to_coordinate_input_descriptor_ref",
-            _descriptor_ref_index(
-                descriptor_refs,
-                materializer.index_to_coordinate_input,
-            ),
-            always=True,
-            default="0xFFFF",
-        )
-        _append_field(
-            fields,
-            "address_index_to_coordinate_descriptor_ref",
-            _descriptor_ref_index(descriptor_refs, materializer.index_to_coordinate),
-            always=True,
-            default="0xFFFF",
-        )
-        _append_field(
-            fields,
-            "address_descriptor_ref",
-            _descriptor_ref_index(descriptor_refs, materializer.address),
-            always=True,
-            default="0xFFFF",
-        )
     return fields
+
+
+def source_memory_byte_offset_materializer_row(
+    descriptor_refs: Mapping[str, int],
+    row: SourceMemoryByteOffsetMaterializer,
+    *,
+    immediate_string_offset: str,
+) -> list[str]:
+    return [
+        f".const_i64_immediate_string_offset = {immediate_string_offset}",
+        f".const_i64_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.const_i64)}",
+        f".add_i64_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.add_i64)}",
+        f".mul_i64_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.mul_i64)}",
+        f".shl_i64_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.shl_i64)}",
+    ]
+
+
+def source_memory_address_materializer_row(
+    descriptor_refs: Mapping[str, int],
+    row: SourceMemoryAddressMaterializer,
+    *,
+    immediate_string_offset: str,
+) -> list[str]:
+    return [
+        f".coordinate_minimum = {_c_i64_literal(row.coordinate_minimum)}",
+        f".coordinate_maximum = {_c_i64_literal(row.coordinate_maximum)}",
+        f".coordinate_unit_byte_count = {row.coordinate_unit_byte_count}",
+        f".const_coordinate_immediate_string_offset = {immediate_string_offset}",
+        f".const_coordinate_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.const_coordinate)}",
+        f".add_coordinate_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.add_coordinate)}",
+        f".mul_coordinate_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.mul_coordinate)}",
+        f".shl_coordinate_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.shl_coordinate)}",
+        f".index_to_coordinate_input_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.index_to_coordinate_input)}",
+        f".index_to_coordinate_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.index_to_coordinate)}",
+        f".address_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.address)}",
+        f".base_kind = {lower_rule_spelling.SOURCE_MEMORY_ADDRESS_BASE_C_NAMES[row.base]}",
+        f".coordinate_type = {lower_rule_spelling.SOURCE_MEMORY_ADDRESS_COORDINATE_TYPE_C_NAMES[row.coordinate_type]}",
+    ]
 
 
 def descriptor_ref_keys(table: CompiledLowerRuleSet, source_contract: ContractFragment) -> tuple[str, ...]:
@@ -859,6 +782,10 @@ def rule_set_row(
     value_refs_name: str,
     materializers_name: str,
     source_memories_name: str,
+    source_memory_byte_offset_materializers: tuple[object, ...],
+    source_memory_byte_offset_materializers_name: str,
+    source_memory_address_materializers: tuple[object, ...],
+    source_memory_address_materializers_name: str,
     descriptor_ref_keys: tuple[str, ...],
     descriptor_refs_name: str,
     diagnostic_param_rows: tuple[tuple[LowerDiagnosticParam, int], ...],
@@ -908,6 +835,18 @@ def rule_set_row(
         "source_memories",
         table.source_memories,
         source_memories_name,
+    )
+    _append_table_fields(
+        fields,
+        "source_memory_byte_offset_materializers",
+        source_memory_byte_offset_materializers,
+        source_memory_byte_offset_materializers_name,
+    )
+    _append_table_fields(
+        fields,
+        "source_memory_address_materializers",
+        source_memory_address_materializers,
+        source_memory_address_materializers_name,
     )
     _append_table_fields(
         fields,

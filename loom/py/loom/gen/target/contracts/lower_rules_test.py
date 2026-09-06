@@ -21,11 +21,14 @@ from loom.gen.target.contracts.lower_rule_rows import (
     diagnostic_param_row,
     diagnostic_stored_params,
     guard_row,
+    source_memory_address_materializer_row,
+    source_memory_byte_offset_materializer_row,
     source_memory_row,
     value_ref_row,
 )
 from loom.gen.target.contracts.lower_rules import (
     _intern_diagnostic_params,
+    _intern_optional_rows,
     _intern_rows,
     _validate_c_table_shape,
     generate_lower_rule_set,
@@ -58,6 +61,7 @@ from loom.target.contracts import (
     SourceMemoryAddressCoordinateType,
     SourceMemoryAddressLayout,
     SourceMemoryAddressMaterializer,
+    SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
@@ -90,6 +94,13 @@ def _expect_value_error(callable_obj: Callable[[], object], message: str) -> Non
         error = exc
     assert error is not None
     assert message in str(error)
+
+
+def test_intern_optional_rows_returns_one_based_refs() -> None:
+    rows, refs = _intern_optional_rows((None, "alpha", "alpha", "beta", None))
+
+    assert rows == ("alpha", "beta")
+    assert refs == (0, 1, 1, 2, 0)
 
 
 def _compiled_lower_rule_set(
@@ -1078,7 +1089,11 @@ def test_source_memory_row_emits_dynamic_byte_stride_any_flag() -> None:
         dynamic_offset_diagnostic_index=4,
     )
 
-    fields = source_memory_row({}, row)
+    fields = source_memory_row(
+        row,
+        byte_offset_materializer_ordinal=0,
+        address_materializer_ordinal=0,
+    )
 
     assert ".flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_BYTE_STRIDE_ANY" in fields
     assert ".dynamic_term_count = 1" in fields
@@ -1101,7 +1116,11 @@ def test_source_memory_row_emits_cache_policy_any_flag() -> None:
         dynamic_offset_diagnostic_index=4,
     )
 
-    fields = source_memory_row({}, row)
+    fields = source_memory_row(
+        row,
+        byte_offset_materializer_ordinal=0,
+        address_materializer_ordinal=0,
+    )
 
     assert ".flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_CACHE_POLICY_ANY" in fields
     assert ".cache_policy_build_flags" not in "\n".join(fields)
@@ -1123,7 +1142,11 @@ def test_source_memory_row_emits_compact_address_layout() -> None:
         address_layout_diagnostic_index=5,
     )
 
-    fields = source_memory_row({}, row)
+    fields = source_memory_row(
+        row,
+        byte_offset_materializer_ordinal=0,
+        address_materializer_ordinal=0,
+    )
 
     assert (".address_layout = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR") in fields
     assert ".address_layout_diagnostic_index = 5" in fields
@@ -1148,7 +1171,11 @@ def test_source_memory_row_emits_preserve_source_index_flag() -> None:
         dynamic_offset_diagnostic_index=4,
     )
 
-    fields = source_memory_row({}, row)
+    fields = source_memory_row(
+        row,
+        byte_offset_materializer_ordinal=0,
+        address_materializer_ordinal=0,
+    )
 
     assert ".flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_PRESERVE_SOURCE_INDEX" in fields
 
@@ -1170,7 +1197,11 @@ def test_source_memory_row_emits_any_positive_dynamic_term_count() -> None:
         dynamic_offset_diagnostic_index=4,
     )
 
-    fields = source_memory_row({}, row)
+    fields = source_memory_row(
+        row,
+        byte_offset_materializer_ordinal=0,
+        address_materializer_ordinal=0,
+    )
 
     assert (".dynamic_term_count = LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_TERM_COUNT_ANY") in fields
     assert ".dynamic_term_count_minimum = 1" in fields
@@ -1195,7 +1226,11 @@ def test_source_memory_row_emits_portable_signed_i64_values() -> None:
         dynamic_offset_diagnostic_index=0xFFFF,
     )
 
-    fields = source_memory_row({}, row)
+    fields = source_memory_row(
+        row,
+        byte_offset_materializer_ordinal=0,
+        address_materializer_ordinal=0,
+    )
 
     assert ".vector_lane_byte_stride = (-INT64_C(2147483648))" in fields
     assert ".static_byte_offset_minimum = INT64_MIN" in fields
@@ -1222,12 +1257,16 @@ def test_source_memory_row_emits_dynamic_stride_values_flag() -> None:
         dynamic_offset_diagnostic_index=4,
     )
 
-    fields = source_memory_row({}, row)
+    fields = source_memory_row(
+        row,
+        byte_offset_materializer_ordinal=0,
+        address_materializer_ordinal=0,
+    )
 
     assert (".flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_BYTE_STRIDE_ANY | LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_STRIDE_VALUES") in fields
 
 
-def test_source_memory_row_emits_complete_address_materializer() -> None:
+def test_source_memory_rows_split_complete_address_materializer() -> None:
     materializer = SourceMemoryAddressMaterializer(
         const_coordinate=TEST_LOW_CONST_I32_DESCRIPTOR,
         add_coordinate=TEST_LOW_ADD_I32_DESCRIPTOR,
@@ -1265,26 +1304,59 @@ def test_source_memory_row_emits_complete_address_materializer() -> None:
     }
 
     fields = source_memory_row(
-        descriptor_refs,
         row,
-        address_immediate_string_offset="TEST_STRING_I32_VALUE",
+        byte_offset_materializer_ordinal=0,
+        address_materializer_ordinal=1,
+    )
+    materializer_fields = source_memory_address_materializer_row(
+        descriptor_refs,
+        materializer,
+        immediate_string_offset="TEST_STRING_I32_VALUE",
     )
 
     assert ".address_diagnostic_index = 5" in fields
     assert ".root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ALLOCA" in fields
-    assert (".address_base_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_VIEW") in fields
-    assert (".address_coordinate_type = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_INDEX") in fields
-    assert ".address_coordinate_unit_byte_count = 4" in fields
-    assert ".address_coordinate_minimum = INT64_C(0)" in fields
-    assert ".address_coordinate_maximum = INT64_C(2147483647)" in fields
-    assert ".address_const_coordinate_descriptor_ref = 0" in fields
-    assert (".address_const_coordinate_immediate_string_offset = TEST_STRING_I32_VALUE") in fields
-    assert ".address_add_coordinate_descriptor_ref = 1" in fields
-    assert ".address_shl_coordinate_descriptor_ref = 65535" in fields
-    assert ".address_index_to_coordinate_input_descriptor_ref = 65535" in fields
-    assert ".address_index_to_coordinate_descriptor_ref = 65535" in fields
-    assert ".address_descriptor_ref = 1" in fields
+    assert ".address_materializer_ordinal = 1" in fields
+    assert (".base_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_VIEW") in materializer_fields
+    assert (".coordinate_type = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_INDEX") in materializer_fields
+    assert ".coordinate_unit_byte_count = 4" in materializer_fields
+    assert ".coordinate_minimum = INT64_C(0)" in materializer_fields
+    assert ".coordinate_maximum = INT64_C(2147483647)" in materializer_fields
+    assert ".const_coordinate_descriptor_ref = 0" in materializer_fields
+    assert (".const_coordinate_immediate_string_offset = TEST_STRING_I32_VALUE") in materializer_fields
+    assert ".add_coordinate_descriptor_ref = 1" in materializer_fields
+    assert ".shl_coordinate_descriptor_ref = 65535" in materializer_fields
+    assert ".index_to_coordinate_input_descriptor_ref = 65535" in materializer_fields
+    assert ".index_to_coordinate_descriptor_ref = 65535" in materializer_fields
+    assert ".address_descriptor_ref = 1" in materializer_fields
 
     table = _compiled_lower_rule_set(source_memories=(row,))
     keys = descriptor_ref_keys(table, _c_shape_contract())
     assert set(keys) == set(descriptor_refs)
+
+
+def test_source_memory_rows_split_byte_offset_materializer() -> None:
+    materializer = SourceMemoryByteOffsetMaterializer(
+        const_i64=TEST_LOW_CONST_I32_DESCRIPTOR,
+        add_i64=TEST_LOW_ADD_I32_DESCRIPTOR,
+        mul_i64=TEST_LOW_MUL_I32_DESCRIPTOR,
+        shl_i64=None,
+        const_i64_immediate="i32_value",
+    )
+    descriptor_refs = {
+        TEST_LOW_CONST_I32_DESCRIPTOR.key: 0,
+        TEST_LOW_ADD_I32_DESCRIPTOR.key: 1,
+        TEST_LOW_MUL_I32_DESCRIPTOR.key: 2,
+    }
+
+    materializer_fields = source_memory_byte_offset_materializer_row(
+        descriptor_refs,
+        materializer,
+        immediate_string_offset="TEST_STRING_I32_VALUE",
+    )
+
+    assert ".const_i64_immediate_string_offset = TEST_STRING_I32_VALUE" in materializer_fields
+    assert ".const_i64_descriptor_ref = 0" in materializer_fields
+    assert ".add_i64_descriptor_ref = 1" in materializer_fields
+    assert ".mul_i64_descriptor_ref = 2" in materializer_fields
+    assert ".shl_i64_descriptor_ref = 65535" in materializer_fields

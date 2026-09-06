@@ -262,29 +262,22 @@ static bool loom_low_lower_emit_materializes_source_memory_address(
   return false;
 }
 
-enum loom_low_lower_source_memory_storage_demand_flag_bits_e {
-  LOOM_LOW_LOWER_SOURCE_MEMORY_STORAGE_DEMAND_FLAG_COMPLETE_ADDRESS = 1u << 0,
-};
-typedef uint32_t loom_low_lower_source_memory_storage_demand_flags_t;
-
 static void loom_low_lower_mark_source_memory_access_storage_demands(
     loom_low_lower_context_t* context,
-    const loom_low_lower_source_memory_t* source_memory,
-    const loom_low_source_memory_access_plan_t* access,
-    loom_low_lower_source_memory_storage_demand_flags_t flags) {
+    const loom_low_lower_source_memory_address_materializer_t*
+        address_materializer,
+    const loom_low_source_memory_access_plan_t* access) {
   uint8_t first_canonical_term = 0;
-  if (iree_any_bit_set(
-          flags,
-          LOOM_LOW_LOWER_SOURCE_MEMORY_STORAGE_DEMAND_FLAG_COMPLETE_ADDRESS)) {
+  if (address_materializer != NULL) {
     const loom_value_id_t base_value_id =
-        source_memory->address_base_kind ==
+        address_materializer->base_kind ==
                 LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_VIEW
             ? loom_low_source_memory_access_base_view_value_id(access)
             : access->root_value_id;
     IREE_ASSERT_NE(base_value_id, LOOM_VALUE_ID_INVALID);
     loom_low_lower_mark_value_storage_required(context, base_value_id);
-    if (source_memory->address_coordinate_unit_byte_count == 1 &&
-        source_memory->address_coordinate_type ==
+    if (address_materializer->coordinate_unit_byte_count == 1 &&
+        address_materializer->coordinate_type ==
             LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_OFFSET &&
         access->dynamic_view_base_term_count != 0 &&
         access->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID) {
@@ -353,14 +346,17 @@ static void loom_low_lower_mark_rule_storage_demands(
       continue;
     }
     IREE_ASSERT(selected_plan->source_memory_access != NULL);
-    const loom_low_lower_source_memory_storage_demand_flags_t flags =
-        loom_low_lower_emit_materializes_source_memory_address(rule_set, emit)
-            ? LOOM_LOW_LOWER_SOURCE_MEMORY_STORAGE_DEMAND_FLAG_COMPLETE_ADDRESS
-            : 0;
     const loom_low_lower_source_memory_t* source_memory =
         &rule_set->source_memories[emit->source_memory_ordinal - 1];
+    const loom_low_lower_source_memory_address_materializer_t*
+        address_materializer =
+            loom_low_lower_emit_materializes_source_memory_address(rule_set,
+                                                                   emit)
+                ? loom_low_lower_rule_set_source_memory_address_materializer(
+                      rule_set, source_memory)
+                : NULL;
     loom_low_lower_mark_source_memory_access_storage_demands(
-        context, source_memory, selected_plan->source_memory_access, flags);
+        context, address_materializer, selected_plan->source_memory_access);
   }
   if (iree_all_bits_set(rule->flags,
                         LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS)) {

@@ -179,11 +179,12 @@ static bool loom_low_lower_rule_source_memory_dynamic_offset_matches(
 
 static bool loom_low_lower_rule_source_memory_address_input_matches(
     const loom_low_lower_rule_match_context_t* match_context,
-    const loom_low_lower_source_memory_t* source_memory,
+    const loom_low_lower_source_memory_address_materializer_t*
+        address_materializer,
     loom_value_id_t source_value_id) {
   const loom_type_t source_type =
       loom_module_value_type(match_context->module, source_value_id);
-  if (source_memory->address_coordinate_type ==
+  if (address_materializer->coordinate_type ==
       LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_INDEX) {
     if (!loom_type_equal(source_type,
                          loom_type_scalar(LOOM_SCALAR_TYPE_INDEX))) {
@@ -192,10 +193,10 @@ static bool loom_low_lower_rule_source_memory_address_input_matches(
     const loom_value_facts_t facts = loom_value_fact_table_lookup(
         match_context->fact_table, source_value_id);
     return !loom_value_facts_is_float(facts) &&
-           facts.range_lo >= source_memory->address_coordinate_minimum &&
-           facts.range_hi <= source_memory->address_coordinate_maximum;
+           facts.range_lo >= address_materializer->coordinate_minimum &&
+           facts.range_hi <= address_materializer->coordinate_maximum;
   }
-  IREE_ASSERT_EQ(source_memory->address_coordinate_type,
+  IREE_ASSERT_EQ(address_materializer->coordinate_type,
                  LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_OFFSET);
   if (loom_type_equal(source_type, loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET))) {
     return true;
@@ -245,15 +246,19 @@ static bool loom_low_lower_rule_source_memory_address_matches(
   if (out_diagnostic_index != NULL) {
     *out_diagnostic_index = source_memory->address_diagnostic_index;
   }
+  const loom_low_lower_source_memory_address_materializer_t*
+      address_materializer =
+          loom_low_lower_rule_set_source_memory_address_materializer(
+              rule_set, source_memory);
 
   const int64_t coordinate_unit_byte_count =
-      source_memory->address_coordinate_unit_byte_count;
+      address_materializer->coordinate_unit_byte_count;
   int64_t minimum_byte_offset = 0;
   int64_t maximum_byte_offset = 0;
   if (coordinate_unit_byte_count <= 0 ||
-      !iree_checked_mul_i64(source_memory->address_coordinate_minimum,
+      !iree_checked_mul_i64(address_materializer->coordinate_minimum,
                             coordinate_unit_byte_count, &minimum_byte_offset) ||
-      !iree_checked_mul_i64(source_memory->address_coordinate_maximum,
+      !iree_checked_mul_i64(address_materializer->coordinate_maximum,
                             coordinate_unit_byte_count, &maximum_byte_offset) ||
       access->static_byte_offset % coordinate_unit_byte_count != 0 ||
       access->static_byte_offset < minimum_byte_offset ||
@@ -269,7 +274,7 @@ static bool loom_low_lower_rule_source_memory_address_matches(
     return false;
   }
 
-  if (source_memory->address_base_kind ==
+  if (address_materializer->base_kind ==
           LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_VIEW &&
       loom_low_source_memory_access_base_view_value_id(access) ==
           LOOM_VALUE_ID_INVALID) {
@@ -278,7 +283,7 @@ static bool loom_low_lower_rule_source_memory_address_matches(
 
   uint8_t first_canonical_term = 0;
   if (coordinate_unit_byte_count == 1 &&
-      source_memory->address_coordinate_type ==
+      address_materializer->coordinate_type ==
           LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_OFFSET &&
       access->dynamic_view_base_term_count != 0 &&
       access->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID) {
@@ -298,13 +303,13 @@ static bool loom_low_lower_rule_source_memory_address_matches(
         !loom_low_lower_rule_source_memory_address_facts_fit_byte_range(
             term->byte_facts, minimum_byte_offset, maximum_byte_offset) ||
         !loom_low_lower_rule_source_memory_address_input_matches(
-            match_context, source_memory, term->index)) {
+            match_context, address_materializer, term->index)) {
       return false;
     }
     for (uint8_t stride_ordinal = 0; stride_ordinal < term->stride_value_count;
          ++stride_ordinal) {
       if (!loom_low_lower_rule_source_memory_address_input_matches(
-              match_context, source_memory,
+              match_context, address_materializer,
               term->stride_values[stride_ordinal])) {
         return false;
       }
