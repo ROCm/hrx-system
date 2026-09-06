@@ -1375,6 +1375,7 @@ def _validate_rematerializable_result(
     forbidden_flags = {
         DescriptorFlag.SIDE_EFFECTING,
         DescriptorFlag.TERMINATOR,
+        DescriptorFlag.UNIQUE_IDENTITY,
     }.intersection(descriptor.flags)
     if forbidden_flags:
         names = ", ".join(sorted(flag.name.lower() for flag in forbidden_flags))

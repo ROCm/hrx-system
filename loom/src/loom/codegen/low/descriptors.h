@@ -458,6 +458,9 @@ typedef uint16_t loom_low_descriptor_flags_t;
 #define LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS ((uint16_t)1u << 6)
 // Descriptor may encode one allocator-planned, bit-preserving register move.
 #define LOOM_LOW_DESCRIPTOR_FLAG_ALLOCATION_MOVE ((uint16_t)1u << 7)
+// Each execution produces a result with a distinct identity. Prevents CSE but
+// permits dead-result elimination.
+#define LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY ((uint16_t)1u << 8)
 
 // Target-neutral semantic classes attached to generated low descriptors.
 // Multiple classes may be present when a packet contributes to several

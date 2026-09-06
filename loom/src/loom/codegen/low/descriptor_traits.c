@@ -68,6 +68,10 @@ loom_trait_flags_t loom_low_descriptor_effective_traits(
                        LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR)) {
     traits |= LOOM_TRAIT_TERMINATOR;
   }
+  if (iree_any_bit_set(descriptor->flags,
+                       LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY)) {
+    traits |= LOOM_TRAIT_UNIQUE_IDENTITY;
+  }
   if (loom_low_descriptor_defines_implicit_state_result(descriptor_set,
                                                         descriptor)) {
     // Implicit state results define target-owned architectural state outside
@@ -80,7 +84,8 @@ loom_trait_flags_t loom_low_descriptor_effective_traits(
 
   if (!iree_any_bit_set(
           traits, LOOM_TRAIT_READS_MEMORY | LOOM_TRAIT_WRITES_MEMORY |
-                      LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_MEMORY_FENCE)) {
+                      LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_MEMORY_FENCE |
+                      LOOM_TRAIT_UNIQUE_IDENTITY)) {
     if (descriptor->effect_count == 0 &&
         iree_any_bit_set(descriptor->flags,
                          LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING)) {

@@ -2212,7 +2212,8 @@ static iree_status_t loom_low_verify_descriptor(
           LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO | LOOM_LOW_DESCRIPTOR_FLAG_BARRIER |
           LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER |
           LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS |
-          LOOM_LOW_DESCRIPTOR_FLAG_ALLOCATION_MOVE,
+          LOOM_LOW_DESCRIPTOR_FLAG_ALLOCATION_MOVE |
+          LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY,
       "descriptor", descriptor_index));
   iree_string_view_t descriptor_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(

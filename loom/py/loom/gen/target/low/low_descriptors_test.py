@@ -109,7 +109,13 @@ def _explicit_physical_descriptor_set():
         if register_class.name == "test.phys"
         else register_class
         for register_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes
-        if register_class.name not in ("test.explicit32", "test.packed.narrow", "test.packed.wide")
+        if register_class.name
+        not in (
+            "test.explicit32",
+            "test.spillable.explicit32",
+            "test.packed.narrow",
+            "test.packed.wide",
+        )
     )
     return replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -902,6 +908,26 @@ def test_compiler_emits_allocation_move_descriptor_flag() -> None:
     assert "LOOM_LOW_DESCRIPTOR_FLAG_ALLOCATION_MOVE" in generated.source
 
 
+def test_compiler_emits_unique_identity_descriptor_flag() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        flags=(
+            *TEST_LOW_ADD_I32_DESCRIPTOR.flags,
+            DescriptorFlag.UNIQUE_IDENTITY,
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert DescriptorFlag.UNIQUE_IDENTITY in compiled.descriptors[0].flags
+    assert "LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY" in generated.source
+
+
 def test_compiler_rejects_multiunit_allocation_move() -> None:
     descriptor = _allocation_move_descriptor()
     descriptor = replace(
@@ -1246,6 +1272,26 @@ def test_compiler_rejects_effectful_rematerializable_result() -> None:
     with pytest.raises(
         ValueError,
         match=re.escape("descriptor 'test.const.i32' rematerializable result 0 requires an effect-free descriptor"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_rematerializing_unique_identity() -> None:
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        flags=(
+            *TEST_LOW_CONST_I32_DESCRIPTOR.flags,
+            DescriptorFlag.UNIQUE_IDENTITY,
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.const.i32' rematerializable result 0 has incompatible descriptor flags: unique_identity"),
     ):
         compiler.compile_descriptor_set(descriptor_set)
 

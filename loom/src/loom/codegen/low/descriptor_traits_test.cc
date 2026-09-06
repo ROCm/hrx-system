@@ -96,6 +96,20 @@ TEST(LowDescriptorTraitsTest, SideEffectingTerminatorFlagsCompose) {
   EXPECT_FALSE(iree_any_bit_set(traits, LOOM_TRAIT_PURE));
 }
 
+TEST(LowDescriptorTraitsTest, UniqueIdentityIsNotPureAndCannotBeCse) {
+  const loom_low_descriptor_set_t descriptor_set = {};
+  loom_low_descriptor_t descriptor = {};
+  descriptor.flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE |
+                     LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY;
+
+  const loom_trait_flags_t traits =
+      loom_low_descriptor_effective_traits(&descriptor_set, &descriptor);
+
+  EXPECT_TRUE(iree_all_bits_set(traits, LOOM_TRAIT_UNIQUE_IDENTITY));
+  EXPECT_FALSE(iree_any_bit_set(traits, LOOM_TRAIT_PURE));
+  EXPECT_FALSE(loom_traits_has_side_effects(traits));
+}
+
 TEST(LowDescriptorTraitsTest, ImplicitStateResultIsNonDeterministic) {
   loom_low_operand_t operand = {};
   operand.role = LOOM_LOW_OPERAND_ROLE_RESULT;
