@@ -597,10 +597,11 @@ static iree_status_t loom_aie2p_array_plan_check_resident_program(
         loom_low_diagnostic_symbol_name(request->module, resident->entry);
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         &request->result->actual_output,
-        "resident worker=%" PRIu32 " entry=@%.*s tile=(%u,%u) phases=%" PRIu32
-        " code-bytes=%" PRIu64 " resources=%" PRIhsz " fixups=%" PRIhsz "\n",
+        "resident worker=%" PRIu32
+        " entry=@%.*s tile=(%u,%u) code-bytes=%" PRIu64 " resources=%" PRIhsz
+        " fixups=%" PRIhsz "\n",
         resident->worker_index, (int)entry_name.size, entry_name.data,
-        coordinate.column, coordinate.row, resident->phase_count,
+        coordinate.column, coordinate.row,
         contribution.realization.code.byte_length,
         contribution.realization.resource_import_count,
         contribution.object.fixup_count));

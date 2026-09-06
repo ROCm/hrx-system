@@ -601,6 +601,25 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
     assert scalar_move.operands[0].ready_stage == 1
     assert scalar_move.operands[1].read_stage == 1
 
+    address_move = descriptors["amd.xdna.aie2p.move.local-address"]
+    assert address_move.semantic_tag == "register.move.local-address"
+    assert address_move.asm_forms[0].mnemonic == "movs"
+    assert all(
+        operand.reg_alts[0].reg_class == "aie2p.ep" for operand in address_move.operands
+    )
+    assert DescriptorFlag.ALLOCATION_MOVE in address_move.flags
+
+    address_to_scalar = descriptors["amd.xdna.aie2p.move.local-address-to-scalar"]
+    scalar_to_address = descriptors["amd.xdna.aie2p.move.scalar-to-local-address"]
+    assert [
+        operand.reg_alts[0].reg_class for operand in address_to_scalar.operands
+    ] == ["aie2p.er", "aie2p.ep"]
+    assert [
+        operand.reg_alts[0].reg_class for operand in scalar_to_address.operands
+    ] == ["aie2p.ep", "aie2p.er"]
+    assert address_to_scalar.asm_forms[0].mnemonic == "mov.address-to-scalar"
+    assert scalar_to_address.asm_forms[0].mnemonic == "mov.scalar-to-address"
+
     predicate_compare = descriptors["amd.xdna.aie2p.cmp.eqz.i8x64"]
     assert [operand.field_name for operand in predicate_compare.operands] == [
         "cmp",

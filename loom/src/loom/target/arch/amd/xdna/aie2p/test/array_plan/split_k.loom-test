@@ -259,238 +259,177 @@ control-relocation index=4 record=8 word=1 payload-offset=300 binding=2 addend=0
 control-relocation index=5 record=10 word=1 payload-offset=364 binding=3 addend=0 width=8 alignment=4
 
 resident-program workers=3
-resident worker=0 entry=@split_k_array$worker$0 tile=(0,2) phases=2 code-bytes=382 resources=0 fixups=1
-resident worker=1 entry=@split_k_array$worker$1 tile=(1,4) phases=2 code-bytes=382 resources=0 fixups=1
-resident worker=2 entry=@split_k_array$worker$2 tile=(0,3) phases=2 code-bytes=414 resources=0 fixups=1
+resident worker=0 entry=@split_k_array$worker$0 tile=(0,2) code-bytes=254 resources=0 fixups=1
+resident worker=1 entry=@split_k_array$worker$1 tile=(1,4) code-bytes=254 resources=0 fixups=1
+resident worker=2 entry=@split_k_array$worker$2 tile=(0,3) code-bytes=290 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$worker$0() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
-  low.br ^_bb1
-^_bb1:
-  %lhs_view$154 = mov.local-address 458752
-  %rhs_view$155 = mov.local-address 491520
-  %partial_view$156 = mov.local-address 458816
+  %167 = mov.local-address 458752
+  %168 = mov.local-address 491520
+  %169 = mov.local-address 458816
+  low.br ^_bb1(%167: reg<aie2p.ep>, %168: reg<aie2p.ep>, %169: reg<aie2p.ep>)
+^_bb1(%lhs_view: reg<aie2p.ep>, %rhs_view: reg<aie2p.ep>, %partial_view: reg<aie2p.ep>):
   acq %acquire_delta, 49
   acq %acquire_delta, 51
   acq %acquire_delta, 52
-  %lhs_fragment$136 = vlda.128.bf16x8 %lhs_view$154, 0
-  %rhs_fragment$137 = vlda.128.bf16x8 %rhs_view$155, 0
-  %accumulator_fragment$138 = acc.clear.f32x64
-  %139 = vbroadcast.bf16x8.to.bf16x32 %lhs_fragment$136, 0
+  low.br ^_bb2
+^_bb2:
+  %lhs_fragment = vlda.128.bf16x8 %lhs_view, 0
+  %rhs_fragment = vlda.128.bf16x8 %rhs_view, 0
+  %accumulator_fragment = acc.clear.f32x64
+  %139 = vbroadcast.bf16x8.to.bf16x32 %lhs_fragment, 0
   %140 = mova.i32 52
   %141 = vshuffle %139, %139, %140
   %142 = mova.i32 53
   %143 = vshuffle %139, %139, %142
   %144 = concat(%141, %143) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
-  %145 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment$137, 0
+  %145 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment, 0
   %146 = vmov.512 %145
   %147 = concat(%145, %146) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   %148 = mova.i32 60
-  %product$149 = mma.bf16bf16.m8n8k1 %accumulator_fragment$138, %144, %147, %148
-  %150 = slice %product$149[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %150, %partial_view$156, 0
-  %151 = slice %product$149[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %151, %partial_view$156, 64
-  %152 = slice %product$149[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %152, %partial_view$156, 128
-  %153 = slice %product$149[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %153, %partial_view$156, 192
+  %product = mma.bf16bf16.m8n8k1 %accumulator_fragment, %144, %147, %148
+  %150 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %150, %partial_view, 0
+  %151 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %151, %partial_view, 64
+  %152 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %152, %partial_view, 128
+  %153 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %153, %partial_view, 192
+  low.br ^_bb3
+^_bb3:
   rel %release_delta, 53
   rel %release_delta, 48
   rel %release_delta, 50
-  low.br ^_bb2
-^_bb2:
-  %lhs_view$178 = mov.local-address 475136
-  %rhs_view$179 = mov.local-address 507904
-  %partial_view$180 = mov.local-address 475200
-  acq %acquire_delta, 49
-  acq %acquire_delta, 51
-  acq %acquire_delta, 52
-  %lhs_fragment$160 = vlda.128.bf16x8 %lhs_view$178, 0
-  %rhs_fragment$161 = vlda.128.bf16x8 %rhs_view$179, 0
-  %accumulator_fragment$162 = acc.clear.f32x64
-  %163 = vbroadcast.bf16x8.to.bf16x32 %lhs_fragment$160, 0
-  %164 = mova.i32 52
-  %165 = vshuffle %163, %163, %164
-  %166 = mova.i32 53
-  %167 = vshuffle %163, %163, %166
-  %168 = concat(%165, %167) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
-  %169 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment$161, 0
-  %170 = vmov.512 %169
-  %171 = concat(%169, %170) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
-  %172 = mova.i32 60
-  %product$173 = mma.bf16bf16.m8n8k1 %accumulator_fragment$162, %168, %171, %172
-  %174 = slice %product$173[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %174, %partial_view$180, 0
-  %175 = slice %product$173[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %175, %partial_view$180, 64
-  %176 = slice %product$173[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %176, %partial_view$180, 128
-  %177 = slice %product$173[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %177, %partial_view$180, 192
-  rel %release_delta, 53
-  rel %release_delta, 48
-  rel %release_delta, 50
-  low.br ^_bb1
+  %157 = mov.address-to-scalar %lhs_view
+  %158 = mov.i32 16384
+  %159 = xor %157, %158
+  %160 = mov.scalar-to-address %159
+  %161 = mov.address-to-scalar %rhs_view
+  %162 = xor %161, %158
+  %163 = mov.scalar-to-address %162
+  %164 = mov.address-to-scalar %partial_view
+  %165 = xor %164, %158
+  %166 = mov.scalar-to-address %165
+  low.br ^_bb1(%160: reg<aie2p.ep>, %163: reg<aie2p.ep>, %166: reg<aie2p.ep>)
 }
 
 low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$worker$1() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
-  low.br ^_bb1
-^_bb1:
-  %lhs_view$204 = mov.local-address 458752
-  %rhs_view$205 = mov.local-address 491520
-  %partial_view$206 = mov.local-address 458816
+  %206 = mov.local-address 458752
+  %207 = mov.local-address 491520
+  %208 = mov.local-address 458816
+  low.br ^_bb1(%206: reg<aie2p.ep>, %207: reg<aie2p.ep>, %208: reg<aie2p.ep>)
+^_bb1(%lhs_view: reg<aie2p.ep>, %rhs_view: reg<aie2p.ep>, %partial_view: reg<aie2p.ep>):
   acq %acquire_delta, 49
   acq %acquire_delta, 51
   acq %acquire_delta, 52
-  %lhs_fragment$186 = vlda.128.bf16x8 %lhs_view$204, 0
-  %rhs_fragment$187 = vlda.128.bf16x8 %rhs_view$205, 0
-  %accumulator_fragment$188 = acc.clear.f32x64
-  %189 = vbroadcast.bf16x8.to.bf16x32 %lhs_fragment$186, 0
-  %190 = mova.i32 52
-  %191 = vshuffle %189, %189, %190
-  %192 = mova.i32 53
-  %193 = vshuffle %189, %189, %192
-  %194 = concat(%191, %193) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
-  %195 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment$187, 0
-  %196 = vmov.512 %195
-  %197 = concat(%195, %196) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
-  %198 = mova.i32 60
-  %product$199 = mma.bf16bf16.m8n8k1 %accumulator_fragment$188, %194, %197, %198
-  %200 = slice %product$199[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %200, %partial_view$206, 0
-  %201 = slice %product$199[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %201, %partial_view$206, 64
-  %202 = slice %product$199[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %202, %partial_view$206, 128
-  %203 = slice %product$199[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %203, %partial_view$206, 192
-  rel %release_delta, 53
-  rel %release_delta, 48
-  rel %release_delta, 50
   low.br ^_bb2
 ^_bb2:
-  %lhs_view$228 = mov.local-address 475136
-  %rhs_view$229 = mov.local-address 507904
-  %partial_view$230 = mov.local-address 475200
-  acq %acquire_delta, 49
-  acq %acquire_delta, 51
-  acq %acquire_delta, 52
-  %lhs_fragment$210 = vlda.128.bf16x8 %lhs_view$228, 0
-  %rhs_fragment$211 = vlda.128.bf16x8 %rhs_view$229, 0
-  %accumulator_fragment$212 = acc.clear.f32x64
-  %213 = vbroadcast.bf16x8.to.bf16x32 %lhs_fragment$210, 0
-  %214 = mova.i32 52
-  %215 = vshuffle %213, %213, %214
-  %216 = mova.i32 53
-  %217 = vshuffle %213, %213, %216
-  %218 = concat(%215, %217) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
-  %219 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment$211, 0
-  %220 = vmov.512 %219
-  %221 = concat(%219, %220) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
-  %222 = mova.i32 60
-  %product$223 = mma.bf16bf16.m8n8k1 %accumulator_fragment$212, %218, %221, %222
-  %224 = slice %product$223[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %224, %partial_view$230, 0
-  %225 = slice %product$223[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %225, %partial_view$230, 64
-  %226 = slice %product$223[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %226, %partial_view$230, 128
-  %227 = slice %product$223[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %227, %partial_view$230, 192
+  %lhs_fragment = vlda.128.bf16x8 %lhs_view, 0
+  %rhs_fragment = vlda.128.bf16x8 %rhs_view, 0
+  %accumulator_fragment = acc.clear.f32x64
+  %178 = vbroadcast.bf16x8.to.bf16x32 %lhs_fragment, 0
+  %179 = mova.i32 52
+  %180 = vshuffle %178, %178, %179
+  %181 = mova.i32 53
+  %182 = vshuffle %178, %178, %181
+  %183 = concat(%180, %182) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %184 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment, 0
+  %185 = vmov.512 %184
+  %186 = concat(%184, %185) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %187 = mova.i32 60
+  %product = mma.bf16bf16.m8n8k1 %accumulator_fragment, %183, %186, %187
+  %189 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %189, %partial_view, 0
+  %190 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %190, %partial_view, 64
+  %191 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %191, %partial_view, 128
+  %192 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %192, %partial_view, 192
+  low.br ^_bb3
+^_bb3:
   rel %release_delta, 53
   rel %release_delta, 48
   rel %release_delta, 50
-  low.br ^_bb1
+  %196 = mov.address-to-scalar %lhs_view
+  %197 = mov.i32 16384
+  %198 = xor %196, %197
+  %199 = mov.scalar-to-address %198
+  %200 = mov.address-to-scalar %rhs_view
+  %201 = xor %200, %197
+  %202 = mov.scalar-to-address %201
+  %203 = mov.address-to-scalar %partial_view
+  %204 = xor %203, %197
+  %205 = mov.scalar-to-address %204
+  low.br ^_bb1(%199: reg<aie2p.ep>, %202: reg<aie2p.ep>, %205: reg<aie2p.ep>)
 }
 
 low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$worker$2() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
-  low.br ^_bb1
-^_bb1:
-  %partial0_view$259 = mov.local-address 262208
-  %partial1_view$260 = mov.local-address 459008
-  %bias_view$261 = mov.local-address 458752
-  %output_view$262 = mov.local-address 491520
+  %254 = mov.local-address 262208
+  %255 = mov.local-address 459008
+  %256 = mov.local-address 458752
+  %257 = mov.local-address 491520
+  low.br ^_bb1(%254: reg<aie2p.ep>, %255: reg<aie2p.ep>, %256: reg<aie2p.ep>, %257: reg<aie2p.ep>)
+^_bb1(%partial0_view: reg<aie2p.ep>, %partial1_view: reg<aie2p.ep>, %bias_view: reg<aie2p.ep>, %output_view: reg<aie2p.ep>):
   acq %acquire_delta, 49
   acq %acquire_delta, 5
   acq %acquire_delta, 53
   acq %acquire_delta, 50
-  %237 = vlda.acc.f32x16 %partial0_view$259, 0
-  %238 = vlda.acc.f32x16 %partial0_view$259, 64
-  %239 = vlda.acc.f32x16 %partial0_view$259, 128
-  %240 = vlda.acc.f32x16 %partial0_view$259, 192
-  %partial0_value$241 = concat(%237, %238, %239, %240) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %242 = vlda.acc.f32x16 %partial1_view$260, 0
-  %243 = vlda.acc.f32x16 %partial1_view$260, 64
-  %244 = vlda.acc.f32x16 %partial1_view$260, 128
-  %245 = vlda.acc.f32x16 %partial1_view$260, 192
-  %partial1_value$246 = concat(%242, %243, %244, %245) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %247 = vlda.acc.f32x16 %bias_view$261, 0
-  %248 = vlda.acc.f32x16 %bias_view$261, 64
-  %249 = vlda.acc.f32x16 %bias_view$261, 128
-  %250 = vlda.acc.f32x16 %bias_view$261, 192
-  %bias_value$251 = concat(%247, %248, %249, %250) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %252 = mova.i32 60
-  %sum$253 = vadd.f32x64 %partial0_value$241, %partial1_value$246, %252
-  %biased$254 = vadd.f32x64 %sum$253, %bias_value$251, %252
-  %255 = slice %biased$254[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %255, %output_view$262, 0
-  %256 = slice %biased$254[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %256, %output_view$262, 64
-  %257 = slice %biased$254[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %257, %output_view$262, 128
-  %258 = slice %biased$254[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %258, %output_view$262, 192
-  rel %release_delta, 51
-  rel %release_delta, 48
-  rel %release_delta, 4
-  rel %release_delta, 52
   low.br ^_bb2
 ^_bb2:
-  %partial0_view$289 = mov.local-address 278592
-  %partial1_view$290 = mov.local-address 475392
-  %bias_view$291 = mov.local-address 475136
-  %output_view$292 = mov.local-address 507904
-  acq %acquire_delta, 49
-  acq %acquire_delta, 5
-  acq %acquire_delta, 53
-  acq %acquire_delta, 50
-  %267 = vlda.acc.f32x16 %partial0_view$289, 0
-  %268 = vlda.acc.f32x16 %partial0_view$289, 64
-  %269 = vlda.acc.f32x16 %partial0_view$289, 128
-  %270 = vlda.acc.f32x16 %partial0_view$289, 192
-  %partial0_value$271 = concat(%267, %268, %269, %270) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %272 = vlda.acc.f32x16 %partial1_view$290, 0
-  %273 = vlda.acc.f32x16 %partial1_view$290, 64
-  %274 = vlda.acc.f32x16 %partial1_view$290, 128
-  %275 = vlda.acc.f32x16 %partial1_view$290, 192
-  %partial1_value$276 = concat(%272, %273, %274, %275) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %277 = vlda.acc.f32x16 %bias_view$291, 0
-  %278 = vlda.acc.f32x16 %bias_view$291, 64
-  %279 = vlda.acc.f32x16 %bias_view$291, 128
-  %280 = vlda.acc.f32x16 %bias_view$291, 192
-  %bias_value$281 = concat(%277, %278, %279, %280) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %282 = mova.i32 60
-  %sum$283 = vadd.f32x64 %partial0_value$271, %partial1_value$276, %282
-  %biased$284 = vadd.f32x64 %sum$283, %bias_value$281, %282
-  %285 = slice %biased$284[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %285, %output_view$292, 0
-  %286 = slice %biased$284[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %286, %output_view$292, 64
-  %287 = slice %biased$284[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %287, %output_view$292, 128
-  %288 = slice %biased$284[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %288, %output_view$292, 192
+  %215 = vlda.acc.f32x16 %partial0_view, 0
+  %216 = vlda.acc.f32x16 %partial0_view, 64
+  %217 = vlda.acc.f32x16 %partial0_view, 128
+  %218 = vlda.acc.f32x16 %partial0_view, 192
+  %partial0_value = concat(%215, %216, %217, %218) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %220 = vlda.acc.f32x16 %partial1_view, 0
+  %221 = vlda.acc.f32x16 %partial1_view, 64
+  %222 = vlda.acc.f32x16 %partial1_view, 128
+  %223 = vlda.acc.f32x16 %partial1_view, 192
+  %partial1_value = concat(%220, %221, %222, %223) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %225 = vlda.acc.f32x16 %bias_view, 0
+  %226 = vlda.acc.f32x16 %bias_view, 64
+  %227 = vlda.acc.f32x16 %bias_view, 128
+  %228 = vlda.acc.f32x16 %bias_view, 192
+  %bias_value = concat(%225, %226, %227, %228) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %230 = mova.i32 60
+  %sum = vadd.f32x64 %partial0_value, %partial1_value, %230
+  %biased = vadd.f32x64 %sum, %bias_value, %230
+  %233 = slice %biased[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %233, %output_view, 0
+  %234 = slice %biased[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %234, %output_view, 64
+  %235 = slice %biased[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %235, %output_view, 128
+  %236 = slice %biased[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc.f32x16 %236, %output_view, 192
+  low.br ^_bb3
+^_bb3:
   rel %release_delta, 51
   rel %release_delta, 48
   rel %release_delta, 4
   rel %release_delta, 52
-  low.br ^_bb1
+  %241 = mov.address-to-scalar %partial0_view
+  %242 = mov.i32 16384
+  %243 = xor %241, %242
+  %244 = mov.scalar-to-address %243
+  %245 = mov.address-to-scalar %partial1_view
+  %246 = xor %245, %242
+  %247 = mov.scalar-to-address %246
+  %248 = mov.address-to-scalar %bias_view
+  %249 = xor %248, %242
+  %250 = mov.scalar-to-address %249
+  %251 = mov.address-to-scalar %output_view
+  %252 = xor %251, %242
+  %253 = mov.scalar-to-address %252
+  low.br ^_bb1(%244: reg<aie2p.ep>, %247: reg<aie2p.ep>, %250: reg<aie2p.ep>, %253: reg<aie2p.ep>)
 }
 
 // ============================================================================
@@ -610,41 +549,187 @@ control-relocation index=0 record=0 word=1 payload-offset=44 binding=0 addend=0 
 control-relocation index=1 record=2 word=1 payload-offset=108 binding=0 addend=4 width=8 alignment=4
 
 resident-program workers=2
-resident worker=0 entry=@multicast_array$worker$0 tile=(0,2) phases=1 code-bytes=108 resources=0 fixups=1
-resident worker=1 entry=@multicast_array$worker$1 tile=(1,2) phases=1 code-bytes=108 resources=0 fixups=1
+resident worker=0 entry=@multicast_array$worker$0 tile=(0,2) code-bytes=110 resources=0 fixups=1
+resident worker=1 entry=@multicast_array$worker$1 tile=(1,2) code-bytes=110 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core>(@multicast_core_target) @multicast_array$worker$0() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
-  low.br ^_bb1
-^_bb1:
-  %input0 = mov.local-address 458752
-  %input1 = mov.local-address 475136
+  %35 = mov.local-address 458752
+  %36 = mov.local-address 475136
+  low.br ^_bb1(%35: reg<aie2p.ep>, %36: reg<aie2p.ep>)
+^_bb1(%input0: reg<aie2p.ep>, %input1: reg<aie2p.ep>):
   acq %acquire_delta, 49
   acq %acquire_delta, 51
+  low.br ^_bb2
+^_bb2:
   %lhs = lda.u8 %input0, 0
   %rhs = lda.u8 %input1, 0
   %sum = add.rr %lhs, %rhs
   st.s8 %sum, %input0, 0
+  low.br ^_bb3
+^_bb3:
   rel %release_delta, 48
   rel %release_delta, 50
-  low.br ^_bb1
+  low.br ^_bb1(%input0: reg<aie2p.ep>, %input1: reg<aie2p.ep>)
 }
 
 low.func.def retain target<amd.xdna.aie2p.core>(@multicast_core_target) @multicast_array$worker$1() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
-  low.br ^_bb1
-^_bb1:
-  %input0 = mov.local-address 458752
-  %input1 = mov.local-address 475136
+  %46 = mov.local-address 458752
+  %47 = mov.local-address 475136
+  low.br ^_bb1(%46: reg<aie2p.ep>, %47: reg<aie2p.ep>)
+^_bb1(%input0: reg<aie2p.ep>, %input1: reg<aie2p.ep>):
   acq %acquire_delta, 49
   acq %acquire_delta, 51
+  low.br ^_bb2
+^_bb2:
   %lhs = lda.u8 %input0, 0
   %rhs = lda.u8 %input1, 0
   %sum = add.rr %lhs, %rhs
   st.s8 %sum, %input0, 0
+  low.br ^_bb3
+^_bb3:
   rel %release_delta, 48
   rel %release_delta, 50
-  low.br ^_bb1
+  low.br ^_bb1(%input0: reg<aie2p.ep>, %input1: reg<aie2p.ep>)
+}
+
+// ============================================================================
+// RUN: emit aie2p-array-plan @coprime_ring_array
+
+aie2p.target<array> @coprime_array_target
+
+aie2p.target<core> @coprime_core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@coprime_array_target) abi(array_program) @coprime_ring_array() asm {
+  %worker_lanes = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %lane0 = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %capacity2 = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %capacity3 = constant.u32 3 : reg<aie2p.array.scalar : index>
+  %row = constant.u32 2 : reg<aie2p.array.scalar : index>
+
+  %workers = group %worker_lanes
+  %worker = worker %workers, %lane0, @consume_coprime
+
+  %input0 = binding 0, "read"
+  %input1 = binding 1, "read"
+  %input0_sender = sender %input0, 0 : reg<aie2p.array.sender : tile<4xi8>>
+  %input1_sender = sender %input1, 0 : reg<aie2p.array.sender : tile<4xi8>>
+  %worker_input0 = receiver %worker, 0 : reg<aie2p.array.receiver : tile<4xi8>>
+  %worker_input1 = receiver %worker, 1 : reg<aie2p.array.receiver : tile<4xi8>>
+  %input0_channel = channel %input0_sender, %worker_input0, %capacity2 : reg<aie2p.array.channel : tile<4xi8>>
+  %input1_channel = channel %input1_sender, %worker_input1, %capacity3 : reg<aie2p.array.channel : tile<4xi8>>
+
+  constrain.location %worker, %lane0, %row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@coprime_core_target) abi(object_function) @consume_coprime() asm {
+  %input0 = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %input1 = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %lhs = lda.u8 %input0, 0
+  %rhs = lda.u8 %input1, 0
+  %sum = add.rr %lhs, %rhs
+  st.s8 %sum, %input0, 0
+  return
+}
+
+// ----
+array @coprime_ring_array family=amd.xdna.npu2 groups=1 workers=1 bindings=2 channels=2 slots=5 locks=4 dma=4 routes=8
+binding index=0 ordinal=0 access=read
+binding index=1 ordinal=1 access=read
+worker index=0 group=0 lane=0 entry=@consume_coprime tile=(0,2) code-bytes=28 resources=2 storage-domains=0
+channel index=0 transport=external-dma record-bytes=4 capacity=2 sender=binding[0]:0 receiver=worker[0]:0
+channel index=1 transport=external-dma record-bytes=4 capacity=3 sender=binding[1]:0 receiver=worker[0]:1
+worker-port worker=0 port=0 direction=receive channel=0 first-slot=0
+worker-port worker=0 port=1 direction=receive channel=1 first-slot=2
+slot channel=0 index=0 owner=(0,2) offset=0x00000 bytes=4 sender=external receiver=0x70000
+slot channel=0 index=1 owner=(0,2) offset=0x04000 bytes=4 sender=external receiver=0x74000
+slot channel=1 index=0 owner=(0,2) offset=0x08000 bytes=4 sender=external receiver=0x78000
+slot channel=1 index=1 owner=(0,2) offset=0x0c000 bytes=4 sender=external receiver=0x7c000
+slot channel=1 index=2 owner=(0,2) offset=0x00040 bytes=4 sender=external receiver=0x70040
+lock channel=0 tile=(0,2) id=0 ring=receive role=credit initial=2
+lock channel=0 tile=(0,2) id=1 ring=receive role=ready initial=0
+lock channel=1 tile=(0,2) id=2 ring=receive role=credit initial=3
+lock channel=1 tile=(0,2) id=3 ring=receive role=ready initial=0
+dma channel=0 tile=(0,2) side=compute direction=stream-to-memory engine-channel=0 bd-start=0 bd-count=2
+dma channel=0 tile=(0,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=1
+dma channel=1 tile=(0,2) side=compute direction=stream-to-memory engine-channel=1 bd-start=2 bd-count=3
+dma channel=1 tile=(0,0) side=shim direction=memory-to-stream engine-channel=1 bd-start=1 bd-count=1
+route channel=0 tile=(0,0) kind=shim-mux source=dma[0] destination=north[3]
+route channel=0 tile=(0,0) kind=switch source=south[3] destination=north[0]
+route channel=0 tile=(0,1) kind=switch source=south[0] destination=north[0]
+route channel=0 tile=(0,2) kind=switch source=south[0] destination=dma[0]
+route channel=1 tile=(0,0) kind=shim-mux source=dma[1] destination=north[7]
+route channel=1 tile=(0,0) kind=switch source=south[7] destination=north[1]
+route channel=1 tile=(0,1) kind=switch source=south[1] destination=north[1]
+route channel=1 tile=(0,2) kind=switch source=south[1] destination=dma[1]
+binding-patch ordinal=0 channel=0 shim=(0,0) direction=memory-to-stream dma-channel=0 partition=0/1
+binding-patch ordinal=1 channel=1 shim=(0,0) direction=memory-to-stream dma-channel=1 partition=0/1
+
+array-program records=28 payload-bytes=612 writes=18 masked-writes=4 block-writes=5 tile-loads=1 waits=0
+array-block record=18 address=0x0021d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=19 address=0x0021d020 words=[0x04000001,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=21 address=0x0021d040 words=[0x08000001,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
+array-block record=22 address=0x0021d060 words=[0x0c000001,0x00000000,0x00000000,0x00000000,0x00000000,0x26047fe2]
+array-block record=23 address=0x0021d080 words=[0x00040001,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
+array-tile-load record=25 tile-program=0
+control-program records=4 payload-bytes=152 writes=2 masked-writes=0 block-writes=2 tile-loads=0 waits=0 relocations=2
+control-block record=0 address=0x0001d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=1 address=0x0001d214 value=0x00000000
+control-block record=2 address=0x0001d020 words=[0x00000001,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=3 address=0x0001d21c value=0x00000001
+control-relocation index=0 record=0 word=1 payload-offset=44 binding=0 addend=0 width=8 alignment=4
+control-relocation index=1 record=2 word=1 payload-offset=108 binding=1 addend=0 width=8 alignment=4
+
+resident-program workers=1
+resident worker=0 entry=@coprime_ring_array$worker$0 tile=(0,2) code-bytes=272 resources=0 fixups=5
+
+low.func.def retain target<amd.xdna.aie2p.core>(@coprime_core_target) @coprime_ring_array$worker$0() asm {
+  %acquire_delta = mov.short -1
+  %release_delta = mov.short 1
+  %46 = mov.local-address 458752
+  %47 = mov.local-address 491520
+  %ring_slot_zero = mov.short 0
+  low.br ^_bb1(%46: reg<aie2p.ep>, %47: reg<aie2p.ep>, %ring_slot_zero: reg<aie2p.er>)
+^_bb1(%input0: reg<aie2p.ep>, %input1: reg<aie2p.ep>, %29: reg<aie2p.er>):
+  acq %acquire_delta, 49
+  acq %acquire_delta, 51
+  low.br ^_bb2
+^_bb2:
+  %lhs = lda.u8 %input0, 0
+  %rhs = lda.u8 %input1, 0
+  %sum = add.rr %lhs, %rhs
+  st.s8 %sum, %input0, 0
+  low.br ^_bb3
+^_bb3:
+  rel %release_delta, 48
+  rel %release_delta, 50
+  %30 = mov.address-to-scalar %input0
+  %31 = mov.i32 16384
+  %32 = xor %30, %31
+  %33 = mov.scalar-to-address %32
+  %36 = mov.short 0
+  %37 = eq %29, %36
+  low.cond_br %37, ^_bb6, ^_bb4 : reg<aie2p.er>
+^_bb4:
+  %38 = mov.short 1
+  %39 = eq %29, %38
+  low.cond_br %39, ^_bb7, ^_bb5 : reg<aie2p.er>
+^_bb5:
+  %40 = mov.local-address 491520
+  %41 = mov.short 0
+  low.br ^_bb8(%40: reg<aie2p.ep>, %41: reg<aie2p.er>)
+^_bb6:
+  %42 = mov.local-address 507904
+  %43 = mov.short 1
+  low.br ^_bb8(%42: reg<aie2p.ep>, %43: reg<aie2p.er>)
+^_bb7:
+  %44 = mov.local-address 458816
+  %45 = mov.short 2
+  low.br ^_bb8(%44: reg<aie2p.ep>, %45: reg<aie2p.er>)
+^_bb8(%34: reg<aie2p.ep>, %35: reg<aie2p.er>):
+  low.br ^_bb1(%33: reg<aie2p.ep>, %34: reg<aie2p.ep>, %35: reg<aie2p.er>)
 }

@@ -22,8 +22,6 @@ extern "C" {
 typedef struct loom_aie2p_array_resident_worker_t {
   // Index of the logical and physically planned worker.
   uint32_t worker_index;
-  // Number of statically unrolled channel-ring phases.
-  uint32_t phase_count;
   // Module-local symbol naming the materialized worker function.
   loom_symbol_ref_t entry;
   // Private retained core Low function implementing the resident loop.
@@ -41,10 +39,10 @@ typedef struct loom_aie2p_array_resident_program_t {
 // Materializes every planned worker as an independently compilable Low CFG.
 //
 // Each source worker function represents one channel firing. The materializer
-// clones its arbitrary CFG once per periodic ring phase, replaces resource
-// imports with exact planned local addresses, surrounds the firing with the
-// channel lock protocol, and connects the final phase back to the first. The
-// resulting functions have no imported resources or register ABI and are
+// clones its arbitrary CFG once, replaces resource imports with loop-carried
+// local-address values, surrounds the firing with the channel lock protocol,
+// and advances every channel ring independently after the firing completes.
+// The resulting functions have no imported resources or register ABI and are
 // retained as final array-image roots.
 iree_status_t loom_aie2p_array_materialize_resident_program(
     loom_module_t* module, const loom_aie2p_array_plan_t* plan,
