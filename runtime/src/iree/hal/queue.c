@@ -189,6 +189,9 @@ iree_hal_queue_host_call(iree_hal_queue_t* queue,
                          iree_hal_host_call_flags_t flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  const iree_hal_host_call_flags_t known_flags =
+      IREE_HAL_HOST_CALL_FLAG_NON_BLOCKING |
+      IREE_HAL_HOST_CALL_FLAG_WAIT_ACTIVE | IREE_HAL_HOST_CALL_FLAG_RELAXED;
   iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!queue)) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
@@ -206,6 +209,12 @@ iree_hal_queue_host_call(iree_hal_queue_t* queue,
   if (iree_status_is_ok(status)) {
     status =
         iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
+  }
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(iree_any_bit_set(flags, ~known_flags))) {
+    status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "unsupported host call flags: 0x%016" PRIx64, flags);
   }
   if (iree_status_is_ok(status)) {
     status = _VTABLE_DISPATCH(queue, host_call)(
@@ -226,6 +235,14 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_dispatch(
     iree_hal_dispatch_flags_t flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  const iree_hal_dispatch_flags_t known_flags =
+      IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS |
+      IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS |
+      IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS |
+      IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_ARGUMENTS |
+      IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_ARGUMENTS |
+      IREE_HAL_DISPATCH_FLAG_ALLOW_INLINE_EXECUTION |
+      IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES;
   iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY(!queue)) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "queue is null");
@@ -240,6 +257,12 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_dispatch(
         iree_hal_queue_family_ordinal(
             iree_hal_executable_queue_family(executable)),
         iree_hal_queue_family_ordinal(iree_hal_queue_family(queue)));
+  } else if (IREE_UNLIKELY(constants.data_length && !constants.data)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "dispatch constant storage is null");
+  } else if (IREE_UNLIKELY(bindings.count && !bindings.values)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "dispatch binding storage is null");
   }
   if (iree_status_is_ok(status)) {
     status =
@@ -248,6 +271,12 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_dispatch(
   if (iree_status_is_ok(status)) {
     status =
         iree_hal_queue_validate_semaphore_list("signal", signal_semaphore_list);
+  }
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(iree_any_bit_set(flags, ~known_flags))) {
+    status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "unsupported dispatch flags: 0x%016" PRIx64, flags);
   }
   if (iree_status_is_ok(status)) {
     status = _VTABLE_DISPATCH(queue, dispatch)(
