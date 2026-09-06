@@ -6,6 +6,9 @@
 
 """AIE2P configured vector data-path control words."""
 
+# AIE2P crRnd encoding for IEEE round-to-nearest, ties-to-even conversion.
+BF16_CONVERSION_ROUNDING = 12
+
 
 def vector_data_path_control(
     *,

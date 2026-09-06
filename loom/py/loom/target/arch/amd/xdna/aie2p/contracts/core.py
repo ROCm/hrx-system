@@ -4,61 +4,32 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""AMD XDNA AIE2P core source-to-Low contract fragment."""
+"""AMD XDNA AIE2P core source-to-Low rule builders."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 
-from loom.dialect.buffer import ALL_BUFFER_OPS
-from loom.dialect.buffer import defs as buffer
-from loom.dialect.index import ALL_INDEX_OPS
 from loom.dialect.index import defs as index
-from loom.dialect.scalar import ALL_SCALAR_OPS
-from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
-from loom.dialect.scf import ALL_SCF_OPS
 from loom.dialect.scf import defs as scf
-from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
-from loom.dialect.view import ALL_VIEW_OPS
-from loom.dialect.view import defs as view
 from loom.dsl import Op
-from loom.target.arch.amd.xdna.aie2p.contracts.conversion import (
-    AIE2P_CONVERSION_RULES,
-)
 from loom.target.arch.amd.xdna.aie2p.contracts.data_path import (
     vector_data_path_control,
 )
-from loom.target.arch.amd.xdna.aie2p.contracts.f32 import AIE2P_F32_RULES
-from loom.target.arch.amd.xdna.aie2p.contracts.floating import (
-    AIE2P_BF16_MATRIX_RULES,
-    AIE2P_FLOATING_RULES,
-)
-from loom.target.arch.amd.xdna.aie2p.contracts.index_conversion import (
-    AIE2P_INDEX_CONVERSION_RULES,
-)
-from loom.target.arch.amd.xdna.aie2p.contracts.memory import AIE2P_MEMORY_RULES
-from loom.target.arch.amd.xdna.aie2p.contracts.packed_dot import (
-    AIE2P_PACKED_DOT_RULES,
-)
-from loom.target.arch.amd.xdna.aie2p.contracts.reduction import (
-    AIE2P_REDUCTION_RULES,
-)
-from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
-    AIE2P_STRUCTURAL_RULES,
+from loom.target.arch.amd.xdna.aie2p.contracts.i64 import (
+    AIE2P_PAIR_SCALAR_TYPES,
+    AIE2P_PAIR_VECTOR_TYPES,
 )
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
 )
 from loom.target.contracts import (
     AttrProject,
-    ContractCase,
-    ContractFragment,
     DescriptorEmitForm,
-    DescriptorMatrixRule,
     DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
@@ -96,6 +67,7 @@ _F8E5M2_VECTOR = Vector("f8E5M2", minimum_static_elements=1, maximum_static_elem
 _I16_VECTOR = Vector("i16", minimum_static_elements=1, maximum_static_elements=32)
 _F16_VECTOR = Vector("f16", minimum_static_elements=1, maximum_static_elements=32)
 _BF16_VECTOR = Vector("bf16", minimum_static_elements=1, maximum_static_elements=32)
+_BF16X8_VECTOR = Vector("bf16", lanes=8)
 _I32_VECTOR = Vector("i32", minimum_static_elements=1, maximum_static_elements=16)
 _F32_VECTOR = Vector("f32", minimum_static_elements=1, maximum_static_elements=16)
 _I32_MATRIX_ACCUMULATOR = Vector("i32", lanes=64)
@@ -111,6 +83,7 @@ _BITCAST_VECTOR_TYPES = (
     _BF16_VECTOR,
     _I32_VECTOR,
     _F32_VECTOR,
+    *AIE2P_PAIR_VECTOR_TYPES,
 )
 
 _I8_MIN = -(2**7)
@@ -202,7 +175,9 @@ def _constant_rule(
     )
 
 
-def _float_constant_rule(result_type: TypePattern) -> DescriptorRule:
+def _float_constant_rule(
+    result_type: TypePattern, bits: ValueProject
+) -> DescriptorRule:
     descriptor = _descriptor("amd.xdna.aie2p.constant.i32")
     return DescriptorRule(
         source_op=scalar_conversion.scalar_constant,
@@ -216,7 +191,7 @@ def _float_constant_rule(result_type: TypePattern) -> DescriptorRule:
             _const_emit(
                 descriptor,
                 ValueRef.result("result"),
-                ValueProject.float_as_f32_bits("result"),
+                bits,
             ),
         ),
     )
@@ -479,30 +454,6 @@ def _unsigned_division_rule(
         descriptor=divide_step,
         guards=_typed_guards(("lhs", "rhs", "result"), type_pattern),
         emit=tuple(emits),
-    )
-
-
-def _conversion_rule(
-    source_op: Op,
-    input_type: TypePattern,
-    result_type: TypePattern,
-    descriptor_key: str,
-) -> DescriptorRule:
-    descriptor = _descriptor(descriptor_key)
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=descriptor,
-        guards=(
-            Guard.value_type("input", input_type),
-            Guard.value_type("result", result_type),
-        ),
-        emit=(
-            _op_emit(
-                descriptor,
-                operands={"s0": ValueRef.operand("input")},
-                results={"d0": ValueRef.result("result")},
-            ),
-        ),
     )
 
 
@@ -938,7 +889,7 @@ def _vector_compare_rule(
     )
 
 
-def _whole_integer_vector_select_rule(
+def _whole_vector_select_rule(
     result_type: TypePattern,
 ) -> DescriptorRule:
     subtract_one = _descriptor("amd.xdna.aie2p.select.mask.i32")
@@ -994,6 +945,37 @@ def _vector_constant_rule(
                 constant,
                 ValueRef.temporary("scalar"),
                 AttrProject.direct("value"),
+                result_type=DescriptorResultType(),
+            ),
+            _op_emit(
+                broadcast,
+                operands={"src": ValueRef.temporary("scalar")},
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _float_vector_constant_rule(
+    result_type: TypePattern,
+    broadcast_descriptor_key: str,
+    bits: ValueProject,
+) -> DescriptorRule:
+    constant = _descriptor("amd.xdna.aie2p.constant.i32")
+    broadcast = _descriptor(broadcast_descriptor_key)
+    return DescriptorRule(
+        source_op=vector.vector_constant,
+        descriptor=broadcast,
+        guards=(
+            Guard.attr_kind("value", "f64"),
+            Guard.value_type("result", result_type),
+            Guard.value_exact_float("result"),
+        ),
+        emit=(
+            _const_emit(
+                constant,
+                ValueRef.temporary("scalar"),
+                bits,
                 result_type=DescriptorResultType(),
             ),
             _op_emit(
@@ -1140,6 +1122,97 @@ def _vector_extract_dynamic_rule(
                 },
                 results={"dst": ValueRef.result("result")},
             ),
+        ),
+    )
+
+
+def _vector_predicate_extract_rule(*, dynamic_index: bool) -> DescriptorRule:
+    """Materializes predicate bits as byte lanes before scalar extraction."""
+
+    constant = _descriptor("amd.xdna.aie2p.constant.i32.short")
+    splat = _descriptor("amd.xdna.aie2p.splat.i8x64")
+    subtract = _descriptor("amd.xdna.aie2p.sub.i8x64")
+    select = _descriptor("amd.xdna.aie2p.select.i8x64")
+    extract = _descriptor(
+        "amd.xdna.aie2p.extract.i8.register"
+        if dynamic_index
+        else "amd.xdna.aie2p.extract.i8.immediate"
+    )
+    guards = [
+        Guard.value_type("source", _I1_VECTOR),
+        Guard.value_type("result", _I1),
+    ]
+    if dynamic_index:
+        guards.extend(
+            (
+                Guard.value_type("indices", _INDEX),
+                Guard.operand_segment_count("indices", 1),
+                Guard.i64_array_count("static_indices", 1),
+                Guard.i64_array_element_range("static_indices", 0, -(2**63), -(2**63)),
+            )
+        )
+        extract_emit = _op_emit(
+            extract,
+            operands={
+                "s1": ValueRef.temporary("boolean_bytes"),
+                "idx": ValueRef.operand("indices"),
+            },
+            results={"dst": ValueRef.result("result")},
+        )
+    else:
+        guards.extend(
+            (
+                Guard.operand_segment_count("indices", 0),
+                Guard.i64_array_count("static_indices", 1),
+                Guard.i64_array_element_range("static_indices", 0, 0, 63),
+            )
+        )
+        extract_emit = EmitDescriptorOp(
+            descriptor=extract,
+            operands={"s1": ValueRef.temporary("boolean_bytes")},
+            results={"dst": ValueRef.result("result")},
+            immediates={
+                "idx": AttrProject.i64_array_element("static_indices", element=0)
+            },
+            form=DescriptorEmitForm.OP,
+        )
+    return DescriptorRule(
+        source_op=vector.vector_extract,
+        descriptor=extract,
+        guards=tuple(guards),
+        emit=(
+            _const_emit(
+                constant,
+                ValueRef.temporary("one"),
+                1,
+                result_type=_I8,
+            ),
+            _op_emit(
+                splat,
+                operands={"src": ValueRef.temporary("one")},
+                results={"dst": ValueRef.temporary("ones")},
+                result_types={"dst": DescriptorResultType()},
+            ),
+            _op_emit(
+                subtract,
+                operands={
+                    "s1": ValueRef.temporary("ones"),
+                    "s2": ValueRef.temporary("ones"),
+                },
+                results={"d": ValueRef.temporary("zeros")},
+                result_types={"d": DescriptorResultType()},
+            ),
+            _op_emit(
+                select,
+                operands={
+                    "s1": ValueRef.temporary("zeros"),
+                    "s2": ValueRef.temporary("ones"),
+                    "sel": ValueRef.operand("source"),
+                },
+                results={"d": ValueRef.temporary("boolean_bytes")},
+                result_types={"d": DescriptorResultType()},
+            ),
+            extract_emit,
         ),
     )
 
@@ -1310,6 +1383,7 @@ def _scalar_bitcast_alias_rules() -> tuple[ValueAliasRule, ...]:
         (_I8, _F8E4M3, _F8E5M2),
         (_I16, _F16, _BF16),
         (_I32, _F32),
+        AIE2P_PAIR_SCALAR_TYPES,
     )
     return tuple(
         _conversion_alias_rule(
@@ -1765,872 +1839,3 @@ def _bitfield_rule(source_op: Op, descriptor_key: str) -> DescriptorRule:
             ),
         ),
     )
-
-
-def aie2p_core_cases() -> Sequence[ContractCase]:
-    # Specialized cases precede general cases because the compact runtime table
-    # is queried in authored order.
-    return (
-        ValueAliasRule(
-            source_op=buffer.buffer_view,
-            source=ValueRef.operand("buffer"),
-            result=ValueRef.result("result"),
-        ),
-        ValueAliasRule(
-            source_op=view.view_subview,
-            source=ValueRef.operand("source"),
-            result=ValueRef.result("result"),
-        ),
-        ValueAliasRule(
-            source_op=view.view_refine,
-            source=ValueRef.operand("source"),
-            result=ValueRef.result("result"),
-        ),
-        *AIE2P_BF16_MATRIX_RULES,
-        DescriptorMatrixRule(
-            source_op=vector.vector_mma,
-            source="vector_mma",
-        ),
-        _matrix_fragment_store_rule(),
-        *AIE2P_PACKED_DOT_RULES,
-        *AIE2P_REDUCTION_RULES,
-        *AIE2P_STRUCTURAL_RULES,
-        *AIE2P_MEMORY_RULES,
-        *(
-            _address_constant_rule(
-                result_type,
-                descriptor_key,
-                minimum,
-                maximum,
-            )
-            for result_type, minimum, maximum in (
-                (_INDEX, _SHORT_MIN, _SHORT_MAX),
-                (_OFFSET, 0, _SHORT_MAX),
-            )
-            for descriptor_key in ("amd.xdna.aie2p.constant.i32.short",)
-        ),
-        *(
-            _address_constant_rule(
-                result_type,
-                "amd.xdna.aie2p.constant.i32",
-                minimum,
-                maximum,
-            )
-            for result_type, minimum, maximum in (
-                (_INDEX, _I32_MIN, _I32_MAX),
-                (_OFFSET, 0, _I32_MAX),
-            )
-        ),
-        *AIE2P_INDEX_CONVERSION_RULES,
-        *(
-            _binary_rule(source_op, type_pattern, descriptor_key)
-            for source_op, descriptor_key in (
-                (index.index_add, "amd.xdna.aie2p.add.i32"),
-                (index.index_sub, "amd.xdna.aie2p.sub.i32"),
-            )
-            for type_pattern in (_INDEX, _OFFSET)
-        ),
-        _binary_rule(
-            index.index_mul,
-            _INDEX,
-            "amd.xdna.aie2p.mul.i32",
-        ),
-        _index_scale_rule(),
-        _unsigned_division_rule(
-            index.index_div,
-            _INDEX,
-            return_quotient=True,
-        ),
-        _unsigned_division_rule(
-            index.index_rem,
-            _INDEX,
-            return_quotient=False,
-        ),
-        _integer_minmax_rule(
-            index.index_min,
-            _INDEX,
-            "amd.xdna.aie2p.cmp.slt.i32.select",
-            swap_compare_operands=False,
-        ),
-        _integer_minmax_rule(
-            index.index_max,
-            _INDEX,
-            "amd.xdna.aie2p.cmp.slt.i32.select",
-            swap_compare_operands=True,
-        ),
-        _madd_rule(index.index_madd, _INDEX),
-        *(
-            _binary_rule(source_op, _INDEX, descriptor_key)
-            for source_op, descriptor_key in (
-                (index.index_andi, "amd.xdna.aie2p.and.i32"),
-                (index.index_ori, "amd.xdna.aie2p.or.i32"),
-                (index.index_xori, "amd.xdna.aie2p.xor.i32"),
-                (index.index_shli, "amd.xdna.aie2p.lshl.i32"),
-            )
-        ),
-        _right_shift_rule(
-            index.index_shrsi,
-            _INDEX,
-            "amd.xdna.aie2p.ashl.i32",
-        ),
-        _right_shift_rule(
-            index.index_shrui,
-            _INDEX,
-            "amd.xdna.aie2p.lshl.i32",
-        ),
-        _rotate_rule(index.index_rotli, _INDEX, rotate_left=True),
-        _rotate_rule(index.index_rotri, _INDEX, rotate_left=False),
-        _unary_rule(
-            index.index_ctlzi,
-            _INDEX,
-            "amd.xdna.aie2p.clz.i32",
-        ),
-        _count_trailing_zeros_rule(index.index_cttzi, _INDEX),
-        _unary_rule(
-            index.index_ctpopi,
-            _INDEX,
-            "amd.xdna.aie2p.popcount.i32",
-        ),
-        *(
-            _compare_rule(
-                index.index_cmp,
-                type_pattern,
-                predicate,
-                descriptor_key,
-                swap_operands=swap_operands,
-            )
-            for type_pattern in (_INDEX, _OFFSET)
-            for predicate, descriptor_key, swap_operands in (
-                ("eq", "amd.xdna.aie2p.cmp.eq.i32", False),
-                ("ne", "amd.xdna.aie2p.cmp.ne.i32", False),
-                ("slt", "amd.xdna.aie2p.cmp.slt.i32", False),
-                ("sle", "amd.xdna.aie2p.cmp.sge.i32", True),
-                ("sgt", "amd.xdna.aie2p.cmp.slt.i32", True),
-                ("sge", "amd.xdna.aie2p.cmp.sge.i32", False),
-                ("ult", "amd.xdna.aie2p.cmp.ult.i32", False),
-                ("ule", "amd.xdna.aie2p.cmp.uge.i32", True),
-                ("ugt", "amd.xdna.aie2p.cmp.ult.i32", True),
-                ("uge", "amd.xdna.aie2p.cmp.uge.i32", False),
-            )
-        ),
-        _logical_constant_rule(),
-        _constant_rule(
-            _I8,
-            "amd.xdna.aie2p.constant.i32.short",
-            _I8_MIN,
-            _I8_MAX,
-        ),
-        _constant_rule(
-            _I16,
-            "amd.xdna.aie2p.constant.i32.short",
-            _SHORT_MIN,
-            _SHORT_MAX,
-        ),
-        _constant_rule(
-            _I16,
-            "amd.xdna.aie2p.constant.i32",
-            _I16_MIN,
-            _I16_MAX,
-        ),
-        _constant_rule(
-            _I32,
-            "amd.xdna.aie2p.constant.i32.short",
-            _SHORT_MIN,
-            _SHORT_MAX,
-        ),
-        _constant_rule(
-            _I32,
-            "amd.xdna.aie2p.constant.i32",
-            _I32_MIN,
-            _I32_MAX,
-        ),
-        _float_constant_rule(_F32),
-        *(
-            _conversion_rule(source_op, input_type, _I32, descriptor_key)
-            for source_op, input_type, descriptor_key in (
-                (
-                    scalar_conversion.scalar_extsi,
-                    _I8,
-                    "amd.xdna.aie2p.extend.signed.i8",
-                ),
-                (
-                    scalar_conversion.scalar_extsi,
-                    _I16,
-                    "amd.xdna.aie2p.extend.signed.i16",
-                ),
-                (
-                    scalar_conversion.scalar_extui,
-                    _I8,
-                    "amd.xdna.aie2p.extend.unsigned.i8",
-                ),
-                (
-                    scalar_conversion.scalar_extui,
-                    _I16,
-                    "amd.xdna.aie2p.extend.unsigned.i16",
-                ),
-            )
-        ),
-        *(
-            _conversion_alias_rule(
-                scalar_conversion.scalar_trunci,
-                _I32,
-                result_type,
-            )
-            for result_type in (_I8, _I16)
-        ),
-        *AIE2P_CONVERSION_RULES,
-        _vector_constant_rule(
-            _I8_VECTOR,
-            "amd.xdna.aie2p.constant.i32.short",
-            "amd.xdna.aie2p.splat.i8x64",
-            _I8_MIN,
-            _I8_MAX,
-        ),
-        _vector_constant_rule(
-            _I16_VECTOR,
-            "amd.xdna.aie2p.constant.i32.short",
-            "amd.xdna.aie2p.splat.i16x32",
-            _SHORT_MIN,
-            _SHORT_MAX,
-        ),
-        _vector_constant_rule(
-            _I16_VECTOR,
-            "amd.xdna.aie2p.constant.i32",
-            "amd.xdna.aie2p.splat.i16x32",
-            _I16_MIN,
-            _I16_MAX,
-        ),
-        _vector_constant_rule(
-            _I32_VECTOR,
-            "amd.xdna.aie2p.constant.i32.short",
-            "amd.xdna.aie2p.splat.i32x16",
-            _SHORT_MIN,
-            _SHORT_MAX,
-        ),
-        _vector_constant_rule(
-            _I32_VECTOR,
-            "amd.xdna.aie2p.constant.i32",
-            "amd.xdna.aie2p.splat.i32x16",
-            _I32_MIN,
-            _I32_MAX,
-        ),
-        *_vector_broadcast_alias_rules(),
-        *(
-            _vector_broadcast_rule(element_type, maximum_lanes, descriptor_key)
-            for element_type, maximum_lanes, descriptor_key in (
-                (
-                    "i8",
-                    64,
-                    "amd.xdna.aie2p.broadcast.i8x64.from-vector",
-                ),
-                (
-                    "i16",
-                    32,
-                    "amd.xdna.aie2p.broadcast.i16x32.from-vector",
-                ),
-                (
-                    "i32",
-                    16,
-                    "amd.xdna.aie2p.broadcast.i32x16.from-vector",
-                ),
-            )
-        ),
-        *(
-            rule
-            for (
-                scalar_type,
-                vector_type,
-                maximum_index,
-                immediate_key,
-                register_key,
-            ) in (
-                (
-                    _I8,
-                    _I8_VECTOR,
-                    63,
-                    "amd.xdna.aie2p.extract.i8.immediate",
-                    "amd.xdna.aie2p.extract.i8.register",
-                ),
-                (
-                    _F8E4M3,
-                    _F8E4M3_VECTOR,
-                    63,
-                    "amd.xdna.aie2p.extract.i8.immediate",
-                    "amd.xdna.aie2p.extract.i8.register",
-                ),
-                (
-                    _F8E5M2,
-                    _F8E5M2_VECTOR,
-                    63,
-                    "amd.xdna.aie2p.extract.i8.immediate",
-                    "amd.xdna.aie2p.extract.i8.register",
-                ),
-                (
-                    _I16,
-                    _I16_VECTOR,
-                    31,
-                    "amd.xdna.aie2p.extract.i16.immediate",
-                    "amd.xdna.aie2p.extract.i16.register",
-                ),
-                (
-                    _F16,
-                    _F16_VECTOR,
-                    31,
-                    "amd.xdna.aie2p.extract.i16.immediate",
-                    "amd.xdna.aie2p.extract.i16.register",
-                ),
-                (
-                    _BF16,
-                    _BF16_VECTOR,
-                    31,
-                    "amd.xdna.aie2p.extract.i16.immediate",
-                    "amd.xdna.aie2p.extract.i16.register",
-                ),
-                (
-                    _I32,
-                    _I32_VECTOR,
-                    15,
-                    "amd.xdna.aie2p.extract.i32.immediate",
-                    "amd.xdna.aie2p.extract.i32.register",
-                ),
-                (
-                    _F32,
-                    _F32_VECTOR,
-                    15,
-                    "amd.xdna.aie2p.extract.i32.immediate",
-                    "amd.xdna.aie2p.extract.i32.register",
-                ),
-            )
-            for rule in (
-                _vector_extract_static_rule(
-                    vector_type,
-                    scalar_type,
-                    maximum_index,
-                    immediate_key,
-                ),
-                _vector_extract_dynamic_rule(
-                    vector_type,
-                    scalar_type,
-                    register_key,
-                ),
-            )
-        ),
-        _vector_extract_static_rule(
-            _I1X2X64_VECTOR,
-            _I1_VECTOR,
-            1,
-            "amd.xdna.aie2p.extract.predicate64.immediate",
-        ),
-        *(
-            rule
-            for scalar_type, vector_type, maximum_index, zero_key, register_key in (
-                (
-                    _I8,
-                    _I8_VECTOR,
-                    63,
-                    "amd.xdna.aie2p.insert.i8.zero",
-                    "amd.xdna.aie2p.insert.i8.register",
-                ),
-                (
-                    _F8E4M3,
-                    _F8E4M3_VECTOR,
-                    63,
-                    "amd.xdna.aie2p.insert.i8.zero",
-                    "amd.xdna.aie2p.insert.i8.register",
-                ),
-                (
-                    _F8E5M2,
-                    _F8E5M2_VECTOR,
-                    63,
-                    "amd.xdna.aie2p.insert.i8.zero",
-                    "amd.xdna.aie2p.insert.i8.register",
-                ),
-                (
-                    _I16,
-                    _I16_VECTOR,
-                    31,
-                    "amd.xdna.aie2p.insert.i16.zero",
-                    "amd.xdna.aie2p.insert.i16.register",
-                ),
-                (
-                    _F16,
-                    _F16_VECTOR,
-                    31,
-                    "amd.xdna.aie2p.insert.i16.zero",
-                    "amd.xdna.aie2p.insert.i16.register",
-                ),
-                (
-                    _BF16,
-                    _BF16_VECTOR,
-                    31,
-                    "amd.xdna.aie2p.insert.i16.zero",
-                    "amd.xdna.aie2p.insert.i16.register",
-                ),
-                (
-                    _I32,
-                    _I32_VECTOR,
-                    15,
-                    "amd.xdna.aie2p.insert.i32.zero",
-                    "amd.xdna.aie2p.insert.i32.register",
-                ),
-                (
-                    _F32,
-                    _F32_VECTOR,
-                    15,
-                    "amd.xdna.aie2p.insert.i32.zero",
-                    "amd.xdna.aie2p.insert.i32.register",
-                ),
-            )
-            for rule in (
-                _vector_insert_zero_rule(scalar_type, vector_type, zero_key),
-                _vector_insert_static_rule(
-                    scalar_type,
-                    vector_type,
-                    maximum_index,
-                    register_key,
-                ),
-                _vector_insert_dynamic_rule(
-                    scalar_type,
-                    vector_type,
-                    register_key,
-                ),
-            )
-        ),
-        _binary_rule(
-            scalar_arithmetic.scalar_addi,
-            _I32,
-            "amd.xdna.aie2p.add.i32",
-        ),
-        _binary_rule(
-            scalar_arithmetic.scalar_subi,
-            _I32,
-            "amd.xdna.aie2p.sub.i32",
-        ),
-        _binary_rule(
-            scalar_arithmetic.scalar_muli,
-            _I32,
-            "amd.xdna.aie2p.mul.i32",
-        ),
-        _unsigned_division_rule(
-            scalar_arithmetic.scalar_divui,
-            _I32,
-            return_quotient=True,
-        ),
-        _unsigned_division_rule(
-            scalar_arithmetic.scalar_remui,
-            _I32,
-            return_quotient=False,
-        ),
-        _unary_rule(
-            scalar_arithmetic.scalar_absi,
-            _I32,
-            "amd.xdna.aie2p.abs.i32",
-        ),
-        *(
-            _integer_minmax_rule(
-                source_op,
-                _I32,
-                descriptor_key,
-                swap_compare_operands=swap_compare_operands,
-            )
-            for source_op, descriptor_key, swap_compare_operands in (
-                (
-                    scalar_arithmetic.scalar_minsi,
-                    "amd.xdna.aie2p.cmp.slt.i32.select",
-                    False,
-                ),
-                (
-                    scalar_arithmetic.scalar_maxsi,
-                    "amd.xdna.aie2p.cmp.slt.i32.select",
-                    True,
-                ),
-                (
-                    scalar_arithmetic.scalar_minui,
-                    "amd.xdna.aie2p.cmp.ult.i32.select",
-                    False,
-                ),
-                (
-                    scalar_arithmetic.scalar_maxui,
-                    "amd.xdna.aie2p.cmp.ult.i32.select",
-                    True,
-                ),
-            )
-        ),
-        _madd_rule(scalar_arithmetic.scalar_fmai, _I32),
-        *(
-            _binary_rule(source_op, type_pattern, descriptor_key)
-            for type_pattern in (_I8, _I16)
-            for source_op, descriptor_key in (
-                (scalar_arithmetic.scalar_addi, "amd.xdna.aie2p.add.i32"),
-                (scalar_arithmetic.scalar_subi, "amd.xdna.aie2p.sub.i32"),
-                (scalar_arithmetic.scalar_muli, "amd.xdna.aie2p.mul.i32"),
-            )
-        ),
-        *(
-            _vector_binary_rule(source_op, type_pattern, descriptor_key)
-            for source_op, type_pattern, descriptor_key in (
-                (
-                    vector.vector_addi,
-                    _I8_VECTOR,
-                    "amd.xdna.aie2p.add.i8x64",
-                ),
-                (
-                    vector.vector_subi,
-                    _I8_VECTOR,
-                    "amd.xdna.aie2p.sub.i8x64",
-                ),
-                (
-                    vector.vector_addi,
-                    _I16_VECTOR,
-                    "amd.xdna.aie2p.add.i16x32",
-                ),
-                (
-                    vector.vector_subi,
-                    _I16_VECTOR,
-                    "amd.xdna.aie2p.sub.i16x32",
-                ),
-                (
-                    vector.vector_addi,
-                    _I32_VECTOR,
-                    "amd.xdna.aie2p.add.i32x16",
-                ),
-                (
-                    vector.vector_subi,
-                    _I32_VECTOR,
-                    "amd.xdna.aie2p.sub.i32x16",
-                ),
-            )
-        ),
-        *(
-            _vector_binary_rule(source_op, vector_type, descriptor_key)
-            for width, vector_type in (
-                (8, _I8_VECTOR),
-                (16, _I16_VECTOR),
-                (32, _I32_VECTOR),
-            )
-            for source_op, operation, signedness in (
-                (vector.vector_minsi, "min", "signed"),
-                (vector.vector_maxsi, "max", "signed"),
-                (vector.vector_minui, "min", "unsigned"),
-                (vector.vector_maxui, "max", "unsigned"),
-            )
-            for descriptor_key in (
-                f"amd.xdna.aie2p.{operation}.{signedness}.i{width}x{512 // width}",
-            )
-        ),
-        _vector_multiply_i16_rule(),
-        _vector_bitunpack_i4_rule(
-            vector.vector_bitunpacku,
-            "amd.xdna.aie2p.unpack.u4x64.to.u8x64.configured",
-        ),
-        _vector_bitunpack_i4_rule(
-            vector.vector_bitunpacks,
-            "amd.xdna.aie2p.unpack.s4x64.to.s8x64.configured",
-        ),
-        _vector_bitunpack_i1_alias_rule(),
-        *AIE2P_F32_RULES,
-        _matrix_accumulator_zero_rule(),
-        *AIE2P_FLOATING_RULES,
-        *(
-            _vector_binary_rule(source_op, type_pattern, descriptor_key)
-            for source_op, type_pattern, descriptor_key in (
-                (
-                    vector.vector_andi,
-                    _I8_VECTOR,
-                    "amd.xdna.aie2p.and.bits512",
-                ),
-                (
-                    vector.vector_andi,
-                    _I16_VECTOR,
-                    "amd.xdna.aie2p.and.bits512",
-                ),
-                (
-                    vector.vector_andi,
-                    _I32_VECTOR,
-                    "amd.xdna.aie2p.and.bits512",
-                ),
-                (
-                    vector.vector_ori,
-                    _I8_VECTOR,
-                    "amd.xdna.aie2p.or.bits512",
-                ),
-                (
-                    vector.vector_ori,
-                    _I16_VECTOR,
-                    "amd.xdna.aie2p.or.bits512",
-                ),
-                (
-                    vector.vector_ori,
-                    _I32_VECTOR,
-                    "amd.xdna.aie2p.or.bits512",
-                ),
-            )
-        ),
-        *(
-            _vector_xor_rule(type_pattern, subtract_descriptor_key)
-            for type_pattern, subtract_descriptor_key in (
-                (_I8_VECTOR, "amd.xdna.aie2p.sub.i8x64"),
-                (_I16_VECTOR, "amd.xdna.aie2p.sub.i16x32"),
-                (_I32_VECTOR, "amd.xdna.aie2p.sub.i32x16"),
-            )
-        ),
-        *(
-            _vector_splat_rule(scalar_type, result_type, descriptor_key)
-            for scalar_type, result_type, descriptor_key in (
-                (_I8, _I8_VECTOR, "amd.xdna.aie2p.splat.i8x64"),
-                (_F8E4M3, _F8E4M3_VECTOR, "amd.xdna.aie2p.splat.i8x64"),
-                (_F8E5M2, _F8E5M2_VECTOR, "amd.xdna.aie2p.splat.i8x64"),
-                (_I16, _I16_VECTOR, "amd.xdna.aie2p.splat.i16x32"),
-                (_F16, _F16_VECTOR, "amd.xdna.aie2p.splat.i16x32"),
-                (_BF16, _BF16_VECTOR, "amd.xdna.aie2p.splat.i16x32"),
-                (_I32, _I32_VECTOR, "amd.xdna.aie2p.splat.i32x16"),
-                (_F32, _F32_VECTOR, "amd.xdna.aie2p.splat.i32x16"),
-            )
-        ),
-        _vector_predicate_splat_rule(),
-        *(
-            _vector_select_rule(value_type, descriptor_key)
-            for value_type, descriptor_key in (
-                (_I8_VECTOR, "amd.xdna.aie2p.select.i8x64"),
-                (_F8E4M3_VECTOR, "amd.xdna.aie2p.select.i8x64"),
-                (_F8E5M2_VECTOR, "amd.xdna.aie2p.select.i8x64"),
-                (_I16_VECTOR, "amd.xdna.aie2p.select.i16x32.mask64"),
-                (_F16_VECTOR, "amd.xdna.aie2p.select.i16x32.mask64"),
-                (_BF16_VECTOR, "amd.xdna.aie2p.select.i16x32.mask64"),
-                (_I32_VECTOR, "amd.xdna.aie2p.select.i32x16.mask64"),
-                (_F32_VECTOR, "amd.xdna.aie2p.select.i32x16.mask64"),
-            )
-        ),
-        *(
-            _vector_predicate_binary_rule(source_op, operation)
-            for source_op, operation in (
-                (vector.vector_andi, "and"),
-                (vector.vector_ori, "or"),
-                (vector.vector_xori, "xor"),
-            )
-        ),
-        *(
-            _vector_compare_rule(predicate, operand_type, width)
-            for width, operand_type in (
-                (8, _I8_VECTOR),
-                (16, _I16_VECTOR),
-                (32, _I32_VECTOR),
-            )
-            for predicate in (
-                "eq",
-                "ne",
-                "slt",
-                "sle",
-                "sgt",
-                "sge",
-                "ult",
-                "ule",
-                "ugt",
-                "uge",
-            )
-        ),
-        *(
-            _scalar_select_rule(result_type)
-            for result_type in (
-                _I1,
-                _I8,
-                _F8E4M3,
-                _F8E5M2,
-                _I16,
-                _F16,
-                _BF16,
-                _I32,
-                _F32,
-                _INDEX,
-                _OFFSET,
-            )
-        ),
-        *(
-            _whole_integer_vector_select_rule(result_type)
-            for result_type in _INTEGER_VECTOR_TYPES
-        ),
-        *_scalar_bitcast_alias_rules(),
-        *_vector_bitcast_alias_rules(),
-        *(
-            _binary_rule(source_op, type_pattern, descriptor_key)
-            for source_op, type_pattern, descriptor_key in (
-                (
-                    scalar_bitwise.scalar_andi,
-                    _I32,
-                    "amd.xdna.aie2p.and.i32",
-                ),
-                (
-                    scalar_bitwise.scalar_ori,
-                    _I32,
-                    "amd.xdna.aie2p.or.i32",
-                ),
-                (
-                    scalar_bitwise.scalar_xori,
-                    _I32,
-                    "amd.xdna.aie2p.xor.i32",
-                ),
-                (
-                    scalar_bitwise.scalar_andi,
-                    _I1,
-                    "amd.xdna.aie2p.and.i32",
-                ),
-                (
-                    scalar_bitwise.scalar_ori,
-                    _I1,
-                    "amd.xdna.aie2p.or.i32",
-                ),
-                (
-                    scalar_bitwise.scalar_xori,
-                    _I1,
-                    "amd.xdna.aie2p.xor.i32",
-                ),
-            )
-        ),
-        *(
-            _binary_rule(source_op, type_pattern, descriptor_key)
-            for type_pattern in (_I8, _I16)
-            for source_op, descriptor_key in (
-                (scalar_bitwise.scalar_andi, "amd.xdna.aie2p.and.i32"),
-                (scalar_bitwise.scalar_ori, "amd.xdna.aie2p.or.i32"),
-                (scalar_bitwise.scalar_xori, "amd.xdna.aie2p.xor.i32"),
-            )
-        ),
-        _binary_rule(
-            scalar_bitwise.scalar_shli,
-            _I32,
-            "amd.xdna.aie2p.lshl.i32",
-        ),
-        _right_shift_rule(
-            scalar_bitwise.scalar_shrsi,
-            _I32,
-            "amd.xdna.aie2p.ashl.i32",
-        ),
-        _right_shift_rule(
-            scalar_bitwise.scalar_shrui,
-            _I32,
-            "amd.xdna.aie2p.lshl.i32",
-        ),
-        _rotate_rule(
-            scalar_bitwise.scalar_rotli,
-            _I32,
-            rotate_left=True,
-        ),
-        _rotate_rule(
-            scalar_bitwise.scalar_rotri,
-            _I32,
-            rotate_left=False,
-        ),
-        _unary_rule(
-            scalar_bitwise.scalar_ctlzi,
-            _I32,
-            "amd.xdna.aie2p.clz.i32",
-        ),
-        _count_trailing_zeros_rule(scalar_bitwise.scalar_cttzi, _I32),
-        _unary_rule(
-            scalar_bitwise.scalar_ctpopi,
-            _I32,
-            "amd.xdna.aie2p.popcount.i32",
-        ),
-        _narrow_left_shift_rule(
-            _I8,
-            "amd.xdna.aie2p.extend.unsigned.i8",
-        ),
-        _narrow_right_shift_rule(
-            scalar_bitwise.scalar_shrsi,
-            _I8,
-            "amd.xdna.aie2p.extend.signed.i8",
-            "amd.xdna.aie2p.extend.unsigned.i8",
-            "amd.xdna.aie2p.ashl.i32",
-        ),
-        _narrow_right_shift_rule(
-            scalar_bitwise.scalar_shrui,
-            _I8,
-            "amd.xdna.aie2p.extend.unsigned.i8",
-            "amd.xdna.aie2p.extend.unsigned.i8",
-            "amd.xdna.aie2p.lshl.i32",
-        ),
-        _narrow_left_shift_rule(
-            _I16,
-            "amd.xdna.aie2p.extend.unsigned.i16",
-        ),
-        _narrow_right_shift_rule(
-            scalar_bitwise.scalar_shrsi,
-            _I16,
-            "amd.xdna.aie2p.extend.signed.i16",
-            "amd.xdna.aie2p.extend.unsigned.i16",
-            "amd.xdna.aie2p.ashl.i32",
-        ),
-        _narrow_right_shift_rule(
-            scalar_bitwise.scalar_shrui,
-            _I16,
-            "amd.xdna.aie2p.extend.unsigned.i16",
-            "amd.xdna.aie2p.extend.unsigned.i16",
-            "amd.xdna.aie2p.lshl.i32",
-        ),
-        _bitfield_rule(
-            scalar_bitwise.scalar_bitfield_extractu,
-            "amd.xdna.aie2p.lshl.i32",
-        ),
-        _bitfield_rule(
-            scalar_bitwise.scalar_bitfield_extracts,
-            "amd.xdna.aie2p.ashl.i32",
-        ),
-        _zero_compare_rule(
-            "eq",
-            "amd.xdna.aie2p.cmp.eqz.i32",
-            zero_field="rhs",
-        ),
-        _zero_compare_rule(
-            "eq",
-            "amd.xdna.aie2p.cmp.eqz.i32",
-            zero_field="lhs",
-        ),
-        _zero_compare_rule(
-            "ne",
-            "amd.xdna.aie2p.cmp.nez.i32",
-            zero_field="rhs",
-        ),
-        _zero_compare_rule(
-            "ne",
-            "amd.xdna.aie2p.cmp.nez.i32",
-            zero_field="lhs",
-        ),
-        *(
-            _compare_rule(
-                scalar_comparison.scalar_cmpi,
-                _I32,
-                predicate,
-                descriptor_key,
-                swap_operands=swap_operands,
-            )
-            for predicate, descriptor_key, swap_operands in (
-                ("eq", "amd.xdna.aie2p.cmp.eq.i32", False),
-                ("ne", "amd.xdna.aie2p.cmp.ne.i32", False),
-                ("slt", "amd.xdna.aie2p.cmp.slt.i32", False),
-                ("sle", "amd.xdna.aie2p.cmp.sge.i32", True),
-                ("sgt", "amd.xdna.aie2p.cmp.slt.i32", True),
-                ("sge", "amd.xdna.aie2p.cmp.sge.i32", False),
-                ("ult", "amd.xdna.aie2p.cmp.ult.i32", False),
-                ("ule", "amd.xdna.aie2p.cmp.uge.i32", True),
-                ("ugt", "amd.xdna.aie2p.cmp.ult.i32", True),
-                ("uge", "amd.xdna.aie2p.cmp.uge.i32", False),
-            )
-        ),
-    )
-
-
-AIE2P_CORE_CONTRACT_DIALECT_OPS = {
-    "buffer": ALL_BUFFER_OPS,
-    "index": ALL_INDEX_OPS,
-    "scalar": ALL_SCALAR_OPS,
-    "scf": ALL_SCF_OPS,
-    "vector": ALL_VECTOR_OPS,
-    "view": ALL_VIEW_OPS,
-}
-
-AIE2P_CORE_CONTRACT_FRAGMENT = ContractFragment(
-    name="amd.xdna.aie2p.core",
-    descriptor_set=AIE2P_CORE_DESCRIPTOR_SET,
-    public_header="loom/target/arch/amd/xdna/aie2p/contracts/core.h",
-    cases=aie2p_core_cases(),
-)

@@ -64,6 +64,7 @@ iree_py_library(
     name = "descriptors",
     srcs = [
         "array_descriptors.py",
+        "core_descriptor_specs.py",
         "core_descriptors.py",
     ],
     visibility = ["//visibility:public"],
@@ -79,6 +80,7 @@ iree_py_library(
 
 iree_py_test(
     name = "array_descriptors_test",
+    size = "small",
     srcs = [
         "array_descriptors_test.py",
         "//loom/py/loom/tools:pytest_style_runner.py",
@@ -90,6 +92,7 @@ iree_py_test(
 
 iree_py_test(
     name = "encoding_test",
+    size = "small",
     srcs = [
         "encoding_test.py",
         "//loom/py/loom/tools:pytest_style_runner.py",
@@ -101,6 +104,7 @@ iree_py_test(
 
 iree_py_test(
     name = "machine_test",
+    size = "small",
     srcs = [
         "machine_test.py",
         "//loom/py/loom/tools:pytest_style_runner.py",
@@ -115,6 +119,7 @@ iree_py_test(
 
 iree_py_test(
     name = "schedule_test",
+    size = "small",
     srcs = [
         "schedule_test.py",
         "//loom/py/loom/tools:pytest_style_runner.py",
@@ -130,6 +135,7 @@ iree_py_test(
 
 iree_py_test(
     name = "descriptors_test",
+    size = "small",
     srcs = [
         "core_descriptors_test.py",
         "//loom/py/loom/tools:pytest_style_runner.py",

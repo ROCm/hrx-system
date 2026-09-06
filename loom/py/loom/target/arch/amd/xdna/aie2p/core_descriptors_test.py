@@ -13,11 +13,13 @@ from loom.target.arch.amd.xdna.aie.schedule import (
     PipelineStageKind,
     pipeline_uses,
 )
+from loom.target.arch.amd.xdna.aie2p.core_descriptor_specs import (
+    _DESCRIPTOR_SPECS,
+    _MACHINE_FORMS,
+)
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     _BUNDLE_SLOT_EXCLUSIONS,
-    _DESCRIPTOR_SPECS,
     _INSTRUCTION_ENCODINGS,
-    _MACHINE_FORMS,
     _SCHEDULE_CLASS_NAMES,
     _SLOT_RESOURCE_KINDS,
     AIE2P_CORE_DESCRIPTOR_SET,
@@ -65,6 +67,13 @@ def test_core_descriptor_closure_is_complete() -> None:
         (view.physical_register, view.reg_class): view.units
         for view in descriptor_set.physical_register_views
     } == {
+        **{
+            (f"l{index}", "aie2p.er"): (
+                f"r{index * 2}",
+                f"r{index * 2 + 1}",
+            )
+            for index in range(16)
+        },
         **{
             (f"x{index}", "aie2p.vec256"): (f"wl{index}", f"wh{index}")
             for index in range(12)
@@ -1079,6 +1088,14 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
     ]
     assert [operand.unit_count for operand in bf16_convert.operands] == [2, 2, 1, 1, 1]
 
+    bf16_widen = descriptors["amd.xdna.aie2p.convert.bf16x32.to.f32x32"]
+    assert [operand.field_name for operand in bf16_widen.operands] == ["dst", "src"]
+    assert [operand.reg_alts[0].reg_class for operand in bf16_widen.operands] == [
+        "aie2p.mbms",
+        "aie2p.vec256",
+    ]
+    assert [operand.unit_count for operand in bf16_widen.operands] == [2, 2]
+
     for numeric_kind in ("s8s8", "u8s8", "s8u8", "u8u8"):
         matrix_multiply = descriptors[
             f"amd.xdna.aie2p.matrix.multiply.{numeric_kind}.m8n8k8.configured"
@@ -1206,6 +1223,19 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
     ]
     assert [operand.unit_count for operand in bf16_broadcast.operands] == [2, 1]
     assert bf16_broadcast.operands[1].register_part == "aie2p.ewl.low128"
+
+    for key in (
+        "amd.xdna.aie2p.insert.bf16x8.zero",
+        "amd.xdna.aie2p.insert.bf16x8.register",
+    ):
+        insert = descriptors[key]
+        operands = {operand.field_name: operand for operand in insert.operands}
+        for field_name in ("dst", "s1"):
+            operand = operands[field_name]
+            assert operand.reg_alts[0].reg_class == "aie2p.ewl"
+            assert operand.unit_count == 1
+            assert operand.register_part is None
+            assert operand.encoding_adapter_id != 0
 
     vector512_move = descriptors["amd.xdna.aie2p.move.vector512"]
     assert [operand.reg_alts[0].reg_class for operand in vector512_move.operands] == [
@@ -1399,6 +1429,28 @@ def test_implicit_registers_and_machine_ties_reach_low() -> None:
         assert carry.reg_alts[0].reg_class == "aie2p.state.srcarry"
         assert carry.reg_alts[0].flags == (RegClassAltFlag.PHYSICAL_ONLY,)
         assert carry.ready_stage == 1
+
+    for key in (
+        "amd.xdna.aie2p.add.carry.i32",
+        "amd.xdna.aie2p.sub.borrow.i32",
+    ):
+        carry_operands = {
+            operand.field_name: operand for operand in descriptors[key].operands
+        }
+        carry_definition = carry_operands["implicit_def_srcarry"]
+        carry_use = carry_operands["implicit_use_srcarry"]
+        assert set(carry_definition.flags) == {
+            OperandFlag.IMPLICIT,
+            OperandFlag.STATE_WRITE,
+        }
+        assert set(carry_use.flags) == {
+            OperandFlag.IMPLICIT,
+            OperandFlag.STATE_READ,
+        }
+        assert carry_definition.reg_alts == carry_use.reg_alts
+        assert carry_definition.reg_alts[0].reg_class == "aie2p.state.srcarry"
+        assert carry_definition.ready_stage == 1
+        assert carry_use.read_stage == 1
 
     link_register = descriptors["amd.xdna.aie2p.return"].operands[0]
     assert link_register.field_name == "implicit_use_lr"

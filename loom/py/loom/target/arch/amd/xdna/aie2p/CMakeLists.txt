@@ -65,6 +65,7 @@ iree_py_library(
     descriptors
   SRCS
     "array_descriptors.py"
+    "core_descriptor_specs.py"
     "core_descriptors.py"
   DEPS
     loom::py::loom::target::arch::amd::xdna::aie2p::encoding_data
@@ -91,6 +92,8 @@ iree_py_test(
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
 )
 
 iree_py_test(
@@ -109,6 +112,8 @@ iree_py_test(
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
 )
 
 iree_py_test(
@@ -128,6 +133,8 @@ iree_py_test(
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
 )
 
 iree_py_test(
@@ -148,6 +155,8 @@ iree_py_test(
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
 )
 
 iree_py_test(
@@ -167,6 +176,8 @@ iree_py_test(
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

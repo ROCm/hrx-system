@@ -62,6 +62,7 @@ def _rules_for(
     volatile: bool = False,
     scalarized_vector_load: bool | None = None,
     split_vector_load: bool | None = None,
+    pair_scalar: bool | None = None,
 ):
     return [
         rule
@@ -94,6 +95,15 @@ def _rules_for(
                 and _primary_descriptor_emit_count(rule) == 2
             )
             is split_vector_load
+        )
+        and (
+            pair_scalar is None
+            or (
+                rule.source_op in (view.view_load, view.view_store)
+                and _source_memory_emit(rule).source_memory.element_byte_count == 8
+                and ".scalar.i32.indexed." in rule.descriptor.key
+            )
+            is pair_scalar
         )
     ]
 
@@ -156,6 +166,7 @@ def test_scalar_memory_rules_cover_every_address_form() -> None:
             view.view_load,
             view.view_store,
             bytewise_scalar=False,
+            pair_scalar=False,
         )
         rule_index = 0
         for (
@@ -204,10 +215,71 @@ def test_scalar_memory_rules_cover_every_address_form() -> None:
         assert rule_index == len(rules)
 
 
+def test_pair_scalar_memory_rules_use_two_native_32bit_accesses() -> None:
+    for root_kind, memory_spaces in _MEMORY_ROOTS:
+        rules = _rules_for(
+            root_kind,
+            view.view_load,
+            view.view_store,
+            pair_scalar=True,
+        )
+        for operation_index, operation in enumerate(
+            (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
+        ):
+            operation_rules = rules[operation_index * 5 : operation_index * 5 + 5]
+            descriptor_prefix = (
+                f"amd.xdna.aie2p.{operation.name.lower()}.scalar.i32.indexed"
+            )
+            assert [rule.descriptor.key for rule in operation_rules] == [
+                f"{descriptor_prefix}.immediate",
+                *(f"{descriptor_prefix}.register",) * 4,
+            ]
+            for rule in operation_rules:
+                assert rule.guards[0].type_pattern.elements == ("i64", "f64")
+                constraint = _source_memory_emit(rule).source_memory
+                assert constraint.operation is operation
+                assert constraint.root_kind is root_kind
+                assert constraint.memory_spaces == memory_spaces
+                assert constraint.element_byte_count == 8
+                assert constraint.vector_lane_count == 1
+                assert constraint.minimum_alignment == 4
+                assert _primary_descriptor_emit_count(rule) == 2
+                if operation is SourceMemoryOperation.LOAD:
+                    concat = rule.emit[-1]
+                    assert isinstance(concat, EmitRegisterConcat)
+                    assert tuple(source.field for source in concat.sources) == (
+                        "chunk_0",
+                        "chunk_1",
+                    )
+                    assert concat.result.field == "result"
+                else:
+                    slices = [
+                        emit
+                        for emit in rule.emit
+                        if isinstance(emit, EmitRegisterSlice)
+                    ]
+                    assert [emit.unit_offset for emit in slices] == [0, 1]
+
+            immediate_projects = [
+                emit.immediates["imm"]
+                for emit in operation_rules[0].emit
+                if isinstance(emit, EmitDescriptorOp)
+            ]
+            assert tuple(project.kind for project in immediate_projects) == (
+                SourceMemoryProjectKind.STATIC_BYTE_OFFSET,
+                SourceMemoryProjectKind.STATIC_BYTE_OFFSET_PLUS_LITERAL,
+            )
+            assert tuple(project.literal_i64 for project in immediate_projects) == (
+                0,
+                4,
+            )
+
+
 def test_bytewise_scalar_memory_rules_preserve_unknown_alignment() -> None:
     expected_shapes = (
         (2, ("i16", "f16", "bf16")),
         (4, ("i32", "f32", "index", "offset")),
+        (8, ("i64", "f64")),
     )
     for root_kind, memory_spaces in _MEMORY_ROOTS:
         rules = _rules_for(
@@ -290,7 +362,9 @@ def test_bytewise_scalar_memory_rules_preserve_unknown_alignment() -> None:
                         if isinstance(emit, EmitDescriptorOp)
                         and emit.descriptor.key == "amd.xdna.aie2p.lshl.i32"
                     ]
-                    assert len(shift_emits) == element_byte_count - 1
+                    expected_word_count = (element_byte_count + 3) // 4
+                    expected_shift_count = element_byte_count - expected_word_count
+                    assert len(shift_emits) == expected_shift_count
                     merge_emits = [
                         emit
                         for emit in rule.emit
@@ -298,10 +372,24 @@ def test_bytewise_scalar_memory_rules_preserve_unknown_alignment() -> None:
                         and emit.descriptor.key == "amd.xdna.aie2p.or.i32"
                     ]
                     if operation is SourceMemoryOperation.LOAD:
-                        assert len(merge_emits) == element_byte_count - 1
-                        assert merge_emits[-1].results["d0"].field == "result"
+                        assert len(merge_emits) == expected_shift_count
+                        if expected_word_count == 1:
+                            assert merge_emits[-1].results["d0"].field == "result"
+                        else:
+                            concat = rule.emit[-1]
+                            assert isinstance(concat, EmitRegisterConcat)
+                            assert concat.result.field == "result"
+                            assert len(concat.sources) == expected_word_count
                     else:
                         assert not merge_emits
+                        slices = [
+                            emit
+                            for emit in rule.emit
+                            if isinstance(emit, EmitRegisterSlice)
+                        ]
+                        assert len(slices) == (
+                            expected_word_count if expected_word_count > 1 else 0
+                        )
 
                 immediate_offsets = [
                     emit.immediates["imm"].literal_i64

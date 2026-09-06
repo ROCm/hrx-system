@@ -16,13 +16,18 @@ iree_py_library(
     "__init__.py"
     "conversion.py"
     "core.py"
+    "core_contract.py"
     "data_path.py"
     "f32.py"
+    "f32_compare.py"
     "floating.py"
+    "i64.py"
     "index_conversion.py"
     "memory.py"
+    "nonlinear.py"
     "packed_dot.py"
     "reduction.py"
+    "scalar_program.py"
     "structural.py"
   DEPS
     loom::py::loom::core
@@ -49,11 +54,14 @@ iree_py_test(
   DEPS
     loom::py::loom::target::arch::amd::xdna::aie2p::contracts::contracts
     loom::py::loom::dialect::scalar::scalar
+    loom::py::loom::dialect::vector::vector
     loom::py::loom::target::contracts::contracts
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
 )
 
 iree_py_test(
@@ -74,6 +82,8 @@ iree_py_test(
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
 )
 
 iree_py_test(
@@ -83,9 +93,15 @@ iree_py_test(
     "../../../../../../tools/pytest_style_runner.py"
   SRCS
     "core_test.py"
+    "i64_test.py"
+    "nonlinear_test.py"
+    "structural_test.py"
     "../../../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.target.arch.amd.xdna.aie2p.contracts.core_test"
+    "loom.target.arch.amd.xdna.aie2p.contracts.i64_test"
+    "loom.target.arch.amd.xdna.aie2p.contracts.nonlinear_test"
+    "loom.target.arch.amd.xdna.aie2p.contracts.structural_test"
   DEPS
     loom::py::loom::target::arch::amd::xdna::aie2p::contracts::contracts
     loom::py::loom::dialect::buffer::buffer
@@ -99,6 +115,8 @@ iree_py_test(
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
 )
 
 iree_py_test(
@@ -119,6 +137,8 @@ iree_py_test(
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
 )
 
 iree_py_test(
@@ -140,6 +160,8 @@ iree_py_test(
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

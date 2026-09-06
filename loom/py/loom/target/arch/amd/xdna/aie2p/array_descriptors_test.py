@@ -49,6 +49,8 @@ def test_topology_parameters_are_ssa_operands() -> None:
     group = descriptors["amd.xdna.aie2p.array.group"]
     assert [operand.field_name for operand in group.operands] == ["result", "lanes"]
     assert not group.immediates
+    assert DescriptorFlag.DEAD_REMOVABLE in group.flags
+    assert DescriptorFlag.UNIQUE_IDENTITY in group.flags
 
     channel = descriptors["amd.xdna.aie2p.array.channel"]
     assert [operand.field_name for operand in channel.operands] == [

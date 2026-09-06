@@ -13,9 +13,16 @@ from collections.abc import Iterable, Mapping
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
+from loom.target.arch.amd.xdna.aie2p.contracts.conversion import (
+    emit_f16_to_f32,
+    emit_f32_to_f16,
+)
 from loom.target.arch.amd.xdna.aie2p.contracts.data_path import (
+    BF16_CONVERSION_ROUNDING,
     vector_data_path_control,
 )
+from loom.target.arch.amd.xdna.aie2p.contracts.f32 import emit_f32_multiply
+from loom.target.arch.amd.xdna.aie2p.contracts.scalar_program import ScalarProgram
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
 )
@@ -38,6 +45,7 @@ from loom.target.contracts import (
 from loom.target.low_descriptors import Descriptor
 
 _F32 = Scalar("f32")
+_F16 = Scalar("f16")
 _BF16X8_VECTOR = Vector("bf16", lanes=8)
 _BF16_DOT2_VECTOR = Vector(
     "bf16", minimum_static_elements=2, maximum_static_elements=32
@@ -56,8 +64,6 @@ _BF16_ELEMENTWISE_MULTIPLY_CONTROL = vector_data_path_control(
     multiplication_mode=3,
     compute_mode=1,
 )
-_BF16_CONVERSION_ROUNDING = 12
-
 # AIE2P T16_32x2_lo/hi select the even and odd BF16 lanes from a 512-bit
 # source. Two ordered VMACs over those streams implement vector.dot2f's two
 # sequential fused accumulations without weakening its exact source contract.
@@ -146,7 +152,7 @@ def _vector_multiply_bf16x32_rule() -> DescriptorRule:
             ),
             EmitDescriptorOp(
                 descriptor=set_rounding,
-                immediates={"i": _BF16_CONVERSION_ROUNDING},
+                immediates={"i": BF16_CONVERSION_ROUNDING},
                 form=DescriptorEmitForm.OP,
             ),
             _op_emit(
@@ -155,6 +161,47 @@ def _vector_multiply_bf16x32_rule() -> DescriptorRule:
                 results={"dst": ValueRef.result("result")},
             ),
         ),
+    )
+
+
+def _scalar_multiply_f16_rule() -> DescriptorRule:
+    """Multiplies binary16 exactly through the binary32 software datapath."""
+
+    # A binary16 product has at most 22 significant bits and remains within
+    # binary32's exponent range, so widening both operands and multiplying in
+    # binary32 computes the exact finite product before the final narrowing.
+    lhs_program = ScalarProgram("lhs_")
+    lhs = emit_f16_to_f32(
+        lhs_program,
+        ValueRef.operand("lhs"),
+        "wide",
+    )
+    rhs_program = ScalarProgram("rhs_")
+    rhs = emit_f16_to_f32(
+        rhs_program,
+        ValueRef.operand("rhs"),
+        "wide",
+    )
+    multiply_emits = emit_f32_multiply(
+        lhs=lhs,
+        rhs=rhs,
+        result_name="result",
+        temporary_prefix="multiply_",
+    )
+    product = ValueRef.temporary("multiply_result")
+    narrow_program = ScalarProgram("narrow_")
+    emit_f32_to_f16(narrow_program, product, None)
+    return DescriptorRule(
+        source_op=scalar_arithmetic.scalar_mulf,
+        descriptor=narrow_program.emits[-1].descriptor,
+        guards=_typed_guards(("lhs", "rhs", "result"), _F16),
+        emit=(
+            *lhs_program.emits,
+            *rhs_program.emits,
+            *multiply_emits,
+            *narrow_program.emits,
+        ),
+        report_key="exact_binary16",
     )
 
 
@@ -455,6 +502,7 @@ def _float_accumulator_binary_emits(
     operation_descriptor_key: str,
     *,
     extract_scalar_result: bool,
+    temporary_prefix: str = "",
 ) -> tuple[ContractEmit, ...]:
     clear = _descriptor("amd.xdna.aie2p.accumulator.clear.f32x64")
     move_to_accumulator = _descriptor("amd.xdna.aie2p.move.vector512.to.accumulator512")
@@ -465,26 +513,27 @@ def _float_accumulator_binary_emits(
     operation = _descriptor(operation_descriptor_key)
     extract = _descriptor("amd.xdna.aie2p.extract.i32.immediate")
 
-    final_vector = (
-        ValueRef.temporary("result_vector") if extract_scalar_result else result
-    )
+    def temporary(name: str) -> ValueRef:
+        return ValueRef.temporary(f"{temporary_prefix}{name}")
+
+    final_vector = temporary("result_vector") if extract_scalar_result else result
     final_vector_result_types = (
         {"dst": DescriptorResultType()} if extract_scalar_result else None
     )
     emits: list[ContractEmit] = [
         _op_emit(
             clear,
-            results={"dst": ValueRef.temporary("zero_accumulator")},
+            results={"dst": temporary("zero_accumulator")},
             result_types={"dst": DescriptorResultType()},
         ),
         EmitRegisterSlice(
-            source=ValueRef.temporary("zero_accumulator"),
-            result=ValueRef.temporary("zero_accumulator_unit"),
+            source=temporary("zero_accumulator"),
+            result=temporary("zero_accumulator_unit"),
             unit_count=1,
         ),
     ]
     for operand_name, operand in (("lhs", lhs), ("rhs", rhs)):
-        accumulator_unit = ValueRef.temporary(f"{operand_name}_accumulator_unit")
+        accumulator_unit = temporary(f"{operand_name}_accumulator_unit")
         emits.extend(
             (
                 _op_emit(
@@ -496,11 +545,11 @@ def _float_accumulator_binary_emits(
                 EmitRegisterConcat(
                     sources=(
                         accumulator_unit,
-                        ValueRef.temporary("zero_accumulator_unit"),
-                        ValueRef.temporary("zero_accumulator_unit"),
-                        ValueRef.temporary("zero_accumulator_unit"),
+                        temporary("zero_accumulator_unit"),
+                        temporary("zero_accumulator_unit"),
+                        temporary("zero_accumulator_unit"),
                     ),
-                    result=ValueRef.temporary(f"{operand_name}_accumulator"),
+                    result=temporary(f"{operand_name}_accumulator"),
                     result_type=_F32X64_ACCUMULATOR,
                 ),
             )
@@ -509,27 +558,27 @@ def _float_accumulator_binary_emits(
         (
             _constant_emit(
                 config_constant,
-                ValueRef.temporary("arithmetic_control"),
+                temporary("arithmetic_control"),
                 _F32_ACCUMULATOR_ADD_CONTROL,
             ),
             _op_emit(
                 operation,
                 operands={
-                    "acc1": ValueRef.temporary("lhs_accumulator"),
-                    "acc2": ValueRef.temporary("rhs_accumulator"),
-                    "acc": ValueRef.temporary("arithmetic_control"),
+                    "acc1": temporary("lhs_accumulator"),
+                    "acc2": temporary("rhs_accumulator"),
+                    "acc": temporary("arithmetic_control"),
                 },
-                results={"dst": ValueRef.temporary("result_accumulator")},
+                results={"dst": temporary("result_accumulator")},
                 result_types={"dst": DescriptorResultType()},
             ),
             EmitRegisterSlice(
-                source=ValueRef.temporary("result_accumulator"),
-                result=ValueRef.temporary("result_accumulator_unit"),
+                source=temporary("result_accumulator"),
+                result=temporary("result_accumulator_unit"),
                 unit_count=1,
             ),
             _op_emit(
                 move_from_accumulator,
-                operands={"src": ValueRef.temporary("result_accumulator_unit")},
+                operands={"src": temporary("result_accumulator_unit")},
                 results={"dst": final_vector},
                 result_types=final_vector_result_types,
             ),
@@ -541,11 +590,51 @@ def _float_accumulator_binary_emits(
                 descriptor=extract,
                 operands={"s1": final_vector},
                 results={"dst": result},
+                result_types={"dst": DescriptorResultType()},
                 immediates={"idx": 0},
                 form=DescriptorEmitForm.OP,
             )
         )
     return tuple(emits)
+
+
+def emit_f32_scalar_accumulator_binary(
+    lhs: ValueRef,
+    rhs: ValueRef,
+    result: ValueRef,
+    operation_descriptor_key: str,
+    *,
+    temporary_prefix: str = "",
+) -> tuple[ContractEmit, ...]:
+    """Builds one scalar binary32 add/sub through the native accumulator."""
+
+    broadcast = _descriptor("amd.xdna.aie2p.splat.i32x16")
+
+    def temporary(name: str) -> ValueRef:
+        return ValueRef.temporary(f"{temporary_prefix}{name}")
+
+    return (
+        _op_emit(
+            broadcast,
+            operands={"src": lhs},
+            results={"dst": temporary("lhs_vector")},
+            result_types={"dst": DescriptorResultType()},
+        ),
+        _op_emit(
+            broadcast,
+            operands={"src": rhs},
+            results={"dst": temporary("rhs_vector")},
+            result_types={"dst": DescriptorResultType()},
+        ),
+        *_float_accumulator_binary_emits(
+            temporary("lhs_vector"),
+            temporary("rhs_vector"),
+            result,
+            operation_descriptor_key,
+            extract_scalar_result=True,
+            temporary_prefix=temporary_prefix,
+        ),
+    )
 
 
 def _float_vector_accumulator_binary_rule(
@@ -571,32 +660,16 @@ def _float_scalar_accumulator_binary_rule(
     source_op: Op,
     operation_descriptor_key: str,
 ) -> DescriptorRule:
-    broadcast = _descriptor("amd.xdna.aie2p.splat.i32x16")
     operation = _descriptor(operation_descriptor_key)
     return DescriptorRule(
         source_op=source_op,
         descriptor=operation,
         guards=_typed_guards(("lhs", "rhs", "result"), _F32),
-        emit=(
-            _op_emit(
-                broadcast,
-                operands={"src": ValueRef.operand("lhs")},
-                results={"dst": ValueRef.temporary("lhs_vector")},
-                result_types={"dst": DescriptorResultType()},
-            ),
-            _op_emit(
-                broadcast,
-                operands={"src": ValueRef.operand("rhs")},
-                results={"dst": ValueRef.temporary("rhs_vector")},
-                result_types={"dst": DescriptorResultType()},
-            ),
-            *_float_accumulator_binary_emits(
-                ValueRef.temporary("lhs_vector"),
-                ValueRef.temporary("rhs_vector"),
-                ValueRef.result("result"),
-                operation_descriptor_key,
-                extract_scalar_result=True,
-            ),
+        emit=emit_f32_scalar_accumulator_binary(
+            ValueRef.operand("lhs"),
+            ValueRef.operand("rhs"),
+            ValueRef.result("result"),
+            operation_descriptor_key,
         ),
     )
 
@@ -604,6 +677,7 @@ def _float_scalar_accumulator_binary_rule(
 AIE2P_BF16_MATRIX_RULES = (_matrix_multiply_bf16bf16_m8n8k1_rule(),)
 
 AIE2P_FLOATING_RULES = (
+    _scalar_multiply_f16_rule(),
     _vector_multiply_bf16x32_rule(),
     _float_matrix_accumulator_zero_rule(),
     _float_matrix_accumulator_add_rule(),

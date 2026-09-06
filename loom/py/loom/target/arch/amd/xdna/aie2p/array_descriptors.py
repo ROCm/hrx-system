@@ -178,7 +178,10 @@ _DESCRIPTORS = (
             operands=("lanes",),
         ),
         schedule_class=_SCHEDULE_GRAPH,
-        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        flags=(
+            DescriptorFlag.DEAD_REMOVABLE,
+            DescriptorFlag.UNIQUE_IDENTITY,
+        ),
     ),
     Descriptor(
         key=f"{_DESCRIPTOR_SET_KEY}.worker",

@@ -71,9 +71,11 @@ _SCALAR_MEMORY_SHAPES = (
         (_I32, _F32, _INDEX, _OFFSET),
     ),
 )
+_PAIR_SCALAR_MEMORY_TYPE = Scalar(("i64", "f64"))
 _BYTEWISE_SCALAR_MEMORY_SHAPES = (
     (2, Scalar(("i16", "f16", "bf16"))),
     (4, Scalar(("i32", "f32", "index", "offset"))),
+    (8, _PAIR_SCALAR_MEMORY_TYPE),
 )
 _F32X64_ACCUMULATOR = Vector("f32", lanes=64)
 _ACCUMULATOR_CHUNK_BYTE_OFFSETS = (0, 64, 128, 192)
@@ -193,6 +195,7 @@ def _memory_constraint(
         dynamic_term_count=None if dynamic else 0,
         dynamic_term_count_minimum=1 if dynamic else 0,
         allow_dynamic_stride_values=dynamic,
+        cache_policy_build_flags=None,
     )
 
 
@@ -599,6 +602,137 @@ def _accumulator_memory_rule(
     )
 
 
+def _pair_scalar_memory_rule(
+    operation: SourceMemoryOperation,
+    address_form: _MemoryAddressForm,
+    *,
+    root_kind: SourceMemoryRootKind,
+    memory_spaces: tuple[str, ...],
+    volatile: bool,
+) -> DescriptorRule:
+    """Builds an i64/f64 access from two native 32-bit scalar accesses."""
+
+    is_load = operation is SourceMemoryOperation.LOAD
+    immediate_memory = address_form is _MemoryAddressForm.IMMEDIATE
+    descriptor_family = "load" if is_load else "store"
+    descriptor_suffix = "immediate" if immediate_memory else "register"
+    descriptor_key = (
+        f"amd.xdna.aie2p.{descriptor_family}.scalar.i32.indexed.{descriptor_suffix}"
+    )
+    if volatile:
+        descriptor_key = f"{descriptor_key}.volatile"
+    memory_descriptor = _descriptor(descriptor_key)
+    source_memory = _memory_constraint(
+        operation,
+        address_form,
+        root_kind=root_kind,
+        memory_spaces=memory_spaces,
+        element_byte_count=8,
+        vector_lane_count=1,
+        minimum_alignment=4,
+        immediate_offset_minimum=-32,
+        immediate_offset_maximum=28,
+        maximum_additional_static_byte_offset=4,
+    )
+
+    emits: list[ContractEmit] = []
+    chunks: list[ValueRef] = []
+    for chunk_index, chunk_byte_offset in enumerate((0, 4)):
+        chunk = ValueRef.temporary(f"chunk_{chunk_index}")
+        chunks.append(chunk)
+        if not is_load:
+            emits.append(
+                EmitRegisterSlice(
+                    source=ValueRef.operand("value"),
+                    result=chunk,
+                    unit_offset=chunk_index,
+                    unit_count=1,
+                )
+            )
+
+        memory_operands = (
+            {"ptr": ValueRef.operand("view")}
+            if is_load
+            else {"src": chunk, "ptr": ValueRef.operand("view")}
+        )
+        memory_results = {"dst": chunk} if is_load else {}
+        if immediate_memory:
+            static_byte_offset = (
+                SourceMemoryProject.static_byte_offset_plus(chunk_byte_offset)
+                if chunk_byte_offset
+                else SourceMemoryProject.static_byte_offset()
+            )
+            emits.append(
+                EmitDescriptorOp(
+                    descriptor=memory_descriptor,
+                    operands=memory_operands,
+                    results=memory_results,
+                    result_types=({"dst": DescriptorResultType()} if is_load else None),
+                    immediates={"imm": static_byte_offset},
+                    source_memory=source_memory,
+                    form=DescriptorEmitForm.OP,
+                )
+            )
+        else:
+            address_emits, address_index = _register_address_emits(
+                source_memory,
+                address_form,
+                additional_static_byte_offset=chunk_byte_offset,
+                temporary_suffix=f"_{chunk_index}",
+            )
+            emits.extend(address_emits)
+            memory_operands["dj"] = address_index
+            emits.append(
+                EmitDescriptorOp(
+                    descriptor=memory_descriptor,
+                    operands=memory_operands,
+                    results=memory_results,
+                    result_types=({"dst": DescriptorResultType()} if is_load else None),
+                    source_memory=source_memory,
+                    form=DescriptorEmitForm.OP,
+                )
+            )
+
+    if is_load:
+        emits.append(
+            EmitRegisterConcat(
+                sources=tuple(chunks),
+                result=ValueRef.result("result"),
+            )
+        )
+
+    return DescriptorRule(
+        source_op=view.view_load if is_load else view.view_store,
+        descriptor=memory_descriptor,
+        guards=(
+            *(
+                (Guard.instance_flags_has_all("memory_flags", "volatile"),)
+                if volatile
+                else ()
+            ),
+            Guard.value_type(
+                "result" if is_load else "value", _PAIR_SCALAR_MEMORY_TYPE
+            ),
+        ),
+        emit=tuple(emits),
+    )
+
+
+def _pair_scalar_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
+    return tuple(
+        _pair_scalar_memory_rule(
+            operation,
+            address_form,
+            root_kind=root_kind,
+            memory_spaces=memory_spaces,
+            volatile=volatile,
+        )
+        for root_kind, memory_spaces in _MEMORY_ROOTS
+        for operation in (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
+        for address_form in _MemoryAddressForm
+    )
+
+
 def _scalar_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
     return tuple(
         _memory_rule(
@@ -681,9 +815,24 @@ def _bytewise_scalar_memory_rule(
 
     emits: list[ContractEmit] = []
     loaded_bytes: list[ValueRef] = []
-    stored_byte = ValueRef.operand("value")
+    word_count = (element_byte_count + 3) // 4
+    stored_words: list[ValueRef] = []
     right_shift_amount = ValueRef.temporary("right_shift_amount")
     if not is_load:
+        if word_count == 1:
+            stored_words.append(ValueRef.operand("value"))
+        else:
+            for word_index in range(word_count):
+                word = ValueRef.temporary(f"stored_word_{word_index}")
+                stored_words.append(word)
+                emits.append(
+                    EmitRegisterSlice(
+                        source=ValueRef.operand("value"),
+                        result=word,
+                        unit_offset=word_index,
+                        unit_count=1,
+                    )
+                )
         emits.append(
             EmitDescriptorOp(
                 descriptor=_descriptor("amd.xdna.aie2p.constant.i32.short"),
@@ -693,24 +842,30 @@ def _bytewise_scalar_memory_rule(
                 form=DescriptorEmitForm.CONST,
             )
         )
+    stored_bytes = list(stored_words)
 
     for byte_index in range(element_byte_count):
         temporary_suffix = f"_{byte_index}"
-        if not is_load and byte_index:
-            next_stored_byte = ValueRef.temporary(f"shifted_{byte_index}")
-            emits.append(
-                EmitDescriptorOp(
-                    descriptor=_descriptor("amd.xdna.aie2p.lshl.i32"),
-                    operands={
-                        "s0": stored_byte,
-                        "s1": right_shift_amount,
-                    },
-                    results={"d0": next_stored_byte},
-                    result_types={"d0": _I32},
-                    form=DescriptorEmitForm.OP,
+        word_index = byte_index // 4
+        byte_in_word = byte_index % 4
+        if not is_load:
+            stored_byte = stored_bytes[word_index]
+            if byte_in_word:
+                next_stored_byte = ValueRef.temporary(f"shifted_{byte_index}")
+                emits.append(
+                    EmitDescriptorOp(
+                        descriptor=_descriptor("amd.xdna.aie2p.lshl.i32"),
+                        operands={
+                            "s0": stored_byte,
+                            "s1": right_shift_amount,
+                        },
+                        results={"d0": next_stored_byte},
+                        result_types={"d0": _I32},
+                        form=DescriptorEmitForm.OP,
+                    )
                 )
-            )
-            stored_byte = next_stored_byte
+                stored_byte = next_stored_byte
+                stored_bytes[word_index] = stored_byte
 
         memory_operands = {"ptr": ValueRef.operand("view")}
         memory_results = {}
@@ -721,7 +876,7 @@ def _bytewise_scalar_memory_rule(
             memory_results = {"dst": loaded_byte}
             memory_result_types = {"dst": _I32}
         else:
-            memory_operands["src"] = stored_byte
+            memory_operands["src"] = stored_bytes[word_index]
 
         if immediate_memory:
             static_byte_offset = (
@@ -761,58 +916,77 @@ def _bytewise_scalar_memory_rule(
             )
 
     if is_load:
-        pieces = [loaded_bytes[0]]
-        for byte_index, loaded_byte in enumerate(loaded_bytes[1:], start=1):
-            shift_amount = ValueRef.temporary(f"shift_amount_{byte_index}")
-            shifted_byte = ValueRef.temporary(f"shifted_{byte_index}")
-            emits.extend(
-                (
-                    EmitDescriptorOp(
-                        descriptor=_descriptor("amd.xdna.aie2p.constant.i32.short"),
-                        results={"dst": shift_amount},
-                        result_types={"dst": _I32},
-                        immediates={"i": byte_index * 8},
-                        form=DescriptorEmitForm.CONST,
-                    ),
-                    EmitDescriptorOp(
-                        descriptor=_descriptor("amd.xdna.aie2p.lshl.i32"),
-                        operands={"s0": loaded_byte, "s1": shift_amount},
-                        results={"d0": shifted_byte},
-                        result_types={"d0": _I32},
-                        form=DescriptorEmitForm.OP,
-                    ),
-                )
-            )
-            pieces.append(shifted_byte)
-
-        merge_level = 0
-        while len(pieces) > 1:
-            merged_pieces: list[ValueRef] = []
-            for pair_index in range(0, len(pieces), 2):
-                if pair_index + 1 == len(pieces):
-                    merged_pieces.append(pieces[pair_index])
-                    continue
-                is_final_merge = len(pieces) == 2
-                merged_piece = (
-                    ValueRef.result("result")
-                    if is_final_merge
-                    else ValueRef.temporary(f"merged_{merge_level}_{pair_index // 2}")
-                )
-                emits.append(
-                    EmitDescriptorOp(
-                        descriptor=_descriptor("amd.xdna.aie2p.or.i32"),
-                        operands={
-                            "s0": pieces[pair_index],
-                            "s1": pieces[pair_index + 1],
-                        },
-                        results={"d0": merged_piece},
-                        result_types=None if is_final_merge else {"d0": _I32},
-                        form=DescriptorEmitForm.OP,
+        loaded_words: list[ValueRef] = []
+        for word_index in range(word_count):
+            word_start = word_index * 4
+            word_end = min(word_start + 4, element_byte_count)
+            pieces = [loaded_bytes[word_start]]
+            for byte_index in range(word_start + 1, word_end):
+                loaded_byte = loaded_bytes[byte_index]
+                shift_amount = ValueRef.temporary(f"shift_amount_{byte_index}")
+                shifted_byte = ValueRef.temporary(f"shifted_{byte_index}")
+                emits.extend(
+                    (
+                        EmitDescriptorOp(
+                            descriptor=_descriptor("amd.xdna.aie2p.constant.i32.short"),
+                            results={"dst": shift_amount},
+                            result_types={"dst": _I32},
+                            immediates={"i": (byte_index - word_start) * 8},
+                            form=DescriptorEmitForm.CONST,
+                        ),
+                        EmitDescriptorOp(
+                            descriptor=_descriptor("amd.xdna.aie2p.lshl.i32"),
+                            operands={"s0": loaded_byte, "s1": shift_amount},
+                            results={"d0": shifted_byte},
+                            result_types={"d0": _I32},
+                            form=DescriptorEmitForm.OP,
+                        ),
                     )
                 )
-                merged_pieces.append(merged_piece)
-            pieces = merged_pieces
-            merge_level += 1
+                pieces.append(shifted_byte)
+
+            merge_level = 0
+            while len(pieces) > 1:
+                merged_pieces: list[ValueRef] = []
+                for pair_index in range(0, len(pieces), 2):
+                    if pair_index + 1 == len(pieces):
+                        merged_pieces.append(pieces[pair_index])
+                        continue
+                    is_final_merge = len(pieces) == 2
+                    merged_piece = (
+                        ValueRef.result("result")
+                        if is_final_merge and word_count == 1
+                        else ValueRef.temporary(
+                            f"word_{word_index}_merged_{merge_level}_{pair_index // 2}"
+                        )
+                    )
+                    emits.append(
+                        EmitDescriptorOp(
+                            descriptor=_descriptor("amd.xdna.aie2p.or.i32"),
+                            operands={
+                                "s0": pieces[pair_index],
+                                "s1": pieces[pair_index + 1],
+                            },
+                            results={"d0": merged_piece},
+                            result_types=(
+                                None
+                                if is_final_merge and word_count == 1
+                                else {"d0": _I32}
+                            ),
+                            form=DescriptorEmitForm.OP,
+                        )
+                    )
+                    merged_pieces.append(merged_piece)
+                pieces = merged_pieces
+                merge_level += 1
+            loaded_words.append(pieces[0])
+        if word_count > 1:
+            emits.append(
+                EmitRegisterConcat(
+                    sources=tuple(loaded_words),
+                    result=ValueRef.result("result"),
+                )
+            )
 
     return DescriptorRule(
         source_op=view.view_load if is_load else view.view_store,
@@ -1234,12 +1408,14 @@ def _accumulator_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
 
 AIE2P_MEMORY_RULES: tuple[DescriptorRule, ...] = (
     *_scalar_memory_rules(volatile=True),
+    *_pair_scalar_memory_rules(volatile=True),
     *_bytewise_scalar_memory_rules(volatile=True),
     *_two_lane_16bit_load_rules(volatile=True),
     *_vector_memory_rules(volatile=True),
     *_split_256bit_vector_load_rules(volatile=True),
     *_accumulator_memory_rules(volatile=True),
     *_scalar_memory_rules(volatile=False),
+    *_pair_scalar_memory_rules(volatile=False),
     *_bytewise_scalar_memory_rules(volatile=False),
     *_two_lane_16bit_load_rules(volatile=False),
     *_vector_memory_rules(volatile=False),

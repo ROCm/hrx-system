@@ -4,11 +4,10 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""AIE2P target-low closure derived from owned machine and schedule tables."""
+"""AIE2P Low descriptors derived from semantic, machine, and schedule tables."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
 from itertools import combinations
 from pathlib import Path
 
@@ -31,6 +30,7 @@ from loom.target.arch.amd.xdna.aie.schedule import (
     memory_separation,
     pipeline_uses,
 )
+from loom.target.arch.amd.xdna.aie2p import core_descriptor_specs as descriptor_specs
 from loom.target.arch.amd.xdna.aie2p.core_encoding_data import CORE_ENCODING_TABLE
 from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
 from loom.target.arch.amd.xdna.aie2p.core_schedule_data import CORE_SCHEDULE_TABLE
@@ -68,7 +68,6 @@ from loom.target.low_descriptors import (
     RegClassFlag,
     RegisterPackingResource,
     RegisterPackingResourceMember,
-    RegisterPart,
     Resource,
     ResourceKind,
     ScheduleClass,
@@ -77,1350 +76,6 @@ from loom.target.low_descriptors import (
     TimingEvent,
 )
 
-_TARGET_KEY = "amd.xdna.aie2p"
-_EL_LOW32_PART = "aie2p.elpredicate.low32"
-_EL_HIGH32_PART = "aie2p.elpredicate.high32"
-_VEC256_LOW128_PART = "aie2p.vec256.low128"
-_VEC256_HIGH128_PART = "aie2p.vec256.high128"
-_EWL_LOW128_PART = "aie2p.ewl.low128"
-_REGISTER_PARTS = (
-    RegisterPart(_EL_LOW32_PART, "aie2p.elpredicate", 0x1),
-    RegisterPart(_EL_HIGH32_PART, "aie2p.elpredicate", 0x2),
-    RegisterPart(_VEC256_LOW128_PART, "aie2p.vec256", 0x1),
-    RegisterPart(_VEC256_HIGH128_PART, "aie2p.vec256", 0x2),
-    RegisterPart(_EWL_LOW128_PART, "aie2p.ewl", 0x1),
-)
-_REGISTER_PARTS_BY_NAME = {part.name: part for part in _REGISTER_PARTS}
-
-
-@dataclass(frozen=True, slots=True)
-class _DescriptorSpec:
-    """Semantic selection of one physical form and its exact itinerary."""
-
-    form_name: str
-    key: str
-    semantic_tag: str
-    itinerary: str
-    storage_overrides: tuple[tuple[str, str], ...] = ()
-    op_kind: DescriptorOpKind = DescriptorOpKind.OP
-    implicit_outputs: tuple[str, ...] = ()
-    asm_mnemonic: str | None = None
-    operand_register_parts: tuple[tuple[str, str], ...] = ()
-    encoding_adapter_overrides: tuple[tuple[str, str], ...] = ()
-    storage_continuation_part: str | None = None
-    schedule_alternatives: tuple[str, ...] = ()
-    memory_width_bits: int | None = None
-    ordered_memory: bool = False
-    effects: tuple[Effect, ...] = ()
-    allocation_move: bool = False
-
-
-_VECTOR_MEMORY_FORM_FAMILIES = (
-    (
-        128,
-        (
-            "VLDA_128_dmv_lda_w_idx",
-            "VLDA_128_dmv_lda_w_idx_imm",
-            "OP_mWa",
-        ),
-        ("VLDB_128_idx", "VLDB_128_idx_imm", "OP_mWb"),
-        (
-            "VST_128_dmv_sts_w_idx",
-            "VST_128_dmv_sts_w_idx_imm",
-            "OP_mWs",
-        ),
-    ),
-    (
-        256,
-        ("VLDA_dmw_lda_w_idx", "VLDA_dmw_lda_w_idx_imm", "OP_mWa"),
-        ("VLDB_dmw_ldb_idx", "VLDB_dmw_ldb_idx_imm", "OP_mWb"),
-        ("VST_dmw_sts_w_idx", "VST_dmw_sts_w_idx_imm", "OP_mWs"),
-    ),
-    (
-        512,
-        ("VLDA_dmx_lda_x_idx", "VLDA_dmx_lda_x_idx_imm", None),
-        ("VLDB_dmx_ldb_x_idx", "VLDB_dmx_ldb_x_idx_imm", None),
-        ("VST_dmx_sts_x_idx", "VST_dmx_sts_x_idx_imm", None),
-    ),
-)
-
-# Value types with native register layouts for the bit-preserving vector
-# load/store forms below.
-AIE2P_VECTOR_MEMORY_ELEMENT_TYPES = (
-    ("i8", 8),
-    ("i16", 16),
-    ("bf16", 16),
-    ("i32", 32),
-    ("f32", 32),
-)
-
-
-def _vector_memory_operand_overrides(
-    width_bits: int,
-    element_type: str,
-    operand_name: str,
-    native_adapter: str | None,
-) -> tuple[
-    tuple[tuple[str, str], ...],
-    tuple[tuple[str, str], ...],
-    tuple[tuple[str, str], ...],
-]:
-    """Returns storage, part, and encoding overrides for one memory operand."""
-
-    if width_bits != 128:
-        return (), (), ()
-    if native_adapter is None:
-        raise ValueError("128-bit vector memory forms need an encoding adapter")
-    if element_type == "bf16":
-        return (
-            ((operand_name, "eWL"),),
-            ((operand_name, _EWL_LOW128_PART),),
-            ((operand_name, f"LOOM_eWL_{native_adapter}"),),
-        )
-    return (
-        (),
-        ((operand_name, _VEC256_LOW128_PART),),
-        ((operand_name, native_adapter),),
-    )
-
-
-def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
-    """Selects every exact-width native vector memory form."""
-
-    result = []
-    for width_bits, load_a, load_b, store in _VECTOR_MEMORY_FORM_FAMILIES:
-        for element_type, element_bits in AIE2P_VECTOR_MEMORY_ELEMENT_TYPES:
-            shape = f"{element_type}x{width_bits // element_bits}"
-            load_a_register_key = f"{_TARGET_KEY}.load.a.{shape}.indexed.register"
-            load_a_immediate_key = f"{_TARGET_KEY}.load.a.{shape}.indexed.immediate"
-            load_b_register_key = f"{_TARGET_KEY}.load.b.{shape}.indexed.register"
-            load_b_immediate_key = f"{_TARGET_KEY}.load.b.{shape}.indexed.immediate"
-            store_register_key = f"{_TARGET_KEY}.store.{shape}.indexed.register"
-            store_immediate_key = f"{_TARGET_KEY}.store.{shape}.indexed.immediate"
-            load_a_overrides = _vector_memory_operand_overrides(
-                width_bits, element_type, "dst", load_a[2]
-            )
-            load_b_overrides = _vector_memory_operand_overrides(
-                width_bits, element_type, "dst", load_b[2]
-            )
-            store_overrides = _vector_memory_operand_overrides(
-                width_bits, element_type, "src", store[2]
-            )
-            load_storage_continuation_part = (
-                _VEC256_HIGH128_PART
-                if width_bits == 128 and element_type != "bf16"
-                else None
-            )
-            result.extend(
-                (
-                    _DescriptorSpec(
-                        load_a[1],
-                        load_a_immediate_key,
-                        f"memory.load.indexed.{shape}",
-                        f"II_{load_a[1]}",
-                        storage_overrides=load_a_overrides[0],
-                        asm_mnemonic=f"vlda.{width_bits}.{shape}",
-                        operand_register_parts=load_a_overrides[1],
-                        encoding_adapter_overrides=load_a_overrides[2],
-                        storage_continuation_part=load_storage_continuation_part,
-                        schedule_alternatives=(load_b_immediate_key,),
-                        memory_width_bits=width_bits,
-                    ),
-                    _DescriptorSpec(
-                        load_a[0],
-                        load_a_register_key,
-                        f"memory.load.indexed.{shape}",
-                        f"II_{load_a[0]}",
-                        storage_overrides=load_a_overrides[0],
-                        asm_mnemonic=f"vlda.{width_bits}.{shape}.index",
-                        operand_register_parts=load_a_overrides[1],
-                        encoding_adapter_overrides=load_a_overrides[2],
-                        storage_continuation_part=load_storage_continuation_part,
-                        schedule_alternatives=(load_b_register_key,),
-                        memory_width_bits=width_bits,
-                    ),
-                    _DescriptorSpec(
-                        load_b[1],
-                        load_b_immediate_key,
-                        f"memory.load.indexed.{shape}",
-                        f"II_{load_b[1]}",
-                        storage_overrides=load_b_overrides[0],
-                        asm_mnemonic=f"vldb.{width_bits}.{shape}",
-                        operand_register_parts=load_b_overrides[1],
-                        encoding_adapter_overrides=load_b_overrides[2],
-                        storage_continuation_part=load_storage_continuation_part,
-                        memory_width_bits=width_bits,
-                    ),
-                    _DescriptorSpec(
-                        load_b[0],
-                        load_b_register_key,
-                        f"memory.load.indexed.{shape}",
-                        f"II_{load_b[0]}",
-                        storage_overrides=load_b_overrides[0],
-                        asm_mnemonic=f"vldb.{width_bits}.{shape}.index",
-                        operand_register_parts=load_b_overrides[1],
-                        encoding_adapter_overrides=load_b_overrides[2],
-                        storage_continuation_part=load_storage_continuation_part,
-                        memory_width_bits=width_bits,
-                    ),
-                    _DescriptorSpec(
-                        store[1],
-                        store_immediate_key,
-                        f"memory.store.indexed.{shape}",
-                        f"II_{store[1]}",
-                        storage_overrides=store_overrides[0],
-                        asm_mnemonic=f"vst.{width_bits}.{shape}",
-                        operand_register_parts=store_overrides[1],
-                        encoding_adapter_overrides=store_overrides[2],
-                        memory_width_bits=width_bits,
-                    ),
-                    _DescriptorSpec(
-                        store[0],
-                        store_register_key,
-                        f"memory.store.indexed.{shape}",
-                        f"II_{store[0]}",
-                        storage_overrides=store_overrides[0],
-                        asm_mnemonic=f"vst.{width_bits}.{shape}.index",
-                        operand_register_parts=store_overrides[1],
-                        encoding_adapter_overrides=store_overrides[2],
-                        memory_width_bits=width_bits,
-                    ),
-                )
-            )
-    return tuple(result)
-
-
-_INTEGER_MATRIX_NUMERIC_KINDS = ("s8s8", "u8s8", "s8u8", "u8u8")
-
-
-def _integer_matrix_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
-    """Selects configured 8x8x8 integer multiply and accumulate forms."""
-
-    operations = (
-        (
-            "multiply",
-            "VMUL_vmul_cm_core_X_X",
-            "II_VMUL_vmul_cm_core_X_X",
-            "mmul",
-            (("dst", "mBMs"),),
-        ),
-        (
-            "accumulate",
-            "VMAC_vmul_cm_core_X_X",
-            "II_VMAC_vmul_cm_core_X_X",
-            "mma",
-            (("dst", "mBMs"), ("acc1", "mBMs")),
-        ),
-    )
-    return tuple(
-        _DescriptorSpec(
-            form_name,
-            f"{_TARGET_KEY}.matrix.{operation}.{numeric_kind}.m8n8k8.configured",
-            f"matrix.{operation}.{numeric_kind}.m8n8k8.configured",
-            itinerary,
-            storage_overrides=storage_overrides,
-            asm_mnemonic=f"{mnemonic}.{numeric_kind}.m8n8k8",
-        )
-        for operation, form_name, itinerary, mnemonic, storage_overrides in operations
-        for numeric_kind in _INTEGER_MATRIX_NUMERIC_KINDS
-    )
-
-
-def _packed_dot_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
-    """Selects the configured 8-bit channel multiply used by dot4i."""
-
-    return (
-        _DescriptorSpec(
-            "VMUL_vmul_cm_core_Y_X",
-            f"{_TARGET_KEY}.dot4i.i8x64.configured",
-            "integer.dot4i.i8x64.configured",
-            "II_VMUL_vmul_cm_core_Y_X",
-            storage_overrides=(("dst", "mBMs"), ("s1", "VEC256")),
-            asm_mnemonic="dot4i.i8x64",
-        ),
-    )
-
-
-def _packed_i4_unpack_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
-    """Selects native 64-lane signed and unsigned 4-to-8-bit unpack forms."""
-
-    return tuple(
-        _DescriptorSpec(
-            f"VUNPACK_mv_unpack_w_unpackSign{sign_bit}",
-            f"{_TARGET_KEY}.unpack.{source_kind}4x64.to.{source_kind}8x64.configured",
-            f"integer.unpack.{source_kind}4x64.to.{source_kind}8x64.configured",
-            f"II_VUNPACK_mv_unpack_w_unpackSign{sign_bit}",
-            asm_mnemonic=f"vunpack.{source_kind}4.to.{source_kind}8x64",
-        )
-        for source_kind, sign_bit in (("u", 0), ("s", 1))
-    )
-
-
-def _scalar_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
-    """Builds exact-width scalar load and store descriptors."""
-
-    result = []
-    for (
-        element_type,
-        memory_width_bits,
-        load_immediate_form,
-        load_immediate_itinerary,
-        load_register_form,
-        load_register_itinerary,
-        store_immediate_form,
-        store_immediate_itinerary,
-        store_register_form,
-        store_register_itinerary,
-    ) in (
-        (
-            "i8",
-            8,
-            "LDA_u8_idx_imm",
-            "II_LDA_u8_idx_imm",
-            "LDA_u8_idx",
-            "II_LDA_u8_idx",
-            "ST_s8_idx_imm",
-            "II_ST_s8_idx_imm",
-            "ST_s8_idx",
-            "II_ST_s8_idx",
-        ),
-        (
-            "i16",
-            16,
-            "LDA_u16_idx_imm",
-            "II_LDA_u16_idx_imm",
-            "LDA_u16_idx",
-            "II_LDA_u16_idx",
-            "ST_s16_idx_imm",
-            "II_ST_s16_idx_imm",
-            "ST_s16_idx",
-            "II_ST_s16_idx",
-        ),
-        (
-            "i32",
-            32,
-            "LDA_dms_lda_idx_imm",
-            "II_LDA_dms_lda_idx_imm_eR",
-            "LDA_dms_lda_idx",
-            "II_LDA_dms_lda_idx_eR",
-            "ST_dms_sts_idx_imm",
-            "II_ST_dms_sts_idx_imm_eR",
-            "ST_dms_sts_idx",
-            "II_ST_dms_sts_idx_eR",
-        ),
-    ):
-        result.extend(
-            (
-                _DescriptorSpec(
-                    load_immediate_form,
-                    f"{_TARGET_KEY}.load.scalar.{element_type}.indexed.immediate",
-                    f"memory.load.indexed.{element_type}",
-                    load_immediate_itinerary,
-                    (("dst", "eR"),),
-                    memory_width_bits=memory_width_bits,
-                ),
-                _DescriptorSpec(
-                    load_register_form,
-                    f"{_TARGET_KEY}.load.scalar.{element_type}.indexed.register",
-                    f"memory.load.indexed.{element_type}",
-                    load_register_itinerary,
-                    (("dst", "eR"),),
-                    asm_mnemonic=f"lda.{element_type}.index",
-                    memory_width_bits=memory_width_bits,
-                ),
-                _DescriptorSpec(
-                    store_immediate_form,
-                    f"{_TARGET_KEY}.store.scalar.{element_type}.indexed.immediate",
-                    f"memory.store.indexed.{element_type}",
-                    store_immediate_itinerary,
-                    (("src", "eR"),),
-                    memory_width_bits=memory_width_bits,
-                ),
-                _DescriptorSpec(
-                    store_register_form,
-                    f"{_TARGET_KEY}.store.scalar.{element_type}.indexed.register",
-                    f"memory.store.indexed.{element_type}",
-                    store_register_itinerary,
-                    (("src", "eR"),),
-                    asm_mnemonic=f"st.{element_type}.index",
-                    memory_width_bits=memory_width_bits,
-                ),
-            )
-        )
-    return tuple(result)
-
-
-_BASE_DESCRIPTOR_SPECS = (
-    _DescriptorSpec(
-        "ADD_add_r_ri",
-        f"{_TARGET_KEY}.add.i32.immediate",
-        "integer.add.i32",
-        "II_ADD_add_r_ri",
-    ),
-    _DescriptorSpec(
-        "MOV_alu_mv_alu_fx2flt",
-        f"{_TARGET_KEY}.convert.signed.i32.to.f32",
-        "conversion.signed.i32.to.f32",
-        "II_MOV_alu_mv_alu_fx2flt",
-        asm_mnemonic="convert.signed.i32.to.f32",
-    ),
-    _DescriptorSpec(
-        "ADD_add_r_ri",
-        f"{_TARGET_KEY}.select.mask.i32",
-        "integer.select.mask.i32",
-        "II_ADD_add_r_ri",
-        (("d0", "eRS16"),),
-        asm_mnemonic="select.mask",
-    ),
-    *_scalar_memory_descriptor_specs(),
-    _DescriptorSpec(
-        "MOVS",
-        f"{_TARGET_KEY}.move.to.address-index",
-        "register.move.to.address-index",
-        "II_MOVS_eDJ_eR",
-        (("dst", "eDJ"), ("src", "eR")),
-        asm_mnemonic="mov.address-index",
-    ),
-    _DescriptorSpec(
-        "NOP",
-        f"{_TARGET_KEY}.nop",
-        "control.nop",
-        "NoItinerary",
-    ),
-    _DescriptorSpec(
-        "ACQ_mLockId_imm",
-        f"{_TARGET_KEY}.lock.acquire.immediate",
-        "synchronization.lock.acquire",
-        "II_ACQ_mLockId_imm",
-        asm_mnemonic="acq",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
-    ),
-    _DescriptorSpec(
-        "ACQ_mLockId_reg",
-        f"{_TARGET_KEY}.lock.acquire.register",
-        "synchronization.lock.acquire",
-        "II_ACQ_mLockId_reg",
-        asm_mnemonic="acq.reg",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
-    ),
-    _DescriptorSpec(
-        "ACQ_COND_mLockId_imm",
-        f"{_TARGET_KEY}.lock.acquire.conditional.immediate",
-        "synchronization.lock.acquire.conditional",
-        "II_ACQ_COND_mLockId_imm",
-        asm_mnemonic="acq.cond",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
-    ),
-    _DescriptorSpec(
-        "ACQ_COND_mLockId_reg",
-        f"{_TARGET_KEY}.lock.acquire.conditional.register",
-        "synchronization.lock.acquire.conditional",
-        "II_ACQ_COND_mLockId_reg",
-        asm_mnemonic="acq.cond.reg",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
-    ),
-    _DescriptorSpec(
-        "REL_mLockId_imm",
-        f"{_TARGET_KEY}.lock.release.immediate",
-        "synchronization.lock.release",
-        "II_REL_mLockId_imm",
-        asm_mnemonic="rel",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
-    ),
-    _DescriptorSpec(
-        "REL_mLockId_reg",
-        f"{_TARGET_KEY}.lock.release.register",
-        "synchronization.lock.release",
-        "II_REL_mLockId_reg",
-        asm_mnemonic="rel.reg",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
-    ),
-    _DescriptorSpec(
-        "REL_COND_mLockId_imm",
-        f"{_TARGET_KEY}.lock.release.conditional.immediate",
-        "synchronization.lock.release.conditional",
-        "II_REL_COND_mLockId_imm",
-        asm_mnemonic="rel.cond",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
-    ),
-    _DescriptorSpec(
-        "REL_COND_mLockId_reg",
-        f"{_TARGET_KEY}.lock.release.conditional.register",
-        "synchronization.lock.release.conditional",
-        "II_REL_COND_mLockId_reg",
-        asm_mnemonic="rel.cond.reg",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
-    ),
-    _DescriptorSpec(
-        "J_lng",
-        f"{_TARGET_KEY}.branch.direct",
-        "control.branch.direct",
-        "II_J_lng",
-        asm_mnemonic="j",
-    ),
-    _DescriptorSpec(
-        "JNZ",
-        f"{_TARGET_KEY}.branch.nonzero",
-        "control.branch.nonzero",
-        "II_JNZ",
-        asm_mnemonic="jnz",
-    ),
-    _DescriptorSpec(
-        "JZ",
-        f"{_TARGET_KEY}.branch.zero",
-        "control.branch.zero",
-        "II_JZ",
-        asm_mnemonic="jz",
-    ),
-    _DescriptorSpec(
-        "RET",
-        f"{_TARGET_KEY}.return",
-        "control.return",
-        "II_RET",
-    ),
-    _DescriptorSpec(
-        "VADD_8",
-        f"{_TARGET_KEY}.add.i8x64",
-        "integer.add.i8x64",
-        "II_VADD_8",
-    ),
-    _DescriptorSpec(
-        "VADD_16",
-        f"{_TARGET_KEY}.add.i16x32",
-        "integer.add.i16x32",
-        "II_VADD_16",
-    ),
-    _DescriptorSpec(
-        "VADD_32",
-        f"{_TARGET_KEY}.add.i32x16",
-        "integer.add.i32x16",
-        "II_VADD_32",
-    ),
-    _DescriptorSpec(
-        "VSUB_8",
-        f"{_TARGET_KEY}.sub.i8x64",
-        "integer.sub.i8x64",
-        "II_VSUB_8",
-    ),
-    _DescriptorSpec(
-        "VSUB_16",
-        f"{_TARGET_KEY}.sub.i16x32",
-        "integer.sub.i16x32",
-        "II_VSUB_16",
-    ),
-    _DescriptorSpec(
-        "VSUB_32",
-        f"{_TARGET_KEY}.sub.i32x16",
-        "integer.sub.i32x16",
-        "II_VSUB_32",
-    ),
-    *(
-        _DescriptorSpec(
-            f"V{operation.upper()}_{comparison}_{width}_vaddSign{sign_bit}",
-            f"{_TARGET_KEY}.{operation}.{signedness}.i{width}x{512 // width}",
-            f"integer.{operation}.{signedness}.i{width}x{512 // width}",
-            f"II_V{operation.upper()}_{comparison}_{width}_vaddSign{sign_bit}",
-            implicit_outputs=("cmp",),
-            asm_mnemonic=(
-                f"{operation}.{'s' if signedness == 'signed' else 'u'}"
-                f"{width}x{512 // width}"
-            ),
-        )
-        for width in (8, 16, 32)
-        for operation, comparison in (("min", "GE"), ("max", "LT"))
-        for signedness, sign_bit in (("signed", 1), ("unsigned", 0))
-    ),
-    _DescriptorSpec(
-        "VMUL_vmul_cm_core_X_X",
-        f"{_TARGET_KEY}.multiply.i16x32.configured",
-        "integer.multiply.i16x32.configured",
-        "II_VMUL_vmul_cm_core_X_X",
-        asm_mnemonic="vmul.i16x32",
-    ),
-    _DescriptorSpec(
-        "VMUL_f_vmul_bf_vmul_bf_core_X_X",
-        f"{_TARGET_KEY}.multiply.bf16x32.configured",
-        "floating.multiply.bf16x32.configured",
-        "II_VMUL_f_vmul_bf_vmul_bf_core_X_X",
-        storage_overrides=(("dst", "mBMs"),),
-        asm_mnemonic="vmul.bf16x32",
-    ),
-    _DescriptorSpec(
-        "VMAC_f_vmac_bf_vmul_bf_core_X_X",
-        f"{_TARGET_KEY}.accumulate.bf16x32.configured",
-        "floating.accumulate.bf16x32.configured",
-        "II_VMAC_f_vmac_bf_vmul_bf_core_X_X",
-        storage_overrides=(("dst", "mBMs"), ("acc1", "mBMs")),
-        asm_mnemonic="vmac.bf16x32",
-    ),
-    _DescriptorSpec(
-        "VEXTBCST_128_vec_extract_broadcast_imm",
-        f"{_TARGET_KEY}.broadcast.bf16x8.to.bf16x32",
-        "floating.broadcast.bf16x8.to.bf16x32",
-        "II_VEXTBCST_128_vec_extract_broadcast_imm",
-        storage_overrides=(("s1", "eWL"),),
-        asm_mnemonic="vbroadcast.bf16x8.to.bf16x32",
-        operand_register_parts=(("s1", _EWL_LOW128_PART),),
-        encoding_adapter_overrides=(("s1", "LOOM_eWL_OP_mXm"),),
-    ),
-    _DescriptorSpec(
-        "VSHUFFLE_vec_shuffle_x",
-        f"{_TARGET_KEY}.shuffle.x.configured",
-        "register.shuffle.x.configured",
-        "II_VSHUFFLE_vec_shuffle_x",
-        storage_overrides=(("dst", "VEC256"),),
-        asm_mnemonic="vshuffle",
-    ),
-    _DescriptorSpec(
-        "VSHIFT",
-        f"{_TARGET_KEY}.shift.bytes.x.configured",
-        "register.shift.bytes.x.configured",
-        "II_VSHIFT",
-        asm_mnemonic="vshift",
-    ),
-    _DescriptorSpec(
-        "VMOV_alu_mv_mv_x",
-        f"{_TARGET_KEY}.move.vector512",
-        "register.move.vector512",
-        "II_VMOV_alu_mv_mv_x",
-        storage_overrides=(("dst", "VEC256"), ("src", "VEC256")),
-        asm_mnemonic="vmov.512",
-        encoding_adapter_overrides=(
-            ("dst", "LOOM_mXm_OP_mMvBMXDst"),
-            ("src", "LOOM_mXm_OP_mMvBMXSrc"),
-        ),
-    ),
-    _DescriptorSpec(
-        "VMOV_alu_mv_mv_w",
-        f"{_TARGET_KEY}.move.vec256",
-        "register.move.vec256",
-        "II_VMOV_alu_mv_mv_w",
-        storage_overrides=(("dst", "VEC256"), ("src", "VEC256")),
-        asm_mnemonic="vmov.256",
-        allocation_move=True,
-    ),
-    _DescriptorSpec(
-        "VMOV_alu_mv_mv_x",
-        f"{_TARGET_KEY}.move.vector512.to.accumulator512",
-        "register.move.vector512.to.accumulator512",
-        "II_VMOV_alu_mv_mv_x",
-        storage_overrides=(("dst", "mBMs"), ("src", "VEC256")),
-        asm_mnemonic="vmov.vector512.to.accumulator512",
-        encoding_adapter_overrides=(
-            ("dst", "LOOM_mBMs_OP_mMvBMXDst"),
-            ("src", "LOOM_mXm_OP_mMvBMXSrc"),
-        ),
-    ),
-    _DescriptorSpec(
-        "VMOV_alu_mv_mv_x",
-        f"{_TARGET_KEY}.move.accumulator512.to.vector512",
-        "register.move.accumulator512.to.vector512",
-        "II_VMOV_alu_mv_mv_x",
-        storage_overrides=(("dst", "VEC256"), ("src", "mBMs")),
-        asm_mnemonic="vmov.accumulator512.to.vector512",
-        encoding_adapter_overrides=(
-            ("dst", "LOOM_mXm_OP_mMvBMXDst"),
-            ("src", "LOOM_mBMs_OP_mMvBMXSrc"),
-        ),
-    ),
-    _DescriptorSpec(
-        "VMOV_alu_mv_mv_x",
-        f"{_TARGET_KEY}.move.accumulator512",
-        "register.move.accumulator512",
-        "II_VMOV_alu_mv_mv_x",
-        storage_overrides=(("dst", "mBMs"), ("src", "mBMs")),
-        asm_mnemonic="vmov.accumulator512",
-        encoding_adapter_overrides=(
-            ("dst", "LOOM_mBMs_OP_mMvBMXDst"),
-            ("src", "LOOM_mBMs_OP_mMvBMXSrc"),
-        ),
-        allocation_move=True,
-    ),
-    _DescriptorSpec(
-        "VMUL_f_vmul_bf_vmul_bf_core_Y_Y",
-        f"{_TARGET_KEY}.matrix.multiply.bf16bf16.m8n8k1.configured",
-        "matrix.multiply.bf16bf16.m8n8k1.configured",
-        "II_VMUL_f_vmul_bf_vmul_bf_core_Y_Y",
-        storage_overrides=(("dst", "mBMs"), ("s1", "VEC256"), ("s2", "VEC256")),
-        asm_mnemonic="mmul.bf16bf16.m8n8k1",
-    ),
-    _DescriptorSpec(
-        "VMAC_f_vmac_bf_vmul_bf_core_Y_Y",
-        f"{_TARGET_KEY}.matrix.accumulate.bf16bf16.m8n8k1.configured",
-        "matrix.accumulate.bf16bf16.m8n8k1.configured",
-        "II_VMAC_f_vmac_bf_vmul_bf_core_Y_Y",
-        storage_overrides=(
-            ("dst", "mBMs"),
-            ("acc1", "mBMs"),
-            ("s1", "VEC256"),
-            ("s2", "VEC256"),
-        ),
-        asm_mnemonic="mma.bf16bf16.m8n8k1",
-    ),
-    _DescriptorSpec(
-        "VADD_f_vmac_cm2_add_reg",
-        f"{_TARGET_KEY}.add.f32x64.configured",
-        "floating.add.f32x64.configured",
-        "II_VADD_f_vmac_cm2_add_reg",
-        storage_overrides=(
-            ("dst", "mBMs"),
-            ("acc1", "mBMs"),
-            ("acc2", "mBMs"),
-        ),
-        asm_mnemonic="vadd.f32x64",
-    ),
-    _DescriptorSpec(
-        "VSUB_f_vmac_cm2_add_reg",
-        f"{_TARGET_KEY}.sub.f32x64.configured",
-        "floating.sub.f32x64.configured",
-        "II_VSUB_f_vmac_cm2_add_reg",
-        storage_overrides=(
-            ("dst", "mBMs"),
-            ("acc1", "mBMs"),
-            ("acc2", "mBMs"),
-        ),
-        asm_mnemonic="vsub.f32x64",
-    ),
-    _DescriptorSpec(
-        "VCONV_bf16_fp32_mv_x_srs_bf",
-        f"{_TARGET_KEY}.convert.f32x32.to.bf16x32",
-        "floating.convert.f32x32.to.bf16x32",
-        "II_VCONV_bf16_fp32_mv_x_srs_bf",
-        storage_overrides=(("src", "mBMs"),),
-        asm_mnemonic="vconv.bf16.fp32",
-    ),
-    _DescriptorSpec(
-        "VCLR",
-        f"{_TARGET_KEY}.accumulator.clear.i32x64",
-        "matrix.accumulator.clear.i32x64",
-        "II_VCLR",
-        storage_overrides=(("dst", "mBMs"),),
-        asm_mnemonic="acc.clear.i32x64",
-    ),
-    _DescriptorSpec(
-        "VCLR",
-        f"{_TARGET_KEY}.accumulator.clear.f32x64",
-        "matrix.accumulator.clear.f32x64",
-        "II_VCLR",
-        storage_overrides=(("dst", "mBMs"),),
-        asm_mnemonic="acc.clear.f32x64",
-    ),
-    *_integer_matrix_descriptor_specs(),
-    *_packed_dot_descriptor_specs(),
-    *_packed_i4_unpack_descriptor_specs(),
-    _DescriptorSpec(
-        "VLDA_dmx_lda_bm_idx",
-        f"{_TARGET_KEY}.load.accumulator.f32x16.indexed.register",
-        "memory.load.accumulator.indexed.f32x16",
-        "II_VLDA_dmx_lda_bm_idx",
-        storage_overrides=(("dst", "mBMs"),),
-        asm_mnemonic="vlda.acc.f32x16.index",
-        memory_width_bits=512,
-    ),
-    _DescriptorSpec(
-        "VLDA_dmx_lda_bm_idx_imm",
-        f"{_TARGET_KEY}.load.accumulator.f32x16.indexed.immediate",
-        "memory.load.accumulator.indexed.f32x16",
-        "II_VLDA_dmx_lda_bm_idx_imm",
-        storage_overrides=(("dst", "mBMs"),),
-        asm_mnemonic="vlda.acc.f32x16",
-        memory_width_bits=512,
-    ),
-    _DescriptorSpec(
-        "VST_dmx_sts_bm_idx",
-        f"{_TARGET_KEY}.store.accumulator.f32x16.indexed.register",
-        "memory.store.accumulator.indexed.f32x16",
-        "II_VST_dmx_sts_bm_idx",
-        asm_mnemonic="vst.acc.f32x16.index",
-        memory_width_bits=512,
-    ),
-    _DescriptorSpec(
-        "VST_dmx_sts_bm_idx_imm",
-        f"{_TARGET_KEY}.store.accumulator.f32x16.indexed.immediate",
-        "memory.store.accumulator.indexed.f32x16",
-        "II_VST_dmx_sts_bm_idx_imm",
-        asm_mnemonic="vst.acc.f32x16",
-        memory_width_bits=512,
-    ),
-    _DescriptorSpec(
-        "VST_dmx_sts_bm_idx_imm",
-        f"{_TARGET_KEY}.store.accumulator.i32x16.indexed.immediate",
-        "memory.store.accumulator.indexed.i32x16",
-        "II_VST_dmx_sts_bm_idx_imm",
-        asm_mnemonic="vst.acc.i32x16",
-        memory_width_bits=512,
-    ),
-    _DescriptorSpec(
-        "VSRS_4x_mv_x_srs_dm_srsSign1",
-        f"{_TARGET_KEY}.narrow.trunc.signed.i16x32",
-        "integer.narrow.trunc.signed.i16x32",
-        "II_VSRS_4x_mv_x_srs_dm_srsSign1",
-        asm_mnemonic="vsrs.trunc.s16x32",
-    ),
-    _DescriptorSpec(
-        "VBAND",
-        f"{_TARGET_KEY}.and.bits512",
-        "integer.and.bits512",
-        "II_VBAND",
-    ),
-    _DescriptorSpec(
-        "VBOR",
-        f"{_TARGET_KEY}.or.bits512",
-        "integer.or.bits512",
-        "II_VBOR",
-    ),
-    _DescriptorSpec(
-        "VBCST_8",
-        f"{_TARGET_KEY}.splat.i8x64",
-        "integer.splat.i8x64",
-        "II_VBCST_8",
-    ),
-    _DescriptorSpec(
-        "VBCST_16",
-        f"{_TARGET_KEY}.splat.i16x32",
-        "integer.splat.i16x32",
-        "II_VBCST_16",
-    ),
-    _DescriptorSpec(
-        "VBCST_32",
-        f"{_TARGET_KEY}.splat.i32x16",
-        "integer.splat.i32x16",
-        "II_VBCST_32",
-    ),
-    _DescriptorSpec(
-        "VEQZ_8",
-        f"{_TARGET_KEY}.cmp.eqz.i8x64",
-        "integer.cmp.eq.i8x64",
-        "II_VEQZ_8",
-        storage_overrides=(("cmp", "eLPredicate"),),
-    ),
-    *(
-        _DescriptorSpec(
-            f"VEQZ_{width}",
-            f"{_TARGET_KEY}.cmp.eqz.i{width}x{512 // width}.el.low32",
-            f"integer.cmp.eq.i{width}x{512 // width}.low32",
-            f"II_VEQZ_{width}",
-            storage_overrides=(("cmp", "eLPredicate"),),
-            asm_mnemonic=f"veqz.{width}.el.low32",
-            operand_register_parts=(("cmp", _EL_LOW32_PART),),
-            encoding_adapter_overrides=(("cmp", "LOOM_eL_low32"),),
-        )
-        for width in (16, 32)
-    ),
-    *(
-        _DescriptorSpec(
-            f"V{relation.upper()}_{width}_vaddSign{sign_bit}",
-            (
-                f"{_TARGET_KEY}.cmp.{relation}.{signedness}."
-                f"i{width}x{512 // width}"
-                f"{'.el.low32' if width != 8 else ''}"
-            ),
-            (
-                f"integer.cmp.{relation}.{signedness}."
-                f"i{width}x{512 // width}"
-                f"{'.low32' if width != 8 else ''}"
-            ),
-            f"II_V{relation.upper()}_{width}_vaddSign{sign_bit}",
-            storage_overrides=(("cmp", "eLPredicate"),),
-            asm_mnemonic=(
-                f"v{relation}.{'s' if signedness == 'signed' else 'u'}"
-                f"{width}x{512 // width}"
-                f"{'.el.low32' if width != 8 else ''}"
-            ),
-            operand_register_parts=((("cmp", _EL_LOW32_PART),) if width != 8 else ()),
-            encoding_adapter_overrides=(
-                (("cmp", "LOOM_eL_low32"),) if width != 8 else ()
-            ),
-        )
-        for width in (8, 16, 32)
-        for relation in ("lt", "ge")
-        for signedness, sign_bit in (("signed", 1), ("unsigned", 0))
-    ),
-    _DescriptorSpec(
-        "VSEL_8",
-        f"{_TARGET_KEY}.select.i8x64",
-        "integer.select.i8x64",
-        "II_VSEL_8",
-        storage_overrides=(("sel", "eLPredicate"),),
-    ),
-    _DescriptorSpec(
-        "VSEL_32",
-        f"{_TARGET_KEY}.select.i32x16",
-        "integer.select.i32x16",
-        "II_VSEL_32",
-    ),
-    *(
-        _DescriptorSpec(
-            f"VSEL_{width}",
-            f"{_TARGET_KEY}.select.i{width}x{512 // width}.mask64",
-            f"integer.select.i{width}x{512 // width}.mask64",
-            f"II_VSEL_{width}",
-            storage_overrides=(("sel", "eLPredicate"),),
-            asm_mnemonic=f"vsel.{width}.mask64",
-            operand_register_parts=(("sel", _EL_LOW32_PART),),
-            encoding_adapter_overrides=(("sel", "LOOM_eL_low32"),),
-        )
-        for width in (16, 32)
-    ),
-    *(
-        _DescriptorSpec(
-            operation.upper(),
-            f"{_TARGET_KEY}.predicate.{operation}.low32",
-            f"integer.predicate.{operation}.low32",
-            f"II_{operation.upper()}",
-            storage_overrides=(
-                ("d0", "eLPredicate"),
-                ("s0", "eLPredicate"),
-                ("s1", "eLPredicate"),
-            ),
-            asm_mnemonic=f"predicate.{operation}.low32",
-            operand_register_parts=(
-                ("d0", _EL_LOW32_PART),
-                ("s0", _EL_LOW32_PART),
-                ("s1", _EL_LOW32_PART),
-            ),
-            encoding_adapter_overrides=(
-                ("d0", "LOOM_eL_low32"),
-                ("s0", "LOOM_eL_low32"),
-                ("s1", "LOOM_eL_low32"),
-            ),
-        )
-        for operation in ("and", "or", "xor")
-    ),
-    *(
-        _DescriptorSpec(
-            operation.upper(),
-            f"{_TARGET_KEY}.predicate.{operation}.high32",
-            f"integer.predicate.{operation}.high32",
-            f"II_{operation.upper()}",
-            storage_overrides=(
-                ("d0", "eLPredicate"),
-                ("s0", "eLPredicate"),
-                ("s1", "eLPredicate"),
-            ),
-            asm_mnemonic=f"predicate.{operation}.high32",
-            operand_register_parts=(
-                ("d0", _EL_HIGH32_PART),
-                ("s0", _EL_HIGH32_PART),
-                ("s1", _EL_HIGH32_PART),
-            ),
-            encoding_adapter_overrides=(
-                ("d0", "LOOM_eL_high32"),
-                ("s0", "LOOM_eL_high32"),
-                ("s1", "LOOM_eL_high32"),
-            ),
-            storage_continuation_part=_EL_LOW32_PART,
-        )
-        for operation in ("and", "or", "xor")
-    ),
-    _DescriptorSpec(
-        "MOVA",
-        f"{_TARGET_KEY}.predicate.complete.zero.high32",
-        "integer.predicate.complete.zero.high32",
-        "II_MOVA_eR",
-        storage_overrides=(("dst", "eLPredicate"),),
-        asm_mnemonic="predicate.complete.zero.high32",
-        operand_register_parts=(("dst", _EL_HIGH32_PART),),
-        encoding_adapter_overrides=(("dst", "LOOM_eL_high32_OP_mLdaCg"),),
-        storage_continuation_part=_EL_LOW32_PART,
-    ),
-    _DescriptorSpec(
-        "VEXTBCST_8_vec_extract_broadcast_imm",
-        f"{_TARGET_KEY}.broadcast.i8x64.from-vector",
-        "integer.broadcast.i8x64.from-vector",
-        "II_VEXTBCST_8_vec_extract_broadcast_imm",
-    ),
-    _DescriptorSpec(
-        "VEXTBCST_16_vec_extract_broadcast_imm",
-        f"{_TARGET_KEY}.broadcast.i16x32.from-vector",
-        "integer.broadcast.i16x32.from-vector",
-        "II_VEXTBCST_16_vec_extract_broadcast_imm",
-    ),
-    _DescriptorSpec(
-        "VEXTBCST_32_vec_extract_broadcast_imm",
-        f"{_TARGET_KEY}.broadcast.i32x16.from-vector",
-        "integer.broadcast.i32x16.from-vector",
-        "II_VEXTBCST_32_vec_extract_broadcast_imm",
-    ),
-    _DescriptorSpec(
-        "VEXTRACT_8_vec_extract_imm_vaddSign0",
-        f"{_TARGET_KEY}.extract.i8.immediate",
-        "integer.extract.i8",
-        "II_VEXTRACT_8_vec_extract_imm_vaddSign0",
-    ),
-    _DescriptorSpec(
-        "VEXTRACT_8_vec_extract_r_vaddSign0",
-        f"{_TARGET_KEY}.extract.i8.register",
-        "integer.extract.i8",
-        "II_VEXTRACT_8_vec_extract_r_vaddSign0",
-    ),
-    _DescriptorSpec(
-        "VEXTRACT_16_vec_extract_imm_vaddSign0",
-        f"{_TARGET_KEY}.extract.i16.immediate",
-        "integer.extract.i16",
-        "II_VEXTRACT_16_vec_extract_imm_vaddSign0",
-    ),
-    _DescriptorSpec(
-        "VEXTRACT_16_vec_extract_r_vaddSign0",
-        f"{_TARGET_KEY}.extract.i16.register",
-        "integer.extract.i16",
-        "II_VEXTRACT_16_vec_extract_r_vaddSign0",
-    ),
-    _DescriptorSpec(
-        "VEXTRACT_32_vec_extract_imm_vaddSign0",
-        f"{_TARGET_KEY}.extract.i32.immediate",
-        "integer.extract.i32",
-        "II_VEXTRACT_32_vec_extract_imm_vaddSign0",
-    ),
-    _DescriptorSpec(
-        "VEXTRACT_32_vec_extract_r_vaddSign0",
-        f"{_TARGET_KEY}.extract.i32.register",
-        "integer.extract.i32",
-        "II_VEXTRACT_32_vec_extract_r_vaddSign0",
-    ),
-    _DescriptorSpec(
-        "VEXTRACT_64_vec_extract_imm_vaddSign1",
-        f"{_TARGET_KEY}.extract.predicate64.immediate",
-        "integer.extract.predicate64",
-        "II_VEXTRACT_64_vec_extract_imm_vaddSign1",
-        storage_overrides=(("dst", "eLPredicate"),),
-        asm_mnemonic="vextract.predicate64",
-    ),
-    _DescriptorSpec(
-        "VINSERT_8_mIdxImm0",
-        f"{_TARGET_KEY}.insert.i8.zero",
-        "integer.insert.i8",
-        "II_VINSERT_8_mIdxImm0",
-    ),
-    _DescriptorSpec(
-        "VINSERT_8_mR29_insert",
-        f"{_TARGET_KEY}.insert.i8.register",
-        "integer.insert.i8",
-        "II_VINSERT_8_mR29_insert",
-    ),
-    _DescriptorSpec(
-        "VINSERT_16_mIdxImm0",
-        f"{_TARGET_KEY}.insert.i16.zero",
-        "integer.insert.i16",
-        "II_VINSERT_16_mIdxImm0",
-    ),
-    _DescriptorSpec(
-        "VINSERT_16_mR29_insert",
-        f"{_TARGET_KEY}.insert.i16.register",
-        "integer.insert.i16",
-        "II_VINSERT_16_mR29_insert",
-    ),
-    _DescriptorSpec(
-        "VINSERT_32_mIdxImm0",
-        f"{_TARGET_KEY}.insert.i32.zero",
-        "integer.insert.i32",
-        "II_VINSERT_32_mIdxImm0",
-    ),
-    _DescriptorSpec(
-        "VINSERT_32_mR29_insert",
-        f"{_TARGET_KEY}.insert.i32.register",
-        "integer.insert.i32",
-        "II_VINSERT_32_mR29_insert",
-    ),
-    *_vector_memory_descriptor_specs(),
-    _DescriptorSpec(
-        "MOVA",
-        f"{_TARGET_KEY}.constant.i32.mova",
-        "integer.const.i32",
-        "II_MOVA_eR",
-        (("dst", "eR"),),
-        DescriptorOpKind.CONST,
-        asm_mnemonic="mova.i32",
-    ),
-    _DescriptorSpec(
-        "MOVA",
-        f"{_TARGET_KEY}.constant.i32.select",
-        "integer.const.i32",
-        "II_MOVA_eR",
-        (("dst", "eRS16"),),
-        DescriptorOpKind.CONST,
-        asm_mnemonic="mov.select",
-    ),
-    _DescriptorSpec(
-        "MOV_alu_mv_mv_mv_cg",
-        f"{_TARGET_KEY}.constant.i32.short",
-        "integer.const.i32",
-        "II_MOV_alu_mv_mv_mv_cg_eR",
-        (("dst", "eR"),),
-        DescriptorOpKind.CONST,
-    ),
-    _DescriptorSpec(
-        "MOV_alu_mv_mv_mv_cg",
-        f"{_TARGET_KEY}.constant.i32.shift",
-        "integer.const.i32",
-        "II_MOV_alu_mv_mv_mv_cg_eS",
-        (("dst", "eS"),),
-        DescriptorOpKind.CONST,
-        asm_mnemonic="mov.shift",
-    ),
-    _DescriptorSpec(
-        "MOV_alu_mv_mv_mv_cg",
-        f"{_TARGET_KEY}.constant.i32.fx2flt-scale",
-        "conversion.scale.signed.i32.to.f32",
-        "II_MOV_alu_mv_mv_mv_cg_eS",
-        (("dst", "mS2"),),
-        DescriptorOpKind.CONST,
-        asm_mnemonic="mov.fx2flt-scale",
-    ),
-    _DescriptorSpec(
-        "MOV_alu_mv_mv_mv_cg",
-        f"{_TARGET_KEY}.state.rounding.immediate",
-        "state.write.rounding",
-        "II_MOV_alu_mv_mv_mv_cg_mCRRnd",
-        (("dst", "mCRRnd"),),
-        implicit_outputs=("dst",),
-        asm_mnemonic="set.rounding",
-    ),
-    _DescriptorSpec(
-        "MOV_alu_mv_mv_mv_cg",
-        f"{_TARGET_KEY}.state.srs-mode.immediate",
-        "state.write.srs-mode",
-        "II_MOV_alu_mv_mv_mv_cg_mCRSRSMode",
-        (("dst", "mCRSRSMode"),),
-        implicit_outputs=("dst",),
-        asm_mnemonic="set.srs-mode",
-    ),
-    _DescriptorSpec(
-        "MOV_alu_mv_mv_mv_cg",
-        f"{_TARGET_KEY}.state.saturation.immediate",
-        "state.write.saturation",
-        "II_MOV_alu_mv_mv_mv_cg_mCRSat",
-        (("dst", "mCRSat"),),
-        implicit_outputs=("dst",),
-        asm_mnemonic="set.saturation",
-    ),
-    _DescriptorSpec(
-        "MOV_alu_mv_mv_mv_cg",
-        f"{_TARGET_KEY}.state.unpack-size.immediate",
-        "state.write.unpack-size",
-        "II_MOV_alu_mv_mv_mv_cg_mCRUnpackSize",
-        (("dst", "mCRUnpackSize"),),
-        implicit_outputs=("dst",),
-        asm_mnemonic="set.unpack-size",
-    ),
-    _DescriptorSpec(
-        "MOVXM",
-        f"{_TARGET_KEY}.constant.i32",
-        "integer.const.i32",
-        "II_MOVXM_eR",
-        (("dst", "eR"),),
-        DescriptorOpKind.CONST,
-    ),
-    _DescriptorSpec(
-        "MOVXM",
-        f"{_TARGET_KEY}.materialize.static-byte-offset.i32",
-        "integer.materialize.static-byte-offset.i32",
-        "II_MOVXM_eR",
-        (("dst", "eR"),),
-        asm_mnemonic="mov.static-byte-offset",
-    ),
-    _DescriptorSpec(
-        "MOVXM",
-        f"{_TARGET_KEY}.materialize.local-address.i32",
-        "memory.materialize.local-address.i32",
-        "II_MOVXM_eP",
-        (("dst", "eP"),),
-        asm_mnemonic="mov.local-address",
-    ),
-    _DescriptorSpec(
-        "MOV_alu_mv_mv_mv_scl",
-        f"{_TARGET_KEY}.move.scalar",
-        "register.move.scalar",
-        "II_MOV_alu_mv_mv_mv_scl_eR_eR",
-        (("dst", "eR"), ("src", "eR")),
-        allocation_move=True,
-    ),
-    _DescriptorSpec(
-        "MOV_alu_mv_mv_mv_scl",
-        f"{_TARGET_KEY}.move.to.division-state",
-        "register.move.to.division-state",
-        "II_MOV_alu_mv_mv_mv_scl",
-        (("dst", "mR31_divs"), ("src", "eR")),
-        asm_mnemonic="mov.dividend",
-    ),
-    _DescriptorSpec(
-        "MOV_alu_mv_mv_mv_scl",
-        f"{_TARGET_KEY}.move.from.division-state",
-        "register.move.from.division-state",
-        "II_MOV_alu_mv_mv_mv_scl",
-        (("dst", "eR"), ("src", "mR31_divs")),
-        asm_mnemonic="mov.quotient",
-    ),
-    _DescriptorSpec(
-        "ADD_alu_r_rr",
-        f"{_TARGET_KEY}.add.i32",
-        "integer.add.i32",
-        "II_ADD_alu_r_rr",
-    ),
-    _DescriptorSpec("SUB", f"{_TARGET_KEY}.sub.i32", "integer.sub.i32", "II_SUB"),
-    _DescriptorSpec("MUL", f"{_TARGET_KEY}.mul.i32", "integer.mul.i32", "II_MUL"),
-    _DescriptorSpec("AND", f"{_TARGET_KEY}.and.i32", "integer.and.i32", "II_AND"),
-    _DescriptorSpec("OR", f"{_TARGET_KEY}.or.i32", "integer.or.i32", "II_OR"),
-    _DescriptorSpec("XOR", f"{_TARGET_KEY}.xor.i32", "integer.xor.i32", "II_XOR"),
-    _DescriptorSpec("ASHL", f"{_TARGET_KEY}.ashl.i32", "integer.ashl.i32", "II_ASHL"),
-    _DescriptorSpec("LSHL", f"{_TARGET_KEY}.lshl.i32", "integer.lshl.i32", "II_LSHL"),
-    _DescriptorSpec("ABS", f"{_TARGET_KEY}.abs.i32", "integer.abs.i32", "II_ABS"),
-    _DescriptorSpec("CLZ", f"{_TARGET_KEY}.clz.i32", "integer.clz.i32", "II_CLZ"),
-    _DescriptorSpec(
-        "POPCOUNT",
-        f"{_TARGET_KEY}.popcount.i32",
-        "integer.popcount.i32",
-        "II_POPCOUNT",
-    ),
-    _DescriptorSpec("MAC", f"{_TARGET_KEY}.madd.i32", "integer.madd.i32", "II_MAC"),
-    _DescriptorSpec(
-        "DIVS",
-        f"{_TARGET_KEY}.divide.step.unsigned.i32",
-        "integer.divide.step.unsigned.i32",
-        "II_DIVS",
-    ),
-    _DescriptorSpec(
-        "SEL_EQZ",
-        f"{_TARGET_KEY}.select.zero.i32",
-        "integer.select.zero.i32",
-        "II_SEL_EQZ",
-    ),
-    _DescriptorSpec(
-        "SEL_NEZ",
-        f"{_TARGET_KEY}.select.nonzero.i32",
-        "integer.select.nonzero.i32",
-        "II_SEL_NEZ",
-    ),
-    _DescriptorSpec(
-        "EXTEND_s8",
-        f"{_TARGET_KEY}.extend.signed.i8",
-        "integer.extend.signed.i8",
-        "II_EXTEND_s8",
-    ),
-    _DescriptorSpec(
-        "EXTEND_s16",
-        f"{_TARGET_KEY}.extend.signed.i16",
-        "integer.extend.signed.i16",
-        "II_EXTEND_s16",
-    ),
-    _DescriptorSpec(
-        "EXTEND_u8",
-        f"{_TARGET_KEY}.extend.unsigned.i8",
-        "integer.extend.unsigned.i8",
-        "II_EXTEND_u8",
-    ),
-    _DescriptorSpec(
-        "EXTEND_u16",
-        f"{_TARGET_KEY}.extend.unsigned.i16",
-        "integer.extend.unsigned.i16",
-        "II_EXTEND_u16",
-    ),
-    _DescriptorSpec("EQ", f"{_TARGET_KEY}.cmp.eq.i32", "integer.cmp.eq.i32", "II_EQ"),
-    _DescriptorSpec("NE", f"{_TARGET_KEY}.cmp.ne.i32", "integer.cmp.ne.i32", "II_NE"),
-    _DescriptorSpec(
-        "EQZ",
-        f"{_TARGET_KEY}.cmp.eqz.i32",
-        "integer.cmp.eq.i32",
-        "II_EQZ",
-    ),
-    _DescriptorSpec(
-        "NEZ",
-        f"{_TARGET_KEY}.cmp.nez.i32",
-        "integer.cmp.ne.i32",
-        "II_NEZ",
-    ),
-    _DescriptorSpec(
-        "LT",
-        f"{_TARGET_KEY}.cmp.slt.i32",
-        "integer.cmp.slt.i32",
-        "II_LT",
-    ),
-    _DescriptorSpec(
-        "GE",
-        f"{_TARGET_KEY}.cmp.sge.i32",
-        "integer.cmp.sge.i32",
-        "II_GE",
-    ),
-    _DescriptorSpec(
-        "LTU",
-        f"{_TARGET_KEY}.cmp.ult.i32",
-        "integer.cmp.ult.i32",
-        "II_LTU",
-    ),
-    _DescriptorSpec(
-        "LT",
-        f"{_TARGET_KEY}.cmp.slt.i32.select",
-        "integer.cmp.slt.i32.select",
-        "II_LT",
-        (("d0", "mR27_select"),),
-        asm_mnemonic="lt.select",
-    ),
-    _DescriptorSpec(
-        "LTU",
-        f"{_TARGET_KEY}.cmp.ult.i32.select",
-        "integer.cmp.ult.i32.select",
-        "II_LTU",
-        (("d0", "mR27_select"),),
-        asm_mnemonic="ltu.select",
-    ),
-    _DescriptorSpec(
-        "GEU",
-        f"{_TARGET_KEY}.cmp.uge.i32",
-        "integer.cmp.uge.i32",
-        "II_GEU",
-    ),
-)
-
-_ASM_MNEMONIC_BY_FORM = {
-    "MOV_alu_mv_mv_mv_cg": "mov.short",
-    "MOV_alu_mv_mv_mv_scl": "mov.scalar",
-    "MOVXM": "mov.i32",
-    "ADD_alu_r_rr": "add.rr",
-    "VEXTRACT_8_vec_extract_imm_vaddSign0": "vextract.8.imm",
-    "VEXTRACT_8_vec_extract_r_vaddSign0": "vextract.8.reg",
-    "VEXTRACT_16_vec_extract_imm_vaddSign0": "vextract.16.imm",
-    "VEXTRACT_16_vec_extract_r_vaddSign0": "vextract.16.reg",
-    "VEXTRACT_32_vec_extract_imm_vaddSign0": "vextract.32.imm",
-    "VEXTRACT_32_vec_extract_r_vaddSign0": "vextract.32.reg",
-    "VINSERT_8_mIdxImm0": "vinsert.8.zero",
-    "VINSERT_8_mR29_insert": "vinsert.8.reg",
-    "VINSERT_16_mIdxImm0": "vinsert.16.zero",
-    "VINSERT_16_mR29_insert": "vinsert.16.reg",
-    "VINSERT_32_mIdxImm0": "vinsert.32.zero",
-    "VINSERT_32_mR29_insert": "vinsert.32.reg",
-}
-
-_MACHINE_FORMS = {form.name: form for form in CORE_MACHINE_TABLE.forms}
-
-
-def _with_ordered_memory_variants(
-    specifications: tuple[_DescriptorSpec, ...],
-) -> tuple[_DescriptorSpec, ...]:
-    """Adds semantic aliases for independently observable memory accesses."""
-
-    result: list[_DescriptorSpec] = []
-    for spec in specifications:
-        if spec.ordered_memory:
-            raise ValueError(f"{spec.key}: base descriptor is already ordered")
-        result.append(spec)
-        form = _MACHINE_FORMS[spec.form_name]
-        if not (has_property(form, "mayLoad") or has_property(form, "mayStore")):
-            continue
-        result.append(
-            replace(
-                spec,
-                key=f"{spec.key}.volatile",
-                semantic_tag=f"{spec.semantic_tag}.volatile",
-                schedule_alternatives=tuple(
-                    f"{key}.volatile" for key in spec.schedule_alternatives
-                ),
-                ordered_memory=True,
-            )
-        )
-    return tuple(result)
-
-
-_DESCRIPTOR_SPECS = _with_ordered_memory_variants(_BASE_DESCRIPTOR_SPECS)
 _MACHINE_REGISTERS = {
     register.name: register for register in CORE_MACHINE_TABLE.physical_registers
 }
@@ -1440,6 +95,7 @@ _MACHINE_IMMEDIATES = {
 # units. Each X register is an ordered pair of W subregisters and remains the
 # aggregate encoding domain for 512-bit instructions.
 _LOW_REGISTER_CLASS_BY_MACHINE_CLASS = {
+    "eL": "eR",
     "mWa": "VEC256",
     "mWb": "VEC256",
     "mWs": "VEC256",
@@ -1491,14 +147,14 @@ _IMMEDIATE_IDS = {
 
 
 def _operand_override_map(
-    spec: _DescriptorSpec,
+    spec: descriptor_specs._DescriptorSpec,
     rows: tuple[tuple[str, str], ...],
     description: str,
 ) -> dict[str, str]:
     names = [name for name, _ in rows]
     if len(names) != len(set(names)):
         raise ValueError(f"{spec.form_name}: {description} names must be unique")
-    form = _MACHINE_FORMS[spec.form_name]
+    form = descriptor_specs._MACHINE_FORMS[spec.form_name]
     explicit_names = {operand.name for operand in (*form.outputs, *form.inputs)}
     unknown_names = set(names) - explicit_names
     if unknown_names:
@@ -1518,7 +174,7 @@ def _operand_machine_class(operand: MachineOperand) -> str:
 
 
 def _operand_encoding_machine_class(
-    spec: _DescriptorSpec, operand: MachineOperand
+    spec: descriptor_specs._DescriptorSpec, operand: MachineOperand
 ) -> str:
     """Returns the physical domain encoded by one selected descriptor operand."""
 
@@ -1661,7 +317,7 @@ def _validate_aggregate_storage_domain(source: str, target: str) -> None:
 
 
 def _operand_storage_machine_class(
-    spec: _DescriptorSpec,
+    spec: descriptor_specs._DescriptorSpec,
     operand: MachineOperand,
 ) -> str:
     machine_class = _operand_encoding_machine_class(spec, operand)
@@ -1715,7 +371,7 @@ def _operand_storage_machine_class(
         _validate_aggregate_storage_domain(machine_class, low_class)
     if has_register_projection:
         part_name = register_parts[operand.name]
-        part = _REGISTER_PARTS_BY_NAME.get(part_name)
+        part = descriptor_specs._REGISTER_PARTS_BY_NAME.get(part_name)
         if part is None:
             raise ValueError(
                 f"{spec.form_name}.{operand.name}: unknown register part {part_name}"
@@ -1772,7 +428,9 @@ def _operand_storage_machine_class(
     return low_class
 
 
-def _operand_unit_count(spec: _DescriptorSpec, operand: MachineOperand) -> int:
+def _operand_unit_count(
+    spec: descriptor_specs._DescriptorSpec, operand: MachineOperand
+) -> int:
     register_parts = _operand_override_map(
         spec, spec.operand_register_parts, "register-part overrides"
     )
@@ -1794,7 +452,9 @@ def _low_register_class_name(machine_class: str) -> str:
     return f"aie2p.{machine_class.lower()}"
 
 
-def _operand_register_class(spec: _DescriptorSpec, operand: MachineOperand) -> str:
+def _operand_register_class(
+    spec: descriptor_specs._DescriptorSpec, operand: MachineOperand
+) -> str:
     return _low_register_class_name(_operand_storage_machine_class(spec, operand))
 
 
@@ -1802,10 +462,10 @@ _EXPLICIT_STORAGE_MACHINE_CLASS_NAMES = tuple(
     sorted(
         {
             _operand_storage_machine_class(spec, operand)
-            for spec in _DESCRIPTOR_SPECS
+            for spec in descriptor_specs._DESCRIPTOR_SPECS
             for operand in (
-                *_MACHINE_FORMS[spec.form_name].outputs,
-                *_MACHINE_FORMS[spec.form_name].inputs,
+                *descriptor_specs._MACHINE_FORMS[spec.form_name].outputs,
+                *descriptor_specs._MACHINE_FORMS[spec.form_name].inputs,
             )
             if operand.kind is not MachineOperandKind.IMMEDIATE
         }
@@ -1909,10 +569,10 @@ def _reg_classes() -> tuple[RegClass, ...]:
     selected_implicit_registers = sorted(
         {
             register_name
-            for spec in _DESCRIPTOR_SPECS
+            for spec in descriptor_specs._DESCRIPTOR_SPECS
             for register_name in (
-                *_MACHINE_FORMS[spec.form_name].implicit_defs,
-                *_MACHINE_FORMS[spec.form_name].implicit_uses,
+                *descriptor_specs._MACHINE_FORMS[spec.form_name].implicit_defs,
+                *descriptor_specs._MACHINE_FORMS[spec.form_name].implicit_uses,
             )
         }
     )
@@ -1948,8 +608,8 @@ def _physical_registers() -> tuple[PhysicalRegister, ...]:
 
 def _physical_register_views() -> tuple[PhysicalRegisterView, ...]:
     views: dict[tuple[str, str], PhysicalRegisterView] = {}
-    for spec in _DESCRIPTOR_SPECS:
-        form = _MACHINE_FORMS[spec.form_name]
+    for spec in descriptor_specs._DESCRIPTOR_SPECS:
+        form = descriptor_specs._MACHINE_FORMS[spec.form_name]
         for operand in (*form.outputs, *form.inputs):
             if operand.kind is MachineOperandKind.IMMEDIATE:
                 continue
@@ -2019,7 +679,7 @@ def _register_packing_resources() -> tuple[RegisterPackingResource, ...]:
         raise ValueError("AIE2P scalar register packing resource has no members")
     return (
         RegisterPackingResource(
-            name=f"{_TARGET_KEY}.register.x.pairs",
+            name=f"{descriptor_specs._TARGET_KEY}.register.x.pairs",
             capacity=x_register_count,
             members=(
                 RegisterPackingResourceMember("aie2p.ewl"),
@@ -2030,7 +690,7 @@ def _register_packing_resources() -> tuple[RegisterPackingResource, ...]:
             ),
         ),
         RegisterPackingResource(
-            name=f"{_TARGET_KEY}.register.scalar.units",
+            name=f"{descriptor_specs._TARGET_KEY}.register.scalar.units",
             capacity=len(scalar_atomic_units),
             members=tuple(scalar_members),
         ),
@@ -2043,8 +703,8 @@ _ITINERARIES = {
 }
 
 
-def _itinerary(spec: _DescriptorSpec) -> Itinerary:
-    form = _MACHINE_FORMS[spec.form_name]
+def _itinerary(spec: descriptor_specs._DescriptorSpec) -> Itinerary:
+    form = descriptor_specs._MACHINE_FORMS[spec.form_name]
     itinerary = _ITINERARIES[spec.itinerary]
     expected_count = (
         len(form.outputs)
@@ -2071,11 +731,11 @@ def _register_event_name(
     bypass: str | None,
 ) -> str:
     bypass_segment = bypass.lower() if bypass is not None else "none"
-    return f"{_TARGET_KEY}.operand.{access}.c{cycle}.{bypass_segment}"
+    return f"{descriptor_specs._TARGET_KEY}.operand.{access}.c{cycle}.{bypass_segment}"
 
 
 def _register_timing_event(
-    spec: _DescriptorSpec,
+    spec: descriptor_specs._DescriptorSpec,
     operand_ordinal: int,
     access: str,
 ) -> str:
@@ -2086,22 +746,22 @@ def _register_timing_event(
 
 
 def _operand_stages(
-    spec: _DescriptorSpec,
+    spec: descriptor_specs._DescriptorSpec,
     operand: MachineOperand,
 ) -> tuple[int, int]:
-    form = _MACHINE_FORMS[spec.form_name]
+    form = descriptor_specs._MACHINE_FORMS[spec.form_name]
     operand_ordinal = _operand_ordinal(form, operand)
     cycle = _itinerary(spec).operand_cycles[operand_ordinal]
     return (0, cycle) if operand_ordinal < len(form.outputs) else (cycle, 0)
 
 
 def _implicit_operand_stage(
-    spec: _DescriptorSpec,
+    spec: descriptor_specs._DescriptorSpec,
     register_name: str,
     *,
     is_definition: bool,
 ) -> tuple[int, int]:
-    form = _MACHINE_FORMS[spec.form_name]
+    form = descriptor_specs._MACHINE_FORMS[spec.form_name]
     if is_definition:
         ordinal = (
             len(form.outputs)
@@ -2120,11 +780,11 @@ def _implicit_operand_stage(
 
 
 def _operand_timing_events(
-    spec: _DescriptorSpec,
+    spec: descriptor_specs._DescriptorSpec,
     operand: MachineOperand,
     role: OperandRole,
 ) -> tuple[str | None, str | None]:
-    form = _MACHINE_FORMS[spec.form_name]
+    form = descriptor_specs._MACHINE_FORMS[spec.form_name]
     operand_ordinal = _operand_ordinal(form, operand)
     if role is OperandRole.RESULT:
         return None, _register_timing_event(spec, operand_ordinal, "write")
@@ -2132,7 +792,7 @@ def _operand_timing_events(
 
 
 def _low_operand(
-    spec: _DescriptorSpec,
+    spec: descriptor_specs._DescriptorSpec,
     operand: MachineOperand,
     role: OperandRole,
 ) -> Operand:
@@ -2175,7 +835,7 @@ def _low_operand(
 
 
 def _storage_continuation_operand(
-    spec: _DescriptorSpec,
+    spec: descriptor_specs._DescriptorSpec,
     register_outputs: tuple[MachineOperand, ...],
 ) -> Operand | None:
     part_name = spec.storage_continuation_part
@@ -2185,7 +845,7 @@ def _storage_continuation_operand(
         raise ValueError(
             f"{spec.form_name}: storage continuation requires exactly one result"
         )
-    part = _REGISTER_PARTS_BY_NAME.get(part_name)
+    part = descriptor_specs._REGISTER_PARTS_BY_NAME.get(part_name)
     if part is None:
         raise ValueError(
             f"{spec.form_name}: unknown storage-continuation part {part_name}"
@@ -2197,7 +857,7 @@ def _storage_continuation_operand(
         raise ValueError(
             f"{spec.form_name}: storage continuation requires a partial result"
         )
-    result_part = _REGISTER_PARTS_BY_NAME[result_part_name]
+    result_part = descriptor_specs._REGISTER_PARTS_BY_NAME[result_part_name]
     if result_part.reg_class != part.reg_class or result_part.mask & part.mask:
         raise ValueError(
             f"{spec.form_name}: storage continuation must preserve a disjoint "
@@ -2213,10 +873,10 @@ def _storage_continuation_operand(
 
 
 def _implicit_output_storage(
-    spec: _DescriptorSpec,
+    spec: descriptor_specs._DescriptorSpec,
     operand: MachineOperand,
 ) -> tuple[str, str]:
-    form = _MACHINE_FORMS[spec.form_name]
+    form = descriptor_specs._MACHINE_FORMS[spec.form_name]
     if operand not in form.outputs:
         raise ValueError(
             f"{spec.form_name}.{operand.name}: implicit output is not a machine output"
@@ -2236,13 +896,13 @@ def _implicit_output_storage(
 
 
 def _implicit_output_operand(
-    spec: _DescriptorSpec,
+    spec: descriptor_specs._DescriptorSpec,
     operand: MachineOperand,
 ) -> Operand:
     """Models one fixed architectural output without producing Low SSA."""
 
     machine_class_name, _ = _implicit_output_storage(spec, operand)
-    form = _MACHINE_FORMS[spec.form_name]
+    form = descriptor_specs._MACHINE_FORMS[spec.form_name]
     operand_ordinal = _operand_ordinal(form, operand)
     read_stage, ready_stage = _operand_stages(spec, operand)
     return Operand(
@@ -2262,7 +922,7 @@ def _implicit_output_operand(
 
 
 def _implicit_output_encoding_field_values(
-    spec: _DescriptorSpec,
+    spec: descriptor_specs._DescriptorSpec,
     operands: tuple[MachineOperand, ...],
 ) -> tuple[EncodingFieldValue, ...]:
     instruction = _INSTRUCTION_ENCODINGS[spec.form_name]
@@ -2296,8 +956,8 @@ def _implicit_output_encoding_field_values(
     return tuple(result)
 
 
-def _implicit_operands(spec: _DescriptorSpec) -> tuple[Operand, ...]:
-    form = _MACHINE_FORMS[spec.form_name]
+def _implicit_operands(spec: descriptor_specs._DescriptorSpec) -> tuple[Operand, ...]:
+    form = descriptor_specs._MACHINE_FORMS[spec.form_name]
     result: list[Operand] = []
     for register_name in form.implicit_defs:
         operand_ordinal = (
@@ -2397,10 +1057,10 @@ def _immediate(form_name: str, operand: MachineOperand) -> Immediate:
 
 def _memory_event_name(access: str, memory: MemoryCycles) -> str:
     cycle_segment = "_".join(str(cycle) for cycle in memory.cycles)
-    return f"{_TARGET_KEY}.memory.{access}.c{cycle_segment}"
+    return f"{descriptor_specs._TARGET_KEY}.memory.{access}.c{cycle_segment}"
 
 
-def _memory_timing_event(spec: _DescriptorSpec, access: str) -> str:
+def _memory_timing_event(spec: descriptor_specs._DescriptorSpec, access: str) -> str:
     memory = _itinerary(spec).memory
     if memory is None:
         raise ValueError(
@@ -2410,7 +1070,9 @@ def _memory_timing_event(spec: _DescriptorSpec, access: str) -> str:
     return _memory_event_name(access, memory)
 
 
-def _effects(spec: _DescriptorSpec, form: MachineForm) -> tuple[Effect, ...]:
+def _effects(
+    spec: descriptor_specs._DescriptorSpec, form: MachineForm
+) -> tuple[Effect, ...]:
     has_memory_effect = has_property(form, "mayLoad") or has_property(form, "mayStore")
     if spec.ordered_memory and not has_memory_effect:
         raise ValueError(f"{form.name}: ordered memory alias is not a memory form")
@@ -2468,7 +1130,7 @@ def _effects(spec: _DescriptorSpec, form: MachineForm) -> tuple[Effect, ...]:
 
 
 def _descriptor_flags(
-    spec: _DescriptorSpec,
+    spec: descriptor_specs._DescriptorSpec,
     form: MachineForm,
     *,
     owns_implicit_state: bool,
@@ -2503,7 +1165,7 @@ def _descriptor_flags(
 
 
 def _instruction_classes(
-    spec: _DescriptorSpec,
+    spec: descriptor_specs._DescriptorSpec,
     form: MachineForm,
 ) -> tuple[InstructionClass, ...]:
     if has_property(form, "mayLoad"):
@@ -2552,8 +1214,8 @@ def _constraints(
     )
 
 
-def _descriptor(spec: _DescriptorSpec) -> Descriptor:
-    form = _MACHINE_FORMS[spec.form_name]
+def _descriptor(spec: descriptor_specs._DescriptorSpec) -> Descriptor:
+    form = descriptor_specs._MACHINE_FORMS[spec.form_name]
     if spec.form_name != form.name:
         raise ValueError(f"descriptor spec selected the wrong machine form {form.name}")
     if spec.itinerary != form.itinerary and not spec.storage_overrides:
@@ -2602,7 +1264,7 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
             f"{form.name}: tied outputs cannot be implicit architectural outputs "
             f"{sorted(tied_implicit_outputs)}"
         )
-    physical_mnemonic = spec.asm_mnemonic or _ASM_MNEMONIC_BY_FORM.get(
+    physical_mnemonic = spec.asm_mnemonic or descriptor_specs._ASM_MNEMONIC_BY_FORM.get(
         spec.form_name, form.assembly.split("\t", 1)[0].strip()
     )
     mnemonic = (
@@ -2724,15 +1386,15 @@ _SLOT_RESOURCE_KINDS = {
 
 
 def _slot_resource_name(slot: str) -> str:
-    return f"{_TARGET_KEY}.slot.{slot}"
+    return f"{descriptor_specs._TARGET_KEY}.slot.{slot}"
 
 
 def _pipeline_resource_name(resource: str) -> str:
-    return f"{_TARGET_KEY}.pipeline.{resource.lower()}"
+    return f"{descriptor_specs._TARGET_KEY}.pipeline.{resource.lower()}"
 
 
 def _bundle_exclusion_resource_name(slots: tuple[str, ...]) -> str:
-    return f"{_TARGET_KEY}.bundle.exclusion.{'.'.join(slots)}"
+    return f"{descriptor_specs._TARGET_KEY}.bundle.exclusion.{'.'.join(slots)}"
 
 
 def _bundle_slot_exclusions() -> tuple[tuple[str, ...], ...]:
@@ -2955,7 +1617,7 @@ def _schedule_flags(form: MachineForm) -> tuple[ScheduleClassFlag, ...]:
 
 
 def _schedule_issue_uses(
-    spec: _DescriptorSpec,
+    spec: descriptor_specs._DescriptorSpec,
     itinerary: Itinerary,
 ) -> tuple[IssueUse, ...]:
     slot = _INSTRUCTION_ENCODINGS[spec.form_name].slot
@@ -2989,8 +1651,8 @@ def _schedule_issue_uses(
     return tuple(result)
 
 
-def _schedule_class(spec: _DescriptorSpec) -> ScheduleClass:
-    form = _MACHINE_FORMS[spec.form_name]
+def _schedule_class(spec: descriptor_specs._DescriptorSpec) -> ScheduleClass:
+    form = descriptor_specs._MACHINE_FORMS[spec.form_name]
     itinerary = _itinerary(spec)
     has_memory_effect = has_property(form, "mayLoad") or has_property(form, "mayStore")
     if has_memory_effect != (itinerary.memory is not None):
@@ -3010,7 +1672,7 @@ def _schedule_class(spec: _DescriptorSpec) -> ScheduleClass:
     )
     name = ".".join(
         (
-            _TARGET_KEY,
+            descriptor_specs._TARGET_KEY,
             "schedule",
             canonical_itinerary,
             *qualifiers,
@@ -3049,7 +1711,7 @@ def _schedule_classes() -> tuple[
 ]:
     names = {}
     classes = {}
-    for spec in _DESCRIPTOR_SPECS:
+    for spec in descriptor_specs._DESCRIPTOR_SPECS:
         schedule_class = _schedule_class(spec)
         key = (spec.form_name, spec.itinerary)
         names[key] = schedule_class.name
@@ -3063,9 +1725,9 @@ _SCHEDULE_CLASS_NAMES, _SCHEDULE_CLASSES = _schedule_classes()
 
 
 AIE2P_CORE_DESCRIPTOR_SET = DescriptorSet(
-    key=f"{_TARGET_KEY}.core",
-    target_key=_TARGET_KEY,
-    feature_key=f"{_TARGET_KEY}.core.v1",
+    key=f"{descriptor_specs._TARGET_KEY}.core",
+    target_key=descriptor_specs._TARGET_KEY,
+    feature_key=f"{descriptor_specs._TARGET_KEY}.core.v1",
     c_header_path=Path(
         "loom/src/loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
     ),
@@ -3079,7 +1741,7 @@ AIE2P_CORE_DESCRIPTOR_SET = DescriptorSet(
     c_enum_prefix="AIE2P_CORE",
     generator_version=1,
     reg_classes=_reg_classes(),
-    register_parts=_REGISTER_PARTS,
+    register_parts=descriptor_specs._REGISTER_PARTS,
     physical_registers=_physical_registers(),
     physical_register_views=_physical_register_views(),
     register_packing_resources=_register_packing_resources(),
@@ -3087,6 +1749,6 @@ AIE2P_CORE_DESCRIPTOR_SET = DescriptorSet(
     event_separations=_EVENT_SEPARATIONS,
     resources=_RESOURCES,
     schedule_classes=_SCHEDULE_CLASSES,
-    descriptors=tuple(_descriptor(spec) for spec in _DESCRIPTOR_SPECS),
+    descriptors=tuple(_descriptor(spec) for spec in descriptor_specs._DESCRIPTOR_SPECS),
     requires_explicit_asm_surface=True,
 )
