@@ -45,6 +45,7 @@ from loom.target.low_descriptors import (
     ImmediateFlag,
     ImmediateKind,
     InstructionClass,
+    IssueUse,
     NativeAsmValue,
     NativeAsmValueKind,
     OperandAddressMapKind,
@@ -2296,6 +2297,34 @@ def test_generator_rejects_missing_schedule_resource() -> None:
             bad_resource_set,
             DescriptorAllowlist(keys=("test.add.i32",)),
         )
+
+
+def test_generator_derives_minimum_issue_cycles_from_resource_pressure() -> None:
+    scalar_resource = replace(TEST_LOW_CORE_DESCRIPTOR_SET.resources[0], capacity_per_cycle=2)
+    vector_resource = replace(TEST_LOW_CORE_DESCRIPTOR_SET.resources[1], capacity_per_cycle=4)
+    scalar_schedule = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes[1],
+        issue_uses=(
+            IssueUse(scalar_resource.name, cycles=3, units=1),
+            IssueUse(scalar_resource.name, cycles=2, units=2),
+            IssueUse(vector_resource.name, cycles=3, units=4),
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        resources=(scalar_resource, vector_resource),
+        schedule_classes=(scalar_schedule,),
+        descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+    generated = generate_descriptor_set(descriptor_set)
+
+    # The scalar resource requires ceil((3*1 + 2*2) / 2) = 4 cycles.
+    # The independent vector resource requires only 3, so resources are not
+    # incorrectly serialized by summing their individual lower bounds.
+    assert compiled.schedule_rows[0]["minimum_issue_cycles"] == 4
+    assert ".minimum_issue_cycles = 4," in generated.source
 
 
 def test_generator_emits_enum_immediate_domains() -> None:

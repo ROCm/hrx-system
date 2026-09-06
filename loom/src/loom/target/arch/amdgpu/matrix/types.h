@@ -420,6 +420,49 @@ typedef enum loom_amdgpu_matrix_fragment_layout_kind_e {
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT = 115,
 } loom_amdgpu_matrix_fragment_layout_kind_t;
 
+// Compact ID for an exact accumulator/result physical representation. Zero
+// denotes a contract without exact reusable fragment-layout facts.
+typedef uint8_t loom_amdgpu_matrix_result_representation_id_t;
+#define LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE UINT8_C(0)
+// Largest representation ID encodable in the target's compact availability
+// bitsets.
+#define LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_MAX_ID UINT8_C(63)
+
+typedef enum loom_amdgpu_matrix_result_representation_flag_bits_e {
+  // The native fragment's M/N coordinates are exchanged at the source
+  // contract boundary.
+  LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_FLAG_TRANSPOSE_MN = 1u << 0,
+} loom_amdgpu_matrix_result_representation_flag_bits_t;
+
+// Bitset of loom_amdgpu_matrix_result_representation_flag_bits_t values.
+typedef uint8_t loom_amdgpu_matrix_result_representation_flags_t;
+
+typedef struct loom_amdgpu_matrix_result_representation_t {
+  // Fragment layout whose result role realizes this deduplicated placement;
+  // the generated catalog verifies uint8 fit.
+  uint8_t fragment_layout_kind;
+  // Matrix numeric type carried by the result payload.
+  uint8_t numeric_type;
+  // Coordinate interpretation applied to the native fragment layout.
+  loom_amdgpu_matrix_result_representation_flags_t flags;
+} loom_amdgpu_matrix_result_representation_t;
+static_assert(sizeof(loom_amdgpu_matrix_result_representation_t) == 3,
+              "matrix result representations must stay compact");
+
+// Sentinel used when no operand-exchanged native contract exists.
+#define LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE UINT16_MAX
+
+typedef struct loom_amdgpu_matrix_contract_realization_choices_t {
+  // Native contract ordinal used after exchanging LHS/RHS, or NONE.
+  uint16_t operand_exchanged_contract_ordinal;
+  // Exact result representation produced by the canonical contract.
+  loom_amdgpu_matrix_result_representation_id_t
+      canonical_result_representation_id;
+  // Exact result representation produced after exchanging LHS/RHS, or NONE.
+  loom_amdgpu_matrix_result_representation_id_t
+      operand_exchanged_result_representation_id;
+} loom_amdgpu_matrix_contract_realization_choices_t;
+
 typedef enum loom_amdgpu_matrix_contract_flag_bits_e {
   // Contract consumes an explicit sparse index operand.
   LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SPARSE = 1u << 0,
@@ -487,6 +530,8 @@ typedef struct loom_amdgpu_matrix_contract_descriptor_t {
   iree_string_view_t name;
   // Stable target-low descriptor ref selected by this descriptor, or NONE.
   loom_amdgpu_descriptor_ref_t low_descriptor_ref;
+  // Exact physical result realizations derived for this contract.
+  loom_amdgpu_matrix_contract_realization_choices_t realization;
   // LLVM AMDGPU intrinsic name selected by this descriptor for LLVM lowering.
   iree_string_view_t llvm_intrinsic_name;
   // AMDGPU instruction family used by this descriptor.

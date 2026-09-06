@@ -119,39 +119,50 @@ static void loom_amdgpu_memory_sort_byte_intervals(
   }
 }
 
-static void loom_amdgpu_memory_calculate_subgroup_geometry(
+void loom_amdgpu_memory_calculate_subgroup_geometry(
     const loom_amdgpu_fragment_memory_address_layout_t* address_layout,
-    uint8_t subgroup_size, uint32_t per_lane_packet_byte_count,
+    uint8_t subgroup_size, uint64_t active_lane_mask,
+    uint32_t per_lane_packet_byte_count,
     loom_low_lower_memory_subgroup_access_report_t* out_report) {
-  uint64_t lane_offsets[LOOM_AMDGPU_MEMORY_MAX_SUBGROUP_SIZE] = {0};
+  IREE_ASSERT_GT(subgroup_size, 0u);
+  IREE_ASSERT_LE(subgroup_size, LOOM_AMDGPU_MEMORY_MAX_SUBGROUP_SIZE);
+  const uint64_t subgroup_lane_mask =
+      subgroup_size == 64 ? UINT64_MAX : (UINT64_C(1) << subgroup_size) - 1u;
+  IREE_ASSERT_NE(active_lane_mask, 0u);
+  IREE_ASSERT_EQ(active_lane_mask & ~subgroup_lane_mask, 0u);
+  IREE_ASSERT_GT(per_lane_packet_byte_count, 0u);
   loom_amdgpu_memory_byte_interval_t
       intervals[LOOM_AMDGPU_MEMORY_MAX_SUBGROUP_SIZE] = {0};
+  uint8_t active_lane_count = 0;
+  bool has_previous_lane = false;
+  uint64_t previous_lane_offset = 0;
   for (uint8_t lane = 0; lane < subgroup_size; ++lane) {
+    if ((active_lane_mask & (UINT64_C(1) << lane)) == 0) continue;
     const uint64_t byte_offset =
         loom_amdgpu_fragment_memory_relative_lane_byte_offset(address_layout,
                                                               lane);
-    lane_offsets[lane] = byte_offset;
-    intervals[lane] = (loom_amdgpu_memory_byte_interval_t){
+    intervals[active_lane_count++] = (loom_amdgpu_memory_byte_interval_t){
         .begin = byte_offset,
         .end = byte_offset + per_lane_packet_byte_count,
     };
-    if (lane != 0) {
-      const uint64_t previous_offset = lane_offsets[lane - 1];
-      const uint64_t delta = byte_offset >= previous_offset
-                                 ? byte_offset - previous_offset
-                                 : previous_offset - byte_offset;
+    if (has_previous_lane) {
+      const uint64_t delta = byte_offset >= previous_lane_offset
+                                 ? byte_offset - previous_lane_offset
+                                 : previous_lane_offset - byte_offset;
       out_report->maximum_adjacent_lane_delta_bytes =
           iree_max(out_report->maximum_adjacent_lane_delta_bytes, delta);
     }
+    previous_lane_offset = byte_offset;
+    has_previous_lane = true;
   }
 
-  loom_amdgpu_memory_sort_byte_intervals(subgroup_size, intervals);
+  loom_amdgpu_memory_sort_byte_intervals(active_lane_count, intervals);
   uint64_t region_begin = intervals[0].begin;
   uint64_t region_end = intervals[0].end;
   uint64_t previous_start = intervals[0].begin;
   out_report->distinct_lane_address_count = 1;
   out_report->contiguous_region_count = 1;
-  for (uint8_t i = 1; i < subgroup_size; ++i) {
+  for (uint8_t i = 1; i < active_lane_count; ++i) {
     const loom_amdgpu_memory_byte_interval_t interval = intervals[i];
     if (interval.begin != previous_start) {
       ++out_report->distinct_lane_address_count;
@@ -172,7 +183,7 @@ static void loom_amdgpu_memory_calculate_subgroup_geometry(
   out_report->subgroup_unique_byte_count += region_end - region_begin;
   out_report->subgroup_span_byte_count = region_end - intervals[0].begin;
   out_report->subgroup_requested_byte_count =
-      (uint64_t)subgroup_size * per_lane_packet_byte_count;
+      (uint64_t)active_lane_count * per_lane_packet_byte_count;
   out_report->interval_coverage = out_report->contiguous_region_count == 1
                                       ? IREE_SV("dense")
                                       : IREE_SV("gapped");
@@ -260,9 +271,12 @@ iree_status_t loom_amdgpu_fragment_memory_report_subgroup_access(
   out_report->lane_address_proof =
       IREE_SV("compiled-fragment-lane-register-layout");
 
+  const uint64_t active_lane_mask =
+      layout->wave_size == 64 ? UINT64_MAX
+                              : (UINT64_C(1) << layout->wave_size) - 1u;
   loom_amdgpu_memory_calculate_subgroup_geometry(
-      &plan->address_layout, layout->wave_size, per_lane_packet_byte_count,
-      out_report);
+      &plan->address_layout, layout->wave_size, active_lane_mask,
+      per_lane_packet_byte_count, out_report);
   out_report->proof = IREE_SV("exact");
   return iree_ok_status();
 }

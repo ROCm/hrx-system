@@ -648,6 +648,7 @@ def emit_source_for_views(
                 f".hazard_start = {compiled.schedule_rows[i]['hazard_start']},",
                 f".hazard_count = {compiled.schedule_rows[i]['hazard_count']},",
                 f".flags = {c_spelling.flag_expr(schedule_class.flags)},",
+                f".minimum_issue_cycles = {compiled.schedule_rows[i]['minimum_issue_cycles']},",
                 f".model_quality = {schedule_class.model_quality.c_name},",
                 f".pressure_delta_start = {compiled.schedule_rows[i]['pressure_delta_start']},",
                 f".pressure_delta_count = {compiled.schedule_rows[i]['pressure_delta_count']},",

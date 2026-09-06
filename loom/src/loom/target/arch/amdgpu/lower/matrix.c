@@ -10,30 +10,21 @@
 
 #include "iree/base/api.h"
 #include "loom/analysis/contract_vector.h"
+#include "loom/codegen/low/lower/representation_observer.h"
 #include "loom/ir/context.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/facts.h"
+#include "loom/target/arch/amdgpu/lower/matrix_fragment_state.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/matrix/projection.h"
 #include "loom/util/numeric_format.h"
 
-typedef struct loom_amdgpu_matrix_target_facts_t {
-  // Generic vector.mma adapter options for this AMDGPU target.
-  loom_contract_vector_mma_options_t options;
-  // Matrix feature bits available on the selected processor.
-  loom_amdgpu_matrix_feature_bits_t feature_bits;
-  // Concrete wave size selected by the target processor.
-  uint32_t wave_size;
-} loom_amdgpu_matrix_target_facts_t;
-
-static void loom_amdgpu_matrix_target_facts_from_environment(
-    const loom_target_contract_query_environment_t* environment,
-    loom_amdgpu_matrix_target_facts_t* out_facts) {
-  *out_facts = (loom_amdgpu_matrix_target_facts_t){0};
-
-  const loom_amdgpu_target_facts_t* target_facts =
-      loom_amdgpu_target_facts_cast(environment->target_facts);
+void loom_amdgpu_matrix_target_configuration_initialize(
+    const loom_amdgpu_target_facts_t* target_facts,
+    const loom_target_bundle_t* bundle,
+    loom_amdgpu_matrix_target_configuration_t* out_configuration) {
+  *out_configuration = (loom_amdgpu_matrix_target_configuration_t){0};
   IREE_ASSERT(target_facts != NULL,
               "AMDGPU matrix lowering requires AMDGPU target facts");
   const loom_amdgpu_processor_properties_t* processor =
@@ -41,8 +32,6 @@ static void loom_amdgpu_matrix_target_facts_from_environment(
   loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
   (void)loom_amdgpu_matrix_feature_bits_from_profile(processor->features.matrix,
                                                      &feature_bits);
-  const loom_target_bundle_t* bundle =
-      loom_target_contract_query_environment_bundle(environment);
   if (bundle == NULL || bundle->snapshot == NULL ||
       bundle->snapshot->subgroup_size == 0) {
     IREE_ASSERT_UNREACHABLE("selected AMDGPU matrix target subgroup size");
@@ -50,7 +39,7 @@ static void loom_amdgpu_matrix_target_facts_from_environment(
   }
   const uint16_t wavefront_size = (uint16_t)bundle->snapshot->subgroup_size;
 
-  *out_facts = (loom_amdgpu_matrix_target_facts_t){
+  *out_configuration = (loom_amdgpu_matrix_target_configuration_t){
       .options =
           (loom_contract_vector_mma_options_t){
               .k_group_size = 1,
@@ -67,13 +56,17 @@ static void loom_amdgpu_matrix_target_facts_from_environment(
   };
 }
 
-static bool loom_amdgpu_matrix_select_contract(
+bool loom_amdgpu_matrix_select_contract(
     const loom_contract_request_t* contract_request,
-    const loom_amdgpu_matrix_target_facts_t* target_facts,
+    const loom_amdgpu_matrix_target_configuration_t* configuration,
     const loom_amdgpu_matrix_contract_descriptor_t** out_descriptor,
+    uint16_t* out_descriptor_ordinal,
     loom_contract_diagnostic_t* out_contract_diagnostic,
     loom_amdgpu_matrix_contract_match_diagnostic_t* out_match_diagnostic) {
   *out_descriptor = NULL;
+  if (out_descriptor_ordinal != NULL) {
+    *out_descriptor_ordinal = LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE;
+  }
   if (out_contract_diagnostic != NULL) {
     *out_contract_diagnostic = (loom_contract_diagnostic_t){0};
   }
@@ -83,13 +76,13 @@ static bool loom_amdgpu_matrix_select_contract(
 
   loom_amdgpu_matrix_contract_match_request_t match_request = {0};
   if (!loom_amdgpu_matrix_contract_match_request_from_contract(
-          contract_request, target_facts->feature_bits, target_facts->wave_size,
-          &match_request, out_contract_diagnostic)) {
+          contract_request, configuration->feature_bits,
+          configuration->wave_size, &match_request, out_contract_diagnostic)) {
     return false;
   }
 
-  *out_descriptor =
-      loom_amdgpu_matrix_contract_select(&match_request, out_match_diagnostic);
+  *out_descriptor = loom_amdgpu_matrix_contract_select(
+      &match_request, out_descriptor_ordinal, out_match_diagnostic);
   return *out_descriptor != NULL;
 }
 
@@ -412,9 +405,12 @@ iree_status_t loom_amdgpu_descriptor_matrix_options(
   (void)user_data;
   (void)rule;
   *out_options = (loom_contract_vector_mma_options_t){0};
-  loom_amdgpu_matrix_target_facts_t target_facts = {0};
-  loom_amdgpu_matrix_target_facts_from_environment(environment, &target_facts);
-  *out_options = target_facts.options;
+  loom_amdgpu_matrix_target_configuration_t configuration = {0};
+  loom_amdgpu_matrix_target_configuration_initialize(
+      loom_amdgpu_target_facts_cast(environment->target_facts),
+      loom_target_contract_query_environment_bundle(environment),
+      &configuration);
+  *out_options = configuration.options;
   return iree_ok_status();
 }
 
@@ -428,17 +424,69 @@ iree_status_t loom_amdgpu_descriptor_matrix_query(
   (void)rule;
   *out_result = loom_target_contract_query_result_empty();
 
-  loom_amdgpu_matrix_target_facts_t target_facts = {0};
-  loom_amdgpu_matrix_target_facts_from_environment(environment, &target_facts);
+  loom_amdgpu_matrix_target_configuration_t configuration = {0};
+  loom_amdgpu_matrix_target_configuration_initialize(
+      loom_amdgpu_target_facts_cast(environment->target_facts),
+      loom_target_contract_query_environment_bundle(environment),
+      &configuration);
+
   loom_contract_diagnostic_t contract_diagnostic = {0};
   loom_amdgpu_matrix_contract_match_diagnostic_t match_diagnostic = {0};
   const loom_amdgpu_matrix_contract_descriptor_t* contract_descriptor = NULL;
-  if (!loom_amdgpu_matrix_select_contract(
-          contract_request, &target_facts, &contract_descriptor,
-          &contract_diagnostic, &match_diagnostic)) {
-    return loom_amdgpu_matrix_contract_query_reject_contract(
-        environment, source_op, LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED,
-        contract_diagnostic, match_diagnostic, out_result);
+  loom_target_contract_descriptor_matrix_transform_flags_t transform_flags = 0;
+  loom_low_representation_id_t selected_representation =
+      LOOM_LOW_REPRESENTATION_ID_NONE;
+  IREE_RETURN_IF_ERROR(loom_low_lower_representation_query_lookup(
+      environment, loom_vector_mma_result(source_op),
+      &selected_representation));
+  uint16_t canonical_contract_ordinal =
+      LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_matrix_fragment_query_contract_ordinal(
+      environment, loom_vector_mma_result(source_op),
+      &canonical_contract_ordinal));
+  // A function boundary may constrain an opaque fragment without proving an
+  // exact realization for its producer. The retained producer contract is the
+  // participation proof for representation-dependent descriptor selection.
+  if (canonical_contract_ordinal != LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE) {
+    IREE_ASSERT(selected_representation != LOOM_LOW_REPRESENTATION_ID_NONE,
+                "recorded matrix contract must select a representation");
+    const loom_amdgpu_matrix_contract_descriptor_t* canonical_descriptor =
+        loom_amdgpu_matrix_contract_descriptor_at(canonical_contract_ordinal);
+    IREE_ASSERT(canonical_descriptor != NULL,
+                "retained matrix contract ordinal must name a descriptor");
+    const loom_amdgpu_matrix_contract_realization_choices_t* choices =
+        &canonical_descriptor->realization;
+    uint16_t selected_contract_ordinal = canonical_contract_ordinal;
+    if (selected_representation ==
+        choices->canonical_result_representation_id) {
+      // Keep the canonical contract.
+    } else {
+      IREE_ASSERT(
+          selected_representation ==
+                  choices->operand_exchanged_result_representation_id &&
+              choices->operand_exchanged_contract_ordinal !=
+                  LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE,
+          "selected matrix representation must realize its source contract");
+      selected_contract_ordinal = choices->operand_exchanged_contract_ordinal;
+      transform_flags =
+          LOOM_TARGET_CONTRACT_DESCRIPTOR_MATRIX_TRANSFORM_TRANSPOSE_MN;
+    }
+    contract_descriptor =
+        selected_contract_ordinal == canonical_contract_ordinal
+            ? canonical_descriptor
+            : loom_amdgpu_matrix_contract_descriptor_at(
+                  selected_contract_ordinal);
+    IREE_ASSERT(contract_descriptor != NULL,
+                "selected matrix contract ordinal must name a descriptor");
+  } else {
+    if (!loom_amdgpu_matrix_select_contract(
+            contract_request, &configuration, &contract_descriptor,
+            /*out_descriptor_ordinal=*/NULL, &contract_diagnostic,
+            &match_diagnostic)) {
+      return loom_amdgpu_matrix_contract_query_reject_contract(
+          environment, source_op, LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED,
+          contract_diagnostic, match_diagnostic, out_result);
+    }
   }
   const loom_amdgpu_matrix_fragment_layout_t* fragment_layout =
       loom_amdgpu_matrix_contract_descriptor_fragment_layout(
@@ -479,6 +527,7 @@ iree_status_t loom_amdgpu_descriptor_matrix_query(
   out_result->selected_native_contraction_facts =
       fragment_layout != NULL ? fragment_layout->native_contraction_facts
                               : NULL;
+  out_result->selected_descriptor_matrix_transform_flags = transform_flags;
   out_result->source_rejection_bits = contract_diagnostic.rejection_bits;
   out_result->target_rejection_bits = match_diagnostic.rejection_bits;
   return iree_ok_status();

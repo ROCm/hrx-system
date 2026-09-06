@@ -172,6 +172,30 @@ iree_py_test(
 )
 
 iree_py_library(
+    name = "matrix_fragment_realization",
+    srcs = ["matrix_fragment_realization.py"],
+    deps = [
+        ":matrix_contracts",
+        ":matrix_fragment_layouts",
+        "//loom/py/loom/target:native_contraction_layout",
+    ],
+)
+
+iree_py_test(
+    name = "matrix_fragment_realization_test",
+    srcs = [
+        "matrix_fragment_realization_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amdgpu.matrix_fragment_realization_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":matrix_fragment_realization",
+        "//loom/py/loom/target:native_contraction_layout",
+    ],
+)
+
+iree_py_library(
     name = "descriptors",
     srcs = [
         "descriptor_overlay.py",

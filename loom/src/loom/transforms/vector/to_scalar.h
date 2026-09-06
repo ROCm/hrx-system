@@ -124,16 +124,6 @@ iree_status_t loom_vector_fragment_store_to_scalar_rewrite_op(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
     bool* out_rewritten);
 
-// Rewrites adjacent target-shaped result fragment stores into one shared
-// scalar loop over physical result payload registers.
-iree_status_t
-loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_ops(
-    loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* const* ops,
-    iree_host_size_t op_count,
-    const loom_matrix_fragment_layout_t* matrix_fragment_layout,
-    uint16_t register_count, loom_vector_to_scalar_flags_t flags,
-    bool* out_rewritten);
-
 // Returns target-independent rejection flags explaining why the scalar
 // reference lowering would refuse one vector.fragment.store op.
 uint32_t loom_vector_fragment_store_to_scalar_reference_rejection_bits(

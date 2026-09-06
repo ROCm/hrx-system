@@ -252,8 +252,8 @@ scf_lookup = Op(
         "column's result type."
     ),
     operands=[
-        Operand("selector", INDEX),
-        Operand("values", ANY, variadic=True),
+        Operand("selector", INDEX, role=OperandRole.SELECT_CONDITION),
+        Operand("values", ANY, variadic=True, role=OperandRole.SELECT_PAYLOAD),
     ],
     results=[Result("results", ANY, variadic=True)],
     attrs=[

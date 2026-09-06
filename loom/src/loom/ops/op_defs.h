@@ -709,7 +709,9 @@ enum loom_operand_role_e {
   LOOM_OPERAND_ROLE_CONTROL_CONDITION = 1,
   // Operand selects between value payloads.
   LOOM_OPERAND_ROLE_SELECT_CONDITION = 2,
-  // Operand is one arm of a value-selecting operation.
+  // Operand is one arm of a value-selecting operation. For operations with
+  // multiple results, payload operands are row-major result tuples: payload
+  // operand N selects result N modulo the result count.
   LOOM_OPERAND_ROLE_SELECT_PAYLOAD = 3,
   // Operand is broadcast into every element of a composite result.
   LOOM_OPERAND_ROLE_BROADCAST_SOURCE = 4,

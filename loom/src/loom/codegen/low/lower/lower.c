@@ -930,6 +930,13 @@ static iree_status_t loom_low_lower_emit_descriptor_matrix_vector_mma(
   loom_value_id_t low_rhs = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
       context, loom_vector_mma_rhs(source_op), &low_rhs));
+  if (iree_any_bit_set(
+          plan->transform_flags,
+          LOOM_TARGET_CONTRACT_DESCRIPTOR_MATRIX_TRANSFORM_TRANSPOSE_MN)) {
+    const loom_value_id_t exchanged_lhs = low_lhs;
+    low_lhs = low_rhs;
+    low_rhs = exchanged_lhs;
+  }
   loom_value_id_t low_init = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
       context, loom_vector_mma_init(source_op), &low_init));

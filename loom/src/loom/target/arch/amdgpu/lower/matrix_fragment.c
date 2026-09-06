@@ -76,6 +76,56 @@ bool loom_amdgpu_matrix_fragment_role_is_result_like(
          role == LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR;
 }
 
+uint8_t loom_amdgpu_matrix_fragment_role_view_axis(
+    loom_contract_operand_role_t role, uint8_t view_rank,
+    loom_amdgpu_matrix_result_representation_flags_t representation_flags,
+    loom_matrix_fragment_axis_t native_axis) {
+  static const uint8_t kViewAxes[][LOOM_MATRIX_FRAGMENT_AXIS_COUNT] = {
+      [LOOM_CONTRACT_OPERAND_ROLE_UNKNOWN] = {UINT8_MAX, UINT8_MAX, UINT8_MAX,
+                                              UINT8_MAX},
+      [LOOM_CONTRACT_OPERAND_ROLE_LHS] = {UINT8_MAX, 0, UINT8_MAX, 1},
+      [LOOM_CONTRACT_OPERAND_ROLE_RHS] = {UINT8_MAX, UINT8_MAX, 1, 0},
+      [LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR] = {UINT8_MAX, 0, 1, UINT8_MAX},
+      [LOOM_CONTRACT_OPERAND_ROLE_RESULT] = {UINT8_MAX, 0, 1, UINT8_MAX},
+  };
+  const bool blocked = view_rank == LOOM_AMDGPU_FRAGMENT_BLOCKED_VIEW_RANK;
+  if (native_axis == LOOM_MATRIX_FRAGMENT_AXIS_BLOCK) {
+    return blocked ? 0 : UINT8_MAX;
+  }
+  loom_matrix_fragment_axis_t source_axis = native_axis;
+  if (loom_amdgpu_matrix_fragment_role_is_result_like(role) &&
+      iree_any_bit_set(
+          representation_flags,
+          LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_FLAG_TRANSPOSE_MN)) {
+    if (source_axis == LOOM_MATRIX_FRAGMENT_AXIS_ROW) {
+      source_axis = LOOM_MATRIX_FRAGMENT_AXIS_COLUMN;
+    } else if (source_axis == LOOM_MATRIX_FRAGMENT_AXIS_COLUMN) {
+      source_axis = LOOM_MATRIX_FRAGMENT_AXIS_ROW;
+    }
+  }
+  uint8_t view_axis = kViewAxes[role][source_axis];
+  if (view_axis != UINT8_MAX && blocked) {
+    ++view_axis;
+  }
+  return view_axis;
+}
+
+loom_amdgpu_matrix_tile_shape_t loom_amdgpu_matrix_fragment_source_tile_shape(
+    const loom_amdgpu_matrix_fragment_layout_t* layout,
+    loom_contract_operand_role_t role,
+    loom_amdgpu_matrix_result_representation_flags_t representation_flags) {
+  loom_amdgpu_matrix_tile_shape_t source_shape = layout->tile_shape;
+  if (loom_amdgpu_matrix_fragment_role_is_result_like(role) &&
+      iree_any_bit_set(
+          representation_flags,
+          LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_FLAG_TRANSPOSE_MN)) {
+    const uint16_t native_row_count = source_shape.result_row_count;
+    source_shape.result_row_count = source_shape.result_column_count;
+    source_shape.result_column_count = native_row_count;
+  }
+  return source_shape;
+}
+
 bool loom_amdgpu_matrix_fragment_role_layout_uses_low_subword(
     const loom_matrix_fragment_role_layout_t* role_layout) {
   return role_layout != NULL && role_layout->coordinate_element_stride > 1;
@@ -115,7 +165,7 @@ bool loom_amdgpu_matrix_fragment_payload_matches_role_storage(
          storage.register_count == role_layout->register_count;
 }
 
-static bool loom_amdgpu_fragment_memory_scalar_type_from_numeric(
+bool loom_amdgpu_matrix_fragment_scalar_type_from_numeric(
     loom_amdgpu_matrix_numeric_type_t numeric_type,
     loom_scalar_type_t* out_element_type) {
   *out_element_type = LOOM_SCALAR_TYPE_NONE;
@@ -183,7 +233,7 @@ bool loom_amdgpu_matrix_fragment_descriptor_role_storage(
   out_storage->element_type = LOOM_SCALAR_TYPE_NONE;
   return loom_amdgpu_fragment_memory_descriptor_payload(
              descriptor, role, &out_storage->payload) &&
-         loom_amdgpu_fragment_memory_scalar_type_from_numeric(
+         loom_amdgpu_matrix_fragment_scalar_type_from_numeric(
              out_storage->payload.numeric_type, &out_storage->element_type);
 }
 
@@ -207,8 +257,11 @@ const loom_amdgpu_matrix_contract_descriptor_t*
 loom_amdgpu_matrix_fragment_contract_candidate_at(
     const loom_amdgpu_matrix_fragment_contract_candidates_t* candidates,
     iree_host_size_t index) {
-  return candidates != NULL ? candidates->descriptors[index]
-                            : loom_amdgpu_matrix_contract_descriptor_at(index);
+  IREE_ASSERT_LE(index, UINT16_MAX);
+  const uint16_t ordinal = candidates != NULL
+                               ? candidates->descriptor_ordinals[index]
+                               : (uint16_t)index;
+  return loom_amdgpu_matrix_contract_descriptor_at(ordinal);
 }
 
 loom_amdgpu_matrix_feature_bits_t loom_amdgpu_matrix_fragment_feature_bits(

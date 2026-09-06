@@ -381,11 +381,53 @@ loom_cc_library(
     "storage_relation.c"
   DEPS
     iree::base
+    loom::analysis::value_relation
     loom::ir
     loom::ops::low
     loom::ops::op_defs
     loom::target::registers
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    storage_relation_test
+  SRCS
+    "storage_relation_test.cc"
+  DEPS
+    ::storage_relation
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::low
+    loom::target::registers
+)
+
+loom_cc_library(
+  NAME
+    representation_plan
+  HDRS
+    "representation_plan.h"
+  SRCS
+    "representation_plan.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    representation_plan_test
+  SRCS
+    "representation_plan_test.cc"
+  DEPS
+    ::representation_plan
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_library(

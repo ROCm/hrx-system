@@ -28,6 +28,34 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "value_relation",
+    srcs = ["value_relation.c"],
+    hdrs = ["value_relation.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/util:cfg_graph",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+loom_cc_test(
+    name = "value_relation_test",
+    srcs = ["value_relation_test.cc"],
+    deps = [
+        ":value_relation",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_test(
     name = "control_uniformity_test",
     srcs = ["control_uniformity_test.cc"],

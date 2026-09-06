@@ -142,6 +142,7 @@ void InitializeRequirementTables(RequirementTables* tables) {
   tables->schedule_classes[0].latency_kind = LOOM_LOW_LATENCY_KIND_EXACT;
   tables->schedule_classes[0].issue_use_start = 0;
   tables->schedule_classes[0].issue_use_count = 1;
+  tables->schedule_classes[0].minimum_issue_cycles = 1;
   tables->schedule_classes[0].model_quality = LOOM_LOW_MODEL_QUALITY_EXACT;
 
   tables->descriptors[0].key_string_offset =

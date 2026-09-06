@@ -1550,7 +1550,8 @@ loom_amdgpu_vgpr_binary_src0_inline_descriptor_ref(
   }
 }
 
-bool loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
+loom_amdgpu_descriptor_ref_t
+loom_amdgpu_select_vgpr_binary_immediate_descriptor_ref(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t descriptor_ref, uint32_t immediate) {
   const loom_amdgpu_descriptor_ref_t src0_inline_descriptor_ref =
@@ -1558,9 +1559,19 @@ bool loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
   if (immediate <= LOOM_AMDGPU_SOURCE_INLINE_U32_MAX &&
       loom_amdgpu_descriptor_set_has_ref(descriptor_set,
                                          src0_inline_descriptor_ref)) {
-    return true;
+    return src0_inline_descriptor_ref;
   }
-  return loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref);
+  return loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref)
+             ? descriptor_ref
+             : LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+}
+
+bool loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_amdgpu_descriptor_ref_t descriptor_ref, uint32_t immediate) {
+  return loom_amdgpu_select_vgpr_binary_immediate_descriptor_ref(
+             descriptor_set, descriptor_ref, immediate) !=
+         LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
 }
 
 bool loom_amdgpu_descriptor_set_can_emit_vgpr_compare_immediate(
@@ -1585,13 +1596,11 @@ iree_status_t loom_amdgpu_emit_vgpr_binary_immediate(
   *out_value = LOOM_VALUE_ID_INVALID;
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);
-  const loom_amdgpu_descriptor_ref_t src0_inline_descriptor_ref =
-      loom_amdgpu_vgpr_binary_src0_inline_descriptor_ref(descriptor_ref);
-  if (immediate <= LOOM_AMDGPU_SOURCE_INLINE_U32_MAX &&
-      loom_amdgpu_descriptor_ref_ordinal(descriptor_set,
-                                         src0_inline_descriptor_ref) !=
-          LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    descriptor_ref = src0_inline_descriptor_ref;
+  const loom_amdgpu_descriptor_ref_t selected_descriptor_ref =
+      loom_amdgpu_select_vgpr_binary_immediate_descriptor_ref(
+          descriptor_set, descriptor_ref, immediate);
+  if (selected_descriptor_ref != LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
+    descriptor_ref = selected_descriptor_ref;
   }
 
   loom_named_attr_t attrs[1] = {0};

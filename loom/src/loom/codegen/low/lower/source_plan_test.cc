@@ -29,12 +29,72 @@ class LowLowerSourcePlanTest : public ::testing::Test {
     bool elided = false;
   };
 
+  struct SourcePlanObservation {
+    loom_op_kind_t op_kinds[4] = {};
+    iree_host_size_t op_count = 0;
+    uint8_t phase = 0;
+    bool invalid_lifecycle = false;
+    bool selection_started = false;
+    bool fail_at_end = false;
+  };
+
   struct PlanObserver {
     const loom_op_t* expected_source_ops[3] = {nullptr, nullptr, nullptr};
     ObservedPlan plans[3];
     iree_host_size_t plan_count = 0;
     bool overflow = false;
+    SourcePlanObservation source_plan;
   };
+
+  static iree_status_t BeginSourcePlanObservation(
+      void* user_data, loom_low_lower_context_t* context,
+      void** out_observer_state) {
+    auto* observer = static_cast<PlanObserver*>(user_data);
+    SourcePlanObservation* observation = &observer->source_plan;
+    observation->selection_started |=
+        loom_low_lower_context_selected_plan_count(context) != 0;
+    observation->invalid_lifecycle |= observation->phase != 0;
+    observation->phase = 1;
+    *out_observer_state = observation;
+    return iree_ok_status();
+  }
+
+  static void ObserveSourcePlanOp(void* observer_state,
+                                  loom_low_lower_context_t* context,
+                                  const loom_op_t* source_op) {
+    auto* observation = static_cast<SourcePlanObservation*>(observer_state);
+    observation->selection_started |=
+        loom_low_lower_context_selected_plan_count(context) != 0;
+    observation->invalid_lifecycle |=
+        observation->phase != 1 || source_op == nullptr;
+    if (source_op != nullptr &&
+        observation->op_count < IREE_ARRAYSIZE(observation->op_kinds)) {
+      observation->op_kinds[observation->op_count] = source_op->kind;
+    }
+    ++observation->op_count;
+  }
+
+  static iree_status_t EndSourcePlanObservation(
+      void* observer_state, loom_low_lower_context_t* context) {
+    auto* observation = static_cast<SourcePlanObservation*>(observer_state);
+    observation->selection_started |=
+        loom_low_lower_context_selected_plan_count(context) != 0;
+    observation->invalid_lifecycle |= observation->phase != 1;
+    observation->phase = 2;
+    if (observation->fail_at_end) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "source plan observation failed");
+    }
+    return iree_ok_status();
+  }
+
+  inline static const loom_low_lower_source_plan_observer_t
+      kSourcePlanObserver = {
+          /*.begin=*/BeginSourcePlanObservation,
+          /*.observe=*/ObserveSourcePlanOp,
+          /*.end=*/EndSourcePlanObservation,
+          /*.user_data=*/nullptr,
+      };
 
   static iree_status_t ObservePlan(void* user_data,
                                    loom_low_lower_context_t* context) {
@@ -76,6 +136,9 @@ class LowLowerSourcePlanTest : public ::testing::Test {
         loom_value_fact_table_compute(&fact_table_, module_, function_));
 
     policy_ = *loom_test_low_lower_policy();
+    source_plan_observer_ = kSourcePlanObserver;
+    source_plan_observer_.user_data = &observer_;
+    policy_.source_plan_observer = &source_plan_observer_;
     policy_.emit_preamble.fn = ObservePlan;
     policy_.emit_preamble.user_data = &observer_;
     options_.target_facts = &target_facts_;
@@ -159,6 +222,7 @@ class LowLowerSourcePlanTest : public ::testing::Test {
   loom_low_lower_policy_t policy_ = {};
   loom_low_lower_options_t options_ = {};
   PlanObserver observer_;
+  loom_low_lower_source_plan_observer_t source_plan_observer_ = {};
   loom_low_lower_result_t result_ = {};
 };
 
@@ -176,6 +240,27 @@ TEST_F(LowLowerSourcePlanTest,
   EXPECT_TRUE(observer_.plans[0].elided);
   EXPECT_FALSE(observer_.plans[1].elided);
   EXPECT_FALSE(observer_.plans[2].elided);
+
+  EXPECT_EQ(observer_.source_plan.phase, 2u);
+  EXPECT_FALSE(observer_.source_plan.invalid_lifecycle);
+  EXPECT_FALSE(observer_.source_plan.selection_started);
+  ASSERT_EQ(observer_.source_plan.op_count, 4u);
+  EXPECT_EQ(observer_.source_plan.op_kinds[0], LOOM_OP_SCALAR_ADDI);
+  EXPECT_EQ(observer_.source_plan.op_kinds[1], LOOM_OP_SCALAR_ADDI);
+  EXPECT_EQ(observer_.source_plan.op_kinds[2], LOOM_OP_SCALAR_ADDI);
+  EXPECT_EQ(observer_.source_plan.op_kinds[3], LOOM_OP_FUNC_RETURN);
+}
+
+TEST_F(LowLowerSourcePlanTest, PropagatesObserverEndFailureBeforeSelection) {
+  observer_.source_plan.fail_at_end = true;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_low_lower_function(module_, function_, &options_, &result_));
+
+  EXPECT_EQ(observer_.source_plan.phase, 2u);
+  EXPECT_FALSE(observer_.source_plan.invalid_lifecycle);
+  EXPECT_FALSE(observer_.source_plan.selection_started);
+  EXPECT_EQ(observer_.plan_count, 0u);
 }
 
 }  // namespace

@@ -242,6 +242,16 @@ loom_amdgpu_matrix_contract_descriptor_at(iree_host_size_t index) {
   return &kLoomAmdgpuMatrixContractDescriptors[index];
 }
 
+const loom_amdgpu_matrix_result_representation_t*
+loom_amdgpu_matrix_result_representation_at(
+    loom_amdgpu_matrix_result_representation_id_t representation_id) {
+  if (representation_id == LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE ||
+      representation_id >= LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_COUNT) {
+    return NULL;
+  }
+  return &kLoomAmdgpuMatrixResultRepresentations[representation_id];
+}
+
 const loom_amdgpu_matrix_contract_descriptor_t*
 loom_amdgpu_matrix_contract_wait_state_descriptor_for_low_descriptor_ref(
     loom_amdgpu_descriptor_ref_t low_descriptor_ref) {
@@ -489,7 +499,11 @@ loom_amdgpu_matrix_contract_scale_format_rejection_bits(
 const loom_amdgpu_matrix_contract_descriptor_t*
 loom_amdgpu_matrix_contract_select(
     const loom_amdgpu_matrix_contract_match_request_t* request,
+    uint16_t* out_descriptor_ordinal,
     loom_amdgpu_matrix_contract_match_diagnostic_t* out_diagnostic) {
+  if (out_descriptor_ordinal != NULL) {
+    *out_descriptor_ordinal = LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE;
+  }
   loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {
       .descriptor_count = kLoomAmdgpuMatrixContractDescriptorCount,
   };
@@ -562,6 +576,10 @@ loom_amdgpu_matrix_contract_select(
     }
     ++diagnostic.wave_candidate_count;
 
+    if (out_descriptor_ordinal != NULL) {
+      IREE_ASSERT_LE(i, UINT16_MAX);
+      *out_descriptor_ordinal = (uint16_t)i;
+    }
     if (out_diagnostic != NULL) *out_diagnostic = diagnostic;
     return descriptor;
   }

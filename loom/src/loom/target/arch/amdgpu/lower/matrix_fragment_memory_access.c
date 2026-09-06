@@ -199,8 +199,7 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
   packet_source.vector_lane_count = vector_lane_count;
   packet_source.vector_lane_byte_stride = plan->element_byte_count;
   loom_amdgpu_fragment_memory_packet_report_t packet_report = {0};
-  loom_amdgpu_fragment_memory_query_packet_report(descriptor_set, plan, packet,
-                                                  &packet_report);
+  loom_amdgpu_fragment_memory_query_packet_report(plan, packet, &packet_report);
   loom_low_lower_memory_subgroup_access_report_t subgroup_access = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_report_subgroup_access(
       context, source_op, layout, plan, packet, element_index, &issued,

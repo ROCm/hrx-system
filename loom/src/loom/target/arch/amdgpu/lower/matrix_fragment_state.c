@@ -6,6 +6,8 @@
 
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_state.h"
 
+#include <string.h>
+
 #include "iree/base/internal/math.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
@@ -51,10 +53,13 @@ iree_status_t loom_amdgpu_matrix_fragment_contract_candidates(
 
   const iree_host_size_t descriptor_count =
       loom_amdgpu_matrix_contract_descriptor_count();
-  const loom_amdgpu_matrix_contract_descriptor_t** descriptors = NULL;
+  uint16_t* descriptor_ordinals = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
-      context, descriptor_count, sizeof(*descriptors), (void**)&descriptors));
+      context, descriptor_count, sizeof(*descriptor_ordinals),
+      (void**)&descriptor_ordinals));
   iree_host_size_t candidate_count = 0;
+  uint64_t canonical_result_representation_bits = 0;
+  uint64_t exact_result_representation_bits = 0;
   for (iree_host_size_t i = 0; i < descriptor_count; ++i) {
     const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
         loom_amdgpu_matrix_contract_descriptor_at(i);
@@ -62,16 +67,95 @@ iree_status_t loom_amdgpu_matrix_fragment_contract_candidates(
             descriptor, descriptor_set, feature_bits, wave_size)) {
       continue;
     }
-    descriptors[candidate_count++] = descriptor;
+    IREE_ASSERT_LE(i, UINT16_MAX);
+    descriptor_ordinals[candidate_count++] = (uint16_t)i;
+    const loom_amdgpu_matrix_contract_realization_choices_t* choices =
+        &descriptor->realization;
+    if (choices->canonical_result_representation_id !=
+        LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE) {
+      canonical_result_representation_bits |=
+          UINT64_C(1) << choices->canonical_result_representation_id;
+      exact_result_representation_bits |=
+          UINT64_C(1) << choices->canonical_result_representation_id;
+    }
+    if (choices->operand_exchanged_result_representation_id !=
+            LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE &&
+        choices->operand_exchanged_contract_ordinal !=
+            LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE) {
+      const loom_amdgpu_matrix_contract_descriptor_t* exchanged_descriptor =
+          loom_amdgpu_matrix_contract_descriptor_at(
+              choices->operand_exchanged_contract_ordinal);
+      if (loom_amdgpu_matrix_fragment_contract_is_available(
+              exchanged_descriptor, descriptor_set, feature_bits, wave_size)) {
+        exact_result_representation_bits |=
+            UINT64_C(1) << choices->operand_exchanged_result_representation_id;
+      }
+    }
   }
   *candidates = (loom_amdgpu_matrix_fragment_contract_candidates_t){
       .descriptor_set = descriptor_set,
       .feature_bits = feature_bits,
       .wave_size = wave_size,
-      .descriptors = descriptors,
+      .descriptor_ordinals = descriptor_ordinals,
       .descriptor_count = candidate_count,
+      .canonical_result_representation_bits =
+          canonical_result_representation_bits,
+      .exact_result_representation_bits = exact_result_representation_bits,
   };
   *out_candidates = candidates;
+  return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_matrix_fragment_record_contract_ordinal(
+    loom_low_lower_context_t* context, loom_value_id_t source_value_id,
+    uint16_t contract_ordinal) {
+  loom_amdgpu_matrix_fragment_state_t* state = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_matrix_fragment_state(context, &state));
+  const loom_local_value_domain_t* value_domain =
+      loom_low_lower_context_value_domain(context);
+  const loom_value_ordinal_t value_ordinal =
+      loom_local_value_domain_try_ordinal(value_domain, source_value_id);
+  IREE_ASSERT_NE(value_ordinal, LOOM_VALUE_ORDINAL_INVALID);
+  if (state->contract_ordinals_by_value_ordinal == NULL) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
+        context, value_domain->value_count,
+        sizeof(*state->contract_ordinals_by_value_ordinal),
+        (void**)&state->contract_ordinals_by_value_ordinal));
+    memset(state->contract_ordinals_by_value_ordinal, 0xFF,
+           value_domain->value_count *
+               sizeof(*state->contract_ordinals_by_value_ordinal));
+    state->contract_ordinal_count = value_domain->value_count;
+  }
+  IREE_ASSERT_EQ(state->contract_ordinal_count, value_domain->value_count);
+  uint16_t* recorded_ordinal =
+      &state->contract_ordinals_by_value_ordinal[value_ordinal];
+  IREE_ASSERT(*recorded_ordinal == LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE ||
+              *recorded_ordinal == contract_ordinal);
+  *recorded_ordinal = contract_ordinal;
+  return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_matrix_fragment_query_contract_ordinal(
+    const loom_target_contract_query_environment_t* environment,
+    loom_value_id_t source_value_id, uint16_t* out_contract_ordinal) {
+  *out_contract_ordinal = LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE;
+  loom_amdgpu_matrix_fragment_state_t* state = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_contract_query_get_or_allocate_target_state(
+      environment, &loom_amdgpu_matrix_fragment_state_key, sizeof(*state),
+      (void**)&state));
+  if (state == NULL || state->contract_ordinals_by_value_ordinal == NULL ||
+      environment->value_domain == NULL) {
+    return iree_ok_status();
+  }
+  const loom_value_ordinal_t value_ordinal =
+      loom_local_value_domain_try_ordinal(environment->value_domain,
+                                          source_value_id);
+  if (value_ordinal == LOOM_VALUE_ORDINAL_INVALID ||
+      value_ordinal >= state->contract_ordinal_count) {
+    return iree_ok_status();
+  }
+  *out_contract_ordinal =
+      state->contract_ordinals_by_value_ordinal[value_ordinal];
   return iree_ok_status();
 }
 

@@ -86,12 +86,15 @@ loom_cc_library(
     "matrix_fragment_memory_access.h"
     "matrix_fragment_memory_address.h"
     "matrix_fragment_memory_emit.h"
+    "matrix_fragment_memory_layout.h"
     "matrix_fragment_memory_narrow.h"
     "matrix_fragment_memory_packet.h"
     "matrix_fragment_memory_plan.h"
+    "matrix_fragment_publication_cost.h"
     "matrix_fragment_repack.h"
     "matrix_fragment_repack_packed_b16.h"
     "matrix_fragment_state.h"
+    "matrix_representation.h"
     "memory.h"
     "memory_bank_service.h"
     "memory_subgroup_access.h"
@@ -167,12 +170,15 @@ loom_cc_library(
     "matrix_fragment_memory_access.c"
     "matrix_fragment_memory_address.c"
     "matrix_fragment_memory_emit.c"
+    "matrix_fragment_memory_layout.c"
     "matrix_fragment_memory_narrow.c"
     "matrix_fragment_memory_packet.c"
     "matrix_fragment_memory_plan.c"
+    "matrix_fragment_publication_cost.c"
     "matrix_fragment_repack.c"
     "matrix_fragment_repack_packed_b16.c"
     "matrix_fragment_state.c"
+    "matrix_representation.c"
     "memory.c"
     "memory_bank_service.c"
     "memory_cache.c"
@@ -226,6 +232,8 @@ loom_cc_library(
     loom::codegen::low::descriptors
     loom::codegen::low::function
     loom::codegen::low::lower
+    loom::codegen::low::lower::representation_observer
+    loom::codegen::low::representation_plan
     loom::codegen::low::source_memory_plan
     loom::ir
     loom::ir::facts
@@ -235,6 +243,7 @@ loom_cc_library(
     loom::ops::cfg
     loom::ops::combining
     loom::ops::encoding
+    loom::ops::func
     loom::ops::global
     loom::ops::index
     loom::ops::kernel

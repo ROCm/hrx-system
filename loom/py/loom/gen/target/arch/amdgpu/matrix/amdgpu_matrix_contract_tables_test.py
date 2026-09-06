@@ -105,8 +105,10 @@ def _payload_numeric_types(contract: AmdgpuMatrixContract) -> tuple[str, ...]:
 
 def _contract_initializer(contract: AmdgpuMatrixContract) -> str:
     catalog = _GLOBAL_MATRIX_DESCRIPTOR_CATALOG
+    contract_ordinal = next(i for i, candidate in enumerate(AMDGPU_MATRIX_CONTRACTS) if candidate.name == contract.name)
     return amdgpu_matrix_contract_tables._contract_initializer(
         contract,
+        amdgpu_matrix_contract_tables.AMDGPU_MATRIX_FRAGMENT_REALIZATION_CATALOG.contract_choices[contract_ordinal],
         keys_by_semantic_tag=catalog.keys_by_semantic_tag,
         descriptor_shapes_by_key=catalog.shapes_by_key,
         descriptor_immediates_by_key=catalog.immediates_by_key,

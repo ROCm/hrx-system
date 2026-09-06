@@ -68,6 +68,12 @@ from loom.target.arch.amdgpu.matrix_fragment_layouts import (  # noqa: E402
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
 )
+from loom.target.arch.amdgpu.matrix_fragment_realization import (  # noqa: E402
+    AMDGPU_MATRIX_FRAGMENT_REALIZATION_CATALOG,
+    MATRIX_CONTRACT_ORDINAL_NONE,
+    MatrixContractRealizationChoices,
+    MatrixFragmentRealizationCatalog,
+)
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A,
@@ -862,6 +868,7 @@ def _validate_contract_tile_shape(contract: AmdgpuMatrixContract) -> None:
 
 def _contract_initializer(
     contract: AmdgpuMatrixContract,
+    realization: MatrixContractRealizationChoices,
     *,
     keys_by_semantic_tag: Mapping[str, tuple[str, ...]],
     descriptor_shapes_by_key: Mapping[str, tuple[_MatrixDescriptorShape, ...]],
@@ -920,12 +927,20 @@ def _contract_initializer(
         field_name="implicit scale format",
         contract=contract,
     )
+    alternative_contract_value = (
+        "LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE" if realization.operand_exchanged_contract_ordinal == MATRIX_CONTRACT_ORDINAL_NONE else f"UINT16_C({realization.operand_exchanged_contract_ordinal})"
+    )
     result_row_count, result_column_count, reduction_count = contract.tile_shape
     return "\n".join(
         [
             "{",
             f'    .name = IREE_SVL("{contract.name}"),',
             f"    .low_descriptor_ref = {low_descriptor_ref},",
+            "    .realization = {",
+            f"        .operand_exchanged_contract_ordinal = {alternative_contract_value},",
+            f"        .canonical_result_representation_id = UINT8_C({realization.canonical_result_representation_id}),",
+            f"        .operand_exchanged_result_representation_id = UINT8_C({realization.operand_exchanged_result_representation_id}),",
+            "    },",
             f'    .llvm_intrinsic_name = IREE_SVL("{_contract_intrinsic_name(contract)}"),',
             f"    .family = {family},",
             f"    .required_feature_bits = {_c_bitset(contract.features, _FEATURE_C_NAMES, field_name='feature', contract=contract)},",
@@ -950,7 +965,36 @@ def _contract_initializer(
     )
 
 
+def _matrix_result_representation_table_lines(
+    catalog: MatrixFragmentRealizationCatalog,
+) -> list[str]:
+    lines = [
+        "const loom_amdgpu_matrix_result_representation_t",
+        "    kLoomAmdgpuMatrixResultRepresentations[",
+        "        LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_COUNT] = {",
+        "    [LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE] = {",
+        "        .fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_UNKNOWN,",
+        "        .numeric_type = LOOM_AMDGPU_MATRIX_NUMERIC_UNKNOWN,",
+        "        .flags = 0,",
+        "    },",
+    ]
+    for representation_id, representation in enumerate(catalog.result_representations, start=1):
+        flags = "LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_FLAG_TRANSPOSE_MN" if representation.transposed else "0"
+        lines.extend(
+            [
+                f"    [UINT8_C({representation_id})] = {{",
+                f"        .fragment_layout_kind = {representation.fragment_layout.c_kind},",
+                f"        .numeric_type = {_NUMERIC_TYPE_C_NAMES[representation.payload.numeric_type]},",
+                f"        .flags = {flags},",
+                "    },",
+            ]
+        )
+    lines.append("};")
+    return lines
+
+
 def _emit_header() -> str:
+    result_representation_count = len(AMDGPU_MATRIX_FRAGMENT_REALIZATION_CATALOG.result_representations) + 1
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -974,6 +1018,10 @@ def _emit_header() -> str:
         "extern const loom_amdgpu_matrix_contract_descriptor_t",
         "    kLoomAmdgpuMatrixContractDescriptors[];",
         "extern const iree_host_size_t kLoomAmdgpuMatrixContractDescriptorCount;",
+        f"#define LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_COUNT {result_representation_count}",
+        "extern const loom_amdgpu_matrix_result_representation_t",
+        "    kLoomAmdgpuMatrixResultRepresentations[",
+        "        LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_COUNT];",
         "extern const loom_amdgpu_matrix_feature_bits_t",
         "    kLoomAmdgpuMatrixFeatureBitsByProfile[",
         "        LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_COUNT];",
@@ -1312,6 +1360,7 @@ def _fragment_layout_initializer(
 
 
 def _emit_source(*, public_header: str) -> str:
+    realization_catalog = AMDGPU_MATRIX_FRAGMENT_REALIZATION_CATALOG
     catalog = _global_matrix_descriptor_catalog()
     keys_by_semantic_tag = catalog.keys_by_semantic_tag
     descriptor_shapes_by_key = catalog.shapes_by_key
@@ -1357,11 +1406,16 @@ def _emit_source(*, public_header: str) -> str:
     lines.extend(
         _contract_initializer(
             contract,
+            realization,
             keys_by_semantic_tag=keys_by_semantic_tag,
             descriptor_shapes_by_key=descriptor_shapes_by_key,
             descriptor_immediates_by_key=descriptor_immediates_by_key,
         )
-        for contract in AMDGPU_MATRIX_CONTRACTS
+        for contract, realization in zip(
+            AMDGPU_MATRIX_CONTRACTS,
+            realization_catalog.contract_choices,
+            strict=True,
+        )
     )
     lines.extend(
         [
@@ -1369,6 +1423,24 @@ def _emit_source(*, public_header: str) -> str:
             "",
             "const iree_host_size_t kLoomAmdgpuMatrixContractDescriptorCount =",
             "    IREE_ARRAYSIZE(kLoomAmdgpuMatrixContractDescriptors);",
+            "",
+            "static_assert(sizeof(loom_amdgpu_matrix_result_representation_t) == 3,",
+            '              "matrix result representation row must remain compact");',
+            "static_assert(sizeof(loom_amdgpu_matrix_contract_realization_choices_t) == 4,",
+            '              "matrix contract realization row must remain compact");',
+            "static_assert(sizeof(loom_amdgpu_matrix_contract_descriptor_t) <= 120,",
+            '              "matrix contract descriptor rows must remain compact");',
+            "static_assert(LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT <= UINT8_MAX + 1u,",
+            '              "matrix fragment layout kinds must fit uint8");',
+            "static_assert(LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_COUNT <=",
+            "                  LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_MAX_ID + 1u,",
+            '              "matrix result representation IDs must fit availability bitsets");',
+            "",
+            *_matrix_result_representation_table_lines(realization_catalog),
+            "",
+            "static_assert(",
+            "    sizeof(kLoomAmdgpuMatrixResultRepresentations) < 2048,",
+            '    "matrix realization catalog must remain below 2 KiB");',
             "",
             "const uint16_t kLoomAmdgpuMatrixWaitStateContractOrdinalsByDescriptorRef[] = {",
         ]

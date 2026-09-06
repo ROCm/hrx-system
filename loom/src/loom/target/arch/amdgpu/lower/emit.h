@@ -119,6 +119,13 @@ iree_status_t loom_amdgpu_resolve_descriptor_ref(
     loom_amdgpu_descriptor_ref_t descriptor_ref,
     loom_low_lower_resolved_descriptor_t* out_descriptor);
 
+// Selects the exact descriptor used to emit |descriptor_ref| with |immediate|,
+// including target inline forms. Returns NONE when no form is available.
+loom_amdgpu_descriptor_ref_t
+loom_amdgpu_select_vgpr_binary_immediate_descriptor_ref(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_amdgpu_descriptor_ref_t descriptor_ref, uint32_t immediate);
+
 // Returns true when |descriptor_set| can emit |descriptor_ref| with |immediate|
 // through the normal VGPR immediate helper, including target inline forms.
 bool loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(

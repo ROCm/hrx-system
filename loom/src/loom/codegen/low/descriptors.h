@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 38u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 39u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -814,6 +814,10 @@ typedef struct loom_low_schedule_class_t {
   uint16_t hazard_count;
   // Schedule-class flags such as load, store, call, or control.
   loom_low_schedule_class_flags_t flags;
+  // Minimum steady-state issue cycles required by one use of this class.
+  // Generated from resource demand and capacity; dependency latency and
+  // hazards are intentionally excluded.
+  uint16_t minimum_issue_cycles;
   // Quality of the schedule model data.
   loom_low_model_quality_t model_quality;
   // First pressure-delta row for this schedule class.
@@ -821,6 +825,9 @@ typedef struct loom_low_schedule_class_t {
   // Number of pressure-delta rows for this schedule class.
   uint16_t pressure_delta_count;
 } loom_low_schedule_class_t;
+
+static_assert(sizeof(loom_low_schedule_class_t) == 32,
+              "schedule classes must remain compact table rows");
 
 // Returns the scheduler dependency distance for |schedule_class|.
 // A zero override preserves the historical latency_cycles behavior.

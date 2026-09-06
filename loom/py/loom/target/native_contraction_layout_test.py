@@ -9,10 +9,13 @@ from __future__ import annotations
 from loom.target.native_contraction_layout import (
     ContractionShape,
     CoordinateDimension,
+    ExactContractionLayout,
     contiguous_element_layout,
+    exact_contraction_role_layout,
     exact_coordinate_map,
     grouped_dot_contraction_layout,
     ownership_relation,
+    transpose_contraction_layout,
     unique_ownership_coordinate_map,
 )
 
@@ -98,4 +101,95 @@ def test_grouped_dot_composes_carrier_atoms_with_contraction_roles() -> None:
         (0, 0, 1),
         (0, 0, 2),
         (0, 0, 3),
+    )
+
+
+def test_transpose_exchanges_operands_and_semantic_axes() -> None:
+    shape = ContractionShape(block_count=1, m=2, n=3, k=2)
+
+    lhs = exact_contraction_role_layout(
+        shape,
+        "lhs",
+        exact_coordinate_map(
+            source_dimensions=(CoordinateDimension("value", 4),),
+            destination_dimensions=shape.role_dimensions("lhs"),
+            evaluate=lambda physical_coordinate: (
+                0,
+                physical_coordinate[0] // 2,
+                physical_coordinate[0] % 2,
+            ),
+        ),
+    )
+    rhs = exact_contraction_role_layout(
+        shape,
+        "rhs",
+        exact_coordinate_map(
+            source_dimensions=(CoordinateDimension("value", 6),),
+            destination_dimensions=shape.role_dimensions("rhs"),
+            evaluate=lambda physical_coordinate: (
+                0,
+                physical_coordinate[0] % 2,
+                physical_coordinate[0] // 2,
+            ),
+        ),
+    )
+    result = exact_contraction_role_layout(
+        shape,
+        "result",
+        exact_coordinate_map(
+            source_dimensions=(CoordinateDimension("value", 6),),
+            destination_dimensions=shape.role_dimensions("result"),
+            evaluate=lambda physical_coordinate: (
+                0,
+                physical_coordinate[0] % 2,
+                physical_coordinate[0] // 2,
+            ),
+        ),
+    )
+    layout = ExactContractionLayout(
+        shape=shape,
+        lhs=lhs,
+        rhs=rhs,
+        accumulator=exact_contraction_role_layout(
+            shape, "accumulator", result.coordinate_map
+        ),
+        result=result,
+    )
+
+    transposed = transpose_contraction_layout(layout)
+
+    assert transposed.shape == ContractionShape(block_count=1, m=3, n=2, k=2)
+    assert transposed.lhs.coordinate_map.source_dimensions == (
+        CoordinateDimension("value", 6),
+    )
+    assert transposed.rhs.coordinate_map.source_dimensions == (
+        CoordinateDimension("value", 4),
+    )
+    assert tuple(
+        transposed.lhs.coordinate_map.evaluate((value,)) for value in range(6)
+    ) == (
+        (0, 0, 0),
+        (0, 0, 1),
+        (0, 1, 0),
+        (0, 1, 1),
+        (0, 2, 0),
+        (0, 2, 1),
+    )
+    assert tuple(
+        transposed.rhs.coordinate_map.evaluate((value,)) for value in range(4)
+    ) == (
+        (0, 0, 0),
+        (0, 1, 0),
+        (0, 0, 1),
+        (0, 1, 1),
+    )
+    assert tuple(
+        transposed.result.coordinate_map.evaluate((value,)) for value in range(6)
+    ) == (
+        (0, 0, 0),
+        (0, 0, 1),
+        (0, 1, 0),
+        (0, 1, 1),
+        (0, 2, 0),
+        (0, 2, 1),
     )

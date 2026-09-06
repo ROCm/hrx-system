@@ -25,11 +25,12 @@
 #include "loom/target/registers.h"
 
 typedef struct loom_low_lower_rule_descriptor_map_t {
-  // Rule set whose local descriptor refs are resolved by descriptors.
+  // Rule set whose local descriptor refs are resolved by descriptor_ordinals.
   const loom_low_lower_rule_set_t* rule_set;
-  // Descriptor rows indexed by rule-set-local descriptor ref.
-  const loom_low_descriptor_t* const* descriptors;
-  // Number of entries in descriptors.
+  // Cached descriptor ordinal plus one by rule-set-local descriptor ref. Zero
+  // is unresolved and UINT32_MAX is a resolved missing descriptor.
+  uint32_t* descriptor_ordinals;
+  // Number of entries in descriptor_ordinals.
   uint16_t descriptor_count;
 } loom_low_lower_rule_descriptor_map_t;
 
@@ -1229,12 +1230,12 @@ static iree_status_t loom_low_lower_rule_match_can_materialize_from_lowering(
                                        out_can_materialize);
 }
 
-static const loom_low_lower_rule_descriptor_map_t*
+static loom_low_lower_rule_descriptor_map_t*
 loom_low_lower_rule_descriptor_map_find(
-    const loom_low_lower_context_t* context,
+    loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set) {
   for (uint16_t i = 0; i < context->lowering.rule_descriptor_map_count; ++i) {
-    const loom_low_lower_rule_descriptor_map_t* map =
+    loom_low_lower_rule_descriptor_map_t* map =
         &context->lowering.rule_descriptor_maps[i];
     if (map->rule_set == rule_set) {
       return map;
@@ -1271,31 +1272,20 @@ static iree_status_t loom_low_lower_rule_descriptor_maps_initialize(
         &context->lowering.rule_descriptor_maps[i];
     *map = (loom_low_lower_rule_descriptor_map_t){
         .rule_set = rule_set,
-        .descriptors = NULL,
+        .descriptor_ordinals = NULL,
         .descriptor_count = rule_set->descriptor_ref_count,
     };
     if (rule_set->descriptor_ref_count == 0) {
       continue;
     }
     IREE_ASSERT(rule_set->descriptor_refs != NULL);
-    const loom_low_descriptor_t** descriptors = NULL;
+    uint32_t* descriptor_ordinals = NULL;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         &context->function_arena, rule_set->descriptor_ref_count,
-        sizeof(*descriptors), (void**)&descriptors));
-    map->descriptors = descriptors;
-    for (uint16_t j = 0; j < rule_set->descriptor_ref_count; ++j) {
-      descriptors[j] = NULL;
-      const iree_string_view_t key = loom_low_lower_rule_set_string(
-          rule_set, rule_set->descriptor_refs[j].key_string_offset);
-      const uint32_t descriptor_ordinal =
-          loom_low_descriptor_set_lookup_descriptor(descriptor_set, key);
-      if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-        continue;
-      }
-      descriptors[j] = loom_low_descriptor_set_descriptor_at(
-          descriptor_set, descriptor_ordinal);
-      IREE_ASSERT(descriptors[j] != NULL);
-    }
+        sizeof(*descriptor_ordinals), (void**)&descriptor_ordinals));
+    memset(descriptor_ordinals, 0,
+           rule_set->descriptor_ref_count * sizeof(*descriptor_ordinals));
+    map->descriptor_ordinals = descriptor_ordinals;
   }
   return iree_ok_status();
 }
@@ -1309,7 +1299,7 @@ iree_status_t loom_low_lower_rule_match_descriptor_ref_from_lowering(
   loom_low_lower_context_t* context = (loom_low_lower_context_t*)user_data;
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_descriptor_maps_initialize(
       context, match_context->descriptor_set));
-  const loom_low_lower_rule_descriptor_map_t* map = NULL;
+  loom_low_lower_rule_descriptor_map_t* map = NULL;
   if (match_context->policy_rule_set_ordinal == 0) {
     map = loom_low_lower_rule_descriptor_map_find(context, rule_set);
   } else {
@@ -1321,7 +1311,23 @@ iree_status_t loom_low_lower_rule_match_descriptor_ref_from_lowering(
   IREE_ASSERT(map != NULL);
   IREE_ASSERT_EQ(map->rule_set, rule_set);
   IREE_ASSERT_LT(descriptor_ref, map->descriptor_count);
-  *out_descriptor = map->descriptors[descriptor_ref];
+  uint32_t cached_ordinal = map->descriptor_ordinals[descriptor_ref];
+  if (cached_ordinal == 0) {
+    const iree_string_view_t key = loom_low_lower_rule_set_string(
+        rule_set, rule_set->descriptor_refs[descriptor_ref].key_string_offset);
+    const uint32_t descriptor_ordinal =
+        loom_low_descriptor_set_lookup_descriptor(match_context->descriptor_set,
+                                                  key);
+    cached_ordinal = descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE
+                         ? UINT32_MAX
+                         : descriptor_ordinal + 1;
+    map->descriptor_ordinals[descriptor_ref] = cached_ordinal;
+  }
+  if (cached_ordinal != UINT32_MAX) {
+    *out_descriptor = loom_low_descriptor_set_descriptor_at(
+        match_context->descriptor_set, cached_ordinal - 1);
+    IREE_ASSERT(*out_descriptor != NULL);
+  }
   return iree_ok_status();
 }
 

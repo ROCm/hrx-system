@@ -1433,8 +1433,9 @@ typedef enum loom_amdgpu_fragment_memory_packet_flag_bits_e {
   // Adjacent-lane f32 result values are exchanged with a DPP packet.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE_DPP = 1u
                                                                            << 1,
-  // Same-lane f32 result values are packed into one BF16 store packet.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_PACKED_B16_STORE = 1u << 2,
+  // A wider packet was legal but rejected because fragment registers were not
+  // contiguous in memory.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_WIDER_NONCONTIGUOUS = 1u << 2,
 } loom_amdgpu_fragment_memory_packet_flag_bits_t;
 
 // Bitset of loom_amdgpu_fragment_memory_packet_flag_bits_t values.
@@ -1463,13 +1464,13 @@ typedef enum loom_amdgpu_fragment_memory_payload_form_e {
   // FP8 memory lanes are converted to packed BF16 operand registers on load.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_FP8_TO_BF16 = 2,
   // FP8 memory lanes are converted to packed F16 operand registers on load.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_FP8_TO_F16 = 5,
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_FP8_TO_F16 = 3,
   // A f32 result fragment is rounded to BF16 lanes before a 16-bit store.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16 = 3,
-  // A f16 low-subword result fragment is widened to f32 lanes before store.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32 = 4,
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16 = 4,
   // A f32 result fragment is rounded to F16 lanes before a 16-bit store.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_F16 = 6,
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_F16 = 5,
+  // A f16 low-subword result fragment is widened to f32 lanes before store.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32 = 6,
 } loom_amdgpu_fragment_memory_payload_form_t;
 
 typedef enum loom_amdgpu_fragment_memory_packetization_e {
@@ -1486,7 +1487,7 @@ enum {
   LOOM_AMDGPU_FRAGMENT_MEMORY_VIEW_RANK_CAPACITY = 3,
 };
 
-typedef enum loom_amdgpu_fragment_memory_epilogue_strategy_e {
+enum loom_amdgpu_fragment_memory_epilogue_strategy_e {
   // No special result-fragment store epilogue strategy is selected.
   LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_NONE = 0,
   // Each f32 result-fragment register is narrowed and stored separately.
@@ -1500,7 +1501,8 @@ typedef enum loom_amdgpu_fragment_memory_epilogue_strategy_e {
   // Adjacent-lane f32 result-fragment registers are exchanged with DPP and
   // packed into b32 stores.
   LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DPP_PACKED_B16_STORE = 4,
-} loom_amdgpu_fragment_memory_epilogue_strategy_t;
+};
+typedef uint8_t loom_amdgpu_fragment_memory_epilogue_strategy_t;
 
 typedef struct loom_amdgpu_fragment_memory_lane_term_t {
   // Power-of-two divisor applied to the subgroup lane ID.
@@ -1524,6 +1526,8 @@ typedef struct loom_amdgpu_fragment_memory_address_layout_t {
   uint16_t primary_lane_divisor;
   // Number of populated lane coordinate terms.
   uint8_t lane_term_count;
+  // Cost units for materializing the lane-dependent address base.
+  uint8_t lane_address_cost;
   // Lane coordinate terms compiled from semantic layout axes.
   loom_amdgpu_fragment_memory_lane_term_t
       lane_terms[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
@@ -1547,6 +1551,22 @@ typedef struct loom_amdgpu_fragment_memory_runtime_axis_t {
   uint32_t
       register_coordinates[LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS];
 } loom_amdgpu_fragment_memory_runtime_axis_t;
+
+#define LOOM_AMDGPU_FRAGMENT_MEMORY_UNIFORM_BIT_PATTERN_INVALID UINT32_MAX
+
+typedef struct loom_amdgpu_fragment_memory_narrowed_result_plan_t {
+  // Optional f32 fragment source to round directly for narrowed stores.
+  loom_value_id_t round_source;
+  // Optional scalar scale applied before narrowed f32-to-16-bit stores.
+  loom_value_id_t scale_source;
+  // Optional packed 16-bit fragment source copied directly for narrowed stores.
+  loom_value_id_t packed_source;
+  // Exact 16-bit pattern shared by every rounded result lane, or
+  // LOOM_AMDGPU_FRAGMENT_MEMORY_UNIFORM_BIT_PATTERN_INVALID.
+  uint32_t uniform_bit_pattern;
+} loom_amdgpu_fragment_memory_narrowed_result_plan_t;
+static_assert(sizeof(loom_amdgpu_fragment_memory_narrowed_result_plan_t) == 16,
+              "narrowed-result plans must stay compact");
 
 typedef struct loom_amdgpu_fragment_memory_plan_t {
   // Direction of the fragment memory movement.
@@ -1573,6 +1593,9 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
       runtime_axes[LOOM_AMDGPU_FRAGMENT_MEMORY_VIEW_RANK_CAPACITY];
   // Rank of the typed view.
   uint8_t view_rank;
+  // Source-to-native coordinate interpretation for the selected result
+  // representation.
+  loom_amdgpu_matrix_result_representation_flags_t representation_flags;
   // Number of target fragment coordinate registers in the selected layout.
   uint16_t register_count;
   // Number of 32-bit registers used by the lowered payload storage value.
@@ -1596,8 +1619,6 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   bool packet_address_sources_consumed_at_issue;
   // High-half D16 load selected to complete packed B16 payload registers.
   loom_amdgpu_descriptor_ref_t packed_b16_high_descriptor_ref;
-  // Aggregate packet-local lowering strategy bits across all packets.
-  loom_amdgpu_fragment_memory_packet_flags_t packet_flags;
   // Payload storage form selected for the fragment movement.
   loom_amdgpu_fragment_memory_payload_form_t payload_form;
   // Memory packetization selected from fragment and physical view layouts.
@@ -1607,12 +1628,8 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   loom_amdgpu_fragment_memory_epilogue_strategy_t epilogue_strategy;
   // Exact cross-lane packed-B16 publication selected for the memory axis.
   const loom_matrix_fragment_packed_b16_publication_t* packed_b16_publication;
-  // Optional f32 fragment source to round directly for narrowed stores.
-  loom_value_id_t narrowed_result_round_source;
-  // Optional scalar scale applied before narrowed f32-to-16-bit stores.
-  loom_value_id_t narrowed_result_scale_source;
-  // Optional packed 16-bit fragment source copied directly for narrowed stores.
-  loom_value_id_t narrowed_result_packed_source;
+  // Proven source forms and facts retained for narrowed-result emission.
+  loom_amdgpu_fragment_memory_narrowed_result_plan_t narrowed_result;
 } loom_amdgpu_fragment_memory_plan_t;
 
 typedef enum loom_amdgpu_fragment_repack_strategy_e {
