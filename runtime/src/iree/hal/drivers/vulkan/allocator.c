@@ -377,22 +377,11 @@ static iree_status_t iree_hal_vulkan_allocator_trim(
 
 iree_status_t iree_hal_vulkan_allocator_query_queue_pool_backend(
     iree_hal_allocator_t* base_allocator,
-    iree_hal_queue_affinity_t queue_affinity,
     iree_hal_queue_pool_backend_t* out_backend) {
   IREE_ASSERT_ARGUMENT(base_allocator);
   IREE_ASSERT_ARGUMENT(out_backend);
   iree_hal_vulkan_allocator_t* allocator =
       iree_hal_vulkan_allocator_cast(base_allocator);
-  iree_hal_queue_affinity_t normalized_affinity =
-      iree_hal_queue_affinity_is_any(queue_affinity)
-          ? allocator->queue_affinity_mask
-          : queue_affinity;
-  iree_hal_queue_affinity_and_into(normalized_affinity,
-                                   allocator->queue_affinity_mask);
-  if (iree_hal_queue_affinity_is_empty(normalized_affinity)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "no valid Vulkan queue affinity bits specified");
-  }
   out_backend->slab_provider = allocator->default_queue_slab_provider;
   out_backend->notification = allocator->default_pool_notification;
   out_backend->epoch_query = iree_hal_pool_epoch_query_null();

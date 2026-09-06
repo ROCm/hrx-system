@@ -53,7 +53,7 @@ class QueueAllocaTest : public CtsTestBase<> {
 
   iree_status_t QueryPoolBackend(iree_hal_queue_pool_backend_t* out_backend) {
     return iree_hal_device_query_queue_pool_backend(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, out_backend);
+        device_, iree_hal_queue_family(transfer_queue_), out_backend);
   }
 
   iree_status_t CreatePassthroughPool(iree_hal_pool_t** out_pool) {

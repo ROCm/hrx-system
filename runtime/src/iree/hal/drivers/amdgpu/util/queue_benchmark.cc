@@ -734,8 +734,8 @@ class QueueBenchmark : public benchmark::Fixture {
                                           iree_hal_pool_t** out_pool) {
     *out_pool = nullptr;
     iree_hal_queue_pool_backend_t backend = {0};
-    IREE_RETURN_IF_ERROR(
-        iree_hal_device_query_queue_pool_backend(device_, kQueue0, &backend));
+    IREE_RETURN_IF_ERROR(iree_hal_device_query_queue_pool_backend(
+        device_, iree_hal_queue_family(queue0_), &backend));
     if (!backend.slab_provider || !backend.notification) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,

@@ -309,12 +309,12 @@ static iree_status_t EnqueueRawBlockingBarrier(
   return iree_ok_status();
 }
 
-static iree_status_t CreateExplicitFixedBlockPool(iree_hal_device_t* device,
-                                                  iree_device_size_t block_size,
-                                                  iree_hal_pool_t** out_pool) {
+static iree_status_t CreateExplicitFixedBlockPool(
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
+    iree_device_size_t block_size, iree_hal_pool_t** out_pool) {
   iree_hal_queue_pool_backend_t backend = {0};
-  IREE_RETURN_IF_ERROR(iree_hal_device_query_queue_pool_backend(
-      device, kQueueAffinity0, &backend));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_device_query_queue_pool_backend(device, queue_family, &backend));
   if (!backend.slab_provider || !backend.notification) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -329,12 +329,12 @@ static iree_status_t CreateExplicitFixedBlockPool(iree_hal_device_t* device,
       iree_hal_pool_epoch_query_null(), iree_allocator_system(), out_pool);
 }
 
-static iree_status_t CreateExplicitTlsfPool(iree_hal_device_t* device,
-                                            iree_device_size_t slab_size,
-                                            iree_hal_pool_t** out_pool) {
+static iree_status_t CreateExplicitTlsfPool(
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
+    iree_device_size_t slab_size, iree_hal_pool_t** out_pool) {
   iree_hal_queue_pool_backend_t backend = {0};
-  IREE_RETURN_IF_ERROR(iree_hal_device_query_queue_pool_backend(
-      device, kQueueAffinity0, &backend));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_device_query_queue_pool_backend(device, queue_family, &backend));
   if (!backend.slab_provider || !backend.notification) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -617,6 +617,7 @@ TEST_F(HostQueuePendingTest, QueueAllocaTlsfGrowthRetriesThroughColdPath) {
 
   Ref<iree_hal_pool_t> pool;
   IREE_ASSERT_OK(CreateExplicitTlsfPool(test_device.base_device(),
+                                        iree_hal_queue_family(&queue->base),
                                         allocation_size, pool.out()));
 
   Ref<iree_hal_semaphore_t> alloca0_signal;
@@ -679,8 +680,9 @@ TEST_F(HostQueuePendingTest,
   ASSERT_NE(queue, nullptr);
 
   Ref<iree_hal_pool_t> pool;
-  IREE_ASSERT_OK(CreateExplicitFixedBlockPool(test_device.base_device(),
-                                              allocation_size, pool.out()));
+  IREE_ASSERT_OK(CreateExplicitFixedBlockPool(
+      test_device.base_device(), iree_hal_queue_family(&queue->base),
+      allocation_size, pool.out()));
 
   Ref<iree_hal_semaphore_t> alloca0_signal;
   IREE_ASSERT_OK(
@@ -798,8 +800,9 @@ TEST_F(HostQueuePendingTest, CancelPendingAllocaFrontierWait) {
   ASSERT_NE(queue, nullptr);
 
   Ref<iree_hal_pool_t> pool;
-  IREE_ASSERT_OK(CreateExplicitFixedBlockPool(test_device.base_device(),
-                                              allocation_size, pool.out()));
+  IREE_ASSERT_OK(CreateExplicitFixedBlockPool(
+      test_device.base_device(), iree_hal_queue_family(&queue->base),
+      allocation_size, pool.out()));
   const iree_async_axis_t death_axis = queue->axis;
   IREE_ASSERT_OK(
       SeedWaitableFixedBlockReservation(pool, allocation_size, death_axis));
@@ -849,8 +852,9 @@ TEST_F(HostQueuePendingTest, CancelPendingAllocaPoolNotificationWait) {
   ASSERT_NE(queue, nullptr);
 
   Ref<iree_hal_pool_t> pool;
-  IREE_ASSERT_OK(CreateExplicitFixedBlockPool(test_device.base_device(),
-                                              allocation_size, pool.out()));
+  IREE_ASSERT_OK(CreateExplicitFixedBlockPool(
+      test_device.base_device(), iree_hal_queue_family(&queue->base),
+      allocation_size, pool.out()));
 
   Ref<iree_hal_semaphore_t> alloca0_signal;
   IREE_ASSERT_OK(

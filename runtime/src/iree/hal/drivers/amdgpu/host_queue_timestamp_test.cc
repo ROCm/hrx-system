@@ -1052,12 +1052,12 @@ static iree_hal_buffer_params_t DeviceLocalTransientBufferParams() {
 
 // Creates a pool holding exactly one allocation of |block_size| bytes, so a
 // second allocation stays unstaged until the first one is released.
-static iree_status_t CreateSingleBlockPool(iree_hal_device_t* device,
-                                           iree_device_size_t block_size,
-                                           iree_hal_pool_t** out_pool) {
+static iree_status_t CreateSingleBlockPool(
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
+    iree_device_size_t block_size, iree_hal_pool_t** out_pool) {
   iree_hal_queue_pool_backend_t backend = {0};
-  IREE_RETURN_IF_ERROR(iree_hal_device_query_queue_pool_backend(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, &backend));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_device_query_queue_pool_backend(device, queue_family, &backend));
   if (!backend.slab_provider || !backend.notification) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -1085,7 +1085,9 @@ TEST_P(HostQueueTimestampTest, RejectsUnstagedTargetWithoutAllocationWait) {
 
   const iree_device_size_t allocation_size = 4096;
   Ref<iree_hal_pool_t> pool;
-  IREE_ASSERT_OK(CreateSingleBlockPool(device, allocation_size, pool.out()));
+  IREE_ASSERT_OK(CreateSingleBlockPool(device,
+                                       iree_hal_queue_family(&queue->base),
+                                       allocation_size, pool.out()));
 
   // One timeline per wrapper: the blocked allocation completes only after the
   // held wrapper is deallocated, so a shared timeline would signal backwards.

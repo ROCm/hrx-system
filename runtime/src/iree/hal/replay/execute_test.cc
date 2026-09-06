@@ -1444,7 +1444,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueAlloca) {
 
   iree_hal_queue_pool_backend_t backend = {};
   IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
-      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, &backend));
+      wrapped_device, iree_hal_queue_family(wrapped_queue), &backend));
   iree_hal_passthrough_pool_options_t pool_options = {};
   pool_options.asan = backend.asan;
   iree_hal_pool_t* pool = nullptr;

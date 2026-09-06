@@ -306,7 +306,7 @@ TEST_P(AsanAllocationTest, QueueDeallocaReleaseReportsAfterSignal) {
   ASSERT_NE(queue, nullptr);
   iree_hal_queue_pool_backend_t backend = {};
   IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
-      device(), IREE_HAL_QUEUE_AFFINITY_ANY, &backend));
+      device(), iree_hal_queue_family(queue), &backend));
   iree_hal_passthrough_pool_options_t options = {};
   options.asan = backend.asan;
   Ref<iree_hal_pool_t> pool;

@@ -640,8 +640,9 @@ iree_hal_task_device_query_semaphore_compatibility(
 }
 
 static iree_status_t iree_hal_task_device_query_queue_pool_backend(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device, const iree_hal_queue_family_t* queue_family,
     iree_hal_queue_pool_backend_t* out_backend) {
+  (void)queue_family;
   iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
   out_backend->slab_provider = device->default_slab_provider;
   out_backend->notification = device->default_pool_notification;

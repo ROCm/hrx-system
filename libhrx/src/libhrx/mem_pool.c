@@ -160,7 +160,8 @@ static iree_status_t hrx_mem_pool_ensure_hal_pools_locked(hrx_mem_pool_t pool) {
 
   iree_hal_queue_pool_backend_t backend;
   IREE_RETURN_IF_ERROR(iree_hal_device_query_queue_pool_backend(
-      pool->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, &backend));
+      pool->device->hal_device,
+      iree_hal_queue_family(pool->device->transfer_queue), &backend));
   if (!backend.notification) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "HAL queue-pool backend returned no allocation "

@@ -65,7 +65,7 @@ class TransientBufferTest : public CtsTestBase<> {
     }
     iree_hal_queue_pool_backend_t backend = {};
     IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, &backend));
+        device_, iree_hal_queue_family(transfer_queue_), &backend));
     iree_hal_passthrough_pool_options_t options = {};
     options.asan = backend.asan;
     IREE_ASSERT_OK(iree_hal_passthrough_pool_create(

@@ -1525,31 +1525,6 @@ static iree_status_t iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, resolved.queue_ordinal, out_queue);
 }
 
-// Selects the physical device backing |queue_affinity| for pool creation.
-//
-// Queue pools are scoped to one physical memory domain, but |queue_affinity|
-// still has the usual "any queue in this mask" meaning. This helper therefore
-// collapses multi-bit masks with the same deterministic first-set-bit policy as
-// host queue submission. In practice IREE_HAL_QUEUE_AFFINITY_ANY usually
-// selects queue 0 after intersecting with this device's supported queue mask.
-static iree_status_t
-iree_hal_amdgpu_logical_device_select_queue_pool_physical_device(
-    iree_hal_amdgpu_logical_device_t* logical_device,
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_amdgpu_physical_device_t** out_physical_device) {
-  IREE_ASSERT_ARGUMENT(logical_device);
-  IREE_ASSERT_ARGUMENT(out_physical_device);
-  *out_physical_device = NULL;
-
-  iree_hal_amdgpu_queue_affinity_resolved_t resolved;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_resolve(
-      iree_hal_amdgpu_logical_device_queue_affinity_domain(logical_device),
-      queue_affinity, &resolved));
-  *out_physical_device =
-      logical_device->physical_devices[resolved.physical_device_ordinal];
-  return iree_ok_status();
-}
-
 static bool iree_hal_amdgpu_logical_device_query_pool_epoch(
     void* user_data, iree_async_axis_t axis, uint64_t epoch) {
   iree_hal_amdgpu_logical_device_t* logical_device =
@@ -2952,14 +2927,14 @@ iree_hal_amdgpu_logical_device_query_semaphore_compatibility(
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_query_queue_pool_backend(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device, const iree_hal_queue_family_t* queue_family,
     iree_hal_queue_pool_backend_t* out_backend) {
   iree_hal_amdgpu_logical_device_t* logical_device =
       iree_hal_amdgpu_logical_device_cast(base_device);
-  iree_hal_amdgpu_physical_device_t* physical_device = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_logical_device_select_queue_pool_physical_device(
-          logical_device, queue_affinity, &physical_device));
+  const iree_hal_queue_family_ordinal_t queue_family_ordinal =
+      iree_hal_queue_family_ordinal(queue_family);
+  iree_hal_amdgpu_physical_device_t* physical_device =
+      logical_device->physical_devices[queue_family_ordinal];
   out_backend->slab_provider = physical_device->default_slab_provider;
   out_backend->notification = physical_device->default_pool_notification;
   out_backend->epoch_query = (iree_hal_pool_epoch_query_t){

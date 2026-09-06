@@ -71,7 +71,6 @@ iree_status_t iree_hal_vulkan_allocator_allocate_direct_buffer(
 // Returns the default queue-pool backend resources borrowed from |allocator|.
 iree_status_t iree_hal_vulkan_allocator_query_queue_pool_backend(
     iree_hal_allocator_t* base_allocator,
-    iree_hal_queue_affinity_t queue_affinity,
     iree_hal_queue_pool_backend_t* out_backend);
 
 // Resolves one pool-backed queue allocation against Vulkan memory properties.

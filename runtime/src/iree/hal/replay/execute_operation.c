@@ -40,18 +40,10 @@ static iree_status_t iree_hal_replay_executor_require_queue_allocation_pool(
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
       executor, record->header.device_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
       &device_entry));
-  const iree_hal_queue_family_ordinal_t family_ordinal =
-      iree_hal_queue_family_ordinal(
-          iree_hal_queue_family(queue_entry->value.queue));
-  if (IREE_UNLIKELY(family_ordinal >= IREE_HAL_MAX_QUEUE_FAMILIES)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "replay queue family ordinal %u is not maskable",
-                            family_ordinal);
-  }
   iree_hal_queue_pool_backend_t pool_backend;
   IREE_RETURN_IF_ERROR(iree_hal_device_query_queue_pool_backend(
       device_entry->value.device,
-      iree_hal_make_queue_family_affinity(family_ordinal), &pool_backend));
+      iree_hal_queue_family(queue_entry->value.queue), &pool_backend));
   const iree_hal_passthrough_pool_options_t options = {
       .asan = pool_backend.asan,
       .trace_name = iree_make_cstring_view("iree_hal_replay_queue"),

@@ -635,7 +635,7 @@ iree_hal_mock_device_query_semaphore_compatibility(
 }
 
 static iree_status_t iree_hal_mock_device_query_queue_pool_backend(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device, const iree_hal_queue_family_t* queue_family,
     iree_hal_queue_pool_backend_t* out_backend) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
 }

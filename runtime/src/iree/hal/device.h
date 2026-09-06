@@ -626,16 +626,20 @@ iree_hal_device_query_semaphore_compatibility(iree_hal_device_t* device,
                                               iree_hal_semaphore_t* semaphore);
 
 // Queries the slab provider, notification, and epoch-query callback to use when
-// constructing custom pools for |queue_affinity|.
+// constructing custom pools backed by the memory domain of |queue_family|.
 //
-// Implementations may collapse a multi-bit |queue_affinity| to one physical
-// memory domain using the same queue-selection policy they use for submission.
+// |queue_family| must be the exact family identity borrowed from |device|. It
+// selects one backing memory domain and does not constrain which queue families
+// may access allocations made from the pool. Allocation accessibility remains
+// specified by iree_hal_buffer_params_t::queue_family_affinity and advertised
+// by iree_hal_pool_capabilities_t::queue_family_affinity.
+//
 // The returned pointers are borrowed from |device| and remain valid until the
 // device is destroyed.
 //
 // Requires that |device| has been assigned to a device group.
 IREE_API_EXPORT iree_status_t iree_hal_device_query_queue_pool_backend(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
     iree_hal_queue_pool_backend_t* out_backend);
 
 // Loads a native executable artifact for |target| on |queue_family|.
@@ -834,7 +838,7 @@ typedef struct iree_hal_device_vtable_t {
       iree_hal_device_t* device, iree_hal_semaphore_t* semaphore);
 
   iree_status_t(IREE_API_PTR* query_queue_pool_backend)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
       iree_hal_queue_pool_backend_t* out_backend);
 
   iree_status_t(IREE_API_PTR* profiling_begin)(
