@@ -287,25 +287,25 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   uint32_t queue_indices[] = {0, 1, 0};
   iree_hal_vulkan_queue_family_plan_t queue_families[] = {
       {
-          .native_family_index = 2,
-          .flags = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT,
-          .timestamp_valid_bits = 64,
-          .queue_count = 2,
-          .queue_offset = 0,
+          /*.native_family_index=*/2,
+          /*.flags=*/VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT,
+          /*.timestamp_valid_bits=*/64,
+          /*.queue_count=*/2,
+          /*.queue_offset=*/0,
       },
       {
-          .native_family_index = 5,
-          .flags = VK_QUEUE_TRANSFER_BIT,
-          .timestamp_valid_bits = 48,
-          .queue_count = 1,
-          .queue_offset = 2,
+          /*.native_family_index=*/5,
+          /*.flags=*/VK_QUEUE_TRANSFER_BIT,
+          /*.timestamp_valid_bits=*/48,
+          /*.queue_count=*/1,
+          /*.queue_offset=*/2,
       },
   };
   device_plan.queue_inventory = {
-      .family_count = IREE_ARRAYSIZE(queue_families),
-      .families = queue_families,
-      .queue_count = IREE_ARRAYSIZE(queue_indices),
-      .queue_indices = queue_indices,
+      /*.family_count=*/IREE_ARRAYSIZE(queue_families),
+      /*.families=*/queue_families,
+      /*.queue_count=*/IREE_ARRAYSIZE(queue_indices),
+      /*.queue_indices=*/queue_indices,
   };
 
   iree_hal_vulkan_device_spec_params_t params = {

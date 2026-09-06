@@ -97,8 +97,8 @@ class TransientBufferTest : public CtsTestBase<> {
     *out_buffer = nullptr;
     iree_hal_buffer_params_t params = MakeTransientBufferParams();
     const iree_hal_pool_reservation_request_t request = {
-        .params = params,
-        .allocation_size = size,
+        /*.params=*/params,
+        /*.allocation_size=*/size,
     };
     iree_hal_buffer_t* buffer = nullptr;
     iree_status_t status = iree_hal_queue_alloca(
@@ -410,8 +410,8 @@ TEST_P(TransientBufferTest, FillTransientWithZeroAccessFlags) {
 
   iree_hal_buffer_t* raw = nullptr;
   const iree_hal_pool_reservation_request_t request = {
-      .params = params,
-      .allocation_size = buffer_size,
+      /*.params=*/params,
+      /*.allocation_size=*/buffer_size,
   };
   IREE_ASSERT_OK(iree_hal_queue_alloca(transfer_queue_, empty_wait, signal,
                                        transient_pool_,

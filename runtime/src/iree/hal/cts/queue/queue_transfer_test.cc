@@ -178,11 +178,11 @@ TEST_P(QueueTransferTest, BufferViewStagingRoundTrip) {
   int32_t source_values[] = {1, 2, 3, 4};
 
   const iree_hal_buffer_params_t staging_params = {
-      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
-      .access = IREE_HAL_MEMORY_ACCESS_ALL,
-      .type =
-          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      .queue_family_affinity = transfer_family_affinity,
+      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+      /*.type=*/
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      /*.queue_family_affinity=*/transfer_family_affinity,
   };
   Ref<iree_hal_buffer_view_t> staging_view;
   IREE_ASSERT_OK(iree_hal_buffer_view_generate(
@@ -191,10 +191,10 @@ TEST_P(QueueTransferTest, BufferViewStagingRoundTrip) {
       GenerateI32Contents, source_values, staging_view.out()));
 
   const iree_hal_buffer_params_t device_params = {
-      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
-      .access = IREE_HAL_MEMORY_ACCESS_ALL,
-      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-      .queue_family_affinity = transfer_family_affinity,
+      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER,
+      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+      /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      /*.queue_family_affinity=*/transfer_family_affinity,
   };
   Ref<iree_hal_buffer_view_t> device_view;
   IREE_ASSERT_OK(iree_hal_buffer_view_allocate_like(

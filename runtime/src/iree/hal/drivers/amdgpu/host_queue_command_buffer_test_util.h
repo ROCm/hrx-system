@@ -230,8 +230,8 @@ static iree_status_t QueueTransientTransferBuffer(
                             "no queue pool supports the transient request");
   }
   const iree_hal_pool_reservation_request_t request = {
-      .params = params,
-      .allocation_size = buffer_size,
+      /*.params=*/params,
+      /*.allocation_size=*/buffer_size,
   };
   return iree_hal_queue_alloca(&queue->base, iree_hal_semaphore_list_empty(),
                                signal_list, pool,

@@ -499,7 +499,7 @@ iree_hal_queue_alloca(iree_hal_queue_t* queue,
           z0, iree_status_annotate_f(status, "allocation request %" PRIhsz, i));
     }
   }
-  iree_status_t status = _VTABLE_DISPATCH(queue, alloca)(
+  iree_status_t status = (_VTABLE_DISPATCH(queue, alloca))(
       queue, wait_semaphore_list, signal_semaphore_list, pool, request_count,
       requests, out_buffers);
   IREE_TRACE_ZONE_END(z0);

@@ -113,8 +113,8 @@ TEST_P(VulkanProfilingTest,
       pool_options, backend.slab_provider, backend.notification,
       iree_allocator_system(), pool.out()));
   const iree_hal_pool_reservation_request_t request = {
-      .params = params,
-      .allocation_size = kBufferSize,
+      /*.params=*/params,
+      /*.allocation_size=*/kBufferSize,
   };
 
   Ref<iree_hal_buffer_t> buffer;

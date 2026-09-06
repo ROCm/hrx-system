@@ -168,8 +168,8 @@ TEST_F(SlabProviderTest, SelectedQueuePoolRoutesOversizedRequests) {
       kAllocationSize);
   ASSERT_NE(pool, nullptr);
   const iree_hal_pool_reservation_request_t request = {
-      .params = params,
-      .allocation_size = kAllocationSize,
+      /*.params=*/params,
+      /*.allocation_size=*/kAllocationSize,
   };
 
   iree_hal_buffer_t* buffer = NULL;
@@ -226,9 +226,11 @@ TEST_F(SlabProviderTest, DefaultPhysicalDevicePoolGrowsAdditionalSlabs) {
   iree_hal_pool_reservation_t first_reservation = {0};
   iree_hal_pool_acquire_info_t first_info = {0};
   iree_hal_pool_acquire_result_t first_result = IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
+  iree_hal_buffer_params_t params = {};
+  params.min_alignment = capabilities.min_allocation_size;
   const iree_hal_pool_reservation_request_t request = {
-      .params = {.min_alignment = capabilities.min_allocation_size},
-      .allocation_size = capabilities.max_allocation_size,
+      /*.params=*/params,
+      /*.allocation_size=*/capabilities.max_allocation_size,
   };
   iree::Status first_status(iree_hal_pool_acquire_reservations(
       default_pool, 1, &request, /*requester_frontier=*/NULL,

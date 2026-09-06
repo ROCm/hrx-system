@@ -121,10 +121,12 @@ TEST_P(SemaphoreSubmissionTest,
         device_, (iree_hal_queue_family_ordinal_t)family_ordinal);
     ASSERT_NE(nullptr, queue_family);
     const iree_hal_buffer_params_t buffer_params = {
-        .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
-        .access = IREE_HAL_MEMORY_ACCESS_ALL,
-        .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-        .queue_family_affinity = iree_hal_make_queue_family_affinity(
+        /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE |
+            IREE_HAL_BUFFER_USAGE_TRANSFER,
+        /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+        /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+        /*.queue_family_affinity=*/
+        iree_hal_make_queue_family_affinity(
             (iree_hal_queue_family_ordinal_t)family_ordinal),
     };
     Ref<iree_hal_buffer_t> source_buffer;
@@ -154,8 +156,8 @@ TEST_P(SemaphoreSubmissionTest,
                                  IREE_ARRAYSIZE(update_data)),
         IREE_HAL_UPDATE_FLAG_NONE));
     const iree_hal_memory_barrier_t update_barrier = {
-        .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
-        .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
+        /*.source_scope=*/IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+        /*.target_scope=*/IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
         command_buffer, IREE_HAL_EXECUTION_STAGE_TRANSFER,

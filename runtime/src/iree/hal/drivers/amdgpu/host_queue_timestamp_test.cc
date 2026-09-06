@@ -943,8 +943,8 @@ static iree_status_t QueueAlloca(iree_hal_amdgpu_host_queue_t* queue,
   params.queue_family_affinity = iree_hal_make_queue_family_affinity(
       iree_hal_queue_family_ordinal(iree_hal_queue_family(&queue->base)));
   const iree_hal_pool_reservation_request_t request = {
-      .params = params,
-      .allocation_size = allocation_size,
+      /*.params=*/params,
+      /*.allocation_size=*/allocation_size,
   };
   return iree_hal_queue_alloca(&queue->base, wait_list, signal_list, pool,
                                /*request_count=*/1, &request, out_buffer);

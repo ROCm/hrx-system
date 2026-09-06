@@ -80,8 +80,8 @@ class DispatchReuseTest : public CtsTestBase<> {
     params.queue_family_affinity = iree_hal_make_queue_family_affinity(
         iree_hal_queue_family_ordinal(iree_hal_queue_family(transfer_queue_)));
     const iree_hal_pool_reservation_request_t request = {
-        .params = params,
-        .allocation_size = allocation_size,
+        /*.params=*/params,
+        /*.allocation_size=*/allocation_size,
     };
     return iree_hal_queue_alloca(transfer_queue_, wait_semaphore_list,
                                  signal_semaphore_list, transient_pool_,

@@ -330,8 +330,8 @@ static iree_status_t MaterializeOneReservation(
     const iree_hal_pool_reservation_t* reservation,
     iree_hal_pool_materialize_flags_t flags, iree_hal_buffer_t** out_buffer) {
   const iree_hal_pool_reservation_request_t request = {
-      .params = params,
-      .allocation_size = reservation->byte_length,
+      /*.params=*/params,
+      /*.allocation_size=*/reservation->byte_length,
   };
   return iree_hal_pool_materialize_reservations(pool, 1, &request, reservation,
                                                 flags, out_buffer);

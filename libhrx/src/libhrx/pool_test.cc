@@ -39,8 +39,8 @@ TEST_F(ExactPoolTest, BatchedReservationsMaterializeAndReleaseTogether) {
                                             params, &pool));
 
   const iree_hal_pool_reservation_request_t requests[2] = {
-      {.params = params, .allocation_size = 4096},
-      {.params = params, .allocation_size = 8192},
+      {/*.params=*/params, /*.allocation_size=*/4096},
+      {/*.params=*/params, /*.allocation_size=*/8192},
   };
   iree_hal_pool_reservation_t reservations[2];
   iree_hal_pool_acquire_info_t acquire_infos[2];
@@ -91,8 +91,8 @@ TEST_F(ExactPoolTest, AcceptsWeakerAndRejectsInvalidOrStrongerAlignment) {
                                             params, &pool));
 
   iree_hal_pool_reservation_request_t request = {
-      .params = params,
-      .allocation_size = 4096,
+      /*.params=*/params,
+      /*.allocation_size=*/4096,
   };
   iree_hal_pool_reservation_t reservation;
   iree_hal_pool_acquire_info_t acquire_info;

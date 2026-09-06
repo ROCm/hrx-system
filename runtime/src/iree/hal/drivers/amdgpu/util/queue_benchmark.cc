@@ -749,8 +749,8 @@ class QueueBenchmark : public benchmark::Fixture {
     params.queue_family_affinity = iree_hal_make_queue_family_affinity(
         iree_hal_queue_family_ordinal(iree_hal_queue_family(queue0_)));
     const iree_hal_pool_reservation_request_t request = {
-        .params = params,
-        .allocation_size = allocation_size,
+        /*.params=*/params,
+        /*.allocation_size=*/allocation_size,
     };
     iree_hal_buffer_t* buffer = nullptr;
     IREE_RETURN_IF_ERROR(iree_hal_queue_alloca(

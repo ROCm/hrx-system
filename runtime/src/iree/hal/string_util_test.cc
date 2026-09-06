@@ -538,9 +538,9 @@ struct BufferView final
                                     Allocator allocator) {
     BufferView buffer_view;
     const iree_hal_buffer_params_t buffer_params = {
-        .usage = IREE_HAL_BUFFER_USAGE_MAPPING,
-        .access = IREE_HAL_MEMORY_ACCESS_ALL,
-        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+        /*.usage=*/IREE_HAL_BUFFER_USAGE_MAPPING,
+        /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+        /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
     };
     iree_status_t status = iree_hal_buffer_view_parse(
         iree_string_view_t{value.data(), (iree_host_size_t)value.size()},

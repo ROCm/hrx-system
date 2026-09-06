@@ -1472,8 +1472,8 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueAlloca) {
   params.queue_family_affinity = iree_hal_make_queue_family_affinity(
       iree_hal_queue_family_ordinal(iree_hal_queue_family(wrapped_queue)));
   const iree_hal_pool_reservation_request_t request = {
-      .params = params,
-      .allocation_size = 16,
+      /*.params=*/params,
+      /*.allocation_size=*/16,
   };
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_queue_alloca(

@@ -126,15 +126,17 @@ static iree_async_notification_t* iree_hal_needs_wait_test_pool_notification(
 }
 
 static const iree_hal_pool_vtable_t iree_hal_needs_wait_test_pool_vtable = {
-    .destroy = iree_hal_needs_wait_test_pool_destroy,
-    .acquire_reservations = iree_hal_needs_wait_test_pool_acquire_reservations,
-    .release_reservations = iree_hal_needs_wait_test_pool_release_reservations,
-    .materialize_reservations =
-        iree_hal_needs_wait_test_pool_materialize_reservations,
-    .query_capabilities = iree_hal_needs_wait_test_pool_query_capabilities,
-    .query_stats = iree_hal_needs_wait_test_pool_query_stats,
-    .trim = iree_hal_needs_wait_test_pool_trim,
-    .notification = iree_hal_needs_wait_test_pool_notification,
+    /*.destroy=*/iree_hal_needs_wait_test_pool_destroy,
+    /*.acquire_reservations=*/
+    iree_hal_needs_wait_test_pool_acquire_reservations,
+    /*.release_reservations=*/
+    iree_hal_needs_wait_test_pool_release_reservations,
+    /*.materialize_reservations=*/
+    iree_hal_needs_wait_test_pool_materialize_reservations,
+    /*.query_capabilities=*/iree_hal_needs_wait_test_pool_query_capabilities,
+    /*.query_stats=*/iree_hal_needs_wait_test_pool_query_stats,
+    /*.trim=*/iree_hal_needs_wait_test_pool_trim,
+    /*.notification=*/iree_hal_needs_wait_test_pool_notification,
 };
 
 static iree_hal_needs_wait_test_pool_t* CreateNeedsWaitTestPool() {
@@ -233,15 +235,15 @@ static iree_async_notification_t* iree_hal_routing_test_pool_notification(
 }
 
 static const iree_hal_pool_vtable_t iree_hal_routing_test_pool_vtable = {
-    .destroy = iree_hal_routing_test_pool_destroy,
-    .acquire_reservations = iree_hal_routing_test_pool_acquire_reservations,
-    .release_reservations = iree_hal_routing_test_pool_release_reservations,
-    .materialize_reservations =
-        iree_hal_routing_test_pool_materialize_reservations,
-    .query_capabilities = iree_hal_routing_test_pool_query_capabilities,
-    .query_stats = iree_hal_routing_test_pool_query_stats,
-    .trim = iree_hal_routing_test_pool_trim,
-    .notification = iree_hal_routing_test_pool_notification,
+    /*.destroy=*/iree_hal_routing_test_pool_destroy,
+    /*.acquire_reservations=*/iree_hal_routing_test_pool_acquire_reservations,
+    /*.release_reservations=*/iree_hal_routing_test_pool_release_reservations,
+    /*.materialize_reservations=*/
+    iree_hal_routing_test_pool_materialize_reservations,
+    /*.query_capabilities=*/iree_hal_routing_test_pool_query_capabilities,
+    /*.query_stats=*/iree_hal_routing_test_pool_query_stats,
+    /*.trim=*/iree_hal_routing_test_pool_trim,
+    /*.notification=*/iree_hal_routing_test_pool_notification,
 };
 
 static iree_hal_routing_test_pool_t* CreateRoutingTestPool(

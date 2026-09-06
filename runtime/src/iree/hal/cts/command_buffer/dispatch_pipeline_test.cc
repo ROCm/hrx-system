@@ -261,8 +261,8 @@ TEST_P(DispatchPipelineTest, TransientInputPipeline) {
   alloca_params.queue_family_affinity = iree_hal_make_queue_family_affinity(
       iree_hal_queue_family_ordinal(iree_hal_queue_family(transfer_queue_)));
   const iree_hal_pool_reservation_request_t request = {
-      .params = alloca_params,
-      .allocation_size = kBufferSize,
+      /*.params=*/alloca_params,
+      /*.allocation_size=*/kBufferSize,
   };
   iree_hal_buffer_t* raw = nullptr;
   IREE_ASSERT_OK(iree_hal_queue_alloca(transfer_queue_, empty_wait,
