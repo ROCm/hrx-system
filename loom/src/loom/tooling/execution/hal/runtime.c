@@ -36,9 +36,11 @@ static iree_status_t loom_run_hal_runtime_select_queue(
           role_name, i);
     }
     *out_queue = queue;
-    break;
+    return iree_ok_status();
   }
-  return iree_ok_status();
+  return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                          "HAL device has no provisioned %s queue family",
+                          role_name);
 }
 
 void loom_run_hal_runtime_options_initialize(
