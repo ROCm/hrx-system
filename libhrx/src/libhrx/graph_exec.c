@@ -4,6 +4,8 @@
 // Graph execution: instantiation of graph templates into executable blocks,
 // and launch of those blocks onto a stream.
 
+#include <string.h>
+
 #include "hrx_internal.h"
 #include "iree/base/api.h"
 #include "iree/hal/utils/resource_set.h"
@@ -80,14 +82,32 @@ typedef struct hrx_graph_exec_block_t {
   uint32_t node_count;
   uint16_t wait_semaphore_count;
   uint16_t signal_semaphore_count;
+  // Type-specific attributes, stored inline so the compiler supplies the
+  // pointer alignment the union requires and the block header ends on that
+  // same boundary.
+  hrx_graph_block_attrs_t attrs;
   // Variable-length trailing data follows.
 } hrx_graph_exec_block_t;
 
+// Blocks are carved out of an arena, which guarantees iree_max_align_t and
+// nothing stronger.
+static_assert(iree_alignof(hrx_graph_exec_block_t) <= iree_max_align_t,
+              "block alignment must be satisfiable by an arena allocation");
+
+// The first trailing region begins at the end of the header and holds
+// uint32_t, so the header's size decides whether that region is aligned.
+// The region order only keeps the regions aligned relative to each other;
+// this assert is what pins the offset they start from.
+static_assert(sizeof(hrx_graph_exec_block_t) % iree_alignof(uint32_t) == 0,
+              "block header must end on the first trailing region's alignment");
+
+// Resolved pointers to a block's payload: the attributes stored inline in the
+// block and the variable-length arrays trailing it.
 typedef struct hrx_graph_block_ptrs_t {
-  uint16_t* wait_semaphore_indices;
   uint32_t* wait_payload_deltas;
-  uint16_t* signal_semaphore_indices;
   uint32_t* signal_payload_deltas;
+  uint16_t* wait_semaphore_indices;
+  uint16_t* signal_semaphore_indices;
   hrx_graph_block_attrs_t* attrs;
 } hrx_graph_block_ptrs_t;
 
@@ -95,18 +115,23 @@ typedef struct hrx_graph_block_ptrs_t {
 // Block helpers
 //===----------------------------------------------------------------------===//
 
+// Resolves the payload pointers for |block|. The trailing arrays run in
+// descending alignment order - both payload delta arrays before both semaphore
+// index arrays - starting at the end of the block header, whose size is a
+// multiple of the block's own alignment. Every region therefore lands on its
+// natural alignment and the block holds no interior padding.
+// hrx_graph_block_allocate sizes the allocation from this same order.
 static inline void hrx_graph_block_get_ptrs(hrx_graph_exec_block_t* block,
                                             hrx_graph_block_ptrs_t* out_ptrs) {
   uint8_t* ptr = (uint8_t*)block + sizeof(*block);
-  out_ptrs->wait_semaphore_indices = (uint16_t*)ptr;
-  ptr += block->wait_semaphore_count * sizeof(uint16_t);
   out_ptrs->wait_payload_deltas = (uint32_t*)ptr;
   ptr += block->wait_semaphore_count * sizeof(uint32_t);
-  out_ptrs->signal_semaphore_indices = (uint16_t*)ptr;
-  ptr += block->signal_semaphore_count * sizeof(uint16_t);
   out_ptrs->signal_payload_deltas = (uint32_t*)ptr;
   ptr += block->signal_semaphore_count * sizeof(uint32_t);
-  out_ptrs->attrs = (hrx_graph_block_attrs_t*)ptr;
+  out_ptrs->wait_semaphore_indices = (uint16_t*)ptr;
+  ptr += block->wait_semaphore_count * sizeof(uint16_t);
+  out_ptrs->signal_semaphore_indices = (uint16_t*)ptr;
+  out_ptrs->attrs = &block->attrs;
 }
 
 static iree_status_t hrx_graph_block_allocate(
@@ -114,12 +139,12 @@ static iree_status_t hrx_graph_block_allocate(
     uint32_t node_start_index, uint32_t node_count,
     uint16_t wait_semaphore_count, uint16_t signal_semaphore_count,
     hrx_graph_exec_block_t** out_block, hrx_graph_block_ptrs_t* out_ptrs) {
+  // Region order matches hrx_graph_block_get_ptrs.
   iree_host_size_t size = sizeof(hrx_graph_exec_block_t);
-  size += wait_semaphore_count * sizeof(uint16_t);
   size += wait_semaphore_count * sizeof(uint32_t);
-  size += signal_semaphore_count * sizeof(uint16_t);
   size += signal_semaphore_count * sizeof(uint32_t);
-  size += sizeof(hrx_graph_block_attrs_t);
+  size += wait_semaphore_count * sizeof(uint16_t);
+  size += signal_semaphore_count * sizeof(uint16_t);
 
   hrx_graph_exec_block_t* block = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, size, (void**)&block));
@@ -328,10 +353,9 @@ iree_status_t hrx_graph_exec_instantiate_locked(
       z0, hrx_graph_schedule_nodes(node_blocks, node_count, additional_edges,
                                    &exec->arena_allocator, &schedule));
 
-  exec->block_count = schedule.block_count;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_arena_allocate(&exec->arena_allocator,
-                              exec->block_count * sizeof(*exec->blocks),
+                              schedule.block_count * sizeof(*exec->blocks),
                               (void**)&exec->blocks));
 
   if (schedule.partition_count == 0) {
@@ -354,33 +378,57 @@ iree_status_t hrx_graph_exec_instantiate_locked(
       }
     }
   }
-  exec->semaphore_count = semaphore_count;
-
-  if (exec->semaphore_count > 0) {
+  if (semaphore_count > 0) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_arena_allocate(&exec->arena_allocator,
-                            exec->semaphore_count * sizeof(*exec->semaphores),
-                            (void**)&exec->semaphores));
+        z0, iree_arena_allocate(&exec->arena_allocator,
+                                semaphore_count * sizeof(*exec->semaphores),
+                                (void**)&exec->semaphores));
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_arena_allocate(
                 &exec->arena_allocator,
-                exec->semaphore_count * sizeof(*exec->semaphore_base_values),
+                semaphore_count * sizeof(*exec->semaphore_base_values),
                 (void**)&exec->semaphore_base_values));
 
-    iree_hal_device_t* hal_device = exec->device->hal_device;
-    for (uint32_t i = 0; i < exec->semaphore_count; i++) {
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_hal_semaphore_create(hal_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-                                        0ull, IREE_HAL_SEMAPHORE_FLAG_NONE,
-                                        &exec->semaphores[i]));
-      exec->semaphore_base_values[i] = 0;
-    }
+    // Arena memory is uninitialized. Zeroing up front keeps the arrays
+    // well-defined if the creation loop below fails part way through, and is
+    // what leaves every base value at zero when it succeeds.
+    memset(exec->semaphores, 0, semaphore_count * sizeof(*exec->semaphores));
+    memset(exec->semaphore_base_values, 0,
+           semaphore_count * sizeof(*exec->semaphore_base_values));
 
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_resource_set_insert(
-                exec->resource_set, exec->semaphore_count, exec->semaphores));
+    // The insert retains a resource the set has not already seen rather than
+    // consuming the creation reference, so each semaphore is released once
+    // inserted and the set holds it until the executable is destroyed;
+    // exec->semaphores stores borrowed pointers. Releasing after inserting is
+    // valid only because these semaphores are freshly created: an insert handed
+    // a resource the set already holds returns without retaining. Launching
+    // takes further references: the queue retains the semaphores an operation
+    // waits on and clones the signal list, so work in flight keeps them alive
+    // independently of the executable.
+    iree_hal_device_t* hal_device = exec->device->hal_device;
+    iree_status_t status = iree_ok_status();
+    for (uint32_t i = 0; iree_status_is_ok(status) && i < semaphore_count;
+         i++) {
+      iree_hal_semaphore_t* semaphore = NULL;
+      status = iree_hal_semaphore_create(
+          hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, 0ull,
+          IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore);
+      if (iree_status_is_ok(status)) {
+        status =
+            iree_hal_resource_set_insert(exec->resource_set, 1, &semaphore);
+        iree_hal_semaphore_release(semaphore);
+      }
+      if (iree_status_is_ok(status)) {
+        exec->semaphores[i] = semaphore;
+      }
+    }
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   }
+
+  // Published only once every semaphore has been created, so a failure above
+  // returns with the count still zero rather than describing an array of null
+  // entries as populated.
+  exec->semaphore_count = semaphore_count;
 
   uint32_t block_index = 0;
   uint32_t semaphore_index = 0;
@@ -419,27 +467,37 @@ iree_status_t hrx_graph_exec_instantiate_locked(
                     partition->start_index, partition->count,
                     wait_semaphore_count, block_signal_count, &block, &ptrs));
 
-        // Create command buffer for recording.
+        // Create the command buffer this block records into. The insert retains
+        // a resource the set has not already seen rather than consuming the
+        // creation reference, so the block stores a borrowed pointer whose
+        // lifetime is the set's; releasing after inserting is valid only
+        // because this command buffer is freshly created. The creation
+        // reference is dropped exactly once below, past the last use of the
+        // local on every path: an insert that fails has taken no reference of
+        // its own, so releasing there frees the command buffer rather than
+        // stranding it. Nothing reaches the block until exec->blocks is written
+        // at the end of this iteration, and destruction discards the arena the
+        // attributes live in without walking it, so a reference held only by
+        // the attributes is a reference nothing can drop.
+        iree_hal_command_buffer_t* command_buffer = NULL;
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
-            z0,
-            iree_hal_command_buffer_create(
-                exec->device->hal_device,
-                IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
-                IREE_HAL_COMMAND_CATEGORY_ANY, IREE_HAL_QUEUE_AFFINITY_ANY,
-                /*binding_capacity=*/0, &ptrs.attrs->execute.command_buffer));
-        ptrs.attrs->execute.flags = IREE_HAL_EXECUTE_FLAG_NONE;
-
-        IREE_RETURN_AND_END_ZONE_IF_ERROR(
-            z0,
-            iree_hal_resource_set_insert(exec->resource_set, 1,
-                                         &ptrs.attrs->execute.command_buffer));
-        iree_hal_command_buffer_release(ptrs.attrs->execute.command_buffer);
-
-        IREE_RETURN_AND_END_ZONE_IF_ERROR(
-            z0, hrx_graph_record_partition(
-                    exec, schedule.sorted_nodes, partition->start_index,
-                    partition->count, schedule.node_index_map, s,
-                    additional_edges, ptrs.attrs->execute.command_buffer));
+            z0, iree_hal_command_buffer_create(
+                    exec->device->hal_device,
+                    IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
+                    IREE_HAL_COMMAND_CATEGORY_ANY, IREE_HAL_QUEUE_AFFINITY_ANY,
+                    /*binding_capacity=*/0, &command_buffer));
+        iree_status_t status = iree_hal_resource_set_insert(exec->resource_set,
+                                                            1, &command_buffer);
+        if (iree_status_is_ok(status)) {
+          ptrs.attrs->execute.command_buffer = command_buffer;
+          ptrs.attrs->execute.flags = IREE_HAL_EXECUTE_FLAG_NONE;
+          status = hrx_graph_record_partition(
+              exec, schedule.sorted_nodes, partition->start_index,
+              partition->count, schedule.node_index_map, s, additional_edges,
+              command_buffer);
+        }
+        iree_hal_command_buffer_release(command_buffer);
+        IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
         if (wait_semaphore_count > 0) {
           for (uint16_t w = 0; w < wait_semaphore_count; w++) {
@@ -505,6 +563,11 @@ iree_status_t hrx_graph_exec_instantiate_locked(
       exec->blocks[block_index++] = block;
     }
   }
+
+  // Published only once every entry has been constructed. A failure above
+  // returns with the count still zero rather than describing the uninitialized
+  // arena bytes past the failure point as blocks.
+  exec->block_count = block_index;
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();

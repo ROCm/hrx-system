@@ -251,4 +251,73 @@ TEST(GraphScheduleTest, AdditionalDependencyStaysOnProducerWorkstream) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
+class GraphExecSemaphoreTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_cpu_initialize(/*flags=*/0)));
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_cpu_device_get(/*index=*/0, &device_)));
+  }
+
+  void TearDown() override {
+    IREE_EXPECT_OK(hrx_status_to_iree(hrx_cpu_shutdown()));
+  }
+
+  hrx_device_t device_ = nullptr;
+};
+
+// Instantiation creates the semaphores that join consecutive partitions and
+// hands ownership of them to the executable resource set. Destroying the
+// executable must therefore drop every reference it took on them. Needing more
+// than one partition to have any internal semaphore at all makes this the only
+// coverage of a block whose payload carries trailing arrays, so it is also what
+// exercises the block payload region layout.
+TEST_F(GraphExecSemaphoreTest,
+       InstantiationLeavesSemaphoresOwnedOnlyByExecutable) {
+  hrx_graph_t graph = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph)));
+
+  // Host calls are not recordable so each one forms its own partition; a chain
+  // of three yields two internal semaphores.
+  const hrx_graph_host_call_node_attrs_t attrs = {
+      /*.fn=*/[](void* user_data) -> hrx_status_t { return hrx_ok_status(); },
+      /*.user_data=*/nullptr,
+  };
+  hrx_graph_node_t previous_node = nullptr;
+  for (int i = 0; i < 3; ++i) {
+    hrx_graph_node_t node = nullptr;
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_host_call_node(
+        graph, previous_node ? &previous_node : nullptr, previous_node ? 1 : 0,
+        &attrs, &node)));
+    previous_node = node;
+  }
+
+  hrx_graph_exec_t exec = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_instantiate(graph, 0, &exec)));
+  ASSERT_EQ(exec->semaphore_count, 2u);
+
+  // Take an independent reference on each semaphore so the reference counts
+  // stay observable once the executable is gone.
+  std::vector<iree_hal_semaphore_t*> semaphores;
+  for (uint32_t i = 0; i < exec->semaphore_count; ++i) {
+    ASSERT_NE(exec->semaphores[i], nullptr);
+    EXPECT_EQ(exec->semaphore_base_values[i], 0u);
+    iree_hal_semaphore_retain(exec->semaphores[i]);
+    semaphores.push_back(exec->semaphores[i]);
+  }
+
+  hrx_graph_exec_release(exec);
+  hrx_graph_release(graph);
+
+  for (iree_hal_semaphore_t* semaphore : semaphores) {
+    // Every HAL object begins with an iree_hal_resource_t, which is what makes
+    // its reference count reachable from an opaque handle.
+    EXPECT_EQ(
+        iree_atomic_ref_count_load(
+            &reinterpret_cast<iree_hal_resource_t*>(semaphore)->ref_count),
+        1);
+    iree_hal_semaphore_release(semaphore);
+  }
+}
+
 }  // namespace
