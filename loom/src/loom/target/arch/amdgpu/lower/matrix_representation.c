@@ -154,8 +154,7 @@ static bool loom_amdgpu_matrix_representation_relation(
   // selected descriptor. Their tied accumulator/result relation is only exact
   // when the matrix boundary below admits a generated realization.
   if (source_op->kind == LOOM_OP_VECTOR_MMA &&
-      relation->source_value_id == loom_vector_mma_init(source_op) &&
-      relation->destination_value_id == loom_vector_mma_result(source_op)) {
+      relation->kind == LOOM_VALUE_RELATION_TIED_RESULT) {
     return false;
   }
   if (iree_any_bit_set(relation->flags, LOOM_VALUE_RELATION_FLAG_TYPE_CHANGE)) {

@@ -15,27 +15,35 @@
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/util/fact_table.h"
 
-static bool
-loom_amdgpu_fragment_memory_query_uniform_narrowed_16bit_bit_pattern(
-    loom_low_lower_context_t* context,
-    const loom_amdgpu_fragment_memory_plan_t* plan, uint16_t* out_bit_pattern) {
-  *out_bit_pattern = 0;
-  loom_scalar_type_t result_type = LOOM_SCALAR_TYPE_NONE;
-  switch (plan->payload_form) {
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16:
-      result_type = LOOM_SCALAR_TYPE_BF16;
-      break;
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_F16:
-      result_type = LOOM_SCALAR_TYPE_F16;
-      break;
-    default:
-      return false;
-  }
+IREE_ATTRIBUTE_NOINLINE static iree_status_t
+loom_amdgpu_build_fragment_memory_packet(loom_low_lower_context_t* context,
+                                         const loom_op_t* source_op,
+                                         const loom_value_id_t* low_registers,
+                                         uint16_t register_count,
+                                         loom_type_t vgpr_type,
+                                         loom_value_id_t* out_packet) {
+  const loom_type_t packet_type =
+      loom_low_register_carrier_type_with_unit_count(vgpr_type, register_count);
+  return loom_amdgpu_build_low_register_range(context, source_op, low_registers,
+                                              register_count, packet_type,
+                                              out_packet);
+}
 
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
+loom_amdgpu_try_emit_fragment_memory_uniform_narrowed_16bit_packet(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fragment_memory_plan_t* plan,
+    uint16_t result_register_count, uint16_t packet_register_count,
+    loom_type_t vgpr_type, loom_value_id_t* out_packet) {
+  const loom_scalar_type_t result_type =
+      plan->payload_form ==
+              LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16
+          ? LOOM_SCALAR_TYPE_BF16
+          : LOOM_SCALAR_TYPE_F16;
   const loom_value_fact_table_t* fact_table =
       loom_low_lower_context_fact_table(context);
-  loom_value_facts_t element_facts = loom_value_facts_unknown();
-  uint64_t bit_pattern = 0;
+  loom_value_facts_t element_facts;
+  uint64_t bit_pattern;
   if (fact_table == NULL ||
       !loom_value_facts_query_all_equal_element(
           &fact_table->context,
@@ -44,20 +52,9 @@ loom_amdgpu_fragment_memory_query_uniform_narrowed_16bit_bit_pattern(
           &element_facts) ||
       !loom_value_facts_as_exact_float_bits(result_type, element_facts,
                                             &bit_pattern)) {
-    return false;
+    return iree_ok_status();
   }
-  *out_bit_pattern = (uint16_t)bit_pattern;
-  return true;
-}
-
-static iree_status_t
-loom_amdgpu_emit_fragment_memory_uniform_narrowed_16bit_packet(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    uint16_t bit_pattern, uint16_t result_register_count,
-    uint16_t packet_register_count, loom_type_t vgpr_type,
-    loom_value_id_t* out_packet) {
-  *out_packet = LOOM_VALUE_ID_INVALID;
-  uint32_t packed_bit_pattern = bit_pattern;
+  uint32_t packed_bit_pattern = (uint16_t)bit_pattern;
   if (result_register_count > 1) {
     packed_bit_pattern |= packed_bit_pattern << 16;
   }
@@ -66,18 +63,13 @@ loom_amdgpu_emit_fragment_memory_uniform_narrowed_16bit_packet(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
       packed_bit_pattern, vgpr_type, &low_register));
   loom_value_id_t
-      low_registers[LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS] = {0};
+      low_registers[LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS];
   for (uint16_t i = 0; i < packet_register_count; ++i) {
     low_registers[i] = low_register;
   }
-  loom_type_t packet_type = vgpr_type;
-  if (packet_register_count > 1) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_packet_type(
-        context, packet_register_count, vgpr_type, &packet_type));
-  }
-  return loom_amdgpu_build_low_register_range(context, source_op, low_registers,
-                                              packet_register_count,
-                                              packet_type, out_packet);
+  return loom_amdgpu_build_fragment_memory_packet(
+      context, source_op, low_registers, packet_register_count, vgpr_type,
+      out_packet);
 }
 
 static iree_status_t loom_amdgpu_emit_fragment_memory_packed_16bit_lane(
@@ -202,14 +194,13 @@ iree_status_t loom_amdgpu_emit_fragment_memory_packed_16bit_packet(
     uint16_t packet_register_count, loom_value_id_t low_scale,
     loom_type_t vgpr_type, loom_value_id_t* out_packet) {
   *out_packet = LOOM_VALUE_ID_INVALID;
-  uint16_t uniform_bit_pattern = 0;
   if (low_scale == LOOM_VALUE_ID_INVALID &&
-      plan->narrowed_result_round_source != LOOM_VALUE_ID_INVALID &&
-      loom_amdgpu_fragment_memory_query_uniform_narrowed_16bit_bit_pattern(
-          context, plan, &uniform_bit_pattern)) {
-    return loom_amdgpu_emit_fragment_memory_uniform_narrowed_16bit_packet(
-        context, source_op, uniform_bit_pattern, result_register_count,
-        packet_register_count, vgpr_type, out_packet);
+      plan->narrowed_result_round_source != LOOM_VALUE_ID_INVALID) {
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_try_emit_fragment_memory_uniform_narrowed_16bit_packet(
+            context, source_op, plan, result_register_count,
+            packet_register_count, vgpr_type, out_packet));
+    if (*out_packet != LOOM_VALUE_ID_INVALID) return iree_ok_status();
   }
   if (result_register_count == 1) {
     if (plan->narrowed_result_round_source != LOOM_VALUE_ID_INVALID) {
@@ -247,20 +238,9 @@ iree_status_t loom_amdgpu_emit_fragment_memory_packed_16bit_packet(
             low_payload, source_register_index, vgpr_type, low_scale,
             &packed_registers[i]));
   }
-  if (packet_register_count == 1) {
-    *out_packet = packed_registers[0];
-    return iree_ok_status();
-  }
-
-  loom_type_t packet_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_packet_type(
-      context, packet_register_count, vgpr_type, &packet_type));
-  loom_op_t* concat_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_concat_build(
-      loom_low_lower_context_builder(context), packed_registers,
-      packet_register_count, packet_type, source_op->location, &concat_op));
-  *out_packet = loom_low_concat_result(concat_op);
-  return iree_ok_status();
+  return loom_amdgpu_build_fragment_memory_packet(
+      context, source_op, packed_registers, packet_register_count, vgpr_type,
+      out_packet);
 }
 
 iree_status_t loom_amdgpu_emit_fragment_memory_f16_to_f32_packet(
@@ -278,21 +258,9 @@ iree_status_t loom_amdgpu_emit_fragment_memory_f16_to_f32_packet(
         context, source_op, low_payload, plan->register_count,
         packet->register_index + i, vgpr_type, &converted_registers[i]));
   }
-  if (packet->packet_register_count == 1) {
-    *out_packet = converted_registers[0];
-    return iree_ok_status();
-  }
-
-  loom_type_t packet_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_packet_type(
-      context, packet->packet_register_count, vgpr_type, &packet_type));
-  loom_op_t* concat_op = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_low_concat_build(loom_low_lower_context_builder(context),
-                            converted_registers, packet->packet_register_count,
-                            packet_type, source_op->location, &concat_op));
-  *out_packet = loom_low_concat_result(concat_op);
-  return iree_ok_status();
+  return loom_amdgpu_build_fragment_memory_packet(
+      context, source_op, converted_registers, packet->packet_register_count,
+      vgpr_type, out_packet);
 }
 
 static iree_status_t loom_amdgpu_emit_fragment_memory_fp8_source_byte(
@@ -1002,19 +970,7 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
               &low_result_registers[result_register_index]));
     }
   }
-  if (packet->result_register_count == 1) {
-    *out_low_packet = low_result_registers[0];
-    return iree_ok_status();
-  }
-
-  loom_type_t result_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_packet_type(
-      context, packet->result_register_count, vgpr_type, &result_type));
-  loom_op_t* concat_op = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_low_concat_build(loom_low_lower_context_builder(context),
-                            low_result_registers, packet->result_register_count,
-                            result_type, source_op->location, &concat_op));
-  *out_low_packet = loom_low_concat_result(concat_op);
-  return iree_ok_status();
+  return loom_amdgpu_build_fragment_memory_packet(
+      context, source_op, low_result_registers, packet->result_register_count,
+      vgpr_type, out_low_packet);
 }
