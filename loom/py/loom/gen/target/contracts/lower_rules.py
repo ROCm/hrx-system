@@ -256,6 +256,7 @@ def _generate_source(
         source_memory_address_materializers,
         address_materializer_ordinals,
     ) = _intern_optional_rows(tuple(row.address_materializer for row in table.source_memories))
+    source_memory_diagnostics, source_memory_diagnostic_indices = _intern_rows(tuple(lower_rule_rows.source_memory_diagnostic_indices(row) for row in table.source_memories))
     _validate_c_table_shape(table, source_contract, descriptor_ref_keys)
     descriptor_refs = {key: index for index, key in enumerate(descriptor_ref_keys)}
     report_key_ordinals = {key: index + 1 for index, key in enumerate(report_keys)}
@@ -347,6 +348,15 @@ def _generate_source(
         )
     )
 
+    source_memory_diagnostics_name = f"k{c_table_prefix}SourceMemoryDiagnostics"
+    lines.extend(
+        lower_rule_rows.emit_optional_array(
+            source_memory_diagnostics_name,
+            "loom_low_lower_source_memory_diagnostics_t",
+            [lower_rule_rows.source_memory_diagnostics_row(row) for row in source_memory_diagnostics],
+        )
+    )
+
     source_memories_name = f"k{c_table_prefix}SourceMemories"
     lines.extend(
         lower_rule_rows.emit_optional_array(
@@ -357,11 +367,13 @@ def _generate_source(
                     row,
                     byte_offset_materializer_ordinal=byte_offset_ordinal,
                     address_materializer_ordinal=address_ordinal,
+                    diagnostics_index=diagnostics_index,
                 )
-                for row, byte_offset_ordinal, address_ordinal in zip(
+                for row, byte_offset_ordinal, address_ordinal, diagnostics_index in zip(
                     table.source_memories,
                     byte_offset_materializer_ordinals,
                     address_materializer_ordinals,
+                    source_memory_diagnostic_indices,
                     strict=True,
                 )
             ],
@@ -521,6 +533,8 @@ def _generate_source(
             value_refs_name=value_refs_name,
             materializers_name=materializers_name,
             source_memories_name=source_memories_name,
+            source_memory_diagnostics=source_memory_diagnostics,
+            source_memory_diagnostics_name=source_memory_diagnostics_name,
             source_memory_byte_offset_materializers=(source_memory_byte_offset_materializers),
             source_memory_byte_offset_materializers_name=(source_memory_byte_offset_materializers_name),
             source_memory_address_materializers=(source_memory_address_materializers),
@@ -628,6 +642,11 @@ def _validate_c_table_shape(
         f"{subject} materializer count",
     )
     _require_u16(len(table.source_memories), f"{subject} source-memory count")
+    source_memory_diagnostics, _ = _intern_rows(tuple(lower_rule_rows.source_memory_diagnostic_indices(row) for row in table.source_memories))
+    _require_u16(
+        len(source_memory_diagnostics),
+        f"{subject} source-memory diagnostic count",
+    )
     source_memory_byte_offset_materializers, _ = _intern_optional_rows(tuple(row.byte_offset_materializer for row in table.source_memories))
     source_memory_address_materializers, _ = _intern_optional_rows(tuple(row.address_materializer for row in table.source_memories))
     _require_u8(
@@ -743,29 +762,27 @@ def _validate_c_table_shape(
             constraint.dynamic_offset_unsigned_bit_count,
             f"{row_subject} dynamic offset unsigned bit count",
         )
-        _require_u16(
-            row.dynamic_offset_diagnostic_index,
-            f"{row_subject} dynamic-offset diagnostic index",
-        )
-        _require_optional_table_index(
-            row.dynamic_offset_diagnostic_index,
-            len(table.diagnostics),
-            f"{row_subject} dynamic-offset diagnostic index",
-            "diagnostic",
-        )
+        for diagnostic_name, diagnostic_index in (
+            ("constraint", row.diagnostic_index),
+            ("dynamic-offset", row.dynamic_offset_diagnostic_index),
+            ("address-layout", row.address_layout_diagnostic_index),
+            ("address", row.address_diagnostic_index),
+        ):
+            _require_u16(
+                diagnostic_index,
+                f"{row_subject} {diagnostic_name} diagnostic index",
+            )
+            _require_optional_table_index(
+                diagnostic_index,
+                len(table.diagnostics),
+                f"{row_subject} {diagnostic_name} diagnostic index",
+                "diagnostic",
+            )
         if constraint.cache_policy_build_flags is not None:
             _require_u32(
                 constraint.cache_policy_build_flags,
                 f"{row_subject} cache policy build flags",
             )
-        _require_u16(row.diagnostic_index, f"{row_subject} diagnostic index")
-        _require_optional_table_index(
-            row.diagnostic_index,
-            len(table.diagnostics),
-            f"{row_subject} diagnostic index",
-            "diagnostic",
-        )
-
     for index, row in enumerate(table.guards):
         row_subject = f"{subject} guard {index}"
         _require_u16(row.value_ref_index, f"{row_subject} value-ref index")

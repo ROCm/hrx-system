@@ -190,6 +190,7 @@ def source_memory_row(
     *,
     byte_offset_materializer_ordinal: int,
     address_materializer_ordinal: int,
+    diagnostics_index: int,
 ) -> list[str]:
     if (row.byte_offset_materializer is None) != (byte_offset_materializer_ordinal == 0):
         raise ValueError("source-memory byte-offset materializer ordinal disagrees with its row")
@@ -306,37 +307,42 @@ def source_memory_row(
         "address_materializer_ordinal",
         address_materializer_ordinal,
     )
-    _append_field(
-        fields,
-        "dynamic_offset_diagnostic_index",
-        lower_rule_spelling.diagnostic_index(row.dynamic_offset_diagnostic_index),
-        always=True,
-    )
-    _append_field(
-        fields,
-        "address_layout_diagnostic_index",
-        lower_rule_spelling.diagnostic_index(row.address_layout_diagnostic_index),
-        always=True,
-    )
+    _append_field(fields, "diagnostics_index", diagnostics_index, always=True)
     if constraint.cache_policy_build_flags is not None:
         _append_field(
             fields,
             "cache_policy_build_flags",
             constraint.cache_policy_build_flags,
         )
-    _append_field(
-        fields,
-        "diagnostic_index",
-        lower_rule_spelling.diagnostic_index(row.diagnostic_index),
-        always=True,
-    )
-    _append_field(
-        fields,
-        "address_diagnostic_index",
-        lower_rule_spelling.diagnostic_index(row.address_diagnostic_index),
-        always=True,
-    )
     return fields
+
+
+def source_memory_diagnostic_indices(
+    row: LowerSourceMemory,
+) -> tuple[int, int, int, int]:
+    return (
+        row.diagnostic_index,
+        row.dynamic_offset_diagnostic_index,
+        row.address_layout_diagnostic_index,
+        row.address_diagnostic_index,
+    )
+
+
+def source_memory_diagnostics_row(
+    indices: tuple[int, int, int, int],
+) -> list[str]:
+    (
+        constraint_diagnostic_index,
+        dynamic_offset_diagnostic_index,
+        address_layout_diagnostic_index,
+        address_diagnostic_index,
+    ) = indices
+    return [
+        ".constraint_diagnostic_index = " + lower_rule_spelling.diagnostic_index(constraint_diagnostic_index),
+        ".dynamic_offset_diagnostic_index = " + lower_rule_spelling.diagnostic_index(dynamic_offset_diagnostic_index),
+        ".address_layout_diagnostic_index = " + lower_rule_spelling.diagnostic_index(address_layout_diagnostic_index),
+        ".address_diagnostic_index = " + lower_rule_spelling.diagnostic_index(address_diagnostic_index),
+    ]
 
 
 def source_memory_byte_offset_materializer_row(
@@ -807,6 +813,8 @@ def rule_set_row(
     value_refs_name: str,
     materializers_name: str,
     source_memories_name: str,
+    source_memory_diagnostics: tuple[object, ...],
+    source_memory_diagnostics_name: str,
     source_memory_byte_offset_materializers: tuple[object, ...],
     source_memory_byte_offset_materializers_name: str,
     source_memory_address_materializers: tuple[object, ...],
@@ -860,6 +868,12 @@ def rule_set_row(
         "source_memories",
         table.source_memories,
         source_memories_name,
+    )
+    _append_table_fields(
+        fields,
+        "source_memory_diagnostics",
+        source_memory_diagnostics,
+        source_memory_diagnostics_name,
     )
     _append_table_fields(
         fields,
@@ -918,6 +932,8 @@ def _table_count_field_name(field_name: str) -> str:
         return "attr_copy_count"
     if field_name == "source_memories":
         return "source_memory_count"
+    if field_name == "source_memory_diagnostics":
+        return "source_memory_diagnostic_count"
     if field_name == "diagnostic_params":
         return "diagnostic_param_count"
     if field_name == "diagnostic_param_refs":

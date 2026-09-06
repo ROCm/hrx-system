@@ -480,6 +480,20 @@ static_assert(sizeof(loom_low_lower_source_memory_address_materializer_t) == 40,
 
 #define LOOM_LOW_LOWER_SOURCE_MEMORY_MATERIALIZER_NONE ((uint8_t)0)
 
+// Interned diagnostic selection for one source-memory constraint family.
+typedef struct loom_low_lower_source_memory_diagnostics_t {
+  // Diagnostic emitted when the base source-memory constraint rejects.
+  uint16_t constraint_diagnostic_index;
+  // Diagnostic emitted when the dynamic byte-offset width check rejects.
+  uint16_t dynamic_offset_diagnostic_index;
+  // Diagnostic emitted when the address-layout classification rejects.
+  uint16_t address_layout_diagnostic_index;
+  // Diagnostic emitted when complete address materialization rejects.
+  uint16_t address_diagnostic_index;
+} loom_low_lower_source_memory_diagnostics_t;
+static_assert(sizeof(loom_low_lower_source_memory_diagnostics_t) == 8,
+              "source-memory diagnostic rows must remain compact");
+
 typedef struct loom_low_lower_source_memory_t {
   // Source memory operation category required by this row.
   uint8_t operation_kind;
@@ -501,18 +515,12 @@ typedef struct loom_low_lower_source_memory_t {
   uint8_t byte_offset_materializer_ordinal;
   // One-based complete-address materializer row, or zero when unused.
   uint8_t address_materializer_ordinal;
+  // Rule-set source-memory diagnostic row index.
+  uint16_t diagnostics_index;
   // Bitfield of source-memory row option bits.
   loom_low_lower_source_memory_flags_t flags;
   // Accepted target-independent source memory spaces.
   loom_low_lower_memory_space_mask_t memory_space_mask;
-  // Diagnostic emitted when the dynamic byte offset width check rejects.
-  uint16_t dynamic_offset_diagnostic_index;
-  // Diagnostic emitted when the address-layout classification rejects.
-  uint16_t address_layout_diagnostic_index;
-  // Diagnostic table row emitted when this source-memory row rejects.
-  uint16_t diagnostic_index;
-  // Diagnostic table row emitted when complete address materialization rejects.
-  uint16_t address_diagnostic_index;
   // Required byte count of one addressed view element.
   uint32_t element_byte_count;
   // Required static number of vector lanes addressed by the operation.
@@ -530,8 +538,8 @@ typedef struct loom_low_lower_source_memory_t {
   // Required byte stride for each dynamic address term unless ANY is set.
   int64_t dynamic_byte_stride;
 } loom_low_lower_source_memory_t;
-static_assert(sizeof(loom_low_lower_source_memory_t) == 72,
-              "loom_low_lower_source_memory_t must be 72 bytes");
+static_assert(sizeof(loom_low_lower_source_memory_t) == 64,
+              "source-memory rows must remain compact");
 
 typedef enum loom_low_lower_guard_kind_e {
   // Invalid or uninitialized guard.
@@ -902,6 +910,10 @@ typedef struct loom_low_lower_rule_set_t {
   const loom_low_lower_source_memory_t* source_memories;
   // Number of rows in source_memories.
   uint16_t source_memory_count;
+  // Interned diagnostic selections referenced by source memories.
+  const loom_low_lower_source_memory_diagnostics_t* source_memory_diagnostics;
+  // Number of rows in source_memory_diagnostics.
+  uint16_t source_memory_diagnostic_count;
   // Interned dynamic byte-offset materializers referenced by source memories.
   const loom_low_lower_source_memory_byte_offset_materializer_t*
       source_memory_byte_offset_materializers;
@@ -967,6 +979,14 @@ loom_low_lower_rule_set_source_memory_byte_offset_materializer(
     const loom_low_lower_source_memory_t* source_memory) {
   return &rule_set->source_memory_byte_offset_materializers
               [source_memory->byte_offset_materializer_ordinal - 1];
+}
+
+// Resolves the trusted diagnostic selection referenced by |source_memory|.
+static inline const loom_low_lower_source_memory_diagnostics_t*
+loom_low_lower_rule_set_source_memory_diagnostics(
+    const loom_low_lower_rule_set_t* rule_set,
+    const loom_low_lower_source_memory_t* source_memory) {
+  return &rule_set->source_memory_diagnostics[source_memory->diagnostics_index];
 }
 
 // Resolves the trusted complete-address materializer referenced by

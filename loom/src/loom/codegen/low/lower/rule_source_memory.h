@@ -65,6 +65,7 @@ bool loom_low_lower_rule_memory_space_matches(
 bool loom_low_lower_rule_source_memory_matches(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_source_memory_t* source_memory,
+    const loom_low_lower_source_memory_diagnostics_t* diagnostics,
     const loom_low_source_memory_access_plan_t* source_memory_access,
     uint16_t* out_diagnostic_index);
 

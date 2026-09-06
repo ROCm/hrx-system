@@ -25,6 +25,8 @@ from loom.gen.target.contracts.lower_rule_rows import (
     rule_row,
     source_memory_address_materializer_row,
     source_memory_byte_offset_materializer_row,
+    source_memory_diagnostic_indices,
+    source_memory_diagnostics_row,
     source_memory_row,
     value_ref_row,
 )
@@ -348,6 +350,31 @@ def test_validate_c_table_shape_rejects_emit_source_memory_ordinal_oob() -> None
         lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
         "lower-rule set 'test.low.generated_c_shape' emit 0 source-memory ordinal references missing source-memory row",
     )
+
+
+def test_validate_c_table_shape_rejects_source_memory_diagnostic_indices_oob() -> None:
+    base_row = LowerSourceMemory(
+        constraint=SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+        ),
+        diagnostic_index=0xFFFF,
+        dynamic_offset_diagnostic_index=0xFFFF,
+    )
+
+    for row, diagnostic_name in (
+        (replace(base_row, address_layout_diagnostic_index=0), "address-layout"),
+        (replace(base_row, address_diagnostic_index=0), "address"),
+    ):
+        table = _compiled_lower_rule_set(source_memories=(row,))
+        _expect_value_error(
+            lambda table=table: _validate_c_table_shape(table, _c_shape_contract(), ()),
+            f"lower-rule set 'test.low.generated_c_shape' source-memory 0 {diagnostic_name} diagnostic index references missing diagnostic row",
+        )
 
 
 def test_validate_c_table_shape_rejects_oversized_emit_count_field() -> None:
@@ -1285,6 +1312,7 @@ def test_source_memory_row_emits_dynamic_byte_stride_any_flag() -> None:
         row,
         byte_offset_materializer_ordinal=0,
         address_materializer_ordinal=0,
+        diagnostics_index=0,
     )
 
     assert ".flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_BYTE_STRIDE_ANY" in fields
@@ -1312,6 +1340,7 @@ def test_source_memory_row_emits_cache_policy_any_flag() -> None:
         row,
         byte_offset_materializer_ordinal=0,
         address_materializer_ordinal=0,
+        diagnostics_index=0,
     )
 
     assert ".flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_CACHE_POLICY_ANY" in fields
@@ -1338,10 +1367,13 @@ def test_source_memory_row_emits_compact_address_layout() -> None:
         row,
         byte_offset_materializer_ordinal=0,
         address_materializer_ordinal=0,
+        diagnostics_index=0,
     )
+    diagnostic_fields = source_memory_diagnostics_row(source_memory_diagnostic_indices(row))
 
     assert (".address_layout = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR") in fields
-    assert ".address_layout_diagnostic_index = 5" in fields
+    assert ".diagnostics_index = 0" in fields
+    assert ".address_layout_diagnostic_index = 5" in diagnostic_fields
 
 
 def test_source_memory_row_emits_preserve_source_index_flag() -> None:
@@ -1367,6 +1399,7 @@ def test_source_memory_row_emits_preserve_source_index_flag() -> None:
         row,
         byte_offset_materializer_ordinal=0,
         address_materializer_ordinal=0,
+        diagnostics_index=0,
     )
 
     assert ".flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_PRESERVE_SOURCE_INDEX" in fields
@@ -1393,6 +1426,7 @@ def test_source_memory_row_emits_any_positive_dynamic_term_count() -> None:
         row,
         byte_offset_materializer_ordinal=0,
         address_materializer_ordinal=0,
+        diagnostics_index=0,
     )
 
     assert (".dynamic_term_count = LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_TERM_COUNT_ANY") in fields
@@ -1422,6 +1456,7 @@ def test_source_memory_row_emits_portable_signed_i64_values() -> None:
         row,
         byte_offset_materializer_ordinal=0,
         address_materializer_ordinal=0,
+        diagnostics_index=0,
     )
 
     assert ".vector_lane_byte_stride = (-INT64_C(2147483648))" in fields
@@ -1453,6 +1488,7 @@ def test_source_memory_row_emits_dynamic_stride_values_flag() -> None:
         row,
         byte_offset_materializer_ordinal=0,
         address_materializer_ordinal=0,
+        diagnostics_index=0,
     )
 
     assert (".flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_BYTE_STRIDE_ANY | LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_STRIDE_VALUES") in fields
@@ -1499,14 +1535,17 @@ def test_source_memory_rows_split_complete_address_materializer() -> None:
         row,
         byte_offset_materializer_ordinal=0,
         address_materializer_ordinal=1,
+        diagnostics_index=0,
     )
+    diagnostic_fields = source_memory_diagnostics_row(source_memory_diagnostic_indices(row))
     materializer_fields = source_memory_address_materializer_row(
         descriptor_refs,
         materializer,
         immediate_string_offset="TEST_STRING_I32_VALUE",
     )
 
-    assert ".address_diagnostic_index = 5" in fields
+    assert ".diagnostics_index = 0" in fields
+    assert ".address_diagnostic_index = 5" in diagnostic_fields
     assert ".root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ALLOCA" in fields
     assert ".address_materializer_ordinal = 1" in fields
     assert (".base_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_VIEW") in materializer_fields
