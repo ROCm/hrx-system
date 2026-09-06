@@ -471,6 +471,7 @@ static iree_status_t loom_aie2p_array_extract_endpoint(
   endpoint->message_type =
       *loom_aie2p_array_result_value_type(builder->module, op);
   endpoint->partition_source_endpoint_index = UINT32_MAX;
+  endpoint->partition_lane = 0;
   endpoint->partition_lane_count = 1;
 
   const loom_value_id_t owner_value = loom_op_operands(op)[0];
@@ -835,19 +836,28 @@ static iree_status_t loom_aie2p_array_validate_topology(
 
   for (iree_host_size_t i = 0; i < builder->plan->endpoint_count; ++i) {
     const loom_aie2p_array_endpoint_t* endpoint = &builder->endpoints[i];
+    const loom_aie2p_array_endpoint_t* base_endpoint =
+        loom_aie2p_array_base_endpoint(builder, endpoint);
+    const bool is_binding_ingress =
+        endpoint->direction == LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND &&
+        base_endpoint->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_BINDING;
     if (endpoint->partition_source_endpoint_index != UINT32_MAX) {
-      if (channel_use_counts[i] != 1 || partition_use_counts[i] != 0) {
+      if (channel_use_counts[i] == 0 || partition_use_counts[i] != 0 ||
+          (!is_binding_ingress && channel_use_counts[i] != 1)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P partition endpoint must feed exactly one channel");
+            "AIE2P partition endpoint must feed one channel or binding "
+            "multicast");
       }
       continue;
     }
     if (partition_use_counts[i] == 0) {
-      if (channel_use_counts[i] != 1) {
+      if (channel_use_counts[i] == 0 ||
+          (!is_binding_ingress && channel_use_counts[i] != 1)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P direct endpoint must feed exactly one channel");
+            "AIE2P direct endpoint must feed one channel or binding "
+            "multicast");
       }
       continue;
     }
@@ -1602,11 +1612,39 @@ static iree_status_t loom_aie2p_array_plan_external_channel(
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_dma(
       builder, channel_index, worker->coordinate, compute_direction,
       channel->capacity, /*shim_side=*/false, &compute_dma_channel));
+
+  uint32_t source_channel_index = channel_index;
+  if (ingress) {
+    for (uint32_t i = 0; i < channel_index; ++i) {
+      if (builder->channels[i].transport ==
+              LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA &&
+          builder->channels[i].sender_endpoint_index ==
+              channel->sender_endpoint_index) {
+        source_channel_index = i;
+        break;
+      }
+    }
+  }
   loom_xdna_tile_coordinate_t shim_coordinate = {0};
   uint8_t shim_dma_channel = 0;
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_select_shim_dma(
-      builder, channel_index, worker->coordinate.column, shim_direction,
-      /*descriptor_count=*/1, &shim_coordinate, &shim_dma_channel));
+  if (source_channel_index == channel_index) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_select_shim_dma(
+        builder, channel_index, worker->coordinate.column, shim_direction,
+        /*descriptor_count=*/1, &shim_coordinate, &shim_dma_channel));
+  } else {
+    const loom_aie2p_array_dma_plan_t* source_dma = NULL;
+    for (iree_host_size_t i = 0; i < builder->dma_channel_cursor; ++i) {
+      const loom_aie2p_array_dma_plan_t* dma = &builder->dma_channels[i];
+      if (dma->channel_index == source_channel_index && dma->shim_side) {
+        source_dma = dma;
+        break;
+      }
+    }
+    IREE_ASSERT(source_dma != NULL,
+                "planned multicast source must own one shim DMA");
+    shim_coordinate = source_dma->coordinate;
+    shim_dma_channel = source_dma->dma_channel;
+  }
 
   if (channel->capacity > INT8_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -1626,16 +1664,18 @@ static iree_status_t loom_aie2p_array_plan_external_channel(
         shim_coordinate, shim_dma_channel));
   }
 
-  builder->binding_plans[builder->binding_plan_cursor++] =
-      (loom_aie2p_array_binding_plan_t){
-          .binding_index = base_binding_endpoint->owner_index,
-          .channel_index = channel_index,
-          .shim_coordinate = shim_coordinate,
-          .direction = shim_direction,
-          .dma_channel = shim_dma_channel,
-          .partition_lane = binding_endpoint->partition_lane,
-          .partition_lane_count = binding_endpoint->partition_lane_count,
-      };
+  if (source_channel_index == channel_index) {
+    builder->binding_plans[builder->binding_plan_cursor++] =
+        (loom_aie2p_array_binding_plan_t){
+            .binding_index = base_binding_endpoint->owner_index,
+            .channel_index = channel_index,
+            .shim_coordinate = shim_coordinate,
+            .direction = shim_direction,
+            .dma_channel = shim_dma_channel,
+            .partition_lane = binding_endpoint->partition_lane,
+            .partition_lane_count = binding_endpoint->partition_lane_count,
+        };
+  }
   IREE_RETURN_IF_ERROR(loom_aie2p_array_append_worker_port(
       builder, worker_endpoint, channel_index, first_slot));
   return iree_ok_status();
