@@ -25,37 +25,44 @@ static iree_status_t iree_hal_replay_dump_append_text_buffer_ref(
 
 static iree_status_t iree_hal_replay_dump_append_text_semaphores(
     iree_string_builder_t* builder, const char* label,
-    const iree_hal_replay_semaphore_timepoint_payload_t* semaphores,
-    iree_host_size_t semaphore_count) {
+    const uint8_t* semaphore_data, iree_host_size_t semaphore_count) {
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_format(builder, " %s=[", label));
   for (iree_host_size_t i = 0; i < semaphore_count; ++i) {
     if (i > 0) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
     }
+    iree_hal_replay_semaphore_timepoint_payload_t semaphore;
+    memcpy(&semaphore,
+           semaphore_data +
+               i * sizeof(iree_hal_replay_semaphore_timepoint_payload_t),
+           sizeof(semaphore));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "{semaphore_id=%" PRIu64 " value=%" PRIu64 "}",
-        semaphores[i].semaphore_id, semaphores[i].value));
+        semaphore.semaphore_id, semaphore.value));
   }
   return iree_string_builder_append_cstring(builder, "]");
 }
 
 static iree_status_t iree_hal_replay_dump_append_text_buffer_refs(
     iree_string_builder_t* builder, const char* label,
-    const iree_hal_replay_buffer_ref_payload_t* buffer_refs,
-    iree_host_size_t buffer_ref_count) {
+    const uint8_t* buffer_ref_data, iree_host_size_t buffer_ref_count) {
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_format(builder, " %s=[", label));
   for (iree_host_size_t i = 0; i < buffer_ref_count; ++i) {
     if (i > 0) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
     }
+    iree_hal_replay_buffer_ref_payload_t buffer_ref;
+    memcpy(&buffer_ref,
+           buffer_ref_data + i * sizeof(iree_hal_replay_buffer_ref_payload_t),
+           sizeof(buffer_ref));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         "{buffer_id=%" PRIu64 " offset=%" PRIu64 " length=%" PRIu64
         " slot=%" PRIu32 "}",
-        buffer_refs[i].buffer_id, buffer_refs[i].offset, buffer_refs[i].length,
-        buffer_refs[i].buffer_slot));
+        buffer_ref.buffer_id, buffer_ref.offset, buffer_ref.length,
+        buffer_ref.buffer_slot));
   }
   return iree_string_builder_append_cstring(builder, "]");
 }
@@ -100,14 +107,10 @@ static iree_status_t iree_hal_replay_dump_append_text_queue_semaphores(
   const uint8_t* payload_data = record->payload.data;
   const uint8_t* wait_data = payload_data + layout->wait_payloads_offset;
   const uint8_t* signal_data = payload_data + layout->signal_payloads_offset;
-  const iree_hal_replay_semaphore_timepoint_payload_t* wait_payloads =
-      (const iree_hal_replay_semaphore_timepoint_payload_t*)wait_data;
-  const iree_hal_replay_semaphore_timepoint_payload_t* signal_payloads =
-      (const iree_hal_replay_semaphore_timepoint_payload_t*)signal_data;
   IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_semaphores(
-      builder, "wait_semaphores", wait_payloads, wait_semaphore_count));
+      builder, "wait_semaphores", wait_data, wait_semaphore_count));
   return iree_hal_replay_dump_append_text_semaphores(
-      builder, "signal_semaphores", signal_payloads, signal_semaphore_count);
+      builder, "signal_semaphores", signal_data, signal_semaphore_count);
 }
 
 static iree_status_t iree_hal_replay_dump_append_text_queue_atomic_header(
@@ -497,25 +500,17 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           payload_range->offset + wait_offset, wait_size,
           payload_range->offset + signal_offset, signal_size,
           payload_range->offset + bindings_offset, bindings_size));
-      const iree_hal_replay_semaphore_timepoint_payload_t* wait_payloads =
-          (const iree_hal_replay_semaphore_timepoint_payload_t*)(record->payload
-                                                                     .data +
-                                                                 wait_offset);
-      const iree_hal_replay_semaphore_timepoint_payload_t* signal_payloads =
-          (const iree_hal_replay_semaphore_timepoint_payload_t*)(record->payload
-                                                                     .data +
-                                                                 signal_offset);
-      const iree_hal_replay_buffer_ref_payload_t* binding_payloads =
-          (const iree_hal_replay_buffer_ref_payload_t*)(record->payload.data +
-                                                        bindings_offset);
+      const uint8_t* wait_data = record->payload.data + wait_offset;
+      const uint8_t* signal_data = record->payload.data + signal_offset;
+      const uint8_t* binding_data = record->payload.data + bindings_offset;
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_semaphores(
-          builder, "wait_semaphores", wait_payloads,
+          builder, "wait_semaphores", wait_data,
           (iree_host_size_t)payload.wait_semaphore_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_semaphores(
-          builder, "signal_semaphores", signal_payloads,
+          builder, "signal_semaphores", signal_data,
           (iree_host_size_t)payload.signal_semaphore_count));
       return iree_hal_replay_dump_append_text_buffer_refs(
-          builder, "bindings", binding_payloads,
+          builder, "bindings", binding_data,
           (iree_host_size_t)payload.binding_count);
     }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER: {

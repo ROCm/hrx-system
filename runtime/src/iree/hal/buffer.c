@@ -655,55 +655,36 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_fill(
     byte_length = target_mapping.contents.data_length;
   }
 
+  iree_status_t status = iree_ok_status();
   if (IREE_UNLIKELY((byte_offset % pattern_length) != 0) ||
       IREE_UNLIKELY((byte_length % pattern_length) != 0)) {
-    iree_status_ignore(iree_hal_buffer_unmap_range(&target_mapping));
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "attempting to fill a range with %" PRIhsz
-                            " byte values "
-                            "that is not aligned (offset=%" PRIdsz
-                            ", length=%" PRIdsz ")",
-                            pattern_length, byte_offset, byte_length);
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "attempting to fill a range with %" PRIhsz
+                              " byte values "
+                              "that is not aligned (offset=%" PRIdsz
+                              ", length=%" PRIdsz ")",
+                              pattern_length, byte_offset, byte_length);
   }
 
-  const uint32_t zero_32 = 0;
-  if (memcmp(pattern, &zero_32, pattern_length) == 0) {
-    // We can turn all-zero values into single-byte fills as that can be much
-    // faster on devices (doing a fill8 vs fill32).
-    pattern_length = 1;
-  }
+  if (iree_status_is_ok(status)) {
+    const uint32_t zero_32 = 0;
+    if (memcmp(pattern, &zero_32, pattern_length) == 0) {
+      // We can turn all-zero values into single-byte fills as that can be much
+      // faster on devices (doing a fill8 vs fill32).
+      pattern_length = 1;
+    }
 
-  iree_status_t status = iree_ok_status();
-  void* data_ptr = target_mapping.contents.data;
-  switch (pattern_length) {
-    case 1: {
-      uint8_t* data = (uint8_t*)data_ptr;
-      uint8_t value_bits = *(const uint8_t*)(pattern);
-      memset(data, value_bits, byte_length);
-      break;
-    }
-    case 2: {
-      uint16_t* data = (uint16_t*)data_ptr;
-      uint16_t value_bits = *(const uint16_t*)(pattern);
-      for (iree_device_size_t i = 0; i < byte_length / sizeof(uint16_t); ++i) {
-        data[i] = value_bits;
+    uint8_t* data = target_mapping.contents.data;
+    if (pattern_length == 1) {
+      memset(data, *(const uint8_t*)pattern, byte_length);
+    } else {
+      // Mappings and pattern storage are byte-aligned. Use memcpy instead of
+      // typed stores so subspans at valid pattern-relative offsets do not
+      // require their underlying allocation to have the same alignment.
+      for (iree_device_size_t i = 0; i < byte_length; i += pattern_length) {
+        memcpy(data + i, pattern, pattern_length);
       }
-      break;
     }
-    case 4: {
-      uint32_t* data = (uint32_t*)data_ptr;
-      uint32_t value_bits = *(const uint32_t*)(pattern);
-      for (iree_device_size_t i = 0; i < byte_length / sizeof(uint32_t); ++i) {
-        data[i] = value_bits;
-      }
-      break;
-    }
-    default:
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "unsupported fill pattern length: %" PRIhsz,
-                                pattern_length);
-      break;
   }
 
   if (iree_status_is_ok(status) &&

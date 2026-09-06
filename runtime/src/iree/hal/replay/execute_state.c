@@ -297,16 +297,19 @@ iree_status_t iree_hal_replay_executor_make_semaphore_list(
       return status;
     }
   }
-  const iree_hal_replay_semaphore_timepoint_payload_t* timepoints =
-      (const iree_hal_replay_semaphore_timepoint_payload_t*)payloads.data;
   for (iree_host_size_t i = 0; i < count; ++i) {
+    iree_hal_replay_semaphore_timepoint_payload_t timepoint;
+    memcpy(&timepoint,
+           payloads.data +
+               i * sizeof(iree_hal_replay_semaphore_timepoint_payload_t),
+           sizeof(timepoint));
     iree_hal_replay_object_entry_t* entry = NULL;
     status = iree_hal_replay_executor_lookup(
-        executor, timepoints[i].semaphore_id,
-        IREE_HAL_REPLAY_OBJECT_TYPE_SEMAPHORE, &entry);
+        executor, timepoint.semaphore_id, IREE_HAL_REPLAY_OBJECT_TYPE_SEMAPHORE,
+        &entry);
     if (!iree_status_is_ok(status)) break;
     out_storage->semaphores[i] = entry->value.semaphore;
-    out_storage->payload_values[i] = timepoints[i].value;
+    out_storage->payload_values[i] = timepoint.value;
   }
   if (!iree_status_is_ok(status)) {
     iree_hal_replay_semaphore_list_storage_deinitialize(

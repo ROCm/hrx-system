@@ -43,12 +43,12 @@ typedef struct iree_hal_replay_plan_command_buffer_execution_barrier_t {
   iree_hal_execution_barrier_flags_t flags;
   // Number of serialized memory barriers.
   iree_host_size_t memory_barrier_count;
-  // Serialized memory barriers borrowed from the replay file.
-  const iree_hal_replay_memory_barrier_payload_t* memory_barrier_payloads;
+  // Unaligned serialized memory barrier bytes borrowed from the replay file.
+  const uint8_t* memory_barrier_data;
   // Number of serialized buffer barriers.
   iree_host_size_t buffer_barrier_count;
-  // Serialized buffer barriers borrowed from the replay file.
-  const iree_hal_replay_buffer_barrier_payload_t* buffer_barrier_payloads;
+  // Unaligned serialized buffer barrier bytes borrowed from the replay file.
+  const uint8_t* buffer_barrier_data;
 } iree_hal_replay_plan_command_buffer_execution_barrier_t;
 
 typedef struct iree_hal_replay_plan_command_buffer_dispatch_t {
@@ -64,10 +64,10 @@ typedef struct iree_hal_replay_plan_command_buffer_dispatch_t {
   iree_hal_replay_buffer_ref_payload_t workgroup_count_ref;
   // Inline constant bytes borrowed from the replay file.
   iree_const_byte_span_t constants;
-  // Number of serialized buffer refs in |binding_payloads|.
+  // Number of serialized buffer refs in |binding_data|.
   iree_host_size_t binding_count;
-  // Serialized dispatch bindings borrowed from the replay file.
-  const iree_hal_replay_buffer_ref_payload_t* binding_payloads;
+  // Unaligned serialized dispatch binding bytes borrowed from the replay file.
+  const uint8_t* binding_data;
   // Dispatch flags captured from the original call.
   iree_hal_dispatch_flags_t flags;
 } iree_hal_replay_plan_command_buffer_dispatch_t;
@@ -81,17 +81,16 @@ typedef struct iree_hal_replay_plan_queue_execute_t {
   iree_hal_queue_execute_flags_t flags;
   // Number of serialized wait semaphore timepoints.
   iree_host_size_t wait_semaphore_count;
-  // Serialized wait semaphore timepoints borrowed from the replay file.
-  const iree_hal_replay_semaphore_timepoint_payload_t* wait_semaphore_payloads;
+  // Unaligned serialized wait semaphore bytes borrowed from the replay file.
+  const uint8_t* wait_semaphore_data;
   // Number of serialized signal semaphore timepoints.
   iree_host_size_t signal_semaphore_count;
-  // Serialized signal semaphore timepoints borrowed from the replay file.
-  const iree_hal_replay_semaphore_timepoint_payload_t*
-      signal_semaphore_payloads;
+  // Unaligned serialized signal semaphore bytes borrowed from the replay file.
+  const uint8_t* signal_semaphore_data;
   // Number of serialized queue binding entries.
   iree_host_size_t binding_count;
-  // Serialized queue binding entries borrowed from the replay file.
-  const iree_hal_replay_buffer_ref_payload_t* binding_payloads;
+  // Unaligned serialized queue binding bytes borrowed from the replay file.
+  const uint8_t* binding_data;
 } iree_hal_replay_plan_queue_execute_t;
 
 typedef struct iree_hal_replay_plan_record_t {
@@ -192,15 +191,11 @@ iree_hal_replay_plan_prepare_command_buffer_execution_barrier(
   out_barrier->flags = payload.flags;
   out_barrier->memory_barrier_count =
       (iree_host_size_t)payload.memory_barrier_count;
-  out_barrier->memory_barrier_payloads =
-      (const iree_hal_replay_memory_barrier_payload_t*)(record->payload.data +
-                                                        sizeof(payload));
+  out_barrier->memory_barrier_data = record->payload.data + sizeof(payload);
   out_barrier->buffer_barrier_count =
       (iree_host_size_t)payload.buffer_barrier_count;
-  out_barrier->buffer_barrier_payloads =
-      (const iree_hal_replay_buffer_barrier_payload_t*)(record->payload.data +
-                                                        sizeof(payload) +
-                                                        memory_payloads_size);
+  out_barrier->buffer_barrier_data =
+      out_barrier->memory_barrier_data + memory_payloads_size;
   return iree_ok_status();
 }
 
@@ -248,9 +243,7 @@ static iree_status_t iree_hal_replay_plan_prepare_command_buffer_dispatch(
       iree_make_const_byte_span(record->payload.data + constants_offset,
                                 (iree_host_size_t)payload.constants_length);
   out_dispatch->binding_count = (iree_host_size_t)payload.binding_count;
-  out_dispatch->binding_payloads =
-      (const iree_hal_replay_buffer_ref_payload_t*)(record->payload.data +
-                                                    binding_offset);
+  out_dispatch->binding_data = record->payload.data + binding_offset;
   out_dispatch->flags = payload.flags;
   return iree_ok_status();
 }
@@ -303,17 +296,14 @@ static iree_status_t iree_hal_replay_plan_prepare_queue_execute(
   out_execute->flags = payload.flags;
   out_execute->wait_semaphore_count =
       (iree_host_size_t)payload.wait_semaphore_count;
-  out_execute->wait_semaphore_payloads =
-      (const iree_hal_replay_semaphore_timepoint_payload_t*)cursor;
+  out_execute->wait_semaphore_data = cursor;
   cursor += wait_size;
   out_execute->signal_semaphore_count =
       (iree_host_size_t)payload.signal_semaphore_count;
-  out_execute->signal_semaphore_payloads =
-      (const iree_hal_replay_semaphore_timepoint_payload_t*)cursor;
+  out_execute->signal_semaphore_data = cursor;
   cursor += signal_size;
   out_execute->binding_count = (iree_host_size_t)payload.binding_count;
-  out_execute->binding_payloads =
-      (const iree_hal_replay_buffer_ref_payload_t*)cursor;
+  out_execute->binding_data = cursor;
   return iree_ok_status();
 }
 
@@ -493,10 +483,13 @@ iree_hal_replay_plan_execute_command_buffer_execution_barrier(
     memory_barriers_allocated = true;
   }
   for (iree_host_size_t i = 0; i < barrier->memory_barrier_count; ++i) {
-    memory_barriers[i].source_scope =
-        barrier->memory_barrier_payloads[i].source_scope;
-    memory_barriers[i].target_scope =
-        barrier->memory_barrier_payloads[i].target_scope;
+    iree_hal_replay_memory_barrier_payload_t memory_payload;
+    memcpy(&memory_payload,
+           barrier->memory_barrier_data +
+               i * sizeof(iree_hal_replay_memory_barrier_payload_t),
+           sizeof(memory_payload));
+    memory_barriers[i].source_scope = memory_payload.source_scope;
+    memory_barriers[i].target_scope = memory_payload.target_scope;
   }
 
   iree_hal_buffer_barrier_t inline_buffer_barriers
@@ -525,13 +518,15 @@ iree_hal_replay_plan_execute_command_buffer_execution_barrier(
   }
   for (iree_host_size_t i = 0;
        i < barrier->buffer_barrier_count && iree_status_is_ok(status); ++i) {
-    buffer_barriers[i].source_scope =
-        barrier->buffer_barrier_payloads[i].source_scope;
-    buffer_barriers[i].target_scope =
-        barrier->buffer_barrier_payloads[i].target_scope;
+    iree_hal_replay_buffer_barrier_payload_t buffer_payload;
+    memcpy(&buffer_payload,
+           barrier->buffer_barrier_data +
+               i * sizeof(iree_hal_replay_buffer_barrier_payload_t),
+           sizeof(buffer_payload));
+    buffer_barriers[i].source_scope = buffer_payload.source_scope;
+    buffer_barriers[i].target_scope = buffer_payload.target_scope;
     status = iree_hal_replay_executor_make_buffer_ref(
-        executor, &barrier->buffer_barrier_payloads[i].buffer_ref,
-        &buffer_barriers[i].buffer_ref);
+        executor, &buffer_payload.buffer_ref, &buffer_barriers[i].buffer_ref);
   }
 
   iree_hal_replay_object_entry_t* command_buffer_entry = NULL;
@@ -565,8 +560,13 @@ static iree_status_t iree_hal_replay_plan_execute_command_buffer_dispatch(
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < dispatch->binding_count && iree_status_is_ok(status); ++i) {
+    iree_hal_replay_buffer_ref_payload_t binding_payload;
+    memcpy(&binding_payload,
+           dispatch->binding_data +
+               i * sizeof(iree_hal_replay_buffer_ref_payload_t),
+           sizeof(binding_payload));
     status = iree_hal_replay_executor_make_buffer_ref(
-        executor, &dispatch->binding_payloads[i], &binding_storage.values[i]);
+        executor, &binding_payload, &binding_storage.values[i]);
   }
 
   iree_hal_replay_object_entry_t* command_buffer_entry = NULL;
@@ -611,17 +611,17 @@ static iree_status_t iree_hal_replay_plan_execute_queue_execute(
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_make_semaphore_list(
       executor,
       iree_make_const_byte_span(
-          (const uint8_t*)queue_execute->wait_semaphore_payloads,
+          queue_execute->wait_semaphore_data,
           queue_execute->wait_semaphore_count *
-              sizeof(*queue_execute->wait_semaphore_payloads)),
+              sizeof(iree_hal_replay_semaphore_timepoint_payload_t)),
       queue_execute->wait_semaphore_count, &wait_storage));
   iree_hal_replay_semaphore_list_storage_t signal_storage;
   iree_status_t status = iree_hal_replay_executor_make_semaphore_list(
       executor,
       iree_make_const_byte_span(
-          (const uint8_t*)queue_execute->signal_semaphore_payloads,
+          queue_execute->signal_semaphore_data,
           queue_execute->signal_semaphore_count *
-              sizeof(*queue_execute->signal_semaphore_payloads)),
+              sizeof(iree_hal_replay_semaphore_timepoint_payload_t)),
       queue_execute->signal_semaphore_count, &signal_storage);
 
   iree_hal_replay_buffer_binding_table_storage_t binding_storage = {0};
@@ -631,9 +631,14 @@ static iree_status_t iree_hal_replay_plan_execute_queue_execute(
   }
   for (iree_host_size_t i = 0;
        i < queue_execute->binding_count && iree_status_is_ok(status); ++i) {
+    iree_hal_replay_buffer_ref_payload_t binding_payload;
+    memcpy(&binding_payload,
+           queue_execute->binding_data +
+               i * sizeof(iree_hal_replay_buffer_ref_payload_t),
+           sizeof(binding_payload));
     iree_hal_buffer_ref_t ref;
-    status = iree_hal_replay_executor_make_buffer_ref(
-        executor, &queue_execute->binding_payloads[i], &ref);
+    status = iree_hal_replay_executor_make_buffer_ref(executor,
+                                                      &binding_payload, &ref);
     if (iree_status_is_ok(status)) {
       binding_storage.bindings[i] = (iree_hal_buffer_binding_t){
           .buffer = ref.buffer,
