@@ -422,13 +422,11 @@ static iree_status_t loom_pipeline_plan_connect_pointwise_flow(
   const loom_pipeline_plan_flow_t* flow = &builder->flows[flow_index];
   const loom_pipeline_plan_group_t* group =
       &builder->groups[target_group_index];
-  const bool binding_group_mismatch =
-      flow->producer_kind == LOOM_PIPELINE_ENDPOINT_KIND_BINDING &&
-      flow->group_index != target_group_index;
-  const bool instance_cardinality_mismatch =
-      flow->producer_kind == LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE &&
-      flow->instance_count != group->lane_count;
-  if (binding_group_mismatch || instance_cardinality_mismatch) {
+  const uint32_t producer_lane_count =
+      flow->producer_kind == LOOM_PIPELINE_ENDPOINT_KIND_BINDING
+          ? builder->groups[flow->group_index].lane_count
+          : flow->instance_count;
+  if (producer_lane_count != group->lane_count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "pointwise pipeline input must match its stage group cardinality");

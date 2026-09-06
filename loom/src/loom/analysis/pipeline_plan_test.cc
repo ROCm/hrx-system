@@ -183,7 +183,7 @@ func.def @first(%input: buffer, %intermediate: buffer) {
   func.return
 }
 
-func.def @second(%intermediate: buffer, %output: buffer) {
+func.def @second(%intermediate: buffer, %shared_input: buffer, %output: buffer) {
   func.return
 }
 
@@ -196,7 +196,7 @@ pipeline.def<kernel> @chain() launch(%input: buffer, %output: buffer) {
   %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
   %input_flow = pipeline.read %input_view on %first_group : view<16xi8>, group -> pipeline.flow<tile<16xi8>>
   %intermediate_flow = pipeline.stage @first on %first_group(%input_flow) : (group, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
-  %output_flow = pipeline.stage @second on %second_group(%intermediate_flow) : (group, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
+  %output_flow = pipeline.stage @second on %second_group(%intermediate_flow, %input_flow) : (group, pipeline.flow<tile<16xi8>>, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
   pipeline.write %output_flow to %output_view : pipeline.flow<tile<16xi8>>, view<16xi8>
   pipeline.return
 }
@@ -217,7 +217,7 @@ pipeline.def<kernel> @chain() launch(%input: buffer, %output: buffer) {
                                           &analysis_arena_, &plan));
 
   ASSERT_EQ(plan.instance_count, 2u);
-  ASSERT_EQ(plan.edge_count, 3u);
+  ASSERT_EQ(plan.edge_count, 4u);
   const loom_pipeline_plan_edge_t& stage_edge = plan.edges[1];
   EXPECT_EQ(stage_edge.source_kind, LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE);
   EXPECT_EQ(stage_edge.source_index, 0u);
@@ -225,6 +225,18 @@ pipeline.def<kernel> @chain() launch(%input: buffer, %output: buffer) {
   EXPECT_EQ(stage_edge.target_kind, LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE);
   EXPECT_EQ(stage_edge.target_index, 1u);
   EXPECT_EQ(stage_edge.target_port, 0u);
+
+  const loom_pipeline_plan_edge_t& first_binding_edge = plan.edges[0];
+  const loom_pipeline_plan_edge_t& second_binding_edge = plan.edges[2];
+  EXPECT_EQ(first_binding_edge.flow_index, second_binding_edge.flow_index);
+  EXPECT_EQ(first_binding_edge.source_kind,
+            LOOM_PIPELINE_ENDPOINT_KIND_BINDING);
+  EXPECT_EQ(second_binding_edge.source_kind,
+            LOOM_PIPELINE_ENDPOINT_KIND_BINDING);
+  EXPECT_EQ(first_binding_edge.source_index, second_binding_edge.source_index);
+  EXPECT_EQ(first_binding_edge.source_port, second_binding_edge.source_port);
+  EXPECT_EQ(first_binding_edge.target_index, 0u);
+  EXPECT_EQ(second_binding_edge.target_index, 1u);
 }
 
 TEST_F(PipelinePlanTest, ExpandsFlowFanoutWithoutCloningProducer) {
