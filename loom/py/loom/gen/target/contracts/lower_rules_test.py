@@ -20,6 +20,7 @@ from loom.gen.target.contracts.lower_rule_rows import (
     diagnostic_has_implicit_target_context,
     diagnostic_param_row,
     diagnostic_stored_params,
+    emit_row,
     guard_row,
     source_memory_address_materializer_row,
     source_memory_byte_offset_materializer_row,
@@ -34,6 +35,8 @@ from loom.gen.target.contracts.lower_rules import (
     generate_lower_rule_set,
 )
 from loom.target.contracts import (
+    LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
+    LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN,
     CompiledLowerRuleSet,
     ContractFragment,
     DescriptorAccumulatorSeed,
@@ -285,6 +288,113 @@ def test_validate_c_table_shape_rejects_oversized_emit_count_field() -> None:
         lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
         "lower-rule set 'test.low.generated_c_shape' emit 0 attr-copy count exceeds uint8_t",
     )
+
+
+def test_validate_c_table_shape_rejects_structural_descriptor_payload() -> None:
+    table = _compiled_lower_rule_set(
+        emits=(
+            LowerEmit(
+                kind=LowerEmitKind.REGISTER_SLICE,
+                attr_copy_start=1,
+            ),
+        ),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "lower-rule set 'test.low.generated_c_shape' emit 0 structural emit cannot carry descriptor table ranges",
+    )
+
+
+def test_validate_c_table_shape_rejects_descriptor_structural_payload() -> None:
+    table = _compiled_lower_rule_set(
+        emits=(
+            LowerEmit(
+                kind=LowerEmitKind.DESCRIPTOR_OP,
+                descriptor=TEST_LOW_ADD_F32_DESCRIPTOR,
+                structural_unit_count=1,
+            ),
+        ),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "lower-rule set 'test.low.generated_c_shape' emit 0 descriptor emit cannot carry a structural payload",
+    )
+
+
+def test_emit_row_overlays_descriptor_table_ranges() -> None:
+    row = emit_row(
+        {TEST_LOW_ADD_F32_DESCRIPTOR.key: 1},
+        LowerEmit(
+            kind=LowerEmitKind.DESCRIPTOR_OP,
+            descriptor=TEST_LOW_ADD_F32_DESCRIPTOR,
+            attr_copy_start=2,
+            attr_copy_count=3,
+            tied_result_start=5,
+            tied_result_count=7,
+        ),
+    )
+
+    assert ".payload.descriptor.attr_copy_start = 2" in row
+    assert ".payload.descriptor.tied_result_start = 5" in row
+
+
+def test_emit_row_overlays_result_type_ranges() -> None:
+    value_ref_row_fields = emit_row(
+        {},
+        LowerEmit(
+            kind=LowerEmitKind.REGISTER_COPY,
+            result_ref_start=2,
+            result_ref_count=1,
+        ),
+    )
+    type_pattern_row_fields = emit_row(
+        {},
+        LowerEmit(
+            kind=LowerEmitKind.REGISTER_COPY,
+            flags=(LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS | LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN),
+            result_type_pattern_start=3,
+            result_ref_count=1,
+            result_bind_ref_start=4,
+        ),
+    )
+
+    assert ".result_type.value_ref_start = 2" in value_ref_row_fields
+    assert ".result_type.type_pattern_start = 3" in type_pattern_row_fields
+
+
+def test_validate_c_table_shape_requires_type_pattern_bind_range() -> None:
+    table = _compiled_lower_rule_set(
+        type_patterns=(LowerTypePattern(Scalar("f32")),),
+        emits=(
+            LowerEmit(
+                kind=LowerEmitKind.DESCRIPTOR_OP,
+                descriptor=TEST_LOW_ADD_F32_DESCRIPTOR,
+                flags=LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN,
+                result_ref_count=1,
+            ),
+        ),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "lower-rule set 'test.low.generated_c_shape' emit 0 result type-pattern requires an explicit result bind range",
+    )
+
+
+def test_emit_row_overlays_register_slice_payload() -> None:
+    row = emit_row(
+        {},
+        LowerEmit(
+            kind=LowerEmitKind.REGISTER_SLICE,
+            structural_offset=2,
+            structural_unit_count=1,
+        ),
+    )
+
+    assert ".payload.structural.offset = 2" in row
+    assert ".payload.structural.unit_count = 1" in row
 
 
 def test_validate_c_table_shape_rejects_span_rule_range_mismatch() -> None:

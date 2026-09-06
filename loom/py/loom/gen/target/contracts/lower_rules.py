@@ -44,6 +44,11 @@ _U8_MAX = 0xFF
 _U16_MAX = 0xFFFF
 _U32_MAX = 0xFFFF_FFFF
 _U64_MAX = 0xFFFF_FFFF_FFFF_FFFF
+_STRUCTURAL_EMIT_KINDS = (
+    LowerEmitKind.REGISTER_SLICE,
+    LowerEmitKind.REGISTER_CONCAT,
+    LowerEmitKind.REGISTER_COPY,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -856,6 +861,19 @@ def _validate_c_table_shape(
 
     for index, row in enumerate(table.emits):
         row_subject = f"{subject} emit {index}"
+        is_structural_emit = row.kind in _STRUCTURAL_EMIT_KINDS
+        _require_u16(row.structural_offset, f"{row_subject} structural offset")
+        _require_u16(
+            row.structural_unit_count,
+            f"{row_subject} structural unit count",
+        )
+        if is_structural_emit:
+            if row.attr_copy_start != 0 or row.attr_copy_count != 0 or row.tied_result_start != 0 or row.tied_result_count != 0:
+                raise ValueError(f"{row_subject} structural emit cannot carry descriptor table ranges")
+            if row.kind != LowerEmitKind.REGISTER_SLICE and (row.structural_offset != 0 or row.structural_unit_count != 0):
+                raise ValueError(f"{row_subject} only register-slice emits can carry a structural payload")
+        elif row.structural_offset != 0 or row.structural_unit_count != 0:
+            raise ValueError(f"{row_subject} descriptor emit cannot carry a structural payload")
         _require_u8(row.flags, f"{row_subject} flags")
         _require_u16(row.operand_ref_start, f"{row_subject} operand-ref start")
         _require_u8(row.operand_ref_count, f"{row_subject} operand-ref count")
@@ -885,6 +903,8 @@ def _validate_c_table_shape(
         _require_u8(row.result_ref_count, f"{row_subject} result-ref count")
         if row.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN and row.flags & LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE:
             raise ValueError(f"{row_subject} cannot use both result type-pattern and descriptor result-type flags")
+        if row.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN and row.result_ref_count != 0 and not row.flags & LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS:
+            raise ValueError(f"{row_subject} result type-pattern requires an explicit result bind range")
         if row.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN:
             _require_table_range(
                 row.result_type_pattern_start,

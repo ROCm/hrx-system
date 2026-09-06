@@ -685,12 +685,17 @@ def emit_row(descriptor_refs: Mapping[str, int], row: LowerEmit) -> list[str]:
         if row.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN:
             _append_field(
                 fields,
-                "result_type_pattern_start",
+                "result_type.type_pattern_start",
                 row.result_type_pattern_start,
                 always=True,
             )
         else:
-            _append_field(fields, "result_ref_start", row.result_ref_start, always=True)
+            _append_field(
+                fields,
+                "result_type.value_ref_start",
+                row.result_ref_start,
+                always=True,
+            )
         _append_field(fields, "result_ref_count", row.result_ref_count, always=True)
     if row.flags & LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS:
         _append_field(
@@ -700,10 +705,20 @@ def emit_row(descriptor_refs: Mapping[str, int], row: LowerEmit) -> list[str]:
             always=True,
         )
     if row.attr_copy_count:
-        _append_field(fields, "attr_copy_start", row.attr_copy_start, always=True)
+        _append_field(
+            fields,
+            "payload.descriptor.attr_copy_start",
+            row.attr_copy_start,
+            always=True,
+        )
         _append_field(fields, "attr_copy_count", row.attr_copy_count, always=True)
     if row.tied_result_count:
-        _append_field(fields, "tied_result_start", row.tied_result_start, always=True)
+        _append_field(
+            fields,
+            "payload.descriptor.tied_result_start",
+            row.tied_result_start,
+            always=True,
+        )
         _append_field(fields, "tied_result_count", row.tied_result_count, always=True)
     if row.source_memory_ordinal != LOWER_SOURCE_MEMORY_NONE:
         _append_field(
@@ -715,14 +730,14 @@ def emit_row(descriptor_refs: Mapping[str, int], row: LowerEmit) -> list[str]:
     if row.kind == LowerEmitKind.REGISTER_SLICE:
         _append_field(
             fields,
-            "structural_offset",
+            "payload.structural.offset",
             row.structural_offset,
             always=True,
         )
         if row.structural_unit_count:
             _append_field(
                 fields,
-                "structural_unit_count",
+                "payload.structural.unit_count",
                 row.structural_unit_count,
                 always=True,
             )

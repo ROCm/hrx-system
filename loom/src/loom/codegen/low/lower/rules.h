@@ -708,10 +708,10 @@ typedef uint8_t loom_low_lower_emit_flags_t;
 // Swaps emitted descriptor operands 0 and 1 after operand lookup/copy/slicing.
 #define LOOM_LOW_LOWER_EMIT_FLAG_SWAP_OPERANDS_0_1 ((uint8_t)1u << 0)
 // Binds emitted low results to result_bind_ref_start instead of
-// result_ref_start.
+// result_type.value_ref_start.
 #define LOOM_LOW_LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS ((uint8_t)1u << 1)
 // Maps emitted low result types from exact type-pattern rows instead of
-// result_ref_start source value refs.
+// result_type.value_ref_start source value refs.
 #define LOOM_LOW_LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN ((uint8_t)1u << 2)
 // Seeds DESCRIPTOR_OP_ACCUMULATE_LANES from lane 0 of its accumulator operand
 // and starts descriptor emission at lane 1.
@@ -738,30 +738,40 @@ typedef struct loom_low_lower_emit_t {
   // concrete register class, supporting destructive/tied operands and fixed
   // physical-register constraints without changing source SSA values.
   uint16_t copy_operand_mask;
-  // First value-ref table row mapped as a low result.
-  //
-  // Result type refs must address source results. When
-  // BIND_RESULTS_TO_REFS is set, result_bind_ref_start controls where the
-  // emitted low results are bound.
-  uint16_t result_ref_start;
-  // First exact type-pattern table row mapped as a low result type when
-  // RESULT_TYPE_PATTERN is set.
-  uint16_t result_type_pattern_start;
+  // Result-type table range selected by RESULT_TYPE_PATTERN.
+  union {
+    // First value-ref table row mapped as a low result. Result type refs must
+    // address source results. When BIND_RESULTS_TO_REFS is set,
+    // result_bind_ref_start controls where the emitted low results are bound.
+    uint16_t value_ref_start;
+    // First exact type-pattern table row mapped as a low result type.
+    uint16_t type_pattern_start;
+  } result_type;
   // First value-ref table row receiving emitted low results when
   // BIND_RESULTS_TO_REFS is set.
   uint16_t result_bind_ref_start;
-  // First attr-copy table row emitted onto the low packet.
-  uint16_t attr_copy_start;
-  // First tied-result table row forwarded to the low packet builder.
-  uint16_t tied_result_start;
   // One-based source-memory row recorded by this descriptor emit. Zero means
   // the emit is not a source memory access.
   uint16_t source_memory_ordinal;
-  // Register-unit offset consumed by REGISTER_SLICE.
-  uint16_t structural_offset;
-  // Explicit result register-unit count consumed by REGISTER_SLICE. Zero maps
-  // the result type through the normal result reference or type pattern.
-  uint16_t structural_unit_count;
+  // Kind-specific descriptor or structural emit payload.
+  union {
+    // Descriptor-backed emit table ranges.
+    struct {
+      // First attr-copy table row emitted onto the low packet.
+      uint16_t attr_copy_start;
+      // First tied-result table row forwarded to the low packet builder.
+      uint16_t tied_result_start;
+    } descriptor;
+    // Structural register operation parameters.
+    struct {
+      // Register-unit offset consumed by REGISTER_SLICE.
+      uint16_t offset;
+      // Explicit result register-unit count consumed by REGISTER_SLICE. Zero
+      // maps the result type through the normal result reference or type
+      // pattern.
+      uint16_t unit_count;
+    } structural;
+  } payload;
   // Number of low operands to copy from value-ref rows.
   uint8_t operand_ref_count;
   // Operand ordinal that carries the threaded scalar accumulator for
@@ -774,8 +784,8 @@ typedef struct loom_low_lower_emit_t {
   // Number of tied-result rows forwarded to the low packet builder.
   uint8_t tied_result_count;
 } loom_low_lower_emit_t;
-static_assert(sizeof(loom_low_lower_emit_t) == 30,
-              "loom_low_lower_emit_t must be 30 bytes");
+static_assert(sizeof(loom_low_lower_emit_t) == 24,
+              "loom_low_lower_emit_t must be 24 bytes");
 
 // Ordinal into a rule set's interned emit table.
 typedef uint16_t loom_low_lower_emit_ref_t;

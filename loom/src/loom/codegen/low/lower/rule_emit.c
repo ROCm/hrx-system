@@ -340,7 +340,8 @@ static iree_status_t loom_low_lower_rule_build_attrs(
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, emit->attr_copy_count, sizeof(*attrs), (void**)&attrs));
   for (uint16_t i = 0; i < emit->attr_copy_count; ++i) {
-    uint16_t attr_copy_index = (uint16_t)(emit->attr_copy_start + i);
+    uint16_t attr_copy_index =
+        (uint16_t)(emit->payload.descriptor.attr_copy_start + i);
     const loom_low_lower_attr_copy_t* attr_copy =
         &rule_set->attr_copies[attr_copy_index];
     IREE_RETURN_IF_ERROR(loom_module_intern_string(
@@ -871,7 +872,7 @@ static iree_status_t loom_low_lower_rule_build_result_types(
   for (uint16_t i = 0; i < emit->result_ref_count; ++i) {
     if (use_type_patterns) {
       const uint16_t type_pattern_index =
-          (uint16_t)(emit->result_type_pattern_start + i);
+          (uint16_t)(emit->result_type.type_pattern_start + i);
       const loom_type_t exact_type =
           loom_low_lower_rule_type_pattern_exact_type(
               &rule_set->type_patterns[type_pattern_index]);
@@ -884,7 +885,7 @@ static iree_status_t loom_low_lower_rule_build_result_types(
     } else {
       loom_value_id_t source_value_id = loom_low_lower_rule_source_value(
           context->module, rule_set, source_op,
-          (uint16_t)(emit->result_ref_start + i));
+          (uint16_t)(emit->result_type.value_ref_start + i));
       IREE_RETURN_IF_ERROR(loom_low_lower_rule_map_result_type(
           context, source_op, source_value_id, &result_types[i]));
     }
@@ -900,7 +901,7 @@ static uint16_t loom_low_lower_rule_emit_result_bind_ref_index(
       iree_any_bit_set(emit->flags,
                        LOOM_LOW_LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS)
           ? emit->result_bind_ref_start
-          : emit->result_ref_start;
+          : emit->result_type.value_ref_start;
   return (uint16_t)(result_bind_ref_start + result_ordinal);
 }
 
@@ -1062,7 +1063,8 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op(
 
   const loom_tied_result_t* tied_results = NULL;
   if (emit->tied_result_count != 0) {
-    tied_results = &rule_set->tied_results[emit->tied_result_start];
+    tied_results =
+        &rule_set->tied_results[emit->payload.descriptor.tied_result_start];
   }
 
   loom_op_t* low_op = NULL;
@@ -1109,13 +1111,13 @@ static iree_status_t loom_low_lower_rule_emit_register_slice(
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_build_low_operands(
       context, rule_set, source_op, state, emit, NULL, NULL, &low_operands));
   loom_type_t result_type = loom_type_none();
-  if (emit->structural_unit_count != 0) {
+  if (emit->payload.structural.unit_count != 0) {
     const loom_type_t source_type = loom_module_value_type(
         loom_low_lower_context_module(context), low_operands[0]);
     if (!loom_low_lower_rule_try_register_type_with_unit_count(
-            source_type, emit->structural_unit_count, &result_type)) {
+            source_type, emit->payload.structural.unit_count, &result_type)) {
       return loom_low_lower_emit_register_width_relation_unsupported(
-          context, source_op, source_type, emit->structural_unit_count);
+          context, source_op, source_type, emit->payload.structural.unit_count);
     }
   } else {
     loom_type_t* result_types = NULL;
@@ -1125,9 +1127,10 @@ static iree_status_t loom_low_lower_rule_emit_register_slice(
   }
 
   loom_op_t* slice_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_slice_build(
-      loom_low_lower_context_builder(context), low_operands[0],
-      emit->structural_offset, result_type, source_op->location, &slice_op));
+  IREE_RETURN_IF_ERROR(
+      loom_low_slice_build(loom_low_lower_context_builder(context),
+                           low_operands[0], emit->payload.structural.offset,
+                           result_type, source_op->location, &slice_op));
   const loom_value_id_t low_result = loom_low_slice_result(slice_op);
   return loom_low_lower_rule_bind_results(context, rule_set, source_op, state,
                                           emit, &low_result);
@@ -1191,7 +1194,8 @@ static const loom_tied_result_t* loom_low_lower_rule_emit_tied_results(
     const loom_low_lower_emit_t* emit) {
   return emit->tied_result_count == 0
              ? NULL
-             : &rule_set->tied_results[emit->tied_result_start];
+             : &rule_set
+                    ->tied_results[emit->payload.descriptor.tied_result_start];
 }
 
 static iree_status_t loom_low_lower_rule_slice_register_units(
@@ -1707,7 +1711,7 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_accumulate_lanes(
       context, source_op, resolved_emit, low_operands));
 
   loom_value_id_t source_result = loom_low_lower_rule_source_value(
-      context->module, rule_set, source_op, emit->result_ref_start);
+      context->module, rule_set, source_op, emit->result_type.value_ref_start);
   loom_type_t result_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_map_result_type(
       context, source_op, source_result, &result_type));
