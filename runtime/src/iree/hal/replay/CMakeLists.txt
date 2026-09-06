@@ -232,6 +232,7 @@ iree_cc_test(
   NAME
     recorder_test
   SRCS
+    "recorder_record.h"
     "recorder_test.cc"
   DEPS
     ::execute

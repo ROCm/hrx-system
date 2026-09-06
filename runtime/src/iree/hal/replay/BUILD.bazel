@@ -233,7 +233,10 @@ if(TARGET iree::hal::drivers::task::registration)
 
 iree_runtime_cc_test(
     name = "recorder_test",
-    srcs = ["recorder_test.cc"],
+    srcs = [
+        "recorder_record.h",
+        "recorder_test.cc",
+    ],
     deps = [
         ":execute",
         ":file_reader",
