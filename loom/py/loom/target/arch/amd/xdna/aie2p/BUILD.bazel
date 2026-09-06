@@ -41,7 +41,10 @@ iree_py_library(
 
 iree_py_library(
     name = "machine_data",
-    srcs = ["core_machine_data.py"],
+    srcs = [
+        "core_machine_data.py",
+        "core_machine_form_data.py",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":encoding_data",

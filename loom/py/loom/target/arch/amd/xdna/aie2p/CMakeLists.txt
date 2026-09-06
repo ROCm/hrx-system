@@ -44,6 +44,7 @@ iree_py_library(
     machine_data
   SRCS
     "core_machine_data.py"
+    "core_machine_form_data.py"
   DEPS
     loom::py::loom::target::arch::amd::xdna::aie2p::encoding_data
     loom::py::loom::target::arch::amd::xdna::aie2p::package_init

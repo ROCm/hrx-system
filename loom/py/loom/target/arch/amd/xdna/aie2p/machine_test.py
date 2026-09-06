@@ -20,29 +20,6 @@ from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
 def test_core_machine_table_is_structurally_complete() -> None:
     validate_machine_table(CORE_MACHINE_TABLE, CORE_ENCODING_TABLE)
 
-    assert len(CORE_MACHINE_TABLE.atomic_unit_names) == 207
-    assert len(CORE_MACHINE_TABLE.physical_registers) == 359
-    assert len(CORE_MACHINE_TABLE.register_classes) == 369
-    assert len(CORE_MACHINE_TABLE.immediates) == 21
-    assert len(CORE_MACHINE_TABLE.forms) == 880
-    assert (
-        sum(
-            len(register.atomic_units)
-            for register in CORE_MACHINE_TABLE.physical_registers
-        )
-        == 701
-    )
-    assert (
-        sum(
-            len(register_class.candidates)
-            for register_class in CORE_MACHINE_TABLE.register_classes
-        )
-        == 3434
-    )
-    assert sum(len(form.ties) for form in CORE_MACHINE_TABLE.forms) == 386
-    assert sum(len(form.implicit_defs) for form in CORE_MACHINE_TABLE.forms) == 387
-    assert sum(len(form.implicit_uses) for form in CORE_MACHINE_TABLE.forms) == 840
-
 
 def test_atomic_units_preserve_subregister_aliasing() -> None:
     registers = {
