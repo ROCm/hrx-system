@@ -384,8 +384,8 @@ static uint64_t iree_hal_amdgpu_device_extend_pattern_x8(
 
 // Returns the number of blocks needed to cover |length| bytes when the vector
 // kernels process |elements_per_block| elements of |element_size| bytes each.
-// Callers of this helper gate on length >= UNALIGNED_MIN_SIZE (128), so
-// full_element_count is guaranteed to be non-zero here.
+// Lengths smaller than one vector element produce a zero-block launch; the
+// unaligned kernels process those entirely through their scalar tail path.
 static uint64_t iree_hal_amdgpu_blit_unaligned_block_count(
     const uint64_t length, const uint64_t element_size,
     const uint64_t elements_per_block) {
@@ -512,14 +512,24 @@ bool iree_hal_amdgpu_device_buffer_fill_plan(
     return false;
   }
   if (IREE_AMDGPU_UNLIKELY(
-          !iree_amdgpu_has_alignment(target_alignment, pattern_length) ||
           !iree_amdgpu_has_alignment(length, pattern_length))) {
     return false;
   }
-  if (iree_amdgpu_has_alignment(target_alignment,
-                                IREE_HAL_AMDGPU_FILL_BLOCK_ELEMENT_SIZE) &&
-      iree_amdgpu_has_alignment(length,
-                                IREE_HAL_AMDGPU_FILL_BLOCK_ELEMENT_SIZE)) {
+  if (!iree_amdgpu_has_alignment(target_alignment, pattern_length)) {
+    // HAL fill alignment is relative to the target buffer range. A subspan can
+    // therefore begin at an allocation address that is not naturally aligned
+    // to the pattern while still describing a valid fill. Preserve the pattern
+    // phase with the byte-granular unaligned kernel in that case.
+    pattern = iree_hal_amdgpu_device_extend_pattern_x8(pattern, pattern_length);
+    kernel =
+        IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_FILL_BLOCK_UNALIGNED_X16;
+    element_size = 1;
+    block_size = 1;
+    uses_byte_length = true;
+  } else if (iree_amdgpu_has_alignment(
+                 target_alignment, IREE_HAL_AMDGPU_FILL_BLOCK_ELEMENT_SIZE) &&
+             iree_amdgpu_has_alignment(
+                 length, IREE_HAL_AMDGPU_FILL_BLOCK_ELEMENT_SIZE)) {
     pattern = iree_hal_amdgpu_device_extend_pattern_x8(pattern, pattern_length);
     kernel = IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_FILL_BLOCK_X16;
     element_size = IREE_HAL_AMDGPU_FILL_BLOCK_ELEMENT_SIZE;
