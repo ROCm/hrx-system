@@ -240,6 +240,8 @@ iree_runtime_cc_test(
     deps = [
         ":execute",
         ":file_reader",
+        ":file_writer",
+        ":format",
         ":recorder",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",

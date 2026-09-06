@@ -237,6 +237,8 @@ iree_cc_test(
   DEPS
     ::execute
     ::file_reader
+    ::file_writer
+    ::format
     ::recorder
     iree::async
     iree::async::util::proactor_pool
