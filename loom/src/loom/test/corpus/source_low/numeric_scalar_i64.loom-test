@@ -114,3 +114,12 @@ func.def @scalar_i64_compare_all_predicates_vgpr_select(%lhs_values: vector<2xi6
   %uge_result = scf.select %uge, %true_value, %false_value : f32
   func.return %eq_result, %ne_result, %slt_result, %sle_result, %sgt_result, %sge_result, %ult_result, %ule_result, %ugt_result, %uge_result : f32, f32, f32, f32, f32, f32, f32, f32, f32, f32
 }
+
+// ====
+
+func.def @scalar_f64_constant_select_bitcast(%condition: i1, %fallback: f64) -> (i64) {
+  %constant = scalar.constant -1.1000000000000001 : f64
+  %selected = scf.select %condition, %constant, %fallback : f64
+  %bits = scalar.bitcast %selected : f64 to i64
+  func.return %bits : i64
+}

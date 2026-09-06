@@ -1,0 +1,100 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_conversion_float8.loom-test
+// RUN: emit source-low output=low control-flow=structured-low
+
+// XFAIL: SPIR-V float8 types and conversions are unsupported
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @scalar_extf_f8e4m3_to_f32(%input: f8E4M3) -> (f32) {
+  %converted = scalar.extf %input : f8E4M3 to f32
+  func.return %converted : f32
+}
+
+// ====
+
+// XFAIL: SPIR-V float8 types and conversions are unsupported
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @scalar_extf_f8e5m2_to_f32(%input: f8E5M2) -> (f32) {
+  %converted = scalar.extf %input : f8E5M2 to f32
+  func.return %converted : f32
+}
+
+// ====
+
+// XFAIL: SPIR-V float8 types and conversions are unsupported
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @vector_extf_f8e4m3x3_to_bf16x3(%input: vector<3xf8E4M3>) -> (vector<3xbf16>) {
+  %converted = vector.extf %input : vector<3xf8E4M3> to vector<3xbf16>
+  func.return %converted : vector<3xbf16>
+}
+
+// ====
+
+// XFAIL: SPIR-V float8 types and conversions are unsupported
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @vector_extf_f8e5m2x3_to_f16x3(%input: vector<3xf8E5M2>) -> (vector<3xf16>) {
+  %converted = vector.extf %input : vector<3xf8E5M2> to vector<3xf16>
+  func.return %converted : vector<3xf16>
+}
+
+// ====
+
+// XFAIL: SPIR-V float8 types and conversions are unsupported
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @scalar_fptrunc_f32_to_f8e4m3(%input: f32) -> (f8E4M3) {
+  %converted = scalar.fptrunc %input : f32 to f8E4M3
+  func.return %converted : f8E4M3
+}
+
+// ====
+
+// XFAIL: SPIR-V float8 types and conversions are unsupported
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @scalar_fptrunc_f32_to_f8e5m2(%input: f32) -> (f8E5M2) {
+  %converted = scalar.fptrunc %input : f32 to f8E5M2
+  func.return %converted : f8E5M2
+}
+
+// ====
+
+// XFAIL: SPIR-V float8 types and conversions are unsupported
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @scalar_fptrunc_f16_to_f8e4m3(%input: f16) -> (f8E4M3) {
+  %converted = scalar.fptrunc %input : f16 to f8E4M3
+  func.return %converted : f8E4M3
+}
+
+// ====
+
+// XFAIL: SPIR-V float8 types and conversions are unsupported
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @scalar_fptrunc_bf16_to_f8e5m2(%input: bf16) -> (f8E5M2) {
+  %converted = scalar.fptrunc %input : bf16 to f8E5M2
+  func.return %converted : f8E5M2
+}
+
+// ====
+
+// XFAIL: SPIR-V float8 types and conversions are unsupported
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @vector_fptrunc_f32x3_to_f8e4m3x3(%input: vector<3xf32>) -> (vector<3xf8E4M3>) {
+  %converted = vector.fptrunc %input : vector<3xf32> to vector<3xf8E4M3>
+  func.return %converted : vector<3xf8E4M3>
+}
+
+// ====
+
+// XFAIL: SPIR-V float8 types and conversions are unsupported
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @vector_fptrunc_f16x3_to_f8e5m2x3(%input: vector<3xf16>) -> (vector<3xf8E5M2>) {
+  %converted = vector.fptrunc %input : vector<3xf16> to vector<3xf8E5M2>
+  func.return %converted : vector<3xf8E5M2>
+}

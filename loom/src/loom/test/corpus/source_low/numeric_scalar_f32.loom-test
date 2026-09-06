@@ -7,3 +7,19 @@ func.def @scalar_f32_arith(%lhs: f32, %rhs: f32, %bias: f32) -> (f32) {
   %result = scalar.fmaf %product, %rhs, %bias : f32
   func.return %result : f32
 }
+
+// ====
+
+func.def @scalar_f32_sign_bits(%input: f32) -> (f32, f32) {
+  %negated = scalar.negf %input : f32
+  %absolute = scalar.absf %input : f32
+  func.return %negated, %absolute : f32, f32
+}
+
+// ====
+
+func.def @vector_f32_sign_bits(%input: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %negated = vector.negf %input : vector<4xf32>
+  %absolute = vector.absf %input : vector<4xf32>
+  func.return %negated, %absolute : vector<4xf32>, vector<4xf32>
+}

@@ -550,6 +550,8 @@ loom_check_test_suite(
         "//loom/src/loom/test/corpus/source_low:ml_attention.loom-test",
         "//loom/src/loom/test/corpus/source_low:ml_contraction.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_conversion.loom-test",
+        "//loom/src/loom/test/corpus/source_low:numeric_conversion_float8.loom-test",
+        "//loom/src/loom/test/corpus/source_low:numeric_conversion_wide.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_f32_memory.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_i32_memory.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_minmax.loom-test",

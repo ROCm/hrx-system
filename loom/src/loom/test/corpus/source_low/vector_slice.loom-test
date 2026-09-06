@@ -42,6 +42,69 @@ func.def @bf16x4_slice_high_half(%values: vector<4xbf16>) -> (vector<2xbf16>) {
 
 // ====
 
+func.def @i8x64_slice_low_half(%values: vector<64xi8>) -> (vector<32xi8>) {
+  %low = vector.slice %values[0] : vector<64xi8> -> vector<32xi8>
+  func.return %low : vector<32xi8>
+}
+
+// ====
+
+func.def @i8x64_slice_high_half(%values: vector<64xi8>) -> (vector<32xi8>) {
+  %high = vector.slice %values[32] : vector<64xi8> -> vector<32xi8>
+  func.return %high : vector<32xi8>
+}
+
+// ====
+
+func.def @i8x32_concat(%low: vector<32xi8>, %high: vector<32xi8>) -> (vector<64xi8>) {
+  %result = vector.concat<0> %low, %high : vector<32xi8>, vector<32xi8> -> vector<64xi8>
+  func.return %result : vector<64xi8>
+}
+
+// ====
+
+func.def @i8x8_interleave(%even: vector<4xi8>, %odd: vector<4xi8>) -> (vector<8xi8>) {
+  %result = vector.interleave<0> %even, %odd : vector<4xi8>, vector<4xi8> -> vector<8xi8>
+  func.return %result : vector<8xi8>
+}
+
+// ====
+
+func.def @i8x8_deinterleave(%values: vector<8xi8>) -> (vector<4xi8>, vector<4xi8>) {
+  %even, %odd = vector.deinterleave<0> %values : vector<8xi8> -> vector<4xi8>, vector<4xi8>
+  func.return %even, %odd : vector<4xi8>, vector<4xi8>
+}
+
+// ====
+
+func.def @i32x4_broadcast_rank2(%values: vector<4xi32>) -> (vector<2x4xi32>) {
+  %result = vector.broadcast %values : vector<4xi32> -> vector<2x4xi32>
+  func.return %result : vector<2x4xi32>
+}
+
+// ====
+
+func.def @i16x1_broadcast(%value: vector<1xi16>) -> (vector<16xi16>) {
+  %result = vector.broadcast %value : vector<1xi16> -> vector<16xi16>
+  func.return %result : vector<16xi16>
+}
+
+// ====
+
+func.def @f32x3x4_slice_row(%values: vector<3x4xf32>) -> (vector<1x4xf32>) {
+  %result = vector.slice %values[1, 0] : vector<3x4xf32> -> vector<1x4xf32>
+  func.return %result : vector<1x4xf32>
+}
+
+// ====
+
+func.def @f32x2x4_insert_static(%values: vector<2x4xf32>, %value: f32) -> (vector<2x4xf32>) {
+  %result = vector.insert %value into %values[1, 2] : f32, vector<2x4xf32>
+  func.return %result : vector<2x4xf32>
+}
+
+// ====
+
 func.def @f32x4_insert_static(%values: vector<4xf32>, %value: f32) -> (vector<4xf32>) {
   %updated = vector.insert %value into %values[2] : f32, vector<4xf32>
   func.return %updated : vector<4xf32>
@@ -88,4 +151,88 @@ func.def @i32x4_insert_dynamic(%values: vector<4xi32>, %value: i32, %lane: index
 func.def @bf16x4_insert_dynamic(%values: vector<4xbf16>, %value: bf16, %lane: index) -> (vector<4xbf16>) {
   %updated = vector.insert %value into %values[%lane] : bf16, vector<4xbf16>
   func.return %updated : vector<4xbf16>
+}
+
+// ====
+
+func.def @i8x128_extract_high(%values: vector<128xi8>) -> (i8) {
+  %result = vector.extract %values[95] : vector<128xi8> -> i8
+  func.return %result : i8
+}
+
+// ====
+
+func.def @f16x64_extract_high(%values: vector<64xf16>) -> (f16) {
+  %result = vector.extract %values[47] : vector<64xf16> -> f16
+  func.return %result : f16
+}
+
+// ====
+
+func.def @f32x24_extract_high(%values: vector<24xf32>) -> (f32) {
+  %result = vector.extract %values[20] : vector<24xf32> -> f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @i64x16_extract_high(%values: vector<16xi64>) -> (i64) {
+  %result = vector.extract %values[12] : vector<16xi64> -> i64
+  func.return %result : i64
+}
+
+// ====
+
+func.def @f32x2x4_extract_static(%values: vector<2x4xf32>) -> (f32) {
+  %result = vector.extract %values[1, 2] : vector<2x4xf32> -> f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @f32x2x2_from_elements(%e0: f32, %e1: f32, %e2: f32, %e3: f32) -> (vector<2x2xf32>) {
+  %result = vector.from_elements %e0, %e1, %e2, %e3 : vector<2x2xf32>
+  func.return %result : vector<2x2xf32>
+}
+
+// ====
+
+func.def @f32x2x4_transpose(%values: vector<2x4xf32>) -> (vector<4x2xf32>) {
+  %result = vector.transpose<[1, 0]> %values : vector<2x4xf32> -> vector<4x2xf32>
+  func.return %result : vector<4x2xf32>
+}
+
+// ====
+
+func.def @f32x2x2x2_extract_static(%values: vector<2x2x2xf32>) -> (f32) {
+  %result = vector.extract %values[1, 0, 1] : vector<2x2x2xf32> -> f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @f32x2x2x2_from_elements(%e0: f32, %e1: f32, %e2: f32, %e3: f32, %e4: f32, %e5: f32, %e6: f32, %e7: f32) -> (vector<2x2x2xf32>) {
+  %result = vector.from_elements %e0, %e1, %e2, %e3, %e4, %e5, %e6, %e7 : vector<2x2x2xf32>
+  func.return %result : vector<2x2x2xf32>
+}
+
+// ====
+
+func.def @f32x2x2x2_transpose(%values: vector<2x2x2xf32>) -> (vector<2x2x2xf32>) {
+  %result = vector.transpose<[2, 0, 1]> %values : vector<2x2x2xf32> -> vector<2x2x2xf32>
+  func.return %result : vector<2x2x2xf32>
+}
+
+// ====
+
+func.def @f32x4x4_transpose(%values: vector<4x4xf32>) -> (vector<4x4xf32>) {
+  %result = vector.transpose<[1, 0]> %values : vector<4x4xf32> -> vector<4x4xf32>
+  func.return %result : vector<4x4xf32>
+}
+
+// ====
+
+func.def @i32x4x4_transpose(%values: vector<4x4xi32>) -> (vector<4x4xi32>) {
+  %result = vector.transpose<[1, 0]> %values : vector<4x4xi32> -> vector<4x4xi32>
+  func.return %result : vector<4x4xi32>
 }

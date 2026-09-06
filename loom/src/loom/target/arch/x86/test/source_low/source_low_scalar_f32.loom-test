@@ -20,3 +20,25 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) @scalar_f32_a
   %result = vfmadd231ss.xmm %15, %product, %rhs
   return %result
 }
+
+// ====
+
+// XFAIL: x86 floating-point sign-bit lowering is unsupported
+x86.target<avx512> @target
+
+func.def target(@target) @scalar_f32_sign_bits(%input: f32) -> (f32, f32) {
+  %negated = scalar.negf %input : f32
+  %absolute = scalar.absf %input : f32
+  func.return %negated, %absolute : f32, f32
+}
+
+// ====
+
+// XFAIL: x86 floating-point sign-bit lowering is unsupported
+x86.target<avx512> @target
+
+func.def target(@target) @vector_f32_sign_bits(%input: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %negated = vector.negf %input : vector<4xf32>
+  %absolute = vector.absf %input : vector<4xf32>
+  func.return %negated, %absolute : vector<4xf32>, vector<4xf32>
+}

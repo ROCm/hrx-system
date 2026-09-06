@@ -18,6 +18,24 @@ func.def @vector_f32_minnum_maxnum(%lhs: vector<2xf32>, %rhs: vector<2xf32>) -> 
 
 // ====
 
+func.def @scalar_f32_minimum_maximum(%lhs: f32, %rhs: f32) -> (f32) {
+  %min = scalar.minimumf %lhs, %rhs : f32
+  %max = scalar.maximumf %lhs, %rhs : f32
+  %sum = scalar.addf %min, %max : f32
+  func.return %sum : f32
+}
+
+// ====
+
+func.def @vector_f32_minimum_maximum(%lhs: vector<2xf32>, %rhs: vector<2xf32>) -> (vector<2xf32>) {
+  %min = vector.minimumf %lhs, %rhs : vector<2xf32>
+  %max = vector.maximumf %lhs, %rhs : vector<2xf32>
+  %sum = vector.addf %min, %max : vector<2xf32>
+  func.return %sum : vector<2xf32>
+}
+
+// ====
+
 func.def @scalar_f32_clampf_number(%input: f32) -> (f32) {
   %lower = scalar.constant -1.0 : f32
   %upper = scalar.constant 1.0 : f32
@@ -45,6 +63,20 @@ func.def @scalar_f32_clampf_ordered(%input: f32, %lower: f32, %upper: f32) -> (f
 
 func.def @vector_f32_clampf_ordered(%input: vector<2xf32>, %lower: vector<2xf32>, %upper: vector<2xf32>) -> (vector<2xf32>) {
   %result = vector.clampf<ordered> %input, %lower, %upper : vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// ====
+
+func.def @scalar_f32_clampf_ieee(%input: f32, %lower: f32, %upper: f32) -> (f32) {
+  %result = scalar.clampf<ieee> %input, %lower, %upper : f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @vector_f32_clampf_ieee(%input: vector<2xf32>, %lower: vector<2xf32>, %upper: vector<2xf32>) -> (vector<2xf32>) {
+  %result = vector.clampf<ieee> %input, %lower, %upper : vector<2xf32>
   func.return %result : vector<2xf32>
 }
 

@@ -47,6 +47,30 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_
 
 // ====
 
+// XFAIL: gfx11 lacks IEEE minimum/maximum instructions
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @scalar_f32_minimum_maximum(%lhs: f32, %rhs: f32) -> (f32) {
+  %min = scalar.minimumf %lhs, %rhs : f32
+  %max = scalar.maximumf %lhs, %rhs : f32
+  %sum = scalar.addf %min, %max : f32
+  func.return %sum : f32
+}
+
+// ====
+
+// XFAIL: gfx11 lacks IEEE minimum/maximum instructions
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_f32_minimum_maximum(%lhs: vector<2xf32>, %rhs: vector<2xf32>) -> (vector<2xf32>) {
+  %min = vector.minimumf %lhs, %rhs : vector<2xf32>
+  %max = vector.maximumf %lhs, %rhs : vector<2xf32>
+  %sum = vector.addf %min, %max : vector<2xf32>
+  func.return %sum : vector<2xf32>
+}
+
+// ====
+
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @scalar_f32_clampf_number(%input: f32) -> (f32) {
@@ -131,6 +155,26 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_
   %22 = v_cndmask_b32 %20, %18, %21
   %result = concat(%15, %22) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %result
+}
+
+// ====
+
+// XFAIL: gfx11 lacks an IEEE clamp instruction
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @scalar_f32_clampf_ieee(%input: f32, %lower: f32, %upper: f32) -> (f32) {
+  %result = scalar.clampf<ieee> %input, %lower, %upper : f32
+  func.return %result : f32
+}
+
+// ====
+
+// XFAIL: gfx11 lacks an IEEE clamp instruction
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_f32_clampf_ieee(%input: vector<2xf32>, %lower: vector<2xf32>, %upper: vector<2xf32>) -> (vector<2xf32>) {
+  %result = vector.clampf<ieee> %input, %lower, %upper : vector<2xf32>
+  func.return %result : vector<2xf32>
 }
 
 // ====

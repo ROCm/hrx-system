@@ -97,3 +97,31 @@ func.def @i32_reduce_minui_select_sentinel(%values: vector<4xi32>) -> (i32) {
   %result = vector.reduce<minui> %selected, %sentinel : vector<4xi32>, i32
   func.return %result : i32
 }
+
+// ====
+
+func.def @i32x3_reduce_combining_kinds(%values: vector<3xi32>, %init: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32) {
+  %product = vector.reduce<muli> %values, %init : vector<3xi32>, i32
+  %signed_minimum = vector.reduce<minsi> %values, %init : vector<3xi32>, i32
+  %signed_maximum = vector.reduce<maxsi> %values, %init : vector<3xi32>, i32
+  %unsigned_minimum = vector.reduce<minui> %values, %init : vector<3xi32>, i32
+  %unsigned_maximum = vector.reduce<maxui> %values, %init : vector<3xi32>, i32
+  %bitwise_and = vector.reduce<andi> %values, %init : vector<3xi32>, i32
+  %bitwise_or = vector.reduce<ori> %values, %init : vector<3xi32>, i32
+  %bitwise_xor = vector.reduce<xori> %values, %init : vector<3xi32>, i32
+  func.return %product, %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum, %bitwise_and, %bitwise_or, %bitwise_xor : i32, i32, i32, i32, i32, i32, i32, i32
+}
+
+// ====
+
+func.def @i32x2x3_reduce_columns(%values: vector<2x3xi32>, %init: vector<3xi32>) -> (vector<3xi32>) {
+  %result = vector.reduce.axes<addi> %values, %init axes [0] : vector<2x3xi32>, vector<3xi32>
+  func.return %result : vector<3xi32>
+}
+
+// ====
+
+func.def @f32x2x2x3_reduce_planes(%values: vector<2x2x3xf32>, %init: vector<2xf32>) -> (vector<2xf32>) {
+  %result = vector.reduce.axes<addf> %values, %init axes [1, 2] : vector<2x2x3xf32>, vector<2xf32>
+  func.return %result : vector<2xf32>
+}

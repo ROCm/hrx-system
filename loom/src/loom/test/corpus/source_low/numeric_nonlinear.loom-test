@@ -1,0 +1,83 @@
+// RUN: roundtrip
+
+func.def @scalar_f32_exp(%input: f32) -> (f32) {
+  %result = scalar.expf<afn> %input : f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @vector_f32_exp(%input: vector<4xf32>) -> (vector<4xf32>) {
+  %result = vector.expf<afn> %input : vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ====
+
+func.def @scalar_f32_exp2(%input: f32) -> (f32) {
+  %result = scalar.exp2f<afn> %input : f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @vector_f32_exp2(%input: vector<4xf32>) -> (vector<4xf32>) {
+  %result = vector.exp2f<afn> %input : vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ====
+
+func.def @scalar_f32_tanh(%input: f32) -> (f32) {
+  %result = scalar.tanhf<afn> %input : f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @vector_f32_tanh(%input: vector<4xf32>) -> (vector<4xf32>) {
+  %result = vector.tanhf<afn> %input : vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ====
+
+func.def @scalar_f32_sqrt(%input: f32) -> (f32) {
+  %result = scalar.sqrtf<afn> %input : f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @scalar_f32_rsqrt(%input: f32) -> (f32) {
+  %result = scalar.rsqrtf<afn> %input : f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @scalar_f32_sin(%input: f32) -> (f32) {
+  %result = scalar.sinf<afn> %input : f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @scalar_f32_cos(%input: f32) -> (f32) {
+  %result = scalar.cosf<afn> %input : f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @scalar_f32_sin_turns(%input: f32) -> (f32) {
+  %result = scalar.sinturnsf<afn> %input : f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @scalar_f32_cos_turns(%input: f32) -> (f32) {
+  %result = scalar.costurnsf<afn> %input : f32
+  func.return %result : f32
+}

@@ -218,3 +218,32 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_s
   st.i32.index %loaded, %output_refined, %31
   return %loaded
 }
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @scalar_static_rank3_i16(%input: buffer, %output: buffer) -> (i16) {
+  %input_base = index.constant 8 : offset
+  %output_base = index.constant 12 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 2} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 2} : buffer
+  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<2x3x4xi16>
+  %output_view = buffer.view %output_aligned[%output_base] : buffer -> view<2x3x4xi16>
+  %loaded = view.load %input_view[1, 2, 3] : view<2x3x4xi16> -> i16
+  view.store %loaded, %output_view[0, 1, 2] : i16, view<2x3x4xi16>
+  func.return %loaded : i16
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_static_rank3_i16() -> (reg<aie2p.er>) asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %16 = mov.static-byte-offset 54
+  %17 = mov.address-index %16
+  %loaded = lda.i16.index %input_view, %17
+  %19 = mov.static-byte-offset 24
+  %20 = mov.address-index %19
+  st.i16.index %loaded, %output_view, %20
+  return %loaded
+}

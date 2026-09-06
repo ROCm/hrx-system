@@ -1,0 +1,20 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_conversion_wide.loom-test
+// RUN: emit source-low output=low control-flow=structured-low
+
+// XFAIL: SPIR-V ordinary BF16 vector conversion is unsupported
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @vector_extf_bf16x32(%input: vector<32xbf16>) -> (vector<32xf32>) {
+  %converted = vector.extf %input : vector<32xbf16> to vector<32xf32>
+  func.return %converted : vector<32xf32>
+}
+
+// ====
+
+// XFAIL: SPIR-V ordinary BF16 vector conversion is unsupported
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @vector_fptrunc_bf16x32(%input: vector<32xf32>) -> (vector<32xbf16>) {
+  %converted = vector.fptrunc %input : vector<32xf32> to vector<32xbf16>
+  func.return %converted : vector<32xbf16>
+}

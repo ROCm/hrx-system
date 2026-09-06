@@ -241,3 +241,123 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_red
   %result = v_min_u32 %62, %56
   return %result
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @i32x3_reduce_combining_kinds(%values: vector<3xi32>, %init: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32) {
+  %product = vector.reduce<muli> %values, %init : vector<3xi32>, i32
+  %signed_minimum = vector.reduce<minsi> %values, %init : vector<3xi32>, i32
+  %signed_maximum = vector.reduce<maxsi> %values, %init : vector<3xi32>, i32
+  %unsigned_minimum = vector.reduce<minui> %values, %init : vector<3xi32>, i32
+  %unsigned_maximum = vector.reduce<maxui> %values, %init : vector<3xi32>, i32
+  %bitwise_and = vector.reduce<andi> %values, %init : vector<3xi32>, i32
+  %bitwise_or = vector.reduce<ori> %values, %init : vector<3xi32>, i32
+  %bitwise_xor = vector.reduce<xori> %values, %init : vector<3xi32>, i32
+  func.return %product, %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum, %bitwise_and, %bitwise_or, %bitwise_xor : i32, i32, i32, i32, i32, i32, i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x3_reduce_combining_kinds(%values: reg<amdgpu.vgpr x3>, %init: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %28 = v_mov_b32_copy %init
+  %29 = slice %values[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %30 = v_mul_lo_u32 %28, %29
+  %31 = slice %values[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %32 = v_mul_lo_u32 %30, %31
+  %33 = slice %values[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %product = v_mul_lo_u32 %32, %33
+  %37 = v_min_i32 %28, %29
+  %39 = v_min_i32 %37, %31
+  %signed_minimum = v_min_i32 %39, %33
+  %44 = v_max_i32 %28, %29
+  %46 = v_max_i32 %44, %31
+  %signed_maximum = v_max_i32 %46, %33
+  %51 = v_min_u32 %28, %29
+  %53 = v_min_u32 %51, %31
+  %unsigned_minimum = v_min_u32 %53, %33
+  %58 = v_max_u32 %28, %29
+  %60 = v_max_u32 %58, %31
+  %unsigned_maximum = v_max_u32 %60, %33
+  %65 = v_and_b32 %28, %29
+  %67 = v_and_b32 %65, %31
+  %bitwise_and = v_and_b32 %67, %33
+  %72 = v_or_b32 %28, %29
+  %74 = v_or_b32 %72, %31
+  %bitwise_or = v_or_b32 %74, %33
+  %79 = v_xor_b32 %28, %29
+  %81 = v_xor_b32 %79, %31
+  %bitwise_xor = v_xor_b32 %81, %33
+  return %product, %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum, %bitwise_and, %bitwise_or, %bitwise_xor
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @i32x2x3_reduce_columns(%values: vector<2x3xi32>, %init: vector<3xi32>) -> (vector<3xi32>) {
+  %result = vector.reduce.axes<addi> %values, %init axes [0] : vector<2x3xi32>, vector<3xi32>
+  func.return %result : vector<3xi32>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x2x3_reduce_columns(%values: reg<amdgpu.vgpr x6>, %init: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x3>) asm {
+  %23 = slice %init[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %24 = slice %values[0] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
+  %25 = v_add_u32 %23, %24
+  %26 = slice %values[3] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
+  %27 = v_add_u32 %25, %26
+  %28 = slice %init[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %29 = slice %values[1] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
+  %30 = v_add_u32 %28, %29
+  %31 = slice %values[4] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
+  %32 = v_add_u32 %30, %31
+  %33 = slice %init[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %34 = slice %values[2] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
+  %35 = v_add_u32 %33, %34
+  %36 = slice %values[5] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
+  %37 = v_add_u32 %35, %36
+  %result = concat(%27, %32, %37) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @f32x2x2x3_reduce_planes(%values: vector<2x2x3xf32>, %init: vector<2xf32>) -> (vector<2xf32>) {
+  %result = vector.reduce.axes<addf> %values, %init axes [1, 2] : vector<2x2x3xf32>, vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x2x2x3_reduce_planes(%values: reg<amdgpu.vgpr x12>, %init: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %34 = slice %init[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %35 = slice %values[0] : reg<amdgpu.vgpr x12> -> reg<amdgpu.vgpr>
+  %36 = v_add_f32 %34, %35
+  %37 = slice %values[1] : reg<amdgpu.vgpr x12> -> reg<amdgpu.vgpr>
+  %38 = v_add_f32 %36, %37
+  %39 = slice %values[2] : reg<amdgpu.vgpr x12> -> reg<amdgpu.vgpr>
+  %40 = v_add_f32 %38, %39
+  %41 = slice %values[3] : reg<amdgpu.vgpr x12> -> reg<amdgpu.vgpr>
+  %42 = v_add_f32 %40, %41
+  %43 = slice %values[4] : reg<amdgpu.vgpr x12> -> reg<amdgpu.vgpr>
+  %44 = v_add_f32 %42, %43
+  %45 = slice %values[5] : reg<amdgpu.vgpr x12> -> reg<amdgpu.vgpr>
+  %46 = v_add_f32 %44, %45
+  %47 = slice %init[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %48 = slice %values[6] : reg<amdgpu.vgpr x12> -> reg<amdgpu.vgpr>
+  %49 = v_add_f32 %47, %48
+  %50 = slice %values[7] : reg<amdgpu.vgpr x12> -> reg<amdgpu.vgpr>
+  %51 = v_add_f32 %49, %50
+  %52 = slice %values[8] : reg<amdgpu.vgpr x12> -> reg<amdgpu.vgpr>
+  %53 = v_add_f32 %51, %52
+  %54 = slice %values[9] : reg<amdgpu.vgpr x12> -> reg<amdgpu.vgpr>
+  %55 = v_add_f32 %53, %54
+  %56 = slice %values[10] : reg<amdgpu.vgpr x12> -> reg<amdgpu.vgpr>
+  %57 = v_add_f32 %55, %56
+  %58 = slice %values[11] : reg<amdgpu.vgpr x12> -> reg<amdgpu.vgpr>
+  %59 = v_add_f32 %57, %58
+  %result = concat(%46, %59) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
