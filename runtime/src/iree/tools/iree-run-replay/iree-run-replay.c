@@ -205,7 +205,7 @@ static void iree_run_replay_print_agent_markdown(FILE* file) {
       "```bash\n"
       "iree-dump-replay --format=jsonl /tmp/model.ireereplay | \\\n"
       "  jq 'select(.kind==\"operation\" and "
-      ".operation==\"device.queue_execute\")'\n"
+      ".operation==\"queue.execute\")'\n"
       "iree-dump-replay --format=jsonl /tmp/model.ireereplay | \\\n"
       "  jq 'select(.payload_type==\"replay_scope\") | .payload.name'\n"
       "```\n"
