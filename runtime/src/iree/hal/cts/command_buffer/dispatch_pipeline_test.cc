@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "iree/hal/cts/util/test_base.h"
+#include "iree/hal/memory/passthrough_pool.h"
 
 namespace iree::hal::cts {
 
@@ -35,6 +36,18 @@ class DispatchPipelineTest : public CtsTestBase<> {
   void SetUp() override {
     CtsTestBase::SetUp();
     if (HasFatalFailure() || IsSkipped()) return;
+    if (!transfer_queue_) {
+      GTEST_SKIP() << "device has no provisioned transfer-capable queue";
+    }
+
+    iree_hal_queue_pool_backend_t backend = {};
+    IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
+        device_, iree_hal_queue_family(transfer_queue_), &backend));
+    iree_hal_passthrough_pool_options_t options = {};
+    options.asan = backend.asan;
+    IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
+        options, backend.slab_provider, backend.notification,
+        iree_allocator_system(), &transient_pool_));
 
     // Load the scale_and_offset kernel:
     //   output[i] = input[i] * scale + offset
@@ -44,6 +57,8 @@ class DispatchPipelineTest : public CtsTestBase<> {
   }
 
   void TearDown() override {
+    iree_hal_pool_release(transient_pool_);
+    transient_pool_ = nullptr;
     iree_hal_executable_release(executable_);
     executable_ = nullptr;
     CtsTestBase::TearDown();
@@ -91,6 +106,7 @@ class DispatchPipelineTest : public CtsTestBase<> {
   }
 
   iree_hal_executable_t* executable_ = nullptr;
+  iree_hal_pool_t* transient_pool_ = nullptr;
 };
 
 // Fills an input buffer via queue_update, dispatches scale_and_offset,
@@ -106,10 +122,9 @@ TEST_P(DispatchPipelineTest, UpdateThenDispatch) {
 
   // Record: dispatch scale=2, offset=5.
   Ref<iree_hal_command_buffer_t> cmd;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/2, cmd.out()));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     /*binding_capacity=*/2, cmd.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(cmd));
   RecordScaleAndOffset(cmd, /*scale=*/2, /*offset=*/5, /*input_slot=*/0,
                        /*output_slot=*/1);
@@ -145,10 +160,9 @@ TEST_P(DispatchPipelineTest, ChainedDispatches) {
   // Dispatch A: intermediate[i] = input[i] * 2 + 0 = [2, 4, 6, 8]
   // Dispatch B: output[i] = intermediate[i] * 1 + 10 = [12, 14, 16, 18]
   Ref<iree_hal_command_buffer_t> cmd;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/3, cmd.out()));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     /*binding_capacity=*/3, cmd.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(cmd));
 
   // Dispatch A: slots 0→1 (input→intermediate).
@@ -193,10 +207,10 @@ TEST_P(DispatchPipelineTest, FillDispatchDispatchPipeline) {
 
   // Record: fill → barrier → dispatch A → barrier → dispatch B.
   Ref<iree_hal_command_buffer_t> cmd;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+  IREE_ASSERT_OK(CreateCommandBuffer(
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
       IREE_HAL_COMMAND_CATEGORY_DISPATCH | IREE_HAL_COMMAND_CATEGORY_TRANSFER,
-      IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/3, cmd.out()));
+      /*binding_capacity=*/3, cmd.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(cmd));
 
   // Fill input with a recognizable pattern via update_buffer.
@@ -244,11 +258,16 @@ TEST_P(DispatchPipelineTest, TransientInputPipeline) {
   alloca_params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
   alloca_params.usage =
       IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+  alloca_params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(transfer_queue_)));
+  const iree_hal_pool_reservation_request_t request = {
+      /*.params=*/alloca_params,
+      /*.allocation_size=*/kBufferSize,
+  };
   iree_hal_buffer_t* raw = nullptr;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, alloca_signal,
-      /*pool=*/NULL, alloca_params, kBufferSize, IREE_HAL_ALLOCA_FLAG_NONE,
-      &raw));
+  IREE_ASSERT_OK(iree_hal_queue_alloca(transfer_queue_, empty_wait,
+                                       alloca_signal, transient_pool_,
+                                       /*request_count=*/1, &request, &raw));
   Ref<iree_hal_buffer_t> transient_input(raw);
 
   // Wait for alloca, then fill the transient input.
@@ -256,9 +275,8 @@ TEST_P(DispatchPipelineTest, TransientInputPipeline) {
       alloca_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
   std::vector<uint32_t> input_data = {5, 10, 15, 20};
-  IREE_ASSERT_OK(iree_hal_device_transfer_h2d(
-      device_, input_data.data(), transient_input, 0, kBufferSize,
-      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+  IREE_ASSERT_OK(UploadBufferData(input_data.data(), transient_input,
+                                  /*target_offset=*/0, kBufferSize));
 
   // Persistent output buffer.
   Ref<iree_hal_buffer_t> output;
@@ -266,10 +284,9 @@ TEST_P(DispatchPipelineTest, TransientInputPipeline) {
 
   // Dispatch: output = transient_input * 4 + 1 = [21, 41, 61, 81]
   Ref<iree_hal_command_buffer_t> cmd;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/2, cmd.out()));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     /*binding_capacity=*/2, cmd.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(cmd));
   RecordScaleAndOffset(cmd, /*scale=*/4, /*offset=*/1, /*input_slot=*/0,
                        /*output_slot=*/1);
@@ -289,9 +306,10 @@ TEST_P(DispatchPipelineTest, TransientInputPipeline) {
 
   // Dealloca after readback.
   SemaphoreList dealloca_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dealloca_signal,
-      transient_input, IREE_HAL_DEALLOCA_FLAG_NONE));
+  iree_hal_buffer_t* transient_input_buffer = transient_input;
+  IREE_ASSERT_OK(
+      iree_hal_queue_dealloca(transfer_queue_, empty_wait, dealloca_signal,
+                              /*buffer_count=*/1, &transient_input_buffer));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       dealloca_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 }
@@ -305,10 +323,9 @@ TEST_P(DispatchPipelineTest, ReusablePipelineWithDifferentInputs) {
   // Stage 2: output = intermediate * 1 + 100
   // Net: output = input * 2 + 100
   Ref<iree_hal_command_buffer_t> cmd;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/3, cmd.out()));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     /*binding_capacity=*/3, cmd.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(cmd));
   RecordScaleAndOffset(cmd, 2, 0, 0, 1);
   RecordBarrier(cmd);
@@ -344,9 +361,10 @@ TEST_P(DispatchPipelineTest, ReusablePipelineWithDifferentInputs) {
 
     SemaphoreList signal(device_, {0}, {1});
     SemaphoreList empty_wait;
-    IREE_ASSERT_OK(iree_hal_device_queue_execute(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, signal, cmd,
-        iree_hal_buffer_binding_table_t{3, table}, IREE_HAL_EXECUTE_FLAG_NONE));
+    IREE_ASSERT_OK(
+        iree_hal_queue_execute(QueueForCommandBuffer(cmd), empty_wait, signal,
+                               cmd, iree_hal_buffer_binding_table_t{3, table},
+                               IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
                                                 IREE_ASYNC_WAIT_FLAG_NONE));
 

@@ -96,37 +96,44 @@ static iree_status_t iree_hal_replay_dump_append_json_buffer_ref(
 
 static iree_status_t iree_hal_replay_dump_append_json_semaphores(
     iree_string_builder_t* builder, const char* field_name,
-    const iree_hal_replay_semaphore_timepoint_payload_t* semaphores,
-    iree_host_size_t semaphore_count) {
+    const uint8_t* semaphore_data, iree_host_size_t semaphore_count) {
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_format(builder, ",\"%s\":[", field_name));
   for (iree_host_size_t i = 0; i < semaphore_count; ++i) {
     if (i > 0) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
     }
+    iree_hal_replay_semaphore_timepoint_payload_t semaphore;
+    memcpy(&semaphore,
+           semaphore_data +
+               i * sizeof(iree_hal_replay_semaphore_timepoint_payload_t),
+           sizeof(semaphore));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "{\"semaphore_id\":%" PRIu64 ",\"value\":%" PRIu64 "}",
-        semaphores[i].semaphore_id, semaphores[i].value));
+        semaphore.semaphore_id, semaphore.value));
   }
   return iree_string_builder_append_cstring(builder, "]");
 }
 
 static iree_status_t iree_hal_replay_dump_append_json_buffer_refs(
     iree_string_builder_t* builder, const char* field_name,
-    const iree_hal_replay_buffer_ref_payload_t* buffer_refs,
-    iree_host_size_t buffer_ref_count) {
+    const uint8_t* buffer_ref_data, iree_host_size_t buffer_ref_count) {
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_format(builder, ",\"%s\":[", field_name));
   for (iree_host_size_t i = 0; i < buffer_ref_count; ++i) {
     if (i > 0) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
     }
+    iree_hal_replay_buffer_ref_payload_t buffer_ref;
+    memcpy(&buffer_ref,
+           buffer_ref_data + i * sizeof(iree_hal_replay_buffer_ref_payload_t),
+           sizeof(buffer_ref));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         "{\"buffer_id\":%" PRIu64 ",\"offset\":%" PRIu64 ",\"length\":%" PRIu64
         ",\"buffer_slot\":%" PRIu32 "}",
-        buffer_refs[i].buffer_id, buffer_refs[i].offset, buffer_refs[i].length,
-        buffer_refs[i].buffer_slot));
+        buffer_ref.buffer_id, buffer_ref.offset, buffer_ref.length,
+        buffer_ref.buffer_slot));
   }
   return iree_string_builder_append_cstring(builder, "]");
 }
@@ -164,14 +171,13 @@ static iree_status_t iree_hal_replay_dump_append_json_atomic_rmw_params(
 }
 
 static iree_status_t iree_hal_replay_dump_append_json_queue_atomic_header(
-    iree_string_builder_t* builder, uint64_t queue_affinity,
-    uint64_t wait_semaphore_count, uint64_t signal_semaphore_count) {
+    iree_string_builder_t* builder, uint64_t wait_semaphore_count,
+    uint64_t signal_semaphore_count) {
   return iree_string_builder_append_format(
       builder,
-      ",\"payload\":{\"queue_affinity\":%" PRIu64
-      ",\"wait_semaphore_count\":%" PRIu64
+      ",\"payload\":{\"wait_semaphore_count\":%" PRIu64
       ",\"signal_semaphore_count\":%" PRIu64,
-      queue_affinity, wait_semaphore_count, signal_semaphore_count);
+      wait_semaphore_count, signal_semaphore_count);
 }
 
 static iree_status_t iree_hal_replay_dump_append_json_queue_semaphores(
@@ -195,14 +201,46 @@ static iree_status_t iree_hal_replay_dump_append_json_queue_semaphores(
   const uint8_t* payload_data = record->payload.data;
   const uint8_t* wait_data = payload_data + layout->wait_payloads_offset;
   const uint8_t* signal_data = payload_data + layout->signal_payloads_offset;
-  const iree_hal_replay_semaphore_timepoint_payload_t* wait_payloads =
-      (const iree_hal_replay_semaphore_timepoint_payload_t*)wait_data;
-  const iree_hal_replay_semaphore_timepoint_payload_t* signal_payloads =
-      (const iree_hal_replay_semaphore_timepoint_payload_t*)signal_data;
   IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_semaphores(
-      builder, "wait_semaphores", wait_payloads, wait_semaphore_count));
+      builder, "wait_semaphores", wait_data, wait_semaphore_count));
   return iree_hal_replay_dump_append_json_semaphores(
-      builder, "signal_semaphores", signal_payloads, signal_semaphore_count);
+      builder, "signal_semaphores", signal_data, signal_semaphore_count);
+}
+
+static iree_status_t iree_hal_replay_dump_append_json_queue_transfer_operations(
+    iree_string_builder_t* builder, const iree_hal_replay_file_record_t* record,
+    const iree_hal_replay_file_range_t* payload_range,
+    const iree_hal_replay_queue_transfer_payload_t* payload,
+    const iree_hal_replay_dump_queue_transfer_layout_t* layout) {
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"operations\":["));
+  for (iree_host_size_t i = 0; i < payload->operation_count; ++i) {
+    if (i > 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    iree_hal_replay_queue_transfer_operation_payload_t operation;
+    IREE_RETURN_IF_ERROR(iree_hal_replay_dump_read_queue_transfer_operation(
+        record, layout, i, &operation));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        "{\"type\":%" PRIu32 ",\"type_name\":\"%s\",\"flags\":%" PRIu64,
+        operation.type,
+        iree_hal_replay_dump_queue_transfer_operation_type_string(
+            operation.type),
+        operation.flags));
+    IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
+        builder, "source_ref", &operation.source_ref));
+    IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
+        builder, "target_ref", &operation.target_ref));
+    iree_hal_replay_file_range_t data_range =
+        iree_hal_replay_dump_payload_subrange(
+            payload_range, layout->data_offset + operation.data_offset,
+            (iree_host_size_t)operation.data_length);
+    IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
+        builder, "data_range", &data_range));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
+  }
+  return iree_string_builder_append_cstring(builder, "]");
 }
 
 static iree_status_t iree_hal_replay_dump_append_json_payload(
@@ -230,12 +268,12 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           builder,
           ",\"payload\":{\"allocation_size\":%" PRIu64
           ",\"byte_offset\":%" PRIu64 ",\"byte_length\":%" PRIu64
-          ",\"queue_affinity\":%" PRIu64 ",\"placement_flags\":%" PRIu32
+          ",\"queue_family_affinity\":%" PRIu64 ",\"placement_flags\":%" PRIu32
           ",\"memory_type\":%" PRIu32 ",\"allowed_usage\":%" PRIu32
           ",\"allowed_access\":%" PRIu16 "}",
           payload.allocation_size, payload.byte_offset, payload.byte_length,
-          payload.queue_affinity, payload.placement_flags, payload.memory_type,
-          payload.allowed_usage, payload.allowed_access);
+          payload.queue_family_affinity, payload.placement_flags,
+          payload.memory_type, payload.allowed_usage, payload.allowed_access);
     }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_ALLOCATE_BUFFER: {
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_payload_length_check(
@@ -245,9 +283,9 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
       return iree_string_builder_append_format(
           builder,
           ",\"payload\":{\"allocation_size\":%" PRIu64
-          ",\"queue_affinity\":%" PRIu64 ",\"min_alignment\":%" PRIu64
+          ",\"queue_family_affinity\":%" PRIu64 ",\"min_alignment\":%" PRIu64
           ",\"usage\":%" PRIu32 ",\"type\":%" PRIu32 ",\"access\":%" PRIu16 "}",
-          payload.allocation_size, payload.queue_affinity,
+          payload.allocation_size, payload.queue_family_affinity,
           payload.min_alignment, payload.usage, payload.type, payload.access);
     }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_IMPORT_BUFFER: {
@@ -268,10 +306,11 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           ",\"payload\":{\"allocation_size\":%" PRIu64
-          ",\"queue_affinity\":%" PRIu64 ",\"min_alignment\":%" PRIu64
+          ",\"queue_family_affinity\":%" PRIu64 ",\"min_alignment\":%" PRIu64
           ",\"usage\":%" PRIu32 ",\"type\":%" PRIu32 ",\"access\":%" PRIu16
           ",\"external_type\":%" PRIu32 ",\"external_flags\":%" PRIu32,
-          payload.allocation.allocation_size, payload.allocation.queue_affinity,
+          payload.allocation.allocation_size,
+          payload.allocation.queue_family_affinity,
           payload.allocation.min_alignment, payload.allocation.usage,
           payload.allocation.type, payload.allocation.access,
           payload.external_type, payload.external_flags));
@@ -333,17 +372,25 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           builder, "data_range", &data_range));
       return iree_string_builder_append_cstring(builder, "}");
     }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_OBJECT: {
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_FAMILY_COMMAND_BUFFER_OBJECT: {
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_payload_length_check(
-          record, sizeof(iree_hal_replay_command_buffer_object_payload_t)));
-      iree_hal_replay_command_buffer_object_payload_t payload;
+          record,
+          sizeof(
+              iree_hal_replay_queue_family_command_buffer_object_payload_t)));
+      iree_hal_replay_queue_family_command_buffer_object_payload_t payload;
       memcpy(&payload, record->payload.data, sizeof(payload));
+      if (payload.reserved0 != 0) {
+        return iree_make_status(
+            IREE_STATUS_DATA_LOSS,
+            "replay command buffer reserved fields must be zero");
+      }
       return iree_string_builder_append_format(
           builder,
           ",\"payload\":{\"mode\":%" PRIu32 ",\"command_categories\":%" PRIu32
-          ",\"queue_affinity\":%" PRIu64 ",\"binding_capacity\":%" PRIu64 "}",
-          payload.mode, payload.command_categories, payload.queue_affinity,
-          payload.binding_capacity);
+          ",\"queue_family_ordinal\":%" PRIu32 ",\"binding_capacity\":%" PRIu64
+          "}",
+          payload.mode, payload.command_categories,
+          payload.queue_family_ordinal, payload.binding_capacity);
     }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_LOAD: {
       if (record->payload.data_length <
@@ -358,13 +405,14 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           record, &payload, &ranges));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
-          ",\"payload\":{\"queue_affinity\":%" PRIu64 ",\"load_flags\":%" PRIu32
-          ",\"target_kind\":%" PRIu32 ",\"target_flags\":%" PRIu32
+          ",\"payload\":{\"queue_family_ordinal\":%" PRIu32
+          ",\"load_flags\":%" PRIu32 ",\"target_kind\":%" PRIu32
+          ",\"target_flags\":%" PRIu32
           ",\"target_physical_device_affinity\":%" PRIu64
           ",\"target_family_length\":%" PRIu32 ",\"target_key_length\":%" PRIu32
           ",\"executable_data_length\":%" PRIu64 ",\"constant_count\":%" PRIu64
           ",\"executable_metadata_length\":%" PRIu32,
-          payload.queue_affinity, payload.load_flags, payload.target_kind,
+          payload.queue_family_ordinal, payload.load_flags, payload.target_kind,
           payload.target_flags, payload.target_physical_device_affinity,
           payload.target_family_length, payload.target_key_length,
           payload.executable_data_length, payload.constant_count,
@@ -420,9 +468,25 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
       memcpy(&payload, record->payload.data, sizeof(payload));
       return iree_string_builder_append_format(
           builder,
-          ",\"payload\":{\"queue_affinity\":%" PRIu64
+          ",\"payload\":{\"queue_family_affinity\":%" PRIu64
           ",\"initial_value\":%" PRIu64 ",\"flags\":%" PRIu64 "}",
-          payload.queue_affinity, payload.initial_value, payload.flags);
+          payload.queue_family_affinity, payload.initial_value, payload.flags);
+    }
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT: {
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_payload_length_check(
+          record, sizeof(iree_hal_replay_provisioned_queue_object_payload_t)));
+      iree_hal_replay_provisioned_queue_object_payload_t payload;
+      memcpy(&payload, record->payload.data, sizeof(payload));
+      if (IREE_UNLIKELY(payload.reserved0 != 0)) {
+        return iree_make_status(
+            IREE_STATUS_DATA_LOSS,
+            "replay provisioned queue reserved fields must be zero");
+      }
+      return iree_string_builder_append_format(
+          builder,
+          ",\"payload\":{\"family_ordinal\":%" PRIu32
+          ",\"queue_ordinal\":%" PRIu32 "}",
+          payload.family_ordinal, payload.queue_ordinal);
     }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_FILE_OBJECT: {
       if (record->payload.data_length <
@@ -441,7 +505,7 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
       IREE_RETURN_IF_ERROR(
           iree_string_builder_append_format(
               builder,
-              ",\"payload\":{\"queue_affinity\":%" PRIu64
+              ",\"payload\":{\"queue_family_affinity\":%" PRIu64
               ",\"file_length\":%" PRIu64 ",\"file_device\":%" PRIu64
               ",\"file_inode\":%" PRIu64 ",\"file_mtime_ns\":%" PRIu64
               ",\"reference_length\":%" PRIu64 ",\"access\":%" PRIu32
@@ -450,8 +514,8 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
               ",\"validation_type\":%" PRIu32 ",\"validation_type_name\":\"%s\""
               ",\"digest_type\":%" PRIu32 ",\"digest_fnv1a64\":\"0x%016" PRIx64
               "\"",
-              payload.queue_affinity, payload.file_length, payload.file_device,
-              payload.file_inode, payload.file_mtime_ns,
+              payload.queue_family_affinity, payload.file_length,
+              payload.file_device, payload.file_inode, payload.file_mtime_ns,
               payload.reference_length, payload.access, payload.flags,
               payload.handle_type, payload.reference_type,
               iree_hal_replay_dump_file_reference_type_string(
@@ -490,20 +554,20 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           ",\"payload\":{\"executable_id\":%" PRIu64
-          ",\"queue_affinity\":%" PRIu64 ",\"function_ordinal\":%" PRIu32
-          ",\"flags\":%" PRIu32 ",\"workgroup_count\":[%" PRIu32 ",%" PRIu32
-          ",%" PRIu32 "],\"workgroup_size\":[%" PRIu32 ",%" PRIu32 ",%" PRIu32
+          ",\"function_ordinal\":%" PRIu32 ",\"flags\":%" PRIu32
+          ",\"workgroup_count\":[%" PRIu32 ",%" PRIu32 ",%" PRIu32
+          "],\"workgroup_size\":[%" PRIu32 ",%" PRIu32 ",%" PRIu32
           "],\"dynamic_workgroup_local_memory\":%" PRIu32
           ",\"wait_semaphore_count\":%" PRIu64
           ",\"signal_semaphore_count\":%" PRIu64
           ",\"constants_length\":%" PRIu64 ",\"binding_count\":%" PRIu64,
-          payload.executable_id, payload.queue_affinity,
-          payload.function_ordinal, payload.flags, payload.workgroup_count[0],
-          payload.workgroup_count[1], payload.workgroup_count[2],
-          payload.workgroup_size[0], payload.workgroup_size[1],
-          payload.workgroup_size[2], payload.dynamic_workgroup_local_memory,
-          payload.wait_semaphore_count, payload.signal_semaphore_count,
-          payload.constants_length, payload.binding_count));
+          payload.executable_id, payload.function_ordinal, payload.flags,
+          payload.workgroup_count[0], payload.workgroup_count[1],
+          payload.workgroup_count[2], payload.workgroup_size[0],
+          payload.workgroup_size[1], payload.workgroup_size[2],
+          payload.dynamic_workgroup_local_memory, payload.wait_semaphore_count,
+          payload.signal_semaphore_count, payload.constants_length,
+          payload.binding_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
           builder, "workgroup_count_ref", &payload.workgroup_count_ref));
       iree_hal_replay_file_range_t wait_range =
@@ -529,13 +593,44 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           builder, "bindings_range", &bindings_range));
       return iree_string_builder_append_cstring(builder, "}");
     }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_EXECUTE: {
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_BARRIER: {
       if (record->payload.data_length <
-          sizeof(iree_hal_replay_device_queue_execute_payload_t)) {
+          sizeof(iree_hal_replay_queue_barrier_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay queue barrier payload is short");
+      }
+      iree_hal_replay_queue_barrier_payload_t payload;
+      memcpy(&payload, record->payload.data, sizeof(payload));
+      if (payload.reserved0 != 0) {
+        return iree_make_status(
+            IREE_STATUS_DATA_LOSS,
+            "replay queue barrier reserved fields must be zero");
+      }
+      iree_hal_replay_dump_queue_payload_layout_t layout;
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
+          record, sizeof(payload), payload.wait_semaphore_count,
+          payload.signal_semaphore_count, /*trailing_payload_length=*/0,
+          &layout));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          ",\"payload\":{\"flags\":%" PRIu64
+          ",\"wait_semaphore_count\":%" PRIu64
+          ",\"signal_semaphore_count\":%" PRIu64,
+          payload.flags, payload.wait_semaphore_count,
+          payload.signal_semaphore_count));
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_queue_semaphores(
+          builder, record, payload_range, &layout,
+          (iree_host_size_t)payload.wait_semaphore_count,
+          (iree_host_size_t)payload.signal_semaphore_count));
+      return iree_string_builder_append_cstring(builder, "}");
+    }
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_EXECUTE: {
+      if (record->payload.data_length <
+          sizeof(iree_hal_replay_queue_execute_payload_t)) {
         return iree_make_status(IREE_STATUS_DATA_LOSS,
                                 "replay queue execute payload is short");
       }
-      iree_hal_replay_device_queue_execute_payload_t payload;
+      iree_hal_replay_queue_execute_payload_t payload;
       memcpy(&payload, record->payload.data, sizeof(payload));
       iree_host_size_t wait_offset = 0;
       iree_host_size_t wait_size = 0;
@@ -548,11 +643,10 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           &signal_size, &bindings_offset, &bindings_size));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
-          ",\"payload\":{\"command_buffer_id\":%" PRIu64
-          ",\"queue_affinity\":%" PRIu64 ",\"flags\":%" PRIu64
+          ",\"payload\":{\"command_buffer_id\":%" PRIu64 ",\"flags\":%" PRIu64
           ",\"wait_semaphore_count\":%" PRIu64
           ",\"signal_semaphore_count\":%" PRIu64 ",\"binding_count\":%" PRIu64,
-          payload.command_buffer_id, payload.queue_affinity, payload.flags,
+          payload.command_buffer_id, payload.flags,
           payload.wait_semaphore_count, payload.signal_semaphore_count,
           payload.binding_count));
       iree_hal_replay_file_range_t wait_range =
@@ -570,233 +664,65 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           builder, "signal_semaphores_range", &signal_range));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
           builder, "bindings_range", &bindings_range));
-      const iree_hal_replay_semaphore_timepoint_payload_t* wait_payloads =
-          (const iree_hal_replay_semaphore_timepoint_payload_t*)(record->payload
-                                                                     .data +
-                                                                 wait_offset);
-      const iree_hal_replay_semaphore_timepoint_payload_t* signal_payloads =
-          (const iree_hal_replay_semaphore_timepoint_payload_t*)(record->payload
-                                                                     .data +
-                                                                 signal_offset);
-      const iree_hal_replay_buffer_ref_payload_t* binding_payloads =
-          (const iree_hal_replay_buffer_ref_payload_t*)(record->payload.data +
-                                                        bindings_offset);
+      const uint8_t* wait_data = record->payload.data + wait_offset;
+      const uint8_t* signal_data = record->payload.data + signal_offset;
+      const uint8_t* binding_data = record->payload.data + bindings_offset;
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_semaphores(
-          builder, "wait_semaphores", wait_payloads,
+          builder, "wait_semaphores", wait_data,
           (iree_host_size_t)payload.wait_semaphore_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_semaphores(
-          builder, "signal_semaphores", signal_payloads,
+          builder, "signal_semaphores", signal_data,
           (iree_host_size_t)payload.signal_semaphore_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_refs(
-          builder, "bindings", binding_payloads,
+          builder, "bindings", binding_data,
           (iree_host_size_t)payload.binding_count));
       return iree_string_builder_append_cstring(builder, "}");
     }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ALLOCA: {
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER: {
       if (record->payload.data_length <
-          sizeof(iree_hal_replay_device_queue_alloca_payload_t)) {
+          sizeof(iree_hal_replay_queue_transfer_payload_t)) {
         return iree_make_status(IREE_STATUS_DATA_LOSS,
-                                "replay queue alloca payload is short");
+                                "replay queue transfer payload is short");
       }
-      iree_hal_replay_device_queue_alloca_payload_t payload;
+      iree_hal_replay_queue_transfer_payload_t payload;
       memcpy(&payload, record->payload.data, sizeof(payload));
-      iree_hal_replay_dump_queue_payload_layout_t layout;
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
-          record, sizeof(payload), payload.wait_semaphore_count,
-          payload.signal_semaphore_count, /*trailing_payload_length=*/0,
-          &layout));
+      iree_hal_replay_dump_queue_transfer_layout_t layout;
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_transfer_layout(
+          record, &payload, &layout));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
-          ",\"payload\":{\"allocation_size\":%" PRIu64
-          ",\"allocation_queue_affinity\":%" PRIu64
-          ",\"min_alignment\":%" PRIu64 ",\"usage\":%" PRIu32
-          ",\"type\":%" PRIu32 ",\"access\":%" PRIu16
-          ",\"queue_affinity\":%" PRIu64 ",\"flags\":%" PRIu64
-          ",\"wait_semaphore_count\":%" PRIu64
-          ",\"signal_semaphore_count\":%" PRIu64,
-          payload.allocation.allocation_size, payload.allocation.queue_affinity,
-          payload.allocation.min_alignment, payload.allocation.usage,
-          payload.allocation.type, payload.allocation.access,
-          payload.queue_affinity, payload.flags, payload.wait_semaphore_count,
-          payload.signal_semaphore_count));
-      iree_hal_replay_file_range_t wait_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.wait_payloads_offset,
-                                                layout.wait_payloads_size);
-      iree_hal_replay_file_range_t signal_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.signal_payloads_offset,
-                                                layout.signal_payloads_size);
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "wait_semaphores_range", &wait_range));
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "signal_semaphores_range", &signal_range));
-      return iree_string_builder_append_cstring(builder, "}");
-    }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_DEALLOCA: {
-      if (record->payload.data_length <
-          sizeof(iree_hal_replay_device_queue_dealloca_payload_t)) {
-        return iree_make_status(IREE_STATUS_DATA_LOSS,
-                                "replay queue dealloca payload is short");
-      }
-      iree_hal_replay_device_queue_dealloca_payload_t payload;
-      memcpy(&payload, record->payload.data, sizeof(payload));
-      iree_hal_replay_dump_queue_payload_layout_t layout;
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
-          record, sizeof(payload), payload.wait_semaphore_count,
-          payload.signal_semaphore_count, /*trailing_payload_length=*/0,
-          &layout));
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          builder,
-          ",\"payload\":{\"queue_affinity\":%" PRIu64 ",\"flags\":%" PRIu64
-          ",\"wait_semaphore_count\":%" PRIu64
-          ",\"signal_semaphore_count\":%" PRIu64,
-          payload.queue_affinity, payload.flags, payload.wait_semaphore_count,
-          payload.signal_semaphore_count));
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
-          builder, "buffer_ref", &payload.buffer_ref));
-      iree_hal_replay_file_range_t wait_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.wait_payloads_offset,
-                                                layout.wait_payloads_size);
-      iree_hal_replay_file_range_t signal_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.signal_payloads_offset,
-                                                layout.signal_payloads_size);
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "wait_semaphores_range", &wait_range));
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "signal_semaphores_range", &signal_range));
-      return iree_string_builder_append_cstring(builder, "}");
-    }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_FILL: {
-      if (record->payload.data_length <
-          sizeof(iree_hal_replay_device_queue_fill_payload_t)) {
-        return iree_make_status(IREE_STATUS_DATA_LOSS,
-                                "replay queue fill payload is short");
-      }
-      iree_hal_replay_device_queue_fill_payload_t payload;
-      memcpy(&payload, record->payload.data, sizeof(payload));
-      iree_hal_replay_dump_queue_payload_layout_t layout;
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
-          record, sizeof(payload), payload.wait_semaphore_count,
-          payload.signal_semaphore_count, payload.pattern_length, &layout));
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          builder,
-          ",\"payload\":{\"queue_affinity\":%" PRIu64 ",\"flags\":%" PRIu64
-          ",\"wait_semaphore_count\":%" PRIu64
-          ",\"signal_semaphore_count\":%" PRIu64 ",\"pattern_length\":%" PRIu64,
-          payload.queue_affinity, payload.flags, payload.wait_semaphore_count,
-          payload.signal_semaphore_count, payload.pattern_length));
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
-          builder, "target_ref", &payload.target_ref));
-      iree_hal_replay_file_range_t wait_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.wait_payloads_offset,
-                                                layout.wait_payloads_size);
-      iree_hal_replay_file_range_t signal_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.signal_payloads_offset,
-                                                layout.signal_payloads_size);
-      iree_hal_replay_file_range_t pattern_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.trailing_payload_offset,
-                                                layout.trailing_payload_size);
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "wait_semaphores_range", &wait_range));
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "signal_semaphores_range", &signal_range));
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "pattern_range", &pattern_range));
-      return iree_string_builder_append_cstring(builder, "}");
-    }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_UPDATE: {
-      if (record->payload.data_length <
-          sizeof(iree_hal_replay_device_queue_update_payload_t)) {
-        return iree_make_status(IREE_STATUS_DATA_LOSS,
-                                "replay queue update payload is short");
-      }
-      iree_hal_replay_device_queue_update_payload_t payload;
-      memcpy(&payload, record->payload.data, sizeof(payload));
-      iree_hal_replay_dump_queue_payload_layout_t layout;
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
-          record, sizeof(payload), payload.wait_semaphore_count,
-          payload.signal_semaphore_count, payload.data_length, &layout));
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          builder,
-          ",\"payload\":{\"queue_affinity\":%" PRIu64 ",\"flags\":%" PRIu64
-          ",\"source_offset\":%" PRIu64 ",\"wait_semaphore_count\":%" PRIu64
-          ",\"signal_semaphore_count\":%" PRIu64 ",\"data_length\":%" PRIu64,
-          payload.queue_affinity, payload.flags, payload.source_offset,
+          ",\"payload\":{\"wait_semaphore_count\":%" PRIu64
+          ",\"signal_semaphore_count\":%" PRIu64 ",\"operation_count\":%" PRIu64
+          ",\"data_length\":%" PRIu64,
           payload.wait_semaphore_count, payload.signal_semaphore_count,
-          payload.data_length));
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
-          builder, "target_ref", &payload.target_ref));
-      iree_hal_replay_file_range_t wait_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.wait_payloads_offset,
-                                                layout.wait_payloads_size);
-      iree_hal_replay_file_range_t signal_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.signal_payloads_offset,
-                                                layout.signal_payloads_size);
+          payload.operation_count, payload.data_length));
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_queue_semaphores(
+          builder, record, payload_range, &layout.queue,
+          (iree_host_size_t)payload.wait_semaphore_count,
+          (iree_host_size_t)payload.signal_semaphore_count));
+      iree_hal_replay_file_range_t operations_range =
+          iree_hal_replay_dump_payload_subrange(
+              payload_range, layout.operation_payloads_offset,
+              layout.operation_payloads_size);
       iree_hal_replay_file_range_t data_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.trailing_payload_offset,
-                                                layout.trailing_payload_size);
+          iree_hal_replay_dump_payload_subrange(
+              payload_range, layout.data_offset, layout.data_size);
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "wait_semaphores_range", &wait_range));
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "signal_semaphores_range", &signal_range));
+          builder, "operations_range", &operations_range));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
           builder, "data_range", &data_range));
+      IREE_RETURN_IF_ERROR(
+          iree_hal_replay_dump_append_json_queue_transfer_operations(
+              builder, record, payload_range, &payload, &layout));
       return iree_string_builder_append_cstring(builder, "}");
     }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_COPY: {
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_READ: {
       if (record->payload.data_length <
-          sizeof(iree_hal_replay_device_queue_copy_payload_t)) {
+          sizeof(iree_hal_replay_queue_read_payload_t)) {
         return iree_make_status(IREE_STATUS_DATA_LOSS,
-                                "replay queue copy payload is short");
+                                "replay exact queue read payload is short");
       }
-      iree_hal_replay_device_queue_copy_payload_t payload;
-      memcpy(&payload, record->payload.data, sizeof(payload));
-      iree_hal_replay_dump_queue_payload_layout_t layout;
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
-          record, sizeof(payload), payload.wait_semaphore_count,
-          payload.signal_semaphore_count, /*trailing_payload_length=*/0,
-          &layout));
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          builder,
-          ",\"payload\":{\"queue_affinity\":%" PRIu64 ",\"flags\":%" PRIu64
-          ",\"wait_semaphore_count\":%" PRIu64
-          ",\"signal_semaphore_count\":%" PRIu64,
-          payload.queue_affinity, payload.flags, payload.wait_semaphore_count,
-          payload.signal_semaphore_count));
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
-          builder, "source_ref", &payload.source_ref));
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
-          builder, "target_ref", &payload.target_ref));
-      iree_hal_replay_file_range_t wait_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.wait_payloads_offset,
-                                                layout.wait_payloads_size);
-      iree_hal_replay_file_range_t signal_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.signal_payloads_offset,
-                                                layout.signal_payloads_size);
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "wait_semaphores_range", &wait_range));
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "signal_semaphores_range", &signal_range));
-      return iree_string_builder_append_cstring(builder, "}");
-    }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_READ: {
-      if (record->payload.data_length <
-          sizeof(iree_hal_replay_device_queue_read_payload_t)) {
-        return iree_make_status(IREE_STATUS_DATA_LOSS,
-                                "replay queue read payload is short");
-      }
-      iree_hal_replay_device_queue_read_payload_t payload;
+      iree_hal_replay_queue_read_payload_t payload;
       memcpy(&payload, record->payload.data, sizeof(payload));
       iree_hal_replay_dump_queue_payload_layout_t layout;
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
@@ -806,27 +732,19 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           ",\"payload\":{\"source_file_id\":%" PRIu64
-          ",\"source_offset\":%" PRIu64 ",\"queue_affinity\":%" PRIu64
-          ",\"flags\":%" PRIu64 ",\"captured_data_length\":%" PRIu64
+          ",\"source_offset\":%" PRIu64 ",\"flags\":%" PRIu64
+          ",\"captured_data_length\":%" PRIu64
           ",\"wait_semaphore_count\":%" PRIu64
           ",\"signal_semaphore_count\":%" PRIu64,
-          payload.source_file_id, payload.source_offset, payload.queue_affinity,
-          payload.flags, payload.captured_data_length,
-          payload.wait_semaphore_count, payload.signal_semaphore_count));
+          payload.source_file_id, payload.source_offset, payload.flags,
+          payload.captured_data_length, payload.wait_semaphore_count,
+          payload.signal_semaphore_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
           builder, "target_ref", &payload.target_ref));
-      iree_hal_replay_file_range_t wait_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.wait_payloads_offset,
-                                                layout.wait_payloads_size);
-      iree_hal_replay_file_range_t signal_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.signal_payloads_offset,
-                                                layout.signal_payloads_size);
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "wait_semaphores_range", &wait_range));
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "signal_semaphores_range", &signal_range));
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_queue_semaphores(
+          builder, record, payload_range, &layout,
+          (iree_host_size_t)payload.wait_semaphore_count,
+          (iree_host_size_t)payload.signal_semaphore_count));
       iree_hal_replay_file_range_t captured_data_range =
           iree_hal_replay_dump_payload_subrange(payload_range,
                                                 layout.trailing_payload_offset,
@@ -835,13 +753,13 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           builder, "captured_data_range", &captured_data_range));
       return iree_string_builder_append_cstring(builder, "}");
     }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_WRITE: {
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_WRITE: {
       if (record->payload.data_length <
-          sizeof(iree_hal_replay_device_queue_write_payload_t)) {
+          sizeof(iree_hal_replay_queue_write_payload_t)) {
         return iree_make_status(IREE_STATUS_DATA_LOSS,
-                                "replay queue write payload is short");
+                                "replay exact queue write payload is short");
       }
-      iree_hal_replay_device_queue_write_payload_t payload;
+      iree_hal_replay_queue_write_payload_t payload;
       memcpy(&payload, record->payload.data, sizeof(payload));
       iree_hal_replay_dump_queue_payload_layout_t layout;
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
@@ -851,36 +769,107 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           ",\"payload\":{\"target_file_id\":%" PRIu64
-          ",\"target_offset\":%" PRIu64 ",\"queue_affinity\":%" PRIu64
-          ",\"flags\":%" PRIu64 ",\"wait_semaphore_count\":%" PRIu64
+          ",\"target_offset\":%" PRIu64 ",\"flags\":%" PRIu64
+          ",\"wait_semaphore_count\":%" PRIu64
           ",\"signal_semaphore_count\":%" PRIu64,
-          payload.target_file_id, payload.target_offset, payload.queue_affinity,
-          payload.flags, payload.wait_semaphore_count,
-          payload.signal_semaphore_count));
+          payload.target_file_id, payload.target_offset, payload.flags,
+          payload.wait_semaphore_count, payload.signal_semaphore_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
           builder, "source_ref", &payload.source_ref));
-      iree_hal_replay_file_range_t wait_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.wait_payloads_offset,
-                                                layout.wait_payloads_size);
-      iree_hal_replay_file_range_t signal_range =
-          iree_hal_replay_dump_payload_subrange(payload_range,
-                                                layout.signal_payloads_offset,
-                                                layout.signal_payloads_size);
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "wait_semaphores_range", &wait_range));
-      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
-          builder, "signal_semaphores_range", &signal_range));
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_queue_semaphores(
+          builder, record, payload_range, &layout,
+          (iree_host_size_t)payload.wait_semaphore_count,
+          (iree_host_size_t)payload.signal_semaphore_count));
       return iree_string_builder_append_cstring(builder, "}");
     }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT: {
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ALLOCA: {
       if (record->payload.data_length <
-          sizeof(iree_hal_replay_device_queue_atomic_wait_payload_t)) {
+          sizeof(iree_hal_replay_queue_alloca_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay exact queue alloca payload is short");
+      }
+      iree_hal_replay_queue_alloca_payload_t payload;
+      memcpy(&payload, record->payload.data, sizeof(payload));
+      iree_host_size_t requests_size = 0;
+      if (payload.reserved0 != 0 ||
+          payload.request_count > IREE_HOST_SIZE_MAX ||
+          !iree_host_size_checked_mul(
+              (iree_host_size_t)payload.request_count,
+              sizeof(iree_hal_replay_queue_alloca_request_payload_t),
+              &requests_size)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay exact queue alloca payload is invalid");
+      }
+      iree_hal_replay_dump_queue_payload_layout_t layout;
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
+          record, sizeof(payload), payload.wait_semaphore_count,
+          payload.signal_semaphore_count, requests_size, &layout));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          ",\"payload\":{\"request_count\":%" PRIu64
+          ",\"wait_semaphore_count\":%" PRIu64
+          ",\"signal_semaphore_count\":%" PRIu64,
+          payload.request_count, payload.wait_semaphore_count,
+          payload.signal_semaphore_count));
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_queue_semaphores(
+          builder, record, payload_range, &layout,
+          (iree_host_size_t)payload.wait_semaphore_count,
+          (iree_host_size_t)payload.signal_semaphore_count));
+      iree_hal_replay_file_range_t request_range =
+          iree_hal_replay_dump_payload_subrange(payload_range,
+                                                layout.trailing_payload_offset,
+                                                layout.trailing_payload_size);
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
+          builder, "requests_range", &request_range));
+      return iree_string_builder_append_cstring(builder, "}");
+    }
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_DEALLOCA: {
+      if (record->payload.data_length <
+          sizeof(iree_hal_replay_queue_dealloca_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay exact queue dealloca payload is short");
+      }
+      iree_hal_replay_queue_dealloca_payload_t payload;
+      memcpy(&payload, record->payload.data, sizeof(payload));
+      iree_host_size_t buffer_ids_size = 0;
+      if (payload.reserved0 != 0 || payload.buffer_count > IREE_HOST_SIZE_MAX ||
+          !iree_host_size_checked_mul((iree_host_size_t)payload.buffer_count,
+                                      sizeof(iree_hal_replay_object_id_t),
+                                      &buffer_ids_size)) {
         return iree_make_status(
             IREE_STATUS_DATA_LOSS,
-            "replay device queue atomic wait payload is short");
+            "replay exact queue dealloca payload is invalid");
       }
-      iree_hal_replay_device_queue_atomic_wait_payload_t payload;
+      iree_hal_replay_dump_queue_payload_layout_t layout;
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
+          record, sizeof(payload), payload.wait_semaphore_count,
+          payload.signal_semaphore_count, buffer_ids_size, &layout));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          ",\"payload\":{\"buffer_count\":%" PRIu64
+          ",\"wait_semaphore_count\":%" PRIu64
+          ",\"signal_semaphore_count\":%" PRIu64,
+          payload.buffer_count, payload.wait_semaphore_count,
+          payload.signal_semaphore_count));
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_queue_semaphores(
+          builder, record, payload_range, &layout,
+          (iree_host_size_t)payload.wait_semaphore_count,
+          (iree_host_size_t)payload.signal_semaphore_count));
+      iree_hal_replay_file_range_t buffer_id_range =
+          iree_hal_replay_dump_payload_subrange(payload_range,
+                                                layout.trailing_payload_offset,
+                                                layout.trailing_payload_size);
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_file_range(
+          builder, "buffer_ids_range", &buffer_id_range));
+      return iree_string_builder_append_cstring(builder, "}");
+    }
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_WAIT: {
+      if (record->payload.data_length <
+          sizeof(iree_hal_replay_queue_atomic_wait_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay queue atomic wait payload is short");
+      }
+      iree_hal_replay_queue_atomic_wait_payload_t payload;
       memcpy(&payload, record->payload.data, sizeof(payload));
       iree_hal_replay_dump_queue_payload_layout_t layout;
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
@@ -888,7 +877,7 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           payload.signal_semaphore_count, /*trailing_payload_length=*/0,
           &layout));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_queue_atomic_header(
-          builder, payload.queue_affinity, payload.wait_semaphore_count,
+          builder, payload.wait_semaphore_count,
           payload.signal_semaphore_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_atomic_wait_params(
           builder, &payload.params));
@@ -900,14 +889,13 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           (iree_host_size_t)payload.signal_semaphore_count));
       return iree_string_builder_append_cstring(builder, "}");
     }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE: {
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_STORE: {
       if (record->payload.data_length <
-          sizeof(iree_hal_replay_device_queue_atomic_store_payload_t)) {
-        return iree_make_status(
-            IREE_STATUS_DATA_LOSS,
-            "replay device queue atomic store payload is short");
+          sizeof(iree_hal_replay_queue_atomic_store_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay queue atomic store payload is short");
       }
-      iree_hal_replay_device_queue_atomic_store_payload_t payload;
+      iree_hal_replay_queue_atomic_store_payload_t payload;
       memcpy(&payload, record->payload.data, sizeof(payload));
       iree_hal_replay_dump_queue_payload_layout_t layout;
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
@@ -915,7 +903,7 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           payload.signal_semaphore_count, /*trailing_payload_length=*/0,
           &layout));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_queue_atomic_header(
-          builder, payload.queue_affinity, payload.wait_semaphore_count,
+          builder, payload.wait_semaphore_count,
           payload.signal_semaphore_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_atomic_store_params(
           builder, &payload.params));
@@ -927,14 +915,13 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           (iree_host_size_t)payload.signal_semaphore_count));
       return iree_string_builder_append_cstring(builder, "}");
     }
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW: {
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_RMW: {
       if (record->payload.data_length <
-          sizeof(iree_hal_replay_device_queue_atomic_rmw_payload_t)) {
-        return iree_make_status(
-            IREE_STATUS_DATA_LOSS,
-            "replay device queue atomic RMW payload is short");
+          sizeof(iree_hal_replay_queue_atomic_rmw_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay queue atomic RMW payload is short");
       }
-      iree_hal_replay_device_queue_atomic_rmw_payload_t payload;
+      iree_hal_replay_queue_atomic_rmw_payload_t payload;
       memcpy(&payload, record->payload.data, sizeof(payload));
       iree_hal_replay_dump_queue_payload_layout_t layout;
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
@@ -942,10 +929,38 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           payload.signal_semaphore_count, /*trailing_payload_length=*/0,
           &layout));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_queue_atomic_header(
-          builder, payload.queue_affinity, payload.wait_semaphore_count,
+          builder, payload.wait_semaphore_count,
           payload.signal_semaphore_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_atomic_rmw_params(
           builder, &payload.params));
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
+          builder, "target_ref", &payload.target_ref));
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_queue_semaphores(
+          builder, record, payload_range, &layout,
+          (iree_host_size_t)payload.wait_semaphore_count,
+          (iree_host_size_t)payload.signal_semaphore_count));
+      return iree_string_builder_append_cstring(builder, "}");
+    }
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TIMESTAMP: {
+      if (record->payload.data_length <
+          sizeof(iree_hal_replay_queue_timestamp_payload_t)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "replay queue timestamp payload is short");
+      }
+      iree_hal_replay_queue_timestamp_payload_t payload;
+      memcpy(&payload, record->payload.data, sizeof(payload));
+      iree_hal_replay_dump_queue_payload_layout_t layout;
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_queue_payload_layout(
+          record, sizeof(payload), payload.wait_semaphore_count,
+          payload.signal_semaphore_count, /*trailing_payload_length=*/0,
+          &layout));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          ",\"payload\":{\"flags\":%" PRIu64
+          ",\"wait_semaphore_count\":%" PRIu64
+          ",\"signal_semaphore_count\":%" PRIu64,
+          payload.flags, payload.wait_semaphore_count,
+          payload.signal_semaphore_count));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
           builder, "target_ref", &payload.target_ref));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_queue_semaphores(

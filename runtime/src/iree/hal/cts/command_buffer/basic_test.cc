@@ -12,10 +12,9 @@ class CommandBufferBasicTest : public CtsTestBase<> {};
 
 TEST_P(CommandBufferBasicTest, Create) {
   iree_hal_command_buffer_t* command_buffer = NULL;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/0, &command_buffer));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     /*binding_capacity=*/0, &command_buffer));
 
   EXPECT_TRUE((iree_hal_command_buffer_allowed_categories(command_buffer) &
                IREE_HAL_COMMAND_CATEGORY_DISPATCH) ==
@@ -26,10 +25,9 @@ TEST_P(CommandBufferBasicTest, Create) {
 
 TEST_P(CommandBufferBasicTest, BeginEnd) {
   iree_hal_command_buffer_t* command_buffer = NULL;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/0, &command_buffer));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     /*binding_capacity=*/0, &command_buffer));
 
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
@@ -39,10 +37,9 @@ TEST_P(CommandBufferBasicTest, BeginEnd) {
 
 TEST_P(CommandBufferBasicTest, SubmitEmpty) {
   iree_hal_command_buffer_t* command_buffer = NULL;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/0, &command_buffer));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     /*binding_capacity=*/0, &command_buffer));
 
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));

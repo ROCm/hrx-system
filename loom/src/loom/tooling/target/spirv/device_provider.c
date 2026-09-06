@@ -17,6 +17,7 @@ static iree_status_t loom_spirv_device_provider_select_target(
     loom_device_target_t* out_target) {
   IREE_ASSERT_ARGUMENT(provider);
   IREE_ASSERT_ARGUMENT(runtime);
+  IREE_ASSERT_ARGUMENT(runtime->dispatch_queue);
   IREE_ASSERT_ARGUMENT(out_target);
 
   *out_target = (loom_device_target_t){0};
@@ -28,10 +29,17 @@ static iree_status_t loom_spirv_device_provider_select_target(
         IREE_STATUS_UNAVAILABLE,
         "Vulkan HAL device does not expose immutable device facts");
   }
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(device_spec);
+  const iree_hal_queue_family_ordinal_t dispatch_family_ordinal =
+      iree_hal_queue_family_ordinal(
+          iree_hal_queue_family(runtime->dispatch_queue));
   const iree_hal_executable_target_selection_t target_selection = {
       .family = IREE_SV("spirv"),
       .target_key = IREE_SV("vulkan1.3+bda"),
       .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
+      .physical_device_affinity = queue_spec->families[dispatch_family_ordinal]
+                                      .physical_device_affinity,
   };
   const iree_hal_executable_target_selection_result_t target_result =
       iree_hal_device_spec_select_executable_target(device_spec,

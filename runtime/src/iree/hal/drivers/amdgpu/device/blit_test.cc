@@ -390,29 +390,22 @@ TEST(BlitTest, FillEmplaceRejectsUnsupportedPatternLengthWithoutMutation) {
   EXPECT_EQ(kernargs.pattern, 0x99u);
 }
 
-TEST(BlitTest, FillEmplaceRejectsMisalignedPatternTransferWithoutMutation) {
+TEST(BlitTest, FillEmplaceUsesByteKernelForMisalignedPatternTransfer) {
   const iree_hal_amdgpu_device_kernels_t kernels = MakeKernels();
   const iree_hal_amdgpu_device_buffer_transfer_context_t context =
       MakeContext(&kernels);
   iree_hsa_kernel_dispatch_packet_t packet = {};
-  packet.setup = 0x55AAu;
-  packet.kernel_object = 0xDEADCAFEu;
-  iree_hal_amdgpu_device_buffer_fill_kernargs_t kernargs = {
-      /*.target_ptr=*/(void*)0x1234,
-      /*.element_length=*/7,
-      /*.pattern=*/0x99,
-  };
+  iree_hal_amdgpu_device_buffer_fill_kernargs_t kernargs = {};
 
-  EXPECT_FALSE(iree_hal_amdgpu_device_buffer_fill_emplace(
-      &context, &packet, (void*)0x2002, /*length=*/16,
+  ASSERT_TRUE(iree_hal_amdgpu_device_buffer_fill_emplace(
+      &context, &packet, (void*)0x2001, /*length=*/20,
       /*pattern=*/0xABCDu,
       /*pattern_length=*/4, &kernargs));
 
-  EXPECT_EQ(packet.setup, 0x55AAu);
-  EXPECT_EQ(packet.kernel_object, 0xDEADCAFEu);
-  EXPECT_EQ(kernargs.target_ptr, (void*)0x1234);
-  EXPECT_EQ(kernargs.element_length, 7u);
-  EXPECT_EQ(kernargs.pattern, 0x99u);
+  EXPECT_EQ(packet.kernel_object, kFillBlockUnalignedX16KernelObject);
+  EXPECT_EQ(kernargs.target_ptr, (void*)0x2001);
+  EXPECT_EQ(kernargs.element_length, 20u);
+  EXPECT_EQ(kernargs.pattern, 0x0000ABCD0000ABCDull);
 }
 
 TEST(BlitTest, CopyEmplaceSelectsBlockCopyForAlignedTransfer) {

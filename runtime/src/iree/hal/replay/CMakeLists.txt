@@ -116,6 +116,7 @@ iree_cc_library(
     ::format
     iree::base
     iree::hal
+    iree::hal::memory::passthrough_pool
     iree::io::file_handle
   PUBLIC
 )
@@ -139,6 +140,8 @@ iree_cc_library(
     "recorder_executable.h"
     "recorder_file.c"
     "recorder_file.h"
+    "recorder_queue.c"
+    "recorder_queue.h"
     "recorder_record.h"
   DEPS
     ::digest
@@ -182,6 +185,7 @@ iree_cc_test(
     iree::base
     iree::hal
     iree::hal::drivers::task::registration
+    iree::hal::memory::passthrough_pool
     iree::hal::testing::mock_device
     iree::io::file_handle
     iree::testing::gtest
@@ -228,10 +232,13 @@ iree_cc_test(
   NAME
     recorder_test
   SRCS
+    "recorder_record.h"
     "recorder_test.cc"
   DEPS
     ::execute
     ::file_reader
+    ::file_writer
+    ::format
     ::recorder
     iree::async
     iree::async::util::proactor_pool

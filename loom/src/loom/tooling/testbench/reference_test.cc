@@ -26,13 +26,12 @@ struct BufferContents {
 };
 
 template <typename T>
-static iree_status_t FillBufferView(iree_hal_buffer_mapping_t* mapping,
-                                    void* user_data) {
-  const BufferContents<T>* contents =
+static iree_status_t FillBufferView(void* user_data,
+                                    iree_byte_span_t buffer_contents) {
+  const BufferContents<T>* values =
       static_cast<const BufferContents<T>*>(user_data);
-  const iree_host_size_t byte_count =
-      contents->count * sizeof(contents->values[0]);
-  memcpy(mapping->contents.data, contents->values, byte_count);
+  const iree_host_size_t byte_count = values->count * sizeof(values->values[0]);
+  memcpy(buffer_contents.data, values->values, byte_count);
   return iree_ok_status();
 }
 
@@ -49,7 +48,6 @@ class ReferenceTest : public ::testing::Test {
         iree_hal_allocator_create_heap(IREE_SV("testbench"), host_allocator_,
                                        host_allocator_, &device_allocator_));
     reference_options_ = {
-        /*.device=*/{},
         /*.device_allocator=*/device_allocator_,
         /*.result_buffer_params=*/BufferParams(),
         /*.host_allocator=*/host_allocator_,
@@ -70,7 +68,7 @@ class ReferenceTest : public ::testing::Test {
         /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
         /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
             IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-        /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+        /*.queue_family_affinity=*/IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
     };
   }
 
@@ -83,10 +81,10 @@ class ReferenceTest : public ::testing::Test {
         /*.count=*/values.size(),
     };
     iree_hal_buffer_view_t* buffer_view = nullptr;
-    IREE_CHECK_OK(iree_hal_buffer_view_generate_buffer(
-        /*device=*/nullptr, device_allocator_, shape.size(), shape.data(),
-        element_type, IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, BufferParams(),
-        FillBufferView<T>, &contents, &buffer_view));
+    IREE_CHECK_OK(iree_hal_buffer_view_generate(
+        device_allocator_, BufferParams(), shape.size(), shape.data(),
+        element_type, IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, FillBufferView<T>,
+        &contents, &buffer_view));
     loom_testbench_value_t value = {};
     IREE_CHECK_OK(
         loom_testbench_value_set_buffer_view_move(buffer_view, &value));

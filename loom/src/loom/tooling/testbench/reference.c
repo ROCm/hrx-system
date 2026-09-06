@@ -1105,14 +1105,16 @@ static iree_status_t loom_testbench_reference_compute_tiled_matmul(
 }
 
 static iree_status_t loom_testbench_reference_fill_matmul_result(
-    iree_hal_buffer_mapping_t* mapping, void* user_data) {
+    void* user_data, iree_byte_span_t contents) {
   const loom_testbench_reference_matmul_result_t* result =
       (const loom_testbench_reference_matmul_result_t*)user_data;
-  if (mapping->contents.data_length < result->data_length) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "reference.matmul result mapping is too small");
+  if (contents.data_length != result->data_length) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "reference.matmul result has %" PRIhsz
+                            " bytes but the buffer view requires %" PRIhsz,
+                            result->data_length, contents.data_length);
   }
-  memcpy(mapping->contents.data, result->data, result->data_length);
+  memcpy(contents.data, result->data, result->data_length);
   return iree_ok_status();
 }
 
@@ -1129,10 +1131,10 @@ static iree_status_t loom_testbench_reference_allocate_matmul_result(
       .data = data,
       .data_length = data_length,
   };
-  return iree_hal_buffer_view_generate_buffer(
-      options->device, options->device_allocator, IREE_ARRAYSIZE(shape), shape,
-      element_type, IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-      options->result_buffer_params,
+  return iree_hal_buffer_view_generate(
+      options->device_allocator, options->result_buffer_params,
+      IREE_ARRAYSIZE(shape), shape, element_type,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
       loom_testbench_reference_fill_matmul_result, &result, out_buffer_view);
 }
 
@@ -1152,10 +1154,10 @@ static iree_status_t loom_testbench_reference_allocate_tiled_matmul_result(
       .data = data,
       .data_length = data_length,
   };
-  return iree_hal_buffer_view_generate_buffer(
-      options->device, options->device_allocator, IREE_ARRAYSIZE(shape), shape,
-      element_type, IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-      options->result_buffer_params,
+  return iree_hal_buffer_view_generate(
+      options->device_allocator, options->result_buffer_params,
+      IREE_ARRAYSIZE(shape), shape, element_type,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
       loom_testbench_reference_fill_matmul_result, &result, out_buffer_view);
 }
 

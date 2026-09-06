@@ -222,6 +222,45 @@ static iree_hal_vulkan_shader_atomic_features_t ShaderAtomicFloatFeatures() {
          IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT64_ADD;
 }
 
+class ScopedDevicePlan : public iree_hal_vulkan_device_plan_t {
+ public:
+  ScopedDevicePlan() : iree_hal_vulkan_device_plan_t{} {}
+
+  ~ScopedDevicePlan() {
+    if (initialized_) {
+      iree_hal_vulkan_device_plan_deinitialize(this);
+    }
+  }
+
+  iree_hal_vulkan_device_plan_t* Initialize() {
+    initialized_ = true;
+    return this;
+  }
+
+ private:
+  bool initialized_ = false;
+};
+
+static iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
+    const iree_hal_vulkan_physical_device_snapshot_t* snapshot,
+    const iree_hal_vulkan_device_options_t* device_options,
+    iree_hal_vulkan_request_flags_t request_flags,
+    iree_hal_vulkan_features_t required_features, ScopedDevicePlan* out_plan) {
+  return ::iree_hal_vulkan_device_plan_initialize_for_create(
+      snapshot, device_options, request_flags, required_features,
+      iree_allocator_system(), out_plan->Initialize());
+}
+
+static iree_status_t iree_hal_vulkan_device_plan_initialize_for_wrap(
+    const iree_hal_vulkan_physical_device_snapshot_t* snapshot,
+    const iree_hal_vulkan_device_options_t* device_options,
+    const iree_hal_vulkan_external_device_params_t* external_device_params,
+    ScopedDevicePlan* out_plan) {
+  return ::iree_hal_vulkan_device_plan_initialize_for_wrap(
+      snapshot, device_options, external_device_params, iree_allocator_system(),
+      out_plan->Initialize());
+}
+
 static bool PlanContainsExtension(const iree_hal_vulkan_device_plan_t& plan,
                                   const char* extension_name) {
   for (uint32_t i = 0; i < plan.enabled_extension_count; ++i) {
@@ -232,17 +271,17 @@ static bool PlanContainsExtension(const iree_hal_vulkan_device_plan_t& plan,
   return false;
 }
 
-TEST(DevicePlanTest, OwnedCreatePrefersDedicatedComputeFamily) {
+TEST(DevicePlanTest, OwnedCreateInventoriesEverySelectedFamilyQueue) {
   PhysicalDeviceSnapshotBuilder builder;
   builder.AddQueueFamily(
       VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 2);
-  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
-  builder.AddQueueFamily(VK_QUEUE_TRANSFER_BIT, 1);
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 3);
+  builder.AddQueueFamily(VK_QUEUE_TRANSFER_BIT, 4);
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
   options.flags = IREE_HAL_VULKAN_DEVICE_FLAG_DEDICATED_COMPUTE_QUEUE;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
       builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
       NoFeatures(), &plan));
@@ -252,17 +291,37 @@ TEST(DevicePlanTest, OwnedCreatePrefersDedicatedComputeFamily) {
   EXPECT_EQ(0u, plan.queue_assignment.compute.queue_index);
   EXPECT_EQ(2u, plan.queue_assignment.transfer.family_index);
   EXPECT_EQ(0u, plan.queue_assignment.transfer.queue_index);
+  EXPECT_EQ(0u, plan.queue_assignment.compute.family_ordinal);
+  EXPECT_EQ(0u, plan.queue_assignment.compute.queue_ordinal);
+  EXPECT_EQ(1u, plan.queue_assignment.transfer.family_ordinal);
+  EXPECT_EQ(0u, plan.queue_assignment.transfer.queue_ordinal);
+  ASSERT_EQ(2u, plan.queue_inventory.family_count);
+  EXPECT_EQ(1u, plan.queue_inventory.families[0].native_family_index);
+  EXPECT_EQ(3u, plan.queue_inventory.families[0].queue_count);
+  EXPECT_EQ(0u, plan.queue_inventory.families[0].queue_offset);
+  EXPECT_EQ(2u, plan.queue_inventory.families[1].native_family_index);
+  EXPECT_EQ(4u, plan.queue_inventory.families[1].queue_count);
+  EXPECT_EQ(3u, plan.queue_inventory.families[1].queue_offset);
+  ASSERT_EQ(7u, plan.queue_inventory.queue_count);
+  const uint32_t expected_queue_indices[] = {0, 1, 2, 0, 1, 2, 3};
+  EXPECT_EQ(
+      0, std::memcmp(plan.queue_inventory.queue_indices, expected_queue_indices,
+                     sizeof(expected_queue_indices)));
   EXPECT_EQ(2u, plan.queue_create_info_count);
+  EXPECT_EQ(1u, plan.queue_create_infos[0].queueFamilyIndex);
+  EXPECT_EQ(3u, plan.queue_create_infos[0].queueCount);
+  EXPECT_EQ(2u, plan.queue_create_infos[1].queueFamilyIndex);
+  EXPECT_EQ(4u, plan.queue_create_infos[1].queueCount);
 }
 
 TEST(DevicePlanTest,
      OwnedCreateUsesSecondQueueWhenTransferSharesComputeFamily) {
   PhysicalDeviceSnapshotBuilder builder;
-  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 2);
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT, 2);
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
       builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
       NoFeatures(), &plan));
@@ -271,6 +330,13 @@ TEST(DevicePlanTest,
   EXPECT_EQ(0u, plan.queue_assignment.compute.queue_index);
   EXPECT_EQ(0u, plan.queue_assignment.transfer.family_index);
   EXPECT_EQ(1u, plan.queue_assignment.transfer.queue_index);
+  EXPECT_EQ(0u, plan.queue_assignment.compute.queue_ordinal);
+  EXPECT_EQ(1u, plan.queue_assignment.transfer.queue_ordinal);
+  ASSERT_EQ(1u, plan.queue_inventory.family_count);
+  EXPECT_TRUE(iree_all_bits_set(plan.queue_inventory.families[0].flags,
+                                VK_QUEUE_TRANSFER_BIT));
+  EXPECT_EQ(2u, plan.queue_inventory.families[0].queue_count);
+  EXPECT_EQ(2u, plan.queue_inventory.queue_count);
   EXPECT_EQ(1u, plan.queue_create_info_count);
   EXPECT_EQ(2u, plan.queue_create_infos[0].queueCount);
 }
@@ -284,7 +350,7 @@ TEST(DevicePlanTest, OwnedCreateKeepsSparseBindingSeparateFromSparseResidency) {
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
       builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
       GeneralFeatures(IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_BINDING), &plan));
@@ -309,7 +375,7 @@ TEST(DevicePlanTest, OwnedCreateRequiresCompleteSparseResidencyRequest) {
       GeneralFeatures(IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_RESIDENCY_ALIASED &
                       ~IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_BINDING);
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(
       StatusCode::kInvalidArgument,
       iree_hal_vulkan_device_plan_initialize_for_create(
@@ -324,7 +390,7 @@ TEST(DevicePlanTest, OwnedCreateRequiresBufferDeviceAddressBaseline) {
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(
       StatusCode::kUnavailable,
       iree_hal_vulkan_device_plan_initialize_for_create(
@@ -338,7 +404,7 @@ TEST(DevicePlanTest, OwnedCreateEnablesBaselineBufferDeviceAddress) {
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
       builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
       NoFeatures(), &plan));
@@ -356,7 +422,7 @@ TEST(DevicePlanTest, OwnedCreateReportsAvailableScalarShaderFeatures) {
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
       builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
       NoFeatures(), &plan));
@@ -412,7 +478,7 @@ TEST(DevicePlanTest, OwnedCreateRejectsRequiredUnavailableReportedFeature) {
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(
       StatusCode::kUnavailable,
       iree_hal_vulkan_device_plan_initialize_for_create(
@@ -428,7 +494,7 @@ TEST(DevicePlanTest,
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(
       StatusCode::kUnavailable,
       iree_hal_vulkan_device_plan_initialize_for_create(
@@ -445,7 +511,7 @@ TEST(DevicePlanTest, OwnedCreateEnablesCooperativeMatrixWhenAvailable) {
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
       builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
       NoFeatures(), &plan));
@@ -482,7 +548,7 @@ TEST(DevicePlanTest, OwnedCreateEnablesMemoryBudgetWhenAvailable) {
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
       builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
       NoFeatures(), &plan));
@@ -501,7 +567,7 @@ TEST(DevicePlanTest, OwnedCreateEnablesShaderBfloat16WhenAvailable) {
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
       builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
       NoFeatures(), &plan));
@@ -548,7 +614,7 @@ TEST(DevicePlanTest, OwnedCreateRejectsRequiredShaderBfloat16WhenUnavailable) {
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(
       StatusCode::kUnavailable,
       iree_hal_vulkan_device_plan_initialize_for_create(
@@ -564,7 +630,7 @@ TEST(DevicePlanTest, OwnedCreateEnablesShaderAtomicFloatWhenAvailable) {
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
       builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
       NoFeatures(), &plan));
@@ -608,7 +674,7 @@ TEST(DevicePlanTest,
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
       builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
       NoFeatures(), &plan));
@@ -628,7 +694,7 @@ TEST(DevicePlanTest,
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(
       StatusCode::kUnavailable,
       iree_hal_vulkan_device_plan_initialize_for_create(
@@ -644,7 +710,7 @@ TEST(DevicePlanTest,
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(
       StatusCode::kUnavailable,
       iree_hal_vulkan_device_plan_initialize_for_create(
@@ -663,7 +729,7 @@ TEST(DevicePlanTest,
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
       builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
       NoFeatures(), &plan));
@@ -685,7 +751,7 @@ TEST(DevicePlanTest, OwnedCreateCarriesRequestFlags) {
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
       builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_DEBUG_UTILS,
       NoFeatures(), &plan));
@@ -699,7 +765,7 @@ TEST(DevicePlanTest, OwnedCreateRejectsUnknownRequestFlags) {
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(StatusCode::kInvalidArgument,
                         iree_hal_vulkan_device_plan_initialize_for_create(
                             builder.snapshot(), &options,
@@ -718,22 +784,22 @@ TEST(DevicePlanTest, WrapRejectsRequestFlagsInEnabledFeatures) {
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(StatusCode::kInvalidArgument,
                         iree_hal_vulkan_device_plan_initialize_for_wrap(
                             builder.snapshot(), &options, &params, &plan));
 }
 
-TEST(DevicePlanTest, WrapInfersTransferFromComputeWhenSupported) {
+TEST(DevicePlanTest, WrapInfersImplicitTransferFromCompute) {
   PhysicalDeviceSnapshotBuilder builder;
-  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT, 1);
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
   iree_hal_vulkan_external_device_params_t params = DefaultExternalParams();
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_wrap(
       builder.snapshot(), &options, &params, &plan));
 
@@ -741,7 +807,6 @@ TEST(DevicePlanTest, WrapInfersTransferFromComputeWhenSupported) {
   EXPECT_EQ(0u, plan.queue_assignment.compute.queue_index);
   EXPECT_EQ(0u, plan.queue_assignment.transfer.family_index);
   EXPECT_EQ(0u, plan.queue_assignment.transfer.queue_index);
-  EXPECT_EQ(1ull << 1, plan.queue_assignment.transfer.affinity);
 }
 
 TEST(DevicePlanTest, WrapCarriesRequestFlags) {
@@ -754,7 +819,7 @@ TEST(DevicePlanTest, WrapCarriesRequestFlags) {
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_wrap(
       builder.snapshot(), &options, &params, &plan));
 
@@ -773,7 +838,7 @@ TEST(DevicePlanTest, WrapCarriesStorageBuffer16BitAccessWhenAvailable) {
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_wrap(
       builder.snapshot(), &options, &params, &plan));
 
@@ -794,7 +859,7 @@ TEST(DevicePlanTest,
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition,
                         iree_hal_vulkan_device_plan_initialize_for_wrap(
                             builder.snapshot(), &options, &params, &plan));
@@ -812,7 +877,7 @@ TEST(DevicePlanTest, WrapRejectsCooperativeMatrixWithoutEnabledExtension) {
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition,
                         iree_hal_vulkan_device_plan_initialize_for_wrap(
                             builder.snapshot(), &options, &params, &plan));
@@ -832,7 +897,7 @@ TEST(DevicePlanTest, WrapRejectsCooperativeMatrixWhenFeatureIsUnavailable) {
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition,
                         iree_hal_vulkan_device_plan_initialize_for_wrap(
                             builder.snapshot(), &options, &params, &plan));
@@ -854,7 +919,7 @@ TEST(DevicePlanTest, WrapCarriesShaderBfloat16WhenAvailable) {
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_wrap(
       builder.snapshot(), &options, &params, &plan));
 
@@ -881,7 +946,7 @@ TEST(DevicePlanTest, WrapRejectsShaderBfloat16WithoutEnabledExtension) {
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition,
                         iree_hal_vulkan_device_plan_initialize_for_wrap(
                             builder.snapshot(), &options, &params, &plan));
@@ -901,7 +966,7 @@ TEST(DevicePlanTest, WrapRejectsShaderBfloat16WhenFeatureIsUnavailable) {
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition,
                         iree_hal_vulkan_device_plan_initialize_for_wrap(
                             builder.snapshot(), &options, &params, &plan));
@@ -921,7 +986,7 @@ TEST(DevicePlanTest, WrapCarriesShaderAtomicFloatFeatures) {
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_wrap(
       builder.snapshot(), &options, &params, &plan));
 
@@ -941,7 +1006,7 @@ TEST(DevicePlanTest, WrapRejectsShaderAtomicFloatWithoutEnabledExtension) {
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition,
                         iree_hal_vulkan_device_plan_initialize_for_wrap(
                             builder.snapshot(), &options, &params, &plan));
@@ -959,7 +1024,7 @@ TEST(DevicePlanTest, WrapRejectsShaderAtomicFloat2WithoutEnabledExtension) {
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition,
                         iree_hal_vulkan_device_plan_initialize_for_wrap(
                             builder.snapshot(), &options, &params, &plan));
@@ -979,7 +1044,7 @@ TEST(DevicePlanTest, WrapRejectsShaderAtomicFloat2WithoutBaseExtension) {
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition,
                         iree_hal_vulkan_device_plan_initialize_for_wrap(
                             builder.snapshot(), &options, &params, &plan));
@@ -999,7 +1064,7 @@ TEST(DevicePlanTest, WrapRejectsUnavailableShaderAtomicFloatFeature) {
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition,
                         iree_hal_vulkan_device_plan_initialize_for_wrap(
                             builder.snapshot(), &options, &params, &plan));
@@ -1015,56 +1080,70 @@ TEST(DevicePlanTest, WrapRejectsUnknownRequestFlags) {
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 
-  iree_hal_vulkan_device_plan_t plan;
+  ScopedDevicePlan plan;
   IREE_EXPECT_STATUS_IS(StatusCode::kInvalidArgument,
                         iree_hal_vulkan_device_plan_initialize_for_wrap(
                             builder.snapshot(), &options, &params, &plan));
 }
 
-TEST(DevicePlanTest, WrapRequiresTransferQueueWhenComputeCannotTransfer) {
+TEST(DevicePlanTest, WrapRejectsQueuesOutsideTheNativeFamily) {
   PhysicalDeviceSnapshotBuilder builder;
-  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT, 1);
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 2);
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
   iree_hal_vulkan_external_device_params_t params = DefaultExternalParams();
   params.compute_queue_set.queue_family_index = 0;
-  params.compute_queue_set.queue_indices = 1ull << 0;
+  params.compute_queue_set.queue_indices = 1ull << 2;
 
-  iree_hal_vulkan_device_plan_t plan;
-  IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition,
+  ScopedDevicePlan plan;
+  IREE_EXPECT_STATUS_IS(StatusCode::kOutOfRange,
                         iree_hal_vulkan_device_plan_initialize_for_wrap(
                             builder.snapshot(), &options, &params, &plan));
 }
 
-TEST(DevicePlanTest, MakeCreateInfoRefreshesSelfReferencesAfterCopy) {
+TEST(DevicePlanTest, WrapInventoriesEverySuppliedQueueWithoutDuplicates) {
   PhysicalDeviceSnapshotBuilder builder;
-  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 2);
-  builder.AddQueueFamily(VK_QUEUE_SPARSE_BINDING_BIT, 1);
+  builder.AddQueueFamily(VK_QUEUE_TRANSFER_BIT, 5);
+  builder.AddQueueFamily(VK_QUEUE_GRAPHICS_BIT, 1);
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT |
+                             VK_QUEUE_SPARSE_BINDING_BIT,
+                         6);
   builder.EnableSparseBinding();
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
+  iree_hal_vulkan_external_device_params_t params = DefaultExternalParams();
+  params.enabled_features.general |=
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_BINDING;
+  params.compute_queue_set.queue_family_index = 2;
+  params.compute_queue_set.queue_indices = (1ull << 1) | (1ull << 5);
+  params.transfer_queue_set.queue_family_index = 0;
+  params.transfer_queue_set.queue_indices = (1ull << 2) | (1ull << 4);
+  params.sparse_binding_queue_set.queue_family_index = 2;
+  params.sparse_binding_queue_set.queue_indices = 1ull << 5;
 
-  iree_hal_vulkan_device_plan_t plan;
-  IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
-      builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
-      GeneralFeatures(IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_BINDING), &plan));
+  ScopedDevicePlan plan;
+  IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_wrap(
+      builder.snapshot(), &options, &params, &plan));
 
-  iree_hal_vulkan_device_plan_t copied_plan = plan;
-  VkDeviceCreateInfo create_info;
-  iree_hal_vulkan_device_plan_make_create_info(&copied_plan, &create_info);
-
-  EXPECT_EQ(&copied_plan.enabled_features2, create_info.pNext);
-  EXPECT_EQ(&copied_plan.enabled_features11,
-            copied_plan.enabled_features2.pNext);
-  EXPECT_EQ(&copied_plan.enabled_features12,
-            copied_plan.enabled_features11.pNext);
-  EXPECT_EQ(&copied_plan.enabled_features13,
-            copied_plan.enabled_features12.pNext);
-  EXPECT_EQ(copied_plan.queue_create_infos, create_info.pQueueCreateInfos);
-  EXPECT_EQ(&copied_plan.queue_priorities[0],
-            copied_plan.queue_create_infos[0].pQueuePriorities);
-  EXPECT_EQ(&copied_plan.queue_priorities[2],
-            copied_plan.queue_create_infos[1].pQueuePriorities);
+  EXPECT_EQ(1u, plan.queue_assignment.compute.queue_index);
+  EXPECT_EQ(1u, plan.queue_assignment.compute.family_ordinal);
+  EXPECT_EQ(0u, plan.queue_assignment.compute.queue_ordinal);
+  EXPECT_EQ(2u, plan.queue_assignment.transfer.queue_index);
+  EXPECT_EQ(0u, plan.queue_assignment.transfer.family_ordinal);
+  EXPECT_EQ(0u, plan.queue_assignment.transfer.queue_ordinal);
+  EXPECT_EQ(5u, plan.queue_assignment.sparse_binding.queue_index);
+  EXPECT_EQ(1u, plan.queue_assignment.sparse_binding.family_ordinal);
+  EXPECT_EQ(1u, plan.queue_assignment.sparse_binding.queue_ordinal);
+  ASSERT_EQ(2u, plan.queue_inventory.family_count);
+  EXPECT_EQ(0u, plan.queue_inventory.families[0].native_family_index);
+  EXPECT_EQ(2u, plan.queue_inventory.families[0].queue_count);
+  EXPECT_EQ(2u, plan.queue_inventory.families[1].native_family_index);
+  EXPECT_EQ(2u, plan.queue_inventory.families[1].queue_count);
+  ASSERT_EQ(4u, plan.queue_inventory.queue_count);
+  const uint32_t expected_queue_indices[] = {2, 4, 1, 5};
+  EXPECT_EQ(
+      0, std::memcmp(plan.queue_inventory.queue_indices, expected_queue_indices,
+                     sizeof(expected_queue_indices)));
 }
 
 }  // namespace

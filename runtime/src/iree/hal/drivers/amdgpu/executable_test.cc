@@ -66,7 +66,7 @@ TEST_F(ExecutableTest, PublishesAndEnforcesResourceLimits) {
 
   Ref<iree_hal_executable_t> executable;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       IREE_SV("command_buffer_dispatch_multi_workgroup_test.bin"),
       executable.out()));
   const iree_hal_executable_function_t function =
@@ -77,8 +77,8 @@ TEST_F(ExecutableTest, PublishesAndEnforcesResourceLimits) {
 
   const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor = nullptr;
   IREE_ASSERT_OK(
-      iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue(
-          executable, function, IREE_HAL_QUEUE_AFFINITY_ANY, &descriptor));
+      iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue_ordinal(
+          executable, function, /*queue_ordinal=*/0, &descriptor));
   ASSERT_NE(descriptor, nullptr);
   EXPECT_EQ(function_info.maximum_workgroup_invocations,
             descriptor->limits.maximum_workgroup_invocations);
@@ -130,8 +130,9 @@ TEST_F(ExecutableTest, PublishesAndEnforcesResourceLimits) {
       [&](uint32_t dynamic_workgroup_local_memory_size) -> iree_status_t {
     Ref<iree_hal_command_buffer_t> command_buffer;
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
-        test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-        IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+        test_device.base_device(), iree_hal_queue_family(test_device.queue()),
+        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+        IREE_HAL_COMMAND_CATEGORY_DISPATCH,
         /*binding_capacity=*/0, command_buffer.out()));
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_begin(command_buffer));
     iree_hal_dispatch_config_t dispatch_config =

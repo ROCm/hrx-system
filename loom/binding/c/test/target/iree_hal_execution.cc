@@ -32,6 +32,8 @@ using HalBufferPtr = HandlePtr<iree_hal_buffer_t, iree_hal_buffer_release>;
 using HalDevicePtr = HandlePtr<iree_hal_device_t, iree_hal_device_release>;
 using HalDeviceGroupPtr =
     HandlePtr<iree_hal_device_group_t, iree_hal_device_group_release>;
+using HalSemaphorePtr =
+    HandlePtr<iree_hal_semaphore_t, iree_hal_semaphore_release>;
 using LaunchConfigProgramPtr = HandlePtr<loomc_launch_config_program_t,
                                          loomc_launch_config_program_release>;
 using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
@@ -225,10 +227,19 @@ loomc_status_t CreateSource(const IreeHalKernelExecutionTarget& target,
   return status;
 }
 
+iree_hal_physical_device_affinity_t QueueFamilyPhysicalDeviceAffinity(
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family) {
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  return queue_spec->families[iree_hal_queue_family_ordinal(queue_family)]
+      .physical_device_affinity;
+}
+
 loomc_status_t CreateHalTargetProfile(
     const IreeHalKernelExecutionTarget& target,
     loomc_target_environment_t* target_environment, iree_hal_device_t* device,
-    TargetProfilePtr* out_profile, ResultPtr* out_result) {
+    const iree_hal_queue_family_t* queue_family, TargetProfilePtr* out_profile,
+    ResultPtr* out_result) {
   loomc_iree_hal_profile_options_t profile_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_PROFILE_OPTIONS,
       /*.structure_size=*/sizeof(profile_options),
@@ -236,7 +247,8 @@ loomc_status_t CreateHalTargetProfile(
       /*.identifier=*/target.target_profile_identifier,
       /*.device=*/device,
       /*.physical_device_affinity=*/
-      target.executable_target_selection.physical_device_affinity,
+      target.executable_target_selection.physical_device_affinity |
+          QueueFamilyPhysicalDeviceAffinity(device, queue_family),
       /*.providers=*/target.profile_providers,
       /*.provider_count=*/target.profile_provider_count,
   };
@@ -329,6 +341,23 @@ loomc_status_t CompileModule(const IreeHalKernelExecutionTarget& target,
   return status;
 }
 
+iree_hal_queue_t* SelectProvisionedQueue(
+    iree_hal_device_t* device,
+    iree_hal_queue_family_role_flags_t required_roles) {
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  for (iree_host_size_t i = 0; i < queue_spec->family_count; ++i) {
+    const iree_hal_queue_family_spec_t* family_spec = &queue_spec->families[i];
+    if (family_spec->provisioned_queue_count > 0 &&
+        iree_all_bits_set(family_spec->role_flags, required_roles)) {
+      return iree_hal_device_queue(
+          device, static_cast<iree_hal_queue_family_ordinal_t>(i),
+          /*queue_ordinal=*/0);
+    }
+  }
+  return nullptr;
+}
+
 iree_status_t AllocateStorageBuffer(iree_hal_device_t* device,
                                     iree_device_size_t buffer_size,
                                     iree_hal_buffer_t** out_buffer) {
@@ -341,11 +370,16 @@ iree_status_t AllocateStorageBuffer(iree_hal_device_t* device,
 
 iree_status_t PrepareExecutableFromArtifact(
     const IreeHalKernelExecutionTarget& target, iree_hal_device_t* device,
-    const loomc_artifact_t* artifact, iree_hal_executable_t** out_executable) {
-  *out_executable = nullptr;
+    iree_hal_queue_t* dispatch_queue, const loomc_artifact_t* artifact,
+    iree_hal_executable_t** out_executable) {
+  iree_hal_executable_target_selection_t target_selection =
+      target.executable_target_selection;
+  target_selection.physical_device_affinity |=
+      QueueFamilyPhysicalDeviceAffinity(device,
+                                        iree_hal_queue_family(dispatch_queue));
   const iree_hal_executable_target_selection_result_t target_result =
       iree_hal_device_spec_select_executable_target(
-          iree_hal_device_spec(device), &target.executable_target_selection);
+          iree_hal_device_spec(device), &target_selection);
   if (target_result.outcome ==
       IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
@@ -364,25 +398,25 @@ iree_status_t PrepareExecutableFromArtifact(
   load_params.executable_data = iree_make_const_byte_span(
       executable_data.data, executable_data.data_length);
   iree_status_t status = iree_hal_device_load_executable(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target, &load_params,
-      out_executable);
+      device, iree_hal_queue_family(dispatch_queue), target_result.target,
+      &load_params, out_executable);
   loomc_allocator_free(loomc_allocator_system(), (void*)executable_data.data);
   return status;
 }
 
-iree_status_t DispatchAndWait(iree_hal_device_t* device,
-                              iree_hal_executable_t* executable,
-                              iree_hal_buffer_t* input_buffer,
-                              iree_hal_buffer_t* output_buffer,
-                              loomc_dimension3_t workgroup_count) {
+iree_status_t Dispatch(iree_hal_device_t* device, iree_hal_queue_t* queue,
+                       iree_hal_executable_t* executable,
+                       iree_hal_buffer_t* input_buffer,
+                       iree_hal_buffer_t* output_buffer,
+                       loomc_dimension3_t workgroup_count,
+                       iree_hal_semaphore_list_t wait_semaphores,
+                       iree_hal_semaphore_list_t signal_semaphores) {
   iree_hal_command_buffer_t* command_buffer = nullptr;
-  iree_hal_semaphore_t* semaphore = nullptr;
   const uint64_t constants[] = {4};
-  uint64_t signal_value = 1;
 
   iree_status_t status = iree_hal_command_buffer_create(
-      device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device, iree_hal_queue_family(queue),
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
       /*binding_capacity=*/0, &command_buffer);
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_begin(command_buffer);
@@ -401,10 +435,9 @@ iree_status_t DispatchAndWait(iree_hal_device_t* device,
     iree_hal_dispatch_config_t dispatch_config =
         iree_hal_make_static_dispatch_config(
             workgroup_count.x, workgroup_count.y, workgroup_count.z);
-    iree_hal_executable_function_t function =
-        iree_hal_executable_function_from_index(0);
     status = iree_hal_command_buffer_dispatch(
-        command_buffer, executable, function, dispatch_config,
+        command_buffer, executable, iree_hal_executable_function_from_index(0),
+        dispatch_config,
         iree_make_const_byte_span(constants, sizeof(constants)), bindings,
         IREE_HAL_DISPATCH_FLAG_NONE);
   }
@@ -412,28 +445,11 @@ iree_status_t DispatchAndWait(iree_hal_device_t* device,
     status = iree_hal_command_buffer_end(command_buffer);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_semaphore_create(
-        device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore);
+    status = iree_hal_queue_execute(queue, wait_semaphores, signal_semaphores,
+                                    command_buffer,
+                                    iree_hal_buffer_binding_table_empty(),
+                                    IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
   }
-  if (iree_status_is_ok(status)) {
-    iree_hal_semaphore_list_t signal_semaphores = {
-        /*.count=*/1,
-        /*.semaphores=*/&semaphore,
-        /*.payload_values=*/&signal_value,
-    };
-    status = iree_hal_device_queue_execute(
-        device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-        signal_semaphores, command_buffer,
-        iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_semaphore_wait(semaphore, signal_value,
-                                     iree_infinite_timeout(),
-                                     IREE_ASYNC_WAIT_FLAG_NONE);
-  }
-
-  iree_hal_semaphore_release(semaphore);
   iree_hal_command_buffer_release(command_buffer);
   return status;
 }
@@ -473,6 +489,12 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
     GTEST_SKIP() << "no live IREE HAL device is available for " << target.label;
   }
   IREE_ASSERT_OK(iree_status);
+  iree_hal_queue_t* transfer_queue = SelectProvisionedQueue(
+      device.get(), IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER);
+  ASSERT_NE(transfer_queue, nullptr);
+  iree_hal_queue_t* dispatch_queue = SelectProvisionedQueue(
+      device.get(), IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH);
+  ASSERT_NE(dispatch_queue, nullptr);
 
   TargetEnvironmentPtr target_environment;
   ContextPtr context;
@@ -489,9 +511,9 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
 
   TargetProfilePtr target_profile;
   ResultPtr result;
-  LOOMC_ASSERT_OK(CreateHalTargetProfile(target, target_environment.get(),
-                                         device.get(), &target_profile,
-                                         &result));
+  LOOMC_ASSERT_OK(CreateHalTargetProfile(
+      target, target_environment.get(), device.get(),
+      iree_hal_queue_family(dispatch_queue), &target_profile, &result));
   if (!ResultSucceeded(result.get(), "IREE HAL target profile creation")) {
     GTEST_SKIP() << target.label << " did not produce a usable target profile";
   }
@@ -569,8 +591,8 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
   ASSERT_GE(loomc_byte_sequence_length(artifact->contents), sizeof(uint32_t));
 
   iree_hal_executable_t* executable = nullptr;
-  IREE_ASSERT_OK(PrepareExecutableFromArtifact(target, device.get(), artifact,
-                                               &executable));
+  IREE_ASSERT_OK(PrepareExecutableFromArtifact(
+      target, device.get(), dispatch_queue, artifact, &executable));
   ExecutablePtr executable_ptr(executable);
 
   std::array<int32_t, 2> input = {7, 10};
@@ -584,24 +606,65 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
       AllocateStorageBuffer(device.get(), sizeof(output), &output_buffer));
   HalBufferPtr output_buffer_ptr(output_buffer);
 
-  IREE_ASSERT_OK(iree_hal_device_transfer_h2d(
-      device.get(), input.data(), input_buffer_ptr.get(), /*target_offset=*/0,
-      sizeof(input), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-      iree_infinite_timeout()));
-  IREE_ASSERT_OK(iree_hal_device_transfer_h2d(
-      device.get(), output.data(), output_buffer_ptr.get(), /*target_offset=*/0,
-      sizeof(output), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-      iree_infinite_timeout()));
+  iree_hal_semaphore_t* transfer_semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device.get(), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &transfer_semaphore));
+  HalSemaphorePtr transfer_semaphore_ptr(transfer_semaphore);
 
-  IREE_ASSERT_OK(DispatchAndWait(device.get(), executable_ptr.get(),
-                                 input_buffer_ptr.get(),
-                                 output_buffer_ptr.get(), workgroup_count));
+  uint64_t upload_value = 1;
+  iree_hal_semaphore_list_t upload_signal = {
+      /*.count=*/1,
+      /*.semaphores=*/&transfer_semaphore,
+      /*.payload_values=*/&upload_value,
+  };
+  iree_hal_transfer_operation_t upload_operations[2] = {};
+  upload_operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+  upload_operations[0].upload.source = input.data();
+  upload_operations[0].upload.target_buffer = input_buffer_ptr.get();
+  upload_operations[0].upload.target_offset = 0;
+  upload_operations[0].upload.length = sizeof(input);
+  upload_operations[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+  upload_operations[1].upload.source = output.data();
+  upload_operations[1].upload.target_buffer = output_buffer_ptr.get();
+  upload_operations[1].upload.target_offset = 0;
+  upload_operations[1].upload.length = sizeof(output);
+  IREE_ASSERT_OK(iree_hal_queue_transfer(
+      transfer_queue, iree_hal_semaphore_list_empty(), upload_signal,
+      IREE_ARRAYSIZE(upload_operations), upload_operations));
 
-  output = {0, 0};
-  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-      device.get(), output_buffer_ptr.get(), /*source_offset=*/0, output.data(),
-      sizeof(output), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-      iree_infinite_timeout()));
+  uint64_t dispatch_value = 2;
+  iree_hal_semaphore_list_t dispatch_wait = {
+      /*.count=*/1,
+      /*.semaphores=*/&transfer_semaphore,
+      /*.payload_values=*/&upload_value,
+  };
+  iree_hal_semaphore_list_t dispatch_signal = {
+      /*.count=*/1,
+      /*.semaphores=*/&transfer_semaphore,
+      /*.payload_values=*/&dispatch_value,
+  };
+  IREE_ASSERT_OK(Dispatch(device.get(), dispatch_queue, executable_ptr.get(),
+                          input_buffer_ptr.get(), output_buffer_ptr.get(),
+                          workgroup_count, dispatch_wait, dispatch_signal));
+
+  uint64_t download_value = 3;
+  iree_hal_semaphore_list_t download_wait = {
+      /*.count=*/1,
+      /*.semaphores=*/&transfer_semaphore,
+      /*.payload_values=*/&dispatch_value,
+  };
+  iree_hal_semaphore_list_t download_signal = {
+      /*.count=*/1,
+      /*.semaphores=*/&transfer_semaphore,
+      /*.payload_values=*/&download_value,
+  };
+  IREE_ASSERT_OK(iree_hal_queue_download(
+      transfer_queue, download_wait, download_signal, output_buffer_ptr.get(),
+      /*source_offset=*/0, output.data(), sizeof(output)));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(transfer_semaphore, download_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
   EXPECT_EQ(output[0], 0);
   EXPECT_EQ(output[1], 20);
 }

@@ -46,9 +46,10 @@ typedef uint32_t iree_hal_memory_file_flags_t;
 // completion before accessing written bytes.
 IREE_API_EXPORT iree_status_t iree_hal_memory_file_wrap(
     iree_hal_allocator_t* device_allocator,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_access_t access,
-    iree_io_file_handle_t* handle, iree_hal_memory_file_flags_t flags,
-    iree_allocator_t host_allocator, iree_hal_file_t** out_file);
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
+    iree_hal_memory_file_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_file_t** out_file);
 
 // Returns true if |file| is a memory file created by
 // iree_hal_memory_file_wrap.

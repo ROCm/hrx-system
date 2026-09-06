@@ -301,7 +301,7 @@ class EventTimestampPoolPendingTest : public EventTimestampPoolTest {
   void SetUp() override {
     EventTimestampPoolTest::SetUp();
     IREE_ASSERT_OK(iree_hal_semaphore_create(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0ull,
+        device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0ull,
         IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore_));
   }
   void TearDown() override {

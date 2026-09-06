@@ -31,10 +31,9 @@ class CommandBufferFillBufferTest : public CtsTestBase<> {
     const iree_host_size_t binding_capacity = indirect ? 1 : 0;
 
     iree_hal_command_buffer_t* command_buffer = NULL;
-    IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-        IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
-        binding_capacity, &command_buffer));
+    IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                       IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                       binding_capacity, &command_buffer));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
     iree_hal_buffer_ref_t target_ref;
@@ -63,10 +62,8 @@ class CommandBufferFillBufferTest : public CtsTestBase<> {
     }
 
     out_data.resize(buffer_size);
-    IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-        device_, device_buffer, /*source_offset=*/0, out_data.data(),
-        buffer_size, IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-        iree_infinite_timeout()));
+    IREE_ASSERT_OK(DownloadBufferData(device_buffer, /*source_offset=*/0,
+                                      out_data.data(), buffer_size));
 
     iree_hal_command_buffer_release(command_buffer);
     iree_hal_buffer_release(device_buffer);

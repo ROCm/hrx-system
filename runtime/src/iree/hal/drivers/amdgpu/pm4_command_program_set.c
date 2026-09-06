@@ -7,7 +7,6 @@
 #include "iree/hal/drivers/amdgpu/pm4_command_program_set.h"
 
 #include "iree/base/internal/math.h"
-#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 
 static iree_status_t iree_hal_amdgpu_pm4_command_program_layout_append_region(
     iree_host_size_t alignment, iree_host_size_t element_byte_length,
@@ -40,8 +39,6 @@ static iree_status_t iree_hal_amdgpu_pm4_command_program_layout_append_region(
 }
 
 iree_status_t iree_hal_amdgpu_pm4_command_program_set_initialize(
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_host_size_t physical_device_ordinal,
     iree_host_size_t physical_queue_count,
     iree_hal_amdgpu_pm4_command_program_set_flags_t flags,
     iree_hal_amdgpu_pm4_command_buffer_profile_plan_t* profile_plans,
@@ -56,53 +53,16 @@ iree_status_t iree_hal_amdgpu_pm4_command_program_set_initialize(
                             flags & ~supported_flags);
   }
   if (IREE_UNLIKELY(physical_queue_count == 0 ||
-                    physical_queue_count > IREE_HAL_MAX_QUEUES)) {
+                    physical_queue_count >
+                        IREE_HAL_AMDGPU_PM4_PHYSICAL_QUEUE_CAPACITY)) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "physical queue count %" PRIhsz " must be in [1, %" PRIhsz "]",
-        physical_queue_count, (iree_host_size_t)IREE_HAL_MAX_QUEUES);
+        physical_queue_count, IREE_HAL_AMDGPU_PM4_PHYSICAL_QUEUE_CAPACITY);
   }
-  if (IREE_UNLIKELY(physical_device_ordinal >= IREE_HAL_MAX_QUEUES)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "physical device ordinal %" PRIhsz
-                            " exceeds queue affinity capacity %" PRIhsz,
-                            physical_device_ordinal,
-                            (iree_host_size_t)IREE_HAL_MAX_QUEUES);
-  }
-
-  const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-      .supported_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
-      .physical_device_count = physical_device_ordinal + 1,
-      .queue_count_per_physical_device = physical_queue_count,
-  };
-  iree_hal_queue_affinity_t physical_device_affinity = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_for_physical_device(
-      domain, physical_device_ordinal, &physical_device_affinity));
-  iree_hal_queue_affinity_t selected_affinity = queue_affinity;
-  if (iree_hal_queue_affinity_is_any(selected_affinity)) {
-    selected_affinity = physical_device_affinity;
-  }
-  if (IREE_UNLIKELY(
-          iree_hal_queue_affinity_is_empty(selected_affinity) ||
-          iree_any_bit_set(selected_affinity, ~physical_device_affinity))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "PM4 command-buffer affinity 0x%" PRIx64
-                            " must select queues on physical device %" PRIhsz,
-                            queue_affinity, physical_device_ordinal);
-  }
-
-  uint64_t eligible_queue_mask = 0;
-  for (iree_host_size_t physical_queue_ordinal = 0;
-       physical_queue_ordinal < physical_queue_count;
-       ++physical_queue_ordinal) {
-    iree_hal_queue_affinity_t singleton_affinity = 0;
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_for_physical_queue(
-        domain, physical_device_ordinal, physical_queue_ordinal,
-        &singleton_affinity));
-    if (iree_any_bit_set(selected_affinity, singleton_affinity)) {
-      eligible_queue_mask |= (uint64_t)1 << physical_queue_ordinal;
-    }
-  }
+  const uint64_t eligible_queue_mask =
+      physical_queue_count == 64 ? UINT64_MAX
+                                 : (((uint64_t)1 << physical_queue_count) - 1u);
 
   const bool has_profile = iree_any_bit_set(
       flags, IREE_HAL_AMDGPU_PM4_COMMAND_PROGRAM_SET_FLAG_PROFILE);

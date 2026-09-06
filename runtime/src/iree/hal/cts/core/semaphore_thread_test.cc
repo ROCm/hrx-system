@@ -20,9 +20,9 @@ class SemaphoreThreadTest : public CtsTestBase<> {};
 // Tests waiting on a semaphore that signals past the desired value.
 TEST_P(SemaphoreThreadTest, WaitLaterSignaledBeyond) {
   iree_hal_semaphore_t* semaphore = NULL;
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 2ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 2ull,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
 
   std::thread thread([&]() {
     // Signal beyond the desired value.
@@ -41,12 +41,12 @@ TEST_P(SemaphoreThreadTest, WaitLaterSignaledBeyond) {
 TEST_P(SemaphoreThreadTest, WaitAnyLaterSignaled) {
   iree_hal_semaphore_t* semaphore_a = NULL;
   iree_hal_semaphore_t* semaphore_b = NULL;
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_a));
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_b));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0ull,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_a));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0ull,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_b));
 
   iree_hal_semaphore_t* semaphore_ptrs[] = {semaphore_a, semaphore_b};
   uint64_t payload_values[] = {1ull, 1ull};
@@ -74,11 +74,11 @@ TEST_P(SemaphoreThreadTest, PingPong) {
   iree_hal_semaphore_t* a2b = NULL;
   iree_hal_semaphore_t* b2a = NULL;
   IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &a2b));
+      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+                                0ull, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &a2b));
   IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &b2a));
+      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+                                0ull, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &b2a));
   std::thread thread([&]() {
     // Should advance right past this because the value is already set.
     IREE_ASSERT_OK(iree_hal_semaphore_wait(

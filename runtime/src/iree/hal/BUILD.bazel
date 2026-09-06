@@ -45,7 +45,6 @@ iree_runtime_cc_library(
         "buffer.c",
         "buffer_heap.c",
         "buffer_heap_impl.h",
-        "buffer_transfer.c",
         "buffer_view.c",
         "buffer_view_util.c",
         "channel.c",
@@ -70,6 +69,7 @@ iree_runtime_cc_library(
         "profile_metrics.c",
         "profile_options.c",
         "profile_sink.c",
+        "queue.c",
         "semaphore.c",
         "string_util.c",
         "topology.c",
@@ -80,7 +80,6 @@ iree_runtime_cc_library(
         "api.h",
         "atomic.h",
         "buffer.h",
-        "buffer_transfer.h",
         "buffer_view.h",
         "buffer_view_util.h",
         "channel.h",
@@ -207,27 +206,6 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:fpu_state",
         "//runtime/src/iree/base/internal:span",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "buffer_view_util_test",
-    srcs = ["buffer_view_util_test.cc"],
-    deps = [
-        ":hal",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "queue_test",
-    srcs = ["queue_test.cc"],
-    deps = [
-        ":hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

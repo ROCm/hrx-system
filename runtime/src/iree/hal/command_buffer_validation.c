@@ -17,7 +17,7 @@
 #include "iree/hal/executable.h"
 #include "iree/hal/resource.h"
 
-// Returns success iff the queue supports the given command categories.
+// Returns success iff the command buffer was created for the given categories.
 static iree_status_t iree_hal_command_buffer_validate_categories(
     const iree_hal_command_buffer_t* command_buffer,
     const iree_hal_command_buffer_validation_state_t* validation_state,

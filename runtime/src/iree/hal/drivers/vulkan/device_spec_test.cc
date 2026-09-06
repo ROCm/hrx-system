@@ -284,14 +284,29 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
       IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_INT64;
   device_plan.enabled_extensions =
       IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_CALIBRATED_TIMESTAMPS;
-  device_plan.queue_assignment.queue_count = 2;
-  device_plan.queue_assignment.compute.affinity = 1ull << 0;
-  device_plan.queue_assignment.transfer.affinity = 1ull << 1;
-  device_plan.queue_assignment.compute.flags =
-      VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT;
-  device_plan.queue_assignment.transfer.flags = VK_QUEUE_TRANSFER_BIT;
-  device_plan.queue_assignment.compute.timestamp_valid_bits = 64;
-  device_plan.queue_assignment.transfer.timestamp_valid_bits = 48;
+  uint32_t queue_indices[] = {0, 1, 0};
+  iree_hal_vulkan_queue_family_plan_t queue_families[] = {
+      {
+          /*.native_family_index=*/2,
+          /*.flags=*/VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT,
+          /*.timestamp_valid_bits=*/64,
+          /*.queue_count=*/2,
+          /*.queue_offset=*/0,
+      },
+      {
+          /*.native_family_index=*/5,
+          /*.flags=*/VK_QUEUE_TRANSFER_BIT,
+          /*.timestamp_valid_bits=*/48,
+          /*.queue_count=*/1,
+          /*.queue_offset=*/2,
+      },
+  };
+  device_plan.queue_inventory = {
+      /*.family_count=*/IREE_ARRAYSIZE(queue_families),
+      /*.families=*/queue_families,
+      /*.queue_count=*/IREE_ARRAYSIZE(queue_indices),
+      /*.queue_indices=*/queue_indices,
+  };
 
   iree_hal_vulkan_device_spec_params_t params = {
       /*.logical_device_id=*/IREE_SV("vulkan://0"),
@@ -319,10 +334,9 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
       iree_hal_device_spec_queues(device_spec);
   ASSERT_NE(queues, nullptr);
   ASSERT_EQ(queues->family_count, 2);
-  EXPECT_TRUE(
-      iree_string_view_equal(queues->families[0].name, IREE_SV("compute")));
-  EXPECT_EQ(queues->families[0].queue_count, 1);
-  EXPECT_EQ(queues->families[0].queue_affinity, 1u);
+  EXPECT_TRUE(iree_string_view_equal(queues->families[0].name,
+                                     IREE_SV("queue-family-2")));
+  EXPECT_EQ(queues->families[0].provisioned_queue_count, 2);
   EXPECT_EQ(queues->families[0].timestamp_valid_bits, 64u);
   EXPECT_EQ(queues->families[0].timestamp_frequency_hz, 1000000000ull);
   EXPECT_EQ(queues->families[0].role_flags,
@@ -342,10 +356,9 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
                 .zero_compute_atomic_capabilities.operations.device_scope_32,
             IREE_HAL_ATOMIC_OPERATION_FLAG_NONE);
 
-  EXPECT_TRUE(
-      iree_string_view_equal(queues->families[1].name, IREE_SV("transfer")));
-  EXPECT_EQ(queues->families[1].queue_count, 1);
-  EXPECT_EQ(queues->families[1].queue_affinity, 2u);
+  EXPECT_TRUE(iree_string_view_equal(queues->families[1].name,
+                                     IREE_SV("queue-family-5")));
+  EXPECT_EQ(queues->families[1].provisioned_queue_count, 1);
   EXPECT_EQ(queues->families[1].timestamp_valid_bits, 48u);
   EXPECT_EQ(queues->families[1].role_flags,
             IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |

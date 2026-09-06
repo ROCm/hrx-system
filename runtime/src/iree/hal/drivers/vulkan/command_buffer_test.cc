@@ -189,6 +189,7 @@ using CommandBufferPtr =
 class VulkanCommandBufferTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    iree_hal_queue_family_initialize(/*ordinal=*/0, &queue_family_);
     IREE_ASSERT_OK(iree_hal_allocator_create_heap(
         iree_make_cstring_view("vulkan_command_buffer_test"),
         iree_allocator_system(), iree_allocator_system(), &device_allocator_));
@@ -211,13 +212,17 @@ class VulkanCommandBufferTest : public ::testing::Test {
           IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT) {
     iree_hal_command_buffer_t* command_buffer = nullptr;
     IREE_EXPECT_OK(iree_hal_vulkan_command_buffer_create(
-        device_allocator_, mode, IREE_HAL_COMMAND_CATEGORY_ANY,
-        IREE_HAL_QUEUE_AFFINITY_ANY, binding_capacity, &atomic_pipelines_,
+        device_allocator_, &queue_family_,
+        VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, mode,
+        IREE_HAL_COMMAND_CATEGORY_ANY, binding_capacity, &atomic_pipelines_,
         &block_pool_, iree_allocator_system(), &command_buffer));
     return CommandBufferPtr(command_buffer);
   }
 
  private:
+  // Canonical family identity borrowed by command buffers in this fixture.
+  iree_hal_queue_family_t queue_family_;
+
   // Test allocator borrowed by command buffers for validation.
   iree_hal_allocator_t* device_allocator_ = nullptr;
 

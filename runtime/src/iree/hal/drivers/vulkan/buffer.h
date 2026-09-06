@@ -106,6 +106,10 @@ iree_status_t iree_hal_vulkan_buffer_handle(iree_hal_buffer_t* buffer,
                                             VkDeviceMemory* out_memory,
                                             VkBuffer* out_handle);
 
+// Returns the byte length of the Vulkan buffer handle backing |buffer|.
+iree_status_t iree_hal_vulkan_buffer_handle_length(
+    iree_hal_buffer_t* buffer, VkDeviceSize* out_handle_length);
+
 // Returns the Vulkan buffer device address backing |buffer| plus its byte
 // offset. Returns 0 when the backing buffer has no device address. Fails if the
 // offset cannot be represented in a VkDeviceAddress.

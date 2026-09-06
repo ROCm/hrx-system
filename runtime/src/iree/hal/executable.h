@@ -306,6 +306,14 @@ IREE_API_EXPORT void iree_hal_executable_retain(
 IREE_API_EXPORT void iree_hal_executable_release(
     iree_hal_executable_t* executable);
 
+// Returns the queue family the executable was loaded for.
+//
+// The returned family is borrowed from the parent device. The parent device
+// must outlive the executable. The executable may only be dispatched on queues
+// and command buffers belonging to this exact family.
+IREE_API_EXPORT const iree_hal_queue_family_t* iree_hal_executable_queue_family(
+    const iree_hal_executable_t* executable);
+
 // Returns the total number of dispatchable functions in the |executable|.
 IREE_API_EXPORT iree_host_size_t
 iree_hal_executable_function_count(iree_hal_executable_t* executable);
@@ -357,13 +365,12 @@ IREE_API_EXPORT iree_status_t iree_hal_executable_global_info(
 
 // Returns a device buffer aliasing |global| storage.
 //
-// |queue_affinity| selects the device instance for per-device globals. Empty or
-// any affinities select an implementation-defined valid device instance. The
-// returned buffer is owned by the executable and is borrowed by the caller.
-// Callers must ensure the executable outlives all uses of the returned buffer.
+// The returned buffer is owned by the executable and is borrowed by the
+// caller. Callers must ensure the executable outlives all uses of the returned
+// buffer.
 IREE_API_EXPORT iree_status_t iree_hal_executable_global_buffer(
     iree_hal_executable_t* executable, iree_hal_executable_global_t global,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer);
+    iree_hal_buffer_t** out_buffer);
 
 //===----------------------------------------------------------------------===//
 // iree_hal_executable_t implementation details
@@ -399,9 +406,25 @@ typedef struct iree_hal_executable_vtable_t {
 
   iree_status_t(IREE_API_PTR* global_buffer)(
       iree_hal_executable_t* executable, iree_hal_executable_global_t global,
-      iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer);
+      iree_hal_buffer_t** out_buffer);
 } iree_hal_executable_vtable_t;
 IREE_HAL_ASSERT_VTABLE_LAYOUT(iree_hal_executable_vtable_t);
+
+// Common executable state embedded at offset zero in every implementation.
+struct iree_hal_executable_t {
+  // Base HAL resource state. Must be at offset zero.
+  iree_hal_resource_t resource;
+
+  // Queue family the executable was loaded for. Borrowed from the parent
+  // device, which must outlive the executable.
+  const iree_hal_queue_family_t* queue_family;
+};
+
+// Initializes |out_executable| with one owning reference.
+IREE_API_EXPORT void iree_hal_executable_initialize(
+    const iree_hal_queue_family_t* queue_family,
+    const iree_hal_executable_vtable_t* vtable,
+    iree_hal_executable_t* out_executable);
 
 IREE_API_EXPORT void iree_hal_executable_destroy(
     iree_hal_executable_t* executable);

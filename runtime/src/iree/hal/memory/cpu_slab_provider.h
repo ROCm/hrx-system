@@ -37,7 +37,8 @@ extern "C" {
 // with no special alignment, registration, or NUMA affinity.
 //
 // Reports IREE_HAL_CPU_SLAB_PROVIDER_MEMORY_TYPE and supports
-// IREE_HAL_CPU_SLAB_PROVIDER_BUFFER_USAGE.
+// IREE_HAL_CPU_SLAB_PROVIDER_BUFFER_USAGE. Materialized buffers are accessible
+// to every queue family in the containing logical device.
 //
 // This is the simplest slab provider; intended for CPU-only testing and as
 // the backing for pass-through pools on host targets.

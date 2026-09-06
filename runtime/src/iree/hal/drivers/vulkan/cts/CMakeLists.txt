@@ -344,6 +344,7 @@ iree_cc_test(
     iree::hal
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
+    iree::hal::memory::passthrough_pool
     iree::testing::gtest
   LABELS
     "iree-build-requirement=runtime.hal.vulkan"
@@ -392,6 +393,7 @@ iree_cc_test(
     iree::hal::cts::util::profile_test_util
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
+    iree::hal::memory::passthrough_pool
     iree::testing::gtest
   LABELS
     "iree-build-requirement=runtime.hal.vulkan"
@@ -622,6 +624,28 @@ iree_cc_test(
     ::vulkan_file_test
     iree::base::tooling::flags
     iree::hal::cts::file::file_test
+    iree::hal::cts::util::registry
+    iree::hal::cts::util::test_base
+    iree::testing::gtest
+  LABELS
+    "iree-build-requirement=runtime.hal.vulkan"
+    "iree-run-requirement=runtime.resource.vulkan_device"
+    "runtime-resource=vulkan-device"
+  RESOURCE_GROUP
+    iree-hal-drivers-vulkan-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_VULKAN)
+iree_cc_test(
+  NAME
+    queue_tests
+  SRCS
+    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
+  DEPS
+    ::backends
+    iree::base::tooling::flags
+    iree::hal::cts::queue::queue_test
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
     iree::testing::gtest

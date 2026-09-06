@@ -11,6 +11,7 @@
 
 #include "iree/hal/cts/sanitizer/sanitizer_test_util.h"
 #include "iree/hal/cts/util/registry.h"
+#include "iree/hal/memory/passthrough_pool.h"
 
 namespace iree::hal::cts {
 
@@ -52,9 +53,9 @@ static iree_hal_buffer_params_t AsanQueueAllocaBufferParams() {
 }
 
 static iree_status_t DispatchAsanAllocationSelector(
-    iree_hal_device_t* device, iree_hal_executable_t* executable,
-    iree_hal_buffer_ref_list_t bindings, uint32_t selector,
-    uint32_t access_length, int32_t address_adjustment) {
+    iree_hal_device_t* device, iree_hal_queue_t* queue,
+    iree_hal_executable_t* executable, iree_hal_buffer_ref_list_t bindings,
+    uint32_t selector, uint32_t access_length, int32_t address_adjustment) {
   const uint32_t constant_data[] = {
       selector,
       access_length,
@@ -65,9 +66,8 @@ static iree_status_t DispatchAsanAllocationSelector(
 
   SemaphoreList empty_wait;
   SemaphoreList dispatch_signal(device, {0}, {1});
-  IREE_RETURN_IF_ERROR(iree_hal_device_queue_dispatch(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dispatch_signal,
-      executable,
+  IREE_RETURN_IF_ERROR(iree_hal_queue_dispatch(
+      queue, empty_wait, dispatch_signal, executable,
       iree_hal_executable_function_from_index(kAsanAllocationBindingEntrypoint),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
@@ -76,8 +76,9 @@ static iree_status_t DispatchAsanAllocationSelector(
 }
 
 static iree_status_t DispatchAsanAllocationRawAddress(
-    iree_hal_device_t* device, iree_hal_executable_t* executable,
-    uint64_t address, uint32_t selector, uint32_t access_length) {
+    iree_hal_device_t* device, iree_hal_queue_t* queue,
+    iree_hal_executable_t* executable, uint64_t address, uint32_t selector,
+    uint32_t access_length) {
   const uint32_t constant_data[] = {
       static_cast<uint32_t>(address),
       static_cast<uint32_t>(address >> 32),
@@ -90,9 +91,8 @@ static iree_status_t DispatchAsanAllocationRawAddress(
   SemaphoreList empty_wait;
   SemaphoreList dispatch_signal(device, {0}, {1});
   iree_hal_buffer_ref_list_t empty_bindings = iree_hal_buffer_ref_list_empty();
-  IREE_RETURN_IF_ERROR(iree_hal_device_queue_dispatch(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dispatch_signal,
-      executable,
+  IREE_RETURN_IF_ERROR(iree_hal_queue_dispatch(
+      queue, empty_wait, dispatch_signal, executable,
       iree_hal_executable_function_from_index(
           kAsanAllocationRawAddressEntrypoint),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, empty_bindings,
@@ -156,8 +156,8 @@ class AsanAllocationTest : public ::testing::TestWithParam<BackendInfo> {
     }
 
     iree_hal_executable_target_selection_result_t result;
-    IREE_ASSERT_OK(
-        SelectBackendExecutableTarget(device(), GetParam(), &result));
+    IREE_ASSERT_OK(SelectBackendExecutableTarget(
+        device(), iree_hal_queue_family(queue()), GetParam(), &result));
     if (result.outcome ==
         IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
       GTEST_SKIP() << "Executable target '"
@@ -173,18 +173,19 @@ class AsanAllocationTest : public ::testing::TestWithParam<BackendInfo> {
     iree_hal_executable_load_params_initialize(&load_params);
     load_params.executable_data = executable_data;
     IREE_ASSERT_OK(iree_hal_device_load_executable(
-        device(), IREE_HAL_QUEUE_AFFINITY_ANY, result.target, &load_params,
+        device(), iree_hal_queue_family(queue()), result.target, &load_params,
         executable_.out()));
   }
 
   void TearDown() override {
     if (device()) {
-      IREE_EXPECT_OK(
-          iree_hal_device_queue_flush(device(), IREE_HAL_QUEUE_AFFINITY_ANY));
+      IREE_EXPECT_OK(iree_hal_queue_flush(asan_device_.queue()));
     }
   }
 
   iree_hal_device_t* device() const { return asan_device_.device(); }
+
+  iree_hal_queue_t* queue() const { return asan_device_.queue(); }
 
   iree_hal_allocator_t* allocator() const { return asan_device_.allocator(); }
 
@@ -234,10 +235,10 @@ TEST_P(AsanAllocationTest, InBoundsAccessStaysQuiet) {
 
   recorder()->Reset();
   IREE_ASSERT_OK(DispatchAsanAllocationSelector(
-      device(), executable(), bindings, kAsanAllocationHookLoad2,
+      device(), queue(), executable(), bindings, kAsanAllocationHookLoad2,
       /*access_length=*/2, /*address_adjustment=*/0));
   IREE_ASSERT_OK(DispatchAsanAllocationSelector(
-      device(), executable(), bindings, kAsanAllocationHookReportLoadN,
+      device(), queue(), executable(), bindings, kAsanAllocationHookReportLoadN,
       kAsanAllocationSentinelLength, /*address_adjustment=*/0));
   ExpectAsanReport(/*expected_count=*/1, IREE_HAL_DEVICE_ASAN_ACCESS_KIND_READ,
                    kAsanAllocationSentinelLength,
@@ -260,7 +261,7 @@ TEST_P(AsanAllocationTest, AllocationRedzonesReport) {
 
   recorder()->Reset();
   IREE_ASSERT_OK(DispatchAsanAllocationSelector(
-      device(), executable(), bindings, kAsanAllocationHookLoad1,
+      device(), queue(), executable(), bindings, kAsanAllocationHookLoad1,
       /*access_length=*/1, /*address_adjustment=*/-1));
   ExpectAsanReport(/*expected_count=*/1, IREE_HAL_DEVICE_ASAN_ACCESS_KIND_READ,
                    1, kAsanReportExpectationFlagShadowPoisoned);
@@ -275,7 +276,7 @@ TEST_P(AsanAllocationTest, AllocationRedzonesReport) {
 
   recorder()->Reset();
   IREE_ASSERT_OK(DispatchAsanAllocationSelector(
-      device(), executable(), tail_bindings, kAsanAllocationHookLoad2,
+      device(), queue(), executable(), tail_bindings, kAsanAllocationHookLoad2,
       /*access_length=*/2, /*address_adjustment=*/0));
   ExpectAsanReport(/*expected_count=*/1, IREE_HAL_DEVICE_ASAN_ACCESS_KIND_READ,
                    2, kAsanReportExpectationFlagShadowPoisoned);
@@ -294,20 +295,38 @@ TEST_P(AsanAllocationTest, ReleasedAllocatorBufferReports) {
 
   recorder()->Reset();
   IREE_ASSERT_OK(DispatchAsanAllocationRawAddress(
-      device(), executable(), stale_address, kAsanAllocationHookLoad1,
+      device(), queue(), executable(), stale_address, kAsanAllocationHookLoad1,
       /*access_length=*/1));
   ExpectAsanReport(/*expected_count=*/1, IREE_HAL_DEVICE_ASAN_ACCESS_KIND_READ,
                    1, kAsanReportExpectationFlagShadowPoisoned);
 }
 
 TEST_P(AsanAllocationTest, QueueDeallocaReleaseReportsAfterSignal) {
+  iree_hal_queue_t* queue = iree_hal_device_queue(device(), 0, 0);
+  ASSERT_NE(queue, nullptr);
+  iree_hal_queue_pool_backend_t backend = {};
+  IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
+      device(), iree_hal_queue_family(queue), &backend));
+  iree_hal_passthrough_pool_options_t options = {};
+  options.asan = backend.asan;
+  Ref<iree_hal_pool_t> pool;
+  IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
+      options, backend.slab_provider, backend.notification,
+      iree_allocator_system(), pool.out()));
+
+  iree_hal_buffer_params_t params = AsanQueueAllocaBufferParams();
+  params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(queue)));
+  const iree_hal_pool_reservation_request_t request = {
+      /*.params=*/params,
+      /*.allocation_size=*/kAsanAllocationBufferLength,
+  };
   Ref<iree_hal_buffer_t> buffer;
   SemaphoreList empty_wait;
   SemaphoreList alloca_signal(device(), {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      device(), IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, alloca_signal,
-      /*pool=*/nullptr, AsanQueueAllocaBufferParams(),
-      kAsanAllocationBufferLength, IREE_HAL_ALLOCA_FLAG_NONE, buffer.out()));
+  IREE_ASSERT_OK(iree_hal_queue_alloca(queue, empty_wait, alloca_signal, pool,
+                                       /*request_count=*/1, &request,
+                                       buffer.out()));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       alloca_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
@@ -316,15 +335,15 @@ TEST_P(AsanAllocationTest, QueueDeallocaReleaseReportsAfterSignal) {
   ASSERT_NE(stale_address, 0u);
 
   SemaphoreList dealloca_signal(device(), {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      device(), IREE_HAL_QUEUE_AFFINITY_ANY, alloca_signal, dealloca_signal,
-      buffer, IREE_HAL_DEALLOCA_FLAG_NONE));
+  iree_hal_buffer_t* dealloca_buffer = buffer;
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queue, alloca_signal, dealloca_signal,
+                                         /*buffer_count=*/1, &dealloca_buffer));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       dealloca_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
   recorder()->Reset();
   IREE_ASSERT_OK(DispatchAsanAllocationRawAddress(
-      device(), executable(), stale_address, kAsanAllocationHookLoad1,
+      device(), queue, executable(), stale_address, kAsanAllocationHookLoad1,
       /*access_length=*/1));
   ExpectAsanReport(/*expected_count=*/1, IREE_HAL_DEVICE_ASAN_ACCESS_KIND_READ,
                    1, kAsanReportExpectationFlagShadowPoisoned);

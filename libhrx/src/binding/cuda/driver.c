@@ -2886,7 +2886,6 @@ CUDAAPI CUresult cuStreamCopyAttributes(CUstream dst, CUstream src) {
   // Note: We don't copy the command buffer, semaphores, or other runtime state.
   dst_stream->flags = src_stream->flags;
   dst_stream->priority = src_stream->priority;
-  dst_stream->queue_affinity = src_stream->queue_affinity;
 
   // If source stream has capture mode settings, copy those too.
   dst_stream->capture_mode = src_stream->capture_mode;

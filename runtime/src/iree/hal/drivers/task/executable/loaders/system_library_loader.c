@@ -199,6 +199,7 @@ static iree_status_t iree_hal_system_executable_query_library(
 }
 
 static iree_status_t iree_hal_system_executable_create(
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_load_params_t* executable_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(executable_params);
@@ -207,7 +208,6 @@ static iree_status_t iree_hal_system_executable_create(
   IREE_ASSERT_ARGUMENT(!executable_params->constant_count ||
                        executable_params->constants);
   IREE_ASSERT_ARGUMENT(out_executable);
-  *out_executable = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_system_executable_t* executable = NULL;
@@ -221,7 +221,8 @@ static iree_status_t iree_hal_system_executable_create(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       iree_allocator_malloc(host_allocator, total_size, (void**)&executable));
-  iree_hal_task_executable_initialize(&iree_hal_system_executable_vtable,
+  iree_hal_task_executable_initialize(queue_family,
+                                      &iree_hal_system_executable_vtable,
                                       host_allocator, &executable->base);
 
   // Copy executable constants so we own them.
@@ -368,11 +369,10 @@ static iree_status_t iree_hal_system_executable_global_info(
 
 static iree_status_t iree_hal_system_executable_global_buffer(
     iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+    iree_hal_buffer_t** out_buffer) {
   (void)base_executable;
   (void)global;
-  (void)queue_affinity;
-  *out_buffer = NULL;
+  (void)out_buffer;
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "invalid system-library executable global");
 }
@@ -472,6 +472,7 @@ static bool iree_hal_system_library_loader_claims_executable(
 
 static iree_status_t iree_hal_system_library_loader_load(
     iree_hal_executable_loader_t* base_executable_loader,
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* executable_params,
     iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable) {
@@ -481,7 +482,7 @@ static iree_status_t iree_hal_system_library_loader_load(
 
   // Perform the load (and requisite disgusting hackery).
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_system_executable_create(executable_params,
+      z0, iree_hal_system_executable_create(queue_family, executable_params,
                                             executable_loader->host_allocator,
                                             out_executable));
 

@@ -16,7 +16,7 @@ extern "C" {
 
 // Validates queue_execute flags supported by the AMDGPU host queue.
 iree_status_t iree_hal_amdgpu_host_queue_validate_execute_flags(
-    iree_hal_execute_flags_t flags);
+    iree_hal_queue_execute_flags_t flags);
 
 // Creates a resource set retaining the binding table prefix required by
 // |command_buffer| unless |execute_flags| explicitly borrows buffer lifetimes.
@@ -24,7 +24,7 @@ iree_status_t iree_hal_amdgpu_host_queue_create_binding_table_resource_set(
     iree_hal_amdgpu_host_queue_t* queue,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t execute_flags,
+    iree_hal_queue_execute_flags_t execute_flags,
     iree_hal_resource_set_t** out_resource_set);
 
 // Replays an AMDGPU AQL command buffer program onto the host queue.
@@ -35,7 +35,7 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_command_buffer(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t execute_flags,
+    iree_hal_queue_execute_flags_t execute_flags,
     iree_hal_resource_set_t** inout_binding_resource_set, bool* out_ready);
 
 #ifdef __cplusplus

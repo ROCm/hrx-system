@@ -28,6 +28,7 @@ iree_cc_library(
     "buffer_table.h"
     "hrx_internal.h"
     "mem_pool.h"
+    "transfer.h"
   SRCS
     "allocator.c"
     "buffer.c"
@@ -100,6 +101,7 @@ iree_cc_library(
     "buffer_table.h"
     "hrx_internal.h"
     "mem_pool.h"
+    "transfer.h"
   SRCS
     "allocator.c"
     "buffer.c"

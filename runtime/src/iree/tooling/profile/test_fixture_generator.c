@@ -147,7 +147,7 @@ static iree_status_t write_smoke_profile(iree_string_view_t path,
     iree_hal_profile_command_buffer_record_t command_buffer =
         iree_hal_profile_command_buffer_record_default();
     command_buffer.command_buffer_id = kSmokeCommandBufferId;
-    command_buffer.queue_affinity = 1;
+    command_buffer.queue_family_ordinal = 0;
     command_buffer.physical_device_ordinal = kSmokePhysicalDevice;
     status = write_profile_chunk(
         sink, IREE_HAL_PROFILE_CONTENT_TYPE_COMMAND_BUFFERS,

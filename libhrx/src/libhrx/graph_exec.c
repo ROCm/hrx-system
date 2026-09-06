@@ -24,7 +24,7 @@ typedef enum hrx_graph_block_type_e {
 typedef void (*hrx_graph_host_callback_fn_t)(void* user_data);
 
 typedef struct hrx_graph_barrier_block_attrs_t {
-  iree_hal_execute_flags_t flags;
+  iree_hal_queue_barrier_flags_t flags;
 } hrx_graph_barrier_block_attrs_t;
 
 typedef struct hrx_graph_fill_block_attrs_t {
@@ -62,7 +62,7 @@ typedef struct hrx_graph_dispatch_block_attrs_t {
 
 typedef struct hrx_graph_execute_block_attrs_t {
   iree_hal_command_buffer_t* command_buffer;
-  iree_hal_execute_flags_t flags;
+  iree_hal_queue_execute_flags_t flags;
 } hrx_graph_execute_block_attrs_t;
 
 typedef union hrx_graph_block_attrs_t {
@@ -371,9 +371,9 @@ iree_status_t hrx_graph_exec_instantiate_locked(
     iree_hal_device_t* hal_device = exec->device->hal_device;
     for (uint32_t i = 0; i < exec->semaphore_count; i++) {
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_hal_semaphore_create(hal_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-                                        0ull, IREE_HAL_SEMAPHORE_FLAG_NONE,
-                                        &exec->semaphores[i]));
+          z0, iree_hal_semaphore_create(
+                  hal_device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0ull,
+                  IREE_HAL_SEMAPHORE_FLAG_NONE, &exec->semaphores[i]));
       exec->semaphore_base_values[i] = 0;
     }
 
@@ -424,10 +424,12 @@ iree_status_t hrx_graph_exec_instantiate_locked(
             z0,
             iree_hal_command_buffer_create(
                 exec->device->hal_device,
+                iree_hal_queue_family(exec->device->dispatch_queue),
                 IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
-                IREE_HAL_COMMAND_CATEGORY_ANY, IREE_HAL_QUEUE_AFFINITY_ANY,
+                IREE_HAL_COMMAND_CATEGORY_TRANSFER |
+                    IREE_HAL_COMMAND_CATEGORY_DISPATCH,
                 /*binding_capacity=*/0, &ptrs.attrs->execute.command_buffer));
-        ptrs.attrs->execute.flags = IREE_HAL_EXECUTE_FLAG_NONE;
+        ptrs.attrs->execute.flags = IREE_HAL_QUEUE_EXECUTE_FLAG_NONE;
 
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
             z0,
@@ -486,7 +488,7 @@ iree_status_t hrx_graph_exec_instantiate_locked(
                 &exec->arena_allocator, HRX_GRAPH_BLOCK_TYPE_QUEUE_BARRIER,
                 partition->start_index, partition->count, wait_semaphore_count,
                 signal_semaphore_count, &block, &ptrs));
-        ptrs.attrs->barrier.flags = IREE_HAL_EXECUTE_FLAG_NONE;
+        ptrs.attrs->barrier.flags = IREE_HAL_QUEUE_BARRIER_FLAG_NONE;
       }
       if (wait_semaphore_count > 0) {
         for (uint16_t w = 0; w < wait_semaphore_count; w++) {
@@ -564,7 +566,6 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
     memcpy(new_base_values, exec->semaphore_base_values, base_values_size);
   }
 
-  iree_hal_device_t* hal_device = exec->device->hal_device;
   for (uint32_t block_index = 0;
        iree_status_is_ok(status) && block_index < exec->block_count;
        block_index++) {
@@ -630,34 +631,32 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
 
     switch (block->type) {
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_BARRIER:
-        status = iree_hal_device_queue_barrier(
-            hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-            signal_semaphores, ptrs.attrs->barrier.flags);
+        status = iree_hal_queue_barrier(stream->hal_queue, wait_semaphores,
+                                        signal_semaphores,
+                                        ptrs.attrs->barrier.flags);
         break;
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_FILL:
-        status = iree_hal_device_queue_fill(
-            hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-            signal_semaphores, ptrs.attrs->fill.target_buffer,
-            ptrs.attrs->fill.target_offset, ptrs.attrs->fill.length,
-            &ptrs.attrs->fill.pattern, ptrs.attrs->fill.pattern_length,
-            ptrs.attrs->fill.flags);
+        status = iree_hal_queue_fill(
+            exec->device->transfer_queue, wait_semaphores, signal_semaphores,
+            ptrs.attrs->fill.target_buffer, ptrs.attrs->fill.target_offset,
+            ptrs.attrs->fill.length, &ptrs.attrs->fill.pattern,
+            ptrs.attrs->fill.pattern_length, ptrs.attrs->fill.flags);
         break;
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_COPY:
-        status = iree_hal_device_queue_copy(
-            hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-            signal_semaphores, ptrs.attrs->copy.source_buffer,
-            ptrs.attrs->copy.source_offset, ptrs.attrs->copy.target_buffer,
-            ptrs.attrs->copy.target_offset, ptrs.attrs->copy.length,
-            ptrs.attrs->copy.flags);
+        status = iree_hal_queue_copy(
+            exec->device->transfer_queue, wait_semaphores, signal_semaphores,
+            ptrs.attrs->copy.source_buffer, ptrs.attrs->copy.source_offset,
+            ptrs.attrs->copy.target_buffer, ptrs.attrs->copy.target_offset,
+            ptrs.attrs->copy.length, ptrs.attrs->copy.flags);
         break;
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_DISPATCH: {
         iree_hal_buffer_ref_list_t bindings_list = {
             .count = ptrs.attrs->dispatch.bindings.count,
             .values = ptrs.attrs->dispatch.bindings.values,
         };
-        status = iree_hal_device_queue_dispatch(
-            hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-            signal_semaphores, ptrs.attrs->dispatch.executable,
+        status = iree_hal_queue_dispatch(
+            stream->hal_queue, wait_semaphores, signal_semaphores,
+            ptrs.attrs->dispatch.executable,
             iree_hal_executable_function_from_index(
                 (uint32_t)ptrs.attrs->dispatch.entry_point),
             ptrs.attrs->dispatch.config, ptrs.attrs->dispatch.constants,
@@ -665,19 +664,19 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
         break;
       }
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE:
-        status = iree_hal_device_queue_execute(
-            hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-            signal_semaphores, ptrs.attrs->execute.command_buffer,
-            iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE);
+        status = iree_hal_queue_execute(stream->hal_queue, wait_semaphores,
+                                        signal_semaphores,
+                                        ptrs.attrs->execute.command_buffer,
+                                        iree_hal_buffer_binding_table_empty(),
+                                        IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
         break;
       case HRX_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL: {
         uint64_t call_args[4] = {
             (uint64_t)(uintptr_t)ptrs.attrs->host_call.fn,
             (uint64_t)(uintptr_t)ptrs.attrs->host_call.user_data,
         };
-        status = iree_hal_device_queue_host_call(
-            hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-            signal_semaphores,
+        status = iree_hal_queue_host_call(
+            stream->hal_queue, wait_semaphores, signal_semaphores,
             iree_hal_make_host_call(hrx_graph_host_callback, NULL), call_args,
             ptrs.attrs->host_call.flags);
         break;

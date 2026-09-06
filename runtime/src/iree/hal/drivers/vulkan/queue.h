@@ -53,7 +53,7 @@ typedef struct iree_hal_vulkan_queue_native_replay_t
 typedef struct iree_hal_vulkan_queue_staging_ring_t
     iree_hal_vulkan_queue_staging_ring_t;
 
-// Logical-device-owned clock alignment state shared with queue lanes while
+// Logical-device-owned clock alignment state shared with exact queues while
 // profiling is active.
 typedef struct iree_hal_vulkan_profile_clock_alignment_t {
   // Mutex protecting the sampled tick ranges and invalid-alignment flag.
@@ -81,16 +81,13 @@ typedef struct iree_hal_vulkan_profile_clock_alignment_t {
   bool has_invalid_alignment;
 } iree_hal_vulkan_profile_clock_alignment_t;
 
-typedef enum iree_hal_vulkan_queue_role_e {
-  IREE_HAL_VULKAN_QUEUE_ROLE_COMPUTE = 0,
-  IREE_HAL_VULKAN_QUEUE_ROLE_TRANSFER = 1,
-  IREE_HAL_VULKAN_QUEUE_ROLE_SPARSE_BINDING = 2,
-} iree_hal_vulkan_queue_role_t;
-
 // Queue construction parameters.
 typedef struct iree_hal_vulkan_queue_params_t {
   // Logical device owning this queue. Borrowed.
   iree_hal_vulkan_logical_device_t* device;
+
+  // Canonical HAL queue family containing this queue. Borrowed.
+  const iree_hal_queue_family_t* queue_family;
 
   // Device-level Vulkan dispatch table. Borrowed and copied into the queue.
   const iree_hal_vulkan_device_syms_t* syms;
@@ -113,9 +110,6 @@ typedef struct iree_hal_vulkan_queue_params_t {
   // Valid timestamp bits reported by the queue family.
   uint32_t timestamp_valid_bits;
 
-  // Mutex serializing host access to |queue|. Borrowed.
-  iree_slim_mutex_t* queue_handle_mutex;
-
   // Proactor used for cold queue-side waits such as pool notifications.
   iree_async_proactor_t* proactor;
 
@@ -124,12 +118,6 @@ typedef struct iree_hal_vulkan_queue_params_t {
 
   // Queue index within the selected family.
   uint32_t queue_index;
-
-  // HAL-visible queue affinity bits represented by this queue lane.
-  iree_hal_queue_affinity_t queue_affinity;
-
-  // Queue role used only for diagnostics and profiling labels.
-  iree_hal_vulkan_queue_role_t role;
 
   // Host allocator used for queue-owned allocations.
   iree_allocator_t host_allocator;
@@ -144,8 +132,11 @@ typedef struct iree_hal_vulkan_queue_params_t {
   uint32_t retained_cached_bda_replay_instances;
 } iree_hal_vulkan_queue_params_t;
 
-// Host-driven Vulkan queue lane.
+// Host-driven exact Vulkan queue.
 typedef struct iree_hal_vulkan_queue_t {
+  // Base HAL queue resource. Must be at offset zero.
+  iree_hal_queue_t base;
+
   // Logical device owning this queue. Borrowed.
   iree_hal_vulkan_logical_device_t* device;
 
@@ -161,7 +152,8 @@ typedef struct iree_hal_vulkan_queue_t {
   // Device-owned built-in pipelines. Borrowed.
   const iree_hal_vulkan_builtins_t* builtins;
 
-  // Device allocator used for queue-owned staging resources. Borrowed.
+  // Device allocator used for queue-owned staging resources. Borrowed and
+  // bound after logical-device allocator creation.
   iree_hal_allocator_t* device_allocator;
 
   // Vulkan queue handle borrowed from the logical device.
@@ -173,8 +165,8 @@ typedef struct iree_hal_vulkan_queue_t {
   // Valid timestamp bits reported by the queue family.
   uint32_t timestamp_valid_bits;
 
-  // Mutex serializing host access to queue. Borrowed.
-  iree_slim_mutex_t* queue_handle_mutex;
+  // Mutex serializing host access to the exact Vulkan queue handle.
+  iree_slim_mutex_t queue_handle_mutex;
 
   // Proactor used for cold queue-side waits such as pool notifications.
   iree_async_proactor_t* proactor;
@@ -185,17 +177,15 @@ typedef struct iree_hal_vulkan_queue_t {
   // Queue index within the selected family.
   uint32_t queue_index;
 
-  // HAL-visible queue affinity bits represented by this queue lane.
-  iree_hal_queue_affinity_t queue_affinity;
-
-  // Queue role used only for diagnostics and profiling labels.
-  iree_hal_vulkan_queue_role_t role;
-
   // Host allocator used for queue-owned allocations.
   iree_allocator_t host_allocator;
 
-  // Mutex serializing queue epoch assignment and lane-local submission state.
+  // Mutex serializing activation, queue epoch assignment, and queue-local
+  // submission state.
   iree_slim_mutex_t submission_mutex;
+
+  // Cold-path activation state published after all submission resources exist.
+  iree_atomic_int32_t activation_state;
 
   // Sticky failure status for this queue. Owned by the queue.
   iree_atomic_intptr_t failure_status;
@@ -403,17 +393,17 @@ typedef struct iree_hal_vulkan_queue_t {
   iree_hal_vulkan_profile_clock_alignment_t* profile_clock_alignment;
 } iree_hal_vulkan_queue_t;
 
-// Initializes a queue lane around a borrowed VkQueue.
+// Initializes an exact queue object around a borrowed VkQueue.
 iree_status_t iree_hal_vulkan_queue_initialize(
     const iree_hal_vulkan_queue_params_t* params,
     iree_hal_vulkan_queue_t* out_queue);
 
-// Initializes queue-owned staging resources once the device allocator exists.
-iree_status_t iree_hal_vulkan_queue_initialize_staging(
+// Binds the device allocator required by lazy queue activation.
+void iree_hal_vulkan_queue_bind_allocator(
     iree_hal_vulkan_queue_t* queue, iree_hal_allocator_t* device_allocator);
 
-// Deinitializes a queue lane and releases all queue-owned resources.
-void iree_hal_vulkan_queue_deinitialize(iree_hal_vulkan_queue_t* queue);
+// Activates submission resources on first use.
+iree_status_t iree_hal_vulkan_queue_activate(iree_hal_vulkan_queue_t* queue);
 
 // Trims idle queue-owned replay/cache resources.
 void iree_hal_vulkan_queue_trim(iree_hal_vulkan_queue_t* queue);
@@ -454,22 +444,21 @@ iree_status_t iree_hal_vulkan_queue_submit_barrier(
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list);
 
-// Submits a queue-ordered transient allocation.
+// Submits one queue-ordered allocation transaction.
 iree_status_t iree_hal_vulkan_queue_submit_alloca(
     iree_hal_vulkan_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_vulkan_queue_alloca_plan_t allocation_plan,
-    iree_hal_buffer_params_t params, iree_device_size_t allocation_size,
-    iree_device_size_t byte_length, iree_hal_alloca_flags_t flags,
-    iree_hal_buffer_t** IREE_RESTRICT out_buffer);
+    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t* const* buffers);
 
-// Submits a queue-ordered transient deallocation.
+// Submits one queue-ordered deallocation transaction.
 iree_status_t iree_hal_vulkan_queue_submit_dealloca(
     iree_hal_vulkan_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags);
+    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers);
 
 // Submits sparse buffer memory binds ordered by queue semaphores.
 //
@@ -553,7 +542,7 @@ iree_status_t iree_hal_vulkan_queue_submit_execute(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t flags,
+    iree_hal_queue_execute_flags_t flags,
     iree_hal_profile_queue_event_type_t queue_event_type);
 
 // Submits a queue-ordered host call.

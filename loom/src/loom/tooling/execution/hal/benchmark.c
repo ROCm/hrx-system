@@ -609,7 +609,7 @@ static iree_status_t loom_run_hal_benchmark_profile_final_batch(
   profile_dispatch_options.command_buffer_mode &=
       ~IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED;
   profile_dispatch_options.execute_flags &=
-      ~IREE_HAL_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME;
+      ~IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME;
 
   loom_run_hal_dispatch_batch_t profile_batch = {0};
   iree_status_t status = loom_run_hal_dispatch_batch_prepare_from_binding_ring(
@@ -662,7 +662,7 @@ static iree_status_t loom_run_hal_benchmark_profile_final_sequence_batch(
   profile_dispatch_options.command_buffer_mode &=
       ~IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED;
   profile_dispatch_options.execute_flags &=
-      ~IREE_HAL_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME;
+      ~IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME;
 
   loom_run_hal_dispatch_batch_t profile_batch = {0};
   iree_status_t status =

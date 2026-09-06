@@ -92,11 +92,14 @@ IREE_API_EXPORT iree_host_size_t iree_hal_command_buffer_validation_state_size(
 }
 
 IREE_API_EXPORT void iree_hal_command_buffer_initialize(
-    iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
+    iree_hal_allocator_t* device_allocator,
+    const iree_hal_queue_family_t* queue_family,
+    iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
-    void* validation_state, const iree_hal_command_buffer_vtable_t* vtable,
+    iree_host_size_t binding_capacity, void* validation_state,
+    const iree_hal_command_buffer_vtable_t* vtable,
     iree_hal_command_buffer_t* command_buffer) {
+  IREE_ASSERT_ARGUMENT(queue_family);
 #if IREE_HAL_COMMAND_BUFFER_VALIDATION_ENABLE
   // If validation is compiled in and the command buffer requires validation
   // then check that state was provided.
@@ -111,9 +114,9 @@ IREE_API_EXPORT void iree_hal_command_buffer_initialize(
 #endif  // !IREE_HAL_COMMAND_BUFFER_VALIDATION_ENABLE
 
   iree_hal_resource_initialize(vtable, &command_buffer->resource);
+  command_buffer->queue_family = queue_family;
   command_buffer->mode = mode;
   command_buffer->allowed_categories = command_categories;
-  command_buffer->queue_affinity = queue_affinity;
   command_buffer->profile_id = (uint64_t)iree_atomic_fetch_add(
       &iree_hal_command_buffer_next_profile_id, 1, iree_memory_order_relaxed);
   command_buffer->binding_capacity = binding_capacity;
@@ -129,19 +132,84 @@ IREE_API_EXPORT void iree_hal_command_buffer_initialize(
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_create(
-    iree_hal_device_t* device, iree_hal_command_buffer_mode_t mode,
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
+    iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
+    iree_host_size_t binding_capacity,
     iree_hal_command_buffer_t** out_command_buffer) {
   IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(queue_family);
   IREE_ASSERT_ARGUMENT(out_command_buffer);
   *out_command_buffer = NULL;
 
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status =
-      IREE_HAL_VTABLE_DISPATCH(device, iree_hal_device, create_command_buffer)(
-          device, mode, command_categories, queue_affinity, binding_capacity,
-          out_command_buffer);
+  iree_status_t status = iree_ok_status();
+  const iree_hal_queue_family_ordinal_t family_ordinal =
+      iree_hal_queue_family_ordinal(queue_family);
+  const iree_hal_queue_family_t* canonical_family =
+      iree_hal_device_queue_family(device, family_ordinal);
+  if (IREE_UNLIKELY(canonical_family != queue_family)) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "queue family %u is not a canonical family of the device",
+        family_ordinal);
+  }
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(command_categories & ~IREE_HAL_COMMAND_CATEGORY_ANY)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unknown command categories: 0x%08" PRIx32,
+                              command_categories);
+  }
+
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  iree_hal_queue_family_role_flags_t required_roles =
+      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_NONE;
+  if (iree_any_bit_set(command_categories,
+                       IREE_HAL_COMMAND_CATEGORY_TRANSFER)) {
+    required_roles |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER;
+  }
+  if (iree_any_bit_set(command_categories,
+                       IREE_HAL_COMMAND_CATEGORY_DISPATCH)) {
+    required_roles |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH;
+  }
+  if (iree_any_bit_set(command_categories, IREE_HAL_COMMAND_CATEGORY_ATOMIC)) {
+    required_roles |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC;
+  }
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(
+          family_ordinal >= queue_spec->family_count ||
+          !iree_all_bits_set(queue_spec->families[family_ordinal].role_flags,
+                             required_roles))) {
+    status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "queue family %u roles 0x%08" PRIx32
+                         " do not cover command categories 0x%08" PRIx32,
+                         family_ordinal,
+                         family_ordinal < queue_spec->family_count
+                             ? queue_spec->families[family_ordinal].role_flags
+                             : 0,
+                         command_categories);
+  }
+
+  iree_hal_command_buffer_t* command_buffer = NULL;
+  if (iree_status_is_ok(status)) {
+    status = IREE_HAL_VTABLE_DISPATCH(device, iree_hal_device,
+                                      create_command_buffer)(
+        device, queue_family, mode, command_categories, binding_capacity,
+        &command_buffer);
+  }
+  if (iree_status_is_ok(status)) {
+    if (IREE_UNLIKELY(!command_buffer)) {
+      status = iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "device returned success without creating a command buffer");
+    } else {
+      *out_command_buffer = command_buffer;
+    }
+  } else {
+    IREE_ASSERT(!command_buffer);
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -159,11 +227,11 @@ iree_hal_command_buffer_allowed_categories(
   return command_buffer->allowed_categories;
 }
 
-IREE_API_EXPORT iree_hal_queue_affinity_t
-iree_hal_command_buffer_queue_affinity(
+IREE_API_EXPORT const iree_hal_queue_family_t*
+iree_hal_command_buffer_queue_family(
     const iree_hal_command_buffer_t* command_buffer) {
   IREE_ASSERT_ARGUMENT(command_buffer);
-  return command_buffer->queue_affinity;
+  return command_buffer->queue_family;
 }
 
 IREE_API_EXPORT uint64_t iree_hal_command_buffer_profile_id(
@@ -414,6 +482,17 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_dispatch(
     return iree_ok_status();
   }
 
+  if (IREE_UNLIKELY(iree_hal_executable_queue_family(executable) !=
+                    command_buffer->queue_family)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "executable queue family %u does not match command buffer queue "
+        "family %u",
+        iree_hal_queue_family_ordinal(
+            iree_hal_executable_queue_family(executable)),
+        iree_hal_queue_family_ordinal(command_buffer->queue_family));
+  }
+
   IREE_TRACE_ZONE_BEGIN(z0);
 #if IREE_HAL_VERBOSE_TRACING_ENABLE
   // TODO(benvanik): add a tracing.h helper that does the snprintf directly
@@ -482,6 +561,9 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_validate_submission(
                             "indirect command buffer requires at least %u "
                             "bindings but only %" PRIhsz " were provided ",
                             command_buffer->binding_count, binding_table.count);
+  } else if (!binding_table.bindings) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "binding table storage is null");
   }
 
   // Validate the binding table against the commands consuming them.
@@ -493,78 +575,4 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_validate_submission(
   });
 
   return iree_ok_status();
-}
-
-//===----------------------------------------------------------------------===//
-// Utilities for command buffer creation
-//===----------------------------------------------------------------------===//
-
-IREE_API_EXPORT iree_status_t iree_hal_create_transfer_command_buffer(
-    iree_hal_device_t* device, iree_hal_command_buffer_mode_t mode,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t transfer_count,
-    const iree_hal_transfer_command_t* transfer_commands,
-    iree_hal_command_buffer_t** out_command_buffer) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_hal_command_buffer_t* command_buffer = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_command_buffer_create(
-              device, mode, IREE_HAL_COMMAND_CATEGORY_TRANSFER, queue_affinity,
-              /*binding_capacity=*/0, &command_buffer));
-
-  iree_status_t status = iree_hal_command_buffer_begin(command_buffer);
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < transfer_count; ++i) {
-      const iree_hal_transfer_command_t* transfer_command =
-          &transfer_commands[i];
-      switch (transfer_command->type) {
-        case IREE_HAL_TRANSFER_COMMAND_TYPE_FILL:
-          status = iree_hal_command_buffer_fill_buffer(
-              command_buffer,
-              iree_hal_make_buffer_ref(transfer_command->fill.target_buffer,
-                                       transfer_command->fill.target_offset,
-                                       transfer_command->fill.length),
-              transfer_command->fill.pattern,
-              transfer_command->fill.pattern_length, IREE_HAL_FILL_FLAG_NONE);
-          break;
-        case IREE_HAL_TRANSFER_COMMAND_TYPE_UPDATE:
-          status = iree_hal_command_buffer_update_buffer(
-              command_buffer, transfer_command->update.source_buffer,
-              transfer_command->update.source_offset,
-              iree_hal_make_buffer_ref(transfer_command->update.target_buffer,
-                                       transfer_command->update.target_offset,
-                                       transfer_command->update.length),
-              IREE_HAL_UPDATE_FLAG_NONE);
-          break;
-        case IREE_HAL_TRANSFER_COMMAND_TYPE_COPY:
-          status = iree_hal_command_buffer_copy_buffer(
-              command_buffer,
-              iree_hal_make_buffer_ref(transfer_command->copy.source_buffer,
-                                       transfer_command->copy.source_offset,
-                                       transfer_command->copy.length),
-              iree_hal_make_buffer_ref(transfer_command->copy.target_buffer,
-                                       transfer_command->copy.target_offset,
-                                       transfer_command->copy.length),
-              IREE_HAL_COPY_FLAG_NONE);
-          break;
-        default:
-          status =
-              iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                               "unknown transfer_commands[%" PRIhsz "] type %d",
-                               i, (int)transfer_command->type);
-          break;
-      }
-      if (!iree_status_is_ok(status)) break;
-    }
-  }
-  status =
-      iree_status_join(status, iree_hal_command_buffer_end(command_buffer));
-
-  if (iree_status_is_ok(status)) {
-    *out_command_buffer = command_buffer;
-  } else {
-    iree_hal_command_buffer_release(command_buffer);
-  }
-  IREE_TRACE_ZONE_END(z0);
-  return status;
 }

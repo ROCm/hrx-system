@@ -56,7 +56,9 @@ extern "C" {
 //         required type bits.
 //      b. Check usage compatibility: pool supports at least the required
 //         usage bits.
-//      c. Check size: allocation_size is within the pool's min/max range.
+//      c. Check queue-family compatibility: pool visibility covers every
+//         requested queue family.
+//      d. Check size: allocation_size is within the pool's min/max range.
 //         This is how fixed-size/slab-size pools decline oversized requests
 //         and let lower-priority direct pools serve them.
 //   3. Return the first compatible pool.

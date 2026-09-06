@@ -11,6 +11,12 @@
 static iree_atomic_int64_t iree_hal_task_transient_buffer_next_profile_id =
     IREE_ATOMIC_VAR_INIT(1);
 
+typedef enum iree_hal_task_transient_buffer_deallocation_state_e {
+  IREE_HAL_TASK_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE = 0,
+  IREE_HAL_TASK_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING = 1,
+  IREE_HAL_TASK_TRANSIENT_BUFFER_DEALLOCATION_STATE_COMPLETE = 2,
+} iree_hal_task_transient_buffer_deallocation_state_t;
+
 // Vtable dispatch for forwarding to the committed buffer's implementation.
 // Equivalent to IREE_HAL_VTABLE_DISPATCH from detail.h but accessible from
 // this driver-private implementation (detail.h is module-private to HAL core).
@@ -40,14 +46,17 @@ struct iree_hal_task_transient_buffer_t {
   // Materialized backing buffer visible to accessors after commit.
   iree_hal_buffer_t* committed_backing;
 
-  // Borrowed pool that owns |reservation| when armed.
-  iree_hal_pool_t* reservation_pool;
+  // Borrowed pool selected for this logical allocation epoch.
+  iree_hal_pool_t* source_pool;
 
   // Optional queue-allocation reservation owned by this wrapper while armed.
   iree_hal_pool_reservation_t reservation;
 
-  // Nonzero while the wrapper still owns |reservation|.
-  int32_t reservation_armed;
+  // True while the wrapper owns |reservation|.
+  bool reservation_armed;
+
+  // State controlling exclusive queue deallocation capture.
+  iree_hal_task_transient_buffer_deallocation_state_t deallocation_state;
 };
 
 static const iree_hal_buffer_vtable_t iree_hal_task_transient_buffer_vtable;
@@ -60,7 +69,6 @@ static iree_hal_task_transient_buffer_t* iree_hal_task_transient_buffer_cast(
 static iree_status_t iree_hal_task_transient_buffer_retain_host_backing(
     iree_hal_task_transient_buffer_t* buffer,
     iree_hal_buffer_t** out_backing_buffer) {
-  *out_backing_buffer = NULL;
   iree_slim_mutex_lock(&buffer->mutex);
   iree_hal_buffer_t* backing_buffer = buffer->committed_backing;
   if (IREE_UNLIKELY(!backing_buffer)) {
@@ -79,9 +87,10 @@ static iree_status_t iree_hal_task_transient_buffer_retain_host_backing(
 iree_status_t iree_hal_task_transient_buffer_create(
     iree_hal_buffer_placement_t placement, iree_hal_buffer_params_t params,
     iree_device_size_t allocation_size, iree_device_size_t byte_length,
-    iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer) {
+    iree_hal_pool_t* source_pool, iree_allocator_t host_allocator,
+    iree_hal_buffer_t** out_buffer) {
+  IREE_ASSERT_ARGUMENT(source_pool);
   IREE_ASSERT_ARGUMENT(out_buffer);
-  *out_buffer = NULL;
   if (IREE_UNLIKELY(byte_length > allocation_size)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "transient buffer byte length (%" PRIu64
@@ -106,9 +115,11 @@ iree_status_t iree_hal_task_transient_buffer_create(
   iree_slim_mutex_initialize(&buffer->mutex);
   buffer->staged_backing = NULL;
   buffer->committed_backing = NULL;
-  buffer->reservation_pool = NULL;
+  buffer->source_pool = source_pool;
   memset(&buffer->reservation, 0, sizeof(buffer->reservation));
-  buffer->reservation_armed = 0;
+  buffer->reservation_armed = false;
+  buffer->deallocation_state =
+      IREE_HAL_TASK_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE;
 
   *out_buffer = &buffer->base;
   IREE_TRACE_ZONE_END(z0);
@@ -135,11 +146,10 @@ void iree_hal_task_transient_buffer_attach_reservation(
   IREE_ASSERT_ARGUMENT(pool);
   IREE_ASSERT_ARGUMENT(reservation);
   iree_slim_mutex_lock(&buffer->mutex);
-  IREE_ASSERT_TRUE(buffer->reservation_pool == NULL);
-  IREE_ASSERT_TRUE(buffer->reservation_armed == 0);
-  buffer->reservation_pool = pool;
+  IREE_ASSERT_TRUE(buffer->source_pool == pool);
+  IREE_ASSERT_FALSE(buffer->reservation_armed);
   buffer->reservation = *reservation;
-  buffer->reservation_armed = 1;
+  buffer->reservation_armed = true;
   iree_slim_mutex_unlock(&buffer->mutex);
 }
 
@@ -183,14 +193,64 @@ bool iree_hal_task_transient_buffer_query_reservation(
   iree_hal_task_transient_buffer_t* buffer =
       iree_hal_task_transient_buffer_cast(base_buffer);
   iree_slim_mutex_lock(&buffer->mutex);
-  const bool has_reservation =
-      buffer->reservation_pool != NULL && buffer->reservation_armed;
+  const bool has_reservation = buffer->reservation_armed;
   if (has_reservation) {
-    if (out_pool) *out_pool = buffer->reservation_pool;
+    if (out_pool) *out_pool = buffer->source_pool;
     if (out_reservation) *out_reservation = buffer->reservation;
   }
   iree_slim_mutex_unlock(&buffer->mutex);
   return has_reservation;
+}
+
+iree_status_t iree_hal_task_transient_buffer_begin_dealloca(
+    iree_hal_buffer_t* base_buffer, iree_hal_pool_t** out_pool) {
+  iree_hal_task_transient_buffer_t* buffer =
+      iree_hal_task_transient_buffer_cast(base_buffer);
+  iree_slim_mutex_lock(&buffer->mutex);
+  iree_status_t status = iree_ok_status();
+  if (buffer->deallocation_state !=
+      IREE_HAL_TASK_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "transient buffer has already been queued for deallocation");
+  } else {
+    buffer->deallocation_state =
+        IREE_HAL_TASK_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING;
+    *out_pool = buffer->source_pool;
+  }
+  iree_slim_mutex_unlock(&buffer->mutex);
+  return status;
+}
+
+void iree_hal_task_transient_buffer_abort_dealloca(
+    iree_hal_buffer_t* base_buffer) {
+  iree_hal_task_transient_buffer_t* buffer =
+      iree_hal_task_transient_buffer_cast(base_buffer);
+  iree_slim_mutex_lock(&buffer->mutex);
+  if (buffer->deallocation_state ==
+      IREE_HAL_TASK_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING) {
+    buffer->deallocation_state =
+        IREE_HAL_TASK_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE;
+  }
+  iree_slim_mutex_unlock(&buffer->mutex);
+}
+
+void iree_hal_task_transient_buffer_take_dealloca_reservation(
+    iree_hal_buffer_t* base_buffer, iree_hal_pool_t** out_pool,
+    iree_hal_pool_reservation_t* out_reservation) {
+  iree_hal_task_transient_buffer_t* buffer =
+      iree_hal_task_transient_buffer_cast(base_buffer);
+  iree_slim_mutex_lock(&buffer->mutex);
+  IREE_ASSERT_TRUE(buffer->deallocation_state ==
+                   IREE_HAL_TASK_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING);
+  IREE_ASSERT_TRUE(buffer->reservation_armed);
+  *out_pool = buffer->source_pool;
+  *out_reservation = buffer->reservation;
+  memset(&buffer->reservation, 0, sizeof(buffer->reservation));
+  buffer->reservation_armed = false;
+  buffer->deallocation_state =
+      IREE_HAL_TASK_TRANSIENT_BUFFER_DEALLOCATION_STATE_COMPLETE;
+  iree_slim_mutex_unlock(&buffer->mutex);
 }
 
 void iree_hal_task_transient_buffer_release_reservation(
@@ -201,19 +261,16 @@ void iree_hal_task_transient_buffer_release_reservation(
   iree_hal_pool_t* pool = NULL;
   iree_hal_pool_reservation_t reservation;
   iree_slim_mutex_lock(&buffer->mutex);
-  const int32_t was_armed = buffer->reservation_armed;
-  if (was_armed) {
-    pool = buffer->reservation_pool;
+  const bool had_reservation = buffer->reservation_armed;
+  if (had_reservation) {
+    pool = buffer->source_pool;
     reservation = buffer->reservation;
-    buffer->reservation_armed = 0;
+    memset(&buffer->reservation, 0, sizeof(buffer->reservation));
+    buffer->reservation_armed = false;
   }
   iree_slim_mutex_unlock(&buffer->mutex);
-  if (was_armed) {
-    iree_hal_pool_release_reservation(pool, &reservation, death_frontier);
-    iree_slim_mutex_lock(&buffer->mutex);
-    buffer->reservation_pool = NULL;
-    memset(&buffer->reservation, 0, sizeof(buffer->reservation));
-    iree_slim_mutex_unlock(&buffer->mutex);
+  if (had_reservation) {
+    iree_hal_pool_release_reservations(pool, 1, &reservation, death_frontier);
   }
 }
 

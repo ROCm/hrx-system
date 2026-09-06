@@ -87,6 +87,39 @@ iree_hal_streaming_timestamp_domain_t iree_hal_streaming_query_timestamp_domain(
   return domain;
 }
 
+static iree_status_t iree_hal_streaming_context_select_queue(
+    iree_hal_device_t* device, iree_hal_queue_t** out_queue) {
+  const iree_hal_queue_family_role_flags_t required_roles =
+      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
+      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH;
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  for (iree_host_size_t family_ordinal = 0;
+       family_ordinal < queue_spec->family_count; ++family_ordinal) {
+    const iree_hal_queue_family_spec_t* family_spec =
+        &queue_spec->families[family_ordinal];
+    if (family_spec->provisioned_queue_count == 0 ||
+        !iree_all_bits_set(family_spec->role_flags, required_roles)) {
+      continue;
+    }
+    iree_hal_queue_t* queue = iree_hal_device_queue(
+        device, (iree_hal_queue_family_ordinal_t)family_ordinal,
+        /*queue_ordinal=*/0);
+    if (!queue) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "device advertises provisioned queue family %" PRIhsz
+          " but the queue is unavailable",
+          family_ordinal);
+    }
+    *out_queue = queue;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "device has no provisioned transfer-and-dispatch queue");
+}
+
 iree_status_t iree_hal_streaming_context_create(
     iree_hal_streaming_device_t* device_entry,
     iree_hal_streaming_context_flags_t flags, iree_allocator_t host_allocator,
@@ -112,7 +145,7 @@ iree_status_t iree_hal_streaming_context_create(
   context->device = device_entry->hal_device;
   context->device_ordinal = device_entry->ordinal;
   context->device_entry = device_entry;
-  context->queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  context->queue = NULL;
   context->device_allocator =
       iree_hal_device_allocator(device_entry->hal_device);
   context->timestamp_domain = iree_hal_streaming_query_timestamp_domain(
@@ -132,7 +165,6 @@ iree_status_t iree_hal_streaming_context_create(
                     iree_memory_order_relaxed);
   context->host_allocator = host_allocator;
   iree_slim_mutex_initialize(&context->mutex);
-  iree_slim_mutex_initialize(&context->direct_transfer_mutex);
   iree_slim_mutex_initialize(&context->pending_free_mutex);
 
   // Initialize global list pointers.
@@ -167,10 +199,15 @@ iree_status_t iree_hal_streaming_context_create(
   iree_hal_streaming_event_timestamp_pool_initialize(
       context->device_allocator, host_allocator, &context->timestamp_pool);
 
+  iree_status_t status =
+      iree_hal_streaming_context_select_queue(context->device, &context->queue);
+
   // Initialize symbol map with global registry as the backing store.
-  iree_status_t status = iree_hal_streaming_context_symbol_map_initialize(
-      context, /*initial_capacity=*/16, registry, host_allocator,
-      &context->symbol_map);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_context_symbol_map_initialize(
+        context, /*initial_capacity=*/16, registry, host_allocator,
+        &context->symbol_map);
+  }
 
   // Allocate stream tracking array.
   if (iree_status_is_ok(status)) {
@@ -280,7 +317,10 @@ static void iree_hal_streaming_context_destroy(
   for (iree_host_size_t i = 0; i < detached_stream_count; ++i) {
     iree_hal_streaming_stream_t* stream = context->streams[i];
     iree_slim_mutex_lock(&stream->mutex);
-    if (stream->context == context) stream->context = NULL;
+    if (stream->context == context) {
+      stream->queue = NULL;
+      stream->context = NULL;
+    }
     iree_slim_mutex_unlock(&stream->mutex);
   }
   for (iree_host_size_t i = 0; i < detached_stream_count; ++i) {
@@ -307,7 +347,6 @@ static void iree_hal_streaming_context_destroy(
   iree_hal_device_release(context->device);
 
   // Deinitialize synchronization.
-  iree_slim_mutex_deinitialize(&context->direct_transfer_mutex);
   iree_slim_mutex_deinitialize(&context->mutex);
 
   // Free context memory.

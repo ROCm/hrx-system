@@ -65,7 +65,7 @@ TEST_F(GraphBufferTest, RecordsAndInstantiatesHandleBasedCopyAndFill) {
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_graph_instantiate(graph, 0, &executable)));
 
-  // The executable retains the HAL buffers referenced by recorded commands.
+  // The executable retains the graph and its captured buffer allocations.
   hrx_buffer_release(destination_);
   destination_ = nullptr;
   hrx_buffer_release(source_);

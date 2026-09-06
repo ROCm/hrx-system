@@ -167,6 +167,7 @@ static void iree_hal_cpu_slab_provider_query_properties(
     iree_hal_slab_provider_properties_t* out_properties) {
   out_properties->memory_type = IREE_HAL_CPU_SLAB_PROVIDER_MEMORY_TYPE;
   out_properties->supported_usage = IREE_HAL_CPU_SLAB_PROVIDER_BUFFER_USAGE;
+  out_properties->queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
   out_properties->atomic_operations =
       iree_hal_atomic_operation_capabilities_for_host(
           IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);

@@ -105,6 +105,7 @@ iree_runtime_cc_library(
         ":format",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:passthrough_pool",
         "//runtime/src/iree/io:file_handle",
     ],
 )
@@ -124,6 +125,8 @@ iree_runtime_cc_library(
         "recorder_executable.h",
         "recorder_file.c",
         "recorder_file.h",
+        "recorder_queue.c",
+        "recorder_queue.h",
         "recorder_record.h",
     ],
     hdrs = [
@@ -174,6 +177,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/task/registration",
+        "//runtime/src/iree/hal/memory:passthrough_pool",
         "//runtime/src/iree/hal/testing:mock_device",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",
@@ -229,10 +233,15 @@ if(TARGET iree::hal::drivers::task::registration)
 
 iree_runtime_cc_test(
     name = "recorder_test",
-    srcs = ["recorder_test.cc"],
+    srcs = [
+        "recorder_record.h",
+        "recorder_test.cc",
+    ],
     deps = [
         ":execute",
         ":file_reader",
+        ":file_writer",
+        ":format",
         ":recorder",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",

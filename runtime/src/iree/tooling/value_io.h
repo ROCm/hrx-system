@@ -120,9 +120,11 @@ void iree_tooling_value_io_context_free(
 // A single specification always materializes a single buffer view. Splat forms
 // that expand one specification into multiple values are intentionally handled
 // above this layer by callers that own an aggregate argument convention.
+// The view is allocated with |allocator| and |buffer_params|. Host-visible
+// scoped-write mapping requirements are added for initialization.
 iree_status_t iree_tooling_buffer_view_spec_parse(
     iree_tooling_value_io_context_t* context, iree_string_view_t spec,
-    iree_hal_device_t* device, iree_hal_allocator_t* device_allocator,
+    iree_hal_buffer_params_t buffer_params, iree_hal_allocator_t* allocator,
     iree_hal_buffer_view_t** out_buffer_view);
 
 // Parses a storage-buffer specification beginning with `&`.
@@ -131,7 +133,7 @@ iree_status_t iree_tooling_buffer_view_spec_parse(
 // returned buffer. The caller owns the returned buffer.
 iree_status_t iree_tooling_storage_buffer_spec_parse(
     iree_tooling_value_io_context_t* context, iree_string_view_t spec,
-    iree_hal_device_t* device, iree_hal_allocator_t* device_allocator,
+    iree_hal_buffer_params_t buffer_params, iree_hal_allocator_t* allocator,
     iree_hal_buffer_t** out_buffer);
 
 // Kind of buffer binding parsed from a tooling buffer specification.
@@ -166,7 +168,7 @@ void iree_tooling_buffer_binding_deinitialize(
 // Parses a single HAL buffer binding specification.
 iree_status_t iree_tooling_buffer_binding_spec_parse(
     iree_tooling_value_io_context_t* context, iree_string_view_t spec,
-    iree_hal_device_t* device, iree_hal_allocator_t* device_allocator,
+    iree_hal_buffer_params_t buffer_params, iree_hal_allocator_t* allocator,
     iree_tooling_buffer_binding_t* out_binding);
 
 #ifdef __cplusplus

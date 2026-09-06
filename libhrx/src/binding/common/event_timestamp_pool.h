@@ -69,7 +69,7 @@ void iree_hal_streaming_event_timestamp_pool_initialize(
 // reference to a slab buffer does not free it while a queue submission still
 // holds one, and the amdgpu queue takes that reference for a timestamp's
 // target buffer on both its immediate and its deferred path. The retention is
-// a fact of the queue implementation; iree_hal_device_queue_timestamp does not
+// a fact of the queue implementation; iree_hal_queue_timestamp does not
 // promise it.
 //
 // Every slot must already have been released. That holds because a record

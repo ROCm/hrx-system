@@ -210,7 +210,10 @@ struct iree_hal_streaming_context_t {
   iree_hal_device_t* device;
   iree_hal_streaming_device_ordinal_t device_ordinal;
   iree_hal_streaming_device_t* device_entry;
-  iree_hal_queue_affinity_t queue_affinity;
+
+  // Provisioned hardware queue used by streams in this context. Borrowed from
+  // |device| and valid for the context lifetime.
+  iree_hal_queue_t* queue;
 
   // HAL resources.
   iree_hal_allocator_t* device_allocator;
@@ -262,8 +265,6 @@ struct iree_hal_streaming_context_t {
 
   // Synchronization.
   iree_slim_mutex_t mutex;
-  // Serializes direct HAL device transfer calls issued outside command buffers.
-  iree_slim_mutex_t direct_transfer_mutex;
 
   // Host allocator.
   iree_allocator_t host_allocator;
@@ -516,8 +517,9 @@ typedef struct iree_hal_streaming_stream_t {
   uint64_t pending_value;    // Last value a submission has been accepted for.
   uint64_t completed_value;  // Last value we've verified as completed
 
-  // Queue affinity.
-  iree_hal_queue_affinity_t queue_affinity;
+  // Provisioned hardware queue used by this stream. Borrowed from the device
+  // retained by |context| and valid while the context remains attached.
+  iree_hal_queue_t* queue;
 
   // Event dependencies that establish safe cross-stream allocation reuse.
   iree_hal_streaming_memory_reuse_dependency_t* memory_reuse_dependencies;
@@ -1936,7 +1938,7 @@ iree_hal_streaming_event_exchange_capture_graph(
 // tick slot is acquired, and covers the device allocation a pool growth
 // performs). Runs under whichever lock the calling record path holds - the
 // stream mutex, which is a precondition because the body reads
-// stream->context and stream->queue_affinity from under it, and on the launch
+// stream->context and stream->queue from under it, and on the launch
 // path the mutex of the executable the launch was issued on, which is the one
 // held for a record inside a child graph too - with the pool mutex nested
 // inside both.

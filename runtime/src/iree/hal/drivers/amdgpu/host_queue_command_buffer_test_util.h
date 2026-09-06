@@ -23,7 +23,6 @@
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer_packet.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
 #include "iree/hal/drivers/amdgpu/physical_device.h"
-#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/system.h"
 #include "iree/hal/drivers/amdgpu/target/selection.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
@@ -70,6 +69,11 @@ class TestLogicalDevice {
 
   iree_hal_device_t* base_device() const { return base_device_; }
 
+  iree_hal_queue_t* queue(iree_hal_queue_family_ordinal_t family_ordinal = 0,
+                          iree_hal_queue_ordinal_t queue_ordinal = 0) const {
+    return iree_hal_device_queue(base_device_, family_ordinal, queue_ordinal);
+  }
+
   iree_hal_allocator_t* allocator() const {
     return iree_hal_device_allocator(base_device_);
   }
@@ -97,22 +101,6 @@ class TestLogicalDevice {
   // Device group that owns the topology assigned to |base_device_|.
   iree_hal_device_group_t* device_group_ = NULL;
 };
-
-static iree_status_t QueueAffinityForPhysicalDevice(
-    const TestLogicalDevice& test_device,
-    iree_host_size_t physical_device_ordinal,
-    iree_hal_queue_affinity_t* out_queue_affinity) {
-  iree_hal_amdgpu_logical_device_t* logical_device =
-      test_device.logical_device();
-  const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-      /*.supported_affinity=*/logical_device->queue_affinity_mask,
-      /*.physical_device_count=*/logical_device->physical_device_count,
-      /*.queue_count_per_physical_device=*/
-      logical_device->system->topology.gpu_agent_queue_count,
-  };
-  return iree_hal_amdgpu_queue_affinity_for_physical_device(
-      domain, physical_device_ordinal, out_queue_affinity);
-}
 
 static iree_status_t CreateHostVisibleTransferBuffer(
     iree_hal_allocator_t* allocator, iree_device_size_t buffer_size,
@@ -170,13 +158,16 @@ static bool IsAmdgpuCtsExecutableTarget(
       IREE_SV("amdgpu_"));
 }
 
-static iree_status_t LoadCtsExecutable(iree_hal_device_t* device,
-                                       iree_string_view_t file_name,
-                                       iree_hal_executable_t** out_executable) {
-  *out_executable = NULL;
-
+static iree_status_t LoadCtsExecutable(
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
+    iree_string_view_t file_name, iree_hal_executable_t** out_executable) {
   const auto targets =
       iree::hal::cts::CtsRegistry::ListExecutableTargets("amdgpu");
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  const iree_hal_physical_device_affinity_t physical_device_affinity =
+      queue_spec->families[iree_hal_queue_family_ordinal(queue_family)]
+          .physical_device_affinity;
   bool found_target = false;
   bool found_executable_data = false;
   for (const auto& target : targets) {
@@ -189,7 +180,7 @@ static iree_status_t LoadCtsExecutable(iree_hal_device_t* device,
     iree_hal_executable_target_selection_result_t target_result;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_device_spec_select_executable_target(
         iree_hal_device_spec(device), iree_make_cstring_view(target.target_key),
-        /*physical_device_affinity=*/0, &target_result));
+        physical_device_affinity, &target_result));
     if (target_result.outcome ==
         IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
       continue;
@@ -204,7 +195,7 @@ static iree_status_t LoadCtsExecutable(iree_hal_device_t* device,
     iree_hal_executable_load_params_t load_params;
     iree_hal_executable_load_params_initialize(&load_params);
     load_params.executable_data = executable_data;
-    return iree_hal_device_load_executable(device, IREE_HAL_QUEUE_AFFINITY_ANY,
+    return iree_hal_device_load_executable(device, queue_family,
                                            target_result.target, &load_params,
                                            out_executable);
   }
@@ -223,17 +214,28 @@ static iree_status_t LoadCtsExecutable(iree_hal_device_t* device,
 }
 
 static iree_status_t QueueTransientTransferBuffer(
-    iree_hal_device_t* device, const iree_hal_semaphore_list_t signal_list,
-    iree_device_size_t buffer_size, iree_hal_buffer_t** out_buffer) {
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t signal_list, iree_device_size_t buffer_size,
+    iree_hal_buffer_t** out_buffer) {
   iree_hal_buffer_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
-  return iree_hal_device_queue_alloca(device, IREE_HAL_QUEUE_AFFINITY_ANY,
-                                      iree_hal_semaphore_list_empty(),
-                                      signal_list,
-                                      /*pool=*/NULL, params, buffer_size,
-                                      IREE_HAL_ALLOCA_FLAG_NONE, out_buffer);
+  params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(&queue->base)));
+  iree_hal_pool_t* pool =
+      iree_hal_pool_set_select(queue->default_pool_set, params, buffer_size);
+  if (!pool) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "no queue pool supports the transient request");
+  }
+  const iree_hal_pool_reservation_request_t request = {
+      /*.params=*/params,
+      /*.allocation_size=*/buffer_size,
+  };
+  return iree_hal_queue_alloca(&queue->base, iree_hal_semaphore_list_empty(),
+                               signal_list, pool,
+                               /*request_count=*/1, &request, out_buffer);
 }
 
 static iree_status_t EnqueueRawBlockingBarrier(
@@ -262,7 +264,7 @@ static bool HostQueueHasPostDrainAction(iree_hal_amdgpu_host_queue_t* queue) {
 static iree_status_t CreateSemaphore(iree_hal_device_t* device,
                                      iree_hal_semaphore_t** out_semaphore) {
   return iree_hal_semaphore_create(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, out_semaphore);
 }
 
@@ -300,7 +302,7 @@ struct TwoDispatchCommandBuffer {
 static iree_status_t InitializeTwoDispatchCommandBufferResources(
     TestLogicalDevice* test_device, TwoDispatchCommandBuffer* out_fixture) {
   IREE_RETURN_IF_ERROR(LoadCtsExecutable(
-      test_device->base_device(),
+      test_device->base_device(), iree_hal_queue_family(test_device->queue()),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
       &out_fixture->executable));
@@ -367,8 +369,8 @@ static iree_status_t CreateTwoDispatchCommandBuffer(
   IREE_RETURN_IF_ERROR(
       InitializeTwoDispatchCommandBufferResources(test_device, out_fixture));
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
-      test_device->base_device(), mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
-      IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/0,
+      test_device->base_device(), iree_hal_queue_family(test_device->queue()),
+      mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH, /*binding_capacity=*/0,
       out_fixture->command_buffer.out()));
   IREE_RETURN_IF_ERROR(
       iree_hal_command_buffer_begin(out_fixture->command_buffer));

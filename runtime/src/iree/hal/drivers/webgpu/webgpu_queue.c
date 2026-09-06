@@ -23,7 +23,226 @@
 // iree_hal_webgpu_queue_t
 //===----------------------------------------------------------------------===//
 
+static void iree_hal_webgpu_queue_destroy(iree_hal_queue_t* base_queue) {
+  iree_hal_webgpu_queue_deinitialize((iree_hal_webgpu_queue_t*)base_queue);
+}
+
+static iree_status_t iree_hal_webgpu_queue_barrier(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_queue_barrier_flags_t flags) {
+  (void)flags;
+  return iree_hal_webgpu_queue_submit_execute(
+      (iree_hal_webgpu_queue_t*)base_queue, wait_semaphore_list,
+      signal_semaphore_list, /*command_buffer=*/NULL,
+      iree_hal_buffer_binding_table_empty(), IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
+}
+
+static iree_status_t iree_hal_webgpu_queue_execute(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t binding_table,
+    iree_hal_queue_execute_flags_t flags) {
+  return iree_hal_webgpu_queue_submit_execute(
+      (iree_hal_webgpu_queue_t*)base_queue, wait_semaphore_list,
+      signal_semaphore_list, command_buffer, binding_table, flags);
+}
+
+static iree_status_t iree_hal_webgpu_queue_host_call(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_host_call_t call, const uint64_t args[4],
+    iree_hal_host_call_flags_t flags) {
+  return iree_hal_webgpu_queue_submit_host_call(
+      (iree_hal_webgpu_queue_t*)base_queue, wait_semaphore_list,
+      signal_semaphore_list, call, args, flags);
+}
+
+static iree_status_t iree_hal_webgpu_queue_dispatch(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_executable_t* executable, iree_hal_executable_function_t function,
+    const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
+    const iree_hal_buffer_ref_list_t bindings,
+    iree_hal_dispatch_flags_t flags) {
+  return iree_hal_webgpu_queue_submit_dispatch(
+      (iree_hal_webgpu_queue_t*)base_queue, wait_semaphore_list,
+      signal_semaphore_list, executable, function, config, constants, bindings,
+      flags);
+}
+
+static iree_status_t iree_hal_webgpu_queue_atomic_wait(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  (void)base_queue;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)target_buffer;
+  (void)target_offset;
+  (void)params;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "WebGPU queues do not support atomic waits");
+}
+
+static iree_status_t iree_hal_webgpu_queue_atomic_store(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  (void)base_queue;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)target_buffer;
+  (void)target_offset;
+  (void)params;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "WebGPU queues do not support atomic stores");
+}
+
+static iree_status_t iree_hal_webgpu_queue_atomic_rmw(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  (void)base_queue;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)target_buffer;
+  (void)target_offset;
+  (void)params;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "WebGPU queues do not support atomic read-modify-write");
+}
+
+static iree_status_t iree_hal_webgpu_queue_timestamp(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags) {
+  (void)base_queue;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)target_buffer;
+  (void)target_offset;
+  (void)flags;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "WebGPU device-side timestamps not implemented");
+}
+
+static iree_status_t iree_hal_webgpu_queue_flush(iree_hal_queue_t* base_queue) {
+  (void)base_queue;
+  // WebGPU's queue.submit() is not buffered, so there is no pending work to
+  // flush.
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_webgpu_queue_alloca(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t** IREE_RESTRICT out_buffers) {
+  (void)base_queue;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)pool;
+  (void)request_count;
+  (void)requests;
+  (void)out_buffers;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "WebGPU exact-queue allocation transactions are not implemented");
+}
+
+static iree_status_t iree_hal_webgpu_queue_dealloca(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers) {
+  (void)base_queue;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)buffer_count;
+  (void)buffers;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "WebGPU exact-queue deallocation transactions are not implemented");
+}
+
+static iree_status_t iree_hal_webgpu_queue_transfer(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations) {
+  (void)base_queue;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)operation_count;
+  (void)operations;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "WebGPU exact-queue transfers are not implemented");
+}
+
+static iree_status_t iree_hal_webgpu_queue_read(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_file_t* source_file, uint64_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_read_flags_t flags) {
+  return iree_hal_webgpu_queue_submit_read(
+      (iree_hal_webgpu_queue_t*)base_queue, wait_semaphore_list,
+      signal_semaphore_list, source_file, source_offset, target_buffer,
+      target_offset, length, flags);
+}
+
+static iree_status_t iree_hal_webgpu_queue_write(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    iree_hal_file_t* target_file, uint64_t target_offset,
+    iree_device_size_t length, iree_hal_write_flags_t flags) {
+  return iree_hal_webgpu_queue_submit_write(
+      (iree_hal_webgpu_queue_t*)base_queue, wait_semaphore_list,
+      signal_semaphore_list, source_buffer, source_offset, target_file,
+      target_offset, length, flags);
+}
+
+static const iree_hal_queue_vtable_t iree_hal_webgpu_queue_vtable = {
+    .destroy = iree_hal_webgpu_queue_destroy,
+    .barrier = iree_hal_webgpu_queue_barrier,
+    .execute = iree_hal_webgpu_queue_execute,
+    .host_call = iree_hal_webgpu_queue_host_call,
+    .dispatch = iree_hal_webgpu_queue_dispatch,
+    .atomic_wait = iree_hal_webgpu_queue_atomic_wait,
+    .atomic_store = iree_hal_webgpu_queue_atomic_store,
+    .atomic_rmw = iree_hal_webgpu_queue_atomic_rmw,
+    .timestamp = iree_hal_webgpu_queue_timestamp,
+    .flush = iree_hal_webgpu_queue_flush,
+    .alloca = iree_hal_webgpu_queue_alloca,
+    .dealloca = iree_hal_webgpu_queue_dealloca,
+    .transfer = iree_hal_webgpu_queue_transfer,
+    .read = iree_hal_webgpu_queue_read,
+    .write = iree_hal_webgpu_queue_write,
+};
+
 iree_status_t iree_hal_webgpu_queue_initialize(
+    const iree_hal_queue_family_t* queue_family,
     iree_hal_webgpu_handle_t device_handle,
     iree_hal_webgpu_handle_t queue_handle,
     const iree_hal_webgpu_builtins_t* builtins, iree_async_proactor_t* proactor,
@@ -51,6 +270,9 @@ iree_status_t iree_hal_webgpu_queue_initialize(
       &out_queue->scratch_builder);
   if (!iree_status_is_ok(status)) {
     iree_arena_block_pool_deinitialize(&out_queue->block_pool);
+  } else {
+    iree_hal_queue_initialize(queue_family, &iree_hal_webgpu_queue_vtable,
+                              &out_queue->base);
   }
   return status;
 }
@@ -338,7 +560,7 @@ static iree_status_t iree_hal_webgpu_queue_execute_one_shot(
 // inline (CPU-only ops) or transfers slab ownership to an embedded signal
 // completion (GPU-submit ops) for GPU completion tracking.
 //
-// CPU-only (barrier, alloca, dealloca):
+// CPU-only (barrier):
 //   wait → CPU work → signal inline → advance epoch → free slab.
 //
 // GPU-submit (fill, update, copy, dispatch, execute):
@@ -349,8 +571,6 @@ static iree_status_t iree_hal_webgpu_queue_execute_one_shot(
 typedef enum iree_hal_webgpu_queue_op_type_e {
   // CPU-only: wait → CPU work → signal inline.
   IREE_HAL_WEBGPU_QUEUE_OP_BARRIER,
-  IREE_HAL_WEBGPU_QUEUE_OP_ALLOCA,
-  IREE_HAL_WEBGPU_QUEUE_OP_DEALLOCA,
   // GPU-submit: wait → GPU work → signal on GPU completion.
   IREE_HAL_WEBGPU_QUEUE_OP_FILL,
   IREE_HAL_WEBGPU_QUEUE_OP_UPDATE,
@@ -382,14 +602,6 @@ typedef struct iree_hal_webgpu_queue_state_t {
   iree_hal_webgpu_queue_op_type_t op_type;
 
   union {
-    struct {
-      iree_hal_buffer_t* buffer;  // Retained stub.
-    } alloca_op;
-
-    struct {
-      iree_hal_buffer_t* buffer;  // Retained.
-    } dealloca;
-
     struct {
       iree_hal_buffer_t* target_buffer;  // Retained.
       iree_device_size_t target_offset;
@@ -458,12 +670,6 @@ static void iree_hal_webgpu_queue_op_release_resources(
     iree_hal_webgpu_queue_state_t* state) {
   switch (state->op_type) {
     case IREE_HAL_WEBGPU_QUEUE_OP_BARRIER:
-      break;
-    case IREE_HAL_WEBGPU_QUEUE_OP_ALLOCA:
-      iree_hal_buffer_release(state->alloca_op.buffer);
-      break;
-    case IREE_HAL_WEBGPU_QUEUE_OP_DEALLOCA:
-      iree_hal_buffer_release(state->dealloca.buffer);
       break;
     case IREE_HAL_WEBGPU_QUEUE_OP_FILL:
       iree_hal_buffer_release(state->fill.target_buffer);
@@ -626,26 +832,6 @@ static void iree_hal_webgpu_queue_op_wait_completion(
   switch (state->op_type) {
     case IREE_HAL_WEBGPU_QUEUE_OP_BARRIER:
       // CPU-only: no work — signal passes straight through.
-      iree_status_ignore(iree_hal_semaphore_list_signal(
-          state->signal_semaphore_list, frontier));
-      break;
-
-    case IREE_HAL_WEBGPU_QUEUE_OP_ALLOCA: {
-      // CPU-only: create the GPU buffer on the stub, then signal.
-      iree_status_t bind_status = iree_hal_webgpu_buffer_bind(
-          state->alloca_op.buffer, state->queue->device_handle);
-      if (iree_status_is_ok(bind_status)) {
-        iree_status_ignore(iree_hal_semaphore_list_signal(
-            state->signal_semaphore_list, frontier));
-      } else {
-        iree_hal_semaphore_list_fail(state->signal_semaphore_list, bind_status);
-      }
-      break;
-    }
-
-    case IREE_HAL_WEBGPU_QUEUE_OP_DEALLOCA:
-      // CPU-only: detach GPU buffer from the wrapper, then signal.
-      iree_hal_webgpu_buffer_unbind(state->dealloca.buffer);
       iree_status_ignore(iree_hal_semaphore_list_signal(
           state->signal_semaphore_list, frontier));
       break;
@@ -988,144 +1174,6 @@ static void iree_hal_webgpu_queue_mark_signals_submitted(
 }
 
 //===----------------------------------------------------------------------===//
-// queue_alloca / queue_dealloca
-//===----------------------------------------------------------------------===//
-
-iree_status_t iree_hal_webgpu_queue_alloca(
-    iree_hal_webgpu_queue_t* queue, iree_hal_allocator_t* device_allocator,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
-    iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
-    iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
-  *out_buffer = NULL;
-
-  // Validate and coerce parameters through the allocator. This ensures the
-  // stub buffer stores the correct memory type and usage flags for when
-  // buffer_bind creates the actual GPU buffer.
-  iree_hal_buffer_params_t compat_params;
-  iree_device_size_t compat_allocation_size = allocation_size;
-  iree_hal_buffer_compatibility_t compatibility =
-      iree_hal_allocator_query_buffer_compatibility(
-          device_allocator, params, allocation_size, &compat_params,
-          &compat_allocation_size);
-  if (!iree_all_bits_set(compatibility,
-                         IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE)) {
-    iree_status_t status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "allocator cannot serve the requested buffer parameters");
-    iree_hal_semaphore_list_fail(signal_semaphore_list,
-                                 iree_status_clone(status));
-    return status;
-  }
-
-  // Create a stub buffer (handle = 0) with the coerced parameters. The GPU
-  // buffer is created later by buffer_bind, either inline (fast path) or in
-  // the async wait callback.
-  iree_hal_buffer_placement_t placement = {
-      .device = NULL,
-      .queue_affinity = compat_params.queue_affinity,
-      .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
-  };
-  iree_hal_buffer_t* buffer = NULL;
-  {
-    iree_status_t status = iree_hal_webgpu_buffer_create_stub(
-        placement, compat_params.type, compat_params.access,
-        compat_params.usage, compat_allocation_size, queue->host_allocator,
-        &buffer);
-    if (!iree_status_is_ok(status)) {
-      iree_hal_semaphore_list_fail(signal_semaphore_list,
-                                   iree_status_clone(status));
-      return status;
-    }
-  }
-
-  // Fast path: waits already satisfied (or FIFO-elided) — bind, signal, return.
-  if (wait_semaphore_list.count == 0 ||
-      iree_hal_semaphore_list_poll(wait_semaphore_list) ||
-      iree_hal_webgpu_queue_can_elide_waits(queue, wait_semaphore_list)) {
-    uint64_t epoch = iree_hal_webgpu_queue_reserve_epoch(queue);
-    iree_status_t status =
-        iree_hal_webgpu_buffer_bind(buffer, queue->device_handle);
-    if (iree_status_is_ok(status)) {
-      iree_async_single_frontier_t frontier_storage;
-      const iree_async_frontier_t* frontier =
-          iree_hal_webgpu_queue_build_frontier(queue, epoch, &frontier_storage);
-      status = iree_hal_semaphore_list_signal(signal_semaphore_list, frontier);
-    }
-    if (iree_status_is_ok(status)) {
-      iree_hal_webgpu_queue_advance_tracker(queue, epoch);
-      *out_buffer = buffer;
-    } else {
-      iree_hal_semaphore_list_fail(signal_semaphore_list,
-                                   iree_status_clone(status));
-      iree_hal_webgpu_queue_advance_tracker(queue, epoch);
-      iree_hal_buffer_release(buffer);
-    }
-    return status;
-  }
-
-  // Async path: give the stub to the caller immediately, then submit a wait
-  // that binds the GPU buffer in its completion callback.
-  iree_hal_webgpu_queue_state_t* state = NULL;
-  iree_status_t status = iree_hal_webgpu_queue_state_allocate(
-      queue, IREE_HAL_WEBGPU_QUEUE_OP_ALLOCA, wait_semaphore_list,
-      signal_semaphore_list, /*trailing_count=*/0,
-      /*trailing_element_size=*/0, /*out_trailing_offset=*/NULL, &state);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_buffer_release(buffer);
-    return status;
-  }
-
-  // Retain the buffer for the slab — the caller also holds a reference via
-  // *out_buffer. The slab's retain is released in release_resources (callback
-  // success) or in the submit failure cleanup below.
-  iree_hal_buffer_retain(buffer);
-  state->alloca_op.buffer = buffer;
-  *out_buffer = buffer;
-
-  status = iree_hal_webgpu_queue_state_submit(state);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_buffer_release(buffer);  // Caller's ref — buffer unusable.
-    *out_buffer = NULL;
-  }
-  return status;
-}
-
-iree_status_t iree_hal_webgpu_queue_dealloca(
-    iree_hal_webgpu_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags) {
-  // Fast path: waits already satisfied (or FIFO-elided) — unbind, signal.
-  if (wait_semaphore_list.count == 0 ||
-      iree_hal_semaphore_list_poll(wait_semaphore_list) ||
-      iree_hal_webgpu_queue_can_elide_waits(queue, wait_semaphore_list)) {
-    uint64_t epoch = iree_hal_webgpu_queue_reserve_epoch(queue);
-    iree_hal_webgpu_buffer_unbind(buffer);
-    iree_async_single_frontier_t frontier_storage;
-    const iree_async_frontier_t* frontier =
-        iree_hal_webgpu_queue_build_frontier(queue, epoch, &frontier_storage);
-    iree_status_t status =
-        iree_hal_semaphore_list_signal(signal_semaphore_list, frontier);
-    iree_hal_webgpu_queue_advance_tracker(queue, epoch);
-    return status;
-  }
-
-  // Async path: retain the buffer, submit a wait, and unbind in the callback.
-  iree_hal_webgpu_queue_state_t* state = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_webgpu_queue_state_allocate(
-      queue, IREE_HAL_WEBGPU_QUEUE_OP_DEALLOCA, wait_semaphore_list,
-      signal_semaphore_list, /*trailing_count=*/0,
-      /*trailing_element_size=*/0, /*out_trailing_offset=*/NULL, &state));
-
-  iree_hal_buffer_retain(buffer);
-  state->dealloca.buffer = buffer;
-
-  return iree_hal_webgpu_queue_state_submit(state);
-}
-
-//===----------------------------------------------------------------------===//
 // Queue operations (scratch builder)
 //===----------------------------------------------------------------------===//
 
@@ -1338,7 +1386,7 @@ static iree_status_t iree_hal_webgpu_queue_read_inline(
   return status;
 }
 
-iree_status_t iree_hal_webgpu_queue_read(
+iree_status_t iree_hal_webgpu_queue_submit_read(
     iree_hal_webgpu_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
@@ -1636,7 +1684,7 @@ static void iree_hal_webgpu_queue_write_wait_completion(
   iree_hal_webgpu_queue_write_phase1(state);
 }
 
-iree_status_t iree_hal_webgpu_queue_write(
+iree_status_t iree_hal_webgpu_queue_submit_write(
     iree_hal_webgpu_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
@@ -1754,7 +1802,7 @@ iree_status_t iree_hal_webgpu_queue_write(
 // On error: fails all signal semaphores with the error status.
 // If NON_BLOCKING: signals semaphores before calling, ignores the result.
 static iree_status_t iree_hal_webgpu_queue_execute_host_call(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_webgpu_queue_t* queue,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     const iree_async_frontier_t* frontier, iree_hal_host_call_t call,
     const uint64_t args[4], iree_hal_host_call_flags_t flags) {
@@ -1764,8 +1812,7 @@ static iree_status_t iree_hal_webgpu_queue_execute_host_call(
     iree_status_t signal_status =
         iree_hal_semaphore_list_signal(signal_semaphore_list, frontier);
     iree_hal_host_call_context_t context = {
-        .device = device,
-        .queue_affinity = queue_affinity,
+        .queue = &queue->base,
         .signal_semaphore_list = iree_hal_semaphore_list_empty(),
     };
     iree_status_free(call.fn(call.user_data, args, &context));
@@ -1773,8 +1820,7 @@ static iree_status_t iree_hal_webgpu_queue_execute_host_call(
   }
 
   iree_hal_host_call_context_t context = {
-      .device = device,
-      .queue_affinity = queue_affinity,
+      .queue = &queue->base,
       .signal_semaphore_list = signal_semaphore_list,
   };
   iree_status_t call_status = call.fn(call.user_data, args, &context);
@@ -1797,16 +1843,31 @@ static iree_status_t iree_hal_webgpu_queue_execute_host_call(
 //   [struct | wait iree_async_semaphore_t*[] | wait uint64_t[] |
 //    signal iree_hal_semaphore_t*[] | signal uint64_t[]]
 typedef struct iree_hal_webgpu_host_call_state_t {
+  // Asynchronous wait operation submitted to the proactor.
   iree_async_semaphore_wait_operation_t wait_operation;
+
+  // User callback and state.
   iree_hal_host_call_t call;
+
+  // User-defined callback arguments.
   uint64_t args[4];
+
+  // Flags controlling callback ordering and completion.
   iree_hal_host_call_flags_t flags;
-  iree_hal_device_t* device;
+
+  // Exact hardware queue issuing the callback. Borrowed from the device.
   iree_hal_webgpu_queue_t* queue;
-  iree_hal_queue_affinity_t queue_affinity;
-  uint64_t epoch;  // Pre-incremented at submit for causal ordering.
+
+  // Pre-incremented at submit for causal ordering.
+  uint64_t epoch;
+
+  // Semaphores signaled when the callback completes.
   iree_hal_semaphore_list_t signal_semaphore_list;
+
+  // Semaphores that must reach their payloads before invoking the callback.
   iree_hal_semaphore_list_t wait_semaphore_list;
+
+  // Allocator used for the state slab.
   iree_allocator_t allocator;
 } iree_hal_webgpu_host_call_state_t;
 
@@ -1826,8 +1887,8 @@ static void iree_hal_webgpu_host_call_completion_fn(
         iree_hal_webgpu_queue_build_frontier(state->queue, state->epoch,
                                              &frontier_storage);
     iree_status_free(iree_hal_webgpu_queue_execute_host_call(
-        state->device, state->queue_affinity, state->signal_semaphore_list,
-        frontier, state->call, state->args, state->flags));
+        state->queue, state->signal_semaphore_list, frontier, state->call,
+        state->args, state->flags));
   } else {
     // Wait itself failed (semaphore failure propagation). Fail all signal
     // semaphores with the wait failure status.
@@ -1843,9 +1904,8 @@ static void iree_hal_webgpu_host_call_completion_fn(
   iree_allocator_free(state->allocator, state);
 }
 
-iree_status_t iree_hal_webgpu_queue_host_call(
-    iree_hal_webgpu_queue_t* queue, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity,
+iree_status_t iree_hal_webgpu_queue_submit_host_call(
+    iree_hal_webgpu_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_host_call_t call, const uint64_t args[4],
@@ -1859,8 +1919,7 @@ iree_status_t iree_hal_webgpu_queue_host_call(
     const iree_async_frontier_t* frontier =
         iree_hal_webgpu_queue_build_frontier(queue, epoch, &frontier_storage);
     iree_status_t status = iree_hal_webgpu_queue_execute_host_call(
-        device, queue_affinity, signal_semaphore_list, frontier, call, args,
-        flags);
+        queue, signal_semaphore_list, frontier, call, args, flags);
     iree_hal_webgpu_queue_advance_tracker(queue, epoch);
     return status;
   }
@@ -1904,9 +1963,7 @@ iree_status_t iree_hal_webgpu_queue_host_call(
   iree_hal_resource_retain(state->call.resource);
   memcpy(state->args, args, sizeof(state->args));
   state->flags = flags;
-  state->device = device;
   state->queue = queue;
-  state->queue_affinity = queue_affinity;
   state->epoch = epoch;
   state->allocator = queue->host_allocator;
 
@@ -1956,7 +2013,7 @@ iree_status_t iree_hal_webgpu_queue_host_call(
 // queue_dispatch
 //===----------------------------------------------------------------------===//
 
-iree_status_t iree_hal_webgpu_queue_dispatch(
+iree_status_t iree_hal_webgpu_queue_submit_dispatch(
     iree_hal_webgpu_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
@@ -2137,13 +2194,13 @@ static iree_status_t iree_hal_webgpu_queue_execute_one_shot(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_webgpu_queue_execute(
+iree_status_t iree_hal_webgpu_queue_submit_execute(
     iree_hal_webgpu_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t flags) {
+    iree_hal_queue_execute_flags_t flags) {
   // Barrier-only submission: no command buffer, just wait->signal.
   // NO FIFO elision — barrier signals are CPU-side with no GPU FIFO backing,
   // so FIFO ordering does not guarantee the signal is visible to consumers.
@@ -2216,14 +2273,4 @@ iree_status_t iree_hal_webgpu_queue_execute(
   }
 
   return iree_hal_webgpu_queue_state_submit(state);
-}
-
-//===----------------------------------------------------------------------===//
-// queue_flush
-//===----------------------------------------------------------------------===//
-
-iree_status_t iree_hal_webgpu_queue_flush(iree_hal_webgpu_queue_t* queue) {
-  // WebGPU's queue.submit() is not buffered — commands are submitted
-  // immediately. No flush is needed.
-  return iree_ok_status();
 }

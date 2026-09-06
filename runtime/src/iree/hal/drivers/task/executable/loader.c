@@ -70,29 +70,33 @@ bool iree_hal_executable_loader_claims_executable(
 
 iree_status_t iree_hal_executable_loader_load(
     iree_hal_executable_loader_t* executable_loader,
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* load_params,
     iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(executable_loader);
+  IREE_ASSERT_ARGUMENT(queue_family);
   IREE_ASSERT_ARGUMENT(target);
   IREE_ASSERT_ARGUMENT(load_params);
   IREE_ASSERT_ARGUMENT(load_params->executable_data.data &&
                        load_params->executable_data.data_length);
   IREE_ASSERT_ARGUMENT(out_executable);
-  return executable_loader->vtable->load(executable_loader, target, load_params,
-                                         worker_capacity, out_executable);
+  return executable_loader->vtable->load(executable_loader, queue_family,
+                                         target, load_params, worker_capacity,
+                                         out_executable);
 }
 
 iree_status_t iree_hal_executable_loader_select_and_load(
     iree_host_size_t loader_count, iree_hal_executable_loader_t** loaders,
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* load_params,
     iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(!loader_count || loaders);
+  IREE_ASSERT_ARGUMENT(queue_family);
   IREE_ASSERT_ARGUMENT(target);
   IREE_ASSERT_ARGUMENT(load_params);
   IREE_ASSERT_ARGUMENT(out_executable);
-  *out_executable = NULL;
 
   iree_hal_executable_loader_t* selected_loader = NULL;
   iree_host_size_t selected_loader_ordinal = IREE_HOST_SIZE_MAX;
@@ -122,6 +126,7 @@ iree_status_t iree_hal_executable_loader_select_and_load(
         (int)target->family.size, target->family.data,
         (int)target->target_key.size, target->target_key.data);
   }
-  return iree_hal_executable_loader_load(selected_loader, target, load_params,
-                                         worker_capacity, out_executable);
+  return iree_hal_executable_loader_load(selected_loader, queue_family, target,
+                                         load_params, worker_capacity,
+                                         out_executable);
 }

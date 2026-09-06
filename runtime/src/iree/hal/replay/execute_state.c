@@ -36,6 +36,10 @@ static void iree_hal_replay_executor_release_entry(
     case IREE_HAL_REPLAY_OBJECT_TYPE_FILE:
       iree_hal_file_release(entry->value.file);
       break;
+    case IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE:
+      iree_hal_pool_release(entry->queue_allocation_pool);
+      iree_hal_queue_release(entry->value.queue);
+      break;
     default:
       break;
   }
@@ -185,11 +189,16 @@ iree_status_t iree_hal_replay_executor_require_payload(
 iree_status_t iree_hal_replay_executor_make_buffer_params(
     const iree_hal_replay_allocator_allocate_buffer_payload_t* payload,
     iree_hal_buffer_params_t* out_params) {
+  if (IREE_UNLIKELY(payload->reserved0 != 0 || payload->reserved1 != 0)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay allocation request reserved fields must be zero");
+  }
   memset(out_params, 0, sizeof(*out_params));
   out_params->usage = payload->usage;
   out_params->type = payload->type;
   out_params->access = payload->access;
-  out_params->queue_affinity = payload->queue_affinity;
+  out_params->queue_family_affinity = payload->queue_family_affinity;
   out_params->min_alignment = payload->min_alignment;
   return iree_ok_status();
 }
@@ -288,16 +297,19 @@ iree_status_t iree_hal_replay_executor_make_semaphore_list(
       return status;
     }
   }
-  const iree_hal_replay_semaphore_timepoint_payload_t* timepoints =
-      (const iree_hal_replay_semaphore_timepoint_payload_t*)payloads.data;
   for (iree_host_size_t i = 0; i < count; ++i) {
+    iree_hal_replay_semaphore_timepoint_payload_t timepoint;
+    memcpy(&timepoint,
+           payloads.data +
+               i * sizeof(iree_hal_replay_semaphore_timepoint_payload_t),
+           sizeof(timepoint));
     iree_hal_replay_object_entry_t* entry = NULL;
     status = iree_hal_replay_executor_lookup(
-        executor, timepoints[i].semaphore_id,
-        IREE_HAL_REPLAY_OBJECT_TYPE_SEMAPHORE, &entry);
+        executor, timepoint.semaphore_id, IREE_HAL_REPLAY_OBJECT_TYPE_SEMAPHORE,
+        &entry);
     if (!iree_status_is_ok(status)) break;
     out_storage->semaphores[i] = entry->value.semaphore;
-    out_storage->payload_values[i] = timepoints[i].value;
+    out_storage->payload_values[i] = timepoint.value;
   }
   if (!iree_status_is_ok(status)) {
     iree_hal_replay_semaphore_list_storage_deinitialize(
@@ -427,10 +439,9 @@ iree_status_t iree_hal_replay_buffer_binding_table_storage_initialize(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_replay_executor_flush_and_wait(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t signal_list) {
-  IREE_RETURN_IF_ERROR(iree_hal_device_queue_flush(device, queue_affinity));
+iree_status_t iree_hal_replay_executor_flush_queue_and_wait(
+    iree_hal_queue_t* queue, const iree_hal_semaphore_list_t signal_list) {
+  IREE_RETURN_IF_ERROR(iree_hal_queue_flush(queue));
   if (signal_list.count == 0) return iree_ok_status();
   return iree_hal_semaphore_list_wait(signal_list, iree_infinite_timeout(),
                                       IREE_ASYNC_WAIT_FLAG_NONE);

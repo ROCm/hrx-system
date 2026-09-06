@@ -21,9 +21,9 @@
 #include "iree/hal/utils/resource_set.h"
 
 iree_status_t iree_hal_amdgpu_host_queue_validate_execute_flags(
-    iree_hal_execute_flags_t flags) {
-  const iree_hal_execute_flags_t supported_flags =
-      IREE_HAL_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME;
+    iree_hal_queue_execute_flags_t flags) {
+  const iree_hal_queue_execute_flags_t supported_flags =
+      IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME;
   if (IREE_UNLIKELY(iree_any_bit_set(flags, ~supported_flags))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported execute flags: 0x%" PRIx64, flags);
@@ -35,7 +35,7 @@ iree_status_t iree_hal_amdgpu_host_queue_create_binding_table_resource_set(
     iree_hal_amdgpu_host_queue_t* queue,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t execute_flags,
+    iree_hal_queue_execute_flags_t execute_flags,
     iree_hal_resource_set_t** out_resource_set) {
   *out_resource_set = NULL;
   IREE_RETURN_IF_ERROR(
@@ -62,8 +62,9 @@ iree_status_t iree_hal_amdgpu_host_queue_create_binding_table_resource_set(
                             "NULL for %" PRIhsz " bindings",
                             binding_table.count);
   }
-  if (iree_any_bit_set(execute_flags,
-                       IREE_HAL_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME)) {
+  if (iree_any_bit_set(
+          execute_flags,
+          IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME)) {
     return iree_ok_status();
   }
 
@@ -336,7 +337,7 @@ iree_hal_amdgpu_host_queue_submit_profiled_pm4_command_buffer(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t execute_flags,
+    iree_hal_queue_execute_flags_t execute_flags,
     iree_hal_resource_set_t** inout_binding_resource_set,
     const iree_hal_amdgpu_host_queue_pm4_profile_dispatch_selection_t*
         selection,
@@ -504,7 +505,7 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_command_buffer(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t execute_flags,
+    iree_hal_queue_execute_flags_t execute_flags,
     iree_hal_resource_set_t** inout_binding_resource_set, bool* out_ready) {
   const iree_host_size_t command_buffer_device_ordinal =
       iree_hal_amdgpu_pm4_command_buffer_device_ordinal(command_buffer);
@@ -667,7 +668,7 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_command_buffer(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t execute_flags,
+    iree_hal_queue_execute_flags_t execute_flags,
     iree_hal_resource_set_t** inout_binding_resource_set, bool* out_ready) {
   IREE_ASSERT_ARGUMENT(queue);
   IREE_ASSERT_ARGUMENT(resolution);

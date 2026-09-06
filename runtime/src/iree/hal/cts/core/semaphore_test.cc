@@ -17,9 +17,9 @@ class SemaphoreTest : public CtsTestBase<> {};
 // Tests that a semaphore that is unused properly cleans itself up.
 TEST_P(SemaphoreTest, NoOp) {
   iree_hal_semaphore_t* semaphore = NULL;
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 123ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 123ull,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
 
   uint64_t value;
   IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore, &value));
@@ -31,9 +31,9 @@ TEST_P(SemaphoreTest, NoOp) {
 // Tests that a semaphore will accept new values as it is signaled.
 TEST_P(SemaphoreTest, NormalSignaling) {
   iree_hal_semaphore_t* semaphore = NULL;
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 2ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 2ull,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
 
   uint64_t value;
   IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore, &value));
@@ -52,9 +52,9 @@ TEST_P(SemaphoreTest, NormalSignaling) {
 // Tests semaphore failure handling.
 TEST_P(SemaphoreTest, Failure) {
   iree_hal_semaphore_t* semaphore = NULL;
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 2ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 2ull,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
 
   IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphore, 3ull, /*frontier=*/NULL));
   uint64_t value;
@@ -91,9 +91,9 @@ TEST_P(SemaphoreTest, EmptyWait) {
 // Tests waiting on a semaphore that has already been signaled.
 TEST_P(SemaphoreTest, WaitAlreadySignaled) {
   iree_hal_semaphore_t* semaphore = NULL;
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 2ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 2ull,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
 
   // Test both previous and current values.
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
@@ -116,9 +116,9 @@ TEST_P(SemaphoreTest, WaitAlreadySignaled) {
 // Tests waiting on a semaphore that has not been signaled.
 TEST_P(SemaphoreTest, WaitUnsignaled) {
   iree_hal_semaphore_t* semaphore = NULL;
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 2ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 2ull,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
 
   // Semaphore is at 2, waiting for 3 with an immediate deadline must fail.
   IREE_EXPECT_STATUS_IS(
@@ -134,12 +134,12 @@ TEST_P(SemaphoreTest, WaitUnsignaled) {
 TEST_P(SemaphoreTest, WaitAllButNotAllSignaled) {
   iree_hal_semaphore_t* semaphore_a = NULL;
   iree_hal_semaphore_t* semaphore_b = NULL;
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_a));
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 1ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_b));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0ull,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_a));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 1ull,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_b));
 
   iree_hal_semaphore_t* semaphore_ptrs[] = {semaphore_a, semaphore_b};
   uint64_t payload_values[] = {1ull, 1ull};
@@ -162,12 +162,12 @@ TEST_P(SemaphoreTest, WaitAllButNotAllSignaled) {
 TEST_P(SemaphoreTest, WaitAllAndAllSignaled) {
   iree_hal_semaphore_t* semaphore_a = NULL;
   iree_hal_semaphore_t* semaphore_b = NULL;
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 1ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_a));
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 1ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_b));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 1ull,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_a));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 1ull,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_b));
 
   iree_hal_semaphore_t* semaphore_ptrs[] = {semaphore_a, semaphore_b};
   uint64_t payload_values[] = {1ull, 1ull};
@@ -188,12 +188,12 @@ TEST_P(SemaphoreTest, WaitAllAndAllSignaled) {
 TEST_P(SemaphoreTest, WaitAnyAlreadySignaled) {
   iree_hal_semaphore_t* semaphore_a = NULL;
   iree_hal_semaphore_t* semaphore_b = NULL;
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_a));
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 1ull,
-                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_b));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0ull,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_a));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 1ull,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore_b));
 
   iree_hal_semaphore_t* semaphore_ptrs[] = {semaphore_a, semaphore_b};
   uint64_t payload_values[] = {1ull, 1ull};

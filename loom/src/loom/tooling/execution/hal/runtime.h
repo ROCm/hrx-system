@@ -21,6 +21,12 @@ extern "C" {
 typedef struct loom_run_hal_runtime_t {
   // Selected HAL device used for executable preparation and dispatch.
   iree_hal_device_t* device;
+  // Borrowed provisioned queue used for dispatch submissions.
+  // The runtime-owned |device| outlives this pointer.
+  iree_hal_queue_t* dispatch_queue;
+  // Borrowed provisioned queue used for host data transfers, if available.
+  // The runtime-owned |device| outlives this pointer.
+  iree_hal_queue_t* transfer_queue;
   // Topology group assigning frontier state to |device|.
   iree_hal_device_group_t* device_group;
 } loom_run_hal_runtime_t;

@@ -109,17 +109,17 @@ static iree_status_t iree_numpy_npy_read_header(
 }
 
 typedef struct {
+  // Stream positioned at the first byte of the array payload.
   iree_io_stream_t* stream;
 } iree_numpy_npy_read_params_t;
-static iree_status_t iree_numpy_npy_read_into_mapping(
-    iree_hal_buffer_mapping_t* mapping, void* user_data) {
+static iree_status_t iree_numpy_npy_read_into_contents(
+    void* user_data, iree_byte_span_t contents) {
   iree_numpy_npy_read_params_t* params =
       (iree_numpy_npy_read_params_t*)user_data;
-  IREE_RETURN_IF_ERROR(
-      iree_io_stream_read(params->stream, mapping->contents.data_length,
-                          mapping->contents.data, NULL),
-      "failed to read npy contents of %" PRIhsz " bytes",
-      mapping->contents.data_length);
+  IREE_RETURN_IF_ERROR(iree_io_stream_read(params->stream, contents.data_length,
+                                           contents.data, NULL),
+                       "failed to read npy contents of %" PRIhsz " bytes",
+                       contents.data_length);
   return iree_ok_status();
 }
 
@@ -287,16 +287,15 @@ static iree_status_t iree_numpy_parse_shape_dims(iree_string_view_t shape,
 
 IREE_API_EXPORT iree_status_t iree_numpy_npy_load_ndarray(
     iree_io_stream_t* stream, iree_numpy_npy_load_options_t options,
-    iree_hal_buffer_params_t buffer_params, iree_hal_device_t* device,
-    iree_hal_allocator_t* device_allocator,
+    iree_hal_buffer_params_t buffer_params, iree_hal_allocator_t* allocator,
     iree_hal_buffer_view_t** out_buffer_view) {
   IREE_ASSERT_ARGUMENT(stream);
-  IREE_ASSERT_ARGUMENT(device_allocator);
+  IREE_ASSERT_ARGUMENT(allocator);
   IREE_ASSERT_ARGUMENT(out_buffer_view);
   *out_buffer_view = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_allocator_t host_allocator =
-      iree_hal_allocator_host_allocator(device_allocator);
+      iree_hal_allocator_host_allocator(allocator);
 
   // Quick check for EOF; if already there we can give a better error than
   // if we failed trying to parse the header. Since npy files are often
@@ -367,11 +366,10 @@ IREE_API_EXPORT iree_status_t iree_numpy_npy_load_ndarray(
     iree_numpy_npy_read_params_t read_params = {
         .stream = stream,
     };
-    buffer_params.access |= IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE;
-    status = iree_hal_buffer_view_generate_buffer(
-        device, device_allocator, shape_rank, shape, element_type,
-        encoding_type, buffer_params, iree_numpy_npy_read_into_mapping,
-        &read_params, out_buffer_view);
+    status = iree_hal_buffer_view_generate(allocator, buffer_params, shape_rank,
+                                           shape, element_type, encoding_type,
+                                           iree_numpy_npy_read_into_contents,
+                                           &read_params, out_buffer_view);
   }
 
   iree_allocator_free(host_allocator, header_buffer);
@@ -567,11 +565,19 @@ static iree_status_t iree_numpy_npy_write_bytes(
       buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ, 0,
       write_length, &mapping));
 
-  iree_status_t status = iree_status_annotate(
-      iree_io_stream_write(stream, write_length, mapping.contents.data),
-      IREE_SV("failed to write buffer contents"));
-
-  IREE_IGNORE_ERROR(iree_hal_buffer_unmap_range(&mapping));
+  iree_status_t status = iree_ok_status();
+  if (write_length > 0 &&
+      !iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
+                         IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
+    status =
+        iree_hal_buffer_mapping_invalidate_range(&mapping, 0, write_length);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_status_annotate(
+        iree_io_stream_write(stream, write_length, mapping.contents.data),
+        IREE_SV("failed to write buffer contents"));
+  }
+  status = iree_status_join(status, iree_hal_buffer_unmap_range(&mapping));
   return status;
 }
 

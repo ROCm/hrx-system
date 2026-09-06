@@ -10,6 +10,7 @@
 
 #include "iree/hal/cts/util/profile_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
+#include "iree/hal/memory/passthrough_pool.h"
 
 namespace iree::hal::cts {
 
@@ -33,14 +34,14 @@ TEST_P(VulkanProfilingTest, QueueEventsRecordNativeTransferSubmissions) {
   SemaphoreList empty_wait;
   SemaphoreList fill_signal(device_, {0}, {1});
   uint32_t pattern = 0xA5A5A5A5u;
-  IREE_ASSERT_OK(iree_hal_device_queue_fill(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, fill_signal, source, 0,
-      kBufferSize, &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_fill(transfer_queue_, empty_wait, fill_signal,
+                                     source, 0, kBufferSize, &pattern,
+                                     sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
 
   SemaphoreList copy_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_copy(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, fill_signal, copy_signal, source, 0,
-      target, 0, kBufferSize, IREE_HAL_COPY_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_copy(transfer_queue_, fill_signal, copy_signal,
+                                     source, 0, target, 0, kBufferSize,
+                                     IREE_HAL_COPY_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       copy_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
@@ -99,21 +100,37 @@ TEST_P(VulkanProfilingTest,
   params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
+  params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(transfer_queue_)));
+
+  iree_hal_queue_pool_backend_t backend = {};
+  IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
+      device_, iree_hal_queue_family(transfer_queue_), &backend));
+  iree_hal_passthrough_pool_options_t pool_options = {};
+  pool_options.asan = backend.asan;
+  Ref<iree_hal_pool_t> pool;
+  IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
+      pool_options, backend.slab_provider, backend.notification,
+      iree_allocator_system(), pool.out()));
+  const iree_hal_pool_reservation_request_t request = {
+      /*.params=*/params,
+      /*.allocation_size=*/kBufferSize,
+  };
 
   Ref<iree_hal_buffer_t> buffer;
   SemaphoreList empty_wait;
   SemaphoreList alloca_signal(device_, {0}, {1});
   iree_hal_buffer_t* raw_buffer = NULL;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, alloca_signal,
-      /*pool=*/NULL, params, kBufferSize, IREE_HAL_ALLOCA_FLAG_NONE,
-      &raw_buffer));
+  IREE_ASSERT_OK(
+      iree_hal_queue_alloca(transfer_queue_, empty_wait, alloca_signal, pool,
+                            /*request_count=*/1, &request, &raw_buffer));
   buffer.reset(raw_buffer);
 
   SemaphoreList dealloca_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, alloca_signal, dealloca_signal,
-      buffer.get(), IREE_HAL_DEALLOCA_FLAG_NONE));
+  iree_hal_buffer_t* dealloca_buffer = buffer.get();
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(transfer_queue_, alloca_signal,
+                                         dealloca_signal,
+                                         /*buffer_count=*/1, &dealloca_buffer));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       dealloca_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 

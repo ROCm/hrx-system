@@ -23,6 +23,11 @@ class ExecutableTest : public CtsTestBase<> {
     CtsTestBase::SetUp();
     if (HasFatalFailure() || IsSkipped()) return;
 
+    dispatch_queue_ =
+        QueueForCommandCategories(IREE_HAL_COMMAND_CATEGORY_DISPATCH);
+    if (!dispatch_queue_) {
+      GTEST_SKIP() << "device has no dispatch-capable queue";
+    }
     LoadExecutableOrSkipUnsupported("executable_test.bin", &executable_);
   }
 
@@ -46,6 +51,7 @@ class ExecutableTest : public CtsTestBase<> {
     return info.parameter_count != 0;
   }
 
+  iree_hal_queue_t* dispatch_queue_ = nullptr;
   iree_hal_executable_t* executable_ = nullptr;
 };
 
@@ -179,17 +185,17 @@ TEST_P(ExecutableTest, LookupGlobalByName) {
   ASSERT_EQ(info.byte_length, sizeof(uint64_t));
 
   iree_hal_buffer_t* global_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_global_buffer(
-      executable_, global, IREE_HAL_QUEUE_AFFINITY_ANY, &global_buffer));
+  IREE_ASSERT_OK(
+      iree_hal_executable_global_buffer(executable_, global, &global_buffer));
   ASSERT_NE(global_buffer, nullptr);
   EXPECT_EQ(iree_hal_buffer_byte_length(global_buffer), sizeof(uint64_t));
 
   const uint64_t expected_value = 0xFEEDFACECAFEBEEFull;
   SemaphoreList empty_wait;
   SemaphoreList update_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_update(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, update_signal,
-      &expected_value, /*source_offset=*/0, global_buffer, /*target_offset=*/0,
+  IREE_ASSERT_OK(iree_hal_queue_update(
+      transfer_queue_, empty_wait, update_signal, &expected_value,
+      /*source_offset=*/0, global_buffer, /*target_offset=*/0,
       sizeof(expected_value), IREE_HAL_UPDATE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       update_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -207,16 +213,16 @@ TEST_P(ExecutableTest, GlobalBufferVisibleToDispatch) {
   if (!found) GTEST_SKIP() << "executable testdata has no globals";
 
   iree_hal_buffer_t* global_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_global_buffer(
-      executable_, global, IREE_HAL_QUEUE_AFFINITY_ANY, &global_buffer));
+  IREE_ASSERT_OK(
+      iree_hal_executable_global_buffer(executable_, global, &global_buffer));
   ASSERT_NE(global_buffer, nullptr);
 
   const uint64_t expected_value = 0xBADDEC0DEFEED123ull;
   SemaphoreList empty_wait;
   SemaphoreList update_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_update(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, update_signal,
-      &expected_value, /*source_offset=*/0, global_buffer, /*target_offset=*/0,
+  IREE_ASSERT_OK(iree_hal_queue_update(
+      transfer_queue_, empty_wait, update_signal, &expected_value,
+      /*source_offset=*/0, global_buffer, /*target_offset=*/0,
       sizeof(expected_value), IREE_HAL_UPDATE_FLAG_NONE));
 
   Ref<iree_hal_buffer_t> output_buffer;
@@ -243,9 +249,9 @@ TEST_P(ExecutableTest, GlobalBufferVisibleToDispatch) {
       iree_make_const_byte_span(constant_data, sizeof(constant_data));
 
   SemaphoreList dispatch_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, update_signal, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      dispatch_queue_, update_signal, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(

@@ -478,7 +478,7 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_direct_file_action(
 }
 
 iree_status_t iree_hal_amdgpu_host_queue_read_file(
-    iree_hal_amdgpu_virtual_queue_t* queue,
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_file_t* source_file, uint64_t source_offset,
@@ -496,25 +496,23 @@ iree_status_t iree_hal_amdgpu_host_queue_read_file(
           iree_hal_amdgpu_host_queue_validate_direct_file_buffer(
               target_buffer, "read", length));
       return iree_hal_amdgpu_host_queue_submit_direct_file_action(
-          (iree_hal_amdgpu_host_queue_t*)queue, wait_semaphore_list,
-          signal_semaphore_list, IREE_HAL_AMDGPU_FILE_ACTION_READ, source_file,
-          source_offset, target_buffer, target_offset, length);
+          queue, wait_semaphore_list, signal_semaphore_list,
+          IREE_HAL_AMDGPU_FILE_ACTION_READ, source_file, source_offset,
+          target_buffer, target_offset, length);
     }
     return iree_hal_amdgpu_host_queue_submit_staged_read(
-        (iree_hal_amdgpu_host_queue_t*)queue, wait_semaphore_list,
-        signal_semaphore_list, source_file, source_offset, target_buffer,
-        target_offset, length);
+        queue, wait_semaphore_list, signal_semaphore_list, source_file,
+        source_offset, target_buffer, target_offset, length);
   }
   IREE_ASSERT(source_offset <= IREE_DEVICE_SIZE_MAX);
   return iree_hal_amdgpu_host_queue_copy_buffer(
-      (iree_hal_amdgpu_host_queue_t*)queue, wait_semaphore_list,
-      signal_semaphore_list, storage_buffer, (iree_device_size_t)source_offset,
-      target_buffer, target_offset, length, IREE_HAL_COPY_FLAG_NONE,
-      IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_READ);
+      queue, wait_semaphore_list, signal_semaphore_list, storage_buffer,
+      (iree_device_size_t)source_offset, target_buffer, target_offset, length,
+      IREE_HAL_COPY_FLAG_NONE, IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_READ);
 }
 
 iree_status_t iree_hal_amdgpu_host_queue_write_file(
-    iree_hal_amdgpu_virtual_queue_t* queue,
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
@@ -532,19 +530,17 @@ iree_status_t iree_hal_amdgpu_host_queue_write_file(
           iree_hal_amdgpu_host_queue_validate_direct_file_buffer(
               source_buffer, "write", length));
       return iree_hal_amdgpu_host_queue_submit_direct_file_action(
-          (iree_hal_amdgpu_host_queue_t*)queue, wait_semaphore_list,
-          signal_semaphore_list, IREE_HAL_AMDGPU_FILE_ACTION_WRITE, target_file,
-          target_offset, source_buffer, source_offset, length);
+          queue, wait_semaphore_list, signal_semaphore_list,
+          IREE_HAL_AMDGPU_FILE_ACTION_WRITE, target_file, target_offset,
+          source_buffer, source_offset, length);
     }
     return iree_hal_amdgpu_host_queue_submit_staged_write(
-        (iree_hal_amdgpu_host_queue_t*)queue, wait_semaphore_list,
-        signal_semaphore_list, source_buffer, source_offset, target_file,
-        target_offset, length);
+        queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
+        source_offset, target_file, target_offset, length);
   }
   IREE_ASSERT(target_offset <= IREE_DEVICE_SIZE_MAX);
   return iree_hal_amdgpu_host_queue_copy_buffer(
-      (iree_hal_amdgpu_host_queue_t*)queue, wait_semaphore_list,
-      signal_semaphore_list, source_buffer, source_offset, storage_buffer,
-      (iree_device_size_t)target_offset, length, IREE_HAL_COPY_FLAG_NONE,
-      IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_WRITE);
+      queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
+      source_offset, storage_buffer, (iree_device_size_t)target_offset, length,
+      IREE_HAL_COPY_FLAG_NONE, IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_WRITE);
 }

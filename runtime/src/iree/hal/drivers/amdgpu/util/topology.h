@@ -21,8 +21,11 @@ extern "C" {
 #define IREE_HAL_AMDGPU_MAX_CPU_AGENT 64
 #define IREE_HAL_AMDGPU_MAX_GPU_AGENT 64
 
-// Default number of logical HAL queues exposed per GPU agent.
-#define IREE_HAL_AMDGPU_DEFAULT_GPU_AGENT_QUEUE_COUNT (2)
+// Maximum flattened queue count representable by an async queue axis.
+#define IREE_HAL_AMDGPU_MAX_QUEUE_AXIS_COUNT ((iree_host_size_t)UINT8_MAX + 1)
+
+// Default number of native hardware queues provisioned per GPU agent.
+#define IREE_HAL_AMDGPU_DEFAULT_GPU_AGENT_QUEUE_COUNT (1)
 
 // Defines a system topology specifying which agents are to be used by the HAL.
 //

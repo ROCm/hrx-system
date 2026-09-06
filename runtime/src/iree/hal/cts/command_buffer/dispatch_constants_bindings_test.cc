@@ -112,10 +112,9 @@ TEST_P(DispatchConstantsBindingsTest, ScaleAndOffset) {
   };
 
   iree_hal_command_buffer_t* command_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      binding_table.count, &command_buffer));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     binding_table.count, &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
   // Push constants: scale=3, offset=10.
@@ -143,11 +142,10 @@ TEST_P(DispatchConstantsBindingsTest, ScaleAndOffset) {
   IREE_ASSERT_OK(SubmitCommandBufferAndWait(command_buffer, binding_table));
 
   std::vector<uint32_t> output_data(4);
-  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-      device_, output_buffer, /*source_offset=*/0,
-      /*target_buffer=*/output_data.data(),
-      /*data_length=*/output_data.size() * sizeof(uint32_t),
-      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+  IREE_ASSERT_OK(
+      DownloadBufferData(output_buffer, /*source_offset=*/0,
+                         /*target=*/output_data.data(),
+                         /*length=*/output_data.size() * sizeof(uint32_t)));
 
   // output[i] = input[i] * 3 + 10 = [13, 16, 19, 22].
   std::vector<uint32_t> expected_data = {13, 16, 19, 22};

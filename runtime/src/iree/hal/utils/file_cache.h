@@ -15,9 +15,9 @@
 extern "C" {
 #endif  // __cplusplus
 
-// An in-memory cache of file handles to devices and queues that have an open
-// HAL file reference. A single file cache may be shared across multiple devices
-// and/or multiple queues within individual devices.
+// An in-memory cache of file handles imported into devices for use by queue
+// families. A single file cache may be shared across multiple devices and
+// queue-family accessibility domains.
 //
 // Thread-safe: multiple threads can access the cache concurrently.
 typedef struct iree_hal_file_cache_t iree_hal_file_cache_t;
@@ -41,15 +41,16 @@ IREE_API_EXPORT void iree_hal_file_cache_release(
 IREE_API_EXPORT void iree_hal_file_cache_trim(
     iree_hal_file_cache_t* file_cache);
 
-// Looks up the file |handle| for use on |device| with any of the queues
-// specified with |queue_affinity| and returns it retained in |out_file|.
-// If the file has not been used on the device yet it will be imported and
-// cached until the cache is trimmed.
+// Looks up the file |handle| for use on |device| by every family in
+// |queue_family_affinity| and returns it retained in |out_file|. A cached file
+// imported for a superset of the requested families may be reused. If no
+// compatible file is cached then one is imported and retained until the cache
+// is trimmed.
 IREE_API_EXPORT iree_status_t iree_hal_file_cache_lookup(
     iree_hal_file_cache_t* file_cache, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_access_t access,
-    iree_io_file_handle_t* handle, iree_hal_external_file_flags_t flags,
-    iree_hal_file_t** out_file);
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
+    iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file);
 
 #ifdef __cplusplus
 }  // extern "C"

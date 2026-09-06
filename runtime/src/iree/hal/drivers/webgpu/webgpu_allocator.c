@@ -369,7 +369,7 @@ static iree_status_t iree_hal_webgpu_allocator_allocate_buffer(
   // Wrap in an IREE HAL buffer.
   iree_hal_buffer_placement_t placement = {
       .device = NULL,  // Set by the device after allocation.
-      .queue_affinity = compat_params.queue_affinity,
+      .queue_family_affinity = compat_params.queue_family_affinity,
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
 

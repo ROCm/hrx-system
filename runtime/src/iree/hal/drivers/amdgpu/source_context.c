@@ -201,7 +201,6 @@ iree_hal_amdgpu_source_context_validate_sanitizer_site_table_record(
 void iree_hal_amdgpu_source_context_initialize(
     uint64_t executable_id, const uint64_t code_object_hash[2],
     iree_host_size_t physical_device_count,
-    uint64_t loaded_physical_device_mask,
     iree_hal_amdgpu_loaded_code_object_range_t* loaded_code_object_ranges,
     iree_hal_amdgpu_source_context_t* out_context) {
   IREE_ASSERT_ARGUMENT(out_context);
@@ -212,7 +211,6 @@ void iree_hal_amdgpu_source_context_initialize(
     out_context->code_object_hash[1] = code_object_hash[1];
   }
   out_context->physical_device_count = physical_device_count;
-  out_context->loaded_physical_device_mask = loaded_physical_device_mask;
   out_context->loaded_code_object_ranges = loaded_code_object_ranges;
   iree_atomic_store(&out_context->sanitizer_site_table_published, 0,
                     iree_memory_order_relaxed);

@@ -1534,10 +1534,11 @@ static void iree_profile_command_print_text_command_buffer(
     FILE* file) {
   fprintf(file,
           "command_buffer %" PRIu64 ": device=%u mode=%" PRIu64
-          " categories=%" PRIu64 " queue_affinity=%" PRIu64 "\n",
+          " categories=%" PRIu64 " queue_family=%u\n",
           command_buffer->command_buffer_id,
           command_buffer->physical_device_ordinal, command_buffer->mode,
-          command_buffer->command_categories, command_buffer->queue_affinity);
+          command_buffer->command_categories,
+          command_buffer->queue_family_ordinal);
 }
 
 static iree_status_t iree_profile_command_print_text_operations(
@@ -1699,11 +1700,13 @@ static void iree_profile_command_print_jsonl_command_buffer(
   fprintf(file,
           "{\"type\":\"command_buffer\",\"command_buffer_id\":%" PRIu64
           ",\"physical_device_ordinal\":%u,\"mode\":%" PRIu64
-          ",\"command_categories\":%" PRIu64 ",\"queue_affinity\":%" PRIu64
+          ",\"command_categories\":%" PRIu64
+          ",\"queue_family_ordinal\":%u"
           "}\n",
           command_buffer->command_buffer_id,
           command_buffer->physical_device_ordinal, command_buffer->mode,
-          command_buffer->command_categories, command_buffer->queue_affinity);
+          command_buffer->command_categories,
+          command_buffer->queue_family_ordinal);
 }
 
 static void iree_profile_command_print_jsonl_command_buffers(

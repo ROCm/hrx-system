@@ -37,8 +37,8 @@ class TsanExecutableTest : public ::testing::TestWithParam<BackendInfo> {
     IREE_ASSERT_OK(status);
 
     iree_hal_executable_target_selection_result_t target_result;
-    IREE_ASSERT_OK(
-        SelectBackendExecutableTarget(device(), GetParam(), &target_result));
+    IREE_ASSERT_OK(SelectBackendExecutableTarget(
+        device(), iree_hal_queue_family(queue()), GetParam(), &target_result));
     if (target_result.outcome ==
         IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
       GTEST_SKIP() << "Executable target '"
@@ -55,18 +55,19 @@ class TsanExecutableTest : public ::testing::TestWithParam<BackendInfo> {
     load_params.executable_data = GetParam().executable_data(
         iree_make_cstring_view("tsan_executable_test.bin"));
     IREE_ASSERT_OK(iree_hal_device_load_executable(
-        device(), IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target,
+        device(), iree_hal_queue_family(queue()), target_result.target,
         &load_params, executable_.out()));
   }
 
   void TearDown() override {
     if (device()) {
-      IREE_EXPECT_OK(
-          iree_hal_device_queue_flush(device(), IREE_HAL_QUEUE_AFFINITY_ANY));
+      IREE_EXPECT_OK(iree_hal_queue_flush(queue()));
     }
   }
 
   iree_hal_device_t* device() const { return tsan_device_.device(); }
+
+  iree_hal_queue_t* queue() const { return tsan_device_.queue(); }
 
   iree_hal_allocator_t* allocator() const { return tsan_device_.allocator(); }
 
@@ -93,13 +94,13 @@ TEST_P(TsanExecutableTest, PublishesTsanConfigGlobal) {
   ASSERT_EQ(info.byte_length, sizeof(iree_hal_amdgpu_tsan_config_t));
 
   iree_hal_buffer_t* global_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_global_buffer(
-      executable_, global, IREE_HAL_QUEUE_AFFINITY_ANY, &global_buffer));
+  IREE_ASSERT_OK(
+      iree_hal_executable_global_buffer(executable_, global, &global_buffer));
   ASSERT_NE(global_buffer, nullptr);
 
   std::vector<iree_hal_amdgpu_tsan_config_t> configs;
-  IREE_ASSERT_OK(
-      SanitizerReadBufferData(device(), allocator(), global_buffer, &configs));
+  IREE_ASSERT_OK(SanitizerReadBufferData(device(), queue(), allocator(),
+                                         global_buffer, &configs));
   ASSERT_EQ(configs.size(), 1u);
   const iree_hal_amdgpu_tsan_config_t& config = configs[0];
   EXPECT_EQ(config.record_length, sizeof(config));
@@ -144,17 +145,17 @@ TEST_P(TsanExecutableTest, PublishesTsanConfigGlobal) {
 
   SemaphoreList empty_wait;
   SemaphoreList dispatch_signal(device(), {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device(), IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      queue(), empty_wait, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       dispatch_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
   std::vector<uint64_t> output_data;
-  IREE_ASSERT_OK(SanitizerReadBufferData(device(), allocator(), output_buffer,
-                                         &output_data));
+  IREE_ASSERT_OK(SanitizerReadBufferData(device(), queue(), allocator(),
+                                         output_buffer, &output_data));
   ASSERT_EQ(output_data.size(), 12u);
   EXPECT_EQ(output_data[0], config.record_length);
   EXPECT_EQ(output_data[1], config.flags);
@@ -185,13 +186,13 @@ TEST_P(TsanExecutableTest, EnablesFeedbackConfigGlobal) {
   ASSERT_EQ(info.byte_length, sizeof(iree_hal_amdgpu_feedback_config_t));
 
   iree_hal_buffer_t* global_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_executable_global_buffer(
-      executable_, global, IREE_HAL_QUEUE_AFFINITY_ANY, &global_buffer));
+  IREE_ASSERT_OK(
+      iree_hal_executable_global_buffer(executable_, global, &global_buffer));
   ASSERT_NE(global_buffer, nullptr);
 
   std::vector<iree_hal_amdgpu_feedback_config_t> configs;
-  IREE_ASSERT_OK(
-      SanitizerReadBufferData(device(), allocator(), global_buffer, &configs));
+  IREE_ASSERT_OK(SanitizerReadBufferData(device(), queue(), allocator(),
+                                         global_buffer, &configs));
   ASSERT_EQ(configs.size(), 1u);
   const iree_hal_amdgpu_feedback_config_t& config = configs[0];
   EXPECT_EQ(config.record_length, sizeof(config));
@@ -228,9 +229,9 @@ TEST_P(TsanExecutableTest, ReportsTsanPacketThroughFeedback) {
 
   SemaphoreList empty_wait;
   SemaphoreList dispatch_signal(device(), {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
-      device(), IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dispatch_signal,
-      executable_, iree_hal_executable_function_from_index(0),
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      queue(), empty_wait, dispatch_signal, executable_,
+      iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1), constants, bindings,
       IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -241,8 +242,8 @@ TEST_P(TsanExecutableTest, ReportsTsanPacketThroughFeedback) {
   EXPECT_EQ(recorder()->tsan_report_count(), 1u);
 
   std::vector<uint64_t> output_data;
-  IREE_ASSERT_OK(SanitizerReadBufferData(device(), allocator(), output_buffer,
-                                         &output_data));
+  IREE_ASSERT_OK(SanitizerReadBufferData(device(), queue(), allocator(),
+                                         output_buffer, &output_data));
   ASSERT_EQ(output_data.size(), 1u);
   EXPECT_EQ(output_data[0], 1u);
 

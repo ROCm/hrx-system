@@ -41,8 +41,8 @@ typedef struct iree_hal_device_t iree_hal_device_t;
 //
 // The bit namespace is local to the canonical device spec containing the
 // records. The device-spec producer assigns one unique bit to each physical
-// device record; bit positions are independent of backend physical-device
-// ordinals and iree_hal_queue_affinity_t bits.
+// device record; bit positions are independent of driver physical-device and
+// queue ordinals.
 typedef uint64_t iree_hal_physical_device_affinity_t;
 
 // Bitmap type for device compatibility masks.

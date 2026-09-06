@@ -18,11 +18,8 @@ typedef struct iree_hal_amdgpu_host_call_state_t {
   // Host allocator used for this state and cloned semaphore-list storage.
   iree_allocator_t host_allocator;
 
-  // Device reported to the host-call callback. Borrowed from the queue.
-  iree_hal_device_t* device;
-
-  // Queue affinity reported to the host-call callback.
-  iree_hal_queue_affinity_t queue_affinity;
+  // Exact hardware queue reported to the callback. Borrowed from the queue.
+  iree_hal_queue_t* queue;
 
   // User callback and user data captured at queue_host_call submission.
   iree_hal_host_call_t call;
@@ -96,8 +93,7 @@ static iree_status_t iree_hal_amdgpu_host_call_state_create(
   iree_hal_resource_initialize(&iree_hal_amdgpu_host_call_state_vtable,
                                &state->resource);
   state->host_allocator = queue->host_allocator;
-  state->device = queue->logical_device;
-  state->queue_affinity = queue->queue_affinity;
+  state->queue = &queue->base;
   state->call = call;
   iree_hal_resource_retain(state->call.resource);
   memcpy(state->args, args, sizeof(state->args));
@@ -168,8 +164,7 @@ static void iree_hal_amdgpu_host_call_execute(
   }
 
   iree_hal_host_call_context_t context = {
-      .device = state->device,
-      .queue_affinity = state->queue_affinity,
+      .queue = state->queue,
       .signal_semaphore_list = is_nonblocking ? iree_hal_semaphore_list_empty()
                                               : state->signal_semaphore_list,
   };

@@ -22,7 +22,6 @@
 #include "iree/hal/drivers/amdgpu/logical_device.h"
 #include "iree/hal/drivers/amdgpu/physical_device.h"
 #include "iree/hal/drivers/amdgpu/pm4_command_buffer.h"
-#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -239,23 +238,13 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*semaphores=*/&command_buffer_signal_ptr,
       /*payload_values=*/&command_buffer_signal_value,
   };
-  const iree_hal_amdgpu_queue_affinity_domain_t affinity_domain = {
-      /*.supported_affinity=*/
-      test_device.logical_device()->queue_affinity_mask,
-      /*.physical_device_count=*/
-      test_device.logical_device()->physical_device_count,
-      /*.queue_count_per_physical_device=*/
-      test_device.logical_device()->system->topology.gpu_agent_queue_count,
-  };
-  iree_hal_queue_affinity_t execution_affinity = 0;
-  IREE_ASSERT_OK(iree_hal_amdgpu_queue_affinity_for_physical_queue(
-      affinity_domain, /*physical_device_ordinal=*/0,
-      physical_device->host_queue_count - 1, &execution_affinity));
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), execution_affinity,
-      iree_hal_semaphore_list_empty(), command_buffer_signal_list,
-      fixture.command_buffer, iree_hal_buffer_binding_table_empty(),
-      IREE_HAL_EXECUTE_FLAG_NONE));
+  iree_hal_queue_t* execution_queue = test_device.queue(
+      /*family_ordinal=*/0, physical_device->host_queue_count - 1);
+  ASSERT_NE(execution_queue, nullptr);
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      execution_queue, iree_hal_semaphore_list_empty(),
+      command_buffer_signal_list, fixture.command_buffer,
+      iree_hal_buffer_binding_table_empty(), IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       command_buffer_signal, command_buffer_signal_value,
       iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -340,12 +329,11 @@ TEST_F(HostQueueCommandBufferProfilingTest,
   IREE_ASSERT_OK(
       InitializeTwoDispatchCommandBufferResources(&test_device, &fixture));
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
       IREE_HAL_COMMAND_CATEGORY_ATOMIC | IREE_HAL_COMMAND_CATEGORY_DISPATCH |
           IREE_HAL_COMMAND_CATEGORY_TRANSFER,
-      IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/0,
-      fixture.command_buffer.out()));
+      /*binding_capacity=*/0, fixture.command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(fixture.command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(
       fixture.command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
@@ -408,11 +396,10 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*semaphores=*/&command_buffer_signal_ptr,
       /*payload_values=*/&command_buffer_signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), command_buffer_signal_list,
-      fixture.command_buffer, iree_hal_buffer_binding_table_empty(),
-      IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      test_device.queue(), iree_hal_semaphore_list_empty(),
+      command_buffer_signal_list, fixture.command_buffer,
+      iree_hal_buffer_binding_table_empty(), IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       command_buffer_signal, command_buffer_signal_value,
       iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -489,11 +476,10 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*semaphores=*/&command_buffer_signal_ptr,
       /*payload_values=*/&command_buffer_signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), command_buffer_signal_list,
-      fixture.command_buffer, iree_hal_buffer_binding_table_empty(),
-      IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      test_device.queue(), iree_hal_semaphore_list_empty(),
+      command_buffer_signal_list, fixture.command_buffer,
+      iree_hal_buffer_binding_table_empty(), IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       command_buffer_signal, command_buffer_signal_value,
       iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -587,8 +573,8 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 
   Ref<iree_hal_command_buffer_t> command_buffer;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
       /*binding_capacity=*/0, command_buffer.out()));
   iree_hal_amdgpu_physical_device_t* physical_device =
       test_device.logical_device()->physical_devices[0];
@@ -648,11 +634,10 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*semaphores=*/&command_buffer_signal_ptr,
       /*payload_values=*/&command_buffer_signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), command_buffer_signal_list,
-      fixture.command_buffer, iree_hal_buffer_binding_table_empty(),
-      IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      test_device.queue(), iree_hal_semaphore_list_empty(),
+      command_buffer_signal_list, fixture.command_buffer,
+      iree_hal_buffer_binding_table_empty(), IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       command_buffer_signal, command_buffer_signal_value,
       iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -1009,9 +994,9 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 
   Ref<iree_hal_command_buffer_t> command_buffer;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER,
       /*binding_capacity=*/0, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
@@ -1025,10 +1010,10 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*semaphores=*/&signal_ptr,
       /*payload_values=*/&signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), signal_list, command_buffer,
-      iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      test_device.queue(), iree_hal_semaphore_list_empty(), signal_list,
+      command_buffer, iree_hal_buffer_binding_table_empty(),
+      IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(signal, signal_value,
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
@@ -1130,11 +1115,10 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*semaphores=*/&command_buffer_signal_ptr,
       /*payload_values=*/&command_buffer_signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), command_buffer_signal_list,
-      fixture.command_buffer, iree_hal_buffer_binding_table_empty(),
-      IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      test_device.queue(), iree_hal_semaphore_list_empty(),
+      command_buffer_signal_list, fixture.command_buffer,
+      iree_hal_buffer_binding_table_empty(), IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       command_buffer_signal, command_buffer_signal_value,
       iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -1269,11 +1253,10 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*semaphores=*/&command_buffer_signal_ptr,
       /*payload_values=*/&command_buffer_signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), command_buffer_signal_list,
-      fixture.command_buffer, iree_hal_buffer_binding_table_empty(),
-      IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      test_device.queue(), iree_hal_semaphore_list_empty(),
+      command_buffer_signal_list, fixture.command_buffer,
+      iree_hal_buffer_binding_table_empty(), IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       command_buffer_signal, command_buffer_signal_value,
       iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -1380,11 +1363,10 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*semaphores=*/&command_buffer_signal_ptr,
       /*payload_values=*/&command_buffer_signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), command_buffer_signal_list,
-      fixture.command_buffer, iree_hal_buffer_binding_table_empty(),
-      IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      test_device.queue(), iree_hal_semaphore_list_empty(),
+      command_buffer_signal_list, fixture.command_buffer,
+      iree_hal_buffer_binding_table_empty(), IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       command_buffer_signal, command_buffer_signal_value,
       iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -1528,11 +1510,10 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*semaphores=*/&command_buffer_signal_ptr,
       /*payload_values=*/&command_buffer_signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), command_buffer_signal_list,
-      fixture.command_buffer, iree_hal_buffer_binding_table_empty(),
-      IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      test_device.queue(), iree_hal_semaphore_list_empty(),
+      command_buffer_signal_list, fixture.command_buffer,
+      iree_hal_buffer_binding_table_empty(), IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       command_buffer_signal, command_buffer_signal_value,
       iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -1590,11 +1571,10 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*semaphores=*/&command_buffer_signal_ptr,
       /*payload_values=*/&command_buffer_signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), command_buffer_signal_list,
-      fixture.command_buffer, iree_hal_buffer_binding_table_empty(),
-      IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      test_device.queue(), iree_hal_semaphore_list_empty(),
+      command_buffer_signal_list, fixture.command_buffer,
+      iree_hal_buffer_binding_table_empty(), IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       command_buffer_signal, command_buffer_signal_value,
       iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -1641,7 +1621,7 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
       &executable));
@@ -1769,7 +1749,7 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 
   iree_hal_executable_t* executable = NULL;
   IREE_ASSERT_OK(LoadCtsExecutable(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       iree_make_cstring_view("command_buffer_dispatch_constants_bindings_test."
                              "bin"),
       &executable));
@@ -1791,10 +1771,10 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 
   Ref<iree_hal_command_buffer_t> command_buffer;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(test_device.queue()),
       IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
           IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_COMMAND_CATEGORY_DISPATCH,
       /*binding_capacity=*/0, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   iree_hal_buffer_ref_t binding_refs[2] = {
@@ -1823,11 +1803,10 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*semaphores=*/&command_buffer_signal_ptr,
       /*payload_values=*/&command_buffer_signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), command_buffer_signal_list,
-      command_buffer, iree_hal_buffer_binding_table_empty(),
-      IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      test_device.queue(), iree_hal_semaphore_list_empty(),
+      command_buffer_signal_list, command_buffer,
+      iree_hal_buffer_binding_table_empty(), IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       command_buffer_signal, command_buffer_signal_value,
       iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -1889,9 +1868,9 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 
   Ref<iree_hal_command_buffer_t> command_buffer;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(&queue->base),
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER,
       /*binding_capacity=*/0, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
@@ -1921,9 +1900,9 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*payload_values=*/&pressure_signal_value,
   };
   const uint32_t pressure_pattern = 0xABCD1234u;
-  iree_status_t status = iree_hal_device_queue_fill(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), pressure_signal_list, pressure_buffer,
+  iree_status_t status = iree_hal_queue_fill(
+      test_device.queue(), iree_hal_semaphore_list_empty(),
+      pressure_signal_list, pressure_buffer,
       /*target_offset=*/0, sizeof(pressure_pattern), &pressure_pattern,
       sizeof(pressure_pattern), IREE_HAL_FILL_FLAG_NONE);
 
@@ -1935,11 +1914,11 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*payload_values=*/&command_buffer_signal_value,
   };
   if (iree_status_is_ok(status)) {
-    status = iree_hal_device_queue_execute(
-        test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-        iree_hal_semaphore_list_empty(), command_buffer_signal_list,
-        command_buffer, iree_hal_buffer_binding_table_empty(),
-        IREE_HAL_EXECUTE_FLAG_NONE);
+    status =
+        iree_hal_queue_execute(&queue->base, iree_hal_semaphore_list_empty(),
+                               command_buffer_signal_list, command_buffer,
+                               iree_hal_buffer_binding_table_empty(),
+                               IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
   }
   const bool replay_parked =
       iree_status_is_ok(status) && HostQueueHasPostDrainAction(queue);
@@ -2021,9 +2000,9 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 
   Ref<iree_hal_command_buffer_t> command_buffer;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      test_device.base_device(),
+      test_device.base_device(), iree_hal_queue_family(&queue->base),
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER,
       /*binding_capacity=*/1, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   std::vector<uint32_t> expected(kFillCount);
@@ -2064,9 +2043,9 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*payload_values=*/&pressure_signal_value,
   };
   const uint32_t pressure_pattern = 0xABCD1234u;
-  iree_status_t status = iree_hal_device_queue_fill(
-      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), pressure_signal_list, pressure_buffer,
+  iree_status_t status = iree_hal_queue_fill(
+      test_device.queue(), iree_hal_semaphore_list_empty(),
+      pressure_signal_list, pressure_buffer,
       /*target_offset=*/0, sizeof(pressure_pattern), &pressure_pattern,
       sizeof(pressure_pattern), IREE_HAL_FILL_FLAG_NONE);
 
@@ -2087,10 +2066,10 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       /*bindings=*/&binding,
   };
   if (iree_status_is_ok(status)) {
-    status = iree_hal_device_queue_execute(
-        test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-        iree_hal_semaphore_list_empty(), command_buffer_signal_list,
-        command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE);
+    status =
+        iree_hal_queue_execute(&queue->base, iree_hal_semaphore_list_empty(),
+                               command_buffer_signal_list, command_buffer,
+                               binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
   }
   const bool replay_parked =
       iree_status_is_ok(status) && HostQueueHasPostDrainAction(queue);

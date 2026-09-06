@@ -166,7 +166,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/amdgpu:queue_affinity",
     ],
 )
 
@@ -742,7 +741,6 @@ iree_runtime_cc_benchmark(
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/drivers/amdgpu",
         "//runtime/src/iree/hal/drivers/amdgpu:headers",
-        "//runtime/src/iree/hal/drivers/amdgpu:queue_affinity",
         "//runtime/src/iree/hal/drivers/amdgpu/cts:testdata_amdgpu",
         "//runtime/src/iree/hal/drivers/amdgpu/device:dispatch",
         "//runtime/src/iree/hal/drivers/amdgpu/device:headers",

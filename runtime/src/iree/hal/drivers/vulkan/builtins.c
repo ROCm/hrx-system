@@ -73,7 +73,7 @@ static iree_status_t iree_hal_vulkan_fill_unaligned_expand_pattern(
 
 static iree_status_t iree_hal_vulkan_builtins_create_compute_pipeline(
     iree_hal_vulkan_builtins_t* builtins, iree_string_view_t spirv_file_name,
-    VkPipeline* out_pipeline) {
+    VkPipelineLayout pipeline_layout, VkPipeline* out_pipeline) {
   *out_pipeline = VK_NULL_HANDLE;
   const iree_const_byte_span_t spirv_module =
       iree_hal_vulkan_device_library_lookup(spirv_file_name);
@@ -98,7 +98,7 @@ static iree_status_t iree_hal_vulkan_builtins_create_compute_pipeline(
     VkComputePipelineCreateInfo pipeline_create_info = {
         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
         .stage = stage_create_info,
-        .layout = builtins->storage_buffer_pipeline_layout,
+        .layout = pipeline_layout,
     };
     IREE_LEAK_CHECK_DISABLE_PUSH();
     status = iree_vkCreateComputePipelines(
@@ -187,11 +187,13 @@ iree_status_t iree_hal_vulkan_builtins_initialize(
   if (iree_status_is_ok(status)) {
     status = iree_hal_vulkan_builtins_create_compute_pipeline(
         out_builtins, IREE_SV("fill_unaligned.spv"),
+        out_builtins->storage_buffer_pipeline_layout,
         &out_builtins->fill_pipeline);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_vulkan_builtins_create_compute_pipeline(
         out_builtins, IREE_SV("update_unaligned.spv"),
+        out_builtins->storage_buffer_pipeline_layout,
         &out_builtins->update_pipeline);
   }
   if (iree_status_is_ok(status)) {

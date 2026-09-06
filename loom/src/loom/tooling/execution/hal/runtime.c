@@ -12,6 +12,36 @@
 #include "iree/hal/api.h"
 #include "iree/tooling/device_util.h"
 
+static iree_status_t loom_run_hal_runtime_select_queue(
+    iree_hal_device_t* device,
+    iree_hal_queue_family_role_flags_t required_roles, const char* role_name,
+    iree_hal_queue_t** out_queue) {
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  for (iree_host_size_t i = 0; i < queue_spec->family_count; ++i) {
+    const iree_hal_queue_family_spec_t* family_spec = &queue_spec->families[i];
+    if (family_spec->provisioned_queue_count == 0 ||
+        !iree_all_bits_set(family_spec->role_flags, required_roles)) {
+      continue;
+    }
+
+    iree_hal_queue_t* queue = iree_hal_device_queue(
+        device, (iree_hal_queue_family_ordinal_t)i, /*queue_ordinal=*/0);
+    if (IREE_UNLIKELY(queue == NULL)) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "HAL device queue specification advertises provisioned %s queue "
+          "family %" PRIhsz " but the queue is unavailable",
+          role_name, i);
+    }
+    *out_queue = queue;
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                          "HAL device has no provisioned %s queue family",
+                          role_name);
+}
+
 void loom_run_hal_runtime_options_initialize(
     iree_string_view_t hal_driver_name,
     loom_run_hal_runtime_options_t* out_options) {
@@ -69,11 +99,28 @@ iree_status_t loom_run_hal_runtime_initialize(
   }
   iree_async_proactor_pool_release(proactor_pool);
   if (iree_status_is_ok(status)) {
+    // Group assignment establishes the device frontier and materializes its
+    // configured hardware queues, so queue lookup must follow finalization.
     status = iree_hal_device_group_create_from_device(
         out_runtime->device, frontier_tracker, allocator,
         &out_runtime->device_group);
   }
   iree_async_frontier_tracker_release(frontier_tracker);
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_runtime_select_queue(
+        out_runtime->device, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
+        "dispatch", &out_runtime->dispatch_queue);
+  }
+  if (iree_status_is_ok(status) && !out_runtime->dispatch_queue) {
+    status = iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "HAL device has no provisioned dispatch-capable queue");
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_runtime_select_queue(
+        out_runtime->device, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
+        "transfer", &out_runtime->transfer_queue);
+  }
   if (!iree_status_is_ok(status)) {
     loom_run_hal_runtime_deinitialize(out_runtime);
   }
@@ -84,6 +131,8 @@ void loom_run_hal_runtime_deinitialize(loom_run_hal_runtime_t* runtime) {
   if (runtime == NULL) {
     return;
   }
+  runtime->dispatch_queue = NULL;
+  runtime->transfer_queue = NULL;
   iree_hal_device_group_release(runtime->device_group);
   iree_hal_device_release(runtime->device);
   *runtime = (loom_run_hal_runtime_t){0};

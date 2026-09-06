@@ -54,6 +54,48 @@ static iree_status_t iree_hal_replay_executor_store_allocator(
                                         entry);
 }
 
+static iree_status_t iree_hal_replay_executor_store_provisioned_queue(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_file_record_t* record) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT,
+      sizeof(iree_hal_replay_provisioned_queue_object_payload_t)));
+  if (IREE_UNLIKELY(
+          record->payload.data_length !=
+          sizeof(iree_hal_replay_provisioned_queue_object_payload_t))) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay provisioned queue object payload length mismatch");
+  }
+  iree_hal_replay_provisioned_queue_object_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+  if (IREE_UNLIKELY(payload.reserved0 != 0)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay provisioned queue object reserved fields must be zero");
+  }
+
+  iree_hal_replay_object_entry_t* device_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
+      executor, record->header.device_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+      &device_entry));
+  iree_hal_queue_t* queue = iree_hal_device_queue(
+      device_entry->value.device,
+      (iree_hal_queue_family_ordinal_t)payload.family_ordinal,
+      (iree_hal_queue_ordinal_t)payload.queue_ordinal);
+  if (IREE_UNLIKELY(!queue)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "replay device does not expose provisioned queue %u:%u",
+        payload.family_ordinal, payload.queue_ordinal);
+  }
+  iree_hal_queue_retain(queue);
+  iree_hal_replay_object_entry_t entry = {.value.queue = queue};
+  return iree_hal_replay_executor_store(executor, record->header.object_id,
+                                        IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+                                        entry);
+}
+
 iree_status_t iree_hal_replay_executor_replay_object(
     iree_hal_replay_executor_t* executor,
     const iree_hal_replay_file_record_t* record) {
@@ -62,6 +104,8 @@ iree_status_t iree_hal_replay_executor_replay_object(
       return iree_hal_replay_executor_store_device(executor, record);
     case IREE_HAL_REPLAY_OBJECT_TYPE_ALLOCATOR:
       return iree_hal_replay_executor_store_allocator(executor, record);
+    case IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE:
+      return iree_hal_replay_executor_store_provisioned_queue(executor, record);
     default:
       return iree_ok_status();
   }
@@ -378,7 +422,8 @@ static iree_status_t iree_hal_replay_executor_load_executable(
   iree_host_size_t metadata_offset = 0;
   iree_host_size_t expected_length = 0;
   if (IREE_UNLIKELY(
-          payload.reserved0 != 0 || payload.reserved1 != 0 ||
+          payload.reserved_queue_family != 0 || payload.reserved0 != 0 ||
+          payload.reserved1 != 0 ||
           payload.target_kind > IREE_HAL_EXECUTABLE_TARGET_KIND_COMPOSITE ||
           payload.target_family_length == 0 || payload.target_key_length == 0 ||
           payload.executable_data_length > IREE_HOST_SIZE_MAX ||
@@ -408,6 +453,14 @@ static iree_status_t iree_hal_replay_executor_load_executable(
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
       executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
       &device_entry));
+  const iree_hal_queue_family_t* queue_family = iree_hal_device_queue_family(
+      device_entry->value.device, payload.queue_family_ordinal);
+  if (IREE_UNLIKELY(!queue_family)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "replay device does not provide captured queue family %u",
+        payload.queue_family_ordinal);
+  }
   iree_hal_executable_target_selection_t target_selection = {
       .family = iree_make_string_view(
           (const char*)record->payload.data + sizeof(payload),
@@ -492,9 +545,8 @@ static iree_status_t iree_hal_replay_executor_load_executable(
         device_entry->value.device, &target_selection, required_flags, &target);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_device_load_executable(device_entry->value.device,
-                                             payload.queue_affinity, target,
-                                             &params, &executable);
+    status = iree_hal_device_load_executable(
+        device_entry->value.device, queue_family, target, &params, &executable);
     if (!iree_status_is_ok(status) && substituted) {
       status = iree_status_annotate_f(
           status,
@@ -532,19 +584,36 @@ static iree_status_t iree_hal_replay_executor_load_executable(
 static iree_status_t iree_hal_replay_executor_create_command_buffer(
     iree_hal_replay_executor_t* executor,
     const iree_hal_replay_file_record_t* record) {
-  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
-      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_OBJECT,
-      sizeof(iree_hal_replay_command_buffer_object_payload_t)));
-  iree_hal_replay_command_buffer_object_payload_t payload;
-  memcpy(&payload, record->payload.data, sizeof(payload));
   iree_hal_replay_object_entry_t* device_entry = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
       executor, record->header.object_id, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
       &device_entry));
+
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_FAMILY_COMMAND_BUFFER_OBJECT,
+      sizeof(iree_hal_replay_queue_family_command_buffer_object_payload_t)));
+  iree_hal_replay_queue_family_command_buffer_object_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+  if (IREE_UNLIKELY(payload.reserved0 != 0 ||
+                    payload.binding_capacity > IREE_HOST_SIZE_MAX)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay queue family command buffer payload is invalid");
+  }
+  const iree_hal_queue_family_t* queue_family = iree_hal_device_queue_family(
+      device_entry->value.device,
+      (iree_hal_queue_family_ordinal_t)payload.queue_family_ordinal);
+  if (IREE_UNLIKELY(!queue_family)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "replay command buffer queue family %u is unavailable",
+        payload.queue_family_ordinal);
+  }
+
   iree_hal_command_buffer_t* command_buffer = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
-      device_entry->value.device, payload.mode, payload.command_categories,
-      payload.queue_affinity, (iree_host_size_t)payload.binding_capacity,
+      device_entry->value.device, queue_family, payload.mode,
+      payload.command_categories, (iree_host_size_t)payload.binding_capacity,
       &command_buffer));
   iree_hal_replay_object_entry_t entry = {.value.command_buffer =
                                               command_buffer};
@@ -567,8 +636,8 @@ static iree_status_t iree_hal_replay_executor_create_semaphore(
       &device_entry));
   iree_hal_semaphore_t* semaphore = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
-      device_entry->value.device, payload.queue_affinity, payload.initial_value,
-      payload.flags, &semaphore));
+      device_entry->value.device, payload.queue_family_affinity,
+      payload.initial_value, payload.flags, &semaphore));
   iree_hal_replay_object_entry_t entry = {.value.semaphore = semaphore};
   return iree_hal_replay_executor_store(
       executor, record->header.related_object_id,
@@ -906,9 +975,9 @@ static iree_status_t iree_hal_replay_executor_import_file(
 
   iree_hal_file_t* file = NULL;
   if (iree_status_is_ok(status) && import_file_handle) {
-    status =
-        iree_hal_file_import(device_entry->value.device, payload.queue_affinity,
-                             payload.access, handle, payload.flags, &file);
+    status = iree_hal_file_import(device_entry->value.device,
+                                  payload.queue_family_affinity, payload.access,
+                                  handle, payload.flags, &file);
   }
   if (iree_status_is_ok(status) &&
       payload.reference_type ==

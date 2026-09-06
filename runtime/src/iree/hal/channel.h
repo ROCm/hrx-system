@@ -68,12 +68,20 @@ typedef struct {
 //   ccl::communicator
 typedef struct iree_hal_channel_t iree_hal_channel_t;
 
-// Creates a channel on |device| for use by all queues defined in
-// |queue_affinity|. |params| may specify the channel parameters or leave its
-// fields as default to indicate that the value should be sourced from the
-// environment.
+// Creates a channel on |device| for use by the local queue families selected by
+// |queue_family_affinity|.
+//
+// The affinity identifies the queue families whose programs may consume
+// resources established by the channel. It does not identify exact queues,
+// establish submission ordering, or describe the collective membership.
+// IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY selects every family on |device|; all
+// other affinities must be a non-empty subset of the device families.
+//
+// |params| may specify the channel parameters or leave its fields as default
+// to indicate that the value should be sourced from the environment.
 IREE_API_EXPORT iree_status_t iree_hal_channel_create(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_channel_params_t params, iree_hal_channel_t** out_channel);
 
 // Retains the given |channel| for the caller.

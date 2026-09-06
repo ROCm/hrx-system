@@ -11,6 +11,7 @@
 
 #include "iree/async/semaphore.h"
 #include "iree/base/api.h"
+#include "iree/base/internal/atomics.h"
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/vulkan/util/libvulkan.h"
 
@@ -33,27 +34,29 @@ enum iree_hal_vulkan_last_signal_flag_bits_e {
 };
 
 // Seqlock-protected cache of the most recent queue signal on a semaphore.
+// Payload fields use atomic accesses so speculative snapshots remain
+// data-race-free while the sequence counter detects and rejects torn reads.
+// Writers are serialized by the semaphore mutex while readers may be
+// concurrent.
 typedef struct iree_hal_vulkan_last_signal_t {
   // Seqlock sequence counter; odd means a writer is updating payload fields.
   iree_atomic_int32_t sequence;
 
   // Cached signal validity and producer-frontier precision flags.
-  iree_hal_vulkan_last_signal_flags_t flags;
-
-  // Reserved bytes kept zero so the payload stays naturally aligned.
-  uint8_t reserved[3];
+  iree_atomic_int32_t flags;
 
   // Producer queue axis that submitted the last cached signal.
-  iree_async_axis_t producer_axis;
+  iree_atomic_int64_t producer_axis;
 
   // Producer queue epoch associated with the last cached signal.
-  uint64_t epoch;
+  iree_atomic_int64_t epoch;
 
   // Semaphore payload value signaled at producer_axis/epoch.
-  uint64_t value;
+  iree_atomic_int64_t value;
 } iree_hal_vulkan_last_signal_t;
 
-// Stores a new last-signal snapshot. Thread-safe.
+// Stores a new last-signal snapshot. Callers must serialize writers; readers
+// may concurrently load the cache.
 void iree_hal_vulkan_last_signal_store(
     iree_hal_vulkan_last_signal_t* cache,
     iree_hal_vulkan_last_signal_flags_t flags, iree_async_axis_t producer_axis,
@@ -70,9 +73,9 @@ bool iree_hal_vulkan_last_signal_load(
 iree_status_t iree_hal_vulkan_semaphore_create(
     iree_hal_vulkan_logical_device_t* device,
     const iree_hal_vulkan_device_syms_t* syms, VkDevice logical_device,
-    iree_async_proactor_t* proactor, iree_hal_queue_affinity_t queue_affinity,
-    uint64_t initial_value, iree_hal_semaphore_flags_t flags,
-    iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore);
+    iree_async_proactor_t* proactor, uint64_t initial_value,
+    iree_hal_semaphore_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_semaphore_t** out_semaphore);
 
 // Returns true if |semaphore| is a Vulkan timeline semaphore.
 bool iree_hal_vulkan_semaphore_isa(iree_hal_semaphore_t* semaphore);
@@ -84,10 +87,6 @@ bool iree_hal_vulkan_semaphore_is_local(
 
 // Returns the Vulkan semaphore creation flags.
 iree_hal_semaphore_flags_t iree_hal_vulkan_semaphore_flags(
-    iree_hal_semaphore_t* semaphore);
-
-// Returns the Vulkan semaphore creation queue affinity.
-iree_hal_queue_affinity_t iree_hal_vulkan_semaphore_queue_affinity(
     iree_hal_semaphore_t* semaphore);
 
 // Returns the native Vulkan timeline semaphore handle.

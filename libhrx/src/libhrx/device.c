@@ -159,6 +159,7 @@ void hrx_device_release(hrx_device_t device) {
   if (iree_atomic_ref_count_dec(&device->ref_count) == 1) {
     iree_hal_allocator_release(device->allocator.hal_allocator);
     device->allocator.hal_allocator = NULL;
+    device->transfer_queue = NULL;
     device->hal_device = NULL;
     device->hal_device_group = NULL;
   }

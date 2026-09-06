@@ -65,6 +65,8 @@ class SanitizerExecutableLoadTest
 
   iree_hal_device_t* device() const { return device_.device(); }
 
+  iree_hal_queue_t* queue() const { return device_.queue(); }
+
   SanitizerCachedBackendDevice device_;
 };
 
@@ -73,8 +75,8 @@ TEST_P(SanitizerExecutableLoadTest, RejectsDisabledRuntimeFeatureGlobal) {
       GetSanitizerExecutableLoadExpectation(GetParam());
 
   iree_hal_executable_target_selection_result_t target_result;
-  IREE_ASSERT_OK(
-      SelectBackendExecutableTarget(device(), GetParam(), &target_result));
+  IREE_ASSERT_OK(SelectBackendExecutableTarget(
+      device(), iree_hal_queue_family(queue()), GetParam(), &target_result));
   if (target_result.outcome ==
       IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
     GTEST_SKIP() << "Executable target '" << GetParam().executable_target_family
@@ -93,8 +95,8 @@ TEST_P(SanitizerExecutableLoadTest, RejectsDisabledRuntimeFeatureGlobal) {
 
   Ref<iree_hal_executable_t> executable;
   iree::Status status(iree_hal_device_load_executable(
-      device(), IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target, &load_params,
-      executable.out()));
+      device(), iree_hal_queue_family(queue()), target_result.target,
+      &load_params, executable.out()));
 
   EXPECT_THAT(status, StatusIs(StatusCode::kFailedPrecondition));
   const std::string status_text = status.ToString();

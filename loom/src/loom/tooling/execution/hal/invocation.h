@@ -82,6 +82,13 @@ typedef struct loom_run_hal_prepared_candidate_t {
 typedef struct loom_run_hal_iteration_t {
   // Iteration-owned binding list cloned from the invocation plan.
   loom_run_hal_binding_list_t bindings;
+  // Device timepoint reached after the iteration dispatch completes.
+  struct {
+    // Retained timeline semaphore signaled by the dispatch.
+    iree_hal_semaphore_t* semaphore;
+    // Semaphore payload value signaled by the dispatch.
+    uint64_t value;
+  } dispatch_completion;
   // True when |bindings| has been initialized for this iteration.
   bool has_bindings;
 } loom_run_hal_iteration_t;
@@ -92,7 +99,7 @@ typedef struct loom_run_hal_dispatch_batch_options_t {
   // Command-buffer mode used while recording the batch.
   iree_hal_command_buffer_mode_t command_buffer_mode;
   // Queue execute flags used for each batch submission.
-  iree_hal_execute_flags_t execute_flags;
+  iree_hal_queue_execute_flags_t execute_flags;
 } loom_run_hal_dispatch_batch_options_t;
 
 typedef struct loom_run_hal_queue_dispatch_t {
@@ -130,7 +137,7 @@ typedef struct loom_run_hal_dispatch_batch_t {
   // Number of dispatches recorded in |command_buffer|.
   iree_host_size_t dispatch_count;
   // Queue execute flags used for each batch submission.
-  iree_hal_execute_flags_t execute_flags;
+  iree_hal_queue_execute_flags_t execute_flags;
 } loom_run_hal_dispatch_batch_t;
 
 typedef struct loom_run_hal_dispatch_sequence_t {
@@ -292,7 +299,8 @@ iree_status_t loom_run_hal_prepared_candidate_prepare(
 
 // Dispatches a prepared HAL executable with |binding_list|.
 iree_status_t loom_run_hal_dispatch(
-    iree_hal_device_t* device, iree_hal_executable_t* executable,
+    iree_hal_device_t* device, iree_hal_queue_t* queue,
+    iree_hal_executable_t* executable,
     const loom_run_hal_binding_list_t* binding_list,
     const loom_run_hal_invocation_options_t* options);
 
@@ -455,9 +463,14 @@ iree_status_t loom_run_hal_invocation_run_plan(
     const loom_run_hal_invocation_plan_t* plan, iree_allocator_t allocator,
     loom_run_hal_invocation_result_t* result);
 
-// Transfers dispatch bindings back to host-visible storage for inspection.
+// Transfers all dispatch bindings back to host-visible storage for inspection.
+// The transfer waits for every timepoint in |wait_semaphore_list|, preserving
+// device memory dependencies when the dispatch used another queue.
+// The binding list is replaced only after the complete transfer succeeds and
+// remains unchanged on failure.
 iree_status_t loom_run_hal_transfer_bindings_to_host(
     const loom_run_hal_runtime_t* runtime,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
     loom_run_hal_binding_list_t* binding_list);
 
 // Parses bindings, dispatches |request->artifact|, transfers bindings back

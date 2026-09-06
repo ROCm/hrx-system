@@ -82,9 +82,7 @@ typedef enum iree_hal_task_queue_op_type_e {
   IREE_HAL_TASK_QUEUE_OP_DEALLOCA,
   IREE_HAL_TASK_QUEUE_OP_READ,
   IREE_HAL_TASK_QUEUE_OP_WRITE,
-  IREE_HAL_TASK_QUEUE_OP_FILL,
-  IREE_HAL_TASK_QUEUE_OP_COPY,
-  IREE_HAL_TASK_QUEUE_OP_UPDATE,
+  IREE_HAL_TASK_QUEUE_OP_TRANSFER,
   IREE_HAL_TASK_QUEUE_OP_ATOMIC_WAIT,
   IREE_HAL_TASK_QUEUE_OP_ATOMIC_STORE,
   IREE_HAL_TASK_QUEUE_OP_ATOMIC_RMW,
@@ -141,6 +139,14 @@ struct iree_hal_task_queue_op_t {
   // table buffers, etc.). Allocated from the small block pool.
   iree_hal_resource_set_t* resource_set;
 
+  // SCOPED buffer mappings referenced by a deferred block recording. The
+  // arena-owned array remains live through recording execution and is unmapped
+  // before user-visible completion is published.
+  iree_hal_buffer_mapping_t* recording_mappings;
+
+  // Number of entries in |recording_mappings|.
+  iree_host_size_t recording_mapping_count;
+
   // Frontier tracker advanced when the operation completes.
   iree_async_frontier_tracker_t* frontier_tracker;
 
@@ -176,40 +182,66 @@ struct iree_hal_task_queue_op_t {
     struct {
       iree_hal_command_buffer_t* command_buffer;
       iree_hal_buffer_binding_table_t binding_table;
-      // SCOPED buffer mappings for binding table resolution. Arena-allocated,
-      // indexed 1:1 with resolved block binding entries. Unmapped in
-      // op_destroy before retained buffers are released. NULL when no mappings
-      // are required.
-      iree_hal_buffer_mapping_t* binding_mappings;
-      // Number of entries in binding_mappings.
-      iree_host_size_t binding_mapping_count;
     } commands;
     struct {
-      iree_hal_device_t* device;
-      iree_hal_queue_affinity_t queue_affinity;
+      // Exact hardware queue reported to the callback.
+      iree_hal_queue_t* queue;
+
+      // User callback and state.
       iree_hal_host_call_t call;
+
+      // User-defined callback arguments.
       uint64_t args[4];
+
+      // Flags controlling callback ordering and completion.
       iree_hal_host_call_flags_t flags;
     } host_call;
     struct {
-      // Borrowed pool used to acquire and materialize the transient buffer.
+      // Borrowed pool used for the complete allocation transaction.
       iree_hal_pool_t* pool;
-      // Buffer parameters captured from queue_alloca after canonicalization.
-      iree_hal_buffer_params_t params;
-      // Requested allocation size in bytes.
-      iree_device_size_t allocation_size;
-      // HAL allocation flags captured from queue_alloca.
-      iree_hal_alloca_flags_t flags;
+
+      // Number of allocation requests in the transaction.
+      iree_host_size_t request_count;
+
+      // Arena-owned requests captured after allocator canonicalization.
+      iree_hal_pool_reservation_request_t* requests;
+
+      // Arena-owned transient wrapper pointers retained by |resource_set|.
+      iree_hal_buffer_t** transient_buffers;
+
+      // Arena-owned reservations populated by the pool acquisition.
+      iree_hal_pool_reservation_t* reservations;
+
+      // Arena-owned per-request pool acquisition information.
+      iree_hal_pool_acquire_info_t* acquire_infos;
+
+      // Arena-owned materialized backing buffer outputs.
+      iree_hal_buffer_t** backing_buffers;
+
       // Pool reservation flags used when probing the selected pool.
       iree_hal_pool_reserve_flags_t reserve_flags;
-      // Transient wrapper returned to the caller and committed on success.
-      iree_hal_buffer_t* transient_buffer;
+
+      // True while this operation owns every entry in |reservations|.
+      bool reservations_held;
+
       // Cold-path memory-readiness wait state. NULL on the immediate path.
       iree_hal_task_queue_alloca_memory_wait_t* memory_wait;
     } alloca;
     struct {
-      // Transient wrapper to decommit once dealloca waits resolve.
-      iree_hal_buffer_t* transient_buffer;
+      // Borrowed common source pool for every buffer in the transaction.
+      iree_hal_pool_t* pool;
+
+      // Number of transient buffers in the transaction.
+      iree_host_size_t buffer_count;
+
+      // Arena-owned transient wrapper pointers retained by |resource_set|.
+      iree_hal_buffer_t** transient_buffers;
+
+      // Arena-owned reservation storage populated when the operation runs.
+      iree_hal_pool_reservation_t* reservations;
+
+      // True while this operation owns each buffer's deallocation mark.
+      bool marks_owned;
     } dealloca;
     struct {
       iree_hal_file_t* hal_file;
@@ -228,26 +260,13 @@ struct iree_hal_task_queue_op_t {
       iree_device_size_t length;
     } write;
     struct {
-      iree_hal_buffer_t* target_buffer;
-      iree_device_size_t target_offset;
-      iree_device_size_t length;
-      uint8_t pattern[4];
-      uint8_t pattern_length;
-    } fill;
-    struct {
-      iree_hal_buffer_t* source_buffer;
-      iree_device_size_t source_offset;
-      iree_hal_buffer_t* target_buffer;
-      iree_device_size_t target_offset;
-      iree_device_size_t length;
-    } copy;
-    struct {
-      iree_hal_buffer_t* target_buffer;
-      iree_device_size_t target_offset;
-      iree_device_size_t length;
-      // Source data arena-allocated (pointer into operation arena).
-      const void* source_data;
-    } update;
+      // Number of operations in the captured transaction.
+      iree_host_size_t operation_count;
+      // Arena-owned operation storage with captured fill and update data.
+      iree_hal_transfer_operation_t* operations;
+      // Saturating sum of active operation lengths used for strategy selection.
+      iree_device_size_t total_length;
+    } transfer;
     struct {
       // Retained buffer containing the target location.
       iree_hal_buffer_t* target_buffer;
@@ -430,8 +449,11 @@ typedef enum iree_hal_task_queue_shutdown_phase_e {
 } iree_hal_task_queue_shutdown_phase_t;
 
 struct iree_hal_task_queue_t {
-  // Affinity mask this queue processes.
-  iree_hal_queue_affinity_t affinity;
+  // Base HAL queue resource. Must be at offset zero.
+  iree_hal_queue_t base;
+
+  // Parent device used to validate queue operation resources. Borrowed.
+  iree_hal_device_t* device;
 
   // Shared executor that the queue submits processes to.
   iree_task_executor_t* executor;
@@ -458,9 +480,9 @@ struct iree_hal_task_queue_t {
   // this queue."
   iree_atomic_int64_t epoch;
 
-  // Length (in bytes) at which queue-level fill/copy operations route through
-  // the block processor framework instead of executing as a direct memcpy in
-  // the queue drain thread. See iree_hal_task_device_params_t for details.
+  // Aggregate payload length at which queue transfer transactions route
+  // through the multi-worker block processor. See
+  // iree_hal_task_device_params_t for details.
   iree_device_size_t inline_transfer_threshold;
 
   // Shared block pool for allocating submission transients.
@@ -585,7 +607,8 @@ struct iree_hal_task_queue_t {
 };
 
 iree_status_t iree_hal_task_queue_initialize(
-    iree_string_view_t identifier, iree_hal_queue_affinity_t affinity,
+    iree_string_view_t identifier, iree_hal_device_t* device,
+    const iree_hal_queue_family_t* queue_family,
     iree_task_scope_flags_t scope_flags, iree_task_executor_t* executor,
     iree_async_proactor_t* proactor,
     iree_device_size_t inline_transfer_threshold,
@@ -598,8 +621,6 @@ iree_status_t iree_hal_task_queue_assign_frontier(
     iree_async_frontier_tracker_t* frontier_tracker, iree_async_axis_t axis);
 
 void iree_hal_task_queue_retire_frontier(iree_hal_task_queue_t* queue);
-
-void iree_hal_task_queue_deinitialize(iree_hal_task_queue_t* queue);
 
 void iree_hal_task_queue_trim(iree_hal_task_queue_t* queue);
 
@@ -624,22 +645,21 @@ iree_status_t iree_hal_task_queue_submit_commands(
     const iree_hal_task_submission_batch_t* batches);
 
 iree_status_t iree_hal_task_queue_submit_host_call(
-    iree_hal_task_queue_t* queue, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_semaphore_list_t wait_semaphores,
+    iree_hal_task_queue_t* queue, iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores, iree_hal_host_call_t call,
     const uint64_t args[4], iree_hal_host_call_flags_t flags);
 
 iree_status_t iree_hal_task_queue_submit_alloca(
     iree_hal_task_queue_t* queue, iree_hal_pool_t* pool,
-    iree_hal_buffer_params_t params, iree_device_size_t allocation_size,
-    iree_hal_alloca_flags_t flags, iree_hal_pool_reserve_flags_t reserve_flags,
-    iree_hal_buffer_t* transient_buffer,
+    iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t* const* transient_buffers,
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores);
 
 iree_status_t iree_hal_task_queue_submit_dealloca(
-    iree_hal_task_queue_t* queue, iree_hal_buffer_t* transient_buffer,
+    iree_hal_task_queue_t* queue, iree_host_size_t buffer_count,
+    iree_hal_buffer_t* const* transient_buffers,
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores);
 

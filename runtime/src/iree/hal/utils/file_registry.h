@@ -22,18 +22,19 @@ extern "C" {
 //
 // Some implementations - such as for IREE_IO_FILE_HANDLE_TYPE_HOST_ALLOCATION -
 // may import the backing storage directly into a device-accessible storage
-// buffer using |device_allocator| and available |queue_affinity|. Passing an
-// allocator enables that optional import path, but import failure does not make
-// the host-backed file invalid.
+// buffer using |device_allocator| and |queue_family_affinity|. Passing an
+// allocator enables that optional import path, but import failure does not
+// make the host-backed file invalid.
 //
 // If |proactor| is non-NULL, file descriptor-based files will be bound to the
 // proactor for async I/O at construction time. The async handle is then
 // available via iree_hal_file_async_handle().
 IREE_API_EXPORT iree_status_t iree_hal_file_from_handle(
     iree_hal_allocator_t* device_allocator,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_access_t access,
-    iree_io_file_handle_t* handle, iree_async_proactor_t* proactor,
-    iree_allocator_t host_allocator, iree_hal_file_t** out_file);
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
+    iree_async_proactor_t* proactor, iree_allocator_t host_allocator,
+    iree_hal_file_t** out_file);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -67,8 +67,25 @@ static iree_hal_device_spec_t* CreateTestDeviceSpec(const char* driver_id,
       /*.physical_devices=*/&physical_device,
       /*.flags=*/IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
   };
+  const iree_hal_queue_family_spec_t queue_family = {
+      /*.name=*/iree_make_cstring_view("default"),
+      /*.provisioned_queue_count=*/0,
+      /*.priority_count=*/1,
+      /*.timestamp_valid_bits=*/0,
+      /*.timestamp_frequency_hz=*/0,
+      /*.physical_device_affinity=*/1ull << logical_ordinal,
+      /*.role_flags=*/IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
+          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
+  };
+  const iree_hal_device_queue_spec_t queues = {
+      /*.family_count=*/1,
+      /*.families=*/&queue_family,
+  };
   iree_hal_device_spec_params_t params = {
       /*.identity=*/&identity,
+      /*.memory=*/nullptr,
+      /*.virtual_memory=*/nullptr,
+      /*.queues=*/&queues,
   };
   iree_hal_device_spec_t* device_spec = NULL;
   IREE_CHECK_OK(iree_hal_device_spec_create(&params, iree_allocator_system(),
@@ -220,11 +237,13 @@ TEST(DeviceGroupBuilder, FailedTopologyAssignmentClearsAssignedDevices) {
 // Queue pool backends expose driver internals that rely on group-assigned
 // frontier/topology state.
 TEST(Device, QueryQueuePoolBackendRequiresDeviceGroup) {
-  iree_hal_device_t* device = CreateMockDevice("mock");
+  iree_hal_device_spec_t* spec = CreateTestDeviceSpec("mock", 0, 0);
+  iree_hal_device_t* device = CreateMockDeviceWithSpec("mock", spec);
+  iree_hal_device_spec_release(spec);
 
   iree_hal_queue_pool_backend_t backend;
   iree_status_t status = iree_hal_device_query_queue_pool_backend(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, &backend);
+      device, iree_hal_device_queue_family(device, 0), &backend);
   EXPECT_THAT(status, StatusIs(iree::StatusCode::kFailedPrecondition));
   iree_status_ignore(status);
 

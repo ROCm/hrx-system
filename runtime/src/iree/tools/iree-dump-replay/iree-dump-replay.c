@@ -42,7 +42,7 @@ static const char kIreeDumpReplayUsage[] =
     "  iree-dump-replay --format=text /tmp/model.ireereplay\n"
     "  iree-dump-replay --format=jsonl /tmp/model.ireereplay | \\\n"
     "      jq 'select(.kind==\"operation\" and "
-    ".operation==\"device.queue_execute\")'\n";
+    ".operation==\"queue.execute\")'\n";
 
 static void iree_dump_replay_print_agent_markdown(FILE* file) {
   fputs(
@@ -59,7 +59,7 @@ static void iree_dump_replay_print_agent_markdown(FILE* file) {
       "```bash\n"
       "iree-dump-replay --format=jsonl /tmp/model.ireereplay | \\\n"
       "  jq 'select(.kind==\"operation\" and "
-      ".operation==\"device.queue_execute\")'\n"
+      ".operation==\"queue.execute\")'\n"
       "iree-dump-replay --format=jsonl /tmp/model.ireereplay | \\\n"
       "  jq 'select(.payload_type==\"replay_scope\") | .payload.name'\n"
       "```\n"

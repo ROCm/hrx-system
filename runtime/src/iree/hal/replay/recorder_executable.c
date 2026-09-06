@@ -28,8 +28,8 @@ typedef struct iree_hal_replay_recorder_executable_function_map_entry_t {
 } iree_hal_replay_recorder_executable_function_map_entry_t;
 
 typedef struct iree_hal_replay_recorder_executable_t {
-  // HAL resource header for the recording wrapper executable.
-  iree_hal_resource_t resource;
+  // Common HAL executable state.
+  iree_hal_executable_t base;
   // Host allocator used for wrapper lifetime.
   iree_allocator_t host_allocator;
   // Shared recorder receiving all captured operations.
@@ -193,13 +193,12 @@ iree_status_t iree_hal_replay_recorder_executable_recorded_ordinal(
 static iree_status_t iree_hal_replay_recorder_executable_create_proxy(
     iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,
     iree_hal_replay_object_id_t executable_id,
+    const iree_hal_queue_family_t* queue_family,
     iree_hal_executable_t* base_executable, iree_allocator_t host_allocator,
     iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(recorder);
   IREE_ASSERT_ARGUMENT(base_executable);
   IREE_ASSERT_ARGUMENT(out_executable);
-  *out_executable = NULL;
-
   iree_host_size_t function_map_count = 0;
   iree_hal_replay_recorder_executable_function_map_entry_t* function_map = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_replay_recorder_executable_build_function_map(
@@ -213,8 +212,9 @@ static iree_status_t iree_hal_replay_recorder_executable_create_proxy(
     return status;
   }
   memset(executable, 0, sizeof(*executable));
-  iree_hal_resource_initialize(&iree_hal_replay_recorder_executable_vtable,
-                               &executable->resource);
+  iree_hal_executable_initialize(queue_family,
+                                 &iree_hal_replay_recorder_executable_vtable,
+                                 &executable->base);
   executable->host_allocator = host_allocator;
   executable->recorder = recorder;
   iree_hal_replay_recorder_retain(executable->recorder);
@@ -351,26 +351,26 @@ static iree_status_t iree_hal_replay_recorder_executable_global_info(
 
 static iree_status_t iree_hal_replay_recorder_executable_global_buffer(
     iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+    iree_hal_buffer_t** out_buffer) {
   iree_hal_replay_recorder_executable_t* executable =
       iree_hal_replay_recorder_executable_cast(base_executable);
   (void)executable;
   (void)global;
-  (void)queue_affinity;
-  *out_buffer = NULL;
+  (void)out_buffer;
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "invalid replay recorder executable global");
 }
 
 static iree_status_t iree_hal_replay_recorder_load_payload_iovecs(
-    iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* params,
     iree_const_byte_span_t executable_metadata,
     iree_hal_replay_executable_load_payload_t* out_payload,
     iree_const_byte_span_t out_iovecs[6]) {
   memset(out_payload, 0, sizeof(*out_payload));
-  out_payload->queue_affinity = queue_affinity;
+  out_payload->queue_family_ordinal =
+      iree_hal_queue_family_ordinal(queue_family);
   out_payload->target_physical_device_affinity =
       target->physical_device_affinity;
   out_payload->executable_data_length = params->executable_data.data_length;
@@ -626,16 +626,27 @@ static iree_status_t iree_hal_replay_recorder_capture_executable_metadata(
 
 iree_status_t iree_hal_replay_recorder_device_load_executable(
     iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* base_device, const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(recorder);
   IREE_ASSERT_ARGUMENT(base_device);
+  IREE_ASSERT_ARGUMENT(queue_family);
   IREE_ASSERT_ARGUMENT(target);
   IREE_ASSERT_ARGUMENT(params);
   IREE_ASSERT_ARGUMENT(out_executable);
-  *out_executable = NULL;
+
+  const iree_hal_queue_family_ordinal_t queue_family_ordinal =
+      iree_hal_queue_family_ordinal(queue_family);
+  const iree_hal_queue_family_t* base_queue_family =
+      iree_hal_device_queue_family(base_device, queue_family_ordinal);
+  if (IREE_UNLIKELY(!base_queue_family)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "recording device queue family %u is absent from the base device",
+        queue_family_ordinal);
+  }
 
   iree_hal_replay_object_id_t executable_id = IREE_HAL_REPLAY_OBJECT_ID_NONE;
   IREE_RETURN_IF_ERROR(
@@ -644,7 +655,7 @@ iree_status_t iree_hal_replay_recorder_device_load_executable(
   iree_hal_replay_executable_load_payload_t operation_payload;
   iree_const_byte_span_t operation_iovecs[6];
   IREE_RETURN_IF_ERROR(iree_hal_replay_recorder_load_payload_iovecs(
-      queue_affinity, target, params, iree_const_byte_span_empty(),
+      queue_family, target, params, iree_const_byte_span_empty(),
       &operation_payload, operation_iovecs));
 
   iree_hal_replay_pending_record_t pending_record;
@@ -657,7 +668,7 @@ iree_status_t iree_hal_replay_recorder_device_load_executable(
   iree_hal_executable_t* base_executable = NULL;
   iree_hal_executable_t* replay_executable = NULL;
   iree_status_t status = iree_hal_device_load_executable(
-      base_device, queue_affinity, target, params, &base_executable);
+      base_device, base_queue_family, target, params, &base_executable);
   iree_byte_span_t executable_metadata_storage = iree_byte_span_empty();
   iree_const_byte_span_t executable_metadata = iree_const_byte_span_empty();
   if (iree_status_is_ok(status)) {
@@ -667,12 +678,12 @@ iree_status_t iree_hal_replay_recorder_device_load_executable(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_replay_recorder_executable_create_proxy(
-        recorder, device_id, executable_id, base_executable, host_allocator,
-        &replay_executable);
+        recorder, device_id, executable_id, queue_family, base_executable,
+        host_allocator, &replay_executable);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_replay_recorder_load_payload_iovecs(
-        queue_affinity, target, params, executable_metadata, &operation_payload,
+        queue_family, target, params, executable_metadata, &operation_payload,
         operation_iovecs);
   }
   status = iree_hal_replay_recorder_end_creation_operation(

@@ -42,6 +42,11 @@ typedef struct iree_hal_slab_provider_properties_t {
   // Buffer usage bits supported by every slab from the provider.
   iree_hal_buffer_usage_t supported_usage;
 
+  // Queue families that may access buffers materialized from the provider.
+  // IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY means every queue family in the
+  // containing logical device.
+  iree_hal_queue_family_affinity_t queue_family_affinity;
+
   // Atomic operations supported by naturally aligned slab locations.
   iree_hal_atomic_operation_capabilities_t atomic_operations;
 } iree_hal_slab_provider_properties_t;

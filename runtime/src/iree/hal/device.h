@@ -295,142 +295,6 @@ iree_hal_device_create_params_default(void) {
 IREE_API_EXPORT iree_status_t iree_hal_device_create_params_verify(
     const iree_hal_device_create_params_t* params);
 
-// Bitfield specifying flags controlling an async allocation operation.
-typedef uint64_t iree_hal_alloca_flags_t;
-enum iree_hal_alloca_flag_bits_t {
-  IREE_HAL_ALLOCA_FLAG_NONE = 0,
-
-  // Buffer lifetime is indeterminate indicating that the compiler or
-  // application allocating the buffer is unable to determine when it is safe to
-  // deallocate the buffer. Explicit deallocation requests are ignored and the
-  // buffer deallocation will happen synchronously when the last remaining
-  // reference to the buffer is released.
-  IREE_HAL_ALLOCA_FLAG_INDETERMINATE_LIFETIME = 1ull << 0,
-
-  // Allows the queue to satisfy the allocation from recycled pool memory whose
-  // death frontier is not dominated by the requester's current queue frontier
-  // by inserting an internal dependency on that death frontier before the
-  // buffer's bytes are used. Without this flag, pools must return only
-  // immediately-usable reservations to queue_alloca.
-  IREE_HAL_ALLOCA_FLAG_ALLOW_POOL_WAIT_FRONTIER = 1ull << 1,
-};
-
-// Bitfield specifying flags controlling an async deallocation operation.
-typedef uint64_t iree_hal_dealloca_flags_t;
-enum iree_hal_dealloca_flag_bits_t {
-  IREE_HAL_DEALLOCA_FLAG_NONE = 0,
-
-  // The provided device and queue affinity will be overridden with the origin
-  // of the allocation as defined by the placement, if available.
-  // If the buffer has no origin device (imported heap buffers and other rare
-  // cases) or was not allocated asynchronously the provided device and queue
-  // affinity will be used to insert a queue barrier. Callers must ensure the
-  // provided device is compatible with the fences provided.
-  IREE_HAL_DEALLOCA_FLAG_PREFER_ORIGIN = 1ull << 0,
-};
-
-// Bitfield specifying flags controlling a file read operation.
-typedef uint64_t iree_hal_read_flags_t;
-enum iree_hal_read_flag_bits_t {
-  IREE_HAL_READ_FLAG_NONE = 0,
-};
-
-// Bitfield specifying flags controlling a file write operation.
-typedef uint64_t iree_hal_write_flags_t;
-enum iree_hal_write_flag_bits_t {
-  IREE_HAL_WRITE_FLAG_NONE = 0,
-};
-
-// Bitfield specifying flags controlling a host call operation.
-typedef uint64_t iree_hal_host_call_flags_t;
-enum iree_hal_host_call_flag_bits_e {
-  IREE_HAL_HOST_CALL_FLAG_NONE = 0ull,
-
-  // The call will not block the queue it is executing on.
-  // The signal semaphores provided to iree_hal_device_queue_host_call will be
-  // signaled immediately after the queue has issued the call so that work can
-  // progress. The queue will not wait for the call to be made and it's possible
-  // for it to happen out of order with respect to subsequent work on the queue.
-  // The application itself must ensure that any references captured by the call
-  // (user_data or args) are valid until the callback has completed.
-  //
-  // This is intended primarily for use as an optimization for custom signaling
-  // behavior or notifications.
-  IREE_HAL_HOST_CALL_FLAG_NON_BLOCKING = 1ull << 0,
-
-  // Hints that the host call is expected to be very short and that the issuing
-  // queue may want to spin (possibly with backoff) until the host call has
-  // signaled completion.
-  IREE_HAL_HOST_CALL_FLAG_WAIT_ACTIVE = 1ull << 1,
-
-  // Hints that the host call does not require the device to flush/invalidate
-  // caches. Use if the call does not consume any device resources that may have
-  // been produced but not yet flushed to host memory and does not produce any
-  // device resources that will be consumed without invalidation.
-  IREE_HAL_HOST_CALL_FLAG_RELAXED = 1ull << 2,
-};
-
-// Provides context to a host call about where it was made from as well as any
-// additional data requested.
-typedef struct iree_hal_host_call_context_t {
-  // The device the call was issued on.
-  iree_hal_device_t* device;
-  // The queue the call was issued on.
-  // This is guaranteed to be equal-to or a subset-of the queue affinity
-  // provided when the call was enqueued. Implementations are allowed to pick a
-  // single queue to call the operation on and block that or block entire groups
-  // of queues if there is some internal aliasing that introduces progress
-  // issues if only one queue is treated as blocked.
-  iree_hal_queue_affinity_t queue_affinity;
-  // A list of semaphores that must be signaled once the call has completed.
-  // Omitted if IREE_HAL_HOST_CALL_FLAG_NON_BLOCKING was requested.
-  //
-  // The list lives on the stack and must be copied and each semaphore retained
-  // if the call function does not immediately signal them inline. Asynchronous
-  // completion would clone the list, retain the semaphores, fire off the async
-  // operation, and then upon completion signal the semaphores and release them.
-  iree_hal_semaphore_list_t signal_semaphore_list;
-} iree_hal_host_call_context_t;
-
-// Executes a user-requested host call in queue order.
-// If the call succeeds and returns OK the semaphores will be signaled and
-// otherwise they will be failed. In non-blocking mode any error returned is
-// ignored and no semaphores are available.
-//
-// To implement asynchronous callbacks the signal_semaphore_list provided in
-// |context| should be cloned (list of pointers and retains on semaphores) and
-// stored for later signaling. The callback must return IREE_STATUS_DEFERRED to
-// indicate the asynchronous operation and when the operation has completed use
-// iree_hal_semaphore_list_signal or iree_hal_semaphore_list_fail based on
-// result.
-typedef iree_status_t(IREE_API_PTR* iree_hal_host_call_fn_t)(
-    void* user_data, const uint64_t args[4],
-    iree_hal_host_call_context_t* context);
-
-// Bound host call function and user data.
-typedef struct iree_hal_host_call_t {
-  // Callback function pointer in the host program.
-  iree_hal_host_call_fn_t fn;
-
-  // User data passed to the callback function. Unowned.
-  // When |resource| is provided it may retain |user_data| transitively.
-  void* user_data;
-
-  // Optional resource retaining callback state.
-  //
-  // The caller must keep its reference live until
-  // iree_hal_device_queue_host_call returns. Implementations retain the
-  // resource when the call may execute after the queue operation returns and
-  // release it after |fn| returns or the queued call is cancelled before
-  // invocation.
-  //
-  // Returning IREE_STATUS_DEFERRED transfers signal semaphore completion to
-  // |fn| but does not extend this retain. A deferred continuation that still
-  // needs the resource must retain it before returning and release it after
-  // completion.
-  iree_hal_resource_t* resource;
-} iree_hal_host_call_t;
-
 // Backend-native ingredients required to create queue-allocation pools for a
 // device memory domain.
 //
@@ -457,42 +321,6 @@ typedef struct iree_hal_queue_pool_backend_t {
   // Disabled when the device does not support or has not enabled ASAN pools.
   iree_hal_asan_pool_options_t asan;
 } iree_hal_queue_pool_backend_t;
-
-// Returns a host call bound to the given function pointer and user data.
-static inline iree_hal_host_call_t iree_hal_make_host_call(
-    iree_hal_host_call_fn_t fn, void* user_data) {
-  iree_hal_host_call_t call = {
-      /*.fn=*/fn,
-      /*.user_data=*/user_data,
-      /*.resource=*/NULL,
-  };
-  return call;
-}
-
-// Returns a host call whose callback state is retained by |resource|.
-static inline iree_hal_host_call_t iree_hal_make_host_call_with_resource(
-    iree_hal_host_call_fn_t fn, void* user_data,
-    iree_hal_resource_t* resource) {
-  iree_hal_host_call_t call = {
-      /*.fn=*/fn,
-      /*.user_data=*/user_data,
-      /*.resource=*/resource,
-  };
-  return call;
-}
-
-// Bitfield specifying flags controlling an execution operation.
-typedef uint64_t iree_hal_execute_flags_t;
-enum iree_hal_execute_flag_bits_t {
-  IREE_HAL_EXECUTE_FLAG_NONE = 0,
-  // Allows the implementation to borrow binding table buffer lifetimes instead
-  // of retaining them until the submitted work completes. Callers using this
-  // flag must keep all buffers referenced by the binding table live and backed
-  // by stable storage until the submission's signal semaphores indicate
-  // completion. The binding table entries themselves are still captured during
-  // the queue_execute call and need not remain live after it returns.
-  IREE_HAL_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME = 1ull << 0,
-};
 
 // Device's cached view of topology for fast compatibility checks.
 //
@@ -710,6 +538,24 @@ iree_status_t iree_hal_device_trim(iree_hal_device_t* device);
 IREE_API_EXPORT const iree_hal_device_spec_t* iree_hal_device_spec(
     iree_hal_device_t* device);
 
+// Returns the queue family at canonical |family_ordinal| or NULL if invalid.
+//
+// The returned pointer is borrowed from |device| and remains stable until the
+// device is destroyed.
+IREE_API_EXPORT const iree_hal_queue_family_t* iree_hal_device_queue_family(
+    iree_hal_device_t* device, iree_hal_queue_family_ordinal_t family_ordinal);
+
+// Returns the provisioned hardware queue at the given coordinate or NULL if
+// either ordinal is invalid.
+//
+// This is an infallible lookup over queues provisioned during device creation;
+// it never creates or acquires a queue. The returned pointer is borrowed from
+// |device| and remains stable until the device is destroyed. The caller may
+// retain the queue but must still ensure the device outlives that reference.
+IREE_API_EXPORT iree_hal_queue_t* iree_hal_device_queue(
+    iree_hal_device_t* device, iree_hal_queue_family_ordinal_t family_ordinal,
+    iree_hal_queue_ordinal_t queue_ordinal);
+
 // Initializes |out_observation| for a device state sample.
 IREE_API_EXPORT void iree_hal_device_observation_initialize(
     iree_hal_device_observation_flags_t requested_flags,
@@ -780,430 +626,42 @@ iree_hal_device_query_semaphore_compatibility(iree_hal_device_t* device,
                                               iree_hal_semaphore_t* semaphore);
 
 // Queries the slab provider, notification, and epoch-query callback to use when
-// constructing custom pools for |queue_affinity|.
+// constructing custom pools backed by the memory domain of |queue_family|.
 //
-// Implementations may collapse a multi-bit |queue_affinity| to one physical
-// memory domain using the same queue-selection policy they use for submission.
+// |queue_family| must be the exact family identity borrowed from |device|. It
+// selects one backing memory domain and does not constrain which queue families
+// may access allocations made from the pool. Allocation accessibility remains
+// specified by iree_hal_buffer_params_t::queue_family_affinity and advertised
+// by iree_hal_pool_capabilities_t::queue_family_affinity.
+//
 // The returned pointers are borrowed from |device| and remain valid until the
 // device is destroyed.
 //
 // Requires that |device| has been assigned to a device group.
 IREE_API_EXPORT iree_status_t iree_hal_device_query_queue_pool_backend(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
     iree_hal_queue_pool_backend_t* out_backend);
 
-// Loads a native executable artifact for |target| on |queue_affinity|.
+// Loads a native executable artifact for |target| on |queue_family|.
 //
+// |queue_family| must be the exact family identity borrowed from |device| and
 // |target| must be an exact borrowed row from iree_hal_device_spec(device).
-// The backend resolves |queue_affinity| to physical devices and requires every
-// selected physical device to be present in |target->physical_device_affinity|.
-// An ANY queue affinity therefore requires a target valid for every physical
-// device selected by the backend.
+// |target| must support every physical device serviced by |queue_family|.
+// The returned executable may only be used with command buffers and direct
+// dispatches targeting |queue_family|.
 //
 // The executable data and constants are borrowed only for the duration of the
 // call. Implementations must finish consuming or copy any retained data before
 // returning. Loading is a cold path and implementations may parse, verify,
 // link, or optimize the native artifact before returning.
+//
+// On success, |out_executable| is assigned one owning reference. It is
+// unchanged on failure.
 IREE_API_EXPORT iree_status_t iree_hal_device_load_executable(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* params,
     iree_hal_executable_t** out_executable);
-
-// Reserves and returns a device-local queue-ordered transient buffer.
-// The allocation will not be committed until the entire |wait_semaphore_list|
-// has been reached. Once the storage is available for use the
-// |signal_semaphore_list| will be signaled. The contents of the buffer are
-// undefined until signaled even if all waits have been resolved and callers
-// must always wait for the signal.
-//
-// |pool| is a borrowed allocation pool selector. NULL selects the device's
-// default pool. Any non-NULL pool must outlive all queue submissions,
-// reservations, and materialized buffers that use it.
-//
-// For optimal performance and minimal memory consumption the returned buffer
-// should be deallocated using iree_hal_device_queue_dealloca as soon as
-// possible. It's still safe to synchronously release the buffer but the
-// lifetime will then be controlled by all potential retainers.
-//
-// Usage:
-//   iree_hal_device_queue_alloca(wait(0), signal(1), &buffer);
-//   iree_hal_device_queue_execute(wait(1), signal(2), commands...);
-//   iree_hal_device_queue_dealloca(wait(2), signal(3), buffer);
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_alloca(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
-    iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
-    iree_hal_buffer_t** IREE_RESTRICT out_buffer);
-
-// Deallocates a queue-ordered transient buffer.
-// The deallocation will not be made until the entire |wait_semaphore_list| has
-// been reached. Once the storage is available for reuse the
-// |signal_semaphore_list| will be signaled. After all waits have been resolved
-// the contents of the buffer are immediately undefined even if the signal has
-// not yet occurred. Queue implementations must perform target-visible release
-// effects such as decommit, sanitizer poisoning, or guard-page updates after
-// all waits are satisfied and before any signals are published. If the buffer
-// was not allocated asynchronously a barrier will be inserted to preserve fence
-// timelines.
-//
-// Deallocations will only be queue-ordered if the |buffer| was originally
-// allocated with iree_hal_device_queue_alloca. Any synchronous allocations will
-// be ignored and deallocated when the |buffer| has been released but a queue
-// barrier will be inserted to preserve the timeline.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_dealloca(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags);
-
-// Enqueues a single queue-ordered fill operation.
-// The |target_buffer| must be visible to the device queue performing the fill.
-//
-// WARNING: individual fills have a high overhead and batching should be
-// performed by the caller instead of calling this multiple times. The
-// iree_hal_create_transfer_command_buffer utility makes it easy to create
-// batches of transfer operations (fill, update, copy) and is only a few lines
-// more code.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_fill(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const void* pattern,
-    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags);
-
-// Enqueues a single queue-ordered buffer update operation.
-// The provided |source_buffer| will be captured and need not remain live or
-// unchanged while the operation is queued. The |target_buffer| must be visible
-// to the device queue performing the update.
-//
-// Some implementations may have limits on the size of the update or may perform
-// poorly if the size is larger than an implementation-defined limit. Updates
-// should be kept as small and infrequent as possible.
-//
-// WARNING: individual copies have a high overhead and batching should be
-// performed by the caller instead of calling this multiple times. The
-// iree_hal_create_transfer_command_buffer utility makes it easy to create
-// batches of transfer operations (fill, update, copy) and is only a few lines
-// more code.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_update(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    const void* source_buffer, iree_host_size_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_update_flags_t flags);
-
-// Enqueues a single queue-ordered copy operation.
-// The |source_buffer| and |target_buffer| must both be visible to the device
-// queue performing the copy.
-//
-// WARNING: individual copies have a high overhead and batching should be
-// performed by the caller instead of calling this multiple times. The
-// iree_hal_create_transfer_command_buffer utility makes it easy to create
-// batches of transfer operations (fill, update, copy) and is only a few lines
-// more code.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_copy(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_copy_flags_t flags);
-
-// Enqueues a file read operation that streams a segment of the |source_file|
-// defined by the |source_offset| and |length| into the HAL |target_buffer| at
-// the specified |target_offset|. The |queue_affinity| should be set to where
-// the target buffer will be consumed. The source file must have read permission
-// and the target buffer must allow writes with transfer-target usage.
-//
-// A non-empty operation retains |source_file| and |target_buffer| until it
-// reaches a terminal state. When |source_file| wraps host memory, callers must
-// order host writes before the queue read with |wait_semaphore_list| and must
-// not mutate the source range again until |signal_semaphore_list| is reached.
-//
-// A zero-length read performs no data access but still forwards the wait
-// dependencies to the signal dependencies.
-// Device-visible storage-backed files use the device's normal queue copy path;
-// other file representations are handled by the backend.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_read(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_file_t* source_file, uint64_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_read_flags_t flags);
-
-// Enqueues a file write operation that streams a segment of the HAL
-// |source_buffer| defined by the |source_offset| and |length| into the
-// |target_file| at the specified |target_offset|. The |queue_affinity| should
-// be set to where the source buffer was produced. The source buffer must have
-// read access with transfer-source usage and the target file must have write
-// permission.
-//
-// A non-empty operation retains |source_buffer| and |target_file| until it
-// reaches a terminal state. When |target_file| wraps host memory, callers must
-// not access the target range until |signal_semaphore_list| is reached.
-//
-// A zero-length write performs no data access but still forwards the wait
-// dependencies to the signal dependencies.
-// Device-visible storage-backed files use the device's normal queue copy path;
-// other file representations are handled by the backend.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_write(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-    iree_hal_file_t* target_file, uint64_t target_offset,
-    iree_device_size_t length, iree_hal_write_flags_t flags);
-
-// Enqueues a host call request.
-// The device will issue the host call once all waits are satisfied. Host calls
-// receive the signal semaphores provided and can be either synchronous (signal
-// inline) or asynchronous (signal at any point in the future). A non-blocking
-// mode is provided for unidirectional/post-style calls.
-//
-// WARNING: re-entrancy is not supported. It is safe to perform semaphore
-// queries and signals and synchronously allocate/deallocate buffers and
-// resources but queue operations _may_ lead to hangs/crashes. Avoid using any
-// iree_hal_device_queue_* API or performing any blocking waits. If queuing is
-// required then bounce the call to another thread and have it performed there.
-//
-// Arguments are passed without modification from the enqueue operation to the
-// callback. If the arguments contain pointers those must remain live until the
-// host call has executed.
-//
-// Calls block dependent work by default. Once all waits have been satisfied the
-// queue will issue the call to the host with the signals provided and the host
-// call is responsible for either completing its work and returning OK to
-// automatically signal the semaphores. Note that other independent work in the
-// queue is allowed to progress while the host call is in-flight. Calls can be
-// implemented asynchronously by cloning and retaining the signal semaphores
-// they are provided, returning IREE_STATUS_DEFERRED, and signaling them at any
-// point in the future (from an async completion callback, another queue, etc).
-//
-// The IREE_HAL_HOST_CALL_FLAG_NON_BLOCKING flag can be used to instead have the
-// queue issue the call after waits have been satisfied and then immediately
-// signal dependencies prior to the host call being executed. This allows post
-// style notifications without blocking subsequent device work and can be used
-// as a generic signaling mechanism.
-//
-// Call lifetime in both modes:
-// ```
-// BLOCKING (call responsible for signaling):
-//   [alloc state]->[wait]->[call on host]->[signal]->[free state]
-//                            ^             ^
-//                            |             |
-//                            |             Call must signal before returning
-//                            Call receives signal_semaphore_list
-//
-// NON_BLOCKING (queue signals, call runs detached):
-//   [alloc state]->[wait]->[signal]->[call on host]->[free state]
-//                            ^       ^
-//                            |       |
-//                            |       Call receives empty signal_semaphore_list
-//                            Queue signals immediately
-// ```
-//
-// NOTE: host calls can be extremely expensive and result in significant
-// performance issues. Some implementations are not able to natively support
-// host calls and require emulation with poller threads and other techniques
-// that add non-trivial latency in device->host->device situations. Avoid host
-// calls if at all possible.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_host_call(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_host_call_t call, const uint64_t args[4],
-    iree_hal_host_call_flags_t flags);
-
-// Enqueues a dispatch over a 3D grid of workgroups.
-// The request may execute overlapped with any other queue operations. The
-// executable specified must be registered for use with the device driver owning
-// the queue it is scheduled on.
-//
-// The provided constant data and binding list will be recorded into the queue
-// and need not remain live beyond the call. By default the executable, binding
-// buffers, and indirect parameter buffer will be retained by the queue until
-// the operation has completed. Callers that already guarantee resource
-// lifetimes may pass IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES to allow
-// implementations to skip that tracking on hot paths.
-//
-// All provided |bindings| must be directly specified and not reference binding
-// table slots.
-//
-// See iree_hal_command_buffer_dispatch for more information.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_dispatch(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_executable_t* executable, iree_hal_executable_function_t function,
-    const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
-    const iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags);
-
-// Executes a command buffer on a device queue.
-// No commands will execute until the wait fence has been reached and the signal
-// fence will be signaled when all commands have completed. If a command buffer
-// is omitted this will act as a barrier.
-//
-// The queue is selected based on the command buffer submitted and the
-// |queue_affinity|. As the number of available queues can vary the
-// |queue_affinity| is used to hash into the available queues for the required
-// categories. For example if 2 queues support transfer commands and the
-// affinity is 5 the resulting queue could be index hash(5)=1. The affinity can
-// thus be treated as just a way to indicate whether two submissions must be
-// placed on to the same queue. Note that the exact hashing function is
-// implementation dependent.
-//
-// An optional binding table must be provided if the command buffer has indirect
-// bindings and may otherwise be `iree_hal_buffer_binding_table_empty()`. The
-// binding table contents will be captured during the call and need not persist
-// after the call returns. By default, buffers referenced by the binding table
-// are retained until the submitted work completes. Callers that already
-// guarantee buffer lifetimes may pass
-// IREE_HAL_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME to allow implementations
-// to skip that tracking on hot paths.
-//
-// The submission behavior matches Vulkan's vkQueueSubmit, with each submission
-// executing its command buffers in the order they are defined but allowing the
-// command buffers to complete out-of-order. See:
-// https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkQueueSubmit.html
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_execute(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_command_buffer_t* command_buffer,
-    iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t flags);
-
-// Enqueues an asynchronous atomic wait on a device queue.
-//
-// The operation becomes eligible after |wait_semaphore_list| is satisfied and
-// publishes |signal_semaphore_list| after the memory predicate is satisfied.
-// The call returns after the operation is accepted and never waits for the
-// predicate on the host. Queue submissions are not implicitly FIFO; callers
-// use semaphore dependencies to order this operation with other submissions.
-// The target buffer is retained until the operation completes.
-//
-// Implementations may actively poll, occupy execution resources, or stall the
-// selected queue until the predicate is satisfied. If the producer is ordered
-// behind the wait or requires resources exhausted by waits, the operation may
-// deadlock. Issued waits are not guaranteed to be cancellable and may prevent
-// device teardown from completing. Callers are responsible for constructing a
-// producer placement and dependency graph that can make progress.
-//
-// |queue_affinity| must contain exactly one bit so the caller can ensure that
-// an independent producer does not depend on work queued behind the wait.
-// |target_offset| must be naturally aligned to |params.width| and the buffer
-// must permit storage reads and device reads.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_atomic_wait(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_atomic_wait_params_t params);
-
-// Enqueues an asynchronous atomic store on a device queue.
-//
-// The operation becomes eligible after |wait_semaphore_list| is satisfied and
-// publishes |signal_semaphore_list| after the store completes. Queue
-// submissions are not implicitly FIFO; callers use semaphore dependencies to
-// order this operation with other submissions. The target buffer is retained
-// until the operation completes.
-//
-// |target_offset| must be naturally aligned to |params.width| and the buffer
-// must permit storage writes and device writes.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_atomic_store(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_atomic_store_params_t params);
-
-// Enqueues an asynchronous no-result atomic read-modify-write on a device
-// queue.
-//
-// The operation becomes eligible after |wait_semaphore_list| is satisfied and
-// publishes |signal_semaphore_list| after the update completes. Queue
-// submissions are not implicitly FIFO; callers use semaphore dependencies to
-// order this operation with other submissions. The target buffer is retained
-// until the operation completes.
-//
-// |target_offset| must be naturally aligned to |params.width| and the buffer
-// must permit storage reads and writes and device reads and writes.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_atomic_rmw(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_atomic_rmw_params_t params);
-
-// Flags controlling iree_hal_device_queue_timestamp behavior.
-typedef uint64_t iree_hal_timestamp_flags_t;
-enum iree_hal_timestamp_flag_bits_t {
-  IREE_HAL_TIMESTAMP_FLAG_NONE = 0u,
-};
-
-// Enqueues a device-side timestamp at the point in the |queue_affinity|
-// timeline reached after |wait_semaphore_list| is satisfied, signaling
-// |signal_semaphore_list| when that point is reached. A single 64-bit device
-// timestamp tick is written by the device into |target_buffer| at
-// |target_offset|. The target must be 8-byte aligned and be a transfer target
-// the device can write 8 bytes into; to read the tick back on the host the
-// buffer must additionally be host-visible (e.g. mappable). Callers must wait
-// on |signal_semaphore_list| before reading the tick back from |target_buffer|.
-//
-// The captured value is a tick in the timestamp domain of the queue the
-// implementation selects for |queue_affinity|. A device may span several
-// physical devices whose timestamp domains are independent counters, and each
-// queue family in iree_hal_device_spec_queues() publishes the timestamp facts
-// and physical_device_affinity identifying the domain its queues capture in.
-// Two ticks may only be compared or subtracted when both captures resolved to
-// the same domain. Two captures issued with the same |queue_affinity| always
-// resolve to the same domain: as with iree_hal_device_queue_execute an
-// affinity selects one queue and a queue captures in one domain, so reusing an
-// affinity keeps captures comparable on a device spanning several physical
-// devices. Which family an affinity resolves to is internal to the
-// implementation, but a caller pairing its own captures need not know it:
-// iree_hal_queue_affinity_t bits and physical-device affinity bits are
-// independent namespaces that the device spec does not map between. Differing
-// affinities may or may not share a domain, though a device reporting one
-// queue family covering one physical device has a single domain in which any
-// two of its captures are comparable. Correlation across domains, or with host
-// time, is not expressed by this operation.
-//
-// Convert with the facts of the family the capture resolved to: only the low
-// timestamp_valid_bits of a tick are defined and the counter wraps at that
-// width, so reduce the difference of two ticks modulo that width before
-// dividing it by the family's timestamp_frequency_hz to convert to seconds.
-// Subtracting the raw values is only correct where timestamp_valid_bits is 64.
-// iree_hal_device_spec_timing() summarizes the same two facts device-scope and
-// may aggregate families that differ, so it stands in for the family facts
-// only on a device reporting one queue family.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_timestamp(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_timestamp_flags_t flags);
-
-// Enqueues a barrier waiting for |wait_semaphore_list| and signaling
-// |signal_semaphore_list| when reached.
-// Equivalent to iree_hal_device_queue_execute with no command buffers.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_barrier(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_execute_flags_t flags);
-
-// Flushes any locally-pending submissions in the queue.
-// When submitting many queue operations this can be used to eagerly flush
-// earlier submissions while later ones are still being constructed.
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_flush(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity);
 
 // Blocks the caller until the semaphores reach or exceed the specified payload
 // values or the |timeout| elapses. All semaphores in |semaphore_list| must be
@@ -1324,6 +782,14 @@ typedef struct iree_hal_device_vtable_t {
   const iree_hal_device_spec_t*(IREE_API_PTR* device_spec)(
       iree_hal_device_t* device);
 
+  const iree_hal_queue_family_t*(IREE_API_PTR* queue_family)(
+      iree_hal_device_t* device,
+      iree_hal_queue_family_ordinal_t family_ordinal);
+
+  iree_hal_queue_t*(IREE_API_PTR* queue)(
+      iree_hal_device_t* device, iree_hal_queue_family_ordinal_t family_ordinal,
+      iree_hal_queue_ordinal_t queue_ordinal);
+
   iree_status_t(IREE_API_PTR* sample_observation)(
       iree_hal_device_t* device,
       iree_hal_device_observation_flags_t requested_flags,
@@ -1341,29 +807,32 @@ typedef struct iree_hal_device_vtable_t {
       const iree_hal_device_topology_info_t* topology_info);
 
   iree_status_t(IREE_API_PTR* create_channel)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_device_t* device,
+      iree_hal_queue_family_affinity_t queue_family_affinity,
       iree_hal_channel_params_t params, iree_hal_channel_t** out_channel);
 
   iree_status_t(IREE_API_PTR* create_command_buffer)(
-      iree_hal_device_t* device, iree_hal_command_buffer_mode_t mode,
+      iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
+      iree_hal_command_buffer_mode_t mode,
       iree_hal_command_category_t command_categories,
-      iree_hal_queue_affinity_t queue_affinity,
       iree_host_size_t binding_capacity,
       iree_hal_command_buffer_t** out_command_buffer);
 
   iree_status_t(IREE_API_PTR* load_executable)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
       const iree_hal_executable_target_t* target,
       const iree_hal_executable_load_params_t* params,
       iree_hal_executable_t** out_executable);
 
   iree_status_t(IREE_API_PTR* import_file)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_device_t* device,
+      iree_hal_queue_family_affinity_t queue_family_affinity,
       iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
       iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file);
 
   iree_status_t(IREE_API_PTR* create_semaphore)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_device_t* device,
+      iree_hal_queue_family_affinity_t queue_family_affinity,
       uint64_t initial_value, iree_hal_semaphore_flags_t flags,
       iree_hal_semaphore_t** out_semaphore);
 
@@ -1372,118 +841,8 @@ typedef struct iree_hal_device_vtable_t {
       iree_hal_device_t* device, iree_hal_semaphore_t* semaphore);
 
   iree_status_t(IREE_API_PTR* query_queue_pool_backend)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
       iree_hal_queue_pool_backend_t* out_backend);
-
-  iree_status_t(IREE_API_PTR* queue_alloca)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
-      iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
-      iree_hal_buffer_t** IREE_RESTRICT out_buffer);
-
-  iree_status_t(IREE_API_PTR* queue_dealloca)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* queue_fill)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_device_size_t length, const void* pattern,
-      iree_host_size_t pattern_length, iree_hal_fill_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* queue_update)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      const void* source_buffer, iree_host_size_t source_offset,
-      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_device_size_t length, iree_hal_update_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* queue_copy)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_device_size_t length, iree_hal_copy_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* queue_read)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_file_t* source_file, uint64_t source_offset,
-      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_device_size_t length, iree_hal_read_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* queue_write)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-      iree_hal_file_t* target_file, uint64_t target_offset,
-      iree_device_size_t length, iree_hal_write_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* queue_host_call)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_host_call_t call, const uint64_t args[4],
-      iree_hal_host_call_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* queue_dispatch)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_executable_t* executable,
-      iree_hal_executable_function_t function,
-      const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
-      const iree_hal_buffer_ref_list_t bindings,
-      iree_hal_dispatch_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* queue_execute)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_command_buffer_t* command_buffer,
-      iree_hal_buffer_binding_table_t binding_table,
-      iree_hal_execute_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* queue_atomic_wait)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_hal_atomic_wait_params_t params);
-
-  iree_status_t(IREE_API_PTR* queue_atomic_store)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_hal_atomic_store_params_t params);
-
-  iree_status_t(IREE_API_PTR* queue_atomic_rmw)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_hal_atomic_rmw_params_t params);
-
-  iree_status_t(IREE_API_PTR* queue_timestamp)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_hal_timestamp_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* queue_flush)(
-      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity);
 
   iree_status_t(IREE_API_PTR* profiling_begin)(
       iree_hal_device_t* device,

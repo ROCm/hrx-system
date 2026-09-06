@@ -257,9 +257,9 @@ static iree_status_t iree_hal_heap_allocator_import_buffer(
 
   const iree_hal_buffer_placement_t placement = {
       .device = NULL,
-      .queue_affinity = compat_params.queue_affinity
-                            ? compat_params.queue_affinity
-                            : IREE_HAL_QUEUE_AFFINITY_ANY,
+      .queue_family_affinity = compat_params.queue_family_affinity
+                                   ? compat_params.queue_family_affinity
+                                   : IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
   return iree_hal_heap_buffer_wrap(
@@ -323,7 +323,8 @@ static iree_status_t iree_hal_heap_allocator_virtual_memory_query_granularity(
 
 static iree_status_t iree_hal_heap_allocator_virtual_memory_reserve(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
-    iree_hal_queue_affinity_t queue_affinity, iree_device_size_t size,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_device_size_t size,
     iree_hal_buffer_t** IREE_RESTRICT out_virtual_buffer) {
   *out_virtual_buffer = NULL;
   return iree_make_status(IREE_STATUS_UNAVAILABLE,
@@ -376,7 +377,7 @@ static iree_status_t iree_hal_heap_allocator_virtual_memory_protect(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_protection_t protection) {
   return iree_make_status(IREE_STATUS_UNAVAILABLE,
                           "heap allocator does not support virtual memory");
@@ -386,7 +387,8 @@ static iree_status_t iree_hal_heap_allocator_virtual_memory_advise(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_advice_t advice) {
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_memory_advice_t advice) {
   return iree_make_status(IREE_STATUS_UNAVAILABLE,
                           "heap allocator does not support virtual memory");
 }

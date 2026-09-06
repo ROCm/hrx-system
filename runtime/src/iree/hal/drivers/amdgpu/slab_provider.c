@@ -13,7 +13,6 @@
 #include "iree/hal/drivers/amdgpu/atomic_memory.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
-#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/memory/tracing.h"
 
@@ -42,10 +41,13 @@ typedef struct iree_hal_amdgpu_slab_provider_t {
   // Borrowed wrapper pool used for materialized HAL buffer views.
   iree_hal_amdgpu_buffer_pool_t* buffer_pool;
 
-  // Queue affinities in this provider's physical memory domain.
-  iree_hal_queue_affinity_t queue_affinity_mask;
+  // Queue families that may access buffers materialized from this provider.
+  iree_hal_queue_family_affinity_t supported_queue_family_affinity;
 
-  // Atomic memory cells supported by every buffer from this provider.
+  // Source GPU masks for atomic operations supported by the HSA memory pool.
+  iree_hal_amdgpu_atomic_memory_source_masks_t atomic_memory_source_masks;
+
+  // Atomic memory cells supported across all queue families.
   iree_hal_amdgpu_atomic_memory_cell_flags_t atomic_memory_cells;
 
   // Stable named-memory stream for HSA backing allocations from this provider.
@@ -185,14 +187,8 @@ static bool iree_hal_amdgpu_slab_provider_record_memory_event(
 static iree_status_t iree_hal_amdgpu_slab_provider_resolve_access_agents(
     const iree_hal_amdgpu_slab_provider_t* provider,
     iree_hal_amdgpu_access_agent_list_t* out_agent_list) {
-  const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-      .supported_affinity = provider->queue_affinity_mask,
-      .physical_device_count = provider->topology->gpu_agent_count,
-      .queue_count_per_physical_device =
-          provider->topology->gpu_agent_queue_count,
-  };
   return iree_hal_amdgpu_access_agent_list_resolve_memory_agents(
-      provider->topology, domain, provider->queue_affinity_mask,
+      provider->topology, provider->supported_queue_family_affinity,
       out_agent_list);
 }
 
@@ -415,7 +411,6 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
     const iree_hal_amdgpu_topology_t* topology,
     iree_hal_amdgpu_slab_provider_options_t options,
     iree_host_size_t physical_device_ordinal,
-    iree_hal_queue_affinity_t queue_affinity_mask,
     iree_hal_amdgpu_buffer_pool_t* buffer_pool, iree_string_view_t trace_name,
     iree_allocator_t host_allocator, iree_hal_slab_provider_t** out_provider) {
   IREE_ASSERT_ARGUMENT(device);
@@ -426,12 +421,6 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_provider = NULL;
 
-  if (IREE_UNLIKELY(iree_hal_queue_affinity_is_empty(queue_affinity_mask))) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU slab provider queue affinity mask must "
-                            "not be empty");
-  }
   if (IREE_UNLIKELY(physical_device_ordinal >= topology->gpu_agent_count)) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(
@@ -440,19 +429,20 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
         " exceeds topology GPU agent count %" PRIhsz,
         physical_device_ordinal, topology->gpu_agent_count);
   }
-  const iree_hal_amdgpu_queue_affinity_domain_t affinity_domain = {
-      .supported_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
-      .physical_device_count = topology->gpu_agent_count,
-      .queue_count_per_physical_device = topology->gpu_agent_queue_count,
-  };
-  if (IREE_UNLIKELY(!iree_hal_amdgpu_queue_affinity_is_physical_device_local(
-          affinity_domain, queue_affinity_mask, physical_device_ordinal))) {
+  if (IREE_UNLIKELY(topology->gpu_agent_count > IREE_HAL_MAX_QUEUE_FAMILIES)) {
     IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU slab provider queue affinity 0x%016" PRIx64
-                            " is not local to physical device %" PRIhsz,
-                            queue_affinity_mask, physical_device_ordinal);
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU topology GPU agent count %" PRIhsz
+                            " exceeds queue-family affinity capacity %" PRIhsz,
+                            topology->gpu_agent_count,
+                            (iree_host_size_t)IREE_HAL_MAX_QUEUE_FAMILIES);
   }
+  const iree_hal_queue_family_affinity_t supported_queue_family_affinity =
+      topology->gpu_agent_count == IREE_HAL_MAX_QUEUE_FAMILIES
+          ? IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY
+          : (((iree_hal_queue_family_affinity_t)1
+              << topology->gpu_agent_count) -
+             1);
   if (IREE_UNLIKELY(!options.memory_pool.handle)) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -511,7 +501,7 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
   provider->memory_pool = options.memory_pool;
   provider->physical_device_ordinal = (uint32_t)physical_device_ordinal;
   provider->buffer_pool = buffer_pool;
-  provider->queue_affinity_mask = queue_affinity_mask;
+  provider->supported_queue_family_affinity = supported_queue_family_affinity;
   provider->flags = options.flags;
   provider->vmem_memory_type = options.vmem_memory_type;
   provider->asan_state = options.asan_state;
@@ -526,17 +516,17 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
     status = iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
         libhsa, options.memory_pool, &properties);
   }
-  iree_hal_amdgpu_atomic_memory_source_masks_t atomic_memory_source_masks;
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_atomic_memory_query_source_masks(
         libhsa, topology, options.memory_pool,
-        HSA_AMD_MEMORY_POOL_STANDARD_FLAG, &atomic_memory_source_masks);
+        HSA_AMD_MEMORY_POOL_STANDARD_FLAG,
+        &provider->atomic_memory_source_masks);
   }
   if (iree_status_is_ok(status)) {
     provider->atomic_memory_cells =
         iree_hal_amdgpu_atomic_memory_select_device_cells(
-            &atomic_memory_source_masks, ((iree_hal_amdgpu_gpu_agent_mask_t)1)
-                                             << physical_device_ordinal);
+            &provider->atomic_memory_source_masks,
+            (iree_hal_amdgpu_gpu_agent_mask_t)supported_queue_family_affinity);
   }
   if (iree_status_is_ok(status) &&
       iree_hal_amdgpu_slab_provider_uses_asan_vmm(provider)) {
@@ -560,6 +550,8 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
   if (iree_status_is_ok(status)) {
     provider->properties.memory_type = options.memory_type;
     provider->properties.supported_usage = options.supported_usage;
+    provider->properties.queue_family_affinity =
+        IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
     provider->properties.atomic_operations =
         iree_hal_amdgpu_atomic_memory_expand_capabilities(
             provider->atomic_memory_cells);
@@ -771,29 +763,37 @@ static iree_status_t iree_hal_amdgpu_slab_provider_wrap_buffer(
 #endif  // IREE_STATUS_MODE
   }
 
-  iree_hal_queue_affinity_t queue_affinity = params.queue_affinity;
-  if (queue_affinity == IREE_HAL_QUEUE_AFFINITY_ANY) {
-    queue_affinity = provider->queue_affinity_mask;
-  } else if (IREE_UNLIKELY(!iree_all_bits_set(provider->queue_affinity_mask,
-                                              queue_affinity))) {
+  iree_hal_queue_family_affinity_t queue_family_affinity =
+      params.queue_family_affinity;
+  if (iree_hal_queue_family_affinity_is_any(queue_family_affinity)) {
+    queue_family_affinity = provider->supported_queue_family_affinity;
+  } else if (IREE_UNLIKELY(
+                 iree_hal_queue_family_affinity_is_empty(
+                     queue_family_affinity) ||
+                 !iree_all_bits_set(provider->supported_queue_family_affinity,
+                                    queue_family_affinity))) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU slab provider queue affinity 0x%016" PRIx64
-        " does not cover requested buffer affinity 0x%016" PRIx64,
-        provider->queue_affinity_mask, queue_affinity);
+        "AMDGPU slab provider family affinity 0x%016" PRIx64
+        " does not cover requested buffer family affinity 0x%016" PRIx64,
+        provider->supported_queue_family_affinity, queue_family_affinity);
   }
 
   const iree_hal_buffer_placement_t placement = {
       .device = provider->device,
-      .queue_affinity = queue_affinity,
+      .queue_family_affinity = queue_family_affinity,
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
   if (!release_callback.fn) {
     release_callback.fn = iree_hal_amdgpu_slab_provider_borrowed_buffer_release;
   }
+  const iree_hal_amdgpu_atomic_memory_cell_flags_t atomic_memory_cells =
+      iree_hal_amdgpu_atomic_memory_select_device_cells(
+          &provider->atomic_memory_source_masks,
+          (iree_hal_amdgpu_gpu_agent_mask_t)queue_family_affinity);
   return iree_hal_amdgpu_buffer_create_pooled(
       provider->libhsa, placement, resolved_type, params.access, params.usage,
-      provider->atomic_memory_cells, allocation_size, allocation_size,
+      atomic_memory_cells, allocation_size, allocation_size,
       slab->base_ptr + slab_offset, release_callback, provider->buffer_pool,
       provider->host_allocator, out_buffer);
 }

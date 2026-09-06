@@ -249,12 +249,18 @@ hrx_status_t hrx_ensure_shared_state(void) {
 }
 
 #ifdef HRX_HAS_IREE_AMDGPU_DRIVER
-static iree_status_t hrx_set_gpu_architecture_from_hal(
-    iree_hal_device_t* hal_device, hrx_device_s* dev) {
-  const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(hal_device);
+static iree_status_t hrx_set_gpu_architecture_from_hal(hrx_device_s* dev) {
+  const iree_hal_device_spec_t* device_spec =
+      iree_hal_device_spec(dev->hal_device);
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(device_spec);
+  const iree_hal_queue_family_ordinal_t dispatch_family_ordinal =
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(dev->dispatch_queue));
   iree_hal_executable_target_selection_t selection = {
       .family = IREE_SV("amdgpu"),
       .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+      .physical_device_affinity = queue_spec->families[dispatch_family_ordinal]
+                                      .physical_device_affinity,
   };
   const iree_hal_executable_target_selection_result_t result =
       iree_hal_device_spec_select_executable_target(device_spec, &selection);
@@ -295,6 +301,124 @@ static void hrx_release_shared_state(void) {
   iree_async_proactor_pool_release(g_shared.proactor_pool);
   g_shared.proactor_pool = NULL;
   g_shared.shared_initialized = false;
+}
+
+// Returns true when |affinity| selects |flat_queue_ordinal| in the
+// family-major provisioned queue table. The HRX API defines zero as selecting
+// any queue.
+static bool hrx_queue_affinity_selects_provisioned_queue(
+    hrx_queue_affinity_t affinity, iree_host_size_t flat_queue_ordinal) {
+  return affinity == 0 ||
+         (flat_queue_ordinal < sizeof(affinity) * 8 &&
+          iree_any_bit_set(affinity, ((hrx_queue_affinity_t)1)
+                                         << flat_queue_ordinal));
+}
+
+iree_status_t hrx_hal_queue_affinity_to_family_affinity(
+    iree_hal_device_t* device, hrx_queue_affinity_t affinity,
+    iree_hal_queue_family_affinity_t* out_family_affinity) {
+  *out_family_affinity = 0;
+  if (affinity == 0 || affinity == (hrx_queue_affinity_t)-1) {
+    *out_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
+    return iree_ok_status();
+  }
+
+  iree_hal_queue_family_affinity_t family_affinity = 0;
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  iree_host_size_t flat_queue_ordinal = 0;
+  for (iree_host_size_t family_ordinal = 0;
+       family_ordinal < queue_spec->family_count; ++family_ordinal) {
+    const iree_hal_queue_family_spec_t* family =
+        &queue_spec->families[family_ordinal];
+    for (iree_hal_queue_ordinal_t queue_ordinal = 0;
+         queue_ordinal < family->provisioned_queue_count;
+         ++queue_ordinal, ++flat_queue_ordinal) {
+      if (!hrx_queue_affinity_selects_provisioned_queue(affinity,
+                                                        flat_queue_ordinal)) {
+        continue;
+      }
+      if (family_ordinal >= IREE_HAL_MAX_QUEUE_FAMILIES) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "HRX queue affinity selects queue family ordinal %" PRIhsz
+            " beyond the HAL family-affinity capacity %" PRIhsz,
+            family_ordinal, (iree_host_size_t)IREE_HAL_MAX_QUEUE_FAMILIES);
+      }
+      family_affinity |= iree_hal_make_queue_family_affinity(
+          (iree_hal_queue_family_ordinal_t)family_ordinal);
+    }
+  }
+  if (iree_hal_queue_family_affinity_is_empty(family_affinity)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "HRX queue affinity 0x%016" PRIx64
+                            " selects no provisioned HAL queues",
+                            affinity);
+  }
+  *out_family_affinity = family_affinity;
+  return iree_ok_status();
+}
+
+// Selects the first exact provisioned queue identified by the HRX affinity
+// whose family provides every |required_roles| and, when specified, matches
+// |required_family|. Queue-family facts and the provisioned queue table are two
+// views of the same immutable device inventory; disagreement is a malformed
+// device rather than a queue-selection fallback case.
+iree_status_t hrx_hal_device_select_queue(
+    iree_hal_device_t* device, hrx_queue_affinity_t affinity,
+    iree_hal_queue_family_role_flags_t required_roles,
+    const iree_hal_queue_family_t* required_family,
+    iree_hal_queue_t** out_queue) {
+  iree_hal_queue_family_ordinal_t required_family_ordinal = 0;
+  if (required_family) {
+    required_family_ordinal = iree_hal_queue_family_ordinal(required_family);
+    if (iree_hal_device_queue_family(device, required_family_ordinal) !=
+        required_family) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "required queue family %u must be borrowed from the device",
+          required_family_ordinal);
+    }
+  }
+
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  iree_host_size_t flat_queue_ordinal = 0;
+  for (iree_host_size_t family_ordinal = 0;
+       family_ordinal < queue_spec->family_count; ++family_ordinal) {
+    const iree_hal_queue_family_spec_t* family =
+        &queue_spec->families[family_ordinal];
+    const bool family_has_required_roles =
+        iree_all_bits_set(family->role_flags, required_roles);
+    const bool family_matches =
+        !required_family || family_ordinal == required_family_ordinal;
+    for (iree_hal_queue_ordinal_t queue_ordinal = 0;
+         queue_ordinal < family->provisioned_queue_count;
+         ++queue_ordinal, ++flat_queue_ordinal) {
+      if (!family_has_required_roles || !family_matches ||
+          !hrx_queue_affinity_selects_provisioned_queue(affinity,
+                                                        flat_queue_ordinal)) {
+        continue;
+      }
+      iree_hal_queue_t* queue = iree_hal_device_queue(
+          device, (iree_hal_queue_family_ordinal_t)family_ordinal,
+          queue_ordinal);
+      if (!queue) {
+        return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "HAL device queue family %" PRIhsz
+                                " queue %" PRIu32
+                                " is provisioned but cannot be resolved",
+                                family_ordinal, queue_ordinal);
+      }
+      *out_queue = queue;
+      return iree_ok_status();
+    }
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "HRX queue affinity 0x%016" PRIx64
+      " selects no provisioned queue with required family roles 0x%08" PRIx32,
+      affinity, required_roles);
 }
 
 //===----------------------------------------------------------------------===//
@@ -630,12 +754,40 @@ hrx_status_t hrx_cpu_initialize(uint32_t flags) {
     return hrx_status_from_iree(iree_status);
   }
 
+  iree_hal_queue_t* dispatch_queue = NULL;
+  iree_status =
+      hrx_hal_device_select_queue(hal_device, /*affinity=*/0,
+                                  IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
+                                      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
+                                  /*required_family=*/NULL, &dispatch_queue);
+  if (!iree_status_is_ok(iree_status)) {
+    iree_hal_device_group_release(device_group);
+    iree_hal_device_release(hal_device);
+    iree_hal_driver_release(driver);
+    hrx_release_shared_state();
+    return hrx_status_from_iree(iree_status);
+  }
+
+  iree_hal_queue_t* transfer_queue = NULL;
+  iree_status = hrx_hal_device_select_queue(
+      hal_device, /*affinity=*/0, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
+      /*required_family=*/NULL, &transfer_queue);
+  if (!iree_status_is_ok(iree_status)) {
+    iree_hal_device_group_release(device_group);
+    iree_hal_device_release(hal_device);
+    iree_hal_driver_release(driver);
+    hrx_release_shared_state();
+    return hrx_status_from_iree(iree_status);
+  }
+
   hrx_device_s* dev = &g_cpu.devices[0];
   memset(dev, 0, sizeof(*dev));
   iree_atomic_ref_count_init(&dev->ref_count);
   dev->type = HRX_ACCELERATOR_CPU;
   dev->ordinal = 0;
   dev->hal_device = hal_device;
+  dev->dispatch_queue = dispatch_queue;
+  dev->transfer_queue = transfer_queue;
   dev->hal_device_group = device_group;
   dev->allocator.hal_allocator = iree_hal_device_allocator(hal_device);
   iree_hal_allocator_retain(dev->allocator.hal_allocator);
@@ -837,12 +989,46 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
       return hrx_status_from_iree(iree_status);
     }
 
+    iree_hal_queue_t* dispatch_queue = NULL;
+    iree_status = hrx_hal_device_select_queue(
+        hal_device, /*affinity=*/0,
+        IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
+            IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
+        /*required_family=*/NULL, &dispatch_queue);
+    if (!iree_status_is_ok(iree_status)) {
+      iree_hal_device_group_release(device_group);
+      iree_hal_device_release(hal_device);
+      hrx_gpu_release_created_devices(created_count);
+      iree_hal_profile_sink_release(profile_sink);
+      iree_allocator_free(alloc, device_infos);
+      iree_hal_driver_release(driver);
+      hrx_release_shared_state();
+      return hrx_status_from_iree(iree_status);
+    }
+
+    iree_hal_queue_t* transfer_queue = NULL;
+    iree_status = hrx_hal_device_select_queue(
+        hal_device, /*affinity=*/0, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
+        /*required_family=*/NULL, &transfer_queue);
+    if (!iree_status_is_ok(iree_status)) {
+      iree_hal_device_group_release(device_group);
+      iree_hal_device_release(hal_device);
+      hrx_gpu_release_created_devices(created_count);
+      iree_hal_profile_sink_release(profile_sink);
+      iree_allocator_free(alloc, device_infos);
+      iree_hal_driver_release(driver);
+      hrx_release_shared_state();
+      return hrx_status_from_iree(iree_status);
+    }
+
     hrx_device_s* dev = &g_gpu.devices[created_count];
     memset(dev, 0, sizeof(*dev));
     iree_atomic_ref_count_init(&dev->ref_count);
     dev->type = HRX_ACCELERATOR_GPU;
     dev->ordinal = created_count;
     dev->hal_device = hal_device;
+    dev->dispatch_queue = dispatch_queue;
+    dev->transfer_queue = transfer_queue;
     dev->hal_device_group = device_group;
     dev->allocator.hal_allocator = iree_hal_device_allocator(hal_device);
     iree_hal_allocator_retain(dev->allocator.hal_allocator);
@@ -857,7 +1043,7 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
     memcpy(dev->name, device_infos[info_index].name.data, name_len);
     dev->name[name_len] = '\0';
 
-    iree_status = hrx_set_gpu_architecture_from_hal(hal_device, dev);
+    iree_status = hrx_set_gpu_architecture_from_hal(dev);
     if (!iree_status_is_ok(iree_status)) {
       hrx_device_release(dev);
       hrx_gpu_release_created_devices(created_count);

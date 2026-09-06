@@ -12,18 +12,19 @@
 static iree_status_t hrx_executable_select_target(
     const iree_hal_device_spec_t* device_spec, iree_string_view_t target_family,
     iree_string_view_t artifact_target_key,
+    iree_hal_physical_device_affinity_t physical_device_affinity,
     iree_hal_executable_target_selection_result_t* out_result) {
 #ifdef HRX_HAS_IREE_AMDGPU_DRIVER
   if (iree_string_view_equal(target_family, IREE_SV("amdgpu"))) {
     return iree_hal_amdgpu_device_spec_select_executable_target(
-        device_spec, artifact_target_key,
-        /*physical_device_affinity=*/0, out_result);
+        device_spec, artifact_target_key, physical_device_affinity, out_result);
   }
 #endif  // HRX_HAS_IREE_AMDGPU_DRIVER
 
   const iree_hal_executable_target_selection_t selection = {
       .family = target_family,
       .target_key = artifact_target_key,
+      .physical_device_affinity = physical_device_affinity,
   };
   *out_result =
       iree_hal_device_spec_select_executable_target(device_spec, &selection);
@@ -150,11 +151,18 @@ hrx_status_t hrx_executable_load_data(hrx_device_t device,
                            "target_family and target_key are required");
   }
 
+  const iree_hal_queue_family_t* dispatch_queue_family =
+      iree_hal_queue_family(device->dispatch_queue);
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device->hal_device));
+  const iree_hal_physical_device_affinity_t physical_device_affinity =
+      queue_spec->families[iree_hal_queue_family_ordinal(dispatch_queue_family)]
+          .physical_device_affinity;
   iree_hal_executable_target_selection_result_t selection_result;
   HRX_RETURN_IF_IREE_ERROR(hrx_executable_select_target(
       iree_hal_device_spec(device->hal_device),
       iree_make_cstring_view(target_family), iree_make_cstring_view(target_key),
-      &selection_result));
+      physical_device_affinity, &selection_result));
   if (selection_result.outcome ==
       IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
@@ -172,7 +180,7 @@ hrx_status_t hrx_executable_load_data(hrx_device_t device,
 
   iree_hal_executable_t* hal_executable = NULL;
   iree_status_t status = iree_hal_device_load_executable(
-      device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, selection_result.target,
+      device->hal_device, dispatch_queue_family, selection_result.target,
       &load_params, &hal_executable);
   if (!iree_status_is_ok(status)) {
     return hrx_status_from_iree(status);

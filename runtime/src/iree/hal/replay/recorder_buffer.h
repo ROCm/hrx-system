@@ -16,6 +16,9 @@
 extern "C" {
 #endif  // __cplusplus
 
+typedef struct iree_hal_replay_recorder_buffer_t
+    iree_hal_replay_recorder_buffer_t;
+
 void iree_hal_replay_recorder_buffer_make_object_payload(
     iree_hal_buffer_t* base_buffer,
     iree_hal_replay_buffer_object_payload_t* out_payload);
@@ -27,11 +30,34 @@ void iree_hal_replay_recorder_buffer_ref_make_payload(
 iree_hal_replay_object_id_t iree_hal_replay_recorder_buffer_id_or_none(
     iree_hal_buffer_t* buffer);
 
+// Returns the captured object id for |buffer| when it belongs to |recorder|,
+// or NONE for buffers outside that recording session.
+iree_hal_replay_object_id_t iree_hal_replay_recorder_find_buffer_id(
+    iree_hal_replay_recorder_t* recorder, iree_hal_buffer_t* buffer);
+
 iree_status_t iree_hal_replay_recorder_buffer_create_proxy(
     iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,
     iree_hal_replay_object_id_t buffer_id, iree_hal_device_t* placement_device,
     iree_hal_buffer_t* base_buffer, iree_allocator_t host_allocator,
     iree_hal_buffer_t** out_buffer);
+
+// Allocates uninitialized proxy storage so a caller can complete all fallible
+// host allocation before submitting a queue operation.
+iree_status_t iree_hal_replay_recorder_buffer_allocate_proxy(
+    iree_allocator_t host_allocator,
+    iree_hal_replay_recorder_buffer_t** out_buffer);
+
+// Frees proxy storage that has not been initialized as a HAL buffer.
+void iree_hal_replay_recorder_buffer_free_proxy(
+    iree_allocator_t host_allocator, iree_hal_replay_recorder_buffer_t* buffer);
+
+// Initializes previously allocated proxy storage around |base_buffer|.
+// Initialization is infallible and transfers no caller-owned references.
+iree_hal_buffer_t* iree_hal_replay_recorder_buffer_initialize_proxy(
+    iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,
+    iree_hal_replay_object_id_t buffer_id, iree_hal_device_t* placement_device,
+    iree_hal_buffer_t* base_buffer, iree_allocator_t host_allocator,
+    iree_hal_replay_recorder_buffer_t* buffer);
 
 iree_hal_buffer_t* iree_hal_replay_recorder_buffer_base_or_self(
     iree_hal_buffer_t* buffer);
@@ -40,6 +66,13 @@ iree_status_t iree_hal_replay_recorder_buffer_unwrap_for_call(
     iree_hal_buffer_t* buffer, iree_allocator_t host_allocator,
     iree_hal_buffer_t** out_base_buffer,
     iree_hal_buffer_t** out_temporary_buffer);
+
+// Rewrites |inout_ref| to the corresponding range on the wrapped device.
+// Unlike iree_hal_replay_recorder_buffer_unwrap_for_call this never creates a
+// temporary subspan, so the rewritten buffer remains valid while the original
+// replay buffer is live.
+iree_status_t iree_hal_replay_recorder_buffer_ref_unwrap_for_call(
+    iree_hal_buffer_ref_t* inout_ref);
 
 void iree_hal_replay_recorder_buffer_release_temporary(
     iree_hal_buffer_t* temporary_buffer);

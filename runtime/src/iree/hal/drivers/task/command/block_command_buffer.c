@@ -501,10 +501,12 @@ static void iree_hal_block_command_buffer_destroy(
     iree_hal_command_buffer_t* base_command_buffer);
 
 iree_status_t iree_hal_block_command_buffer_create(
-    iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
+    iree_hal_allocator_t* device_allocator,
+    const iree_hal_queue_family_t* queue_family,
+    iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
+    iree_host_size_t binding_capacity, iree_arena_block_pool_t* block_pool,
+    iree_allocator_t host_allocator,
     iree_hal_command_buffer_t** out_command_buffer) {
   IREE_ASSERT_ARGUMENT(out_command_buffer);
   *out_command_buffer = NULL;
@@ -526,7 +528,7 @@ iree_status_t iree_hal_block_command_buffer_create(
                                 (void**)&command_buffer));
   memset(command_buffer, 0, sizeof(*command_buffer));
   iree_hal_command_buffer_initialize(
-      device_allocator, mode, command_categories, queue_affinity,
+      device_allocator, queue_family, mode, command_categories,
       binding_capacity, (uint8_t*)command_buffer + validation_state_offset,
       &iree_hal_block_command_buffer_vtable, &command_buffer->base);
   command_buffer->host_allocator = host_allocator;
@@ -617,8 +619,8 @@ void iree_hal_block_command_buffer_profile_metadata(
   record.mode = iree_hal_command_buffer_mode(base_command_buffer);
   record.command_categories =
       iree_hal_command_buffer_allowed_categories(base_command_buffer);
-  record.queue_affinity =
-      iree_hal_command_buffer_queue_affinity(base_command_buffer);
+  record.queue_family_ordinal = iree_hal_queue_family_ordinal(
+      iree_hal_command_buffer_queue_family(base_command_buffer));
   record.physical_device_ordinal = physical_device_ordinal;
 
   *out_command_buffer = record;

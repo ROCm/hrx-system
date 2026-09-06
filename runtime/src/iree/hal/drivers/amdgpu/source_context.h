@@ -49,8 +49,6 @@ typedef struct iree_hal_amdgpu_source_context_t {
   uint64_t code_object_hash[2];
   // Number of physical device ranges in |loaded_code_object_ranges|.
   iree_host_size_t physical_device_count;
-  // Bitmask of physical device ordinals with loaded code objects.
-  uint64_t loaded_physical_device_mask;
   // Borrowed executable-owned loaded code-object ranges indexed by device.
   iree_hal_amdgpu_loaded_code_object_range_t* loaded_code_object_ranges;
   // Optional parsed Loom sanitizer site-table descriptor.
@@ -63,7 +61,6 @@ typedef struct iree_hal_amdgpu_source_context_t {
 void iree_hal_amdgpu_source_context_initialize(
     uint64_t executable_id, const uint64_t code_object_hash[2],
     iree_host_size_t physical_device_count,
-    uint64_t loaded_physical_device_mask,
     iree_hal_amdgpu_loaded_code_object_range_t* loaded_code_object_ranges,
     iree_hal_amdgpu_source_context_t* out_context);
 

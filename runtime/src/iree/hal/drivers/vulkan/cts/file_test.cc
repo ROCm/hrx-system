@@ -50,7 +50,7 @@ class VulkanFileTest : public CtsTestBase<> {
 
     Ref<iree_hal_file_t> file;
     IREE_ASSERT_OK(iree_hal_file_import(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+        device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
         IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
         handle.get(), IREE_HAL_EXTERNAL_FILE_FLAG_NONE, file.out()));
     *out_file = std::move(file);
@@ -74,13 +74,13 @@ class VulkanFileTest : public CtsTestBase<> {
     SemaphoreList empty_wait;
     SemaphoreList write_signal(device_, {0}, {1});
     SemaphoreList read_signal(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_device_queue_write(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, write_signal,
-        source_buffer.get(), /*source_offset=*/0, file.get(),
+    IREE_ASSERT_OK(iree_hal_queue_write(
+        transfer_queue_, empty_wait, write_signal, source_buffer.get(),
+        /*source_offset=*/0, file.get(),
         /*target_offset=*/0, file_length, IREE_HAL_WRITE_FLAG_NONE));
-    IREE_ASSERT_OK(iree_hal_device_queue_read(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, write_signal, read_signal,
-        file.get(), /*source_offset=*/0, target_buffer.get(),
+    IREE_ASSERT_OK(iree_hal_queue_read(
+        transfer_queue_, write_signal, read_signal, file.get(),
+        /*source_offset=*/0, target_buffer.get(),
         /*target_offset=*/0, file_length, IREE_HAL_READ_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
         read_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -124,7 +124,7 @@ TEST_P(VulkanFileTest, NativeFileShortReadExceedsStagingRingFails) {
 
   Ref<iree_hal_file_t> file;
   IREE_ASSERT_OK(iree_hal_file_import(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, handle.get(),
       IREE_HAL_EXTERNAL_FILE_FLAG_NONE, file.out()));
 
@@ -135,8 +135,8 @@ TEST_P(VulkanFileTest, NativeFileShortReadExceedsStagingRingFails) {
 
   SemaphoreList empty_wait;
   SemaphoreList read_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_read(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, read_signal, file.get(),
+  IREE_ASSERT_OK(iree_hal_queue_read(
+      transfer_queue_, empty_wait, read_signal, file.get(),
       /*source_offset=*/0, target_buffer.get(), /*target_offset=*/0,
       import_length, IREE_HAL_READ_FLAG_NONE));
   IREE_EXPECT_STATUS_IS(

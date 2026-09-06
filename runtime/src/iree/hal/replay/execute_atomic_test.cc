@@ -18,7 +18,7 @@
 
 namespace {
 
-static constexpr iree_hal_replay_object_id_t kDeviceId = 1;
+static constexpr iree_hal_replay_object_id_t kQueueId = 1;
 static constexpr iree_hal_replay_object_id_t kBufferId = 2;
 static constexpr iree_hal_replay_object_id_t kCommandBufferId = 3;
 static constexpr iree_hal_replay_object_id_t kWaitSemaphoreId = 4;
@@ -45,8 +45,6 @@ typedef struct AtomicInvocation {
   iree_hal_execution_stage_t source_stage_mask;
   // Target stages passed to a command buffer operation.
   iree_hal_execution_stage_t target_stage_mask;
-  // Queue affinity passed to a queue operation.
-  iree_hal_queue_affinity_t queue_affinity;
   // Number of wait semaphore timepoints passed to a queue operation.
   iree_host_size_t wait_semaphore_count;
   // First wait semaphore timepoint passed to a queue operation.
@@ -74,24 +72,22 @@ typedef struct CapturingCommandBuffer {
   iree_host_size_t invocation_count;
 } CapturingCommandBuffer;
 
-typedef struct CapturingDevice {
-  // Base resource dispatched through the public HAL API.
-  iree_hal_resource_t resource;
+typedef struct CapturingQueue {
+  // Base queue dispatched through the public HAL API.
+  iree_hal_queue_t base;
   // Most recent atomic backend invocation.
   AtomicInvocation invocation;
   // Total number of atomic backend invocations.
   iree_host_size_t invocation_count;
-  // Total number of queue flush invocations.
-  iree_host_size_t flush_count;
-} CapturingDevice;
+} CapturingQueue;
 
 static CapturingCommandBuffer* CastCommandBuffer(
     iree_hal_command_buffer_t* base_command_buffer) {
   return reinterpret_cast<CapturingCommandBuffer*>(base_command_buffer);
 }
 
-static CapturingDevice* CastDevice(iree_hal_device_t* base_device) {
-  return reinterpret_cast<CapturingDevice*>(base_device);
+static CapturingQueue* CastQueue(iree_hal_queue_t* base_queue) {
+  return reinterpret_cast<CapturingQueue*>(base_queue);
 }
 
 static void CapturingCommandBufferDestroy(
@@ -164,22 +160,20 @@ static iree_status_t CapturingCommandBufferAtomicRmw(
   return iree_ok_status();
 }
 
-static void CapturingDeviceDestroy(iree_hal_device_t* base_device) {
-  (void)base_device;
+static void CapturingQueueDestroy(iree_hal_queue_t* base_queue) {
+  (void)base_queue;
 }
 
-static AtomicInvocation* BeginDeviceInvocation(
-    iree_hal_device_t* base_device, AtomicInvocationKind kind,
-    iree_hal_queue_affinity_t queue_affinity,
+static AtomicInvocation* BeginQueueInvocation(
+    iree_hal_queue_t* base_queue, AtomicInvocationKind kind,
     iree_hal_semaphore_list_t wait_semaphore_list,
     iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_atomic_width_t width) {
-  CapturingDevice* device = CastDevice(base_device);
-  AtomicInvocation* invocation = &device->invocation;
+  CapturingQueue* queue = CastQueue(base_queue);
+  AtomicInvocation* invocation = &queue->invocation;
   memset(invocation, 0, sizeof(*invocation));
   invocation->kind = kind;
-  invocation->queue_affinity = queue_affinity;
   invocation->wait_semaphore_count = wait_semaphore_list.count;
   if (wait_semaphore_list.count != 0) {
     invocation->wait_timepoint.semaphore = wait_semaphore_list.semaphores[0];
@@ -194,56 +188,54 @@ static AtomicInvocation* BeginDeviceInvocation(
   }
   invocation->target_ref = iree_hal_make_buffer_ref(
       target_buffer, target_offset, iree_hal_atomic_width_byte_count(width));
-  ++device->invocation_count;
+  ++queue->invocation_count;
   return invocation;
 }
 
-static iree_status_t CapturingDeviceAtomicWait(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+static iree_status_t CapturingQueueAtomicWait(
+    iree_hal_queue_t* base_queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_atomic_wait_params_t params) {
-  AtomicInvocation* invocation = BeginDeviceInvocation(
-      base_device, kAtomicInvocationWait, queue_affinity, wait_semaphore_list,
+  AtomicInvocation* invocation = BeginQueueInvocation(
+      base_queue, kAtomicInvocationWait, wait_semaphore_list,
       signal_semaphore_list, target_buffer, target_offset, params.width);
   invocation->wait_params = params;
   return iree_hal_semaphore_list_signal(signal_semaphore_list,
                                         /*frontier=*/nullptr);
 }
 
-static iree_status_t CapturingDeviceAtomicStore(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+static iree_status_t CapturingQueueAtomicStore(
+    iree_hal_queue_t* base_queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_atomic_store_params_t params) {
-  AtomicInvocation* invocation = BeginDeviceInvocation(
-      base_device, kAtomicInvocationStore, queue_affinity, wait_semaphore_list,
+  AtomicInvocation* invocation = BeginQueueInvocation(
+      base_queue, kAtomicInvocationStore, wait_semaphore_list,
       signal_semaphore_list, target_buffer, target_offset, params.width);
   invocation->store_params = params;
   return iree_hal_semaphore_list_signal(signal_semaphore_list,
                                         /*frontier=*/nullptr);
 }
 
-static iree_status_t CapturingDeviceAtomicRmw(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+static iree_status_t CapturingQueueAtomicRmw(
+    iree_hal_queue_t* base_queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_atomic_rmw_params_t params) {
-  AtomicInvocation* invocation = BeginDeviceInvocation(
-      base_device, kAtomicInvocationRmw, queue_affinity, wait_semaphore_list,
+  AtomicInvocation* invocation = BeginQueueInvocation(
+      base_queue, kAtomicInvocationRmw, wait_semaphore_list,
       signal_semaphore_list, target_buffer, target_offset, params.width);
   invocation->rmw_params = params;
   return iree_hal_semaphore_list_signal(signal_semaphore_list,
                                         /*frontier=*/nullptr);
 }
 
-static iree_status_t CapturingDeviceQueueFlush(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity) {
-  (void)queue_affinity;
-  ++CastDevice(base_device)->flush_count;
+static iree_status_t CapturingQueueFlush(iree_hal_queue_t* base_queue) {
+  (void)base_queue;
   return iree_ok_status();
 }
 
@@ -335,11 +327,15 @@ class ReplayAtomicExecutionTest : public ::testing::Test {
         iree_hal_device_allocator(task_device_), buffer_params, 64,
         &target_buffer_));
     IREE_ASSERT_OK(iree_hal_semaphore_create(
-        task_device_, /*queue_affinity=*/1, /*initial_value=*/7,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &wait_semaphore_));
+        task_device_,
+        /*queue_family_affinity=*/iree_hal_make_queue_family_affinity(0),
+        /*initial_value=*/7, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+        &wait_semaphore_));
     IREE_ASSERT_OK(iree_hal_semaphore_create(
-        task_device_, /*queue_affinity=*/1, /*initial_value=*/0,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore_));
+        task_device_,
+        /*queue_family_affinity=*/iree_hal_make_queue_family_affinity(0),
+        /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+        &signal_semaphore_));
 
     const iree_host_size_t validation_state_size =
         iree_hal_command_buffer_validation_state_size(
@@ -349,6 +345,9 @@ class ReplayAtomicExecutionTest : public ::testing::Test {
           iree_allocator_system(), validation_state_size, &validation_state_));
       memset(validation_state_, 0, validation_state_size);
     }
+    iree_hal_queue_t* task_queue = iree_hal_device_queue(
+        task_device_, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+    ASSERT_NE(nullptr, task_queue);
     command_buffer_vtable_.destroy = CapturingCommandBufferDestroy;
     command_buffer_vtable_.begin = CapturingCommandBufferBegin;
     command_buffer_vtable_.end = CapturingCommandBufferEnd;
@@ -356,25 +355,27 @@ class ReplayAtomicExecutionTest : public ::testing::Test {
     command_buffer_vtable_.atomic_store = CapturingCommandBufferAtomicStore;
     command_buffer_vtable_.atomic_rmw = CapturingCommandBufferAtomicRmw;
     iree_hal_command_buffer_initialize(
-        iree_hal_device_allocator(task_device_), /*mode=*/0,
-        IREE_HAL_COMMAND_CATEGORY_ATOMIC, /*queue_affinity=*/1,
+        iree_hal_device_allocator(task_device_),
+        iree_hal_queue_family(task_queue), /*mode=*/0,
+        IREE_HAL_COMMAND_CATEGORY_ATOMIC,
         /*binding_capacity=*/1, validation_state_, &command_buffer_vtable_,
         &command_buffer_.base);
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(&command_buffer_.base));
 
-    device_vtable_.destroy = CapturingDeviceDestroy;
-    device_vtable_.queue_atomic_wait = CapturingDeviceAtomicWait;
-    device_vtable_.queue_atomic_store = CapturingDeviceAtomicStore;
-    device_vtable_.queue_atomic_rmw = CapturingDeviceAtomicRmw;
-    device_vtable_.queue_flush = CapturingDeviceQueueFlush;
-    iree_hal_resource_initialize(&device_vtable_, &device_.resource);
+    queue_vtable_.destroy = CapturingQueueDestroy;
+    queue_vtable_.atomic_wait = CapturingQueueAtomicWait;
+    queue_vtable_.atomic_store = CapturingQueueAtomicStore;
+    queue_vtable_.atomic_rmw = CapturingQueueAtomicRmw;
+    queue_vtable_.flush = CapturingQueueFlush;
+    iree_hal_queue_initialize(iree_hal_queue_family(task_queue), &queue_vtable_,
+                              &queue_.base);
     execute_options_ = iree_hal_replay_execute_options_default();
     IREE_ASSERT_OK(iree_hal_replay_executor_initialize(
         &executor_, iree_const_byte_span_empty(), /*object_capacity=*/8,
         /*device_group=*/nullptr, &execute_options_, iree_allocator_system()));
-    iree_hal_replay_object_entry_t device_entry = {};
-    device_entry.value.device = reinterpret_cast<iree_hal_device_t*>(&device_);
-    StoreObject(kDeviceId, IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE, device_entry);
+    iree_hal_replay_object_entry_t queue_entry = {};
+    queue_entry.value.queue = &queue_.base;
+    StoreObject(kQueueId, IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE, queue_entry);
     iree_hal_replay_object_entry_t buffer_entry = {};
     buffer_entry.value.buffer = target_buffer_;
     StoreObject(kBufferId, IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER, buffer_entry);
@@ -443,10 +444,10 @@ class ReplayAtomicExecutionTest : public ::testing::Test {
   iree_hal_command_buffer_vtable_t command_buffer_vtable_ = {};
   // Backend command buffer capturing decoded operations.
   CapturingCommandBuffer command_buffer_ = {};
-  // Vtable implementing the device methods under test.
-  iree_hal_device_vtable_t device_vtable_ = {};
-  // Backend device capturing decoded queue operations.
-  CapturingDevice device_ = {};
+  // Vtable implementing the queue methods under test.
+  iree_hal_queue_vtable_t queue_vtable_ = {};
+  // Backend queue capturing decoded queue operations.
+  CapturingQueue queue_ = {};
   // Options retained by |executor_|.
   iree_hal_replay_execute_options_t execute_options_ = {};
   // Executor under test.
@@ -556,9 +557,8 @@ TEST_F(ReplayAtomicExecutionTest, ReplaysCommandBufferOperations) {
 TEST_F(ReplayAtomicExecutionTest, ReplaysQueueOperations) {
   OperationRecord record;
 
-  iree_hal_replay_device_queue_atomic_wait_payload_t wait_payload = {};
+  iree_hal_replay_queue_atomic_wait_payload_t wait_payload = {};
   wait_payload.target_ref = DirectTarget(/*offset=*/8, /*length=*/8);
-  wait_payload.queue_affinity = 1;
   wait_payload.wait_semaphore_count = 1;
   wait_payload.signal_semaphore_count = 1;
   wait_payload.params.value = UINT64_C(0x1020304050607080);
@@ -567,76 +567,69 @@ TEST_F(ReplayAtomicExecutionTest, ReplaysQueueOperations) {
   wait_payload.params.width = IREE_HAL_ATOMIC_WIDTH_64;
   wait_payload.params.condition =
       IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL;
-  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_WAIT,
-               IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT, kDeviceId,
+  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_WAIT,
+               IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_WAIT, kQueueId,
                wait_payload, {WaitTimepoint(), SignalTimepoint(9)});
   IREE_ASSERT_OK(Replay(record));
-  EXPECT_EQ(1u, device_.invocation_count);
-  EXPECT_EQ(1u, device_.flush_count);
-  EXPECT_EQ(kAtomicInvocationWait, device_.invocation.kind);
-  EXPECT_EQ(1u, device_.invocation.queue_affinity);
-  EXPECT_EQ(1u, device_.invocation.wait_semaphore_count);
-  EXPECT_EQ(wait_semaphore_, device_.invocation.wait_timepoint.semaphore);
-  EXPECT_EQ(7u, device_.invocation.wait_timepoint.value);
-  EXPECT_EQ(1u, device_.invocation.signal_semaphore_count);
-  EXPECT_EQ(signal_semaphore_, device_.invocation.signal_timepoint.semaphore);
-  EXPECT_EQ(9u, device_.invocation.signal_timepoint.value);
-  EXPECT_EQ(target_buffer_, device_.invocation.target_ref.buffer);
-  EXPECT_EQ(8u, device_.invocation.target_ref.offset);
-  EXPECT_EQ(wait_payload.params.value, device_.invocation.wait_params.value);
-  EXPECT_EQ(wait_payload.params.mask, device_.invocation.wait_params.mask);
-  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, device_.invocation.wait_params.flags);
-  EXPECT_EQ(wait_payload.params.width, device_.invocation.wait_params.width);
+  EXPECT_EQ(1u, queue_.invocation_count);
+  EXPECT_EQ(kAtomicInvocationWait, queue_.invocation.kind);
+  EXPECT_EQ(1u, queue_.invocation.wait_semaphore_count);
+  EXPECT_EQ(wait_semaphore_, queue_.invocation.wait_timepoint.semaphore);
+  EXPECT_EQ(7u, queue_.invocation.wait_timepoint.value);
+  EXPECT_EQ(1u, queue_.invocation.signal_semaphore_count);
+  EXPECT_EQ(signal_semaphore_, queue_.invocation.signal_timepoint.semaphore);
+  EXPECT_EQ(9u, queue_.invocation.signal_timepoint.value);
+  EXPECT_EQ(target_buffer_, queue_.invocation.target_ref.buffer);
+  EXPECT_EQ(8u, queue_.invocation.target_ref.offset);
+  EXPECT_EQ(wait_payload.params.value, queue_.invocation.wait_params.value);
+  EXPECT_EQ(wait_payload.params.mask, queue_.invocation.wait_params.mask);
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, queue_.invocation.wait_params.flags);
+  EXPECT_EQ(wait_payload.params.width, queue_.invocation.wait_params.width);
   EXPECT_EQ(wait_payload.params.condition,
-            device_.invocation.wait_params.condition);
+            queue_.invocation.wait_params.condition);
 
-  iree_hal_replay_device_queue_atomic_store_payload_t store_payload = {};
+  iree_hal_replay_queue_atomic_store_payload_t store_payload = {};
   store_payload.target_ref = DirectTarget(/*offset=*/16, /*length=*/4);
-  store_payload.queue_affinity = 1;
   store_payload.wait_semaphore_count = 1;
   store_payload.signal_semaphore_count = 1;
   store_payload.params.value = UINT64_C(0xAABBCCDD);
   store_payload.params.flags = IREE_HAL_ATOMIC_FLAGS_KNOWN;
   store_payload.params.width = IREE_HAL_ATOMIC_WIDTH_32;
-  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE,
-               IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE,
-               kDeviceId, store_payload,
-               {WaitTimepoint(), SignalTimepoint(10)});
+  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_STORE,
+               IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_STORE, kQueueId,
+               store_payload, {WaitTimepoint(), SignalTimepoint(10)});
   IREE_ASSERT_OK(Replay(record));
-  EXPECT_EQ(2u, device_.invocation_count);
-  EXPECT_EQ(2u, device_.flush_count);
-  EXPECT_EQ(kAtomicInvocationStore, device_.invocation.kind);
-  EXPECT_EQ(16u, device_.invocation.target_ref.offset);
-  EXPECT_EQ(4u, device_.invocation.target_ref.length);
-  EXPECT_EQ(10u, device_.invocation.signal_timepoint.value);
-  EXPECT_EQ(store_payload.params.value, device_.invocation.store_params.value);
-  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, device_.invocation.store_params.flags);
-  EXPECT_EQ(store_payload.params.width, device_.invocation.store_params.width);
+  EXPECT_EQ(2u, queue_.invocation_count);
+  EXPECT_EQ(kAtomicInvocationStore, queue_.invocation.kind);
+  EXPECT_EQ(16u, queue_.invocation.target_ref.offset);
+  EXPECT_EQ(4u, queue_.invocation.target_ref.length);
+  EXPECT_EQ(10u, queue_.invocation.signal_timepoint.value);
+  EXPECT_EQ(store_payload.params.value, queue_.invocation.store_params.value);
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, queue_.invocation.store_params.flags);
+  EXPECT_EQ(store_payload.params.width, queue_.invocation.store_params.width);
 
-  iree_hal_replay_device_queue_atomic_rmw_payload_t rmw_payload = {};
+  iree_hal_replay_queue_atomic_rmw_payload_t rmw_payload = {};
   rmw_payload.target_ref = DirectTarget(/*offset=*/24, /*length=*/8);
-  rmw_payload.queue_affinity = 1;
   rmw_payload.wait_semaphore_count = 1;
   rmw_payload.signal_semaphore_count = 1;
   rmw_payload.params.operand = UINT64_C(0x1122334455667788);
   rmw_payload.params.flags = IREE_HAL_ATOMIC_FLAGS_KNOWN;
   rmw_payload.params.width = IREE_HAL_ATOMIC_WIDTH_64;
   rmw_payload.params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD;
-  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_RMW,
-               IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW, kDeviceId,
+  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_RMW,
+               IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_RMW, kQueueId,
                rmw_payload, {WaitTimepoint(), SignalTimepoint(11)});
   IREE_ASSERT_OK(Replay(record));
-  EXPECT_EQ(3u, device_.invocation_count);
-  EXPECT_EQ(3u, device_.flush_count);
-  EXPECT_EQ(kAtomicInvocationRmw, device_.invocation.kind);
-  EXPECT_EQ(24u, device_.invocation.target_ref.offset);
-  EXPECT_EQ(8u, device_.invocation.target_ref.length);
-  EXPECT_EQ(11u, device_.invocation.signal_timepoint.value);
-  EXPECT_EQ(rmw_payload.params.operand, device_.invocation.rmw_params.operand);
-  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, device_.invocation.rmw_params.flags);
-  EXPECT_EQ(rmw_payload.params.width, device_.invocation.rmw_params.width);
+  EXPECT_EQ(3u, queue_.invocation_count);
+  EXPECT_EQ(kAtomicInvocationRmw, queue_.invocation.kind);
+  EXPECT_EQ(24u, queue_.invocation.target_ref.offset);
+  EXPECT_EQ(8u, queue_.invocation.target_ref.length);
+  EXPECT_EQ(11u, queue_.invocation.signal_timepoint.value);
+  EXPECT_EQ(rmw_payload.params.operand, queue_.invocation.rmw_params.operand);
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, queue_.invocation.rmw_params.flags);
+  EXPECT_EQ(rmw_payload.params.width, queue_.invocation.rmw_params.width);
   EXPECT_EQ(rmw_payload.params.operation,
-            device_.invocation.rmw_params.operation);
+            queue_.invocation.rmw_params.operation);
 }
 
 TEST_F(ReplayAtomicExecutionTest, RejectsMalformedRecords) {
@@ -668,48 +661,46 @@ TEST_F(ReplayAtomicExecutionTest, RejectsMalformedRecords) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Replay(record));
   EXPECT_EQ(0u, command_buffer_.invocation_count);
 
-  iree_hal_replay_device_queue_atomic_store_payload_t queue_payload = {};
+  iree_hal_replay_queue_atomic_store_payload_t queue_payload = {};
   queue_payload.target_ref = DirectTarget(/*offset=*/0, /*length=*/4);
-  queue_payload.queue_affinity = 1;
   queue_payload.wait_semaphore_count = 1;
   queue_payload.signal_semaphore_count = 1;
   queue_payload.params.value = 1;
   queue_payload.params.width = IREE_HAL_ATOMIC_WIDTH_32;
 
   queue_payload.target_ref.reserved0 = 1;
-  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE,
-               IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE,
-               kDeviceId, queue_payload, {WaitTimepoint(), SignalTimepoint(9)});
+  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_STORE,
+               IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_STORE, kQueueId,
+               queue_payload, {WaitTimepoint(), SignalTimepoint(9)});
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, Replay(record));
 
   queue_payload.target_ref.reserved0 = 0;
   queue_payload.target_ref.buffer_slot = 1;
-  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE,
-               IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE,
-               kDeviceId, queue_payload, {WaitTimepoint(), SignalTimepoint(9)});
+  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_STORE,
+               IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_STORE, kQueueId,
+               queue_payload, {WaitTimepoint(), SignalTimepoint(9)});
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, Replay(record));
 
   queue_payload.target_ref.buffer_id = IREE_HAL_REPLAY_OBJECT_ID_NONE;
   queue_payload.target_ref.buffer_slot = 0;
-  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE,
-               IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE,
-               kDeviceId, queue_payload, {WaitTimepoint(), SignalTimepoint(9)});
+  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_STORE,
+               IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_STORE, kQueueId,
+               queue_payload, {WaitTimepoint(), SignalTimepoint(9)});
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, Replay(record));
 
   queue_payload.target_ref = DirectTarget(/*offset=*/0, /*length=*/8);
-  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE,
-               IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE,
-               kDeviceId, queue_payload, {WaitTimepoint(), SignalTimepoint(9)});
+  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_STORE,
+               IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_STORE, kQueueId,
+               queue_payload, {WaitTimepoint(), SignalTimepoint(9)});
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, Replay(record));
 
   queue_payload.target_ref = DirectTarget(/*offset=*/0, /*length=*/4);
   queue_payload.wait_semaphore_count = 2;
-  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE,
-               IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE,
-               kDeviceId, queue_payload, {WaitTimepoint(), SignalTimepoint(9)});
+  record.Reset(IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ATOMIC_STORE,
+               IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_ATOMIC_STORE, kQueueId,
+               queue_payload, {WaitTimepoint(), SignalTimepoint(9)});
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, Replay(record));
-  EXPECT_EQ(0u, device_.invocation_count);
-  EXPECT_EQ(0u, device_.flush_count);
+  EXPECT_EQ(0u, queue_.invocation_count);
 }
 
 }  // namespace

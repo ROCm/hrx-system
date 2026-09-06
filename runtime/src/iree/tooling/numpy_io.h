@@ -17,9 +17,8 @@
 // not all dtypes are supported.
 //
 // .npy and uncompressed .npz files can be mapped into host memory with
-// IREE_NUMPY_NPY_LOAD_OPTION_MAP_FILE if the HAL device allocator
-// supports using such memory. On devices with discrete memory the contents will
-// be loaded into host memory and copied to the device.
+// IREE_NUMPY_NPY_LOAD_OPTION_MAP_FILE if the HAL allocator supports using such
+// memory.
 //
 // This current implementation is very basic; in the future it'd be nice to
 // support an iree_io_stream_t to allow for externalizing the file access.
@@ -53,7 +52,7 @@ enum iree_numpy_npy_load_options_bits_t {
   IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT = 0u,
 
   // Tries to map the file into memory and use the contents directly from the
-  // file system. Only available if the HAL device supports accessing mapped
+  // file system. Only available if the HAL allocator supports accessing mapped
   // data.
   // Like providing `mmap_mode` to `numpy.load`.
   // May be ignored if the implementation does not support mapping.
@@ -69,10 +68,10 @@ typedef uint32_t iree_numpy_npy_save_options_t;
 
 // Loads a single value from a .npy |stream| into a buffer view.
 // On success |out_buffer_view| will have a buffer view matching the parameters
-// in the npy file allocated from the given |device_allocator|.
+// in the npy file allocated from the given |allocator| and |buffer_params|.
 //
 // If IREE_NUMPY_NPY_LOAD_OPTION_MAP_FILE is set and the
-// |device_allocator| supports mapping then the file will be mapped into the
+// |allocator| supports mapping then the file will be mapped into the
 // host process. Otherwise the file will be loaded into a new allocation.
 //
 // Upon return the |stream| will be positioned immediately following the
@@ -84,8 +83,7 @@ typedef uint32_t iree_numpy_npy_save_options_t;
 // https://numpy.org/doc/stable/reference/generated/numpy.load.html
 IREE_API_EXPORT iree_status_t iree_numpy_npy_load_ndarray(
     iree_io_stream_t* stream, iree_numpy_npy_load_options_t options,
-    iree_hal_buffer_params_t buffer_params, iree_hal_device_t* device,
-    iree_hal_allocator_t* device_allocator,
+    iree_hal_buffer_params_t buffer_params, iree_hal_allocator_t* allocator,
     iree_hal_buffer_view_t** out_buffer_view);
 
 // Saves |buffer_view| to a .npy |stream|.

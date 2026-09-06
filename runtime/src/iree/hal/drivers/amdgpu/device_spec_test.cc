@@ -77,7 +77,7 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
       iree_hal_device_spec_queues(device_spec);
   ASSERT_NE(queues, nullptr);
   ASSERT_EQ(queues->family_count, 1);
-  EXPECT_EQ(queues->families[0].queue_count, 2);
+  EXPECT_EQ(queues->families[0].provisioned_queue_count, 2);
   EXPECT_EQ(queues->families[0].timestamp_frequency_hz,
             kAgentTimestampFrequencyHz);
 

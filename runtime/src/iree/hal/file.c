@@ -16,8 +16,42 @@
 
 IREE_HAL_API_RETAIN_RELEASE(file);
 
+static iree_status_t iree_hal_file_validate_queue_family_affinity(
+    iree_hal_device_t* device,
+    iree_hal_queue_family_affinity_t queue_family_affinity) {
+  if (iree_hal_queue_family_affinity_is_any(queue_family_affinity)) {
+    return iree_ok_status();
+  }
+
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  if (IREE_UNLIKELY(queue_spec->family_count > IREE_HAL_MAX_QUEUE_FAMILIES)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "device queue family count %" PRIhsz
+                            " exceeds file affinity capacity %" PRIhsz,
+                            queue_spec->family_count,
+                            (iree_host_size_t)IREE_HAL_MAX_QUEUE_FAMILIES);
+  }
+  const iree_hal_queue_family_affinity_t supported_affinity =
+      queue_spec->family_count == IREE_HAL_MAX_QUEUE_FAMILIES
+          ? IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY
+          : (((iree_hal_queue_family_affinity_t)1 << queue_spec->family_count) -
+             1);
+  if (IREE_UNLIKELY(
+          iree_hal_queue_family_affinity_is_empty(queue_family_affinity) ||
+          !iree_all_bits_set(supported_affinity, queue_family_affinity))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "file queue family affinity 0x%016" PRIx64
+        " is not a non-empty subset of device affinity 0x%016" PRIx64,
+        queue_family_affinity, supported_affinity);
+  }
+  return iree_ok_status();
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_file_import(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_device_t* device,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
   IREE_ASSERT_ARGUMENT(device);
@@ -30,9 +64,18 @@ IREE_API_EXPORT iree_status_t iree_hal_file_import(
                             flags);
   }
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status =
-      IREE_HAL_VTABLE_DISPATCH(device, iree_hal_device, import_file)(
-          device, queue_affinity, access, handle, flags, out_file);
+  iree_status_t status = iree_hal_file_validate_queue_family_affinity(
+      device, queue_family_affinity);
+  iree_hal_file_t* file = NULL;
+  if (iree_status_is_ok(status)) {
+    status = IREE_HAL_VTABLE_DISPATCH(device, iree_hal_device, import_file)(
+        device, queue_family_affinity, access, handle, flags, &file);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_file = file;
+  } else {
+    iree_hal_file_release(file);
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

@@ -400,6 +400,7 @@ static const iree_hal_task_executable_vtable_t kFakeTaskExecutableVTable = {
 class TaskProfileRecorderTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    iree_hal_queue_family_initialize(/*ordinal=*/0, &queue_family_);
     RecordingProfileSinkInitialize(&sink_);
     device_record_ = MakeDeviceRecord(1);
     queue_record_ = MakeQueueRecord(0);
@@ -447,6 +448,7 @@ class TaskProfileRecorderTest : public ::testing::Test {
   }
 
   RecordingProfileSink sink_;
+  iree_hal_queue_family_t queue_family_;
   iree_hal_profile_device_record_t device_record_;
   iree_hal_profile_queue_record_t queue_record_;
   iree_hal_task_profile_recorder_options_t recorder_options_ = {};
@@ -500,7 +502,8 @@ TEST_F(TaskProfileRecorderTest, RecordsExecutableMetadataOnce) {
 
   FakeTaskExecutable executable;
   iree_hal_task_executable_initialize(
-      &kFakeTaskExecutableVTable, iree_allocator_system(), &executable.base);
+      &queue_family_, &kFakeTaskExecutableVTable, iree_allocator_system(),
+      &executable.base);
   iree_hal_executable_t* base_executable =
       reinterpret_cast<iree_hal_executable_t*>(&executable.base);
 
@@ -527,7 +530,8 @@ TEST_F(TaskProfileRecorderTest, HostExecutionEnablesExecutableMetadata) {
 
   FakeTaskExecutable executable;
   iree_hal_task_executable_initialize(
-      &kFakeTaskExecutableVTable, iree_allocator_system(), &executable.base);
+      &queue_family_, &kFakeTaskExecutableVTable, iree_allocator_system(),
+      &executable.base);
   iree_hal_executable_t* base_executable =
       reinterpret_cast<iree_hal_executable_t*>(&executable.base);
 

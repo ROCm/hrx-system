@@ -30,10 +30,11 @@ extern "C" {
 // implicit-argument template. The allocation it references must remain valid
 // for the command buffer lifetime.
 iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
-    iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
+    iree_hal_allocator_t* device_allocator,
+    const iree_hal_queue_family_t* queue_family,
+    iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
-    iree_host_size_t device_ordinal,
+    iree_host_size_t binding_capacity, iree_host_size_t device_ordinal,
     iree_host_size_t queue_count_per_physical_device,
     uint32_t tsan_shadow_slot_count,
     iree_hal_amdgpu_aql_prepublished_kernarg_storage_t

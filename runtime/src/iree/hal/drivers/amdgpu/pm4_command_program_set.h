@@ -16,6 +16,10 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Number of physical queues addressable by the PM4 eligible-queue bitmap.
+#define IREE_HAL_AMDGPU_PM4_PHYSICAL_QUEUE_CAPACITY \
+  ((iree_host_size_t)(sizeof(uint64_t) * 8))
+
 // Device-resident command-buffer storage and dynamic fixup records owned by a
 // finalized PM4 command buffer.
 typedef struct iree_hal_amdgpu_pm4_command_buffer_fixup_plan_t {
@@ -84,7 +88,7 @@ typedef struct iree_hal_amdgpu_pm4_command_program_set_t {
   iree_hal_amdgpu_pm4_command_buffer_fixup_plan_t fixup;
   // Caller-owned profile plans indexed by compact profile-plan ordinal.
   iree_hal_amdgpu_pm4_command_buffer_profile_plan_t* profile_plans;
-  // Local physical queue bits selected by the command-buffer affinity.
+  // Local physical queue bits eligible to execute the command buffer.
   uint64_t eligible_queue_mask;
   // Number of physical queues addressable by |eligible_queue_mask|.
   uint32_t physical_queue_count;
@@ -128,8 +132,6 @@ typedef struct iree_hal_amdgpu_pm4_command_program_layout_t {
 
 // Initializes |out_program_set| and clears all caller-owned |profile_plans|.
 iree_status_t iree_hal_amdgpu_pm4_command_program_set_initialize(
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_host_size_t physical_device_ordinal,
     iree_host_size_t physical_queue_count,
     iree_hal_amdgpu_pm4_command_program_set_flags_t flags,
     iree_hal_amdgpu_pm4_command_buffer_profile_plan_t* profile_plans,
@@ -171,7 +173,7 @@ iree_hal_amdgpu_pm4_command_program_layout_dummy_ticks_offset(
 }
 
 // Returns the profile plan selected for |physical_queue_ordinal|, or NULL when
-// profiling is absent or that queue is outside the command-buffer affinity.
+// profiling is absent or that queue cannot execute the command buffer.
 const iree_hal_amdgpu_pm4_command_buffer_profile_plan_t*
 iree_hal_amdgpu_pm4_command_program_set_select_profile(
     const iree_hal_amdgpu_pm4_command_program_set_t* program_set,

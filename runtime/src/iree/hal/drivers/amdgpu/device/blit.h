@@ -154,7 +154,7 @@ typedef struct iree_hal_amdgpu_device_buffer_fill_plan_t {
   uint32_t grid_size[3];
   // Dispatch workgroup X dimension in work-items.
   uint32_t workgroup_size_x;
-  // Number of elements passed to the selected kernel.
+  // Number of elements, or bytes for an unaligned block kernel, to process.
   uint64_t element_length;
   // Fill pattern represented as expected by the selected kernel.
   uint64_t pattern;
@@ -237,10 +237,10 @@ void iree_hal_amdgpu_device_buffer_copy_plan_emplace(
 // storage. The caller owns packet header commit, completion signal assignment,
 // and queue doorbell signaling.
 //
-// Returns false if |pattern_length| is unsupported, the target pointer/length
-// alignment is incompatible with that pattern width, or |length| cannot be
-// represented by the dispatch packet grid dimensions. On failure,
-// |dispatch_packet| and |kernarg_ptr| are left unmodified.
+// Returns false if |pattern_length| is unsupported, |length| is not a multiple
+// of the pattern width, or |length| cannot be represented by the dispatch
+// packet grid dimensions. Target pointers may have any byte alignment. On
+// failure, |dispatch_packet| and |kernarg_ptr| are left unmodified.
 bool iree_hal_amdgpu_device_buffer_fill_emplace(
     const iree_hal_amdgpu_device_buffer_transfer_context_t* IREE_AMDGPU_RESTRICT
         context,

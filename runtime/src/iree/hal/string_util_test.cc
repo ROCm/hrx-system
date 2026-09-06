@@ -537,9 +537,14 @@ struct BufferView final
   static StatusOr<BufferView> Parse(const std::string& value,
                                     Allocator allocator) {
     BufferView buffer_view;
+    const iree_hal_buffer_params_t buffer_params = {
+        /*.usage=*/IREE_HAL_BUFFER_USAGE_MAPPING,
+        /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+        /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+    };
     iree_status_t status = iree_hal_buffer_view_parse(
         iree_string_view_t{value.data(), (iree_host_size_t)value.size()},
-        /*device=*/NULL, allocator, &buffer_view);
+        allocator, buffer_params, &buffer_view);
     IREE_RETURN_IF_ERROR(std::move(status));
     return std::move(buffer_view);
   }

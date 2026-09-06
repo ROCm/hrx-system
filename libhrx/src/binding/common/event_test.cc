@@ -128,12 +128,11 @@ iree_hal_queue_family_spec_t QueueFamily(
     uint32_t timestamp_valid_bits, uint64_t timestamp_frequency_hz) {
   iree_hal_queue_family_spec_t family = {};
   family.name = iree_make_cstring_view("test");
-  family.queue_count = 1;
+  family.provisioned_queue_count = 1;
   family.priority_count = 1;
   family.timestamp_valid_bits = timestamp_valid_bits;
   family.timestamp_frequency_hz = timestamp_frequency_hz;
   family.physical_device_affinity = physical_device_affinity;
-  family.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   family.role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH;
   return family;
 }

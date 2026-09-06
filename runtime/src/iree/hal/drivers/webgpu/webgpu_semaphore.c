@@ -33,9 +33,10 @@ static iree_hal_webgpu_semaphore_t* iree_hal_webgpu_semaphore_cast(
 }
 
 iree_status_t iree_hal_webgpu_semaphore_create(
-    iree_async_proactor_t* proactor, iree_hal_queue_affinity_t queue_affinity,
-    uint64_t initial_value, iree_hal_semaphore_flags_t flags,
-    iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore) {
+    iree_async_proactor_t* proactor, uint64_t initial_value,
+    iree_hal_semaphore_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_semaphore_t** out_semaphore) {
+  (void)flags;
   IREE_ASSERT_ARGUMENT(proactor);
   IREE_ASSERT_ARGUMENT(out_semaphore);
   IREE_TRACE_ZONE_BEGIN(z0);

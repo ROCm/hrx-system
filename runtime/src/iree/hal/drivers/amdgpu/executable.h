@@ -99,9 +99,9 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
 // |libhsa| and |topology| are captured by-reference and must remain valid for
 // the lifetime of the executable.
 //
-// |queue_affinity| selects the physical devices onto which the executable is
-// loaded. |target| must be an exact borrowed row from |device|'s immutable spec
-// and cover every selected physical device.
+// |queue_family| selects the physical device onto which the executable is
+// loaded. It and |target| must be exact borrowed rows from |device|'s immutable
+// state, and |target| must cover the family's physical device.
 //
 // |executable_id| is a non-zero logical-device-local identifier assigned to
 // this executable before it is visible to profiling or device-originated
@@ -118,9 +118,9 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
 // config globals when enabled. It may be NULL when TSAN is unavailable.
 //
 // |queue_scopes| captures immutable queue identities for the owning logical
-// device. Executables with queue-scoped globals may load one HSA executable
-// variant per physical queue ordinal and publish per-queue config without
-// mutating state on each dispatch.
+// queue family. Executables with queue-scoped globals may load one HSA
+// executable variant per physical queue ordinal and publish per-queue config
+// without mutating state on each dispatch.
 //
 // |physical_device_list| contains |physical_device_count| devices in topology
 // ordinal order. It is used only during creation to validate metadata against
@@ -131,9 +131,9 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
 // may begin after executable preparation, so this cold-path metadata is always
 // durable instead of being gated on an active profiling session.
 iree_status_t iree_hal_amdgpu_executable_create(
-    iree_hal_device_t* device, const iree_hal_amdgpu_libhsa_t* libhsa,
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
+    const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology,
-    iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* load_params,
     uint64_t executable_id, iree_hal_amdgpu_feedback_state_t* feedback_state,
@@ -162,9 +162,9 @@ iree_status_t iree_hal_amdgpu_executable_lookup_kernel_args_for_host(
 // Returns metadata about an exported kernel function in device memory.
 // Kernel arguments are specific to the physical device specified by
 // |device_ordinal| in the topology and cannot be used on any other device. The
-// lookup fails if the executable queue affinity did not include
-// |device_ordinal| at load time. The returned pointers will remain valid for
-// the lifetime of the executable.
+// lookup fails if the executable's queue family does not service
+// |device_ordinal|. The returned pointers will remain valid for the lifetime of
+// the executable.
 iree_status_t iree_hal_amdgpu_executable_lookup_kernel_args_for_device(
     iree_hal_executable_t* executable,
     iree_hal_executable_function_t export_ordinal,
@@ -176,8 +176,8 @@ iree_status_t iree_hal_amdgpu_executable_lookup_kernel_args_for_device(
 //
 // The returned descriptor is specific to |device_ordinal| because the kernel
 // object embedded in the dispatch packet is per device. The lookup fails if the
-// executable queue affinity did not include |device_ordinal| at load time. The
-// pointer remains valid for the lifetime of the executable.
+// executable's queue family does not service |device_ordinal|. The pointer
+// remains valid for the lifetime of the executable.
 iree_status_t iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_device(
     iree_hal_executable_t* executable,
     iree_hal_executable_function_t export_ordinal,
@@ -185,15 +185,16 @@ iree_status_t iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_device(
     const iree_hal_amdgpu_executable_dispatch_descriptor_t** out_descriptor);
 
 // Returns host-resident dispatch metadata for an exported kernel function on a
-// queue.
+// provisioned queue ordinal in the executable's exact queue family.
 //
 // Queue-scoped executable variants require this lookup so the selected kernel
 // object and executable globals match the queue that will receive the dispatch.
 // Non-queue-scoped executables collapse this to the existing per-device lookup.
-iree_status_t iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue(
+iree_status_t
+iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_queue_ordinal(
     iree_hal_executable_t* executable,
     iree_hal_executable_function_t export_ordinal,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_ordinal_t queue_ordinal,
     const iree_hal_amdgpu_executable_dispatch_descriptor_t** out_descriptor);
 
 // Returns true when dispatches must select executable metadata by queue.

@@ -15,9 +15,6 @@ namespace {
 struct FakeResolver {
   iree_host_size_t verify_call_count = 0;
   iree_host_size_t create_buffer_call_count = 0;
-  iree_host_size_t last_verify_physical_device_ordinal = IREE_HOST_SIZE_MAX;
-  iree_host_size_t last_create_physical_device_ordinal = IREE_HOST_SIZE_MAX;
-  iree_hal_queue_affinity_t last_create_queue_affinity = 0;
 };
 
 static bool TryLookupFakeGlobal(iree_string_view_t name,
@@ -34,14 +31,11 @@ static bool TryLookupFakeGlobal(iree_string_view_t name,
   return false;
 }
 
-static iree_status_t FakeTryVerify(
-    void* user_data, iree_string_view_t name,
-    iree_host_size_t verification_physical_device_ordinal, bool* out_found,
-    iree_device_size_t* out_byte_length) {
+static iree_status_t FakeTryVerify(void* user_data, iree_string_view_t name,
+                                   bool* out_found,
+                                   iree_device_size_t* out_byte_length) {
   auto* resolver = static_cast<FakeResolver*>(user_data);
   ++resolver->verify_call_count;
-  resolver->last_verify_physical_device_ordinal =
-      verification_physical_device_ordinal;
   *out_found = TryLookupFakeGlobal(name, out_byte_length);
   return iree_ok_status();
 }
@@ -51,15 +45,11 @@ static void FakeBufferRelease(void* user_data, iree_hal_buffer_t* buffer) {
   iree_allocator_free_aligned(iree_allocator_system(), user_data);
 }
 
-static iree_status_t FakeCreateBuffer(
-    void* user_data, iree_string_view_t name,
-    iree_device_size_t expected_byte_length,
-    iree_hal_queue_affinity_t selected_queue_affinity,
-    iree_host_size_t physical_device_ordinal, iree_hal_buffer_t** out_buffer) {
+static iree_status_t FakeCreateBuffer(void* user_data, iree_string_view_t name,
+                                      iree_device_size_t expected_byte_length,
+                                      iree_hal_buffer_t** out_buffer) {
   auto* resolver = static_cast<FakeResolver*>(user_data);
   ++resolver->create_buffer_call_count;
-  resolver->last_create_physical_device_ordinal = physical_device_ordinal;
-  resolver->last_create_queue_affinity = selected_queue_affinity;
   *out_buffer = nullptr;
 
   iree_device_size_t byte_length = 0;
@@ -78,7 +68,7 @@ static iree_status_t FakeCreateBuffer(
 
   iree_hal_buffer_placement_t placement = {
       /*.device=*/nullptr,
-      /*.queue_affinity=*/selected_queue_affinity,
+      /*.queue_family_affinity=*/IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       /*.flags=*/IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
   iree_hal_buffer_release_callback_t release_callback = {
@@ -98,22 +88,11 @@ static iree_status_t FakeCreateBuffer(
   return status;
 }
 
-static iree_hal_amdgpu_queue_affinity_domain_t TwoDeviceDomain() {
-  return (iree_hal_amdgpu_queue_affinity_domain_t){
-      /*.supported_affinity=*/0xFull,
-      /*.physical_device_count=*/2,
-      /*.queue_count_per_physical_device=*/2,
-  };
-}
-
 class GlobalTableTest : public ::testing::Test {
  protected:
   void SetUp() override {
     const iree_hal_amdgpu_global_table_params_t params = {
         /*.host_allocator=*/iree_allocator_system(),
-        /*.queue_affinity_domain=*/TwoDeviceDomain(),
-        /*.loaded_physical_device_mask=*/0x3ull,
-        /*.physical_device_count=*/2,
         /*.resolver=*/
         {
             /*.user_data=*/&resolver_,
@@ -139,7 +118,6 @@ TEST_F(GlobalTableTest, LookupInternsAndCachesByName) {
       &table_, IREE_SV("global_a"), &first_global));
   EXPECT_TRUE(iree_hal_executable_global_is_valid(first_global));
   EXPECT_EQ(resolver_.verify_call_count, 1u);
-  EXPECT_EQ(resolver_.last_verify_physical_device_ordinal, 0u);
 
   iree_hal_executable_global_t second_global =
       iree_hal_executable_global_invalid();
@@ -173,34 +151,22 @@ TEST_F(GlobalTableTest, InfoReturnsBorrowedMetadata) {
   EXPECT_EQ(info.byte_length, 128u);
 }
 
-TEST_F(GlobalTableTest, BufferCachesPerPhysicalDevice) {
+TEST_F(GlobalTableTest, BufferMaterializesOnce) {
   iree_hal_executable_global_t global = iree_hal_executable_global_invalid();
   IREE_ASSERT_OK(iree_hal_amdgpu_global_table_lookup(
       &table_, IREE_SV("global_a"), &global));
 
-  iree_hal_buffer_t* first_device_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_amdgpu_global_table_buffer(
-      &table_, global, IREE_HAL_QUEUE_AFFINITY_ANY, &first_device_buffer));
-  ASSERT_NE(first_device_buffer, nullptr);
-  EXPECT_EQ(resolver_.create_buffer_call_count, 1u);
-  EXPECT_EQ(resolver_.last_create_physical_device_ordinal, 0u);
-  EXPECT_EQ(resolver_.last_create_queue_affinity, 0x3ull);
-
-  iree_hal_buffer_t* cached_first_device_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_amdgpu_global_table_buffer(
-      &table_, global, IREE_HAL_QUEUE_AFFINITY_ANY,
-      &cached_first_device_buffer));
-  EXPECT_EQ(cached_first_device_buffer, first_device_buffer);
+  iree_hal_buffer_t* first_buffer = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_amdgpu_global_table_buffer(&table_, global, &first_buffer));
+  ASSERT_NE(first_buffer, nullptr);
   EXPECT_EQ(resolver_.create_buffer_call_count, 1u);
 
-  iree_hal_buffer_t* second_device_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_amdgpu_global_table_buffer(&table_, global, 0xCull,
-                                                     &second_device_buffer));
-  ASSERT_NE(second_device_buffer, nullptr);
-  EXPECT_NE(second_device_buffer, first_device_buffer);
-  EXPECT_EQ(resolver_.create_buffer_call_count, 2u);
-  EXPECT_EQ(resolver_.last_create_physical_device_ordinal, 1u);
-  EXPECT_EQ(resolver_.last_create_queue_affinity, 0xCull);
+  iree_hal_buffer_t* cached_buffer = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_amdgpu_global_table_buffer(&table_, global, &cached_buffer));
+  EXPECT_EQ(cached_buffer, first_buffer);
+  EXPECT_EQ(resolver_.create_buffer_call_count, 1u);
 }
 
 TEST_F(GlobalTableTest, InvalidGlobalAccessRejected) {
@@ -214,38 +180,8 @@ TEST_F(GlobalTableTest, InvalidGlobalAccessRejected) {
   iree_hal_buffer_t* buffer = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_amdgpu_global_table_buffer(
-          &table_, global, IREE_HAL_QUEUE_AFFINITY_ANY, &buffer));
+      iree_hal_amdgpu_global_table_buffer(&table_, global, &buffer));
   EXPECT_EQ(buffer, nullptr);
-}
-
-TEST(GlobalTableStandaloneTest, BufferRejectsUnloadedPhysicalDevice) {
-  FakeResolver resolver;
-  iree_hal_amdgpu_global_table_t table;
-  const iree_hal_amdgpu_global_table_params_t params = {
-      /*.host_allocator=*/iree_allocator_system(),
-      /*.queue_affinity_domain=*/TwoDeviceDomain(),
-      /*.loaded_physical_device_mask=*/0x1ull,
-      /*.physical_device_count=*/2,
-      /*.resolver=*/
-      {
-          /*.user_data=*/&resolver,
-          /*.try_verify=*/FakeTryVerify,
-          /*.create_buffer=*/FakeCreateBuffer,
-      },
-  };
-  IREE_ASSERT_OK(iree_hal_amdgpu_global_table_initialize(&params, &table));
-
-  iree_hal_executable_global_t global = iree_hal_executable_global_invalid();
-  IREE_ASSERT_OK(iree_hal_amdgpu_global_table_lookup(
-      &table, IREE_SV("global_a"), &global));
-  iree_hal_buffer_t* buffer = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_amdgpu_global_table_buffer(&table, global, 0xCull, &buffer));
-  EXPECT_EQ(buffer, nullptr);
-
-  iree_hal_amdgpu_global_table_deinitialize(&table);
 }
 
 }  // namespace

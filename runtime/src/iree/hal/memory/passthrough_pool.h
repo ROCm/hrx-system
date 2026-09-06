@@ -27,20 +27,20 @@ typedef struct iree_hal_passthrough_pool_options_t {
   iree_string_view_t trace_name;
 } iree_hal_passthrough_pool_options_t;
 
-// Creates a pass-through pool that delegates every allocation directly to the
-// slab provider. Each acquire_reservation() acquires a new slab and each
-// release_reservation() frees it. No suballocation, no offset management, and
-// no death-frontier tracking.
+// Creates a pass-through pool that delegates every reservation directly to the
+// slab provider. Each acquired reservation owns a new slab and releasing the
+// reservation frees it. No suballocation, no offset management, and no
+// death-frontier tracking.
 //
-// This is the simplest possible pool; it exists to provide the default device
-// pool with the same behavior as direct allocation through the current
-// iree_hal_allocator_t. It proves the pool vtable dispatch chain works and
-// serves as a baseline for benchmarking suballocating pool types.
+// This is the simplest possible pool. It provides the same behavior as direct
+// allocation through the current iree_hal_allocator_t and serves as a baseline
+// for benchmarking suballocating pool types.
 //
 // |slab_provider| is retained for the lifetime of the pool.
 // |notification| is retained for the lifetime of the pool, published on
-// release_reservation(), and skips wake work when no waiter is observing it.
-// |host_allocator| is used for the pool struct and per-buffer release state.
+// reservation release, and skips wake work when no waiter is observing it.
+// |host_allocator| is used for pool metadata, reservation state, and
+// materialization transaction state.
 iree_status_t iree_hal_passthrough_pool_create(
     iree_hal_passthrough_pool_options_t options,
     iree_hal_slab_provider_t* slab_provider,

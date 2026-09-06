@@ -135,8 +135,8 @@ static iree_atomic_int64_t iree_hal_vulkan_executable_next_profile_id =
     IREE_ATOMIC_VAR_INIT(1);
 
 typedef struct iree_hal_vulkan_executable_t {
-  // HAL resource header.
-  iree_hal_resource_t resource;
+  // Common executable state.
+  iree_hal_executable_t base;
 
   // Host allocator used for executable lifetime.
   iree_allocator_t host_allocator;
@@ -185,17 +185,16 @@ uint64_t iree_hal_vulkan_executable_profile_id(
 
 static iree_status_t iree_hal_vulkan_allocate_executable(
     const iree_hal_vulkan_device_syms_t* syms, VkDevice logical_device,
+    const iree_hal_queue_family_t* queue_family,
     iree_host_size_t pipeline_count, iree_host_size_t name_storage_size,
     iree_allocator_t host_allocator,
     iree_hal_vulkan_executable_t** out_executable) {
-  *out_executable = NULL;
-
   iree_hal_vulkan_executable_t* executable = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       host_allocator, sizeof(*executable), (void**)&executable));
   memset(executable, 0, sizeof(*executable));
-  iree_hal_resource_initialize(&iree_hal_vulkan_executable_vtable,
-                               &executable->resource);
+  iree_hal_executable_initialize(
+      queue_family, &iree_hal_vulkan_executable_vtable, &executable->base);
   executable->host_allocator = host_allocator;
   executable->syms = syms;
   executable->logical_device = logical_device;
@@ -229,10 +228,9 @@ static iree_status_t iree_hal_vulkan_allocate_executable(
 
 static iree_status_t iree_hal_vulkan_create_bda_executable(
     const iree_hal_vulkan_device_syms_t* syms, VkDevice logical_device,
-    VkPipelineCache pipeline_cache,
+    VkPipelineCache pipeline_cache, const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
-  *out_executable = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   if (load_params->executable_data.data_length % sizeof(uint32_t) != 0) {
@@ -309,8 +307,8 @@ static iree_status_t iree_hal_vulkan_create_bda_executable(
   iree_hal_vulkan_executable_t* executable = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_hal_vulkan_allocate_executable(
-        syms, logical_device, entry_point_count, name_storage_size,
-        host_allocator, &executable);
+        syms, logical_device, queue_family, entry_point_count,
+        name_storage_size, host_allocator, &executable);
   }
 
   VkShaderModule shader_module = VK_NULL_HANDLE;
@@ -434,17 +432,16 @@ static iree_status_t iree_hal_vulkan_create_bda_executable(
 
 iree_status_t iree_hal_vulkan_executable_create(
     const iree_hal_vulkan_device_syms_t* syms, VkDevice logical_device,
-    VkPipelineCache pipeline_cache,
+    VkPipelineCache pipeline_cache, const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(syms);
   IREE_ASSERT_ARGUMENT(logical_device);
   IREE_ASSERT_ARGUMENT(load_params);
   IREE_ASSERT_ARGUMENT(out_executable);
-  *out_executable = NULL;
-  return iree_hal_vulkan_create_bda_executable(syms, logical_device,
-                                               pipeline_cache, load_params,
-                                               host_allocator, out_executable);
+  return iree_hal_vulkan_create_bda_executable(
+      syms, logical_device, pipeline_cache, queue_family, load_params,
+      host_allocator, out_executable);
 }
 
 static void iree_hal_vulkan_executable_destroy(
@@ -569,11 +566,10 @@ static iree_status_t iree_hal_vulkan_executable_global_info(
 
 static iree_status_t iree_hal_vulkan_executable_global_buffer(
     iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+    iree_hal_buffer_t** out_buffer) {
   (void)base_executable;
   (void)global;
-  (void)queue_affinity;
-  *out_buffer = NULL;
+  (void)out_buffer;
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "invalid Vulkan executable global");
 }

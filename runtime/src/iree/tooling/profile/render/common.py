@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 17
 UINT64_MASK = (1 << 64) - 1
 UINT32_MAX = (1 << 32) - 1
 INT64_MIN = -(1 << 63)

@@ -39,6 +39,9 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 
 typedef struct iree_hal_webgpu_queue_t {
+  // Exact HAL queue resource. Must be at offset zero.
+  iree_hal_queue_t base;
+
   // Bridge handles for the GPUDevice and its GPUQueue.
   iree_hal_webgpu_handle_t device_handle;
   iree_hal_webgpu_handle_t queue_handle;
@@ -73,6 +76,7 @@ typedef struct iree_hal_webgpu_queue_t {
 // Initializes a queue. All borrowed pointers (builtins, proactor,
 // frontier_tracker) must outlive the queue.
 iree_status_t iree_hal_webgpu_queue_initialize(
+    const iree_hal_queue_family_t* queue_family,
     iree_hal_webgpu_handle_t device_handle,
     iree_hal_webgpu_handle_t queue_handle,
     const iree_hal_webgpu_builtins_t* builtins, iree_async_proactor_t* proactor,
@@ -85,20 +89,6 @@ void iree_hal_webgpu_queue_deinitialize(iree_hal_webgpu_queue_t* queue);
 //===----------------------------------------------------------------------===//
 // Queue operations
 //===----------------------------------------------------------------------===//
-
-iree_status_t iree_hal_webgpu_queue_alloca(
-    iree_hal_webgpu_queue_t* queue, iree_hal_allocator_t* device_allocator,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
-    iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
-    iree_hal_buffer_t** IREE_RESTRICT out_buffer);
-
-iree_status_t iree_hal_webgpu_queue_dealloca(
-    iree_hal_webgpu_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags);
 
 iree_status_t iree_hal_webgpu_queue_fill(
     iree_hal_webgpu_queue_t* queue,
@@ -124,7 +114,7 @@ iree_status_t iree_hal_webgpu_queue_copy(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, iree_hal_copy_flags_t flags);
 
-iree_status_t iree_hal_webgpu_queue_read(
+iree_status_t iree_hal_webgpu_queue_submit_read(
     iree_hal_webgpu_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
@@ -132,7 +122,7 @@ iree_status_t iree_hal_webgpu_queue_read(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, iree_hal_read_flags_t flags);
 
-iree_status_t iree_hal_webgpu_queue_write(
+iree_status_t iree_hal_webgpu_queue_submit_write(
     iree_hal_webgpu_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
@@ -140,17 +130,15 @@ iree_status_t iree_hal_webgpu_queue_write(
     iree_hal_file_t* target_file, uint64_t target_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags);
 
-// |device| is passed through to the host call context — the queue does not
-// retain it. The caller (device vtable) guarantees it remains valid.
-iree_status_t iree_hal_webgpu_queue_host_call(
-    iree_hal_webgpu_queue_t* queue, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity,
+// Enqueues a host callback on the exact WebGPU queue.
+iree_status_t iree_hal_webgpu_queue_submit_host_call(
+    iree_hal_webgpu_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_host_call_t call, const uint64_t args[4],
     iree_hal_host_call_flags_t flags);
 
-iree_status_t iree_hal_webgpu_queue_dispatch(
+iree_status_t iree_hal_webgpu_queue_submit_dispatch(
     iree_hal_webgpu_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
@@ -158,15 +146,13 @@ iree_status_t iree_hal_webgpu_queue_dispatch(
     iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags);
 
-iree_status_t iree_hal_webgpu_queue_execute(
+iree_status_t iree_hal_webgpu_queue_submit_execute(
     iree_hal_webgpu_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
-    iree_hal_execute_flags_t flags);
-
-iree_status_t iree_hal_webgpu_queue_flush(iree_hal_webgpu_queue_t* queue);
+    iree_hal_queue_execute_flags_t flags);
 
 #ifdef __cplusplus
 }  // extern "C"

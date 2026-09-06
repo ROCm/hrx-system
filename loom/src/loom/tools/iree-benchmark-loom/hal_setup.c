@@ -37,8 +37,6 @@ static iree_status_t iree_benchmark_loom_initialize_sequence_compile_context(
   }
 
   if (iree_status_is_ok(status)) {
-    context->execution_options.materializer.device =
-        options->hal_context->execution.runtime.device;
     context->execution_options.materializer.device_allocator =
         iree_hal_device_allocator(
             options->hal_context->execution.runtime.device);
@@ -141,8 +139,6 @@ static iree_status_t iree_benchmark_loom_initialize_single_compile_context(
   }
   if (iree_status_is_ok(status)) {
     context->hal_provider_initialized = true;
-    context->execution_options.materializer.device =
-        options->hal_context->execution.runtime.device;
     context->execution_options.materializer.device_allocator =
         iree_hal_device_allocator(
             options->hal_context->execution.runtime.device);

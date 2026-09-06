@@ -44,7 +44,6 @@ void iree_benchmark_loom_configure_reference_oracles(
     loom_testbench_case_execution_options_t* inout_execution_options) {
   *out_oracles = (iree_benchmark_loom_reference_oracles_t){0};
   out_oracles->options = (loom_testbench_reference_matmul_oracle_options_t){
-      .device = context->runtime.device,
       .device_allocator = iree_hal_device_allocator(context->runtime.device),
       .result_buffer_params =
           loom_run_hal_testbench_host_visible_buffer_params(),

@@ -212,7 +212,6 @@ iree_cc_library(
     iree::base::internal
     iree::base::threading
     iree::hal
-    iree::hal::drivers::amdgpu::queue_affinity
   PUBLIC
 )
 endif()
@@ -1092,7 +1091,6 @@ iree_cc_binary_benchmark(
     iree::hal::drivers::amdgpu::device::dispatch
     iree::hal::drivers::amdgpu::device::headers
     iree::hal::drivers::amdgpu::headers
-    iree::hal::drivers::amdgpu::queue_affinity
     iree::hal::drivers::amdgpu::registration
     iree::hal::drivers::amdgpu::target::selection
     iree::hal::memory::tlsf_pool

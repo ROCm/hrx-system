@@ -27,7 +27,6 @@
 #include "iree/hal/drivers/amdgpu/util/notification_ring.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_capabilities.h"
 #include "iree/hal/drivers/amdgpu/util/queue_upload_ring.h"
-#include "iree/hal/drivers/amdgpu/virtual_queue.h"
 #include "iree/hal/pool.h"
 #include "iree/hal/profile_schema.h"
 #include "iree/hal/profile_sink.h"
@@ -150,7 +149,7 @@ IREE_ASYNC_FIXED_FRONTIER_TYPE(iree_hal_amdgpu_host_queue_frontier_t,
   (2u + IREE_HAL_AMDGPU_HOST_QUEUE_DISPATCH_SCRATCH_BINDING_CAPACITY)
 
 // Host-driven queue with per-queue epoch signal and wait-backed
-// notification ring. Embeds iree_hal_amdgpu_virtual_queue_t at offset 0.
+// notification ring. Embeds iree_hal_queue_t at offset zero.
 //
 // The epoch signal (owned by the notification ring) is a single hsa_signal_t
 // set as completion_signal on each submission's last AQL packet. The CP
@@ -158,11 +157,11 @@ IREE_ASYNC_FIXED_FRONTIER_TYPE(iree_hal_amdgpu_host_queue_frontier_t,
 // semaphore signals that serialized completion drain publishes when the epoch
 // advances.
 //
-// All queue operations enter through the virtual_queue vtable. There are no
-// public methods beyond initialize/deinitialize.
+// Every operation targets this exact queue and shares its submission, progress,
+// failure, notification, and reclaim state.
 typedef struct iree_hal_amdgpu_host_queue_t {
-  // Virtual queue vtable at offset 0.
-  iree_hal_amdgpu_virtual_queue_t base;
+  // Base HAL queue resource. Must be at offset zero.
+  iree_hal_queue_t base;
 
   // HSA API handle for queue operations. Not retained.
   const iree_hal_amdgpu_libhsa_t* libhsa;
@@ -473,16 +472,8 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   // profiling enable reads it unlocked, so writes must precede both.
   iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy;
 
-  // One-bit logical queue affinity identifying this queue in HAL buffer
-  // placements. queue_alloca uses this as the transient wrapper's origin so
-  // PREFER_ORIGIN dealloca routes back to the same queue.
-  iree_hal_queue_affinity_t queue_affinity;
-
-  // Flattened logical queue ordinal in the owning HAL device.
-  iree_host_size_t queue_ordinal;
-
   // Queue ordinal relative to |device_ordinal|.
-  iree_host_size_t physical_queue_ordinal;
+  iree_hal_queue_ordinal_t physical_queue_ordinal;
 
   // Logical-device epoch signal table for cross-queue barrier emission (tier 2
   // wait resolution). Maps flattened queue indices to hsa_signal_t values for
@@ -710,14 +701,14 @@ void iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
 // event records must be host-readable because the profiling sink serializes
 // them on the CPU.
 iree_status_t iree_hal_amdgpu_host_queue_initialize(
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_amdgpu_libhsa_t* libhsa, iree_hal_device_t* logical_device,
     void* hostcall_buffer, iree_async_proactor_t* proactor,
     hsa_agent_t gpu_agent,
     const iree_hal_amdgpu_kernarg_ring_memory_t* kernarg_memory,
     hsa_amd_memory_pool_t pm4_ib_pool,
     iree_async_frontier_tracker_t* frontier_tracker, iree_async_axis_t axis,
-    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t queue_ordinal,
-    iree_host_size_t physical_queue_ordinal,
+    iree_hal_queue_ordinal_t physical_queue_ordinal,
     iree_thread_affinity_t completion_thread_affinity,
     iree_hal_amdgpu_aql_queue_execution_mode_t aql_queue_execution_mode,
     iree_hal_amdgpu_wait_barrier_strategy_t wait_barrier_strategy,
@@ -736,6 +727,54 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
     uint32_t upload_capacity, iree_allocator_t host_allocator,
     iree_hal_amdgpu_host_queue_t* out_queue);
 
+// Trims transient resources retained by |queue|.
+void iree_hal_amdgpu_host_queue_trim(iree_hal_amdgpu_host_queue_t* queue);
+
+// Enqueues a buffer fill on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_fill(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, uint64_t pattern_bits,
+    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags);
+
+// Enqueues a host-to-buffer update on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_update(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    const void* source_buffer, iree_host_size_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_update_flags_t flags);
+
+// Enqueues a buffer copy on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_copy(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_copy_flags_t flags);
+
+// Enqueues a file-to-buffer read on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_submit_read(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_file_t* source_file, uint64_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_read_flags_t flags);
+
+// Enqueues a buffer-to-file write on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_submit_write(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    iree_hal_file_t* target_file, uint64_t target_offset,
+    iree_device_size_t length, iree_hal_write_flags_t flags);
+
 // Initializes queue-owned TSAN state.
 //
 // This is called after queue creation when logical TSAN is enabled. The queue
@@ -743,7 +782,6 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
 iree_status_t iree_hal_amdgpu_host_queue_initialize_tsan_state(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_amdgpu_tsan_memory_policy_t* memory_policy,
-    iree_host_size_t queue_ordinal, iree_host_size_t physical_queue_ordinal,
     iree_device_size_t workgroup_shadow_stride,
     iree_device_size_t dispatch_shadow_stride, uint32_t workgroup_capacity,
     uint32_t shadow_entry_size, uint32_t memory_granule_shift,

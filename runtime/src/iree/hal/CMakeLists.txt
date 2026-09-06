@@ -17,7 +17,6 @@ iree_cc_library(
     "api.h"
     "atomic.h"
     "buffer.h"
-    "buffer_transfer.h"
     "buffer_view.h"
     "buffer_view_util.h"
     "channel.h"
@@ -53,7 +52,6 @@ iree_cc_library(
     "buffer.c"
     "buffer_heap.c"
     "buffer_heap_impl.h"
-    "buffer_transfer.c"
     "buffer_view.c"
     "buffer_view_util.c"
     "channel.c"
@@ -78,6 +76,7 @@ iree_cc_library(
     "profile_metrics.c"
     "profile_options.c"
     "profile_sink.c"
+    "queue.c"
     "semaphore.c"
     "string_util.c"
     "topology.c"
@@ -187,29 +186,6 @@ iree_cc_test(
     iree::base
     iree::base::internal::fpu_state
     iree::base::internal::span
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-iree_cc_test(
-  NAME
-    buffer_view_util_test
-  SRCS
-    "buffer_view_util_test.cc"
-  DEPS
-    ::hal
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-iree_cc_test(
-  NAME
-    queue_test
-  SRCS
-    "queue_test.cc"
-  DEPS
-    ::hal
     iree::testing::gtest
     iree::testing::gtest_main
 )

@@ -31,8 +31,8 @@ typedef struct iree_hal_webgpu_executable_entry_t {
 //===----------------------------------------------------------------------===//
 
 typedef struct iree_hal_webgpu_executable_t {
-  // Abstract resource header for HAL lifetime management.
-  iree_hal_resource_t resource;
+  // Common executable state.
+  iree_hal_executable_t base;
   // Host allocator used to allocate the executable and entry storage.
   iree_allocator_t host_allocator;
   // Number of functions in the executable.
@@ -114,12 +114,12 @@ static iree_status_t iree_hal_webgpu_executable_initialize_export(
 
 iree_status_t iree_hal_webgpu_executable_create(
     iree_hal_webgpu_handle_t device_handle,
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(load_params);
   IREE_ASSERT_ARGUMENT(out_executable);
   IREE_TRACE_ZONE_BEGIN(z0);
-  *out_executable = NULL;
 
   if (IREE_UNLIKELY(load_params->constant_count != 0)) {
     IREE_TRACE_ZONE_END(z0);
@@ -157,8 +157,8 @@ iree_status_t iree_hal_webgpu_executable_create(
       z0,
       iree_allocator_malloc(host_allocator, total_size, (void**)&executable));
   memset(executable, 0, total_size);
-  iree_hal_resource_initialize(&iree_hal_webgpu_executable_vtable,
-                               &executable->resource);
+  iree_hal_executable_initialize(
+      queue_family, &iree_hal_webgpu_executable_vtable, &executable->base);
   executable->host_allocator = host_allocator;
   executable->function_count = export_count;
   char* name_storage =
@@ -308,11 +308,10 @@ static iree_status_t iree_hal_webgpu_executable_global_info(
 
 static iree_status_t iree_hal_webgpu_executable_global_buffer(
     iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+    iree_hal_buffer_t** out_buffer) {
   (void)base_executable;
   (void)global;
-  (void)queue_affinity;
-  *out_buffer = NULL;
+  (void)out_buffer;
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "invalid WebGPU executable global");
 }

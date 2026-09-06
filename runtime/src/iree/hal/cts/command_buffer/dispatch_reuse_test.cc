@@ -26,6 +26,7 @@
 
 #include "iree/hal/cts/util/profile_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
+#include "iree/hal/memory/passthrough_pool.h"
 
 namespace iree::hal::cts {
 
@@ -37,6 +38,18 @@ class DispatchReuseTest : public CtsTestBase<> {
   void SetUp() override {
     CtsTestBase::SetUp();
     if (HasFatalFailure() || IsSkipped()) return;
+    if (!transfer_queue_) {
+      GTEST_SKIP() << "device has no provisioned transfer-capable queue";
+    }
+
+    iree_hal_queue_pool_backend_t backend = {};
+    IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
+        device_, iree_hal_queue_family(transfer_queue_), &backend));
+    iree_hal_passthrough_pool_options_t options = {};
+    options.asan = backend.asan;
+    IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
+        options, backend.slab_provider, backend.notification,
+        iree_allocator_system(), &transient_pool_));
 
     // Load the workgroup-ID kernel: writes workgroup_id[0] to buffer[wg_id].
     LoadExecutableOrSkipUnsupported(
@@ -50,11 +63,37 @@ class DispatchReuseTest : public CtsTestBase<> {
   }
 
   void TearDown() override {
+    iree_hal_pool_release(transient_pool_);
+    transient_pool_ = nullptr;
     iree_hal_executable_release(absf_executable_);
     absf_executable_ = nullptr;
     iree_hal_executable_release(workgroup_id_executable_);
     workgroup_id_executable_ = nullptr;
     CtsTestBase::TearDown();
+  }
+
+  iree_status_t QueueAlloca(iree_hal_semaphore_list_t wait_semaphore_list,
+                            iree_hal_semaphore_list_t signal_semaphore_list,
+                            iree_hal_buffer_params_t params,
+                            iree_device_size_t allocation_size,
+                            iree_hal_buffer_t** out_buffer) {
+    params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+        iree_hal_queue_family_ordinal(iree_hal_queue_family(transfer_queue_)));
+    const iree_hal_pool_reservation_request_t request = {
+        /*.params=*/params,
+        /*.allocation_size=*/allocation_size,
+    };
+    return iree_hal_queue_alloca(transfer_queue_, wait_semaphore_list,
+                                 signal_semaphore_list, transient_pool_,
+                                 /*request_count=*/1, &request, out_buffer);
+  }
+
+  iree_status_t QueueDealloca(iree_hal_semaphore_list_t wait_semaphore_list,
+                              iree_hal_semaphore_list_t signal_semaphore_list,
+                              iree_hal_buffer_t* buffer) {
+    return iree_hal_queue_dealloca(transfer_queue_, wait_semaphore_list,
+                                   signal_semaphore_list,
+                                   /*buffer_count=*/1, &buffer);
   }
 
   void RecordDispatchBarrier(iree_hal_command_buffer_t* command_buffer) {
@@ -84,9 +123,9 @@ class DispatchReuseTest : public CtsTestBase<> {
                                  iree_hal_command_buffer_mode_t mode =
                                      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT) {
     iree_hal_command_buffer_t* command_buffer = nullptr;
-    IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        device_, mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
-        IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/1, &command_buffer));
+    IREE_ASSERT_OK(CreateCommandBuffer(mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                       /*binding_capacity=*/1,
+                                       &command_buffer));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
     iree_hal_buffer_ref_t binding_refs[1] = {{
@@ -113,6 +152,8 @@ class DispatchReuseTest : public CtsTestBase<> {
     *out_command_buffer = command_buffer;
   }
 
+  iree_hal_pool_t* transient_pool_ = nullptr;
+
   // Records two workgroup-ID dispatches into slots 0 and 1. The portable
   // command indexes of the dispatch operations are 0 and 2 because each
   // dispatch is followed by a barrier.
@@ -122,9 +163,9 @@ class DispatchReuseTest : public CtsTestBase<> {
       iree_hal_command_buffer_mode_t mode =
           IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT) {
     iree_hal_command_buffer_t* command_buffer = nullptr;
-    IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        device_, mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
-        IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/2, &command_buffer));
+    IREE_ASSERT_OK(CreateCommandBuffer(mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                       /*binding_capacity=*/2,
+                                       &command_buffer));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
     for (uint32_t buffer_slot = 0; buffer_slot < 2; ++buffer_slot) {
@@ -157,9 +198,9 @@ class DispatchReuseTest : public CtsTestBase<> {
       iree_hal_buffer_binding_table_t binding_table) {
     SemaphoreList signal(device_, {0}, {1});
     SemaphoreList empty_wait;
-    IREE_ASSERT_OK(iree_hal_device_queue_execute(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, signal,
-        command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        QueueForCommandBuffer(command_buffer), empty_wait, signal,
+        command_buffer, binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
                                                 IREE_ASYNC_WAIT_FLAG_NONE));
   }
@@ -322,9 +363,8 @@ TEST_P(DispatchReuseTest, MixedDirectAndIndirectBindings) {
       CreateFilledDeviceBuffer<float>(kByteLength, -9.0f, output.out()));
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+  IREE_ASSERT_OK(CreateCommandBuffer(
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
       /*binding_capacity=*/1, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
@@ -381,10 +421,9 @@ TEST_P(DispatchReuseTest, DeferredExecuteRetainsDispatchBindingTable) {
       CreateFilledDeviceBuffer<float>(kByteLength, -9.0f, output.out()));
 
   iree_hal_command_buffer_t* command_buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/2, &command_buffer));
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                     /*binding_capacity=*/2, &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
   iree_hal_buffer_ref_t binding_refs[2] = {
@@ -421,9 +460,9 @@ TEST_P(DispatchReuseTest, DeferredExecuteRetainsDispatchBindingTable) {
       IREE_ARRAYSIZE(table_bindings),
       table_bindings,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait, signal, command_buffer,
-      binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      QueueForCommandBuffer(command_buffer), wait, signal, command_buffer,
+      binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
 
   iree_hal_command_buffer_release(command_buffer);
   iree_hal_buffer_release(input);
@@ -465,19 +504,17 @@ TEST_P(DispatchReuseTest, AllocaExecuteDeallocaCycle) {
     SemaphoreList alloca_signal(device_, {0}, {1});
     SemaphoreList empty_wait;
     iree_hal_buffer_t* transient_buffer = nullptr;
-    IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, alloca_signal,
-        /*pool=*/NULL, alloca_params, buffer_size, IREE_HAL_ALLOCA_FLAG_NONE,
-        &transient_buffer));
+    IREE_ASSERT_OK(QueueAlloca(empty_wait, alloca_signal, alloca_params,
+                               buffer_size, &transient_buffer));
     Ref<iree_hal_buffer_t> transient(transient_buffer);
 
     // Step 2: execute — waits on alloca, signals execute.
     SemaphoreList execute_signal(device_, {0}, {1});
     iree_hal_buffer_binding_t bindings[1] = {{transient, 0, buffer_size}};
     iree_hal_buffer_binding_table_t binding_table = {1, bindings};
-    IREE_ASSERT_OK(iree_hal_device_queue_execute(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, alloca_signal, execute_signal,
-        command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        QueueForCommandBuffer(command_buffer), alloca_signal, execute_signal,
+        command_buffer, binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
 
     // Wait for execute to complete, then verify.
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -491,9 +528,7 @@ TEST_P(DispatchReuseTest, AllocaExecuteDeallocaCycle) {
 
     // Step 3: dealloca — AFTER readback to avoid decommit race.
     SemaphoreList dealloca_signal(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, execute_signal, dealloca_signal,
-        transient, IREE_HAL_DEALLOCA_FLAG_NONE));
+    IREE_ASSERT_OK(QueueDealloca(execute_signal, dealloca_signal, transient));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
         dealloca_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
   }
@@ -519,34 +554,30 @@ TEST_P(DispatchReuseTest, PipelinedAllocaExecuteDealloca) {
   // Phase 1: alloca + execute for buffer A.
   SemaphoreList alloca_a_signal(device_, {0}, {1});
   iree_hal_buffer_t* raw_a = nullptr;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, alloca_a_signal,
-      /*pool=*/NULL, alloca_params, buffer_size, IREE_HAL_ALLOCA_FLAG_NONE,
-      &raw_a));
+  IREE_ASSERT_OK(QueueAlloca(empty_wait, alloca_a_signal, alloca_params,
+                             buffer_size, &raw_a));
   Ref<iree_hal_buffer_t> buffer_a(raw_a);
 
   SemaphoreList execute_a_signal(device_, {0}, {1});
   iree_hal_buffer_binding_t bindings_a[1] = {{buffer_a, 0, buffer_size}};
   iree_hal_buffer_binding_table_t table_a = {1, bindings_a};
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, alloca_a_signal, execute_a_signal,
-      command_buffer, table_a, IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      QueueForCommandBuffer(command_buffer), alloca_a_signal, execute_a_signal,
+      command_buffer, table_a, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
 
   // Phase 2: alloca + execute for buffer B (independent of phase 1).
   SemaphoreList alloca_b_signal(device_, {0}, {1});
   iree_hal_buffer_t* raw_b = nullptr;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, alloca_b_signal,
-      /*pool=*/NULL, alloca_params, buffer_size, IREE_HAL_ALLOCA_FLAG_NONE,
-      &raw_b));
+  IREE_ASSERT_OK(QueueAlloca(empty_wait, alloca_b_signal, alloca_params,
+                             buffer_size, &raw_b));
   Ref<iree_hal_buffer_t> buffer_b(raw_b);
 
   SemaphoreList execute_b_signal(device_, {0}, {1});
   iree_hal_buffer_binding_t bindings_b[1] = {{buffer_b, 0, buffer_size}};
   iree_hal_buffer_binding_table_t table_b = {1, bindings_b};
-  IREE_ASSERT_OK(iree_hal_device_queue_execute(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, alloca_b_signal, execute_b_signal,
-      command_buffer, table_b, IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      QueueForCommandBuffer(command_buffer), alloca_b_signal, execute_b_signal,
+      command_buffer, table_b, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
 
   // Wait for both executes, then verify results.
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -568,13 +599,9 @@ TEST_P(DispatchReuseTest, PipelinedAllocaExecuteDealloca) {
   // if we enqueue dealloca before reading, it can race and decommit before
   // our d2h transfer maps the buffer).
   SemaphoreList dealloca_a_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, execute_a_signal, dealloca_a_signal,
-      buffer_a, IREE_HAL_DEALLOCA_FLAG_NONE));
+  IREE_ASSERT_OK(QueueDealloca(execute_a_signal, dealloca_a_signal, buffer_a));
   SemaphoreList dealloca_b_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, execute_b_signal, dealloca_b_signal,
-      buffer_b, IREE_HAL_DEALLOCA_FLAG_NONE));
+  IREE_ASSERT_OK(QueueDealloca(execute_b_signal, dealloca_b_signal, buffer_b));
 
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       dealloca_a_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));

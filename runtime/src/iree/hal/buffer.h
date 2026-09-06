@@ -449,15 +449,6 @@ typedef enum iree_hal_buffer_overlap_e {
 
 typedef uint32_t iree_hal_buffer_compatibility_t;
 
-// A bitfield specifying buffer transfer behavior.
-enum iree_hal_transfer_buffer_flag_bits_t {
-  // TODO(benvanik): flags controlling blocking, flushing, invalidation, and
-  // persistence. We may also want to set a bit that causes failure on emulated
-  // transfers that would otherwise be really expensive.
-  IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT = 0,
-};
-typedef uint32_t iree_hal_transfer_buffer_flags_t;
-
 // Determines buffer mapping behavior.
 enum iree_hal_mapping_mode_bits_t {
   // Buffers are mapped as part of a scoped map-access-unmap sequence.
@@ -485,23 +476,16 @@ typedef uint32_t iree_hal_mapping_mode_t;
 typedef uint32_t iree_hal_buffer_placement_flags_t;
 enum iree_hal_buffer_placement_flag_bits_t {
   IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE = 0u,
-  // Buffer was allocated with an asynchronous allocation API such as
-  // iree_hal_device_queue_alloca and/or can be deallocated with an asynchronous
-  // deallocation API such as iree_hal_device_queue_dealloca.
+  // Buffer was allocated with iree_hal_queue_alloca and can be deallocated with
+  // iree_hal_queue_dealloca.
   IREE_HAL_BUFFER_PLACEMENT_FLAG_ASYNCHRONOUS = 1u << 0,
-  // Buffer lifetime is indeterminate indicating that the compiler or
-  // application allocating the buffer is unable to determine when it is safe to
-  // deallocate the buffer. Explicit deallocation requests are ignored and the
-  // buffer deallocation will happen synchronously when the last remaining
-  // reference to the buffer is released.
-  IREE_HAL_BUFFER_PLACEMENT_FLAG_INDETERMINATE_LIFETIME = 1u << 1,
   // TODO(benvanik): flags for discrete/external to allow for quick export
   // checks.
 };
 
 // Describes the origin of an allocated buffer.
 // This is used internally to route buffers back to pools and can be used by
-// hosting layers to route deallocations to appropriate devices/queues.
+// hosting layers to route deallocations to the originating device.
 // This information is generally only valid for allocated buffers (the result of
 // an iree_hal_buffer_allocated_buffer query).
 typedef struct iree_hal_buffer_placement_t {
@@ -510,17 +494,15 @@ typedef struct iree_hal_buffer_placement_t {
   // May be NULL if the buffer is not associated with any particular device such
   // as a free-floating heap-allocated buffer on the host.
   iree_hal_device_t* device;
-  // Queues on the device to which the buffer is available. Depending on the
-  // device this may indicate which queues have exclusive access to the buffer
-  // or which queues have optimal access. This may be broader than the original
-  // request if the buffer is able to be accessed by other queues without
-  // penalty. Usage of the buffer for queue read/write or asynchronous
-  // deallocation via iree_hal_device_queue_dealloca is only legal with a queue
-  // affinity that is a subset of this affinity set.
-  iree_hal_queue_affinity_t queue_affinity;
+  // Queue families on the device that may access the buffer. This may be
+  // broader than the original request when additional families can access the
+  // buffer without penalty. Queue operations may only use the buffer when their
+  // family is included in this set.
+  iree_hal_queue_family_affinity_t queue_family_affinity;
   // Describes the placement behavior of a buffer on a device and its allocation
   // semantics.
   iree_hal_buffer_placement_flags_t flags;
+  // Reserved for future placement metadata. Must be zero.
   uint32_t reserved;
 } iree_hal_buffer_placement_t;
 
@@ -580,15 +562,14 @@ typedef struct iree_hal_buffer_params_t {
   // If 0 then the type will be set as IREE_HAL_MEMORY_TYPE_OPTIMAL.
   iree_hal_memory_type_t type;
 
-  // Queue affinity bitmap indicating which queues may access this buffer.
-  // For NUMA devices this can be used to more tightly scope the allocation to
-  // particular device memory and provide better pool placement. When a device
-  // supports peering or replication the affinity bitmap will be used to choose
-  // which subdevices require configuration.
+  // Queue family affinity indicating which families may access this buffer.
+  // This can more tightly scope placement to memory visible from the selected
+  // families. Implementations may configure peering or replication to satisfy
+  // multi-family requests.
   //
-  // If 0 then the buffer will be available on any queue as if
-  // IREE_HAL_QUEUE_AFFINITY_ANY was specified.
-  iree_hal_queue_affinity_t queue_affinity;
+  // If 0 then the buffer will be available to every queue family as if
+  // IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY was specified.
+  iree_hal_queue_family_affinity_t queue_family_affinity;
 
   // Minimum alignment, in bytes, of the resulting allocation.
   // The actual alignment may be any value greater-than-or-equal-to this value.
@@ -610,8 +591,8 @@ static inline void iree_hal_buffer_params_canonicalize(
   if (!params->type) {
     params->type = IREE_HAL_MEMORY_TYPE_OPTIMAL;
   }
-  if (!params->queue_affinity) {
-    params->queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  if (!params->queue_family_affinity) {
+    params->queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
   }
 }
 
@@ -870,11 +851,10 @@ IREE_API_EXPORT void iree_hal_buffer_allocation_preserve(
 //     if (iree_all_bits_set(placement.flags,
 //                           IREE_HAL_BUFFER_PLACEMENT_FLAG_ASYNCHRONOUS)) {
 //       <timeline logic>
-//       iree_hal_device_queue_dealloca(
-//           placement.device, placement.queue_affinity,
-//           wait_semaphore_list, signal_semaphore_list,
-//           IREE_HAL_DEALLOCA_FLAG_NONE,
-//           iree_hal_buffer_allocated_buffer(buffer));
+//       iree_hal_buffer_t* allocation =
+//           iree_hal_buffer_allocated_buffer(buffer);
+//       iree_hal_queue_dealloca(queue, wait_semaphore_list,
+//                               signal_semaphore_list, 1, &allocation);
 //     }
 //   }
 IREE_API_EXPORT IREE_MUST_USE_RESULT bool iree_hal_buffer_allocation_discard(
@@ -897,7 +877,7 @@ IREE_API_EXPORT IREE_MUST_USE_RESULT bool iree_hal_buffer_allocation_discard(
 //   if (iree_hal_buffer_allocation_is_terminal(buffer)) {
 //     new_buffer = buffer;  // safe to reuse
 //   } else {
-//     iree_hal_device_queue_alloca(..., &new_buffer);  // need a new buffer
+//     iree_hal_queue_alloca(..., &new_buffer);  // need a new buffer
 //   }
 IREE_API_EXPORT bool iree_hal_buffer_allocation_is_terminal(
     const iree_hal_buffer_t* buffer);

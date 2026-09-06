@@ -120,9 +120,11 @@ class HrxLoader {
   decltype(&hrx_buffer_get_device_ptr) buffer_get_device_ptr;
   decltype(&hrx_buffer_get_size) buffer_get_size;
 
-  // Synchronous transfers.
+  // Host/device transfers.
   decltype(&hrx_synchronous_h2d) synchronous_h2d;
   decltype(&hrx_synchronous_d2h) synchronous_d2h;
+  decltype(&hrx_stream_copy_h2d) stream_copy_h2d;
+  decltype(&hrx_stream_copy_d2h) stream_copy_d2h;
 
   // Stream ops.
   decltype(&hrx_stream_fill_buffer) stream_fill_buffer;

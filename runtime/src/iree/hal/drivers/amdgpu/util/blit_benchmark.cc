@@ -77,6 +77,14 @@ class BlitBenchmark : public benchmark::Fixture {
           device_, frontier_tracker, host_allocator_, &device_group_);
     }
     iree_async_frontier_tracker_release(frontier_tracker);
+    if (iree_status_is_ok(status)) {
+      queue_ = iree_hal_device_queue(device_, /*family_ordinal=*/0,
+                                     /*queue_ordinal=*/0);
+      if (!queue_) {
+        status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                  "AMDGPU HAL device has no queue 0");
+      }
+    }
 
     if (iree_status_is_ok(status)) {
       available_ = true;
@@ -85,6 +93,7 @@ class BlitBenchmark : public benchmark::Fixture {
 
     iree_status_fprint(stderr, status);
     iree_status_free(status);
+    queue_ = nullptr;
     iree_hal_device_release(device_);
     iree_hal_driver_release(driver_);
     device_ = nullptr;
@@ -93,6 +102,7 @@ class BlitBenchmark : public benchmark::Fixture {
 
   static void DeinitializeOnce() {
     if (!initialized_) return;
+    queue_ = nullptr;
     iree_hal_device_release(device_);
     iree_hal_device_group_release(device_group_);
     iree_hal_driver_release(driver_);
@@ -189,10 +199,10 @@ class BlitBenchmark : public benchmark::Fixture {
         /*semaphores=*/&semaphore,
         /*payload_values=*/&payload_value,
     };
-    IREE_RETURN_IF_ERROR(iree_hal_device_queue_copy(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-        signal_semaphore_list, source_buffer_, source_offset_, target_buffer_,
-        target_offset_, length_, IREE_HAL_COPY_FLAG_NONE));
+    IREE_RETURN_IF_ERROR(iree_hal_queue_copy(
+        queue_, iree_hal_semaphore_list_empty(), signal_semaphore_list,
+        source_buffer_, source_offset_, target_buffer_, target_offset_, length_,
+        IREE_HAL_COPY_FLAG_NONE));
     return WaitForCompletion(payload_value);
   }
 
@@ -222,10 +232,10 @@ class BlitBenchmark : public benchmark::Fixture {
           /*semaphores=*/&semaphore,
           /*payload_values=*/&signal_payload_value,
       };
-      IREE_RETURN_IF_ERROR(iree_hal_device_queue_copy(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphore_list,
-          signal_semaphore_list, source_buffer_, source_offset_, target_buffer_,
-          target_offset_, length_, IREE_HAL_COPY_FLAG_NONE));
+      IREE_RETURN_IF_ERROR(iree_hal_queue_copy(
+          queue_, wait_semaphore_list, signal_semaphore_list, source_buffer_,
+          source_offset_, target_buffer_, target_offset_, length_,
+          IREE_HAL_COPY_FLAG_NONE));
       payload_value = signal_payload_value;
     }
     completion_payload_value_ = payload_value;
@@ -244,10 +254,10 @@ class BlitBenchmark : public benchmark::Fixture {
         /*semaphores=*/&semaphore,
         /*payload_values=*/&payload_value,
     };
-    IREE_RETURN_IF_ERROR(iree_hal_device_queue_fill(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-        signal_semaphore_list, target_buffer, target_offset, length, pattern,
-        pattern_length, IREE_HAL_FILL_FLAG_NONE));
+    IREE_RETURN_IF_ERROR(iree_hal_queue_fill(
+        queue_, iree_hal_semaphore_list_empty(), signal_semaphore_list,
+        target_buffer, target_offset, length, pattern, pattern_length,
+        IREE_HAL_FILL_FLAG_NONE));
     return WaitForCompletion(payload_value);
   }
 
@@ -282,10 +292,10 @@ class BlitBenchmark : public benchmark::Fixture {
           /*semaphores=*/&semaphore,
           /*payload_values=*/&signal_payload_value,
       };
-      IREE_RETURN_IF_ERROR(iree_hal_device_queue_fill(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphore_list,
-          signal_semaphore_list, target_buffer_, target_offset_, length_,
-          &fill_pattern_, pattern_length_, IREE_HAL_FILL_FLAG_NONE));
+      IREE_RETURN_IF_ERROR(iree_hal_queue_fill(
+          queue_, wait_semaphore_list, signal_semaphore_list, target_buffer_,
+          target_offset_, length_, &fill_pattern_, pattern_length_,
+          IREE_HAL_FILL_FLAG_NONE));
       payload_value = signal_payload_value;
     }
     completion_payload_value_ = payload_value;
@@ -301,11 +311,10 @@ class BlitBenchmark : public benchmark::Fixture {
         /*semaphores=*/&semaphore,
         /*payload_values=*/&payload_value,
     };
-    IREE_RETURN_IF_ERROR(iree_hal_device_queue_update(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-        signal_semaphore_list, update_source_.data(),
-        (iree_host_size_t)source_offset_, target_buffer_, target_offset_,
-        length_, IREE_HAL_UPDATE_FLAG_NONE));
+    IREE_RETURN_IF_ERROR(iree_hal_queue_update(
+        queue_, iree_hal_semaphore_list_empty(), signal_semaphore_list,
+        update_source_.data(), (iree_host_size_t)source_offset_, target_buffer_,
+        target_offset_, length_, IREE_HAL_UPDATE_FLAG_NONE));
     return WaitForCompletion(payload_value);
   }
 
@@ -335,11 +344,10 @@ class BlitBenchmark : public benchmark::Fixture {
           /*semaphores=*/&semaphore,
           /*payload_values=*/&signal_payload_value,
       };
-      IREE_RETURN_IF_ERROR(iree_hal_device_queue_update(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphore_list,
-          signal_semaphore_list, update_source_.data(),
-          (iree_host_size_t)source_offset_, target_buffer_, target_offset_,
-          length_, IREE_HAL_UPDATE_FLAG_NONE));
+      IREE_RETURN_IF_ERROR(iree_hal_queue_update(
+          queue_, wait_semaphore_list, signal_semaphore_list,
+          update_source_.data(), (iree_host_size_t)source_offset_,
+          target_buffer_, target_offset_, length_, IREE_HAL_UPDATE_FLAG_NONE));
       payload_value = signal_payload_value;
     }
     completion_payload_value_ = payload_value;
@@ -378,7 +386,7 @@ class BlitBenchmark : public benchmark::Fixture {
 
     if (!HandleStatus(state,
                       iree_hal_semaphore_create(
-                          device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+                          device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
                           /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
                           &completion_semaphore_),
                       "failed to create completion semaphore")) {
@@ -435,6 +443,8 @@ class BlitBenchmark : public benchmark::Fixture {
   static iree_hal_driver_t* driver_;
   static iree_hal_device_group_t* device_group_;
   static iree_hal_device_t* device_;
+  // Queue borrowed from |device_| for the lifetime of the benchmark fixture.
+  static iree_hal_queue_t* queue_;
 
   iree_hal_buffer_t* source_buffer_ = nullptr;
   iree_hal_buffer_t* target_buffer_ = nullptr;
@@ -456,6 +466,7 @@ iree_allocator_t BlitBenchmark::host_allocator_;
 iree_hal_driver_t* BlitBenchmark::driver_ = nullptr;
 iree_hal_device_group_t* BlitBenchmark::device_group_ = nullptr;
 iree_hal_device_t* BlitBenchmark::device_ = nullptr;
+iree_hal_queue_t* BlitBenchmark::queue_ = nullptr;
 
 BENCHMARK_DEFINE_F(BlitBenchmark, QueueCopy)(benchmark::State& state) {
   if (!PrepareCopy(state)) return;

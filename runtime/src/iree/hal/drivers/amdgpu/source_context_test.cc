@@ -123,8 +123,7 @@ static void InitializeContext(
     iree_hal_amdgpu_source_context_t* out_context) {
   const uint64_t code_object_hash[2] = {0x1234u, 0x5678u};
   iree_hal_amdgpu_source_context_initialize(
-      /*executable_id=*/0x123u, code_object_hash, range_count,
-      /*loaded_physical_device_mask=*/range_count ? 1u : 0u, ranges,
+      /*executable_id=*/0x123u, code_object_hash, range_count, ranges,
       out_context);
 }
 

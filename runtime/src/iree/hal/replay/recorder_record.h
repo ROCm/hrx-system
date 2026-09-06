@@ -24,6 +24,20 @@ typedef struct iree_hal_replay_pending_record_t {
   iree_hal_replay_file_record_metadata_t metadata;
 } iree_hal_replay_pending_record_t;
 
+// One object record appended after a successful creation operation.
+typedef struct iree_hal_replay_created_object_record_t {
+  // Session-local object id assigned before the operation began.
+  iree_hal_replay_object_id_t object_id;
+  // HAL object type stored under |object_id|.
+  iree_hal_replay_object_type_t object_type;
+  // Schema identifying the serialized object payload.
+  iree_hal_replay_payload_type_t payload_type;
+  // Number of byte spans composing the object payload.
+  iree_host_size_t iovec_count;
+  // Borrowed byte spans valid until the pending operation is completed.
+  const iree_const_byte_span_t* iovecs;
+} iree_hal_replay_created_object_record_t;
+
 // Returns the immutable options captured by |recorder| at creation.
 const iree_hal_replay_recorder_options_t* iree_hal_replay_recorder_options(
     const iree_hal_replay_recorder_t* recorder);
@@ -72,19 +86,34 @@ iree_status_t iree_hal_replay_recorder_register_semaphore(
     iree_hal_replay_pending_record_t* pending_record,
     iree_hal_semaphore_t* semaphore, iree_hal_replay_object_id_t semaphore_id);
 
+// Returns the captured object id for |semaphore|, or NONE when the semaphore
+// was not created through |recorder|.
+iree_hal_replay_object_id_t iree_hal_replay_recorder_semaphore_id_or_none(
+    iree_hal_replay_recorder_t* recorder, iree_hal_semaphore_t* semaphore);
+
 // Marks |pending_record| as a captured operation that cannot be replayed.
 void iree_hal_replay_recorder_mark_unsupported(
     iree_hal_replay_pending_record_t* pending_record);
 
+// Completes |pending_record| and returns |operation_status| unchanged.
+// Record write failures become terminal recorder failures reported by
+// iree_hal_replay_recorder_close.
 iree_status_t iree_hal_replay_recorder_end_operation(
     iree_hal_replay_pending_record_t* pending_record,
     iree_status_t operation_status);
 
+// Completes |pending_record| with |iovecs| and returns |operation_status|
+// unchanged. Record write failures become terminal recorder failures reported
+// by iree_hal_replay_recorder_close.
 iree_status_t iree_hal_replay_recorder_end_operation_with_payload(
     iree_hal_replay_pending_record_t* pending_record,
     iree_status_t operation_status, iree_host_size_t iovec_count,
     const iree_const_byte_span_t* iovecs);
 
+// Completes a creation operation and atomically appends its successfully
+// created object record before releasing the recorder mutex. Returns
+// |operation_status| unchanged; record write failures become terminal recorder
+// failures reported by iree_hal_replay_recorder_close.
 iree_status_t iree_hal_replay_recorder_end_creation_operation(
     iree_hal_replay_pending_record_t* pending_record,
     iree_status_t operation_status, iree_host_size_t operation_iovec_count,
@@ -94,6 +123,17 @@ iree_status_t iree_hal_replay_recorder_end_creation_operation(
     iree_hal_replay_payload_type_t object_payload_type,
     iree_host_size_t object_iovec_count,
     const iree_const_byte_span_t* object_iovecs);
+
+// Completes a creation operation and atomically appends all successfully
+// created object records before releasing the recorder mutex. Returns
+// |operation_status| unchanged; record write failures become terminal recorder
+// failures reported by iree_hal_replay_recorder_close.
+iree_status_t iree_hal_replay_recorder_end_creation_operation_list(
+    iree_hal_replay_pending_record_t* pending_record,
+    iree_status_t operation_status, iree_host_size_t operation_iovec_count,
+    const iree_const_byte_span_t* operation_iovecs,
+    iree_host_size_t created_object_count,
+    const iree_hal_replay_created_object_record_t* created_objects);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -132,7 +132,7 @@ TEST_F(SlabProviderTest,
   iree_hal_buffer_release(buffer);
 }
 
-TEST_F(SlabProviderTest, DefaultQueueAllocaRoutesOversizedRequests) {
+TEST_F(SlabProviderTest, SelectedQueuePoolRoutesOversizedRequests) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   options.default_pool.range_length = 4096;
@@ -143,7 +143,7 @@ TEST_F(SlabProviderTest, DefaultQueueAllocaRoutesOversizedRequests) {
 
   iree_hal_semaphore_t* signal_semaphore = NULL;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      test_device.hal_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
+      test_device.hal_device(), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
   iree_hal_semaphore_t* alloca_signal_semaphores[] = {signal_semaphore};
   uint64_t alloca_signal_values[] = {1};
@@ -157,12 +157,25 @@ TEST_F(SlabProviderTest, DefaultQueueAllocaRoutesOversizedRequests) {
   params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  iree_hal_queue_t* queue =
+      iree_hal_device_queue(test_device.hal_device(), 0, 0);
+  ASSERT_NE(queue, nullptr);
+  params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+      iree_hal_queue_family_ordinal(iree_hal_queue_family(queue)));
+  constexpr iree_device_size_t kAllocationSize = 8192;
+  iree_hal_pool_t* pool = iree_hal_pool_set_select(
+      &test_device.device()->physical_devices[0]->default_pool_set, params,
+      kAllocationSize);
+  ASSERT_NE(pool, nullptr);
+  const iree_hal_pool_reservation_request_t request = {
+      /*.params=*/params,
+      /*.allocation_size=*/kAllocationSize,
+  };
 
   iree_hal_buffer_t* buffer = NULL;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      test_device.hal_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), alloca_signal_list, /*pool=*/NULL,
-      params, /*allocation_size=*/8192, IREE_HAL_ALLOCA_FLAG_NONE, &buffer));
+  IREE_ASSERT_OK(iree_hal_queue_alloca(queue, iree_hal_semaphore_list_empty(),
+                                       alloca_signal_list, pool,
+                                       /*request_count=*/1, &request, &buffer));
   ASSERT_NE(buffer, nullptr);
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       alloca_signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -181,9 +194,9 @@ TEST_F(SlabProviderTest, DefaultQueueAllocaRoutesOversizedRequests) {
       dealloca_signal_semaphores,
       dealloca_signal_values,
   };
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      test_device.hal_device(), IREE_HAL_QUEUE_AFFINITY_ANY, dealloca_wait_list,
-      dealloca_signal_list, buffer, IREE_HAL_DEALLOCA_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queue, dealloca_wait_list,
+                                         dealloca_signal_list,
+                                         /*buffer_count=*/1, &buffer));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(dealloca_signal_list,
                                               iree_infinite_timeout(),
                                               IREE_ASYNC_WAIT_FLAG_NONE));
@@ -213,9 +226,14 @@ TEST_F(SlabProviderTest, DefaultPhysicalDevicePoolGrowsAdditionalSlabs) {
   iree_hal_pool_reservation_t first_reservation = {0};
   iree_hal_pool_acquire_info_t first_info = {0};
   iree_hal_pool_acquire_result_t first_result = IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
-  iree::Status first_status(iree_hal_pool_acquire_reservation(
-      default_pool, capabilities.max_allocation_size,
-      capabilities.min_allocation_size, /*requester_frontier=*/NULL,
+  iree_hal_buffer_params_t params = {};
+  params.min_alignment = capabilities.min_allocation_size;
+  const iree_hal_pool_reservation_request_t request = {
+      /*.params=*/params,
+      /*.allocation_size=*/capabilities.max_allocation_size,
+  };
+  iree::Status first_status(iree_hal_pool_acquire_reservations(
+      default_pool, 1, &request, /*requester_frontier=*/NULL,
       IREE_HAL_POOL_RESERVE_FLAG_NONE, &first_reservation, &first_info,
       &first_result));
   const bool first_acquired =
@@ -226,9 +244,8 @@ TEST_F(SlabProviderTest, DefaultPhysicalDevicePoolGrowsAdditionalSlabs) {
   iree_hal_pool_acquire_info_t second_info = {0};
   iree_hal_pool_acquire_result_t second_result =
       IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
-  iree::Status second_status(iree_hal_pool_acquire_reservation(
-      default_pool, capabilities.max_allocation_size,
-      capabilities.min_allocation_size, /*requester_frontier=*/NULL,
+  iree::Status second_status(iree_hal_pool_acquire_reservations(
+      default_pool, 1, &request, /*requester_frontier=*/NULL,
       IREE_HAL_POOL_RESERVE_FLAG_NONE, &second_reservation, &second_info,
       &second_result));
   const bool second_acquired =
@@ -239,12 +256,12 @@ TEST_F(SlabProviderTest, DefaultPhysicalDevicePoolGrowsAdditionalSlabs) {
   iree_hal_pool_query_stats(default_pool, &stats);
 
   if (second_acquired) {
-    iree_hal_pool_release_reservation(default_pool, &second_reservation,
-                                      /*death_frontier=*/NULL);
+    iree_hal_pool_release_reservations(default_pool, 1, &second_reservation,
+                                       /*death_frontier=*/NULL);
   }
   if (first_acquired) {
-    iree_hal_pool_release_reservation(default_pool, &first_reservation,
-                                      /*death_frontier=*/NULL);
+    iree_hal_pool_release_reservations(default_pool, 1, &first_reservation,
+                                       /*death_frontier=*/NULL);
   }
 
   EXPECT_TRUE(first_status.ok()) << first_status.ToString();

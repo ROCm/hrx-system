@@ -9,7 +9,6 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/util/global_table.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 
@@ -22,11 +21,8 @@ typedef struct iree_hal_amdgpu_executable_global_resolver_t {
   // Host allocator used for executable-owned buffer aliases.
   iree_allocator_t host_allocator;
 
-  // Queue affinity domain of the owning AMDGPU logical device.
-  iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain;
-
-  // Bitmask of physical device ordinals this executable was loaded on.
-  uint64_t loaded_physical_device_mask;
+  // Physical device ordinal selected by the executable's queue family.
+  iree_host_size_t physical_device_ordinal;
 
   // Borrowed HSA dynamic symbol table.
   const iree_hal_amdgpu_libhsa_t* libhsa;
@@ -37,11 +33,8 @@ typedef struct iree_hal_amdgpu_executable_global_resolver_t {
   // Borrowed HSA executable containing variable symbols.
   hsa_executable_t executable;
 
-  // Number of physical device agents in |device_agents|.
-  iree_host_size_t device_agent_count;
-
-  // Borrowed physical device agent table owned by the executable.
-  const hsa_agent_t* device_agents;
+  // Physical device agent selected by the executable's queue family.
+  hsa_agent_t device_agent;
 } iree_hal_amdgpu_executable_global_resolver_t;
 
 // Initializes |out_table| with callbacks backed by |resolver|.

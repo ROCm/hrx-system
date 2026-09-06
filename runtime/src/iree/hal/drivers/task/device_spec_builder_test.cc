@@ -58,10 +58,12 @@ static bool test_executable_loader_claims_executable(
 
 static iree_status_t test_executable_loader_load(
     iree_hal_executable_loader_t* base_executable_loader,
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* load_params,
     iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable) {
-  *out_executable = NULL;
+  (void)queue_family;
+  (void)out_executable;
   return iree_make_status(IREE_STATUS_INTERNAL);
 }
 
@@ -151,8 +153,7 @@ TEST(TaskDeviceSpecBuilderTest, CapturesCommonTaskFacts) {
       iree_hal_device_spec_queues(spec);
   ASSERT_NE(queues, nullptr);
   ASSERT_EQ(queues->family_count, 1);
-  EXPECT_EQ(queues->families[0].queue_count, 2);
-  EXPECT_EQ(queues->families[0].queue_affinity, 3u);
+  EXPECT_EQ(queues->families[0].provisioned_queue_count, 2);
   EXPECT_TRUE(iree_all_bits_set(queues->families[0].role_flags,
                                 IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC));
   EXPECT_EQ(queues->families[0].atomic_capabilities.operations.device_scope_32,

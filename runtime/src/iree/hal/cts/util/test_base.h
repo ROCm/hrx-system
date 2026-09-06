@@ -32,7 +32,6 @@
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/registry.h"
-#include "iree/io/file_handle.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -54,6 +53,7 @@ struct HalTraits;
   }
 
 CTS_HAL_TRAITS(iree_hal_buffer_t, iree_hal_buffer_release);
+CTS_HAL_TRAITS(iree_hal_buffer_view_t, iree_hal_buffer_view_release);
 CTS_HAL_TRAITS(iree_hal_command_buffer_t, iree_hal_command_buffer_release);
 CTS_HAL_TRAITS(iree_hal_semaphore_t, iree_hal_semaphore_release);
 CTS_HAL_TRAITS(iree_hal_executable_t, iree_hal_executable_release);
@@ -128,7 +128,7 @@ struct SemaphoreList {
     for (size_t i = 0; i < initial_values.size(); ++i) {
       iree_hal_semaphore_t* semaphore = NULL;
       IREE_EXPECT_OK(iree_hal_semaphore_create(
-          device, IREE_HAL_QUEUE_AFFINITY_ANY, initial_values[i],
+          device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, initial_values[i],
           IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
       semaphores.push_back(semaphore);
     }
@@ -242,28 +242,26 @@ inline std::map<std::string, CachedBackendResources>& GetBackendCache() {
   return cache;
 }
 
-// Returns the affinity covering every physical device in |device_spec|.
-inline iree_hal_physical_device_affinity_t GetAllPhysicalDeviceAffinity(
-    const iree_hal_device_spec_t* device_spec) {
-  iree_hal_physical_device_affinity_t physical_device_affinity = 0;
-  const iree_hal_device_identity_spec_t* identity =
-      iree_hal_device_spec_identity(device_spec);
-  for (iree_host_size_t i = 0; i < identity->physical_device_count; ++i) {
-    physical_device_affinity |=
-        identity->physical_devices[i].physical_device_affinity;
-  }
-  return physical_device_affinity;
-}
-
-// Selects the executable target attached to |backend| from |device|.
+// Selects the executable target attached to |backend| for |queue_family|.
 inline iree_status_t SelectBackendExecutableTarget(
-    iree_hal_device_t* device, const BackendInfo& backend,
+    iree_hal_device_t* device, const iree_hal_queue_family_t* queue_family,
+    const BackendInfo& backend,
     iree_hal_executable_target_selection_result_t* out_result) {
   const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(device);
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(device_spec);
+  const iree_hal_queue_family_ordinal_t queue_family_ordinal =
+      iree_hal_queue_family_ordinal(queue_family);
+  if (queue_family_ordinal >= queue_spec->family_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "queue family ordinal %u is out of range",
+                            queue_family_ordinal);
+  }
   return backend.executable_target_selector(
       device_spec, iree_make_cstring_view(backend.executable_target_family),
       iree_make_cstring_view(backend.executable_target_key),
-      GetAllPhysicalDeviceAffinity(device_spec), out_result);
+      queue_spec->families[queue_family_ordinal].physical_device_affinity,
+      out_result);
 }
 
 // GTest environment that releases all cached backend resources at program exit.
@@ -413,6 +411,21 @@ class CtsTestBase : public BaseType {
     iree_hal_device_retain(device_);
     device_allocator_ = cached.allocator;
     iree_hal_allocator_retain(device_allocator_);
+
+    const iree_hal_device_queue_spec_t* queue_spec =
+        iree_hal_device_spec_queues(iree_hal_device_spec(device_));
+    for (iree_host_size_t i = 0; i < queue_spec->family_count; ++i) {
+      const iree_hal_queue_family_spec_t* family_spec =
+          &queue_spec->families[i];
+      if (family_spec->provisioned_queue_count > 0 &&
+          iree_all_bits_set(family_spec->role_flags,
+                            IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER)) {
+        transfer_queue_ =
+            iree_hal_device_queue(device_, (iree_hal_queue_family_ordinal_t)i,
+                                  /*queue_ordinal=*/0);
+        break;
+      }
+    }
   }
 
   void TearDown() override {
@@ -429,6 +442,7 @@ class CtsTestBase : public BaseType {
     // releases just decrement the refcount, they don't destroy anything.
     iree_hal_allocator_release(device_allocator_);
     device_allocator_ = nullptr;
+    transfer_queue_ = nullptr;
     iree_hal_device_release(device_);
     device_ = nullptr;
     iree_hal_device_group_release(device_group_);
@@ -473,14 +487,17 @@ class CtsTestBase : public BaseType {
         iree_hal_device_spec(device_), &selection);
   }
 
-  // Selects the current CTS executable parameterization from the device.
+  // Selects the current CTS executable parameterization for |queue_family|.
   iree_status_t SelectExecutableTarget(
+      const iree_hal_queue_family_t* queue_family,
       iree_hal_executable_target_selection_result_t* out_result) const {
-    return SelectBackendExecutableTarget(device_, this->GetParam(), out_result);
+    return SelectBackendExecutableTarget(device_, queue_family,
+                                         this->GetParam(), out_result);
   }
 
   // Loads native executable data for a borrowed target of the current device.
-  iree_status_t LoadExecutable(const iree_hal_executable_target_t* target,
+  iree_status_t LoadExecutable(const iree_hal_queue_family_t* queue_family,
+                               const iree_hal_executable_target_t* target,
                                iree_hal_executable_load_flags_t flags,
                                iree_const_byte_span_t executable_data,
                                iree_hal_executable_t** out_executable) const {
@@ -488,9 +505,8 @@ class CtsTestBase : public BaseType {
     iree_hal_executable_load_params_initialize(&load_params);
     load_params.flags = flags;
     load_params.executable_data = executable_data;
-    return iree_hal_device_load_executable(device_, IREE_HAL_QUEUE_AFFINITY_ANY,
-                                           target, &load_params,
-                                           out_executable);
+    return iree_hal_device_load_executable(device_, queue_family, target,
+                                           &load_params, out_executable);
   }
 
   // Loads |file_name| for the current test executable target.
@@ -501,10 +517,15 @@ class CtsTestBase : public BaseType {
   // loading. Once a target is selected, all native loader errors are failures.
   void LoadExecutableOrSkipUnsupported(const char* file_name,
                                        iree_hal_executable_t** out_executable) {
-    *out_executable = nullptr;
+    iree_hal_queue_t* dispatch_queue =
+        QueueForCommandCategories(IREE_HAL_COMMAND_CATEGORY_DISPATCH);
+    if (!dispatch_queue) {
+      GTEST_SKIP() << "device has no dispatch-capable queue";
+    }
 
     iree_hal_executable_target_selection_result_t result;
-    IREE_ASSERT_OK(SelectExecutableTarget(&result));
+    IREE_ASSERT_OK(
+        SelectExecutableTarget(iree_hal_queue_family(dispatch_queue), &result));
     if (result.outcome ==
         IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
       GTEST_SKIP() << "Executable target '" << executable_target_family() << ":"
@@ -521,7 +542,8 @@ class CtsTestBase : public BaseType {
     }
 
     IREE_ASSERT_OK(LoadExecutable(
-        result.target, IREE_HAL_EXECUTABLE_LOAD_FLAG_NONE,
+        iree_hal_queue_family(dispatch_queue), result.target,
+        IREE_HAL_EXECUTABLE_LOAD_FLAG_NONE,
         executable_data(iree_make_cstring_view(file_name)), out_executable));
   }
 
@@ -543,21 +565,22 @@ class CtsTestBase : public BaseType {
   iree_status_t CreateZeroedDeviceBuffer(iree_device_size_t buffer_size,
                                          iree_hal_buffer_t** out_buffer) {
     *out_buffer = nullptr;
-    iree_hal_buffer_params_t params = {0};
-    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-    params.usage =
-        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+    if (!transfer_queue_) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "device has no provisioned transfer-capable queue");
+    }
     iree_hal_buffer_t* buffer = nullptr;
-    iree_status_t status = iree_hal_allocator_allocate_buffer(
-        device_allocator_, params, buffer_size, &buffer);
+    iree_status_t status =
+        CreateUninitializedDeviceBuffer(buffer_size, &buffer);
     if (iree_status_is_ok(status)) {
       uint8_t pattern = 0;
       SemaphoreList empty_wait;
       SemaphoreList fill_signal(device_, {0}, {1});
-      status = iree_hal_device_queue_fill(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, fill_signal, buffer,
-          /*target_offset=*/0, buffer_size, &pattern, sizeof(pattern),
-          IREE_HAL_FILL_FLAG_NONE);
+      status =
+          iree_hal_queue_fill(transfer_queue_, empty_wait, fill_signal, buffer,
+                              /*target_offset=*/0, buffer_size, &pattern,
+                              sizeof(pattern), IREE_HAL_FILL_FLAG_NONE);
       if (iree_status_is_ok(status)) {
         status = iree_hal_semaphore_list_wait(
             fill_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
@@ -575,20 +598,21 @@ class CtsTestBase : public BaseType {
                                            iree_device_size_t buffer_size,
                                            iree_hal_buffer_t** out_buffer) {
     *out_buffer = nullptr;
-    iree_hal_buffer_params_t params = {0};
-    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-    params.usage =
-        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+    if (!transfer_queue_) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "device has no provisioned transfer-capable queue");
+    }
     iree_hal_buffer_t* buffer = nullptr;
-    iree_status_t status = iree_hal_allocator_allocate_buffer(
-        device_allocator_, params, buffer_size, &buffer);
+    iree_status_t status =
+        CreateUninitializedDeviceBuffer(buffer_size, &buffer);
     if (iree_status_is_ok(status)) {
       SemaphoreList empty_wait;
       SemaphoreList upload_signal(device_, {0}, {1});
-      status = iree_hal_device_queue_update(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, upload_signal,
-          source_data, /*source_offset=*/0, buffer, /*target_offset=*/0,
-          buffer_size, IREE_HAL_UPDATE_FLAG_NONE);
+      status = iree_hal_queue_update(
+          transfer_queue_, empty_wait, upload_signal, source_data,
+          /*source_offset=*/0, buffer, /*target_offset=*/0, buffer_size,
+          IREE_HAL_UPDATE_FLAG_NONE);
       if (iree_status_is_ok(status)) {
         status = iree_hal_semaphore_list_wait(
             upload_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
@@ -607,20 +631,21 @@ class CtsTestBase : public BaseType {
                                          PatternType pattern,
                                          iree_hal_buffer_t** out_buffer) {
     *out_buffer = nullptr;
-    iree_hal_buffer_params_t params = {0};
-    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-    params.usage =
-        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+    if (!transfer_queue_) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "device has no provisioned transfer-capable queue");
+    }
     iree_hal_buffer_t* buffer = nullptr;
-    iree_status_t status = iree_hal_allocator_allocate_buffer(
-        device_allocator_, params, buffer_size, &buffer);
+    iree_status_t status =
+        CreateUninitializedDeviceBuffer(buffer_size, &buffer);
     if (iree_status_is_ok(status)) {
       SemaphoreList empty_wait;
       SemaphoreList fill_signal(device_, {0}, {1});
-      status = iree_hal_device_queue_fill(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, fill_signal, buffer,
-          /*target_offset=*/0, buffer_size, &pattern, sizeof(pattern),
-          IREE_HAL_FILL_FLAG_NONE);
+      status =
+          iree_hal_queue_fill(transfer_queue_, empty_wait, fill_signal, buffer,
+                              /*target_offset=*/0, buffer_size, &pattern,
+                              sizeof(pattern), IREE_HAL_FILL_FLAG_NONE);
       if (iree_status_is_ok(status)) {
         status = iree_hal_semaphore_list_wait(
             fill_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
@@ -653,44 +678,56 @@ class CtsTestBase : public BaseType {
     return data;
   }
 
-  // Reads a specific byte range from a buffer.
-  std::vector<uint8_t> ReadBufferBytes(
-      iree_hal_buffer_t* buffer, iree_device_size_t offset,
-      iree_device_size_t length,
-      iree_hal_queue_affinity_t queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY) {
-    std::vector<uint8_t> data(length);
-    if (iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
-                          IREE_HAL_MEMORY_TYPE_HOST_VISIBLE) &&
-        iree_all_bits_set(iree_hal_buffer_allowed_usage(buffer),
-                          IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED)) {
-      IREE_EXPECT_OK(
-          iree_hal_buffer_map_read(buffer, offset, data.data(), length));
-      return data;
+  // Uploads host bytes to a buffer and waits for completion.
+  iree_status_t UploadBufferData(const void* source,
+                                 iree_hal_buffer_t* target_buffer,
+                                 iree_device_size_t target_offset,
+                                 iree_device_size_t length) {
+    if (!transfer_queue_) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "device has no provisioned transfer-capable queue");
     }
-
-    iree_io_file_handle_t* handle = nullptr;
-    IREE_EXPECT_OK(iree_io_file_handle_wrap_host_allocation(
-        IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
-        iree_make_byte_span(data.data(), length),
-        iree_io_file_handle_release_callback_null(), iree_allocator_system(),
-        &handle));
-    if (!handle) return data;
-
-    iree_hal_file_t* file = nullptr;
-    IREE_EXPECT_OK(iree_hal_file_import(
-        device_, queue_affinity, IREE_HAL_MEMORY_ACCESS_WRITE, handle,
-        IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
-    iree_io_file_handle_release(handle);
-    if (!file) return data;
-
     SemaphoreList empty_wait;
-    SemaphoreList write_signal(device_, {0}, {1});
-    IREE_EXPECT_OK(iree_hal_device_queue_write(
-        device_, queue_affinity, empty_wait, write_signal, buffer, offset, file,
-        /*target_offset=*/0, length, IREE_HAL_WRITE_FLAG_NONE));
-    IREE_EXPECT_OK(iree_hal_semaphore_list_wait(
-        write_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-    iree_hal_file_release(file);
+    SemaphoreList upload_signal(device_, {0}, {1});
+    iree_status_t status =
+        iree_hal_queue_upload(transfer_queue_, empty_wait, upload_signal,
+                              source, target_buffer, target_offset, length);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_semaphore_list_wait(
+          upload_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+    }
+    return status;
+  }
+
+  // Downloads buffer bytes to host memory and waits for completion.
+  iree_status_t DownloadBufferData(iree_hal_buffer_t* source_buffer,
+                                   iree_device_size_t source_offset,
+                                   void* target, iree_device_size_t length) {
+    if (!transfer_queue_) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "device has no provisioned transfer-capable queue");
+    }
+    SemaphoreList empty_wait;
+    SemaphoreList download_signal(device_, {0}, {1});
+    iree_status_t status =
+        iree_hal_queue_download(transfer_queue_, empty_wait, download_signal,
+                                source_buffer, source_offset, target, length);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_semaphore_list_wait(
+          download_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+    }
+    return status;
+  }
+
+  // Reads a specific byte range from a buffer.
+  std::vector<uint8_t> ReadBufferBytes(iree_hal_buffer_t* buffer,
+                                       iree_device_size_t offset,
+                                       iree_device_size_t length) {
+    std::vector<uint8_t> data(length);
+    IREE_EXPECT_OK(
+        DownloadBufferData(buffer, offset, data.data(), data.size()));
     return data;
   }
 
@@ -698,7 +735,67 @@ class CtsTestBase : public BaseType {
   // Command buffer and semaphore helpers
   //===--------------------------------------------------------------------===//
 
-  // Submits |command_buffer| to the device and waits for completion.
+  // Selects a provisioned queue whose family supports |command_categories|.
+  iree_hal_queue_t* QueueForCommandCategories(
+      iree_hal_command_category_t command_categories) const {
+    iree_hal_queue_family_role_flags_t required_roles = 0;
+    if (iree_any_bit_set(command_categories,
+                         IREE_HAL_COMMAND_CATEGORY_TRANSFER)) {
+      required_roles |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER;
+    }
+    if (iree_any_bit_set(command_categories,
+                         IREE_HAL_COMMAND_CATEGORY_DISPATCH)) {
+      required_roles |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH;
+    }
+    if (iree_any_bit_set(command_categories,
+                         IREE_HAL_COMMAND_CATEGORY_ATOMIC)) {
+      required_roles |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC;
+    }
+    const iree_hal_device_queue_spec_t* queue_spec =
+        iree_hal_device_spec_queues(iree_hal_device_spec(device_));
+    for (iree_host_size_t family_ordinal = 0;
+         family_ordinal < queue_spec->family_count; ++family_ordinal) {
+      const iree_hal_queue_family_spec_t* family_spec =
+          &queue_spec->families[family_ordinal];
+      if (family_spec->provisioned_queue_count == 0 ||
+          !iree_all_bits_set(family_spec->role_flags, required_roles)) {
+        continue;
+      }
+      return iree_hal_device_queue(
+          device_, (iree_hal_queue_family_ordinal_t)family_ordinal,
+          /*queue_ordinal=*/0);
+    }
+    return nullptr;
+  }
+
+  iree_status_t CreateCommandBuffer(
+      iree_hal_command_buffer_mode_t mode,
+      iree_hal_command_category_t command_categories,
+      iree_host_size_t binding_capacity,
+      iree_hal_command_buffer_t** out_command_buffer) const {
+    iree_hal_queue_t* queue = QueueForCommandCategories(command_categories);
+    if (!queue) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "device has no provisioned queue for command categories 0x%08x",
+          command_categories);
+    }
+    return iree_hal_command_buffer_create(device_, iree_hal_queue_family(queue),
+                                          mode, command_categories,
+                                          binding_capacity, out_command_buffer);
+  }
+
+  // Returns the first provisioned queue in the command buffer's family.
+  iree_hal_queue_t* QueueForCommandBuffer(
+      const iree_hal_command_buffer_t* command_buffer) const {
+    const iree_hal_queue_family_t* queue_family =
+        iree_hal_command_buffer_queue_family(command_buffer);
+    return iree_hal_device_queue(device_,
+                                 iree_hal_queue_family_ordinal(queue_family),
+                                 /*queue_ordinal=*/0);
+  }
+
+  // Submits |command_buffer| to a queue in its family and waits for completion.
   iree_status_t SubmitCommandBufferAndWait(
       iree_hal_command_buffer_t* command_buffer,
       iree_hal_buffer_binding_table_t binding_table =
@@ -707,7 +804,7 @@ class CtsTestBase : public BaseType {
 
     iree_hal_semaphore_t* signal_semaphore = nullptr;
     IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0ull,
+        device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0ull,
         IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
     uint64_t target_payload_value = 1ull;
     iree_hal_semaphore_list_t signal_semaphores = {
@@ -716,10 +813,14 @@ class CtsTestBase : public BaseType {
         /*payload_values=*/&target_payload_value,
     };
 
-    iree_status_t status = iree_hal_device_queue_execute(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphores,
-        signal_semaphores, command_buffer, binding_table,
-        IREE_HAL_EXECUTE_FLAG_NONE);
+    iree_hal_queue_t* queue = QueueForCommandBuffer(command_buffer);
+    iree_status_t status =
+        queue ? iree_hal_queue_execute(
+                    queue, wait_semaphores, signal_semaphores, command_buffer,
+                    binding_table, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE)
+              : iree_make_status(
+                    IREE_STATUS_FAILED_PRECONDITION,
+                    "command buffer family has no provisioned queue");
     if (iree_status_is_ok(status)) {
       status = iree_hal_semaphore_wait(signal_semaphore, target_payload_value,
                                        iree_infinite_timeout(),
@@ -738,10 +839,9 @@ class CtsTestBase : public BaseType {
   iree_hal_command_buffer_t* CreateEmptyCommandBuffer(
       iree_host_size_t binding_capacity = 0) {
     iree_hal_command_buffer_t* command_buffer = nullptr;
-    IREE_EXPECT_OK(iree_hal_command_buffer_create(
-        device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-        IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-        binding_capacity, &command_buffer));
+    IREE_EXPECT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                       IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                       binding_capacity, &command_buffer));
     IREE_EXPECT_OK(iree_hal_command_buffer_begin(command_buffer));
     IREE_EXPECT_OK(iree_hal_command_buffer_end(command_buffer));
     return command_buffer;
@@ -749,9 +849,9 @@ class CtsTestBase : public BaseType {
 
   iree_hal_semaphore_t* CreateSemaphore() {
     iree_hal_semaphore_t* semaphore = nullptr;
-    IREE_EXPECT_OK(
-        iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0ull,
-                                  IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+    IREE_EXPECT_OK(iree_hal_semaphore_create(
+        device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0ull,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
     return semaphore;
   }
 
@@ -762,10 +862,16 @@ class CtsTestBase : public BaseType {
     EXPECT_EQ(expected_value, value);
   }
 
+  // Retained HAL driver backing |device_|.
   iree_hal_driver_t* driver_ = nullptr;
+  // Retained topology group containing |device_|.
   iree_hal_device_group_t* device_group_ = nullptr;
+  // Retained HAL device used by the test.
   iree_hal_device_t* device_ = nullptr;
+  // Retained allocator exposed by |device_|.
   iree_hal_allocator_t* device_allocator_ = nullptr;
+  // Provisioned transfer-capable queue borrowed from |device_|.
+  iree_hal_queue_t* transfer_queue_ = nullptr;
 
  private:
   // Extracts the canonical test identity "TestClass.TestMethod" from GTest's

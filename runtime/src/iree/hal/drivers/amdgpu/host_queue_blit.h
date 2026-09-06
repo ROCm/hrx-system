@@ -35,6 +35,20 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_fill(
     iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
     bool* out_ready);
 
+// Emits a fill blit with an optional completion action and resource.
+// Caller must hold submission_mutex.
+iree_status_t iree_hal_amdgpu_host_queue_submit_fill_with_action(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_amdgpu_wait_resolution_t* resolution,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, uint64_t pattern_bits,
+    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags,
+    iree_hal_amdgpu_reclaim_action_t pre_signal_action,
+    iree_hal_resource_t* completion_resource,
+    iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
+    bool* out_ready);
+
 // Emits a copy blit kernel submission. Caller must hold submission_mutex.
 iree_status_t iree_hal_amdgpu_host_queue_submit_copy(
     iree_hal_amdgpu_host_queue_t* queue,
@@ -72,6 +86,20 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_update(
     const void* source_buffer, iree_host_size_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, iree_hal_update_flags_t flags,
+    iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
+    bool* out_ready);
+
+// Emits an update blit with an optional completion action and resource.
+// Caller must hold submission_mutex.
+iree_status_t iree_hal_amdgpu_host_queue_submit_update_with_action(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_amdgpu_wait_resolution_t* resolution,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    const void* source_buffer, iree_host_size_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_update_flags_t flags,
+    iree_hal_amdgpu_reclaim_action_t pre_signal_action,
+    iree_hal_resource_t* completion_resource,
     iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
     bool* out_ready);
 

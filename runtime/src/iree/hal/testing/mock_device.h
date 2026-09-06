@@ -7,11 +7,11 @@
 // A lightweight mock HAL device for testing HAL infrastructure that operates
 // on devices without needing real hardware or a full driver stack.
 //
-// The mock device implements the topology-related vtable methods (id,
-// device_spec, topology_info, refine_topology_edge, and assign_topology_info)
-// with configurable behavior. It can optionally load tiny metadata-only
-// executables for tests that need executable objects without real compiled
-// kernels. All other vtable methods return IREE_STATUS_UNIMPLEMENTED or
+// The mock device implements immutable device facts, queue-family identities,
+// and topology-related vtable methods with configurable behavior. It can
+// optionally load tiny metadata-only executables for tests that need executable
+// objects without real compiled kernels. It does not expose provisioned queues;
+// all execution and memory vtable methods return IREE_STATUS_UNIMPLEMENTED or
 // zero/NULL as appropriate.
 //
 // This is intended for testing code that coordinates devices (device groups,
@@ -41,7 +41,8 @@ typedef struct iree_hal_mock_device_options_t {
   // Optional immutable spec returned by iree_hal_device_spec().
   // Retained by the mock when provided; otherwise a default spec is created.
   // Callers enabling executable support with a custom spec must advertise the
-  // mock:metadata executable target themselves.
+  // mock:metadata executable target and at least one dispatch queue family
+  // themselves. Queue families must not advertise provisioned queues.
   iree_hal_device_spec_t* device_spec;
 
   // Optional status returned by assign_topology_info. IREE_STATUS_OK means the

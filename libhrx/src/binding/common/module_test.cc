@@ -30,14 +30,15 @@ struct FakeFunction {
 // extractor owns all parsing, validation, and allocation behavior.
 class FakeExecutable {
  public:
-  FakeExecutable() { iree_hal_resource_initialize(&kVtable, &resource_); }
+  FakeExecutable() {
+    iree_hal_queue_family_initialize(/*ordinal=*/0, &queue_family_);
+    iree_hal_executable_initialize(&queue_family_, &kVtable, &base_);
+  }
 
   FakeExecutable(const FakeExecutable&) = delete;
   FakeExecutable& operator=(const FakeExecutable&) = delete;
 
-  iree_hal_executable_t* base() {
-    return reinterpret_cast<iree_hal_executable_t*>(this);
-  }
+  iree_hal_executable_t* base() { return &base_; }
 
   void AddFunction(
       std::string name, uint32_t constant_byte_length, uint16_t binding_count,
@@ -153,19 +154,19 @@ class FakeExecutable {
 
   static iree_status_t GlobalBuffer(iree_hal_executable_t* base_executable,
                                     iree_hal_executable_global_t global,
-                                    iree_hal_queue_affinity_t queue_affinity,
                                     iree_hal_buffer_t** out_buffer) {
     (void)base_executable;
     (void)global;
-    (void)queue_affinity;
-    *out_buffer = nullptr;
+    (void)out_buffer;
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
   }
 
   static const iree_hal_executable_vtable_t kVtable;
 
-  // Must be first so the HAL may cast between the resource and executable.
-  iree_hal_resource_t resource_;
+  // Must be first so the HAL may cast between the base and fake executable.
+  iree_hal_executable_t base_;
+  // Stable family identity borrowed by |base_|.
+  iree_hal_queue_family_t queue_family_;
   std::vector<FakeFunction> functions_;
   bool has_function_count_override_ = false;
   iree_host_size_t function_count_override_ = 0;

@@ -28,9 +28,9 @@ class CommandBufferStressTest : public CtsTestBase<> {
                         iree_host_size_t pattern_length) {
     SemaphoreList empty_wait;
     SemaphoreList fill_signal(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_device_queue_fill(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, fill_signal,
-        target_buffer, /*target_offset=*/0, length, pattern, pattern_length,
+    IREE_ASSERT_OK(iree_hal_queue_fill(
+        transfer_queue_, empty_wait, fill_signal, target_buffer,
+        /*target_offset=*/0, length, pattern, pattern_length,
         IREE_HAL_FILL_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
         fill_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -51,10 +51,10 @@ TEST_P(CommandBufferStressTest, RapidFillSubmit) {
     uint32_t pattern = (uint32_t)(0xBEEF0000 | i);
 
     Ref<iree_hal_command_buffer_t> command_buffer;
-    IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-        IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
-        /*binding_capacity=*/0, command_buffer.out()));
+    IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                       IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                       /*binding_capacity=*/0,
+                                       command_buffer.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
     IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
         command_buffer, iree_hal_make_buffer_ref(buffer, 0, buffer_size),
@@ -86,10 +86,10 @@ TEST_P(CommandBufferStressTest, RapidCopySubmit) {
 
     // Copy source→target via command buffer.
     Ref<iree_hal_command_buffer_t> command_buffer;
-    IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        device_, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-        IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
-        /*binding_capacity=*/0, command_buffer.out()));
+    IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                       IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                       /*binding_capacity=*/0,
+                                       command_buffer.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
     IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
         command_buffer, iree_hal_make_buffer_ref(source, 0, buffer_size),
@@ -117,9 +117,8 @@ TEST_P(CommandBufferStressTest, LargeFillCommandBuffer) {
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(buffer_size, buffer.out()));
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+  IREE_ASSERT_OK(CreateCommandBuffer(
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
       /*binding_capacity=*/0, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   std::vector<uint32_t> expected(kFillCount);

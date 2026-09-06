@@ -154,9 +154,8 @@ IREE_FLAG_CALLBACK_NAMED(
     iree_run_loom_parse_kernel_input_buffer_flag,
     iree_run_loom_print_kernel_input_buffer_flag, NULL, kernel_input_buffer,
     "kernel-input-buffer",
-    "Appends a HAL kernel buffer binding. Bindings use the same "
-    "shape/type/data syntax as iree-benchmark-executable and may use '&' for "
-    "in-place storage buffers.");
+    "Appends a HAL kernel buffer binding. Bindings use the HAL tooling "
+    "shape/type/data syntax and may use '&' for in-place storage buffers.");
 
 static iree_status_t iree_run_loom_parse_expected_kernel_buffer_flag(
     iree_string_view_t flag_name, void* storage, iree_string_view_t value) {
@@ -393,8 +392,8 @@ static void iree_run_loom_print_agents_markdown(FILE* stream) {
       "iree-run-loom --backend=amdgpu-hal --probe-hal\n"
       "```\n"
       "\n"
-      "`--kernel-input-buffer` and `--expected-kernel-buffer` use the same "
-      "shape/type/value syntax as `iree-benchmark-executable`. "
+      "`--kernel-input-buffer` and `--expected-kernel-buffer` use the HAL "
+      "tooling shape/type/value syntax. "
       "`--workgroup-count` overrides a static\n"
       "`kernel.launch.config` dispatch count when the test needs a different\n"
       "grid. `--emit-only` is HAL-only and stops after producing artifacts.\n"

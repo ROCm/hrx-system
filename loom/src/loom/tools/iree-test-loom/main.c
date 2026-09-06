@@ -304,7 +304,6 @@ static iree_status_t iree_test_loom_configure_hal_actual_sequence(
   IREE_RETURN_IF_ERROR(
       loom_run_hal_testbench_context_ensure_runtime(hal_context));
 
-  execution_options->materializer.device = hal_context->runtime.device;
   execution_options->materializer.device_allocator =
       iree_hal_device_allocator(hal_context->runtime.device);
   execution_options->materializer.buffer_params =
@@ -391,7 +390,6 @@ static iree_status_t iree_test_loom_run_case_samples(
     if (iree_status_is_ok(status)) {
       matmul_oracle_options =
           (loom_testbench_reference_matmul_oracle_options_t){
-              .device = hal_context->runtime.device,
               .device_allocator =
                   iree_hal_device_allocator(hal_context->runtime.device),
               .result_buffer_params =

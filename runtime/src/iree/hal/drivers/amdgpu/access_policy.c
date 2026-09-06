@@ -27,73 +27,58 @@ static iree_status_t iree_hal_amdgpu_access_agent_list_append_unique(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_amdgpu_access_agent_list_select_devices(
+static iree_status_t iree_hal_amdgpu_access_agent_list_select_families(
     const iree_hal_amdgpu_topology_t* topology,
-    iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain,
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_amdgpu_queue_affinity_physical_device_set_t*
-        out_physical_device_set) {
-  if (IREE_UNLIKELY(queue_affinity_domain.physical_device_count >
-                    topology->gpu_agent_count)) {
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_amdgpu_gpu_agent_mask_t* out_gpu_agent_mask) {
+  if (IREE_UNLIKELY(topology->gpu_agent_count > IREE_HAL_MAX_QUEUE_FAMILIES)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU queue affinity domain device count %" PRIhsz
-                            " exceeds topology GPU agent count %" PRIhsz,
-                            queue_affinity_domain.physical_device_count,
-                            topology->gpu_agent_count);
+                            "AMDGPU topology GPU agent count %" PRIhsz
+                            " exceeds queue-family affinity capacity %" PRIhsz,
+                            topology->gpu_agent_count,
+                            (iree_host_size_t)IREE_HAL_MAX_QUEUE_FAMILIES);
   }
-
-  return iree_hal_amdgpu_queue_affinity_select_physical_devices(
-      queue_affinity_domain, queue_affinity, out_physical_device_set);
-}
-
-iree_status_t iree_hal_amdgpu_access_agent_list_resolve_queue_agents(
-    const iree_hal_amdgpu_topology_t* topology,
-    iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain,
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_amdgpu_access_agent_list_t* out_agent_list) {
-  IREE_ASSERT_ARGUMENT(topology);
-  IREE_ASSERT_ARGUMENT(out_agent_list);
-  memset(out_agent_list, 0, sizeof(*out_agent_list));
-
-  iree_hal_amdgpu_queue_affinity_physical_device_set_t physical_device_set;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_access_agent_list_select_devices(
-      topology, queue_affinity_domain, queue_affinity, &physical_device_set));
-
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t physical_device_ordinal = 0;
-       physical_device_ordinal < topology->gpu_agent_count &&
-       iree_status_is_ok(status);
-       ++physical_device_ordinal) {
-    if (!iree_all_bits_set(physical_device_set.physical_device_mask,
-                           ((uint64_t)1) << physical_device_ordinal)) {
-      continue;
-    }
-    status = iree_hal_amdgpu_access_agent_list_append_unique(
-        out_agent_list, topology->gpu_agents[physical_device_ordinal]);
+  const iree_hal_queue_family_affinity_t supported_affinity =
+      topology->gpu_agent_count == IREE_HAL_MAX_QUEUE_FAMILIES
+          ? IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY
+          : (((iree_hal_queue_family_affinity_t)1
+              << topology->gpu_agent_count) -
+             1);
+  if (iree_hal_queue_family_affinity_is_any(queue_family_affinity)) {
+    queue_family_affinity = supported_affinity;
   }
-  return status;
+  if (IREE_UNLIKELY(
+          iree_hal_queue_family_affinity_is_empty(queue_family_affinity) ||
+          !iree_all_bits_set(supported_affinity, queue_family_affinity))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU queue family affinity 0x%016" PRIx64
+        " is not a non-empty subset of supported families 0x%016" PRIx64,
+        queue_family_affinity, supported_affinity);
+  }
+  *out_gpu_agent_mask = (iree_hal_amdgpu_gpu_agent_mask_t)queue_family_affinity;
+  return iree_ok_status();
 }
 
 iree_status_t iree_hal_amdgpu_access_agent_list_resolve_memory_agents(
     const iree_hal_amdgpu_topology_t* topology,
-    iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_amdgpu_access_agent_list_t* out_agent_list) {
   IREE_ASSERT_ARGUMENT(topology);
   IREE_ASSERT_ARGUMENT(out_agent_list);
   memset(out_agent_list, 0, sizeof(*out_agent_list));
 
-  iree_hal_amdgpu_queue_affinity_physical_device_set_t physical_device_set;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_access_agent_list_select_devices(
-      topology, queue_affinity_domain, queue_affinity, &physical_device_set));
+  iree_hal_amdgpu_gpu_agent_mask_t gpu_agent_mask = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_access_agent_list_select_families(
+      topology, queue_family_affinity, &gpu_agent_mask));
 
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t physical_device_ordinal = 0;
        physical_device_ordinal < topology->gpu_agent_count &&
        iree_status_is_ok(status);
        ++physical_device_ordinal) {
-    if (!iree_all_bits_set(physical_device_set.physical_device_mask,
-                           ((uint64_t)1) << physical_device_ordinal)) {
+    if (!iree_all_bits_set(gpu_agent_mask, ((uint64_t)1)
+                                               << physical_device_ordinal)) {
       continue;
     }
     const iree_host_size_t cpu_agent_ordinal =
@@ -113,6 +98,33 @@ iree_status_t iree_hal_amdgpu_access_agent_list_resolve_memory_agents(
       status = iree_hal_amdgpu_access_agent_list_append_unique(
           out_agent_list, topology->cpu_agents[cpu_agent_ordinal]);
     }
+  }
+  return status;
+}
+
+iree_status_t iree_hal_amdgpu_access_agent_list_resolve_queue_family_agents(
+    const iree_hal_amdgpu_topology_t* topology,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_amdgpu_access_agent_list_t* out_agent_list) {
+  IREE_ASSERT_ARGUMENT(topology);
+  IREE_ASSERT_ARGUMENT(out_agent_list);
+  memset(out_agent_list, 0, sizeof(*out_agent_list));
+
+  iree_hal_amdgpu_gpu_agent_mask_t gpu_agent_mask = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_access_agent_list_select_families(
+      topology, queue_family_affinity, &gpu_agent_mask));
+
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t physical_device_ordinal = 0;
+       physical_device_ordinal < topology->gpu_agent_count &&
+       iree_status_is_ok(status);
+       ++physical_device_ordinal) {
+    if (!iree_all_bits_set(gpu_agent_mask, ((uint64_t)1)
+                                               << physical_device_ordinal)) {
+      continue;
+    }
+    status = iree_hal_amdgpu_access_agent_list_append_unique(
+        out_agent_list, topology->gpu_agents[physical_device_ordinal]);
   }
   return status;
 }

@@ -229,15 +229,14 @@ iree_status_t iree_hal_streaming_event_enqueue_record(
   }
 
   const iree_status_t status =
-      slot ? iree_hal_device_queue_timestamp(
-                 context->device, stream->queue_affinity, wait_semaphores,
-                 signal_semaphores,
+      slot ? iree_hal_queue_timestamp(
+                 stream->queue, wait_semaphores, signal_semaphores,
                  iree_hal_streaming_event_timestamp_slot_buffer(slot),
                  iree_hal_streaming_event_timestamp_slot_offset(slot),
                  IREE_HAL_TIMESTAMP_FLAG_NONE)
-           : iree_hal_device_queue_barrier(
-                 context->device, stream->queue_affinity, wait_semaphores,
-                 signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
+           : iree_hal_queue_barrier(stream->queue, wait_semaphores,
+                                    signal_semaphores,
+                                    IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
   if (!iree_status_is_ok(status)) {
     // A rejected enqueue leaves no write outstanding against the slot, which
     // only this path can say; every other release names the point's own
@@ -340,8 +339,7 @@ iree_status_t iree_hal_streaming_event_record(
         iree_hal_streaming_event_commit_recorded_point(event, recorded_point);
     previous_stream =
         iree_hal_streaming_event_exchange_recording_stream(event, stream);
-    status = iree_hal_device_queue_flush(stream->context->device,
-                                         stream->queue_affinity);
+    status = iree_hal_queue_flush(stream->queue);
   }
   iree_slim_mutex_unlock(&stream->mutex);
   // Stream teardown re-enters the streaming layer, and the last reference to a

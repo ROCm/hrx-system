@@ -82,10 +82,13 @@ hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
   status = hrx_iree_exact_pool_create(stream->device->allocator.hal_allocator,
                                       params, &buf->hal_pool);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_device_queue_alloca(
-        stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
-        signal_list, buf->hal_pool, params, (iree_device_size_t)size,
-        IREE_HAL_ALLOCA_FLAG_NONE, &buf->hal_buffer);
+    const iree_hal_pool_reservation_request_t request = {
+        .params = params,
+        .allocation_size = (iree_device_size_t)size,
+    };
+    status = iree_hal_queue_alloca(
+        stream->device->transfer_queue, wait_list, signal_list, buf->hal_pool,
+        /*request_count=*/1, &request, &buf->hal_buffer);
   }
   if (iree_status_is_ok(status)) {
     // The AMDGPU transient allocator resolves committed backing while recording

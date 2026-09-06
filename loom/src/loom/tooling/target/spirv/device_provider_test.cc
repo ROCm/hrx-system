@@ -136,6 +136,22 @@ static iree_status_t CreateBaselineDeviceSpec(DeviceSpecPtr* out_device_spec) {
       /*.targets=*/&executable_target,
       /*.flags=*/IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
   };
+  const iree_hal_queue_family_spec_t queue_family = {
+      /*.name=*/IREE_SV("dispatch"),
+      /*.provisioned_queue_count=*/1,
+      /*.priority_count=*/1,
+      /*.timestamp_valid_bits=*/0,
+      /*.timestamp_frequency_hz=*/0,
+      /*.physical_device_affinity=*/1,
+      /*.role_flags=*/IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
+  };
+  const iree_hal_device_queue_spec_t queues = {
+      /*.family_count=*/1,
+      /*.families=*/&queue_family,
+  };
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_spec_builder_set_queues(&builder, &queues);
+  }
   if (iree_status_is_ok(status)) {
     status =
         iree_hal_device_spec_builder_set_executables(&builder, &executables);
@@ -165,7 +181,10 @@ class SpirvDeviceProviderTest : public ::testing::Test {
     IREE_RETURN_IF_ERROR(CreateBaselineDeviceSpec(&device_spec_));
     device_.device_spec = device_spec_.get();
     iree_hal_resource_initialize(&kFakeHalDeviceVtable, &device_.resource);
+    iree_hal_queue_family_initialize(/*ordinal=*/0, &dispatch_queue_family_);
+    dispatch_queue_.queue_family = &dispatch_queue_family_;
     runtime_.device = reinterpret_cast<iree_hal_device_t*>(&device_);
+    runtime_.dispatch_queue = &dispatch_queue_;
     return loom_spirv_vulkan_device_provider.select_target(
         &loom_spirv_vulkan_device_provider, &runtime_, iree_allocator_system(),
         &target_);
@@ -176,6 +195,11 @@ class SpirvDeviceProviderTest : public ::testing::Test {
 
   // Stack HAL device exposing |device_spec_| through the real device API.
   FakeHalDevice device_ = {};
+
+  // Stack family identity selecting the sole dispatch family in |device_spec_|.
+  iree_hal_queue_family_t dispatch_queue_family_ = {};
+  // Stack queue carrying |dispatch_queue_family_| through the runtime contract.
+  iree_hal_queue_t dispatch_queue_ = {};
 
   // Runtime view passed through the production device-provider contract.
   loom_run_hal_runtime_t runtime_ = {};

@@ -29,9 +29,8 @@ typedef struct iree_hal_amdgpu_semaphore_t {
   // Creation flags controlling synchronization behavior.
   iree_hal_semaphore_flags_t flags;
 
-  // Queue affinity provided at creation. When DEVICE_LOCAL is set this is the
-  // complete set of queues that may legally signal or wait on the semaphore.
-  iree_hal_queue_affinity_t queue_affinity;
+  // Complete set of queue families that may use the semaphore.
+  iree_hal_queue_family_affinity_t queue_family_affinity;
 
   // Seqlock-protected cache of the most recent signal from a queue.
   // Updated by the submission path when queue_execute signals this semaphore.
@@ -51,9 +50,9 @@ static iree_hal_amdgpu_semaphore_t* iree_hal_amdgpu_semaphore_cast(
 
 iree_status_t iree_hal_amdgpu_semaphore_create(
     iree_hal_amdgpu_logical_device_t* device, iree_async_proactor_t* proactor,
-    iree_hal_queue_affinity_t queue_affinity, uint64_t initial_value,
-    iree_hal_semaphore_flags_t flags, iree_allocator_t host_allocator,
-    iree_hal_semaphore_t** out_semaphore) {
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    uint64_t initial_value, iree_hal_semaphore_flags_t flags,
+    iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(proactor);
   IREE_ASSERT_ARGUMENT(out_semaphore);
@@ -80,7 +79,7 @@ iree_status_t iree_hal_amdgpu_semaphore_create(
     semaphore->host_allocator = host_allocator;
     semaphore->device = device;
     semaphore->flags = flags;
-    semaphore->queue_affinity = queue_affinity;
+    semaphore->queue_family_affinity = queue_family_affinity;
     memset(&semaphore->last_signal, 0, sizeof(semaphore->last_signal));
     *out_semaphore = iree_hal_semaphore_cast(&semaphore->async);
   }
@@ -120,9 +119,10 @@ iree_hal_semaphore_flags_t iree_hal_amdgpu_semaphore_flags(
   return ((const iree_hal_amdgpu_semaphore_t*)semaphore)->flags;
 }
 
-iree_hal_queue_affinity_t iree_hal_amdgpu_semaphore_queue_affinity(
+iree_hal_queue_family_affinity_t
+iree_hal_amdgpu_semaphore_queue_family_affinity(
     iree_hal_semaphore_t* semaphore) {
-  return ((const iree_hal_amdgpu_semaphore_t*)semaphore)->queue_affinity;
+  return ((const iree_hal_amdgpu_semaphore_t*)semaphore)->queue_family_affinity;
 }
 
 bool iree_hal_amdgpu_semaphore_has_private_stream_semantics(

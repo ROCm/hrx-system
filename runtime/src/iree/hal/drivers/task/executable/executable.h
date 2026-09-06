@@ -16,7 +16,9 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct iree_hal_task_executable_t {
-  iree_hal_resource_t resource;
+  // Common executable state.
+  iree_hal_executable_t base;
+  // Host allocator used for executable lifetime.
   iree_allocator_t host_allocator;
 
   // Per-entry point dispatch attributes (constant counts, binding counts,
@@ -55,6 +57,7 @@ typedef struct iree_hal_task_executable_vtable_t {
 
 // Initializes the task executable base type.
 void iree_hal_task_executable_initialize(
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_task_executable_vtable_t* vtable,
     iree_allocator_t host_allocator,
     iree_hal_task_executable_t* out_base_executable);

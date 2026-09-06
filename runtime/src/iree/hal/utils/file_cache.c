@@ -12,7 +12,7 @@
 typedef struct iree_hal_file_cache_entry_t {
   iree_io_file_handle_t* handle;
   iree_hal_device_t* device;
-  iree_hal_queue_affinity_t queue_affinity;
+  iree_hal_queue_family_affinity_t queue_family_affinity;
   iree_hal_memory_access_t access;
   iree_hal_file_t* file;
 } iree_hal_file_cache_entry_t;
@@ -118,8 +118,9 @@ IREE_API_EXPORT void iree_hal_file_cache_trim(
 
 static iree_status_t iree_hal_file_cache_insert_unsafe(
     iree_hal_file_cache_t* file_cache, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_access_t access,
-    iree_io_file_handle_t* handle, iree_hal_file_t* file) {
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
+    iree_hal_file_t* file) {
   // Ensure there's space to grow the cache table.
   if (file_cache->entry_count == file_cache->entry_capacity) {
     IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
@@ -136,7 +137,7 @@ static iree_status_t iree_hal_file_cache_insert_unsafe(
   iree_io_file_handle_retain(entry->handle);
   entry->device = device;
   iree_hal_device_retain(entry->device);
-  entry->queue_affinity = queue_affinity;
+  entry->queue_family_affinity = queue_family_affinity;
   entry->access = access;
   entry->file = file;
   iree_hal_file_retain(entry->file);
@@ -148,9 +149,9 @@ static iree_status_t iree_hal_file_cache_insert_unsafe(
 
 IREE_API_EXPORT iree_status_t iree_hal_file_cache_lookup(
     iree_hal_file_cache_t* file_cache, iree_hal_device_t* device,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_access_t access,
-    iree_io_file_handle_t* handle, iree_hal_external_file_flags_t flags,
-    iree_hal_file_t** out_file) {
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
+    iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
   IREE_ASSERT_ARGUMENT(file_cache);
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(handle);
@@ -163,7 +164,8 @@ IREE_API_EXPORT iree_status_t iree_hal_file_cache_lookup(
   for (iree_host_size_t i = 0; i < file_cache->entry_count; ++i) {
     iree_hal_file_cache_entry_t* entry = file_cache->entries[i];
     if (entry->device == device &&
-        iree_all_bits_set(entry->queue_affinity, queue_affinity) &&
+        iree_all_bits_set(entry->queue_family_affinity,
+                          queue_family_affinity) &&
         iree_all_bits_set(entry->access, access) && entry->handle == handle) {
       iree_hal_file_t* file = entry->file;
       iree_hal_file_retain(file);
@@ -178,15 +180,15 @@ IREE_API_EXPORT iree_status_t iree_hal_file_cache_lookup(
   // such that other files can still be accessed through the cache but (today)
   // it's unexpected that file I/O initialization is a hot path.
   iree_hal_file_t* file = NULL;
-  iree_status_t status = iree_hal_file_import(device, queue_affinity, access,
-                                              handle, flags, &file);
+  iree_status_t status = iree_hal_file_import(device, queue_family_affinity,
+                                              access, handle, flags, &file);
 
   // Insert into cache as an append.
   // If we support removal we'll compact the entries list at the time an entry
   // is removed to keep this simple.
   if (iree_status_is_ok(status)) {
     status = iree_hal_file_cache_insert_unsafe(
-        file_cache, device, queue_affinity, access, handle, file);
+        file_cache, device, queue_family_affinity, access, handle, file);
   }
 
   iree_slim_mutex_unlock(&file_cache->mutex);
