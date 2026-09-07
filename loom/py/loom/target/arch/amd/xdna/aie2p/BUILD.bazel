@@ -82,6 +82,16 @@ iree_py_library(
     ],
 )
 
+iree_py_library(
+    name = "compile_report_suggestions",
+    srcs = ["compile_report_suggestions.py"],
+    visibility = ["//loom/py/loom/target/arch:__pkg__"],
+    deps = [
+        ":package_init",
+        "//loom/py/loom/reporting",
+    ],
+)
+
 iree_py_test(
     name = "array_descriptors_test",
     size = "small",
@@ -149,5 +159,22 @@ iree_py_test(
     deps = [
         ":descriptors",
         ":machine_data",
+    ],
+)
+
+iree_py_test(
+    name = "compile_report_suggestions_test",
+    size = "small",
+    srcs = [
+        "compile_report_suggestions_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = [
+        "loom.target.arch.amd.xdna.aie2p.compile_report_suggestions_test",
+    ],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":compile_report_suggestions",
+        "//loom/py/loom/target/arch:compile_report_suggestions",
     ],
 )

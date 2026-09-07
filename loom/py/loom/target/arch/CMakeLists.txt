@@ -33,6 +33,7 @@ iree_py_library(
     "compile_report_suggestions.py"
   DEPS
     loom::py::loom::reporting::reporting
+    loom::py::loom::target::arch::amd::xdna::aie2p::compile_report_suggestions
     loom::py::loom::target::arch::amdgpu::compile_report_suggestions
 )
 

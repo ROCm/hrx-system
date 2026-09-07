@@ -14,12 +14,16 @@ from loom.reporting.compile_report_suggestions import (
     CompileReportSuggestionProvider,
     CompileReportSuggestionResult,
 )
+from loom.target.arch.amd.xdna.aie2p.compile_report_suggestions import (
+    AIE2P_COMPILE_REPORT_SUGGESTION_PROVIDER,
+)
 from loom.target.arch.amdgpu.compile_report_suggestions import (
     AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER,
 )
 
 _PROVIDERS: tuple[CompileReportSuggestionProvider, ...] = (
     AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER,
+    AIE2P_COMPILE_REPORT_SUGGESTION_PROVIDER,
 )
 
 
