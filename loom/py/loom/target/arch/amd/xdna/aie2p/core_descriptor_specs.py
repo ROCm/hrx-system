@@ -23,6 +23,18 @@ from loom.target.low_descriptors import (
 )
 
 _TARGET_KEY = "amd.xdna.aie2p"
+# AIEBaseInstrInfo's conservative lock model at LLVM_AIE_SCHEDULE_SOURCE_COMMIT
+# in core_schedule_data.py. AIE2P inherits these core stall/resume cycles and
+# uses the itinerary memory cycles for lock ordering; these are not calibration
+# measurements or additional resource occupancy from the itinerary tables.
+_LOCK_CORE_STALL_CYCLE = 2
+_LOCK_CORE_RESUME_CYCLE = 8
+_LOCK_EFFECT = Effect(
+    EffectKind.BARRIER,
+    MemorySpace.WORKGROUP,
+    producer_event=f"{_TARGET_KEY}.lock.resume.c{_LOCK_CORE_RESUME_CYCLE}",
+    consumer_event=f"{_TARGET_KEY}.lock.stall.c{_LOCK_CORE_STALL_CYCLE}",
+)
 _EL_LOW32_PART = "aie2p.elpredicate.low32"
 _EL_HIGH32_PART = "aie2p.elpredicate.high32"
 _VEC256_LOW128_PART = "aie2p.vec256.low128"
@@ -466,7 +478,7 @@ _BASE_DESCRIPTOR_SPECS = (
         "synchronization.lock.acquire",
         "II_ACQ_mLockId_imm",
         asm_mnemonic="acq",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
+        effects=(_LOCK_EFFECT,),
     ),
     _DescriptorSpec(
         "ACQ_mLockId_reg",
@@ -474,7 +486,7 @@ _BASE_DESCRIPTOR_SPECS = (
         "synchronization.lock.acquire",
         "II_ACQ_mLockId_reg",
         asm_mnemonic="acq.reg",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
+        effects=(_LOCK_EFFECT,),
     ),
     _DescriptorSpec(
         "ACQ_COND_mLockId_imm",
@@ -482,7 +494,7 @@ _BASE_DESCRIPTOR_SPECS = (
         "synchronization.lock.acquire.conditional",
         "II_ACQ_COND_mLockId_imm",
         asm_mnemonic="acq.cond",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
+        effects=(_LOCK_EFFECT,),
     ),
     _DescriptorSpec(
         "ACQ_COND_mLockId_reg",
@@ -490,7 +502,7 @@ _BASE_DESCRIPTOR_SPECS = (
         "synchronization.lock.acquire.conditional",
         "II_ACQ_COND_mLockId_reg",
         asm_mnemonic="acq.cond.reg",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
+        effects=(_LOCK_EFFECT,),
     ),
     _DescriptorSpec(
         "REL_mLockId_imm",
@@ -498,7 +510,7 @@ _BASE_DESCRIPTOR_SPECS = (
         "synchronization.lock.release",
         "II_REL_mLockId_imm",
         asm_mnemonic="rel",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
+        effects=(_LOCK_EFFECT,),
     ),
     _DescriptorSpec(
         "REL_mLockId_reg",
@@ -506,7 +518,7 @@ _BASE_DESCRIPTOR_SPECS = (
         "synchronization.lock.release",
         "II_REL_mLockId_reg",
         asm_mnemonic="rel.reg",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
+        effects=(_LOCK_EFFECT,),
     ),
     _DescriptorSpec(
         "REL_COND_mLockId_imm",
@@ -514,7 +526,7 @@ _BASE_DESCRIPTOR_SPECS = (
         "synchronization.lock.release.conditional",
         "II_REL_COND_mLockId_imm",
         asm_mnemonic="rel.cond",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
+        effects=(_LOCK_EFFECT,),
     ),
     _DescriptorSpec(
         "REL_COND_mLockId_reg",
@@ -522,7 +534,7 @@ _BASE_DESCRIPTOR_SPECS = (
         "synchronization.lock.release.conditional",
         "II_REL_COND_mLockId_reg",
         asm_mnemonic="rel.cond.reg",
-        effects=(Effect(EffectKind.BARRIER, MemorySpace.WORKGROUP),),
+        effects=(_LOCK_EFFECT,),
     ),
     _DescriptorSpec(
         "J_lng",

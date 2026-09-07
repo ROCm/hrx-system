@@ -79,6 +79,8 @@ loom_cc_library(
         "descriptor_rows.h",
         "diagnostics.c",
         "diagnostics.h",
+        "effect_dependencies.c",
+        "effect_dependencies.h",
         "graph.c",
         "graph.h",
         "json.c",

@@ -59,7 +59,9 @@ class Aie2pLeafObjectTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
-  iree_status_t CompileSource(std::string_view source, CompiledLeaf* out_leaf) {
+  iree_status_t CompileSource(std::string_view source, CompiledLeaf* out_leaf,
+                              loom_low_schedule_strategy_t schedule_strategy =
+                                  LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
     *out_leaf = CompiledLeaf{};
     loom_text_parse_options_t parse_options = {
         /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
@@ -101,7 +103,7 @@ class Aie2pLeafObjectTest : public ::testing::Test {
     frame_options.descriptor_registry = &registry_.registry;
     frame_options.schedule_structural_models =
         loom_aie2p_low_structural_schedule_models();
-    frame_options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
+    frame_options.schedule_strategy = schedule_strategy;
     IREE_RETURN_IF_ERROR(loom_low_emission_frame_build(
         out_leaf->module, function_op, &frame_options, &planning_arena_,
         &out_leaf->frame));
@@ -598,6 +600,122 @@ TEST_F(Aie2pLeafObjectTest, ReturnFallsBackAfterAnOccupiedAluCycle) {
   EXPECT_EQ(leaf.contribution.object.symbol_count, 1u);
 
   ResetLeaf(&leaf);
+}
+
+TEST_F(Aie2pLeafObjectTest, LocksRespectIssueAndMemoryResumeTiming) {
+  CompiledLeaf leaf;
+  IREE_ASSERT_OK(CompileSource(
+      "low.func.def target<amd.xdna.aie2p.core> @lock_then_load(\n"
+      "    %lock_value: reg<aie2p.er>, %source: reg<aie2p.ep>) asm {\n"
+      "  acq %lock_value, 5\n"
+      "  acq %lock_value, 37\n"
+      "  acq %lock_value, 49\n"
+      "  acq %lock_value, 50\n"
+      "  %value = vlda.acc.f32x16 %source, 0\n"
+      "  return\n"
+      "}\n",
+      &leaf, LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY));
+
+  ASSERT_EQ(leaf.frame.schedule.issue_group_count, 6u);
+  constexpr std::array<uint32_t, 6> kExpectedIssueCycles = {0,  4,  8,
+                                                            12, 16, 17};
+  for (iree_host_size_t i = 0; i < kExpectedIssueCycles.size(); ++i) {
+    EXPECT_EQ(leaf.frame.schedule.issue_groups[i].issue_cycle,
+              kExpectedIssueCycles[i])
+        << i;
+  }
+
+  std::array<iree_host_size_t, 5> packet_bundle_indices;
+  packet_bundle_indices.fill(IREE_HOST_SIZE_MAX);
+  for (iree_host_size_t bundle_index = 0; bundle_index < leaf.plan.bundle_count;
+       ++bundle_index) {
+    const loom_aie2p_planned_bundle_t& bundle = leaf.plan.bundles[bundle_index];
+    for (uint8_t slot_index = 0; slot_index < bundle.slot_count; ++slot_index) {
+      const uint32_t packet_index =
+          leaf.plan.slots[bundle.slot_start + slot_index]
+              .scheduled_packet_index;
+      if (packet_index < packet_bundle_indices.size()) {
+        packet_bundle_indices[packet_index] = bundle_index;
+      }
+    }
+  }
+  constexpr std::array<iree_host_size_t, 5> kExpectedBundleIndices = {0, 4, 8,
+                                                                      12, 16};
+  EXPECT_EQ(packet_bundle_indices, kExpectedBundleIndices);
+  for (iree_host_size_t i = 0; i < 4; ++i) {
+    const loom_low_packet_view_t lock =
+        loom_low_packet_at(&leaf.frame.schedule, i);
+    ASSERT_NE(lock.descriptor, nullptr);
+    EXPECT_EQ(lock.node->issue_cycle, i * 4u);
+  }
+  const loom_low_packet_view_t load =
+      loom_low_packet_at(&leaf.frame.schedule, 4);
+  ASSERT_NE(load.descriptor, nullptr);
+  EXPECT_EQ(load.node->issue_cycle, 16u);
+
+  ResetLeaf(&leaf);
+}
+
+TEST_F(Aie2pLeafObjectTest, LockTimingCrossesControlFlowEdges) {
+  constexpr std::array<std::string_view, 3> kSources = {
+      "low.func.def target<amd.xdna.aie2p.core> @lock_then_load_edge(\n"
+      "    %lock_value: reg<aie2p.er>, %source: reg<aie2p.ep>) asm {\n"
+      "  acq %lock_value, 5\n"
+      "  low.br ^consume\n"
+      "^consume:\n"
+      "  %value = vlda.acc.f32x16 %source, 0\n"
+      "  return\n"
+      "}\n",
+      "low.func.def target<amd.xdna.aie2p.core> @load_then_lock_edge(\n"
+      "    %lock_value: reg<aie2p.er>, %source: reg<aie2p.ep>) asm {\n"
+      "  %value = vlda.acc.f32x16 %source, 0\n"
+      "  low.br ^consume\n"
+      "^consume:\n"
+      "  acq %lock_value, 5\n"
+      "  return\n"
+      "}\n",
+      "low.func.def target<amd.xdna.aie2p.core> @lock_then_lock_edge(\n"
+      "    %lock_value: reg<aie2p.er>) asm {\n"
+      "  acq %lock_value, 5\n"
+      "  low.br ^consume\n"
+      "^consume:\n"
+      "  rel %lock_value, 37\n"
+      "  return\n"
+      "}\n",
+  };
+
+  for (const std::string_view source : kSources) {
+    CompiledLeaf leaf;
+    IREE_ASSERT_OK(CompileSource(source, &leaf,
+                                 LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY));
+
+    ASSERT_EQ(leaf.frame.schedule.node_count, 4u);
+    EXPECT_TRUE(loom_low_br_isa(leaf.frame.schedule.nodes[1].op));
+    EXPECT_EQ(leaf.frame.schedule.nodes[0].issue_cycle, 0u);
+    EXPECT_EQ(leaf.frame.schedule.nodes[1].issue_cycle, 4u);
+    EXPECT_EQ(leaf.frame.schedule.nodes[2].issue_cycle, 0u);
+
+    const loom_low_schedule_dependency_t* boundary_dependency = nullptr;
+    for (iree_host_size_t i = 0; i < leaf.frame.schedule.dependencies.count;
+         ++i) {
+      const loom_low_schedule_dependency_t* dependency =
+          loom_low_schedule_dependency_graph_at(
+              &leaf.frame.schedule.dependencies, i);
+      if (dependency->producer_node == 0 && dependency->consumer_node == 1 &&
+          dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT &&
+          dependency->separation_source ==
+              LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR) {
+        boundary_dependency = dependency;
+        break;
+      }
+    }
+    ASSERT_NE(boundary_dependency, nullptr);
+    EXPECT_EQ(boundary_dependency->minimum_issue_separation_cycles, 4);
+    EXPECT_EQ(boundary_dependency->consumer_attachment_kind,
+              LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_NONE);
+
+    ResetLeaf(&leaf);
+  }
 }
 
 TEST_F(Aie2pLeafObjectTest, MaterializesFixedRegisterCopiesAsScalarMoves) {

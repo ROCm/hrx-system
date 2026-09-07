@@ -123,7 +123,7 @@ control-relocation index=0 record=0 word=1 payload-offset=44 binding=0 addend=0 
 control-relocation index=1 record=2 word=1 payload-offset=108 binding=1 addend=0 width=8 alignment=4
 
 resident-program workers=1
-resident worker=0 entry=@temporal_fold_array$worker$0 tile=(0,2) code-bytes=374 resources=0 fixups=5
+resident worker=0 entry=@temporal_fold_array$worker$0 tile=(0,2) code-bytes=396 resources=0 fixups=5
 
 low.func.def retain target<amd.xdna.aie2p.core>(@temporal_fold_core_target) @temporal_fold_array$worker$0() asm {
   %acquire_delta = mov.short -1

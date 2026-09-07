@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/schedule/diagnostics.h"
+#include "loom/codegen/low/schedule/effect_dependencies.h"
 #include "loom/codegen/low/storage_relation.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
@@ -23,21 +24,6 @@ typedef struct loom_low_schedule_dependency_timing_t {
   // Origin of the selected timing rule.
   loom_low_schedule_separation_source_t separation_source;
 } loom_low_schedule_dependency_timing_t;
-
-typedef struct loom_low_schedule_effect_frontier_t {
-  // Latest ordered effect node that every later dependency effect must follow.
-  uint32_t ordered_node;
-  // Descriptor attachment for ordered_node, or an empty endpoint.
-  loom_low_schedule_dependency_endpoint_t ordered_endpoint;
-  // Outstanding reads not yet subsumed by a later write or ordered effect.
-  loom_low_schedule_effect_frontier_entry_t* reads;
-  // Number of outstanding read entries.
-  iree_host_size_t read_count;
-  // Outstanding writes not yet subsumed by a later write or ordered effect.
-  loom_low_schedule_effect_frontier_entry_t* writes;
-  // Number of outstanding write entries.
-  iree_host_size_t write_count;
-} loom_low_schedule_effect_frontier_t;
 
 static loom_low_schedule_dependency_endpoint_t
 loom_low_schedule_dependency_endpoint_none(void) {
@@ -115,22 +101,6 @@ static bool loom_low_schedule_op_is_terminator(const loom_module_t* module,
                                                const loom_op_t* op) {
   return iree_any_bit_set(loom_op_effective_traits(module, op),
                           LOOM_TRAIT_TERMINATOR);
-}
-
-static bool loom_low_schedule_node_has_effects(
-    const loom_low_schedule_node_t* node,
-    const loom_low_descriptor_t* descriptor) {
-  if (descriptor) {
-    return descriptor->effect_count != 0 ||
-           iree_any_bit_set(descriptor->flags,
-                            LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |
-                                LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR);
-  }
-  return loom_traits_may_read(node->traits) ||
-         loom_traits_may_write(node->traits) ||
-         iree_any_bit_set(node->traits, LOOM_TRAIT_NON_DETERMINISTIC |
-                                            LOOM_TRAIT_CONVERGENT |
-                                            LOOM_TRAIT_OBSERVABLE_EFFECT);
 }
 
 static iree_status_t loom_low_schedule_resolve_descriptor(
@@ -277,7 +247,9 @@ static bool loom_low_schedule_dependency_equal(
          dependency->producer_attachment_kind ==
              producer_endpoint.attachment_kind &&
          dependency->consumer_attachment_kind ==
-             consumer_endpoint.attachment_kind;
+             consumer_endpoint.attachment_kind &&
+         dependency->producer_event_id == producer_endpoint.timing_event_id &&
+         dependency->consumer_event_id == consumer_endpoint.timing_event_id;
 }
 
 static loom_low_schedule_dependency_timing_t
@@ -349,7 +321,7 @@ static iree_status_t loom_low_schedule_append_dependency(
       state->arena);
 }
 
-static iree_status_t loom_low_schedule_add_dependency(
+iree_status_t loom_low_schedule_add_dependency(
     loom_low_schedule_build_state_t* state, uint32_t producer_node,
     uint32_t consumer_node, loom_low_schedule_dependency_kind_t kind,
     uint16_t value_operand_index,
@@ -1220,59 +1192,6 @@ static iree_status_t loom_low_schedule_note_state_value_read(
       read_endpoint);
 }
 
-static bool loom_low_schedule_effect_is_ordered(
-    const loom_low_effect_t* effect) {
-  if (iree_any_bit_set(effect->flags, LOOM_LOW_EFFECT_FLAG_ORDERED)) {
-    return true;
-  }
-  switch (effect->kind) {
-    case LOOM_LOW_EFFECT_KIND_READ:
-    case LOOM_LOW_EFFECT_KIND_WRITE:
-      return false;
-    case LOOM_LOW_EFFECT_KIND_UNKNOWN:
-    case LOOM_LOW_EFFECT_KIND_CALL:
-    case LOOM_LOW_EFFECT_KIND_BARRIER:
-    case LOOM_LOW_EFFECT_KIND_COUNTER:
-    case LOOM_LOW_EFFECT_KIND_CONVERGENT:
-    case LOOM_LOW_EFFECT_KIND_CONTROL:
-    default:
-      return true;
-  }
-}
-
-static bool loom_low_schedule_effect_orders_memory(
-    const loom_low_effect_t* effect) {
-  if (!loom_low_schedule_effect_is_ordered(effect)) {
-    return false;
-  }
-  switch (effect->kind) {
-    case LOOM_LOW_EFFECT_KIND_READ:
-    case LOOM_LOW_EFFECT_KIND_WRITE:
-    case LOOM_LOW_EFFECT_KIND_UNKNOWN:
-    case LOOM_LOW_EFFECT_KIND_CALL:
-    case LOOM_LOW_EFFECT_KIND_BARRIER:
-    case LOOM_LOW_EFFECT_KIND_COUNTER:
-    case LOOM_LOW_EFFECT_KIND_CONTROL:
-      return true;
-    case LOOM_LOW_EFFECT_KIND_CONVERGENT:
-    default:
-      return effect->memory_space != LOOM_LOW_MEMORY_SPACE_NONE;
-  }
-}
-
-static bool loom_low_schedule_descriptor_has_ordered_effect(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor) {
-  for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
-    const loom_low_effect_t* effect =
-        &descriptor_set->effects[descriptor->effect_start + i];
-    if (loom_low_schedule_effect_is_ordered(effect)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 static bool loom_low_schedule_descriptor_state_read_has_explicit_value(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_schedule_node_t* node,
@@ -1569,352 +1488,11 @@ iree_status_t loom_low_schedule_fill_nodes(
   return iree_ok_status();
 }
 
-static void loom_low_schedule_effect_frontier_reset(
-    loom_low_schedule_effect_frontier_t* frontier) {
-  frontier->ordered_node = LOOM_LOW_SCHEDULE_NODE_NONE;
-  frontier->ordered_endpoint = loom_low_schedule_dependency_endpoint_none();
-  frontier->read_count = 0;
-  frontier->write_count = 0;
-}
-
-static void loom_low_schedule_effect_frontier_initialize(
-    loom_low_schedule_build_state_t* state,
-    loom_low_schedule_effect_frontier_t* out_frontier) {
-  *out_frontier = (loom_low_schedule_effect_frontier_t){
-      .reads = state->effect_read_entries,
-      .writes = state->effect_write_entries,
-  };
-  loom_low_schedule_effect_frontier_reset(out_frontier);
-}
-
-static loom_low_schedule_dependency_endpoint_t
-loom_low_schedule_effect_frontier_entry_endpoint(
-    const loom_low_schedule_effect_frontier_entry_t* entry) {
-  return loom_low_schedule_dependency_effect_endpoint(entry->effect_ordinal,
-                                                      entry->producer_event_id);
-}
-
-static iree_status_t loom_low_schedule_effect_frontier_depend_on_ordered(
-    loom_low_schedule_build_state_t* state,
-    loom_low_schedule_effect_frontier_t* frontier, uint32_t node_index,
-    loom_low_schedule_dependency_endpoint_t consumer_endpoint) {
-  if (frontier->ordered_node == LOOM_LOW_SCHEDULE_NODE_NONE) {
-    return iree_ok_status();
-  }
-  return loom_low_schedule_add_dependency(
-      state, frontier->ordered_node, node_index,
-      LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, LOOM_LOW_ID_NONE,
-      frontier->ordered_endpoint, consumer_endpoint);
-}
-
-static iree_status_t loom_low_schedule_effect_frontier_note_read(
-    loom_low_schedule_build_state_t* state,
-    loom_low_schedule_effect_frontier_t* frontier, uint32_t node_index,
-    const loom_low_memory_access_summary_t* summary,
-    loom_low_schedule_dependency_endpoint_t consumer_endpoint,
-    loom_low_schedule_dependency_endpoint_t producer_endpoint) {
-  IREE_RETURN_IF_ERROR(loom_low_schedule_effect_frontier_depend_on_ordered(
-      state, frontier, node_index, consumer_endpoint));
-  for (iree_host_size_t i = 0; i < frontier->write_count; ++i) {
-    const loom_low_schedule_effect_frontier_entry_t* write =
-        &frontier->writes[i];
-    if (!loom_low_memory_access_summaries_may_alias(summary, &write->summary)) {
-      continue;
-    }
-    IREE_RETURN_IF_ERROR(loom_low_schedule_add_dependency(
-        state, write->node_index, node_index,
-        LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, LOOM_LOW_ID_NONE,
-        loom_low_schedule_effect_frontier_entry_endpoint(write),
-        consumer_endpoint));
-  }
-  IREE_ASSERT(frontier->read_count < state->effect_read_capacity,
-              "precomputed effect-frontier read capacity must cover all rows");
-  frontier->reads[frontier->read_count] =
-      (loom_low_schedule_effect_frontier_entry_t){
-          .node_index = node_index,
-          .effect_ordinal = producer_endpoint.attachment_index,
-          .producer_event_id = producer_endpoint.timing_event_id,
-          .summary = *summary,
-      };
-  ++frontier->read_count;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_schedule_effect_frontier_note_write_complete(
-    loom_low_schedule_build_state_t* state,
-    loom_low_schedule_effect_frontier_t* frontier, uint32_t node_index,
-    const loom_low_memory_access_summary_t* summary,
-    loom_low_schedule_dependency_endpoint_t producer_endpoint) {
-  iree_host_size_t write_index = 0;
-  for (iree_host_size_t read_index = 0; read_index < frontier->read_count;
-       ++read_index) {
-    const loom_low_schedule_effect_frontier_entry_t* read =
-        &frontier->reads[read_index];
-    if (loom_low_memory_access_write_subsumes_read(summary, &read->summary)) {
-      continue;
-    }
-    frontier->reads[write_index] = *read;
-    ++write_index;
-  }
-  frontier->read_count = write_index;
-  write_index = 0;
-  for (iree_host_size_t i = 0; i < frontier->write_count; ++i) {
-    const loom_low_schedule_effect_frontier_entry_t* write =
-        &frontier->writes[i];
-    if (loom_low_memory_access_write_subsumes_access(summary,
-                                                     &write->summary)) {
-      continue;
-    }
-    frontier->writes[write_index] = *write;
-    ++write_index;
-  }
-  frontier->write_count = write_index;
-  IREE_ASSERT(frontier->write_count < state->effect_write_capacity,
-              "precomputed effect-frontier write capacity must cover all rows");
-  frontier->writes[frontier->write_count] =
-      (loom_low_schedule_effect_frontier_entry_t){
-          .node_index = node_index,
-          .effect_ordinal = producer_endpoint.attachment_index,
-          .producer_event_id = producer_endpoint.timing_event_id,
-          .summary = *summary,
-      };
-  ++frontier->write_count;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_schedule_effect_frontier_note_write(
-    loom_low_schedule_build_state_t* state,
-    loom_low_schedule_effect_frontier_t* frontier, uint32_t node_index,
-    const loom_low_memory_access_summary_t* summary,
-    loom_low_schedule_dependency_endpoint_t consumer_endpoint,
-    loom_low_schedule_dependency_endpoint_t producer_endpoint) {
-  IREE_RETURN_IF_ERROR(loom_low_schedule_effect_frontier_depend_on_ordered(
-      state, frontier, node_index, consumer_endpoint));
-  for (iree_host_size_t i = 0; i < frontier->write_count; ++i) {
-    const loom_low_schedule_effect_frontier_entry_t* write =
-        &frontier->writes[i];
-    if (!loom_low_memory_access_summaries_may_alias(summary, &write->summary)) {
-      continue;
-    }
-    IREE_RETURN_IF_ERROR(loom_low_schedule_add_dependency(
-        state, write->node_index, node_index,
-        LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, LOOM_LOW_ID_NONE,
-        loom_low_schedule_effect_frontier_entry_endpoint(write),
-        consumer_endpoint));
-  }
-  for (iree_host_size_t i = 0; i < frontier->read_count; ++i) {
-    const loom_low_schedule_effect_frontier_entry_t* read = &frontier->reads[i];
-    if (!loom_low_memory_access_summaries_may_alias(summary, &read->summary)) {
-      continue;
-    }
-    IREE_RETURN_IF_ERROR(loom_low_schedule_add_dependency(
-        state, read->node_index, node_index,
-        LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, LOOM_LOW_ID_NONE,
-        loom_low_schedule_effect_frontier_entry_endpoint(read),
-        consumer_endpoint));
-  }
-  return loom_low_schedule_effect_frontier_note_write_complete(
-      state, frontier, node_index, summary, producer_endpoint);
-}
-
-static iree_status_t loom_low_schedule_effect_frontier_note_ordered(
-    loom_low_schedule_build_state_t* state,
-    loom_low_schedule_effect_frontier_t* frontier, uint32_t node_index,
-    loom_low_schedule_dependency_endpoint_t consumer_endpoint,
-    loom_low_schedule_dependency_endpoint_t producer_endpoint) {
-  IREE_RETURN_IF_ERROR(loom_low_schedule_effect_frontier_depend_on_ordered(
-      state, frontier, node_index, consumer_endpoint));
-  for (iree_host_size_t i = 0; i < frontier->write_count; ++i) {
-    const loom_low_schedule_effect_frontier_entry_t* write =
-        &frontier->writes[i];
-    IREE_RETURN_IF_ERROR(loom_low_schedule_add_dependency(
-        state, write->node_index, node_index,
-        LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, LOOM_LOW_ID_NONE,
-        loom_low_schedule_effect_frontier_entry_endpoint(write),
-        consumer_endpoint));
-  }
-  for (iree_host_size_t i = 0; i < frontier->read_count; ++i) {
-    const loom_low_schedule_effect_frontier_entry_t* read = &frontier->reads[i];
-    IREE_RETURN_IF_ERROR(loom_low_schedule_add_dependency(
-        state, read->node_index, node_index,
-        LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, LOOM_LOW_ID_NONE,
-        loom_low_schedule_effect_frontier_entry_endpoint(read),
-        consumer_endpoint));
-  }
-  loom_low_schedule_effect_frontier_reset(frontier);
-  frontier->ordered_node = node_index;
-  frontier->ordered_endpoint = producer_endpoint;
-  return iree_ok_status();
-}
-
-static const loom_low_memory_access_summary_t*
-loom_low_schedule_lookup_memory_access_summary(
-    loom_low_schedule_build_state_t* state, uint32_t node_index,
-    const loom_low_descriptor_t* descriptor,
-    const loom_low_effect_t* selected_effect) {
-  const uint32_t record_index =
-      state->nodes[node_index].memory_access_record_index;
-  if (record_index == LOOM_LOW_SCHEDULE_MEMORY_ACCESS_RECORD_NONE) {
-    return NULL;
-  }
-  if (record_index >= state->memory_access_record_count) {
-    return NULL;
-  }
-  const loom_low_memory_access_record_t* record =
-      &state->memory_access_records[record_index];
-  const loom_low_memory_access_summary_t* summary = &record->summary;
-
-  // A single dependency memory effect is unambiguous regardless of whether
-  // its descriptor space is generic. Multi-effect descriptors may refine the
-  // unique effect in the same concrete memory space as the source record.
-  // Ambiguous same-space effects remain conservative because a record does not
-  // yet identify an individual descriptor effect ordinal.
-  uint16_t dependency_memory_effect_count = 0;
-  uint16_t matching_memory_space_effect_count = 0;
-  const loom_low_memory_space_t summary_space =
-      loom_low_memory_access_normalize_space(summary->memory_space);
-  const loom_low_memory_space_t selected_space =
-      loom_low_memory_access_normalize_space(selected_effect->memory_space);
-  const loom_low_descriptor_set_t* descriptor_set =
-      state->target.descriptor_set;
-  for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
-    const loom_low_effect_t* effect =
-        &descriptor_set->effects[descriptor->effect_start + i];
-    if (!iree_any_bit_set(effect->flags, LOOM_LOW_EFFECT_FLAG_DEPENDENCY) ||
-        (effect->kind != LOOM_LOW_EFFECT_KIND_READ &&
-         effect->kind != LOOM_LOW_EFFECT_KIND_WRITE)) {
-      continue;
-    }
-    ++dependency_memory_effect_count;
-    if (summary_space != LOOM_LOW_MEMORY_SPACE_GENERIC &&
-        loom_low_memory_access_normalize_space(effect->memory_space) ==
-            summary_space) {
-      ++matching_memory_space_effect_count;
-    }
-  }
-  if (dependency_memory_effect_count == 1) {
-    return summary;
-  }
-  return summary_space != LOOM_LOW_MEMORY_SPACE_GENERIC &&
-                 selected_space == summary_space &&
-                 matching_memory_space_effect_count == 1
-             ? summary
-             : NULL;
-}
-
-static iree_status_t loom_low_schedule_note_descriptor_effects(
-    loom_low_schedule_build_state_t* state,
-    loom_low_schedule_effect_frontier_t* frontier, uint32_t node_index,
-    const loom_low_descriptor_t* descriptor) {
-  if (descriptor->effect_count == 0) {
-    return iree_ok_status();
-  }
-  const loom_low_descriptor_set_t* descriptor_set =
-      state->target.descriptor_set;
-  for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
-    const loom_low_effect_t* effect =
-        &descriptor_set->effects[descriptor->effect_start + i];
-    if (loom_low_schedule_effect_orders_memory(effect)) {
-      return loom_low_schedule_effect_frontier_note_ordered(
-          state, frontier, node_index,
-          loom_low_schedule_dependency_effect_endpoint(
-              i, effect->consumer_event_id),
-          loom_low_schedule_dependency_effect_endpoint(
-              i, effect->producer_event_id));
-    }
-  }
-  for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
-    const loom_low_effect_t* effect =
-        &descriptor_set->effects[descriptor->effect_start + i];
-    if (!iree_any_bit_set(effect->flags, LOOM_LOW_EFFECT_FLAG_DEPENDENCY)) {
-      continue;
-    }
-    const loom_low_memory_access_summary_t* source_summary =
-        loom_low_schedule_lookup_memory_access_summary(state, node_index,
-                                                       descriptor, effect);
-    switch (effect->kind) {
-      case LOOM_LOW_EFFECT_KIND_READ: {
-        loom_low_memory_access_summary_t summary =
-            loom_low_memory_access_summary_from_effect(effect);
-        if (source_summary != NULL) {
-          summary = *source_summary;
-        }
-        IREE_RETURN_IF_ERROR(loom_low_schedule_effect_frontier_note_read(
-            state, frontier, node_index, &summary,
-            loom_low_schedule_dependency_effect_endpoint(
-                i, effect->consumer_event_id),
-            loom_low_schedule_dependency_effect_endpoint(
-                i, effect->producer_event_id)));
-        break;
-      }
-      case LOOM_LOW_EFFECT_KIND_WRITE: {
-        loom_low_memory_access_summary_t summary =
-            loom_low_memory_access_summary_from_effect(effect);
-        if (source_summary != NULL) {
-          summary = *source_summary;
-        }
-        IREE_RETURN_IF_ERROR(loom_low_schedule_effect_frontier_note_write(
-            state, frontier, node_index, &summary,
-            loom_low_schedule_dependency_effect_endpoint(
-                i, effect->consumer_event_id),
-            loom_low_schedule_dependency_effect_endpoint(
-                i, effect->producer_event_id)));
-        break;
-      }
-      default:
-        if (loom_low_schedule_effect_orders_memory(effect)) {
-          return loom_low_schedule_effect_frontier_note_ordered(
-              state, frontier, node_index,
-              loom_low_schedule_dependency_effect_endpoint(
-                  i, effect->consumer_event_id),
-              loom_low_schedule_dependency_effect_endpoint(
-                  i, effect->producer_event_id));
-        }
-        break;
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_schedule_note_structural_effects(
-    loom_low_schedule_build_state_t* state,
-    loom_low_schedule_effect_frontier_t* frontier, uint32_t node_index) {
-  const loom_low_schedule_node_t* node = &state->nodes[node_index];
-  if (iree_any_bit_set(node->traits, LOOM_TRAIT_NON_DETERMINISTIC |
-                                         LOOM_TRAIT_UNKNOWN_EFFECTS |
-                                         LOOM_TRAIT_CONVERGENT |
-                                         LOOM_TRAIT_OBSERVABLE_EFFECT)) {
-    return loom_low_schedule_effect_frontier_note_ordered(
-        state, frontier, node_index,
-        loom_low_schedule_dependency_endpoint_none(),
-        loom_low_schedule_dependency_endpoint_none());
-  }
-  if (iree_any_bit_set(node->traits, LOOM_TRAIT_WRITES_MEMORY)) {
-    loom_low_memory_access_summary_t summary =
-        loom_low_memory_access_summary_synthetic(LOOM_LOW_MEMORY_SPACE_GENERIC);
-    return loom_low_schedule_effect_frontier_note_write(
-        state, frontier, node_index, &summary,
-        loom_low_schedule_dependency_endpoint_none(),
-        loom_low_schedule_dependency_endpoint_none());
-  }
-  if (iree_any_bit_set(node->traits, LOOM_TRAIT_READS_MEMORY)) {
-    loom_low_memory_access_summary_t summary =
-        loom_low_memory_access_summary_synthetic(LOOM_LOW_MEMORY_SPACE_GENERIC);
-    return loom_low_schedule_effect_frontier_note_read(
-        state, frontier, node_index, &summary,
-        loom_low_schedule_dependency_endpoint_none(),
-        loom_low_schedule_dependency_endpoint_none());
-  }
-  return iree_ok_status();
-}
-
 iree_status_t loom_low_schedule_build_dependencies(
     loom_low_schedule_build_state_t* state) {
   for (iree_host_size_t block_index = 0; block_index < state->body->block_count;
        ++block_index) {
     const loom_low_schedule_block_t* block_record = &state->blocks[block_index];
-    loom_low_schedule_effect_frontier_t effect_frontier;
-    loom_low_schedule_effect_frontier_initialize(state, &effect_frontier);
     IREE_RETURN_IF_ERROR(
         loom_low_schedule_index_state_value_clobbers(state, block_record));
     if (state->state_chain_read_heads != NULL) {
@@ -2004,15 +1582,8 @@ iree_status_t loom_low_schedule_build_dependencies(
           state, node_index, descriptor));
       IREE_RETURN_IF_ERROR(
           loom_low_schedule_note_structural_state_reads(state, node_index));
-      if (descriptor != NULL) {
-        IREE_RETURN_IF_ERROR(loom_low_schedule_note_descriptor_effects(
-            state, &effect_frontier, node_index, descriptor));
-      } else if (loom_low_schedule_node_has_effects(node, NULL)) {
-        IREE_RETURN_IF_ERROR(loom_low_schedule_note_structural_effects(
-            state, &effect_frontier, node_index));
-      }
     }
     loom_low_schedule_reset_storage_reads(state);
   }
-  return iree_ok_status();
+  return loom_low_schedule_build_effect_dependencies(state);
 }

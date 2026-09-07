@@ -140,15 +140,148 @@ low.func.def target<test.low.core> @directional_effect(%address: reg<test.ptr>, 
   EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 2u);
   EXPECT_EQ(frame.schedule.nodes[2].issue_cycle, 4u);
 
-  ASSERT_GE(frame.schedule.dependencies.count, 2u);
-  const loom_low_schedule_dependency_t* store_to_barrier =
-      loom_low_schedule_dependency_graph_at(&frame.schedule.dependencies, 0);
-  const loom_low_schedule_dependency_t* barrier_to_load =
-      loom_low_schedule_dependency_graph_at(&frame.schedule.dependencies, 1);
+  const loom_low_schedule_dependency_t* store_to_barrier = nullptr;
+  const loom_low_schedule_dependency_t* barrier_to_load = nullptr;
+  for (iree_host_size_t i = 0; i < frame.schedule.dependencies.count; ++i) {
+    const loom_low_schedule_dependency_t* dependency =
+        loom_low_schedule_dependency_graph_at(&frame.schedule.dependencies, i);
+    if (dependency->kind != LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT ||
+        dependency->separation_source !=
+            LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR) {
+      continue;
+    }
+    if (dependency->producer_node == 0 && dependency->consumer_node == 1) {
+      store_to_barrier = dependency;
+    } else if (dependency->producer_node == 1 &&
+               dependency->consumer_node == 2) {
+      barrier_to_load = dependency;
+    }
+  }
+  ASSERT_NE(store_to_barrier, nullptr);
+  ASSERT_NE(barrier_to_load, nullptr);
   EXPECT_EQ(store_to_barrier->minimum_issue_separation_cycles, 2);
   EXPECT_EQ(barrier_to_load->minimum_issue_separation_cycles, 2);
   EXPECT_NE(store_to_barrier->consumer_event_id,
             barrier_to_load->producer_event_id);
+}
+
+TEST_F(LowEmissionFrameTest, EffectTimingCrossesDirectCfgEdge) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @direct_effect_edge(%address: reg<test.ptr>, %payload: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  test.store.v4i32 %address, %payload
+  low.br ^consume
+^consume:
+  %loaded = test.load.v4i32 %address
+  return %loaded
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame,
+                            LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY));
+
+  ASSERT_EQ(frame.schedule.node_count, 4u);
+  EXPECT_TRUE(loom_low_br_isa(frame.schedule.nodes[1].op));
+  EXPECT_EQ(frame.schedule.nodes[0].issue_cycle, 0u);
+  EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 2u);
+  EXPECT_EQ(frame.schedule.nodes[2].issue_cycle, 0u);
+
+  const loom_low_schedule_dependency_t* boundary_dependency = nullptr;
+  for (iree_host_size_t i = 0; i < frame.schedule.dependencies.count; ++i) {
+    const loom_low_schedule_dependency_t* dependency =
+        loom_low_schedule_dependency_graph_at(&frame.schedule.dependencies, i);
+    if (dependency->producer_node == 0 && dependency->consumer_node == 1 &&
+        dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT &&
+        dependency->separation_source ==
+            LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR) {
+      boundary_dependency = dependency;
+      break;
+    }
+  }
+  ASSERT_NE(boundary_dependency, nullptr);
+  EXPECT_EQ(boundary_dependency->minimum_issue_separation_cycles, 2);
+  EXPECT_EQ(boundary_dependency->producer_attachment_kind,
+            LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_EFFECT);
+  EXPECT_EQ(boundary_dependency->consumer_attachment_kind,
+            LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_NONE);
+}
+
+TEST_F(LowEmissionFrameTest, EffectTimingCrossesDiamondAndEmptyBlock) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @diamond_effect_edge(%condition: reg<test.i32>, %address: reg<test.ptr>, %payload: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  test.store.v4i32 %address, %payload
+  low.cond_br %condition, ^empty, ^write : reg<test.i32>
+^empty:
+  low.br ^read
+^read:
+  %loaded = test.load.v4i32 %address
+  return %loaded
+^write:
+  test.store.v4i32 %address, %payload
+  return %payload
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame,
+                            LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY));
+
+  ASSERT_EQ(frame.schedule.node_count, 7u);
+  EXPECT_TRUE(loom_low_cond_br_isa(frame.schedule.nodes[1].op));
+  EXPECT_EQ(frame.schedule.nodes[0].issue_cycle, 0u);
+  EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 2u);
+
+  bool found_read_requirement = false;
+  bool found_write_requirement = false;
+  for (iree_host_size_t i = 0; i < frame.schedule.dependencies.count; ++i) {
+    const loom_low_schedule_dependency_t* dependency =
+        loom_low_schedule_dependency_graph_at(&frame.schedule.dependencies, i);
+    if (dependency->producer_node != 0 || dependency->consumer_node != 1 ||
+        dependency->kind != LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT ||
+        dependency->separation_source !=
+            LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR) {
+      continue;
+    }
+    found_read_requirement |= dependency->minimum_issue_separation_cycles == 2;
+    found_write_requirement |= dependency->minimum_issue_separation_cycles == 1;
+  }
+  EXPECT_TRUE(found_read_requirement);
+  EXPECT_TRUE(found_write_requirement);
+}
+
+TEST_F(LowEmissionFrameTest, EffectTimingCrossesCfgBackedge) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @loop_effect_edge(%condition: reg<test.i32>, %address: reg<test.ptr>) -> (reg<test.i32 x4>) asm {
+  low.br ^loop
+^loop:
+  %loaded = test.load.v4i32 %address
+  test.barrier
+  low.cond_br %condition, ^loop, ^exit : reg<test.i32>
+^exit:
+  return %loaded
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame,
+                            LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY));
+
+  ASSERT_EQ(frame.schedule.node_count, 5u);
+  EXPECT_TRUE(loom_low_cond_br_isa(frame.schedule.nodes[3].op));
+  EXPECT_EQ(frame.schedule.nodes[3].issue_cycle,
+            frame.schedule.nodes[2].issue_cycle + 2u);
+
+  const loom_low_schedule_dependency_t* backedge_dependency = nullptr;
+  for (iree_host_size_t i = 0; i < frame.schedule.dependencies.count; ++i) {
+    const loom_low_schedule_dependency_t* dependency =
+        loom_low_schedule_dependency_graph_at(&frame.schedule.dependencies, i);
+    if (dependency->producer_node == 2 && dependency->consumer_node == 3 &&
+        dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT &&
+        dependency->separation_source ==
+            LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR) {
+      backedge_dependency = dependency;
+      break;
+    }
+  }
+  ASSERT_NE(backedge_dependency, nullptr);
+  EXPECT_EQ(backedge_dependency->minimum_issue_separation_cycles, 2);
 }
 
 TEST_F(LowEmissionFrameTest, StructuralModelCarriesNativePacketTiming) {
