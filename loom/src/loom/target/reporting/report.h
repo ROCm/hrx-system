@@ -2001,8 +2001,8 @@ typedef struct loom_target_compile_report_t {
   // Target-inserted native packet counts across entries.
   loom_target_compile_report_target_insertion_summary_t
       target_insertion_summary;
-  // Selected pipeline realization and optional physical-plan rows.
-  loom_target_compile_report_pipeline_plan_t pipeline_plan;
+  // Selected pipeline realizations and optional physical-plan rows.
+  loom_target_compile_report_pipeline_plan_list_t pipeline_plans;
   // Owned emitted artifact entry summary rows.
   loom_target_compile_report_row_list_t entry_rows;
   // Owned register-class pressure summaries used by target resources.

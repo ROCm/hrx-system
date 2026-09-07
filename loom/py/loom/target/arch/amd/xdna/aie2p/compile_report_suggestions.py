@@ -59,24 +59,31 @@ class Aie2pCompileReportSuggestionProvider:
             if vliw is not None:
                 suggestions.append(vliw)
 
-        pipeline_plan_value = document.report.get("pipeline_plan")
-        if pipeline_plan_value is not None:
-            pipeline_plan = _report_object(pipeline_plan_value, "pipeline_plan")
-            workers = _optional_indexed_rows(pipeline_plan, "workers")
+        pipeline_plan_values = document.report.get("pipeline_plans", [])
+        if not isinstance(pipeline_plan_values, list):
+            raise CompileReportError("pipeline_plans: expected array")
+        for plan_index, pipeline_plan_value in enumerate(pipeline_plan_values):
+            plan_path = f"pipeline_plans[{plan_index}]"
+            pipeline_plan = _report_object(pipeline_plan_value, plan_path)
+            root_name = _report_string(pipeline_plan.get("root"), f"{plan_path}.root")
+            workers = _optional_indexed_rows(pipeline_plan, plan_path, "workers")
             if workers:
                 for position, worker in enumerate(workers):
-                    path_prefix = f"pipeline_plan.workers.rows[{position}]"
+                    path_prefix = f"{plan_path}.workers.rows[{position}]"
                     suggestions.extend(_suggest_worker_pressure(worker, path_prefix))
             else:
-                suggestions.extend(_suggest_summary_pressure(pipeline_plan))
-            channels = _optional_indexed_rows(pipeline_plan, "channels")
+                suggestions.extend(_suggest_summary_pressure(pipeline_plan, plan_path))
+            channels = _optional_indexed_rows(pipeline_plan, plan_path, "channels")
             for position, channel in enumerate(channels):
-                path_prefix = f"pipeline_plan.channels.rows[{position}]"
-                transform = _suggest_storage_transform(channel, path_prefix)
+                path_prefix = f"{plan_path}.channels.rows[{position}]"
+                entry_name = _channel_entry_name(channel, root_name)
+                transform = _suggest_storage_transform(channel, entry_name, path_prefix)
                 if transform is not None:
                     suggestions.append(transform)
                 if options.include_experimental:
-                    dma = _suggest_dma_record_coalescing(channel, path_prefix)
+                    dma = _suggest_dma_record_coalescing(
+                        channel, entry_name, path_prefix
+                    )
                     if dma is not None:
                         suggestions.append(dma)
 
@@ -180,17 +187,18 @@ def _suggest_vliw_coissue_density(
 
 def _suggest_summary_pressure(
     pipeline_plan: dict[str, object],
+    path_prefix: str,
 ) -> tuple[CompileReportSuggestion, ...]:
-    entry_name = _report_string(pipeline_plan.get("root"), "pipeline_plan.root")
+    entry_name = _report_string(pipeline_plan.get("root"), f"{path_prefix}.root")
     suggestions = []
 
     code_byte_count = _report_integer(
         pipeline_plan.get("maximum_worker_code_byte_count"),
-        "pipeline_plan.maximum_worker_code_byte_count",
+        f"{path_prefix}.maximum_worker_code_byte_count",
     )
     code_headroom = _report_integer(
         pipeline_plan.get("minimum_worker_code_headroom_byte_count"),
-        "pipeline_plan.minimum_worker_code_headroom_byte_count",
+        f"{path_prefix}.minimum_worker_code_headroom_byte_count",
     )
     code_capacity = code_byte_count + code_headroom
     code_suggestion = _capacity_pressure_suggestion(
@@ -201,11 +209,11 @@ def _suggest_summary_pressure(
         capacity=code_capacity,
         evidence=(
             CompileReportSuggestionEvidence(
-                path="pipeline_plan.maximum_worker_code_byte_count",
+                path=f"{path_prefix}.maximum_worker_code_byte_count",
                 value=code_byte_count,
             ),
             CompileReportSuggestionEvidence(
-                path="pipeline_plan.minimum_worker_code_headroom_byte_count",
+                path=f"{path_prefix}.minimum_worker_code_headroom_byte_count",
                 value=code_headroom,
             ),
         ),
@@ -215,11 +223,11 @@ def _suggest_summary_pressure(
 
     bank_storage = _report_integer(
         pipeline_plan.get("maximum_bank_storage_byte_count"),
-        "pipeline_plan.maximum_bank_storage_byte_count",
+        f"{path_prefix}.maximum_bank_storage_byte_count",
     )
     bank_capacity = _report_integer(
         pipeline_plan.get("bank_storage_capacity_byte_count"),
-        "pipeline_plan.bank_storage_capacity_byte_count",
+        f"{path_prefix}.bank_storage_capacity_byte_count",
     )
     bank_suggestion = _capacity_pressure_suggestion(
         suggestion_id="aie2p.bank_pressure",
@@ -229,15 +237,15 @@ def _suggest_summary_pressure(
         capacity=bank_capacity,
         evidence=(
             CompileReportSuggestionEvidence(
-                path="pipeline_plan.maximum_bank_storage_byte_count",
+                path=f"{path_prefix}.maximum_bank_storage_byte_count",
                 value=bank_storage,
             ),
             CompileReportSuggestionEvidence(
-                path="pipeline_plan.bank_storage_capacity_byte_count",
+                path=f"{path_prefix}.bank_storage_capacity_byte_count",
                 value=bank_capacity,
             ),
         ),
-        usage_path="pipeline_plan.maximum_bank_storage_byte_count",
+        usage_path=f"{path_prefix}.maximum_bank_storage_byte_count",
     )
     if bank_suggestion is not None:
         suggestions.append(bank_suggestion)
@@ -332,7 +340,7 @@ def _capacity_pressure_suggestion(
 
 
 def _suggest_storage_transform(
-    channel: dict[str, object], path_prefix: str
+    channel: dict[str, object], entry_name: str, path_prefix: str
 ) -> CompileReportSuggestion | None:
     storage_value = channel.get("storage")
     if storage_value is None:
@@ -350,7 +358,7 @@ def _suggest_storage_transform(
     schema = _report_string(storage.get("schema"), f"{path_prefix}.storage.schema")
     return CompileReportSuggestion(
         suggestion_id="aie2p.storage_transform",
-        entry_name=_channel_entry_name(channel),
+        entry_name=entry_name,
         action=(
             "Benchmark direct canonical-record consumption against this storage "
             "transform and retain the transform only when its measured compute "
@@ -372,7 +380,7 @@ def _suggest_storage_transform(
 
 
 def _suggest_dma_record_coalescing(
-    channel: dict[str, object], path_prefix: str
+    channel: dict[str, object], entry_name: str, path_prefix: str
 ) -> CompileReportSuggestion | None:
     transfer_value = channel.get("external_transfer")
     if transfer_value is None:
@@ -394,7 +402,7 @@ def _suggest_dma_record_coalescing(
         return None
     return CompileReportSuggestion(
         suggestion_id="aie2p.dma_record_coalescing",
-        entry_name=_channel_entry_name(channel),
+        entry_name=entry_name,
         confidence=CompileReportSuggestionConfidence.EXPERIMENTAL,
         action=(
             "Benchmark packing two or four adjacent logical records into each "
@@ -416,12 +424,12 @@ def _suggest_dma_record_coalescing(
 
 
 def _optional_indexed_rows(
-    pipeline_plan: dict[str, object], collection_name: str
+    pipeline_plan: dict[str, object], path_prefix: str, collection_name: str
 ) -> tuple[dict[str, object], ...]:
     collection_value = pipeline_plan.get(collection_name)
     if collection_value is None:
         return ()
-    collection_path = f"pipeline_plan.{collection_name}"
+    collection_path = f"{path_prefix}.{collection_name}"
     collection = _report_object(collection_value, collection_path)
     rows_value = collection.get("rows")
     if rows_value is None:
@@ -447,14 +455,18 @@ def _optional_indexed_rows(
     return tuple(rows)
 
 
-def _channel_entry_name(channel: dict[str, object]) -> str:
+def _channel_entry_name(channel: dict[str, object], root_name: str) -> str:
     receiver = channel.get("receiver")
     if isinstance(receiver, dict) and receiver.get("owner") == "worker":
         owner_index = _optional_report_integer(receiver.get("owner_index"))
         if owner_index is not None:
-            return f"worker[{owner_index}]"
+            return f"{root_name}:worker[{owner_index}]"
     channel_index = _optional_report_integer(channel.get("channel_index"))
-    return f"channel[{channel_index}]" if channel_index is not None else "<pipeline>"
+    return (
+        f"{root_name}:channel[{channel_index}]"
+        if channel_index is not None
+        else root_name
+    )
 
 
 def _require_usage_within_capacity(usage: int, capacity: int, path: str) -> None:

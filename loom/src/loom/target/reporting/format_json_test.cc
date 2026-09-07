@@ -380,7 +380,7 @@ TEST(CompileReportFormatTest, FormatsAndAggregatesLowPlanningStatistics) {
   loom_target_compile_report_deinitialize(&report);
 }
 
-TEST(CompileReportFormatTest, FormatsAndClonesPipelinePlan) {
+TEST(CompileReportFormatTest, FormatsAndClonesPipelinePlans) {
   loom_target_compile_report_pipeline_worker_row_t worker = {};
   worker.worker_index = 0;
   worker.group_index = 2;
@@ -474,15 +474,27 @@ TEST(CompileReportFormatTest, FormatsAndClonesPipelinePlan) {
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PIPELINE_PLAN_ROWS;
   IREE_ASSERT_OK(
       loom_target_compile_report_record_pipeline_plan(&report, &pipeline_plan));
-  ASSERT_NE(report.pipeline_plan.worker_rows, &worker);
-  ASSERT_NE(report.pipeline_plan.channel_rows, &channel);
+  pipeline_plan.summary.root_name = IREE_SVL("q4_gate_up");
+  IREE_ASSERT_OK(
+      loom_target_compile_report_record_pipeline_plan(&report, &pipeline_plan));
+  ASSERT_EQ(report.pipeline_plans.count, 2u);
+  ASSERT_NE(report.pipeline_plans.values[0].worker_rows, &worker);
+  ASSERT_NE(report.pipeline_plans.values[0].channel_rows, &channel);
+  ASSERT_NE(report.pipeline_plans.values[1].worker_rows, &worker);
+  ASSERT_NE(report.pipeline_plans.values[1].channel_rows, &channel);
+  ASSERT_NE(report.pipeline_plans.values[0].worker_rows,
+            report.pipeline_plans.values[1].worker_rows);
 
   loom_target_compile_report_t clone = {};
   IREE_ASSERT_OK(loom_target_compile_report_clone(
       &report, iree_allocator_system(), &clone));
-  ASSERT_NE(clone.pipeline_plan.worker_rows, report.pipeline_plan.worker_rows);
-  ASSERT_NE(clone.pipeline_plan.channel_rows,
-            report.pipeline_plan.channel_rows);
+  ASSERT_EQ(clone.pipeline_plans.count, 2u);
+  ASSERT_NE(clone.pipeline_plans.values[0].worker_rows,
+            report.pipeline_plans.values[0].worker_rows);
+  ASSERT_NE(clone.pipeline_plans.values[0].channel_rows,
+            report.pipeline_plans.values[0].channel_rows);
+  ASSERT_NE(clone.pipeline_plans.values[1].worker_rows,
+            report.pipeline_plans.values[1].worker_rows);
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -495,7 +507,10 @@ TEST(CompileReportFormatTest, FormatsAndClonesPipelinePlan) {
       loom_target_compile_report_format_json(&clone, &options, &stream));
   const iree_string_view_t root =
       ParseJsonDocument(iree_string_builder_view(&builder));
-  const iree_string_view_t plan = LookupObject(root, IREE_SV("pipeline_plan"));
+  const iree_string_view_t plans =
+      LookupObject(root, IREE_SV("pipeline_plans"));
+  ExpectArrayLength(plans, 2);
+  const iree_string_view_t plan = LookupArrayElement(plans, 0);
   ExpectObjectValueEquals(plan, IREE_SV("root"), IREE_SV("q5_gate_up"));
   ExpectObjectUint64Equals(plan, IREE_SV("external_dma_byte_count"), 1408);
   const iree_string_view_t workers = LookupObject(plan, IREE_SV("workers"));
@@ -514,6 +529,8 @@ TEST(CompileReportFormatTest, FormatsAndClonesPipelinePlan) {
   const iree_string_view_t transfer =
       LookupObject(channel_json, IREE_SV("external_transfer"));
   ExpectObjectUint64Equals(transfer, IREE_SV("binding_byte_offset"), 1408);
+  const iree_string_view_t second_plan = LookupArrayElement(plans, 1);
+  ExpectObjectValueEquals(second_plan, IREE_SV("root"), IREE_SV("q4_gate_up"));
   iree_string_builder_deinitialize(&builder);
 
   loom_target_compile_report_deinitialize(&clone);
