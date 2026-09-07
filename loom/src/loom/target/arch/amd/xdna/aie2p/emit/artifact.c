@@ -32,11 +32,20 @@ static bool loom_aie2p_xdna_has_contract(const loom_module_t* module,
          iree_string_view_equal(module->strings.entries[contract_id], contract);
 }
 
-static iree_status_t loom_aie2p_xdna_find_array_entry(
+typedef struct loom_aie2p_xdna_source_entry_t {
+  // Public array function defining the entry.
+  loom_op_t* function_op;
+  // Stable exported symbol name.
+  iree_string_view_t name;
+} loom_aie2p_xdna_source_entry_t;
+
+static iree_status_t loom_aie2p_xdna_collect_array_entries(
     const loom_aie2p_xdna_artifact_request_t* request,
-    loom_op_t** out_function_op, iree_string_view_t* out_entry_name) {
-  *out_function_op = NULL;
-  *out_entry_name = iree_string_view_empty();
+    loom_aie2p_xdna_source_entry_t** out_entries,
+    iree_host_size_t* out_entry_count) {
+  *out_entries = NULL;
+  *out_entry_count = 0;
+  iree_host_size_t entry_count = 0;
   loom_symbol_t* symbol = NULL;
   loom_module_for_each_symbol(request->module, symbol) {
     if (symbol->defining_op == NULL ||
@@ -55,19 +64,36 @@ static iree_status_t loom_aie2p_xdna_find_array_entry(
           IREE_STATUS_FAILED_PRECONDITION,
           "public AIE2P array entries must be retained array programs");
     }
-    if (*out_function_op != NULL) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AIE2P XDNA emission requires exactly one public array entry");
-    }
-    *out_function_op = symbol->defining_op;
-    *out_entry_name = request->module->strings.entries[symbol->name_id];
+    ++entry_count;
   }
-  if (*out_function_op == NULL) {
+  if (entry_count == 0) {
     return iree_make_status(
         IREE_STATUS_NOT_FOUND,
-        "AIE2P XDNA emission requires one public retained array program");
+        "AIE2P XDNA emission requires a public retained array program");
   }
+
+  loom_aie2p_xdna_source_entry_t* entries = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      request->scratch_arena, entry_count, sizeof(*entries), (void**)&entries));
+  iree_host_size_t entry_index = 0;
+  loom_module_for_each_symbol(request->module, symbol) {
+    if (symbol->defining_op == NULL ||
+        !loom_low_func_def_isa(symbol->defining_op) ||
+        !loom_aie2p_xdna_has_contract(request->module, symbol->defining_op,
+                                      IREE_SV("amd.xdna.aie2p.array"))) {
+      continue;
+    }
+    const loom_func_like_t function =
+        loom_func_like_cast(request->module, symbol->defining_op);
+    if (loom_func_like_visibility(function) == 0) continue;
+    entries[entry_index++] = (loom_aie2p_xdna_source_entry_t){
+        .function_op = symbol->defining_op,
+        .name = request->module->strings.entries[symbol->name_id],
+    };
+  }
+  IREE_ASSERT_EQ(entry_index, entry_count);
+  *out_entries = entries;
+  *out_entry_count = entry_count;
   return iree_ok_status();
 }
 
@@ -78,6 +104,34 @@ static const loom_target_facts_t* loom_aie2p_xdna_function_target_facts(
           request->function_versions,
           loom_func_like_cast(request->module, function_op));
   return version != NULL ? version->function_target_facts : NULL;
+}
+
+static iree_status_t loom_aie2p_xdna_resolve_device_profile(
+    const loom_aie2p_xdna_artifact_request_t* request,
+    const loom_aie2p_xdna_source_entry_t* entries, iree_host_size_t entry_count,
+    const loom_xdna_device_profile_t** out_device_profile) {
+  const loom_xdna_device_profile_t* device_profile = request->device_profile;
+  for (iree_host_size_t i = 0; i < entry_count; ++i) {
+    const loom_aie2p_target_facts_t* target_facts =
+        loom_aie2p_target_facts_cast(loom_aie2p_xdna_function_target_facts(
+            request, entries[i].function_op));
+    const loom_xdna_device_profile_t* function_profile =
+        target_facts != NULL ? target_facts->device_profile : NULL;
+    if (function_profile == NULL) continue;
+    if (device_profile != NULL && device_profile != function_profile) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "public AIE2P array entries select incompatible device profiles");
+    }
+    device_profile = function_profile;
+  }
+  if (device_profile == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AIE2P XDNA emission requires an exact device profile");
+  }
+  *out_device_profile = device_profile;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_aie2p_xdna_compile_source_leaves(
@@ -291,57 +345,70 @@ iree_status_t loom_aie2p_xdna_artifact_emit(
   IREE_ASSERT_ARGUMENT(out_contents);
   *out_contents = NULL;
 
-  loom_op_t* array_function = NULL;
-  iree_string_view_t entry_name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_xdna_find_array_entry(request, &array_function, &entry_name));
-  const loom_xdna_device_profile_t* device_profile = request->device_profile;
-  if (device_profile == NULL) {
-    const loom_aie2p_target_facts_t* target_facts =
-        loom_aie2p_target_facts_cast(
-            loom_aie2p_xdna_function_target_facts(request, array_function));
-    device_profile = target_facts != NULL ? target_facts->device_profile : NULL;
-  }
-  if (device_profile == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AIE2P XDNA emission requires an exact device profile");
-  }
+  loom_aie2p_xdna_source_entry_t* source_entries = NULL;
+  iree_host_size_t entry_count = 0;
+  IREE_RETURN_IF_ERROR(loom_aie2p_xdna_collect_array_entries(
+      request, &source_entries, &entry_count));
+  const loom_xdna_device_profile_t* device_profile = NULL;
+  IREE_RETURN_IF_ERROR(loom_aie2p_xdna_resolve_device_profile(
+      request, source_entries, entry_count, &device_profile));
   if (request->compile_report != NULL) {
     loom_target_compile_report_initialize_if_empty(request->compile_report,
                                                    request->allocator);
-    loom_target_compile_report_record_low_kernel_workload(
-        request->compile_report, array_function);
   }
 
   loom_aie2p_array_leaf_t* source_leaves = NULL;
   iree_host_size_t source_leaf_count = 0;
   IREE_RETURN_IF_ERROR(loom_aie2p_xdna_compile_source_leaves(
       request, &source_leaves, &source_leaf_count));
-  loom_aie2p_array_plan_t array_plan = {0};
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_build(
-      request->module, array_function, source_leaves, source_leaf_count,
-      request->diagnostic_emitter, request->scratch_arena, &array_plan));
-  loom_aie2p_array_program_t array_program = {0};
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_program_build(
-      &array_plan, request->scratch_arena, &array_program));
-  loom_aie2p_array_resident_program_t resident_program = {0};
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_materialize_resident_program(
-      request->module, &array_plan, request->scratch_arena, &resident_program));
-  loom_aie2p_xdna_tile_t* tiles = NULL;
-  IREE_RETURN_IF_ERROR(loom_aie2p_xdna_compile_resident_tiles(
-      request, &array_plan, &resident_program, &tiles));
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_report_record(
-      request->module, entry_name, &array_plan, tiles, request->compile_report,
-      request->scratch_arena));
+
+  loom_aie2p_array_plan_t* array_plans = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(request->scratch_arena, entry_count,
+                                sizeof(*array_plans), (void**)&array_plans));
+  loom_aie2p_array_program_t* array_programs = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      request->scratch_arena, entry_count, sizeof(*array_programs),
+      (void**)&array_programs));
+  loom_aie2p_xdna_entry_t* product_entries = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      request->scratch_arena, entry_count, sizeof(*product_entries),
+      (void**)&product_entries));
+  for (iree_host_size_t i = 0; i < entry_count; ++i) {
+    const loom_aie2p_xdna_source_entry_t* source_entry = &source_entries[i];
+    if (request->compile_report != NULL) {
+      loom_target_compile_report_record_low_kernel_workload(
+          request->compile_report, source_entry->function_op);
+    }
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_build(
+        request->module, source_entry->function_op, source_leaves,
+        source_leaf_count, request->diagnostic_emitter, request->scratch_arena,
+        &array_plans[i]));
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_program_build(
+        &array_plans[i], request->scratch_arena, &array_programs[i]));
+    loom_aie2p_array_resident_program_t resident_program = {0};
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_materialize_resident_program(
+        request->module, &array_plans[i], request->scratch_arena,
+        &resident_program));
+    loom_aie2p_xdna_tile_t* tiles = NULL;
+    IREE_RETURN_IF_ERROR(loom_aie2p_xdna_compile_resident_tiles(
+        request, &array_plans[i], &resident_program, &tiles));
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_report_record(
+        request->module, source_entry->name, &array_plans[i], tiles,
+        request->compile_report, request->scratch_arena));
+    product_entries[i] = (loom_aie2p_xdna_entry_t){
+        .name = source_entry->name,
+        .array_plan = &array_plans[i],
+        .array_program = &array_programs[i],
+        .tiles = tiles,
+        .tile_count = resident_program.worker_count,
+    };
+  }
 
   const loom_aie2p_xdna_product_t product = {
       .device_profile = device_profile,
-      .entry_name = entry_name,
-      .array_plan = &array_plan,
-      .array_program = &array_program,
-      .tiles = tiles,
-      .tile_count = resident_program.worker_count,
+      .entries = product_entries,
+      .entry_count = entry_count,
   };
 
   iree_io_stream_t* stream = NULL;

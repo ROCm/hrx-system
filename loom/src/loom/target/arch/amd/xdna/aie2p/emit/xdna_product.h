@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Canonical single-entry AIE2P XDNA ELF product emission.
+// Canonical AIE2P XDNA ELF product emission.
 
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_EMIT_XDNA_PRODUCT_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_EMIT_XDNA_PRODUCT_H_
@@ -33,12 +33,10 @@ typedef struct loom_aie2p_xdna_tile_t {
   const loom_aie2p_linked_tile_t* linked_tile;
 } loom_aie2p_xdna_tile_t;
 
-// Complete inputs to one canonical single-entry AIE2P XDNA product.
-typedef struct loom_aie2p_xdna_product_t {
-  // Exact deployment profile serialized into the ABI note.
-  const loom_xdna_device_profile_t* device_profile;
+// One independently dispatchable array entry in an XDNA product.
+typedef struct loom_aie2p_xdna_entry_t {
   // Diagnostic and runtime export name.
-  iree_string_view_t entry_name;
+  iree_string_view_t name;
   // Exact physical array plan defining bindings and placements.
   const loom_aie2p_array_plan_t* array_plan;
   // Typed array and invocation-control program awaiting final ordinals.
@@ -47,13 +45,26 @@ typedef struct loom_aie2p_xdna_product_t {
   const loom_aie2p_xdna_tile_t* tiles;
   // Number of records in |tiles|.
   iree_host_size_t tile_count;
+} loom_aie2p_xdna_entry_t;
+
+// Complete inputs to one canonical multi-entry AIE2P XDNA product.
+typedef struct loom_aie2p_xdna_product_t {
+  // Exact deployment profile serialized into the ABI note.
+  const loom_xdna_device_profile_t* device_profile;
+  // Independently dispatchable entries in stable export-ordinal order.
+  const loom_aie2p_xdna_entry_t* entries;
+  // Number of records in |entries|.
+  iree_host_size_t entry_count;
 } loom_aie2p_xdna_product_t;
 
 // Writes one canonical ELF32LE `.xdna` product.
 //
 // The program-header table is the runtime directory. Tile programs are raw
 // linked sections in the outer ELF; no nested object or vendor container is
-// produced. Metadata tables, symbols, section names, and final ELF layout use
+// produced. Each entry owns a consecutive TILE program-header range containing
+// all of its core programs and data contributions. Identical section payloads
+// share one file range even when multiple entry-specific program headers refer
+// to them. Metadata tables, symbols, section names, and final ELF layout use
 // |scratch_arena| and remain live only for the call.
 iree_status_t loom_aie2p_xdna_product_write(
     const loom_aie2p_xdna_product_t* product, iree_io_stream_t* stream,

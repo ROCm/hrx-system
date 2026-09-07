@@ -160,13 +160,16 @@ iree_status_t loom_aie2p_array_program_build(
 // Encodes one typed program after final ELF program-header placement.
 //
 // Tile program indices are resolved relative to
-// |first_tile_program_header_ordinal|. Runtime relocation targets are resolved
-// against |control_program_header_ordinal| and the encoded control record
-// offsets.
+// |first_tile_program_header_ordinal|. |tile_program_header_count| covers the
+// complete consecutive TILE program-header range owned by the array,
+// including data contributions following the directly referenced core program
+// headers. Runtime relocation targets are resolved against
+// |control_program_header_ordinal| and the encoded control record offsets.
 iree_status_t loom_aie2p_array_program_encode(
     const loom_aie2p_array_program_t* program,
     uint32_t first_tile_program_header_ordinal,
-    uint32_t control_program_header_ordinal, iree_arena_allocator_t* arena,
+    uint32_t tile_program_header_count, uint32_t control_program_header_ordinal,
+    iree_arena_allocator_t* arena,
     loom_aie2p_encoded_array_program_t* out_program);
 
 #ifdef __cplusplus

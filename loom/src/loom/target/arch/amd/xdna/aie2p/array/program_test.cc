@@ -400,6 +400,7 @@ TEST(Aie2pArrayProgramTest, EncodesTypedRecordsAndResolvesRelocation) {
   loom_aie2p_encoded_array_program_t encoded = {};
   IREE_ASSERT_OK(loom_aie2p_array_program_encode(
       &program, /*first_tile_program_header_ordinal=*/7,
+      /*tile_program_header_count=*/3,
       /*control_program_header_ordinal=*/13, &arena, &encoded));
 
   ASSERT_EQ(encoded.array_payload.data_length, 108u);
@@ -408,7 +409,7 @@ TEST(Aie2pArrayProgramTest, EncodesTypedRecordsAndResolvesRelocation) {
   EXPECT_EQ(iree_unaligned_load_le_u32(array + 12), 4u);
   EXPECT_EQ(iree_unaligned_load_le_u32(array + 16), 108u);
   EXPECT_EQ(iree_unaligned_load_le_u32(array + 24), 7u);
-  EXPECT_EQ(iree_unaligned_load_le_u32(array + 28), 1u);
+  EXPECT_EQ(iree_unaligned_load_le_u32(array + 28), 3u);
 
   EXPECT_EQ(iree_unaligned_load_le_u16(array + 32),
             LOOM_AIE2P_PROGRAM_RECORD_REGISTER_WRITE32);

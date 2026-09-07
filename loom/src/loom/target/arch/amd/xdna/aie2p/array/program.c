@@ -1493,7 +1493,8 @@ static iree_status_t loom_aie2p_program_encode_records(
 iree_status_t loom_aie2p_array_program_encode(
     const loom_aie2p_array_program_t* program,
     uint32_t first_tile_program_header_ordinal,
-    uint32_t control_program_header_ordinal, iree_arena_allocator_t* arena,
+    uint32_t tile_program_header_count, uint32_t control_program_header_ordinal,
+    iree_arena_allocator_t* arena,
     loom_aie2p_encoded_array_program_t* out_program) {
   IREE_ASSERT_ARGUMENT(program);
   IREE_ASSERT_ARGUMENT(arena);
@@ -1506,7 +1507,12 @@ iree_status_t loom_aie2p_array_program_encode(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AIE2P program storage is incomplete");
   }
-  if (program->tile_program_count >
+  if (tile_program_header_count < program->tile_program_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AIE2P TILE program-header range omits resident core programs");
+  }
+  if (tile_program_header_count >
       UINT32_MAX - first_tile_program_header_ordinal) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AIE2P tile program-header range overflows");
@@ -1544,7 +1550,7 @@ iree_status_t loom_aie2p_array_program_encode(
       .byte_length = (uint32_t)array_byte_length,
       .flags = 0,
       .first_tile_program_header_ordinal = first_tile_program_header_ordinal,
-      .tile_program_header_count = program->tile_program_count,
+      .tile_program_header_count = tile_program_header_count,
   };
   IREE_RETURN_IF_ERROR(loom_xdna_elf_encode_array_header(
       &array_header,

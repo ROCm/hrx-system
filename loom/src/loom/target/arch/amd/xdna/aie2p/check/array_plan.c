@@ -707,6 +707,7 @@ static iree_status_t loom_aie2p_array_plan_check_execute(
   loom_aie2p_encoded_array_program_t encoded_program = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_array_program_encode(
       &array_program, /*first_tile_program_header_ordinal=*/0,
+      /*tile_program_header_count=*/array_program.tile_program_count,
       /*control_program_header_ordinal=*/0, request->case_arena,
       &encoded_program));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_program_check_format(
