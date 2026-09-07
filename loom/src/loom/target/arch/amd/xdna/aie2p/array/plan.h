@@ -132,6 +132,9 @@ typedef struct loom_aie2p_array_channel_t {
   uint32_t sender_endpoint_index;
   // Index of the receiving endpoint.
   uint32_t receiver_endpoint_index;
+  // Channel owning shared producer storage, DMA, and locks. Equal to this
+  // channel's index for a canonical multicast branch or a single consumer.
+  uint32_t source_channel_index;
   // Number of records held by the channel ring.
   uint32_t capacity;
   // Number of ordered records transferred per activation.

@@ -167,7 +167,7 @@ typedef struct loom_target_compile_report_pipeline_worker_row_t {
   uint32_t input_channel_count;
   // Number of output channels carrying the worker state machine.
   uint32_t output_channel_count;
-  // Number of ring positions retained in the worker state machine.
+  // Number of independently advanced channel rings in the worker state.
   uint32_t ring_state_count;
   // Synchronized input record firings per port and pipeline activation.
   uint32_t input_record_count;

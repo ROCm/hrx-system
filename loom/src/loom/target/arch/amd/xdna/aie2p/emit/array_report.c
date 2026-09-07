@@ -62,7 +62,10 @@ static uint32_t loom_aie2p_array_report_channel_storage_byte_count(
         loom_aie2p_array_report_storage_present(&slot->sender_storage);
     const bool has_receiver =
         loom_aie2p_array_report_storage_present(&slot->receiver_storage);
-    if (has_sender) byte_count += slot->byte_length;
+    if (has_sender &&
+        plan->channels[channel_index].source_channel_index == channel_index) {
+      byte_count += slot->byte_length;
+    }
     if (has_receiver &&
         (!has_sender || !loom_aie2p_array_report_storage_equal(
                             &slot->sender_storage, &slot->receiver_storage))) {
@@ -73,20 +76,26 @@ static uint32_t loom_aie2p_array_report_channel_storage_byte_count(
 }
 
 static void loom_aie2p_array_report_accumulate_channel_storage(
-    const loom_aie2p_array_channel_slot_t* slot,
+    const loom_aie2p_array_plan_t* plan, iree_host_size_t slot_index,
     loom_xdna_tile_coordinate_t coordinate, uint32_t range_offset,
     uint32_t range_byte_count, uint32_t* byte_count,
     uint32_t* range_overlap_byte_count, uint32_t* high_water_byte_count) {
+  const loom_aie2p_array_channel_slot_t* slot =
+      &plan->channel_slots[slot_index];
   const loom_aie2p_array_channel_storage_plan_t* storages[] = {
       &slot->sender_storage,
       &slot->receiver_storage,
   };
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(storages); ++i) {
     const loom_aie2p_array_channel_storage_plan_t* storage = storages[i];
-    if (!loom_aie2p_array_report_storage_present(storage) ||
+    if ((i == 0 && plan->channels[slot->channel_index].source_channel_index !=
+                       slot->channel_index) ||
         !loom_aie2p_array_report_coordinate_equal(storage->owner, coordinate) ||
-        (i != 0 && loom_aie2p_array_report_storage_present(storages[0]) &&
-         loom_aie2p_array_report_storage_equal(storages[0], storage))) {
+        !loom_aie2p_array_report_storage_present(storage) ||
+        (i != 0 &&
+         loom_aie2p_array_report_storage_present(&slot->sender_storage) &&
+         loom_aie2p_array_report_storage_equal(&slot->sender_storage,
+                                               storage))) {
       continue;
     }
     if (byte_count != NULL) *byte_count += slot->byte_length;
@@ -121,7 +130,7 @@ static void loom_aie2p_array_report_query_tile_usage(
   }
   for (iree_host_size_t i = 0; i < plan->channel_slot_count; ++i) {
     loom_aie2p_array_report_accumulate_channel_storage(
-        &plan->channel_slots[i], coordinate, /*range_offset=*/0,
+        plan, i, coordinate, /*range_offset=*/0,
         /*range_byte_count=*/0, &out_usage->channel_storage_byte_count,
         /*range_overlap_byte_count=*/NULL, &high_water);
   }
@@ -145,7 +154,7 @@ static void loom_aie2p_array_report_query_tile_usage(
     }
     for (iree_host_size_t i = 0; i < plan->channel_slot_count; ++i) {
       loom_aie2p_array_report_accumulate_channel_storage(
-          &plan->channel_slots[i], coordinate, bank_offset, bank_byte_count,
+          plan, i, coordinate, bank_offset, bank_byte_count,
           /*byte_count=*/NULL, &occupied_byte_count,
           /*high_water_byte_count=*/NULL);
     }
@@ -219,16 +228,23 @@ static void loom_aie2p_array_report_worker_record_counts(
     loom_target_compile_report_pipeline_worker_row_t* row) {
   for (iree_host_size_t i = 0; i < plan->worker_port_count; ++i) {
     const loom_aie2p_array_worker_port_plan_t* port = &plan->worker_ports[i];
-    if (port->worker_index != worker_index) continue;
-    const uint32_t record_count =
-        plan->channels[port->channel_index].record_count;
-    ++row->ring_state_count;
-    if (port->direction == LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE) {
+    if (port->worker_index == worker_index) ++row->ring_state_count;
+  }
+  for (iree_host_size_t i = 0; i < plan->channel_count; ++i) {
+    const loom_aie2p_array_channel_t* channel = &plan->channels[i];
+    const loom_aie2p_array_endpoint_t* sender =
+        &plan->endpoints[channel->sender_endpoint_index];
+    const loom_aie2p_array_endpoint_t* receiver =
+        &plan->endpoints[channel->receiver_endpoint_index];
+    if (receiver->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
+        receiver->owner_index == worker_index) {
       ++row->input_channel_count;
-      row->input_record_count = record_count;
-    } else {
+      row->input_record_count = channel->record_count;
+    }
+    if (sender->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
+        sender->owner_index == worker_index) {
       ++row->output_channel_count;
-      row->output_record_count = record_count;
+      row->output_record_count = channel->record_count;
     }
   }
 }
