@@ -48,11 +48,13 @@ loom_cc_library(
   NAME
     report
   HDRS
+    "pipeline_plan.h"
     "report.h"
     "target_insertion.h"
   SRCS
     "memory_summary.c"
     "memory_summary.h"
+    "pipeline_plan.c"
     "report.c"
     "row_list.c"
     "row_list.h"
@@ -79,6 +81,8 @@ loom_cc_library(
     "format_json.h"
     "format_json_lowering.c"
     "format_json_planning.c"
+    "format_pipeline.c"
+    "format_pipeline.h"
     "format_text.c"
     "format_text.h"
     "format_text_lowering.c"

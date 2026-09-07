@@ -380,6 +380,146 @@ TEST(CompileReportFormatTest, FormatsAndAggregatesLowPlanningStatistics) {
   loom_target_compile_report_deinitialize(&report);
 }
 
+TEST(CompileReportFormatTest, FormatsAndClonesPipelinePlan) {
+  loom_target_compile_report_pipeline_worker_row_t worker = {};
+  worker.worker_index = 0;
+  worker.group_index = 2;
+  worker.lane = 1;
+  worker.flags = LOOM_TARGET_COMPILE_REPORT_PIPELINE_WORKER_RESIDENT |
+                 LOOM_TARGET_COMPILE_REPORT_PIPELINE_WORKER_FOLDED |
+                 LOOM_TARGET_COMPILE_REPORT_PIPELINE_WORKER_PLACED;
+  worker.entry_name = IREE_SVL("projection");
+  worker.placement.rank = 2;
+  worker.placement.x = 4;
+  worker.placement.y = 3;
+  worker.input_channel_count = 2;
+  worker.output_channel_count = 1;
+  worker.ring_state_count = 3;
+  worker.input_record_count = 8;
+  worker.output_record_count = 1;
+  worker.finite_loop_trip_count = 8;
+  worker.fold_kind = IREE_SVL("addf");
+  worker.code_byte_count = 7168;
+  worker.code_capacity_byte_count = 16384;
+  worker.channel_storage_byte_count = 704;
+  worker.local_memory_byte_count = 17152;
+  worker.local_memory_capacity_byte_count = 65536;
+  worker.maximum_bank_storage_byte_count = 352;
+  worker.bank_storage_capacity_byte_count = 16384;
+
+  loom_target_compile_report_pipeline_channel_row_t channel = {};
+  channel.channel_index = 0;
+  channel.transport = IREE_SVL("external-dma");
+  channel.sender.owner =
+      LOOM_TARGET_COMPILE_REPORT_PIPELINE_ENDPOINT_OWNER_BINDING;
+  channel.sender.owner_index = 0;
+  channel.receiver.owner =
+      LOOM_TARGET_COMPILE_REPORT_PIPELINE_ENDPOINT_OWNER_WORKER;
+  channel.receiver.owner_index = 0;
+  channel.receiver.port = 1;
+  channel.capacity = 2;
+  channel.record_count = 8;
+  channel.record_byte_count = 176;
+  channel.activation_byte_count = 1408;
+  channel.local_storage_byte_count = 352;
+  channel.hardware_lock_count = 2;
+  channel.dma_channel_count = 2;
+  channel.dma_buffer_descriptor_count = 3;
+  channel.route_count = 4;
+  channel.storage.schema_name = IREE_SVL("ggml.q5_k");
+  channel.storage.address_layout = IREE_SVL("dense");
+  channel.storage.transform = IREE_SVL("none");
+  channel.storage.schema_logical_element_count = 256;
+  channel.storage.schema_record_byte_count = 176;
+  channel.storage.schema_required_alignment = 2;
+  channel.storage.schema_records_per_channel_record = 1;
+  channel.transfer.binding_ordinal = 0;
+  channel.transfer.partition_lane = 1;
+  channel.transfer.partition_lane_count = 2;
+  channel.transfer.binding_byte_offset = 1408;
+  channel.transfer.binding_span_byte_count = 1408;
+  channel.transfer.task_byte_count = 1408;
+  channel.transfer.task_repeat_count = 1;
+  channel.transfer.activation_byte_count = 1408;
+
+  loom_target_compile_report_pipeline_plan_t pipeline_plan = {};
+  pipeline_plan.summary.root_name = IREE_SVL("q5_gate_up");
+  pipeline_plan.summary.realization = IREE_SVL("spatial-program");
+  pipeline_plan.summary.group_count = 3;
+  pipeline_plan.summary.worker_count = 1;
+  pipeline_plan.summary.binding_count = 1;
+  pipeline_plan.summary.channel_count = 1;
+  pipeline_plan.summary.channel_slot_count = 2;
+  pipeline_plan.summary.hardware_lock_count = 2;
+  pipeline_plan.summary.dma_channel_count = 2;
+  pipeline_plan.summary.dma_buffer_descriptor_count = 3;
+  pipeline_plan.summary.route_count = 4;
+  pipeline_plan.summary.worker_code_byte_count = 7168;
+  pipeline_plan.summary.maximum_worker_code_byte_count = 7168;
+  pipeline_plan.summary.minimum_worker_code_headroom_byte_count = 9216;
+  pipeline_plan.summary.channel_storage_byte_count = 352;
+  pipeline_plan.summary.maximum_tile_local_memory_byte_count = 17152;
+  pipeline_plan.summary.minimum_tile_local_memory_headroom_byte_count = 48384;
+  pipeline_plan.summary.maximum_bank_storage_byte_count = 352;
+  pipeline_plan.summary.bank_storage_capacity_byte_count = 16384;
+  pipeline_plan.summary.external_dma_byte_count = 1408;
+  pipeline_plan.worker_rows = &worker;
+  pipeline_plan.worker_row_count = 1;
+  pipeline_plan.channel_rows = &channel;
+  pipeline_plan.channel_row_count = 1;
+
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  report.requested_detail_flags =
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_PIPELINE_PLAN_ROWS;
+  IREE_ASSERT_OK(
+      loom_target_compile_report_record_pipeline_plan(&report, &pipeline_plan));
+  ASSERT_NE(report.pipeline_plan.worker_rows, &worker);
+  ASSERT_NE(report.pipeline_plan.channel_rows, &channel);
+
+  loom_target_compile_report_t clone = {};
+  IREE_ASSERT_OK(loom_target_compile_report_clone(
+      &report, iree_allocator_system(), &clone));
+  ASSERT_NE(clone.pipeline_plan.worker_rows, report.pipeline_plan.worker_rows);
+  ASSERT_NE(clone.pipeline_plan.channel_rows,
+            report.pipeline_plan.channel_rows);
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+  const loom_target_compile_report_format_options_t options = {
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+  };
+  IREE_ASSERT_OK(
+      loom_target_compile_report_format_json(&clone, &options, &stream));
+  const iree_string_view_t root =
+      ParseJsonDocument(iree_string_builder_view(&builder));
+  const iree_string_view_t plan = LookupObject(root, IREE_SV("pipeline_plan"));
+  ExpectObjectValueEquals(plan, IREE_SV("root"), IREE_SV("q5_gate_up"));
+  ExpectObjectUint64Equals(plan, IREE_SV("external_dma_byte_count"), 1408);
+  const iree_string_view_t workers = LookupObject(plan, IREE_SV("workers"));
+  ExpectObjectUint64Equals(workers, IREE_SV("count"), 1);
+  const iree_string_view_t worker_json =
+      LookupArrayElement(LookupObject(workers, IREE_SV("rows")), 0);
+  ExpectObjectValueEquals(worker_json, IREE_SV("entry"), IREE_SV("projection"));
+  ExpectObjectUint64Equals(worker_json, IREE_SV("finite_loop_trip_count"), 8);
+  const iree_string_view_t channels = LookupObject(plan, IREE_SV("channels"));
+  const iree_string_view_t channel_json =
+      LookupArrayElement(LookupObject(channels, IREE_SV("rows")), 0);
+  const iree_string_view_t storage =
+      LookupObject(channel_json, IREE_SV("storage"));
+  ExpectObjectValueEquals(storage, IREE_SV("schema"), IREE_SV("ggml.q5_k"));
+  ExpectObjectUint64Equals(storage, IREE_SV("schema_record_byte_count"), 176);
+  const iree_string_view_t transfer =
+      LookupObject(channel_json, IREE_SV("external_transfer"));
+  ExpectObjectUint64Equals(transfer, IREE_SV("binding_byte_offset"), 1408);
+  iree_string_builder_deinitialize(&builder);
+
+  loom_target_compile_report_deinitialize(&clone);
+  loom_target_compile_report_deinitialize(&report);
+}
+
 TEST(CompileReportFormatTest, FormatsJsonEscapedStrings) {
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());

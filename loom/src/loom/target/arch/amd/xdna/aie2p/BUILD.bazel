@@ -514,6 +514,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/target/reporting:low",
         "//loom/src/loom/target/reporting:report",
+        "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -550,7 +551,11 @@ loom_cc_library(
 
 loom_cc_library(
     name = "artifact",
-    srcs = ["emit/artifact.c"],
+    srcs = [
+        "emit/array_report.c",
+        "emit/array_report.h",
+        "emit/artifact.c",
+    ],
     hdrs = ["emit/artifact.h"],
     visibility = ["//loom/src/loom/tooling/target/amd/xdna:__pkg__"],
     deps = [
@@ -564,12 +569,15 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/encoding",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target/arch/amd/xdna:device_profile",
         "//loom/src/loom/target/reporting:low",
         "//loom/src/loom/target/reporting:report",
+        "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",

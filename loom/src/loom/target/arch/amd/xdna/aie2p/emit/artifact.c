@@ -14,6 +14,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/array/plan.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/program.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/resident.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/array_report.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_compile.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/tile_link.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/xdna_product.h"
@@ -330,6 +331,9 @@ iree_status_t loom_aie2p_xdna_artifact_emit(
   loom_aie2p_xdna_tile_t* tiles = NULL;
   IREE_RETURN_IF_ERROR(loom_aie2p_xdna_compile_resident_tiles(
       request, &array_plan, &resident_program, &tiles));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_report_record(
+      request->module, entry_name, &array_plan, tiles, request->compile_report,
+      request->scratch_arena));
 
   const loom_aie2p_xdna_product_t product = {
       .device_profile = device_profile,

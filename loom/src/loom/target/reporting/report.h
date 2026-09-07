@@ -13,6 +13,7 @@
 #include "loom/analysis/native_layout.h"
 #include "loom/codegen/low/planning_statistics.h"
 #include "loom/ir/scalar_type.h"
+#include "loom/target/reporting/pipeline_plan.h"
 #include "loom/target/reporting/target_insertion.h"
 #include "loom/target/residency.h"
 #include "loom/target/types.h"
@@ -90,6 +91,10 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS = 1u << 25,
   // Final target body, entry, and coissued instruction counts were recorded.
   LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION_BREAKDOWN = 1u << 26,
+  // Aggregate pipeline realization facts were recorded.
+  LOOM_TARGET_COMPILE_REPORT_DETAIL_PIPELINE_PLAN = 1u << 27,
+  // Per-worker and per-channel pipeline realization rows were recorded.
+  LOOM_TARGET_COMPILE_REPORT_DETAIL_PIPELINE_PLAN_ROWS = 1u << 28,
 };
 
 typedef enum loom_target_compile_report_move_cause_e {
@@ -1996,6 +2001,8 @@ typedef struct loom_target_compile_report_t {
   // Target-inserted native packet counts across entries.
   loom_target_compile_report_target_insertion_summary_t
       target_insertion_summary;
+  // Selected pipeline realization and optional physical-plan rows.
+  loom_target_compile_report_pipeline_plan_t pipeline_plan;
   // Owned emitted artifact entry summary rows.
   loom_target_compile_report_row_list_t entry_rows;
   // Owned register-class pressure summaries used by target resources.

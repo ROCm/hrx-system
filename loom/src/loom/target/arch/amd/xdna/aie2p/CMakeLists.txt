@@ -562,6 +562,7 @@ loom_cc_library(
     loom::ir
     loom::target::reporting::low
     loom::target::reporting::report
+    loom::util::fact_table
   PUBLIC
 )
 
@@ -606,6 +607,8 @@ loom_cc_library(
   HDRS
     "emit/artifact.h"
   SRCS
+    "emit/array_report.c"
+    "emit/array_report.h"
     "emit/artifact.c"
   DEPS
     ::array_plan
@@ -621,12 +624,15 @@ loom_cc_library(
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
     loom::ir
+    loom::ir::facts
+    loom::ops::encoding
     loom::ops::low
     loom::ops::op_defs
     loom::target::arch::amd::xdna::device_profile
     loom::target::function_version
     loom::target::reporting::low
     loom::target::reporting::report
+    loom::util::fact_table
   PUBLIC
 )
 
