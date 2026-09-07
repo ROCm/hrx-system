@@ -542,6 +542,30 @@ static iree_status_t loom_aie2p_program_encode_field(const char* key,
   return iree_ok_status();
 }
 
+static uint32_t loom_aie2p_program_encode_dma_wrap(uint32_t wrap,
+                                                   uint8_t field_bits) {
+  const uint32_t field_mask = (UINT32_C(1) << field_bits) - 1u;
+  return wrap & field_mask;
+}
+
+static const char* const loom_aie2p_program_shim_dma_step_keys[] = {
+    "shim_noc.dma.bd.word3.d0_step_size",
+    "shim_noc.dma.bd.word4.d1_step_size",
+    "shim_noc.dma.bd.word5.d2_step_size",
+};
+
+static const char* const loom_aie2p_program_shim_dma_wrap_keys[] = {
+    "shim_noc.dma.bd.word3.d0_wrap",
+    "shim_noc.dma.bd.word4.d1_wrap",
+};
+
+static_assert(IREE_ARRAYSIZE(loom_aie2p_program_shim_dma_step_keys) ==
+                  LOOM_AIE2P_ARRAY_BINDING_DMA_DIMENSION_COUNT,
+              "one shim DMA step field is required per address dimension");
+static_assert(IREE_ARRAYSIZE(loom_aie2p_program_shim_dma_wrap_keys) + 1u ==
+                  LOOM_AIE2P_ARRAY_BINDING_DMA_DIMENSION_COUNT,
+              "the outermost shim DMA address dimension does not wrap");
+
 static const loom_aie2p_array_channel_slot_t*
 loom_aie2p_program_find_channel_slot(const loom_aie2p_array_plan_t* plan,
                                      uint32_t channel_index, uint32_t slot) {
@@ -759,6 +783,21 @@ static iree_status_t loom_aie2p_program_build_shim_dma_descriptor(
                                   tile->dma.transfer_length_offset;
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
       "shim_noc.dma.bd.word0.buffer_length", encoded_length, &words[0]));
+  for (uint8_t i = 0; i < binding_plan->dma_dimension_count; ++i) {
+    const loom_aie2p_array_binding_dma_dimension_t* dimension =
+        &binding_plan->dma_dimensions[i];
+    const uint8_t word_index = i + 3u;
+    IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
+        loom_aie2p_program_shim_dma_step_keys[i], dimension->step_size - 1u,
+        &words[word_index]));
+    if (dimension->wrap != 0) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
+          loom_aie2p_program_shim_dma_wrap_keys[i],
+          loom_aie2p_program_encode_dma_wrap(dimension->wrap,
+                                             tile->dma.wrap_bits),
+          &words[word_index]));
+    }
+  }
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
       "shim_noc.dma.bd.word4.burst_length",
       LOOM_AIE2P_SHIM_DMA_BURST_LENGTH_ENCODING, &words[4]));

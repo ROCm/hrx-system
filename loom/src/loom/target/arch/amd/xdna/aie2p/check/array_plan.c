@@ -414,6 +414,15 @@ static iree_status_t loom_aie2p_array_plan_check_format(
         binding->partition_lane_count, binding->binding_byte_offset,
         binding->binding_span_byte_length, binding->transfer_byte_length,
         binding->task_repeat_count));
+    for (uint8_t j = 0; j < binding->dma_dimension_count; ++j) {
+      const loom_aie2p_array_binding_dma_dimension_t* dimension =
+          &binding->dma_dimensions[j];
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "binding-dimension channel=%" PRIu32 " index=%u step=%" PRIu32
+          " wrap=%" PRIu32 "\n",
+          binding->channel_index, j, dimension->step_size, dimension->wrap));
+    }
   }
   return iree_ok_status();
 }

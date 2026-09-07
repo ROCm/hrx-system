@@ -1864,13 +1864,12 @@ static iree_status_t loom_aie2p_array_plan_external_channel(
     const loom_xdna_tile_facts_t* shim_tile = NULL;
     IREE_RETURN_IF_ERROR(loom_xdna_array_tile_facts(
         builder->family, shim_coordinate, &shim_tile));
-    const loom_type_t partition_source_type =
-        binding_endpoint->partition_source_endpoint_index == UINT32_MAX
-            ? loom_type_none()
-            : base_binding_endpoint->message_type;
+    const bool partitioned =
+        binding_endpoint->partition_source_endpoint_index != UINT32_MAX;
     IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_binding_transfer(
-        builder->module, &builder->facts, partition_source_type,
-        binding_endpoint->message_type, binding_endpoint->partition_lane,
+        builder->module, &builder->facts, builder->family,
+        base_binding_endpoint->message_type, binding_endpoint->message_type,
+        partitioned, binding_endpoint->partition_lane,
         channel->record_byte_length, channel->record_count, &shim_tile->dma,
         &binding_plan));
     builder->binding_plans[builder->binding_plan_cursor++] = binding_plan;
