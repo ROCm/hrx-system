@@ -706,7 +706,8 @@ static iree_status_t loom_aie2p_array_validate_worker_rates(
   for (uint32_t worker_index = 0; worker_index < builder->plan->worker_count;
        ++worker_index) {
     const loom_aie2p_array_worker_t* worker = &builder->workers[worker_index];
-    uint32_t record_count = 0;
+    uint32_t common_record_count = 0;
+    uint32_t output_record_count = 0;
     uint32_t sender_count = 0;
     for (uint32_t endpoint_index = 0;
          endpoint_index < builder->plan->endpoint_count; ++endpoint_index) {
@@ -720,8 +721,9 @@ static iree_status_t loom_aie2p_array_validate_worker_rates(
       const loom_aie2p_array_channel_t* channel =
           loom_aie2p_array_endpoint_channel(builder, endpoint_index);
       if (worker->fold_record_count == 0) {
-        if (record_count == 0) record_count = channel->record_count;
-        if (record_count != channel->record_count) {
+        if (common_record_count == 0)
+          common_record_count = channel->record_count;
+        if (common_record_count != channel->record_count) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
               "AIE2P recordwise worker channels must have one record count");
@@ -730,21 +732,22 @@ static iree_status_t loom_aie2p_array_validate_worker_rates(
       }
 
       if (endpoint->direction == LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE) {
-        if (channel->record_count != worker->fold_record_count) {
+        if (common_record_count == 0) {
+          common_record_count = channel->record_count;
+        } else if (common_record_count != channel->record_count) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
-              "AIE2P folded worker inputs must match its fold record count");
+              "AIE2P folded worker inputs must have one record count");
         }
         continue;
       }
       ++sender_count;
-      if (endpoint->port != worker->fold_output_port ||
-          channel->record_count != 1) {
+      if (endpoint->port != worker->fold_output_port) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P folded worker must produce one record on its folded output "
-            "port");
+            "AIE2P folded worker must use its folded output port");
       }
+      output_record_count = channel->record_count;
       const uint32_t record_byte_length = channel->record_byte_length;
       const uint32_t accumulator_lane_byte_length = 16 * sizeof(float);
       const bool supported_f32_shape =
@@ -771,6 +774,14 @@ static iree_status_t loom_aie2p_array_validate_worker_rates(
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "AIE2P folded worker must have exactly one sender port");
+      }
+      const uint64_t expected_input_record_count =
+          (uint64_t)worker->fold_record_count * output_record_count;
+      if (common_record_count != expected_input_record_count) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "AIE2P folded worker must consume its fold record count for each "
+            "output record");
       }
     }
   }
