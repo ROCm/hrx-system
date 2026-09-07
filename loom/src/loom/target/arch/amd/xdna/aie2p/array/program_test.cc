@@ -154,6 +154,126 @@ TEST(Aie2pArrayProgramTest, ResetsComputeDmaBeforePlannedQueueStarts) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
+TEST(Aie2pArrayProgramTest, KeepsDmaServiceCoreReset) {
+  const loom_aie2p_leaf_contribution_t contribution = {};
+  const loom_aie2p_array_worker_plan_t worker_plan = {
+      /*.worker_index=*/0,
+      /*.coordinate=*/{0, 2},
+      /*.contribution=*/&contribution,
+  };
+  const loom_aie2p_array_channel_t channel = {
+      /*.value_id=*/0,
+      /*.sender_endpoint_index=*/0,
+      /*.receiver_endpoint_index=*/0,
+      /*.capacity=*/1,
+      /*.record_count=*/1,
+      /*.record_byte_length=*/64,
+      /*.transport=*/LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA,
+  };
+  const loom_aie2p_array_channel_slot_t channel_slot = {
+      /*.channel_index=*/0,
+      /*.slot=*/0,
+      /*.byte_length=*/64,
+      /*.sender_storage=*/{},
+      /*.receiver_storage=*/
+      {
+          /*.owner=*/{0, 3},
+          /*.owner_offset=*/0,
+          /*.load_address=*/0x00060000,
+      },
+  };
+  const loom_aie2p_array_lock_plan_t locks[] = {
+      {
+          /*.channel_index=*/0,
+          /*.coordinate=*/{0, 3},
+          /*.lock_id=*/0,
+          /*.initial_value=*/1,
+          /*.ring_endpoint_direction=*/
+          LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE,
+          /*.consumer_ready=*/0,
+      },
+      {
+          /*.channel_index=*/0,
+          /*.coordinate=*/{0, 3},
+          /*.lock_id=*/1,
+          /*.initial_value=*/0,
+          /*.ring_endpoint_direction=*/
+          LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE,
+          /*.consumer_ready=*/1,
+      },
+  };
+  const loom_aie2p_array_dma_plan_t dma = {
+      /*.channel_index=*/0,
+      /*.coordinate=*/{0, 3},
+      /*.direction=*/LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY,
+      /*.dma_channel=*/0,
+      /*.buffer_descriptor_start=*/0,
+      /*.buffer_descriptor_count=*/1,
+      /*.shim_side=*/0,
+  };
+  loom_aie2p_array_plan_t plan = {};
+  plan.family = loom_xdna_npu2_array_family();
+  plan.channels = &channel;
+  plan.channel_count = 1;
+  plan.worker_plans = &worker_plan;
+  plan.worker_plan_count = 1;
+  plan.channel_slots = &channel_slot;
+  plan.channel_slot_count = 1;
+  plan.locks = locks;
+  plan.lock_count = IREE_ARRAYSIZE(locks);
+  plan.dma_channels = &dma;
+  plan.dma_channel_count = 1;
+
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+  loom_aie2p_array_program_t program = {};
+  IREE_ASSERT_OK(loom_aie2p_array_program_build(&plan, &arena, &program));
+
+  ASSERT_EQ(program.array_record_count, 25u);
+  ExpectRegisterMaskWrite(program.array_records[0], 0x00232000, 0x00000003,
+                          0x00000002);
+  ExpectRegisterMaskWrite(program.array_records[1], 0x00332000, 0x00000003,
+                          0x00000002);
+  ExpectRegisterMaskWrite(program.array_records[6], 0x0031DE00, 0x00000002,
+                          0x00000002);
+  ExpectRegisterMaskWrite(program.array_records[7], 0x0031DE08, 0x00000002,
+                          0x00000002);
+  ExpectRegisterMaskWrite(program.array_records[8], 0x0031DE10, 0x00000002,
+                          0x00000002);
+  ExpectRegisterMaskWrite(program.array_records[9], 0x0031DE18, 0x00000002,
+                          0x00000002);
+  ASSERT_EQ(program.array_records[12].type,
+            LOOM_AIE2P_PROGRAM_RECORD_REGISTER_BLOCK_WRITE32);
+  EXPECT_EQ(program.array_records[12].value.register_block_write32.address,
+            0x0031D000u);
+  ASSERT_EQ(program.array_records[13].type,
+            LOOM_AIE2P_PROGRAM_RECORD_TILE_PROGRAM_LOAD);
+  EXPECT_EQ(
+      program.array_records[13].value.tile_program_load.tile_program_index, 0u);
+  ExpectRegisterMaskWrite(program.array_records[18], 0x0031DE00, 0x00000002,
+                          0x00000000);
+  ExpectRegisterMaskWrite(program.array_records[19], 0x0031DE08, 0x00000002,
+                          0x00000000);
+  ExpectRegisterMaskWrite(program.array_records[20], 0x0031DE10, 0x00000002,
+                          0x00000000);
+  ExpectRegisterMaskWrite(program.array_records[21], 0x0031DE18, 0x00000002,
+                          0x00000000);
+  ASSERT_EQ(program.array_records[22].type,
+            LOOM_AIE2P_PROGRAM_RECORD_REGISTER_WRITE32);
+  EXPECT_EQ(program.array_records[22].value.register_write32.address,
+            0x0031DE04u);
+  EXPECT_EQ(program.array_records[22].value.register_write32.value, 0u);
+  ExpectRegisterMaskWrite(program.array_records[23], 0x00232000, 0x00000002,
+                          0x00000000);
+  ExpectRegisterMaskWrite(program.array_records[24], 0x00232000, 0x00000001,
+                          0x00000001);
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
 TEST(Aie2pArrayProgramTest, RoutesShimCompletionTokensToFirmware) {
   const loom_aie2p_array_binding_t binding = {
       /*.value_id=*/0,

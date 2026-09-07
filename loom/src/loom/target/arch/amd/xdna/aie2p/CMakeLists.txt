@@ -425,6 +425,7 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "test/array_plan/endpoint_storage.loom-test"
     "test/array_plan/record_contracts.loom-test"
     "test/array_plan/split_k.loom-test"
     "test/module_contracts.loom-test"

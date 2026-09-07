@@ -1032,6 +1032,73 @@ static iree_status_t loom_aie2p_program_build_control(
   return iree_ok_status();
 }
 
+static bool loom_aie2p_program_coordinates_equal(
+    loom_xdna_tile_coordinate_t lhs, loom_xdna_tile_coordinate_t rhs) {
+  return lhs.column == rhs.column && lhs.row == rhs.row;
+}
+
+static bool loom_aie2p_program_coordinate_has_worker(
+    const loom_aie2p_array_plan_t* plan,
+    loom_xdna_tile_coordinate_t coordinate) {
+  for (iree_host_size_t i = 0; i < plan->worker_plan_count; ++i) {
+    if (loom_aie2p_program_coordinates_equal(plan->worker_plans[i].coordinate,
+                                             coordinate)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool loom_aie2p_program_is_first_compute_dma_coordinate(
+    const loom_aie2p_array_plan_t* plan, iree_host_size_t dma_index) {
+  const loom_aie2p_array_dma_plan_t* dma = &plan->dma_channels[dma_index];
+  for (iree_host_size_t i = 0; i < dma_index; ++i) {
+    const loom_aie2p_array_dma_plan_t* previous = &plan->dma_channels[i];
+    if (!previous->shim_side && loom_aie2p_program_coordinates_equal(
+                                    previous->coordinate, dma->coordinate)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool loom_aie2p_program_is_dma_service_coordinate(
+    const loom_aie2p_array_plan_t* plan, iree_host_size_t dma_index) {
+  const loom_aie2p_array_dma_plan_t* dma = &plan->dma_channels[dma_index];
+  return !dma->shim_side &&
+         loom_aie2p_program_is_first_compute_dma_coordinate(plan, dma_index) &&
+         !loom_aie2p_program_coordinate_has_worker(plan, dma->coordinate);
+}
+
+static iree_status_t loom_aie2p_program_append_dma_service_core_resets(
+    loom_aie2p_array_program_builder_t* builder) {
+  for (iree_host_size_t i = 0; i < builder->plan->dma_channel_count; ++i) {
+    const loom_aie2p_array_dma_plan_t* dma = &builder->plan->dma_channels[i];
+    if (!loom_aie2p_program_is_dma_service_coordinate(builder->plan, i))
+      continue;
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_program_append_core_reset(builder, dma->coordinate));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_program_append_owned_compute_dma_resets(
+    loom_aie2p_array_program_builder_t* builder,
+    loom_aie2p_compute_dma_reset_state_t reset_state) {
+  for (iree_host_size_t i = 0; i < builder->plan->worker_plan_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_program_append_compute_dma_reset(
+        builder, builder->plan->worker_plans[i].coordinate, reset_state));
+  }
+  for (iree_host_size_t i = 0; i < builder->plan->dma_channel_count; ++i) {
+    const loom_aie2p_array_dma_plan_t* dma = &builder->plan->dma_channels[i];
+    if (!loom_aie2p_program_is_dma_service_coordinate(builder->plan, i))
+      continue;
+    IREE_RETURN_IF_ERROR(loom_aie2p_program_append_compute_dma_reset(
+        builder, dma->coordinate, reset_state));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_aie2p_program_count_storage(
     const loom_aie2p_array_plan_t* plan,
     iree_host_size_t* out_array_record_capacity,
@@ -1043,6 +1110,7 @@ static iree_status_t loom_aie2p_program_count_storage(
   iree_host_size_t compute_buffer_descriptor_count = 0;
   iree_host_size_t compute_dma_lifecycle_record_count = 0;
   iree_host_size_t completion_binding_count = 0;
+  iree_host_size_t dma_service_tile_count = 0;
   for (iree_host_size_t i = 0; i < plan->dma_channel_count; ++i) {
     const loom_aie2p_array_dma_plan_t* dma = &plan->dma_channels[i];
     if (!dma->shim_side) {
@@ -1050,6 +1118,17 @@ static iree_status_t loom_aie2p_program_count_storage(
           loom_aie2p_program_add_capacity(1, &compute_dma_count));
       IREE_RETURN_IF_ERROR(loom_aie2p_program_add_capacity(
           dma->buffer_descriptor_count, &compute_buffer_descriptor_count));
+      if (loom_aie2p_program_is_dma_service_coordinate(plan, i)) {
+        IREE_RETURN_IF_ERROR(
+            loom_aie2p_program_add_capacity(1, &dma_service_tile_count));
+        const loom_xdna_tile_facts_t* tile = NULL;
+        IREE_RETURN_IF_ERROR(
+            loom_xdna_array_tile_facts(plan->family, dma->coordinate, &tile));
+        IREE_RETURN_IF_ERROR(loom_aie2p_program_add_scaled_capacity(
+            tile->dma.channel_count_per_direction,
+            2 * IREE_ARRAYSIZE(loom_aie2p_compute_dma_reset_keys),
+            &compute_dma_lifecycle_record_count));
+      }
     }
   }
   for (iree_host_size_t i = 0; i < plan->binding_plan_count; ++i) {
@@ -1069,10 +1148,11 @@ static iree_status_t loom_aie2p_program_count_storage(
         2 * IREE_ARRAYSIZE(loom_aie2p_compute_dma_reset_keys),
         &compute_dma_lifecycle_record_count));
   }
-
   iree_host_size_t array_record_capacity = 0;
   IREE_RETURN_IF_ERROR(loom_aie2p_program_add_scaled_capacity(
       plan->worker_plan_count, 4, &array_record_capacity));
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_add_capacity(dma_service_tile_count,
+                                                       &array_record_capacity));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_add_capacity(
       compute_dma_lifecycle_record_count, &array_record_capacity));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_add_capacity(plan->lock_count,
@@ -1120,11 +1200,10 @@ static iree_status_t loom_aie2p_program_build_array(
     IREE_RETURN_IF_ERROR(loom_aie2p_program_append_core_reset(
         builder, builder->plan->worker_plans[i].coordinate));
   }
-  for (iree_host_size_t i = 0; i < builder->plan->worker_plan_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_aie2p_program_append_compute_dma_reset(
-        builder, builder->plan->worker_plans[i].coordinate,
-        LOOM_AIE2P_COMPUTE_DMA_RESET_ASSERTED));
-  }
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_program_append_dma_service_core_resets(builder));
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_append_owned_compute_dma_resets(
+      builder, LOOM_AIE2P_COMPUTE_DMA_RESET_ASSERTED));
   for (iree_host_size_t i = 0; i < builder->plan->lock_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_aie2p_program_append_lock_initialization(
         builder, &builder->plan->locks[i]));
@@ -1140,11 +1219,8 @@ static iree_status_t loom_aie2p_program_build_array(
   for (iree_host_size_t i = 0; i < builder->plan->worker_plan_count; ++i) {
     loom_aie2p_program_append_tile_program_load(&builder->array, (uint32_t)i);
   }
-  for (iree_host_size_t i = 0; i < builder->plan->worker_plan_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_aie2p_program_append_compute_dma_reset(
-        builder, builder->plan->worker_plans[i].coordinate,
-        LOOM_AIE2P_COMPUTE_DMA_RESET_RELEASED));
-  }
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_append_owned_compute_dma_resets(
+      builder, LOOM_AIE2P_COMPUTE_DMA_RESET_RELEASED));
   for (iree_host_size_t i = 0; i < builder->plan->dma_channel_count; ++i) {
     const loom_aie2p_array_dma_plan_t* dma = &builder->plan->dma_channels[i];
     if (!dma->shim_side) {

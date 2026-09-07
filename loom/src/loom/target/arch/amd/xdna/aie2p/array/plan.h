@@ -378,9 +378,12 @@ typedef struct loom_aie2p_array_plan_t {
 //
 // Exact SSA facts drive all resource cardinalities and placement coordinates.
 // Every worker entry must have one matching detached leaf in |leaves|. The
-// planner maps external binding channels through shim DMA, vertically adjacent
-// workers through neighbor-visible memory, and all other worker channels
-// through compute DMA and the stream network.
+// planner maps external binding channels through shim DMA and compute endpoints
+// whose storage and locks are visible to the worker. The worker tile is
+// preferred, with adjacent compute tiles providing additional physical DMA
+// channels without changing the logical port topology. Vertically adjacent
+// workers communicate through neighbor-visible memory; all other worker
+// channels use compute DMA and the stream network.
 // Invalid user input returns an error; structured diagnostics, when available,
 // are delivered through |diagnostic_emitter| before returning.
 iree_status_t loom_aie2p_array_plan_build(
