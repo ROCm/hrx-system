@@ -6,6 +6,8 @@
 
 #include "loom/analysis/type_refinement.h"
 
+#include "loom/ops/encoding/storage.h"
+
 static bool loom_type_refinement_type_has_dimensions(loom_type_t type) {
   return loom_type_is_shaped(type) || loom_type_is_pool(type);
 }
@@ -145,6 +147,43 @@ iree_status_t loom_type_refine_with_value_facts(
   }
 
   *out_type = encoding_refined_type;
+  *out_result = result;
+  return iree_ok_status();
+}
+
+iree_status_t loom_type_specialize_with_value_facts(
+    loom_module_t* module, loom_type_t current_type,
+    const loom_value_fact_table_t* fact_table, iree_arena_allocator_t* arena,
+    loom_type_t* out_type, loom_type_refinement_result_t* out_result) {
+  loom_type_t refined_type = current_type;
+  loom_type_refinement_result_t result = LOOM_TYPE_REFINEMENT_UNCHANGED;
+  IREE_RETURN_IF_ERROR(loom_type_refine_with_value_facts(
+      current_type, fact_table, arena, &refined_type, &result));
+  if (result != LOOM_TYPE_REFINEMENT_CONFLICT &&
+      loom_type_has_ssa_encoding(refined_type)) {
+    const loom_value_id_t encoding_value =
+        (loom_value_id_t)loom_type_encoding_value_id(refined_type);
+    const loom_value_facts_t facts =
+        loom_value_fact_table_lookup(fact_table, encoding_value);
+    loom_value_fact_encoding_summary_t summary = {0};
+    if (loom_value_facts_query_encoding_summary(&fact_table->context, facts,
+                                                &summary)) {
+      uint16_t encoding_id = 0;
+      IREE_RETURN_IF_ERROR(
+          loom_encoding_intern_exact_summary(module, &summary, &encoding_id));
+      if (encoding_id != 0) {
+        loom_type_t encoding_refined_type = refined_type;
+        loom_type_refinement_result_t encoding_result =
+            LOOM_TYPE_REFINEMENT_UNCHANGED;
+        IREE_RETURN_IF_ERROR(loom_type_refine_encoding_with_attachment(
+            refined_type, encoding_id, /*candidate_encoding_flags=*/0, arena,
+            &encoding_refined_type, &encoding_result));
+        loom_type_refinement_merge_analysis_result(encoding_result, &result);
+        refined_type = encoding_refined_type;
+      }
+    }
+  }
+  *out_type = refined_type;
   *out_result = result;
   return iree_ok_status();
 }

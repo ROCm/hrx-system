@@ -734,6 +734,63 @@ TEST(EncodingStorageQueryTest, AbsentShapedAttachmentIsDense) {
       /*stride_storage=*/nullptr, /*stride_capacity=*/0, &vector_layout));
 }
 
+TEST_F(EncodingStorageTest, InternExactComposedStorageSummary) {
+  loom_module_t* module = Parse(
+      IREE_SV("%schema = encoding.define #ggml.q5_k : encoding<schema>\n"));
+  ASSERT_NE(module, nullptr);
+  const uint16_t schema_encoding_id = FirstSpecId(module);
+
+  loom_value_facts_t stride_facts[] = {
+      loom_value_facts_exact_i64(352),
+      loom_value_facts_exact_i64(704),
+      loom_value_facts_exact_i64(176),
+      loom_value_facts_exact_i64(1),
+  };
+  const loom_value_fact_encoding_summary_t summary = {
+      /*.role=*/LOOM_ENCODING_ROLE_PHYSICAL_STORAGE,
+      /*.static_spec_encoding_id=*/0,
+      /*.address_layout=*/
+      {
+          /*.kind=*/LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+          /*.rank=*/IREE_ARRAYSIZE(stride_facts),
+          /*.strides=*/stride_facts,
+      },
+      /*.storage_schema=*/
+      {
+          /*.static_spec_encoding_id=*/schema_encoding_id,
+      },
+  };
+  uint16_t storage_encoding_id = 0;
+  IREE_ASSERT_OK(loom_encoding_intern_exact_summary(module, &summary,
+                                                    &storage_encoding_id));
+  ASSERT_NE(storage_encoding_id, 0);
+
+  loom_value_facts_t decoded_stride_facts[IREE_ARRAYSIZE(stride_facts)] = {};
+  loom_value_fact_address_layout_t decoded_layout = {};
+  ASSERT_TRUE(loom_encoding_query_static_address_layout(
+      module, storage_encoding_id, decoded_stride_facts,
+      IREE_ARRAYSIZE(decoded_stride_facts), &decoded_layout));
+  ASSERT_EQ(decoded_layout.kind, LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED);
+  ASSERT_EQ(decoded_layout.rank, IREE_ARRAYSIZE(stride_facts));
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(stride_facts); ++i) {
+    int64_t stride = -1;
+    ASSERT_TRUE(
+        loom_value_facts_as_exact_i64(decoded_layout.strides[i], &stride));
+    EXPECT_EQ(stride, stride_facts[i].range_lo);
+  }
+
+  loom_value_fact_storage_schema_t decoded_schema = {};
+  ASSERT_TRUE(loom_encoding_query_static_storage_schema(
+      module, storage_encoding_id, &decoded_schema));
+  EXPECT_EQ(decoded_schema.static_spec_encoding_id, schema_encoding_id);
+
+  uint16_t duplicate_encoding_id = 0;
+  IREE_ASSERT_OK(loom_encoding_intern_exact_summary(module, &summary,
+                                                    &duplicate_encoding_id));
+  EXPECT_EQ(duplicate_encoding_id, storage_encoding_id);
+  loom_module_free(module);
+}
+
 TEST_F(EncodingStorageTest, FixedRecordGeometry) {
   loom_module_t* module =
       Parse(IREE_SV("%schema = encoding.define #test.fixed_record : "

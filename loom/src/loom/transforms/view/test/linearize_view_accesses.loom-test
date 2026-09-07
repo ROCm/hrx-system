@@ -109,15 +109,14 @@ func.def @linearize_dense_vector_load_store_with_ssa_layout(%input: buffer, %out
 
 // ----
 func.def @linearize_dense_vector_load_store_with_ssa_layout(%input: buffer, %output: buffer, %zero_bytes: offset, %row: index, %column: index) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<128xf32, %layout>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<128xf32, %layout>
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<128xf32>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<128xf32>
   %column_bounded = index.assume %column [range(%column, 0, 12)] : index
   %row_bounded = index.assume %row [range(%row, 0, 7)] : index
   %11 = index.constant 16 : index
   %12 = index.madd %row_bounded, %11, %column_bounded : index
-  %value = vector.load %input_view[%12] {cache_scope = device, cache_temporal = non_temporal} : view<128xf32, %layout> -> vector<4xf32>
-  vector.store %value, %output_view[%12] {cache_scope = system, cache_temporal = bypass} : vector<4xf32>, view<128xf32, %layout>
+  %value = vector.load %input_view[%12] {cache_scope = device, cache_temporal = non_temporal} : view<128xf32> -> vector<4xf32>
+  vector.store %value, %output_view[%12] {cache_scope = system, cache_temporal = bypass} : vector<4xf32>, view<128xf32>
   func.return
 }
 
@@ -154,8 +153,7 @@ func.def @linearize_dense_rank2_vector_load(%input: buffer, %zero_bytes: offset,
 // ----
 func.def @linearize_dense_rank2_vector_load(%input: buffer, %zero_bytes: offset, %row: index, %column: index) {
   %dense_view = buffer.view %input[%zero_bytes] : buffer -> view<128xf32>
-  %strided_layout = encoding.layout.strided [64, 1] : encoding<layout>
-  %strided_view = buffer.view %input[%zero_bytes] : buffer -> view<8x16xf32, %strided_layout>
+  %strided_view = buffer.view %input[%zero_bytes] : buffer -> view<8x16xf32, #encoding.layout.strided<strides=[64, 1]>>
   %column_bounded = index.assume %column [range(%column, 0, 12)] : index
   %row_bounded = index.assume %row [range(%row, 0, 6)] : index
   %12 = index.constant 16 : index
@@ -165,7 +163,7 @@ func.def @linearize_dense_rank2_vector_load(%input: buffer, %zero_bytes: offset,
   %21 = vector.load %dense_view[%20] : view<128xf32> -> vector<4xf32>
   %22 = vector.concat<0> %14, %21 : vector<4xf32>, vector<4xf32> -> vector<8xf32>
   %rank2 = vector.bitcast %22 : vector<8xf32> to vector<2x4xf32>
-  %strided = vector.load %strided_view[%row, %column] : view<8x16xf32, %strided_layout> -> vector<4xf32>
+  %strided = vector.load %strided_view[%row, %column] : view<8x16xf32, #encoding.layout.strided<strides=[64, 1]>> -> vector<4xf32>
   test.use %rank2, %strided : vector<2x4xf32>, vector<4xf32>
   func.return
 }
@@ -202,6 +200,16 @@ func.def @leave_rank1_and_strided_views(%input: buffer, %zero_bytes: offset, %ro
   %strided_view = buffer.view %input[%zero_bytes] : buffer -> view<8x16xf32, %strided_layout>
   %dense = view.load %dense_view[%row] : view<128xf32> -> f32
   %strided = view.load %strided_view[%row, %column] : view<8x16xf32, %strided_layout> -> f32
+  test.use %dense, %strided : f32, f32
+  func.return
+}
+
+// ----
+func.def @leave_rank1_and_strided_views(%input: buffer, %zero_bytes: offset, %row: index, %column: index) {
+  %dense_view = buffer.view %input[%zero_bytes] : buffer -> view<128xf32>
+  %strided_view = buffer.view %input[%zero_bytes] : buffer -> view<8x16xf32, #encoding.layout.strided<strides=[64, 1]>>
+  %dense = view.load %dense_view[%row] : view<128xf32> -> f32
+  %strided = view.load %strided_view[%row, %column] : view<8x16xf32, #encoding.layout.strided<strides=[64, 1]>> -> f32
   test.use %dense, %strided : f32, f32
   func.return
 }

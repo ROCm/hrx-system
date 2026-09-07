@@ -894,6 +894,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:type_refinement",
+        "//loom/src/loom/ops/encoding",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

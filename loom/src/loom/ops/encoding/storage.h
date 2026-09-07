@@ -32,6 +32,8 @@ typedef struct loom_fact_context_t loom_fact_context_t;
 typedef struct loom_value_facts_t loom_value_facts_t;
 typedef struct loom_value_fact_address_layout_t
     loom_value_fact_address_layout_t;
+typedef struct loom_value_fact_encoding_summary_t
+    loom_value_fact_encoding_summary_t;
 typedef struct loom_value_fact_storage_schema_t
     loom_value_fact_storage_schema_t;
 
@@ -51,6 +53,19 @@ typedef struct loom_encoding_address_layout_operands_t {
 // Registers the storage-composition family with |context|. Built-in
 // context setup calls this through the encoding family registry.
 iree_status_t loom_encoding_register_storage_family(loom_context_t* context);
+
+// Interns a canonical static encoding equivalent to |summary| when its
+// semantics can be represented without losing information. Exact named specs
+// reuse their existing module ID. Exact dense/strided layouts and physical
+// storage compositions are reconstructed from their facts. Other summaries
+// leave |out_encoding_id| zero.
+//
+// This mutates the module encoding table and is intended for specialization
+// transforms that need a durable static type attachment after the defining SSA
+// encoding values disappear.
+iree_status_t loom_encoding_intern_exact_summary(
+    loom_module_t* module, const loom_value_fact_encoding_summary_t* summary,
+    uint16_t* out_encoding_id);
 
 // Maximum static layout rank decoded into caller-provided stride storage.
 // Shaped type ranks are packed in four header bits, so no well-formed consumer

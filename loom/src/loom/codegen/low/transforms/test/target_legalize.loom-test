@@ -71,9 +71,8 @@ test.target<low_core> @test_target
 
 func.def target(@test_target) @scalarizes_dynamic_flat_mma_store(%m: index, %n: index, %k: index, %lhs0: f32, %rhs0: f32, %init0: f32, %out_buffer: buffer) {
   %base = index.constant 0 : offset
-  %layout = encoding.layout.dense : encoding<layout>
   %mn = index.mul %m, %n : index
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<[%mn]xf32, %layout>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<[%mn]xf32>
   %21 = index.constant 0 : index
   %22 = index.constant 1 : index
   cfg.br ^_bb1(%21: index)
@@ -96,7 +95,7 @@ func.def target(@test_target) @scalarizes_dynamic_flat_mma_store(%m: index, %n: 
 ^_bb5:
   cfg.br ^_bb6(%44: f32)
 ^_bb6(%42: f32):
-  view.store %42, %out_view[%39] : f32, view<[%mn]xf32, %layout>
+  view.store %42, %out_view[%39] : f32, view<[%mn]xf32>
   %41 = index.add %39, %22 : index
   cfg.br ^_bb1(%41: index)
 ^_bb7:
@@ -133,8 +132,7 @@ test.target<low_core> @test_target
 
 func.def target(@test_target) @scalarizes_dense_flat_mma_fragment_store(%lhs0: f32, %rhs0: f32, %init0: f32, %out_buffer: buffer) {
   %base = index.constant 0 : offset
-  %layout = encoding.layout.dense : encoding<layout>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<2x2xf32, %layout>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<2x2xf32>
   %18 = index.constant 0 : index
   %19 = index.constant 2 : index
   %20 = index.constant 1 : index
@@ -168,7 +166,7 @@ func.def target(@test_target) @scalarizes_dense_flat_mma_fragment_store(%lhs0: f
 ^_bb7:
   cfg.br ^_bb8(%52: f32)
 ^_bb8(%50: f32):
-  view.store %50, %out_view[%43, %47] : f32, view<2x2xf32, %layout>
+  view.store %50, %out_view[%43, %47] : f32, view<2x2xf32>
   %49 = index.add %47, %24 : index
   cfg.br ^_bb3(%49: index)
 ^_bb9:

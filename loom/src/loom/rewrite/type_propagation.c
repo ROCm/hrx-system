@@ -997,9 +997,9 @@ static iree_status_t loom_type_propagator_seed_op_value_facts(
         loom_type_propagator_value_type(propagator, value_id);
     loom_type_t refined_type = current_type;
     loom_type_refinement_result_t result = LOOM_TYPE_REFINEMENT_UNCHANGED;
-    IREE_RETURN_IF_ERROR(loom_type_refine_with_value_facts(
-        current_type, rewriter->fact_table, propagator->arena, &refined_type,
-        &result));
+    IREE_RETURN_IF_ERROR(loom_type_specialize_with_value_facts(
+        propagator->module, current_type, rewriter->fact_table,
+        propagator->arena, &refined_type, &result));
     if (result == LOOM_TYPE_REFINEMENT_CONFLICT) {
       propagator->conflict = true;
       return iree_ok_status();
@@ -1017,9 +1017,9 @@ static iree_status_t loom_type_propagator_seed_op_value_facts(
         loom_type_propagator_value_type(propagator, value_id);
     loom_type_t refined_type = current_type;
     loom_type_refinement_result_t result = LOOM_TYPE_REFINEMENT_UNCHANGED;
-    IREE_RETURN_IF_ERROR(loom_type_refine_with_value_facts(
-        current_type, rewriter->fact_table, propagator->arena, &refined_type,
-        &result));
+    IREE_RETURN_IF_ERROR(loom_type_specialize_with_value_facts(
+        propagator->module, current_type, rewriter->fact_table,
+        propagator->arena, &refined_type, &result));
     if (result == LOOM_TYPE_REFINEMENT_CONFLICT) {
       propagator->conflict = true;
       return iree_ok_status();

@@ -894,8 +894,8 @@ static iree_status_t loom_refine_boundaries_refine_value_type_with_facts(
   loom_type_t current_type = loom_module_value_type(module, value_id);
   loom_type_t refined_type = current_type;
   loom_type_refinement_result_t result = LOOM_TYPE_REFINEMENT_UNCHANGED;
-  IREE_RETURN_IF_ERROR(loom_type_refine_with_value_facts(
-      current_type, facts, &module->arena, &refined_type, &result));
+  IREE_RETURN_IF_ERROR(loom_type_specialize_with_value_facts(
+      module, current_type, facts, &module->arena, &refined_type, &result));
   if (result == LOOM_TYPE_REFINEMENT_CONFLICT) {
     return loom_refine_boundaries_emit_boundary_type_conflict(
         pass, module, owner_op, current_type);

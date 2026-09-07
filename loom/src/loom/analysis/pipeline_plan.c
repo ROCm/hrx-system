@@ -872,13 +872,23 @@ static bool loom_pipeline_plan_op_is_compile_time(
     return false;
   }
   for (uint16_t i = 0; i < op->result_count; ++i) {
+    const loom_value_id_t result = loom_op_results(op)[i];
+    const loom_type_t result_type =
+        loom_module_value_type(builder->module, result);
+    const loom_value_facts_t result_facts =
+        loom_value_fact_table_lookup(builder->facts, result);
+    if (loom_type_is_encoding(result_type)) {
+      loom_value_fact_encoding_summary_t encoding_summary = {0};
+      if (!loom_value_facts_query_encoding_summary(
+              &builder->facts->context, result_facts, &encoding_summary)) {
+        return false;
+      }
+      continue;
+    }
     loom_value_facts_t element_facts = loom_value_facts_unknown();
     int64_t value = 0;
     if (!loom_value_facts_query_all_equal_element(
-            &builder->facts->context,
-            loom_value_fact_table_lookup(builder->facts,
-                                         loom_op_results(op)[i]),
-            &element_facts) ||
+            &builder->facts->context, result_facts, &element_facts) ||
         !loom_value_facts_as_exact_i64(element_facts, &value)) {
       return false;
     }

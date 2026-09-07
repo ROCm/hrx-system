@@ -668,9 +668,8 @@ func.def @guarded_loaded_i32_precast_index_proves_unit_axis(%ids: buffer, %paylo
 
 // ----
 func.def @guarded_loaded_i32_precast_index_proves_unit_axis(%ids: buffer, %payload: buffer, %base: offset, %row_count: i32) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %id_view = buffer.view %ids[%base] : buffer -> view<1xi32, %layout>
-  %row = view.load %id_view[0] : view<1xi32, %layout> -> i32
+  %id_view = buffer.view %ids[%base] : buffer -> view<1xi32>
+  %row = view.load %id_view[0] : view<1xi32> -> i32
   %row_idx = index.cast %row : i32 to index
   %row_count_idx = index.cast %row_count : i32 to index
   %minimum_row = scalar.constant 0 : i32
@@ -679,8 +678,8 @@ func.def @guarded_loaded_i32_precast_index_proves_unit_axis(%ids: buffer, %paylo
   %guard = scalar.andi %nonnegative, %below : i1
   scf.if %guard {
     %16 = index.assume %row_idx [ge(%row_idx, 0), lt(%row_idx, %row_count)] : index
-    %payload_view = buffer.view %payload[%base] : buffer -> view<[%row_count_idx]x4xf32, %layout>
-    %loaded = vector.load %payload_view[%16, 0] : view<[%row_count_idx]x4xf32, %layout> -> vector<4xf32>
+    %payload_view = buffer.view %payload[%base] : buffer -> view<[%row_count_idx]x4xf32>
+    %loaded = vector.load %payload_view[%16, 0] : view<[%row_count_idx]x4xf32> -> vector<4xf32>
     test.use %loaded : vector<4xf32>
   } else {
   }
@@ -708,7 +707,6 @@ func.def @guarded_i64_precast_index_proves_store_unit_axis(%payload: buffer, %ba
 
 // ----
 func.def @guarded_i64_precast_index_proves_store_unit_axis(%payload: buffer, %base: offset, %row: i64, %row_count: i64, %value: vector<4xf32>) {
-  %layout = encoding.layout.dense : encoding<layout>
   %row_idx = index.cast %row : i64 to index
   %row_count_idx = index.cast %row_count : i64 to index
   %minimum_row = scalar.constant 0 : i64
@@ -717,8 +715,8 @@ func.def @guarded_i64_precast_index_proves_store_unit_axis(%payload: buffer, %ba
   %guard = scalar.andi %nonnegative, %below : i1
   scf.if %guard {
     %13 = index.assume %row_idx [ge(%row_idx, 0), lt(%row_idx, %row_count)] : index
-    %payload_view = buffer.view %payload[%base] : buffer -> view<[%row_count_idx]x4xf32, %layout>
-    vector.store %value, %payload_view[%13, 0] : vector<4xf32>, view<[%row_count_idx]x4xf32, %layout>
+    %payload_view = buffer.view %payload[%base] : buffer -> view<[%row_count_idx]x4xf32>
+    vector.store %value, %payload_view[%13, 0] : vector<4xf32>, view<[%row_count_idx]x4xf32>
   } else {
   }
   func.return

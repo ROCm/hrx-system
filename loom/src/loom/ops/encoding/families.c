@@ -300,7 +300,7 @@ static iree_status_t loom_encoding_layout_strided_diagnose_static(
     case LOOM_ENCODING_LAYOUT_STRIDED_STATIC_OVERSIZED_RANK:
       return loom_encoding_emit_attribute_constraint_error(
           emitter, op, IREE_SV("strides"), validation.actual_value,
-          IREE_SV("rank <= 8"));
+          IREE_SV("rank <= 15"));
     case LOOM_ENCODING_LAYOUT_STRIDED_STATIC_NEGATIVE_STRIDE_ARRAY_ELEMENT:
       return loom_encoding_emit_attribute_constraint_error(
           emitter, op, IREE_SV("strides"), validation.actual_value,

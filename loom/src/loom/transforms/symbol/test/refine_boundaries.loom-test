@@ -585,6 +585,41 @@ func.def public @call_private_strided_view(%buffer: buffer) {
 
 // ====
 
+// Exact composed storage facts specialize both sides of a call before the
+// defining encoding values disappear. Physical strides and schema identity
+// remain attached to the returned view.
+func.def @private_composed_storage_view(%buffer: buffer, %storage: encoding<storage>) -> (view<2x3x176xi8, %storage>) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<2x3x176xi8, %storage>
+  func.return %view : view<2x3x176xi8, %storage>
+}
+
+func.def public @call_private_composed_storage_view(%buffer: buffer) {
+  %group_stride = index.constant 704 : index
+  %record_stride = index.constant 176 : index
+  %layout = encoding.layout.strided [%group_stride, %record_stride, 1] : encoding<layout>
+  %schema = encoding.define #ggml.q5_k : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = func.call @private_composed_storage_view(%buffer, %storage) : (buffer, encoding<storage>) -> (view<2x3x176xi8, %storage>)
+  test.use %view : view<2x3x176xi8, %storage>
+  func.return
+}
+
+// ----
+func.def @private_composed_storage_view(%buffer: buffer) -> (view<2x3x176xi8, #encoding.storage<layout=#encoding.layout.strided<strides=[704, 176, 1]>, schema=#ggml.q5_k>>) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<2x3x176xi8, #encoding.storage<layout=#encoding.layout.strided<strides=[704, 176, 1]>, schema=#ggml.q5_k>>
+  func.return %view : view<2x3x176xi8, #encoding.storage<layout=#encoding.layout.strided<strides=[704, 176, 1]>, schema=#ggml.q5_k>>
+}
+
+func.def public @call_private_composed_storage_view(%buffer: buffer) {
+  %view = func.call pure @private_composed_storage_view(%buffer) : (buffer) -> (view<2x3x176xi8, #encoding.storage<layout=#encoding.layout.strided<strides=[704, 176, 1]>, schema=#ggml.q5_k>>)
+  test.use %view : view<2x3x176xi8, #encoding.storage<layout=#encoding.layout.strided<strides=[704, 176, 1]>, schema=#ggml.q5_k>>
+  func.return
+}
+
+// ====
+
 // Conflicting extension payloads fork private callees into static-layout
 // specializations instead of forcing one dynamic signature to serve incompatible
 // exact layouts.

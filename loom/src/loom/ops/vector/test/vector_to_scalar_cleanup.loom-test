@@ -13,10 +13,9 @@ func.def @gather_zero_offsets(%buffer: buffer, %byte_offset: offset) -> (vector<
 
 // ----
 func.def @gather_zero_offsets(%buffer: buffer, %byte_offset: offset) -> (vector<2xf32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32, %layout>
-  %8 = view.load %view[3] : view<8xf32, %layout> -> f32
-  %10 = view.load %view[3] : view<8xf32, %layout> -> f32
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32>
+  %8 = view.load %view[3] : view<8xf32> -> f32
+  %10 = view.load %view[3] : view<8xf32> -> f32
   %loaded = vector.from_elements %8, %10 : vector<2xf32>
   func.return %loaded : vector<2xf32>
 }
@@ -38,14 +37,13 @@ func.def @gather_iota_offsets(%n: index, %buffer: buffer, %byte_offset: offset, 
 
 // ----
 func.def @gather_iota_offsets(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index) -> (vector<[%n]xf32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xf32, %layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xf32>
   %11 = vector.constant 0.0 : vector<[%n]xf32>
   %12 = index.constant 0 : index
   %13 = index.constant 1 : index
   %loaded = scf.for %14 = [%12 to %n step %13](%15 = %11 : vector<[%n]xf32>) -> (vector<[%n]xf32>) {
     %19 = index.add %origin, %14 : index
-    %20 = view.load %view[%19] : view<[%n]xf32, %layout> -> f32
+    %20 = view.load %view[%19] : view<[%n]xf32> -> f32
     %21 = vector.insert %20 into %15[%14] : f32, vector<[%n]xf32>
     scf.yield %21 : vector<[%n]xf32>
   }
@@ -70,10 +68,9 @@ func.def @load_full_range_mask(%buffer: buffer, %byte_offset: offset) -> (vector
 
 // ----
 func.def @load_full_range_mask(%buffer: buffer, %byte_offset: offset) -> (vector<2xf32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32, %layout>
-  %16 = view.load %view[3] : view<8xf32, %layout> -> f32
-  %23 = view.load %view[4] : view<8xf32, %layout> -> f32
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32>
+  %16 = view.load %view[3] : view<8xf32> -> f32
+  %23 = view.load %view[4] : view<8xf32> -> f32
   %loaded = vector.from_elements %16, %23 : vector<2xf32>
   func.return %loaded : vector<2xf32>
 }

@@ -1256,9 +1256,8 @@ func.def @gather_iota_to_load(%n: index, %buffer: buffer, %offset: offset, %orig
 }
 // ----
 func.def @gather_iota_to_load(%n: index, %buffer: buffer, %offset: offset, %origin: index) -> (vector<[%n]xf32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%offset] : buffer -> view<[%n]xf32, %layout>
-  %r = vector.load %view[%origin] {cache_scope = device, cache_temporal = high_temporal} : view<[%n]xf32, %layout> -> vector<[%n]xf32>
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%n]xf32>
+  %r = vector.load %view[%origin] {cache_scope = device, cache_temporal = high_temporal} : view<[%n]xf32> -> vector<[%n]xf32>
   func.return %r : vector<[%n]xf32>
 }
 
@@ -1277,9 +1276,8 @@ func.def @gather_mask_iota_to_load_mask(%buffer: buffer, %offset: offset, %origi
 }
 // ----
 func.def @gather_mask_iota_to_load_mask(%buffer: buffer, %offset: offset, %origin: index, %mask: vector<4xi1>, %old: vector<4xf32>) -> (vector<4xf32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %r = vector.load.mask %view[%origin], %mask, %old : view<16xf32, %layout>, vector<4xi1>, vector<4xf32>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32>
+  %r = vector.load.mask %view[%origin], %mask, %old : view<16xf32>, vector<4xi1>, vector<4xf32>
   func.return %r : vector<4xf32>
 }
 
@@ -1298,9 +1296,8 @@ func.def @scatter_iota_to_store(%buffer: buffer, %offset: offset, %origin: index
 }
 // ----
 func.def @scatter_iota_to_store(%buffer: buffer, %offset: offset, %origin: index, %value: vector<4xf32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  vector.store %value, %view[%origin] : vector<4xf32>, view<16xf32, %layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32>
+  vector.store %value, %view[%origin] : vector<4xf32>, view<16xf32>
   func.return
 }
 
@@ -1319,9 +1316,8 @@ func.def @scatter_mask_iota_to_store_mask(%buffer: buffer, %offset: offset, %ori
 }
 // ----
 func.def @scatter_mask_iota_to_store_mask(%buffer: buffer, %offset: offset, %origin: index, %mask: vector<4xi1>, %value: vector<4xf32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  vector.store.mask %value, %view[%origin], %mask : vector<4xf32>, view<16xf32, %layout>, vector<4xi1>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32>
+  vector.store.mask %value, %view[%origin], %mask : vector<4xf32>, view<16xf32>, vector<4xi1>
   func.return
 }
 
@@ -1367,9 +1363,8 @@ func.def @load_mask_all_true_to_load(%buffer: buffer, %offset: offset, %old: vec
 }
 // ----
 func.def @load_mask_all_true_to_load(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %r = vector.load %view[0] {cache_scope = device, cache_temporal = non_temporal} : view<16xf32, %layout> -> vector<4xf32>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32>
+  %r = vector.load %view[0] {cache_scope = device, cache_temporal = non_temporal} : view<16xf32> -> vector<4xf32>
   func.return %r : vector<4xf32>
 }
 
@@ -1388,9 +1383,8 @@ func.def @load_mask_full_range_to_load(%buffer: buffer, %offset: offset, %old: v
 }
 // ----
 func.def @load_mask_full_range_to_load(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %r = vector.load %view[0] : view<16xf32, %layout> -> vector<4xf32>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32>
+  %r = vector.load %view[0] : view<16xf32> -> vector<4xf32>
   func.return %r : vector<4xf32>
 }
 
@@ -1410,10 +1404,9 @@ func.def @store_mask_bounded_full_range_to_store(%buffer: buffer, %offset: offse
 }
 // ----
 func.def @store_mask_bounded_full_range_to_store(%buffer: buffer, %offset: offset, %value: vector<16xf32>, %lo0: index, %hi0: index, %step0: index) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%offset] : buffer -> view<1024xf32, %layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1024xf32>
   %lo = index.assume %lo0 [range(%lo0, 0, 752)] : index
-  vector.store %value, %view[%lo] : vector<16xf32>, view<1024xf32, %layout>
+  vector.store %value, %view[%lo] : vector<16xf32>, view<1024xf32>
   func.return
 }
 
@@ -1429,9 +1422,8 @@ func.def @store_mask_all_true_to_store(%buffer: buffer, %offset: offset, %value:
 }
 // ----
 func.def @store_mask_all_true_to_store(%buffer: buffer, %offset: offset, %value: vector<4xf32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  vector.store %value, %view[0] {cache_scope = system, cache_temporal = writeback} : vector<4xf32>, view<16xf32, %layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32>
+  vector.store %value, %view[0] {cache_scope = system, cache_temporal = writeback} : vector<4xf32>, view<16xf32>
   func.return
 }
 
@@ -1447,9 +1439,8 @@ func.def @load_expand_all_true_to_load(%buffer: buffer, %offset: offset, %old: v
 }
 // ----
 func.def @load_expand_all_true_to_load(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %r = vector.load %view[0] : view<16xf32, %layout> -> vector<4xf32>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32>
+  %r = vector.load %view[0] : view<16xf32> -> vector<4xf32>
   func.return %r : vector<4xf32>
 }
 
@@ -1465,9 +1456,8 @@ func.def @store_compress_all_true_to_store(%buffer: buffer, %offset: offset, %va
 }
 // ----
 func.def @store_compress_all_true_to_store(%buffer: buffer, %offset: offset, %value: vector<4xf32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  vector.store %value, %view[0] : vector<4xf32>, view<16xf32, %layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32>
+  vector.store %value, %view[0] : vector<4xf32>, view<16xf32>
   func.return
 }
 
@@ -1483,9 +1473,8 @@ func.def @gather_mask_all_true_to_gather(%buffer: buffer, %offset: offset, %offs
 }
 // ----
 func.def @gather_mask_all_true_to_gather(%buffer: buffer, %offset: offset, %offsets: vector<4xi32>, %old: vector<4xf32>) -> (vector<4xf32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %r = vector.gather %view[0][%offsets] : view<16xf32, %layout>, vector<4xi32> -> vector<4xf32>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32>
+  %r = vector.gather %view[0][%offsets] : view<16xf32>, vector<4xi32> -> vector<4xf32>
   func.return %r : vector<4xf32>
 }
 
@@ -1501,9 +1490,8 @@ func.def @scatter_mask_all_true_to_scatter(%buffer: buffer, %offset: offset, %of
 }
 // ----
 func.def @scatter_mask_all_true_to_scatter(%buffer: buffer, %offset: offset, %offsets: vector<4xi32>, %value: vector<4xf32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  vector.scatter %value, %view[0][%offsets] : vector<4xf32>, view<16xf32, %layout>, vector<4xi32>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32>
+  vector.scatter %value, %view[0][%offsets] : vector<4xf32>, view<16xf32>, vector<4xi32>
   func.return
 }
 
@@ -1519,9 +1507,8 @@ func.def @atomic_rmw_mask_all_true_to_atomic_rmw(%buffer: buffer, %offset: offse
 }
 // ----
 func.def @atomic_rmw_mask_all_true_to_atomic_rmw(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>, %value: vector<4xi32>, %old: vector<4xi32>) -> (vector<4xi32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
-  %r = vector.atomic.rmw<addi> %value, %view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<16xi32, %layout>, vector<4xindex>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32>
+  %r = vector.atomic.rmw<addi> %value, %view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<16xi32>, vector<4xindex>
   func.return %r : vector<4xi32>
 }
 
@@ -1537,8 +1524,7 @@ func.def @atomic_reduce_mask_all_true_to_atomic_reduce(%buffer: buffer, %offset:
 }
 // ----
 func.def @atomic_reduce_mask_all_true_to_atomic_reduce(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>, %value: vector<4xi32>) {
-  %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
-  vector.atomic.reduce<addi> %value, %view[0][%offsets] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : vector<4xi32>, view<16xi32, %layout>, vector<4xindex>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32>
+  vector.atomic.reduce<addi> %value, %view[0][%offsets] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : vector<4xi32>, view<16xi32>, vector<4xindex>
   func.return
 }

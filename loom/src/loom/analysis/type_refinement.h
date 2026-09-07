@@ -23,6 +23,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_module_t loom_module_t;
+
 // Refines |current_type| using exact facts referenced by the type itself.
 //
 // Dynamic dimensions narrow when their SSA value has exact non-negative integer
@@ -34,6 +36,17 @@ iree_status_t loom_type_refine_with_value_facts(
     loom_type_t current_type, const loom_value_fact_table_t* fact_table,
     iree_arena_allocator_t* arena, loom_type_t* out_type,
     loom_type_refinement_result_t* out_result);
+
+// Specializes |current_type| using exact facts and canonical module encodings.
+//
+// This includes ordinary dimension/static-spec refinement and additionally
+// interns a lossless static representation for exact composed encodings such
+// as dynamic strided physical storage. Callers must own a module rewrite or
+// transformation boundary because the module encoding table may grow.
+iree_status_t loom_type_specialize_with_value_facts(
+    loom_module_t* module, loom_type_t current_type,
+    const loom_value_fact_table_t* fact_table, iree_arena_allocator_t* arena,
+    loom_type_t* out_type, loom_type_refinement_result_t* out_result);
 
 #ifdef __cplusplus
 }

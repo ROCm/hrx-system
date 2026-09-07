@@ -35,6 +35,10 @@ static iree_string_view_t loom_encoding_schema_param_name(void) {
   return IREE_SV("schema");
 }
 
+static iree_string_view_t loom_encoding_strides_param_name(void) {
+  return IREE_SV("strides");
+}
+
 static uint16_t loom_encoding_u16_param(const loom_named_attr_t* parameter) {
   return (uint16_t)loom_attr_as_i64(parameter->value);
 }
@@ -46,6 +50,99 @@ loom_encoding_layout_dense_address_layout(void) {
       .rank = 0,
       .strides = NULL,
   };
+}
+
+static iree_status_t loom_encoding_intern_family(
+    loom_module_t* module, const loom_encoding_family_descriptor_t* descriptor,
+    loom_named_attr_t* attributes, uint8_t attribute_count,
+    uint16_t* out_encoding_id) {
+  loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      module, loom_bstring_view(descriptor->name), &name_id));
+  const loom_encoding_t encoding = {
+      .name_id = name_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = attribute_count,
+      .attributes = attributes,
+  };
+  return loom_module_add_encoding(module, &encoding, out_encoding_id);
+}
+
+static iree_status_t loom_encoding_intern_exact_address_layout(
+    loom_module_t* module, loom_value_fact_address_layout_t layout,
+    uint16_t* out_encoding_id) {
+  *out_encoding_id = 0;
+  if (layout.kind == LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE) {
+    return loom_encoding_intern_family(
+        module, &loom_encoding_layout_dense_family_descriptor,
+        /*attributes=*/NULL, /*attribute_count=*/0, out_encoding_id);
+  }
+  if (layout.kind != LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED ||
+      layout.rank > LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK) {
+    return iree_ok_status();
+  }
+
+  int64_t strides[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {0};
+  for (uint8_t i = 0; i < layout.rank; ++i) {
+    if (!loom_value_facts_as_exact_i64(layout.strides[i], &strides[i]) ||
+        strides[i] < 0) {
+      return iree_ok_status();
+    }
+  }
+  loom_string_id_t strides_name_id = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      module, loom_encoding_strides_param_name(), &strides_name_id));
+  loom_named_attr_t attribute = {
+      .name_id = strides_name_id,
+      .value = loom_attr_i64_array(strides, layout.rank),
+  };
+  return loom_encoding_intern_family(
+      module, &loom_encoding_layout_strided_family_descriptor, &attribute, 1,
+      out_encoding_id);
+}
+
+iree_status_t loom_encoding_intern_exact_summary(
+    loom_module_t* module, const loom_value_fact_encoding_summary_t* summary,
+    uint16_t* out_encoding_id) {
+  *out_encoding_id = 0;
+  if (summary->static_spec_encoding_id != 0) {
+    *out_encoding_id = summary->static_spec_encoding_id;
+    return iree_ok_status();
+  }
+  if (summary->role == LOOM_ENCODING_ROLE_ADDRESS_LAYOUT) {
+    return loom_encoding_intern_exact_address_layout(
+        module, summary->address_layout, out_encoding_id);
+  }
+  if (summary->role != LOOM_ENCODING_ROLE_PHYSICAL_STORAGE ||
+      summary->storage_schema.static_spec_encoding_id == 0) {
+    return iree_ok_status();
+  }
+
+  uint16_t layout_encoding_id = 0;
+  IREE_RETURN_IF_ERROR(loom_encoding_intern_exact_address_layout(
+      module, summary->address_layout, &layout_encoding_id));
+  if (layout_encoding_id == 0) return iree_ok_status();
+
+  loom_string_id_t layout_name_id = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      module, loom_encoding_layout_param_name(), &layout_name_id));
+  loom_string_id_t schema_name_id = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      module, loom_encoding_schema_param_name(), &schema_name_id));
+  loom_named_attr_t attributes[] = {
+      {
+          .name_id = layout_name_id,
+          .value = loom_attr_encoding(layout_encoding_id),
+      },
+      {
+          .name_id = schema_name_id,
+          .value = loom_attr_encoding(
+              summary->storage_schema.static_spec_encoding_id),
+      },
+  };
+  return loom_encoding_intern_family(
+      module, &loom_encoding_storage_family_descriptor, attributes,
+      IREE_ARRAYSIZE(attributes), out_encoding_id);
 }
 
 void loom_encoding_layout_dense_summarize(

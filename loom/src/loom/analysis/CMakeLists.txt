@@ -1020,6 +1020,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::ir
     loom::ir::type_refinement
+    loom::ops::encoding
     loom::util::fact_table
   PUBLIC
 )
