@@ -329,14 +329,20 @@ pipeline_fold = Op(
     "pipeline.fold",
     group=pipeline_ops,
     doc=(
-        "Fold each lane's finite input record sequence into one record using "
-        "the template combining kind. Lane cardinality and tile shape are "
-        "preserved; only the temporal record count changes from N to one. "
-        "Optional fastmath flags permit the corresponding floating-point "
-        "reassociation and approximation choices."
+        "Fold the innermost temporal dimension of each lane's finite input "
+        "record sequence using the template combining kind. Outer temporal "
+        "dimensions, lane cardinality, and tile shape are preserved. Optional "
+        "fastmath flags permit the corresponding floating-point reassociation "
+        "and approximation choices."
     ),
     operands=[Operand("source", ANY, doc="Finite per-lane input record flow.")],
-    results=[Result("result", ANY, doc="One folded record per source lane.")],
+    results=[
+        Result(
+            "result",
+            ANY,
+            doc="One folded record per outer temporal position and source lane.",
+        )
+    ],
     attrs=[
         AttrDef("kind", ATTR_TYPE_ENUM, enum_def=CombiningKind),
         AttrDef(

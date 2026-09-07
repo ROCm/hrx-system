@@ -104,16 +104,16 @@ pipeline.def<kernel> @split_k() launch(%lhs: buffer, %rhs: buffer, %bias: buffer
   %reducers = group.create %reducer_lanes : index -> group
   %lhs_view = buffer.view %lhs[%base] : buffer -> view<[%product_lanes]x[%record_rows]x[%record_columns]x[%tile_extent]x[%tile_extent]xi8>
   %rhs_view = buffer.view %rhs[%base] : buffer -> view<[%product_lanes]x[%record_rows]x[%record_columns]x[%tile_extent]x[%tile_extent]xi8>
-  %bias_view = buffer.view %bias[%base] : buffer -> view<[%tile_extent]x[%tile_extent]xi32>
-  %output_view = buffer.view %output[%base] : buffer -> view<[%tile_extent]x[%tile_extent]xi32>
+  %bias_view = buffer.view %bias[%base] : buffer -> view<[%record_rows]x[%tile_extent]x[%tile_extent]xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%record_rows]x[%tile_extent]x[%tile_extent]xi32>
   %lhs_tiles = pipeline.scatter %lhs_view across %products : view<[%product_lanes]x[%record_rows]x[%record_columns]x[%tile_extent]x[%tile_extent]xi8>, group -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi8>>
   %rhs_tiles = pipeline.scatter %rhs_view across %products : view<[%product_lanes]x[%record_rows]x[%record_columns]x[%tile_extent]x[%tile_extent]xi8>, group -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi8>>
-  %bias_tile = pipeline.read %bias_view on %reducers : view<[%tile_extent]x[%tile_extent]xi32>, group -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>
+  %bias_tile = pipeline.read %bias_view on %reducers : view<[%record_rows]x[%tile_extent]x[%tile_extent]xi32>, group -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>
   %partials = pipeline.stage @product on %products(%lhs_tiles, %rhs_tiles) : (group, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi8>>, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi8>>) -> (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>)
   %folded_partials = pipeline.fold<addi> %partials : pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>
   %buffered_partials = pipeline.buffer %folded_partials capacity %ring_capacity : (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>, index) -> pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>
   %result = pipeline.reduce @reduce from %products(%buffered_partials) to %reducers(%bias_tile) : (group, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>) to (group, pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>) -> (pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>)
-  pipeline.write %result to %output_view : pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>, view<[%tile_extent]x[%tile_extent]xi32>
+  pipeline.write %result to %output_view : pipeline.flow<tile<[%tile_extent]x[%tile_extent]xi32>>, view<[%record_rows]x[%tile_extent]x[%tile_extent]xi32>
   pipeline.return
 }
 )");
@@ -147,12 +147,12 @@ pipeline.def<kernel> @split_k() launch(%lhs: buffer, %rhs: buffer, %bias: buffer
   ASSERT_EQ(plan.instance_count, 3u);
   EXPECT_EQ(plan.instances[0].group_index, 0u);
   EXPECT_EQ(plan.instances[0].lane, 0u);
-  EXPECT_EQ(plan.instances[0].fold_record_count, 4u);
+  EXPECT_EQ(plan.instances[0].fold_record_count, 2u);
   EXPECT_EQ(plan.instances[0].fold_output_port, 2u);
   EXPECT_EQ(plan.instances[0].fold_kind, LOOM_COMBINING_KIND_ADDI);
   EXPECT_EQ(plan.instances[1].group_index, 0u);
   EXPECT_EQ(plan.instances[1].lane, 1u);
-  EXPECT_EQ(plan.instances[1].fold_record_count, 4u);
+  EXPECT_EQ(plan.instances[1].fold_record_count, 2u);
   EXPECT_EQ(plan.instances[2].group_index, 1u);
   EXPECT_EQ(plan.instances[2].lane, 0u);
   EXPECT_EQ(plan.instances[2].fold_record_count, 0u);
@@ -161,12 +161,17 @@ pipeline.def<kernel> @split_k() launch(%lhs: buffer, %rhs: buffer, %bias: buffer
   EXPECT_EQ(plan.edge_count, 8u);
   EXPECT_EQ(plan.flows[0].record_count, 4u);
   EXPECT_EQ(plan.flows[1].record_count, 4u);
-  EXPECT_EQ(plan.flows[2].record_count, 1u);
+  EXPECT_EQ(plan.flows[2].record_count, 2u);
   EXPECT_EQ(plan.flows[3].record_count, 4u);
-  EXPECT_EQ(plan.flows[4].record_count, 1u);
-  EXPECT_EQ(plan.flows[5].record_count, 1u);
+  EXPECT_EQ(plan.flows[4].record_count, 2u);
+  EXPECT_EQ(plan.flows[5].record_count, 2u);
   EXPECT_EQ(plan.flows[5].minimum_capacity, 2u);
-  EXPECT_EQ(plan.flows[6].record_count, 1u);
+  EXPECT_EQ(plan.flows[6].record_count, 2u);
+  EXPECT_EQ(plan.flows[0].record_shape.rank, 2u);
+  EXPECT_EQ(plan.flows[0].record_shape.dimensions[0], 2u);
+  EXPECT_EQ(plan.flows[0].record_shape.dimensions[1], 2u);
+  EXPECT_EQ(plan.flows[4].record_shape.rank, 1u);
+  EXPECT_EQ(plan.flows[4].record_shape.dimensions[0], 2u);
   for (uint32_t i = 0; i < plan.flow_count; ++i) {
     EXPECT_TRUE(loom_type_is_all_static(plan.flows[i].tile_type));
     EXPECT_EQ(loom_type_dim_static_size_at(plan.flows[i].tile_type, 0), 8);
@@ -406,6 +411,30 @@ pipeline.def<kernel> @mismatch() launch(%lhs: buffer, %rhs: buffer) {
   %rhs_view = buffer.view %rhs[%base] : buffer -> view<2x8xi8>
   %lhs_records = pipeline.read %lhs_view on %workers : view<4x8xi8>, group -> pipeline.flow<tile<8xi8>>
   %rhs_records = pipeline.read %rhs_view on %workers : view<2x8xi8>, group -> pipeline.flow<tile<8xi8>>
+  %output = pipeline.stage @join on %workers(%lhs_records, %rhs_records) : (group, pipeline.flow<tile<8xi8>>, pipeline.flow<tile<8xi8>>) -> (pipeline.flow<tile<8xi8>>)
+  pipeline.return
+}
+)");
+
+  loom_pipeline_plan_t plan = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        BuildPlan(module.get(), IREE_SV("mismatch"), &plan));
+}
+
+TEST_F(PipelinePlanTest, RejectsDifferentlyShapedStageRecordSequences) {
+  ModulePtr module = Parse(R"(
+func.def @join(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  func.return
+}
+
+pipeline.def<kernel> @mismatch() launch(%lhs: buffer, %rhs: buffer) {
+  %lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lanes : index -> group
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<2x2x8xi8>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<4x8xi8>
+  %lhs_records = pipeline.read %lhs_view on %workers : view<2x2x8xi8>, group -> pipeline.flow<tile<8xi8>>
+  %rhs_records = pipeline.read %rhs_view on %workers : view<4x8xi8>, group -> pipeline.flow<tile<8xi8>>
   %output = pipeline.stage @join on %workers(%lhs_records, %rhs_records) : (group, pipeline.flow<tile<8xi8>>, pipeline.flow<tile<8xi8>>) -> (pipeline.flow<tile<8xi8>>)
   pipeline.return
 }

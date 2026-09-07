@@ -176,7 +176,7 @@ iree_status_t loom_pipeline_buffer_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_PIPELINE_FOLD: Fold each lane's finite input record sequence into one record using the template combining kind. Lane cardinality and tile shape are preserved; only the temporal record count changes from N to one. Optional fastmath flags permit the corresponding floating-point reassociation and approximation choices.
+// LOOM_OP_PIPELINE_FOLD: Fold the innermost temporal dimension of each lane's finite input record sequence using the template combining kind. Outer temporal dimensions, lane cardinality, and tile shape are preserved. Optional fastmath flags permit the corresponding floating-point reassociation and approximation choices.
 // %partial = pipeline.fold<addf, reassoc> %contributions : pipeline.flow<tile<1xf32>>
 LOOM_DEFINE_ISA(loom_pipeline_fold_isa, LOOM_OP_PIPELINE_FOLD)
 LOOM_DEFINE_OPERAND(loom_pipeline_fold_source, 0)

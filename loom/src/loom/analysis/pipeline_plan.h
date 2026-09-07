@@ -87,12 +87,23 @@ typedef struct loom_pipeline_plan_instance_t {
   uint8_t fold_fast_math_flags;
 } loom_pipeline_plan_instance_t;
 
+typedef struct loom_pipeline_plan_record_shape_t {
+  // Exact outer-to-inner temporal dimensions of one lane's record sequence.
+  const uint32_t* dimensions;
+
+  // Number of dimensions in |dimensions|. Rank zero denotes one record.
+  uint8_t rank;
+} loom_pipeline_plan_record_shape_t;
+
 typedef struct loom_pipeline_plan_flow_t {
   // Source SSA identity naming this flow version.
   loom_value_id_t source_value;
 
   // Tile record type transferred by the flow.
   loom_type_t tile_type;
+
+  // Ordered temporal shape transferred per lane and activation.
+  loom_pipeline_plan_record_shape_t record_shape;
 
   // Number of ordered records transferred per lane and activation.
   uint32_t record_count;
