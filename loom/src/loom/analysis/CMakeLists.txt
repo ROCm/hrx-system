@@ -448,6 +448,7 @@ loom_cc_library(
     loom::ir::facts
     loom::ops::buffer
     loom::ops::combining
+    loom::ops::encoding
     loom::ops::group
     loom::ops::op_defs
     loom::ops::pipeline
@@ -469,6 +470,7 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::format::text::parser
     loom::ir
+    loom::ops::encoding
     loom::ops::pipeline
     loom::testing::context
     loom::testing::module_ptr

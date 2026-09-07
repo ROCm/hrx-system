@@ -11,6 +11,7 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/encoding/storage.h"
 #include "loom/ops/pipeline/ops.h"
 #include "loom/testing/context.h"
 #include "loom/testing/module_ptr.h"
@@ -214,6 +215,78 @@ pipeline.def<kernel> @split_k() launch(%lhs: buffer, %rhs: buffer, %bias: buffer
                                    /*.instance_count=*/2,
                                },
                                &analysis_arena_, &undersized_plan));
+}
+
+TEST_F(PipelinePlanTest, PreservesFixedRecordStorageAcrossPartitions) {
+  ModulePtr module = Parse(R"(
+func.def @consume(%weight: buffer, %activation: buffer) {
+  func.return
+}
+
+pipeline.def<kernel> @encoded() launch(%weight: buffer, %activation: buffer) {
+  %lane_count = index.constant 2 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lane_count : index -> group
+  %weight_view = buffer.view %weight[%base] : buffer -> view<2x3x176xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q5_k>>
+  %activation_view = buffer.view %activation[%base] : buffer -> view<2x3x2x144xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q8_1_x4>>
+  %weight_records = pipeline.scatter %weight_view across %workers : view<2x3x176xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q5_k>>, group -> pipeline.flow<tile<176xi8>>
+  %activation_records = pipeline.scatter %activation_view across %workers : view<2x3x2x144xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q8_1_x4>>, group -> pipeline.flow<tile<2x144xi8>>
+  pipeline.stage @consume on %workers(%weight_records, %activation_records) : (group, pipeline.flow<tile<176xi8>>, pipeline.flow<tile<2x144xi8>>) -> ()
+  pipeline.return
+}
+)");
+
+  loom_pipeline_plan_t plan = {};
+  IREE_ASSERT_OK(BuildPlan(module.get(), IREE_SV("encoded"), &plan));
+
+  ASSERT_EQ(plan.flow_count, 2u);
+  EXPECT_EQ(plan.flows[0].record_count, 3u);
+  EXPECT_EQ(plan.flows[1].record_count, 3u);
+  const loom_encoding_record_layout_t* weight_layout = nullptr;
+  ASSERT_TRUE(loom_encoding_query_type_record_layout(
+      nullptr, module.get(), plan.flows[0].partition_source_type,
+      &weight_layout));
+  ASSERT_NE(weight_layout, nullptr);
+  EXPECT_EQ(weight_layout->geometry.logical_element_count, 256u);
+  EXPECT_EQ(weight_layout->geometry.storage_byte_count, 176u);
+  EXPECT_EQ(weight_layout->geometry.required_alignment, 2u);
+  const loom_encoding_record_layout_t* activation_layout = nullptr;
+  ASSERT_TRUE(loom_encoding_query_type_record_layout(
+      nullptr, module.get(), plan.flows[1].partition_source_type,
+      &activation_layout));
+  ASSERT_NE(activation_layout, nullptr);
+  EXPECT_EQ(activation_layout->geometry.logical_element_count, 128u);
+  EXPECT_EQ(activation_layout->geometry.storage_byte_count, 144u);
+  EXPECT_EQ(activation_layout->geometry.required_alignment, 16u);
+  loom_value_facts_t stride_storage[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK];
+  loom_value_fact_address_layout_t address_layout = {};
+  ASSERT_TRUE(loom_encoding_query_type_address_layout(
+      nullptr, module.get(), plan.flows[0].partition_source_type,
+      stride_storage, IREE_ARRAYSIZE(stride_storage), &address_layout));
+  EXPECT_EQ(address_layout.kind, LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE);
+}
+
+TEST_F(PipelinePlanTest, RejectsPartialFixedStorageRecordTiles) {
+  ModulePtr module = Parse(R"(
+func.def @consume(%weight: buffer) {
+  func.return
+}
+
+pipeline.def<kernel> @partial_record() launch(%weight: buffer) {
+  %lane_count = index.constant 2 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lane_count : index -> group
+  %weight_view = buffer.view %weight[%base] : buffer -> view<2x3x175xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q5_k>>
+  %weight_records = pipeline.scatter %weight_view across %workers : view<2x3x175xi8, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q5_k>>, group -> pipeline.flow<tile<175xi8>>
+  pipeline.stage @consume on %workers(%weight_records) : (group, pipeline.flow<tile<175xi8>>) -> ()
+  pipeline.return
+}
+)");
+
+  loom_pipeline_plan_t plan = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      BuildPlan(module.get(), IREE_SV("partial_record"), &plan));
 }
 
 TEST_F(PipelinePlanTest, ConnectsEqualCardinalityStageGroupsPointwise) {

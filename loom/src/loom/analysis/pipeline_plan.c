@@ -11,6 +11,7 @@
 #include "loom/analysis/type_refinement.h"
 #include "loom/ir/context.h"
 #include "loom/ops/buffer/ops.h"
+#include "loom/ops/encoding/storage.h"
 #include "loom/ops/group/ops.h"
 #include "loom/ops/pipeline/ops.h"
 #include "loom/ops/type_registry.h"
@@ -191,6 +192,41 @@ static iree_status_t loom_pipeline_plan_exact_record_shape(
   };
   if (out_record_count != NULL) {
     *out_record_count = (uint32_t)record_count;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_pipeline_plan_validate_fixed_record_tile(
+    const loom_pipeline_plan_builder_t* builder, loom_type_t view_type,
+    loom_type_t tile_type) {
+  const loom_encoding_record_layout_t* record_layout = NULL;
+  if (!loom_encoding_query_type_record_layout(&builder->facts->context,
+                                              builder->module, view_type,
+                                              &record_layout)) {
+    return iree_ok_status();
+  }
+
+  uint64_t element_count = 0;
+  const int32_t element_bit_width =
+      loom_scalar_type_bitwidth(loom_type_element_type(tile_type));
+  uint64_t bit_length = 0;
+  if (!loom_type_static_element_count(tile_type, &element_count) ||
+      element_bit_width <= 0 ||
+      !iree_checked_mul_u64(element_count, (uint64_t)element_bit_width,
+                            &bit_length) ||
+      (bit_length & 7u) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "pipeline encoded flow tile must have a whole-byte physical shape");
+  }
+  const uint64_t tile_byte_length = bit_length / 8u;
+  const uint16_t record_byte_length =
+      record_layout->geometry.storage_byte_count;
+  if (record_byte_length == 0 || tile_byte_length == 0 ||
+      tile_byte_length % record_byte_length != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "pipeline encoded flow tile must contain whole fixed storage records");
   }
   return iree_ok_status();
 }
@@ -429,6 +465,8 @@ static iree_status_t loom_pipeline_plan_define_external_flow(
       loom_pipeline_plan_flow_tile_type(builder, result, &tile_type));
   const loom_type_t view_type =
       loom_module_value_type(builder->module, source_view);
+  IREE_RETURN_IF_ERROR(loom_pipeline_plan_validate_fixed_record_tile(
+      builder, view_type, tile_type));
   loom_pipeline_plan_record_shape_t record_shape = {0};
   uint32_t record_count = 0;
   IREE_RETURN_IF_ERROR(loom_pipeline_plan_exact_record_shape(
@@ -796,6 +834,8 @@ static iree_status_t loom_pipeline_plan_parse_write(
       builder, loom_pipeline_write_target(op), &binding_index));
   const loom_type_t target_type =
       loom_module_value_type(builder->module, loom_pipeline_write_target(op));
+  IREE_RETURN_IF_ERROR(loom_pipeline_plan_validate_fixed_record_tile(
+      builder, target_type, flow->tile_type));
   loom_pipeline_plan_record_shape_t target_record_shape = {0};
   IREE_RETURN_IF_ERROR(loom_pipeline_plan_exact_record_shape(
       builder, target_type, flow->tile_type, /*partitioned=*/false,
