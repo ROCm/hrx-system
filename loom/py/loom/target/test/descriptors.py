@@ -102,6 +102,7 @@ _SCHEDULE_EVENT_SLOW = "test.event.slow"
 _SCHEDULE_EVENT_CONSUMER = "test.event.consumer"
 _SCHEDULE_RESOURCE_REQUIRED = "test.resource.required"
 _SCHEDULE_RESOURCE_RESERVED = "test.resource.reserved"
+_SCHEDULE_RESOURCE_SERIAL = "test.resource.serial"
 _SCHEDULE_ALTERNATIVE_B = "test.schedule.alternative_b"
 
 _EVENT_FAST_WRITE = "test.write.fast"
@@ -621,6 +622,16 @@ TEST_LOW_RESOURCE_RESERVED_I32_DESCRIPTOR = Descriptor(
     operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
     asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
     schedule_class=_SCHEDULE_RESOURCE_RESERVED,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_RESOURCE_SERIAL_I32_DESCRIPTOR = Descriptor(
+    key="test.resource.serial.i32",
+    mnemonic="test.resource.serial.i32",
+    semantic_tag="test.resource.serial.i32",
+    operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
+    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_RESOURCE_SERIAL,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
@@ -2000,6 +2011,13 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             model_quality=ModelQuality.EXACT,
         ),
         ScheduleClass(
+            _SCHEDULE_RESOURCE_SERIAL,
+            latency_kind=LatencyKind.EXACT,
+            latency_cycles=1,
+            issue_uses=(IssueUse(_RESOURCE_SCALAR, cycles=4, units=1),),
+            model_quality=ModelQuality.EXACT,
+        ),
+        ScheduleClass(
             _SCHEDULE_ALTERNATIVE_B,
             latency_kind=LatencyKind.EXACT,
             latency_cycles=1,
@@ -2021,6 +2039,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_EVENT_SLOW_I32_DESCRIPTOR,
         TEST_LOW_RESOURCE_REQUIRED_I32_DESCRIPTOR,
         TEST_LOW_RESOURCE_RESERVED_I32_DESCRIPTOR,
+        TEST_LOW_RESOURCE_SERIAL_I32_DESCRIPTOR,
         TEST_LOW_EVENT_EARLY_CONSUMER_I32_DESCRIPTOR,
         TEST_LOW_EVENT_LATE_CONSUMER_I32_DESCRIPTOR,
         TEST_LOW_EVENT_MEMORY_READ_I32_DESCRIPTOR,

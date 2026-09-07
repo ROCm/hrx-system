@@ -45,35 +45,40 @@ class LowEmissionFrameTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
+  ModulePtr ParseModule(const char* source) {
+    loom_text_parse_options_t options = {};
+    loom_low_descriptor_text_asm_environment_initialize(
+        &registry_.registry, &options.low_asm_environment);
+    loom_module_t* module = nullptr;
+    IREE_CHECK_OK(loom_text_parse(iree_make_cstring_view(source),
+                                  IREE_SV("frame_test.loom"), &context_,
+                                  &block_pool_, &options, &module));
+    return ModulePtr(module);
+  }
+
   ModulePtr ParseModule() {
-    static constexpr const char* kSource = R"(
+    return ParseModule(R"(
 low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm {
   %storage = storage {byte_alignment = 16, byte_length = 64} : low.storage<workgroup>
   %address = storage_address %storage : low.storage<workgroup> -> reg<test.ptr>
   %value = test.load.v4i32 %address
   return %value
 }
-)";
-    loom_text_parse_options_t options = {};
-    loom_low_descriptor_text_asm_environment_initialize(
-        &registry_.registry, &options.low_asm_environment);
-    loom_module_t* module = nullptr;
-    IREE_CHECK_OK(loom_text_parse(iree_make_cstring_view(kSource),
-                                  IREE_SV("frame_test.loom"), &context_,
-                                  &block_pool_, &options, &module));
-    return ModulePtr(module);
+)");
   }
 
   iree_status_t BuildFrame(
       loom_module_t* module,
       loom_low_schedule_structural_model_list_t structural_models,
-      loom_low_emission_frame_t* out_frame) {
+      loom_low_emission_frame_t* out_frame,
+      loom_low_schedule_strategy_t schedule_strategy =
+          LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
     loom_block_t* module_block = loom_module_block(module);
     IREE_ASSERT_EQ(module_block->op_count, 1);
     loom_low_emission_frame_options_t options = {};
     options.descriptor_registry = &registry_.registry;
     options.schedule_structural_models = structural_models;
-    options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
+    options.schedule_strategy = schedule_strategy;
     return loom_low_emission_frame_build(module, loom_block_op(module_block, 0),
                                          &options, &arena_, out_frame);
   }
@@ -93,6 +98,29 @@ low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm
   loom_target_low_descriptor_registry_t registry_ = {};
   iree_arena_allocator_t arena_ = {};
 };
+
+TEST_F(LowEmissionFrameTest, EveryStrategyEnforcesIssueResourceCapacity) {
+  constexpr loom_low_schedule_strategy_t kStrategies[] = {
+      LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+      LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE,
+      LOOM_LOW_SCHEDULE_STRATEGY_LATENCY_HIDING,
+      LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+  };
+  for (const loom_low_schedule_strategy_t strategy : kStrategies) {
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @resource_capacity(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %first = test.resource.serial.i32 %lhs, %rhs
+  %second = test.resource.serial.i32 %lhs, %rhs
+  return %first, %second
+}
+)");
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame, strategy));
+    ASSERT_GE(frame.schedule.node_count, 2u);
+    EXPECT_EQ(frame.schedule.nodes[0].issue_cycle, 0u);
+    EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 4u);
+  }
+}
 
 TEST_F(LowEmissionFrameTest, StructuralModelCarriesNativePacketTiming) {
   ModulePtr module = ParseModule();

@@ -781,10 +781,8 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
       };
     }
   }
-  if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
-    IREE_RETURN_IF_ERROR(loom_low_schedule_resource_calendar_initialize(
-        descriptor_set, state->arena, &state->resource_calendar));
-  }
+  IREE_RETURN_IF_ERROR(loom_low_schedule_resource_calendar_initialize(
+      descriptor_set, state->arena, &state->resource_calendar));
   if (effect_use_capacity != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, effect_use_capacity, sizeof(*state->effect_uses),
@@ -1480,6 +1478,11 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
         issue_cycle =
             iree_max(issue_cycle, state->node_ready_issue_cycles[chosen_node]);
       }
+      uint16_t bottleneck_resource_id = LOOM_LOW_RESOURCE_NONE;
+      issue_cycle =
+          loom_low_schedule_resource_calendar_find_earliest_issue_cycle(
+              &state->resource_calendar, chosen->schedule_class, issue_cycle,
+              &bottleneck_resource_id);
       state->current_issue_cycle = issue_cycle;
       chosen->scheduled_ordinal = scheduled_in_block++;
       chosen->issue_cycle = issue_cycle;
