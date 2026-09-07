@@ -567,6 +567,7 @@ NPU2_ARRAY_FAMILY = ArrayFamily(
             register_modules=(RegisterModule.SHIM_NOC, RegisterModule.SHIM_PL),
             dma=DmaEngineFacts(
                 buffer_descriptor_count=16,
+                maximum_task_repeat_count=256,
                 channel_count_per_direction=2,
                 address_dimension_count=3,
                 address_maximum=0x1000000000000,
@@ -586,7 +587,6 @@ NPU2_ARRAY_FAMILY = ArrayFamily(
                 supports_padding=False,
                 supports_out_of_order=True,
                 supports_tokens=True,
-                supports_repeat=True,
                 supports_tlast_suppression=True,
             ),
         ),
@@ -618,6 +618,7 @@ NPU2_ARRAY_FAMILY = ArrayFamily(
             register_modules=(RegisterModule.MEMORY_TILE,),
             dma=DmaEngineFacts(
                 buffer_descriptor_count=48,
+                maximum_task_repeat_count=256,
                 channel_count_per_direction=6,
                 address_dimension_count=4,
                 address_maximum=0x180000,
@@ -637,7 +638,6 @@ NPU2_ARRAY_FAMILY = ArrayFamily(
                 supports_padding=True,
                 supports_out_of_order=True,
                 supports_tokens=True,
-                supports_repeat=True,
                 supports_tlast_suppression=True,
             ),
         ),
@@ -672,6 +672,7 @@ NPU2_ARRAY_FAMILY = ArrayFamily(
             register_modules=(RegisterModule.CORE, RegisterModule.COMPUTE_MEMORY),
             dma=DmaEngineFacts(
                 buffer_descriptor_count=16,
+                maximum_task_repeat_count=256,
                 channel_count_per_direction=2,
                 address_dimension_count=3,
                 address_maximum=0x20000,
@@ -691,7 +692,6 @@ NPU2_ARRAY_FAMILY = ArrayFamily(
                 supports_padding=False,
                 supports_out_of_order=True,
                 supports_tokens=True,
-                supports_repeat=True,
                 supports_tlast_suppression=True,
             ),
         ),

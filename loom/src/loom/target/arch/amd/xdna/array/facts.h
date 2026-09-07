@@ -123,8 +123,7 @@ typedef enum loom_xdna_dma_feature_bit_e {
   LOOM_XDNA_DMA_FEATURE_PADDING = 1u << 1,
   LOOM_XDNA_DMA_FEATURE_OUT_OF_ORDER = 1u << 2,
   LOOM_XDNA_DMA_FEATURE_TOKENS = 1u << 3,
-  LOOM_XDNA_DMA_FEATURE_REPEAT = 1u << 4,
-  LOOM_XDNA_DMA_FEATURE_TLAST_SUPPRESSION = 1u << 5,
+  LOOM_XDNA_DMA_FEATURE_TLAST_SUPPRESSION = 1u << 4,
 } loom_xdna_dma_feature_bit_t;
 typedef uint8_t loom_xdna_dma_feature_bits_t;
 
@@ -134,6 +133,8 @@ typedef struct loom_xdna_dma_facts_t {
   uint64_t address_maximum;
   // Number of buffer descriptors.
   uint16_t buffer_descriptor_count;
+  // Maximum actual execution count for one queued DMA task.
+  uint16_t maximum_task_repeat_count;
   // Number of channels in each transfer direction.
   uint8_t channel_count_per_direction;
   // Number of address dimensions.

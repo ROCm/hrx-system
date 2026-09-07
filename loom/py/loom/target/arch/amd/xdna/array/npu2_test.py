@@ -113,7 +113,8 @@ def test_npu2_dma_encoding_and_stream_port_mappings_are_exact() -> None:
         shim.address_encoding_shift,
         shim.transfer_length_granularity,
         shim.transfer_length_offset,
-    ) == (0, 4, 0)
+        shim.maximum_task_repeat_count,
+    ) == (0, 4, 0, 256)
     assert (
         shim.memory_to_stream_port_base,
         shim.memory_to_stream_port_stride,

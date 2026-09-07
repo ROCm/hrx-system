@@ -110,12 +110,7 @@ def emit_array_facts() -> str:
         dma = tile.dma
         assert dma is not None
         dma_flags = (
-            int(dma.supports_compression)
-            | (int(dma.supports_padding) << 1)
-            | (int(dma.supports_out_of_order) << 2)
-            | (int(dma.supports_tokens) << 3)
-            | (int(dma.supports_repeat) << 4)
-            | (int(dma.supports_tlast_suppression) << 5)
+            int(dma.supports_compression) | (int(dma.supports_padding) << 1) | (int(dma.supports_out_of_order) << 2) | (int(dma.supports_tokens) << 3) | (int(dma.supports_tlast_suppression) << 4)
         )
         tile_lines.extend(
             [
@@ -139,6 +134,7 @@ def emit_array_facts() -> str:
                 "        .dma = {",
                 f"            .address_maximum = UINT64_C(0x{dma.address_maximum:016x}),",
                 f"            .buffer_descriptor_count = {dma.buffer_descriptor_count},",
+                f"            .maximum_task_repeat_count = {dma.maximum_task_repeat_count},",
                 f"            .channel_count_per_direction = {dma.channel_count_per_direction},",
                 f"            .address_dimension_count = {dma.address_dimension_count},",
                 f"            .address_alignment = {dma.address_alignment},",

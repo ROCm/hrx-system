@@ -105,6 +105,7 @@ class DmaEngineFacts:
     """Resource and field-width limits for one tile DMA engine."""
 
     buffer_descriptor_count: int
+    maximum_task_repeat_count: int
     channel_count_per_direction: int
     address_dimension_count: int
     address_maximum: int
@@ -124,7 +125,6 @@ class DmaEngineFacts:
     supports_padding: bool
     supports_out_of_order: bool
     supports_tokens: bool
-    supports_repeat: bool
     supports_tlast_suppression: bool
 
 
@@ -286,6 +286,7 @@ def _validate_dma(tile: TileFacts) -> None:
         return
     positive_values = (
         dma.buffer_descriptor_count,
+        dma.maximum_task_repeat_count,
         dma.channel_count_per_direction,
         dma.address_dimension_count,
         dma.address_maximum,

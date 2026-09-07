@@ -30,6 +30,7 @@ TEST(XdnaArrayFactsTest, ExposesCompleteNpu2Topology) {
   IREE_ASSERT_OK(loom_xdna_array_tile_facts(family, {0, 0}, &tile));
   EXPECT_EQ(tile->kind, LOOM_XDNA_TILE_KIND_SHIM_NOC);
   EXPECT_EQ(tile->dma.buffer_descriptor_count, 16u);
+  EXPECT_EQ(tile->dma.maximum_task_repeat_count, 256u);
   EXPECT_EQ(tile->dma.address_encoding_shift, 0u);
   EXPECT_EQ(tile->dma.transfer_length_granularity, 4u);
   EXPECT_EQ(tile->dma.transfer_length_offset, 0u);
