@@ -324,6 +324,18 @@ static const char* loom_aie2p_program_shim_dma_queue_token_key(
   return NULL;
 }
 
+static const char* loom_aie2p_program_shim_dma_queue_repeat_key(
+    loom_aie2p_array_dma_direction_t direction) {
+  switch (direction) {
+    case LOOM_AIE2P_ARRAY_DMA_DIRECTION_MEMORY_TO_STREAM:
+      return "shim_noc.dma.channel.mm2s.task_queue.repeat_count";
+    case LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY:
+      return "shim_noc.dma.channel.s2mm.task_queue.repeat_count";
+  }
+  IREE_ASSERT_UNREACHABLE("validated AIE2P DMA direction");
+  return NULL;
+}
+
 static iree_status_t loom_aie2p_program_append_masked_field(
     const loom_aie2p_array_plan_t* plan,
     loom_aie2p_program_record_builder_t* records, const char* key,
@@ -707,7 +719,7 @@ static iree_status_t loom_aie2p_program_shim_dma_buffer_descriptor_address(
 
 static void loom_aie2p_program_append_relocation(
     loom_aie2p_array_program_builder_t* builder, uint32_t target_record_index,
-    uint32_t binding_ordinal, int64_t addend, uint32_t transfer_byte_length,
+    uint32_t binding_ordinal, int64_t addend, uint64_t binding_span_byte_length,
     const loom_xdna_dma_facts_t* dma_facts) {
   IREE_ASSERT_LT(builder->relocation_count, builder->relocation_capacity);
   builder->relocations[builder->relocation_count++] =
@@ -719,7 +731,8 @@ static void loom_aie2p_program_append_relocation(
           .field_byte_width = 8,
           .addend = addend,
           .minimum_value = 0,
-          .maximum_value = dma_facts->address_maximum - transfer_byte_length,
+          .maximum_value =
+              dma_facts->address_maximum - binding_span_byte_length,
           .required_alignment = dma_facts->address_alignment,
       };
 }
@@ -728,19 +741,9 @@ static iree_status_t loom_aie2p_program_build_shim_dma_descriptor(
     loom_aie2p_array_program_builder_t* builder,
     const loom_aie2p_array_binding_plan_t* binding_plan,
     const loom_aie2p_array_dma_plan_t* dma) {
-  const loom_aie2p_array_channel_t* channel =
-      &builder->plan->channels[binding_plan->channel_index];
   const loom_xdna_tile_facts_t* tile = NULL;
   IREE_RETURN_IF_ERROR(loom_xdna_array_tile_facts(builder->plan->family,
                                                   dma->coordinate, &tile));
-  uint64_t transfer_byte_length = 0;
-  if (!iree_checked_mul_u64(channel->record_byte_length, channel->record_count,
-                            &transfer_byte_length) ||
-      transfer_byte_length > UINT32_MAX ||
-      transfer_byte_length % tile->dma.transfer_length_granularity != 0) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AIE2P shim DMA span is not representable");
-  }
   uint32_t descriptor_address = 0;
   IREE_RETURN_IF_ERROR(loom_aie2p_program_shim_dma_buffer_descriptor_address(
       builder->plan, dma->coordinate, dma->buffer_descriptor_start,
@@ -751,9 +754,9 @@ static iree_status_t loom_aie2p_program_build_shim_dma_descriptor(
       LOOM_AIE2P_SHIM_DMA_BUFFER_DESCRIPTOR_WORD_COUNT);
   memset(words, 0,
          LOOM_AIE2P_SHIM_DMA_BUFFER_DESCRIPTOR_WORD_COUNT * sizeof(*words));
-  const uint32_t encoded_length =
-      (uint32_t)transfer_byte_length / tile->dma.transfer_length_granularity -
-      tile->dma.transfer_length_offset;
+  const uint32_t encoded_length = binding_plan->transfer_byte_length /
+                                      tile->dma.transfer_length_granularity -
+                                  tile->dma.transfer_length_offset;
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
       "shim_noc.dma.bd.word0.buffer_length", encoded_length, &words[0]));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
@@ -765,22 +768,18 @@ static iree_status_t loom_aie2p_program_build_shim_dma_descriptor(
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
       "shim_noc.dma.bd.word7.valid_bd", 1, &words[7]));
 
-  const uint64_t addend =
-      (uint64_t)binding_plan->partition_lane * transfer_byte_length;
-  if (addend > INT64_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AIE2P binding partition offset overflows");
-  }
   const uint32_t binding_ordinal =
       builder->plan->bindings[binding_plan->binding_index].ordinal;
   loom_aie2p_program_append_relocation(
-      builder, target_record_index, binding_ordinal, (int64_t)addend,
-      (uint32_t)transfer_byte_length, &tile->dma);
+      builder, target_record_index, binding_ordinal,
+      (int64_t)binding_plan->binding_byte_offset,
+      binding_plan->binding_span_byte_length, &tile->dma);
   return iree_ok_status();
 }
 
 static iree_status_t loom_aie2p_program_build_shim_dma_queue(
     loom_aie2p_array_program_builder_t* builder,
+    const loom_aie2p_array_binding_plan_t* binding_plan,
     const loom_aie2p_array_dma_plan_t* dma) {
   const uint16_t indices[] = {dma->dma_channel};
   const bool issues_completion =
@@ -806,6 +805,14 @@ static iree_status_t loom_aie2p_program_build_shim_dma_queue(
       loom_aie2p_program_shim_dma_queue_start_key(dma->direction),
       dma->coordinate, IREE_ARRAYSIZE(indices), indices,
       dma->buffer_descriptor_start, &queue));
+  loom_aie2p_register_update_t repeat = {0};
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
+      builder->plan,
+      loom_aie2p_program_shim_dma_queue_repeat_key(dma->direction),
+      dma->coordinate, IREE_ARRAYSIZE(indices), indices,
+      binding_plan->task_repeat_count - 1u, &repeat));
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_program_merge_register_update(&repeat, &queue));
   if (issues_completion) {
     loom_aie2p_register_update_t token = {0};
     IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
@@ -829,7 +836,8 @@ static iree_status_t loom_aie2p_program_build_control(
         builder->plan, binding_plan->channel_index);
     IREE_RETURN_IF_ERROR(loom_aie2p_program_build_shim_dma_descriptor(
         builder, binding_plan, dma));
-    IREE_RETURN_IF_ERROR(loom_aie2p_program_build_shim_dma_queue(builder, dma));
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_program_build_shim_dma_queue(builder, binding_plan, dma));
   }
   for (iree_host_size_t i = 0; i < builder->plan->binding_plan_count; ++i) {
     const loom_aie2p_array_binding_plan_t* binding_plan =

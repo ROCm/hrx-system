@@ -405,12 +405,15 @@ static iree_status_t loom_aie2p_array_plan_check_format(
         builder,
         "binding-patch ordinal=%" PRIu32 " channel=%" PRIu32
         " shim=(%u,%u) direction=%s dma-channel=%u partition=%" PRIu32
-        "/%" PRIu32 "\n",
+        "/%" PRIu32 " offset=%" PRIu64 " span=%" PRIu64 " transfer=%" PRIu32
+        " repeat=%u\n",
         plan->bindings[binding->binding_index].ordinal, binding->channel_index,
         binding->shim_coordinate.column, binding->shim_coordinate.row,
         loom_aie2p_array_plan_check_dma_direction_name(binding->direction),
         binding->dma_channel, binding->partition_lane,
-        binding->partition_lane_count));
+        binding->partition_lane_count, binding->binding_byte_offset,
+        binding->binding_span_byte_length, binding->transfer_byte_length,
+        binding->task_repeat_count));
   }
   return iree_ok_status();
 }

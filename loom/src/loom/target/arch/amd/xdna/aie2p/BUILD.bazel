@@ -184,7 +184,11 @@ loom_cc_library(
 
 loom_cc_library(
     name = "array_plan",
-    srcs = ["array/plan.c"],
+    srcs = [
+        "array/binding.c",
+        "array/binding.h",
+        "array/plan.c",
+    ],
     hdrs = ["array/plan.h"],
     deps = [
         ":array_descriptors",
@@ -197,6 +201,7 @@ loom_cc_library(
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:combining",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/encoding",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amd/xdna:array_facts",
         "//loom/src/loom/util:fact_table",

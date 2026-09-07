@@ -103,8 +103,8 @@ route channel=1 tile=(0,2) kind=switch source=dma[0] destination=south[0]
 route channel=1 tile=(0,1) kind=switch source=north[0] destination=south[0]
 route channel=1 tile=(0,0) kind=switch source=north[0] destination=south[2]
 route channel=1 tile=(0,0) kind=shim-mux source=north[2] destination=dma[0]
-binding-patch ordinal=0 channel=0 shim=(0,0) direction=memory-to-stream dma-channel=0 partition=0/1
-binding-patch ordinal=1 channel=1 shim=(0,0) direction=stream-to-memory dma-channel=0 partition=0/1
+binding-patch ordinal=0 channel=0 shim=(0,0) direction=memory-to-stream dma-channel=0 partition=0/1 offset=0 span=16 transfer=16 repeat=1
+binding-patch ordinal=1 channel=1 shim=(0,0) direction=stream-to-memory dma-channel=0 partition=0/1 offset=0 span=4 transfer=4 repeat=1
 
 array-program records=28 payload-bytes=592 writes=18 masked-writes=5 block-writes=4 tile-loads=1 waits=0
 array-block record=19 address=0x0021d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]

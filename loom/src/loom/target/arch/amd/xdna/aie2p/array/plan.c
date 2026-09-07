@@ -16,6 +16,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/target/arch/amd/xdna/aie2p/array/binding.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/array_descriptors.h"
 #include "loom/util/fact_table.h"
 
@@ -1851,16 +1852,28 @@ static iree_status_t loom_aie2p_array_plan_external_channel(
   }
 
   if (source_channel_index == channel_index) {
-    builder->binding_plans[builder->binding_plan_cursor++] =
-        (loom_aie2p_array_binding_plan_t){
-            .binding_index = base_binding_endpoint->owner_index,
-            .channel_index = channel_index,
-            .shim_coordinate = shim_coordinate,
-            .direction = shim_direction,
-            .dma_channel = shim_dma_channel,
-            .partition_lane = binding_endpoint->partition_lane,
-            .partition_lane_count = binding_endpoint->partition_lane_count,
-        };
+    loom_aie2p_array_binding_plan_t binding_plan = {
+        .binding_index = base_binding_endpoint->owner_index,
+        .channel_index = channel_index,
+        .shim_coordinate = shim_coordinate,
+        .direction = shim_direction,
+        .dma_channel = shim_dma_channel,
+        .partition_lane = binding_endpoint->partition_lane,
+        .partition_lane_count = binding_endpoint->partition_lane_count,
+    };
+    const loom_xdna_tile_facts_t* shim_tile = NULL;
+    IREE_RETURN_IF_ERROR(loom_xdna_array_tile_facts(
+        builder->family, shim_coordinate, &shim_tile));
+    const loom_type_t partition_source_type =
+        binding_endpoint->partition_source_endpoint_index == UINT32_MAX
+            ? loom_type_none()
+            : base_binding_endpoint->message_type;
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_binding_transfer(
+        builder->module, &builder->facts, partition_source_type,
+        binding_endpoint->message_type, binding_endpoint->partition_lane,
+        channel->record_byte_length, channel->record_count, &shim_tile->dma,
+        &binding_plan));
+    builder->binding_plans[builder->binding_plan_cursor++] = binding_plan;
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_array_append_worker_port(
       builder, worker_endpoint, channel_index, first_slot));

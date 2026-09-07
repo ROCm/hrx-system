@@ -208,6 +208,8 @@ loom_cc_library(
   HDRS
     "array/plan.h"
   SRCS
+    "array/binding.c"
+    "array/binding.h"
     "array/plan.c"
   DEPS
     ::array_descriptors
@@ -221,6 +223,7 @@ loom_cc_library(
     loom::ir
     loom::ir::facts
     loom::ops::combining
+    loom::ops::encoding
     loom::ops::low
     loom::ops::op_defs
     loom::target::arch::amd::xdna::array_facts

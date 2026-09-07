@@ -281,6 +281,14 @@ typedef struct loom_aie2p_array_binding_plan_t {
   uint32_t partition_lane;
   // External tile partition count, or one when direct.
   uint32_t partition_lane_count;
+  // Byte offset added to the runtime binding base address.
+  uint64_t binding_byte_offset;
+  // Physical byte span reachable from binding_byte_offset.
+  uint64_t binding_span_byte_length;
+  // Number of bytes transferred by each shim DMA task execution.
+  uint32_t transfer_byte_length;
+  // Actual number of executions requested by the queued shim DMA task.
+  uint16_t task_repeat_count;
 } loom_aie2p_array_binding_plan_t;
 
 // Complete arena-owned logical topology and deterministic NPU2 physical plan.
