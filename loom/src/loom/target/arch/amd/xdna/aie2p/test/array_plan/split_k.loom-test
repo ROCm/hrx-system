@@ -217,26 +217,26 @@ binding-patch ordinal=1 channel=3 shim=(1,0) direction=memory-to-stream dma-chan
 binding-patch ordinal=2 channel=4 shim=(2,0) direction=memory-to-stream dma-channel=0 partition=0/1 offset=0 span=256 transfer=256 repeat=1
 binding-patch ordinal=3 channel=5 shim=(0,0) direction=stream-to-memory dma-channel=0 partition=0/1 offset=0 span=256 transfer=256 repeat=1
 
-array-program records=116 payload-bytes=2312 writes=84 masked-writes=13 block-writes=16 tile-loads=3 waits=0
-array-block record=83 address=0x0021d000 words=[0x00000004,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
-array-block record=84 address=0x0021d020 words=[0x04000004,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
-array-block record=86 address=0x0021d040 words=[0x08000004,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
-array-block record=87 address=0x0021d060 words=[0x0c000004,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
-array-block record=89 address=0x0241d000 words=[0x00000004,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
-array-block record=90 address=0x0241d020 words=[0x04000004,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
-array-block record=92 address=0x0241d040 words=[0x08000004,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
-array-block record=93 address=0x0241d060 words=[0x0c000004,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
-array-block record=95 address=0x0031d000 words=[0x00000040,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
-array-block record=96 address=0x0031d020 words=[0x04000040,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
-array-block record=98 address=0x0031d040 words=[0x08000040,0x00000000,0x00000000,0x00000000,0x00000000,0x1e045fe3]
-array-block record=99 address=0x0031d060 words=[0x0c000040,0x00000000,0x00000000,0x00000000,0x00000000,0x16045fe3]
-array-block record=101 address=0x0241d080 words=[0x00040040,0x00000000,0x00000000,0x00000000,0x00000000,0x2e049fe5]
-array-block record=102 address=0x0241d0a0 words=[0x04040040,0x00000000,0x00000000,0x00000000,0x00000000,0x26049fe5]
-array-block record=104 address=0x0031d080 words=[0x00100040,0x00000000,0x00000000,0x00000000,0x00000000,0x2e04bfe4]
-array-block record=105 address=0x0031d0a0 words=[0x04100040,0x00000000,0x00000000,0x00000000,0x00000000,0x2604bfe4]
-array-tile-load record=107 tile-program=0
-array-tile-load record=108 tile-program=1
-array-tile-load record=109 tile-program=2
+array-program records=143 payload-bytes=2840 writes=87 masked-writes=37 block-writes=16 tile-loads=3 waits=0
+array-block record=98 address=0x0021d000 words=[0x00000004,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=99 address=0x0021d020 words=[0x04000004,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=100 address=0x0021d040 words=[0x08000004,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
+array-block record=101 address=0x0021d060 words=[0x0c000004,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
+array-block record=102 address=0x0241d000 words=[0x00000004,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=103 address=0x0241d020 words=[0x04000004,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=104 address=0x0241d040 words=[0x08000004,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
+array-block record=105 address=0x0241d060 words=[0x0c000004,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
+array-block record=106 address=0x0031d000 words=[0x00000040,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=107 address=0x0031d020 words=[0x04000040,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=108 address=0x0031d040 words=[0x08000040,0x00000000,0x00000000,0x00000000,0x00000000,0x1e045fe3]
+array-block record=109 address=0x0031d060 words=[0x0c000040,0x00000000,0x00000000,0x00000000,0x00000000,0x16045fe3]
+array-block record=110 address=0x0241d080 words=[0x00040040,0x00000000,0x00000000,0x00000000,0x00000000,0x2e049fe5]
+array-block record=111 address=0x0241d0a0 words=[0x04040040,0x00000000,0x00000000,0x00000000,0x00000000,0x26049fe5]
+array-block record=112 address=0x0031d080 words=[0x00100040,0x00000000,0x00000000,0x00000000,0x00000000,0x2e04bfe4]
+array-block record=113 address=0x0031d0a0 words=[0x04100040,0x00000000,0x00000000,0x00000000,0x00000000,0x2604bfe4]
+array-tile-load record=114 tile-program=0
+array-tile-load record=115 tile-program=1
+array-tile-load record=116 tile-program=2
 control-program records=14 payload-bytes=444 writes=6 masked-writes=1 block-writes=6 tile-loads=0 waits=1 relocations=6
 control-block record=0 address=0x0001d000 words=[0x00000004,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
 control-write record=1 address=0x0001d214 value=0x00000000
@@ -535,13 +535,13 @@ route channel=3 tile=(1,2) kind=switch source=south[1] destination=dma[1]
 binding-patch ordinal=0 channel=0 shim=(0,0) direction=memory-to-stream dma-channel=0 partition=0/2 offset=0 span=4 transfer=4 repeat=1
 binding-patch ordinal=0 channel=1 shim=(0,0) direction=memory-to-stream dma-channel=1 partition=1/2 offset=4 span=4 transfer=4 repeat=1
 
-array-program records=51 payload-bytes=964 writes=38 masked-writes=7 block-writes=4 tile-loads=2 waits=0
-array-block record=37 address=0x0021d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
-array-block record=39 address=0x0021d020 words=[0x04000001,0x00000000,0x00000000,0x00000000,0x00000000,0x0e047fe2]
-array-block record=41 address=0x0221d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
-array-block record=43 address=0x0221d020 words=[0x04000001,0x00000000,0x00000000,0x00000000,0x00000000,0x0e047fe2]
-array-tile-load record=45 tile-program=0
-array-tile-load record=46 tile-program=1
+array-program records=67 payload-bytes=1284 writes=38 masked-writes=23 block-writes=4 tile-loads=2 waits=0
+array-block record=45 address=0x0021d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=46 address=0x0021d020 words=[0x04000001,0x00000000,0x00000000,0x00000000,0x00000000,0x0e047fe2]
+array-block record=47 address=0x0221d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=48 address=0x0221d020 words=[0x04000001,0x00000000,0x00000000,0x00000000,0x00000000,0x0e047fe2]
+array-tile-load record=49 tile-program=0
+array-tile-load record=50 tile-program=1
 control-program records=4 payload-bytes=152 writes=2 masked-writes=0 block-writes=2 tile-loads=0 waits=0 relocations=2
 control-block record=0 address=0x0001d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
 control-write record=1 address=0x0001d214 value=0x00000000
@@ -672,13 +672,13 @@ route channel=1 tile=(0,2) kind=switch source=south[1] destination=dma[1]
 binding-patch ordinal=0 channel=0 shim=(0,0) direction=memory-to-stream dma-channel=0 partition=0/1 offset=0 span=4 transfer=4 repeat=1
 binding-patch ordinal=1 channel=1 shim=(0,0) direction=memory-to-stream dma-channel=1 partition=0/1 offset=0 span=4 transfer=4 repeat=1
 
-array-program records=28 payload-bytes=612 writes=18 masked-writes=4 block-writes=5 tile-loads=1 waits=0
-array-block record=18 address=0x0021d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
-array-block record=19 address=0x0021d020 words=[0x04000001,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
-array-block record=21 address=0x0021d040 words=[0x08000001,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
-array-block record=22 address=0x0021d060 words=[0x0c000001,0x00000000,0x00000000,0x00000000,0x00000000,0x26047fe2]
-array-block record=23 address=0x0021d080 words=[0x00040001,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
-array-tile-load record=25 tile-program=0
+array-program records=36 payload-bytes=772 writes=18 masked-writes=12 block-writes=5 tile-loads=1 waits=0
+array-block record=22 address=0x0021d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=23 address=0x0021d020 words=[0x04000001,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=24 address=0x0021d040 words=[0x08000001,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
+array-block record=25 address=0x0021d060 words=[0x0c000001,0x00000000,0x00000000,0x00000000,0x00000000,0x26047fe2]
+array-block record=26 address=0x0021d080 words=[0x00040001,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
+array-tile-load record=27 tile-program=0
 control-program records=4 payload-bytes=152 writes=2 masked-writes=0 block-writes=2 tile-loads=0 waits=0 relocations=2
 control-block record=0 address=0x0001d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
 control-write record=1 address=0x0001d214 value=0x00000000
@@ -811,12 +811,12 @@ route channel=1 tile=(0,0) kind=shim-mux source=north[2] destination=dma[0]
 binding-patch ordinal=0 channel=0 shim=(0,0) direction=memory-to-stream dma-channel=0 partition=0/1 offset=0 span=512 transfer=512 repeat=3
 binding-patch ordinal=1 channel=1 shim=(0,0) direction=stream-to-memory dma-channel=0 partition=0/1 offset=0 span=384 transfer=384 repeat=1
 
-array-program records=28 payload-bytes=592 writes=18 masked-writes=5 block-writes=4 tile-loads=1 waits=0
-array-block record=19 address=0x0021d000 words=[0x00000020,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
-array-block record=20 address=0x0021d020 words=[0x04000020,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
-array-block record=22 address=0x0021d040 words=[0x08000020,0x00000000,0x00000000,0x00000000,0x00000000,0x1e045fe3]
-array-block record=23 address=0x0021d060 words=[0x0c000020,0x00000000,0x00000000,0x00000000,0x00000000,0x16045fe3]
-array-tile-load record=25 tile-program=0
+array-program records=39 payload-bytes=800 writes=21 masked-writes=13 block-writes=4 tile-loads=1 waits=0
+array-block record=26 address=0x0021d000 words=[0x00000020,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=27 address=0x0021d020 words=[0x04000020,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=28 address=0x0021d040 words=[0x08000020,0x00000000,0x00000000,0x00000000,0x00000000,0x1e045fe3]
+array-block record=29 address=0x0021d060 words=[0x0c000020,0x00000000,0x00000000,0x00000000,0x00000000,0x16045fe3]
+array-tile-load record=30 tile-program=0
 control-program records=6 payload-bytes=188 writes=2 masked-writes=1 block-writes=2 tile-loads=0 waits=1 relocations=2
 control-block record=0 address=0x0001d000 words=[0x00000080,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
 control-write record=1 address=0x0001d214 value=0x00020000
@@ -983,14 +983,14 @@ binding-dimension channel=0 index=2 step=176 wrap=0
 binding-patch ordinal=1 channel=1 shim=(0,0) direction=memory-to-stream dma-channel=1 partition=0/1 offset=0 span=352 transfer=352 repeat=3
 binding-patch ordinal=2 channel=2 shim=(0,0) direction=stream-to-memory dma-channel=0 partition=0/1 offset=0 span=384 transfer=384 repeat=1
 
-array-program records=39 payload-bytes=816 writes=27 masked-writes=5 block-writes=6 tile-loads=1 waits=0
-array-block record=27 address=0x0021d000 words=[0x0000002c,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
-array-block record=28 address=0x0021d020 words=[0x0400002c,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
-array-block record=30 address=0x0021d040 words=[0x0800002c,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
-array-block record=31 address=0x0021d060 words=[0x0c00002c,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
-array-block record=33 address=0x0021d080 words=[0x000c0010,0x00000000,0x00000000,0x00000000,0x00000000,0x2e049fe5]
-array-block record=34 address=0x0021d0a0 words=[0x040c0010,0x00000000,0x00000000,0x00000000,0x00000000,0x26049fe5]
-array-tile-load record=36 tile-program=0
+array-program records=50 payload-bytes=1024 writes=30 masked-writes=13 block-writes=6 tile-loads=1 waits=0
+array-block record=34 address=0x0021d000 words=[0x0000002c,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=35 address=0x0021d020 words=[0x0400002c,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=36 address=0x0021d040 words=[0x0800002c,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
+array-block record=37 address=0x0021d060 words=[0x0c00002c,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
+array-block record=38 address=0x0021d080 words=[0x000c0010,0x00000000,0x00000000,0x00000000,0x00000000,0x2e049fe5]
+array-block record=39 address=0x0021d0a0 words=[0x040c0010,0x00000000,0x00000000,0x00000000,0x00000000,0x26049fe5]
+array-tile-load record=40 tile-program=0
 control-program records=8 payload-bytes=252 writes=3 masked-writes=1 block-writes=3 tile-loads=0 waits=1 relocations=3
 control-block record=0 address=0x0001d000 words=[0x00000108,0x00000000,0x00000000,0x02c00000,0xc020002b,0x020000af,0x00000000,0x02000000]
 control-write record=1 address=0x0001d214 value=0x00000000

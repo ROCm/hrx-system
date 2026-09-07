@@ -106,12 +106,12 @@ route channel=1 tile=(0,0) kind=shim-mux source=north[2] destination=dma[0]
 binding-patch ordinal=0 channel=0 shim=(0,0) direction=memory-to-stream dma-channel=0 partition=0/1 offset=0 span=16 transfer=16 repeat=1
 binding-patch ordinal=1 channel=1 shim=(0,0) direction=stream-to-memory dma-channel=0 partition=0/1 offset=0 span=4 transfer=4 repeat=1
 
-array-program records=28 payload-bytes=592 writes=18 masked-writes=5 block-writes=4 tile-loads=1 waits=0
-array-block record=19 address=0x0021d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
-array-block record=20 address=0x0021d020 words=[0x04000001,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
-array-block record=22 address=0x0021d040 words=[0x08000001,0x00000000,0x00000000,0x00000000,0x00000000,0x1e045fe3]
-array-block record=23 address=0x0021d060 words=[0x0c000001,0x00000000,0x00000000,0x00000000,0x00000000,0x16045fe3]
-array-tile-load record=25 tile-program=0
+array-program records=39 payload-bytes=800 writes=21 masked-writes=13 block-writes=4 tile-loads=1 waits=0
+array-block record=26 address=0x0021d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=27 address=0x0021d020 words=[0x04000001,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=28 address=0x0021d040 words=[0x08000001,0x00000000,0x00000000,0x00000000,0x00000000,0x1e045fe3]
+array-block record=29 address=0x0021d060 words=[0x0c000001,0x00000000,0x00000000,0x00000000,0x00000000,0x16045fe3]
+array-tile-load record=30 tile-program=0
 control-program records=6 payload-bytes=188 writes=2 masked-writes=1 block-writes=2 tile-loads=0 waits=1 relocations=2
 control-block record=0 address=0x0001d000 words=[0x00000004,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
 control-write record=1 address=0x0001d214 value=0x00000000

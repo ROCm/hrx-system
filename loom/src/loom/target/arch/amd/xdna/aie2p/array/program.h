@@ -147,10 +147,12 @@ typedef struct loom_aie2p_encoded_array_program_t {
 
 // Materializes executable AIE2P array and invocation-control operations.
 //
-// The array program resets resident cores, initializes locks and routing,
-// programs circular compute DMA rings, loads each tile program, and activates
-// the cores. The control program patches and queues one finite shim DMA task
-// per external channel and waits for every egress completion token.
+// The array program takes fresh ownership of resident cores and compute DMA
+// engines, initializes locks and routing, programs circular DMA rings, loads
+// each tile program while the engines remain reset, releases and starts only
+// the planned DMA work, and activates the cores. The control program patches
+// and queues one finite shim DMA task per external channel and waits for every
+// egress completion token.
 iree_status_t loom_aie2p_array_program_build(
     const loom_aie2p_array_plan_t* plan, iree_arena_allocator_t* arena,
     loom_aie2p_array_program_t* out_program);
