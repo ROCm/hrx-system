@@ -22,6 +22,12 @@ typedef enum loom_pipeline_external_flow_kind_e {
   LOOM_PIPELINE_EXTERNAL_FLOW_KIND_SCATTER = 1,
 } loom_pipeline_external_flow_kind_t;
 
+typedef enum loom_pipeline_plan_flow_usage_e {
+  LOOM_PIPELINE_PLAN_FLOW_USAGE_NONE = 0,
+  LOOM_PIPELINE_PLAN_FLOW_USAGE_USED = 1u << 0,
+  LOOM_PIPELINE_PLAN_FLOW_USAGE_FOLDED = 1u << 1,
+} loom_pipeline_plan_flow_usage_t;
+
 typedef struct loom_pipeline_plan_view_binding_t {
   // Source view SSA identity.
   loom_value_id_t source_value;
@@ -82,8 +88,8 @@ typedef struct loom_pipeline_plan_builder_t {
   // Maximum logical flows allocated.
   uint32_t flow_capacity;
 
-  // Whether each flow version has at least one physical consumer.
-  bool* flow_used;
+  // Physical consumer and fold ownership flags for each flow version.
+  uint8_t* flow_usage;
 
   // Concrete point-to-point edge table.
   loom_pipeline_plan_edge_t* edges;
@@ -146,6 +152,33 @@ static iree_status_t loom_pipeline_plan_exact_dimension(
   return loom_pipeline_plan_exact_u32(
       builder, loom_type_dim_value_id_at(type, dimension), "tile dimension",
       out_value);
+}
+
+static iree_status_t loom_pipeline_plan_exact_record_count(
+    const loom_pipeline_plan_builder_t* builder, loom_type_t view_type,
+    loom_type_t tile_type, bool partitioned, uint32_t* out_record_count) {
+  const uint8_t view_rank = loom_type_rank(view_type);
+  const uint8_t tile_rank = loom_type_rank(tile_type);
+  const uint8_t sequence_start = partitioned ? 1 : 0;
+  IREE_ASSERT_GE(view_rank, tile_rank + sequence_start);
+  const uint8_t sequence_end = view_rank - tile_rank;
+  uint64_t record_count = 1;
+  for (uint8_t axis = sequence_start; axis < sequence_end; ++axis) {
+    uint32_t dimension = 0;
+    IREE_RETURN_IF_ERROR(loom_pipeline_plan_exact_dimension(builder, view_type,
+                                                            axis, &dimension));
+    if (dimension == 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "pipeline record sequence cannot be empty");
+    }
+    record_count *= dimension;
+    if (record_count > UINT32_MAX) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "pipeline record count exceeds u32 range");
+    }
+  }
+  *out_record_count = (uint32_t)record_count;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_pipeline_plan_refine_record_type(
@@ -237,7 +270,13 @@ static iree_status_t loom_pipeline_plan_use_flow(
     uint32_t* out_index) {
   IREE_RETURN_IF_ERROR(
       loom_pipeline_plan_lookup_flow(builder, value_id, out_index));
-  builder->flow_used[*out_index] = true;
+  if (iree_any_bit_set(builder->flow_usage[*out_index],
+                       LOOM_PIPELINE_PLAN_FLOW_USAGE_FOLDED)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "pipeline fold source cannot also have a recordwise consumer");
+  }
+  builder->flow_usage[*out_index] |= LOOM_PIPELINE_PLAN_FLOW_USAGE_USED;
   return iree_ok_status();
 }
 
@@ -366,10 +405,16 @@ static iree_status_t loom_pipeline_plan_define_external_flow(
   loom_type_t tile_type = loom_type_none();
   IREE_RETURN_IF_ERROR(
       loom_pipeline_plan_flow_tile_type(builder, result, &tile_type));
+  const loom_type_t view_type =
+      loom_module_value_type(builder->module, source_view);
+  uint32_t record_count = 0;
+  IREE_RETURN_IF_ERROR(loom_pipeline_plan_exact_record_count(
+      builder, view_type, tile_type, partitioned, &record_count));
   loom_pipeline_plan_define_flow(
       builder, result,
       (loom_pipeline_plan_flow_t){
           .tile_type = tile_type,
+          .record_count = record_count,
           .group_index = group_index,
           .minimum_capacity = LOOM_PIPELINE_PLAN_IMPLICIT_MINIMUM_CAPACITY,
           .producer_kind = LOOM_PIPELINE_ENDPOINT_KIND_BINDING,
@@ -458,7 +503,8 @@ static iree_status_t loom_pipeline_plan_connect_pointwise_flow(
 
 static iree_status_t loom_pipeline_plan_define_instance_outputs(
     loom_pipeline_plan_builder_t* builder, loom_value_slice_t outputs,
-    uint32_t group_index, uint32_t instance_start, uint32_t first_output_port) {
+    uint32_t group_index, uint32_t instance_start, uint32_t first_output_port,
+    uint32_t record_count) {
   const uint32_t instance_count = builder->groups[group_index].lane_count;
   for (uint16_t i = 0; i < outputs.count; ++i) {
     loom_type_t tile_type = loom_type_none();
@@ -468,6 +514,7 @@ static iree_status_t loom_pipeline_plan_define_instance_outputs(
         builder, outputs.values[i],
         (loom_pipeline_plan_flow_t){
             .tile_type = tile_type,
+            .record_count = record_count,
             .group_index = group_index,
             .minimum_capacity = LOOM_PIPELINE_PLAN_IMPLICIT_MINIMUM_CAPACITY,
             .producer_kind = LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE,
@@ -482,22 +529,94 @@ static iree_status_t loom_pipeline_plan_define_instance_outputs(
   return iree_ok_status();
 }
 
+static iree_status_t loom_pipeline_plan_common_record_count(
+    const loom_pipeline_plan_builder_t* builder, loom_value_slice_t values,
+    const char* operation, uint32_t* inout_record_count,
+    bool* inout_has_record_count) {
+  for (uint16_t i = 0; i < values.count; ++i) {
+    uint32_t flow_index = 0;
+    IREE_RETURN_IF_ERROR(
+        loom_pipeline_plan_lookup_flow(builder, values.values[i], &flow_index));
+    const uint32_t record_count = builder->flows[flow_index].record_count;
+    if (!*inout_has_record_count) {
+      *inout_record_count = record_count;
+      *inout_has_record_count = true;
+    } else if (*inout_record_count != record_count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "pipeline %s inputs must have equal "
+                              "record counts",
+                              operation);
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_pipeline_plan_parse_stage(
     loom_pipeline_plan_builder_t* builder, const loom_op_t* op) {
+  const loom_value_slice_t inputs = loom_pipeline_stage_inputs(op);
+  uint32_t record_count = 1;
+  bool has_record_count = false;
+  IREE_RETURN_IF_ERROR(loom_pipeline_plan_common_record_count(
+      builder, inputs, "stage", &record_count, &has_record_count));
   uint32_t group_index = 0;
   IREE_RETURN_IF_ERROR(loom_pipeline_plan_lookup_group(
       builder, loom_pipeline_stage_group(op), &group_index));
   uint32_t instance_start = 0;
   IREE_RETURN_IF_ERROR(loom_pipeline_plan_materialize_group_instances(
       builder, group_index, loom_pipeline_stage_entry(op), &instance_start));
-  const loom_value_slice_t inputs = loom_pipeline_stage_inputs(op);
   for (uint16_t i = 0; i < inputs.count; ++i) {
     IREE_RETURN_IF_ERROR(loom_pipeline_plan_connect_pointwise_flow(
         builder, inputs.values[i], group_index, instance_start, i));
   }
   return loom_pipeline_plan_define_instance_outputs(
       builder, loom_pipeline_stage_outputs(op), group_index, instance_start,
-      inputs.count);
+      inputs.count, record_count);
+}
+
+static iree_status_t loom_pipeline_plan_parse_fold(
+    loom_pipeline_plan_builder_t* builder, const loom_op_t* op) {
+  uint32_t source_flow_index = 0;
+  IREE_RETURN_IF_ERROR(loom_pipeline_plan_lookup_flow(
+      builder, loom_pipeline_fold_source(op), &source_flow_index));
+  if (iree_any_bit_set(builder->flow_usage[source_flow_index],
+                       LOOM_PIPELINE_PLAN_FLOW_USAGE_USED)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "pipeline fold must be the source flow's only consumer");
+  }
+  const loom_value_t* source_value =
+      loom_module_value(builder->module, loom_pipeline_fold_source(op));
+  const loom_op_t* source_op = loom_value_def_op(source_value);
+  if (source_op == NULL || !loom_pipeline_stage_isa(source_op) ||
+      source_op->result_count != 1) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "concrete pipeline folds currently require a direct single-output "
+        "stage source");
+  }
+
+  loom_pipeline_plan_flow_t flow = builder->flows[source_flow_index];
+  IREE_ASSERT_EQ(flow.producer_kind, LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE);
+  for (uint32_t i = 0; i < flow.instance_count; ++i) {
+    loom_pipeline_plan_instance_t* instance =
+        &builder->instances[flow.instance_start + i];
+    if (instance->fold_record_count != 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "pipeline worker has more than one fold");
+    }
+    instance->fold_record_count = flow.record_count;
+    instance->fold_output_port = flow.producer_port;
+    instance->fold_kind = loom_pipeline_fold_kind(op);
+    instance->fold_fast_math_flags = loom_pipeline_fold_fastmath(op);
+  }
+  builder->flow_usage[source_flow_index] |=
+      LOOM_PIPELINE_PLAN_FLOW_USAGE_USED | LOOM_PIPELINE_PLAN_FLOW_USAGE_FOLDED;
+
+  flow.record_count = 1;
+  flow.minimum_capacity = LOOM_PIPELINE_PLAN_IMPLICIT_MINIMUM_CAPACITY;
+  loom_pipeline_plan_define_flow(builder, loom_pipeline_fold_result(op), flow,
+                                 NULL);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_pipeline_plan_validate_entry_argument_count(
@@ -542,6 +661,12 @@ static iree_status_t loom_pipeline_plan_parse_reduce(
   const loom_value_slice_t target_inputs =
       loom_pipeline_reduce_target_inputs(op);
   const loom_value_slice_t outputs = loom_pipeline_reduce_outputs(op);
+  uint32_t record_count = 1;
+  bool has_record_count = false;
+  IREE_RETURN_IF_ERROR(loom_pipeline_plan_common_record_count(
+      builder, source_inputs, "reduction", &record_count, &has_record_count));
+  IREE_RETURN_IF_ERROR(loom_pipeline_plan_common_record_count(
+      builder, target_inputs, "reduction", &record_count, &has_record_count));
   const uint64_t expanded_source_count =
       (uint64_t)source_inputs.count * source_group->lane_count;
   const uint64_t expected_argument_count =
@@ -590,7 +715,8 @@ static iree_status_t loom_pipeline_plan_parse_reduce(
         target_instance_start, target_port++));
   }
   return loom_pipeline_plan_define_instance_outputs(
-      builder, outputs, target_group_index, target_instance_start, target_port);
+      builder, outputs, target_group_index, target_instance_start, target_port,
+      record_count);
 }
 
 static iree_status_t loom_pipeline_plan_parse_buffer(
@@ -629,6 +755,17 @@ static iree_status_t loom_pipeline_plan_parse_write(
   uint32_t binding_index = 0;
   IREE_RETURN_IF_ERROR(loom_pipeline_plan_binding_for_view(
       builder, loom_pipeline_write_target(op), &binding_index));
+  const loom_type_t target_type =
+      loom_module_value_type(builder->module, loom_pipeline_write_target(op));
+  uint32_t target_record_count = 0;
+  IREE_RETURN_IF_ERROR(loom_pipeline_plan_exact_record_count(
+      builder, target_type, flow->tile_type, /*partitioned=*/false,
+      &target_record_count));
+  if (target_record_count != flow->record_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "pipeline output view and flow must have equal record counts");
+  }
   builder->bindings[binding_index].access |=
       LOOM_PIPELINE_BINDING_ACCESS_FLAG_WRITE;
   if (builder->binding_next_ports[binding_index] == UINT32_MAX) {
@@ -694,6 +831,8 @@ static iree_status_t loom_pipeline_plan_parse_graph(
       IREE_RETURN_IF_ERROR(loom_pipeline_plan_parse_stage(builder, op));
     } else if (loom_pipeline_buffer_isa(op)) {
       IREE_RETURN_IF_ERROR(loom_pipeline_plan_parse_buffer(builder, op));
+    } else if (loom_pipeline_fold_isa(op)) {
+      IREE_RETURN_IF_ERROR(loom_pipeline_plan_parse_fold(builder, op));
     } else if (loom_pipeline_reduce_isa(op)) {
       IREE_RETURN_IF_ERROR(loom_pipeline_plan_parse_reduce(builder, op));
     } else if (loom_pipeline_write_isa(op)) {
@@ -722,7 +861,8 @@ static iree_status_t loom_pipeline_plan_parse_graph(
     }
   }
   for (uint32_t i = 0; i < builder->flow_count; ++i) {
-    if (!builder->flow_used[i]) {
+    if (!iree_any_bit_set(builder->flow_usage[i],
+                          LOOM_PIPELINE_PLAN_FLOW_USAGE_USED)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "pipeline contains a flow with no physical consumer");
@@ -754,7 +894,7 @@ static iree_status_t loom_pipeline_plan_measure_graph(
     if (loom_buffer_view_isa(op)) ++view_count;
     if (loom_pipeline_scatter_isa(op) || loom_pipeline_read_isa(op) ||
         loom_pipeline_stage_isa(op) || loom_pipeline_buffer_isa(op) ||
-        loom_pipeline_reduce_isa(op)) {
+        loom_pipeline_fold_isa(op) || loom_pipeline_reduce_isa(op)) {
       flow_count += op->result_count;
     }
   }
@@ -820,7 +960,7 @@ static iree_status_t loom_pipeline_plan_builder_initialize(
   LOOM_PIPELINE_PLAN_ALLOCATE(group_materialized, builder->group_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(instances, builder->instance_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(flows, builder->flow_capacity);
-  LOOM_PIPELINE_PLAN_ALLOCATE(flow_used, builder->flow_capacity);
+  LOOM_PIPELINE_PLAN_ALLOCATE(flow_usage, builder->flow_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(edges, builder->edge_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(view_bindings, builder->view_binding_capacity);
 #undef LOOM_PIPELINE_PLAN_ALLOCATE
@@ -836,8 +976,8 @@ static iree_status_t loom_pipeline_plan_builder_initialize(
            builder->group_capacity * sizeof(*builder->group_materialized));
   }
   if (builder->flow_capacity != 0) {
-    memset(builder->flow_used, 0,
-           builder->flow_capacity * sizeof(*builder->flow_used));
+    memset(builder->flow_usage, 0,
+           builder->flow_capacity * sizeof(*builder->flow_usage));
   }
   return iree_ok_status();
 }

@@ -447,6 +447,7 @@ loom_cc_library(
     loom::ir
     loom::ir::facts
     loom::ops::buffer
+    loom::ops::combining
     loom::ops::group
     loom::ops::op_defs
     loom::ops::pipeline

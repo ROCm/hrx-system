@@ -19,7 +19,9 @@ iree_py_library(
     ],
     deps = [
         "//loom/py/loom:core",
+        "//loom/py/loom/dialect:shared",
         "//loom/py/loom/dialect/func",
+        "//loom/py/loom/dialect/scalar",
     ],
 )
 
@@ -37,6 +39,7 @@ iree_py_test(
         "//loom/py/loom/dialect/func",
         "//loom/py/loom/dialect/group",
         "//loom/py/loom/dialect/index",
+        "//loom/py/loom/dialect/scalar",
         "//loom/py/loom/dialect/test",
         "//loom/py/loom/format/bytecode",
         "//loom/py/loom/format/text",

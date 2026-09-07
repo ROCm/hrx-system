@@ -17,7 +17,9 @@ iree_py_library(
     "defs.py"
   DEPS
     loom::py::loom::core
+    loom::py::loom::dialect::shared
     loom::py::loom::dialect::func::func
+    loom::py::loom::dialect::scalar::scalar
 )
 
 iree_py_test(
@@ -36,6 +38,7 @@ iree_py_test(
     loom::py::loom::dialect::func::func
     loom::py::loom::dialect::group::group
     loom::py::loom::dialect::index::index
+    loom::py::loom::dialect::scalar::scalar
     loom::py::loom::dialect::test::test
     loom::py::loom::format::bytecode::bytecode
     loom::py::loom::format::text::text

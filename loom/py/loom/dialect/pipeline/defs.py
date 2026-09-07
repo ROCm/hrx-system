@@ -26,14 +26,18 @@ from loom.assembly import (
     Scope,
     SymbolRef,
     TemplateParam,
+    TemplateParamFlags,
     TypeOf,
     TypesOf,
     kw,
 )
+from loom.dialect.combining import CombiningKind
 from loom.dialect.func.defs import Retain, Visibility
+from loom.dialect.scalar import FastMathFlags
 from loom.dsl import (
     ANY,
     ATTR_TYPE_ENUM,
+    ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64,
     INDEX,
     ISOLATED_FROM_ABOVE,
@@ -198,7 +202,11 @@ _PIPELINE_GRAPH_TRAITS = [HasAncestor("pipeline.def")]
 pipeline_scatter = Op(
     "pipeline.scatter",
     group=pipeline_ops,
-    doc=("Partition the leading dimension of a source view across a scheduling group, producing one suffix-shaped tile record per lane."),
+    doc=(
+        "Partition the leading dimension of a source view across a scheduling "
+        "group. The flow tile matches a trailing record suffix; intervening "
+        "dimensions form a finite ordered record sequence for each lane."
+    ),
     operands=[
         Operand("source", VIEW, doc="Dense source view with a lane dimension."),
         Operand("group", ANY, doc="Destination scheduling group."),
@@ -223,7 +231,7 @@ pipeline_scatter = Op(
 pipeline_read = Op(
     "pipeline.read",
     group=pipeline_ops,
-    doc="Read one complete source-view tile record for each destination lane.",
+    doc=("Read the same finite source-view record sequence for each destination lane. The flow tile matches a trailing record suffix and preceding dimensions form the ordered sequence."),
     operands=[
         Operand("source", VIEW, doc="Source view containing one tile record."),
         Operand("group", ANY, doc="Destination scheduling group."),
@@ -317,6 +325,39 @@ pipeline_buffer = Op(
     examples=["%buffered = pipeline.buffer %partials capacity %ring_capacity : (pipeline.flow<tile<8x8xi32>>, index) -> pipeline.flow<tile<8x8xi32>>"],
 )
 
+pipeline_fold = Op(
+    "pipeline.fold",
+    group=pipeline_ops,
+    doc=(
+        "Fold each lane's finite input record sequence into one record using "
+        "the template combining kind. Lane cardinality and tile shape are "
+        "preserved; only the temporal record count changes from N to one. "
+        "Optional fastmath flags permit the corresponding floating-point "
+        "reassociation and approximation choices."
+    ),
+    operands=[Operand("source", ANY, doc="Finite per-lane input record flow.")],
+    results=[Result("result", ANY, doc="One folded record per source lane.")],
+    attrs=[
+        AttrDef("kind", ATTR_TYPE_ENUM, enum_def=CombiningKind),
+        AttrDef(
+            "fastmath",
+            ATTR_TYPE_FLAGS,
+            optional=True,
+            enum_def=FastMathFlags,
+        ),
+    ],
+    constraints=[SameType("source", "result")],
+    traits=[UNKNOWN_EFFECTS, *_PIPELINE_GRAPH_TRAITS],
+    verify="loom_pipeline_fold_verify",
+    format=[
+        TemplateParamFlags("kind", "fastmath"),
+        Ref("source"),
+        COLON,
+        TypeOf("source"),
+    ],
+    examples=["%partial = pipeline.fold<addf, reassoc> %contributions : pipeline.flow<tile<1xf32>>"],
+)
+
 pipeline_reduce = Op(
     "pipeline.reduce",
     group=pipeline_ops,
@@ -372,7 +413,7 @@ pipeline_reduce = Op(
 pipeline_write = Op(
     "pipeline.write",
     group=pipeline_ops,
-    doc="Write each source-group tile record to a destination view.",
+    doc=("Write each source-group record sequence to a destination view whose trailing dimensions match the flow tile."),
     operands=[
         Operand("source", ANY, doc="Source tile flow."),
         Operand("target", VIEW, doc="Destination view."),
@@ -406,6 +447,7 @@ ALL_PIPELINE_OPS: tuple[Op, ...] = (
     pipeline_read,
     pipeline_stage,
     pipeline_buffer,
+    pipeline_fold,
     pipeline_reduce,
     pipeline_write,
     pipeline_return,

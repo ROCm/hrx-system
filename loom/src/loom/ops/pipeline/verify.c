@@ -101,16 +101,16 @@ static bool loom_pipeline_type_is_flow_tile(const loom_module_t* module,
   return true;
 }
 
-static bool loom_pipeline_tile_matches_view(loom_type_t tile_type,
-                                            loom_type_t view_type,
-                                            uint8_t view_axis_offset) {
+static bool loom_pipeline_tile_matches_view_suffix(
+    loom_type_t tile_type, loom_type_t view_type, uint8_t minimum_prefix_rank) {
   if (!loom_type_is_tile(tile_type) || !loom_type_is_view(view_type) ||
       loom_type_element_type(tile_type) != loom_type_element_type(view_type)) {
     return false;
   }
   const uint8_t tile_rank = loom_type_rank(tile_type);
   const uint8_t view_rank = loom_type_rank(view_type);
-  if ((uint16_t)tile_rank + view_axis_offset != view_rank) return false;
+  if ((uint16_t)tile_rank + minimum_prefix_rank > view_rank) return false;
+  const uint8_t view_axis_offset = view_rank - tile_rank;
   for (uint8_t axis = 0; axis < tile_rank; ++axis) {
     if (loom_type_dim(tile_type, axis) !=
         loom_type_dim(view_type, axis + view_axis_offset)) {
@@ -264,8 +264,7 @@ iree_status_t loom_pipeline_scatter_verify(const loom_module_t* module,
   if (!valid) return iree_ok_status();
   const loom_type_t source_type =
       loom_module_value_type(module, loom_pipeline_scatter_source(op));
-  if (loom_type_rank(source_type) > 0 &&
-      loom_pipeline_tile_matches_view(tile_type, source_type, 1)) {
+  if (loom_pipeline_tile_matches_view_suffix(tile_type, source_type, 1)) {
     return iree_ok_status();
   }
   return loom_pipeline_emit_result_constraint(
@@ -289,13 +288,13 @@ iree_status_t loom_pipeline_read_verify(const loom_module_t* module,
   if (!valid) return iree_ok_status();
   const loom_type_t source_type =
       loom_module_value_type(module, loom_pipeline_read_source(op));
-  if (loom_pipeline_tile_matches_view(tile_type, source_type, 0)) {
+  if (loom_pipeline_tile_matches_view_suffix(tile_type, source_type, 0)) {
     return iree_ok_status();
   }
   return loom_pipeline_emit_result_constraint(
       emitter, op, IREE_SV("result"),
       loom_module_value_type(module, loom_pipeline_read_result(op)),
-      IREE_SV("pipeline.flow tile matching the complete source view"));
+      IREE_SV("pipeline.flow tile matching a source view suffix"));
 }
 
 iree_status_t loom_pipeline_stage_verify(const loom_module_t* module,
@@ -330,6 +329,43 @@ iree_status_t loom_pipeline_buffer_verify(const loom_module_t* module,
       module, op, emitter, IREE_SV("source"), loom_pipeline_buffer_source(op),
       &tile_type, &valid));
   return iree_ok_status();
+}
+
+iree_status_t loom_pipeline_fold_verify(const loom_module_t* module,
+                                        const loom_op_t* op,
+                                        iree_diagnostic_emitter_t emitter) {
+  loom_type_t tile_type = {0};
+  bool valid = false;
+  IREE_RETURN_IF_ERROR(loom_pipeline_verify_operand_flow(
+      module, op, emitter, IREE_SV("source"), loom_pipeline_fold_source(op),
+      &tile_type, &valid));
+  if (!valid) return iree_ok_status();
+  if (loom_pipeline_fold_fastmath(op) != 0 &&
+      !loom_scalar_type_is_float(loom_type_element_type(tile_type))) {
+    return loom_pipeline_emit_operand_constraint(
+        emitter, op, IREE_SV("source"),
+        loom_module_value_type(module, loom_pipeline_fold_source(op)),
+        IREE_SV("floating-point tile element type when float flags are "
+                "present"));
+  }
+
+  const loom_combining_kind_t kind = loom_pipeline_fold_kind(op);
+  const loom_scalar_type_t element_type = loom_type_element_type(tile_type);
+  if ((loom_scalar_type_is_integer(element_type) &&
+       loom_combining_kind_accepts_integer(kind)) ||
+      (loom_scalar_type_is_float(element_type) &&
+       loom_combining_kind_accepts_float(kind)) ||
+      !loom_combining_kind_is_valid(kind)) {
+    return iree_ok_status();
+  }
+  const iree_string_view_t expected_constraint =
+      loom_combining_kind_accepts_integer(kind)
+          ? IREE_SV("integer tile element type for fold kind")
+          : IREE_SV("floating-point tile element type for fold kind");
+  return loom_pipeline_emit_operand_constraint(
+      emitter, op, IREE_SV("source"),
+      loom_module_value_type(module, loom_pipeline_fold_source(op)),
+      expected_constraint);
 }
 
 iree_status_t loom_pipeline_reduce_verify(const loom_module_t* module,
@@ -374,11 +410,11 @@ iree_status_t loom_pipeline_write_verify(const loom_module_t* module,
   if (!valid) return iree_ok_status();
   const loom_type_t target_type =
       loom_module_value_type(module, loom_pipeline_write_target(op));
-  if (loom_pipeline_tile_matches_view(tile_type, target_type, 0)) {
+  if (loom_pipeline_tile_matches_view_suffix(tile_type, target_type, 0)) {
     return iree_ok_status();
   }
   return loom_pipeline_emit_operand_constraint(
       emitter, op, IREE_SV("source"),
       loom_module_value_type(module, loom_pipeline_write_source(op)),
-      IREE_SV("pipeline.flow tile matching the complete target view"));
+      IREE_SV("pipeline.flow tile matching a target view suffix"));
 }

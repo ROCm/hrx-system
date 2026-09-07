@@ -21,6 +21,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
+#include "loom/ops/combining.h"
 #include "loom/ops/op_defs.h"
 #include "loom/util/fact_table.h"
 
@@ -71,6 +72,19 @@ typedef struct loom_pipeline_plan_instance_t {
 
   // Callable implementing one record firing.
   loom_symbol_ref_t entry;
+
+  // Number of source records folded into one output record, or zero when the
+  // worker fires independently for every record.
+  uint32_t fold_record_count;
+
+  // Callable output port folded by the worker when fold_record_count is set.
+  uint32_t fold_output_port;
+
+  // Elementwise combining operation used by the temporal fold.
+  loom_combining_kind_t fold_kind;
+
+  // Floating-point permissions applied by the temporal fold.
+  uint8_t fold_fast_math_flags;
 } loom_pipeline_plan_instance_t;
 
 typedef struct loom_pipeline_plan_flow_t {
@@ -79,6 +93,9 @@ typedef struct loom_pipeline_plan_flow_t {
 
   // Tile record type transferred by the flow.
   loom_type_t tile_type;
+
+  // Number of ordered records transferred per lane and activation.
+  uint32_t record_count;
 
   // Scheduling group defining the flow lane cardinality.
   uint32_t group_index;

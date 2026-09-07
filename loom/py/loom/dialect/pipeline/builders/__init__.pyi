@@ -70,6 +70,18 @@ class PipelineBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
+    def fold(
+        self,
+        *,
+        kind: str,
+        fastmath: str = ...,
+        source: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
     def reduce(
         self,
         *,
