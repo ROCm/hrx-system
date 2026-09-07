@@ -1102,25 +1102,29 @@ def _effects(
     if has_property(form, "mayLoad"):
         if register_width_bits == 0:
             raise ValueError(f"{form.name}: load has no register payload width")
+        timing_event = _memory_timing_event(spec, "read")
         result.append(
             Effect(
                 EffectKind.READ,
                 MemorySpace.WORKGROUP,
                 flags=memory_flags,
                 width_bits=register_width_bits,
-                timing_event=_memory_timing_event(spec, "read"),
+                producer_event=timing_event,
+                consumer_event=timing_event,
             )
         )
     if has_property(form, "mayStore"):
         if register_width_bits == 0:
             raise ValueError(f"{form.name}: store has no register payload width")
+        timing_event = _memory_timing_event(spec, "write")
         result.append(
             Effect(
                 EffectKind.WRITE,
                 MemorySpace.WORKGROUP,
                 flags=memory_flags,
                 width_bits=register_width_bits,
-                timing_event=_memory_timing_event(spec, "write"),
+                producer_event=timing_event,
+                consumer_event=timing_event,
             )
         )
     if form.control_flow_kind is not None:

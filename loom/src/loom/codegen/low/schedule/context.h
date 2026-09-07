@@ -131,8 +131,8 @@ typedef struct loom_low_schedule_effect_frontier_entry_t {
   uint32_t node_index;
   // Descriptor-local effect row, or LOOM_LOW_ID_NONE for structural effects.
   uint16_t effect_ordinal;
-  // Timing event observed by the effect, or LOOM_LOW_TIMING_EVENT_NONE.
-  uint16_t timing_event_id;
+  // Producer event published to later effects, or NONE.
+  uint16_t producer_event_id;
   // Alias summary used to decide which later effects depend on this entry.
   loom_low_memory_access_summary_t summary;
 } loom_low_schedule_effect_frontier_entry_t;

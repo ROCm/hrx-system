@@ -419,7 +419,8 @@ _LOAD_EFFECT = Effect(
     memory_space=MemorySpace.GENERIC,
     flags=(EffectFlag.DEPENDENCY,),
     width_bits=128,
-    timing_event=_EVENT_MEMORY_READ,
+    producer_event=_EVENT_MEMORY_READ,
+    consumer_event=_EVENT_MEMORY_READ,
 )
 
 _COUNTER_LOAD_EFFECT = Effect(
@@ -435,7 +436,8 @@ _ORDERED_LOAD_EFFECT = Effect(
     memory_space=MemorySpace.GENERIC,
     flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
     width_bits=128,
-    timing_event=_EVENT_MEMORY_READ,
+    producer_event=_EVENT_MEMORY_READ,
+    consumer_event=_EVENT_MEMORY_READ,
 )
 
 _STORE_EFFECT = Effect(
@@ -443,7 +445,8 @@ _STORE_EFFECT = Effect(
     memory_space=MemorySpace.GENERIC,
     flags=(EffectFlag.DEPENDENCY,),
     width_bits=128,
-    timing_event=_EVENT_MEMORY_WRITE,
+    producer_event=_EVENT_MEMORY_WRITE,
+    consumer_event=_EVENT_MEMORY_WRITE,
 )
 
 _CALL_EFFECT = Effect(
@@ -455,6 +458,8 @@ _BARRIER_EFFECT = Effect(
     EffectKind.BARRIER,
     memory_space=MemorySpace.GENERIC,
     flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
+    producer_event=_EVENT_MEMORY_WRITE,
+    consumer_event=_EVENT_MEMORY_READ,
 )
 
 _CONTROL_EFFECT = Effect(

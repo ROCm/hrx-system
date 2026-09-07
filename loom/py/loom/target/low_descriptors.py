@@ -563,7 +563,8 @@ class Effect:
     flags: tuple[EffectFlag, ...] = ()
     counter_id: int = 0
     width_bits: int = 0
-    timing_event: str | None = None
+    producer_event: str | None = None
+    consumer_event: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

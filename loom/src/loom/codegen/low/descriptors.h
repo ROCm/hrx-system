@@ -779,10 +779,10 @@ typedef struct loom_low_effect_t {
   uint16_t counter_id;
   // Access width in bits, or zero when not width-specific.
   uint16_t width_bits;
-  // Target timing event observed by this effect, or NONE.
-  uint16_t timing_event_id;
-  // Reserved for future effect timing refinements.
-  uint16_t reserved;
+  // Event published when this effect orders a later consumer, or NONE.
+  uint16_t producer_event_id;
+  // Event consumed when this effect follows an earlier producer, or NONE.
+  uint16_t consumer_event_id;
 } loom_low_effect_t;
 
 // Summary of descriptor memory effect widths.

@@ -627,8 +627,8 @@ def emit_source_for_views(
                 f".flags = {c_spelling.flag_expr(effect.flags)},",
                 f".counter_id = {effect.counter_id},",
                 f".width_bits = {effect.width_bits},",
-                ".timing_event_id = " + ("LOOM_LOW_TIMING_EVENT_NONE" if effect.timing_event is None else str(compiled.timing_event_ids[effect.timing_event])) + ",",
-                ".reserved = 0,",
+                ".producer_event_id = " + ("LOOM_LOW_TIMING_EVENT_NONE" if effect.producer_event is None else str(compiled.timing_event_ids[effect.producer_event])) + ",",
+                ".consumer_event_id = " + ("LOOM_LOW_TIMING_EVENT_NONE" if effect.consumer_event is None else str(compiled.timing_event_ids[effect.consumer_event])) + ",",
             ]
             for effect in compiled.effects
         ],

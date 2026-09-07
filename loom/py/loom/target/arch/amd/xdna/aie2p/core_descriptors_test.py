@@ -1574,7 +1574,8 @@ def test_ordered_memory_descriptors_are_semantic_physical_aliases() -> None:
             assert ordered_effect.scope_id == ordinary_effect.scope_id
             assert ordered_effect.counter_id == ordinary_effect.counter_id
             assert ordered_effect.width_bits == ordinary_effect.width_bits
-            assert ordered_effect.timing_event == ordinary_effect.timing_event
+            assert ordered_effect.producer_event == ordinary_effect.producer_event
+            assert ordered_effect.consumer_event == ordinary_effect.consumer_event
             assert ordered_effect.flags == (
                 EffectFlag.ORDERED,
                 *ordinary_effect.flags,
@@ -1636,10 +1637,12 @@ def test_seed_schedule_contract_retains_endpoint_events_and_separations() -> Non
     assert separations[vector_write, vector_store_read] == 2
 
     memory_write = next(
-        row.timing_event for row in vector_store.effects if row.kind is EffectKind.WRITE
+        row.producer_event
+        for row in vector_store.effects
+        if row.kind is EffectKind.WRITE
     )
     memory_read = next(
-        row.timing_event for row in vector_load.effects if row.kind is EffectKind.READ
+        row.consumer_event for row in vector_load.effects if row.kind is EffectKind.READ
     )
     assert separations[memory_write, memory_read] == 1
     assert vector_load.immediates[0].encoding_field_id != 0

@@ -3162,16 +3162,16 @@ def test_generator_rejects_unknown_operand_timing_event() -> None:
         generate_descriptor_set(replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,)))
 
 
-def test_generator_rejects_unknown_effect_timing_event() -> None:
+def test_generator_rejects_unknown_effect_endpoint_event() -> None:
     descriptor = next(descriptor for descriptor in TEST_LOW_CORE_DESCRIPTOR_SET.descriptors if descriptor.key == "test.event.memory.read.i32")
     descriptor = replace(
         descriptor,
-        effects=(replace(descriptor.effects[0], timing_event="test.missing"),),
+        effects=(replace(descriptor.effects[0], producer_event="test.missing"),),
     )
 
     with pytest.raises(
         ValueError,
-        match=re.escape("descriptor 'test.event.memory.read.i32' effect 0 references unknown timing event 'test.missing'"),
+        match=re.escape("descriptor 'test.event.memory.read.i32' effect 0 producer references unknown timing event 'test.missing'"),
     ):
         generate_descriptor_set(replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,)))
 

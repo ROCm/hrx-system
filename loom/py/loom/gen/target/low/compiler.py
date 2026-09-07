@@ -1117,8 +1117,10 @@ def compile_descriptor_set(
             if operand.write_event is not None:
                 used_timing_event_names.add(operand.write_event)
         for effect in descriptor.effects:
-            if effect.timing_event is not None:
-                used_timing_event_names.add(effect.timing_event)
+            if effect.producer_event is not None:
+                used_timing_event_names.add(effect.producer_event)
+            if effect.consumer_event is not None:
+                used_timing_event_names.add(effect.consumer_event)
         seen_fixed_encoding_fields: set[int] = set()
         for field_value in descriptor.encoding_field_values:
             validation.validate_u16(

@@ -122,6 +122,35 @@ low.func.def target<test.low.core> @resource_capacity(%lhs: reg<test.i32>, %rhs:
   }
 }
 
+TEST_F(LowEmissionFrameTest, OrderedEffectUsesDirectionalTimingEndpoints) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @directional_effect(%address: reg<test.ptr>, %payload: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  test.store.v4i32 %address, %payload
+  test.barrier
+  %loaded = test.load.v4i32 %address
+  return %loaded
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame,
+                            LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY));
+
+  ASSERT_GE(frame.schedule.node_count, 3u);
+  EXPECT_EQ(frame.schedule.nodes[0].issue_cycle, 0u);
+  EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 2u);
+  EXPECT_EQ(frame.schedule.nodes[2].issue_cycle, 4u);
+
+  ASSERT_GE(frame.schedule.dependencies.count, 2u);
+  const loom_low_schedule_dependency_t* store_to_barrier =
+      loom_low_schedule_dependency_graph_at(&frame.schedule.dependencies, 0);
+  const loom_low_schedule_dependency_t* barrier_to_load =
+      loom_low_schedule_dependency_graph_at(&frame.schedule.dependencies, 1);
+  EXPECT_EQ(store_to_barrier->minimum_issue_separation_cycles, 2);
+  EXPECT_EQ(barrier_to_load->minimum_issue_separation_cycles, 2);
+  EXPECT_NE(store_to_barrier->consumer_event_id,
+            barrier_to_load->producer_event_id);
+}
+
 TEST_F(LowEmissionFrameTest, StructuralModelCarriesNativePacketTiming) {
   ModulePtr module = ParseModule();
   const loom_low_schedule_structural_model_t models[] = {

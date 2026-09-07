@@ -690,8 +690,12 @@ def validate_schedule_model(descriptor_set: DescriptorSet) -> None:
                 if timing_event_name is not None and timing_event_name not in timing_event_names:
                     raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' {access_name} references unknown timing event '{timing_event_name}'")
         for effect_index, effect in enumerate(descriptor.effects):
-            if effect.timing_event is not None and effect.timing_event not in timing_event_names:
-                raise ValueError(f"descriptor '{descriptor.key}' effect {effect_index} references unknown timing event '{effect.timing_event}'")
+            for endpoint_name, timing_event_name in (
+                ("producer", effect.producer_event),
+                ("consumer", effect.consumer_event),
+            ):
+                if timing_event_name is not None and timing_event_name not in timing_event_names:
+                    raise ValueError(f"descriptor '{descriptor.key}' effect {effect_index} {endpoint_name} references unknown timing event '{timing_event_name}'")
 
 
 def _schedule_alternative_semantics(descriptor: Descriptor) -> Descriptor:
