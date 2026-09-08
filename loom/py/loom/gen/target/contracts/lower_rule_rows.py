@@ -819,6 +819,12 @@ def rule_row(
     if row.emit_count:
         _append_field(fields, "action.emit_start", row.emit_start, always=True)
         _append_field(fields, "emit_count", row.emit_count, always=True)
+        _append_field(
+            fields,
+            "metadata.emit.primary_emit_ordinal",
+            row.primary_emit_ordinal,
+            always=True,
+        )
     if row.alias_ref_count:
         _append_field(
             fields,
@@ -826,7 +832,12 @@ def rule_row(
             row.alias_ref_start,
             always=True,
         )
-        _append_field(fields, "alias_ref_count", row.alias_ref_count, always=True)
+        _append_field(
+            fields,
+            "metadata.value.alias_ref_count",
+            row.alias_ref_count,
+            always=True,
+        )
     if row.elide_ref_count:
         _append_field(
             fields,
@@ -834,7 +845,12 @@ def rule_row(
             row.elide_ref_start,
             always=True,
         )
-        _append_field(fields, "elide_ref_count", row.elide_ref_count, always=True)
+        _append_field(
+            fields,
+            "metadata.value.elide_ref_count",
+            row.elide_ref_count,
+            always=True,
+        )
     return fields
 
 

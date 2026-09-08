@@ -101,6 +101,7 @@ from loom.target.contracts.lower_rule_tables import (
     LOWER_EMIT_FLAG_SWAP_OPERANDS_0_1,
     LOWER_RULE_FLAG_CONTRACT_ONLY,
     LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
+    LOWER_RULE_PRIMARY_EMIT_NONE,
     LOWER_SOURCE_MEMORY_NONE,
     CompiledLowerRuleSet,
     LowerAttrCopy,
@@ -273,6 +274,14 @@ class _LowerRuleSetCompiler:
                 f"{rule.source_op.name}: descriptor-rule contracts must "
                 "author their emit program in Python"
             )
+        if rule.descriptor is not None and not any(
+            isinstance(emit, EmitDescriptorOp) and emit.descriptor == rule.descriptor
+            for emit in rule.emit
+        ):
+            raise ValueError(
+                f"{rule.source_op.name}: primary descriptor "
+                f"'{rule.descriptor.key}' is not emitted by the rule"
+            )
         self._source_ops = {"": rule.source_op}
         self._source_node_ordinals = {"": 0}
         for source_node_index, source_node in enumerate(rule.source_nodes, start=1):
@@ -320,7 +329,14 @@ class _LowerRuleSetCompiler:
 
         emit_start = len(self._emits)
         temporary_ordinals: dict[str, int] = {}
+        primary_emit_ordinal = LOWER_RULE_PRIMARY_EMIT_NONE
         for emit in rule.emit:
+            if (
+                primary_emit_ordinal == LOWER_RULE_PRIMARY_EMIT_NONE
+                and isinstance(emit, EmitDescriptorOp)
+                and (rule.descriptor is None or emit.descriptor == rule.descriptor)
+            ):
+                primary_emit_ordinal = len(self._emits) - emit_start
             self._append_emit(
                 rule.source_op,
                 emit,
@@ -335,6 +351,7 @@ class _LowerRuleSetCompiler:
                 guard_count=len(self._guards) - guard_start,
                 emit_start=emit_start,
                 emit_count=len(self._emits) - emit_start,
+                primary_emit_ordinal=primary_emit_ordinal,
                 source_node_start=(source_node_start if rule.source_nodes else 0),
                 source_node_count=len(rule.source_nodes),
                 report_key=rule.report_key,

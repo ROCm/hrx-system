@@ -868,6 +868,9 @@ typedef uint16_t loom_low_lower_rule_flags_t;
 // Rule row has no structured report key.
 #define LOOM_LOW_LOWER_RULE_REPORT_KEY_NONE ((uint16_t)0)
 
+// Emission rule has no descriptor-bearing primary emit.
+#define LOOM_LOW_LOWER_RULE_PRIMARY_EMIT_NONE ((uint16_t)UINT16_MAX)
+
 typedef struct loom_low_lower_rule_t {
   // Source op kind this rule accepts.
   loom_op_kind_t source_op_kind;
@@ -897,10 +900,21 @@ typedef struct loom_low_lower_rule_t {
   } action;
   // Number of emit-reference rows for this rule's program.
   uint16_t emit_count;
-  // Number of operand/result alias pairs consumed by this rule.
-  uint8_t alias_ref_count;
-  // Number of source result refs erased by this rule.
-  uint8_t elide_ref_count;
+  // Action-specific metadata sharing storage across disjoint rule kinds.
+  union {
+    // Metadata for descriptor-emission rules.
+    struct {
+      // Ordinal of the descriptor emit representing the rule's primary action.
+      uint16_t primary_emit_ordinal;
+    } emit;
+    // Metadata for value alias and elision rules.
+    struct {
+      // Number of operand/result alias pairs consumed by this rule.
+      uint8_t alias_ref_count;
+      // Number of source result refs erased by this rule.
+      uint8_t elide_ref_count;
+    } value;
+  } metadata;
 } loom_low_lower_rule_t;
 static_assert(sizeof(loom_low_lower_rule_t) == 20,
               "loom_low_lower_rule_t must be 20 bytes");

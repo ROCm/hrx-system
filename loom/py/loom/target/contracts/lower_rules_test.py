@@ -22,6 +22,7 @@ from loom.target.contracts import (
     LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE,
     LOWER_RULE_FLAG_CONTRACT_ONLY,
     LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
+    LOWER_RULE_PRIMARY_EMIT_NONE,
     AttrProject,
     ContractFragment,
     DescriptorEmitForm,
@@ -166,6 +167,10 @@ def test_compile_structural_register_emits() -> None:
     )
 
     assert all(emit.descriptor is None for emit in compiled.emits)
+    assert all(
+        rule.primary_emit_ordinal == LOWER_RULE_PRIMARY_EMIT_NONE
+        for rule in compiled.rules
+    )
     rules_by_source_op = {rule.source_op: rule for rule in compiled.rules}
 
     concat_emit = compiled.emits[
@@ -759,6 +764,7 @@ def test_compile_lower_rule_set_compiles_setup_before_per_lane_sequence() -> Non
 
     compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
 
+    assert compiled.rules[0].primary_emit_ordinal == 1
     assert tuple(emit.kind for emit in compiled.emits) == (
         LowerEmitKind.DESCRIPTOR_CONST,
         LowerEmitKind.DESCRIPTOR_OP_PER_LANE_SEQUENCE,
@@ -1609,6 +1615,34 @@ def test_compile_lower_rule_set_rejects_descriptor_rule_without_emit() -> None:
     _expect_value_error(
         lambda: compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS}),
         "scalar.addi: descriptor-rule contracts must author their emit",
+    )
+
+
+def test_compile_lower_rule_set_rejects_primary_descriptor_not_emitted() -> None:
+    table = ContractFragment(
+        name="test.primary-not-emitted",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            DescriptorRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_MUL_I32_DESCRIPTOR,
+                        operands={
+                            "lhs": ValueRef.operand("lhs"),
+                            "rhs": ValueRef.operand("rhs"),
+                        },
+                        results={"dst": ValueRef.result("result")},
+                    ),
+                ),
+            )
+        ],
+    )
+
+    _expect_value_error(
+        lambda: compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS}),
+        "scalar.addi: primary descriptor 'test.add.i32' is not emitted by the rule",
     )
 
 

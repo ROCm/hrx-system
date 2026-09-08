@@ -348,9 +348,11 @@ static void loom_low_lower_mark_rule_storage_demands(
     loom_low_lower_mark_source_memory_access_storage_demands(
         context, address_materializer, selected_plan->source_memory_access);
   }
+  if (rule->emit_count != 0) return;
+
   if (iree_all_bits_set(rule->flags,
                         LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS)) {
-    IREE_ASSERT_EQ(rule->alias_ref_count, 1);
+    IREE_ASSERT_EQ(rule->metadata.value.alias_ref_count, 1);
     const loom_value_slice_t source_span =
         loom_low_lower_rule_value_ref_field_span_from_nodes(
             context->module, rule_set, selected_plan->source_op,
@@ -361,7 +363,8 @@ static void loom_low_lower_mark_rule_storage_demands(
                                                  source_span.values[i]);
     }
   } else {
-    for (uint16_t alias_ordinal = 0; alias_ordinal < rule->alias_ref_count;
+    for (uint16_t alias_ordinal = 0;
+         alias_ordinal < rule->metadata.value.alias_ref_count;
          ++alias_ordinal) {
       const uint16_t value_ref_index =
           (uint16_t)(rule->action.alias_ref_start + alias_ordinal * 2);
@@ -372,7 +375,7 @@ static void loom_low_lower_mark_rule_storage_demands(
       }
     }
   }
-  if (rule->alias_ref_count == 0) return;
+  if (rule->metadata.value.alias_ref_count == 0) return;
 
   // Canonical source-memory plans own the storage demands for addresses through
   // buffer.view aliases. Requiring the original byte-offset expression here
@@ -788,20 +791,24 @@ static void loom_low_lower_record_elided_hint_plan(
                });
 }
 
-static bool loom_low_lower_descriptor_has_ordered_memory_effect(
+static bool loom_low_lower_descriptor_memory_effects_are_ordered(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor) {
+    const loom_low_descriptor_t* descriptor, bool* out_has_memory_effect) {
+  *out_has_memory_effect = false;
   for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
     const uint32_t effect_index = descriptor->effect_start + i;
     IREE_ASSERT_LT(effect_index, descriptor_set->effect_count);
     const loom_low_effect_t* effect = &descriptor_set->effects[effect_index];
-    if ((effect->kind == LOOM_LOW_EFFECT_KIND_READ ||
-         effect->kind == LOOM_LOW_EFFECT_KIND_WRITE) &&
-        iree_any_bit_set(effect->flags, LOOM_LOW_EFFECT_FLAG_ORDERED)) {
-      return true;
+    if (effect->kind != LOOM_LOW_EFFECT_KIND_READ &&
+        effect->kind != LOOM_LOW_EFFECT_KIND_WRITE) {
+      continue;
+    }
+    *out_has_memory_effect = true;
+    if (!iree_any_bit_set(effect->flags, LOOM_LOW_EFFECT_FLAG_ORDERED)) {
+      return false;
     }
   }
-  return false;
+  return true;
 }
 
 static bool loom_low_lower_selected_plan_preserves_volatile_memory(
@@ -818,20 +825,24 @@ static bool loom_low_lower_selected_plan_preserves_volatile_memory(
       selected_plan->rule == NULL || selected_plan->resolved_emits == NULL) {
     return false;
   }
-  bool found_source_memory_emit = false;
+  bool found_source_memory_access = false;
   for (uint16_t i = 0; i < selected_plan->rule->emit_count; ++i) {
     const loom_low_lower_resolved_emit_t* resolved_emit =
         &selected_plan->resolved_emits[i];
     if (resolved_emit->emit->source_memory_ordinal == 0) {
       continue;
     }
-    found_source_memory_emit = true;
-    if (!loom_low_lower_descriptor_has_ordered_memory_effect(
-            context->descriptor_set, resolved_emit->descriptor.descriptor)) {
+    // Source-memory projections also annotate address materialization emits.
+    // Only descriptors with memory effects participate in volatile ordering.
+    bool has_memory_effect = false;
+    if (!loom_low_lower_descriptor_memory_effects_are_ordered(
+            context->descriptor_set, resolved_emit->descriptor.descriptor,
+            &has_memory_effect)) {
       return false;
     }
+    found_source_memory_access |= has_memory_effect;
   }
-  return found_source_memory_emit;
+  return found_source_memory_access;
 }
 
 static iree_status_t loom_low_lower_validate_selected_plans(

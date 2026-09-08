@@ -978,7 +978,7 @@ static iree_status_t loom_low_lower_rule_elide_results(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_rule_t* rule) {
-  for (uint16_t i = 0; i < rule->elide_ref_count; ++i) {
+  for (uint16_t i = 0; i < rule->metadata.value.elide_ref_count; ++i) {
     const uint16_t value_ref_index =
         (uint16_t)(rule->action.elide_ref_start + i);
     const loom_low_lower_value_ref_t* value_ref =
@@ -997,7 +997,7 @@ static iree_status_t loom_low_lower_rule_bind_aliases(
     const loom_low_lower_rule_t* rule) {
   if (iree_all_bits_set(rule->flags,
                         LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS)) {
-    IREE_ASSERT_EQ(rule->alias_ref_count, 1);
+    IREE_ASSERT_EQ(rule->metadata.value.alias_ref_count, 1);
     const uint16_t source_ref_index = rule->action.alias_ref_start;
     const uint16_t result_ref_index = (uint16_t)(source_ref_index + 1);
     const loom_low_lower_value_ref_t* source_ref =
@@ -1019,7 +1019,7 @@ static iree_status_t loom_low_lower_rule_bind_aliases(
     }
     return iree_ok_status();
   }
-  for (uint16_t i = 0; i < rule->alias_ref_count; ++i) {
+  for (uint16_t i = 0; i < rule->metadata.value.alias_ref_count; ++i) {
     const uint16_t source_ref_index =
         (uint16_t)(rule->action.alias_ref_start + i * 2);
     const uint16_t result_ref_index = (uint16_t)(source_ref_index + 1);
@@ -1968,6 +1968,8 @@ iree_status_t loom_low_lower_rule_set_emit_rule(
         IREE_BUILTIN_UNREACHABLE();
     }
   }
+  if (rule->emit_count != 0) return iree_ok_status();
+
   IREE_RETURN_IF_ERROR(
       loom_low_lower_rule_bind_aliases(context, rule_set, source_op, rule));
   return loom_low_lower_rule_elide_results(context, rule_set, source_op, rule);

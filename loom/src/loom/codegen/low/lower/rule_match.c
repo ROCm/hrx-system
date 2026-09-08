@@ -1764,19 +1764,19 @@ const loom_low_lower_diagnostic_t* loom_low_lower_rule_set_selection_diagnostic(
   return &rule_set->diagnostics[selection.diagnostic_index];
 }
 
-loom_low_lower_descriptor_ref_t loom_low_lower_rule_first_descriptor_ref(
+loom_low_lower_descriptor_ref_t loom_low_lower_rule_primary_descriptor_ref(
     const loom_low_lower_rule_set_t* rule_set,
     const loom_low_lower_rule_t* rule) {
-  for (uint16_t i = 0; i < rule->emit_count; ++i) {
-    const uint16_t emit_ref_index = (uint16_t)(rule->action.emit_start + i);
-    const loom_low_lower_descriptor_ref_t descriptor_ref =
-        loom_low_lower_rule_set_emit_at(rule_set, emit_ref_index)
-            ->descriptor_ref;
-    if (descriptor_ref != LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
-      return descriptor_ref;
-    }
+  if (rule->emit_count == 0 || rule->metadata.emit.primary_emit_ordinal ==
+                                   LOOM_LOW_LOWER_RULE_PRIMARY_EMIT_NONE) {
+    return LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE;
   }
-  return LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE;
+  IREE_ASSERT_LT(rule->metadata.emit.primary_emit_ordinal, rule->emit_count);
+  const uint16_t emit_ref_index =
+      (uint16_t)(rule->action.emit_start +
+                 rule->metadata.emit.primary_emit_ordinal);
+  return loom_low_lower_rule_set_emit_at(rule_set, emit_ref_index)
+      ->descriptor_ref;
 }
 
 iree_status_t loom_low_lower_rule_set_emit_selection_failure(

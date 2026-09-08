@@ -251,7 +251,12 @@ def test_rule_row_overlays_action_range_starts() -> None:
         "guard_count": 0,
     }
     emit_fields = rule_row(
-        LowerRule(**common, emit_start=2, emit_count=3),
+        LowerRule(
+            **common,
+            emit_start=2,
+            emit_count=3,
+            primary_emit_ordinal=1,
+        ),
         {},
     )
     alias_fields = rule_row(
@@ -276,8 +281,83 @@ def test_rule_row_overlays_action_range_starts() -> None:
     )
 
     assert ".action.emit_start = 2" in emit_fields
+    assert ".metadata.emit.primary_emit_ordinal = 1" in emit_fields
     assert ".action.alias_ref_start = 4" in alias_fields
+    assert ".metadata.value.alias_ref_count = 1" in alias_fields
     assert ".action.elide_ref_start = 5" in elide_fields
+    assert ".metadata.value.elide_ref_count = 1" in elide_fields
+
+
+def test_validate_c_table_shape_accepts_structural_emit_without_primary() -> None:
+    table = _compiled_lower_rule_set(
+        rules=(
+            LowerRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                temporary_count=0,
+                guard_start=0,
+                guard_count=0,
+                emit_start=0,
+                emit_count=1,
+            ),
+        ),
+        emits=(LowerEmit(kind=LowerEmitKind.REGISTER_COPY),),
+    )
+
+    _validate_c_table_shape(table, _c_shape_contract(), ())
+
+
+def test_validate_c_table_shape_rejects_descriptor_emit_without_primary() -> None:
+    table = _compiled_lower_rule_set(
+        rules=(
+            LowerRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                temporary_count=0,
+                guard_start=0,
+                guard_count=0,
+                emit_start=0,
+                emit_count=1,
+            ),
+        ),
+        emits=(
+            LowerEmit(
+                kind=LowerEmitKind.DESCRIPTOR_OP,
+                descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+            ),
+        ),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "rule 0 has no primary descriptor emit",
+    )
+
+
+def test_validate_c_table_shape_rejects_structural_primary_emit() -> None:
+    table = _compiled_lower_rule_set(
+        rules=(
+            LowerRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                temporary_count=0,
+                guard_start=0,
+                guard_count=0,
+                emit_start=0,
+                emit_count=2,
+                primary_emit_ordinal=0,
+            ),
+        ),
+        emits=(
+            LowerEmit(kind=LowerEmitKind.REGISTER_COPY),
+            LowerEmit(
+                kind=LowerEmitKind.DESCRIPTOR_OP,
+                descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+            ),
+        ),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "rule 0 primary emit does not carry a descriptor",
+    )
 
 
 def test_validate_c_table_shape_rejects_oversized_type_payload() -> None:
@@ -822,7 +902,13 @@ def test_validate_c_table_shape_rejects_emit_ref_outside_source_graph() -> None:
     table = _compiled_source_graph_table()
     table = replace(
         table,
-        rules=(replace(table.rules[0], emit_count=1),),
+        rules=(
+            replace(
+                table.rules[0],
+                emit_count=1,
+                primary_emit_ordinal=0,
+            ),
+        ),
         value_refs=(
             *table.value_refs,
             LowerValueRef(

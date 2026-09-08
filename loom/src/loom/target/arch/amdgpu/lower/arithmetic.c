@@ -500,7 +500,7 @@ iree_status_t loom_amdgpu_emit_fmaf_literal_operand_form_diagnostic(
   }
 
   const loom_low_lower_descriptor_ref_t descriptor_ref =
-      loom_low_lower_rule_first_descriptor_ref(
+      loom_low_lower_rule_primary_descriptor_ref(
           &loom_amdgpu_arithmetic_lower_rule_set, selection.rule);
   if (descriptor_ref == LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
     return iree_ok_status();

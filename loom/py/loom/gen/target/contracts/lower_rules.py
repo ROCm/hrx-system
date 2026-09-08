@@ -22,6 +22,7 @@ from loom.target.contracts import (
     LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
     LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE,
     LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN,
+    LOWER_RULE_PRIMARY_EMIT_NONE,
     LOWER_SOURCE_MEMORY_NONE,
     MAX_SOURCE_NODES,
     SOURCE_NODE_COUNT_BITS,
@@ -1111,6 +1112,21 @@ def _validate_c_table_shape(
             f"{row_subject} emit range",
             "emit",
         )
+        if row.emit_count:
+            has_descriptor_emit = any(table.emits[row.emit_start + emit_ordinal].descriptor is not None for emit_ordinal in range(row.emit_count))
+            if not has_descriptor_emit:
+                if row.primary_emit_ordinal != LOWER_RULE_PRIMARY_EMIT_NONE:
+                    raise ValueError(f"{row_subject} structural emit program has a primary emit ordinal")
+            else:
+                if row.primary_emit_ordinal == LOWER_RULE_PRIMARY_EMIT_NONE:
+                    raise ValueError(f"{row_subject} has no primary descriptor emit")
+                if row.primary_emit_ordinal >= row.emit_count:
+                    raise ValueError(f"{row_subject} primary emit ordinal exceeds its emit range")
+                primary_emit = table.emits[row.emit_start + row.primary_emit_ordinal]
+                if primary_emit.descriptor is None:
+                    raise ValueError(f"{row_subject} primary emit does not carry a descriptor")
+        elif row.primary_emit_ordinal != LOWER_RULE_PRIMARY_EMIT_NONE:
+            raise ValueError(f"{row_subject} inactive emit range has a primary emit ordinal")
         _require_u16(row.alias_ref_start, f"{row_subject} alias-ref start")
         _require_u8(row.alias_ref_count, f"{row_subject} alias-ref count")
         _require_table_range(

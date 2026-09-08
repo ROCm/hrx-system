@@ -60,6 +60,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_DOT4I_S8S8_DESCRIPTOR,
     TEST_LOW_FROM_ELEMENTS_V4I32_DESCRIPTOR,
+    TEST_LOW_LOAD_INDEX_ORDERED_V4I32_DESCRIPTOR,
     TEST_LOW_LOAD_INDEX_V4F32_DESCRIPTOR,
     TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
     TEST_LOW_LOAD_ORDERED_V4I32_DESCRIPTOR,
@@ -567,6 +568,12 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
             TEST_LOW_LOAD_V4F32_DESCRIPTOR,
             _V4F32,
             dynamic=False,
+        ),
+        _vector_load_rule(
+            TEST_LOW_LOAD_INDEX_ORDERED_V4I32_DESCRIPTOR,
+            _V4I32,
+            dynamic=True,
+            volatile=True,
         ),
         _vector_load_rule(
             TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,

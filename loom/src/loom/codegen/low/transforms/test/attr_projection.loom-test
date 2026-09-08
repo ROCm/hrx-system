@@ -35,3 +35,27 @@ low.func.def target<test.low.core>(@test_target) abi(object_function) @volatile_
   %result = low.op<test.load.ordered.v4i32>(%view) : (reg<test.ptr>) -> reg<test.i32 x4>
   low.return %result : reg<test.i32 x4>
 }
+
+// ====
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @dynamic_volatile_vector_load(%source: buffer, %element0: index) -> (vector<4xi32>) {
+  %element = index.assume %element0 [range(%element0, 0, 60), mul(%element0, 4)] : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %source[%base] : buffer -> view<64xi32>
+  %result = vector.load<volatile> %view[%element] : view<64xi32> -> vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @dynamic_volatile_vector_load(%element: reg<test.i32>) -> (reg<test.i32 x4>) {
+  %view = low.resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  %10 = low.const<test.const.i32> {i32_value = 4} : reg<test.i32>
+  %11 = low.op<test.mul.i32>(%element, %10) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %result = low.op<test.load.index.ordered.v4i32>(%view, %11) : (reg<test.ptr>, reg<test.i32>) -> reg<test.i32 x4>
+  low.return %result : reg<test.i32 x4>
+}

@@ -1436,6 +1436,21 @@ TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.SIDE_EFFECTING,),
 )
 
+TEST_LOW_LOAD_INDEX_ORDERED_V4I32_DESCRIPTOR = Descriptor(
+    key="test.load.index.ordered.v4i32",
+    mnemonic="test.load.index.ordered.v4i32",
+    semantic_tag="memory.load.index.ordered.v128",
+    operands=(
+        Operand("dst", OperandRole.RESULT, _I32_ALT, unit_count=4),
+        _ptr_resource("address"),
+        _i32_operand("index"),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("address", "index")),
+    effects=(_ORDERED_LOAD_EFFECT,),
+    schedule_class=_SCHEDULE_LOAD,
+    flags=(DescriptorFlag.SIDE_EFFECTING,),
+)
+
 TEST_LOW_LOAD_INDEX_V4F32_DESCRIPTOR = Descriptor(
     key="test.load.index.v4f32",
     mnemonic="test.load.index.v4f32",
@@ -2132,6 +2147,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_LOAD_ORDERED_V4I32_DESCRIPTOR,
         TEST_LOW_LOAD_V4F32_DESCRIPTOR,
         TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+        TEST_LOW_LOAD_INDEX_ORDERED_V4I32_DESCRIPTOR,
         TEST_LOW_LOAD_INDEX_V4F32_DESCRIPTOR,
         TEST_LOW_STORE_V4I32_DESCRIPTOR,
         TEST_LOW_SCHEDULE_ALTERNATIVE_STORE_A_V4I32_DESCRIPTOR,

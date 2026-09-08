@@ -212,9 +212,9 @@ iree_status_t loom_low_lower_rule_resolve_descriptor_ref(
     loom_low_lower_descriptor_ref_t descriptor_ref,
     const loom_low_descriptor_t** out_descriptor);
 
-// Returns the first descriptor ref emitted by |rule|, or
+// Returns the descriptor ref authored as |rule|'s primary action, or
 // LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE when none is emitted.
-loom_low_lower_descriptor_ref_t loom_low_lower_rule_first_descriptor_ref(
+loom_low_lower_descriptor_ref_t loom_low_lower_rule_primary_descriptor_ref(
     const loom_low_lower_rule_set_t* rule_set,
     const loom_low_lower_rule_t* rule);
 

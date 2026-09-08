@@ -104,6 +104,7 @@ LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE = 1 << 6
 LOWER_SOURCE_MEMORY_NONE = 0
 LOWER_RULE_FLAG_CONTRACT_ONLY = 1 << 0
 LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS = 1 << 1
+LOWER_RULE_PRIMARY_EMIT_NONE = 0xFFFF
 
 _LOW_VALUE_GUARD_KINDS = (
     GuardKind.LOW_VALUE_REGISTER_CLASS,
@@ -260,6 +261,7 @@ class LowerRule:
     guard_count: int
     emit_start: int
     emit_count: int
+    primary_emit_ordinal: int = LOWER_RULE_PRIMARY_EMIT_NONE
     source_node_start: int = 0
     source_node_count: int = 0
     flags: int = 0
