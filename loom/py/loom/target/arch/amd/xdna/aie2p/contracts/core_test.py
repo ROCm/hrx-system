@@ -778,29 +778,50 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for rule in rules
         if rule.source_op in (vector.vector_bitunpacku, vector.vector_bitunpacks)
     ]
-    assert len(bitunpack_rules) == 2
-    for rule, source_op, source_kind in zip(
-        bitunpack_rules,
-        (vector.vector_bitunpacku, vector.vector_bitunpacks),
-        ("u", "s"),
-        strict=True,
+    expected_bitunpack_keys = {
+        (
+            f"amd.xdna.aie2p.unpack.{source_kind}4x{source_lane_count * 2}.to."
+            f"{source_kind}8x{source_lane_count * 2}.configured"
+        )
+        for source_kind in ("u", "s")
+        for source_lane_count in (32, 64)
+    }
+    assert {rule.descriptor.key for rule in bitunpack_rules} == (
+        expected_bitunpack_keys
+    )
+    for source_op, source_kind in (
+        (vector.vector_bitunpacku, "u"),
+        (vector.vector_bitunpacks, "s"),
     ):
-        assert rule.source_op is source_op
-        assert rule.descriptor.key == (
-            f"amd.xdna.aie2p.unpack.{source_kind}4x64.to.{source_kind}8x64.configured"
-        )
-        packed_slice, set_unpack_size, unpack = rule.emit
-        assert isinstance(packed_slice, EmitRegisterSlice)
-        assert packed_slice.source.field == "source"
-        assert packed_slice.result.field == "packed_source"
-        assert packed_slice.unit_count == 1
-        assert set_unpack_size.descriptor.key == (
-            "amd.xdna.aie2p.state.unpack-size.immediate"
-        )
-        assert set_unpack_size.immediates == {"i": 0}
-        assert unpack.descriptor is rule.descriptor
-        assert unpack.operands["src"].field == "packed_source"
-        assert unpack.results["dst"].field == "result"
+        for source_lane_count in (32, 64):
+            result_lane_count = source_lane_count * 2
+            descriptor_key = (
+                f"amd.xdna.aie2p.unpack.{source_kind}4x{result_lane_count}.to."
+                f"{source_kind}8x{result_lane_count}.configured"
+            )
+            rule = next(
+                rule
+                for rule in bitunpack_rules
+                if rule.descriptor.key == descriptor_key
+            )
+            assert rule.source_op is source_op
+            emits = list(rule.emit)
+            source_field = "source"
+            if source_lane_count == 32:
+                packed_slice = emits.pop(0)
+                assert isinstance(packed_slice, EmitRegisterSlice)
+                assert packed_slice.source.field == "source"
+                assert packed_slice.result.field == "packed_source"
+                assert packed_slice.unit_count == 1
+                source_field = "packed_source"
+            set_unpack_size, unpack = emits
+            assert set_unpack_size.descriptor.key == (
+                "amd.xdna.aie2p.state.unpack-size.immediate"
+            )
+            assert set_unpack_size.immediates == {"i": 0}
+            assert unpack.descriptor is rule.descriptor
+            assert unpack.operands["src"].field == source_field
+            assert unpack.results["dst"].field == "result"
 
     bf16_multiply_rules = [
         rule for rule in rules if rule.source_op is vector.vector_mulf

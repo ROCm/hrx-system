@@ -22,11 +22,13 @@ from loom.target.arch.amd.xdna.aie2p.contracts.memory import (
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.packet_conversion import (
     BF16_F32_PACKET_LANE_COUNTS,
+    I4_UNPACK_SOURCE_LANE_COUNTS,
     INTEGER_PACK_CASES,
     INTEGER_WIDEN_CASES,
     IntegerPackCase,
     IntegerWidenCase,
     integer_pack_state_emits,
+    integer_unpack_state_emits,
     integer_widen_result_emits,
     integer_widen_state_emits,
 )
@@ -109,6 +111,80 @@ def _fused_memory_constraint(
         minimum_alignment=memory_width_bits // 8,
         immediate_offset_minimum=-memory_width_bits,
         immediate_offset_maximum=memory_width_bits - memory_width_bits // 8,
+    )
+
+
+def _fused_i4_unpack_load_rule(
+    address_form: _MemoryAddressForm,
+    *,
+    root_kind: SourceMemoryRootKind,
+    memory_spaces: tuple[str, ...],
+    source_op: Op,
+    source_kind: str,
+    source_lane_count: int,
+    volatile: bool,
+) -> DescriptorRule:
+    result_lane_count = source_lane_count * 2
+    source_type = Vector("i8", lanes=source_lane_count)
+    result_type = Vector("i8", lanes=result_lane_count)
+    signedness = "unsigned" if source_kind == "u" else "signed"
+    address_family = (
+        "immediate" if address_form is _MemoryAddressForm.IMMEDIATE else "register"
+    )
+    descriptor_key = (
+        f"amd.xdna.aie2p.load.unpack.{source_kind}4x{result_lane_count}.to."
+        f"{source_kind}8x{result_lane_count}.configured.indexed.{address_family}"
+    )
+    if volatile:
+        descriptor_key = f"{descriptor_key}.volatile"
+    memory_descriptor = _descriptor(descriptor_key)
+    source_memory = _fused_memory_constraint(
+        SourceMemoryOperation.LOAD,
+        address_form,
+        root_kind=root_kind,
+        memory_spaces=memory_spaces,
+        element_byte_count=1,
+        vector_lane_count=source_lane_count,
+        memory_width_bits=source_lane_count * 8,
+    )
+    return DescriptorRule(
+        source_op=vector.vector_load,
+        descriptor=memory_descriptor,
+        source_nodes=(
+            SourceNode.adjacent_unique_user(
+                "convert",
+                source_op=source_op,
+                parent_result=ValueRef.result("result"),
+                node_operand=ValueRef.operand("source"),
+                guards=(
+                    Guard.value_type("source", source_type),
+                    Guard.value_type("result", result_type),
+                    Guard.attr_kind("width", "i64"),
+                    Guard.i64_range("width", 4, 4),
+                ),
+            ),
+        ),
+        guards=(
+            *(
+                (Guard.instance_flags_has_all("memory_flags", "volatile"),)
+                if volatile
+                else ()
+            ),
+            Guard.value_type("result", source_type),
+        ),
+        emit=_fused_memory_access_emits(
+            address_form,
+            memory_descriptor,
+            source_memory,
+            {"ptr": ValueRef.operand("view")},
+            access_preamble=integer_unpack_state_emits(),
+            results={"dst": ValueRef.result("result", source_node="convert")},
+        ),
+        priority=1,
+        report_key=(
+            f"native_memory_load_{signedness}_i4x{result_lane_count}_to_"
+            f"i8x{result_lane_count}"
+        ),
     )
 
 
@@ -463,6 +539,24 @@ def _fused_integer_pack_store_rule(
 
 def _fused_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
     return (
+        *(
+            _fused_i4_unpack_load_rule(
+                address_form,
+                root_kind=root_kind,
+                memory_spaces=memory_spaces,
+                source_op=source_op,
+                source_kind=source_kind,
+                source_lane_count=source_lane_count,
+                volatile=volatile,
+            )
+            for root_kind, memory_spaces in _MEMORY_ROOTS
+            for source_op, source_kind in (
+                (vector.vector_bitunpacku, "u"),
+                (vector.vector_bitunpacks, "s"),
+            )
+            for source_lane_count in I4_UNPACK_SOURCE_LANE_COUNTS
+            for address_form in _MemoryAddressForm
+        ),
         *(
             _fused_float_load_rule(
                 address_form,

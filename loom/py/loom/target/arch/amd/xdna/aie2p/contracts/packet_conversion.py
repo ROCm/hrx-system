@@ -36,6 +36,10 @@ from loom.target.low_descriptors import Descriptor
 # Source-visible lane counts supported by native BF16/F32 packet conversion.
 BF16_F32_PACKET_LANE_COUNTS = (16, 32)
 
+# Packed i4 byte counts consumed by native VUNPACK forms. Each input byte
+# produces two sign- or zero-extended i8 lanes.
+I4_UNPACK_SOURCE_LANE_COUNTS = (32, 64)
+
 
 @dataclass(frozen=True, slots=True)
 class IntegerWidenCase:
@@ -295,6 +299,65 @@ def integer_pack_state_emits(pack_size: int) -> tuple[ContractEmit, ...]:
     )
 
 
+def integer_unpack_state_emits() -> tuple[ContractEmit, ...]:
+    """Builds the configured state consumed by one four-bit VUNPACK form."""
+
+    return (
+        EmitDescriptorOp(
+            descriptor=_descriptor("amd.xdna.aie2p.state.unpack-size.immediate"),
+            immediates={"i": 0},
+            form=DescriptorEmitForm.OP,
+        ),
+    )
+
+
+def _integer_bitunpack_rule(
+    source_op: Op,
+    source_kind: str,
+    source_lane_count: int,
+) -> DescriptorRule:
+    result_lane_count = source_lane_count * 2
+    unpack = _descriptor(
+        f"amd.xdna.aie2p.unpack.{source_kind}4x{result_lane_count}.to."
+        f"{source_kind}8x{result_lane_count}.configured"
+    )
+    source = ValueRef.operand("source")
+    input_emits: tuple[ContractEmit, ...] = ()
+    if source_lane_count == 32:
+        source = ValueRef.temporary("packed_source")
+        input_emits = (
+            EmitRegisterSlice(
+                source=ValueRef.operand("source"),
+                result=source,
+                unit_count=1,
+            ),
+        )
+    signedness = "unsigned" if source_kind == "u" else "signed"
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=unpack,
+        guards=(
+            Guard.value_type("source", _exact_vector("i8", source_lane_count)),
+            Guard.value_type("result", _exact_vector("i8", result_lane_count)),
+            Guard.attr_kind("width", "i64"),
+            Guard.i64_range("width", 4, 4),
+        ),
+        emit=(
+            *input_emits,
+            *integer_unpack_state_emits(),
+            EmitDescriptorOp(
+                descriptor=unpack,
+                operands={"src": source},
+                results={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+        report_key=(
+            f"native_{signedness}_i4x{result_lane_count}_to_i8x{result_lane_count}"
+        ),
+    )
+
+
 def _integer_widen_rule(
     source_op: Op,
     signedness: str,
@@ -533,6 +596,14 @@ def _integer_pack_rule(pack_case: IntegerPackCase) -> DescriptorRule:
 
 
 AIE2P_PACKET_CONVERSION_RULES = (
+    *(
+        _integer_bitunpack_rule(source_op, source_kind, source_lane_count)
+        for source_op, source_kind in (
+            (vector.vector_bitunpacku, "u"),
+            (vector.vector_bitunpacks, "s"),
+        )
+        for source_lane_count in I4_UNPACK_SOURCE_LANE_COUNTS
+    ),
     *(
         _integer_widen_rule(source_op, signedness, widen_case)
         for source_op, signedness in (

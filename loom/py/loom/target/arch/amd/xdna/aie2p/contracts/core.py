@@ -33,7 +33,6 @@ from loom.target.contracts import (
     DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
-    EmitRegisterSlice,
     Guard,
     RecipeRule,
     ResultTypeBinding,
@@ -60,8 +59,6 @@ _INDEX = Scalar("index")
 _OFFSET = Scalar("offset")
 _I8_VECTOR = Vector("i8", minimum_static_elements=1, maximum_static_elements=64)
 _I8X16_VECTOR = Vector("i8", lanes=16)
-_I8X32_VECTOR = Vector("i8", lanes=32)
-_I8X64_VECTOR = Vector("i8", lanes=64)
 _F8E4M3_VECTOR = Vector("f8E4M3", minimum_static_elements=1, maximum_static_elements=64)
 _F8E5M2_VECTOR = Vector("f8E5M2", minimum_static_elements=1, maximum_static_elements=64)
 _I16_VECTOR = Vector("i16", minimum_static_elements=1, maximum_static_elements=32)
@@ -552,38 +549,6 @@ def _vector_multiply_i16_rule() -> DescriptorRule:
                     "src": ValueRef.temporary("wide_product"),
                     "su": ValueRef.temporary("narrow_shift"),
                 },
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
-def _vector_bitunpack_i4_rule(source_op: Op, descriptor_key: str) -> DescriptorRule:
-    set_unpack_size = _descriptor("amd.xdna.aie2p.state.unpack-size.immediate")
-    unpack = _descriptor(descriptor_key)
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=unpack,
-        guards=(
-            Guard.value_type("source", _I8X32_VECTOR),
-            Guard.value_type("result", _I8X64_VECTOR),
-            Guard.attr_kind("width", "i64"),
-            Guard.i64_range("width", 4, 4),
-        ),
-        emit=(
-            EmitRegisterSlice(
-                source=ValueRef.operand("source"),
-                result=ValueRef.temporary("packed_source"),
-                unit_count=1,
-            ),
-            EmitDescriptorOp(
-                descriptor=set_unpack_size,
-                immediates={"i": 0},
-                form=DescriptorEmitForm.OP,
-            ),
-            _op_emit(
-                unpack,
-                operands={"src": ValueRef.temporary("packed_source")},
                 results={"dst": ValueRef.result("result")},
             ),
         ),

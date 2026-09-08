@@ -299,16 +299,26 @@ def _packed_dot_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
 
 
 def _packed_i4_unpack_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
-    """Selects native 64-lane signed and unsigned 4-to-8-bit unpack forms."""
+    """Selects native signed and unsigned 4-to-8-bit unpack forms."""
 
     return tuple(
         _DescriptorSpec(
-            f"VUNPACK_mv_unpack_w_unpackSign{sign_bit}",
-            f"{_TARGET_KEY}.unpack.{source_kind}4x64.to.{source_kind}8x64.configured",
-            f"convert.integer.unpack.{source_kind}4x64.to.{source_kind}8x64.configured",
-            f"II_VUNPACK_mv_unpack_w_unpackSign{sign_bit}",
-            asm_mnemonic=f"vunpack.{source_kind}4.to.{source_kind}8x64",
+            f"VUNPACK_mv_unpack_{carrier}_unpackSign{sign_bit}",
+            (
+                f"{_TARGET_KEY}.unpack.{source_kind}4x{result_lane_count}.to."
+                f"{source_kind}8x{result_lane_count}.configured"
+            ),
+            (
+                f"convert.integer.unpack.{source_kind}4x{result_lane_count}.to."
+                f"{source_kind}8x{result_lane_count}.configured"
+            ),
+            f"II_VUNPACK_mv_unpack_{carrier}_unpackSign{sign_bit}",
+            asm_mnemonic=(
+                f"vunpack.{source_kind}4.to.{source_kind}8x{result_lane_count}"
+            ),
         )
+        for source_lane_count, carrier in ((32, "w"), (64, "x"))
+        for result_lane_count in (source_lane_count * 2,)
         for source_kind, sign_bit in (("u", 0), ("s", 1))
     )
 
@@ -369,6 +379,35 @@ def _integer_conversion_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
 def _fused_vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
     """Selects indexed vector memory forms with native packet conversion."""
 
+    load_unpack_specs = tuple(
+        _DescriptorSpec(
+            f"{form_stem}{form_suffix}_unpackSign{sign_bit}",
+            (
+                f"{_TARGET_KEY}.load.unpack.{source_kind}4x{result_lane_count}."
+                f"to.{source_kind}8x{result_lane_count}.configured.indexed."
+                f"{address_form}"
+            ),
+            (
+                f"convert.integer.unpack.{source_kind}4x{result_lane_count}."
+                f"to.{source_kind}8x{result_lane_count}.configured.memory.load"
+            ),
+            f"II_{form_stem}{form_suffix}_unpackSign{sign_bit}",
+            asm_mnemonic=(
+                f"vldb.unpack.{source_kind}4.to.{source_kind}8x"
+                f"{result_lane_count}"
+                f"{'.index' if address_form == 'register' else ''}"
+            ),
+            memory_width_bits=source_lane_count * 8,
+        )
+        for source_lane_count, carrier in ((32, "w"), (64, "x"))
+        for result_lane_count in (source_lane_count * 2,)
+        for source_kind, sign_bit in (("u", 0), ("s", 1))
+        for form_stem in (f"VLDB_UNPACK_dm{carrier}_ldb_unpack_idx",)
+        for address_form, form_suffix in (
+            ("register", ""),
+            ("immediate", "_imm"),
+        )
+    )
     load_convert_specs = tuple(
         _DescriptorSpec(
             form_name,
@@ -478,6 +517,7 @@ def _fused_vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
         )
     )
     return (
+        *load_unpack_specs,
         *load_convert_specs,
         *load_widen_specs,
         *store_convert_specs,

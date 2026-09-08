@@ -254,20 +254,19 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
   %packed_lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
-  %28 = vlda.256.i8x32 %packed_lhs_view, 0
   set.unpack-size 0
-  %lhs_fragment = vunpack.u4.to.u8x64 %28
+  %lhs_fragment = vldb.unpack.u4.to.u8x64 %packed_lhs_view, 0
   %rhs_fragment = vlda.512.i8x64 %rhs_view, 0
-  %34 = mova.i32 264
-  %product = mmul.u8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %34
-  %36 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %36, %output_view, 0
-  %37 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %37, %output_view, 64
-  %38 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %38, %output_view, 128
-  %39 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %39, %output_view, 192
+  %28 = mova.i32 264
+  %product = mmul.u8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %28
+  %30 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %30, %output_view, 0
+  %31 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %31, %output_view, 64
+  %32 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %32, %output_view, 128
+  %33 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %33, %output_view, 192
   return
 }
 
@@ -310,32 +309,31 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
   %high_lhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 3, source_type = buffer} : reg<aie2p.ep>
-  %38 = vlda.256.i8x32 %packed_lhs_view, 0
   set.unpack-size 0
-  %low_lhs_value = vunpack.u4.to.u8x64 %38
-  %42 = mov.short 0
-  %43 = vbcst.8 %42
-  %44 = slice %43[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %45 = slice %43[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %46 = copy %44 : reg<aie2p.vec256> -> reg<aie2p.vec256>
-  %47 = vlda.128.i8x16 %high_lhs_view, %46, 0
-  %high_lhs_bits = concat(%47, %45) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %low_lhs_value = vldb.unpack.u4.to.u8x64 %packed_lhs_view, 0
+  %36 = mov.short 0
+  %37 = vbcst.8 %36
+  %38 = slice %37[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %39 = slice %37[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %40 = copy %38 : reg<aie2p.vec256> -> reg<aie2p.vec256>
+  %41 = vlda.128.i8x16 %high_lhs_view, %40, 0
+  %high_lhs_bits = concat(%41, %39) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   %high_lhs_mask = vextract.predicate64 %high_lhs_bits, 0
-  %50 = mov.short 16
-  %high_bit_value = vbcst.8 %50
+  %44 = mov.short 16
+  %high_bit_value = vbcst.8 %44
   %high_lhs_candidates = vadd.8 %low_lhs_value, %high_bit_value
   %lhs_fragment = vsel.8 %low_lhs_value, %high_lhs_candidates, %high_lhs_mask
   %rhs_fragment = vlda.512.i8x64 %rhs_view, 0
-  %56 = mova.i32 264
-  %product = mmul.u8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %56
-  %58 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %58, %output_view, 0
-  %59 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %59, %output_view, 64
-  %60 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %60, %output_view, 128
-  %61 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %61, %output_view, 192
+  %50 = mova.i32 264
+  %product = mmul.u8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %50
+  %52 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %52, %output_view, 0
+  %53 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %53, %output_view, 64
+  %54 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %54, %output_view, 128
+  %55 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %55, %output_view, 192
   return
 }
 
@@ -369,19 +367,18 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
   %packed_lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
-  %27 = vlda.256.i8x32 %packed_lhs_view, 0
   set.unpack-size 0
-  %lhs_fragment = vunpack.s4.to.s8x64 %27
+  %lhs_fragment = vldb.unpack.s4.to.s8x64 %packed_lhs_view, 0
   %rhs_fragment = vlda.512.i8x64 %rhs_view, 0
-  %33 = mova.i32 776
-  %product = mmul.s8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %33
-  %35 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %35, %output_view, 0
-  %36 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %36, %output_view, 64
-  %37 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %37, %output_view, 128
-  %38 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %38, %output_view, 192
+  %27 = mova.i32 776
+  %product = mmul.s8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %27
+  %29 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %29, %output_view, 0
+  %30 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %30, %output_view, 64
+  %31 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %31, %output_view, 128
+  %32 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %32, %output_view, 192
   return
 }

@@ -100,6 +100,52 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @load_ext
 
 aie2p.target<core> @target
 
+func.def target(@target) @load_bitunpacku_i4x64(%source: buffer) -> (vector<64xi8>) {
+  %source_aligned = buffer.assume.alignment %source {minimum_alignment = 32} : buffer
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<32xi8>
+  %packed = vector.load %source_view[0] : view<32xi8> -> vector<32xi8>
+  %unpacked = vector.bitunpacku<4> %packed : vector<32xi8> -> vector<64xi8>
+  func.return %unpacked : vector<64xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @load_bitunpacku_i4x64() -> (reg<aie2p.vec256 x2>) asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  set.unpack-size 0
+  %unpacked = vldb.unpack.u4.to.u8x64 %source_view, 0
+  return %unpacked
+}
+
+// ====
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @load_bitunpacks_i4x128_dynamic(%source: buffer, %element0: index) -> (vector<128xi8>) {
+  %source_aligned = buffer.assume.alignment %source {minimum_alignment = 64} : buffer
+  %element = index.assume %element0 [range(%element0, 0, 192), mul(%element0, 64)] : index
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<256xi8>
+  %packed = vector.load<volatile> %source_view[%element] : view<256xi8> -> vector<64xi8>
+  %unpacked = vector.bitunpacks<4> %packed : vector<64xi8> -> vector<128xi8>
+  func.return %unpacked : vector<128xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @load_bitunpacks_i4x128_dynamic(%element: reg<aie2p.er>) -> (reg<aie2p.vec256 x4>) asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %12 = mov.address-index %element
+  set.unpack-size 0
+  %unpacked = vldb.unpack.s4.to.s8x128.index.volatile %source_view, %12
+  return %unpacked
+}
+
+// ====
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
 func.def target(@target) @store_fptrunc_bf16x16(%input: vector<16xf32>, %output: buffer) {
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 32} : buffer
   %base = index.constant 0 : offset
@@ -238,6 +284,27 @@ COMPILE-REPORT: source_low selected_ops=3 emitted_ops=2 rows=3
 COMPILE-REPORT: source_low[0] function=report_store_fptrunc_once source_op=index.constant selection=rule descriptor_key=amd.xdna.aie2p.constant.i32.short descriptor_semantic_tag=integer.const.i32 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_store_fptrunc_once source_op=buffer.view selection=rule emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_store_fptrunc_once source_op=vector.store selection=rule plan_key=native_memory_store_f32x32_to_bf16x32 descriptor_key=amd.xdna.aie2p.store.convert.f32x32.to.bf16x32.indexed.immediate descriptor_semantic_tag=convert.floating.f32x32.to.bf16x32.memory.store emitted_ops=2
+
+// ====
+// RUN: compile-report source-to-low,low-dce
+
+aie2p.target<core> @target
+
+func.def target(@target) @report_load_bitunpack_once(%source: buffer) -> (vector<64xi8>) {
+  %source_aligned = buffer.assume.alignment %source {minimum_alignment = 32} : buffer
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<32xi8>
+  %packed = vector.load %source_view[0] : view<32xi8> -> vector<32xi8>
+  %unpacked = vector.bitunpacku<4> %packed : vector<32xi8> -> vector<64xi8>
+  func.return %unpacked : vector<64xi8>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=3 emitted_ops=2 rows=3
+COMPILE-REPORT: source_low[0] function=report_load_bitunpack_once source_op=index.constant selection=rule descriptor_key=amd.xdna.aie2p.constant.i32.short descriptor_semantic_tag=integer.const.i32 emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_load_bitunpack_once source_op=buffer.view selection=rule emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_load_bitunpack_once source_op=vector.load selection=rule plan_key=native_memory_load_unsigned_i4x64_to_i8x64 descriptor_key=amd.xdna.aie2p.load.unpack.u4x64.to.u8x64.configured.indexed.immediate descriptor_semantic_tag=convert.integer.unpack.u4x64.to.u8x64.configured.memory.load emitted_ops=2
 
 // ====
 // RUN: emit source-low output=low

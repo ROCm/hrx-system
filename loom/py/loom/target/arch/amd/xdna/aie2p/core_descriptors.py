@@ -92,10 +92,12 @@ _MACHINE_IMMEDIATES = {
 
 # LLVM's mW*/mX* names describe instruction-operand encoding roles, not
 # distinct storage domains. W registers are the architectural 256-bit storage
-# units. Each X register is an ordered pair of W subregisters and remains the
-# aggregate encoding domain for 512-bit instructions.
+# units. Each X register is an ordered pair of W subregisters and each Y
+# register is an ordered group of four; both remain aggregate encoding domains
+# over the same physical W units.
 _LOW_REGISTER_CLASS_BY_MACHINE_CLASS = {
     "eL": "eR",
+    "eY": "VEC256",
     "mWa": "VEC256",
     "mWb": "VEC256",
     "mWs": "VEC256",

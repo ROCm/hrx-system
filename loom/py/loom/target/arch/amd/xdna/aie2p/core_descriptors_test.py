@@ -181,6 +181,36 @@ def test_fused_vector_memory_descriptors_preserve_conversion_and_memory_contract
         for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
     }
 
+    for source_lane_count in (32, 64):
+        result_lane_count = source_lane_count * 2
+        for source_kind, sign_bit in (("u", 0), ("s", 1)):
+            for address_form, address_field in (
+                ("register", "dj"),
+                ("immediate", None),
+            ):
+                key = (
+                    f"amd.xdna.aie2p.load.unpack.{source_kind}4x"
+                    f"{result_lane_count}.to.{source_kind}8x{result_lane_count}."
+                    f"configured.indexed.{address_form}"
+                )
+                descriptor = descriptors[key]
+                assert descriptor.mnemonic == (
+                    f"vldb.unpack.{source_kind}4.to.{source_kind}8x"
+                    f"{result_lane_count}"
+                    f"{'.index' if address_form == 'register' else ''}"
+                )
+                assert [operand.field_name for operand in descriptor.operands] == [
+                    "dst",
+                    "ptr",
+                    *([address_field] if address_field is not None else []),
+                    "implicit_use_crunpacksize",
+                    f"implicit_use_unpacksign{sign_bit}",
+                ]
+                assert descriptor.operands[0].reg_alts[0].reg_class == ("aie2p.vec256")
+                assert descriptor.operands[0].unit_count == result_lane_count // 32
+                assert descriptor.effects[0].kind is EffectKind.READ
+                assert descriptor.effects[0].width_bits == source_lane_count * 8
+
     load_convert_shapes = (
         ("bf16x16", "f32x16", 256, 1),
         ("bf16x32", "f32x32", 512, 2),
@@ -287,6 +317,7 @@ def test_fused_vector_memory_descriptors_preserve_conversion_and_memory_contract
         if not key.startswith(
             (
                 "amd.xdna.aie2p.load.convert.",
+                "amd.xdna.aie2p.load.unpack.",
                 "amd.xdna.aie2p.load.widen.",
                 "amd.xdna.aie2p.store.convert.",
                 "amd.xdna.aie2p.store.pack.",
@@ -1402,23 +1433,31 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
     ]
     assert [operand.unit_count for operand in packed_dot.operands] == [4, 4, 2, 1]
 
-    for source_kind, sign_bit in (("u", 0), ("s", 1)):
-        unpack = descriptors[
-            f"amd.xdna.aie2p.unpack.{source_kind}4x64.to.{source_kind}8x64.configured"
-        ]
-        assert [operand.field_name for operand in unpack.operands] == [
-            "dst",
-            "src",
-            "implicit_use_crunpacksize",
-            f"implicit_use_unpacksign{sign_bit}",
-        ]
-        assert [operand.reg_alts[0].reg_class for operand in unpack.operands] == [
-            "aie2p.vec256",
-            "aie2p.vec256",
-            "aie2p.mcrunpacksize",
-            f"aie2p.state.unpacksign{sign_bit}",
-        ]
-        assert [operand.unit_count for operand in unpack.operands] == [2, 1, 1, 1]
+    for source_lane_count in (32, 64):
+        result_lane_count = source_lane_count * 2
+        for source_kind, sign_bit in (("u", 0), ("s", 1)):
+            unpack = descriptors[
+                f"amd.xdna.aie2p.unpack.{source_kind}4x{result_lane_count}.to."
+                f"{source_kind}8x{result_lane_count}.configured"
+            ]
+            assert [operand.field_name for operand in unpack.operands] == [
+                "dst",
+                "src",
+                "implicit_use_crunpacksize",
+                f"implicit_use_unpacksign{sign_bit}",
+            ]
+            assert [operand.reg_alts[0].reg_class for operand in unpack.operands] == [
+                "aie2p.vec256",
+                "aie2p.vec256",
+                "aie2p.mcrunpacksize",
+                f"aie2p.state.unpacksign{sign_bit}",
+            ]
+            assert [operand.unit_count for operand in unpack.operands] == [
+                result_lane_count // 32,
+                source_lane_count // 32,
+                1,
+                1,
+            ]
 
     for shape, result_units, source_units in (
         ("2x.w-to-b", 1, 1),

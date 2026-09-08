@@ -8,6 +8,7 @@
 
 from loom.dialect.vector import defs as vector
 from loom.target.arch.amd.xdna.aie2p.contracts.packet_conversion import (
+    I4_UNPACK_SOURCE_LANE_COUNTS,
     INTEGER_PACK_CASES,
     INTEGER_WIDEN_CASES,
 )
@@ -83,6 +84,31 @@ def _fused_rule_identity(rule):
 
 def test_fused_packet_memory_rules_cover_the_native_shape_matrix() -> None:
     logical_cases = [
+        *(
+            (
+                vector.vector_load,
+                source_op,
+                SourceNodeRelation.ADJACENT_UNIQUE_USER,
+                SourceMemoryOperation.LOAD,
+                (
+                    f"native_memory_load_{signedness}_i4x"
+                    f"{source_lane_count * 2}_to_i8x{source_lane_count * 2}"
+                ),
+                (
+                    f"amd.xdna.aie2p.load.unpack.{source_kind}4x"
+                    f"{source_lane_count * 2}.to.{source_kind}8x"
+                    f"{source_lane_count * 2}.configured"
+                ),
+                1,
+                source_lane_count,
+                source_lane_count * 8,
+            )
+            for source_op, source_kind, signedness in (
+                (vector.vector_bitunpacku, "u", "unsigned"),
+                (vector.vector_bitunpacks, "s", "signed"),
+            )
+            for source_lane_count in I4_UNPACK_SOURCE_LANE_COUNTS
+        ),
         *(
             (
                 vector.vector_load,
@@ -222,7 +248,12 @@ def test_fused_packet_memory_rules_preserve_graph_and_state_contracts() -> None:
         if rule.source_op is vector.vector_load:
             assert source_node.relation is SourceNodeRelation.ADJACENT_UNIQUE_USER
             assert source_node.parent_value == ValueRef.result("result")
-            assert source_node.node_value == ValueRef.operand("input")
+            assert source_node.node_value == ValueRef.operand(
+                "source"
+                if source_node.source_op
+                in (vector.vector_bitunpacku, vector.vector_bitunpacks)
+                else "input"
+            )
         else:
             assert rule.source_op is vector.vector_store
             assert source_node.relation is SourceNodeRelation.ADJACENT_DEFINITION
@@ -235,7 +266,11 @@ def test_fused_packet_memory_rules_preserve_graph_and_state_contracts() -> None:
             if isinstance(emit, EmitDescriptorOp)
         ]
         memory_index = descriptor_keys.index(rule.descriptor.key)
-        if ".load.widen." in rule.descriptor.key:
+        if ".load.unpack." in rule.descriptor.key:
+            assert descriptor_keys[memory_index - 1] == (
+                "amd.xdna.aie2p.state.unpack-size.immediate"
+            )
+        elif ".load.widen." in rule.descriptor.key:
             assert descriptor_keys[memory_index - 3 : memory_index] == [
                 "amd.xdna.aie2p.constant.i32.shift",
                 "amd.xdna.aie2p.state.saturation.immediate",

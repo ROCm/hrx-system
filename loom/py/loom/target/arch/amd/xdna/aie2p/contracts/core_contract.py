@@ -634,14 +634,6 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             )
         ),
         core_rules._vector_multiply_i16_rule(),
-        core_rules._vector_bitunpack_i4_rule(
-            vector.vector_bitunpacku,
-            "amd.xdna.aie2p.unpack.u4x64.to.u8x64.configured",
-        ),
-        core_rules._vector_bitunpack_i4_rule(
-            vector.vector_bitunpacks,
-            "amd.xdna.aie2p.unpack.s4x64.to.s8x64.configured",
-        ),
         core_rules._vector_bitunpack_i1_alias_rule(),
         *AIE2P_F32_COMPARE_RULES,
         *AIE2P_F32_RULES,
