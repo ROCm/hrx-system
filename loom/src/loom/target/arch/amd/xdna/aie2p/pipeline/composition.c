@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "loom/analysis/pipeline_firing.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
@@ -30,16 +31,6 @@ static bool loom_aie2p_pipeline_composition_symbol_refs_equal(
   return lhs.module_id == rhs.module_id && lhs.symbol_id == rhs.symbol_id;
 }
 
-static bool loom_aie2p_pipeline_composition_record_shapes_equal(
-    loom_pipeline_plan_record_shape_t lhs,
-    loom_pipeline_plan_record_shape_t rhs) {
-  if (lhs.rank != rhs.rank) return false;
-  for (uint8_t i = 0; i < lhs.rank; ++i) {
-    if (lhs.dimensions[i] != rhs.dimensions[i]) return false;
-  }
-  return true;
-}
-
 static bool loom_aie2p_pipeline_composition_flow_is_internal(
     const loom_pipeline_plan_flow_t* flow, uint32_t group_index) {
   return flow->producer_kind == LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE &&
@@ -47,61 +38,30 @@ static bool loom_aie2p_pipeline_composition_flow_is_internal(
 }
 
 static iree_status_t loom_aie2p_pipeline_composition_validate_group(
-    const loom_pipeline_plan_t* plan, uint32_t group_index) {
-  loom_pipeline_plan_record_shape_t group_record_shape = {0};
-  uint32_t group_record_count = 1;
-  uint32_t fold_record_count = 0;
-  loom_combining_kind_t fold_kind = LOOM_COMBINING_KIND_ADDI;
-  uint8_t fold_fast_math_flags = 0;
-  bool has_group_record_shape = false;
-  bool has_folded_stage = false;
-  bool has_recordwise_stage = false;
-  for (uint32_t stage_index = 0; stage_index < plan->stage_count;
-       ++stage_index) {
+    const loom_pipeline_plan_t* plan, const loom_pipeline_firing_plan_t* firing,
+    uint32_t group_index) {
+  const loom_pipeline_firing_group_t* group_firing =
+      &firing->groups[group_index];
+  if (group_firing->completion_stage_count != 0) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "AIE2P frame-completion stages require a phased worker program");
+  }
+  const loom_pipeline_plan_group_t* group = &plan->groups[group_index];
+  const loom_pipeline_plan_instance_t* instance =
+      &plan->instances[group->instance_start];
+  if (group_firing->fold_count != 0 &&
+      (instance->fold_record_count != group_firing->records_per_frame ||
+       instance->fold_output_count != group_firing->fold_count)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "AIE2P folded worker requires compatible folds on every boundary "
+        "output; mixed cadences require a phased worker program");
+  }
+  for (uint32_t i = 0; i < group_firing->record_stage_count; ++i) {
+    const uint32_t stage_index =
+        firing->stage_indices[group_firing->stage_start + i];
     const loom_pipeline_plan_stage_t* stage = &plan->stages[stage_index];
-    if (stage->group_index != group_index) continue;
-    if (stage->fold_record_count != 0) {
-      if (!has_folded_stage) {
-        fold_record_count = stage->fold_record_count;
-        fold_kind = stage->fold_kind;
-        fold_fast_math_flags = stage->fold_fast_math_flags;
-        has_folded_stage = true;
-      } else if (stage->fold_record_count != fold_record_count ||
-                 stage->fold_kind != fold_kind ||
-                 stage->fold_fast_math_flags != fold_fast_math_flags) {
-        return iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "AIE2P same-group pipeline folds must have identical record "
-            "counts, combining kinds, and floating-point permissions");
-      }
-    } else {
-      has_recordwise_stage = true;
-    }
-
-    const uint32_t port_count =
-        (uint32_t)stage->input_count + stage->output_count;
-    loom_pipeline_plan_record_shape_t stage_record_shape = {0};
-    uint32_t stage_record_count = 1;
-    if (port_count != 0) {
-      const uint32_t flow_index =
-          plan->stage_ports[stage->port_start].flow_index;
-      IREE_ASSERT_LT(flow_index, plan->flow_count);
-      stage_record_shape = plan->flows[flow_index].record_shape;
-      stage_record_count = plan->flows[flow_index].record_count;
-    }
-    if (!has_group_record_shape) {
-      group_record_shape = stage_record_shape;
-      group_record_count = stage_record_count;
-      has_group_record_shape = true;
-    } else if (group_record_count != stage_record_count ||
-               !loom_aie2p_pipeline_composition_record_shapes_equal(
-                   group_record_shape, stage_record_shape)) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "AIE2P same-group pipeline rate change requires a composite state "
-          "machine");
-    }
-
     for (uint16_t input_index = 0; input_index < stage->input_count;
          ++input_index) {
       const uint32_t flow_index =
@@ -114,25 +74,6 @@ static iree_status_t loom_aie2p_pipeline_composition_validate_group(
             "AIE2P buffered same-group pipeline flow requires a composite "
             "ring state machine");
       }
-    }
-  }
-  if (has_folded_stage && has_recordwise_stage) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "AIE2P same-group pipeline cannot mix folded and recordwise stages");
-  }
-  if (has_folded_stage) {
-    const loom_pipeline_plan_group_t* group = &plan->groups[group_index];
-    const loom_pipeline_plan_instance_t* instance =
-        &plan->instances[group->instance_start];
-    if (instance->fold_record_count != fold_record_count ||
-        instance->fold_output_count != group->stage_count ||
-        instance->fold_kind != fold_kind ||
-        instance->fold_fast_math_flags != fold_fast_math_flags) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AIE2P parallel folds were not represented by one physical worker "
-          "behavior");
     }
   }
   return iree_ok_status();
@@ -304,7 +245,8 @@ static iree_status_t loom_aie2p_pipeline_composition_allocate_flow_buffer(
 
 static iree_status_t loom_aie2p_pipeline_composition_build_group(
     loom_module_t* module, const loom_pipeline_plan_t* plan,
-    uint32_t group_index, loom_symbol_ref_t target, loom_rewriter_t* rewriter,
+    const loom_pipeline_firing_plan_t* firing, uint32_t group_index,
+    loom_symbol_ref_t target, loom_rewriter_t* rewriter,
     iree_arena_allocator_t* arena, loom_symbol_ref_t* out_entry,
     loom_op_t** out_function) {
   *out_entry = loom_symbol_ref_null();
@@ -329,15 +271,17 @@ static iree_status_t loom_aie2p_pipeline_composition_build_group(
     flow_buffers[i] = LOOM_VALUE_ID_INVALID;
   }
 
-  const uint32_t stage_count = plan->groups[group_index].stage_count;
+  const loom_pipeline_firing_group_t* group_firing =
+      &firing->groups[group_index];
+  const uint32_t stage_count = group_firing->record_stage_count;
   loom_op_t** call_ops = NULL;
   IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_composition_allocate_array(
       arena, stage_count, sizeof(*call_ops), (void**)&call_ops));
   uint32_t maximum_stage_port_count = 0;
-  for (uint32_t stage_index = 0; stage_index < plan->stage_count;
-       ++stage_index) {
+  for (uint32_t i = 0; i < stage_count; ++i) {
+    const uint32_t stage_index =
+        firing->stage_indices[group_firing->stage_start + i];
     const loom_pipeline_plan_stage_t* stage = &plan->stages[stage_index];
-    if (stage->group_index != group_index) continue;
     const uint32_t stage_port_count =
         (uint32_t)stage->input_count + stage->output_count;
     maximum_stage_port_count =
@@ -389,10 +333,10 @@ static iree_status_t loom_aie2p_pipeline_composition_build_group(
   }
 
   uint32_t call_count = 0;
-  for (uint32_t stage_index = 0; stage_index < plan->stage_count;
-       ++stage_index) {
+  for (uint32_t i = 0; i < stage_count; ++i) {
+    const uint32_t stage_index =
+        firing->stage_indices[group_firing->stage_start + i];
     const loom_pipeline_plan_stage_t* stage = &plan->stages[stage_index];
-    if (stage->group_index != group_index) continue;
     const uint32_t stage_port_count =
         (uint32_t)stage->input_count + stage->output_count;
     for (uint32_t port_index = 0; port_index < stage_port_count; ++port_index) {
@@ -473,6 +417,8 @@ iree_status_t loom_aie2p_pipeline_composition_materialize(
     iree_arena_allocator_t* arena,
     loom_aie2p_pipeline_composition_t* out_composition) {
   *out_composition = (loom_aie2p_pipeline_composition_t){0};
+  loom_pipeline_firing_plan_t firing = {0};
+  IREE_RETURN_IF_ERROR(loom_pipeline_firing_plan_build(plan, arena, &firing));
   loom_symbol_ref_t* instance_entries = NULL;
   IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_composition_allocate_array(
       arena, plan->instance_count, sizeof(*instance_entries),
@@ -498,8 +444,8 @@ iree_status_t loom_aie2p_pipeline_composition_materialize(
        ++group_index) {
     group_targets[group_index] = loom_symbol_ref_null();
     if (plan->groups[group_index].stage_count == 1) continue;
-    IREE_RETURN_IF_ERROR(
-        loom_aie2p_pipeline_composition_validate_group(plan, group_index));
+    IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_composition_validate_group(
+        plan, &firing, group_index));
     IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_composition_group_target(
         module, plan, group_index, &group_targets[group_index]));
   }
@@ -515,8 +461,8 @@ iree_status_t loom_aie2p_pipeline_composition_materialize(
       entry = plan->instances[group->instance_start].entry;
     } else {
       status = loom_aie2p_pipeline_composition_build_group(
-          module, plan, group_index, group_targets[group_index], &rewriter,
-          arena, &entry, &group_functions[group_index]);
+          module, plan, &firing, group_index, group_targets[group_index],
+          &rewriter, arena, &entry, &group_functions[group_index]);
     }
     if (!iree_status_is_ok(status)) break;
     for (uint32_t lane = 0; lane < group->lane_count; ++lane) {

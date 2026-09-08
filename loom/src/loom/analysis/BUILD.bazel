@@ -408,6 +408,7 @@ loom_cc_test(
     name = "pipeline_plan_test",
     srcs = ["pipeline_plan_test.cc"],
     deps = [
+        ":pipeline_firing",
         ":pipeline_plan",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
@@ -420,6 +421,17 @@ loom_cc_test(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "pipeline_firing",
+    srcs = ["pipeline_firing.c"],
+    hdrs = ["pipeline_firing.h"],
+    deps = [
+        ":pipeline_plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 

@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/analysis/scc.h"
 #include "loom/ir/facts.h"
 
 // Mutable logical topology under validation before physical planning begins.
@@ -24,6 +25,82 @@ typedef struct loom_aie2p_array_topology_t {
   // Mutable channel array receiving transport and multicast classification.
   loom_aie2p_array_channel_t* channels;
 } loom_aie2p_array_topology_t;
+
+// Adjacency over worker-to-worker channels. Binding transfers do not create
+// worker dependencies, and multiple channels retain their distinct edges.
+typedef struct loom_aie2p_array_worker_graph_t {
+  // Validated logical array topology.
+  const loom_aie2p_array_plan_t* plan;
+  // First outgoing channel per worker, or UINT32_MAX when there are none.
+  uint32_t* first_channels;
+  // Next outgoing channel from the same worker, or UINT32_MAX at the end.
+  uint32_t* next_channels;
+} loom_aie2p_array_worker_graph_t;
+
+static iree_status_t loom_aie2p_array_worker_graph_visit(
+    void* user_data, iree_host_size_t node,
+    loom_scc_successor_callback_t successor) {
+  const loom_aie2p_array_worker_graph_t* graph = user_data;
+  for (uint32_t channel_index = graph->first_channels[node];
+       channel_index != UINT32_MAX;
+       channel_index = graph->next_channels[channel_index]) {
+    const loom_aie2p_array_channel_t* channel =
+        &graph->plan->channels[channel_index];
+    const uint32_t receiver =
+        graph->plan->endpoints[channel->receiver_endpoint_index].owner_index;
+    IREE_RETURN_IF_ERROR(successor.fn(successor.user_data, receiver));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_array_topology_validate_worker_dependencies(
+    const loom_aie2p_array_topology_t* topology) {
+  const loom_aie2p_array_plan_t* plan = topology->plan;
+  loom_aie2p_array_worker_graph_t graph = {.plan = plan};
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      topology->arena, plan->worker_count, sizeof(*graph.first_channels),
+      (void**)&graph.first_channels));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      topology->arena, plan->channel_count, sizeof(*graph.next_channels),
+      (void**)&graph.next_channels));
+  for (uint32_t i = 0; i < plan->worker_count; ++i) {
+    graph.first_channels[i] = UINT32_MAX;
+  }
+  for (uint32_t i = 0; i < plan->channel_count; ++i) {
+    const loom_aie2p_array_channel_t* channel = &plan->channels[i];
+    const loom_aie2p_array_endpoint_t* sender =
+        &plan->endpoints[channel->sender_endpoint_index];
+    const loom_aie2p_array_endpoint_t* receiver =
+        &plan->endpoints[channel->receiver_endpoint_index];
+    if (sender->owner_kind != LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER ||
+        receiver->owner_kind != LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER) {
+      continue;
+    }
+    graph.next_channels[i] = graph.first_channels[sender->owner_index];
+    graph.first_channels[sender->owner_index] = i;
+  }
+  const loom_scc_graph_t scc_graph = {
+      .node_count = plan->worker_count,
+      .visit_successors = loom_scc_visit_successors_callback_make(
+          loom_aie2p_array_worker_graph_visit, &graph),
+  };
+  loom_scc_list_t components = {0};
+  IREE_RETURN_IF_ERROR(loom_scc_compute(&scc_graph, /*options=*/NULL,
+                                        topology->arena, &components));
+  for (iree_host_size_t i = 0; i < components.count; ++i) {
+    if (components.values[i].is_cycle) {
+      const uint32_t worker_index = (uint32_t)components.values[i].nodes[0];
+      const loom_aie2p_array_worker_t* worker = &plan->workers[worker_index];
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "AIE2P worker channel cycle requires interleaved channel phases; "
+          "worker %u (group %u lane %u) waits for all inputs before publishing "
+          "any output",
+          worker_index, worker->group_index, worker->lane);
+    }
+  }
+  return iree_ok_status();
+}
 
 const loom_aie2p_array_endpoint_t* loom_aie2p_array_topology_base_endpoint(
     const loom_aie2p_array_plan_t* plan,
@@ -565,5 +642,7 @@ iree_status_t loom_aie2p_array_topology_validate(
       }
     }
   }
-  return loom_aie2p_array_topology_validate_worker_rates(topology);
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_array_topology_validate_worker_rates(topology));
+  return loom_aie2p_array_topology_validate_worker_dependencies(topology);
 }

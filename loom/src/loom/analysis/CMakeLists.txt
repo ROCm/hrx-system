@@ -463,6 +463,7 @@ loom_cc_test(
   SRCS
     "pipeline_plan_test.cc"
   DEPS
+    ::pipeline_firing
     ::pipeline_plan
     iree::base
     iree::base::internal::arena
@@ -475,6 +476,20 @@ loom_cc_test(
     loom::testing::context
     loom::testing::module_ptr
     loom::util::fact_table
+)
+
+loom_cc_library(
+  NAME
+    pipeline_firing
+  HDRS
+    "pipeline_firing.h"
+  SRCS
+    "pipeline_firing.c"
+  DEPS
+    ::pipeline_plan
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
 )
 
 loom_cc_library(

@@ -197,6 +197,7 @@ loom_cc_library(
     deps = [
         ":array_descriptors",
         ":leaf_object",
+        "//loom/src/loom/analysis:scc",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/error:emitter",
@@ -326,6 +327,7 @@ loom_cc_library(
     deps = [
         ":array_descriptors",
         ":array_plan",
+        "//loom/src/loom/analysis:pipeline_firing",
         "//loom/src/loom/analysis:pipeline_plan",
         "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/ir",

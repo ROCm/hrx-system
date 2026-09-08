@@ -8,6 +8,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/analysis/pipeline_firing.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -262,6 +263,124 @@ pipeline.def<kernel> @parallel_folds() launch(%left: buffer, %right: buffer, %sh
             LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_SEND);
   EXPECT_EQ(plan.group_ports[4].direction,
             LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_SEND);
+}
+
+TEST_F(PipelinePlanTest, SeparatesRecordAndCompletionStagesInDependencyOrder) {
+  ModulePtr module = Parse(R"(
+func.def @copy(%input: buffer, %output: buffer) {
+  func.return
+}
+func.def @join(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  func.return
+}
+pipeline.def<kernel> @frames() launch(%input: buffer, %output: buffer) {
+  %lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lanes : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<3x8x1xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<3x1xf32>
+  %records = pipeline.read %input_view on %workers : view<3x8x1xf32>, group -> pipeline.flow<tile<1xf32>>
+  %mapped = pipeline.stage @copy on %workers(%records) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %left = pipeline.stage @copy on %workers(%mapped) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %left_sum = pipeline.fold<addf> %left : pipeline.flow<tile<1xf32>>
+  %finished = pipeline.stage @copy on %workers(%left_sum) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %right = pipeline.stage @copy on %workers(%records) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %right_sum = pipeline.fold<addf> %right : pipeline.flow<tile<1xf32>>
+  %result = pipeline.stage @join on %workers(%finished, %right_sum) : (group, pipeline.flow<tile<1xf32>>, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  pipeline.write %result to %output_view : pipeline.flow<tile<1xf32>>, view<3x1xf32>
+  pipeline.return
+}
+)");
+  loom_pipeline_plan_t plan = {};
+  IREE_ASSERT_OK(BuildPlan(module.get(), IREE_SV("frames"), &plan));
+  // A completion stage is not a terminal folded-output worker. Failed flat
+  // behavior recognition must not leave a partially initialized fold contract.
+  EXPECT_EQ(plan.instances[0].fold_record_count, 0u);
+  EXPECT_EQ(plan.instances[0].fold_output_count, 0u);
+  loom_pipeline_firing_plan_t firing = {};
+  IREE_ASSERT_OK(
+      loom_pipeline_firing_plan_build(&plan, &analysis_arena_, &firing));
+  const auto& group = firing.groups[0];
+  EXPECT_EQ(group.frame_count, 3u);
+  EXPECT_EQ(group.records_per_frame, 8u);
+  EXPECT_EQ(group.fold_count, 2u);
+  EXPECT_EQ(group.record_stage_count, 3u);
+  EXPECT_EQ(group.completion_stage_count, 2u);
+  const uint32_t expected_order[] = {0, 1, 3, 2, 4};
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(expected_order); ++i) {
+    EXPECT_EQ(firing.stage_indices[group.stage_start + i], expected_order[i]);
+  }
+  EXPECT_EQ(plan.stages[1].fold_kind, LOOM_COMBINING_KIND_ADDF);
+  EXPECT_EQ(plan.stages[3].fold_kind, LOOM_COMBINING_KIND_ADDF);
+  EXPECT_EQ(plan.stages[1].fold_fast_math_flags, 0u);
+  EXPECT_EQ(plan.stages[3].fold_fast_math_flags, 0u);
+}
+
+TEST_F(PipelinePlanTest, PreservesCompletionDependencyForOneRecordFold) {
+  ModulePtr module = Parse(R"(
+func.def @copy(%input: buffer, %output: buffer) {
+  func.return
+}
+pipeline.def<kernel> @one_record() launch(%input: buffer, %output: buffer) {
+  %lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lanes : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32>
+  %input_flow = pipeline.read %input_view on %workers : view<1xf32>, group -> pipeline.flow<tile<1xf32>>
+  %mapped = pipeline.stage @copy on %workers(%input_flow) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %records = pipeline.stage @copy on %workers(%mapped) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %sum = pipeline.fold<addf> %records : pipeline.flow<tile<1xf32>>
+  %result = pipeline.stage @copy on %workers(%sum) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  pipeline.write %result to %output_view : pipeline.flow<tile<1xf32>>, view<1xf32>
+  pipeline.return
+}
+)");
+  loom_pipeline_plan_t plan = {};
+  IREE_ASSERT_OK(BuildPlan(module.get(), IREE_SV("one_record"), &plan));
+  loom_pipeline_firing_plan_t firing = {};
+  IREE_ASSERT_OK(
+      loom_pipeline_firing_plan_build(&plan, &analysis_arena_, &firing));
+  EXPECT_EQ(firing.groups[0].frame_count, 1u);
+  EXPECT_EQ(firing.groups[0].records_per_frame, 1u);
+  EXPECT_EQ(firing.groups[0].fold_count, 1u);
+  EXPECT_EQ(firing.groups[0].record_stage_count, 2u);
+  EXPECT_EQ(firing.groups[0].completion_stage_count, 1u);
+  EXPECT_EQ(firing.stage_indices[2], 2u);
+}
+
+TEST_F(PipelinePlanTest, RejectsEqualCountsWithDifferentFrameBoundaries) {
+  ModulePtr module = Parse(R"(
+func.def @copy(%input: buffer, %output: buffer) {
+  func.return
+}
+pipeline.def<kernel> @cadences() launch(%lhs: buffer, %rhs: buffer, %lhs_output: buffer, %rhs_output: buffer) {
+  %lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lanes : index -> group
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<2x4x1xf32>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<4x2x1xf32>
+  %lhs_output_view = buffer.view %lhs_output[%base] : buffer -> view<2x1xf32>
+  %rhs_output_view = buffer.view %rhs_output[%base] : buffer -> view<4x1xf32>
+  %left = pipeline.read %lhs_view on %workers : view<2x4x1xf32>, group -> pipeline.flow<tile<1xf32>>
+  %right = pipeline.read %rhs_view on %workers : view<4x2x1xf32>, group -> pipeline.flow<tile<1xf32>>
+  %left_records = pipeline.stage @copy on %workers(%left) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %right_records = pipeline.stage @copy on %workers(%right) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %left_sum = pipeline.fold<addf> %left_records : pipeline.flow<tile<1xf32>>
+  %right_sum = pipeline.fold<addf> %right_records : pipeline.flow<tile<1xf32>>
+  pipeline.write %left_sum to %lhs_output_view : pipeline.flow<tile<1xf32>>, view<2x1xf32>
+  pipeline.write %right_sum to %rhs_output_view : pipeline.flow<tile<1xf32>>, view<4x1xf32>
+  pipeline.return
+}
+)");
+  loom_pipeline_plan_t plan = {};
+  IREE_ASSERT_OK(BuildPlan(module.get(), IREE_SV("cadences"), &plan));
+  loom_pipeline_firing_plan_t firing = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      loom_pipeline_firing_plan_build(&plan, &analysis_arena_, &firing));
+  EXPECT_EQ(firing.groups, nullptr);
+  EXPECT_EQ(firing.stage_indices, nullptr);
 }
 
 TEST_F(PipelinePlanTest, PreservesFixedRecordStorageAcrossPartitions) {

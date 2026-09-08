@@ -1141,30 +1141,32 @@ static iree_status_t loom_pipeline_plan_prepare_group_ports(
   return iree_ok_status();
 }
 
-static bool loom_pipeline_plan_group_has_parallel_folds(
+static bool loom_pipeline_plan_group_has_terminal_folds(
     const loom_pipeline_plan_builder_t* builder, uint32_t group_index,
     uint32_t* out_record_count, uint32_t* out_output_port,
     uint16_t* out_output_count, loom_combining_kind_t* out_kind,
     uint8_t* out_fast_math_flags) {
-  const loom_pipeline_plan_group_t* group = &builder->groups[group_index];
-  bool has_behavior = false;
+  uint32_t fold_count = 0;
+  uint32_t record_count = 0;
+  loom_combining_kind_t kind = LOOM_COMBINING_KIND_ADDI;
+  uint8_t fast_math_flags = 0;
   for (uint32_t stage_index = 0; stage_index < builder->stage_count;
        ++stage_index) {
     const loom_pipeline_plan_stage_t* stage = &builder->stages[stage_index];
     if (stage->group_index != group_index) continue;
-    if (stage->fold_record_count == 0) return false;
-    if (!has_behavior) {
-      *out_record_count = stage->fold_record_count;
-      *out_kind = stage->fold_kind;
-      *out_fast_math_flags = stage->fold_fast_math_flags;
-      has_behavior = true;
-    } else if (stage->fold_record_count != *out_record_count ||
-               stage->fold_kind != *out_kind ||
-               stage->fold_fast_math_flags != *out_fast_math_flags) {
+    if (stage->fold_record_count == 0) continue;
+    if (fold_count == 0) {
+      record_count = stage->fold_record_count;
+      kind = stage->fold_kind;
+      fast_math_flags = stage->fold_fast_math_flags;
+    } else if (stage->fold_record_count != record_count ||
+               stage->fold_kind != kind ||
+               stage->fold_fast_math_flags != fast_math_flags) {
       return false;
     }
+    ++fold_count;
   }
-  if (!has_behavior) return false;
+  if (fold_count == 0) return false;
 
   uint32_t first_output_port = UINT32_MAX;
   uint32_t last_output_port = 0;
@@ -1184,12 +1186,15 @@ static bool loom_pipeline_plan_group_has_parallel_folds(
     last_output_port = iree_max(last_output_port, port->port);
     ++output_count;
   }
-  if (output_count != group->stage_count || output_count > UINT16_MAX ||
+  if (output_count != fold_count || output_count > UINT16_MAX ||
       last_output_port - first_output_port + 1 != output_count) {
     return false;
   }
   *out_output_port = first_output_port;
   *out_output_count = (uint16_t)output_count;
+  *out_record_count = record_count;
+  *out_kind = kind;
+  *out_fast_math_flags = fast_math_flags;
   return true;
 }
 
@@ -1218,7 +1223,7 @@ static void loom_pipeline_plan_finalize_instance_behaviors(
         break;
       }
     } else {
-      loom_pipeline_plan_group_has_parallel_folds(
+      loom_pipeline_plan_group_has_terminal_folds(
           builder, group_index, &fold_record_count, &fold_output_port,
           &fold_output_count, &fold_kind, &fold_fast_math_flags);
     }
