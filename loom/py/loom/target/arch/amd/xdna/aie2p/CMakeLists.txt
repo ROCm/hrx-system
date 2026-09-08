@@ -178,9 +178,11 @@ iree_py_test(
     "../../../../../tools/pytest_style_runner.py"
   SRCS
     "core_descriptors_test.py"
+    "core_memory_descriptors_test.py"
     "../../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.target.arch.amd.xdna.aie2p.core_descriptors_test"
+    "loom.target.arch.amd.xdna.aie2p.core_memory_descriptors_test"
   DEPS
     loom::py::loom::target::arch::amd::xdna::aie2p::descriptors
     loom::py::loom::target::arch::amd::xdna::aie2p::machine_data

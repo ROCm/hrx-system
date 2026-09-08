@@ -152,9 +152,13 @@ iree_py_test(
     size = "small",
     srcs = [
         "core_descriptors_test.py",
+        "core_memory_descriptors_test.py",
         "//loom/py/loom/tools:pytest_style_runner.py",
     ],
-    args = ["loom.target.arch.amd.xdna.aie2p.core_descriptors_test"],
+    args = [
+        "loom.target.arch.amd.xdna.aie2p.core_descriptors_test",
+        "loom.target.arch.amd.xdna.aie2p.core_memory_descriptors_test",
+    ],
     main = "pytest_style_runner.py",
     deps = [
         ":descriptors",
