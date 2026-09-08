@@ -173,6 +173,134 @@ def test_native_numeric_descriptors_have_report_semantic_categories() -> None:
         assert semantic_tag.startswith(f"{expected_category}.")
 
 
+def test_fused_vector_memory_descriptors_preserve_conversion_and_memory_contracts() -> (
+    None
+):
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+
+    load_convert_shapes = (
+        ("bf16x16", "f32x16", 256, 1),
+        ("bf16x32", "f32x32", 512, 2),
+    )
+    for (
+        source_shape,
+        result_shape,
+        memory_width_bits,
+        result_units,
+    ) in load_convert_shapes:
+        for address_form, address_field in (
+            ("register", "dj"),
+            ("immediate", None),
+        ):
+            key = (
+                f"amd.xdna.aie2p.load.convert.{source_shape}.to.{result_shape}"
+                f".indexed.{address_form}"
+            )
+            descriptor = descriptors[key]
+            assert descriptor.mnemonic == (
+                f"vlda.convert.{source_shape}.to.{result_shape}"
+                f"{'.index' if address_form == 'register' else ''}"
+            )
+            assert descriptor.semantic_tag == (
+                f"convert.floating.{source_shape}.to.{result_shape}.memory.load"
+            )
+            assert [operand.field_name for operand in descriptor.operands] == [
+                "op",
+                "ptr",
+                *([address_field] if address_field is not None else []),
+            ]
+            assert descriptor.operands[0].reg_alts[0].reg_class == "aie2p.mbms"
+            assert descriptor.operands[0].unit_count == result_units
+            assert len(descriptor.effects) == 1
+            assert descriptor.effects[0].kind is EffectKind.READ
+            assert descriptor.effects[0].width_bits == memory_width_bits
+
+    for shape, memory_width_bits, result_units in (
+        ("2x.w-to-b", 256, 1),
+        ("4x.w-to-c", 256, 2),
+        ("2x.x-to-c", 512, 2),
+        ("4x.x-to-d", 512, 4),
+    ):
+        for signedness, sign_bit in (("unsigned", 0), ("signed", 1)):
+            key = (
+                f"amd.xdna.aie2p.load.widen.{shape}.{signedness}.configured"
+                ".indexed.immediate"
+            )
+            descriptor = descriptors[key]
+            assert [operand.field_name for operand in descriptor.operands] == [
+                "dst",
+                "su",
+                "ptr",
+                "implicit_def_srups_of",
+                "implicit_use_crsat",
+                "implicit_use_crupsmode",
+                f"implicit_use_upssign{sign_bit}",
+            ]
+            assert descriptor.operands[0].reg_alts[0].reg_class == "aie2p.mbms"
+            assert descriptor.operands[0].unit_count == result_units
+            assert descriptor.effects[0].kind is EffectKind.READ
+            assert descriptor.effects[0].width_bits == memory_width_bits
+
+    for source_shape, result_shape, memory_width_bits, source_units in (
+        ("f32x16", "bf16x16", 256, 1),
+        ("f32x32", "bf16x32", 512, 2),
+    ):
+        key = (
+            f"amd.xdna.aie2p.store.convert.{source_shape}.to.{result_shape}"
+            ".indexed.immediate"
+        )
+        descriptor = descriptors[key]
+        assert [operand.field_name for operand in descriptor.operands] == [
+            "src",
+            "ptr",
+            "implicit_def_srf2fflags",
+            "implicit_use_crf2fmask",
+            "implicit_use_crrnd",
+        ]
+        assert descriptor.operands[0].reg_alts[0].reg_class == "aie2p.mbms"
+        assert descriptor.operands[0].unit_count == source_units
+        assert descriptor.effects[0].kind is EffectKind.WRITE
+        assert descriptor.effects[0].width_bits == memory_width_bits
+
+    for width, memory_width_bits, source_units in (
+        ("w", 256, 2),
+        ("x", 512, 4),
+    ):
+        key = f"amd.xdna.aie2p.store.pack.{width}.trunc.configured.indexed.immediate"
+        descriptor = descriptors[key]
+        assert [operand.field_name for operand in descriptor.operands] == [
+            "src",
+            "ptr",
+            "implicit_use_crpacksize",
+            "implicit_use_crsat",
+            "implicit_use_packsign0",
+        ]
+        assert descriptor.operands[0].reg_alts[0].reg_class == "aie2p.vec256"
+        assert descriptor.operands[0].unit_count == source_units
+        assert descriptor.effects[0].kind is EffectKind.WRITE
+        assert descriptor.effects[0].width_bits == memory_width_bits
+
+    for key in tuple(descriptors):
+        if not key.startswith(
+            (
+                "amd.xdna.aie2p.load.convert.",
+                "amd.xdna.aie2p.load.widen.",
+                "amd.xdna.aie2p.store.convert.",
+                "amd.xdna.aie2p.store.pack.",
+            )
+        ) or key.endswith(".volatile"):
+            continue
+        ordinary = descriptors[key]
+        ordered = descriptors[f"{key}.volatile"]
+        assert ordered.mnemonic == f"{ordinary.mnemonic}.volatile"
+        assert ordered.effects[0].kind is ordinary.effects[0].kind
+        assert ordered.effects[0].width_bits == ordinary.effects[0].width_bits
+        assert EffectFlag.ORDERED in ordered.effects[0].flags
+
+
 def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
     assert {

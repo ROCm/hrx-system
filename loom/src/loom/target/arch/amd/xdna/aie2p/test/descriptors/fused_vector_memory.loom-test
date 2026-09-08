@@ -1,0 +1,30 @@
+// RUN: emit source-low output=module
+
+aie2p.target<core> @target
+
+low.func.def retain target<amd.xdna.aie2p.core>(@target) @fused_vector_memory(%pointer: reg<aie2p.ep>, %index: reg<aie2p.edj>, %shift: reg<aie2p.es>, %accumulator512: reg<aie2p.mbms>, %accumulator1024: reg<aie2p.mbms x2>, %vector512: reg<aie2p.vec256 x2>, %vector1024: reg<aie2p.vec256 x4>) -> (reg<aie2p.mbms>, reg<aie2p.mbms x2>, reg<aie2p.mbms>, reg<aie2p.mbms x2>) asm {
+  %bf16x16 = vlda.convert.bf16x16.to.f32x16 %pointer, 0
+  %bf16x32 = vlda.convert.bf16x32.to.f32x32.index %pointer, %index
+  %signed_i16 = vlda.ups.2x.w-to-b.signed %shift, %pointer, 0
+  %unsigned_i8 = vlda.ups.4x.w-to-c.unsigned.index %shift, %pointer, %index
+  vst.convert.f32x16.to.bf16x16 %accumulator512, %pointer, 0
+  vst.convert.f32x32.to.bf16x32.index %accumulator1024, %pointer, %index
+  vst.pack.w.trunc %vector512, %pointer, 0
+  vst.pack.x.trunc.index %vector1024, %pointer, %index
+  return %bf16x16, %bf16x32, %signed_i16, %unsigned_i8
+}
+
+// ----
+aie2p.target<core> @target
+
+low.func.def retain target<amd.xdna.aie2p.core>(@target) @fused_vector_memory(%pointer: reg<aie2p.ep>, %index: reg<aie2p.edj>, %shift: reg<aie2p.es>, %accumulator512: reg<aie2p.mbms>, %accumulator1024: reg<aie2p.mbms x2>, %vector512: reg<aie2p.vec256 x2>, %vector1024: reg<aie2p.vec256 x4>) -> (reg<aie2p.mbms>, reg<aie2p.mbms x2>, reg<aie2p.mbms>, reg<aie2p.mbms x2>) asm {
+  %bf16x16 = vlda.convert.bf16x16.to.f32x16 %pointer, 0
+  %bf16x32 = vlda.convert.bf16x32.to.f32x32.index %pointer, %index
+  %signed_i16 = vlda.ups.2x.w-to-b.signed %shift, %pointer, 0
+  %unsigned_i8 = vlda.ups.4x.w-to-c.unsigned.index %shift, %pointer, %index
+  vst.convert.f32x16.to.bf16x16 %accumulator512, %pointer, 0
+  vst.convert.f32x32.to.bf16x32.index %accumulator1024, %pointer, %index
+  vst.pack.w.trunc %vector512, %pointer, 0
+  vst.pack.x.trunc.index %vector1024, %pointer, %index
+  return %bf16x16, %bf16x32, %signed_i16, %unsigned_i8
+}

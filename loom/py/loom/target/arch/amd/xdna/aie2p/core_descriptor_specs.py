@@ -366,6 +366,125 @@ def _integer_conversion_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
     return (*widen_specs, *pack_specs)
 
 
+def _fused_vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
+    """Selects indexed vector memory forms with native packet conversion."""
+
+    load_convert_specs = tuple(
+        _DescriptorSpec(
+            form_name,
+            f"{_TARGET_KEY}.load.convert.{source_shape}.to.{result_shape}.indexed.{address_form}",
+            f"convert.floating.{source_shape}.to.{result_shape}.memory.load",
+            f"II_{form_name}",
+            storage_overrides=(("op", "mBMs"),),
+            asm_mnemonic=(
+                f"vlda.convert.{source_shape}.to.{result_shape}"
+                f"{'.index' if address_form == 'register' else ''}"
+            ),
+            memory_width_bits=memory_width_bits,
+        )
+        for source_shape, result_shape, memory_width_bits, form_stem in (
+            (
+                "bf16x16",
+                "f32x16",
+                256,
+                "VLDA_CONV_fp32_bf16_dmw_lda_ups_bf_idx",
+            ),
+            (
+                "bf16x32",
+                "f32x32",
+                512,
+                "VLDA_CONV_fp32_bf16_dmx_lda_ups_bf_idx",
+            ),
+        )
+        for address_form, form_name in (
+            ("register", form_stem),
+            ("immediate", f"{form_stem}_imm"),
+        )
+    )
+    load_widen_specs = tuple(
+        _DescriptorSpec(
+            f"{form_stem}{form_suffix}_upsSign{sign_bit}",
+            f"{_TARGET_KEY}.load.widen.{shape}.{signedness}.configured.indexed.{address_form}",
+            f"convert.integer.widen.{shape}.{signedness}.configured.memory.load",
+            f"II_{form_stem}{form_suffix}_upsSign{sign_bit}",
+            storage_overrides=(("dst", "mBMs"),),
+            asm_mnemonic=(
+                f"vlda.ups.{shape}.{signedness}"
+                f"{'.index' if address_form == 'register' else ''}"
+            ),
+            memory_width_bits=memory_width_bits,
+        )
+        for shape, memory_width_bits, form_stem in (
+            ("2x.w-to-b", 256, "VLDA_UPS_2x_dmw_lda_ups_w2b_idx"),
+            ("4x.w-to-c", 256, "VLDA_UPS_4x_dmw_lda_ups_w2c_idx"),
+            ("2x.x-to-c", 512, "VLDA_UPS_2x_dmx_lda_ups_x2c_idx"),
+            ("4x.x-to-d", 512, "VLDA_UPS_4x_dmx_lda_ups_x2d_idx"),
+        )
+        for signedness, sign_bit in (("unsigned", 0), ("signed", 1))
+        for address_form, form_suffix in (("register", ""), ("immediate", "_imm"))
+    )
+    store_convert_specs = tuple(
+        _DescriptorSpec(
+            form_name,
+            f"{_TARGET_KEY}.store.convert.{source_shape}.to.{result_shape}.indexed.{address_form}",
+            f"convert.floating.{source_shape}.to.{result_shape}.memory.store",
+            f"II_{form_name}",
+            storage_overrides=(("src", "mBMs"),),
+            asm_mnemonic=(
+                f"vst.convert.{source_shape}.to.{result_shape}"
+                f"{'.index' if address_form == 'register' else ''}"
+            ),
+            memory_width_bits=memory_width_bits,
+        )
+        for source_shape, result_shape, memory_width_bits, form_stem in (
+            (
+                "f32x16",
+                "bf16x16",
+                256,
+                "VST_CONV_bf16_fp32_dmw_sts_srs_bf_idx",
+            ),
+            (
+                "f32x32",
+                "bf16x32",
+                512,
+                "VST_CONV_bf16_fp32_dmx_sts_srs_bf_idx",
+            ),
+        )
+        for address_form, form_name in (
+            ("register", form_stem),
+            ("immediate", f"{form_stem}_imm"),
+        )
+    )
+    store_pack_specs = tuple(
+        _DescriptorSpec(
+            form_name,
+            f"{_TARGET_KEY}.store.pack.{width}.trunc.configured.indexed.{address_form}",
+            f"convert.integer.pack.{width}.trunc.configured.memory.store",
+            f"II_{form_name}",
+            storage_overrides=storage_overrides,
+            asm_mnemonic=(
+                f"vst.pack.{width}.trunc"
+                f"{'.index' if address_form == 'register' else ''}"
+            ),
+            memory_width_bits=memory_width_bits,
+        )
+        for width, memory_width_bits, form_stem, storage_overrides in (
+            ("w", 256, "VST_PACK_dmw_sts_pack_idx", ()),
+            ("x", 512, "VST_PACK_dmx_sts_pack_idx", (("src", "VEC256"),)),
+        )
+        for address_form, form_name in (
+            ("register", f"{form_stem}_packSign0"),
+            ("immediate", f"{form_stem}_imm_packSign0"),
+        )
+    )
+    return (
+        *load_convert_specs,
+        *load_widen_specs,
+        *store_convert_specs,
+        *store_pack_specs,
+    )
+
+
 def _accumulator_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
     """Selects raw 512-bit accumulator loads and stores."""
 
@@ -920,6 +1039,7 @@ _BASE_DESCRIPTOR_SPECS = (
     *_packed_dot_descriptor_specs(),
     *_packed_i4_unpack_descriptor_specs(),
     *_integer_conversion_descriptor_specs(),
+    *_fused_vector_memory_descriptor_specs(),
     *_accumulator_memory_descriptor_specs(),
     _DescriptorSpec(
         "VSRS_4x_mv_x_srs_dm_srsSign1",

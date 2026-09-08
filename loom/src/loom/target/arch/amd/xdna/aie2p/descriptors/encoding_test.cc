@@ -526,6 +526,83 @@ TEST(DescriptorEncodingTest,
   }
 }
 
+TEST(DescriptorEncodingTest,
+     FusedVectorMemoryConversionsMatchOracleInstructionEncodings) {
+  struct TestCase {
+    std::string_view descriptor_key;
+    std::vector<std::string_view> registers;
+    std::vector<int64_t> immediates;
+    std::string_view bundle_format;
+    std::array<uint8_t, 4> expected;
+  };
+  const TestCase test_cases[] = {
+      {"amd.xdna.aie2p.load.convert.bf16x16.to.f32x16.indexed.immediate",
+       {"bmhl4", "p3"},
+       {224},
+       "I32_LDA",
+       {0x98, 0x49, 0x76, 0x03}},
+      {"amd.xdna.aie2p.load.convert.bf16x32.to.f32x32.indexed.immediate",
+       {"cml2", "p2"},
+       {-512},
+       "I32_LDA",
+       {0x98, 0x2B, 0x85, 0x02}},
+      {"amd.xdna.aie2p.load.widen.2x.w-to-b.unsigned.configured.indexed."
+       "immediate",
+       {"bmhh3", "s1", "p1"},
+       {32},
+       "I32_LDA",
+       {0x98, 0xE8, 0x15, 0x01}},
+      {"amd.xdna.aie2p.load.widen.2x.x-to-c.unsigned.configured.indexed."
+       "immediate",
+       {"cmh3", "s1", "p7"},
+       {-512},
+       "I32_LDA",
+       {0x18, 0xD3, 0x85, 0x07}},
+      {"amd.xdna.aie2p.load.widen.4x.w-to-c.signed.configured.indexed."
+       "immediate",
+       {"cmh3", "s0", "p0"},
+       {0},
+       "I32_LDA",
+       {0x18, 0xCD, 0x05, 0x00}},
+      {"amd.xdna.aie2p.load.widen.4x.x-to-d.signed.configured.indexed."
+       "immediate",
+       {"dm2", "s3", "p6"},
+       {-512},
+       "I32_LDA",
+       {0x18, 0x7F, 0x85, 0x06}},
+      {"amd.xdna.aie2p.store.convert.f32x16.to.bf16x16.indexed.immediate",
+       {"bmll0", "p0"},
+       {-128},
+       "I32_ST",
+       {0x98, 0x12, 0xC4, 0x08}},
+      {"amd.xdna.aie2p.store.convert.f32x32.to.bf16x32.indexed.immediate",
+       {"cml0", "p0"},
+       {-256},
+       "I32_ST",
+       {0x18, 0x23, 0xC4, 0x08}},
+      {"amd.xdna.aie2p.store.pack.w.trunc.configured.indexed.immediate",
+       {"x7", "p7"},
+       {32},
+       "I32_ST",
+       {0x98, 0xC2, 0x15, 0x0F}},
+      {"amd.xdna.aie2p.store.pack.x.trunc.configured.indexed.immediate",
+       {"y5", "p7"},
+       {448},
+       "I32_ST",
+       {0x98, 0x8E, 0x76, 0x0F}},
+  };
+
+  for (const TestCase& test_case : test_cases) {
+    SCOPED_TRACE(test_case.descriptor_key);
+    std::vector<uint8_t> program;
+    IREE_ASSERT_OK(EncodeSingleDescriptor(
+        test_case.descriptor_key, test_case.registers, test_case.immediates,
+        test_case.bundle_format, &program));
+    EXPECT_EQ(program, std::vector<uint8_t>(test_case.expected.begin(),
+                                            test_case.expected.end()));
+  }
+}
+
 TEST(DescriptorEncodingTest, IntegerMinMaxMatchOracleInstructionEncodings) {
   struct TestCase {
     std::string_view descriptor_key;
