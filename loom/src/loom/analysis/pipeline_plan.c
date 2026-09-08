@@ -1007,26 +1007,6 @@ static bool loom_pipeline_plan_flow_is_internal_to_group(
          flow->group_index == group_index;
 }
 
-static void loom_pipeline_plan_finalize_instance_behaviors(
-    loom_pipeline_plan_builder_t* builder) {
-  for (uint32_t stage_index = 0; stage_index < builder->stage_count;
-       ++stage_index) {
-    const loom_pipeline_plan_stage_t* stage = &builder->stages[stage_index];
-    const loom_pipeline_plan_group_t* group =
-        &builder->groups[stage->group_index];
-    if (group->stage_count != 1) continue;
-    for (uint32_t lane = 0; lane < group->lane_count; ++lane) {
-      loom_pipeline_plan_instance_t* instance =
-          &builder->instances[group->instance_start + lane];
-      instance->entry = stage->entry;
-      instance->fold_record_count = stage->fold_record_count;
-      instance->fold_output_port = stage->fold_output_port;
-      instance->fold_kind = stage->fold_kind;
-      instance->fold_fast_math_flags = stage->fold_fast_math_flags;
-    }
-  }
-}
-
 static uint32_t loom_pipeline_plan_group_next_port(
     const loom_pipeline_plan_builder_t* builder, uint32_t group_index) {
   uint32_t next_port = 0;
@@ -1161,6 +1141,100 @@ static iree_status_t loom_pipeline_plan_prepare_group_ports(
   return iree_ok_status();
 }
 
+static bool loom_pipeline_plan_group_has_parallel_folds(
+    const loom_pipeline_plan_builder_t* builder, uint32_t group_index,
+    uint32_t* out_record_count, uint32_t* out_output_port,
+    uint16_t* out_output_count, loom_combining_kind_t* out_kind,
+    uint8_t* out_fast_math_flags) {
+  const loom_pipeline_plan_group_t* group = &builder->groups[group_index];
+  bool has_behavior = false;
+  for (uint32_t stage_index = 0; stage_index < builder->stage_count;
+       ++stage_index) {
+    const loom_pipeline_plan_stage_t* stage = &builder->stages[stage_index];
+    if (stage->group_index != group_index) continue;
+    if (stage->fold_record_count == 0) return false;
+    if (!has_behavior) {
+      *out_record_count = stage->fold_record_count;
+      *out_kind = stage->fold_kind;
+      *out_fast_math_flags = stage->fold_fast_math_flags;
+      has_behavior = true;
+    } else if (stage->fold_record_count != *out_record_count ||
+               stage->fold_kind != *out_kind ||
+               stage->fold_fast_math_flags != *out_fast_math_flags) {
+      return false;
+    }
+  }
+  if (!has_behavior) return false;
+
+  uint32_t first_output_port = UINT32_MAX;
+  uint32_t last_output_port = 0;
+  uint32_t output_count = 0;
+  for (uint32_t i = 0; i < builder->group_port_count; ++i) {
+    const loom_pipeline_plan_group_port_t* port = &builder->group_ports[i];
+    if (port->group_index != group_index ||
+        port->direction != LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_SEND) {
+      continue;
+    }
+    const loom_pipeline_plan_flow_t* flow = &builder->flows[port->flow_index];
+    if (flow->producer_stage_index >= builder->stage_count ||
+        builder->stages[flow->producer_stage_index].fold_record_count == 0) {
+      return false;
+    }
+    first_output_port = iree_min(first_output_port, port->port);
+    last_output_port = iree_max(last_output_port, port->port);
+    ++output_count;
+  }
+  if (output_count != group->stage_count || output_count > UINT16_MAX ||
+      last_output_port - first_output_port + 1 != output_count) {
+    return false;
+  }
+  *out_output_port = first_output_port;
+  *out_output_count = (uint16_t)output_count;
+  return true;
+}
+
+static void loom_pipeline_plan_finalize_instance_behaviors(
+    loom_pipeline_plan_builder_t* builder) {
+  for (uint32_t group_index = 0; group_index < builder->group_count;
+       ++group_index) {
+    const loom_pipeline_plan_group_t* group = &builder->groups[group_index];
+    uint32_t fold_record_count = 0;
+    uint32_t fold_output_port = 0;
+    uint16_t fold_output_count = 0;
+    loom_combining_kind_t fold_kind = LOOM_COMBINING_KIND_ADDI;
+    uint8_t fold_fast_math_flags = 0;
+    loom_symbol_ref_t entry = loom_symbol_ref_null();
+    if (group->stage_count == 1) {
+      for (uint32_t stage_index = 0; stage_index < builder->stage_count;
+           ++stage_index) {
+        const loom_pipeline_plan_stage_t* stage = &builder->stages[stage_index];
+        if (stage->group_index != group_index) continue;
+        entry = stage->entry;
+        fold_record_count = stage->fold_record_count;
+        fold_output_port = stage->fold_output_port;
+        fold_output_count = stage->fold_record_count != 0 ? 1 : 0;
+        fold_kind = stage->fold_kind;
+        fold_fast_math_flags = stage->fold_fast_math_flags;
+        break;
+      }
+    } else {
+      loom_pipeline_plan_group_has_parallel_folds(
+          builder, group_index, &fold_record_count, &fold_output_port,
+          &fold_output_count, &fold_kind, &fold_fast_math_flags);
+    }
+    for (uint32_t lane = 0; lane < group->lane_count; ++lane) {
+      loom_pipeline_plan_instance_t* instance =
+          &builder->instances[group->instance_start + lane];
+      instance->entry = entry;
+      instance->fold_record_count = fold_record_count;
+      instance->fold_output_port = fold_output_port;
+      instance->fold_output_count = fold_output_count;
+      instance->fold_kind = fold_kind;
+      instance->fold_fast_math_flags = fold_fast_math_flags;
+    }
+  }
+}
+
 static bool loom_pipeline_plan_has_edge_target(
     const loom_pipeline_plan_builder_t* builder, uint32_t flow_index,
     uint32_t target_index, uint32_t target_port) {
@@ -1277,8 +1351,8 @@ static iree_status_t loom_pipeline_plan_emit_write_edges(
 
 static iree_status_t loom_pipeline_plan_finalize_graph(
     loom_pipeline_plan_builder_t* builder) {
-  loom_pipeline_plan_finalize_instance_behaviors(builder);
   IREE_RETURN_IF_ERROR(loom_pipeline_plan_prepare_group_ports(builder));
+  loom_pipeline_plan_finalize_instance_behaviors(builder);
   for (uint32_t stage_index = 0; stage_index < builder->stage_count;
        ++stage_index) {
     IREE_RETURN_IF_ERROR(

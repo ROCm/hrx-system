@@ -50,15 +50,32 @@ static iree_status_t loom_aie2p_pipeline_composition_validate_group(
     const loom_pipeline_plan_t* plan, uint32_t group_index) {
   loom_pipeline_plan_record_shape_t group_record_shape = {0};
   uint32_t group_record_count = 1;
+  uint32_t fold_record_count = 0;
+  loom_combining_kind_t fold_kind = LOOM_COMBINING_KIND_ADDI;
+  uint8_t fold_fast_math_flags = 0;
   bool has_group_record_shape = false;
+  bool has_folded_stage = false;
+  bool has_recordwise_stage = false;
   for (uint32_t stage_index = 0; stage_index < plan->stage_count;
        ++stage_index) {
     const loom_pipeline_plan_stage_t* stage = &plan->stages[stage_index];
     if (stage->group_index != group_index) continue;
     if (stage->fold_record_count != 0) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "AIE2P same-group pipeline fold requires a composite state machine");
+      if (!has_folded_stage) {
+        fold_record_count = stage->fold_record_count;
+        fold_kind = stage->fold_kind;
+        fold_fast_math_flags = stage->fold_fast_math_flags;
+        has_folded_stage = true;
+      } else if (stage->fold_record_count != fold_record_count ||
+                 stage->fold_kind != fold_kind ||
+                 stage->fold_fast_math_flags != fold_fast_math_flags) {
+        return iree_make_status(
+            IREE_STATUS_UNIMPLEMENTED,
+            "AIE2P same-group pipeline folds must have identical record "
+            "counts, combining kinds, and floating-point permissions");
+      }
+    } else {
+      has_recordwise_stage = true;
     }
 
     const uint32_t port_count =
@@ -97,6 +114,25 @@ static iree_status_t loom_aie2p_pipeline_composition_validate_group(
             "AIE2P buffered same-group pipeline flow requires a composite "
             "ring state machine");
       }
+    }
+  }
+  if (has_folded_stage && has_recordwise_stage) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "AIE2P same-group pipeline cannot mix folded and recordwise stages");
+  }
+  if (has_folded_stage) {
+    const loom_pipeline_plan_group_t* group = &plan->groups[group_index];
+    const loom_pipeline_plan_instance_t* instance =
+        &plan->instances[group->instance_start];
+    if (instance->fold_record_count != fold_record_count ||
+        instance->fold_output_count != group->stage_count ||
+        instance->fold_kind != fold_kind ||
+        instance->fold_fast_math_flags != fold_fast_math_flags) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AIE2P parallel folds were not represented by one physical worker "
+          "behavior");
     }
   }
   return iree_ok_status();

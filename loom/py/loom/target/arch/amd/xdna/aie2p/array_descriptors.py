@@ -266,6 +266,7 @@ _DESCRIPTORS = (
                 unsigned_max=(2**32) - 1,
             ),
             _u32("output_port"),
+            _u32("output_count"),
             Immediate(
                 "kind",
                 ImmediateKind.ENUM,
@@ -277,7 +278,13 @@ _DESCRIPTORS = (
             "worker.fold",
             results=("result",),
             operands=("group", "lane", "records"),
-            immediates=("entry", "output_port", "kind", "fast_math"),
+            immediates=(
+                "entry",
+                "output_port",
+                "output_count",
+                "kind",
+                "fast_math",
+            ),
         ),
         effects=(_TOPOLOGY_EFFECT,),
         schedule_class=_SCHEDULE_GRAPH,

@@ -1011,7 +1011,7 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@temporal_fold_array_tar
   %binding_offset = constant.u64 64 : reg<aie2p.array.offset : offset>
 
   %group = group %lanes
-  %worker = worker.fold %group, %lane, %fold_records, @copy_f32_record, 1, 1, 0
+  %worker = worker.fold %group, %lane, %fold_records, @copy_f32_record, 1, 1, 1, 0
   %input = binding 0, "read"
   %output = binding 1, "write"
   %input_sender = sender %input, 0 : reg<aie2p.array.sender : tile<1x3x4x32xf32, #encoding.layout.strided<strides=[0, 0, 32, 1]>>>
@@ -1039,7 +1039,7 @@ low.func.def target<amd.xdna.aie2p.core>(@temporal_fold_core_target) abi(object_
 array @temporal_fold_array family=amd.xdna.npu2 groups=1 workers=1 bindings=2 channels=2 slots=4 locks=4 dma=4 routes=8
 binding index=0 ordinal=0 access=read
 binding index=1 ordinal=1 access=write
-worker index=0 group=0 lane=0 entry=@copy_f32_record tile=(0,2) fold-records=4 fold-output=1 fold-kind=1 fold-fast-math=0x00 code-bytes=28 resources=2 storage-domains=0
+worker index=0 group=0 lane=0 entry=@copy_f32_record tile=(0,2) fold-records=4 fold-output=1+1 fold-kind=1 fold-fast-math=0x00 code-bytes=28 resources=2 storage-domains=0
 channel index=0 transport=external-dma record-bytes=128 capacity=2 records=12 sender=binding[0]:0 partition=0/1 receiver=worker[0]:0
 channel index=1 transport=external-dma record-bytes=128 capacity=2 records=3 sender=worker[0]:1 receiver=binding[1]:0
 worker-port worker=0 port=0 direction=receive channel=0 first-slot=0

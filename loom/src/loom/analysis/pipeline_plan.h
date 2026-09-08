@@ -162,6 +162,10 @@ typedef struct loom_pipeline_plan_instance_t {
 
   // Floating-point permissions applied by the temporal fold.
   uint8_t fold_fast_math_flags;
+
+  // Number of contiguous callable output ports folded independently. Zero
+  // denotes recordwise execution.
+  uint16_t fold_output_count;
 } loom_pipeline_plan_instance_t;
 
 typedef struct loom_pipeline_plan_record_shape_t {

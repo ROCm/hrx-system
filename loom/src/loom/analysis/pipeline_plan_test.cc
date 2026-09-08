@@ -150,6 +150,7 @@ pipeline.def<kernel> @split_k() launch(%lhs: buffer, %rhs: buffer, %bias: buffer
   EXPECT_EQ(plan.instances[0].lane, 0u);
   EXPECT_EQ(plan.instances[0].fold_record_count, 2u);
   EXPECT_EQ(plan.instances[0].fold_output_port, 2u);
+  EXPECT_EQ(plan.instances[0].fold_output_count, 1u);
   EXPECT_EQ(plan.instances[0].fold_kind, LOOM_COMBINING_KIND_ADDI);
   EXPECT_EQ(plan.instances[1].group_index, 0u);
   EXPECT_EQ(plan.instances[1].lane, 1u);
@@ -157,6 +158,7 @@ pipeline.def<kernel> @split_k() launch(%lhs: buffer, %rhs: buffer, %bias: buffer
   EXPECT_EQ(plan.instances[2].group_index, 1u);
   EXPECT_EQ(plan.instances[2].lane, 0u);
   EXPECT_EQ(plan.instances[2].fold_record_count, 0u);
+  EXPECT_EQ(plan.instances[2].fold_output_count, 0u);
 
   EXPECT_EQ(plan.flow_count, 7u);
   EXPECT_EQ(plan.edge_count, 8u);
@@ -214,6 +216,52 @@ pipeline.def<kernel> @split_k() launch(%lhs: buffer, %rhs: buffer, %bias: buffer
                                    /*.instance_count=*/2,
                                },
                                &analysis_arena_, &undersized_plan));
+}
+
+TEST_F(PipelinePlanTest, CombinesParallelFoldedStagesIntoOneWorkerBehavior) {
+  ModulePtr module = Parse(R"(
+func.def @add(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  func.return
+}
+
+pipeline.def<kernel> @parallel_folds() launch(%left: buffer, %right: buffer, %shared: buffer, %left_output: buffer, %right_output: buffer) {
+  %lane_count = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lane_count : index -> group
+  %left_view = buffer.view %left[%base] : buffer -> view<2x1xf32>
+  %right_view = buffer.view %right[%base] : buffer -> view<2x1xf32>
+  %shared_view = buffer.view %shared[%base] : buffer -> view<2x1xf32>
+  %left_output_view = buffer.view %left_output[%base] : buffer -> view<1xf32>
+  %right_output_view = buffer.view %right_output[%base] : buffer -> view<1xf32>
+  %left_flow = pipeline.read %left_view on %workers : view<2x1xf32>, group -> pipeline.flow<tile<1xf32>>
+  %right_flow = pipeline.read %right_view on %workers : view<2x1xf32>, group -> pipeline.flow<tile<1xf32>>
+  %shared_flow = pipeline.read %shared_view on %workers : view<2x1xf32>, group -> pipeline.flow<tile<1xf32>>
+  %left_records = pipeline.stage @add on %workers(%left_flow, %shared_flow) : (group, pipeline.flow<tile<1xf32>>, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %right_records = pipeline.stage @add on %workers(%right_flow, %shared_flow) : (group, pipeline.flow<tile<1xf32>>, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %left_sum = pipeline.fold<addf> %left_records : pipeline.flow<tile<1xf32>>
+  %right_sum = pipeline.fold<addf> %right_records : pipeline.flow<tile<1xf32>>
+  pipeline.write %left_sum to %left_output_view : pipeline.flow<tile<1xf32>>, view<1xf32>
+  pipeline.write %right_sum to %right_output_view : pipeline.flow<tile<1xf32>>, view<1xf32>
+  pipeline.return
+}
+)");
+
+  loom_pipeline_plan_t plan = {};
+  IREE_ASSERT_OK(BuildPlan(module.get(), IREE_SV("parallel_folds"), &plan));
+
+  ASSERT_EQ(plan.group_count, 1u);
+  ASSERT_EQ(plan.instance_count, 1u);
+  EXPECT_FALSE(loom_symbol_ref_is_valid(plan.instances[0].entry));
+  EXPECT_EQ(plan.instances[0].fold_record_count, 2u);
+  EXPECT_EQ(plan.instances[0].fold_output_port, 3u);
+  EXPECT_EQ(plan.instances[0].fold_output_count, 2u);
+  EXPECT_EQ(plan.instances[0].fold_kind, LOOM_COMBINING_KIND_ADDF);
+
+  ASSERT_EQ(plan.group_port_count, 5u);
+  EXPECT_EQ(plan.group_ports[3].direction,
+            LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_SEND);
+  EXPECT_EQ(plan.group_ports[4].direction,
+            LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_SEND);
 }
 
 TEST_F(PipelinePlanTest, PreservesFixedRecordStorageAcrossPartitions) {

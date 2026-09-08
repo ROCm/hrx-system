@@ -20,6 +20,8 @@
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/array/facts.h"
 
+enum { LOOM_AIE2P_ARRAY_SCALAR_FOLD_PACK_WIDTH = 16 };
+
 typedef enum loom_aie2p_array_lock_role_e {
   LOOM_AIE2P_ARRAY_LOCK_ROLE_CREDIT = 0,
   LOOM_AIE2P_ARRAY_LOCK_ROLE_READY = 1,
@@ -402,6 +404,67 @@ static iree_status_t loom_aie2p_array_resident_build_f32_accumulator(
   return iree_ok_status();
 }
 
+static iree_status_t loom_aie2p_array_resident_build_insert_i32(
+    loom_aie2p_array_resident_builder_t* builder, loom_builder_t* ir_builder,
+    loom_value_id_t vector, uint32_t lane, loom_value_id_t scalar,
+    loom_location_id_t location, loom_value_id_t* out_vector) {
+  loom_value_id_t lane_value = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_constant(
+      builder, ir_builder, AIE2P_CORE_DESCRIPTOR_REF_CONSTANT_I32_SHORT, lane,
+      location, /*value_name=*/NULL, &lane_value));
+  const loom_value_id_t operands[] = {vector, lane_value, scalar};
+  return loom_aie2p_array_resident_build_op(
+      builder, ir_builder, AIE2P_CORE_DESCRIPTOR_REF_INSERT_I32_REGISTER,
+      operands, IREE_ARRAYSIZE(operands), loom_named_attr_slice_empty(),
+      &builder->vector512_type, location, out_vector);
+}
+
+static iree_status_t loom_aie2p_array_resident_build_scalar_fold_contribution(
+    loom_aie2p_array_resident_builder_t* builder, loom_builder_t* ir_builder,
+    loom_aie2p_array_resident_port_state_t* const* output_states,
+    uint32_t output_start, uint32_t output_count, loom_location_id_t location,
+    loom_value_id_t* out_accumulator) {
+  const loom_aie2p_array_resident_port_state_t* first_state =
+      output_states[output_start];
+  loom_value_id_t first_scalar = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_load_i32(
+      builder, ir_builder, first_state->current_address, location,
+      &first_scalar));
+  loom_value_id_t vector = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_op(
+      builder, ir_builder, AIE2P_CORE_DESCRIPTOR_REF_SPLAT_I32X16,
+      &first_scalar, 1, loom_named_attr_slice_empty(), &builder->vector512_type,
+      location, &vector));
+  for (uint32_t i = 1; i < output_count; ++i) {
+    loom_value_id_t scalar = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_load_i32(
+        builder, ir_builder, output_states[output_start + i]->current_address,
+        location, &scalar));
+    loom_value_id_t next_vector = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_insert_i32(
+        builder, ir_builder, vector, i, scalar, location, &next_vector));
+    vector = next_vector;
+  }
+  loom_value_id_t accumulator_lane = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_op(
+      builder, ir_builder,
+      AIE2P_CORE_DESCRIPTOR_REF_MOVE_VECTOR512_TO_ACCUMULATOR512, &vector, 1,
+      loom_named_attr_slice_empty(), &builder->accumulator512_type, location,
+      &accumulator_lane));
+  const loom_value_id_t lanes[] = {
+      accumulator_lane,
+      accumulator_lane,
+      accumulator_lane,
+      accumulator_lane,
+  };
+  loom_op_t* concat_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_concat_build(
+      ir_builder, lanes, IREE_ARRAYSIZE(lanes), builder->accumulator2048_type,
+      location, &concat_op));
+  *out_accumulator = loom_low_concat_result(concat_op);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_aie2p_array_resident_build_add_f32_accumulators(
     loom_aie2p_array_resident_builder_t* builder, loom_builder_t* ir_builder,
     loom_value_id_t lhs, loom_value_id_t rhs, loom_value_id_t mode,
@@ -415,7 +478,7 @@ static iree_status_t loom_aie2p_array_resident_build_add_f32_accumulators(
 
 static iree_status_t loom_aie2p_array_resident_build_extract_f32(
     loom_aie2p_array_resident_builder_t* builder, loom_builder_t* ir_builder,
-    loom_value_id_t accumulator, loom_location_id_t location,
+    loom_value_id_t accumulator, uint32_t lane, loom_location_id_t location,
     loom_value_id_t* out_value) {
   loom_op_t* slice_op = NULL;
   IREE_RETURN_IF_ERROR(
@@ -428,13 +491,13 @@ static iree_status_t loom_aie2p_array_resident_build_extract_f32(
       AIE2P_CORE_DESCRIPTOR_REF_MOVE_ACCUMULATOR512_TO_VECTOR512, &sum_lane, 1,
       loom_named_attr_slice_empty(), &builder->vector512_type, location,
       &sum_vector));
-  const loom_named_attr_t lane = {
+  const loom_named_attr_t lane_attr = {
       .name_id = builder->vector_index_name,
-      .value = loom_attr_i64(0),
+      .value = loom_attr_i64(lane),
   };
   return loom_aie2p_array_resident_build_op(
       builder, ir_builder, AIE2P_CORE_DESCRIPTOR_REF_EXTRACT_I32_IMMEDIATE,
-      &sum_vector, 1, loom_make_named_attr_slice(&lane, 1),
+      &sum_vector, 1, loom_make_named_attr_slice(&lane_attr, 1),
       &builder->lock_delta_type, location, out_value);
 }
 
@@ -481,7 +544,7 @@ static iree_status_t loom_aie2p_array_resident_build_fold_store(
   if (byte_length == sizeof(float)) {
     loom_value_id_t result = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_extract_f32(
-        builder, ir_builder, accumulator, location, &result));
+        builder, ir_builder, accumulator, /*lane=*/0, location, &result));
     return loom_aie2p_array_resident_build_store_i32(builder, ir_builder,
                                                      result, address, location);
   }
@@ -974,24 +1037,30 @@ static iree_status_t loom_aie2p_array_resident_rewrite_returns(
   return iree_ok_status();
 }
 
-static loom_aie2p_array_resident_port_state_t*
-loom_aie2p_array_resident_find_fold_output(
+static void loom_aie2p_array_resident_find_fold_outputs(
     const loom_aie2p_array_worker_t* worker,
     loom_aie2p_array_resident_port_state_t* port_states,
-    iree_host_size_t port_state_count) {
-  loom_aie2p_array_resident_port_state_t* result = NULL;
+    iree_host_size_t port_state_count,
+    loom_aie2p_array_resident_port_state_t** out_states) {
+  for (uint32_t i = 0; i < worker->fold_output_count; ++i) {
+    out_states[i] = NULL;
+  }
+  const uint64_t output_end =
+      (uint64_t)worker->fold_output_port + worker->fold_output_count;
   for (iree_host_size_t i = 0; i < port_state_count; ++i) {
     const loom_aie2p_array_worker_port_plan_t* port = port_states[i].port;
     if (port->direction == LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND &&
-        port->port == worker->fold_output_port) {
-      IREE_ASSERT(result == NULL &&
-                  "validated folded worker must have one output port");
-      result = &port_states[i];
+        port->port >= worker->fold_output_port && port->port < output_end) {
+      const uint32_t output_index = port->port - worker->fold_output_port;
+      IREE_ASSERT(out_states[output_index] == NULL &&
+                  "validated folded worker output ports must be unique");
+      out_states[output_index] = &port_states[i];
     }
   }
-  IREE_ASSERT(result != NULL &&
-              "validated folded worker must have one output port");
-  return result;
+  for (uint32_t i = 0; i < worker->fold_output_count; ++i) {
+    IREE_ASSERT(out_states[i] != NULL &&
+                "validated folded worker output range must be complete");
+  }
 }
 
 static iree_status_t loom_aie2p_array_resident_build_zero_accumulator(
@@ -1002,6 +1071,7 @@ static iree_status_t loom_aie2p_array_resident_build_zero_accumulator(
       builder, ir_builder, AIE2P_CORE_DESCRIPTOR_REF_ACCUMULATOR_CLEAR_F32X64,
       /*operands=*/NULL, /*operand_count=*/0, loom_named_attr_slice_empty(),
       &builder->accumulator2048_type, location, out_accumulator));
+  if (out_lane == NULL) return iree_ok_status();
   loom_op_t* slice_op = NULL;
   IREE_RETURN_IF_ERROR(
       loom_low_slice_build(ir_builder, *out_accumulator, /*offset=*/0,
@@ -1056,6 +1126,7 @@ static iree_status_t loom_aie2p_array_resident_materialize_folded_body(
     loom_aie2p_array_resident_port_state_t* record_states,
     iree_host_size_t port_state_count, loom_value_id_t acquire_delta,
     loom_value_id_t release_delta, loom_location_id_t location) {
+  const uint32_t output_count = worker->fold_output_count;
   loom_aie2p_array_resident_port_state_t* activation_states = NULL;
   if (port_state_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -1066,10 +1137,49 @@ static iree_status_t loom_aie2p_array_resident_materialize_folded_body(
       builder, ir_builder, activation_header, record_states, port_state_count,
       activation_states));
 
-  loom_value_id_t accumulator = LOOM_VALUE_ID_INVALID;
+  loom_aie2p_array_resident_port_state_t** output_states = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(builder->arena, output_count,
+                                                 sizeof(*output_states),
+                                                 (void**)&output_states));
+  loom_aie2p_array_resident_find_fold_outputs(worker, record_states,
+                                              port_state_count, output_states);
+
+  bool pack_scalar_outputs = true;
+  for (uint32_t i = 0; i < output_count; ++i) {
+    const loom_aie2p_array_channel_t* output_channel =
+        &builder->plan->channels[output_states[i]->port->channel_index];
+    if (output_channel->record_byte_length != sizeof(float)) {
+      pack_scalar_outputs = false;
+      break;
+    }
+  }
+  const uint32_t accumulator_count =
+      pack_scalar_outputs
+          ? 1 + (output_count - 1) / LOOM_AIE2P_ARRAY_SCALAR_FOLD_PACK_WIDTH
+          : output_count;
+
+  iree_host_size_t fold_value_count = 0;
+  if (!iree_host_size_checked_mul(accumulator_count, 5, &fold_value_count) ||
+      !iree_host_size_checked_add(fold_value_count, 2, &fold_value_count)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "AIE2P folded worker state is too large");
+  }
+  loom_value_id_t* fold_values = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(builder->arena, fold_value_count,
+                                sizeof(*fold_values), (void**)&fold_values));
+  loom_value_id_t* accumulators = fold_values;
+  loom_value_id_t* contributions = accumulators + accumulator_count;
+  loom_value_id_t* merged_accumulators = contributions + accumulator_count;
+  loom_value_id_t* added_accumulators = merged_accumulators + accumulator_count;
+  loom_value_id_t* record_state = added_accumulators + accumulator_count;
+
+  for (uint32_t i = 0; i < accumulator_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_builder_define_block_arg(
+        ir_builder, record_header, builder->accumulator2048_type,
+        &accumulators[i]));
+  }
   loom_value_id_t remaining_records = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_builder_define_block_arg(
-      ir_builder, record_header, builder->accumulator2048_type, &accumulator));
   IREE_RETURN_IF_ERROR(loom_builder_define_block_arg(
       ir_builder, record_header, builder->lock_delta_type, &remaining_records));
   loom_value_id_t is_first_record = LOOM_VALUE_ID_INVALID;
@@ -1093,21 +1203,21 @@ static iree_status_t loom_aie2p_array_resident_materialize_folded_body(
   loom_value_id_t zero_accumulator_lane = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_zero_accumulator(
       builder, ir_builder, location, &zero_accumulator,
-      &zero_accumulator_lane));
+      pack_scalar_outputs ? NULL : &zero_accumulator_lane));
 
   loom_builder_set_block(ir_builder, activation_header);
   IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_acquires(
       builder, ir_builder, worker_index,
       LOOM_AIE2P_ARRAY_PORT_DIRECTION_FLAG_SEND, acquire_delta, location));
-  const loom_value_id_t initial_record_state[] = {
-      zero_accumulator,
-      record_count,
-      release_delta,
-  };
+  for (uint32_t i = 0; i < accumulator_count; ++i) {
+    record_state[i] = zero_accumulator;
+  }
+  record_state[accumulator_count] = record_count;
+  record_state[accumulator_count + 1] = release_delta;
   IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_state_branch(
       builder, ir_builder, record_header, activation_states, port_state_count,
-      LOOM_AIE2P_ARRAY_STATE_VALUE_CURRENT, initial_record_state,
-      IREE_ARRAYSIZE(initial_record_state), location));
+      LOOM_AIE2P_ARRAY_STATE_VALUE_CURRENT, record_state, accumulator_count + 2,
+      location));
 
   loom_builder_set_block(ir_builder, record_header);
   IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_acquires(
@@ -1136,25 +1246,39 @@ static iree_status_t loom_aie2p_array_resident_materialize_folded_body(
                                                 &continue_block));
   IREE_RETURN_IF_ERROR(loom_region_append_block(builder->module, resident_body,
                                                 &completion_block));
-  loom_value_id_t sum = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_builder_define_block_arg(ir_builder, accumulation_merge_block,
-                                    builder->accumulator2048_type, &sum));
+  for (uint32_t i = 0; i < accumulator_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_builder_define_block_arg(
+        ir_builder, accumulation_merge_block, builder->accumulator2048_type,
+        &merged_accumulators[i]));
+  }
   IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_rewrite_returns(
       builder, ir_builder, resident_body, source_block_start,
       source_body->block_count, record_latch));
 
   loom_builder_set_block(ir_builder, record_latch);
-  loom_aie2p_array_resident_port_state_t* output_state =
-      loom_aie2p_array_resident_find_fold_output(worker, record_states,
-                                                 port_state_count);
-  const loom_aie2p_array_channel_t* output_channel =
-      &builder->plan->channels[output_state->port->channel_index];
-  loom_value_id_t contribution_accumulator = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_fold_contribution(
-      builder, ir_builder, output_state->current_address,
-      output_channel->record_byte_length, zero_accumulator_lane, location,
-      &contribution_accumulator));
+  if (pack_scalar_outputs) {
+    for (uint32_t i = 0; i < accumulator_count; ++i) {
+      const uint32_t output_start = i * LOOM_AIE2P_ARRAY_SCALAR_FOLD_PACK_WIDTH;
+      const uint32_t packed_output_count =
+          iree_min(output_count - output_start,
+                   (uint32_t)LOOM_AIE2P_ARRAY_SCALAR_FOLD_PACK_WIDTH);
+      IREE_RETURN_IF_ERROR(
+          loom_aie2p_array_resident_build_scalar_fold_contribution(
+              builder, ir_builder, output_states, output_start,
+              packed_output_count, location, &contributions[i]));
+    }
+  } else {
+    for (uint32_t i = 0; i < output_count; ++i) {
+      const loom_aie2p_array_resident_port_state_t* output_state =
+          output_states[i];
+      const loom_aie2p_array_channel_t* output_channel =
+          &builder->plan->channels[output_state->port->channel_index];
+      IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_fold_contribution(
+          builder, ir_builder, output_state->current_address,
+          output_channel->record_byte_length, zero_accumulator_lane, location,
+          &contributions[i]));
+    }
+  }
   loom_value_id_t initialize_accumulator = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_unary(
       builder, ir_builder, AIE2P_CORE_DESCRIPTOR_REF_CMP_NEZ_I32,
@@ -1167,19 +1291,20 @@ static iree_status_t loom_aie2p_array_resident_materialize_folded_body(
 
   loom_builder_set_block(ir_builder, initialize_block);
   loom_op_t* initialized_branch = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_br_build(
-      ir_builder, accumulation_merge_block, &contribution_accumulator,
-      /*args_count=*/1, location, &initialized_branch));
+  IREE_RETURN_IF_ERROR(loom_low_br_build(ir_builder, accumulation_merge_block,
+                                         contributions, accumulator_count,
+                                         location, &initialized_branch));
 
   loom_builder_set_block(ir_builder, add_block);
-  loom_value_id_t accumulated_sum = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_add_f32_accumulators(
-      builder, ir_builder, accumulator, contribution_accumulator, mode,
-      location, &accumulated_sum));
+  for (uint32_t i = 0; i < accumulator_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_add_f32_accumulators(
+        builder, ir_builder, accumulators[i], contributions[i], mode, location,
+        &added_accumulators[i]));
+  }
   loom_op_t* accumulated_branch = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_low_br_build(ir_builder, accumulation_merge_block, &accumulated_sum,
-                        /*args_count=*/1, location, &accumulated_branch));
+  IREE_RETURN_IF_ERROR(loom_low_br_build(ir_builder, accumulation_merge_block,
+                                         added_accumulators, accumulator_count,
+                                         location, &accumulated_branch));
 
   loom_builder_set_block(ir_builder, accumulation_merge_block);
   IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_releases(
@@ -1205,17 +1330,40 @@ static iree_status_t loom_aie2p_array_resident_materialize_folded_body(
                                               location, &completion_branch));
 
   loom_builder_set_block(ir_builder, continue_block);
-  const loom_value_id_t next_record_state[] = {sum, next_remaining_records,
-                                               zero};
+  for (uint32_t i = 0; i < accumulator_count; ++i) {
+    record_state[i] = merged_accumulators[i];
+  }
+  record_state[accumulator_count] = next_remaining_records;
+  record_state[accumulator_count + 1] = zero;
   IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_state_branch(
       builder, ir_builder, record_header, record_states, port_state_count,
-      LOOM_AIE2P_ARRAY_STATE_VALUE_NEXT, next_record_state,
-      IREE_ARRAYSIZE(next_record_state), location));
+      LOOM_AIE2P_ARRAY_STATE_VALUE_NEXT, record_state, accumulator_count + 2,
+      location));
 
   loom_builder_set_block(ir_builder, completion_block);
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_fold_store(
-      builder, ir_builder, sum, output_state->current_address,
-      output_channel->record_byte_length, location));
+  if (pack_scalar_outputs) {
+    for (uint32_t i = 0; i < output_count; ++i) {
+      loom_value_id_t result = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_extract_f32(
+          builder, ir_builder,
+          merged_accumulators[i / LOOM_AIE2P_ARRAY_SCALAR_FOLD_PACK_WIDTH],
+          i % LOOM_AIE2P_ARRAY_SCALAR_FOLD_PACK_WIDTH, location, &result));
+      IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_store_i32(
+          builder, ir_builder, result, output_states[i]->current_address,
+          location));
+    }
+  } else {
+    for (uint32_t i = 0; i < output_count; ++i) {
+      const loom_aie2p_array_resident_port_state_t* output_state =
+          output_states[i];
+      const loom_aie2p_array_channel_t* output_channel =
+          &builder->plan->channels[output_state->port->channel_index];
+      IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_fold_store(
+          builder, ir_builder, merged_accumulators[i],
+          output_state->current_address, output_channel->record_byte_length,
+          location));
+    }
+  }
   IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_releases(
       builder, ir_builder, worker_index,
       LOOM_AIE2P_ARRAY_PORT_DIRECTION_FLAG_SEND, release_delta, location));

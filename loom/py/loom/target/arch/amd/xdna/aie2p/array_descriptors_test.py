@@ -106,10 +106,11 @@ def test_worker_entries_are_explicit_symbolic_product_edges() -> None:
     assert [immediate.field_name for immediate in fold.immediates] == [
         "entry",
         "output_port",
+        "output_count",
         "kind",
         "fast_math",
     ]
-    assert fold.immediates[2].kind is ImmediateKind.ENUM
+    assert fold.immediates[3].kind is ImmediateKind.ENUM
 
 
 def test_channels_are_typed_persistent_topology_edges() -> None:

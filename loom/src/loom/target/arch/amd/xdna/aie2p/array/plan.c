@@ -491,6 +491,7 @@ static iree_status_t loom_aie2p_array_extract_worker(
       loom_aie2p_array_attr(builder->module, op, IREE_SV("entry")));
   worker->fold_record_count = 0;
   worker->fold_output_port = 0;
+  worker->fold_output_count = 0;
   worker->fold_kind = LOOM_COMBINING_KIND_ADDI;
   worker->fold_fast_math_flags = 0;
   if (rate == LOOM_AIE2P_ARRAY_WORKER_RATE_FOLDED) {
@@ -515,6 +516,8 @@ static iree_status_t loom_aie2p_array_extract_worker(
     }
     worker->fold_output_port = (uint32_t)loom_attr_as_i64(
         loom_aie2p_array_attr(builder->module, op, IREE_SV("output_port")));
+    worker->fold_output_count = (uint32_t)loom_attr_as_i64(
+        loom_aie2p_array_attr(builder->module, op, IREE_SV("output_count")));
     const loom_low_descriptor_t* descriptor =
         &builder->descriptor_set
              ->descriptors[AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_WORKER_FOLD];
@@ -763,33 +766,63 @@ static bool loom_aie2p_array_coordinate_has_worker(
   return false;
 }
 
-static bool loom_aie2p_array_try_allocate_tile_storage(
-    loom_aie2p_array_tile_state_t* state, uint32_t byte_length,
+static bool loom_aie2p_array_try_allocate_storage_in_bank(
+    loom_aie2p_array_tile_state_t* state, uint8_t bank, uint32_t byte_length,
     uint32_t alignment, uint32_t* out_owner_offset) {
   const uint32_t bank_capacity =
       state->facts->memory.local_capacity / state->facts->memory.bank_count;
+  uint64_t cursor = state->bank_cursors[bank];
+  if (!iree_checked_align_u64(cursor, alignment, &cursor) ||
+      cursor + byte_length > bank_capacity) {
+    return false;
+  }
+  state->bank_cursors[bank] = (uint32_t)(cursor + byte_length);
+  *out_owner_offset = bank * bank_capacity + (uint32_t)cursor;
+  return true;
+}
+
+static bool loom_aie2p_array_try_allocate_channel_storage(
+    loom_aie2p_array_tile_state_t* state, uint32_t byte_length,
+    uint32_t alignment, uint32_t* out_owner_offset) {
   for (uint8_t attempt = 0; attempt < state->facts->memory.bank_count;
        ++attempt) {
     const uint8_t bank = (uint8_t)((state->next_bank + attempt) %
                                    state->facts->memory.bank_count);
-    uint64_t cursor = state->bank_cursors[bank];
-    if (!iree_checked_align_u64(cursor, alignment, &cursor) ||
-        cursor + byte_length > bank_capacity) {
+    if (!loom_aie2p_array_try_allocate_storage_in_bank(
+            state, bank, byte_length, alignment, out_owner_offset)) {
       continue;
     }
-    state->bank_cursors[bank] = (uint32_t)(cursor + byte_length);
     state->next_bank = (uint8_t)((bank + 1u) % state->facts->memory.bank_count);
-    *out_owner_offset = bank * bank_capacity + (uint32_t)cursor;
     return true;
   }
   return false;
 }
 
-static iree_status_t loom_aie2p_array_allocate_tile_storage(
+static iree_status_t loom_aie2p_array_allocate_channel_storage(
     loom_aie2p_array_tile_state_t* state, uint32_t byte_length,
     uint32_t alignment, uint32_t* out_owner_offset) {
-  if (loom_aie2p_array_try_allocate_tile_storage(state, byte_length, alignment,
-                                                 out_owner_offset)) {
+  if (loom_aie2p_array_try_allocate_channel_storage(
+          state, byte_length, alignment, out_owner_offset)) {
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          "AIE2P tile local memory banks are exhausted");
+}
+
+// Packs persistent worker storage from high banks without perturbing the
+// round-robin cursor used by channel rings. Keeping the two allocation classes
+// independent gives equivalent workers stable ring addresses while separating
+// long-lived state from the first banks selected for streaming traffic.
+static iree_status_t loom_aie2p_array_allocate_worker_storage(
+    loom_aie2p_array_tile_state_t* state, uint32_t byte_length,
+    uint32_t alignment, uint32_t* out_owner_offset) {
+  const uint8_t bank_count = state->facts->memory.bank_count;
+  for (uint8_t attempt = 0; attempt < bank_count; ++attempt) {
+    const uint8_t bank = (uint8_t)(bank_count - attempt - 1u);
+    if (!loom_aie2p_array_try_allocate_storage_in_bank(
+            state, bank, byte_length, alignment, out_owner_offset)) {
+      continue;
+    }
     return iree_ok_status();
   }
   return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -859,7 +892,7 @@ static bool loom_aie2p_array_can_allocate_ring_storage(
     for (uint32_t record = 0; record < pending_endpoint->record_count;
          ++record) {
       uint32_t owner_offset = 0;
-      if (!loom_aie2p_array_try_allocate_tile_storage(
+      if (!loom_aie2p_array_try_allocate_channel_storage(
               &probe, pending_endpoint->record_byte_length,
               LOOM_AIE2P_ARRAY_CHANNEL_ALIGNMENT, &owner_offset)) {
         return false;
@@ -868,7 +901,7 @@ static bool loom_aie2p_array_can_allocate_ring_storage(
   }
   for (uint32_t record = 0; record < record_count; ++record) {
     uint32_t owner_offset = 0;
-    if (!loom_aie2p_array_try_allocate_tile_storage(
+    if (!loom_aie2p_array_try_allocate_channel_storage(
             &probe, record_byte_length, LOOM_AIE2P_ARRAY_CHANNEL_ALIGNMENT,
             &owner_offset)) {
       return false;
@@ -1162,7 +1195,7 @@ static iree_status_t loom_aie2p_array_plan_workers(
             "AIE2P worker storage requirement is not representable");
       }
       uint32_t owner_offset = 0;
-      IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_tile_storage(
+      IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_worker_storage(
           tile_state, (uint32_t)requirement->byte_length,
           (uint32_t)requirement->minimum_alignment, &owner_offset));
       uint32_t load_address = 0;
@@ -1286,7 +1319,7 @@ static iree_status_t loom_aie2p_array_plan_channel_slots(
         loom_aie2p_array_tile_state_t* owner_state =
             loom_aie2p_array_tile_state(builder, owner);
         uint32_t owner_offset = 0;
-        IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_tile_storage(
+        IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_channel_storage(
             owner_state, channel->record_byte_length,
             LOOM_AIE2P_ARRAY_CHANNEL_ALIGNMENT, &owner_offset));
         channel_slot->sender_storage.owner = owner;
@@ -1311,7 +1344,7 @@ static iree_status_t loom_aie2p_array_plan_channel_slots(
       if (!aliases_sender) {
         loom_aie2p_array_tile_state_t* owner_state =
             loom_aie2p_array_tile_state(builder, owner);
-        IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_tile_storage(
+        IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_channel_storage(
             owner_state, channel->record_byte_length,
             LOOM_AIE2P_ARRAY_CHANNEL_ALIGNMENT, &owner_offset));
       }

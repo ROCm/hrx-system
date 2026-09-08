@@ -252,10 +252,11 @@ static iree_status_t loom_aie2p_array_plan_check_format(
     if (worker->fold_record_count != 0) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
-          " fold-records=%" PRIu32 " fold-output=%" PRIu32
+          " fold-records=%" PRIu32 " fold-output=%" PRIu32 "+%" PRIu32
           " fold-kind=%u fold-fast-math=0x%02x",
           worker->fold_record_count, worker->fold_output_port,
-          (unsigned)worker->fold_kind, worker->fold_fast_math_flags));
+          worker->fold_output_count, (unsigned)worker->fold_kind,
+          worker->fold_fast_math_flags));
     }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,

@@ -94,6 +94,8 @@ typedef struct loom_aie2p_array_worker_t {
   uint32_t fold_record_count;
   // Callable output port carrying the folded result.
   uint32_t fold_output_port;
+  // Number of contiguous callable output ports folded independently.
+  uint32_t fold_output_count;
   // Elementwise combining operation used by the temporal fold.
   loom_combining_kind_t fold_kind;
   // Floating-point permissions applied by the temporal fold.

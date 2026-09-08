@@ -15,7 +15,7 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@temporal_fold_array_tar
 
   %group = group %lanes
   // ERROR@+1: TARGET/083 {record_count="0"}
-  %worker = worker.fold %group, %lane, %lane, @copy_f32_record, 1, 1, 0
+  %worker = worker.fold %group, %lane, %lane, @copy_f32_record, 1, 1, 1, 0
   %input = binding 0, "read"
   %output = binding 1, "write"
   %input_sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xf32>>
@@ -53,7 +53,7 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@temporal_fold_array_tar
   %row = constant.u32 2 : reg<aie2p.array.scalar : index>
 
   %group = group %lanes
-  %worker = worker.fold %group, %lane, %input_records, @copy_f32_record, 1, 1, 0
+  %worker = worker.fold %group, %lane, %input_records, @copy_f32_record, 1, 1, 1, 0
   %input = binding 0, "read"
   %output = binding 1, "write"
   %input_sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xf32>>
@@ -78,7 +78,7 @@ low.func.def target<amd.xdna.aie2p.core>(@temporal_fold_core_target) abi(object_
 array @temporal_fold_array family=amd.xdna.npu2 groups=1 workers=1 bindings=2 channels=2 slots=4 locks=4 dma=4 routes=8
 binding index=0 ordinal=0 access=read
 binding index=1 ordinal=1 access=write
-worker index=0 group=0 lane=0 entry=@copy_f32_record tile=(0,2) fold-records=4 fold-output=1 fold-kind=1 fold-fast-math=0x00 code-bytes=22 resources=2 storage-domains=0
+worker index=0 group=0 lane=0 entry=@copy_f32_record tile=(0,2) fold-records=4 fold-output=1+1 fold-kind=1 fold-fast-math=0x00 code-bytes=22 resources=2 storage-domains=0
 channel index=0 transport=external-dma record-bytes=4 capacity=2 records=4 sender=binding[0]:0 receiver=worker[0]:0
 channel index=1 transport=external-dma record-bytes=4 capacity=2 records=1 sender=worker[0]:1 receiver=binding[1]:0
 worker-port worker=0 port=0 direction=receive channel=0 first-slot=0
@@ -132,10 +132,9 @@ low.func.def retain target<amd.xdna.aie2p.core>(@temporal_fold_core_target) @tem
   %fold_record_count = mov.i32 4
   %fold_mode = mova.i32 60
   %35 = acc.clear.f32x64
-  %36 = slice %35[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %57 = mov.local-address 458752
-  %58 = mov.local-address 491520
-  low.br ^_bb1(%57: reg<aie2p.ep>, %58: reg<aie2p.ep>)
+  %56 = mov.local-address 458752
+  %57 = mov.local-address 491520
+  low.br ^_bb1(%56: reg<aie2p.ep>, %57: reg<aie2p.ep>)
 ^_bb1(%27: reg<aie2p.ep>, %28: reg<aie2p.ep>):
   acq %acquire_delta, 50
   low.br ^_bb2(%27: reg<aie2p.ep>, %28: reg<aie2p.ep>, %35: reg<aie2p.mbms x4>, %fold_record_count: reg<aie2p.er>, %release_delta: reg<aie2p.er>)
@@ -147,37 +146,37 @@ low.func.def retain target<amd.xdna.aie2p.core>(@temporal_fold_core_target) @tem
   st %value, %output, 0
   low.br ^_bb4
 ^_bb4:
-  %38 = lda %output, 0
-  %39 = vbcst.32 %38
-  %40 = vmov.vector512.to.accumulator512 %39
-  %41 = concat(%40, %36, %36, %36) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %42 = nez %31
-  low.cond_br %42, ^_bb5, ^_bb6 : reg<aie2p.er>
+  %37 = lda %output, 0
+  %38 = vbcst.32 %37
+  %39 = vmov.vector512.to.accumulator512 %38
+  %40 = concat(%39, %39, %39, %39) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %41 = nez %31
+  low.cond_br %41, ^_bb5, ^_bb6 : reg<aie2p.er>
 ^_bb5:
-  low.br ^_bb7(%41: reg<aie2p.mbms x4>)
+  low.br ^_bb7(%40: reg<aie2p.mbms x4>)
 ^_bb6:
-  %43 = vadd.f32x64 %29, %41, %fold_mode
-  low.br ^_bb7(%43: reg<aie2p.mbms x4>)
-^_bb7(%37: reg<aie2p.mbms x4>):
+  %42 = vadd.f32x64 %29, %40, %fold_mode
+  low.br ^_bb7(%42: reg<aie2p.mbms x4>)
+^_bb7(%36: reg<aie2p.mbms x4>):
   rel %release_delta, 48
-  %44 = mov.address-to-scalar %input
-  %45 = mov.i32 16384
-  %46 = xor %44, %45
-  %47 = mov.scalar-to-address %46
-  %48 = sub %30, %release_delta
-  %49 = nez %48
-  low.cond_br %49, ^_bb8, ^_bb9 : reg<aie2p.er>
+  %43 = mov.address-to-scalar %input
+  %44 = mov.i32 16384
+  %45 = xor %43, %44
+  %46 = mov.scalar-to-address %45
+  %47 = sub %30, %release_delta
+  %48 = nez %47
+  low.cond_br %48, ^_bb8, ^_bb9 : reg<aie2p.er>
 ^_bb8:
-  low.br ^_bb2(%47: reg<aie2p.ep>, %output: reg<aie2p.ep>, %37: reg<aie2p.mbms x4>, %48: reg<aie2p.er>, %fold_zero: reg<aie2p.er>)
+  low.br ^_bb2(%46: reg<aie2p.ep>, %output: reg<aie2p.ep>, %36: reg<aie2p.mbms x4>, %47: reg<aie2p.er>, %fold_zero: reg<aie2p.er>)
 ^_bb9:
-  %50 = slice %37[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %51 = vmov.accumulator512.to.vector512 %50
-  %52 = vextract.32.imm %51, 0
-  st %52, %output, 0
+  %49 = slice %36[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %50 = vmov.accumulator512.to.vector512 %49
+  %51 = vextract.32.imm %50, 0
+  st %51, %output, 0
   rel %release_delta, 51
-  %53 = mov.address-to-scalar %output
-  %54 = mov.i32 16384
-  %55 = xor %53, %54
-  %56 = mov.scalar-to-address %55
-  low.br ^_bb1(%47: reg<aie2p.ep>, %56: reg<aie2p.ep>)
+  %52 = mov.address-to-scalar %output
+  %53 = mov.i32 16384
+  %54 = xor %52, %53
+  %55 = mov.scalar-to-address %54
+  low.br ^_bb1(%46: reg<aie2p.ep>, %55: reg<aie2p.ep>)
 }

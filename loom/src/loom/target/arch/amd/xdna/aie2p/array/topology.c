@@ -88,6 +88,14 @@ static iree_status_t loom_aie2p_array_topology_validate_worker_rates(
     uint32_t common_record_count = 0;
     uint32_t output_record_count = 0;
     uint32_t sender_count = 0;
+    const uint64_t fold_output_end =
+        (uint64_t)worker->fold_output_port + worker->fold_output_count;
+    if (worker->fold_record_count != 0 &&
+        (worker->fold_output_count == 0 || fold_output_end > UINT32_MAX)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AIE2P folded worker output port range is invalid");
+    }
     for (uint32_t endpoint_index = 0;
          endpoint_index < topology->plan->endpoint_count; ++endpoint_index) {
       const loom_aie2p_array_endpoint_t* endpoint =
@@ -123,12 +131,19 @@ static iree_status_t loom_aie2p_array_topology_validate_worker_rates(
         continue;
       }
       ++sender_count;
-      if (endpoint->port != worker->fold_output_port) {
+      if (endpoint->port < worker->fold_output_port ||
+          endpoint->port >= fold_output_end) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P folded worker must use its folded output port");
+            "AIE2P folded worker must use its folded output port range");
       }
-      output_record_count = channel->record_count;
+      if (output_record_count == 0) {
+        output_record_count = channel->record_count;
+      } else if (output_record_count != channel->record_count) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "AIE2P folded worker outputs must have one record count");
+      }
       const uint32_t record_byte_length = channel->record_byte_length;
       const uint32_t accumulator_lane_byte_length = 16 * sizeof(float);
       const bool supported_f32_shape =
@@ -151,10 +166,11 @@ static iree_status_t loom_aie2p_array_topology_validate_worker_rates(
             IREE_STATUS_UNIMPLEMENTED,
             "AIE2P temporal fold currently supports floating-point addition");
       }
-      if (sender_count != 1) {
+      if (sender_count != worker->fold_output_count) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P folded worker must have exactly one sender port");
+            "AIE2P folded worker sender ports must exactly cover its output "
+            "port range");
       }
       const uint64_t expected_input_record_count =
           (uint64_t)worker->fold_record_count * output_record_count;

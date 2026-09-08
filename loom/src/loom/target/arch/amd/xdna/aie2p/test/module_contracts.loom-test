@@ -184,6 +184,6 @@ low.func.def target<amd.xdna.aie2p.array>(@array_target) @bad_fold_entry() asm {
   %one = constant.u32 1 : reg<aie2p.array.scalar : index>
   %workers = group %one
   // ERROR@+1: TARGET/079 {function_name="bad_fold_entry", descriptor_key="amd.xdna.aie2p.array.worker.fold", immediate_name="entry", symbol_name="wrong_entry", actual_contract="amd.xdna.aie2p.array", expected_contract="amd.xdna.aie2p.core"}
-  %worker = worker.fold %workers, %zero, %one, @wrong_entry, 0, 1, 0
+  %worker = worker.fold %workers, %zero, %one, @wrong_entry, 0, 1, 1, 0
   return
 }

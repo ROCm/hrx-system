@@ -423,6 +423,9 @@ typedef struct loom_aie2p_pipeline_emitter_t {
   // Interned immediate name `output_port`.
   loom_string_id_t output_port_attr_name;
 
+  // Interned immediate name `output_count`.
+  loom_string_id_t output_count_attr_name;
+
   // Interned immediate name `kind`.
   loom_string_id_t kind_attr_name;
 
@@ -486,6 +489,8 @@ static iree_status_t loom_aie2p_pipeline_emitter_initialize(
                                                  &emitter->port_attr_name));
   IREE_RETURN_IF_ERROR(loom_module_intern_string(
       module, IREE_SV("output_port"), &emitter->output_port_attr_name));
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      module, IREE_SV("output_count"), &emitter->output_count_attr_name));
   IREE_RETURN_IF_ERROR(loom_module_intern_string(module, IREE_SV("kind"),
                                                  &emitter->kind_attr_name));
   IREE_RETURN_IF_ERROR(loom_module_intern_string(
@@ -644,6 +649,10 @@ static iree_status_t loom_aie2p_pipeline_emit_instances(
           {
               .name_id = emitter->output_port_attr_name,
               .value = loom_attr_i64(instance->fold_output_port),
+          },
+          {
+              .name_id = emitter->output_count_attr_name,
+              .value = loom_attr_i64(instance->fold_output_count),
           },
           {
               .name_id = emitter->kind_attr_name,
