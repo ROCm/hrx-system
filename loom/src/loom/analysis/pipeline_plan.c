@@ -458,7 +458,6 @@ static iree_status_t loom_pipeline_plan_define_external_flow(
       LOOM_PIPELINE_BINDING_ACCESS_FLAG_READ;
 
   uint32_t binding_partition_index = UINT32_MAX;
-  uint32_t port_count = builder->groups[group_index].lane_count;
   if (partitioned) {
     const loom_type_t view_type =
         loom_module_value_type(builder->module, source_view);
@@ -475,14 +474,13 @@ static iree_status_t loom_pipeline_plan_define_external_flow(
         loom_pipeline_plan_view_tile_type(builder, view_type, &binding_type));
     binding_partition_index =
         loom_pipeline_plan_define_binding_partition(builder, binding_type);
-    port_count = 1;
   }
-  if (builder->binding_next_ports[binding_index] > UINT32_MAX - port_count) {
+  if (builder->binding_next_ports[binding_index] == UINT32_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "pipeline binding port ordinal overflow");
   }
-  const uint32_t first_port = builder->binding_next_ports[binding_index];
-  builder->binding_next_ports[binding_index] += port_count;
+  const uint32_t binding_port = builder->binding_next_ports[binding_index];
+  ++builder->binding_next_ports[binding_index];
   loom_type_t tile_type = loom_type_none();
   IREE_RETURN_IF_ERROR(
       loom_pipeline_plan_flow_tile_type(builder, result, &tile_type));
@@ -506,7 +504,7 @@ static iree_status_t loom_pipeline_plan_define_external_flow(
           .producer_kind = LOOM_PIPELINE_ENDPOINT_KIND_BINDING,
           .binding_index = binding_index,
           .instance_start = UINT32_MAX,
-          .producer_port = first_port,
+          .producer_port = binding_port,
           .binding_partition_index = binding_partition_index,
       },
       NULL);
@@ -563,27 +561,21 @@ static iree_status_t loom_pipeline_plan_connect_pointwise_flow(
   }
   for (uint32_t lane = 0; lane < group->lane_count; ++lane) {
     loom_pipeline_plan_append_edge(
-        builder,
-        (loom_pipeline_plan_edge_t){
-            .flow_index = flow_index,
-            .binding_partition_index = flow->binding_partition_index,
-            .source_kind = flow->producer_kind,
-            .source_index =
-                flow->producer_kind == LOOM_PIPELINE_ENDPOINT_KIND_BINDING
-                    ? flow->binding_index
-                    : flow->instance_start + lane,
-            .source_port =
-                flow->producer_port +
-                (flow->producer_kind == LOOM_PIPELINE_ENDPOINT_KIND_BINDING &&
-                         flow->binding_partition_index == UINT32_MAX
-                     ? lane
-                     : 0),
-            .binding_partition_lane =
-                flow->binding_partition_index != UINT32_MAX ? lane : 0,
-            .target_kind = LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE,
-            .target_index = target_instance_start + lane,
-            .target_port = target_port,
-        });
+        builder, (loom_pipeline_plan_edge_t){
+                     .flow_index = flow_index,
+                     .binding_partition_index = flow->binding_partition_index,
+                     .source_kind = flow->producer_kind,
+                     .source_index = flow->producer_kind ==
+                                             LOOM_PIPELINE_ENDPOINT_KIND_BINDING
+                                         ? flow->binding_index
+                                         : flow->instance_start + lane,
+                     .source_port = flow->producer_port,
+                     .binding_partition_lane =
+                         flow->binding_partition_index != UINT32_MAX ? lane : 0,
+                     .target_kind = LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE,
+                     .target_index = target_instance_start + lane,
+                     .target_port = target_port,
+                 });
   }
   return iree_ok_status();
 }

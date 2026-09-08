@@ -131,7 +131,7 @@ typedef struct loom_pipeline_plan_flow_t {
   // Number of producer instances, or zero for a binding producer.
   uint32_t instance_count;
 
-  // Callable output port or first external binding port.
+  // Callable output port or external binding port.
   uint32_t producer_port;
 
   // Binding-partition table index when produced by a partitioned binding, or

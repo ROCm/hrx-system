@@ -355,6 +355,46 @@ pipeline.def<kernel> @chain() launch(%input: buffer, %output: buffer) {
   EXPECT_EQ(second_binding_edge.target_index, 1u);
 }
 
+TEST_F(PipelinePlanTest, BroadcastsMultiLaneReadsFromOneBindingPort) {
+  ModulePtr module = Parse(R"(
+func.def @consume(%input: buffer) {
+  func.return
+}
+
+pipeline.def<kernel> @broadcast() launch(%input: buffer) {
+  %lane_count = index.constant 2 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lane_count : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<3x4xi8>
+  %input_records = pipeline.read %input_view on %workers : view<3x4xi8>, group -> pipeline.flow<tile<4xi8>>
+  pipeline.stage @consume on %workers(%input_records) : (group, pipeline.flow<tile<4xi8>>) -> ()
+  pipeline.return
+}
+)");
+
+  loom_pipeline_plan_t plan = {};
+  IREE_ASSERT_OK(BuildPlan(module.get(), IREE_SV("broadcast"), &plan));
+
+  ASSERT_EQ(plan.binding_count, 1u);
+  EXPECT_EQ(plan.bindings[0].access, LOOM_PIPELINE_BINDING_ACCESS_FLAG_READ);
+  ASSERT_EQ(plan.flow_count, 1u);
+  EXPECT_EQ(plan.flows[0].record_count, 3u);
+  EXPECT_EQ(plan.flows[0].producer_port, 0u);
+  EXPECT_EQ(plan.flows[0].binding_partition_index, UINT32_MAX);
+  ASSERT_EQ(plan.edge_count, 2u);
+  for (uint32_t lane = 0; lane < 2; ++lane) {
+    const loom_pipeline_plan_edge_t& edge = plan.edges[lane];
+    EXPECT_EQ(edge.flow_index, 0u);
+    EXPECT_EQ(edge.source_kind, LOOM_PIPELINE_ENDPOINT_KIND_BINDING);
+    EXPECT_EQ(edge.source_index, 0u);
+    EXPECT_EQ(edge.source_port, 0u);
+    EXPECT_EQ(edge.binding_partition_index, UINT32_MAX);
+    EXPECT_EQ(edge.target_kind, LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE);
+    EXPECT_EQ(edge.target_index, lane);
+    EXPECT_EQ(edge.target_port, 0u);
+  }
+}
+
 TEST_F(PipelinePlanTest, ExpandsFlowFanoutWithoutCloningProducer) {
   ModulePtr module = Parse(R"(
 func.def @producer(%input: buffer, %intermediate: buffer) {
