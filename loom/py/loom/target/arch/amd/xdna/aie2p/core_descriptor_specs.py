@@ -247,6 +247,44 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
     return tuple(result)
 
 
+def _fifo_load_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
+    """Selects the 512-bit streaming load FIFO fill and pop forms."""
+
+    fill_keys = {
+        lane: f"{_TARGET_KEY}.load.{lane}.fifo.fill.512" for lane in ("a", "b")
+    }
+    result = [
+        _DescriptorSpec(
+            f"VLD{lane.upper()}_FILL_512",
+            fill_keys[lane],
+            "memory.load.fifo.fill.512",
+            f"II_VLD{lane.upper()}_FILL_512",
+            asm_mnemonic=f"vld{lane}.fill.512",
+            schedule_alternatives=(fill_keys["b"],) if lane == "a" else (),
+            memory_width_bits=512,
+        )
+        for lane in ("a", "b")
+    ]
+    for element_type, element_bits in AIE2P_VECTOR_MEMORY_ELEMENT_TYPES:
+        shape = f"{element_type}x{512 // element_bits}"
+        pop_keys = {
+            lane: f"{_TARGET_KEY}.load.{lane}.{shape}.fifo.pop" for lane in ("a", "b")
+        }
+        result.extend(
+            _DescriptorSpec(
+                f"VLD{lane.upper()}_POP_512_normal_pop",
+                pop_keys[lane],
+                f"memory.load.fifo.pop.{shape}",
+                f"II_VLD{lane.upper()}_POP_512_normal_pop",
+                asm_mnemonic=f"vld{lane}.pop.512.{shape}",
+                schedule_alternatives=(pop_keys["b"],) if lane == "a" else (),
+                memory_width_bits=512,
+            )
+            for lane in ("a", "b")
+        )
+    return tuple(result)
+
+
 _INTEGER_MATRIX_NUMERIC_KINDS = ("s8s8", "u8s8", "s8u8", "u8u8")
 
 
@@ -1412,6 +1450,7 @@ _BASE_DESCRIPTOR_SPECS = (
         asm_mnemonic="vinsert.64.reg",
     ),
     *_vector_memory_descriptor_specs(),
+    *_fifo_load_descriptor_specs(),
     _DescriptorSpec(
         "MOVA",
         f"{_TARGET_KEY}.constant.i32.mova",
@@ -1420,6 +1459,15 @@ _BASE_DESCRIPTOR_SPECS = (
         (("dst", "eR"),),
         DescriptorOpKind.CONST,
         asm_mnemonic="mova.i32",
+    ),
+    _DescriptorSpec(
+        "MOVA",
+        f"{_TARGET_KEY}.constant.i32.fifo-position",
+        "integer.const.i32",
+        "II_MOVA_eR",
+        (("dst", "eRF2"),),
+        DescriptorOpKind.CONST,
+        asm_mnemonic="mova.fifo.position",
     ),
     _DescriptorSpec(
         "MOVA",

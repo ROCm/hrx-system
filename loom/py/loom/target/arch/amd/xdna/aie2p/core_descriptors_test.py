@@ -17,6 +17,7 @@ from loom.target.arch.amd.xdna.aie2p.core_descriptor_specs import (
     _DESCRIPTOR_SPECS,
     _LOCK_EFFECT,
     _MACHINE_FORMS,
+    AIE2P_VECTOR_MEMORY_ELEMENT_TYPES,
 )
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     _BUNDLE_SLOT_EXCLUSIONS,
@@ -141,6 +142,7 @@ def test_core_descriptor_closure_is_complete() -> None:
             (
                 ("aie2p.elpredicate", 1, 2),
                 ("aie2p.er", 1, 1),
+                ("aie2p.erf2", 1, 1),
                 ("aie2p.ers16", 1, 1),
                 ("aie2p.ml8m", 1, 2),
                 ("aie2p.mr16_vcompare", 1, 1),
@@ -171,6 +173,133 @@ def test_native_numeric_descriptors_have_report_semantic_categories() -> None:
         semantic_tag = descriptors[key].semantic_tag
         assert semantic_tag is not None
         assert semantic_tag.startswith(f"{expected_category}.")
+
+
+def test_fifo_load_descriptors_preserve_fifo_state_and_recurrence() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+
+    for lane, alternate_lane in (("a", "b"), ("b", None)):
+        fill = descriptors[f"amd.xdna.aie2p.load.{lane}.fifo.fill.512"]
+        assert fill.mnemonic == f"vld{lane}.fill.512"
+        assert [operand.field_name for operand in fill.operands] == [
+            "ptr_out",
+            "fifo_reg_out",
+            "pos_out",
+            "ptr",
+            "fifo_reg",
+            "pos",
+        ]
+        assert [operand.reg_alts[0].reg_class for operand in fill.operands] == [
+            "aie2p.eps",
+            "aie2p.eldfiforeg",
+            "aie2p.erf2",
+            "aie2p.eps",
+            "aie2p.eldfiforeg",
+            "aie2p.erf2",
+        ]
+        assert fill.asm_forms[0].results == (
+            "ptr_out",
+            "fifo_reg_out",
+            "pos_out",
+        )
+        assert fill.asm_forms[0].operands == ("ptr", "fifo_reg", "pos")
+        assert fill.effects[0].kind is EffectKind.READ
+        assert fill.effects[0].width_bits == 512
+        assert fill.schedule_alternatives == (
+            (f"amd.xdna.aie2p.load.{alternate_lane}.fifo.fill.512",)
+            if alternate_lane is not None
+            else ()
+        )
+
+        tied_names = {
+            (
+                fill.operands[constraint.lhs_operand_index].field_name,
+                fill.operands[constraint.rhs_operand_index].field_name,
+            )
+            for constraint in fill.constraints
+            if constraint.kind is ConstraintKind.TIED
+        }
+        assert tied_names == {
+            ("ptr_out", "ptr"),
+            ("fifo_reg_out", "fifo_reg"),
+            ("pos_out", "pos"),
+        }
+        coindexed_names = {
+            frozenset(
+                (
+                    fill.operands[constraint.lhs_operand_index].field_name,
+                    fill.operands[constraint.rhs_operand_index].field_name,
+                )
+            )
+            for constraint in fill.constraints
+            if constraint.kind is ConstraintKind.SAME_REGISTER_ORDINAL
+        }
+        assert coindexed_names == {
+            frozenset(("ptr", "fifo_reg")),
+            frozenset(("ptr", "pos")),
+            frozenset(("fifo_reg", "pos")),
+        }
+
+        for element_type, element_bits in AIE2P_VECTOR_MEMORY_ELEMENT_TYPES:
+            shape = f"{element_type}x{512 // element_bits}"
+            pop = descriptors[f"amd.xdna.aie2p.load.{lane}.{shape}.fifo.pop"]
+            assert pop.mnemonic == f"vld{lane}.pop.512.{shape}"
+            assert [operand.field_name for operand in pop.operands] == [
+                "dst",
+                "ptr_out",
+                "fifo_reg_out",
+                "pos_out",
+                "ptr",
+                "fifo_reg",
+                "pos",
+                "implicit_def_srfifo_uf",
+            ]
+            assert pop.asm_forms[0].results == (
+                "dst",
+                "ptr_out",
+                "fifo_reg_out",
+                "pos_out",
+            )
+            assert pop.asm_forms[0].operands == ("ptr", "fifo_reg", "pos")
+            assert pop.effects[0].kind is EffectKind.READ
+            assert pop.effects[0].width_bits == 512
+            assert pop.schedule_alternatives == (
+                (f"amd.xdna.aie2p.load.{alternate_lane}.{shape}.fifo.pop",)
+                if alternate_lane is not None
+                else ()
+            )
+
+            tied_names = {
+                (
+                    pop.operands[constraint.lhs_operand_index].field_name,
+                    pop.operands[constraint.rhs_operand_index].field_name,
+                )
+                for constraint in pop.constraints
+                if constraint.kind is ConstraintKind.TIED
+            }
+            assert tied_names == {
+                ("ptr_out", "ptr"),
+                ("fifo_reg_out", "fifo_reg"),
+                ("pos_out", "pos"),
+            }
+            coindexed_names = {
+                frozenset(
+                    (
+                        pop.operands[constraint.lhs_operand_index].field_name,
+                        pop.operands[constraint.rhs_operand_index].field_name,
+                    )
+                )
+                for constraint in pop.constraints
+                if constraint.kind is ConstraintKind.SAME_REGISTER_ORDINAL
+            }
+            assert coindexed_names == {
+                frozenset(("ptr", "fifo_reg")),
+                frozenset(("ptr", "pos")),
+                frozenset(("fifo_reg", "pos")),
+            }
 
 
 def test_fused_vector_memory_descriptors_preserve_conversion_and_memory_contracts() -> (

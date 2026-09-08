@@ -1,0 +1,22 @@
+// RUN: emit source-low output=module
+
+aie2p.target<core> @target
+
+low.func.def retain target<amd.xdna.aie2p.core>(@target) @fifo_load(%pointer: reg<aie2p.eps>, %initial_fifo: reg<aie2p.eldfiforeg>) -> (reg<aie2p.vec256 x2>) asm {
+  %position = mova.fifo.position 0
+  %filled_pointer, %fifo, %filled_position = vldb.fill.512 %pointer, %initial_fifo, %position
+  %first_data, %next_pointer, %next_fifo, %next_position = vldb.pop.512.i8x64 %filled_pointer, %fifo, %filled_position
+  %data, %final_pointer, %final_fifo, %final_position = vldb.pop.512.i8x64 %next_pointer, %next_fifo, %next_position
+  return %data
+}
+
+// ----
+aie2p.target<core> @target
+
+low.func.def retain target<amd.xdna.aie2p.core>(@target) @fifo_load(%pointer: reg<aie2p.eps>, %initial_fifo: reg<aie2p.eldfiforeg>) -> (reg<aie2p.vec256 x2>) asm {
+  %position = mova.fifo.position 0
+  %filled_pointer, %fifo, %filled_position = vldb.fill.512 %pointer, %initial_fifo, %position
+  %first_data, %next_pointer, %next_fifo, %next_position = vldb.pop.512.i8x64 %filled_pointer, %fifo, %filled_position
+  %data, %final_pointer, %final_fifo, %final_position = vldb.pop.512.i8x64 %next_pointer, %next_fifo, %next_position
+  return %data
+}

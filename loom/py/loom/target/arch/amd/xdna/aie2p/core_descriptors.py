@@ -1234,18 +1234,45 @@ def _constraints(
     form: MachineForm,
     explicit_operands: tuple[MachineOperand, ...],
 ) -> tuple[Constraint, ...]:
+    """Returns direct update ties and heterogeneous tuple constraints."""
+
     operand_indices = {
         operand.name: operand_index
         for operand_index, operand in enumerate(explicit_operands)
     }
-    return tuple(
+    result = [
         Constraint(
             ConstraintKind.TIED,
             operand_indices[tie.definition],
             operand_indices[tie.use],
         )
         for tie in form.ties
-    )
+    ]
+
+    # AIE2P load FIFO forms update one heterogeneous physical-register tuple.
+    # LLVM models these through a target hook instead of TableGen Constraints,
+    # so they are absent from the imported machine-form ties. Recover the
+    # direct state updates from the stable operand family and constrain every
+    # tuple member pair: the allocator may visit the three classes in any
+    # order, and each partial assignment must select the same aggregate row.
+    update_group = ("ptr", "fifo_reg", "pos")
+    output_names = tuple(f"{name}_out" for name in update_group)
+    if all(name in operand_indices for name in output_names):
+        existing_ties = {
+            (constraint.lhs_operand_index, constraint.rhs_operand_index)
+            for constraint in result
+        }
+        for input_name, output_name in zip(update_group, output_names, strict=True):
+            pair = (operand_indices[output_name], operand_indices[input_name])
+            if pair not in existing_ties:
+                result.append(Constraint(ConstraintKind.TIED, *pair))
+        result.extend(
+            Constraint(ConstraintKind.SAME_REGISTER_ORDINAL, lhs, rhs)
+            for lhs, rhs in combinations(
+                (operand_indices[name] for name in update_group), 2
+            )
+        )
+    return tuple(result)
 
 
 def _descriptor(spec: descriptor_specs._DescriptorSpec) -> Descriptor:

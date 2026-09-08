@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <initializer_list>
 #include <string>
 #include <string_view>
 
@@ -24,6 +25,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/low_registry.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/relocation.h"
+#include "loom/target/arch/amd/xdna/aie2p/machine/machine.h"
 
 namespace loom {
 namespace {
@@ -149,6 +151,23 @@ class Aie2pLeafObjectTest : public ::testing::Test {
         "  return\n"
         "}\n",
         out_leaf);
+  }
+
+  void ExpectPhysicalRegisters(
+      const CompiledLeaf& leaf, const loom_low_packet_view_t& packet,
+      std::initializer_list<iree_string_view_t> register_names) {
+    uint16_t operand_index = 0;
+    for (iree_string_view_t name : register_names) {
+      SCOPED_TRACE(operand_index);
+      const loom_low_allocation_assignment_t* assignment =
+          loom_low_packet_descriptor_operand_assignment(
+              &leaf.frame.allocation, &packet, operand_index++);
+      ASSERT_NE(assignment, nullptr);
+      EXPECT_EQ(assignment->location_kind,
+                LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
+      EXPECT_EQ(assignment->location_base,
+                loom_aie2p_machine_find_physical_register(name));
+    }
   }
 
   void ResetLeaf(CompiledLeaf* leaf) {
@@ -282,6 +301,134 @@ TEST_F(Aie2pLeafObjectTest, LowFunctionsEmitOptimizedVectorLeaves) {
     }
     ResetLeaf(&leaf);
   }
+}
+
+TEST_F(Aie2pLeafObjectTest, FifoLoadStateAllocatesAsOnePhysicalTuple) {
+  // Pinned Peano independently establishes the physical instruction
+  // encodings for the same unaligned 512-bit load. Loom chains a second pop
+  // through the updated tuple and selects the compact four-byte standalone
+  // bundle instead of Peano's move-plus-two-NOP bundle.
+  constexpr std::array<uint8_t, 32> kExpected = {
+      0x18, 0xc0, 0x00, 0x00, 0x18, 0x14, 0x14, 0x3c, 0x18, 0x14, 0x00,
+      0x38, 0x18, 0x14, 0x00, 0x38, 0x00, 0x00, 0x18, 0x00, 0x28, 0x10,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  };
+  CompiledLeaf leaf;
+  IREE_ASSERT_OK(CompileSource(
+      "low.func.def target<amd.xdna.aie2p.core> @fifo_load("
+      "%pointer: reg<aie2p.eps>, %initial_fifo: reg<aie2p.eldfiforeg>) "
+      "-> (reg<aie2p.vec256 x2>) asm {\n"
+      "  %position = mova.fifo.position 0\n"
+      "  %filled_pointer, %fifo, %filled_position = vldb.fill.512 "
+      "%pointer, %initial_fifo, %position\n"
+      "  %first_data, %next_pointer, %next_fifo, %next_position = "
+      "vldb.pop.512.i8x64 %filled_pointer, %fifo, %filled_position\n"
+      "  %data, %final_pointer, %final_fifo, %final_position = "
+      "vldb.pop.512.i8x64 %next_pointer, %next_fifo, %next_position\n"
+      "  return %data\n"
+      "}\n",
+      &leaf));
+
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_aie2p_core_descriptor_set();
+  const loom_low_packet_view_t* fill = nullptr;
+  std::array<loom_low_packet_view_t, 2> pop_storage = {};
+  iree_host_size_t pop_count = 0;
+  loom_low_packet_view_t fill_storage = {};
+  for (iree_host_size_t packet_index = 0;
+       packet_index < loom_low_packet_count(&leaf.frame.schedule);
+       ++packet_index) {
+    const loom_low_packet_view_t packet =
+        loom_low_packet_at(&leaf.frame.schedule, packet_index);
+    if (packet.descriptor ==
+        &descriptor_set
+             ->descriptors[AIE2P_CORE_DESCRIPTOR_REF_LOAD_B_FIFO_FILL_512]) {
+      fill_storage = packet;
+      fill = &fill_storage;
+    } else if (packet.descriptor ==
+               &descriptor_set->descriptors
+                    [AIE2P_CORE_DESCRIPTOR_REF_LOAD_B_I8X64_FIFO_POP]) {
+      ASSERT_LT(pop_count, pop_storage.size());
+      pop_storage[pop_count++] = packet;
+    }
+  }
+  ASSERT_NE(fill, nullptr);
+  ASSERT_EQ(pop_count, pop_storage.size());
+
+  ExpectPhysicalRegisters(leaf, *fill,
+                          {IREE_SV("p0"), IREE_SV("lf0"), IREE_SV("r24"),
+                           IREE_SV("p0"), IREE_SV("lf0"), IREE_SV("r24")});
+  for (const loom_low_packet_view_t& pop : pop_storage) {
+    ExpectPhysicalRegisters(
+        leaf, pop,
+        {IREE_SV("x0"), IREE_SV("p0"), IREE_SV("lf0"), IREE_SV("r24"),
+         IREE_SV("p0"), IREE_SV("lf0"), IREE_SV("r24")});
+  }
+  EXPECT_EQ(leaf.frame.allocation.spill_count, 0u);
+  EXPECT_EQ(leaf.frame.allocation.materialized_copy_count, 0u);
+
+  ASSERT_EQ(leaf.contribution.object.section_count, 1u);
+  const loom_native_section_contribution_t& section =
+      leaf.contribution.object.sections[0];
+  ASSERT_EQ(section.contents.data_length, kExpected.size());
+  for (iree_host_size_t i = 0; i < kExpected.size(); ++i) {
+    EXPECT_EQ(section.contents.data[i], kExpected[i]) << i;
+  }
+
+  ResetLeaf(&leaf);
+}
+
+TEST_F(Aie2pLeafObjectTest, IndependentFifoRefillsPreserveBothPhysicalTuples) {
+  // Both incoming FIFO states are live. Reversing their parameter order
+  // relative to the pointers prevents independent first-free allocations
+  // from accidentally satisfying the shared hardware selectors.
+  CompiledLeaf leaf;
+  IREE_ASSERT_OK(CompileSource(
+      "low.func.def target<amd.xdna.aie2p.core> @fifo_pair("
+      "%pointer0: reg<aie2p.eps>, %pointer1: reg<aie2p.eps>, "
+      "%fifo1: reg<aie2p.eldfiforeg>, %fifo0: reg<aie2p.eldfiforeg>, "
+      "%position1: reg<aie2p.erf2>, %position0: reg<aie2p.erf2>) "
+      "-> (reg<aie2p.vec256 x2>) asm {\n"
+      "  %p0, %f0, %a0 = vlda.fill.512 %pointer0, %fifo0, %position0\n"
+      "  %p1, %f1, %a1 = vldb.fill.512 %pointer1, %fifo1, %position1\n"
+      "  %lhs, %next_p0, %next_f0, %next_a0 = "
+      "vlda.pop.512.i32x16 %p0, %f0, %a0\n"
+      "  %rhs, %next_p1, %next_f1, %next_a1 = "
+      "vldb.pop.512.i32x16 %p1, %f1, %a1\n"
+      "  %sum = vadd.32 %lhs, %rhs\n"
+      "  return %sum\n"
+      "}\n",
+      &leaf));
+
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_aie2p_core_descriptor_set();
+  uint32_t fill_count = 0;
+  for (iree_host_size_t packet_index = 0;
+       packet_index < loom_low_packet_count(&leaf.frame.schedule);
+       ++packet_index) {
+    const loom_low_packet_view_t packet =
+        loom_low_packet_at(&leaf.frame.schedule, packet_index);
+    if (packet.descriptor ==
+        &descriptor_set
+             ->descriptors[AIE2P_CORE_DESCRIPTOR_REF_LOAD_A_FIFO_FILL_512]) {
+      ExpectPhysicalRegisters(leaf, packet,
+                              {IREE_SV("p0"), IREE_SV("lf0"), IREE_SV("r24"),
+                               IREE_SV("p0"), IREE_SV("lf0"), IREE_SV("r24")});
+      ++fill_count;
+    } else if (packet.descriptor ==
+               &descriptor_set->descriptors
+                    [AIE2P_CORE_DESCRIPTOR_REF_LOAD_B_FIFO_FILL_512]) {
+      ExpectPhysicalRegisters(leaf, packet,
+                              {IREE_SV("p1"), IREE_SV("lf1"), IREE_SV("r25"),
+                               IREE_SV("p1"), IREE_SV("lf1"), IREE_SV("r25")});
+      ++fill_count;
+    }
+  }
+  EXPECT_EQ(fill_count, 2u);
+  EXPECT_EQ(leaf.frame.allocation.spill_count, 0u);
+  EXPECT_EQ(leaf.frame.allocation.materialized_copy_count, 0u);
+  EXPECT_GT(leaf.contribution.object.sections[0].contents.data_length, 0u);
+  ResetLeaf(&leaf);
 }
 
 TEST_F(Aie2pLeafObjectTest, ResourceImportsAnchorRegistersWithoutEmittingCode) {
