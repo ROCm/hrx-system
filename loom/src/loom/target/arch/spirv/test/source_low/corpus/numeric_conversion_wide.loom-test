@@ -21,6 +21,16 @@ func.def target(@target) @vector_fptrunc_bf16x32(%input: vector<32xf32>) -> (vec
 
 // ====
 
+// XFAIL: SPIR-V ordinary BF16 vector-to-integer conversion is unsupported
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @vector_fptosi_bf16x16_i32x16(%input: vector<16xbf16>) -> (vector<16xi32>) {
+  %converted = vector.fptosi %input : vector<16xbf16> to vector<16xi32>
+  func.return %converted : vector<16xi32>
+}
+
+// ====
+
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
 spirv.target<vulkan1_3> @target
 

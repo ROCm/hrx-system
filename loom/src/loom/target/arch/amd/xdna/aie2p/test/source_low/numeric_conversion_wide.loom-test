@@ -34,6 +34,40 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f
 
 aie2p.target<core> @target
 
+func.def target(@target) @vector_fptosi_bf16x16_i32x16(%input: vector<16xbf16>) -> (vector<16xi32>) {
+  %converted = vector.fptosi %input : vector<16xbf16> to vector<16xi32>
+  func.return %converted : vector<16xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_fptosi_bf16x16_i32x16(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %5 = mov.i32 52992
+  %6 = vbcst.16 %5
+  %7 = vsub.16 %input, %6
+  %8 = veqz.16.el.low32 %7
+  %9 = predicate.complete.zero.high32 %8, 0
+  %10 = vsub.16 %6, %6
+  %11 = vlt.s16x32.el.low32 %input, %10
+  %12 = predicate.complete.zero.high32 %11, 0
+  %13 = mov.i32 32767
+  %14 = vbcst.16 %13
+  %15 = vband %input, %14
+  %16 = vsel.16.mask64 %15, %10, %9
+  %17 = slice %16[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %18 = mov.shift 0
+  %19 = vfloor.s32.bf16 %17, %18
+  %20 = vsub.32 %10, %19
+  %21 = vsel.32.mask64 %19, %20, %12
+  %22 = mov.i32 -2147483648
+  %23 = vbcst.32 %22
+  %converted = vsel.32.mask64 %21, %23, %9
+  return %converted
+}
+
+// ====
+
+aie2p.target<core> @target
+
 func.def target(@target) @vector_extui_i16x16_i32x16(%input: vector<16xi16>) -> (vector<16xi32>) {
   %converted = vector.extui %input : vector<16xi16> to vector<16xi32>
   func.return %converted : vector<16xi32>

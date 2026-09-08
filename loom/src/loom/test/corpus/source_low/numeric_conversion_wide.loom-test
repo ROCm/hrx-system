@@ -14,6 +14,13 @@ func.def @vector_fptrunc_bf16x32(%input: vector<32xf32>) -> (vector<32xbf16>) {
 
 // ====
 
+func.def @vector_fptosi_bf16x16_i32x16(%input: vector<16xbf16>) -> (vector<16xi32>) {
+  %converted = vector.fptosi %input : vector<16xbf16> to vector<16xi32>
+  func.return %converted : vector<16xi32>
+}
+
+// ====
+
 func.def @vector_extui_i16x16_i32x16(%input: vector<16xi16>) -> (vector<16xi32>) {
   %converted = vector.extui %input : vector<16xi16> to vector<16xi32>
   func.return %converted : vector<16xi32>

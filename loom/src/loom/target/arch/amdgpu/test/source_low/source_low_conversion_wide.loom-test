@@ -255,6 +255,16 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_
 
 // ====
 
+// XFAIL: AMDGPU ordinary BF16 vector-to-integer conversion is unsupported
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_fptosi_bf16x16_i32x16(%input: vector<16xbf16>) -> (vector<16xi32>) {
+  %converted = vector.fptosi %input : vector<16xbf16> to vector<16xi32>
+  func.return %converted : vector<16xi32>
+}
+
+// ====
+
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @vector_extui_i16x16_i32x16(%input: vector<16xi16>) -> (vector<16xi32>) {

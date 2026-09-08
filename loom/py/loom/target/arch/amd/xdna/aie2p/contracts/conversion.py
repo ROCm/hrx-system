@@ -45,7 +45,9 @@ _F8E5M2 = Scalar("f8E5M2")
 _F16 = Scalar("f16")
 _BF16 = Scalar("bf16")
 _F32 = Scalar("f32")
+_BF16X16 = Vector("bf16", lanes=16)
 _BF16X32 = Vector("bf16", lanes=32)
+_I32X16 = Vector("i32", lanes=16)
 _F32X32 = Vector("f32", lanes=32)
 _NARROW_INTEGERS = ("i8", "i16")
 _SIGNED_INTEGERS = (*_NARROW_INTEGERS, "i32")
@@ -1222,6 +1224,164 @@ def _bf16x32_to_f32x32_rule() -> DescriptorRule:
     )
 
 
+def _bf16x16_to_signed_i32x16_rule() -> DescriptorRule:
+    """Truncates every defined BF16 input to signed i32 exactly."""
+
+    emits: list[ContractEmit] = []
+
+    def constant(
+        result_name: str,
+        value: int,
+        descriptor_key: str = "constant.i32",
+    ) -> ValueRef:
+        result = ValueRef.temporary(result_name)
+        emits.append(
+            EmitDescriptorOp(
+                descriptor=_descriptor(f"amd.xdna.aie2p.{descriptor_key}"),
+                results={"dst": result},
+                result_types={"dst": DescriptorResultType()},
+                immediates={"i": value},
+                form=DescriptorEmitForm.CONST,
+            )
+        )
+        return result
+
+    def operation(
+        result_name: str | None,
+        descriptor_key: str,
+        result_field: str,
+        *,
+        immediates: dict[str, int] | None = None,
+        **operands: ValueRef,
+    ) -> ValueRef:
+        result = (
+            ValueRef.result("result")
+            if result_name is None
+            else ValueRef.temporary(result_name)
+        )
+        emits.append(
+            EmitDescriptorOp(
+                descriptor=_descriptor(f"amd.xdna.aie2p.{descriptor_key}"),
+                operands=operands,
+                results={result_field: result},
+                result_types=(
+                    None
+                    if result_name is None
+                    else {result_field: DescriptorResultType()}
+                ),
+                immediates={} if immediates is None else immediates,
+                form=DescriptorEmitForm.OP,
+            )
+        )
+        return result
+
+    # VFLOOR implements floor, while vector.fptosi requires truncation toward
+    # zero. Convert a nonnegative magnitude and restore the sign afterward.
+    # The sole defined input whose magnitude is not representable in signed
+    # i32 is -2^31; sanitize that lane before VFLOOR and restore it last. This
+    # keeps the native conversion in range for every defined source value.
+    input_value = ValueRef.operand("input")
+    minimum_scalar = constant("minimum_bf16_scalar", 0xCF00)
+    minimum_bf16 = operation("minimum_bf16", "splat.i16x32", "dst", src=minimum_scalar)
+    minimum_difference = operation(
+        "minimum_difference",
+        "sub.i16x32",
+        "d",
+        s1=input_value,
+        s2=minimum_bf16,
+    )
+    minimum_low = operation(
+        "minimum_low", "cmp.eqz.i16x32.el.low32", "cmp", s2=minimum_difference
+    )
+    minimum = operation(
+        "minimum",
+        "predicate.complete.zero.high32",
+        "dst",
+        immediates={"i": 0},
+        storage=minimum_low,
+    )
+    zero = operation("zero", "sub.i16x32", "d", s1=minimum_bf16, s2=minimum_bf16)
+    negative_low = operation(
+        "negative_low",
+        "cmp.lt.signed.i16x32.el.low32",
+        "cmp",
+        s1=input_value,
+        s2=zero,
+    )
+    negative = operation(
+        "negative",
+        "predicate.complete.zero.high32",
+        "dst",
+        immediates={"i": 0},
+        storage=negative_low,
+    )
+    absolute_mask_scalar = constant("absolute_mask_scalar", 0x7FFF)
+    absolute_mask = operation(
+        "absolute_mask", "splat.i16x32", "dst", src=absolute_mask_scalar
+    )
+    absolute = operation(
+        "absolute", "and.bits512", "d", s1=input_value, s2=absolute_mask
+    )
+    safe_absolute = operation(
+        "safe_absolute",
+        "select.i16x32.mask64",
+        "d",
+        s1=absolute,
+        s2=zero,
+        sel=minimum,
+    )
+    safe_absolute_w = ValueRef.temporary("safe_absolute_w")
+    emits.append(
+        EmitRegisterSlice(
+            source=safe_absolute,
+            result=safe_absolute_w,
+            unit_count=1,
+        )
+    )
+    shift = constant("shift", 0, "constant.i32.shift")
+    magnitude = operation(
+        "magnitude",
+        "convert.floor.bf16x16.to.i32x16",
+        "dst",
+        src=safe_absolute_w,
+        shft=shift,
+    )
+    negative_magnitude = operation(
+        "negative_magnitude", "sub.i32x16", "d", s1=zero, s2=magnitude
+    )
+    signed_result = operation(
+        "signed_result",
+        "select.i32x16.mask64",
+        "d",
+        s1=magnitude,
+        s2=negative_magnitude,
+        sel=negative,
+    )
+    minimum_i32_scalar = constant("minimum_i32_scalar", -(2**31))
+    minimum_i32 = operation(
+        "minimum_i32", "splat.i32x16", "dst", src=minimum_i32_scalar
+    )
+    operation(
+        None,
+        "select.i32x16.mask64",
+        "d",
+        s1=signed_result,
+        s2=minimum_i32,
+        sel=minimum,
+    )
+
+    return DescriptorRule(
+        source_op=vector.vector_fptosi,
+        descriptor=emits[-1].descriptor,
+        guards=(
+            Guard.value_type("input", _BF16X16),
+            Guard.value_type("result", _I32X16),
+        ),
+        emit=tuple(emits),
+        report_key="exact_bfloat16x16_to_signed_i32x16",
+    )
+
+
 def _vector_integer_widen_rule(
     source_op: Op,
     input_type: TypePattern,
@@ -1803,4 +1963,5 @@ AIE2P_CONVERSION_RULES = (
     ),
     _f32x32_to_bf16x32_rule(),
     _bf16x32_to_f32x32_rule(),
+    _bf16x16_to_signed_i32x16_rule(),
 )

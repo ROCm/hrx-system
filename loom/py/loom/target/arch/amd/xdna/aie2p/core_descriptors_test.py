@@ -153,6 +153,26 @@ def test_core_descriptor_closure_is_complete() -> None:
     ]
 
 
+def test_native_numeric_descriptors_have_report_semantic_categories() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+    expected_categories = {
+        "amd.xdna.aie2p.dot4i.i8x64.configured": "dot",
+        "amd.xdna.aie2p.unpack.s4x64.to.s8x64.configured": "convert",
+        "amd.xdna.aie2p.widen.2x.w-to-b.signed.configured": "convert",
+        "amd.xdna.aie2p.pack.w.trunc.configured": "convert",
+        "amd.xdna.aie2p.convert.signed.i32.to.f32": "convert",
+        "amd.xdna.aie2p.convert.f32x32.to.bf16x32": "convert",
+    }
+
+    for key, expected_category in expected_categories.items():
+        semantic_tag = descriptors[key].semantic_tag
+        assert semantic_tag is not None
+        assert semantic_tag.startswith(f"{expected_category}.")
+
+
 def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
     assert {
@@ -1166,6 +1186,26 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
         "aie2p.vec256",
     ]
     assert [operand.unit_count for operand in bf16_widen.operands] == [2, 2]
+
+    bf16_floor = descriptors["amd.xdna.aie2p.convert.floor.bf16x16.to.i32x16"]
+    assert [operand.field_name for operand in bf16_floor.operands] == [
+        "dst",
+        "src",
+        "shft",
+        "implicit_def_srf2iflags",
+        "implicit_use_crf2imask",
+    ]
+    assert [operand.reg_alts[0].reg_class for operand in bf16_floor.operands] == [
+        "aie2p.vec256",
+        "aie2p.vec256",
+        "aie2p.es",
+        "aie2p.state.srf2iflags",
+        "aie2p.state.crf2imask",
+    ]
+    assert [operand.unit_count for operand in bf16_floor.operands] == [2, 1, 1, 1, 1]
+    assert [
+        (operand.read_stage, operand.ready_stage) for operand in bf16_floor.operands
+    ] == [(0, 2), (1, 0), (1, 0), (0, 3), (2, 0)]
 
     for numeric_kind in ("s8s8", "u8s8", "s8u8", "u8u8"):
         matrix_multiply = descriptors[

@@ -290,7 +290,7 @@ def _packed_dot_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
         _DescriptorSpec(
             "VMUL_vmul_cm_core_Y_X",
             f"{_TARGET_KEY}.dot4i.i8x64.configured",
-            "integer.dot4i.i8x64.configured",
+            "dot.integer.i8x64.configured",
             "II_VMUL_vmul_cm_core_Y_X",
             storage_overrides=(("dst", "mBMs"), ("s1", "VEC256")),
             asm_mnemonic="dot4i.i8x64",
@@ -305,7 +305,7 @@ def _packed_i4_unpack_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
         _DescriptorSpec(
             f"VUNPACK_mv_unpack_w_unpackSign{sign_bit}",
             f"{_TARGET_KEY}.unpack.{source_kind}4x64.to.{source_kind}8x64.configured",
-            f"integer.unpack.{source_kind}4x64.to.{source_kind}8x64.configured",
+            f"convert.integer.unpack.{source_kind}4x64.to.{source_kind}8x64.configured",
             f"II_VUNPACK_mv_unpack_w_unpackSign{sign_bit}",
             asm_mnemonic=f"vunpack.{source_kind}4.to.{source_kind}8x64",
         )
@@ -320,7 +320,7 @@ def _integer_conversion_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
         _DescriptorSpec(
             f"{form_name}_upsSign{sign_bit}",
             f"{_TARGET_KEY}.widen.{shape}.{signedness}.configured",
-            f"integer.widen.{shape}.{signedness}.configured",
+            f"convert.integer.widen.{shape}.{signedness}.configured",
             f"II_{form_name}_upsSign{sign_bit}",
             storage_overrides=storage_overrides,
             asm_mnemonic=f"vups.{shape}.{signedness}",
@@ -353,7 +353,7 @@ def _integer_conversion_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
         _DescriptorSpec(
             f"VPACK_mv_pack_{width}_packSign0",
             f"{_TARGET_KEY}.pack.{width}.trunc.configured",
-            f"integer.pack.{width}.trunc.configured",
+            f"convert.integer.pack.{width}.trunc.configured",
             f"II_VPACK_mv_pack_{width}_packSign0",
             storage_overrides=storage_overrides,
             asm_mnemonic=f"vpack.{width}.trunc",
@@ -495,14 +495,14 @@ _BASE_DESCRIPTOR_SPECS = (
     _DescriptorSpec(
         "MOV_alu_mv_alu_fx2flt",
         f"{_TARGET_KEY}.convert.signed.i32.to.f32",
-        "conversion.signed.i32.to.f32",
+        "convert.signed.i32.to.f32",
         "II_MOV_alu_mv_alu_fx2flt",
         asm_mnemonic="convert.signed.i32.to.f32",
     ),
     _DescriptorSpec(
         "MOV_alu_mv_alu_flt2fx",
         f"{_TARGET_KEY}.convert.round-nearest.f32.to.signed.i32",
-        "conversion.round-nearest.f32.to.signed.i32",
+        "convert.round-nearest.f32.to.signed.i32",
         "II_MOV_alu_mv_alu_flt2fx",
         asm_mnemonic="convert.round-nearest.f32.to.signed.i32",
     ),
@@ -845,9 +845,17 @@ _BASE_DESCRIPTOR_SPECS = (
         asm_mnemonic="vsub.f32x64",
     ),
     _DescriptorSpec(
+        "VFLOOR_s32_bf16_mv_float_to_int_w",
+        f"{_TARGET_KEY}.convert.floor.bf16x16.to.i32x16",
+        "convert.floor.bf16x16.to.i32x16",
+        "II_VFLOOR_s32_bf16_mv_float_to_int_w",
+        storage_overrides=(("src", "VEC256"),),
+        asm_mnemonic="vfloor.s32.bf16",
+    ),
+    _DescriptorSpec(
         "VCONV_bf16_fp32_mv_w_srs_bf",
         f"{_TARGET_KEY}.convert.f32x16.to.bf16x16",
-        "floating.convert.f32x16.to.bf16x16",
+        "convert.floating.f32x16.to.bf16x16",
         "II_VCONV_bf16_fp32_mv_w_srs_bf",
         storage_overrides=(("dst", "VEC256"), ("src", "mBMs")),
         asm_mnemonic="vconv.bf16.fp32x16",
@@ -855,7 +863,7 @@ _BASE_DESCRIPTOR_SPECS = (
     _DescriptorSpec(
         "VCONV_bf16_fp32_mv_x_srs_bf",
         f"{_TARGET_KEY}.convert.f32x32.to.bf16x32",
-        "floating.convert.f32x32.to.bf16x32",
+        "convert.floating.f32x32.to.bf16x32",
         "II_VCONV_bf16_fp32_mv_x_srs_bf",
         storage_overrides=(("src", "mBMs"),),
         asm_mnemonic="vconv.bf16.fp32",
@@ -863,7 +871,7 @@ _BASE_DESCRIPTOR_SPECS = (
     _DescriptorSpec(
         "VCONV_fp32_bf16_mv_ups_xbf",
         f"{_TARGET_KEY}.convert.bf16x32.to.f32x32",
-        "floating.convert.bf16x32.to.f32x32",
+        "convert.floating.bf16x32.to.f32x32",
         "II_VCONV_fp32_bf16_mv_ups_xbf",
         storage_overrides=(("dst", "mBMs"), ("src", "VEC256")),
         asm_mnemonic="vconv.fp32.bf16",
@@ -871,7 +879,7 @@ _BASE_DESCRIPTOR_SPECS = (
     _DescriptorSpec(
         "VCONV_fp32_bf16_mv_ups_wbf",
         f"{_TARGET_KEY}.convert.bf16x16.to.f32x16",
-        "floating.convert.bf16x16.to.f32x16",
+        "convert.floating.bf16x16.to.f32x16",
         "II_VCONV_fp32_bf16_mv_ups_wbf",
         storage_overrides=(("dst", "mBMs"), ("src", "VEC256")),
         asm_mnemonic="vconv.fp32.bf16x16",

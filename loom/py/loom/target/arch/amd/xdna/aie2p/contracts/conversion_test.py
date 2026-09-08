@@ -302,6 +302,15 @@ def _reference_integer_to_f16(value: int) -> int:
     return sign | ((exponent + 15) << 10) | (significand & 0x03FF)
 
 
+def _reference_bf16_fptosi_recipe(input_bits: int) -> int:
+    minimum = input_bits == 0xCF00
+    negative = bool(input_bits & 0x8000)
+    absolute_bits = 0 if minimum else input_bits & 0x7FFF
+    magnitude = math.floor(_bits_float(absolute_bits << 16))
+    result = -magnitude if negative else magnitude
+    return -(2**31) if minimum else result
+
+
 def _rule(report_key: str) -> DescriptorRule:
     return next(
         rule
@@ -517,6 +526,66 @@ def test_native_bfloat16_packet_conversions_preserve_exact_width_and_rounding() 
     assert [emit.descriptor.key for emit in widen.emit] == [
         "amd.xdna.aie2p.convert.bf16x32.to.f32x32"
     ]
+
+
+def test_bfloat16_packet_to_signed_i32_is_exact_over_defined_domain() -> None:
+    rule = _rule("exact_bfloat16x16_to_signed_i32x16")
+    assert rule.source_op is vector.vector_fptosi
+    assert [
+        emit.descriptor.key for emit in rule.emit if isinstance(emit, EmitDescriptorOp)
+    ] == [
+        "amd.xdna.aie2p.constant.i32",
+        "amd.xdna.aie2p.splat.i16x32",
+        "amd.xdna.aie2p.sub.i16x32",
+        "amd.xdna.aie2p.cmp.eqz.i16x32.el.low32",
+        "amd.xdna.aie2p.predicate.complete.zero.high32",
+        "amd.xdna.aie2p.sub.i16x32",
+        "amd.xdna.aie2p.cmp.lt.signed.i16x32.el.low32",
+        "amd.xdna.aie2p.predicate.complete.zero.high32",
+        "amd.xdna.aie2p.constant.i32",
+        "amd.xdna.aie2p.splat.i16x32",
+        "amd.xdna.aie2p.and.bits512",
+        "amd.xdna.aie2p.select.i16x32.mask64",
+        "amd.xdna.aie2p.constant.i32.shift",
+        "amd.xdna.aie2p.convert.floor.bf16x16.to.i32x16",
+        "amd.xdna.aie2p.sub.i32x16",
+        "amd.xdna.aie2p.select.i32x16.mask64",
+        "amd.xdna.aie2p.constant.i32",
+        "amd.xdna.aie2p.splat.i32x16",
+        "amd.xdna.aie2p.select.i32x16.mask64",
+    ]
+    assert isinstance(rule.emit[12], EmitRegisterSlice)
+    assert rule.emit[12].unit_count == 1
+
+    sanitize = rule.emit[11]
+    assert isinstance(sanitize, EmitDescriptorOp)
+    assert sanitize.operands == {
+        "s1": ValueRef.temporary("absolute"),
+        "s2": ValueRef.temporary("zero"),
+        "sel": ValueRef.temporary("minimum"),
+    }
+    restore_sign = rule.emit[16]
+    assert isinstance(restore_sign, EmitDescriptorOp)
+    assert restore_sign.operands == {
+        "s1": ValueRef.temporary("magnitude"),
+        "s2": ValueRef.temporary("negative_magnitude"),
+        "sel": ValueRef.temporary("negative"),
+    }
+    restore_minimum = rule.emit[19]
+    assert isinstance(restore_minimum, EmitDescriptorOp)
+    assert restore_minimum.operands == {
+        "s1": ValueRef.temporary("signed_result"),
+        "s2": ValueRef.temporary("minimum_i32"),
+        "sel": ValueRef.temporary("minimum"),
+    }
+
+    for input_bits in range(1 << 16):
+        value = _bits_float(input_bits << 16)
+        if not math.isfinite(value) or not -(2**31) <= value < 2**31:
+            continue
+        assert _reference_bf16_fptosi_recipe(input_bits) == math.trunc(value), hex(
+            input_bits
+        )
 
 
 def test_native_integer_packet_conversions_are_compact_exact_rules() -> None:
