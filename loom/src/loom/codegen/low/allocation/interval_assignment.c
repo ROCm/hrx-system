@@ -305,7 +305,8 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
 
     if (loom_low_allocation_target_constraints_fixed_value_conflicts(
             state->context->target_constraints, state->context->liveness,
-            state->context->unit_liveness, &candidate,
+            state->context->unit_liveness, state->context->placement,
+            &candidate,
             /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0) ||
         loom_low_allocation_target_constraints_reserved_range_conflicts(
             state->context->target_constraints,

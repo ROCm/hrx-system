@@ -1267,10 +1267,54 @@ uint32_t loom_low_allocation_target_constraints_assigned_location_search_limit(
   return max_end;
 }
 
+static bool loom_low_allocation_target_constraints_fixed_value_is_tied_alias(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_placement_table_t* placement,
+    const loom_low_allocation_resolved_fixed_value_t* fixed_value,
+    const loom_low_allocation_assignment_t* candidate) {
+  for (uint32_t direction = 0; direction < 2; ++direction) {
+    const bool fixed_is_result = direction == 0;
+    const loom_low_placement_relation_range_t range =
+        fixed_is_result
+            ? loom_low_placement_relation_range_for_value_ordinal(
+                  placement, fixed_value->value_ordinal)
+            : loom_low_placement_relation_range_for_source_value_ordinal(
+                  placement, fixed_value->value_ordinal);
+    for (uint32_t i = 0; i < range.count; ++i) {
+      const uint32_t relation_index =
+          fixed_is_result
+              ? range.start + i
+              : placement->relation_indices_by_source_ordinal[range.start + i];
+      const loom_low_placement_relation_t* relation =
+          &placement->relations[relation_index];
+      if (relation->cause != LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT ||
+          relation->kind != LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE ||
+          !iree_any_bit_set(relation->flags,
+                            LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD) ||
+          relation->unit_count != candidate->unit_count ||
+          relation->unit_count != fixed_value->assignment.unit_count) {
+        continue;
+      }
+      const loom_value_ordinal_t counterpart_ordinal =
+          fixed_is_result ? relation->source_ordinal : relation->result_ordinal;
+      if (loom_low_placement_value_id(placement, counterpart_ordinal) ==
+              candidate->value_id &&
+          loom_low_allocation_storage_placement_relation_satisfied(
+              descriptor_set, relation,
+              fixed_is_result ? &fixed_value->assignment : candidate,
+              fixed_is_result ? candidate : &fixed_value->assignment)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 bool loom_low_allocation_target_constraints_fixed_value_conflicts(
     const loom_low_allocation_target_constraints_t* constraints,
     const loom_liveness_analysis_t* liveness,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_low_placement_table_t* placement,
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count) {
   IREE_ASSERT_ARGUMENT(constraints);
@@ -1303,7 +1347,9 @@ bool loom_low_allocation_target_constraints_fixed_value_conflicts(
     if (loom_low_allocation_live_range_assignments_conflict(
             descriptor_set, liveness, unit_liveness->start_points,
             unit_liveness->end_points, unit_liveness->point_count,
-            fixed_assignment, candidate)) {
+            fixed_assignment, candidate) &&
+        !loom_low_allocation_target_constraints_fixed_value_is_tied_alias(
+            descriptor_set, placement, fixed_value, candidate)) {
       return true;
     }
   }

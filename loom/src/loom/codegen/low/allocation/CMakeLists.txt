@@ -589,6 +589,7 @@ loom_cc_library(
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
     loom::codegen::low::function
+    loom::codegen::low::placement
     loom::codegen::low::target_binding
     loom::error::emitter
     loom::error::error_defs

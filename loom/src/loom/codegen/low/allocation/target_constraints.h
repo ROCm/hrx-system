@@ -15,6 +15,7 @@
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
@@ -253,11 +254,13 @@ uint32_t loom_low_allocation_target_constraints_assigned_location_search_limit(
     const loom_low_allocation_target_constraints_t* constraints,
     uint16_t reg_class_id, loom_low_allocation_location_kind_t location_kind);
 
-// Returns true when |candidate| conflicts with a fixed value.
+// Returns true when |candidate| conflicts with a fixed value. Whole-value hard
+// ties in |placement| share storage even before either interval is assigned.
 bool loom_low_allocation_target_constraints_fixed_value_conflicts(
     const loom_low_allocation_target_constraints_t* constraints,
     const loom_liveness_analysis_t* liveness,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_low_placement_table_t* placement,
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count);
 

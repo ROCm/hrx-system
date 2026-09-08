@@ -289,7 +289,8 @@ static bool loom_low_allocation_loop_edge_relocation_candidate_target_conflicts(
       context->assignments[candidate->source_assignment_index].value_id;
   if (loom_low_allocation_target_constraints_fixed_value_conflicts(
           context->target_constraints, context->liveness,
-          context->unit_liveness, &candidate->assignment, &source_value_id,
+          context->unit_liveness, context->placement, &candidate->assignment,
+          &source_value_id,
           /*ignored_value_count=*/1)) {
     return true;
   }
@@ -451,7 +452,7 @@ static bool loom_low_allocation_loop_edge_relocation_eviction_location_is_legal(
   }
   if (loom_low_allocation_target_constraints_fixed_value_conflicts(
           context->target_constraints, context->liveness,
-          context->unit_liveness, &assignment,
+          context->unit_liveness, context->placement, &assignment,
           /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0) ||
       loom_low_allocation_target_constraints_reserved_range_conflicts(
           context->target_constraints, assignment.descriptor_reg_class_id,

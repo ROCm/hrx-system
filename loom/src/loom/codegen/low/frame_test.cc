@@ -47,6 +47,7 @@ class LowEmissionFrameTest : public ::testing::Test {
 
   ModulePtr ParseModule(const char* source) {
     loom_text_parse_options_t options = {};
+    options.diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr};
     loom_low_descriptor_text_asm_environment_initialize(
         &registry_.registry, &options.low_asm_environment);
     loom_module_t* module = nullptr;
@@ -119,6 +120,71 @@ low.func.def target<test.low.core> @resource_capacity(%lhs: reg<test.i32>, %rhs:
     ASSERT_GE(frame.schedule.node_count, 2u);
     EXPECT_EQ(frame.schedule.nodes[0].issue_cycle, 0u);
     EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 4u);
+  }
+}
+
+TEST_F(LowEmissionFrameTest, SingletonReservationsPreserveTiedStateUpdates) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @fixed_updates(%state: reg<test.fixed.r0>, %delta: reg<test.i32>, %independent: reg<test.explicit32>) -> (reg<test.fixed.r0>, reg<test.explicit32>) asm {
+  %first = test.fixed.update.i32 %state, %delta
+  %second = test.fixed.update.i32 %first, %delta
+  return %second, %independent
+}
+)");
+  ASSERT_NE(module, nullptr);
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+  ASSERT_EQ(frame.schedule.error_count, 0u);
+  ASSERT_EQ(frame.allocation.error_count, 0u);
+  EXPECT_EQ(frame.allocation.spill_count, 0u);
+  EXPECT_EQ(frame.allocation.materialized_copy_count, 0u);
+  uint32_t fixed_count = 0;
+  for (iree_host_size_t i = 0; i < frame.allocation.assignment_count; ++i) {
+    const auto& assignment = frame.allocation.assignments[i];
+    if (assignment.descriptor_reg_class_id ==
+        TEST_LOW_CORE_REG_CLASS_ID_TEST_EXPLICIT32) {
+      EXPECT_NE(assignment.location_base, 0u);
+    }
+    if (assignment.descriptor_reg_class_id !=
+        TEST_LOW_CORE_REG_CLASS_ID_TEST_FIXED_R0) {
+      continue;
+    }
+    EXPECT_EQ(assignment.location_kind,
+              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
+    EXPECT_EQ(assignment.location_base, 0u);
+    ++fixed_count;
+  }
+  EXPECT_EQ(fixed_count, 3u);
+}
+
+TEST_F(LowEmissionFrameTest, SingletonTiedStateCrossesDynamicLoopBackedge) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @fixed_loop(%initial: reg<test.fixed.r0>, %count: reg<test.i32>) -> (reg<test.fixed.r0>) asm {
+  %decrement = test.const.i32 -1
+  low.br ^loop(%initial: reg<test.fixed.r0>, %count: reg<test.i32>)
+^loop(%state: reg<test.fixed.r0>, %remaining: reg<test.i32>):
+  low.cond_br %remaining, ^body, ^exit : reg<test.i32>
+^body:
+  %next_state = test.fixed.update.i32 %state, %decrement
+  %next_remaining = test.add.i32 %remaining, %decrement
+  low.br ^loop(%next_state: reg<test.fixed.r0>, %next_remaining: reg<test.i32>)
+^exit:
+  return %state
+}
+)");
+  ASSERT_NE(module, nullptr);
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+  ASSERT_EQ(frame.schedule.error_count, 0u);
+  ASSERT_EQ(frame.allocation.error_count, 0u);
+  EXPECT_EQ(frame.allocation.spill_count, 0u);
+  EXPECT_EQ(frame.allocation.materialized_copy_count, 0u);
+  for (iree_host_size_t i = 0; i < frame.allocation.assignment_count; ++i) {
+    const auto& assignment = frame.allocation.assignments[i];
+    if (assignment.descriptor_reg_class_id ==
+        TEST_LOW_CORE_REG_CLASS_ID_TEST_FIXED_R0) {
+      EXPECT_EQ(assignment.location_base, 0u);
+    }
   }
 }
 
