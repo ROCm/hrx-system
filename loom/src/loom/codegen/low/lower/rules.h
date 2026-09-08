@@ -146,6 +146,8 @@ static_assert(sizeof(loom_low_lower_rule_descriptor_ref_t) == 4,
 typedef struct loom_low_lower_value_ref_t {
   // Source value namespace being referenced.
   loom_low_lower_value_ref_kind_t kind;
+  // Source node containing the referenced field. Zero selects the rule root.
+  uint8_t source_node_index;
   // Ordinal within the namespace selected by |kind|. For operand and result
   // refs this is the source field index; |element_index| selects within that
   // field.
@@ -158,6 +160,46 @@ typedef struct loom_low_lower_value_ref_t {
 } loom_low_lower_value_ref_t;
 static_assert(sizeof(loom_low_lower_value_ref_t) == 8,
               "loom_low_lower_value_ref_t must be 8 bytes");
+
+#define LOOM_LOW_LOWER_MAX_SOURCE_NODES 8
+
+// Number of low bits occupied by the related source-node count in a packed
+// rule source-node span. The root is implicit, so at most seven rows are
+// stored for an eight-node source graph.
+#define LOOM_LOW_LOWER_SOURCE_NODE_COUNT_BITS 3
+#define LOOM_LOW_LOWER_SOURCE_NODE_COUNT_MASK \
+  ((1u << LOOM_LOW_LOWER_SOURCE_NODE_COUNT_BITS) - 1u)
+#define LOOM_LOW_LOWER_SOURCE_NODE_SPAN(start, count)                        \
+  ((uint16_t)(((uint16_t)(start) << LOOM_LOW_LOWER_SOURCE_NODE_COUNT_BITS) | \
+              ((uint16_t)(count) & LOOM_LOW_LOWER_SOURCE_NODE_COUNT_MASK)))
+
+typedef uint8_t loom_low_lower_source_node_relation_t;
+
+enum loom_low_lower_source_node_relation_e {
+  // The node is the adjacent sole ordinary user of a parent result.
+  LOOM_LOW_LOWER_SOURCE_NODE_ADJACENT_UNIQUE_USER = 0,
+  // The node is the adjacent sole-use definition of a parent operand.
+  LOOM_LOW_LOWER_SOURCE_NODE_ADJACENT_DEFINITION = 1,
+};
+
+typedef struct loom_low_lower_source_node_t {
+  // SSA relation used to find this source op.
+  loom_low_lower_source_node_relation_t relation;
+  // Previously resolved node that owns parent_value_ref_index.
+  uint8_t parent_node_index;
+  // Required source op kind for this node.
+  loom_op_kind_t source_op_kind;
+  // Value-ref row selecting the connection in the parent node.
+  uint16_t parent_value_ref_index;
+  // Value-ref row selecting the same connection in this node.
+  uint16_t node_value_ref_index;
+  // First node-local guard ref.
+  uint16_t guard_start;
+  // Number of node-local guard refs.
+  uint16_t guard_count;
+} loom_low_lower_source_node_t;
+static_assert(sizeof(loom_low_lower_source_node_t) == 12,
+              "loom_low_lower_source_node_t must be 12 bytes");
 
 typedef enum loom_low_lower_attr_copy_kind_e {
   // Copy the source op attribute directly into the emitted low packet.
@@ -837,6 +879,9 @@ typedef struct loom_low_lower_rule_t {
   // Number of rule-local temporary low values available while emitting this
   // rule.
   uint16_t temporary_count;
+  // Packed first related source-node row and row count. The root source op is
+  // implicit node zero.
+  uint16_t source_node_span;
   // First guard-ref row for this rule.
   uint16_t guard_start;
   // Number of guard refs for this rule.
@@ -857,8 +902,20 @@ typedef struct loom_low_lower_rule_t {
   // Number of source result refs erased by this rule.
   uint8_t elide_ref_count;
 } loom_low_lower_rule_t;
-static_assert(sizeof(loom_low_lower_rule_t) == 18,
-              "loom_low_lower_rule_t must be 18 bytes");
+static_assert(sizeof(loom_low_lower_rule_t) == 20,
+              "loom_low_lower_rule_t must be 20 bytes");
+
+static inline uint16_t loom_low_lower_rule_source_node_start(
+    const loom_low_lower_rule_t* rule) {
+  return (uint16_t)(rule->source_node_span >>
+                    LOOM_LOW_LOWER_SOURCE_NODE_COUNT_BITS);
+}
+
+static inline uint8_t loom_low_lower_rule_source_node_count(
+    const loom_low_lower_rule_t* rule) {
+  return (uint8_t)(rule->source_node_span &
+                   LOOM_LOW_LOWER_SOURCE_NODE_COUNT_MASK);
+}
 
 typedef struct loom_low_lower_rule_span_t {
   // Source op kind covered by this contiguous rule range.
@@ -902,6 +959,10 @@ typedef struct loom_low_lower_rule_set_t {
   const loom_low_lower_value_ref_t* value_refs;
   // Number of rows in value_refs.
   uint16_t value_ref_count;
+  // Related source-op rows referenced by rules.
+  const loom_low_lower_source_node_t* source_nodes;
+  // Number of rows in source_nodes.
+  uint16_t source_node_count;
   // Target-owned value materializers referenced by one-based value refs.
   const loom_low_lower_value_materializer_t* materializers;
   // Number of rows in materializers.

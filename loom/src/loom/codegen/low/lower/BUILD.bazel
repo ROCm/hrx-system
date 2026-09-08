@@ -210,6 +210,7 @@ loom_cc_test(
         "//loom/src/loom/codegen/low/testing:source_workload",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

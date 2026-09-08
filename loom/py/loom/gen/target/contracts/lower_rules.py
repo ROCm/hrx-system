@@ -23,6 +23,8 @@ from loom.target.contracts import (
     LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE,
     LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN,
     LOWER_SOURCE_MEMORY_NONE,
+    MAX_SOURCE_NODES,
+    SOURCE_NODE_COUNT_BITS,
     CompiledLowerRuleSet,
     ContractFragment,
     GuardKind,
@@ -30,6 +32,8 @@ from loom.target.contracts import (
     LowerEmitKind,
     SourceMemoryAddressMaterializer,
     SourceMemoryByteOffsetMaterializer,
+    SourceNodeRelation,
+    SourceValueKind,
     TypePattern,
     compile_lower_rule_set,
 )
@@ -292,6 +296,15 @@ def _generate_source(
         )
     )
 
+    source_nodes_name = f"k{c_table_prefix}SourceNodes"
+    lines.extend(
+        lower_rule_rows.emit_optional_array(
+            source_nodes_name,
+            "loom_low_lower_source_node_t",
+            [lower_rule_rows.source_node_row(row) for row in table.source_nodes],
+        )
+    )
+
     materializers_name = f"k{c_table_prefix}Materializers"
     lines.extend(
         lower_rule_rows.emit_optional_array(
@@ -531,6 +544,7 @@ def _generate_source(
             report_keys_name=report_keys_name,
             type_patterns_name=type_patterns_name,
             value_refs_name=value_refs_name,
+            source_nodes_name=source_nodes_name,
             materializers_name=materializers_name,
             source_memories_name=source_memories_name,
             source_memory_diagnostics=source_memory_diagnostics,
@@ -637,6 +651,8 @@ def _validate_c_table_shape(
     _require_u16(len(_collect_report_keys(table)), f"{subject} report-key count")
     _require_u16(len(table.type_patterns), f"{subject} type-pattern count")
     _require_u16(len(table.value_refs), f"{subject} value-ref count")
+    if len(table.source_nodes) > 1 << (16 - SOURCE_NODE_COUNT_BITS):
+        raise ValueError(f"{subject} source-node count exceeds packed capacity")
     _require_u16(
         len(source_contract.materializers),
         f"{subject} materializer count",
@@ -686,6 +702,8 @@ def _validate_c_table_shape(
                     f"{param_subject} value-ref index",
                     "value-ref",
                 )
+                if table.value_refs[param.value_ref_index].source_node_index:
+                    raise ValueError(f"{param_subject} must reference its local diagnostic source op")
             _require_i64(param.i64_value, f"{param_subject} i64 value")
             _require_u32(param.u32_value, f"{param_subject} u32 value")
             _require_u64(param.u64_value, f"{param_subject} u64 value")
@@ -700,6 +718,7 @@ def _validate_c_table_shape(
 
     for index, row in enumerate(table.value_refs):
         row_subject = f"{subject} value-ref {index}"
+        _require_u8(row.source_node_index, f"{row_subject} source-node index")
         _require_u16(row.index, f"{row_subject} index")
         _require_u16(row.element_index, f"{row_subject} element index")
         _require_u16(row.materializer_index, f"{row_subject} materializer index")
@@ -710,6 +729,39 @@ def _validate_c_table_shape(
                 f"{row_subject} materializer index",
                 "materializer",
             )
+
+    for index, row in enumerate(table.source_nodes):
+        row_subject = f"{subject} source-node {index}"
+        _require_u8(row.parent_node_index, f"{row_subject} parent-node index")
+        _require_u16(
+            row.parent_value_ref_index,
+            f"{row_subject} parent value-ref index",
+        )
+        _require_table_index(
+            row.parent_value_ref_index,
+            len(table.value_refs),
+            f"{row_subject} parent value-ref index",
+            "value-ref",
+        )
+        _require_u16(
+            row.node_value_ref_index,
+            f"{row_subject} node value-ref index",
+        )
+        _require_table_index(
+            row.node_value_ref_index,
+            len(table.value_refs),
+            f"{row_subject} node value-ref index",
+            "value-ref",
+        )
+        _require_u16(row.guard_start, f"{row_subject} guard start")
+        _require_u16(row.guard_count, f"{row_subject} guard count")
+        _require_table_range(
+            row.guard_start,
+            row.guard_count,
+            len(table.guards),
+            f"{row_subject} guard range",
+            "guard",
+        )
 
     for index, row in enumerate(table.source_memories):
         row_subject = f"{subject} source-memory {index}"
@@ -797,6 +849,8 @@ def _validate_c_table_shape(
                 f"{row_subject} value-ref index",
                 "value-ref",
             )
+            if table.value_refs[row.value_ref_index].source_node_index:
+                raise ValueError(f"{row_subject} must reference its local guarded source op")
         if lower_rule_rows.guard_uses_other_value_ref(row.kind):
             _require_table_index(
                 row.other_value_ref_index,
@@ -804,6 +858,8 @@ def _validate_c_table_shape(
                 f"{row_subject} other value-ref index",
                 "value-ref",
             )
+            if table.value_refs[row.other_value_ref_index].source_node_index:
+                raise ValueError(f"{row_subject} must reference its local guarded source op")
         _require_u16(row.attr_index, f"{row_subject} attr index")
         _require_u16(row.type_pattern_index, f"{row_subject} type-pattern index")
         if row.kind == GuardKind.VALUE_TYPE:
@@ -994,6 +1050,49 @@ def _validate_c_table_shape(
         if row.report_key:
             _require_report_key(row.report_key, f"{row_subject} report key")
         _require_u16(row.temporary_count, f"{row_subject} temporary count")
+        if row.source_node_start >= 1 << (16 - SOURCE_NODE_COUNT_BITS):
+            raise ValueError(f"{row_subject} source-node start exceeds packed capacity")
+        _require_u8(row.source_node_count, f"{row_subject} source-node count")
+        if row.source_node_count + 1 > MAX_SOURCE_NODES:
+            raise ValueError(f"{row_subject} source-node count exceeds capacity")
+        if row.source_node_count == 0 and row.source_node_start != 0:
+            raise ValueError(f"{row_subject} inactive source-node range has a nonzero start")
+        _require_table_range(
+            row.source_node_start,
+            row.source_node_count,
+            len(table.source_nodes),
+            f"{row_subject} source-node range",
+            "source-node",
+        )
+        source_node_guard_count = 0
+        for source_node_index in range(1, row.source_node_count + 1):
+            source_node = table.source_nodes[row.source_node_start + source_node_index - 1]
+            node_subject = f"{row_subject} source-node {source_node_index}"
+            if source_node.parent_node_index >= source_node_index:
+                raise ValueError(f"{node_subject} parent must precede the related node")
+            parent_ref = table.value_refs[source_node.parent_value_ref_index]
+            node_ref = table.value_refs[source_node.node_value_ref_index]
+            if parent_ref.source_node_index != source_node.parent_node_index:
+                raise ValueError(f"{node_subject} parent value-ref selects source node {parent_ref.source_node_index}, expected {source_node.parent_node_index}")
+            if node_ref.source_node_index != source_node_index:
+                raise ValueError(f"{node_subject} local value-ref selects source node {node_ref.source_node_index}, expected {source_node_index}")
+            if source_node.relation is SourceNodeRelation.ADJACENT_UNIQUE_USER:
+                parent_kind = SourceValueKind.RESULT
+                node_kind = SourceValueKind.OPERAND
+            elif source_node.relation is SourceNodeRelation.ADJACENT_DEFINITION:
+                parent_kind = SourceValueKind.OPERAND
+                node_kind = SourceValueKind.RESULT
+            else:
+                raise ValueError(f"{node_subject} has an unknown relation")
+            if parent_ref.kind is not parent_kind or node_ref.kind is not node_kind:
+                raise ValueError(f"{node_subject} connection value-ref kinds do not match relation {source_node.relation.value!r}")
+            if parent_ref.materializer_index or node_ref.materializer_index:
+                raise ValueError(f"{node_subject} connection value-refs cannot use materializers")
+            source_node_guard_count += source_node.guard_count
+        _require_u16(
+            row.guard_count + source_node_guard_count,
+            f"{row_subject} aggregate guard count",
+        )
         _require_u16(row.guard_start, f"{row_subject} guard start")
         _require_u16(row.guard_count, f"{row_subject} guard count")
         _require_table_range(
@@ -1030,6 +1129,42 @@ def _validate_c_table_shape(
             f"{row_subject} elide-ref range",
             "value-ref",
         )
+        visible_value_ref_indices: list[int] = []
+        visible_value_ref_indices.extend(range(row.alias_ref_start, row.alias_ref_start + row.alias_ref_count * 2))
+        visible_value_ref_indices.extend(range(row.elide_ref_start, row.elide_ref_start + row.elide_ref_count))
+        for emit_index in range(row.emit_start, row.emit_start + row.emit_count):
+            emit = table.emits[emit_index]
+            visible_value_ref_indices.extend(
+                range(
+                    emit.operand_ref_start,
+                    emit.operand_ref_start + emit.operand_ref_count,
+                )
+            )
+            if not emit.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN:
+                visible_value_ref_indices.extend(
+                    range(
+                        emit.result_ref_start,
+                        emit.result_ref_start + emit.result_ref_count,
+                    )
+                )
+            if emit.flags & LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS:
+                visible_value_ref_indices.extend(
+                    range(
+                        emit.result_bind_ref_start,
+                        emit.result_bind_ref_start + emit.result_ref_count,
+                    )
+                )
+            for attr_copy_index in range(
+                emit.attr_copy_start,
+                emit.attr_copy_start + emit.attr_copy_count,
+            ):
+                attr_copy = table.attr_copies[attr_copy_index]
+                if lower_rule_rows.attr_copy_uses_value_ref(attr_copy.kind):
+                    visible_value_ref_indices.append(attr_copy.value_ref_index)
+        for value_ref_index in visible_value_ref_indices:
+            source_node_index = table.value_refs[value_ref_index].source_node_index
+            if source_node_index > row.source_node_count:
+                raise ValueError(f"{row_subject} value-ref {value_ref_index} selects source node {source_node_index} outside its source graph")
 
     for index, row in enumerate(table.spans):
         row_subject = f"{subject} span {index}"

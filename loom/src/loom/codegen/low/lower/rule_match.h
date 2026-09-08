@@ -109,6 +109,11 @@ struct loom_low_lower_rule_match_context_t {
 typedef struct loom_low_lower_rule_selection_t {
   // Selected rule row, or NULL when no rule accepted the source op.
   const loom_low_lower_rule_t* rule;
+  // Source op carrying the best rejection diagnostic. Defaults to the rule
+  // root when a root guard or source-memory constraint rejected the rule.
+  const loom_op_t* diagnostic_source_op;
+  // Resolved source graph for the selected rule. Entry zero is the rule root.
+  const loom_op_t* source_nodes[LOOM_LOW_LOWER_MAX_SOURCE_NODES];
   // Selected rule row ordinal, or UINT16_MAX when no rule accepted the source
   // op.
   uint16_t rule_index;
@@ -123,7 +128,16 @@ typedef struct loom_low_lower_rule_selection_t {
   bool source_memory_compatible;
   // True when the selected rule consumes the canonical source-memory plan.
   bool uses_source_memory_access;
+  // Number of populated source_nodes entries for the selected rule.
+  uint8_t source_node_count;
 } loom_low_lower_rule_selection_t;
+
+// Returns true when |candidate| carries a more useful selection failure than
+// |incumbent|. Actionable diagnostics win over structural non-matches, then
+// source-memory compatibility and matched guard depth break ties.
+bool loom_low_lower_rule_selection_failure_is_better(
+    loom_low_lower_rule_selection_t candidate,
+    loom_low_lower_rule_selection_t incumbent);
 
 // Initializes a rule match context backed by a mutable lowering context.
 // |source_memory_state| retains the canonical source-memory plan across every

@@ -22,6 +22,7 @@ from loom.target.contracts.rules import (
     RecipeRule,
     ValueAliasRule,
     ValueElideRule,
+    contract_case_priority,
 )
 
 CONTRACT_ROW_NONE = 0xFFFF
@@ -119,6 +120,7 @@ def compile_contract_fragment(
     for op_identity, op_cases in sorted_op_cases:
         dialect, op_index = op_indexes[op_identity]
         source_op = op_cases[0][1].source_op
+        op_cases.sort(key=lambda item: (-contract_case_priority(item[1]), item[0]))
         case_start = len(compiled_cases)
         for authored_case_index, contract_case in op_cases:
             compiled_case = _compile_case(

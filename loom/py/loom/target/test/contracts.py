@@ -40,6 +40,7 @@ from loom.target.contracts import (
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
+    SourceNode,
     TypePattern,
     ValueAliasRule,
     ValueRef,
@@ -53,6 +54,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_ADD_F32_DESCRIPTOR,
     TEST_LOW_ADD_I32_DESCRIPTOR,
     TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
+    TEST_LOW_ADD_MUL_I32_DESCRIPTOR,
     TEST_LOW_CMP_EQ_I32_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -63,6 +65,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_LOAD_ORDERED_V4I32_DESCRIPTOR,
     TEST_LOW_LOAD_V4F32_DESCRIPTOR,
     TEST_LOW_LOAD_V4I32_DESCRIPTOR,
+    TEST_LOW_MUL_ADD_I32_DESCRIPTOR,
     TEST_LOW_MUL_F32_DESCRIPTOR,
     TEST_LOW_MUL_I32_DESCRIPTOR,
     TEST_LOW_SELECT_I32_DESCRIPTOR,
@@ -340,6 +343,75 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
                     ),
                 ),
             ),
+        ),
+        DescriptorRule(
+            source_op=scalar_arithmetic.scalar_addi,
+            descriptor=TEST_LOW_ADD_MUL_I32_DESCRIPTOR,
+            source_nodes=(
+                SourceNode.adjacent_unique_user(
+                    "product",
+                    source_op=scalar_arithmetic.scalar_muli,
+                    parent_result=ValueRef.result("result"),
+                    node_operand=ValueRef.operand("lhs"),
+                    guards=(
+                        Guard.value_type("rhs", _I32),
+                        Guard.value_type("result", _I32),
+                    ),
+                ),
+            ),
+            guards=(
+                Guard.value_type("lhs", _I32),
+                Guard.value_type("rhs", _I32),
+                Guard.value_type("result", _I32),
+            ),
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=TEST_LOW_ADD_MUL_I32_DESCRIPTOR,
+                    operands={
+                        "add_lhs": ValueRef.operand("lhs"),
+                        "add_rhs": ValueRef.operand("rhs"),
+                        "factor": ValueRef.operand("rhs", source_node="product"),
+                    },
+                    results={"dst": ValueRef.result("result", source_node="product")},
+                ),
+            ),
+            priority=1,
+            report_key="test.fused.add_mul.i32",
+        ),
+        DescriptorRule(
+            source_op=scalar_arithmetic.scalar_addi,
+            descriptor=TEST_LOW_MUL_ADD_I32_DESCRIPTOR,
+            source_nodes=(
+                SourceNode.adjacent_definition(
+                    "product",
+                    source_op=scalar_arithmetic.scalar_muli,
+                    parent_operand=ValueRef.operand("lhs"),
+                    node_result=ValueRef.result("result"),
+                    guards=(
+                        Guard.value_type("lhs", _I32),
+                        Guard.value_type("rhs", _I32),
+                        Guard.value_type("result", _I32),
+                    ),
+                ),
+            ),
+            guards=(
+                Guard.value_type("lhs", _I32),
+                Guard.value_type("rhs", _I32),
+                Guard.value_type("result", _I32),
+            ),
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=TEST_LOW_MUL_ADD_I32_DESCRIPTOR,
+                    operands={
+                        "multiplicand": ValueRef.operand("lhs", source_node="product"),
+                        "multiplier": ValueRef.operand("rhs", source_node="product"),
+                        "addend": ValueRef.operand("rhs"),
+                    },
+                    results={"dst": ValueRef.result("result")},
+                ),
+            ),
+            priority=1,
+            report_key="test.fused.mul_add.i32",
         ),
         _binary_rule(
             scalar_arithmetic.scalar_addi,

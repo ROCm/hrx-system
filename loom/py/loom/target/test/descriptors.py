@@ -572,6 +572,42 @@ TEST_LOW_MUL_I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_ADD_MUL_I32_DESCRIPTOR = Descriptor(
+    key="test.add_mul.i32",
+    mnemonic="test.add_mul.i32",
+    semantic_tag="test.fused.add_mul.i32",
+    operands=(
+        _i32_result(),
+        _i32_operand("add_lhs"),
+        _i32_operand("add_rhs"),
+        _i32_operand("factor"),
+    ),
+    asm_forms=_asm(
+        results=("dst",),
+        operands=("add_lhs", "add_rhs", "factor"),
+    ),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_MUL_ADD_I32_DESCRIPTOR = Descriptor(
+    key="test.mul_add.i32",
+    mnemonic="test.mul_add.i32",
+    semantic_tag="test.fused.mul_add.i32",
+    operands=(
+        _i32_result(),
+        _i32_operand("multiplicand"),
+        _i32_operand("multiplier"),
+        _i32_operand("addend"),
+    ),
+    asm_forms=_asm(
+        results=("dst",),
+        operands=("multiplicand", "multiplier", "addend"),
+    ),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
 TEST_LOW_EVENT_FAST_I32_DESCRIPTOR = Descriptor(
     key="test.event.fast.i32",
     mnemonic="test.event.fast.i32",
@@ -2040,6 +2076,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
         TEST_LOW_CONVERGENT_I32_DESCRIPTOR,
         TEST_LOW_MUL_I32_DESCRIPTOR,
+        TEST_LOW_ADD_MUL_I32_DESCRIPTOR,
+        TEST_LOW_MUL_ADD_I32_DESCRIPTOR,
         TEST_LOW_EVENT_FAST_I32_DESCRIPTOR,
         TEST_LOW_EVENT_SLOW_I32_DESCRIPTOR,
         TEST_LOW_RESOURCE_REQUIRED_I32_DESCRIPTOR,

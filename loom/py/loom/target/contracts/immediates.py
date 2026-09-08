@@ -8,8 +8,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from enum import Enum, unique
 from typing import Self
 
@@ -521,8 +521,16 @@ class ValueProject:
 
     kind: ValueProjectKind
     source_value: str
+    source_node: str = ""
     target_bit_offset: int = 0
     word_index: int = 0
+
+    def in_source_node(self, source_node: str) -> Self:
+        """Returns this projection scoped to a named descriptor-rule node."""
+
+        if not source_node:
+            raise ValueError("value projection source node must be non-empty")
+        return replace(self, source_node=source_node)
 
     @classmethod
     def exact_i64(cls, source_value: str, *, target_bit_offset: int = 0) -> Self:
@@ -674,9 +682,21 @@ class ValueProject:
         source_op: Op,
         descriptor: Descriptor,
         bound_immediate_name: str | None,
+        *,
+        source_ops: Mapping[str, Op] | None = None,
     ) -> None:
         subject = f"immediate projection {self.kind.value}"
-        _require_value(source_op, self.source_value, subject)
+        referenced_op = source_op
+        if self.source_node:
+            referenced_op = (
+                source_ops.get(self.source_node) if source_ops is not None else None
+            )
+            if referenced_op is None:
+                raise ValueError(
+                    f"{source_op.name}: {subject} references unknown source node "
+                    f"'{self.source_node}'"
+                )
+        _require_value(referenced_op, self.source_value, subject)
         if bound_immediate_name is None:
             raise ValueError(
                 f"{source_op.name}: {subject} must bind one descriptor immediate"

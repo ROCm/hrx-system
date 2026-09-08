@@ -200,6 +200,7 @@ loom_cc_test(
     loom::codegen::low::testing::source_workload
     loom::ir
     loom::ops::index
+    loom::ops::scalar
 )
 
 loom_cc_test(

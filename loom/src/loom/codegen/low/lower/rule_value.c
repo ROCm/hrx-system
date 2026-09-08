@@ -76,9 +76,26 @@ loom_low_lower_u32_divisor_magic_info(uint32_t divisor) {
   return info;
 }
 
-loom_value_id_t loom_low_lower_rule_source_value(
+const loom_op_t* loom_low_lower_rule_source_op(
+    const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
+    const loom_op_t* const* source_nodes, uint8_t source_node_count,
+    uint16_t value_ref_index) {
+  const uint8_t source_node_index =
+      rule_set->value_refs[value_ref_index].source_node_index;
+  if (source_node_index == 0) return source_op;
+  IREE_ASSERT(source_nodes != NULL);
+  IREE_ASSERT_GT(source_node_count, 1);
+  IREE_ASSERT_LT(source_node_index, source_node_count);
+  IREE_ASSERT_EQ(source_nodes[0], source_op);
+  return source_nodes[source_node_index];
+}
+
+loom_value_id_t loom_low_lower_rule_source_value_from_nodes(
     const loom_module_t* module, const loom_low_lower_rule_set_t* rule_set,
-    const loom_op_t* source_op, uint16_t value_ref_index) {
+    const loom_op_t* source_op, const loom_op_t* const* source_nodes,
+    uint8_t source_node_count, uint16_t value_ref_index) {
+  source_op = loom_low_lower_rule_source_op(rule_set, source_op, source_nodes,
+                                            source_node_count, value_ref_index);
   const loom_low_lower_value_ref_t* value_ref =
       &rule_set->value_refs[value_ref_index];
   switch (value_ref->kind) {
@@ -117,9 +134,20 @@ loom_value_id_t loom_low_lower_rule_source_value(
   }
 }
 
-loom_value_slice_t loom_low_lower_rule_value_ref_field_span(
+loom_value_id_t loom_low_lower_rule_source_value(
     const loom_module_t* module, const loom_low_lower_rule_set_t* rule_set,
     const loom_op_t* source_op, uint16_t value_ref_index) {
+  return loom_low_lower_rule_source_value_from_nodes(
+      module, rule_set, source_op, /*source_nodes=*/NULL,
+      /*source_node_count=*/1, value_ref_index);
+}
+
+loom_value_slice_t loom_low_lower_rule_value_ref_field_span_from_nodes(
+    const loom_module_t* module, const loom_low_lower_rule_set_t* rule_set,
+    const loom_op_t* source_op, const loom_op_t* const* source_nodes,
+    uint8_t source_node_count, uint16_t value_ref_index) {
+  source_op = loom_low_lower_rule_source_op(rule_set, source_op, source_nodes,
+                                            source_node_count, value_ref_index);
   const loom_low_lower_value_ref_t* value_ref =
       &rule_set->value_refs[value_ref_index];
   const loom_op_vtable_t* vtable = loom_op_vtable(module, source_op);
@@ -137,6 +165,14 @@ loom_value_slice_t loom_low_lower_rule_value_ref_field_span(
       IREE_ASSERT_UNREACHABLE("unknown generated value ref kind");
       IREE_BUILTIN_UNREACHABLE();
   }
+}
+
+loom_value_slice_t loom_low_lower_rule_value_ref_field_span(
+    const loom_module_t* module, const loom_low_lower_rule_set_t* rule_set,
+    const loom_op_t* source_op, uint16_t value_ref_index) {
+  return loom_low_lower_rule_value_ref_field_span_from_nodes(
+      module, rule_set, source_op, /*source_nodes=*/NULL,
+      /*source_node_count=*/1, value_ref_index);
 }
 
 bool loom_low_lower_rule_integer_immediate_facts(

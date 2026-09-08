@@ -22,6 +22,7 @@ class ValueRef:
 
     kind: SourceValueKind
     field: str
+    source_node: str = ""
     materializer: str | None = None
     element: int = 0
 
@@ -30,19 +31,32 @@ class ValueRef:
         cls,
         field: str,
         *,
+        source_node: str = "",
         materializer: str | None = None,
         element: int = 0,
     ) -> Self:
         return cls(
             kind=SourceValueKind.OPERAND,
             field=field,
+            source_node=source_node,
             materializer=materializer,
             element=element,
         )
 
     @classmethod
-    def result(cls, field: str, *, element: int = 0) -> Self:
-        return cls(kind=SourceValueKind.RESULT, field=field, element=element)
+    def result(
+        cls,
+        field: str,
+        *,
+        source_node: str = "",
+        element: int = 0,
+    ) -> Self:
+        return cls(
+            kind=SourceValueKind.RESULT,
+            field=field,
+            source_node=source_node,
+            element=element,
+        )
 
     @classmethod
     def temporary(cls, field: str) -> Self:
@@ -78,6 +92,13 @@ class ValueRef:
         *,
         defined_temporaries: Iterable[str] = (),
     ) -> None:
+        if self.source_node and self.kind not in (
+            SourceValueKind.OPERAND,
+            SourceValueKind.RESULT,
+        ):
+            raise ValueError(
+                f"{source_op.name}: {subject} source node requires an operand or result"
+            )
         if self.materializer is not None:
             if not self.materializer:
                 raise ValueError(

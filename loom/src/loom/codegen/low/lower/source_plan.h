@@ -34,6 +34,8 @@ enum loom_low_lower_selected_plan_flag_bits_e {
   // The selected source op is intentionally skipped because none of its
   // results require a target-Low SSA value.
   LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED = (uint8_t)1u << 0,
+  // The source op is emitted by another selected rule spanning a source DAG.
+  LOOM_LOW_LOWER_SELECTED_PLAN_CLAIMED = (uint8_t)1u << 1,
 };
 typedef uint8_t loom_low_lower_selected_plan_flags_t;
 
@@ -55,6 +57,9 @@ typedef struct loom_low_lower_selected_plan_t {
   loom_low_lower_selected_plan_kind_t kind;
   // Selection lifecycle flags.
   loom_low_lower_selected_plan_flags_t flags;
+  // Number of source nodes owned by a table rule, including the root. Zero for
+  // target-owned plans and claimed placeholders.
+  uint8_t source_node_count;
   // Policy rule-set ordinal for table-driven selections.
   uint16_t rule_set_index;
   // Rule-table ordinal for table-driven selections.
@@ -68,8 +73,14 @@ typedef struct loom_low_lower_selected_plan_t {
   // Canonical source-memory plan retained from rule selection, or NULL when
   // the selected rule does not consume source memory.
   const loom_low_source_memory_access_plan_t* source_memory_access;
-  // Target-owned plan selected during planning, or empty for table rules.
-  loom_low_lower_plan_t plan;
+  // Selected-plan-specific retained payload.
+  union {
+    // Target-owned plan selected during planning.
+    loom_low_lower_plan_t target_plan;
+    // Function-arena-owned source graph for a multi-node table rule. Entry
+    // zero is |source_op|. NULL for root-only rules.
+    const loom_op_t* const* source_nodes;
+  } data;
 } loom_low_lower_selected_plan_t;
 
 // Shared descriptor-matrix plan retained between contract selection and

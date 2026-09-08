@@ -8,37 +8,19 @@
 
 from __future__ import annotations
 
-import struct
-from collections.abc import Hashable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
-from enum import Enum, unique
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 
 from loom.dsl import ATTR_TYPE_ENUM, Op
-from loom.error.target import (
-    ERR_TARGET_002,
-    ERR_TARGET_003,
-    ERR_TARGET_004,
-    ERR_TARGET_005,
-    ERR_TARGET_006,
-    ERR_TARGET_007,
-    ERR_TARGET_008,
-)
-from loom.errors import ErrorDef
 from loom.target.contracts.diagnostics import (
     DiagnosticParam,
     DiagnosticParamKind,
     DiagnosticRef,
-    i64_param,
-    string_param,
-    target_diagnostic,
-    u32_param,
-    value_type_param,
 )
 from loom.target.contracts.emits import (
     ContractEmit,
     DescriptorAccumulatorSeed,
     DescriptorAccumulatorTree,
-    DescriptorEmitForm,
     DescriptorResultType,
     EmitDescriptorOp,
     EmitRegisterConcat,
@@ -52,13 +34,94 @@ from loom.target.contracts.immediates import (
     AttrProject,
     AttrProjectKind,
     SourceMemoryProject,
-    SourceMemoryProjectKind,
     SourceOpProject,
-    SourceOpProjectKind,
     ValueProject,
     ValueProjectKind,
 )
 from loom.target.contracts.kinds import SourceValueKind
+from loom.target.contracts.lower_rule_bindings import (
+    _descriptor_operand_is_input,
+    _descriptor_operand_is_output,
+    _f64_bits,
+    _lower_descriptor_ties,
+    _lower_emit_kind,
+    _lower_explicit_copy_operand_mask,
+    _lower_source_memory_project,
+    _lower_source_op_project,
+    _lower_value_ref,
+    _operand_segment_counts,
+    _order_operand_segment_guards,
+    _require_exact_result_type_pattern,
+    _source_attr_index,
+    _source_operand_index,
+    _value_ref_for_source_field,
+)
+from loom.target.contracts.lower_rule_diagnostics import (
+    _attr_diagnostic,
+    _bounded_integer_diagnostic,
+    _descriptor_available_diagnostic,
+    _enum_attr_diagnostic,
+    _exact_float_diagnostic,
+    _exact_integer_diagnostic,
+    _exact_power_of_two_integer_diagnostic,
+    _float_equals_diagnostic,
+    _guard_diagnostic,
+    _i64_array_count_diagnostic,
+    _i64_array_element_range_diagnostic,
+    _i64_array_elements_range_diagnostic,
+    _i64_attr_range_diagnostic,
+    _instance_flags_diagnostic,
+    _integer_range_diagnostic,
+    _integer_range_relation_diagnostic,
+    _materializer_diagnostic,
+    _named_constraint_diagnostic,
+    _operand_segment_count_diagnostic,
+    _register_class_diagnostic,
+    _register_unit_count_diagnostic,
+    _register_unit_count_exact_diagnostic,
+    _source_memory_address_diagnostic,
+    _source_memory_address_layout_diagnostic,
+    _source_memory_diagnostic,
+    _source_memory_dynamic_offset_diagnostic,
+    _static_dim0_multiple_diagnostic,
+    _static_element_count_relation_diagnostic,
+    _storage_element_format_diagnostic,
+    _u32_divisor_magic_is_add_diagnostic,
+    _value_no_uses_diagnostic,
+    _value_type_diagnostic,
+)
+from loom.target.contracts.lower_rule_tables import (
+    _LOW_VALUE_GUARD_KINDS,
+    LOWER_EMIT_FLAG_ACCUMULATE_SEED_FIRST_LANE,
+    LOWER_EMIT_FLAG_ACCUMULATE_SKIP_FIRST_LANE,
+    LOWER_EMIT_FLAG_ACCUMULATE_TREE_BALANCED,
+    LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
+    LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE,
+    LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN,
+    LOWER_EMIT_FLAG_SWAP_OPERANDS_0_1,
+    LOWER_RULE_FLAG_CONTRACT_ONLY,
+    LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
+    LOWER_SOURCE_MEMORY_NONE,
+    CompiledLowerRuleSet,
+    LowerAttrCopy,
+    LowerAttrCopyKind,
+    LowerDiagnostic,
+    LowerDiagnosticParam,
+    LowerEmit,
+    LowerEmitKind,
+    LowerGuard,
+    LowerRule,
+    LowerSourceMemory,
+    LowerSourceNode,
+    LowerTiedResult,
+    LowerTypePattern,
+    LowerValueRef,
+    _append_interned_row_sequence,
+    _build_op_ordinals,
+    _build_spans,
+    _intern_program_rows,
+    _op_kind_key,
+)
 from loom.target.contracts.patterns import TypePattern
 from loom.target.contracts.rules import (
     DescriptorRule,
@@ -66,6 +129,7 @@ from loom.target.contracts.rules import (
     RecipeRule,
     ValueAliasRule,
     ValueElideRule,
+    contract_case_priority,
 )
 from loom.target.contracts.source import ValueRef
 from loom.target.contracts.source_memory import (
@@ -74,280 +138,6 @@ from loom.target.contracts.source_memory import (
     SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
 )
-from loom.target.low_descriptors import (
-    ConstraintKind,
-    Descriptor,
-    DescriptorOpKind,
-    OperandRole,
-)
-
-
-@unique
-class LowerEmitKind(Enum):
-    """Interpreter emit operation used by a compiled lower-rule row."""
-
-    DESCRIPTOR_OP = "descriptor_op"
-    DESCRIPTOR_CONST = "descriptor_const"
-    DESCRIPTOR_OP_FIRST_LANE = "descriptor_op_first_lane"
-    DESCRIPTOR_OP_PER_LANE = "descriptor_op_per_lane"
-    DESCRIPTOR_OP_PER_LANE_SEQUENCE = "descriptor_op_per_lane_sequence"
-    DESCRIPTOR_OP_ACCUMULATE_LANES = "descriptor_op_accumulate_lanes"
-    REGISTER_SLICE = "register_slice"
-    REGISTER_CONCAT = "register_concat"
-    REGISTER_COPY = "register_copy"
-
-
-@unique
-class LowerAttrCopyKind(Enum):
-    """Interpreter attribute-copy operation used by a compiled emit row."""
-
-    DIRECT = "direct"
-    ENUM_ORDINAL = "enum_ordinal"
-    I64_ARRAY_ELEMENT = "i64_array_element"
-    I64_ARRAY_ELEMENT_PLUS_LITERAL = "i64_array_element_plus_literal"
-    I64_ARRAY_PACK_ELEMENTS = "i64_array_pack_elements"
-    I64_ATTRS_PACK_CONSECUTIVE = "i64_attrs_pack_consecutive"
-    I64_LITERAL = "i64_literal"
-    VALUE_EXACT_I64 = "value_exact_i64"
-    VALUE_EXACT_I64_I32_WORD = "value_exact_i64_i32_word"
-    VALUE_EXACT_I64_NEGATE = "value_exact_i64_negate"
-    VALUE_EXACT_I64_LOG2 = "value_exact_i64_log2"
-    VALUE_EXACT_I64_MINUS_ONE = "value_exact_i64_minus_one"
-    VALUE_U32_DIVISOR_MAGIC_MULTIPLIER = "value_u32_divisor_magic_multiplier"
-    VALUE_U32_DIVISOR_MAGIC_SHIFT = "value_u32_divisor_magic_shift"
-    VALUE_I32_AS_U32_BITS = "value_i32_as_u32_bits"
-    VALUE_FLOAT_AS_F16_BITS = "value_float_as_f16_bits"
-    VALUE_FLOAT_AS_BF16_BITS = "value_float_as_bf16_bits"
-    VALUE_FLOAT_AS_F32_BITS = "value_float_as_f32_bits"
-    VALUE_FLOAT_AS_F32_I32 = "value_float_as_f32_i32"
-    VALUE_FLOAT_AS_F64_BITS = "value_float_as_f64_bits"
-    VALUE_FLOAT_AS_F64_I32_WORD = "value_float_as_f64_i32_word"
-    I64_ARRAY_LANE_BYTE = "i64_array_lane_byte"
-    SOURCE_MEMORY_STATIC_BYTE_OFFSET = "source_memory_static_byte_offset"
-    SOURCE_MEMORY_STATIC_BYTE_OFFSET_PLUS_LITERAL = (
-        "source_memory_static_byte_offset_plus_literal"
-    )
-    SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT = (
-        "source_memory_static_byte_offset_quotient"
-    )
-    SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER = (
-        "source_memory_static_byte_offset_remainder"
-    )
-    SOURCE_MEMORY_DYNAMIC_BYTE_STRIDE = "source_memory_dynamic_byte_stride"
-    SOURCE_OP_INSTANCE_FLAGS = "source_op_instance_flags"
-    I64_LOW_BIT_MASK = "i64_low_bit_mask"
-    I64_SHIFTED_LOW_BIT_MASK = "i64_shifted_low_bit_mask"
-    I64_SHIFTED_LOW_BIT_CLEAR_MASK = "i64_shifted_low_bit_clear_mask"
-    I64_LITERAL_MINUS_ATTR = "i64_literal_minus_attr"
-    I64_LITERAL_MINUS_ATTRS = "i64_literal_minus_attrs"
-    I64_ATTR_MINUS_LITERAL = "i64_attr_minus_literal"
-
-
-LOWER_EMIT_FLAG_SWAP_OPERANDS_0_1 = 1 << 0
-LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS = 1 << 1
-LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN = 1 << 2
-LOWER_EMIT_FLAG_ACCUMULATE_SEED_FIRST_LANE = 1 << 3
-LOWER_EMIT_FLAG_ACCUMULATE_TREE_BALANCED = 1 << 4
-LOWER_EMIT_FLAG_ACCUMULATE_SKIP_FIRST_LANE = 1 << 5
-LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE = 1 << 6
-LOWER_SOURCE_MEMORY_NONE = 0
-LOWER_RULE_FLAG_CONTRACT_ONLY = 1 << 0
-LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS = 1 << 1
-
-_LOW_VALUE_GUARD_KINDS = (
-    GuardKind.LOW_VALUE_REGISTER_CLASS,
-    GuardKind.LOW_VALUE_REGISTER_UNIT_COUNT,
-    GuardKind.VALUE_STATIC_DIM0_MULTIPLE,
-    GuardKind.LOW_VALUE_REGISTER_UNIT_COUNT_EQ,
-)
-
-
-@dataclass(frozen=True, slots=True)
-class LowerTypePattern:
-    """Compiled type-pattern row."""
-
-    type_pattern: TypePattern
-
-
-@dataclass(frozen=True, slots=True)
-class LowerValueRef:
-    """Compiled source value-reference row."""
-
-    kind: SourceValueKind
-    index: int
-    element_index: int = 0
-    materializer_index: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class LowerDiagnosticParam:
-    """Compiled parameter projection for a rejection diagnostic."""
-
-    name: str
-    kind: DiagnosticParamKind
-    string_value: str = ""
-    value_ref_index: int = 0
-    i64_value: int = 0
-    u32_value: int = 0
-    u64_value: int = 0
-    bool_value: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class LowerDiagnostic:
-    """Compiled rejection diagnostic row."""
-
-    error: ErrorDef
-    params: tuple[LowerDiagnosticParam, ...]
-    target_context_param_count: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class LowerSourceMemory:
-    """Compiled source-memory constraint row."""
-
-    constraint: SourceMemoryConstraint
-    diagnostic_index: int
-    dynamic_offset_diagnostic_index: int
-    address_layout_diagnostic_index: int = 0xFFFF
-    address_diagnostic_index: int = 0xFFFF
-    byte_offset_materializer: SourceMemoryByteOffsetMaterializer | None = None
-    address_materializer: SourceMemoryAddressMaterializer | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class LowerGuard:
-    """Compiled selection guard row."""
-
-    kind: GuardKind
-    value_ref_index: int = 0
-    other_value_ref_index: int = 0
-    attr_index: int = 0
-    type_pattern_index: int = 0
-    diagnostic_index: int = 0xFFFF
-    attr_kind: str | None = None
-    u64: int = 0
-    u64_c_expression: str | None = None
-    memory_spaces: tuple[str, ...] = ()
-    descriptor: Descriptor | None = None
-    register_class_id: int = 0
-    minimum_i64: int = 0
-    maximum_i64: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class LowerAttrCopy:
-    """Compiled source-attribute projection row."""
-
-    kind: LowerAttrCopyKind
-    target_name: str
-    source_attr_index: int = 0
-    other_source_attr_index: int = 0
-    source_element_index: int = 0
-    source_element_count: int = 0
-    source_element_bit_width: int = 0
-    target_bit_offset: int = 0
-    value_ref_index: int = 0
-    literal_i64: int = 0
-    dynamic_term_index: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class LowerTiedResult:
-    """Compiled result-to-operand tie row."""
-
-    result_index: int
-    operand_index: int
-    has_type_change: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class LowerEmit:
-    """Compiled emit-program row."""
-
-    kind: LowerEmitKind
-    descriptor: Descriptor | None = None
-    flags: int = 0
-    operand_ref_start: int = 0
-    operand_ref_count: int = 0
-    copy_operand_mask: int = 0
-    accumulator_operand_index: int = 0
-    result_ref_start: int = 0
-    result_type_pattern_start: int = 0
-    result_ref_count: int = 0
-    result_bind_ref_start: int = 0
-    attr_copy_start: int = 0
-    attr_copy_count: int = 0
-    tied_result_start: int = 0
-    tied_result_count: int = 0
-    source_memory_ordinal: int = LOWER_SOURCE_MEMORY_NONE
-    structural_offset: int = 0
-    structural_unit_count: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class LowerRule:
-    """Compiled lowering rule row."""
-
-    source_op: Op
-    temporary_count: int
-    guard_start: int
-    guard_count: int
-    emit_start: int
-    emit_count: int
-    flags: int = 0
-    alias_ref_start: int = 0
-    alias_ref_count: int = 0
-    elide_ref_start: int = 0
-    elide_ref_count: int = 0
-    report_key: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class LowerRuleSpan:
-    """Compiled op-kind to rule-range row."""
-
-    source_op: Op
-    rule_start: int
-    rule_count: int
-
-
-@dataclass(frozen=True, slots=True)
-class CompiledLowerRuleSet:
-    """Lower-rule set rows generated from a contract fragment."""
-
-    name: str
-    authored_case_indices: tuple[int, ...]
-    rules: tuple[LowerRule, ...]
-    spans: tuple[LowerRuleSpan, ...]
-    type_patterns: tuple[LowerTypePattern, ...]
-    value_refs: tuple[LowerValueRef, ...]
-    source_memories: tuple[LowerSourceMemory, ...]
-    guards: tuple[LowerGuard, ...]
-    attr_copies: tuple[LowerAttrCopy, ...]
-    tied_results: tuple[LowerTiedResult, ...]
-    emits: tuple[LowerEmit, ...]
-    diagnostics: tuple[LowerDiagnostic, ...]
-
-
-def _intern_program_rows[ProgramRowT: Hashable](
-    rows: Sequence[ProgramRowT],
-    ranges: Iterable[tuple[int, int]],
-) -> tuple[tuple[ProgramRowT, ...], tuple[int, ...]]:
-    """Interns exact immutable row programs and returns their new starts."""
-
-    interned_rows: list[ProgramRowT] = []
-    program_starts: dict[tuple[ProgramRowT, ...], int] = {(): 0}
-    rewritten_starts: list[int] = []
-    for start, count in ranges:
-        program = tuple(rows[start : start + count])
-        interned_start = program_starts.get(program)
-        if interned_start is None:
-            interned_start = len(interned_rows)
-            program_starts[program] = interned_start
-            interned_rows.extend(program)
-        rewritten_starts.append(interned_start)
-    return tuple(interned_rows), tuple(rewritten_starts)
 
 
 def compile_lower_rule_set(
@@ -372,6 +162,7 @@ class _LowerRuleSetCompiler:
         self._rules: list[LowerRule] = []
         self._type_patterns: list[LowerTypePattern] = []
         self._value_refs: list[LowerValueRef] = []
+        self._source_nodes: list[LowerSourceNode] = []
         self._source_memories: list[LowerSourceMemory] = []
         self._guards: list[LowerGuard] = []
         self._attr_copies: list[LowerAttrCopy] = []
@@ -389,10 +180,20 @@ class _LowerRuleSetCompiler:
             materializer.name: index + 1
             for index, materializer in enumerate(table.materializers)
         }
-        self._operand_segment_counts: dict[str, int] = {}
+        self._source_ops: dict[str, Op] = {}
+        self._source_node_ordinals: dict[str, int] = {}
+        self._operand_segment_counts: dict[int, dict[str, int]] = {}
 
     def compile(self) -> CompiledLowerRuleSet:
-        for authored_case_index, contract_case in enumerate(self._table.cases):
+        ordered_cases = sorted(
+            enumerate(self._table.cases),
+            key=lambda item: (
+                _op_kind_key(item[1].source_op, self._op_ordinals),
+                -contract_case_priority(item[1]),
+                item[0],
+            ),
+        )
+        for authored_case_index, contract_case in ordered_cases:
             if isinstance(contract_case, DescriptorRule):
                 self._append_descriptor_rule(authored_case_index, contract_case)
             elif isinstance(contract_case, ValueAliasRule):
@@ -417,9 +218,14 @@ class _LowerRuleSetCompiler:
             elif isinstance(contract_case, RecipeRule):
                 self._append_recipe_rule(authored_case_index, contract_case)
 
+        guard_ranges = [(rule.guard_start, rule.guard_count) for rule in self._rules]
+        guard_ranges.extend(
+            (source_node.guard_start, source_node.guard_count)
+            for source_node in self._source_nodes
+        )
         guards, guard_starts = _intern_program_rows(
             self._guards,
-            ((rule.guard_start, rule.guard_count) for rule in self._rules),
+            guard_ranges,
         )
         emits, emit_starts = _intern_program_rows(
             self._emits,
@@ -433,6 +239,13 @@ class _LowerRuleSetCompiler:
             )
             for index, rule in enumerate(self._rules)
         )
+        source_nodes = tuple(
+            replace(
+                source_node,
+                guard_start=guard_starts[len(self._rules) + index],
+            )
+            for index, source_node in enumerate(self._source_nodes)
+        )
         spans = _build_spans(rules, self._op_ordinals)
         return CompiledLowerRuleSet(
             name=self._table.name,
@@ -441,6 +254,7 @@ class _LowerRuleSetCompiler:
             spans=spans,
             type_patterns=tuple(self._type_patterns),
             value_refs=tuple(self._value_refs),
+            source_nodes=source_nodes,
             source_memories=tuple(self._source_memories),
             guards=guards,
             attr_copies=tuple(self._attr_copies),
@@ -459,8 +273,49 @@ class _LowerRuleSetCompiler:
                 f"{rule.source_op.name}: descriptor-rule contracts must "
                 "author their emit program in Python"
             )
+        self._source_ops = {"": rule.source_op}
+        self._source_node_ordinals = {"": 0}
+        for source_node_index, source_node in enumerate(rule.source_nodes, start=1):
+            self._source_ops[source_node.name] = source_node.source_op
+            self._source_node_ordinals[source_node.name] = source_node_index
+        type_patterns_by_source_node: dict[int, dict[str, TypePattern]] = {}
+        source_node_start = len(self._source_nodes)
+        for source_node_index, source_node in enumerate(rule.source_nodes, start=1):
+            source_node_guard_start = len(self._guards)
+            source_node_type_patterns: dict[str, TypePattern] = {}
+            type_patterns_by_source_node[source_node_index] = source_node_type_patterns
+            self._append_guards(
+                source_node.source_op,
+                source_node.guards,
+                source_node_type_patterns,
+                source_node_index=source_node_index,
+            )
+            self._source_nodes.append(
+                LowerSourceNode(
+                    relation=source_node.relation,
+                    source_op=source_node.source_op,
+                    parent_node_index=self._source_node_ordinals[source_node.parent],
+                    parent_value_ref_index=self._append_value_ref(
+                        rule.source_op,
+                        replace(
+                            source_node.parent_value,
+                            source_node=source_node.parent,
+                        ),
+                    ),
+                    node_value_ref_index=self._append_value_ref(
+                        rule.source_op,
+                        replace(
+                            source_node.node_value,
+                            source_node=source_node.name,
+                        ),
+                    ),
+                    guard_start=source_node_guard_start,
+                    guard_count=len(self._guards) - source_node_guard_start,
+                )
+            )
         guard_start = len(self._guards)
         type_patterns_by_field: dict[str, TypePattern] = {}
+        type_patterns_by_source_node[0] = type_patterns_by_field
         self._append_guards(rule.source_op, rule.guards, type_patterns_by_field)
 
         emit_start = len(self._emits)
@@ -469,7 +324,7 @@ class _LowerRuleSetCompiler:
             self._append_emit(
                 rule.source_op,
                 emit,
-                type_patterns_by_field,
+                type_patterns_by_source_node,
                 temporary_ordinals,
             )
         self._rules.append(
@@ -480,6 +335,8 @@ class _LowerRuleSetCompiler:
                 guard_count=len(self._guards) - guard_start,
                 emit_start=emit_start,
                 emit_count=len(self._emits) - emit_start,
+                source_node_start=(source_node_start if rule.source_nodes else 0),
+                source_node_count=len(rule.source_nodes),
                 report_key=rule.report_key,
             )
         )
@@ -495,6 +352,8 @@ class _LowerRuleSetCompiler:
         *,
         flags: int = 0,
     ) -> None:
+        self._source_ops = {"": source_op}
+        self._source_node_ordinals = {"": 0}
         guard_start = len(self._guards)
         type_patterns_by_field: dict[str, TypePattern] = {}
         self._append_guards(source_op, guards, type_patterns_by_field)
@@ -535,6 +394,8 @@ class _LowerRuleSetCompiler:
         authored_case_index: int,
         rule: ValueElideRule,
     ) -> None:
+        self._source_ops = {"": rule.source_op}
+        self._source_node_ordinals = {"": 0}
         guard_start = len(self._guards)
         type_patterns_by_field: dict[str, TypePattern] = {}
         self._append_guards(rule.source_op, rule.guards, type_patterns_by_field)
@@ -563,6 +424,8 @@ class _LowerRuleSetCompiler:
         authored_case_index: int,
         rule: RecipeRule,
     ) -> None:
+        self._source_ops = {"": rule.source_op}
+        self._source_node_ordinals = {"": 0}
         guard_start = len(self._guards)
         type_patterns_by_field: dict[str, TypePattern] = {}
         self._append_guards(rule.source_op, rule.guards, type_patterns_by_field)
@@ -584,8 +447,12 @@ class _LowerRuleSetCompiler:
         source_op: Op,
         guards: Sequence[Guard],
         type_patterns_by_field: dict[str, TypePattern],
+        *,
+        source_node_index: int = 0,
     ) -> None:
-        self._operand_segment_counts = _operand_segment_counts(source_op, guards)
+        self._operand_segment_counts[source_node_index] = _operand_segment_counts(
+            source_op, guards
+        )
         for guard in _order_operand_segment_guards(source_op, guards):
             self._append_guard(source_op, guard, type_patterns_by_field)
 
@@ -1332,14 +1199,14 @@ class _LowerRuleSetCompiler:
         self,
         source_op: Op,
         emit: ContractEmit,
-        type_patterns_by_field: dict[str, TypePattern],
+        type_patterns_by_source_node: dict[int, dict[str, TypePattern]],
         temporary_ordinals: dict[str, int],
     ) -> None:
         if isinstance(emit, EmitDescriptorOp):
             self._append_descriptor_emit(
                 source_op,
                 emit,
-                type_patterns_by_field,
+                type_patterns_by_source_node,
                 temporary_ordinals,
             )
             return
@@ -1381,10 +1248,16 @@ class _LowerRuleSetCompiler:
         self,
         source_op: Op,
         emit: EmitDescriptorOp,
-        type_patterns_by_field: dict[str, TypePattern],
+        type_patterns_by_source_node: dict[int, dict[str, TypePattern]],
         temporary_ordinals: dict[str, int],
     ) -> None:
-        emit_kind = _lower_emit_kind(source_op, emit, type_patterns_by_field)
+        emit_kind = _lower_emit_kind(
+            source_op,
+            emit,
+            type_patterns_by_source_node,
+            self._source_node_ordinals,
+            self._source_ops,
+        )
         operand_bindings = emit.operands if emit.operands is not None else {}
         result_bindings = emit.results if emit.results is not None else {}
         operand_refs: list[LowerValueRef] = []
@@ -1718,39 +1591,46 @@ class _LowerRuleSetCompiler:
         *,
         allow_variadic_span: bool = False,
     ) -> LowerValueRef:
+        source_node_index = 0
+        referenced_op = source_op
+        if value_ref.source_node:
+            referenced_op = self._source_ops.get(value_ref.source_node)
+            source_node_index = self._source_node_ordinals.get(
+                value_ref.source_node, -1
+            )
+            if referenced_op is None or source_node_index < 0:
+                raise ValueError(
+                    f"{source_op.name}: source value field '{value_ref.field}' "
+                    f"references unknown source node '{value_ref.source_node}'"
+                )
         if value_ref.kind == SourceValueKind.OPERAND and not allow_variadic_span:
-            operand = source_op.operand(value_ref.field)
+            operand = referenced_op.operand(value_ref.field)
             if operand is not None and operand.variadic:
-                expected_count = self._operand_segment_counts.get(value_ref.field)
+                expected_count = self._operand_segment_counts.get(
+                    source_node_index, {}
+                ).get(value_ref.field)
                 if expected_count is None:
                     raise ValueError(
-                        f"{source_op.name}: variadic operand reference "
+                        f"{referenced_op.name}: variadic operand reference "
                         f"'{value_ref.field}[{value_ref.element}]' needs an "
                         "operand_segment_count guard"
                     )
                 if value_ref.element >= expected_count:
                     raise ValueError(
-                        f"{source_op.name}: variadic operand reference "
+                        f"{referenced_op.name}: variadic operand reference "
                         f"'{value_ref.field}[{value_ref.element}]' exceeds guarded "
                         f"segment count {expected_count}"
                     )
         return _lower_value_ref(
-            source_op,
+            referenced_op,
             value_ref,
             temporary_ordinals,
+            source_node_index=source_node_index,
             materializer_ordinals=self._materializer_ordinals,
         )
 
     def _append_value_ref_sequence(self, sequence: tuple[LowerValueRef, ...]) -> int:
-        if not sequence:
-            return 0
-        sequence_count = len(sequence)
-        for start in range(len(self._value_refs) - sequence_count + 1):
-            if tuple(self._value_refs[start : start + sequence_count]) == sequence:
-                return start
-        ordinal = len(self._value_refs)
-        self._value_refs.extend(sequence)
-        return ordinal
+        return _append_interned_row_sequence(self._value_refs, sequence)
 
     def _lower_attr_copies(
         self,
@@ -1781,13 +1661,11 @@ class _LowerRuleSetCompiler:
                 continue
             if isinstance(binding, SourceOpProject):
                 attr_copies.append(
-                    self._lower_source_op_project(source_op, target_name, binding)
+                    _lower_source_op_project(source_op, target_name, binding)
                 )
                 continue
             if isinstance(binding, SourceMemoryProject):
-                attr_copies.append(
-                    self._lower_source_memory_project(target_name, binding)
-                )
+                attr_copies.append(_lower_source_memory_project(target_name, binding))
                 continue
             attr_copies.append(
                 self._lower_value_project(source_op, target_name, binding)
@@ -1992,90 +1870,39 @@ class _LowerRuleSetCompiler:
                 f"{source_op.name}: immediate projection '{project.kind.value}' is "
                 "not representable by generated lower rules yet"
             )
+        referenced_op = source_op
+        if project.source_node:
+            referenced_op = self._source_ops.get(project.source_node)
+            if referenced_op is None:
+                raise ValueError(
+                    f"{source_op.name}: immediate projection references unknown "
+                    f"source node '{project.source_node}'"
+                )
+        value_ref = _value_ref_for_source_field(
+            referenced_op,
+            project.source_value,
+        )
+        if project.source_node:
+            value_ref = replace(value_ref, source_node=project.source_node)
         return LowerAttrCopy(
             kind=kind,
             target_name=target_name,
             value_ref_index=self._append_value_ref(
                 source_op,
-                _value_ref_for_source_field(source_op, project.source_value),
+                value_ref,
             ),
             target_bit_offset=project.target_bit_offset,
             source_element_index=project.word_index,
         )
 
-    def _lower_source_memory_project(
-        self,
-        target_name: str,
-        project: SourceMemoryProject,
-    ) -> LowerAttrCopy:
-        if project.kind == SourceMemoryProjectKind.STATIC_BYTE_OFFSET:
-            kind = LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET
-        elif project.kind == SourceMemoryProjectKind.STATIC_BYTE_OFFSET_PLUS_LITERAL:
-            kind = LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_PLUS_LITERAL
-        elif project.kind == SourceMemoryProjectKind.STATIC_BYTE_OFFSET_QUOTIENT:
-            kind = LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT
-        elif project.kind == SourceMemoryProjectKind.STATIC_BYTE_OFFSET_REMAINDER:
-            kind = LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER
-        elif project.kind == SourceMemoryProjectKind.DYNAMIC_BYTE_STRIDE:
-            kind = LowerAttrCopyKind.SOURCE_MEMORY_DYNAMIC_BYTE_STRIDE
-        else:
-            raise ValueError(
-                "source-memory immediate projection "
-                f"'{project.kind.value}' is not representable by generated "
-                "lower rules yet"
-            )
-        return LowerAttrCopy(
-            kind=kind,
-            target_name=target_name,
-            dynamic_term_index=project.dynamic_term_index,
-            literal_i64=(
-                project.literal_i64
-                if project.kind
-                == SourceMemoryProjectKind.STATIC_BYTE_OFFSET_PLUS_LITERAL
-                else project.divisor
-            ),
-        )
-
-    def _lower_source_op_project(
-        self,
-        source_op: Op,
-        target_name: str,
-        project: SourceOpProject,
-    ) -> LowerAttrCopy:
-        if project.kind != SourceOpProjectKind.INSTANCE_FLAGS:
-            raise ValueError(
-                f"{source_op.name}: immediate projection '{project.kind.value}' is "
-                "not representable by generated lower rules yet"
-            )
-        return LowerAttrCopy(
-            kind=LowerAttrCopyKind.SOURCE_OP_INSTANCE_FLAGS,
-            target_name=target_name,
-        )
-
     def _append_attr_copy_sequence(self, sequence: tuple[LowerAttrCopy, ...]) -> int:
-        if not sequence:
-            return 0
-        sequence_count = len(sequence)
-        for start in range(len(self._attr_copies) - sequence_count + 1):
-            if tuple(self._attr_copies[start : start + sequence_count]) == sequence:
-                return start
-        ordinal = len(self._attr_copies)
-        self._attr_copies.extend(sequence)
-        return ordinal
+        return _append_interned_row_sequence(self._attr_copies, sequence)
 
     def _append_tied_result_sequence(
         self,
         sequence: tuple[LowerTiedResult, ...],
     ) -> int:
-        if not sequence:
-            return 0
-        sequence_count = len(sequence)
-        for start in range(len(self._tied_results) - sequence_count + 1):
-            if tuple(self._tied_results[start : start + sequence_count]) == sequence:
-                return start
-        ordinal = len(self._tied_results)
-        self._tied_results.extend(sequence)
-        return ordinal
+        return _append_interned_row_sequence(self._tied_results, sequence)
 
     def _append_diagnostic(self, diagnostic: LowerDiagnostic) -> int:
         ordinal = self._diagnostic_ordinals.get(diagnostic)
@@ -2124,740 +1951,3 @@ class _LowerRuleSetCompiler:
             u64_value=param.u64_value,
             bool_value=param.bool_value,
         )
-
-
-def _build_spans(
-    rules: list[LowerRule],
-    op_ordinals: dict[int, int],
-) -> tuple[LowerRuleSpan, ...]:
-    spans: list[LowerRuleSpan] = []
-    i = 0
-    while i < len(rules):
-        rule_start = i
-        rule = rules[i]
-        rule_count = 1
-        while (
-            i + rule_count < len(rules)
-            and rules[i + rule_count].source_op is rule.source_op
-        ):
-            rule_count += 1
-        spans.append(
-            LowerRuleSpan(
-                source_op=rule.source_op,
-                rule_start=rule_start,
-                rule_count=rule_count,
-            )
-        )
-        i += rule_count
-    return tuple(
-        sorted(spans, key=lambda span: _op_kind_key(span.source_op, op_ordinals))
-    )
-
-
-def _f64_bits(value: float) -> int:
-    return int.from_bytes(struct.pack("<d", value), byteorder="little", signed=False)
-
-
-def _lower_emit_kind(
-    source_op: Op,
-    emit: EmitDescriptorOp,
-    type_patterns_by_field: dict[str, TypePattern],
-) -> LowerEmitKind:
-    if emit.form == DescriptorEmitForm.OP:
-        return LowerEmitKind.DESCRIPTOR_OP
-    if emit.form == DescriptorEmitForm.CONST:
-        return LowerEmitKind.DESCRIPTOR_CONST
-    if emit.form == DescriptorEmitForm.FIRST_LANE:
-        return LowerEmitKind.DESCRIPTOR_OP_FIRST_LANE
-    if emit.form == DescriptorEmitForm.PER_LANE:
-        return LowerEmitKind.DESCRIPTOR_OP_PER_LANE
-    if emit.form == DescriptorEmitForm.PER_LANE_SEQUENCE:
-        return LowerEmitKind.DESCRIPTOR_OP_PER_LANE_SEQUENCE
-    if emit.form == DescriptorEmitForm.ACCUMULATE_LANES:
-        return LowerEmitKind.DESCRIPTOR_OP_ACCUMULATE_LANES
-
-    if emit.descriptor.op_kind is DescriptorOpKind.CONST:
-        return LowerEmitKind.DESCRIPTOR_CONST
-
-    result_bindings = (
-        emit.result_types
-        if emit.result_types is not None
-        else (emit.results if emit.results is not None else {})
-    )
-    vector_result_lanes: int | None = None
-    for descriptor_operand in emit.descriptor.operands:
-        if not _descriptor_operand_is_output(descriptor_operand.role):
-            continue
-        result_type_binding = result_bindings.get(descriptor_operand.field_name)
-        if result_type_binding is None:
-            continue
-        if isinstance(result_type_binding, TypePattern):
-            result_type = result_type_binding
-        elif isinstance(result_type_binding, DescriptorResultType):
-            return LowerEmitKind.DESCRIPTOR_OP
-        else:
-            result_type = _require_type_pattern(
-                source_op,
-                result_type_binding.field,
-                type_patterns_by_field,
-            )
-        if result_type.kind != "vector":
-            return LowerEmitKind.DESCRIPTOR_OP
-        vector_result_lanes = result_type.lanes
-        if vector_result_lanes is None:
-            raise ValueError(
-                f"{source_op.name}: per-lane descriptor emits require a "
-                "static vector lane count"
-            )
-        if descriptor_operand.unit_count == 1:
-            return LowerEmitKind.DESCRIPTOR_OP_PER_LANE
-    return LowerEmitKind.DESCRIPTOR_OP
-
-
-def _require_type_pattern(
-    source_op: Op,
-    field: str,
-    type_patterns_by_field: dict[str, TypePattern],
-) -> TypePattern:
-    type_pattern = type_patterns_by_field.get(field)
-    if type_pattern is None:
-        raise ValueError(
-            f"{source_op.name}: descriptor emit field '{field}' needs a "
-            "value_type guard"
-        )
-    return type_pattern
-
-
-def _require_exact_result_type_pattern(
-    source_op: Op,
-    descriptor_field: str,
-    type_pattern: TypePattern,
-) -> None:
-    if type_pattern.kind == "view":
-        raise ValueError(
-            f"{source_op.name}: descriptor emit result type pattern for "
-            f"'{descriptor_field}' cannot synthesize view types"
-        )
-    if len(type_pattern.elements) != 1:
-        raise ValueError(
-            f"{source_op.name}: descriptor emit result type pattern for "
-            f"'{descriptor_field}' must select exactly one scalar element"
-        )
-    if type_pattern.kind == "vector" and type_pattern.lanes is None:
-        raise ValueError(
-            f"{source_op.name}: descriptor emit result type pattern for "
-            f"'{descriptor_field}' must have an exact vector lane count"
-        )
-
-
-def _value_ref_for_source_field(source_op: Op, field: str) -> ValueRef:
-    if source_op.operand(field) is not None:
-        return ValueRef.operand(field)
-    if source_op.result(field) is not None:
-        return ValueRef.result(field)
-    raise ValueError(f"{source_op.name}: source field '{field}' is not a value")
-
-
-def _lower_value_ref(
-    source_op: Op,
-    value_ref: ValueRef,
-    temporary_ordinals: Mapping[str, int],
-    *,
-    materializer_ordinals: Mapping[str, int],
-) -> LowerValueRef:
-    materializer_index = 0
-    if value_ref.materializer is not None:
-        materializer_index = materializer_ordinals.get(value_ref.materializer, 0)
-        if materializer_index == 0:
-            raise ValueError(
-                f"{source_op.name}: source value field '{value_ref.field}' "
-                f"references unknown materializer '{value_ref.materializer}'"
-            )
-    return LowerValueRef(
-        kind=value_ref.kind,
-        index=_source_value_index(source_op, value_ref, temporary_ordinals),
-        element_index=(
-            value_ref.element
-            if value_ref.kind in (SourceValueKind.OPERAND, SourceValueKind.RESULT)
-            else 0
-        ),
-        materializer_index=materializer_index,
-    )
-
-
-def _source_value_index(
-    source_op: Op,
-    value_ref: ValueRef,
-    temporary_ordinals: Mapping[str, int],
-) -> int:
-    if value_ref.kind == SourceValueKind.OPERAND:
-        operand = source_op.operand(value_ref.field)
-        if operand is not None:
-            return source_op.operands.index(operand)
-    if value_ref.kind == SourceValueKind.RESULT:
-        result = source_op.result(value_ref.field)
-        if result is not None:
-            return source_op.results.index(result)
-    if value_ref.kind == SourceValueKind.TEMPORARY:
-        ordinal = temporary_ordinals.get(value_ref.field)
-        if ordinal is not None:
-            return ordinal
-    if value_ref.kind == SourceValueKind.SOURCE_MEMORY_DYNAMIC_TERM:
-        return value_ref.element
-    if value_ref.kind == SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET:
-        return 0
-    if value_ref.kind == SourceValueKind.SOURCE_MEMORY_ADDRESS:
-        return 0
-    raise ValueError(f"source value field '{value_ref.field}' is not declared")
-
-
-def _source_attr_index(source_op: Op, field: str) -> int:
-    attr = source_op.attr(field)
-    if attr is None:
-        raise ValueError(f"{source_op.name}: source field '{field}' is not an attr")
-    return source_op.attrs.index(attr)
-
-
-def _source_operand_index(source_op: Op, field: str) -> int:
-    operand = source_op.operand(field)
-    if operand is None:
-        raise ValueError(f"{source_op.name}: source field '{field}' is not an operand")
-    return source_op.operands.index(operand)
-
-
-def _operand_segment_counts(
-    source_op: Op,
-    guards: Sequence[Guard],
-) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for guard in guards:
-        if guard.kind != GuardKind.OPERAND_SEGMENT_COUNT:
-            continue
-        if guard.count is None:
-            raise ValueError(
-                f"{source_op.name}: operand-segment-count guard needs a count"
-            )
-        previous_count = counts.get(guard.field)
-        if previous_count is not None:
-            raise ValueError(
-                f"{source_op.name}: variadic operand '{guard.field}' has "
-                "multiple operand_segment_count guards"
-            )
-        counts[guard.field] = guard.count
-    return counts
-
-
-def _order_operand_segment_guards(
-    source_op: Op,
-    guards: Sequence[Guard],
-) -> tuple[Guard, ...]:
-    """Orders each variadic arity guard before its first dereference."""
-    ordered_guards = list(guards)
-    for segment_guard in guards:
-        if segment_guard.kind != GuardKind.OPERAND_SEGMENT_COUNT:
-            continue
-        segment_guard_index = next(
-            index
-            for index, candidate in enumerate(ordered_guards)
-            if candidate is segment_guard
-        )
-        first_reference_index = next(
-            (
-                index
-                for index, candidate in enumerate(ordered_guards)
-                if candidate.kind != GuardKind.OPERAND_SEGMENT_COUNT
-                and any(
-                    field == segment_guard.field
-                    for field in (candidate.field, candidate.other_field)
-                )
-            ),
-            None,
-        )
-        if (
-            first_reference_index is not None
-            and first_reference_index < segment_guard_index
-        ):
-            ordered_guards.pop(segment_guard_index)
-            ordered_guards.insert(first_reference_index, segment_guard)
-    return tuple(ordered_guards)
-
-
-def _type_pattern_text(type_pattern: TypePattern) -> str:
-    element_text = _type_pattern_element_text(type_pattern)
-    if type_pattern.kind == "scalar":
-        return element_text
-    if type_pattern.kind == "view":
-        return f"view<{element_text}>"
-    if type_pattern.dims:
-        dims_text = "x".join(str(dim) for dim in type_pattern.dims)
-        return f"vector<{dims_text}x{element_text}>"
-    if type_pattern.lanes is not None:
-        return f"vector<{type_pattern.lanes}x{element_text}>"
-    return f"vector<{element_text}>"
-
-
-def _type_pattern_element_text(type_pattern: TypePattern) -> str:
-    if len(type_pattern.elements) == 1:
-        return type_pattern.elements[0]
-    return "{" + ", ".join(type_pattern.elements) + "}"
-
-
-def _value_type_diagnostic(field: str, type_pattern: TypePattern) -> DiagnosticRef:
-    return target_diagnostic(
-        ERR_TARGET_002,
-        string_param("field_name", field),
-        value_type_param("actual_type", field),
-        string_param("expected_type", _type_pattern_text(type_pattern)),
-    )
-
-
-def _enum_attr_diagnostic(field: str, enum_keyword: str) -> DiagnosticRef:
-    return _named_constraint_diagnostic(
-        "field",
-        field,
-        f"enum_case.{enum_keyword}",
-    )
-
-
-def _i64_attr_range_diagnostic(
-    field: str,
-    minimum: int,
-    maximum: int,
-) -> DiagnosticRef:
-    return _range_constraint_diagnostic(
-        "field", field, "i64_attr_range", minimum, maximum
-    )
-
-
-def _descriptor_available_diagnostic(descriptor: Descriptor) -> DiagnosticRef:
-    return _named_constraint_diagnostic(
-        "descriptor",
-        descriptor.key,
-        "descriptor_available",
-    )
-
-
-def _materializer_diagnostic(field: str, materializer: str) -> DiagnosticRef:
-    return _named_constraint_diagnostic(
-        "field",
-        field,
-        f"materializer.{materializer}",
-    )
-
-
-def _register_class_diagnostic(field: str, register_class: str) -> DiagnosticRef:
-    return _named_constraint_diagnostic(
-        "field",
-        field,
-        f"low_register_class.{register_class}",
-    )
-
-
-def _static_dim0_multiple_diagnostic(field: str, multiple: int) -> DiagnosticRef:
-    return _count_constraint_diagnostic(
-        "field",
-        field,
-        "static_dim0_multiple",
-        multiple,
-    )
-
-
-def _register_unit_count_diagnostic(
-    field: str,
-    other_field: str,
-) -> DiagnosticRef:
-    return _relation_constraint_diagnostic(
-        "field",
-        field,
-        other_field,
-        "low_register_unit_count_eq",
-    )
-
-
-def _static_element_count_relation_diagnostic(
-    field: str,
-    other_field: str,
-) -> DiagnosticRef:
-    return _relation_constraint_diagnostic(
-        "field",
-        field,
-        other_field,
-        "static_element_count_eq",
-    )
-
-
-def _register_unit_count_exact_diagnostic(field: str, count: int) -> DiagnosticRef:
-    return _count_constraint_diagnostic(
-        "field",
-        field,
-        "low_register_unit_count",
-        count,
-    )
-
-
-def _operand_segment_count_diagnostic(field: str, count: int) -> DiagnosticRef:
-    return _count_constraint_diagnostic(
-        "operand_segment",
-        field,
-        "operand_segment_count",
-        count,
-    )
-
-
-def _i64_array_count_diagnostic(field: str, count: int) -> DiagnosticRef:
-    return _count_constraint_diagnostic("i64_array", field, "array_count", count)
-
-
-def _i64_array_element_range_diagnostic(
-    field: str,
-    element: int,
-    minimum: int,
-    maximum: int,
-) -> DiagnosticRef:
-    return _element_range_constraint_diagnostic(
-        "i64_array",
-        field,
-        "element_range",
-        element,
-        minimum,
-        maximum,
-    )
-
-
-def _i64_array_elements_range_diagnostic(
-    field: str,
-    minimum: int,
-    maximum: int,
-) -> DiagnosticRef:
-    return _range_constraint_diagnostic(
-        "i64_array",
-        field,
-        "elements_range",
-        minimum,
-        maximum,
-    )
-
-
-def _bounded_integer_diagnostic(field: str, guard: Guard) -> DiagnosticRef:
-    signedness = (
-        "signed" if guard.kind == GuardKind.VALUE_SIGNED_BIT_COUNT else "unsigned"
-    )
-    return _count_constraint_diagnostic(
-        "value_fact",
-        field,
-        f"{signedness}_bit_count",
-        guard.count or 0,
-    )
-
-
-def _exact_integer_diagnostic(field: str) -> DiagnosticRef:
-    return _named_constraint_diagnostic("value_fact", field, "exact_i64")
-
-
-def _exact_power_of_two_integer_diagnostic(field: str) -> DiagnosticRef:
-    return _named_constraint_diagnostic(
-        "value_fact",
-        field,
-        "exact_power_of_two_i64",
-    )
-
-
-def _u32_divisor_magic_is_add_diagnostic(field: str, *, is_add: bool) -> DiagnosticRef:
-    suffix = "add" if is_add else "no_add"
-    return _named_constraint_diagnostic(
-        "value_fact",
-        field,
-        f"u32_divisor_magic.{suffix}",
-    )
-
-
-def _exact_float_diagnostic(field: str) -> DiagnosticRef:
-    return _named_constraint_diagnostic("value_fact", field, "exact_float")
-
-
-def _integer_range_diagnostic(
-    field: str,
-    minimum: int,
-    maximum: int,
-) -> DiagnosticRef:
-    return _range_constraint_diagnostic(
-        "value_fact", field, "i64_range", minimum, maximum
-    )
-
-
-def _integer_range_relation_diagnostic(
-    field: str,
-    other_field: str,
-    relation: str,
-) -> DiagnosticRef:
-    return _relation_constraint_diagnostic(
-        "value_fact",
-        field,
-        other_field,
-        f"i64_range_{relation}",
-    )
-
-
-def _float_equals_diagnostic(field: str, value: float) -> DiagnosticRef:
-    return _named_constraint_diagnostic(
-        "value_fact", field, f"float_equals.0x{_f64_bits(value):016x}"
-    )
-
-
-def _storage_element_format_diagnostic(field: str) -> DiagnosticRef:
-    return _named_constraint_diagnostic("value", field, "storage_schema.element_format")
-
-
-def _value_no_uses_diagnostic(field: str) -> DiagnosticRef:
-    return _named_constraint_diagnostic("value", field, "no_ordinary_uses")
-
-
-def _instance_flags_diagnostic(field: str, enum_keyword: str) -> DiagnosticRef:
-    return _named_constraint_diagnostic("flags", field, f"has_all.{enum_keyword}")
-
-
-def _source_memory_diagnostic(
-    constraint: SourceMemoryConstraint,
-) -> DiagnosticRef:
-    if constraint.diagnostic is not None:
-        ref = constraint.diagnostic.ref
-        if ref is None:
-            raise ValueError("source-memory diagnostic is missing an error ref")
-        return ref
-    return target_diagnostic(
-        ERR_TARGET_008,
-        string_param("operation_kind", constraint.operation.value),
-    )
-
-
-def _source_memory_dynamic_offset_diagnostic(
-    constraint: SourceMemoryConstraint,
-) -> DiagnosticRef:
-    if constraint.dynamic_offset_diagnostic is not None:
-        ref = constraint.dynamic_offset_diagnostic.ref
-        if ref is None:
-            raise ValueError(
-                "source-memory dynamic-offset diagnostic is missing an error ref"
-            )
-        return ref
-    return _source_memory_diagnostic(constraint)
-
-
-def _source_memory_address_layout_diagnostic(
-    constraint: SourceMemoryConstraint,
-) -> DiagnosticRef:
-    if constraint.address_layout_diagnostic is not None:
-        ref = constraint.address_layout_diagnostic.ref
-        if ref is None:
-            raise ValueError(
-                "source-memory address-layout diagnostic is missing an error ref"
-            )
-        return ref
-    return _source_memory_diagnostic(constraint)
-
-
-def _source_memory_address_diagnostic(
-    constraint: SourceMemoryConstraint,
-    materializer: SourceMemoryAddressMaterializer | None,
-) -> DiagnosticRef:
-    if materializer is not None and materializer.diagnostic is not None:
-        ref = materializer.diagnostic.ref
-        if ref is None:
-            raise ValueError("source-memory address diagnostic is missing an error ref")
-        return ref
-    return _source_memory_diagnostic(constraint)
-
-
-def _attr_diagnostic(field: str, attr_type: str) -> DiagnosticRef:
-    return _named_constraint_diagnostic("field", field, f"attr_kind.{attr_type}")
-
-
-def _named_constraint_diagnostic(
-    subject_role: str,
-    subject_name: str,
-    constraint_key: str,
-) -> DiagnosticRef:
-    return target_diagnostic(
-        ERR_TARGET_003,
-        string_param("subject_role", subject_role),
-        string_param("subject_name", subject_name),
-        string_param("constraint_key", constraint_key),
-    )
-
-
-def _count_constraint_diagnostic(
-    subject_role: str,
-    subject_name: str,
-    constraint_key: str,
-    expected_count: int,
-) -> DiagnosticRef:
-    return target_diagnostic(
-        ERR_TARGET_004,
-        string_param("subject_role", subject_role),
-        string_param("subject_name", subject_name),
-        string_param("constraint_key", constraint_key),
-        u32_param("expected_count", expected_count),
-    )
-
-
-def _range_constraint_diagnostic(
-    subject_role: str,
-    subject_name: str,
-    constraint_key: str,
-    minimum: int,
-    maximum: int,
-) -> DiagnosticRef:
-    return target_diagnostic(
-        ERR_TARGET_005,
-        string_param("subject_role", subject_role),
-        string_param("subject_name", subject_name),
-        string_param("constraint_key", constraint_key),
-        i64_param("minimum", minimum),
-        i64_param("maximum", maximum),
-    )
-
-
-def _element_range_constraint_diagnostic(
-    subject_role: str,
-    subject_name: str,
-    constraint_key: str,
-    element: int,
-    minimum: int,
-    maximum: int,
-) -> DiagnosticRef:
-    return target_diagnostic(
-        ERR_TARGET_006,
-        string_param("subject_role", subject_role),
-        string_param("subject_name", subject_name),
-        u32_param("element", element),
-        string_param("constraint_key", constraint_key),
-        i64_param("minimum", minimum),
-        i64_param("maximum", maximum),
-    )
-
-
-def _relation_constraint_diagnostic(
-    subject_role: str,
-    subject_name: str,
-    other_subject_name: str,
-    constraint_key: str,
-) -> DiagnosticRef:
-    return target_diagnostic(
-        ERR_TARGET_007,
-        string_param("subject_role", subject_role),
-        string_param("subject_name", subject_name),
-        string_param("other_subject_name", other_subject_name),
-        string_param("constraint_key", constraint_key),
-    )
-
-
-def _guard_diagnostic(
-    guard: Guard,
-    default_diagnostic: DiagnosticRef,
-) -> DiagnosticRef:
-    if guard.diagnostic is None:
-        return default_diagnostic
-    ref = guard.diagnostic.ref
-    if ref is None:
-        raise ValueError("guard diagnostic is missing an error ref")
-    return ref
-
-
-def _descriptor_operand_is_input(role: OperandRole) -> bool:
-    return role in (
-        OperandRole.OPERAND,
-        OperandRole.OPERAND_RESULT,
-        OperandRole.PREDICATE,
-        OperandRole.RESOURCE,
-    )
-
-
-def _descriptor_operand_is_output(role: OperandRole) -> bool:
-    return role in (OperandRole.RESULT, OperandRole.OPERAND_RESULT)
-
-
-def _lower_descriptor_ties(
-    descriptor: Descriptor,
-    operand_ordinals_by_descriptor_field: Mapping[str, int],
-) -> tuple[tuple[LowerTiedResult, ...], int]:
-    result_ordinals_by_descriptor_index: dict[int, int] = {}
-    operand_ordinals_by_descriptor_index: dict[int, int] = {}
-    result_ordinal = 0
-    for descriptor_index, descriptor_operand in enumerate(descriptor.operands):
-        if _descriptor_operand_is_output(descriptor_operand.role):
-            result_ordinals_by_descriptor_index[descriptor_index] = result_ordinal
-            result_ordinal += 1
-        if _descriptor_operand_is_input(descriptor_operand.role):
-            operand_ordinal = operand_ordinals_by_descriptor_field.get(
-                descriptor_operand.field_name
-            )
-            if operand_ordinal is not None:
-                operand_ordinals_by_descriptor_index[descriptor_index] = operand_ordinal
-
-    tied_results: list[LowerTiedResult] = []
-    copy_operand_mask = 0
-    for constraint in descriptor.constraints:
-        if constraint.kind not in (ConstraintKind.TIED, ConstraintKind.DESTRUCTIVE):
-            continue
-        if constraint.rhs_operand_index is None:
-            raise ValueError(
-                f"descriptor '{descriptor.key}' constraint needs a rhs operand"
-            )
-        try:
-            result_index = result_ordinals_by_descriptor_index[
-                constraint.lhs_operand_index
-            ]
-            operand_index = operand_ordinals_by_descriptor_index[
-                constraint.rhs_operand_index
-            ]
-        except KeyError as exc:
-            raise ValueError(
-                f"descriptor '{descriptor.key}' constraint references an "
-                "unbound result or operand"
-            ) from exc
-        if constraint.kind is ConstraintKind.TIED:
-            tied_results.append(
-                LowerTiedResult(
-                    result_index=result_index,
-                    operand_index=operand_index,
-                )
-            )
-        else:
-            copy_operand_mask |= 1 << operand_index
-    return tuple(tied_results), copy_operand_mask
-
-
-def _lower_explicit_copy_operand_mask(
-    source_op: Op,
-    emit: EmitDescriptorOp,
-    operand_ordinals_by_descriptor_field: Mapping[str, int],
-) -> int:
-    copy_operand_mask = 0
-    for descriptor_field in emit.copy_operands:
-        try:
-            operand_index = operand_ordinals_by_descriptor_field[descriptor_field]
-        except KeyError as exc:
-            raise ValueError(
-                f"{source_op.name}: copied descriptor operand "
-                f"'{descriptor_field}' is not emitted"
-            ) from exc
-        copy_operand_mask |= 1 << operand_index
-    return copy_operand_mask
-
-
-def _build_op_ordinals(dialect_ops: Mapping[str, Sequence[Op]]) -> dict[int, int]:
-    op_ordinals: dict[int, int] = {}
-    for ops in dialect_ops.values():
-        for op_index, op in enumerate(ops):
-            op_ordinals[id(op)] = op_index
-    return op_ordinals
-
-
-def _op_kind_key(op: Op, op_ordinals: dict[int, int]) -> tuple[int, int]:
-    if op.group is None:
-        raise ValueError(f"op '{op.name}' is not assigned to a dialect")
-    try:
-        op_index = op_ordinals[id(op)]
-    except KeyError as exc:
-        raise ValueError(f"op '{op.name}' is not present in dialect_ops") from exc
-    return (op.group.dialect_id, op_index)

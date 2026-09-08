@@ -10,26 +10,182 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import Enum, unique
+from typing import Self
 
-from loom.dsl import FACT_IDENTITY, MemoryAccessInterface, Op
+from loom.dsl import FACT_IDENTITY, PURE, MemoryAccessInterface, Op
 from loom.target.contracts.descriptors import _require_descriptor
 from loom.target.contracts.emits import (
     ContractEmit,
     DescriptorEmitForm,
     EmitDescriptorOp,
+    EmitRegisterConcat,
+    EmitRegisterCopy,
+    EmitRegisterSlice,
 )
 from loom.target.contracts.guards import Guard
 from loom.target.contracts.kinds import ContractSystem, SourceValueKind
 from loom.target.contracts.source import ValueRef
 from loom.target.low_descriptors import Descriptor, DescriptorSet, OperandRole
 
+MAX_SOURCE_NODES = 8
+SOURCE_NODE_COUNT_BITS = (MAX_SOURCE_NODES - 1).bit_length()
+
+
+@unique
+class SourceNodeRelation(Enum):
+    """SSA relation used to find one source op adjacent to another."""
+
+    ADJACENT_UNIQUE_USER = "adjacent_unique_user"
+    ADJACENT_DEFINITION = "adjacent_definition"
+
+
+@dataclass(frozen=True, slots=True)
+class SourceNode:
+    """Named source op joined to the root of a descriptor rule."""
+
+    name: str
+    source_op: Op
+    relation: SourceNodeRelation
+    parent_value: ValueRef
+    node_value: ValueRef
+    parent: str = ""
+    guards: tuple[Guard, ...] = ()
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        source_op: Op,
+        relation: SourceNodeRelation,
+        parent_value: ValueRef,
+        node_value: ValueRef,
+        parent: str = "",
+        guards: Sequence[Guard] = (),
+    ) -> None:
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "source_op", source_op)
+        object.__setattr__(self, "relation", relation)
+        object.__setattr__(self, "parent_value", parent_value)
+        object.__setattr__(self, "node_value", node_value)
+        object.__setattr__(self, "parent", parent)
+        object.__setattr__(self, "guards", tuple(guards))
+
+    @classmethod
+    def adjacent_unique_user(
+        cls,
+        name: str,
+        *,
+        source_op: Op,
+        parent_result: ValueRef,
+        node_operand: ValueRef,
+        parent: str = "",
+        guards: Sequence[Guard] = (),
+    ) -> Self:
+        """Finds the adjacent sole user of a parent result."""
+
+        return cls(
+            name=name,
+            source_op=source_op,
+            relation=SourceNodeRelation.ADJACENT_UNIQUE_USER,
+            parent_value=parent_result,
+            node_value=node_operand,
+            parent=parent,
+            guards=guards,
+        )
+
+    @classmethod
+    def adjacent_definition(
+        cls,
+        name: str,
+        *,
+        source_op: Op,
+        parent_operand: ValueRef,
+        node_result: ValueRef,
+        parent: str = "",
+        guards: Sequence[Guard] = (),
+    ) -> Self:
+        """Finds the adjacent sole-use definition of a parent operand."""
+
+        return cls(
+            name=name,
+            source_op=source_op,
+            relation=SourceNodeRelation.ADJACENT_DEFINITION,
+            parent_value=parent_operand,
+            node_value=node_result,
+            parent=parent,
+            guards=guards,
+        )
+
+    def validate(self, source_ops: dict[str, Op]) -> None:
+        if not self.name:
+            raise ValueError("descriptor-rule source node name must be non-empty")
+        if self.name in source_ops:
+            raise ValueError(f"duplicate descriptor-rule source node '{self.name}'")
+        parent_op = source_ops.get(self.parent)
+        if parent_op is None:
+            raise ValueError(
+                f"{self.source_op.name}: source node '{self.name}' references "
+                f"unknown parent '{self.parent}'"
+            )
+        if not isinstance(self.relation, SourceNodeRelation):
+            raise ValueError(
+                f"{self.source_op.name}: source node '{self.name}' has an "
+                "unknown relation"
+            )
+        if self.source_op.regions or PURE not in self.source_op.traits:
+            raise ValueError(
+                f"{self.source_op.name}: related source nodes must be pure and "
+                "regionless"
+            )
+        for subject, value_ref in (
+            ("parent connection", self.parent_value),
+            ("node connection", self.node_value),
+        ):
+            if value_ref.source_node:
+                raise ValueError(
+                    f"{self.source_op.name}: source node '{self.name}' {subject} "
+                    "must be local to its endpoint"
+                )
+            if value_ref.materializer is not None:
+                raise ValueError(
+                    f"{self.source_op.name}: source node '{self.name}' {subject} "
+                    "cannot use a materializer"
+                )
+        if self.relation is SourceNodeRelation.ADJACENT_UNIQUE_USER:
+            expected_parent_kind = SourceValueKind.RESULT
+            expected_node_kind = SourceValueKind.OPERAND
+        else:
+            expected_parent_kind = SourceValueKind.OPERAND
+            expected_node_kind = SourceValueKind.RESULT
+        if self.parent_value.kind is not expected_parent_kind:
+            raise ValueError(
+                f"{self.source_op.name}: source node '{self.name}' parent "
+                f"connection must be a {expected_parent_kind.value}"
+            )
+        if self.node_value.kind is not expected_node_kind:
+            raise ValueError(
+                f"{self.source_op.name}: source node '{self.name}' node "
+                f"connection must be a {expected_node_kind.value}"
+            )
+        self.parent_value.validate(parent_op, "source-node parent connection")
+        self.node_value.validate(self.source_op, "source-node local connection")
+        for guard in self.guards:
+            guard.validate(self.source_op)
+        source_ops[self.name] = self.source_op
+
 
 @dataclass(frozen=True, slots=True)
 class DescriptorRule:
-    """Source-to-Low rule contract case authored in Python."""
+    """Source-to-Low rule contract case authored in Python.
+
+    Cases for the same source operation are selected by descending priority,
+    preserving authored order among cases with equal priority.
+    """
 
     source_op: Op
     descriptor: Descriptor | None
+    source_nodes: tuple[SourceNode, ...] = ()
     guards: tuple[Guard, ...] = ()
     emit: tuple[ContractEmit, ...] = ()
     priority: int = 0
@@ -40,6 +196,7 @@ class DescriptorRule:
         *,
         source_op: Op,
         descriptor: Descriptor | None = None,
+        source_nodes: Sequence[SourceNode] = (),
         guards: Sequence[Guard] = (),
         emit: Sequence[ContractEmit] = (),
         priority: int = 0,
@@ -47,6 +204,7 @@ class DescriptorRule:
     ) -> None:
         object.__setattr__(self, "source_op", source_op)
         object.__setattr__(self, "descriptor", descriptor)
+        object.__setattr__(self, "source_nodes", tuple(source_nodes))
         object.__setattr__(self, "guards", tuple(guards))
         object.__setattr__(self, "emit", tuple(emit))
         object.__setattr__(self, "priority", priority)
@@ -62,6 +220,14 @@ class DescriptorRule:
     def validate(self, descriptor_set: DescriptorSet) -> None:
         if self.descriptor is not None:
             _require_descriptor(descriptor_set, self.descriptor)
+        if len(self.source_nodes) + 1 > MAX_SOURCE_NODES:
+            raise ValueError(
+                f"{self.source_op.name}: descriptor rules support at most "
+                f"{MAX_SOURCE_NODES} source nodes"
+            )
+        source_ops = {"": self.source_op}
+        for source_node in self.source_nodes:
+            source_node.validate(source_ops)
         for guard in self.guards:
             guard.validate(self.source_op)
         defined_temporaries = set[str]()
@@ -75,10 +241,62 @@ class DescriptorRule:
                 self.source_op,
                 descriptor_set,
                 defined_temporaries,
+                source_ops=source_ops,
             )
             defined_temporaries.update(produced_temporaries)
+        self._validate_related_results()
         self._validate_source_memory_index_preservation()
         self._validate_per_lane_sequence()
+
+    def _validate_related_results(self) -> None:
+        covered_results = set[tuple[str, str, int]]()
+        for source_node in self.source_nodes:
+            if source_node.node_value.kind is SourceValueKind.RESULT:
+                covered_results.add(
+                    (
+                        source_node.name,
+                        source_node.node_value.field,
+                        source_node.node_value.element,
+                    )
+                )
+            if source_node.parent and (
+                source_node.parent_value.kind is SourceValueKind.RESULT
+            ):
+                covered_results.add(
+                    (
+                        source_node.parent,
+                        source_node.parent_value.field,
+                        source_node.parent_value.element,
+                    )
+                )
+        for emit in self.emit:
+            if isinstance(emit, EmitDescriptorOp):
+                result_refs = tuple(emit.results.values())
+            elif isinstance(
+                emit,
+                (EmitRegisterConcat, EmitRegisterCopy, EmitRegisterSlice),
+            ):
+                result_refs = (emit.result,)
+            else:
+                result_refs = ()
+            covered_results.update(
+                (value_ref.source_node, value_ref.field, value_ref.element)
+                for value_ref in result_refs
+                if value_ref.kind is SourceValueKind.RESULT and value_ref.source_node
+            )
+        for source_node in self.source_nodes:
+            for result in source_node.source_op.results:
+                if result.variadic:
+                    raise ValueError(
+                        f"{source_node.source_op.name}: related source node "
+                        f"'{source_node.name}' cannot have variadic results"
+                    )
+                if (source_node.name, result.name, 0) not in covered_results:
+                    raise ValueError(
+                        f"{source_node.source_op.name}: related source node "
+                        f"'{source_node.name}' result '{result.name}' is neither "
+                        "internal nor bound by the emit program"
+                    )
 
     def _validate_source_memory_index_preservation(self) -> None:
         source_memories = tuple(
@@ -101,6 +319,7 @@ class DescriptorRule:
             return
         source_index_used = any(
             value_ref.kind == SourceValueKind.OPERAND
+            and not value_ref.source_node
             and value_ref.field == memory_access.indices
             for emit in self.emit
             if isinstance(emit, EmitDescriptorOp)
@@ -390,6 +609,14 @@ type ContractCase = (
     | RecipeRule
     | DescriptorMatrixRule
 )
+
+
+def contract_case_priority(contract_case: ContractCase) -> int:
+    """Returns the selection priority for a contract case."""
+
+    if isinstance(contract_case, DescriptorRule):
+        return contract_case.priority
+    return 0
 
 
 def _validate_report_key(source_op: Op, report_key: str) -> None:

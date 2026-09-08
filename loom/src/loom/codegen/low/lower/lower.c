@@ -1006,6 +1006,10 @@ static iree_status_t loom_low_lower_emit_selected_plan(
           [context->lowering.source_plan.selected_plan_emit_index++];
   IREE_ASSERT_EQ(selected_plan.source_op, source_op);
   if (iree_any_bit_set(selected_plan.flags,
+                       LOOM_LOW_LOWER_SELECTED_PLAN_CLAIMED)) {
+    return iree_ok_status();
+  }
+  if (iree_any_bit_set(selected_plan.flags,
                        LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED)) {
     return loom_low_lower_emit_elided_selected_plan(context, &selected_plan);
   }
@@ -1020,20 +1024,23 @@ static iree_status_t loom_low_lower_emit_selected_plan(
     IREE_ASSERT(selected_plan.rule != NULL);
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_set_emit_rule(
         context, selected_plan.rule_set, source_op, selected_plan.rule,
-        selected_plan.resolved_emits, selected_plan.source_memory_access));
+        selected_plan.resolved_emits, selected_plan.source_memory_access,
+        selected_plan.data.source_nodes, selected_plan.source_node_count));
   } else if (selected_plan.kind ==
              LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX) {
-    IREE_ASSERT_FALSE(loom_low_lower_plan_is_empty(selected_plan.plan));
+    IREE_ASSERT_FALSE(
+        loom_low_lower_plan_is_empty(selected_plan.data.target_plan));
     IREE_RETURN_IF_ERROR(loom_low_lower_emit_descriptor_matrix_plan(
         context, source_op,
         (const loom_low_lower_descriptor_matrix_plan_t*)
-            selected_plan.plan.target_data));
+            selected_plan.data.target_plan.target_data));
   } else {
-    IREE_ASSERT_FALSE(loom_low_lower_plan_is_empty(selected_plan.plan));
+    IREE_ASSERT_FALSE(
+        loom_low_lower_plan_is_empty(selected_plan.data.target_plan));
     IREE_ASSERT(context->policy->emit_op.fn != NULL);
     IREE_RETURN_IF_ERROR(
         context->policy->emit_op.fn(context->policy->emit_op.user_data, context,
-                                    source_op, selected_plan.plan));
+                                    source_op, selected_plan.data.target_plan));
   }
   if (report_allocator_provided) {
     const uint64_t after_op_count = loom_low_lower_count_low_body_ops(context);

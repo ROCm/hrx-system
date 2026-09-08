@@ -38,11 +38,33 @@ loom_low_lower_rule_value_materializer(
     const loom_low_lower_rule_set_t* rule_set,
     const loom_low_lower_value_ref_t* value_ref);
 
+// Returns the source op containing the operand or result selected by a
+// value-ref row. |source_nodes| contains the rule root at index zero when the
+// rule spans multiple source operations; it may be NULL for root-only rules.
+const loom_op_t* loom_low_lower_rule_source_op(
+    const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
+    const loom_op_t* const* source_nodes, uint8_t source_node_count,
+    uint16_t value_ref_index);
+
+// Resolves an operand or result value-ref row across a selected source graph.
+// Generated table indices and value-ref kinds are trusted.
+loom_value_id_t loom_low_lower_rule_source_value_from_nodes(
+    const loom_module_t* module, const loom_low_lower_rule_set_t* rule_set,
+    const loom_op_t* source_op, const loom_op_t* const* source_nodes,
+    uint8_t source_node_count, uint16_t value_ref_index);
+
 // Resolves an operand or result value-ref row to its source SSA value.
 // Generated table indices and value-ref kinds are trusted.
 loom_value_id_t loom_low_lower_rule_source_value(
     const loom_module_t* module, const loom_low_lower_rule_set_t* rule_set,
     const loom_op_t* source_op, uint16_t value_ref_index);
+
+// Resolves an operand or result value-ref row to the complete source field
+// across a selected source graph. Non-source value refs return an empty span.
+loom_value_slice_t loom_low_lower_rule_value_ref_field_span_from_nodes(
+    const loom_module_t* module, const loom_low_lower_rule_set_t* rule_set,
+    const loom_op_t* source_op, const loom_op_t* const* source_nodes,
+    uint8_t source_node_count, uint16_t value_ref_index);
 
 // Resolves an operand or result value-ref row to the complete source field.
 // Non-source value refs return an empty span.

@@ -18,6 +18,7 @@ from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
 from loom.target.contracts import (
+    LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
     LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE,
     LOWER_RULE_FLAG_CONTRACT_ONLY,
     LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
@@ -49,6 +50,8 @@ from loom.target.contracts import (
     SourceMemoryOperation,
     SourceMemoryProject,
     SourceMemoryRootKind,
+    SourceNode,
+    SourceNodeRelation,
     SourceOpProject,
     SourceValueKind,
     TypePattern,
@@ -162,24 +165,38 @@ def test_compile_structural_register_emits() -> None:
         },
     )
 
-    assert tuple(emit.kind for emit in compiled.emits) == (
-        LowerEmitKind.REGISTER_CONCAT,
-        LowerEmitKind.REGISTER_SLICE,
-        LowerEmitKind.REGISTER_SLICE,
-        LowerEmitKind.REGISTER_COPY,
-    )
     assert all(emit.descriptor is None for emit in compiled.emits)
-    assert compiled.emits[0].operand_ref_count == 2
-    assert compiled.emits[1].operand_ref_count == 1
-    assert compiled.emits[1].structural_offset == 1
-    assert compiled.emits[1].structural_unit_count == 1
-    assert compiled.emits[1].flags == 0
-    typed_slice_result = compiled.value_refs[compiled.emits[1].result_bind_ref_start]
+    rules_by_source_op = {rule.source_op: rule for rule in compiled.rules}
+
+    concat_emit = compiled.emits[
+        rules_by_source_op[vector.vector_from_elements].emit_start
+    ]
+    assert concat_emit.kind is LowerEmitKind.REGISTER_CONCAT
+    assert concat_emit.operand_ref_count == 2
+
+    extract_rule = rules_by_source_op[vector.vector_extract]
+    slice_emits = compiled.emits[
+        extract_rule.emit_start : extract_rule.emit_start + extract_rule.emit_count
+    ]
+    assert tuple(emit.kind for emit in slice_emits) == (
+        LowerEmitKind.REGISTER_SLICE,
+        LowerEmitKind.REGISTER_SLICE,
+    )
+    assert slice_emits[0].operand_ref_count == 1
+    assert slice_emits[0].structural_offset == 1
+    assert slice_emits[0].structural_unit_count == 1
+    assert slice_emits[0].flags == 0
+    typed_slice_result = compiled.value_refs[slice_emits[0].result_bind_ref_start]
     assert typed_slice_result.kind is SourceValueKind.TEMPORARY
-    assert compiled.emits[2].operand_ref_count == 1
-    assert compiled.emits[2].structural_offset == 0
-    assert compiled.emits[3].operand_ref_count == 1
-    assert compiled.emits[3].result_ref_count == 1
+    assert slice_emits[1].operand_ref_count == 1
+    assert slice_emits[1].structural_offset == 0
+
+    copy_emit = compiled.emits[
+        rules_by_source_op[scalar_conversion.scalar_bitcast].emit_start
+    ]
+    assert copy_emit.kind is LowerEmitKind.REGISTER_COPY
+    assert copy_emit.operand_ref_count == 1
+    assert copy_emit.result_ref_count == 1
 
 
 def test_compile_variadic_result_element_refs() -> None:
@@ -217,6 +234,117 @@ def test_compile_variadic_result_element_refs() -> None:
     )
     assert tuple(ref.index for ref in result_refs) == (0, 0)
     assert tuple(ref.element_index for ref in result_refs) == (0, 1)
+
+
+def test_compile_forward_related_source_node() -> None:
+    fragment = ContractFragment(
+        name="test.forward-related-source-node",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=(
+            DescriptorRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                source_nodes=(
+                    SourceNode.adjacent_unique_user(
+                        "consumer",
+                        source_op=scalar_arithmetic.scalar_muli,
+                        parent_result=ValueRef.result("result"),
+                        node_operand=ValueRef.operand("lhs"),
+                        guards=(Guard.value_type("result", Scalar("i32")),),
+                    ),
+                ),
+                guards=(Guard.value_type("lhs", Scalar("i32")),),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                        operands={
+                            "lhs": ValueRef.operand("lhs"),
+                            "rhs": ValueRef.operand("rhs", source_node="consumer"),
+                        },
+                        results={
+                            "dst": ValueRef.result("result", source_node="consumer")
+                        },
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    compiled = compile_lower_rule_set(fragment, dialect_ops={"scalar": ALL_SCALAR_OPS})
+
+    assert len(compiled.rules) == 1
+    assert compiled.rules[0].source_node_start == 0
+    assert compiled.rules[0].source_node_count == 1
+    assert len(compiled.source_nodes) == 1
+    source_node = compiled.source_nodes[0]
+    assert source_node.relation is SourceNodeRelation.ADJACENT_UNIQUE_USER
+    assert source_node.source_op is scalar_arithmetic.scalar_muli
+    assert source_node.parent_node_index == 0
+    assert source_node.guard_count == 1
+    parent_ref = compiled.value_refs[source_node.parent_value_ref_index]
+    node_ref = compiled.value_refs[source_node.node_value_ref_index]
+    assert parent_ref.kind is SourceValueKind.RESULT
+    assert parent_ref.source_node_index == 0
+    assert node_ref.kind is SourceValueKind.OPERAND
+    assert node_ref.source_node_index == 1
+    node_guard = compiled.guards[source_node.guard_start]
+    assert compiled.value_refs[node_guard.value_ref_index].source_node_index == 0
+    emit = compiled.emits[0]
+    emit_refs = compiled.value_refs[
+        emit.operand_ref_start : emit.operand_ref_start + emit.operand_ref_count
+    ]
+    assert tuple(ref.source_node_index for ref in emit_refs) == (0, 1)
+    result_ref_index = (
+        emit.result_bind_ref_start
+        if emit.flags & LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS
+        else emit.result_ref_start
+    )
+    result_ref = compiled.value_refs[result_ref_index]
+    assert result_ref.source_node_index == 1
+
+
+def test_compile_backward_related_source_node() -> None:
+    fragment = ContractFragment(
+        name="test.backward-related-source-node",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=(
+            DescriptorRule(
+                source_op=scalar_arithmetic.scalar_muli,
+                descriptor=TEST_LOW_MUL_I32_DESCRIPTOR,
+                source_nodes=(
+                    SourceNode.adjacent_definition(
+                        "producer",
+                        source_op=scalar_arithmetic.scalar_addi,
+                        parent_operand=ValueRef.operand("lhs"),
+                        node_result=ValueRef.result("result"),
+                    ),
+                ),
+                guards=(Guard.value_type("result", Scalar("i32")),),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_MUL_I32_DESCRIPTOR,
+                        operands={
+                            "lhs": ValueRef.operand("lhs", source_node="producer"),
+                            "rhs": ValueRef.operand("rhs"),
+                        },
+                        results={"dst": ValueRef.result("result")},
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    compiled = compile_lower_rule_set(fragment, dialect_ops={"scalar": ALL_SCALAR_OPS})
+
+    source_node = compiled.source_nodes[0]
+    assert source_node.relation is SourceNodeRelation.ADJACENT_DEFINITION
+    assert source_node.parent_node_index == 0
+    parent_ref = compiled.value_refs[source_node.parent_value_ref_index]
+    node_ref = compiled.value_refs[source_node.node_value_ref_index]
+    assert parent_ref.kind is SourceValueKind.OPERAND
+    assert parent_ref.source_node_index == 0
+    assert node_ref.kind is SourceValueKind.RESULT
+    assert node_ref.source_node_index == 1
 
 
 def _expect_value_error(callable_obj: Callable[[], object], message: str) -> None:
@@ -392,6 +520,54 @@ def test_compile_lower_rule_set_compiles_direct_scalar_rule() -> None:
     assert compiled.emits[0].descriptor is TEST_LOW_ADD_I32_DESCRIPTOR
     assert compiled.emits[0].operand_ref_count == 2
     assert compiled.emits[0].result_ref_count == 1
+
+
+def test_compile_lower_rule_set_groups_ops_and_orders_rules_by_priority() -> None:
+    table = ContractFragment(
+        name="test.priority",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=(
+            _binary_rule(
+                source_op=scalar_arithmetic.scalar_addi,
+                type_pattern=Scalar("i32"),
+            ),
+            replace(
+                _binary_rule(
+                    source_op=scalar_arithmetic.scalar_addi,
+                    type_pattern=Scalar("i32"),
+                ),
+                priority=2,
+            ),
+            _binary_rule(
+                source_op=scalar_arithmetic.scalar_muli,
+                type_pattern=Scalar("i32"),
+            ),
+            replace(
+                _binary_rule(
+                    source_op=scalar_arithmetic.scalar_addi,
+                    type_pattern=Scalar("i32"),
+                ),
+                priority=2,
+            ),
+        ),
+    )
+
+    compiled = compile_lower_rule_set(
+        table,
+        dialect_ops={"scalar": ALL_SCALAR_OPS},
+    )
+
+    addi_spans = [
+        span
+        for span in compiled.spans
+        if span.source_op is scalar_arithmetic.scalar_addi
+    ]
+    assert len(addi_spans) == 1
+    addi_span = addi_spans[0]
+    assert addi_span.rule_count == 3
+    assert compiled.authored_case_indices[
+        addi_span.rule_start : addi_span.rule_start + addi_span.rule_count
+    ] == (1, 3, 0)
 
 
 def test_compile_lower_rule_set_interns_exact_rule_programs() -> None:

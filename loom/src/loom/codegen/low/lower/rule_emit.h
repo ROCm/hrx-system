@@ -36,12 +36,15 @@ iree_status_t loom_low_lower_rule_set_resolve_emit_program(
     const loom_low_lower_resolved_emit_t** out_resolved_emits);
 
 // Emits target-Low packets for |source_op| using a previously selected rule.
+// Multi-node rules provide the retained source graph with the root at index
+// zero; root-only rules may provide NULL with a count of one.
 iree_status_t loom_low_lower_rule_set_emit_rule(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_rule_t* rule,
     const loom_low_lower_resolved_emit_t* resolved_emits,
-    const loom_low_source_memory_access_plan_t* source_memory_access);
+    const loom_low_source_memory_access_plan_t* source_memory_access,
+    const loom_op_t* const* source_nodes, uint8_t source_node_count);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -1,0 +1,116 @@
+// RUN: pass source-to-low,low-dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @fuses_forward_producer_consumer(%lhs: i32, %rhs: i32, %factor: i32) -> (i32) {
+  %sum = scalar.addi %lhs, %rhs : i32
+  %product = scalar.muli %sum, %factor : i32
+  func.return %product : i32
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @fuses_forward_producer_consumer(%lhs: reg<test.i32>, %rhs: reg<test.i32>, %factor: reg<test.i32>) -> (reg<test.i32>) {
+  %product = low.op<test.add_mul.i32>(%lhs, %rhs, %factor) : (reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %product : reg<test.i32>
+}
+
+// ====
+
+// RUN: pass source-to-low,low-dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @fuses_preceding_definition(%lhs: i32, %rhs: i32, %addend: i32) -> (i32) {
+  %product = scalar.muli %lhs, %rhs : i32
+  %result = scalar.addi %product, %addend : i32
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @fuses_preceding_definition(%lhs: reg<test.i32>, %rhs: reg<test.i32>, %addend: reg<test.i32>) -> (reg<test.i32>) {
+  %result = low.op<test.mul_add.i32>(%lhs, %rhs, %addend) : (reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+// RUN: pass source-to-low,low-dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_nonadjacent_consumer(%lhs: i32, %rhs: i32, %factor: i32) -> (i32) {
+  %sum = scalar.addi %lhs, %rhs : i32
+  %gap = scalar.subi %lhs, %rhs : i32
+  %product = scalar.muli %sum, %factor : i32
+  func.return %product : i32
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @rejects_nonadjacent_consumer(%lhs: reg<test.i32>, %rhs: reg<test.i32>, %factor: reg<test.i32>) -> (reg<test.i32>) {
+  %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %product = low.op<test.mul.i32>(%sum, %factor) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %product : reg<test.i32>
+}
+
+// ====
+
+// RUN: pass source-to-low,low-dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_shared_producer_result(%lhs: i32, %rhs: i32, %factor0: i32, %factor1: i32) -> (i32, i32) {
+  %sum = scalar.addi %lhs, %rhs : i32
+  %product0 = scalar.muli %sum, %factor0 : i32
+  %product1 = scalar.muli %sum, %factor1 : i32
+  func.return %product0, %product1 : i32, i32
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @rejects_shared_producer_result(%lhs: reg<test.i32>, %rhs: reg<test.i32>, %factor0: reg<test.i32>, %factor1: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+  %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %product0 = low.op<test.mul.i32>(%sum, %factor0) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %product1 = low.op<test.mul.i32>(%sum, %factor1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %product0, %product1 : reg<test.i32>, reg<test.i32>
+}
+
+// ====
+
+// RUN: compile-report source-to-low,low-dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @reports_fused_source_graph_once(%lhs: i32, %rhs: i32, %factor: i32) -> (i32) {
+  %sum = scalar.addi %lhs, %rhs : i32
+  %product = scalar.muli %sum, %factor : i32
+  func.return %product : i32
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=1 rows=1
+COMPILE-REPORT: source_low[0] function=reports_fused_source_graph_once source_op=scalar.addi selection=rule plan_key=test.fused.add_mul.i32 descriptor_key=test.add_mul.i32 descriptor_semantic_tag=test.fused.add_mul.i32 emitted_ops=1
+
+// ====
+
+// RUN: compile-report source-to-low,low-dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @reports_claimed_definition_once(%lhs: i32, %rhs: i32, %addend: i32) -> (i32) {
+  %product = scalar.muli %lhs, %rhs : i32
+  %result = scalar.addi %product, %addend : i32
+  func.return %result : i32
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=1 rows=1
+COMPILE-REPORT: source_low[0] function=reports_claimed_definition_once source_op=scalar.addi selection=rule plan_key=test.fused.mul_add.i32 descriptor_key=test.mul_add.i32 descriptor_semantic_tag=test.fused.mul_add.i32 emitted_ops=1

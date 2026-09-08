@@ -67,7 +67,7 @@ from loom.target.contracts.immediates import (
     ValueProjectKind,
 )
 from loom.target.contracts.kinds import ContractSystem, SourceValueKind
-from loom.target.contracts.lower_rules import (
+from loom.target.contracts.lower_rule_tables import (
     LOWER_EMIT_FLAG_ACCUMULATE_SEED_FIRST_LANE,
     LOWER_EMIT_FLAG_ACCUMULATE_SKIP_FIRST_LANE,
     LOWER_EMIT_FLAG_ACCUMULATE_TREE_BALANCED,
@@ -89,19 +89,26 @@ from loom.target.contracts.lower_rules import (
     LowerRule,
     LowerRuleSpan,
     LowerSourceMemory,
+    LowerSourceNode,
     LowerTiedResult,
     LowerTypePattern,
     LowerValueRef,
+)
+from loom.target.contracts.lower_rules import (
     compile_lower_rule_set,
 )
 from loom.target.contracts.materializers import ValueMaterializer
 from loom.target.contracts.patterns import Scalar, TypePattern, Vector, View
 from loom.target.contracts.rules import (
+    MAX_SOURCE_NODES,
+    SOURCE_NODE_COUNT_BITS,
     ContractCase,
     DescriptorMatrixRule,
     DescriptorRule,
     OrdinalValueAliasRule,
     RecipeRule,
+    SourceNode,
+    SourceNodeRelation,
     ValueAliasRule,
     ValueElideRule,
 )
@@ -178,6 +185,8 @@ __all__ = [
     "LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS",
     "LOWER_SOURCE_MEMORY_NONE",
     "MAX_TARGET_DIAGNOSTIC_PARAMS",
+    "MAX_SOURCE_NODES",
+    "SOURCE_NODE_COUNT_BITS",
     "LowerAttrCopy",
     "LowerAttrCopyKind",
     "LowerDiagnostic",
@@ -187,6 +196,7 @@ __all__ = [
     "LowerGuard",
     "LowerRule",
     "LowerRuleSpan",
+    "LowerSourceNode",
     "LowerSourceMemory",
     "LowerTiedResult",
     "LowerTypePattern",
@@ -211,6 +221,8 @@ __all__ = [
     "SourceMemoryRootKind",
     "SourceOpProject",
     "SourceOpProjectKind",
+    "SourceNode",
+    "SourceNodeRelation",
     "TypePattern",
     "ValueAliasRule",
     "ValueElideRule",

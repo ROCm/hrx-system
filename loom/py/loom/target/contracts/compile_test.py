@@ -131,6 +131,44 @@ def test_compile_contract_fragment_uses_supplied_descriptor_rule_rows() -> None:
     assert compiled.descriptor_rules[0].rule_index == 9
 
 
+def test_compile_contract_fragment_orders_cases_by_priority() -> None:
+    table = ContractFragment(
+        name="test-low.priority",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            DescriptorRule(
+                source_op=vector.vector_addi,
+                descriptor=TEST_LOW_ADD_V4I32_DESCRIPTOR,
+            ),
+            DescriptorRule(
+                source_op=vector.vector_addi,
+                descriptor=TEST_LOW_ADD_V4I32_DESCRIPTOR,
+                priority=2,
+            ),
+            DescriptorRule(
+                source_op=vector.vector_addi,
+                descriptor=TEST_LOW_ADD_V4I32_DESCRIPTOR,
+                priority=2,
+            ),
+        ],
+    )
+
+    compiled = compile_contract_fragment(
+        table,
+        dialect_ops={"vector": ALL_VECTOR_OPS},
+        descriptor_rule_rows={
+            0: CompiledDescriptorRule(rule_index=10),
+            1: CompiledDescriptorRule(rule_index=11),
+            2: CompiledDescriptorRule(rule_index=12),
+        },
+        lower_rule_indices={0: 10, 1: 11, 2: 12},
+    )
+
+    assert compiled.op_spans[0].case_count == 3
+    assert [row.row_index for row in compiled.cases] == [1, 2, 0]
+    assert [row.rule_index for row in compiled.descriptor_rules] == [10, 11, 12]
+
+
 def test_compile_contract_fragment_records_value_elide_cases() -> None:
     table = ContractFragment(
         name="test-low.elide",

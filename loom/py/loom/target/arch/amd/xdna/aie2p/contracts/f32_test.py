@@ -418,9 +418,18 @@ def test_f32_programs_are_compact_descriptor_data() -> None:
         ),
         dialect_ops={"scalar": ALL_SCALAR_OPS, "vector": ALL_VECTOR_OPS},
     )
-    assert [rule.emit_count for rule in compiled.rules] == [
-        len(rule.emit) for rule in AIE2P_F32_RULES
-    ]
+    for compiled_rule, authored_index in zip(
+        compiled.rules, compiled.authored_case_indices, strict=True
+    ):
+        authored_rule = AIE2P_F32_RULES[authored_index]
+        emitted_steps = compiled.emits[
+            compiled_rule.emit_start : compiled_rule.emit_start
+            + compiled_rule.emit_count
+        ]
+        assert compiled_rule.report_key == authored_rule.report_key
+        assert [step.descriptor for step in emitted_steps] == [
+            step.descriptor for step in authored_rule.emit
+        ]
     integer_multiply_counts = {
         rule.report_key: sum(
             emit.descriptor.key == "amd.xdna.aie2p.mul.i32" for emit in rule.emit

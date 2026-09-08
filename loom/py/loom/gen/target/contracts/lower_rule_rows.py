@@ -32,10 +32,12 @@ from loom.target.contracts import (
     LowerRule,
     LowerRuleSpan,
     LowerSourceMemory,
+    LowerSourceNode,
     LowerTiedResult,
     LowerValueRef,
     SourceMemoryAddressMaterializer,
     SourceMemoryByteOffsetMaterializer,
+    SourceNodeRelation,
     TypePattern,
 )
 from loom.target.contracts.diagnostics import DiagnosticParamKind
@@ -179,9 +181,47 @@ def value_ref_row(row: LowerValueRef) -> list[str]:
         lower_rule_spelling.VALUE_REF_KIND_C_NAMES[row.kind],
         always=True,
     )
+    _append_field(fields, "source_node_index", row.source_node_index)
     _append_field(fields, "index", row.index, always=True)
     _append_field(fields, "element_index", row.element_index)
     _append_field(fields, "materializer_index", row.materializer_index)
+    return fields
+
+
+def source_node_row(row: LowerSourceNode) -> list[str]:
+    fields: list[str] = []
+    relation_names = {
+        SourceNodeRelation.ADJACENT_UNIQUE_USER: ("LOOM_LOW_LOWER_SOURCE_NODE_ADJACENT_UNIQUE_USER"),
+        SourceNodeRelation.ADJACENT_DEFINITION: ("LOOM_LOW_LOWER_SOURCE_NODE_ADJACENT_DEFINITION"),
+    }
+    _append_field(fields, "relation", relation_names[row.relation], always=True)
+    _append_field(
+        fields,
+        "source_op_kind",
+        lower_rule_spelling.op_c_name(row.source_op),
+        always=True,
+    )
+    _append_field(
+        fields,
+        "parent_node_index",
+        row.parent_node_index,
+        always=True,
+    )
+    _append_field(
+        fields,
+        "parent_value_ref_index",
+        row.parent_value_ref_index,
+        always=True,
+    )
+    _append_field(
+        fields,
+        "node_value_ref_index",
+        row.node_value_ref_index,
+        always=True,
+    )
+    if row.guard_count:
+        _append_field(fields, "guard_start", row.guard_start, always=True)
+        _append_field(fields, "guard_count", row.guard_count, always=True)
     return fields
 
 
@@ -766,6 +806,13 @@ def rule_row(
             always=True,
         )
     _append_field(fields, "temporary_count", row.temporary_count)
+    if row.source_node_count:
+        _append_field(
+            fields,
+            "source_node_span",
+            (f"LOOM_LOW_LOWER_SOURCE_NODE_SPAN({row.source_node_start}, {row.source_node_count})"),
+            always=True,
+        )
     if row.guard_count:
         _append_field(fields, "guard_start", row.guard_start, always=True)
         _append_field(fields, "guard_count", row.guard_count, always=True)
@@ -811,6 +858,7 @@ def rule_set_row(
     report_keys_name: str,
     type_patterns_name: str,
     value_refs_name: str,
+    source_nodes_name: str,
     materializers_name: str,
     source_memories_name: str,
     source_memory_diagnostics: tuple[object, ...],
@@ -857,6 +905,12 @@ def rule_set_row(
         type_patterns_name,
     )
     _append_table_fields(fields, "value_refs", table.value_refs, value_refs_name)
+    _append_table_fields(
+        fields,
+        "source_nodes",
+        table.source_nodes,
+        source_nodes_name,
+    )
     _append_table_fields(
         fields,
         "materializers",

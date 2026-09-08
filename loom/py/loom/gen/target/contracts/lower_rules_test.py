@@ -28,6 +28,7 @@ from loom.gen.target.contracts.lower_rule_rows import (
     source_memory_diagnostic_indices,
     source_memory_diagnostics_row,
     source_memory_row,
+    source_node_row,
     value_ref_row,
 )
 from loom.gen.target.contracts.lower_rules import (
@@ -59,6 +60,7 @@ from loom.target.contracts import (
     LowerRule,
     LowerRuleSpan,
     LowerSourceMemory,
+    LowerSourceNode,
     LowerTypePattern,
     LowerValueRef,
     RecipeRule,
@@ -72,6 +74,7 @@ from loom.target.contracts import (
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
     SourceMemoryRootKind,
+    SourceNodeRelation,
     SourceOpProject,
     SourceValueKind,
     ValueProject,
@@ -115,6 +118,7 @@ def _compiled_lower_rule_set(
     spans: tuple[LowerRuleSpan, ...] = (),
     type_patterns: tuple[LowerTypePattern, ...] = (),
     value_refs: tuple[LowerValueRef, ...] = (),
+    source_nodes: tuple[LowerSourceNode, ...] = (),
     source_memories: tuple[LowerSourceMemory, ...] = (),
     guards: tuple[LowerGuard, ...] = (),
     attr_copies: tuple[LowerAttrCopy, ...] = (),
@@ -127,6 +131,7 @@ def _compiled_lower_rule_set(
         spans=spans,
         type_patterns=type_patterns,
         value_refs=value_refs,
+        source_nodes=source_nodes,
         source_memories=source_memories,
         guards=guards,
         attr_copies=attr_copies,
@@ -662,6 +667,184 @@ def test_value_ref_row_emits_element_indices() -> None:
         ".index = 1",
         ".element_index = 2",
     ]
+
+
+def test_source_node_row_emits_compact_relation() -> None:
+    row = source_node_row(
+        LowerSourceNode(
+            relation=SourceNodeRelation.ADJACENT_UNIQUE_USER,
+            source_op=scalar_arithmetic.scalar_muli,
+            parent_node_index=0,
+            parent_value_ref_index=3,
+            node_value_ref_index=4,
+            guard_start=5,
+            guard_count=2,
+        )
+    )
+
+    assert row == [
+        ".relation = LOOM_LOW_LOWER_SOURCE_NODE_ADJACENT_UNIQUE_USER",
+        ".source_op_kind = LOOM_OP_SCALAR_MULI",
+        ".parent_node_index = 0",
+        ".parent_value_ref_index = 3",
+        ".node_value_ref_index = 4",
+        ".guard_start = 5",
+        ".guard_count = 2",
+    ]
+
+
+def test_rule_row_packs_source_node_span() -> None:
+    row = rule_row(
+        LowerRule(
+            source_op=scalar_arithmetic.scalar_addi,
+            temporary_count=0,
+            guard_start=0,
+            guard_count=0,
+            emit_start=0,
+            emit_count=0,
+            source_node_start=12,
+            source_node_count=3,
+        ),
+        {},
+    )
+
+    assert ".source_node_span = LOOM_LOW_LOWER_SOURCE_NODE_SPAN(12, 3)" in row
+
+
+def _compiled_source_graph_table() -> CompiledLowerRuleSet:
+    return _compiled_lower_rule_set(
+        rules=(
+            LowerRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                temporary_count=0,
+                guard_start=0,
+                guard_count=0,
+                emit_start=0,
+                emit_count=0,
+                source_node_start=0,
+                source_node_count=1,
+            ),
+        ),
+        value_refs=(
+            LowerValueRef(
+                kind=SourceValueKind.RESULT,
+                index=0,
+                source_node_index=0,
+            ),
+            LowerValueRef(
+                kind=SourceValueKind.OPERAND,
+                index=0,
+                source_node_index=1,
+            ),
+        ),
+        source_nodes=(
+            LowerSourceNode(
+                relation=SourceNodeRelation.ADJACENT_UNIQUE_USER,
+                source_op=scalar_arithmetic.scalar_muli,
+                parent_node_index=0,
+                parent_value_ref_index=0,
+                node_value_ref_index=1,
+                guard_start=0,
+                guard_count=0,
+            ),
+        ),
+    )
+
+
+def test_validate_c_table_shape_rejects_nonpreceding_source_node_parent() -> None:
+    table = _compiled_source_graph_table()
+    table = replace(
+        table,
+        source_nodes=(replace(table.source_nodes[0], parent_node_index=1),),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "rule 0 source-node 1 parent must precede the related node",
+    )
+
+
+def test_validate_c_table_shape_rejects_mismatched_source_node_ref() -> None:
+    table = _compiled_source_graph_table()
+    table = replace(
+        table,
+        value_refs=(table.value_refs[0], replace(table.value_refs[1], source_node_index=0)),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "rule 0 source-node 1 local value-ref selects source node 0, expected 1",
+    )
+
+
+def test_validate_c_table_shape_rejects_source_node_connection_kind() -> None:
+    table = _compiled_source_graph_table()
+    table = replace(
+        table,
+        value_refs=(
+            replace(table.value_refs[0], kind=SourceValueKind.OPERAND),
+            table.value_refs[1],
+        ),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "rule 0 source-node 1 connection value-ref kinds do not match relation",
+    )
+
+
+def test_validate_c_table_shape_rejects_nonlocal_guard_ref() -> None:
+    table = _compiled_lower_rule_set(
+        type_patterns=(LowerTypePattern(Scalar("i32")),),
+        value_refs=(
+            LowerValueRef(
+                kind=SourceValueKind.OPERAND,
+                index=0,
+                source_node_index=1,
+            ),
+        ),
+        guards=(
+            LowerGuard(
+                kind=GuardKind.VALUE_TYPE,
+                value_ref_index=0,
+                type_pattern_index=0,
+            ),
+        ),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "guard 0 must reference its local guarded source op",
+    )
+
+
+def test_validate_c_table_shape_rejects_emit_ref_outside_source_graph() -> None:
+    table = _compiled_source_graph_table()
+    table = replace(
+        table,
+        rules=(replace(table.rules[0], emit_count=1),),
+        value_refs=(
+            *table.value_refs,
+            LowerValueRef(
+                kind=SourceValueKind.OPERAND,
+                index=0,
+                source_node_index=2,
+            ),
+        ),
+        emits=(
+            LowerEmit(
+                kind=LowerEmitKind.DESCRIPTOR_OP,
+                descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                operand_ref_start=2,
+                operand_ref_count=1,
+            ),
+        ),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "rule 0 value-ref 2 selects source node 2 outside its source graph",
+    )
 
 
 def test_generate_lower_rule_set_emits_report_key_ordinals() -> None:
