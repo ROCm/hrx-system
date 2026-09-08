@@ -220,6 +220,8 @@ typedef struct loom_callable_cfg_body_t {
   loom_op_kind_t return_op_kind;
   // Number of return exits across all body blocks.
   uint16_t return_count;
+  // Whether an internal edge carries arguments back to the entry block.
+  bool entry_has_predecessor;
 } loom_callable_cfg_body_t;
 
 static bool loom_callable_value_is_valid(const loom_module_t* module,
@@ -311,6 +313,7 @@ static iree_status_t loom_callable_validate_cfg_body(
   }
 
   uint16_t return_count = 0;
+  bool entry_has_predecessor = false;
   for (uint16_t block_index = 0; block_index < body->block_count;
        ++block_index) {
     loom_block_t* block = loom_region_block(body, block_index);
@@ -326,14 +329,14 @@ static iree_status_t loom_callable_validate_cfg_body(
     }
     for (uint8_t successor_index = 0;
          successor_index < terminator->successor_count; ++successor_index) {
+      loom_block_t* successor = loom_op_successors(terminator)[successor_index];
       uint16_t ignored_block_index = 0;
-      if (!loom_region_try_block_index(
-              body, loom_op_successors(terminator)[successor_index],
-              &ignored_block_index)) {
+      if (!loom_region_try_block_index(body, successor, &ignored_block_index)) {
         return iree_make_status(
             IREE_STATUS_FAILED_PRECONDITION,
             "callee terminator successor leaves the callable body");
       }
+      entry_has_predecessor |= successor == entry_block;
     }
     if (terminator->kind != body_descriptor->terminator) {
       continue;
@@ -370,6 +373,7 @@ static iree_status_t loom_callable_validate_cfg_body(
       .entry_block = entry_block,
       .return_op_kind = body_descriptor->terminator,
       .return_count = return_count,
+      .entry_has_predecessor = entry_has_predecessor,
   };
   return iree_ok_status();
 }
@@ -573,6 +577,20 @@ static iree_status_t loom_callable_collect_return_projections(
   return iree_ok_status();
 }
 
+static iree_status_t loom_callable_capture_cfg_entry_arguments(
+    loom_rewriter_t* rewriter, loom_block_t* entry_block,
+    loom_value_slice_t call_operands) {
+  for (uint16_t i = 0; i < call_operands.count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_with(
+        rewriter, loom_block_arg_id(entry_block, i), call_operands.values[i]));
+  }
+  for (uint16_t i = entry_block->arg_count; i > 0; --i) {
+    IREE_RETURN_IF_ERROR(
+        loom_block_remove_arg(rewriter->module, entry_block, i - 1));
+  }
+  return iree_ok_status();
+}
+
 static bool loom_callable_user_moves_to_continuation(const loom_op_t* call_op,
                                                      const loom_op_t* user_op) {
   const loom_block_t* caller_block = call_op->parent_block;
@@ -681,8 +699,9 @@ static iree_status_t loom_callable_inline_cfg_call(
                                rewriter->arena, &remap_options, &remap));
 
   const loom_value_slice_t call_operands = loom_call_like_operands(call);
+  const bool capture_entry_arguments = !body->entry_has_predecessor;
   loom_value_id_t* entry_arguments = NULL;
-  if (call_operands.count > 0) {
+  if (!capture_entry_arguments && call_operands.count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         rewriter->arena, call_operands.count, sizeof(*entry_arguments),
         (void**)&entry_arguments));
@@ -704,6 +723,14 @@ static iree_status_t loom_callable_inline_cfg_call(
   iree_status_t status =
       loom_ir_clone_region_blocks(&rewriter->builder, body->region,
                                   caller_region, cloned_block_index, &remap);
+  loom_block_t* cloned_entry_block = NULL;
+  if (iree_status_is_ok(status)) {
+    cloned_entry_block = loom_region_block(caller_region, cloned_block_index);
+    if (capture_entry_arguments) {
+      status = loom_callable_capture_cfg_entry_arguments(
+          rewriter, cloned_entry_block, call_operands);
+    }
+  }
   loom_block_t* continuation_block = NULL;
   if (iree_status_is_ok(status)) {
     status = loom_region_insert_block(
@@ -770,12 +797,11 @@ static iree_status_t loom_callable_inline_cfg_call(
   if (iree_status_is_ok(status)) {
     loom_builder_set_block(&rewriter->builder, caller_block);
     rewriter->builder.ip.parent_op = caller_parent_op;
-    loom_block_t* cloned_entry_block =
-        loom_region_block(caller_region, cloned_block_index);
     loom_op_t* entry_branch = NULL;
-    status =
-        build_branch(&rewriter->builder, cloned_entry_block, entry_arguments,
-                     call_operands.count, call_location, &entry_branch);
+    status = build_branch(&rewriter->builder, cloned_entry_block,
+                          capture_entry_arguments ? NULL : entry_arguments,
+                          capture_entry_arguments ? 0 : call_operands.count,
+                          call_location, &entry_branch);
   }
   loom_builder_restore(&rewriter->builder, saved_ip);
   return status;

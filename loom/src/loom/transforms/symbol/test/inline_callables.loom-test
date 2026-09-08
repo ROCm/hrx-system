@@ -738,6 +738,8 @@ func.def public @tail_scope_entry(%entry_value: i32) -> (i32) {
 // A shared CFG wrapper exercises both execution dependencies. Its nested leaf
 // must be flattened before the wrapper is cloned, and the clone must complete
 // before the final use consumes and erases the wrapper definition.
+// The cloned entry has no predecessor inside its callee and captures the call
+// operand directly; the transferred body retains its original entry argument.
 func.def inline @shared_cfg_leaf(%leaf_value: i32) -> (i32) {
   cfg.br ^exit(%leaf_value: i32)
 ^exit(%leaf_forwarded: i32):
@@ -761,9 +763,9 @@ func.def public @consume_cfg_wrapper(%consume_value: i32) -> (i32) {
 
 // ----
 func.def public @clone_cfg_wrapper(%clone_value: i32) -> (i32) {
-  cfg.br ^_bb1(%clone_value: i32)
-^_bb1(%wrapper_value: i32):
-  cfg.br ^_bb2(%wrapper_value: i32)
+  cfg.br ^_bb1
+^_bb1:
+  cfg.br ^_bb2(%clone_value: i32)
 ^_bb2(%leaf_value: i32):
   cfg.br ^_bb3(%leaf_value: i32)
 ^_bb3(%leaf_forwarded: i32):
@@ -874,5 +876,71 @@ func.def public @consume_loop_wrapper(%value: i32) -> (i32) {
     %doubled = test.addi %accumulator, %accumulator : i32
     scf.yield %doubled : i32
   }
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+// An entry backedge carries both the updated value and the remaining count.
+// Cloning the first call must retain those block arguments; consuming the last
+// call preserves the same loop and returns its final value through the join.
+func.def inline @countdown(%value: i32, %remaining: i32) -> (i32) {
+^repeat:
+  %c0 = scalar.constant 0 : i32
+  %has_more = scalar.cmpi sgt, %remaining, %c0 : i32
+  cfg.cond_br %has_more, ^step, ^exit
+^step:
+  %c1 = scalar.constant 1 : i32
+  %updated = test.addi %value, %remaining : i32
+  %next = scalar.subi %remaining, %c1 : i32
+  cfg.br ^repeat(%updated: i32, %next: i32)
+^exit:
+  func.return %value : i32
+}
+
+func.def public @clone_countdown(%input: i32, %count: i32) -> (i32) {
+  %result = func.call @countdown(%input, %count) : (i32, i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public @consume_countdown(%input: i32, %count: i32) -> (i32) {
+  %result = func.call @countdown(%input, %count) : (i32, i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public @clone_countdown(%input: i32, %count: i32) -> (i32) {
+  cfg.br ^_bb1(%input: i32, %count: i32)
+^_bb1(%value: i32, %remaining: i32):
+  %c0 = scalar.constant 0 : i32
+  %has_more = scalar.cmpi sgt, %remaining, %c0 : i32
+  cfg.cond_br %has_more, ^_bb2, ^_bb3
+^_bb2:
+  %c1 = scalar.constant 1 : i32
+  %updated = test.addi %value, %remaining : i32
+  %next = scalar.subi %remaining, %c1 : i32
+  cfg.br ^_bb1(%updated: i32, %next: i32)
+^_bb3:
+  cfg.br ^_bb4(%value: i32)
+^_bb4(%result: i32):
+  func.return %result : i32
+}
+
+func.def public @consume_countdown(%input: i32, %count: i32) -> (i32) {
+  cfg.br ^_bb1(%input: i32, %count: i32)
+^_bb1(%value: i32, %remaining: i32):
+  %c0 = scalar.constant 0 : i32
+  %has_more = scalar.cmpi sgt, %remaining, %c0 : i32
+  cfg.cond_br %has_more, ^_bb2, ^_bb3
+^_bb2:
+  %c1 = scalar.constant 1 : i32
+  %updated = test.addi %value, %remaining : i32
+  %next = scalar.subi %remaining, %c1 : i32
+  cfg.br ^_bb1(%updated: i32, %next: i32)
+^_bb3:
+  cfg.br ^_bb4(%value: i32)
+^_bb4(%result: i32):
   func.return %result : i32
 }
