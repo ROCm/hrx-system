@@ -547,6 +547,9 @@ TEST(LowDescriptorsTest, EnumNamesAreStableDiagnosticSpellings) {
   EXPECT_EQ(StringViewToString(loom_low_constraint_kind_name(
                 LOOM_LOW_CONSTRAINT_KIND_FOLDABLE)),
             "foldable");
+  EXPECT_EQ(StringViewToString(loom_low_constraint_kind_name(
+                LOOM_LOW_CONSTRAINT_KIND_SAME_REGISTER_ORDINAL)),
+            "same_register_ordinal");
 
   EXPECT_EQ(StringViewToString(
                 loom_low_latency_kind_name(LOOM_LOW_LATENCY_KIND_UNKNOWN)),

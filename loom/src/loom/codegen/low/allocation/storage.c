@@ -721,6 +721,27 @@ bool loom_low_allocation_storage_placement_relation_satisfied(
           descriptor_set, result_assignment, relation->result_unit_offset,
           source_assignment, relation->source_unit_offset,
           relation->unit_count);
+    case LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL: {
+      if (relation->result_unit_offset != 0 ||
+          relation->source_unit_offset != 0 || relation->unit_count != 1 ||
+          result_assignment->location_kind !=
+              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER ||
+          source_assignment->location_kind !=
+              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER ||
+          result_assignment->location_count != 1 ||
+          source_assignment->location_count != 1) {
+        return false;
+      }
+      uint16_t result_candidate_ordinal = 0;
+      uint16_t source_candidate_ordinal = 0;
+      return loom_low_descriptor_set_find_physical_register_candidate(
+                 descriptor_set, result_assignment->descriptor_reg_class_id,
+                 result_assignment->location_base, &result_candidate_ordinal) &&
+             loom_low_descriptor_set_find_physical_register_candidate(
+                 descriptor_set, source_assignment->descriptor_reg_class_id,
+                 source_assignment->location_base, &source_candidate_ordinal) &&
+             result_candidate_ordinal == source_candidate_ordinal;
+    }
     default:
       return false;
   }

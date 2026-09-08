@@ -28,6 +28,9 @@ typedef enum loom_low_placement_relation_kind_bits_e {
   LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION = 4,
   // Result and source unit ranges should occupy disjoint storage.
   LOOM_LOW_PLACEMENT_RELATION_DISJOINT_STORAGE = 5,
+  // Values select the same candidate ordinal from distinct explicit
+  // physical-register classes.
+  LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL = 6,
 } loom_low_placement_relation_kind_bits_t;
 typedef uint8_t loom_low_placement_relation_kind_t;
 

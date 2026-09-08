@@ -365,6 +365,50 @@ TEST(LowAllocationStorageTest, ResolvesExplicitAggregateRegisterViews) {
   EXPECT_EQ(pressure_extent, 4u);
 }
 
+TEST(LowAllocationStorageTest, MatchesExplicitRegisterCandidateOrdinals) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_test_low_core_descriptor_set();
+  uint16_t primary_reg_class_id = LOOM_LOW_REG_CLASS_NONE;
+  ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
+      descriptor_set, IREE_SV("test.packed.narrow"), &primary_reg_class_id,
+      nullptr));
+  uint16_t partner_reg_class_id = LOOM_LOW_REG_CLASS_NONE;
+  ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
+      descriptor_set, IREE_SV("test.coindexed.partner"), &partner_reg_class_id,
+      nullptr));
+
+  const loom_low_allocation_assignment_t primary = Assignment(
+      primary_reg_class_id, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      loom_low_descriptor_set_physical_register_candidate(
+          descriptor_set, primary_reg_class_id, 1),
+      /*location_count=*/1);
+  const loom_low_allocation_assignment_t matching_partner = Assignment(
+      partner_reg_class_id, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      loom_low_descriptor_set_physical_register_candidate(
+          descriptor_set, partner_reg_class_id, 1),
+      /*location_count=*/1);
+  const loom_low_allocation_assignment_t mismatched_partner = Assignment(
+      partner_reg_class_id, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      loom_low_descriptor_set_physical_register_candidate(
+          descriptor_set, partner_reg_class_id, 0),
+      /*location_count=*/1);
+  const loom_low_placement_relation_t relation = {
+      /*.op=*/nullptr,
+      /*.result_ordinal=*/0,
+      /*.source_ordinal=*/1,
+      /*.result_unit_offset=*/0,
+      /*.source_unit_offset=*/0,
+      /*.unit_count=*/1,
+      /*.location_mask=*/0,
+      /*.kind=*/LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL,
+  };
+
+  EXPECT_TRUE(loom_low_allocation_storage_placement_relation_satisfied(
+      descriptor_set, &relation, &primary, &matching_partner));
+  EXPECT_FALSE(loom_low_allocation_storage_placement_relation_satisfied(
+      descriptor_set, &relation, &primary, &mismatched_partner));
+}
+
 TEST(LowAllocationStorageTest, MapsRegisterClassToLocationKind) {
   const loom_low_reg_class_t allocatable_reg_class =
       RegClass(/*alias_set_id=*/0, /*allocatable_count=*/16);

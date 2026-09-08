@@ -354,6 +354,97 @@ def _validate_physical_metric(
     raise ValueError(f"{description} physical {metric_name} {value} exceeds generation bound {limit}")
 
 
+def _validate_same_register_ordinal_components(
+    descriptor: Descriptor,
+    register_classes: Mapping[str, RegClass],
+    physical_registers: Mapping[str, PhysicalRegister],
+) -> None:
+    """Proves descriptor-local co-indexed physical-register tuples."""
+
+    adjacency: dict[int, set[int]] = {}
+    edges: set[tuple[int, int]] = set()
+    for constraint in descriptor.constraints:
+        if constraint.kind is not ConstraintKind.SAME_REGISTER_ORDINAL:
+            continue
+        assert constraint.rhs_operand_index is not None
+        edge = tuple(sorted((constraint.lhs_operand_index, constraint.rhs_operand_index)))
+        if edge in edges:
+            raise ValueError(f"descriptor '{descriptor.key}' repeats same-register-ordinal constraint for operand rows {edge[0]} and {edge[1]}")
+        edges.add(edge)
+        adjacency.setdefault(edge[0], set()).add(edge[1])
+        adjacency.setdefault(edge[1], set()).add(edge[0])
+
+    remaining = set(adjacency)
+    while remaining:
+        root = min(remaining)
+        stack = [root]
+        component: set[int] = set()
+        while stack:
+            operand_index = stack.pop()
+            if operand_index in component:
+                continue
+            component.add(operand_index)
+            stack.extend(adjacency[operand_index] - component)
+        remaining.difference_update(component)
+
+        ordered_component = tuple(sorted(component))
+        expected_edge_count = len(ordered_component) * (len(ordered_component) - 1) // 2
+        component_edge_count = sum(1 for lhs_index, rhs_index in edges if lhs_index in component and rhs_index in component)
+        if component_edge_count != expected_edge_count:
+            operand_names = ", ".join(descriptor.operands[index].field_name for index in ordered_component)
+            raise ValueError(f"descriptor '{descriptor.key}' same-register-ordinal component [{operand_names}] must constrain every operand pair")
+
+        component_classes: list[RegClass] = []
+        for operand_index in ordered_component:
+            operand = descriptor.operands[operand_index]
+            description = f"descriptor '{descriptor.key}' same-register-ordinal operand '{operand.field_name}'"
+            if operand.unit_count != 1:
+                raise ValueError(f"{description} must occupy exactly one allocation unit")
+            if len(operand.reg_alts) != 1 or operand.reg_alts[0].reg_class is None:
+                raise ValueError(f"{description} must name exactly one register class")
+            register_class = register_classes[operand.reg_alts[0].reg_class]
+            required_flags = {
+                RegClassFlag.PHYSICAL,
+                RegClassFlag.UNSPILLABLE,
+                RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
+            }
+            missing_flags = required_flags.difference(register_class.flags)
+            if missing_flags:
+                names = ", ".join(sorted(flag.name.lower() for flag in missing_flags))
+                raise ValueError(f"{description} register class '{register_class.name}' is missing required flag(s): {names}")
+            component_classes.append(register_class)
+
+        candidate_counts = {len(register_class.physical_registers) for register_class in component_classes}
+        if len(candidate_counts) != 1:
+            operand_names = ", ".join(descriptor.operands[index].field_name for index in ordered_component)
+            raise ValueError(f"descriptor '{descriptor.key}' same-register-ordinal component [{operand_names}] register classes have different candidate counts")
+
+        candidate_count = next(iter(candidate_counts))
+        seen_tuple_storage: set[tuple[int, ...]] = set()
+        aggregate_storage = {physical_register.atomic_units for physical_register in physical_registers.values()}
+        for candidate_ordinal in range(candidate_count):
+            tuple_atomic_units: list[int] = []
+            occupied_atomic_units: set[int] = set()
+            tuple_names: list[str] = []
+            for register_class in component_classes:
+                physical_register_name = register_class.physical_registers[candidate_ordinal]
+                tuple_names.append(physical_register_name)
+                physical_register = physical_registers[physical_register_name]
+                overlap = occupied_atomic_units.intersection(physical_register.atomic_units)
+                if overlap:
+                    raise ValueError(f"descriptor '{descriptor.key}' same-register-ordinal candidate {candidate_ordinal} tuple [{', '.join(tuple_names)}] overlaps atomic storage unit {min(overlap)}")
+                occupied_atomic_units.update(physical_register.atomic_units)
+                tuple_atomic_units.extend(physical_register.atomic_units)
+            tuple_storage = tuple(sorted(tuple_atomic_units))
+            if tuple_storage not in aggregate_storage:
+                raise ValueError(
+                    f"descriptor '{descriptor.key}' same-register-ordinal candidate {candidate_ordinal} tuple [{', '.join(tuple_names)}] does not form a declared aggregate physical register"
+                )
+            if tuple_storage in seen_tuple_storage:
+                raise ValueError(f"descriptor '{descriptor.key}' same-register-ordinal candidate {candidate_ordinal} repeats an earlier aggregate physical register")
+            seen_tuple_storage.add(tuple_storage)
+
+
 def validate_physical_descriptor_set(
     descriptor_set: DescriptorSet,
 ) -> None:
@@ -407,6 +498,11 @@ def validate_physical_descriptor_set(
             for alternative in operand.reg_alts:
                 if alternative.reg_class is not None and alternative.reg_class not in register_classes:
                     raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' references unknown register class '{alternative.reg_class}'")
+        _validate_same_register_ordinal_components(
+            descriptor,
+            register_classes,
+            physical_registers,
+        )
         early_clobber_results = frozenset(constraint.lhs_operand_index for constraint in descriptor.constraints if constraint.kind is ConstraintKind.EARLY_CLOBBER)
         tied_operand_roots = _descriptor_tied_operand_roots(descriptor)
 
@@ -1442,6 +1538,17 @@ def validate_descriptor_constraints(
             rhs = descriptor.operands[rhs_operand_index]
             if lhs.role is not OperandRole.OPERAND or rhs.role is not OperandRole.OPERAND:
                 raise ValueError(f"descriptor '{descriptor.key}' commutable constraint requires two operand rows")
+        elif constraint.kind is ConstraintKind.SAME_REGISTER_ORDINAL:
+            rhs_operand_index = _validate_binary_constraint(
+                descriptor,
+                constraint_index,
+                "same-register-ordinal",
+                lhs_operand_index,
+                rhs_operand_index,
+            )
+            rhs = descriptor.operands[rhs_operand_index]
+            if (lhs.role is not OperandRole.RESULT and not operand_role_is_packet_input(lhs.role)) or (rhs.role is not OperandRole.RESULT and not operand_role_is_packet_input(rhs.role)):
+                raise ValueError(f"descriptor '{descriptor.key}' same-register-ordinal constraint requires two result or packet operand rows")
         elif constraint.kind in (
             ConstraintKind.EARLY_CLOBBER,
             ConstraintKind.REMATERIALIZABLE,

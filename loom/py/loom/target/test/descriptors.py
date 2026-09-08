@@ -75,6 +75,7 @@ _REG_SPILLABLE_EXPLICIT32 = "test.spillable.explicit32"
 _REG_FIXED_R0 = "test.fixed.r0"
 _REG_PACKED_NARROW = "test.packed.narrow"
 _REG_PACKED_WIDE = "test.packed.wide"
+_REG_COINDEXED_PARTNER = "test.coindexed.partner"
 
 _REG_PART_I32_LOW16 = "test.i32.low16"
 _REG_PART_I32_HIGH16 = "test.i32.high16"
@@ -127,6 +128,7 @@ _SCHEDULE_STATE_ALT = (RegClassAlt(_REG_SCHEDULE_STATE),)
 _PRESSURE_ALIAS32_ALT = (RegClassAlt(_REG_PRESSURE_ALIAS32),)
 _PACKED_NARROW_ALT = (RegClassAlt(_REG_PACKED_NARROW),)
 _PACKED_WIDE_ALT = (RegClassAlt(_REG_PACKED_WIDE),)
+_COINDEXED_PARTNER_ALT = (RegClassAlt(_REG_COINDEXED_PARTNER),)
 
 
 def _asm(
@@ -774,6 +776,20 @@ TEST_LOW_TIED_ANY_DESCRIPTOR = Descriptor(
     operands=(_i32_i64_result(), _i32_i64_operand("src")),
     constraints=_TIED_RESULT_CONSTRAINTS,
     asm_forms=_asm(results=("dst",), operands=("src",)),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_COINDEXED_RESULTS_DESCRIPTOR = Descriptor(
+    key="test.coindexed.results",
+    mnemonic="test.coindexed.results",
+    semantic_tag="test.coindexed.results",
+    operands=(
+        Operand("primary", OperandRole.RESULT, _PACKED_NARROW_ALT),
+        Operand("partner", OperandRole.RESULT, _COINDEXED_PARTNER_ALT),
+    ),
+    constraints=(Constraint(ConstraintKind.SAME_REGISTER_ORDINAL, 0, 1),),
+    asm_forms=_asm(results=("primary", "partner")),
     schedule_class=_SCHEDULE_SCALAR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
@@ -1805,6 +1821,17 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
                 "test.r3",
             ),
         ),
+        RegClass(
+            _REG_COINDEXED_PARTNER,
+            32,
+            SpillSlotSpace.PRIVATE,
+            flags=(
+                RegClassFlag.PHYSICAL,
+                RegClassFlag.UNSPILLABLE,
+                RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
+            ),
+            physical_registers=("test.r2", "test.r3"),
+        ),
     ),
     physical_registers=(
         PhysicalRegister("test.r0", (1,)),
@@ -2108,6 +2135,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_AMBIGUOUS_DESCRIPTOR,
         TEST_LOW_PASS_ANY_DESCRIPTOR,
         TEST_LOW_TIED_ANY_DESCRIPTOR,
+        TEST_LOW_COINDEXED_RESULTS_DESCRIPTOR,
         TEST_LOW_READ_LOW16_I32_DESCRIPTOR,
         TEST_LOW_READ_HIGH16_I32_DESCRIPTOR,
         TEST_LOW_WRITE_LOW16_I32_DESCRIPTOR,

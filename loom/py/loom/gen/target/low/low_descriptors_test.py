@@ -115,6 +115,7 @@ def _explicit_physical_descriptor_set():
             "test.spillable.explicit32",
             "test.packed.narrow",
             "test.packed.wide",
+            "test.coindexed.partner",
         )
     )
     return replace(

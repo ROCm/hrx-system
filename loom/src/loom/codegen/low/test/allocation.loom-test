@@ -287,6 +287,20 @@ low.func.def target<test.low.core>(@test_target) @explicit_physical_aggregate_vi
 
 // ====
 
+// RUN: emit low-allocation-json @same_register_ordinal_selects_matching_tuple fixed=%primary:physical_register:1:1
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @same_register_ordinal_selects_matching_tuple() -> (reg<test.packed.narrow>, reg<test.coindexed.partner>) asm {
+  %primary, %partner = test.coindexed.results
+  return %primary, %partner
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"same_register_ordinal_selects_matching_tuple","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":2,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":2,"name":"primary","type":"reg<test.packed.narrow>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.packed.narrow"},"start_point":1,"end_point":2,"unit_count":1,"location":{"kind":"physical_register","base":1,"count":1}},{"index":1,"value":{"id":3,"name":"partner","type":"reg<test.coindexed.partner>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.coindexed.partner"},"start_point":1,"end_point":2,"unit_count":1,"location":{"kind":"physical_register","base":3,"count":1}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
 // RUN: emit low-allocation-json @singleton_physical_class_reserves_future_interval
 
 test.target<low_core> @test_target

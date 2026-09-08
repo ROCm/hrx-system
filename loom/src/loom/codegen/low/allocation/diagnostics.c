@@ -133,6 +133,8 @@ static iree_string_view_t loom_low_allocation_placement_cause_name(
       return IREE_SV("low.scf.condition");
     case LOOM_LOW_PLACEMENT_CAUSE_SCHEDULE_PAIR_AFFINITY:
       return IREE_SV("schedule-pair-affinity");
+    case LOOM_LOW_PLACEMENT_CAUSE_DESCRIPTOR_CONSTRAINT:
+      return IREE_SV("descriptor-constraint");
     default:
       return IREE_SV("unknown");
   }
@@ -151,6 +153,8 @@ static iree_string_view_t loom_low_allocation_placement_relation_kind_name(
       return IREE_SV("different-masked-location");
     case LOOM_LOW_PLACEMENT_RELATION_DISJOINT_STORAGE:
       return IREE_SV("disjoint-storage");
+    case LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL:
+      return IREE_SV("same-register-ordinal");
     default:
       return IREE_SV("unknown");
   }
@@ -194,6 +198,13 @@ static iree_string_view_t loom_low_allocation_placement_decision_reason_key(
           result_assignment, relation->result_unit_offset,
           relation->unit_count)) {
     return IREE_SV("relation-exceeds-assignment");
+  }
+  if (relation->kind == LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL) {
+    *out_accepted = loom_low_allocation_storage_placement_relation_satisfied(
+        table->target.descriptor_set, relation, result_assignment,
+        source_assignment);
+    return *out_accepted ? IREE_SV("assigned-register-ordinals-match")
+                         : IREE_SV("assigned-register-ordinals-differ");
   }
   if (relation->kind == LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION) {
     if (!loom_low_allocation_storage_assignment_classes_share(

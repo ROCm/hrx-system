@@ -312,6 +312,9 @@ typedef enum loom_low_constraint_kind_e {
   LOOM_LOW_CONSTRAINT_KIND_REMATERIALIZABLE = 5,
   // Descriptor may participate in algebraic folding.
   LOOM_LOW_CONSTRAINT_KIND_FOLDABLE = 6,
+  // Two descriptor values select the same candidate ordinal from distinct
+  // explicit physical-register classes.
+  LOOM_LOW_CONSTRAINT_KIND_SAME_REGISTER_ORDINAL = 7,
 } loom_low_constraint_kind_t;
 
 // Bitset of descriptor constraint flags.

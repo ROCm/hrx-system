@@ -392,8 +392,10 @@ loom_cc_library(
     srcs = ["placement.c"],
     hdrs = ["placement.h"],
     deps = [
+        ":descriptors",
         ":placement_pair",
         ":storage_relation",
+        ":target_binding",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base",

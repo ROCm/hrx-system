@@ -93,6 +93,86 @@ def _descriptor_set(
     )
 
 
+def _coindexed_register_classes(
+    partner_candidates: tuple[str, str] = ("test.r2", "test.r3"),
+) -> tuple[RegClass, RegClass]:
+    flags = (
+        RegClassFlag.PHYSICAL,
+        RegClassFlag.UNSPILLABLE,
+        RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
+    )
+    return (
+        RegClass(
+            "tuple.primary",
+            32,
+            SpillSlotSpace.PRIVATE,
+            flags=flags,
+            physical_registers=("test.r0", "test.r1"),
+        ),
+        RegClass(
+            "tuple.partner",
+            32,
+            SpillSlotSpace.PRIVATE,
+            flags=flags,
+            physical_registers=partner_candidates,
+        ),
+    )
+
+
+def test_physical_descriptor_set_accepts_same_register_ordinal_tuple() -> None:
+    register_classes = _coindexed_register_classes()
+    descriptor = _descriptor(
+        "test.coindexed",
+        (
+            _physical_operand("primary", OperandRole.RESULT, "tuple.primary"),
+            _physical_operand("partner", OperandRole.RESULT, "tuple.partner"),
+        ),
+        constraints=(Constraint(ConstraintKind.SAME_REGISTER_ORDINAL, 0, 1),),
+    )
+
+    validation.validate_physical_descriptor_set(_descriptor_set(descriptor, register_classes=register_classes))
+
+
+def test_physical_descriptor_set_rejects_unproven_register_ordinal_tuple() -> None:
+    register_classes = _coindexed_register_classes(partner_candidates=("test.r3", "test.r2"))
+    descriptor = _descriptor(
+        "test.coindexed",
+        (
+            _physical_operand("primary", OperandRole.RESULT, "tuple.primary"),
+            _physical_operand("partner", OperandRole.RESULT, "tuple.partner"),
+        ),
+        constraints=(Constraint(ConstraintKind.SAME_REGISTER_ORDINAL, 0, 1),),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.coindexed' same-register-ordinal candidate 0 tuple [test.r0, test.r3] does not form a declared aggregate physical register"),
+    ):
+        validation.validate_physical_descriptor_set(_descriptor_set(descriptor, register_classes=register_classes))
+
+
+def test_physical_descriptor_set_requires_register_ordinal_clique() -> None:
+    register_classes = _coindexed_register_classes()
+    descriptor = _descriptor(
+        "test.coindexed",
+        (
+            _physical_operand("first", OperandRole.RESULT, "tuple.primary"),
+            _physical_operand("second", OperandRole.RESULT, "tuple.partner"),
+            _physical_operand("third", OperandRole.RESULT, "tuple.primary"),
+        ),
+        constraints=(
+            Constraint(ConstraintKind.SAME_REGISTER_ORDINAL, 0, 1),
+            Constraint(ConstraintKind.SAME_REGISTER_ORDINAL, 1, 2),
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.coindexed' same-register-ordinal component [first, second, third] must constrain every operand pair"),
+    ):
+        validation.validate_physical_descriptor_set(_descriptor_set(descriptor, register_classes=register_classes))
+
+
 def test_physical_base_domain_matches_enumerated_contract() -> None:
     windows = tuple(
         validation._PhysicalAddressWindow(

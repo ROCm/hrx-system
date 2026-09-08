@@ -231,8 +231,8 @@ iree_status_t loom_low_allocate_function(
         options->schedule != NULL ? options->schedule->placement_pair_uses
                                   : loom_low_placement_pair_use_list_empty();
     status = loom_low_placement_analyze_region(
-        model->module, state.body, value_domain, &state.liveness,
-        placement_pair_uses, arena, &state.placement);
+        model->module, state.body, state.target.descriptor_set, value_domain,
+        &state.liveness, placement_pair_uses, arena, &state.placement);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_unit_liveness_initialize(

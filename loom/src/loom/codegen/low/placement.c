@@ -9,12 +9,15 @@
 #include <string.h>
 
 #include "loom/codegen/low/storage_relation.h"
+#include "loom/codegen/low/target_binding.h"
 
 typedef struct loom_low_placement_build_state_t {
   // Module containing the analyzed low region.
   loom_module_t* module;
   // Low function body region being analyzed.
   const loom_region_t* region;
+  // Descriptor set defining target packet constraints.
+  const loom_low_descriptor_set_t* descriptor_set;
   // Acquired local value domain for |region|.
   const loom_local_value_domain_t* value_domain;
   // Liveness analysis over |value_domain|.
@@ -41,6 +44,8 @@ typedef struct loom_low_placement_build_state_t {
   uint32_t relation_count;
   // Number of collected concrete-location relations.
   iree_host_size_t location_relation_count;
+  // Number of collected hard concrete-location relations.
+  uint32_t hard_location_relation_count;
   // Number of low.copy/move/slice/concat operations that may require packet
   // moves.
   uint32_t packet_move_group_count;
@@ -146,8 +151,13 @@ static iree_status_t loom_low_placement_collect_relation(
         LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE;
   }
   if (relation->kind == LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION ||
-      relation->kind == LOOM_LOW_PLACEMENT_RELATION_DISJOINT_STORAGE) {
+      relation->kind == LOOM_LOW_PLACEMENT_RELATION_DISJOINT_STORAGE ||
+      relation->kind == LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL) {
     ++state->location_relation_count;
+    if (iree_any_bit_set(relation->flags,
+                         LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD)) {
+      ++state->hard_location_relation_count;
+    }
   }
   ++result_range->count;
   ++source_range->count;
@@ -308,6 +318,14 @@ static void loom_low_placement_assert_storage_relation_units(
               "verified low storage source range must fit liveness units");
 }
 
+static loom_value_id_t loom_low_placement_descriptor_operand_value_id(
+    const loom_op_t* op, const loom_low_operand_t* descriptor_operand) {
+  if (descriptor_operand->role == LOOM_LOW_OPERAND_ROLE_RESULT) {
+    return loom_op_const_results(op)[descriptor_operand->source_value_index];
+  }
+  return loom_op_const_operands(op)[descriptor_operand->source_value_index];
+}
+
 static iree_status_t loom_low_placement_collect_op_relations(
     loom_low_placement_build_state_t* state, const loom_op_t* op) {
   loom_low_placement_move_group_flags_t move_group_flags = 0;
@@ -338,6 +356,46 @@ static iree_status_t loom_low_placement_collect_op_relations(
             storage_relation.unit_count),
         .flags = loom_low_placement_flags_from_storage_relation(
             storage_relation.flags),
+        .priority = 1,
+    };
+    IREE_RETURN_IF_ERROR(
+        loom_low_placement_collect_relation(state, &placement_relation));
+  }
+
+  loom_low_descriptor_packet_t packet;
+  loom_low_descriptor_packet_initialize(state->descriptor_set, op, &packet);
+  if (packet.descriptor == NULL) {
+    return iree_ok_status();
+  }
+  const loom_low_descriptor_t* descriptor = packet.descriptor;
+  const loom_low_operand_t* descriptor_operands =
+      &state->descriptor_set->operands[descriptor->operand_start];
+  for (uint16_t i = 0; i < descriptor->constraint_count; ++i) {
+    const loom_low_constraint_t* constraint =
+        &state->descriptor_set
+             ->constraints[descriptor->constraint_start + (uint32_t)i];
+    if (constraint->kind != LOOM_LOW_CONSTRAINT_KIND_SAME_REGISTER_ORDINAL) {
+      continue;
+    }
+    const loom_value_id_t result_value_id =
+        loom_low_placement_descriptor_operand_value_id(
+            op, &descriptor_operands[constraint->lhs_operand_index]);
+    const loom_value_id_t source_value_id =
+        loom_low_placement_descriptor_operand_value_id(
+            op, &descriptor_operands[constraint->rhs_operand_index]);
+    if (result_value_id == source_value_id) continue;
+    const loom_low_placement_relation_t placement_relation = {
+        .op = op,
+        .result_ordinal =
+            loom_low_placement_value_ordinal(state, result_value_id),
+        .source_ordinal =
+            loom_low_placement_value_ordinal(state, source_value_id),
+        .result_unit_offset = 0,
+        .source_unit_offset = 0,
+        .unit_count = 1,
+        .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL,
+        .cause = LOOM_LOW_PLACEMENT_CAUSE_DESCRIPTOR_CONSTRAINT,
+        .flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD,
         .priority = 1,
     };
     IREE_RETURN_IF_ERROR(
@@ -621,6 +679,7 @@ static iree_status_t loom_low_placement_build(
       .relations = state->relations,
       .relation_count = relation_count,
       .location_relation_count = state->location_relation_count,
+      .hard_location_relation_count = state->hard_location_relation_count,
       .packet_move_group_count = state->packet_move_group_count,
       .packet_move_unit_count = state->packet_move_unit_count,
       .edge_copy_group_count = state->edge_copy_group_count,
@@ -635,6 +694,7 @@ static iree_status_t loom_low_placement_build(
 
 iree_status_t loom_low_placement_analyze_region(
     loom_module_t* module, const loom_region_t* region,
+    const loom_low_descriptor_set_t* descriptor_set,
     const loom_local_value_domain_t* value_domain,
     const loom_liveness_analysis_t* liveness,
     loom_low_placement_pair_use_list_t pair_uses, iree_arena_allocator_t* arena,
@@ -651,6 +711,7 @@ iree_status_t loom_low_placement_analyze_region(
   loom_low_placement_build_state_t state = {
       .module = module,
       .region = region,
+      .descriptor_set = descriptor_set,
       .value_domain = value_domain,
       .liveness = liveness,
       .pair_uses = pair_uses,

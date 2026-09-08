@@ -410,8 +410,10 @@ loom_cc_library(
   SRCS
     "placement.c"
   DEPS
+    ::descriptors
     ::placement_pair
     ::storage_relation
+    ::target_binding
     iree::base
     iree::base::internal::arena
     loom::analysis::liveness

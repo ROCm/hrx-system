@@ -18,6 +18,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/liveness.h"
+#include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/placement_pair.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/local_value_domain.h"
@@ -49,6 +50,9 @@ typedef enum loom_low_placement_cause_bits_e {
   LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_CONDITION = 9,
   // Scheduled target-packet pair location affinity.
   LOOM_LOW_PLACEMENT_CAUSE_SCHEDULE_PAIR_AFFINITY = 10,
+  // Target descriptor constraint coupling physical-register candidate
+  // ordinals without aliasing their storage.
+  LOOM_LOW_PLACEMENT_CAUSE_DESCRIPTOR_CONSTRAINT = 11,
 } loom_low_placement_cause_bits_t;
 typedef uint8_t loom_low_placement_cause_t;
 
@@ -164,6 +168,8 @@ typedef struct loom_low_placement_table_t {
   iree_host_size_t relation_count;
   // Number of relations constraining concrete location choice.
   iree_host_size_t location_relation_count;
+  // Number of hard relations constraining concrete location choice.
+  uint32_t hard_location_relation_count;
   // Number of low.copy/move/slice/concat operations that may require packet
   // moves.
   uint32_t packet_move_group_count;
@@ -191,9 +197,11 @@ bool loom_low_placement_relation_can_alias(
 bool loom_low_placement_cause_is_edge(loom_low_placement_cause_t cause);
 
 // Builds a function-local placement relation table over an acquired value
-// domain and its liveness analysis.
+// domain and its liveness analysis. |descriptor_set| is the function's
+// verified representation contract and supplies target packet constraints.
 iree_status_t loom_low_placement_analyze_region(
     loom_module_t* module, const loom_region_t* region,
+    const loom_low_descriptor_set_t* descriptor_set,
     const loom_local_value_domain_t* value_domain,
     const loom_liveness_analysis_t* liveness,
     loom_low_placement_pair_use_list_t pair_uses, iree_arena_allocator_t* arena,

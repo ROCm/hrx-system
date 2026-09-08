@@ -226,6 +226,73 @@ static uint32_t loom_low_allocation_search_location_preference_penalty(
   return penalty;
 }
 
+static bool loom_low_allocation_search_hard_relation_conflicts(
+    const loom_low_allocation_search_context_t* context,
+    const loom_low_placement_relation_t* relation,
+    const loom_low_allocation_assignment_t* candidate,
+    bool candidate_is_result) {
+  if (relation->kind != LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL ||
+      !iree_any_bit_set(relation->flags,
+                        LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD)) {
+    return false;
+  }
+  const loom_value_ordinal_t counterpart_ordinal =
+      candidate_is_result ? relation->source_ordinal : relation->result_ordinal;
+  const loom_low_allocation_assignment_t* counterpart =
+      loom_low_allocation_assignment_map_assignment_for_value_ordinal(
+          context->assignment_map, counterpart_ordinal, NULL);
+  if (counterpart == NULL) {
+    return false;
+  }
+  const loom_low_allocation_assignment_t* result_assignment =
+      candidate_is_result ? candidate : counterpart;
+  const loom_low_allocation_assignment_t* source_assignment =
+      candidate_is_result ? counterpart : candidate;
+  return !loom_low_allocation_storage_placement_relation_satisfied(
+      context->descriptor_set, relation, result_assignment, source_assignment);
+}
+
+static bool loom_low_allocation_search_hard_relations_conflict(
+    const loom_low_allocation_search_context_t* context,
+    const loom_low_allocation_assignment_t* candidate) {
+  const loom_low_placement_table_t* placement = context->placement;
+  if (placement == NULL || placement->hard_location_relation_count == 0) {
+    return false;
+  }
+  loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
+  if (!loom_low_allocation_assignment_map_value_ordinal_for_value(
+          context->assignment_map, candidate->value_id, &value_ordinal)) {
+    return false;
+  }
+
+  const loom_low_placement_relation_range_t result_range =
+      loom_low_placement_relation_range_for_value_ordinal(placement,
+                                                          value_ordinal);
+  for (uint32_t i = 0; i < result_range.count; ++i) {
+    const loom_low_placement_relation_t* relation =
+        &placement->relations[result_range.start + i];
+    if (loom_low_allocation_search_hard_relation_conflicts(
+            context, relation, candidate, /*candidate_is_result=*/true)) {
+      return true;
+    }
+  }
+
+  const loom_low_placement_relation_range_t source_range =
+      loom_low_placement_relation_range_for_source_value_ordinal(placement,
+                                                                 value_ordinal);
+  for (uint32_t i = 0; i < source_range.count; ++i) {
+    const uint32_t relation_index =
+        placement->relation_indices_by_source_ordinal[source_range.start + i];
+    const loom_low_placement_relation_t* relation =
+        &placement->relations[relation_index];
+    if (loom_low_allocation_search_hard_relation_conflicts(
+            context, relation, candidate, /*candidate_is_result=*/false)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool loom_low_allocation_search_assignment_conflicts(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_assignment_t* candidate,
@@ -233,6 +300,9 @@ bool loom_low_allocation_search_assignment_conflicts(
     const loom_value_id_t* ignored_storage_lease_value_ids,
     uint16_t ignored_storage_lease_value_count,
     loom_low_allocation_storage_release_policy_t release_policy) {
+  if (loom_low_allocation_search_hard_relations_conflict(context, candidate)) {
+    return true;
+  }
   if (loom_low_allocation_active_set_conflicts(
           context->active_set, context->descriptor_set, context->unit_liveness,
           context->assignment_map->assignments,
