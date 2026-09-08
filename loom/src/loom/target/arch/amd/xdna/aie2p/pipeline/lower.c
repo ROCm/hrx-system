@@ -42,6 +42,9 @@ typedef struct loom_aie2p_pipeline_placement_t {
   // Number of legal compute coordinates.
   uint32_t compute_coordinate_count;
 
+  // Direct north/south neighbor count for each legal compute coordinate.
+  uint8_t* neighbor_capacities;
+
   // Physical coordinate selected for each resident instance.
   loom_xdna_tile_coordinate_t* instance_coordinates;
 
@@ -99,6 +102,25 @@ static iree_status_t loom_aie2p_pipeline_placement_initialize(
   if (placement->compute_coordinate_count == 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "AIE2P target has no compute tiles");
+  }
+  IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_allocate_array(
+      arena, placement->compute_coordinate_count,
+      sizeof(*placement->neighbor_capacities),
+      (void**)&placement->neighbor_capacities));
+  for (uint32_t i = 0; i < placement->compute_coordinate_count; ++i) {
+    const loom_xdna_tile_coordinate_t coordinate =
+        placement->compute_coordinates[i];
+    uint8_t capacity = 0;
+    for (uint32_t j = 0; j < placement->compute_coordinate_count; ++j) {
+      const loom_xdna_tile_coordinate_t candidate =
+          placement->compute_coordinates[j];
+      const int row_delta = (int)candidate.row - (int)coordinate.row;
+      if (candidate.column == coordinate.column &&
+          (row_delta == -1 || row_delta == 1)) {
+        ++capacity;
+      }
+    }
+    placement->neighbor_capacities[i] = capacity;
   }
   if (plan->instance_count > placement->compute_coordinate_count) {
     return iree_make_status(
@@ -235,6 +257,16 @@ static bool loom_aie2p_pipeline_candidate_precedes(
       &rhs_adjacent, &rhs_distance);
   if (lhs_adjacent != rhs_adjacent) return lhs_adjacent > rhs_adjacent;
   if (lhs_distance != rhs_distance) return lhs_distance < rhs_distance;
+  uint32_t assigned_neighbor_count = 0;
+  const uint32_t degree = loom_aie2p_pipeline_instance_degree(
+      placement, instance_index, &assigned_neighbor_count);
+  // Seed high-degree workers where two direct neighbors remain possible. The
+  // normal affinity scores take over once any connected peer has a placement.
+  if (degree > 2 && assigned_neighbor_count == 0) {
+    const uint8_t lhs_capacity = placement->neighbor_capacities[lhs_index];
+    const uint8_t rhs_capacity = placement->neighbor_capacities[rhs_index];
+    if (lhs_capacity != rhs_capacity) return lhs_capacity > rhs_capacity;
+  }
   return lhs_index < rhs_index;
 }
 
