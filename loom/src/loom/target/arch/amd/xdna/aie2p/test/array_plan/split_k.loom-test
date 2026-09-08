@@ -33,10 +33,10 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array
   %bias_sender = sender %bias, 0 : reg<aie2p.array.sender : tile<8x8xf32>>
   %output_receiver = receiver %output, 0 : reg<aie2p.array.receiver : tile<8x8xf32>>
 
-  %lhs0 = partition %lhs_tiles, %product0_lane, %partition_lanes : reg<aie2p.array.sender : tile<8xbf16>>
-  %lhs1 = partition %lhs_tiles, %product1_lane, %partition_lanes : reg<aie2p.array.sender : tile<8xbf16>>
-  %rhs0 = partition %rhs_tiles, %product0_lane, %partition_lanes : reg<aie2p.array.sender : tile<8xbf16>>
-  %rhs1 = partition %rhs_tiles, %product1_lane, %partition_lanes : reg<aie2p.array.sender : tile<8xbf16>>
+  %lhs0 = partition.sender %lhs_tiles, %product0_lane, %partition_lanes : reg<aie2p.array.sender : tile<8xbf16>>
+  %lhs1 = partition.sender %lhs_tiles, %product1_lane, %partition_lanes : reg<aie2p.array.sender : tile<8xbf16>>
+  %rhs0 = partition.sender %rhs_tiles, %product0_lane, %partition_lanes : reg<aie2p.array.sender : tile<8xbf16>>
+  %rhs1 = partition.sender %rhs_tiles, %product1_lane, %partition_lanes : reg<aie2p.array.sender : tile<8xbf16>>
 
   %product0_lhs = receiver %product0, 0 : reg<aie2p.array.receiver : tile<8xbf16>>
   %product0_rhs = receiver %product0, 1 : reg<aie2p.array.receiver : tile<8xbf16>>
@@ -455,8 +455,8 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@multicast_array_target)
 
   %input = binding 0, "read"
   %input_tiles = sender %input, 0 : reg<aie2p.array.sender : tile<2x4xi8>>
-  %input0 = partition %input_tiles, %lane0, %partition_lanes : reg<aie2p.array.sender : tile<4xi8>>
-  %input1 = partition %input_tiles, %lane1, %partition_lanes : reg<aie2p.array.sender : tile<4xi8>>
+  %input0 = partition.sender %input_tiles, %lane0, %partition_lanes : reg<aie2p.array.sender : tile<4xi8>>
+  %input1 = partition.sender %input_tiles, %lane1, %partition_lanes : reg<aie2p.array.sender : tile<4xi8>>
 
   %worker0_input0 = receiver %worker0, 0 : reg<aie2p.array.receiver : tile<4xi8>>
   %worker0_input1 = receiver %worker0, 1 : reg<aie2p.array.receiver : tile<4xi8>>
@@ -946,7 +946,7 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@temporal_fold_array_tar
   %input = binding 0, "read"
   %output = binding 1, "write"
   %input_sender = sender %input, 0 : reg<aie2p.array.sender : tile<1x3x4x32xf32, #encoding.layout.strided<strides=[0, 0, 32, 1]>>>
-  %input_lane = partition %input_sender, %lane, %lanes : reg<aie2p.array.sender : tile<32xf32>>
+  %input_lane = partition.sender %input_sender, %lane, %lanes : reg<aie2p.array.sender : tile<32xf32>>
   %worker_input = receiver %worker, 0 : reg<aie2p.array.receiver : tile<32xf32>>
   %worker_output = sender %worker, 1 : reg<aie2p.array.sender : tile<32xf32>>
   %output_receiver = receiver %output, 0 : reg<aie2p.array.receiver : tile<32xf32>>
@@ -1098,8 +1098,8 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@canonical_q5_stream_arr
   %weight_sender = sender %weight, 0 : reg<aie2p.array.sender : tile<1x3x2x176xi8, #encoding.layout.strided<strides=[352, 704, 176, 1]>>>
   %activation_sender = sender %activation, 0 : reg<aie2p.array.sender : tile<1x3x2x176xi8, #encoding.layout.strided<strides=[352, 0, 176, 1]>>>
   %output_receiver = receiver %output, 0 : reg<aie2p.array.receiver : tile<64xi8>>
-  %weight_lane = partition %weight_sender, %lane, %lanes : reg<aie2p.array.sender : tile<176xi8>>
-  %activation_lane = partition %activation_sender, %lane, %lanes : reg<aie2p.array.sender : tile<176xi8>>
+  %weight_lane = partition.sender %weight_sender, %lane, %lanes : reg<aie2p.array.sender : tile<176xi8>>
+  %activation_lane = partition.sender %activation_sender, %lane, %lanes : reg<aie2p.array.sender : tile<176xi8>>
   %worker_weight = receiver %worker, 0 : reg<aie2p.array.receiver : tile<176xi8>>
   %worker_activation = receiver %worker, 1 : reg<aie2p.array.receiver : tile<176xi8>>
   %worker_output = sender %worker, 2 : reg<aie2p.array.sender : tile<64xi8>>

@@ -52,6 +52,11 @@ typedef struct loom_pipeline_plan_binding_t {
   loom_pipeline_binding_access_flags_t access;
 } loom_pipeline_plan_binding_t;
 
+typedef struct loom_pipeline_plan_binding_partition_t {
+  // Full binding tile type before removing the leading lane dimension.
+  loom_type_t binding_type;
+} loom_pipeline_plan_binding_partition_t;
+
 typedef struct loom_pipeline_plan_group_t {
   // Source SSA identity naming the scheduling group.
   loom_value_id_t source_value;
@@ -129,16 +134,18 @@ typedef struct loom_pipeline_plan_flow_t {
   // Callable output port or first external binding port.
   uint32_t producer_port;
 
-  // Full source-view tile type for a lane-partitioned binding producer.
-  loom_type_t partition_source_type;
-
-  // True when the binding producer partitions its leading dimension by lane.
-  bool partitioned;
+  // Binding-partition table index when produced by a partitioned binding, or
+  // UINT32_MAX when the producer endpoint is direct.
+  uint32_t binding_partition_index;
 } loom_pipeline_plan_flow_t;
 
 typedef struct loom_pipeline_plan_edge_t {
   // Flow supplying the edge and its record contract.
   uint32_t flow_index;
+
+  // Binding-partition table index for the edge's binding endpoint, or
+  // UINT32_MAX when the endpoint is direct.
+  uint32_t binding_partition_index;
 
   // Kind of concrete producer endpoint.
   loom_pipeline_endpoint_kind_t source_kind;
@@ -149,8 +156,8 @@ typedef struct loom_pipeline_plan_edge_t {
   // Producer endpoint port.
   uint32_t source_port;
 
-  // Partition lane for a lane-partitioned binding source.
-  uint32_t partition_lane;
+  // Selected leading-dimension lane in a partitioned binding endpoint.
+  uint32_t binding_partition_lane;
 
   // Kind of concrete consumer endpoint.
   loom_pipeline_endpoint_kind_t target_kind;
@@ -176,6 +183,12 @@ typedef struct loom_pipeline_plan_t {
 
   // Number of launch binding slots.
   uint32_t binding_count;
+
+  // Typed leading-dimension partitions referenced by concrete edges.
+  const loom_pipeline_plan_binding_partition_t* binding_partitions;
+
+  // Number of binding partition records.
+  uint32_t binding_partition_count;
 
   // Scheduling groups in source definition order.
   const loom_pipeline_plan_group_t* groups;

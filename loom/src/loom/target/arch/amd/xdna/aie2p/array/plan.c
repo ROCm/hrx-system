@@ -347,7 +347,8 @@ static iree_status_t loom_aie2p_array_count_topology(
         break;
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_SENDER:
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_RECEIVER:
-      case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_PARTITION:
+      case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_PARTITION_SENDER:
+      case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_PARTITION_RECEIVER:
         ++builder->plan->endpoint_count;
         break;
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_CHANNEL:
@@ -540,12 +541,12 @@ static iree_status_t loom_aie2p_array_extract_partition(
   loom_aie2p_array_endpoint_t* endpoint =
       &builder->endpoints[builder->endpoint_cursor];
   endpoint->value_id = loom_op_results(op)[0];
-  endpoint->direction = LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND;
   IREE_RETURN_IF_ERROR(loom_aie2p_array_lookup_entity(
       builder, loom_op_operands(op)[0], LOOM_AIE2P_ARRAY_ENTITY_ENDPOINT,
       "partition source", &endpoint->partition_source_endpoint_index));
   const loom_aie2p_array_endpoint_t* source =
       &builder->endpoints[endpoint->partition_source_endpoint_index];
+  endpoint->direction = source->direction;
   endpoint->owner_kind = source->owner_kind;
   endpoint->owner_index = source->owner_index;
   endpoint->port = source->port;
@@ -655,7 +656,8 @@ static iree_status_t loom_aie2p_array_extract_topology(
             builder, op, LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE));
         break;
       }
-      case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_PARTITION: {
+      case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_PARTITION_SENDER:
+      case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_PARTITION_RECEIVER: {
         IREE_RETURN_IF_ERROR(loom_aie2p_array_extract_partition(builder, op));
         break;
       }
@@ -791,7 +793,6 @@ static iree_status_t loom_aie2p_array_validate_partition(
       loom_aie2p_array_base_endpoint(builder, endpoint);
   if (source == endpoint ||
       source->partition_source_endpoint_index != UINT32_MAX ||
-      source->direction != LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND ||
       source->owner_kind != LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_BINDING ||
       endpoint->partition_lane_count == 0 ||
       endpoint->partition_lane >= endpoint->partition_lane_count) {
@@ -963,18 +964,24 @@ static iree_status_t loom_aie2p_array_validate_topology(
     ++channel_use_counts[channel->sender_endpoint_index];
     ++channel_use_counts[channel->receiver_endpoint_index];
 
-    const loom_aie2p_array_endpoint_t* base_sender =
-        loom_aie2p_array_base_endpoint(builder, sender);
+    const loom_aie2p_array_endpoint_t* partition_endpoint = NULL;
     if (sender->partition_source_endpoint_index != UINT32_MAX) {
+      partition_endpoint = sender;
+    } else if (receiver->partition_source_endpoint_index != UINT32_MAX) {
+      partition_endpoint = receiver;
+    }
+    if (partition_endpoint != NULL) {
       uint32_t partition_record_count = 0;
       IREE_RETURN_IF_ERROR(loom_aie2p_array_validate_partition(
-          builder, sender, &partition_record_count));
+          builder, partition_endpoint, &partition_record_count));
       if (channel->record_count != partition_record_count) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "AIE2P channel record count must match its binding partition");
       }
     }
+    const loom_aie2p_array_endpoint_t* base_sender =
+        loom_aie2p_array_base_endpoint(builder, sender);
     if (base_sender->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_BINDING &&
         receiver->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER) {
       const loom_aie2p_array_binding_t* binding =

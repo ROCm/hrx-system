@@ -59,6 +59,15 @@ typedef struct loom_pipeline_plan_builder_t {
   // Next unclaimed endpoint port for each binding.
   uint32_t* binding_next_ports;
 
+  // Typed leading-dimension binding partitions.
+  loom_pipeline_plan_binding_partition_t* binding_partitions;
+
+  // Number of defined binding partitions.
+  uint32_t binding_partition_count;
+
+  // Maximum binding partitions allocated.
+  uint32_t binding_partition_capacity;
+
   // Scheduling group table.
   loom_pipeline_plan_group_t* groups;
 
@@ -284,7 +293,7 @@ static iree_status_t loom_pipeline_plan_view_tile_type(
       LOOM_TYPE_TILE, loom_type_element_type(view_type),
       loom_type_rank(view_type), loom_type_flags(view_type));
   return loom_pipeline_plan_refine_record_type(builder, view_type,
-                                               "partition source", out_type);
+                                               "binding partition", out_type);
 }
 
 static iree_status_t loom_pipeline_plan_lookup_group(
@@ -321,6 +330,17 @@ static void loom_pipeline_plan_define_flow(
   flow.source_value = source_value;
   builder->flows[index] = flow;
   if (out_index != NULL) *out_index = index;
+}
+
+static uint32_t loom_pipeline_plan_define_binding_partition(
+    loom_pipeline_plan_builder_t* builder, loom_type_t binding_type) {
+  IREE_ASSERT_LT(builder->binding_partition_count,
+                 builder->binding_partition_capacity);
+  const uint32_t index = builder->binding_partition_count++;
+  builder->binding_partitions[index] = (loom_pipeline_plan_binding_partition_t){
+      .binding_type = binding_type,
+  };
+  return index;
 }
 
 static iree_status_t loom_pipeline_plan_use_flow(
@@ -437,7 +457,7 @@ static iree_status_t loom_pipeline_plan_define_external_flow(
   builder->bindings[binding_index].access |=
       LOOM_PIPELINE_BINDING_ACCESS_FLAG_READ;
 
-  loom_type_t partition_source_type = loom_type_none();
+  uint32_t binding_partition_index = UINT32_MAX;
   uint32_t port_count = builder->groups[group_index].lane_count;
   if (partitioned) {
     const loom_type_t view_type =
@@ -450,8 +470,11 @@ static iree_status_t loom_pipeline_plan_define_external_flow(
           IREE_STATUS_INVALID_ARGUMENT,
           "pipeline scatter leading dimension must equal group cardinality");
     }
-    IREE_RETURN_IF_ERROR(loom_pipeline_plan_view_tile_type(
-        builder, view_type, &partition_source_type));
+    loom_type_t binding_type = loom_type_none();
+    IREE_RETURN_IF_ERROR(
+        loom_pipeline_plan_view_tile_type(builder, view_type, &binding_type));
+    binding_partition_index =
+        loom_pipeline_plan_define_binding_partition(builder, binding_type);
     port_count = 1;
   }
   if (builder->binding_next_ports[binding_index] > UINT32_MAX - port_count) {
@@ -484,8 +507,7 @@ static iree_status_t loom_pipeline_plan_define_external_flow(
           .binding_index = binding_index,
           .instance_start = UINT32_MAX,
           .producer_port = first_port,
-          .partition_source_type = partition_source_type,
-          .partitioned = partitioned,
+          .binding_partition_index = binding_partition_index,
       },
       NULL);
   return iree_ok_status();
@@ -544,6 +566,7 @@ static iree_status_t loom_pipeline_plan_connect_pointwise_flow(
         builder,
         (loom_pipeline_plan_edge_t){
             .flow_index = flow_index,
+            .binding_partition_index = flow->binding_partition_index,
             .source_kind = flow->producer_kind,
             .source_index =
                 flow->producer_kind == LOOM_PIPELINE_ENDPOINT_KIND_BINDING
@@ -552,10 +575,11 @@ static iree_status_t loom_pipeline_plan_connect_pointwise_flow(
             .source_port =
                 flow->producer_port +
                 (flow->producer_kind == LOOM_PIPELINE_ENDPOINT_KIND_BINDING &&
-                         !flow->partitioned
+                         flow->binding_partition_index == UINT32_MAX
                      ? lane
                      : 0),
-            .partition_lane = lane,
+            .binding_partition_lane =
+                flow->binding_partition_index != UINT32_MAX ? lane : 0,
             .target_kind = LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE,
             .target_index = target_instance_start + lane,
             .target_port = target_port,
@@ -586,7 +610,7 @@ static iree_status_t loom_pipeline_plan_define_instance_outputs(
             .instance_start = instance_start,
             .instance_count = instance_count,
             .producer_port = first_output_port + i,
-            .partition_source_type = loom_type_none(),
+            .binding_partition_index = UINT32_MAX,
         },
         NULL);
   }
@@ -777,6 +801,7 @@ static iree_status_t loom_pipeline_plan_parse_reduce(
       loom_pipeline_plan_append_edge(
           builder, (loom_pipeline_plan_edge_t){
                        .flow_index = flow_index,
+                       .binding_partition_index = UINT32_MAX,
                        .source_kind = LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE,
                        .source_index = flow->instance_start + lane,
                        .source_port = flow->producer_port,
@@ -822,12 +847,10 @@ static iree_status_t loom_pipeline_plan_parse_write(
   IREE_RETURN_IF_ERROR(loom_pipeline_plan_use_flow(
       builder, loom_pipeline_write_source(op), &flow_index));
   const loom_pipeline_plan_flow_t* flow = &builder->flows[flow_index];
-  if (flow->producer_kind != LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE ||
-      flow->instance_count != 1 ||
-      builder->groups[flow->group_index].lane_count != 1) {
+  if (flow->producer_kind != LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
-        "concrete pipeline writes currently require one source lane");
+        "concrete pipeline writes require a resident source-group flow");
   }
   uint32_t binding_index = 0;
   IREE_RETURN_IF_ERROR(loom_pipeline_plan_binding_for_view(
@@ -836,10 +859,34 @@ static iree_status_t loom_pipeline_plan_parse_write(
       loom_module_value_type(builder->module, loom_pipeline_write_target(op));
   IREE_RETURN_IF_ERROR(loom_pipeline_plan_validate_fixed_record_tile(
       builder, target_type, flow->tile_type));
+  const uint32_t lane_count = builder->groups[flow->group_index].lane_count;
+  const bool partitioned = lane_count > 1;
+  uint32_t binding_partition_index = UINT32_MAX;
+  if (partitioned) {
+    if (loom_type_rank(target_type) <= loom_type_rank(flow->tile_type)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "multi-lane pipeline output requires a leading lane dimension");
+    }
+    uint32_t leading_dimension = 0;
+    IREE_RETURN_IF_ERROR(loom_pipeline_plan_exact_dimension(
+        builder, target_type, 0, &leading_dimension));
+    if (leading_dimension != lane_count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "pipeline output leading dimension must equal source-group "
+          "cardinality");
+    }
+    loom_type_t binding_type = loom_type_none();
+    IREE_RETURN_IF_ERROR(
+        loom_pipeline_plan_view_tile_type(builder, target_type, &binding_type));
+    binding_partition_index =
+        loom_pipeline_plan_define_binding_partition(builder, binding_type);
+  }
   loom_pipeline_plan_record_shape_t target_record_shape = {0};
   IREE_RETURN_IF_ERROR(loom_pipeline_plan_exact_record_shape(
-      builder, target_type, flow->tile_type, /*partitioned=*/false,
-      &target_record_shape, /*out_record_count=*/NULL));
+      builder, target_type, flow->tile_type, partitioned, &target_record_shape,
+      /*out_record_count=*/NULL));
   if (!loom_pipeline_plan_record_shapes_equal(target_record_shape,
                                               flow->record_shape)) {
     return iree_make_status(
@@ -853,16 +900,20 @@ static iree_status_t loom_pipeline_plan_parse_write(
                             "pipeline binding port ordinal overflow");
   }
   const uint32_t target_port = builder->binding_next_ports[binding_index]++;
-  loom_pipeline_plan_append_edge(
-      builder, (loom_pipeline_plan_edge_t){
-                   .flow_index = flow_index,
-                   .source_kind = LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE,
-                   .source_index = flow->instance_start,
-                   .source_port = flow->producer_port,
-                   .target_kind = LOOM_PIPELINE_ENDPOINT_KIND_BINDING,
-                   .target_index = binding_index,
-                   .target_port = target_port,
-               });
+  for (uint32_t lane = 0; lane < lane_count; ++lane) {
+    loom_pipeline_plan_append_edge(
+        builder, (loom_pipeline_plan_edge_t){
+                     .flow_index = flow_index,
+                     .binding_partition_index = binding_partition_index,
+                     .source_kind = LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE,
+                     .source_index = flow->instance_start + lane,
+                     .source_port = flow->producer_port,
+                     .binding_partition_lane = partitioned ? lane : 0,
+                     .target_kind = LOOM_PIPELINE_ENDPOINT_KIND_BINDING,
+                     .target_index = binding_index,
+                     .target_port = target_port,
+                 });
+  }
   return iree_ok_status();
 }
 
@@ -963,10 +1014,12 @@ static iree_status_t loom_pipeline_plan_parse_graph(
 
 static iree_status_t loom_pipeline_plan_measure_graph(
     loom_func_like_t pipeline, uint32_t* out_group_count,
-    uint32_t* out_flow_count, uint32_t* out_view_count) {
+    uint32_t* out_flow_count, uint32_t* out_view_count,
+    uint32_t* out_binding_partition_count) {
   *out_group_count = 0;
   *out_flow_count = 0;
   *out_view_count = 0;
+  *out_binding_partition_count = 0;
   loom_region_t* body = loom_func_like_body(pipeline);
   if (body == NULL || body->block_count != 1) {
     return iree_make_status(
@@ -977,11 +1030,15 @@ static iree_status_t loom_pipeline_plan_measure_graph(
   uint64_t group_count = 0;
   uint64_t flow_count = 0;
   uint64_t view_count = 0;
+  uint64_t binding_partition_count = 0;
   const loom_block_t* block = loom_region_const_entry_block(body);
   loom_op_t* op = NULL;
   loom_block_for_each_op(block, op) {
     if (loom_group_create_isa(op)) ++group_count;
     if (loom_buffer_view_isa(op)) ++view_count;
+    if (loom_pipeline_scatter_isa(op) || loom_pipeline_write_isa(op)) {
+      ++binding_partition_count;
+    }
     if (loom_pipeline_scatter_isa(op) || loom_pipeline_read_isa(op) ||
         loom_pipeline_stage_isa(op) || loom_pipeline_buffer_isa(op) ||
         loom_pipeline_fold_isa(op) || loom_pipeline_reduce_isa(op)) {
@@ -989,13 +1046,14 @@ static iree_status_t loom_pipeline_plan_measure_graph(
     }
   }
   if (group_count > UINT32_MAX || flow_count > UINT32_MAX ||
-      view_count > UINT32_MAX) {
+      view_count > UINT32_MAX || binding_partition_count > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "pipeline graph entity count is too large");
   }
   *out_group_count = (uint32_t)group_count;
   *out_flow_count = (uint32_t)flow_count;
   *out_view_count = (uint32_t)view_count;
+  *out_binding_partition_count = (uint32_t)binding_partition_count;
   return iree_ok_status();
 }
 
@@ -1017,14 +1075,17 @@ static iree_status_t loom_pipeline_plan_builder_initialize(
   uint32_t group_capacity = 0;
   uint32_t flow_capacity = 0;
   uint32_t view_binding_capacity = 0;
+  uint32_t binding_partition_capacity = 0;
   IREE_RETURN_IF_ERROR(loom_pipeline_plan_measure_graph(
-      pipeline, &group_capacity, &flow_capacity, &view_binding_capacity));
+      pipeline, &group_capacity, &flow_capacity, &view_binding_capacity,
+      &binding_partition_capacity));
   *out_builder = (loom_pipeline_plan_builder_t){
       .module = module,
       .pipeline = pipeline,
       .facts = facts,
       .arena = arena,
       .binding_count = argument_count - (uint32_t)specialization_count,
+      .binding_partition_capacity = binding_partition_capacity,
       .group_capacity = group_capacity,
       .instance_capacity = limits.instance_count,
       .flow_capacity = flow_capacity,
@@ -1046,6 +1107,8 @@ static iree_status_t loom_pipeline_plan_builder_initialize(
       arena, (count), sizeof(*builder->field), (void**)&builder->field))
   LOOM_PIPELINE_PLAN_ALLOCATE(bindings, builder->binding_count);
   LOOM_PIPELINE_PLAN_ALLOCATE(binding_next_ports, builder->binding_count);
+  LOOM_PIPELINE_PLAN_ALLOCATE(binding_partitions,
+                              builder->binding_partition_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(groups, builder->group_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(group_materialized, builder->group_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(instances, builder->instance_capacity);
@@ -1094,6 +1157,8 @@ iree_status_t loom_pipeline_plan_build(const loom_module_t* module,
       .pipeline = pipeline,
       .bindings = builder.bindings,
       .binding_count = builder.binding_count,
+      .binding_partitions = builder.binding_partitions,
+      .binding_partition_count = builder.binding_partition_count,
       .groups = builder.groups,
       .group_count = builder.group_count,
       .instances = builder.instances,

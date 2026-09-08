@@ -116,7 +116,8 @@ def test_channels_are_typed_persistent_topology_edges() -> None:
     }
     sender = descriptors["amd.xdna.aie2p.array.sender"]
     receiver = descriptors["amd.xdna.aie2p.array.receiver"]
-    partition = descriptors["amd.xdna.aie2p.array.partition"]
+    sender_partition = descriptors["amd.xdna.aie2p.array.partition.sender"]
+    receiver_partition = descriptors["amd.xdna.aie2p.array.partition.receiver"]
     channel = descriptors["amd.xdna.aie2p.array.channel"]
 
     assert {alternative.reg_class for alternative in sender.operands[1].reg_alts} == {
@@ -127,26 +128,38 @@ def test_channels_are_typed_persistent_topology_edges() -> None:
         "aie2p.array.binding",
         "aie2p.array.worker",
     }
-    assert [operand.field_name for operand in partition.operands] == [
-        "result",
-        "source",
-        "lane",
-        "lanes",
-    ]
+    for partition, register_class in (
+        (sender_partition, "aie2p.array.sender"),
+        (receiver_partition, "aie2p.array.receiver"),
+    ):
+        assert [operand.field_name for operand in partition.operands] == [
+            "result",
+            "source",
+            "lane",
+            "lanes",
+        ]
+        assert all(
+            alternative.reg_class == register_class
+            for operand in partition.operands[:2]
+            for alternative in operand.reg_alts
+        )
     assert DescriptorFlag.SIDE_EFFECTING in channel.flags
 
 
 def test_asm_mnemonics_are_target_relative() -> None:
-    assert {
+    mnemonics = [
         descriptor.asm_forms[0].mnemonic
         for descriptor in AIE2P_ARRAY_DESCRIPTOR_SET.descriptors
-    } == {
+    ]
+    assert len(mnemonics) == len(set(mnemonics))
+    assert set(mnemonics) == {
         "binding",
         "channel",
         "constant.u32",
         "constrain.location",
         "group",
-        "partition",
+        "partition.receiver",
+        "partition.sender",
         "receiver",
         "sender",
         "worker",

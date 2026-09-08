@@ -178,14 +178,14 @@ pipeline.def<kernel> @split_k() launch(%lhs: buffer, %rhs: buffer, %bias: buffer
     EXPECT_EQ(loom_type_dim_static_size_at(plan.flows[i].tile_type, 0), 8);
     EXPECT_EQ(loom_type_dim_static_size_at(plan.flows[i].tile_type, 1), 8);
   }
-  ASSERT_TRUE(plan.flows[0].partitioned);
-  EXPECT_TRUE(loom_type_is_all_static(plan.flows[0].partition_source_type));
-  EXPECT_EQ(
-      loom_type_dim_static_size_at(plan.flows[0].partition_source_type, 0), 2);
-  EXPECT_EQ(
-      loom_type_dim_static_size_at(plan.flows[0].partition_source_type, 1), 2);
-  EXPECT_EQ(
-      loom_type_dim_static_size_at(plan.flows[0].partition_source_type, 2), 2);
+  ASSERT_NE(plan.flows[0].binding_partition_index, UINT32_MAX);
+  const loom_type_t lhs_partition_type =
+      plan.binding_partitions[plan.flows[0].binding_partition_index]
+          .binding_type;
+  EXPECT_TRUE(loom_type_is_all_static(lhs_partition_type));
+  EXPECT_EQ(loom_type_dim_static_size_at(lhs_partition_type, 0), 2);
+  EXPECT_EQ(loom_type_dim_static_size_at(lhs_partition_type, 1), 2);
+  EXPECT_EQ(loom_type_dim_static_size_at(lhs_partition_type, 2), 2);
 
   const loom_pipeline_plan_edge_t& product0_to_reducer = plan.edges[4];
   EXPECT_EQ(product0_to_reducer.source_kind,
@@ -242,18 +242,22 @@ pipeline.def<kernel> @encoded() launch(%weight: buffer, %activation: buffer) {
   ASSERT_EQ(plan.flow_count, 2u);
   EXPECT_EQ(plan.flows[0].record_count, 3u);
   EXPECT_EQ(plan.flows[1].record_count, 3u);
+  const loom_type_t weight_partition_type =
+      plan.binding_partitions[plan.flows[0].binding_partition_index]
+          .binding_type;
+  const loom_type_t activation_partition_type =
+      plan.binding_partitions[plan.flows[1].binding_partition_index]
+          .binding_type;
   const loom_encoding_record_layout_t* weight_layout = nullptr;
   ASSERT_TRUE(loom_encoding_query_type_record_layout(
-      nullptr, module.get(), plan.flows[0].partition_source_type,
-      &weight_layout));
+      nullptr, module.get(), weight_partition_type, &weight_layout));
   ASSERT_NE(weight_layout, nullptr);
   EXPECT_EQ(weight_layout->geometry.logical_element_count, 256u);
   EXPECT_EQ(weight_layout->geometry.storage_byte_count, 176u);
   EXPECT_EQ(weight_layout->geometry.required_alignment, 2u);
   const loom_encoding_record_layout_t* activation_layout = nullptr;
   ASSERT_TRUE(loom_encoding_query_type_record_layout(
-      nullptr, module.get(), plan.flows[1].partition_source_type,
-      &activation_layout));
+      nullptr, module.get(), activation_partition_type, &activation_layout));
   ASSERT_NE(activation_layout, nullptr);
   EXPECT_EQ(activation_layout->geometry.logical_element_count, 128u);
   EXPECT_EQ(activation_layout->geometry.storage_byte_count, 144u);
@@ -261,8 +265,8 @@ pipeline.def<kernel> @encoded() launch(%weight: buffer, %activation: buffer) {
   loom_value_facts_t stride_storage[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK];
   loom_value_fact_address_layout_t address_layout = {};
   ASSERT_TRUE(loom_encoding_query_type_address_layout(
-      nullptr, module.get(), plan.flows[0].partition_source_type,
-      stride_storage, IREE_ARRAYSIZE(stride_storage), &address_layout));
+      nullptr, module.get(), weight_partition_type, stride_storage,
+      IREE_ARRAYSIZE(stride_storage), &address_layout));
   EXPECT_EQ(address_layout.kind, LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE);
 }
 
@@ -404,6 +408,80 @@ pipeline.def<kernel> @fanout() launch(%input: buffer, %output0: buffer, %output1
   EXPECT_EQ(plan.edges[2].source_port, 1u);
   EXPECT_EQ(plan.edges[1].target_index, 1u);
   EXPECT_EQ(plan.edges[2].target_index, 2u);
+}
+
+TEST_F(PipelinePlanTest, PartitionsMultiLaneWritesByLeadingDimension) {
+  ModulePtr module = Parse(R"(
+func.def @copy(%input: buffer, %output: buffer) {
+  func.return
+}
+
+pipeline.def<kernel> @distributed_copy() launch(%input: buffer, %output: buffer) {
+  %lane_count = index.constant 2 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lane_count : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<2x3x4xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<2x3x4xi8>
+  %input_records = pipeline.scatter %input_view across %workers : view<2x3x4xi8>, group -> pipeline.flow<tile<4xi8>>
+  %output_records = pipeline.stage @copy on %workers(%input_records) : (group, pipeline.flow<tile<4xi8>>) -> (pipeline.flow<tile<4xi8>>)
+  pipeline.write %output_records to %output_view : pipeline.flow<tile<4xi8>>, view<2x3x4xi8>
+  pipeline.return
+}
+)");
+
+  loom_pipeline_plan_t plan = {};
+  IREE_ASSERT_OK(BuildPlan(module.get(), IREE_SV("distributed_copy"), &plan));
+
+  ASSERT_EQ(plan.binding_count, 2u);
+  EXPECT_EQ(plan.bindings[0].access, LOOM_PIPELINE_BINDING_ACCESS_FLAG_READ);
+  EXPECT_EQ(plan.bindings[1].access, LOOM_PIPELINE_BINDING_ACCESS_FLAG_WRITE);
+  ASSERT_EQ(plan.flow_count, 2u);
+  EXPECT_EQ(plan.flows[1].record_count, 3u);
+  ASSERT_EQ(plan.binding_partition_count, 2u);
+  ASSERT_EQ(plan.edge_count, 4u);
+  for (uint32_t lane = 0; lane < 2; ++lane) {
+    const loom_pipeline_plan_edge_t& input_edge = plan.edges[lane];
+    EXPECT_EQ(input_edge.binding_partition_lane, lane);
+    ASSERT_NE(input_edge.binding_partition_index, UINT32_MAX);
+
+    const loom_pipeline_plan_edge_t& output_edge = plan.edges[2 + lane];
+    EXPECT_EQ(output_edge.source_kind, LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE);
+    EXPECT_EQ(output_edge.source_index, lane);
+    EXPECT_EQ(output_edge.target_kind, LOOM_PIPELINE_ENDPOINT_KIND_BINDING);
+    EXPECT_EQ(output_edge.target_index, 1u);
+    EXPECT_EQ(output_edge.binding_partition_lane, lane);
+    ASSERT_NE(output_edge.binding_partition_index, UINT32_MAX);
+    const loom_pipeline_plan_binding_partition_t& output_partition =
+        plan.binding_partitions[output_edge.binding_partition_index];
+    EXPECT_TRUE(loom_type_is_all_static(output_partition.binding_type));
+    EXPECT_EQ(loom_type_rank(output_partition.binding_type), 3u);
+    EXPECT_EQ(loom_type_dim_static_size_at(output_partition.binding_type, 0),
+              2);
+  }
+}
+
+TEST_F(PipelinePlanTest, RejectsMismatchedOutputLaneDimension) {
+  ModulePtr module = Parse(R"(
+func.def @copy(%input: buffer, %output: buffer) {
+  func.return
+}
+
+pipeline.def<kernel> @mismatch() launch(%input: buffer, %output: buffer) {
+  %lane_count = index.constant 2 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lane_count : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<2x3x4xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<3x3x4xi8>
+  %input_records = pipeline.scatter %input_view across %workers : view<2x3x4xi8>, group -> pipeline.flow<tile<4xi8>>
+  %output_records = pipeline.stage @copy on %workers(%input_records) : (group, pipeline.flow<tile<4xi8>>) -> (pipeline.flow<tile<4xi8>>)
+  pipeline.write %output_records to %output_view : pipeline.flow<tile<4xi8>>, view<3x3x4xi8>
+  pipeline.return
+}
+)");
+
+  loom_pipeline_plan_t plan = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        BuildPlan(module.get(), IREE_SV("mismatch"), &plan));
 }
 
 TEST_F(PipelinePlanTest, RejectsUnresolvedCardinalityAtConcreteBoundary) {

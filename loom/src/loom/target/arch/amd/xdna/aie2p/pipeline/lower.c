@@ -414,8 +414,8 @@ typedef struct loom_aie2p_pipeline_emitter_t {
   // Emitted binding registers indexed by launch binding.
   loom_value_id_t* binding_values;
 
-  // Shared source endpoint for each partitioned plan flow.
-  loom_value_id_t* partition_source_values;
+  // Shared full-width endpoint for each binding partition record.
+  loom_value_id_t* binding_partition_values;
 
   // Emitted sender endpoints indexed by concrete plan edge. Fanout edges with
   // the same source share one endpoint value.
@@ -472,8 +472,8 @@ static iree_status_t loom_aie2p_pipeline_emitter_initialize(
   LOOM_AIE2P_PIPELINE_ALLOCATE_VALUES(group_values, plan->group_count);
   LOOM_AIE2P_PIPELINE_ALLOCATE_VALUES(instance_values, plan->instance_count);
   LOOM_AIE2P_PIPELINE_ALLOCATE_VALUES(binding_values, plan->binding_count);
-  LOOM_AIE2P_PIPELINE_ALLOCATE_VALUES(partition_source_values,
-                                      plan->flow_count);
+  LOOM_AIE2P_PIPELINE_ALLOCATE_VALUES(binding_partition_values,
+                                      plan->binding_partition_count);
   LOOM_AIE2P_PIPELINE_ALLOCATE_VALUES(edge_sender_values, plan->edge_count);
 #undef LOOM_AIE2P_PIPELINE_ALLOCATE_VALUES
   return iree_ok_status();
@@ -656,11 +656,71 @@ static loom_value_id_t loom_aie2p_pipeline_endpoint_owner(
 static bool loom_aie2p_pipeline_edges_share_source(
     const loom_pipeline_plan_edge_t* lhs,
     const loom_pipeline_plan_edge_t* rhs) {
-  return lhs->flow_index == rhs->flow_index &&
-         lhs->source_kind == rhs->source_kind &&
-         lhs->source_index == rhs->source_index &&
-         lhs->source_port == rhs->source_port &&
-         lhs->partition_lane == rhs->partition_lane;
+  if (lhs->flow_index != rhs->flow_index ||
+      lhs->source_kind != rhs->source_kind ||
+      lhs->source_index != rhs->source_index ||
+      lhs->source_port != rhs->source_port) {
+    return false;
+  }
+  return lhs->source_kind != LOOM_PIPELINE_ENDPOINT_KIND_BINDING ||
+         (lhs->binding_partition_index == rhs->binding_partition_index &&
+          lhs->binding_partition_lane == rhs->binding_partition_lane);
+}
+
+static iree_status_t loom_aie2p_pipeline_emit_partitioned_binding_endpoint(
+    loom_aie2p_pipeline_emitter_t* emitter, uint32_t edge_index,
+    loom_aie2p_array_endpoint_direction_t direction,
+    loom_location_id_t location, loom_value_id_t* out_endpoint) {
+  const loom_pipeline_plan_edge_t* edge = &emitter->plan->edges[edge_index];
+  const loom_pipeline_plan_flow_t* flow =
+      &emitter->plan->flows[edge->flow_index];
+  IREE_ASSERT_LT(edge->binding_partition_index,
+                 emitter->plan->binding_partition_count);
+  const loom_pipeline_plan_binding_partition_t* partition =
+      &emitter->plan->binding_partitions[edge->binding_partition_index];
+  loom_value_id_t* partition_base =
+      &emitter->binding_partition_values[edge->binding_partition_index];
+  const bool sender = direction == LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND;
+  if (*partition_base == LOOM_VALUE_ID_INVALID) {
+    const loom_pipeline_endpoint_kind_t endpoint_kind =
+        sender ? edge->source_kind : edge->target_kind;
+    IREE_ASSERT_EQ(endpoint_kind, LOOM_PIPELINE_ENDPOINT_KIND_BINDING);
+    const uint32_t endpoint_index =
+        sender ? edge->source_index : edge->target_index;
+    const uint32_t endpoint_port =
+        sender ? edge->source_port : edge->target_port;
+    IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_endpoint(
+        emitter,
+        sender ? AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_SENDER
+               : AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_RECEIVER,
+        emitter->binding_values[endpoint_index], endpoint_port,
+        partition->binding_type, location, partition_base));
+  }
+
+  loom_value_id_t lane = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t lane_count = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_constant(
+      emitter, edge->binding_partition_lane, location, &lane));
+  IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_constant(
+      emitter, emitter->plan->groups[flow->group_index].lane_count, location,
+      &lane_count));
+  const loom_value_id_t operands[] = {
+      *partition_base,
+      lane,
+      lane_count,
+  };
+  const uint16_t reg_class_id =
+      sender ? AIE2P_ARRAY_REG_CLASS_ID_AIE2P_ARRAY_SENDER
+             : AIE2P_ARRAY_REG_CLASS_ID_AIE2P_ARRAY_RECEIVER;
+  loom_type_t endpoint_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_typed_resource_type(
+      emitter, reg_class_id, flow->tile_type, &endpoint_type));
+  return loom_aie2p_pipeline_emit_op(
+      emitter,
+      sender ? AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_PARTITION_SENDER
+             : AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_PARTITION_RECEIVER,
+      operands, IREE_ARRAYSIZE(operands), loom_named_attr_slice_empty(),
+      &endpoint_type, location, out_endpoint);
 }
 
 static iree_status_t loom_aie2p_pipeline_emit_edge(
@@ -677,36 +737,12 @@ static iree_status_t loom_aie2p_pipeline_emit_edge(
       break;
     }
   }
-  if (sender == LOOM_VALUE_ID_INVALID && flow->partitioned) {
-    IREE_ASSERT_EQ(edge->source_kind, LOOM_PIPELINE_ENDPOINT_KIND_BINDING);
-    loom_value_id_t* partition_source =
-        &emitter->partition_source_values[edge->flow_index];
-    if (*partition_source == LOOM_VALUE_ID_INVALID) {
-      IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_endpoint(
-          emitter, AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_SENDER,
-          emitter->binding_values[edge->source_index], flow->producer_port,
-          flow->partition_source_type, location, partition_source));
-    }
-    loom_value_id_t lane = LOOM_VALUE_ID_INVALID;
-    loom_value_id_t lane_count = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_constant(
-        emitter, edge->partition_lane, location, &lane));
-    IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_constant(
-        emitter, emitter->plan->groups[flow->group_index].lane_count, location,
-        &lane_count));
-    const loom_value_id_t operands[] = {
-        *partition_source,
-        lane,
-        lane_count,
-    };
-    loom_type_t sender_type = loom_type_none();
-    IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_typed_resource_type(
-        emitter, AIE2P_ARRAY_REG_CLASS_ID_AIE2P_ARRAY_SENDER, flow->tile_type,
-        &sender_type));
-    IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_op(
-        emitter, AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_PARTITION, operands,
-        IREE_ARRAYSIZE(operands), loom_named_attr_slice_empty(), &sender_type,
-        location, &sender));
+  if (sender == LOOM_VALUE_ID_INVALID &&
+      edge->source_kind == LOOM_PIPELINE_ENDPOINT_KIND_BINDING &&
+      edge->binding_partition_index != UINT32_MAX) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_partitioned_binding_endpoint(
+        emitter, edge_index, LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND, location,
+        &sender));
   } else if (sender == LOOM_VALUE_ID_INVALID) {
     IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_endpoint(
         emitter, AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_SENDER,
@@ -717,11 +753,18 @@ static iree_status_t loom_aie2p_pipeline_emit_edge(
   emitter->edge_sender_values[edge_index] = sender;
 
   loom_value_id_t receiver = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_endpoint(
-      emitter, AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_RECEIVER,
-      loom_aie2p_pipeline_endpoint_owner(emitter, edge->target_kind,
-                                         edge->target_index),
-      edge->target_port, flow->tile_type, location, &receiver));
+  if (edge->target_kind == LOOM_PIPELINE_ENDPOINT_KIND_BINDING &&
+      edge->binding_partition_index != UINT32_MAX) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_partitioned_binding_endpoint(
+        emitter, edge_index, LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE,
+        location, &receiver));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_endpoint(
+        emitter, AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_RECEIVER,
+        loom_aie2p_pipeline_endpoint_owner(emitter, edge->target_kind,
+                                           edge->target_index),
+        edge->target_port, flow->tile_type, location, &receiver));
+  }
 
   const uint32_t capacity =
       flow->minimum_capacity > LOOM_AIE2P_PIPELINE_DEFAULT_CHANNEL_CAPACITY

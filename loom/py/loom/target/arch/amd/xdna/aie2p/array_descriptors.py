@@ -295,9 +295,9 @@ _DESCRIPTORS = (
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     Descriptor(
-        key=f"{_DESCRIPTOR_SET_KEY}.partition",
-        mnemonic="partition",
-        semantic_tag="array.partition",
+        key=f"{_DESCRIPTOR_SET_KEY}.partition.sender",
+        mnemonic="partition.sender",
+        semantic_tag="array.partition.sender",
         operands=(
             _result(_REG_SENDER),
             _operand(_REG_SENDER, "source"),
@@ -305,7 +305,25 @@ _DESCRIPTORS = (
             _operand(_REG_SCALAR, "lanes"),
         ),
         asm_forms=_asm(
-            "partition",
+            "partition.sender",
+            results=("result",),
+            operands=("source", "lane", "lanes"),
+        ),
+        schedule_class=_SCHEDULE_GRAPH,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
+    Descriptor(
+        key=f"{_DESCRIPTOR_SET_KEY}.partition.receiver",
+        mnemonic="partition.receiver",
+        semantic_tag="array.partition.receiver",
+        operands=(
+            _result(_REG_RECEIVER),
+            _operand(_REG_RECEIVER, "source"),
+            _operand(_REG_SCALAR, "lane"),
+            _operand(_REG_SCALAR, "lanes"),
+        ),
+        asm_forms=_asm(
+            "partition.receiver",
             results=("result",),
             operands=("source", "lane", "lanes"),
         ),
