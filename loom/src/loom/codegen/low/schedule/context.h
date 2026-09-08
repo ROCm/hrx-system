@@ -225,8 +225,6 @@ typedef struct loom_low_schedule_build_state_t {
   loom_liveness_block_order_t* liveness_block_orders;
   // Operation pointers in final scheduled order.
   const loom_op_t** scheduled_ops;
-  // Function-local storage layout accumulated while populating schedule nodes.
-  loom_low_storage_layout_builder_t storage_layout_builder;
   // Stable dependency graph accumulated while building the schedule DAG.
   loom_low_schedule_dependency_graph_t dependencies;
   // Compact verified storage relations grouped by owning schedule node.

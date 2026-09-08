@@ -21,10 +21,10 @@
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/function_requirements.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/schedule/dependencies.h"
-#include "loom/codegen/low/storage_layout.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
@@ -697,8 +697,8 @@ typedef struct loom_low_schedule_options_t {
   loom_low_schedule_strategy_t strategy;
 } loom_low_schedule_options_t;
 
-// Schedule table for one target-low function body. All arrays are arena-owned
-// by the caller-provided arena passed to loom_low_schedule_function.
+// Schedule table for one target-low function body. Tables belong to the
+// function-model and scheduling arenas; both must outlive their consumers.
 typedef struct loom_low_schedule_table_t {
   // Module containing the scheduled low function.
   const loom_module_t* module;
@@ -708,8 +708,8 @@ typedef struct loom_low_schedule_table_t {
   loom_low_resolved_target_t target;
   // Borrowed source-derived memory summaries attached to scheduled nodes.
   loom_low_memory_access_table_t memory_access_table;
-  // Function-local storage reservations packed during source node collection.
-  loom_low_storage_layout_t storage_layout;
+  // Declared interfaces and storage retained from the immutable function model.
+  loom_low_function_requirements_t requirements;
   // Function-local value IDs indexed by local value ordinal.
   const loom_value_id_t* value_ids;
   // Number of entries in |value_ids|.

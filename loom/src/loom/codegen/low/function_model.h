@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/function_requirements.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/local_value_domain.h"
@@ -48,8 +49,8 @@ typedef struct loom_low_function_model_t {
   loom_cfg_graph_t cfg_graph;
   // Canonical loop intervals preserved from |cfg_graph|.
   loom_cfg_loop_forest_t loop_forest;
-  // Number of top-level operations in |body|.
-  iree_host_size_t node_count;
+  // Declared interfaces, storage, and structural counts for this snapshot.
+  loom_low_function_requirements_t requirements;
   // Number of user-facing errors emitted while constructing the model.
   uint32_t error_count;
 } loom_low_function_model_t;

@@ -599,7 +599,7 @@ loom_amdgpu_hal_kernel_library_validate_final_workgroup_storage(
   }
 
   const uint64_t workgroup_bytes =
-      frame->schedule.storage_layout.space_sizes.workgroup_bytes;
+      frame->schedule.requirements.storage_layout.space_sizes.workgroup_bytes;
   if (workgroup_bytes <= limit) {
     return iree_ok_status();
   }

@@ -97,7 +97,8 @@ static iree_status_t loom_amdgpu_native_preflight_collect_storage_usage(
     const loom_low_schedule_table_t* schedule,
     const loom_amdgpu_native_preflight_options_t* options,
     loom_amdgpu_native_preflight_t* preflight) {
-  const loom_low_storage_layout_t* layout = &schedule->storage_layout;
+  const loom_low_storage_layout_t* layout =
+      &schedule->requirements.storage_layout;
   for (iree_host_size_t i = 0; i < layout->record_count; ++i) {
     const loom_low_storage_layout_record_t* record = &layout->records[i];
     if (loom_low_storage_space_set_contains(kLoomAmdgpuNativeStorageSpaces,

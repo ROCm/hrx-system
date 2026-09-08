@@ -93,6 +93,21 @@ void loom_low_storage_layout_builder_initialize(
   *out_builder = (loom_low_storage_layout_builder_t){0};
 }
 
+loom_low_storage_layout_requirement_t loom_low_storage_layout_requirement(
+    const loom_low_storage_layout_t* layout, loom_storage_space_t space) {
+  loom_low_storage_layout_requirement_t requirement = {0};
+  for (iree_host_size_t i = 0; i < layout->record_count; ++i) {
+    const loom_low_storage_layout_reservation_t* reservation =
+        &layout->records[i].reservation;
+    if (reservation->space != space) continue;
+    requirement.byte_length = reservation->byte_offset + reservation->byte_size;
+    requirement.minimum_alignment =
+        iree_max(requirement.minimum_alignment, reservation->byte_alignment);
+  }
+  if (requirement.byte_length == 0) requirement.minimum_alignment = 0;
+  return requirement;
+}
+
 iree_status_t loom_low_storage_layout_builder_append(
     const loom_module_t* module, const loom_op_t* reserve_op,
     iree_arena_allocator_t* arena, loom_low_storage_layout_builder_t* builder) {

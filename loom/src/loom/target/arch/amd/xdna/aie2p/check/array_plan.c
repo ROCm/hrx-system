@@ -9,6 +9,8 @@
 #include <inttypes.h>
 
 #include "loom/codegen/low/diagnostics.h"
+#include "loom/codegen/low/function_requirements.h"
+#include "loom/codegen/low/storage_layout.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/format/text/printer.h"
 #include "loom/ir/module.h"
@@ -59,9 +61,8 @@ static bool loom_aie2p_array_plan_check_has_contract(
                                 expected_contract);
 }
 
-static iree_status_t loom_aie2p_array_plan_check_compile_leaves(
+static iree_status_t loom_aie2p_array_plan_check_collect_leaves(
     const loom_check_emit_provider_request_t* request,
-    iree_diagnostic_emitter_t diagnostic_emitter,
     loom_aie2p_array_leaf_t** out_leaves, iree_host_size_t* out_leaf_count) {
   *out_leaves = NULL;
   *out_leaf_count = 0;
@@ -81,17 +82,8 @@ static iree_status_t loom_aie2p_array_plan_check_compile_leaves(
   }
 
   loom_aie2p_array_leaf_t* leaves = NULL;
-  loom_aie2p_leaf_contribution_t* contributions = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       request->case_arena, leaf_count, sizeof(*leaves), (void**)&leaves));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      request->case_arena, leaf_count, sizeof(*contributions),
-      (void**)&contributions));
-
-  const loom_aie2p_leaf_compile_options_t compile_options = {
-      .descriptor_registry = &request->low_registry->registry,
-      .diagnostic_emitter = diagnostic_emitter,
-  };
   iree_host_size_t leaf_index = 0;
   loom_module_for_each_symbol(request->module, symbol) {
     if (!symbol->defining_op || !loom_low_func_def_isa(symbol->defining_op) ||
@@ -100,16 +92,15 @@ static iree_status_t loom_aie2p_array_plan_check_compile_leaves(
             IREE_SV("amd.xdna.aie2p.core"))) {
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_aie2p_leaf_compile(
-        request->module, symbol->defining_op, &compile_options,
-        request->case_arena, &contributions[leaf_index]));
     leaves[leaf_index] = (loom_aie2p_array_leaf_t){
         .entry = {.module_id = 0,
                   .symbol_id =
                       (loom_symbol_id_t)(symbol -
                                          request->module->symbols.entries)},
-        .contribution = &contributions[leaf_index],
     };
+    IREE_RETURN_IF_ERROR(loom_low_function_requirements_build(
+        request->module, loom_low_func_def_body(symbol->defining_op),
+        request->case_arena, &leaves[leaf_index].requirements));
     ++leaf_index;
   }
   *out_leaves = leaves;
@@ -239,8 +230,8 @@ static iree_status_t loom_aie2p_array_plan_check_format(
   }
   for (iree_host_size_t i = 0; i < plan->worker_count; ++i) {
     const loom_aie2p_array_worker_t* worker = &plan->workers[i];
-    const loom_aie2p_leaf_realization_t* realization =
-        &plan->worker_plans[i].contribution->realization;
+    const loom_low_function_requirements_t* requirements =
+        plan->worker_plans[i].requirements;
     const iree_string_view_t entry_name =
         loom_low_diagnostic_symbol_name(module, worker->entry);
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -258,12 +249,16 @@ static iree_status_t loom_aie2p_array_plan_check_format(
           worker->fold_output_count, (unsigned)worker->fold_kind,
           worker->fold_fast_math_flags));
     }
+    uint32_t storage_domain_count = 0;
+    for (uint32_t space = 0; space < LOOM_STORAGE_SPACE_COUNT_; ++space) {
+      storage_domain_count +=
+          loom_low_storage_layout_requirement(&requirements->storage_layout,
+                                              (loom_storage_space_t)space)
+              .byte_length != 0;
+    }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        builder,
-        " code-bytes=%" PRIu64 " resources=%" PRIhsz " storage-domains=%" PRIhsz
-        "\n",
-        realization->code.byte_length, realization->resource_import_count,
-        realization->storage_domain_count));
+        builder, " resources=%" PRIhsz " storage-domains=%" PRIu32 "\n",
+        requirements->resource_count, storage_domain_count));
   }
   for (iree_host_size_t i = 0; i < plan->channel_count; ++i) {
     const loom_aie2p_array_channel_t* channel = &plan->channels[i];
@@ -685,8 +680,8 @@ static iree_status_t loom_aie2p_array_plan_check_execute(
 
   loom_aie2p_array_leaf_t* leaves = NULL;
   iree_host_size_t leaf_count = 0;
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_check_compile_leaves(
-      request, diagnostic_emitter, &leaves, &leaf_count));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_check_collect_leaves(
+      request, &leaves, &leaf_count));
   if (request->diagnostic_collector->count != 0) return iree_ok_status();
 
   loom_aie2p_array_plan_t plan = {0};

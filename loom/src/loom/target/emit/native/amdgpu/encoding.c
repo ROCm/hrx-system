@@ -2222,8 +2222,9 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
   const loom_amdgpu_storage_layout_t* storage_layout =
       options ? options->storage_layout : NULL;
   if (storage_layout == NULL) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_build(
-        &schedule->storage_layout, arena, &derived_storage_layout));
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_storage_layout_build(&schedule->requirements.storage_layout,
+                                         arena, &derived_storage_layout));
     storage_layout = &derived_storage_layout;
   }
   const loom_amdgpu_native_descriptor_refs_t descriptors = {

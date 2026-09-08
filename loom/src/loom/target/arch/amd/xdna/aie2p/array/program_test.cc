@@ -11,6 +11,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/function_requirements.h"
 
 namespace loom {
 namespace {
@@ -37,11 +38,11 @@ static void ExpectRegisterMaskWrite(const loom_aie2p_program_record_t& record,
 }
 
 TEST(Aie2pArrayProgramTest, ResetsComputeDmaBeforePlannedQueueStarts) {
-  const loom_aie2p_leaf_contribution_t contribution = {};
+  const loom_low_function_requirements_t requirements = {};
   const loom_aie2p_array_worker_plan_t worker_plan = {
       /*.worker_index=*/0,
       /*.coordinate=*/{0, 2},
-      /*.contribution=*/&contribution,
+      /*.requirements=*/&requirements,
   };
   const loom_aie2p_array_channel_t channel = {
       /*.value_id=*/0,
@@ -156,11 +157,11 @@ TEST(Aie2pArrayProgramTest, ResetsComputeDmaBeforePlannedQueueStarts) {
 }
 
 TEST(Aie2pArrayProgramTest, KeepsDmaServiceCoreReset) {
-  const loom_aie2p_leaf_contribution_t contribution = {};
+  const loom_low_function_requirements_t requirements = {};
   const loom_aie2p_array_worker_plan_t worker_plan = {
       /*.worker_index=*/0,
       /*.coordinate=*/{0, 2},
-      /*.contribution=*/&contribution,
+      /*.requirements=*/&requirements,
   };
   const loom_aie2p_array_channel_t channel = {
       /*.value_id=*/0,

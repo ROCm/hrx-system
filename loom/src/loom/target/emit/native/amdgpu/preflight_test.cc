@@ -187,8 +187,8 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     schedule.module = module_;
     schedule.function_op = function_op_;
     schedule.target = ResolvedTarget(descriptor_set);
-    loom_low_storage_layout_builder_finish(&storage_layout_builder_,
-                                           &schedule.storage_layout);
+    loom_low_storage_layout_builder_finish(
+        &storage_layout_builder_, &schedule.requirements.storage_layout);
     return schedule;
   }
 

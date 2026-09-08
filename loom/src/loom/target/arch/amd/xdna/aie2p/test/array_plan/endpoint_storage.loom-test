@@ -51,7 +51,7 @@ array @neighbor_egress family=amd.xdna.npu2 groups=1 workers=1 bindings=3 channe
 binding index=0 ordinal=0 access=write
 binding index=1 ordinal=1 access=write
 binding index=2 ordinal=2 access=write
-worker index=0 group=0 lane=0 entry=@write_three_outputs tile=(0,2) code-bytes=30 resources=3 storage-domains=0
+worker index=0 group=0 lane=0 entry=@write_three_outputs tile=(0,2) resources=3 storage-domains=0
 channel index=0 transport=external-dma record-bytes=4 capacity=2 records=1 sender=worker[0]:0 receiver=binding[0]:0
 channel index=1 transport=external-dma record-bytes=4 capacity=2 records=1 sender=worker[0]:1 receiver=binding[1]:0
 channel index=2 transport=external-dma record-bytes=4 capacity=2 records=1 sender=worker[0]:2 receiver=binding[2]:0

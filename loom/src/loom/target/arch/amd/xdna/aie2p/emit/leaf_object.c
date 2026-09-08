@@ -70,21 +70,14 @@ static iree_string_view_t loom_aie2p_leaf_object_storage_space_name(
 static void loom_aie2p_leaf_object_measure_function_storage(
     const loom_low_storage_layout_t* layout,
     loom_aie2p_leaf_realization_t* realization) {
-  realization->stack.byte_length = layout->space_sizes.stack_bytes;
-  realization->scratch.byte_length = layout->space_sizes.scratch_bytes;
-  realization->private_storage.byte_length = layout->space_sizes.private_bytes;
-  realization->workgroup_storage.byte_length =
-      layout->space_sizes.workgroup_bytes;
-  for (iree_host_size_t i = 0; i < layout->record_count; ++i) {
-    const loom_low_storage_layout_reservation_t* reservation =
-        &layout->records[i].reservation;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kStorageSpaceOrder); ++i) {
+    const loom_storage_space_t space = kStorageSpaceOrder[i];
+    const loom_low_storage_layout_requirement_t source_requirement =
+        loom_low_storage_layout_requirement(layout, space);
     loom_aie2p_leaf_storage_requirement_t* requirement =
-        loom_aie2p_leaf_object_storage_requirement_mutable(realization,
-                                                           reservation->space);
-    if (requirement->byte_length != 0) {
-      requirement->minimum_alignment =
-          iree_max(requirement->minimum_alignment, reservation->byte_alignment);
-    }
+        loom_aie2p_leaf_object_storage_requirement_mutable(realization, space);
+    requirement->byte_length = source_requirement.byte_length;
+    requirement->minimum_alignment = source_requirement.minimum_alignment;
   }
 }
 
@@ -124,22 +117,17 @@ static iree_status_t loom_aie2p_leaf_object_measure_spills(
 static iree_status_t loom_aie2p_leaf_object_collect_resources(
     const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,
     loom_aie2p_leaf_realization_t* realization) {
-  loom_region_t* body = loom_func_like_body(
-      loom_func_like_cast(frame->module, (loom_op_t*)frame->function_op));
-  const loom_block_t* entry_block = loom_region_const_entry_block(body);
-  iree_host_size_t resource_count = 0;
-  const loom_op_t* op = NULL;
-  loom_block_for_each_op(entry_block, op) {
-    if (loom_low_resource_isa(op)) ++resource_count;
-  }
+  const loom_low_function_requirements_t* requirements =
+      &frame->schedule.requirements;
+  const iree_host_size_t resource_count = requirements->resource_count;
   if (resource_count == 0) return iree_ok_status();
 
   loom_aie2p_leaf_resource_import_t* resources = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, resource_count, sizeof(*resources), (void**)&resources));
-  iree_host_size_t resource_index = 0;
-  loom_block_for_each_op(entry_block, op) {
-    if (!loom_low_resource_isa(op)) continue;
+  for (iree_host_size_t resource_index = 0; resource_index < resource_count;
+       ++resource_index) {
+    const loom_op_t* op = requirements->resources[resource_index];
 
     const loom_low_schedule_node_t* node =
         loom_low_schedule_node_for_op(&frame->schedule, op);
@@ -191,7 +179,7 @@ static iree_status_t loom_aie2p_leaf_object_collect_resources(
 
     const loom_type_id_t source_type_id = loom_low_resource_source_type(op);
     IREE_ASSERT_LT(source_type_id, frame->module->types.count);
-    resources[resource_index++] = (loom_aie2p_leaf_resource_import_t){
+    resources[resource_index] = (loom_aie2p_leaf_resource_import_t){
         .index = (uint64_t)loom_low_resource_index(op),
         .extent = extent,
         .cache_swizzle_stride = cache_swizzle_stride,
@@ -209,7 +197,6 @@ static iree_status_t loom_aie2p_leaf_object_collect_resources(
             loom_type_kind(frame->module->types.entries[source_type_id]),
     };
   }
-  IREE_ASSERT_EQ(resource_index, resource_count);
   realization->resource_imports = resources;
   realization->resource_import_count = resource_count;
   realization->capability_flags |=
@@ -321,7 +308,7 @@ iree_status_t loom_aie2p_leaf_object_emit(
           },
   };
   loom_aie2p_leaf_object_measure_function_storage(
-      &plan->frame->schedule.storage_layout, realization);
+      &plan->frame->schedule.requirements.storage_layout, realization);
   IREE_RETURN_IF_ERROR(
       loom_aie2p_leaf_object_measure_spills(plan->frame, realization));
 

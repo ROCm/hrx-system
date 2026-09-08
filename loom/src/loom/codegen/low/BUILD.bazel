@@ -228,12 +228,26 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "function_requirements",
+    srcs = ["function_requirements.c"],
+    hdrs = ["function_requirements.h"],
+    deps = [
+        ":storage_layout",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "function_model",
     srcs = ["function_model.c"],
     hdrs = ["function_model.h"],
     deps = [
         ":descriptors",
         ":function",
+        ":function_requirements",
         ":target_binding",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/ir",
@@ -241,6 +255,24 @@ loom_cc_library(
         "//loom/src/loom/util:cfg_loop",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "function_requirements_test",
+    srcs = ["function_requirements_test.cc"],
+    deps = [
+        ":function_requirements",
+        ":storage_layout",
+        ":text_asm",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/test:low_registry",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

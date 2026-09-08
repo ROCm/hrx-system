@@ -11,10 +11,10 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/codegen/low/function_requirements.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/combining.h"
-#include "loom/target/arch/amd/xdna/aie2p/emit/leaf_object.h"
 #include "loom/target/arch/amd/xdna/array/facts.h"
 
 #ifdef __cplusplus
@@ -151,22 +151,22 @@ typedef struct loom_aie2p_array_channel_t {
   loom_aie2p_array_channel_transport_t transport;
 } loom_aie2p_array_channel_t;
 
-// Detached compiled leaf associated with an array worker entry symbol.
+// Declared requirements associated with a worker entry symbol.
 typedef struct loom_aie2p_array_leaf_t {
   // Module-local core entry symbol.
   loom_symbol_ref_t entry;
-  // Detached leaf object and exact physical requirements.
-  const loom_aie2p_leaf_contribution_t* contribution;
+  // Source imports and storage retained before resident worker construction.
+  loom_low_function_requirements_t requirements;
 } loom_aie2p_array_leaf_t;
 
-// Final placement of one resident worker and its compiled leaf.
+// Final placement of one resident worker before native compilation.
 typedef struct loom_aie2p_array_worker_plan_t {
   // Index of the logical worker represented by this placement.
   uint32_t worker_index;
   // Physical compute tile executing the worker.
   loom_xdna_tile_coordinate_t coordinate;
-  // Detached leaf contribution placed on the tile.
-  const loom_aie2p_leaf_contribution_t* contribution;
+  // Immutable source requirements used to assign ports and storage.
+  const loom_low_function_requirements_t* requirements;
 } loom_aie2p_array_worker_plan_t;
 
 // Final local-data placement for one compiled worker storage domain.
@@ -386,13 +386,16 @@ typedef struct loom_aie2p_array_plan_t {
 // Extracts and plans one verified amd.xdna.aie2p.array Low function.
 //
 // Exact SSA facts drive all resource cardinalities and placement coordinates.
-// Every worker entry must have one matching detached leaf in |leaves|. The
+// Every worker entry must have one matching source inventory in |leaves|. The
 // planner maps external binding channels through shim DMA and compute endpoints
 // whose storage and locks are visible to the worker. The worker tile is
 // preferred, with adjacent compute tiles providing additional physical DMA
 // channels without changing the logical port topology. Vertically adjacent
 // workers communicate through neighbor-visible memory; all other worker
 // channels use compute DMA and the stream network.
+// Final resident code size and allocation are checked after channel
+// realization; physical planning does not compile source leaves or allocate
+// their registers.
 // Invalid user input returns an error; structured diagnostics, when available,
 // are delivered through |diagnostic_emitter| before returning.
 iree_status_t loom_aie2p_array_plan_build(

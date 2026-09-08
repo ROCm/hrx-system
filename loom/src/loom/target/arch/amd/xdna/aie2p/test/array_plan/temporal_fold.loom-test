@@ -1,0 +1,152 @@
+// RUN: emit aie2p-array-plan @temporal_fold_array
+
+// Four input records accumulate into each output while both rings keep advancing.
+
+aie2p.target<array> @temporal_fold_array_target
+
+aie2p.target<core> @temporal_fold_core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@temporal_fold_array_target) abi(array_program) @temporal_fold_array() asm {
+  %lanes = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %lane = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %capacity = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %fold_records = constant.u32 4 : reg<aie2p.array.scalar : index>
+  %input_records = constant.u32 12 : reg<aie2p.array.scalar : index>
+  %output_records = constant.u32 3 : reg<aie2p.array.scalar : index>
+  %column = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %binding_offset = constant.u64 64 : reg<aie2p.array.offset : offset>
+
+  %group = group %lanes
+  %worker = worker.fold %group, %lane, %fold_records, @copy_f32_record, 1, 1, 1, 0
+  %input = binding 0, "read"
+  %output = binding 1, "write"
+  %input_sender = sender %input, 0 : reg<aie2p.array.sender : tile<1x3x4x32xf32, #encoding.layout.strided<strides=[0, 0, 32, 1]>>>
+  %input_lane = partition.sender %input_sender, %binding_offset, %lane, %lanes : reg<aie2p.array.sender : tile<32xf32>>
+  %worker_input = receiver %worker, 0 : reg<aie2p.array.receiver : tile<32xf32>>
+  %worker_output = sender %worker, 1 : reg<aie2p.array.sender : tile<32xf32>>
+  %output_receiver = receiver %output, 0 : reg<aie2p.array.receiver : tile<32xf32>>
+  %input_channel = channel %input_lane, %worker_input, %capacity, %input_records : reg<aie2p.array.channel : tile<32xf32>>
+  %output_channel = channel %worker_output, %output_receiver, %capacity, %output_records : reg<aie2p.array.channel : tile<32xf32>>
+  constrain.location %worker, %column, %row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@temporal_fold_core_target) abi(object_function) @copy_f32_record() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %low = vlda.acc %input, 0
+  %high = vlda.acc %input, 64
+  vst.acc %low, %output, 0
+  vst.acc %high, %output, 64
+  return
+}
+
+// ----
+array @temporal_fold_array family=amd.xdna.npu2 groups=1 workers=1 bindings=2 channels=2 slots=4 locks=4 dma=4 routes=8
+binding index=0 ordinal=0 access=read
+binding index=1 ordinal=1 access=write
+worker index=0 group=0 lane=0 entry=@copy_f32_record tile=(0,2) fold-records=4 fold-output=1+1 fold-kind=1 fold-fast-math=0x00 resources=2 storage-domains=0
+channel index=0 transport=external-dma record-bytes=128 capacity=2 records=12 sender=binding[0]:0 partition=0/1 receiver=worker[0]:0
+channel index=1 transport=external-dma record-bytes=128 capacity=2 records=3 sender=worker[0]:1 receiver=binding[1]:0
+worker-port worker=0 port=0 direction=receive channel=0 first-slot=0
+worker-port worker=0 port=1 direction=send channel=1 first-slot=2
+slot channel=0 index=0 owner=(0,2) offset=0x00000 bytes=128 sender=external receiver=0x70000
+slot channel=0 index=1 owner=(0,2) offset=0x04000 bytes=128 sender=external receiver=0x74000
+slot channel=1 index=0 owner=(0,2) offset=0x08000 bytes=128 sender=0x78000 receiver=external
+slot channel=1 index=1 owner=(0,2) offset=0x0c000 bytes=128 sender=0x7c000 receiver=external
+lock channel=0 tile=(0,2) id=0 ring=receive role=credit initial=2
+lock channel=0 tile=(0,2) id=1 ring=receive role=ready initial=0
+lock channel=1 tile=(0,2) id=2 ring=send role=credit initial=2
+lock channel=1 tile=(0,2) id=3 ring=send role=ready initial=0
+dma channel=0 tile=(0,2) side=compute direction=stream-to-memory engine-channel=0 bd-start=0 bd-count=2
+dma channel=0 tile=(0,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=1
+dma channel=1 tile=(0,2) side=compute direction=memory-to-stream engine-channel=0 bd-start=2 bd-count=2
+dma channel=1 tile=(0,0) side=shim direction=stream-to-memory engine-channel=0 bd-start=1 bd-count=1
+route channel=0 tile=(0,0) kind=shim-mux source=dma[0] destination=north[3]
+route channel=0 tile=(0,0) kind=switch source=south[3] destination=north[0]
+route channel=0 tile=(0,1) kind=switch source=south[0] destination=north[0]
+route channel=0 tile=(0,2) kind=switch source=south[0] destination=dma[0]
+route channel=1 tile=(0,2) kind=switch source=dma[0] destination=south[0]
+route channel=1 tile=(0,1) kind=switch source=north[0] destination=south[0]
+route channel=1 tile=(0,0) kind=switch source=north[0] destination=south[2]
+route channel=1 tile=(0,0) kind=shim-mux source=north[2] destination=dma[0]
+binding-patch ordinal=0 channel=0 shim=(0,0) direction=memory-to-stream dma-channel=0 partition=0/1 offset=64 span=512 transfer=512 repeat=3
+binding-patch ordinal=1 channel=1 shim=(0,0) direction=stream-to-memory dma-channel=0 partition=0/1 offset=0 span=384 transfer=384 repeat=1
+
+array-program records=39 payload-bytes=800 writes=21 masked-writes=13 block-writes=4 tile-loads=1 waits=0
+array-block record=26 address=0x0021d000 words=[0x00000020,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=27 address=0x0021d020 words=[0x04000020,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=28 address=0x0021d040 words=[0x08000020,0x00000000,0x00000000,0x00000000,0x00000000,0x1e045fe3]
+array-block record=29 address=0x0021d060 words=[0x0c000020,0x00000000,0x00000000,0x00000000,0x00000000,0x16045fe3]
+array-tile-load record=30 tile-program=0
+control-program records=6 payload-bytes=188 writes=2 masked-writes=1 block-writes=2 tile-loads=0 waits=1 relocations=2
+control-block record=0 address=0x0001d000 words=[0x00000080,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=1 address=0x0001d214 value=0x00020000
+control-block record=2 address=0x0001d020 words=[0x00000060,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-mask-write record=3 address=0x0001d200 mask=0x00001f00 value=0x00000f00
+control-write record=4 address=0x0001d204 value=0x80000001
+control-wait record=5 tile=(0,0) direction=stream-to-memory dma-channel=0 columns=1 rows=1
+control-relocation index=0 record=0 word=1 payload-offset=44 binding=0 addend=64 width=8 alignment=4
+control-relocation index=1 record=2 word=1 payload-offset=108 binding=1 addend=0 width=8 alignment=4
+
+resident-program workers=1
+resident worker=0 entry=@temporal_fold_array$worker$0 tile=(0,2) code-bytes=372 resources=0 fixups=5
+
+low.func.def retain target<amd.xdna.aie2p.core>(@temporal_fold_core_target) @temporal_fold_array$worker$0() asm {
+  %acquire_delta = mov.short -1
+  %release_delta = mov.short 1
+  %fold_zero = mov.short 0
+  %fold_record_count = mov.i32 4
+  %fold_mode = mova.i32 60
+  %40 = acc.clear.f32x64
+  %41 = slice %40[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %60 = mov.local-address 458752
+  %61 = mov.local-address 491520
+  low.br ^_bb1(%60: reg<aie2p.ep>, %61: reg<aie2p.ep>)
+^_bb1(%32: reg<aie2p.ep>, %33: reg<aie2p.ep>):
+  acq %acquire_delta, 50
+  low.br ^_bb2(%32: reg<aie2p.ep>, %33: reg<aie2p.ep>, %40: reg<aie2p.mbms x4>, %fold_record_count: reg<aie2p.er>, %release_delta: reg<aie2p.er>)
+^_bb2(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>, %34: reg<aie2p.mbms x4>, %35: reg<aie2p.er>, %36: reg<aie2p.er>):
+  acq %acquire_delta, 49
+  low.br ^_bb3
+^_bb3:
+  %low = vlda.acc %input, 0
+  %high = vlda.acc %input, 64
+  vst.acc %low, %output, 0
+  vst.acc %high, %output, 64
+  low.br ^_bb4
+^_bb4:
+  %43 = vlda.acc %output, 0
+  %44 = vlda.acc %output, 64
+  %45 = concat(%43, %44, %41, %41) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %46 = nez %36
+  low.cond_br %46, ^_bb5, ^_bb6 : reg<aie2p.er>
+^_bb5:
+  low.br ^_bb7(%45: reg<aie2p.mbms x4>)
+^_bb6:
+  %47 = vadd.f32x64 %34, %45, %fold_mode
+  low.br ^_bb7(%47: reg<aie2p.mbms x4>)
+^_bb7(%42: reg<aie2p.mbms x4>):
+  rel %release_delta, 48
+  %48 = mov.address-to-scalar %input
+  %49 = mov.i32 16384
+  %50 = xor %48, %49
+  %51 = mov.scalar-to-address %50
+  %52 = sub %35, %release_delta
+  %53 = nez %52
+  low.cond_br %53, ^_bb8, ^_bb9 : reg<aie2p.er>
+^_bb8:
+  low.br ^_bb2(%51: reg<aie2p.ep>, %output: reg<aie2p.ep>, %42: reg<aie2p.mbms x4>, %52: reg<aie2p.er>, %fold_zero: reg<aie2p.er>)
+^_bb9:
+  %54 = slice %42[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %54, %output, 0
+  %55 = slice %42[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %55, %output, 64
+  rel %release_delta, 51
+  %56 = mov.address-to-scalar %output
+  %57 = mov.i32 16384
+  %58 = xor %56, %57
+  %59 = mov.scalar-to-address %58
+  low.br ^_bb1(%51: reg<aie2p.ep>, %59: reg<aie2p.ep>)
+}

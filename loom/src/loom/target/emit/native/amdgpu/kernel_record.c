@@ -409,7 +409,7 @@ iree_status_t loom_amdgpu_kernel_record_build(
 
   loom_amdgpu_storage_layout_t storage_layout = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build_storage_layout(
-      &schedule->storage_layout, scratch_arena, &storage_layout));
+      &schedule->requirements.storage_layout, scratch_arena, &storage_layout));
 
   const loom_target_bundle_t* bundle =
       loom_low_resolved_target_bundle(&schedule->target);

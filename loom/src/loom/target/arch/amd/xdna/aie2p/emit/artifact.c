@@ -8,6 +8,7 @@
 
 #include "iree/io/vec_stream.h"
 #include "loom/codegen/low/diagnostics.h"
+#include "loom/codegen/low/frame.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
@@ -134,7 +135,7 @@ static iree_status_t loom_aie2p_xdna_resolve_device_profile(
   return iree_ok_status();
 }
 
-static iree_status_t loom_aie2p_xdna_compile_source_leaves(
+static iree_status_t loom_aie2p_xdna_prepare_source_leaves(
     const loom_aie2p_xdna_artifact_request_t* request,
     loom_aie2p_array_leaf_t** out_leaves, iree_host_size_t* out_leaf_count) {
   *out_leaves = NULL;
@@ -155,12 +156,8 @@ static iree_status_t loom_aie2p_xdna_compile_source_leaves(
   }
 
   loom_aie2p_array_leaf_t* leaves = NULL;
-  loom_aie2p_leaf_contribution_t* contributions = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       request->scratch_arena, leaf_count, sizeof(*leaves), (void**)&leaves));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      request->scratch_arena, leaf_count, sizeof(*contributions),
-      (void**)&contributions));
   iree_host_size_t leaf_index = 0;
   loom_module_for_each_symbol(request->module, symbol) {
     loom_op_t* function_op = symbol->defining_op;
@@ -169,6 +166,8 @@ static iree_status_t loom_aie2p_xdna_compile_source_leaves(
                                       IREE_SV("amd.xdna.aie2p.core"))) {
       continue;
     }
+    // Prepare shared bodies once before resident cloning. Only their final
+    // resident instances need bundle planning and native object emission.
     loom_target_compile_report_t leaf_report;
     loom_target_compile_report_t* leaf_report_ptr = NULL;
     if (request->compile_report != NULL) {
@@ -185,9 +184,9 @@ static iree_status_t loom_aie2p_xdna_compile_source_leaves(
         .diagnostic_emitter = request->diagnostic_emitter,
         .compile_report = leaf_report_ptr,
     };
-    iree_status_t status = loom_aie2p_leaf_compile(
-        request->module, function_op, &options, request->scratch_arena,
-        &contributions[leaf_index]);
+    loom_low_emission_frame_t frame = {0};
+    iree_status_t status = loom_aie2p_leaf_build_frame(
+        request->module, function_op, &options, request->scratch_arena, &frame);
     if (leaf_report_ptr != NULL) {
       status = iree_status_join(status,
                                 loom_target_compile_report_record_entry_report(
@@ -203,8 +202,8 @@ static iree_status_t loom_aie2p_xdna_compile_source_leaves(
                     (loom_symbol_id_t)(symbol -
                                        request->module->symbols.entries),
             },
-        .contribution = &contributions[leaf_index],
     };
+    leaves[leaf_index].requirements = frame.schedule.requirements;
     ++leaf_index;
   }
   *out_leaves = leaves;
@@ -359,7 +358,7 @@ iree_status_t loom_aie2p_xdna_artifact_emit(
 
   loom_aie2p_array_leaf_t* source_leaves = NULL;
   iree_host_size_t source_leaf_count = 0;
-  IREE_RETURN_IF_ERROR(loom_aie2p_xdna_compile_source_leaves(
+  IREE_RETURN_IF_ERROR(loom_aie2p_xdna_prepare_source_leaves(
       request, &source_leaves, &source_leaf_count));
 
   loom_aie2p_array_plan_t* array_plans = NULL;

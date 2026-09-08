@@ -1,0 +1,155 @@
+// RUN: emit aie2p-array-plan @canonical_q5_stream_array
+
+// Packed 176-byte records preserve their strided and repeated transfer geometry.
+
+aie2p.target<array> @canonical_q5_stream_array_target
+
+aie2p.target<core> @canonical_q5_stream_core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@canonical_q5_stream_array_target) abi(array_program) @canonical_q5_stream_array() asm {
+  %lanes = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %lane = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %capacity = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %records = constant.u32 6 : reg<aie2p.array.scalar : index>
+  %column = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %binding_offset = constant.u64 0 : reg<aie2p.array.offset : offset>
+
+  %group = group %lanes
+  %worker = worker %group, %lane, @consume_q5_record
+  %weight = binding 0, "read"
+  %activation = binding 1, "read"
+  %output = binding 2, "write"
+  %weight_sender = sender %weight, 0 : reg<aie2p.array.sender : tile<1x3x2x176xi8, #encoding.layout.strided<strides=[352, 704, 176, 1]>>>
+  %activation_sender = sender %activation, 0 : reg<aie2p.array.sender : tile<1x3x2x176xi8, #encoding.layout.strided<strides=[352, 0, 176, 1]>>>
+  %output_receiver = receiver %output, 0 : reg<aie2p.array.receiver : tile<64xi8>>
+  %weight_lane = partition.sender %weight_sender, %binding_offset, %lane, %lanes : reg<aie2p.array.sender : tile<176xi8>>
+  %activation_lane = partition.sender %activation_sender, %binding_offset, %lane, %lanes : reg<aie2p.array.sender : tile<176xi8>>
+  %worker_weight = receiver %worker, 0 : reg<aie2p.array.receiver : tile<176xi8>>
+  %worker_activation = receiver %worker, 1 : reg<aie2p.array.receiver : tile<176xi8>>
+  %worker_output = sender %worker, 2 : reg<aie2p.array.sender : tile<64xi8>>
+  %weight_channel = channel %weight_lane, %worker_weight, %capacity, %records : reg<aie2p.array.channel : tile<176xi8>>
+  %activation_channel = channel %activation_lane, %worker_activation, %capacity, %records : reg<aie2p.array.channel : tile<176xi8>>
+  %output_channel = channel %worker_output, %output_receiver, %capacity, %records : reg<aie2p.array.channel : tile<64xi8>>
+  constrain.location %worker, %column, %row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@canonical_q5_stream_core_target) abi(object_function) @consume_q5_record() asm {
+  %weight = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %activation = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %output = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %weight_head = vlda.512.i8x64 %weight, 0
+  %activation_head = vlda.512.i8x64 %activation, 0
+  %sum = vadd.8 %weight_head, %activation_head
+  vst.512.i8x64 %sum, %output, 0
+  return
+}
+
+// ----
+array @canonical_q5_stream_array family=amd.xdna.npu2 groups=1 workers=1 bindings=3 channels=3 slots=6 locks=6 dma=6 routes=12
+binding index=0 ordinal=0 access=read
+binding index=1 ordinal=1 access=read
+binding index=2 ordinal=2 access=write
+worker index=0 group=0 lane=0 entry=@consume_q5_record tile=(0,2) resources=3 storage-domains=0
+channel index=0 transport=external-dma record-bytes=176 capacity=2 records=6 sender=binding[0]:0 partition=0/1 receiver=worker[0]:0
+channel index=1 transport=external-dma record-bytes=176 capacity=2 records=6 sender=binding[1]:0 partition=0/1 receiver=worker[0]:1
+channel index=2 transport=external-dma record-bytes=64 capacity=2 records=6 sender=worker[0]:2 receiver=binding[2]:0
+worker-port worker=0 port=0 direction=receive channel=0 first-slot=0
+worker-port worker=0 port=1 direction=receive channel=1 first-slot=2
+worker-port worker=0 port=2 direction=send channel=2 first-slot=4
+slot channel=0 index=0 owner=(0,2) offset=0x00000 bytes=176 sender=external receiver=0x70000
+slot channel=0 index=1 owner=(0,2) offset=0x04000 bytes=176 sender=external receiver=0x74000
+slot channel=1 index=0 owner=(0,2) offset=0x08000 bytes=176 sender=external receiver=0x78000
+slot channel=1 index=1 owner=(0,2) offset=0x0c000 bytes=176 sender=external receiver=0x7c000
+slot channel=2 index=0 owner=(0,2) offset=0x000c0 bytes=64 sender=0x700c0 receiver=external
+slot channel=2 index=1 owner=(0,2) offset=0x040c0 bytes=64 sender=0x740c0 receiver=external
+lock channel=0 tile=(0,2) id=0 ring=receive role=credit initial=2
+lock channel=0 tile=(0,2) id=1 ring=receive role=ready initial=0
+lock channel=1 tile=(0,2) id=2 ring=receive role=credit initial=2
+lock channel=1 tile=(0,2) id=3 ring=receive role=ready initial=0
+lock channel=2 tile=(0,2) id=4 ring=send role=credit initial=2
+lock channel=2 tile=(0,2) id=5 ring=send role=ready initial=0
+dma channel=0 tile=(0,2) side=compute direction=stream-to-memory engine-channel=0 bd-start=0 bd-count=2
+dma channel=0 tile=(0,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=1
+dma channel=1 tile=(0,2) side=compute direction=stream-to-memory engine-channel=1 bd-start=2 bd-count=2
+dma channel=1 tile=(0,0) side=shim direction=memory-to-stream engine-channel=1 bd-start=1 bd-count=1
+dma channel=2 tile=(0,2) side=compute direction=memory-to-stream engine-channel=0 bd-start=4 bd-count=2
+dma channel=2 tile=(0,0) side=shim direction=stream-to-memory engine-channel=0 bd-start=2 bd-count=1
+route channel=0 tile=(0,0) kind=shim-mux source=dma[0] destination=north[3]
+route channel=0 tile=(0,0) kind=switch source=south[3] destination=north[0]
+route channel=0 tile=(0,1) kind=switch source=south[0] destination=north[0]
+route channel=0 tile=(0,2) kind=switch source=south[0] destination=dma[0]
+route channel=1 tile=(0,0) kind=shim-mux source=dma[1] destination=north[7]
+route channel=1 tile=(0,0) kind=switch source=south[7] destination=north[1]
+route channel=1 tile=(0,1) kind=switch source=south[1] destination=north[1]
+route channel=1 tile=(0,2) kind=switch source=south[1] destination=dma[1]
+route channel=2 tile=(0,2) kind=switch source=dma[0] destination=south[0]
+route channel=2 tile=(0,1) kind=switch source=north[0] destination=south[0]
+route channel=2 tile=(0,0) kind=switch source=north[0] destination=south[2]
+route channel=2 tile=(0,0) kind=shim-mux source=north[2] destination=dma[0]
+binding-patch ordinal=0 channel=0 shim=(0,0) direction=memory-to-stream dma-channel=0 partition=0/1 offset=0 span=1760 transfer=1056 repeat=1
+binding-dimension channel=0 index=0 step=1 wrap=44
+binding-dimension channel=0 index=1 step=44 wrap=2
+binding-dimension channel=0 index=2 step=176 wrap=0
+binding-patch ordinal=1 channel=1 shim=(0,0) direction=memory-to-stream dma-channel=1 partition=0/1 offset=0 span=352 transfer=352 repeat=3
+binding-patch ordinal=2 channel=2 shim=(0,0) direction=stream-to-memory dma-channel=0 partition=0/1 offset=0 span=384 transfer=384 repeat=1
+
+array-program records=50 payload-bytes=1024 writes=30 masked-writes=13 block-writes=6 tile-loads=1 waits=0
+array-block record=34 address=0x0021d000 words=[0x0000002c,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=35 address=0x0021d020 words=[0x0400002c,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=36 address=0x0021d040 words=[0x0800002c,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
+array-block record=37 address=0x0021d060 words=[0x0c00002c,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
+array-block record=38 address=0x0021d080 words=[0x000c0010,0x00000000,0x00000000,0x00000000,0x00000000,0x2e049fe5]
+array-block record=39 address=0x0021d0a0 words=[0x040c0010,0x00000000,0x00000000,0x00000000,0x00000000,0x26049fe5]
+array-tile-load record=40 tile-program=0
+control-program records=8 payload-bytes=252 writes=3 masked-writes=1 block-writes=3 tile-loads=0 waits=1 relocations=3
+control-block record=0 address=0x0001d000 words=[0x00000108,0x00000000,0x00000000,0x02c00000,0xc020002b,0x020000af,0x00000000,0x02000000]
+control-write record=1 address=0x0001d214 value=0x00000000
+control-block record=2 address=0x0001d020 words=[0x00000058,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=3 address=0x0001d21c value=0x00020001
+control-block record=4 address=0x0001d040 words=[0x00000060,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-mask-write record=5 address=0x0001d200 mask=0x00001f00 value=0x00000f00
+control-write record=6 address=0x0001d204 value=0x80000002
+control-wait record=7 tile=(0,0) direction=stream-to-memory dma-channel=0 columns=1 rows=1
+control-relocation index=0 record=0 word=1 payload-offset=44 binding=0 addend=0 width=8 alignment=4
+control-relocation index=1 record=2 word=1 payload-offset=108 binding=1 addend=0 width=8 alignment=4
+control-relocation index=2 record=4 word=1 payload-offset=172 binding=2 addend=0 width=8 alignment=4
+
+resident-program workers=1
+resident worker=0 entry=@canonical_q5_stream_array$worker$0 tile=(0,2) code-bytes=190 resources=0 fixups=1
+
+low.func.def retain target<amd.xdna.aie2p.core>(@canonical_q5_stream_core_target) @canonical_q5_stream_array$worker$0() asm {
+  %acquire_delta = mov.short -1
+  %release_delta = mov.short 1
+  %50 = mov.local-address 458752
+  %51 = mov.local-address 491520
+  %52 = mov.local-address 458944
+  low.br ^_bb1(%50: reg<aie2p.ep>, %51: reg<aie2p.ep>, %52: reg<aie2p.ep>)
+^_bb1(%weight: reg<aie2p.ep>, %activation: reg<aie2p.ep>, %output: reg<aie2p.ep>):
+  acq %acquire_delta, 49
+  acq %acquire_delta, 51
+  acq %acquire_delta, 52
+  low.br ^_bb2
+^_bb2:
+  %weight_head = vlda.512.i8x64 %weight, 0
+  %activation_head = vlda.512.i8x64 %activation, 0
+  %sum = vadd.8 %weight_head, %activation_head
+  vst.512.i8x64 %sum, %output, 0
+  low.br ^_bb3
+^_bb3:
+  rel %release_delta, 53
+  rel %release_delta, 48
+  rel %release_delta, 50
+  %40 = mov.address-to-scalar %weight
+  %41 = mov.i32 16384
+  %42 = xor %40, %41
+  %43 = mov.scalar-to-address %42
+  %44 = mov.address-to-scalar %activation
+  %45 = xor %44, %41
+  %46 = mov.scalar-to-address %45
+  %47 = mov.address-to-scalar %output
+  %48 = xor %47, %41
+  %49 = mov.scalar-to-address %48
+  low.br ^_bb1(%43: reg<aie2p.ep>, %46: reg<aie2p.ep>, %49: reg<aie2p.ep>)
+}

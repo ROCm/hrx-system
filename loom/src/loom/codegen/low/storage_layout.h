@@ -128,6 +128,19 @@ typedef struct loom_low_storage_layout_reference_t {
   uint64_t byte_length;
 } loom_low_storage_layout_reference_t;
 
+// Placement requirement for one complete function-local storage space.
+typedef struct loom_low_storage_layout_requirement_t {
+  // Packed byte length, including padding between reservations.
+  uint64_t byte_length;
+  // Strongest reservation alignment, or zero for an empty space.
+  uint64_t minimum_alignment;
+} loom_low_storage_layout_requirement_t;
+
+// Measures one verified storage space from the retained layout. This excludes
+// padding imposed by a target outside the function-local storage domain.
+loom_low_storage_layout_requirement_t loom_low_storage_layout_requirement(
+    const loom_low_storage_layout_t* layout, loom_storage_space_t space);
+
 // Initializes an empty one-pass layout builder.
 void loom_low_storage_layout_builder_initialize(
     loom_low_storage_layout_builder_t* out_builder);

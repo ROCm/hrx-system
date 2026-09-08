@@ -3677,7 +3677,8 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
       options ? options->storage_layout : NULL;
   if (storage_layout == NULL) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_build(
-        &schedule->storage_layout, scratch_arena, &derived_storage_layout));
+        &schedule->requirements.storage_layout, scratch_arena,
+        &derived_storage_layout));
     storage_layout = &derived_storage_layout;
   }
   const loom_amdgpu_packet_plan_t* packet_plan =

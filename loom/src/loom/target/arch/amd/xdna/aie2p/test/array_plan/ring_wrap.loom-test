@@ -1,0 +1,139 @@
+// RUN: emit aie2p-array-plan @coprime_ring_array
+
+// Coprime ring capacities advance and wrap independently in the resident loop.
+
+aie2p.target<array> @coprime_array_target
+
+aie2p.target<core> @coprime_core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@coprime_array_target) abi(array_program) @coprime_ring_array() asm {
+  %worker_lanes = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %lane0 = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %capacity2 = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %capacity3 = constant.u32 3 : reg<aie2p.array.scalar : index>
+  %record_count = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %row = constant.u32 2 : reg<aie2p.array.scalar : index>
+
+  %workers = group %worker_lanes
+  %worker = worker %workers, %lane0, @consume_coprime
+
+  %input0 = binding 0, "read"
+  %input1 = binding 1, "read"
+  %input0_sender = sender %input0, 0 : reg<aie2p.array.sender : tile<4xi8>>
+  %input1_sender = sender %input1, 0 : reg<aie2p.array.sender : tile<4xi8>>
+  %worker_input0 = receiver %worker, 0 : reg<aie2p.array.receiver : tile<4xi8>>
+  %worker_input1 = receiver %worker, 1 : reg<aie2p.array.receiver : tile<4xi8>>
+  %input0_channel = channel %input0_sender, %worker_input0, %capacity2, %record_count : reg<aie2p.array.channel : tile<4xi8>>
+  %input1_channel = channel %input1_sender, %worker_input1, %capacity3, %record_count : reg<aie2p.array.channel : tile<4xi8>>
+
+  constrain.location %worker, %lane0, %row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@coprime_core_target) abi(object_function) @consume_coprime() asm {
+  %input0 = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %input1 = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %lhs = lda.u8 %input0, 0
+  %rhs = lda.u8 %input1, 0
+  %sum = add.rr %lhs, %rhs
+  st.s8 %sum, %input0, 0
+  return
+}
+
+// ----
+array @coprime_ring_array family=amd.xdna.npu2 groups=1 workers=1 bindings=2 channels=2 slots=5 locks=4 dma=4 routes=8
+binding index=0 ordinal=0 access=read
+binding index=1 ordinal=1 access=read
+worker index=0 group=0 lane=0 entry=@consume_coprime tile=(0,2) resources=2 storage-domains=0
+channel index=0 transport=external-dma record-bytes=4 capacity=2 records=1 sender=binding[0]:0 receiver=worker[0]:0
+channel index=1 transport=external-dma record-bytes=4 capacity=3 records=1 sender=binding[1]:0 receiver=worker[0]:1
+worker-port worker=0 port=0 direction=receive channel=0 first-slot=0
+worker-port worker=0 port=1 direction=receive channel=1 first-slot=2
+slot channel=0 index=0 owner=(0,2) offset=0x00000 bytes=4 sender=external receiver=0x70000
+slot channel=0 index=1 owner=(0,2) offset=0x04000 bytes=4 sender=external receiver=0x74000
+slot channel=1 index=0 owner=(0,2) offset=0x08000 bytes=4 sender=external receiver=0x78000
+slot channel=1 index=1 owner=(0,2) offset=0x0c000 bytes=4 sender=external receiver=0x7c000
+slot channel=1 index=2 owner=(0,2) offset=0x00040 bytes=4 sender=external receiver=0x70040
+lock channel=0 tile=(0,2) id=0 ring=receive role=credit initial=2
+lock channel=0 tile=(0,2) id=1 ring=receive role=ready initial=0
+lock channel=1 tile=(0,2) id=2 ring=receive role=credit initial=3
+lock channel=1 tile=(0,2) id=3 ring=receive role=ready initial=0
+dma channel=0 tile=(0,2) side=compute direction=stream-to-memory engine-channel=0 bd-start=0 bd-count=2
+dma channel=0 tile=(0,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=1
+dma channel=1 tile=(0,2) side=compute direction=stream-to-memory engine-channel=1 bd-start=2 bd-count=3
+dma channel=1 tile=(0,0) side=shim direction=memory-to-stream engine-channel=1 bd-start=1 bd-count=1
+route channel=0 tile=(0,0) kind=shim-mux source=dma[0] destination=north[3]
+route channel=0 tile=(0,0) kind=switch source=south[3] destination=north[0]
+route channel=0 tile=(0,1) kind=switch source=south[0] destination=north[0]
+route channel=0 tile=(0,2) kind=switch source=south[0] destination=dma[0]
+route channel=1 tile=(0,0) kind=shim-mux source=dma[1] destination=north[7]
+route channel=1 tile=(0,0) kind=switch source=south[7] destination=north[1]
+route channel=1 tile=(0,1) kind=switch source=south[1] destination=north[1]
+route channel=1 tile=(0,2) kind=switch source=south[1] destination=dma[1]
+binding-patch ordinal=0 channel=0 shim=(0,0) direction=memory-to-stream dma-channel=0 partition=0/1 offset=0 span=4 transfer=4 repeat=1
+binding-patch ordinal=1 channel=1 shim=(0,0) direction=memory-to-stream dma-channel=1 partition=0/1 offset=0 span=4 transfer=4 repeat=1
+
+array-program records=36 payload-bytes=772 writes=18 masked-writes=12 block-writes=5 tile-loads=1 waits=0
+array-block record=22 address=0x0021d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=23 address=0x0021d020 words=[0x04000001,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=24 address=0x0021d040 words=[0x08000001,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
+array-block record=25 address=0x0021d060 words=[0x0c000001,0x00000000,0x00000000,0x00000000,0x00000000,0x26047fe2]
+array-block record=26 address=0x0021d080 words=[0x00040001,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
+array-tile-load record=27 tile-program=0
+control-program records=4 payload-bytes=152 writes=2 masked-writes=0 block-writes=2 tile-loads=0 waits=0 relocations=2
+control-block record=0 address=0x0001d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=1 address=0x0001d214 value=0x00000000
+control-block record=2 address=0x0001d020 words=[0x00000001,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=3 address=0x0001d21c value=0x00000001
+control-relocation index=0 record=0 word=1 payload-offset=44 binding=0 addend=0 width=8 alignment=4
+control-relocation index=1 record=2 word=1 payload-offset=108 binding=1 addend=0 width=8 alignment=4
+
+resident-program workers=1
+resident worker=0 entry=@coprime_ring_array$worker$0 tile=(0,2) code-bytes=304 resources=0 fixups=5
+
+low.func.def retain target<amd.xdna.aie2p.core>(@coprime_core_target) @coprime_ring_array$worker$0() asm {
+  %acquire_delta = mov.short -1
+  %release_delta = mov.short 1
+  %47 = mov.local-address 458752
+  %48 = mov.local-address 491520
+  %ring_slot_zero = mov.short 0
+  low.br ^_bb1(%47: reg<aie2p.ep>, %48: reg<aie2p.ep>, %ring_slot_zero: reg<aie2p.er>)
+^_bb1(%input0: reg<aie2p.ep>, %input1: reg<aie2p.ep>, %30: reg<aie2p.er>):
+  acq %acquire_delta, 49
+  acq %acquire_delta, 51
+  low.br ^_bb2
+^_bb2:
+  %lhs = lda.u8 %input0, 0
+  %rhs = lda.u8 %input1, 0
+  %sum = add.rr %lhs, %rhs
+  st.s8 %sum, %input0, 0
+  low.br ^_bb3
+^_bb3:
+  rel %release_delta, 48
+  rel %release_delta, 50
+  %31 = mov.address-to-scalar %input0
+  %32 = mov.i32 16384
+  %33 = xor %31, %32
+  %34 = mov.scalar-to-address %33
+  %37 = mov.short 0
+  %38 = eq %30, %37
+  low.cond_br %38, ^_bb6, ^_bb4 : reg<aie2p.er>
+^_bb4:
+  %39 = mov.short 1
+  %40 = eq %30, %39
+  low.cond_br %40, ^_bb7, ^_bb5 : reg<aie2p.er>
+^_bb5:
+  %41 = mov.local-address 491520
+  %42 = mov.short 0
+  low.br ^_bb8(%41: reg<aie2p.ep>, %42: reg<aie2p.er>)
+^_bb6:
+  %43 = mov.local-address 507904
+  %44 = mov.short 1
+  low.br ^_bb8(%43: reg<aie2p.ep>, %44: reg<aie2p.er>)
+^_bb7:
+  %45 = mov.local-address 458816
+  %46 = mov.short 2
+  low.br ^_bb8(%45: reg<aie2p.ep>, %46: reg<aie2p.er>)
+^_bb8(%35: reg<aie2p.ep>, %36: reg<aie2p.er>):
+  low.br ^_bb1(%34: reg<aie2p.ep>, %35: reg<aie2p.ep>, %36: reg<aie2p.er>)
+}

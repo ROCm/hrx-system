@@ -191,5 +191,32 @@ TEST_F(LowStorageLayoutTest, ResolvesNestedStorageViews) {
   EXPECT_EQ(reference.byte_length, 4u);
 }
 
+TEST_F(LowStorageLayoutTest, PlacementIncludesPaddingAndStrongestAlignment) {
+  Reserve(LOOM_STORAGE_SPACE_STACK, 8, 4);
+  Reserve(LOOM_STORAGE_SPACE_PRIVATE, 12, 64);
+  Reserve(LOOM_STORAGE_SPACE_STACK, 16, 16);
+  Reserve(LOOM_STORAGE_SPACE_STACK, 4, 4);
+  loom_low_storage_layout_t layout = {};
+  loom_low_storage_layout_builder_finish(&layout_builder_, &layout);
+  const auto stack =
+      loom_low_storage_layout_requirement(&layout, LOOM_STORAGE_SPACE_STACK);
+  EXPECT_EQ(stack.byte_length, 36u);
+  EXPECT_EQ(stack.minimum_alignment, 16u);
+  const auto private_storage =
+      loom_low_storage_layout_requirement(&layout, LOOM_STORAGE_SPACE_PRIVATE);
+  EXPECT_EQ(private_storage.byte_length, 12u);
+  EXPECT_EQ(private_storage.minimum_alignment, 64u);
+}
+
+TEST_F(LowStorageLayoutTest, EmptySpaceHasNoPlacementRequirement) {
+  Reserve(LOOM_STORAGE_SPACE_PRIVATE, 8, 8);
+  loom_low_storage_layout_t layout = {};
+  loom_low_storage_layout_builder_finish(&layout_builder_, &layout);
+  const auto requirement =
+      loom_low_storage_layout_requirement(&layout, LOOM_STORAGE_SPACE_STACK);
+  EXPECT_EQ(requirement.byte_length, 0u);
+  EXPECT_EQ(requirement.minimum_alignment, 0u);
+}
+
 }  // namespace
 }  // namespace loom

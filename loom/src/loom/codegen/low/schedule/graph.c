@@ -1457,11 +1457,6 @@ iree_status_t loom_low_schedule_fill_nodes(
           (loom_low_move_isa(op) && loom_low_move_detached(op))) {
         ++state->detached_transfer_node_count;
       }
-      if (loom_low_storage_reserve_isa(op)) {
-        IREE_RETURN_IF_ERROR(loom_low_storage_layout_builder_append(
-            state->module, op, state->arena, &state->storage_layout_builder));
-      }
-
       const loom_low_descriptor_t* descriptor = NULL;
       IREE_RETURN_IF_ERROR(
           loom_low_schedule_resolve_descriptor(state, op, node, &descriptor));

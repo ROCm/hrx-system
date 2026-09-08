@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/packet.h"
+#include "loom/codegen/low/storage_layout.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/facts.h"
@@ -731,13 +732,13 @@ static iree_status_t loom_aie2p_array_extract_topology(
   return iree_ok_status();
 }
 
-static const loom_aie2p_leaf_contribution_t* loom_aie2p_array_find_leaf(
+static const loom_low_function_requirements_t* loom_aie2p_array_find_leaf(
     const loom_aie2p_array_plan_builder_t* builder, loom_symbol_ref_t entry) {
-  const loom_aie2p_leaf_contribution_t* result = NULL;
+  const loom_low_function_requirements_t* result = NULL;
   for (iree_host_size_t i = 0; i < builder->leaf_count; ++i) {
     if (loom_aie2p_array_symbol_ref_equal(builder->leaves[i].entry, entry)) {
       IREE_ASSERT(result == NULL, "leaf table entries must be unique");
-      result = builder->leaves[i].contribution;
+      result = &builder->leaves[i].requirements;
     }
   }
   return result;
@@ -1074,12 +1075,11 @@ static iree_status_t loom_aie2p_array_select_shim_dma(
 
 static iree_status_t loom_aie2p_array_validate_worker_leaf(
     const loom_aie2p_array_plan_builder_t* builder, uint32_t worker_index,
-    const loom_aie2p_leaf_contribution_t* contribution) {
-  if (contribution == NULL) {
+    const loom_low_function_requirements_t* requirements) {
+  if (requirements == NULL) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "AIE2P worker has no compiled leaf contribution");
+                            "AIE2P worker has no core function requirements");
   }
-  const loom_aie2p_leaf_realization_t* realization = &contribution->realization;
   const loom_aie2p_array_worker_t* worker = &builder->workers[worker_index];
   IREE_ASSERT_EQ(worker->entry.module_id, 0u);
   IREE_ASSERT_LT(worker->entry.symbol_id, builder->module->symbols.count);
@@ -1101,38 +1101,20 @@ static iree_status_t loom_aie2p_array_validate_worker_leaf(
         IREE_STATUS_INVALID_ARGUMENT,
         "AIE2P worker entry must have no register arguments or results");
   }
-  const loom_region_t* worker_body =
-      loom_low_func_def_body(worker_symbol->defining_op);
-  iree_host_size_t return_count = 0;
-  const loom_block_t* worker_block = NULL;
-  loom_region_for_each_block(worker_body, worker_block) {
-    const loom_op_t* worker_op = NULL;
-    loom_block_for_each_op(worker_block, worker_op) {
-      if (loom_low_return_isa(worker_op)) ++return_count;
-    }
-  }
-  if (return_count == 0) {
+  if (requirements->return_count == 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "AIE2P worker entry must return after one channel firing");
   }
-  const loom_aie2p_array_tile_state_t* tile_state = loom_aie2p_array_tile_state(
-      (loom_aie2p_array_plan_builder_t*)builder, worker->coordinate);
-  if (realization->code.byte_length >
-      tile_state->facts->memory.program_capacity) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "AIE2P worker code exceeds tile program memory");
-  }
-
   for (iree_host_size_t i = 0; i < builder->plan->endpoint_count; ++i) {
     const loom_aie2p_array_endpoint_t* endpoint = &builder->endpoints[i];
     if (endpoint->binding_view_source_endpoint_index == UINT32_MAX &&
         endpoint->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
         endpoint->owner_index == worker_index) {
       iree_host_size_t import_match_count = 0;
-      for (iree_host_size_t j = 0; j < realization->resource_import_count;
-           ++j) {
-        if (realization->resource_imports[j].index == endpoint->port) {
+      for (iree_host_size_t j = 0; j < requirements->resource_count; ++j) {
+        if ((uint64_t)loom_low_resource_index(requirements->resources[j]) ==
+            endpoint->port) {
           ++import_match_count;
         }
       }
@@ -1143,16 +1125,16 @@ static iree_status_t loom_aie2p_array_validate_worker_leaf(
       }
     }
   }
-  for (iree_host_size_t i = 0; i < realization->resource_import_count; ++i) {
-    const loom_aie2p_leaf_resource_import_t* resource =
-        &realization->resource_imports[i];
+  for (iree_host_size_t i = 0; i < requirements->resource_count; ++i) {
+    const uint64_t resource_index =
+        (uint64_t)loom_low_resource_index(requirements->resources[i]);
     iree_host_size_t endpoint_match_count = 0;
     for (iree_host_size_t j = 0; j < builder->plan->endpoint_count; ++j) {
       const loom_aie2p_array_endpoint_t* endpoint = &builder->endpoints[j];
       if (endpoint->binding_view_source_endpoint_index == UINT32_MAX &&
           endpoint->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
           endpoint->owner_index == worker_index &&
-          endpoint->port == resource->index) {
+          endpoint->port == resource_index) {
         ++endpoint_match_count;
       }
     }
@@ -1169,47 +1151,48 @@ static iree_status_t loom_aie2p_array_plan_workers(
     loom_aie2p_array_plan_builder_t* builder) {
   for (iree_host_size_t i = 0; i < builder->plan->worker_count; ++i) {
     const loom_aie2p_array_worker_t* worker = &builder->workers[i];
-    const loom_aie2p_leaf_contribution_t* contribution =
+    const loom_low_function_requirements_t* requirements =
         loom_aie2p_array_find_leaf(builder, worker->entry);
     IREE_RETURN_IF_ERROR(loom_aie2p_array_validate_worker_leaf(
-        builder, (uint32_t)i, contribution));
+        builder, (uint32_t)i, requirements));
     builder->worker_plans[i] = (loom_aie2p_array_worker_plan_t){
         .worker_index = (uint32_t)i,
         .coordinate = worker->coordinate,
-        .contribution = contribution,
+        .requirements = requirements,
     };
 
     loom_aie2p_array_tile_state_t* tile_state =
         loom_aie2p_array_tile_state(builder, worker->coordinate);
-    for (iree_host_size_t j = 0;
-         j < contribution->realization.storage_domain_count; ++j) {
-      const loom_aie2p_leaf_storage_domain_t* domain =
-          &contribution->realization.storage_domains[j];
-      const loom_aie2p_leaf_storage_requirement_t* requirement =
-          loom_aie2p_leaf_storage_requirement(&contribution->realization,
-                                              domain->storage_space);
-      if (requirement->byte_length > UINT32_MAX ||
-          requirement->minimum_alignment > UINT32_MAX) {
+    for (uint32_t space_index = 0; space_index < LOOM_STORAGE_SPACE_COUNT_;
+         ++space_index) {
+      const loom_storage_space_t storage_space =
+          (loom_storage_space_t)space_index;
+      const loom_low_storage_layout_requirement_t requirement =
+          loom_low_storage_layout_requirement(&requirements->storage_layout,
+                                              storage_space);
+      if (requirement.byte_length == 0) continue;
+      if (requirement.byte_length > UINT32_MAX ||
+          requirement.minimum_alignment > UINT32_MAX) {
         return iree_make_status(
             IREE_STATUS_RESOURCE_EXHAUSTED,
             "AIE2P worker storage requirement is not representable");
       }
       uint32_t owner_offset = 0;
       IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_worker_storage(
-          tile_state, (uint32_t)requirement->byte_length,
-          (uint32_t)requirement->minimum_alignment, &owner_offset));
+          tile_state, (uint32_t)requirement.byte_length,
+          (uint32_t)requirement.minimum_alignment, &owner_offset));
       uint32_t load_address = 0;
       IREE_RETURN_IF_ERROR(loom_xdna_array_form_load_address(
           builder->family, worker->coordinate, LOOM_XDNA_MEMORY_SPACE_DATA,
-          worker->coordinate, owner_offset, (uint32_t)requirement->byte_length,
+          worker->coordinate, owner_offset, (uint32_t)requirement.byte_length,
           &load_address));
       builder->worker_storage[builder->worker_storage_cursor++] =
           (loom_aie2p_array_worker_storage_plan_t){
               .worker_index = (uint32_t)i,
-              .storage_space = domain->storage_space,
+              .storage_space = storage_space,
               .owner_offset = owner_offset,
               .load_address = load_address,
-              .byte_length = (uint32_t)requirement->byte_length,
+              .byte_length = (uint32_t)requirement.byte_length,
           };
     }
   }
@@ -1682,14 +1665,14 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
 
   uint64_t worker_storage_count = 0;
   for (iree_host_size_t i = 0; i < builder->plan->worker_count; ++i) {
-    const loom_aie2p_leaf_contribution_t* contribution =
+    const loom_low_function_requirements_t* requirements =
         loom_aie2p_array_find_leaf(builder, builder->workers[i].entry);
-    if (contribution != NULL &&
-        !iree_checked_add_u64(worker_storage_count,
-                              contribution->realization.storage_domain_count,
-                              &worker_storage_count)) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "AIE2P worker storage count overflowed");
+    if (requirements == NULL) continue;
+    for (uint32_t space = 0; space < LOOM_STORAGE_SPACE_COUNT_; ++space) {
+      worker_storage_count +=
+          loom_low_storage_layout_requirement(&requirements->storage_layout,
+                                              (loom_storage_space_t)space)
+              .byte_length != 0;
     }
   }
   uint64_t lock_count = 0;

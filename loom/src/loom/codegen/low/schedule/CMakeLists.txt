@@ -128,6 +128,7 @@ loom_cc_library(
     loom::codegen::low::diagnostics
     loom::codegen::low::function
     loom::codegen::low::function_model
+    loom::codegen::low::function_requirements
     loom::codegen::low::memory_access
     loom::codegen::low::placement
     loom::codegen::low::storage_layout

@@ -57,13 +57,13 @@ iree_status_t loom_low_function_model_initialize(
     status = loom_cfg_loop_forest_build(&out_model->cfg_graph, arena,
                                         &out_model->loop_forest);
   }
+  if (iree_status_is_ok(status)) {
+    status = loom_low_function_requirements_build(
+        module, out_model->body, arena, &out_model->requirements);
+  }
   if (!iree_status_is_ok(status)) {
     loom_local_value_domain_release(&out_model->value_domain);
     return status;
-  }
-  const loom_block_t* block = NULL;
-  loom_region_for_each_block(out_model->body, block) {
-    out_model->node_count += block->op_count;
   }
   return iree_ok_status();
 }
