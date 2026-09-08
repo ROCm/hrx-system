@@ -20,6 +20,10 @@ from loom.dialect.vector import defs as vector
 from loom.target.arch.amd.xdna.aie2p.contracts.conversion import (
     AIE2P_CONVERSION_RULES,
 )
+from loom.target.arch.amd.xdna.aie2p.contracts.packet_conversion import (
+    INTEGER_PACK_CASES,
+    INTEGER_WIDEN_CASES,
+)
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
 )
@@ -589,37 +593,20 @@ def test_bfloat16_packet_to_signed_i32_is_exact_over_defined_domain() -> None:
 
 
 def test_native_integer_packet_conversions_are_compact_exact_rules() -> None:
-    widening_shapes = (
-        ("i16", "i32", 16, "2x.w-to-b", 0, True, 1, False),
-        ("i32", "i64", 8, "2x.w-to-b", 1, True, 1, False),
-        ("i8", "i32", 32, "4x.w-to-c", 0, True, 2, False),
-        ("i16", "i64", 16, "4x.w-to-c", 1, True, 2, False),
-        ("i16", "i32", 32, "2x.x-to-c", 0, False, 2, False),
-        ("i32", "i64", 16, "2x.x-to-c", 1, False, 2, False),
-        ("i8", "i32", 64, "4x.x-to-d", 0, False, 4, True),
-        ("i16", "i64", 32, "4x.x-to-d", 1, False, 4, True),
-    )
     for source_op, signedness in (
         (vector.vector_extui, "unsigned"),
         (vector.vector_extsi, "signed"),
     ):
-        for (
-            input_element,
-            result_element,
-            lane_count,
-            physical_shape,
-            ups_mode,
-            sliced,
-            accumulator_unit_count,
-            direct_accumulator_result,
-        ) in widening_shapes:
+        for widen_case in INTEGER_WIDEN_CASES:
             rule = _rule(
-                f"native_{signedness}_{input_element}x{lane_count}_to_"
-                f"{result_element}x{lane_count}"
+                f"native_{signedness}_{widen_case.input_element}x"
+                f"{widen_case.lane_count}_to_{widen_case.result_element}x"
+                f"{widen_case.lane_count}"
             )
             assert rule.source_op is source_op
             assert rule.descriptor.key == (
-                f"amd.xdna.aie2p.widen.{physical_shape}.{signedness}.configured"
+                f"amd.xdna.aie2p.widen.{widen_case.physical_shape}."
+                f"{signedness}.configured"
             )
             input_slices = [
                 emit
@@ -627,7 +614,7 @@ def test_native_integer_packet_conversions_are_compact_exact_rules() -> None:
                 if isinstance(emit, EmitRegisterSlice)
                 and emit.result.field == "source_w"
             ]
-            assert len(input_slices) == int(sliced)
+            assert len(input_slices) == int(widen_case.slice_input)
             descriptor_keys = [
                 emit.descriptor.key
                 for emit in rule.emit
@@ -641,9 +628,9 @@ def test_native_integer_packet_conversions_are_compact_exact_rules() -> None:
             ]
             assert descriptor_keys[4:] == (
                 []
-                if direct_accumulator_result
+                if widen_case.direct_accumulator_result
                 else ["amd.xdna.aie2p.move.accumulator512.to.vector512"]
-                * accumulator_unit_count
+                * widen_case.accumulator_unit_count
             )
             set_ups_mode = next(
                 emit
@@ -651,16 +638,14 @@ def test_native_integer_packet_conversions_are_compact_exact_rules() -> None:
                 if isinstance(emit, EmitDescriptorOp)
                 and emit.descriptor.key == "amd.xdna.aie2p.state.ups-mode.immediate"
             )
-            assert set_ups_mode.immediates == {"i": ups_mode}
+            assert set_ups_mode.immediates == {"i": widen_case.ups_mode}
 
-    for report_key, source_op, pack_size in (
-        ("native_trunc_i16x32_to_i8x32", vector.vector_trunci, 1),
-        ("native_trunc_i16x64_to_i8x64", vector.vector_trunci, 1),
-        ("native_bitpack_i8x64_to_i4x64", vector.vector_bitpack, 0),
-        ("native_bitpack_i8x128_to_i4x128", vector.vector_bitpack, 0),
-    ):
-        rule = _rule(report_key)
-        assert rule.source_op is source_op
+    for pack_case in INTEGER_PACK_CASES:
+        rule = _rule(pack_case.report_key)
+        assert rule.source_op is pack_case.source_op
+        assert rule.descriptor.key == (
+            f"amd.xdna.aie2p.pack.{pack_case.physical_width}.trunc.configured"
+        )
         assert [
             emit.descriptor.key
             for emit in rule.emit
@@ -671,7 +656,7 @@ def test_native_integer_packet_conversions_are_compact_exact_rules() -> None:
             rule.descriptor.key,
         ]
         assert rule.emit[0].immediates == {"i": 0}
-        assert rule.emit[1].immediates == {"i": pack_size}
+        assert rule.emit[1].immediates == {"i": pack_case.pack_size}
 
 
 def test_binary32_to_integer_programs_match_truncation_oracles() -> None:

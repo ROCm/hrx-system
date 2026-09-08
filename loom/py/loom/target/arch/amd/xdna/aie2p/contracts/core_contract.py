@@ -46,6 +46,9 @@ from loom.target.arch.amd.xdna.aie2p.contracts.nonlinear import (
 from loom.target.arch.amd.xdna.aie2p.contracts.packed_dot import (
     AIE2P_PACKED_DOT_RULES,
 )
+from loom.target.arch.amd.xdna.aie2p.contracts.packet_memory import (
+    AIE2P_PACKET_MEMORY_RULES,
+)
 from loom.target.arch.amd.xdna.aie2p.contracts.reduction import (
     AIE2P_REDUCTION_RULES,
 )
@@ -66,8 +69,8 @@ from loom.target.contracts import (
 
 
 def aie2p_core_cases() -> Sequence[ContractCase]:
-    # Specialized cases precede general cases because the compact runtime table
-    # is queried in authored order.
+    # Priorities order specialized cases for the same source op; authored order
+    # remains the stable tie break within each priority.
     return (
         ValueAliasRule(
             source_op=buffer.buffer_view,
@@ -94,6 +97,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
         *AIE2P_REDUCTION_RULES,
         *AIE2P_STRUCTURAL_RULES,
         *AIE2P_I64_RULES,
+        *AIE2P_PACKET_MEMORY_RULES,
         *AIE2P_MEMORY_RULES,
         *(
             core_rules._address_constant_rule(

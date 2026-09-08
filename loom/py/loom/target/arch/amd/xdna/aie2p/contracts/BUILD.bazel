@@ -27,6 +27,8 @@ iree_py_library(
         "memory.py",
         "nonlinear.py",
         "packed_dot.py",
+        "packet_conversion.py",
+        "packet_memory.py",
         "reduction.py",
         "scalar_program.py",
         "structural.py",
@@ -128,9 +130,13 @@ iree_py_test(
     size = "small",
     srcs = [
         "memory_test.py",
+        "packet_memory_test.py",
         "//loom/py/loom/tools:pytest_style_runner.py",
     ],
-    args = ["loom.target.arch.amd.xdna.aie2p.contracts.memory_test"],
+    args = [
+        "loom.target.arch.amd.xdna.aie2p.contracts.memory_test",
+        "loom.target.arch.amd.xdna.aie2p.contracts.packet_memory_test",
+    ],
     main = "pytest_style_runner.py",
     deps = [
         ":contracts",

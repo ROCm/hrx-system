@@ -1,0 +1,275 @@
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @load_extf_bf16x16(%source: buffer) -> (vector<16xf32>) {
+  %source_aligned = buffer.assume.alignment %source {minimum_alignment = 32} : buffer
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<16xbf16>
+  %loaded = vector.load %source_view[0] : view<16xbf16> -> vector<16xbf16>
+  %converted = vector.extf %loaded : vector<16xbf16> to vector<16xf32>
+  func.return %converted : vector<16xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @load_extf_bf16x16() -> (reg<aie2p.vec256 x2>) asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %9 = vlda.convert.bf16x16.to.f32x16 %source_view, 0
+  %converted = vmov.accumulator512.to.vector512 %9
+  return %converted
+}
+
+// ====
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @load_extf_bf16x32_dynamic(%source: buffer, %element0: index) -> (vector<32xf32>) {
+  %source_aligned = buffer.assume.alignment %source {minimum_alignment = 64} : buffer
+  %element = index.assume %element0 [range(%element0, 0, 96), mul(%element0, 32)] : index
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<128xbf16>
+  %loaded = vector.load<volatile> %source_view[%element] : view<128xbf16> -> vector<32xbf16>
+  %converted = vector.extf %loaded : vector<32xbf16> to vector<32xf32>
+  func.return %converted : vector<32xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @load_extf_bf16x32_dynamic(%element: reg<aie2p.er>) -> (reg<aie2p.mbms x2>) asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %12 = mov.i32 1
+  %13 = lshl %element, %12
+  %14 = mov.address-index %13
+  %converted = vlda.convert.bf16x32.to.f32x32.index.volatile %source_view, %14
+  return %converted
+}
+
+// ====
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @load_extsi_i16x16(%source: buffer) -> (vector<16xi32>) {
+  %source_aligned = buffer.assume.alignment %source {minimum_alignment = 32} : buffer
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<16xi16>
+  %loaded = vector.load %source_view[0] : view<16xi16> -> vector<16xi16>
+  %converted = vector.extsi %loaded : vector<16xi16> to vector<16xi32>
+  func.return %converted : vector<16xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @load_extsi_i16x16() -> (reg<aie2p.vec256 x2>) asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %9 = mov.shift 0
+  set.saturation 0
+  set.ups-mode 0
+  %10 = vlda.ups.2x.w-to-b.signed %9, %source_view, 0
+  %converted = vmov.accumulator512.to.vector512 %10
+  return %converted
+}
+
+// ====
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @load_extui_i8x64_dynamic(%source: buffer, %element0: index) -> (vector<64xi32>) {
+  %source_aligned = buffer.assume.alignment %source {minimum_alignment = 64} : buffer
+  %element = index.assume %element0 [range(%element0, 0, 192), mul(%element0, 64)] : index
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<256xi8>
+  %loaded = vector.load %source_view[%element] : view<256xi8> -> vector<64xi8>
+  %converted = vector.extui %loaded : vector<64xi8> to vector<64xi32>
+  func.return %converted : vector<64xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @load_extui_i8x64_dynamic(%element: reg<aie2p.er>) -> (reg<aie2p.mbms x4>) asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %12 = mov.address-index %element
+  %13 = mov.shift 0
+  set.saturation 0
+  set.ups-mode 0
+  %converted = vlda.ups.4x.x-to-d.unsigned.index %13, %source_view, %12
+  return %converted
+}
+
+// ====
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @store_fptrunc_bf16x16(%input: vector<16xf32>, %output: buffer) {
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 32} : buffer
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16xbf16>
+  %converted = vector.fptrunc %input : vector<16xf32> to vector<16xbf16>
+  vector.store %converted, %output_view[0] : vector<16xbf16>, view<16xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_fptrunc_bf16x16(%input: reg<aie2p.vec256 x2>) asm {
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %8 = vmov.vector512.to.accumulator512 %input
+  set.rounding 12
+  vst.convert.f32x16.to.bf16x16 %8, %output_view, 0
+  return
+}
+
+// ====
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @store_fptrunc_bf16x32_dynamic(%input: vector<32xf32>, %output: buffer, %element0: index) {
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %element = index.assume %element0 [range(%element0, 0, 96), mul(%element0, 32)] : index
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<128xbf16>
+  %converted = vector.fptrunc %input : vector<32xf32> to vector<32xbf16>
+  vector.store<volatile> %converted, %output_view[%element] : vector<32xbf16>, view<128xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_fptrunc_bf16x32_dynamic(%input: reg<aie2p.mbms x2>, %element: reg<aie2p.er>) asm {
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %11 = mov.i32 1
+  %12 = lshl %element, %11
+  %13 = mov.address-index %12
+  set.rounding 12
+  vst.convert.f32x32.to.bf16x32.index.volatile %input, %output_view, %13
+  return
+}
+
+// ====
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @store_trunci_i16x32(%input: vector<32xi16>, %output: buffer) {
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 32} : buffer
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<32xi8>
+  %converted = vector.trunci %input : vector<32xi16> to vector<32xi8>
+  vector.store %converted, %output_view[0] : vector<32xi8>, view<32xi8>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_trunci_i16x32(%input: reg<aie2p.vec256 x2>) asm {
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  set.saturation 0
+  set.pack-size 1
+  vst.pack.w.trunc %input, %output_view, 0
+  return
+}
+
+// ====
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @store_bitpack_i8x128_dynamic(%input: vector<128xi8>, %output: buffer, %element0: index) {
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %element = index.assume %element0 [range(%element0, 0, 192), mul(%element0, 64)] : index
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<256xi8>
+  %converted = vector.bitpack<4> %input : vector<128xi8> -> vector<64xi8>
+  vector.store %converted, %output_view[%element] : vector<64xi8>, view<256xi8>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_bitpack_i8x128_dynamic(%input: reg<aie2p.vec256 x4>, %element: reg<aie2p.er>) asm {
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %11 = mov.address-index %element
+  set.saturation 0
+  set.pack-size 0
+  vst.pack.x.trunc.index %input, %output_view, %11
+  return
+}
+
+// ====
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @shared_load_does_not_fuse(%source: buffer, %raw_output: buffer) -> (vector<32xf32>) {
+  %source_aligned, %output_aligned = buffer.assume.alignment %source, %raw_output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<32xbf16>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<32xbf16>
+  %loaded = vector.load %source_view[0] : view<32xbf16> -> vector<32xbf16>
+  %converted = vector.extf %loaded : vector<32xbf16> to vector<32xf32>
+  vector.store %loaded, %output_view[0] : vector<32xbf16>, view<32xbf16>
+  func.return %converted : vector<32xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @shared_load_does_not_fuse() -> (reg<aie2p.mbms x2>) asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %loaded = vlda.512.bf16x32 %source_view, 0
+  %converted = vconv.fp32.bf16 %loaded
+  vst.512.bf16x32 %loaded, %output_view, 0
+  return %converted
+}
+
+// ====
+// RUN: compile-report source-to-low,low-dce
+
+aie2p.target<core> @target
+
+func.def target(@target) @report_store_fptrunc_once(%input: vector<32xf32>, %output: buffer) {
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<32xbf16>
+  %converted = vector.fptrunc %input : vector<32xf32> to vector<32xbf16>
+  vector.store %converted, %output_view[0] : vector<32xbf16>, view<32xbf16>
+  func.return
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=3 emitted_ops=2 rows=3
+COMPILE-REPORT: source_low[0] function=report_store_fptrunc_once source_op=index.constant selection=rule descriptor_key=amd.xdna.aie2p.constant.i32.short descriptor_semantic_tag=integer.const.i32 emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_store_fptrunc_once source_op=buffer.view selection=rule emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_store_fptrunc_once source_op=vector.store selection=rule plan_key=native_memory_store_f32x32_to_bf16x32 descriptor_key=amd.xdna.aie2p.store.convert.f32x32.to.bf16x32.indexed.immediate descriptor_semantic_tag=convert.floating.f32x32.to.bf16x32.memory.store emitted_ops=2
+
+// ====
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @extsi_i16x32_i64x32(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<32xi16>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<32xi64>
+  %input_value = vector.load %input_view[0] : view<32xi16> -> vector<32xi16>
+  %result = vector.extsi %input_value : vector<32xi16> to vector<32xi64>
+  vector.store %result, %output_view[0] : vector<32xi64>, view<32xi64>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @extsi_i16x32_i64x32() asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %11 = mov.shift 0
+  set.saturation 0
+  set.ups-mode 1
+  %result = vlda.ups.4x.x-to-d.signed %11, %input_view, 0
+  %13 = slice %result[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %13, %output_view, 0
+  %14 = slice %result[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %14, %output_view, 64
+  %15 = slice %result[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %15, %output_view, 128
+  %16 = slice %result[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %16, %output_view, 192
+  return
+}
