@@ -344,8 +344,10 @@ loom_cc_library(
   NAME
     pipeline_lower
   HDRS
+    "pipeline/composition.h"
     "pipeline/lower.h"
   SRCS
+    "pipeline/composition.c"
     "pipeline/lower.c"
   DEPS
     ::array_descriptors
@@ -355,9 +357,14 @@ loom_cc_library(
     loom::analysis::pipeline_plan
     loom::codegen::low::builder
     loom::ir
+    loom::ops::buffer
+    loom::ops::func
+    loom::ops::index
     loom::ops::low
     loom::ops::op_defs
     loom::ops::pipeline
+    loom::rewrite::callable
+    loom::rewrite::rewriter
     loom::target::arch::amd::xdna::array_facts
     loom::util::fact_table
   PUBLIC

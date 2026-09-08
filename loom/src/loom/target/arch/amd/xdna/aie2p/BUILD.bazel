@@ -315,8 +315,14 @@ loom_cc_library(
 
 loom_cc_library(
     name = "pipeline_lower",
-    srcs = ["pipeline/lower.c"],
-    hdrs = ["pipeline/lower.h"],
+    srcs = [
+        "pipeline/composition.c",
+        "pipeline/lower.c",
+    ],
+    hdrs = [
+        "pipeline/composition.h",
+        "pipeline/lower.h",
+    ],
     deps = [
         ":array_descriptors",
         ":array_plan",
@@ -324,8 +330,13 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/pipeline",
+        "//loom/src/loom/rewrite:callable",
+        "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target/arch/amd/xdna:array_facts",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",

@@ -17,6 +17,7 @@
 #include "loom/ops/pipeline/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/plan.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/array_descriptors.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/composition.h"
 #include "loom/target/arch/amd/xdna/array/facts.h"
 
 enum { LOOM_AIE2P_PIPELINE_DEFAULT_CHANNEL_CAPACITY = 2 };
@@ -360,6 +361,9 @@ typedef struct loom_aie2p_pipeline_emitter_t {
   // Parsed and placed target-independent plan.
   const loom_pipeline_plan_t* plan;
 
+  // Effective source callable for each physical resident instance.
+  const loom_symbol_ref_t* instance_entries;
+
   // AIE2P physical placement for resident instances.
   const loom_aie2p_pipeline_placement_t* placement;
 
@@ -427,11 +431,13 @@ typedef struct loom_aie2p_pipeline_emitter_t {
 
 static iree_status_t loom_aie2p_pipeline_emitter_initialize(
     loom_module_t* module, const loom_pipeline_plan_t* plan,
+    const loom_symbol_ref_t* instance_entries,
     const loom_aie2p_pipeline_placement_t* placement,
     iree_arena_allocator_t* arena, loom_aie2p_pipeline_emitter_t* out_emitter) {
   *out_emitter = (loom_aie2p_pipeline_emitter_t){
       .module = module,
       .plan = plan,
+      .instance_entries = instance_entries,
       .placement = placement,
       .descriptor_set = loom_aie2p_array_descriptor_set(),
   };
@@ -583,7 +589,7 @@ static iree_status_t loom_aie2p_pipeline_emit_instances(
       };
       const loom_named_attr_t entry_attr = {
           .name_id = emitter->entry_attr_name,
-          .value = loom_attr_symbol(instance->entry),
+          .value = loom_attr_symbol(emitter->instance_entries[i]),
       };
       IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_op(
           emitter, AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_WORKER, operands,
@@ -601,7 +607,7 @@ static iree_status_t loom_aie2p_pipeline_emit_instances(
       const loom_named_attr_t attrs[] = {
           {
               .name_id = emitter->entry_attr_name,
-              .value = loom_attr_symbol(instance->entry),
+              .value = loom_attr_symbol(emitter->instance_entries[i]),
           },
           {
               .name_id = emitter->output_port_attr_name,
@@ -930,11 +936,12 @@ static iree_status_t loom_aie2p_pipeline_create_low_function(
 
 static iree_status_t loom_aie2p_pipeline_emit_low_function(
     loom_module_t* module, const loom_pipeline_plan_t* plan,
+    const loom_symbol_ref_t* instance_entries,
     const loom_aie2p_pipeline_placement_t* placement,
     iree_arena_allocator_t* arena, loom_op_t** out_low_function) {
   loom_aie2p_pipeline_emitter_t emitter = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emitter_initialize(
-      module, plan, placement, arena, &emitter));
+      module, plan, instance_entries, placement, arena, &emitter));
   IREE_RETURN_IF_ERROR(
       loom_aie2p_pipeline_create_low_function(&emitter, out_low_function));
   const loom_location_id_t location = plan->pipeline.op->location;
@@ -972,6 +979,7 @@ iree_status_t loom_aie2p_pipeline_lower_to_array_low(
   iree_arena_initialize(module->arena.block_pool, &scratch_arena);
   loom_aie2p_pipeline_placement_t placement = {0};
   loom_pipeline_plan_t plan = {0};
+  loom_aie2p_pipeline_composition_t composition = {0};
   const loom_xdna_array_family_t* family = loom_xdna_npu2_array_family();
   const uint32_t maximum_instance_count =
       (uint32_t)family->column_count * family->row_count;
@@ -988,20 +996,31 @@ iree_status_t loom_aie2p_pipeline_lower_to_array_low(
   if (iree_status_is_ok(status)) {
     status = loom_aie2p_pipeline_place_instances(&placement);
   }
+  if (iree_status_is_ok(status)) {
+    status = loom_aie2p_pipeline_composition_materialize(
+        module, &plan, &scratch_arena, &composition);
+  }
   loom_op_t* low_function = NULL;
   if (iree_status_is_ok(status)) {
     status = loom_aie2p_pipeline_emit_low_function(
-        module, &plan, &placement, &scratch_arena, &low_function);
+        module, &plan, composition.instance_entries, &placement, &scratch_arena,
+        &low_function);
   }
-  if (!iree_status_is_ok(status) && low_function != NULL) {
-    status = iree_status_join(status, loom_op_erase(module, low_function));
-    low_function = NULL;
+  if (!iree_status_is_ok(status)) {
+    if (low_function != NULL) {
+      status = iree_status_join(status, loom_op_erase(module, low_function));
+      low_function = NULL;
+    }
+    status = iree_status_join(
+        status, loom_aie2p_pipeline_composition_erase(module, &composition));
   }
   if (iree_status_is_ok(status)) {
     status = loom_op_erase(module, pipeline.op);
     if (!iree_status_is_ok(status)) {
       status = iree_status_join(status, loom_op_erase(module, low_function));
       low_function = NULL;
+      status = iree_status_join(
+          status, loom_aie2p_pipeline_composition_erase(module, &composition));
     }
   }
   if (iree_status_is_ok(status)) {
