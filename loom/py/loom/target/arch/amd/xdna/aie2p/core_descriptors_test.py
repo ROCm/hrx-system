@@ -146,6 +146,7 @@ def test_core_descriptor_closure_is_complete() -> None:
                 ("aie2p.ers16", 1, 1),
                 ("aie2p.ml8m", 1, 2),
                 ("aie2p.mr16_vcompare", 1, 1),
+                ("aie2p.mr26_fifo_st", 1, 1),
                 ("aie2p.mr26_lock", 1, 1),
                 ("aie2p.mr27_select", 1, 1),
                 ("aie2p.mr29_insert", 1, 1),
@@ -300,6 +301,46 @@ def test_fifo_load_descriptors_preserve_fifo_state_and_recurrence() -> None:
                 frozenset(("ptr", "pos")),
                 frozenset(("fifo_reg", "pos")),
             }
+
+
+def test_fifo_stores_preserve_the_fixed_tuple_and_overflow_state() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+    flush = descriptors["amd.xdna.aie2p.store.fifo.flush.512"]
+    pushes = [
+        descriptors[f"amd.xdna.aie2p.store.{element}x{512 // bits}.fifo.push"]
+        for element, bits in AIE2P_VECTOR_MEMORY_ELEMENT_TYPES
+    ]
+    for descriptor in (flush, *pushes):
+        assert descriptor.asm_forms[0].results == (
+            "fifo_reg_out",
+            "ptr_out",
+            "avail_out",
+        )
+        assert descriptor.asm_forms[0].operands == (
+            ("fifo_reg", "ptr", "avail")
+            if descriptor is flush
+            else ("fifo_reg", "src", "ptr", "avail")
+        )
+        assert descriptor.effects[0].kind is EffectKind.WRITE
+        assert descriptor.effects[0].width_bits == 512
+        assert {
+            (
+                descriptor.operands[constraint.lhs_operand_index].field_name,
+                descriptor.operands[constraint.rhs_operand_index].field_name,
+            )
+            for constraint in descriptor.constraints
+            if constraint.kind is ConstraintKind.TIED
+        } == {
+            ("fifo_reg_out", "fifo_reg"),
+            ("ptr_out", "ptr"),
+            ("avail_out", "avail"),
+        }
+        overflow = descriptor.operands[-1]
+        assert overflow.field_name == "implicit_def_srfifo_of"
+        assert OperandFlag.STATE_WRITE in overflow.flags
 
 
 def test_fused_vector_memory_descriptors_preserve_conversion_and_memory_contracts() -> (
@@ -679,10 +720,14 @@ def test_lock_memory_timing_matches_aie2p_stall_and_resume_oracle() -> None:
     assert _LOCK_EFFECT.consumer_event is not None
     assert separations[_LOCK_EFFECT.producer_event, _LOCK_EFFECT.consumer_event] == 4
 
-    # The pinned AIE2P model uses memory cycles 5 for normal accesses and 5/11
-    # for partword read-modify-write stores. Core resume at 8 and stall at 2
-    # require these forward/backward issue separations for every selected form.
-    expected_separations_by_cycles = {(5,): (4, 4), (5, 11): (4, 10)}
+    # The pinned AIE2P model uses memory cycles 5 for normal accesses, 6 for
+    # FIFO stores, and 5/11 for partword read-modify-write stores. Core resume
+    # at 8 and stall at 2 require these forward/backward issue separations.
+    expected_separations_by_cycles = {
+        (5,): (4, 4),
+        (6,): (3, 5),
+        (5, 11): (4, 10),
+    }
 
     memory_spec_count = 0
     read_modify_write_spec_count = 0

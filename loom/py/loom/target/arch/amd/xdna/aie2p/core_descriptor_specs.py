@@ -285,6 +285,34 @@ def _fifo_load_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
     return tuple(result)
 
 
+def _fifo_store_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
+    """Selects state-preserving streaming stores and their final partial flush."""
+
+    result = [
+        _DescriptorSpec(
+            "VST_FLUSH_512_normal_flush",
+            f"{_TARGET_KEY}.store.fifo.flush.512",
+            "memory.store.fifo.flush.512",
+            "II_VST_FLUSH_512_normal_flush",
+            asm_mnemonic="vst.flush.512",
+            memory_width_bits=512,
+        ),
+    ]
+    for element_type, element_bits in AIE2P_VECTOR_MEMORY_ELEMENT_TYPES:
+        shape = f"{element_type}x{512 // element_bits}"
+        result.append(
+            _DescriptorSpec(
+                "VST_PUSH_512",
+                f"{_TARGET_KEY}.store.{shape}.fifo.push",
+                f"memory.store.fifo.push.{shape}",
+                "II_VST_PUSH_512",
+                asm_mnemonic=f"vst.push.512.{shape}",
+                memory_width_bits=512,
+            )
+        )
+    return tuple(result)
+
+
 _INTEGER_MATRIX_NUMERIC_KINDS = ("s8s8", "u8s8", "s8u8", "u8u8")
 
 
@@ -1451,6 +1479,7 @@ _BASE_DESCRIPTOR_SPECS = (
     ),
     *_vector_memory_descriptor_specs(),
     *_fifo_load_descriptor_specs(),
+    *_fifo_store_descriptor_specs(),
     _DescriptorSpec(
         "MOVA",
         f"{_TARGET_KEY}.constant.i32.mova",
@@ -1468,6 +1497,15 @@ _BASE_DESCRIPTOR_SPECS = (
         (("dst", "eRF2"),),
         DescriptorOpKind.CONST,
         asm_mnemonic="mova.fifo.position",
+    ),
+    _DescriptorSpec(
+        "MOVA",
+        f"{_TARGET_KEY}.constant.i32.store-fifo-position",
+        "integer.const.i32",
+        "II_MOVA_eR",
+        (("dst", "mR26_fifo_st"),),
+        DescriptorOpKind.CONST,
+        asm_mnemonic="mova.fifo.store.position",
     ),
     _DescriptorSpec(
         "MOVA",

@@ -20,3 +20,28 @@ low.func.def retain target<amd.xdna.aie2p.core>(@target) @fifo_load(%pointer: re
   %data, %final_pointer, %final_fifo, %final_position = vldb.pop.512.i8x64 %next_pointer, %next_fifo, %next_position
   return %data
 }
+
+// ====
+
+// RUN: emit source-low output=module
+
+aie2p.target<core> @target
+
+low.func.def retain target<amd.xdna.aie2p.core>(@target) @fifo_store(%first: reg<aie2p.vec256 x2>, %second: reg<aie2p.vec256 x2>, %pointer: reg<aie2p.mpfs>, %initial_fifo: reg<aie2p.mstfifo>) asm {
+  %position = mova.fifo.store.position 0
+  %fifo1, %pointer1, %position1 = vst.push.512.bf16x32 %initial_fifo, %first, %pointer, %position
+  %fifo2, %pointer2, %position2 = vst.push.512.bf16x32 %fifo1, %second, %pointer1, %position1
+  %fifo3, %pointer3, %position3 = vst.flush.512 %fifo2, %pointer2, %position2
+  return
+}
+
+// ----
+aie2p.target<core> @target
+
+low.func.def retain target<amd.xdna.aie2p.core>(@target) @fifo_store(%first: reg<aie2p.vec256 x2>, %second: reg<aie2p.vec256 x2>, %pointer: reg<aie2p.mpfs>, %initial_fifo: reg<aie2p.mstfifo>) asm {
+  %position = mova.fifo.store.position 0
+  %fifo1, %pointer1, %position1 = vst.push.512.bf16x32 %initial_fifo, %first, %pointer, %position
+  %fifo2, %pointer2, %position2 = vst.push.512.bf16x32 %fifo1, %second, %pointer1, %position1
+  %fifo3, %pointer3, %position3 = vst.flush.512 %fifo2, %pointer2, %position2
+  return
+}
