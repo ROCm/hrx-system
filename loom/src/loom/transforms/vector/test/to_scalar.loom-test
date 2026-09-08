@@ -1511,3 +1511,80 @@ func.def @preserves_target_shaped_fragment_mma_store_snapshots(%lhs_buffer: buff
   vector.fragment.store<result> %result, %out_view[%origin, %origin] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
   func.return
 }
+
+// ====
+
+func.def @paired_integer_extension_i8_to_i32(%input: vector<4xi8>) -> (vector<4xi32>, vector<4xi32>) {
+  %signed_values = vector.extsi %input : vector<4xi8> to vector<4xi32>
+  %unsigned_values = vector.extui %input : vector<4xi8> to vector<4xi32>
+  func.return %signed_values, %unsigned_values : vector<4xi32>, vector<4xi32>
+}
+
+// ----
+func.def @paired_integer_extension_i8_to_i32(%input: vector<4xi8>) -> (vector<4xi32>, vector<4xi32>) {
+  %14 = vector.extract %input[0] : vector<4xi8> -> i8
+  %15 = scalar.extsi %14 : i8 to i32
+  %16 = vector.extract %input[1] : vector<4xi8> -> i8
+  %17 = scalar.extsi %16 : i8 to i32
+  %18 = vector.extract %input[2] : vector<4xi8> -> i8
+  %19 = scalar.extsi %18 : i8 to i32
+  %20 = vector.extract %input[3] : vector<4xi8> -> i8
+  %21 = scalar.extsi %20 : i8 to i32
+  %signed_values = vector.from_elements %15, %17, %19, %21 : vector<4xi32>
+  %5 = vector.extract %input[0] : vector<4xi8> -> i8
+  %6 = scalar.extui %5 : i8 to i32
+  %7 = vector.extract %input[1] : vector<4xi8> -> i8
+  %8 = scalar.extui %7 : i8 to i32
+  %9 = vector.extract %input[2] : vector<4xi8> -> i8
+  %10 = scalar.extui %9 : i8 to i32
+  %11 = vector.extract %input[3] : vector<4xi8> -> i8
+  %12 = scalar.extui %11 : i8 to i32
+  %unsigned_values = vector.from_elements %6, %8, %10, %12 : vector<4xi32>
+  func.return %signed_values, %unsigned_values : vector<4xi32>, vector<4xi32>
+}
+
+// ====
+
+func.def @paired_integer_extension_i16_to_i64(%input: vector<2xi16>) -> (vector<2xi64>, vector<2xi64>) {
+  %signed_values = vector.extsi %input : vector<2xi16> to vector<2xi64>
+  %unsigned_values = vector.extui %input : vector<2xi16> to vector<2xi64>
+  func.return %signed_values, %unsigned_values : vector<2xi64>, vector<2xi64>
+}
+
+// ----
+func.def @paired_integer_extension_i16_to_i64(%input: vector<2xi16>) -> (vector<2xi64>, vector<2xi64>) {
+  %10 = vector.extract %input[0] : vector<2xi16> -> i16
+  %11 = scalar.extsi %10 : i16 to i64
+  %12 = vector.extract %input[1] : vector<2xi16> -> i16
+  %13 = scalar.extsi %12 : i16 to i64
+  %signed_values = vector.from_elements %11, %13 : vector<2xi64>
+  %5 = vector.extract %input[0] : vector<2xi16> -> i16
+  %6 = scalar.extui %5 : i16 to i64
+  %7 = vector.extract %input[1] : vector<2xi16> -> i16
+  %8 = scalar.extui %7 : i16 to i64
+  %unsigned_values = vector.from_elements %6, %8 : vector<2xi64>
+  func.return %signed_values, %unsigned_values : vector<2xi64>, vector<2xi64>
+}
+
+// ====
+
+func.def @paired_integer_extension_i32_to_i64(%input: vector<2xi32>) -> (vector<2xi64>, vector<2xi64>) {
+  %signed_values = vector.extsi %input : vector<2xi32> to vector<2xi64>
+  %unsigned_values = vector.extui %input : vector<2xi32> to vector<2xi64>
+  func.return %signed_values, %unsigned_values : vector<2xi64>, vector<2xi64>
+}
+
+// ----
+func.def @paired_integer_extension_i32_to_i64(%input: vector<2xi32>) -> (vector<2xi64>, vector<2xi64>) {
+  %10 = vector.extract %input[0] : vector<2xi32> -> i32
+  %11 = scalar.extsi %10 : i32 to i64
+  %12 = vector.extract %input[1] : vector<2xi32> -> i32
+  %13 = scalar.extsi %12 : i32 to i64
+  %signed_values = vector.from_elements %11, %13 : vector<2xi64>
+  %5 = vector.extract %input[0] : vector<2xi32> -> i32
+  %6 = scalar.extui %5 : i32 to i64
+  %7 = vector.extract %input[1] : vector<2xi32> -> i32
+  %8 = scalar.extui %7 : i32 to i64
+  %unsigned_values = vector.from_elements %6, %8 : vector<2xi64>
+  func.return %signed_values, %unsigned_values : vector<2xi64>, vector<2xi64>
+}

@@ -611,7 +611,7 @@ TEST_F(Aie2pLeafObjectTest, LocksRespectIssueAndMemoryResumeTiming) {
       "  acq %lock_value, 37\n"
       "  acq %lock_value, 49\n"
       "  acq %lock_value, 50\n"
-      "  %value = vlda.acc.f32x16 %source, 0\n"
+      "  %value = vlda.acc %source, 0\n"
       "  return\n"
       "}\n",
       &leaf, LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY));
@@ -663,12 +663,12 @@ TEST_F(Aie2pLeafObjectTest, LockTimingCrossesControlFlowEdges) {
       "  acq %lock_value, 5\n"
       "  low.br ^consume\n"
       "^consume:\n"
-      "  %value = vlda.acc.f32x16 %source, 0\n"
+      "  %value = vlda.acc %source, 0\n"
       "  return\n"
       "}\n",
       "low.func.def target<amd.xdna.aie2p.core> @load_then_lock_edge(\n"
       "    %lock_value: reg<aie2p.er>, %source: reg<aie2p.ep>) asm {\n"
-      "  %value = vlda.acc.f32x16 %source, 0\n"
+      "  %value = vlda.acc %source, 0\n"
       "  low.br ^consume\n"
       "^consume:\n"
       "  acq %lock_value, 5\n"

@@ -751,7 +751,7 @@ def test_256bit_vector_loads_split_at_16_byte_alignment() -> None:
             )
 
 
-def test_f32_accumulator_memory_rules_decompose_into_native_chunks() -> None:
+def test_accumulator_memory_rules_decompose_raw_payloads_into_native_chunks() -> None:
     expected_chunk_offsets = (0, 64, 128, 192)
     expected_project_kinds = (
         SourceMemoryProjectKind.STATIC_BYTE_OFFSET,
@@ -768,107 +768,121 @@ def test_f32_accumulator_memory_rules_decompose_into_native_chunks() -> None:
     )
 
     for root_kind, memory_spaces in _MEMORY_ROOTS:
-        rules = _rules_for(
+        root_rules = _rules_for(
             root_kind,
             vector.vector_load,
             vector.vector_store,
             accumulator=True,
         )
-        assert [rule.descriptor.key for rule in rules] == [
-            "amd.xdna.aie2p.load.accumulator.f32x16.indexed.immediate",
-            *("amd.xdna.aie2p.load.accumulator.f32x16.indexed.register",) * 4,
-            "amd.xdna.aie2p.store.accumulator.f32x16.indexed.immediate",
-            *("amd.xdna.aie2p.store.accumulator.f32x16.indexed.register",) * 4,
-        ]
-
-        for operation_index, operation in enumerate(
-            (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
+        for element_byte_count, vector_lane_count, element_types in (
+            (4, 64, ("i32", "f32")),
+            (8, 32, ("i64",)),
         ):
-            operation_rules = rules[operation_index * 5 : operation_index * 5 + 5]
-            for address_index, rule in enumerate(operation_rules):
-                constraint = _source_memory_emit(rule).source_memory
-                assert constraint is not None
-                assert constraint.operation is operation
-                assert constraint.root_kind is root_kind
-                assert (
-                    constraint.address_layout
-                    is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
-                )
-                assert constraint.memory_spaces == memory_spaces
-                assert constraint.element_byte_count == 4
-                assert constraint.vector_lane_count == 64
-                assert constraint.vector_lane_byte_stride == 4
-                assert constraint.minimum_alignment == 64
-                assert (
-                    constraint.static_byte_offset_minimum,
-                    constraint.static_byte_offset_maximum,
-                    constraint.dynamic_term_count,
-                    constraint.dynamic_term_count_minimum,
-                    constraint.allow_dynamic_stride_values,
-                ) == expected_static_ranges[address_index]
-
-                memory_emits = [
-                    emit
-                    for emit in rule.emit
-                    if isinstance(emit, EmitDescriptorOp)
-                    and emit.descriptor == rule.descriptor
-                ]
-                assert len(memory_emits) == 4
-
-                if operation is SourceMemoryOperation.LOAD:
-                    assert not any(
-                        isinstance(emit, EmitRegisterSlice) for emit in rule.emit
-                    )
-                    concat = rule.emit[-1]
-                    assert isinstance(concat, EmitRegisterConcat)
-                    assert [source.field for source in concat.sources] == [
-                        "chunk_0",
-                        "chunk_1",
-                        "chunk_2",
-                        "chunk_3",
-                    ]
-                    assert concat.result.field == "result"
-                else:
-                    slices = [
-                        emit
-                        for emit in rule.emit
-                        if isinstance(emit, EmitRegisterSlice)
-                    ]
-                    assert [emit.unit_offset for emit in slices] == [0, 1, 2, 3]
-                    assert [emit.unit_count for emit in slices] == [1, 1, 1, 1]
-                    assert all(emit.result_type is None for emit in slices)
-
-            immediate_projects = [
-                emit.immediates["imm"]
-                for emit in operation_rules[0].emit
-                if isinstance(emit, EmitDescriptorOp)
+            rules = [
+                rule
+                for rule in root_rules
+                if _source_memory_emit(rule).source_memory.element_byte_count
+                == element_byte_count
+            ]
+            assert [rule.descriptor.key for rule in rules] == [
+                "amd.xdna.aie2p.load.accumulator.indexed.immediate",
+                *("amd.xdna.aie2p.load.accumulator.indexed.register",) * 4,
+                "amd.xdna.aie2p.store.accumulator.indexed.immediate",
+                *("amd.xdna.aie2p.store.accumulator.indexed.register",) * 4,
             ]
             assert all(
-                isinstance(project, SourceMemoryProject)
-                for project in immediate_projects
-            )
-            assert tuple(project.kind for project in immediate_projects) == (
-                expected_project_kinds
-            )
-            assert tuple(project.literal_i64 for project in immediate_projects) == (
-                expected_chunk_offsets
+                rule.guards[-1].type_pattern.elements == element_types for rule in rules
             )
 
-            for address_index, expected_offsets in (
-                (1, expected_chunk_offsets),
-                (2, expected_chunk_offsets[1:]),
-                (3, expected_chunk_offsets),
-                (4, expected_chunk_offsets),
+            for operation_index, operation in enumerate(
+                (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
             ):
-                static_projects = [
-                    project
-                    for emit in operation_rules[address_index].emit
+                operation_rules = rules[operation_index * 5 : operation_index * 5 + 5]
+                for address_index, rule in enumerate(operation_rules):
+                    constraint = _source_memory_emit(rule).source_memory
+                    assert constraint is not None
+                    assert constraint.operation is operation
+                    assert constraint.root_kind is root_kind
+                    assert (
+                        constraint.address_layout
+                        is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
+                    )
+                    assert constraint.memory_spaces == memory_spaces
+                    assert constraint.element_byte_count == element_byte_count
+                    assert constraint.vector_lane_count == vector_lane_count
+                    assert constraint.vector_lane_byte_stride == element_byte_count
+                    assert constraint.minimum_alignment == 64
+                    assert (
+                        constraint.static_byte_offset_minimum,
+                        constraint.static_byte_offset_maximum,
+                        constraint.dynamic_term_count,
+                        constraint.dynamic_term_count_minimum,
+                        constraint.allow_dynamic_stride_values,
+                    ) == expected_static_ranges[address_index]
+
+                    memory_emits = [
+                        emit
+                        for emit in rule.emit
+                        if isinstance(emit, EmitDescriptorOp)
+                        and emit.descriptor == rule.descriptor
+                    ]
+                    assert len(memory_emits) == 4
+
+                    if operation is SourceMemoryOperation.LOAD:
+                        assert not any(
+                            isinstance(emit, EmitRegisterSlice) for emit in rule.emit
+                        )
+                        concat = rule.emit[-1]
+                        assert isinstance(concat, EmitRegisterConcat)
+                        assert [source.field for source in concat.sources] == [
+                            "chunk_0",
+                            "chunk_1",
+                            "chunk_2",
+                            "chunk_3",
+                        ]
+                        assert concat.result.field == "result"
+                    else:
+                        slices = [
+                            emit
+                            for emit in rule.emit
+                            if isinstance(emit, EmitRegisterSlice)
+                        ]
+                        assert [emit.unit_offset for emit in slices] == [0, 1, 2, 3]
+                        assert [emit.unit_count for emit in slices] == [1, 1, 1, 1]
+                        assert all(emit.result_type is None for emit in slices)
+
+                immediate_projects = [
+                    emit.immediates["imm"]
+                    for emit in operation_rules[0].emit
                     if isinstance(emit, EmitDescriptorOp)
-                    if isinstance(emit.immediates, dict)
-                    for project in emit.immediates.values()
-                    if isinstance(project, SourceMemoryProject)
                 ]
-                assert (
-                    tuple(project.literal_i64 for project in static_projects)
-                    == expected_offsets
+                assert all(
+                    isinstance(project, SourceMemoryProject)
+                    for project in immediate_projects
                 )
+                assert tuple(project.kind for project in immediate_projects) == (
+                    expected_project_kinds
+                )
+                assert (
+                    tuple(project.literal_i64 for project in immediate_projects)
+                    == expected_chunk_offsets
+                )
+
+                for address_index, expected_offsets in (
+                    (1, expected_chunk_offsets),
+                    (2, expected_chunk_offsets[1:]),
+                    (3, expected_chunk_offsets),
+                    (4, expected_chunk_offsets),
+                ):
+                    static_projects = [
+                        project
+                        for emit in operation_rules[address_index].emit
+                        if isinstance(emit, EmitDescriptorOp)
+                        if isinstance(emit.immediates, dict)
+                        for project in emit.immediates.values()
+                        if isinstance(project, SourceMemoryProject)
+                    ]
+                    assert (
+                        tuple(project.literal_i64 for project in static_projects)
+                        == expected_offsets
+                    )

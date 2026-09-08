@@ -313,6 +313,84 @@ def _packed_i4_unpack_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
     )
 
 
+def _integer_conversion_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
+    """Selects exact native integer widening and truncating pack forms."""
+
+    widen_specs = tuple(
+        _DescriptorSpec(
+            f"{form_name}_upsSign{sign_bit}",
+            f"{_TARGET_KEY}.widen.{shape}.{signedness}.configured",
+            f"integer.widen.{shape}.{signedness}.configured",
+            f"II_{form_name}_upsSign{sign_bit}",
+            storage_overrides=storage_overrides,
+            asm_mnemonic=f"vups.{shape}.{signedness}",
+        )
+        for shape, form_name, storage_overrides in (
+            (
+                "2x.w-to-b",
+                "VUPS_2x_mv_ups_w2b",
+                (("dst", "mBMs"), ("src", "VEC256")),
+            ),
+            (
+                "4x.w-to-c",
+                "VUPS_4x_mv_ups_w2c",
+                (("dst", "mBMs"), ("src", "VEC256")),
+            ),
+            (
+                "2x.x-to-c",
+                "VUPS_2x_mv_ups_x2c",
+                (("dst", "mBMs"),),
+            ),
+            (
+                "4x.x-to-d",
+                "VUPS_4x_mv_ups_x2d",
+                (("dst", "mBMs"),),
+            ),
+        )
+        for signedness, sign_bit in (("unsigned", 0), ("signed", 1))
+    )
+    pack_specs = tuple(
+        _DescriptorSpec(
+            f"VPACK_mv_pack_{width}_packSign0",
+            f"{_TARGET_KEY}.pack.{width}.trunc.configured",
+            f"integer.pack.{width}.trunc.configured",
+            f"II_VPACK_mv_pack_{width}_packSign0",
+            storage_overrides=storage_overrides,
+            asm_mnemonic=f"vpack.{width}.trunc",
+        )
+        for width, storage_overrides in (
+            ("w", ()),
+            ("x", (("src", "VEC256"),)),
+        )
+    )
+    return (*widen_specs, *pack_specs)
+
+
+def _accumulator_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
+    """Selects raw 512-bit accumulator loads and stores."""
+
+    return tuple(
+        _DescriptorSpec(
+            form_name,
+            f"{_TARGET_KEY}.{operation}.accumulator.indexed.{address_form}",
+            f"memory.{operation}.accumulator.indexed",
+            f"II_{form_name}",
+            storage_overrides=((("dst", "mBMs"),) if operation == "load" else ()),
+            asm_mnemonic=(
+                f"v{'lda' if operation == 'load' else 'st'}.acc"
+                f"{'.index' if address_form == 'register' else ''}"
+            ),
+            memory_width_bits=512,
+        )
+        for operation, address_form, form_name in (
+            ("load", "register", "VLDA_dmx_lda_bm_idx"),
+            ("load", "immediate", "VLDA_dmx_lda_bm_idx_imm"),
+            ("store", "register", "VST_dmx_sts_bm_idx"),
+            ("store", "immediate", "VST_dmx_sts_bm_idx_imm"),
+        )
+    )
+
+
 def _scalar_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
     """Builds exact-width scalar load and store descriptors."""
 
@@ -833,48 +911,8 @@ _BASE_DESCRIPTOR_SPECS = (
     *_integer_matrix_descriptor_specs(),
     *_packed_dot_descriptor_specs(),
     *_packed_i4_unpack_descriptor_specs(),
-    _DescriptorSpec(
-        "VLDA_dmx_lda_bm_idx",
-        f"{_TARGET_KEY}.load.accumulator.f32x16.indexed.register",
-        "memory.load.accumulator.indexed.f32x16",
-        "II_VLDA_dmx_lda_bm_idx",
-        storage_overrides=(("dst", "mBMs"),),
-        asm_mnemonic="vlda.acc.f32x16.index",
-        memory_width_bits=512,
-    ),
-    _DescriptorSpec(
-        "VLDA_dmx_lda_bm_idx_imm",
-        f"{_TARGET_KEY}.load.accumulator.f32x16.indexed.immediate",
-        "memory.load.accumulator.indexed.f32x16",
-        "II_VLDA_dmx_lda_bm_idx_imm",
-        storage_overrides=(("dst", "mBMs"),),
-        asm_mnemonic="vlda.acc.f32x16",
-        memory_width_bits=512,
-    ),
-    _DescriptorSpec(
-        "VST_dmx_sts_bm_idx",
-        f"{_TARGET_KEY}.store.accumulator.f32x16.indexed.register",
-        "memory.store.accumulator.indexed.f32x16",
-        "II_VST_dmx_sts_bm_idx",
-        asm_mnemonic="vst.acc.f32x16.index",
-        memory_width_bits=512,
-    ),
-    _DescriptorSpec(
-        "VST_dmx_sts_bm_idx_imm",
-        f"{_TARGET_KEY}.store.accumulator.f32x16.indexed.immediate",
-        "memory.store.accumulator.indexed.f32x16",
-        "II_VST_dmx_sts_bm_idx_imm",
-        asm_mnemonic="vst.acc.f32x16",
-        memory_width_bits=512,
-    ),
-    _DescriptorSpec(
-        "VST_dmx_sts_bm_idx_imm",
-        f"{_TARGET_KEY}.store.accumulator.i32x16.indexed.immediate",
-        "memory.store.accumulator.indexed.i32x16",
-        "II_VST_dmx_sts_bm_idx_imm",
-        asm_mnemonic="vst.acc.i32x16",
-        memory_width_bits=512,
-    ),
+    *_integer_conversion_descriptor_specs(),
+    *_accumulator_memory_descriptor_specs(),
     _DescriptorSpec(
         "VSRS_4x_mv_x_srs_dm_srsSign1",
         f"{_TARGET_KEY}.narrow.trunc.signed.i16x32",
@@ -1294,6 +1332,24 @@ _BASE_DESCRIPTOR_SPECS = (
         (("dst", "mCRUnpackSize"),),
         implicit_outputs=("dst",),
         asm_mnemonic="set.unpack-size",
+    ),
+    _DescriptorSpec(
+        "MOV_alu_mv_mv_mv_cg",
+        f"{_TARGET_KEY}.state.ups-mode.immediate",
+        "state.write.ups-mode",
+        "II_MOV_alu_mv_mv_mv_cg_mCRUPSMode",
+        (("dst", "mCRUPSMode"),),
+        implicit_outputs=("dst",),
+        asm_mnemonic="set.ups-mode",
+    ),
+    _DescriptorSpec(
+        "MOV_alu_mv_mv_mv_cg",
+        f"{_TARGET_KEY}.state.pack-size.immediate",
+        "state.write.pack-size",
+        "II_MOV_alu_mv_mv_mv_cg_mCRPackSize",
+        (("dst", "mCRPackSize"),),
+        implicit_outputs=("dst",),
+        asm_mnemonic="set.pack-size",
     ),
     _DescriptorSpec(
         "MOVXM",

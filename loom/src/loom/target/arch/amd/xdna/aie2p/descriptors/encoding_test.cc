@@ -438,6 +438,89 @@ TEST(DescriptorEncodingTest, NarrowExtendsMatchOracleInstructionEncodings) {
   }
 }
 
+TEST(DescriptorEncodingTest,
+     IntegerPacketConversionsMatchOracleInstructionEncodings) {
+  struct TestCase {
+    std::string_view descriptor_key;
+    std::vector<std::string_view> registers;
+    std::vector<int64_t> immediates;
+    std::string_view bundle_format;
+    std::array<uint8_t, 4> expected;
+  };
+  const TestCase test_cases[] = {
+      {"amd.xdna.aie2p.widen.2x.w-to-b.unsigned.configured",
+       {"bmhl2", "wl3", "s0"},
+       {},
+       "I32_MV",
+       {0xF8, 0x10, 0x87, 0x1A}},
+      {"amd.xdna.aie2p.widen.2x.w-to-b.signed.configured",
+       {"bmlh4", "wh7", "s2"},
+       {},
+       "I32_MV",
+       {0xF8, 0xB0, 0x4E, 0x1C}},
+      {"amd.xdna.aie2p.widen.2x.x-to-c.unsigned.configured",
+       {"cmh4", "x4", "s1"},
+       {},
+       "I32_MV",
+       {0xF8, 0x58, 0x88, 0x1C}},
+      {"amd.xdna.aie2p.widen.2x.x-to-c.signed.configured",
+       {"cmh0", "x9", "s2"},
+       {},
+       "I32_MV",
+       {0xF8, 0xB8, 0x92, 0x18}},
+      {"amd.xdna.aie2p.widen.4x.w-to-c.unsigned.configured",
+       {"cmh4", "wl3", "s1"},
+       {},
+       "I32_MV",
+       {0xF8, 0x48, 0x87, 0x1C}},
+      {"amd.xdna.aie2p.widen.4x.w-to-c.signed.configured",
+       {"cmh3", "wl0", "s3"},
+       {},
+       "I32_MV",
+       {0xF8, 0xE8, 0x81, 0x1B}},
+      {"amd.xdna.aie2p.widen.4x.x-to-d.unsigned.configured",
+       {"dm2", "x6", "s2"},
+       {},
+       "I32_MV",
+       {0xF8, 0x84, 0x0C, 0x1A}},
+      {"amd.xdna.aie2p.widen.4x.x-to-d.signed.configured",
+       {"dm2", "x2", "s3"},
+       {},
+       "I32_MV",
+       {0xF8, 0xE4, 0x04, 0x1A}},
+      {"amd.xdna.aie2p.pack.w.trunc.configured",
+       {"wl9", "x11"},
+       {},
+       "I32_ST",
+       {0x18, 0xD6, 0xDA, 0x0C}},
+      {"amd.xdna.aie2p.pack.x.trunc.configured",
+       {"x11", "y0"},
+       {},
+       "I32_ST",
+       {0x18, 0x16, 0x84, 0x0D}},
+      {"amd.xdna.aie2p.state.ups-mode.immediate",
+       {},
+       {1023},
+       "I32_MV",
+       {0xB8, 0xFE, 0x77, 0x1E}},
+      {"amd.xdna.aie2p.state.pack-size.immediate",
+       {},
+       {-1024},
+       "I32_MV",
+       {0xB8, 0x00, 0xB8, 0x1B}},
+  };
+
+  for (const TestCase& test_case : test_cases) {
+    SCOPED_TRACE(test_case.descriptor_key);
+    std::vector<uint8_t> program;
+    IREE_ASSERT_OK(EncodeSingleDescriptor(
+        test_case.descriptor_key, test_case.registers, test_case.immediates,
+        test_case.bundle_format, &program));
+    EXPECT_EQ(program, std::vector<uint8_t>(test_case.expected.begin(),
+                                            test_case.expected.end()));
+  }
+}
+
 TEST(DescriptorEncodingTest, IntegerMinMaxMatchOracleInstructionEncodings) {
   struct TestCase {
     std::string_view descriptor_key;

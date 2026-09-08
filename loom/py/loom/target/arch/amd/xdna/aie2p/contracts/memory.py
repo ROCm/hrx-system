@@ -77,7 +77,10 @@ _BYTEWISE_SCALAR_MEMORY_SHAPES = (
     (4, Scalar(("i32", "f32", "index", "offset"))),
     (8, _PAIR_SCALAR_MEMORY_TYPE),
 )
-_F32X64_ACCUMULATOR = Vector("f32", lanes=64)
+_ACCUMULATOR_VECTOR_SHAPES = (
+    (4, 64, Vector(("i32", "f32"), lanes=64)),
+    (8, 32, Vector("i64", lanes=32)),
+)
 _ACCUMULATOR_CHUNK_BYTE_OFFSETS = (0, 64, 128, 192)
 _ZERO_X_SPLAT_BY_ELEMENT_BYTE_COUNT = {
     1: "amd.xdna.aie2p.splat.i8x64",
@@ -493,6 +496,9 @@ def _accumulator_memory_rule(
     *,
     root_kind: SourceMemoryRootKind,
     memory_spaces: tuple[str, ...],
+    element_byte_count: int,
+    vector_lane_count: int,
+    value_type: TypePattern,
     volatile: bool,
 ) -> DescriptorRule:
     is_load = operation is SourceMemoryOperation.LOAD
@@ -501,8 +507,7 @@ def _accumulator_memory_rule(
     descriptor_family = "load" if is_load else "store"
     address_family = "immediate" if immediate_memory else "register"
     descriptor_key = (
-        f"amd.xdna.aie2p.{descriptor_family}.accumulator."
-        f"f32x16.indexed.{address_family}"
+        f"amd.xdna.aie2p.{descriptor_family}.accumulator.indexed.{address_family}"
     )
     if volatile:
         descriptor_key = f"{descriptor_key}.volatile"
@@ -512,8 +517,8 @@ def _accumulator_memory_rule(
         address_form,
         root_kind=root_kind,
         memory_spaces=memory_spaces,
-        element_byte_count=4,
-        vector_lane_count=64,
+        element_byte_count=element_byte_count,
+        vector_lane_count=vector_lane_count,
         minimum_alignment=64,
         immediate_offset_minimum=-512,
         immediate_offset_maximum=448,
@@ -596,7 +601,7 @@ def _accumulator_memory_rule(
                 if volatile
                 else ()
             ),
-            Guard.value_type("result" if is_load else "value", _F32X64_ACCUMULATOR),
+            Guard.value_type("result" if is_load else "value", value_type),
         ),
         emit=tuple(emits),
     )
@@ -1398,9 +1403,15 @@ def _accumulator_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
             address_form,
             root_kind=root_kind,
             memory_spaces=memory_spaces,
+            element_byte_count=element_byte_count,
+            vector_lane_count=vector_lane_count,
+            value_type=value_type,
             volatile=volatile,
         )
         for root_kind, memory_spaces in _MEMORY_ROOTS
+        for element_byte_count, vector_lane_count, value_type in (
+            _ACCUMULATOR_VECTOR_SHAPES
+        )
         for operation in (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
         for address_form in _MemoryAddressForm
     )

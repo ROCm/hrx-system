@@ -16,6 +16,7 @@ from itertools import pairwise
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.vector import ALL_VECTOR_OPS
+from loom.dialect.vector import defs as vector
 from loom.target.arch.amd.xdna.aie2p.contracts.conversion import (
     AIE2P_CONVERSION_RULES,
 )
@@ -26,6 +27,7 @@ from loom.target.contracts import (
     ContractFragment,
     DescriptorEmitForm,
     DescriptorRule,
+    EmitDescriptorOp,
     EmitRegisterConcat,
     EmitRegisterSlice,
     ValueAliasRule,
@@ -515,6 +517,92 @@ def test_native_bfloat16_packet_conversions_preserve_exact_width_and_rounding() 
     assert [emit.descriptor.key for emit in widen.emit] == [
         "amd.xdna.aie2p.convert.bf16x32.to.f32x32"
     ]
+
+
+def test_native_integer_packet_conversions_are_compact_exact_rules() -> None:
+    widening_shapes = (
+        ("i16", "i32", 16, "2x.w-to-b", 0, True, 1, False),
+        ("i32", "i64", 8, "2x.w-to-b", 1, True, 1, False),
+        ("i8", "i32", 32, "4x.w-to-c", 0, True, 2, False),
+        ("i16", "i64", 16, "4x.w-to-c", 1, True, 2, False),
+        ("i16", "i32", 32, "2x.x-to-c", 0, False, 2, False),
+        ("i32", "i64", 16, "2x.x-to-c", 1, False, 2, False),
+        ("i8", "i32", 64, "4x.x-to-d", 0, False, 4, True),
+        ("i16", "i64", 32, "4x.x-to-d", 1, False, 4, True),
+    )
+    for source_op, signedness in (
+        (vector.vector_extui, "unsigned"),
+        (vector.vector_extsi, "signed"),
+    ):
+        for (
+            input_element,
+            result_element,
+            lane_count,
+            physical_shape,
+            ups_mode,
+            sliced,
+            accumulator_unit_count,
+            direct_accumulator_result,
+        ) in widening_shapes:
+            rule = _rule(
+                f"native_{signedness}_{input_element}x{lane_count}_to_"
+                f"{result_element}x{lane_count}"
+            )
+            assert rule.source_op is source_op
+            assert rule.descriptor.key == (
+                f"amd.xdna.aie2p.widen.{physical_shape}.{signedness}.configured"
+            )
+            input_slices = [
+                emit
+                for emit in rule.emit
+                if isinstance(emit, EmitRegisterSlice)
+                and emit.result.field == "source_w"
+            ]
+            assert len(input_slices) == int(sliced)
+            descriptor_keys = [
+                emit.descriptor.key
+                for emit in rule.emit
+                if isinstance(emit, EmitDescriptorOp)
+            ]
+            assert descriptor_keys[:4] == [
+                "amd.xdna.aie2p.constant.i32.shift",
+                "amd.xdna.aie2p.state.saturation.immediate",
+                "amd.xdna.aie2p.state.ups-mode.immediate",
+                rule.descriptor.key,
+            ]
+            assert descriptor_keys[4:] == (
+                []
+                if direct_accumulator_result
+                else ["amd.xdna.aie2p.move.accumulator512.to.vector512"]
+                * accumulator_unit_count
+            )
+            set_ups_mode = next(
+                emit
+                for emit in rule.emit
+                if isinstance(emit, EmitDescriptorOp)
+                and emit.descriptor.key == "amd.xdna.aie2p.state.ups-mode.immediate"
+            )
+            assert set_ups_mode.immediates == {"i": ups_mode}
+
+    for report_key, source_op, pack_size in (
+        ("native_trunc_i16x32_to_i8x32", vector.vector_trunci, 1),
+        ("native_trunc_i16x64_to_i8x64", vector.vector_trunci, 1),
+        ("native_bitpack_i8x64_to_i4x64", vector.vector_bitpack, 0),
+        ("native_bitpack_i8x128_to_i4x128", vector.vector_bitpack, 0),
+    ):
+        rule = _rule(report_key)
+        assert rule.source_op is source_op
+        assert [
+            emit.descriptor.key
+            for emit in rule.emit
+            if isinstance(emit, EmitDescriptorOp)
+        ] == [
+            "amd.xdna.aie2p.state.saturation.immediate",
+            "amd.xdna.aie2p.state.pack-size.immediate",
+            rule.descriptor.key,
+        ]
+        assert rule.emit[0].immediates == {"i": 0}
+        assert rule.emit[1].immediates == {"i": pack_size}
 
 
 def test_binary32_to_integer_programs_match_truncation_oracles() -> None:

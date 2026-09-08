@@ -33,13 +33,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
   %26 = mova.i32 776
   %product = mmul.s8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %26
   %28 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %28, %output_view, 0
+  vst.acc %28, %output_view, 0
   %29 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %29, %output_view, 64
+  vst.acc %29, %output_view, 64
   %30 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %30, %output_view, 128
+  vst.acc %30, %output_view, 128
   %31 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %31, %output_view, 192
+  vst.acc %31, %output_view, 192
   return
 }
 
@@ -78,13 +78,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
   %27 = mova.i32 264
   %product = mmul.u8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %27
   %29 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %29, %output_view, 0
+  vst.acc %29, %output_view, 0
   %30 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %30, %output_view, 64
+  vst.acc %30, %output_view, 64
   %31 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %31, %output_view, 128
+  vst.acc %31, %output_view, 128
   %32 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %32, %output_view, 192
+  vst.acc %32, %output_view, 192
   return
 }
 
@@ -123,13 +123,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
   %27 = mova.i32 520
   %product = mmul.s8u8.m8n8k8 %lhs_fragment, %rhs_fragment, %27
   %29 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %29, %output_view, 0
+  vst.acc %29, %output_view, 0
   %30 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %30, %output_view, 64
+  vst.acc %30, %output_view, 64
   %31 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %31, %output_view, 128
+  vst.acc %31, %output_view, 128
   %32 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %32, %output_view, 192
+  vst.acc %32, %output_view, 192
   return
 }
 
@@ -169,13 +169,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
   %28 = mova.i32 8
   %product = mmul.u8u8.m8n8k8 %lhs_fragment, %rhs_fragment, %28
   %30 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %30, %output_view, 0
+  vst.acc %30, %output_view, 0
   %31 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %31, %output_view, 64
+  vst.acc %31, %output_view, 64
   %32 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %32, %output_view, 128
+  vst.acc %32, %output_view, 128
   %33 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %33, %output_view, 192
+  vst.acc %33, %output_view, 192
   return
 }
 
@@ -213,13 +213,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_a
   %27 = mova.i32 264
   %product = mma.u8s8.m8n8k8 %accumulator_fragment, %lhs_fragment, %rhs_fragment, %27
   %29 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %29, %output_view, 0
+  vst.acc %29, %output_view, 0
   %30 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %30, %output_view, 64
+  vst.acc %30, %output_view, 64
   %31 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %31, %output_view, 128
+  vst.acc %31, %output_view, 128
   %32 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %32, %output_view, 192
+  vst.acc %32, %output_view, 192
   return
 }
 
@@ -261,13 +261,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
   %34 = mova.i32 264
   %product = mmul.u8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %34
   %36 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %36, %output_view, 0
+  vst.acc %36, %output_view, 0
   %37 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %37, %output_view, 64
+  vst.acc %37, %output_view, 64
   %38 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %38, %output_view, 128
+  vst.acc %38, %output_view, 128
   %39 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %39, %output_view, 192
+  vst.acc %39, %output_view, 192
   return
 }
 
@@ -329,13 +329,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
   %56 = mova.i32 264
   %product = mmul.u8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %56
   %58 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %58, %output_view, 0
+  vst.acc %58, %output_view, 0
   %59 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %59, %output_view, 64
+  vst.acc %59, %output_view, 64
   %60 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %60, %output_view, 128
+  vst.acc %60, %output_view, 128
   %61 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %61, %output_view, 192
+  vst.acc %61, %output_view, 192
   return
 }
 
@@ -376,12 +376,12 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
   %33 = mova.i32 776
   %product = mmul.s8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %33
   %35 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %35, %output_view, 0
+  vst.acc %35, %output_view, 0
   %36 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %36, %output_view, 64
+  vst.acc %36, %output_view, 64
   %37 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %37, %output_view, 128
+  vst.acc %37, %output_view, 128
   %38 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.i32x16 %38, %output_view, 192
+  vst.acc %38, %output_view, 192
   return
 }

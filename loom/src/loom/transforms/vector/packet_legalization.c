@@ -1181,6 +1181,80 @@ static iree_status_t loom_vector_packet_erase_dead_sources(
   return iree_ok_status();
 }
 
+iree_status_t loom_vector_packet_legalize_load(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    const loom_vector_packet_policy_t* policy, bool* out_rewritten) {
+  *out_rewritten = false;
+
+  loom_vector_memory_footprint_t footprint = {0};
+  if (!loom_vector_memory_footprint_describe(
+          loom_vector_packet_fact_context(context), context->module, op,
+          &footprint) ||
+      footprint.kind != LOOM_VECTOR_MEMORY_FOOTPRINT_DENSE) {
+    return iree_ok_status();
+  }
+  loom_vector_packet_memory_chunk_shape_t shape = {0};
+  loom_vector_memory_cache_policy_t cache_policy = {0};
+  if (!loom_vector_packet_memory_chunk_shape(policy, footprint.vector_type,
+                                             &shape) ||
+      !loom_vector_memory_cache_policy_from_op(context->module, op,
+                                               &cache_policy) ||
+      !loom_vector_packet_memory_can_build_chunk_origins(context, &footprint,
+                                                         &shape)) {
+    return iree_ok_status();
+  }
+
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, op);
+  const loom_value_id_t value_checkpoint =
+      loom_rewriter_value_checkpoint(rewriter);
+  loom_value_id_t* packets = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->arena, shape.chunk_count, sizeof(*packets), (void**)&packets));
+  for (uint32_t chunk_index = 0; chunk_index < shape.chunk_count;
+       ++chunk_index) {
+    const uint32_t lane_offset = chunk_index * shape.chunk_lane_count;
+    const loom_vector_packet_slice_t slice = {
+        .dynamic_lane_offset = LOOM_VALUE_ID_INVALID,
+        .static_lane_offset = lane_offset,
+        .lane_count =
+            iree_min(shape.lane_count - lane_offset, shape.chunk_lane_count),
+    };
+    const loom_value_id_t* dynamic_indices = NULL;
+    iree_host_size_t dynamic_index_count = 0;
+    const int64_t* static_indices = NULL;
+    iree_host_size_t static_index_count = 0;
+    IREE_RETURN_IF_ERROR(loom_vector_packet_build_memory_origin(
+        context, &footprint, op, &slice, &dynamic_indices, &dynamic_index_count,
+        &static_indices, &static_index_count));
+    const loom_type_t packet_type = loom_vector_packet_memory_chunk_type(
+        footprint.vector_type, slice.lane_count);
+    loom_op_t* packet_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_load_build(
+        builder, cache_policy.build_flags, loom_vector_load_memory_flags(op),
+        footprint.view, dynamic_indices, dynamic_index_count, static_indices,
+        static_index_count, cache_policy.cache_scope,
+        cache_policy.cache_temporal, packet_type, op->location, &packet_op));
+    packets[chunk_index] = loom_vector_load_result(packet_op);
+  }
+
+  loom_value_id_t replacement = packets[0];
+  if (shape.chunk_count > 1) {
+    loom_op_t* concat_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_concat_build(
+        builder, /*axis=*/0, packets, shape.chunk_count, footprint.vector_type,
+        op->location, &concat_op));
+    replacement = loom_vector_concat_result(concat_op);
+  }
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &replacement, 1, value_checkpoint));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement, 1));
+  *out_rewritten = true;
+  return iree_ok_status();
+}
+
 iree_status_t loom_vector_packet_legalize_store(
     loom_target_legalization_context_t* context, loom_op_t* op,
     const loom_vector_packet_policy_t* policy, bool* out_rewritten) {

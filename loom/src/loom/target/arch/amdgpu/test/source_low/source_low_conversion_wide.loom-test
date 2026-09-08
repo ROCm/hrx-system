@@ -252,3 +252,264 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_
   %converted = concat(%15, %26, %37, %48, %59, %70, %81, %92, %103, %114, %125, %136, %147, %158, %169, %180) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x16>
   return %converted
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extui_i16x16_i32x16(%input: vector<16xi16>) -> (vector<16xi32>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.extui"}
+  %converted = vector.extui %input : vector<16xi16> to vector<16xi32>
+  func.return %converted : vector<16xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extsi_i16x16_i32x16(%input: vector<16xi16>) -> (vector<16xi32>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.extsi"}
+  %converted = vector.extsi %input : vector<16xi16> to vector<16xi32>
+  func.return %converted : vector<16xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extui_i32x8_i64x8(%input: vector<8xi32>) -> (vector<8xi64>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.extui"}
+  %converted = vector.extui %input : vector<8xi32> to vector<8xi64>
+  func.return %converted : vector<8xi64>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extsi_i32x8_i64x8(%input: vector<8xi32>) -> (vector<8xi64>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.extsi"}
+  %converted = vector.extsi %input : vector<8xi32> to vector<8xi64>
+  func.return %converted : vector<8xi64>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extui_i8x32_i32x32(%input: vector<32xi8>) -> (vector<32xi32>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.extui"}
+  %converted = vector.extui %input : vector<32xi8> to vector<32xi32>
+  func.return %converted : vector<32xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extsi_i8x32_i32x32(%input: vector<32xi8>) -> (vector<32xi32>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.extsi"}
+  %converted = vector.extsi %input : vector<32xi8> to vector<32xi32>
+  func.return %converted : vector<32xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extui_i16x16_i64x16(%input: vector<16xi16>) -> (vector<16xi64>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.extui"}
+  %converted = vector.extui %input : vector<16xi16> to vector<16xi64>
+  func.return %converted : vector<16xi64>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extsi_i16x16_i64x16(%input: vector<16xi16>) -> (vector<16xi64>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.extsi"}
+  %converted = vector.extsi %input : vector<16xi16> to vector<16xi64>
+  func.return %converted : vector<16xi64>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extui_i16x32_i32x32(%input: vector<32xi16>) -> (vector<32xi32>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.extui"}
+  %converted = vector.extui %input : vector<32xi16> to vector<32xi32>
+  func.return %converted : vector<32xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extsi_i16x32_i32x32(%input: vector<32xi16>) -> (vector<32xi32>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.extsi"}
+  %converted = vector.extsi %input : vector<32xi16> to vector<32xi32>
+  func.return %converted : vector<32xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extui_i32x16_i64x16(%input: vector<16xi32>) -> (vector<16xi64>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.extui"}
+  %converted = vector.extui %input : vector<16xi32> to vector<16xi64>
+  func.return %converted : vector<16xi64>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extsi_i32x16_i64x16(%input: vector<16xi32>) -> (vector<16xi64>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.extsi"}
+  %converted = vector.extsi %input : vector<16xi32> to vector<16xi64>
+  func.return %converted : vector<16xi64>
+}
+
+// ====
+
+// XFAIL: AMDGPU wide integer extension exceeds the current 32-lane target-low carrier
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extui_i8x64_i32x64(%input: vector<64xi8>) -> (vector<64xi32>) {
+  %converted = vector.extui %input : vector<64xi8> to vector<64xi32>
+  func.return %converted : vector<64xi32>
+}
+
+// ====
+
+// XFAIL: AMDGPU wide integer extension exceeds the current 32-lane target-low carrier
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extsi_i8x64_i32x64(%input: vector<64xi8>) -> (vector<64xi32>) {
+  %converted = vector.extsi %input : vector<64xi8> to vector<64xi32>
+  func.return %converted : vector<64xi32>
+}
+
+// ====
+
+// XFAIL: AMDGPU wide integer extension exceeds the current 32-lane target-low carrier
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extui_i16x32_i64x32(%input: vector<32xi16>) -> (vector<32xi64>) {
+  %converted = vector.extui %input : vector<32xi16> to vector<32xi64>
+  func.return %converted : vector<32xi64>
+}
+
+// ====
+
+// XFAIL: AMDGPU wide integer extension exceeds the current 32-lane target-low carrier
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_extsi_i16x32_i64x32(%input: vector<32xi16>) -> (vector<32xi64>) {
+  %converted = vector.extsi %input : vector<32xi16> to vector<32xi64>
+  func.return %converted : vector<32xi64>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_trunci_i16x32_i8x32(%input: vector<32xi16>) -> (vector<32xi8>) {
+  %converted = vector.trunci %input : vector<32xi16> to vector<32xi8>
+  func.return %converted : vector<32xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_trunci_i16x32_i8x32(%input: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x8>) asm {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %7 = v_lshrrev_b32_src0_inline %5, 16
+  %8 = slice %input[1] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %10 = v_lshrrev_b32_src0_inline %8, 16
+  %11 = slice %input[2] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %13 = v_lshrrev_b32_src0_inline %11, 16
+  %14 = slice %input[3] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %16 = v_lshrrev_b32_src0_inline %14, 16
+  %17 = slice %input[4] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %19 = v_lshrrev_b32_src0_inline %17, 16
+  %20 = slice %input[5] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %22 = v_lshrrev_b32_src0_inline %20, 16
+  %23 = slice %input[6] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %25 = v_lshrrev_b32_src0_inline %23, 16
+  %26 = slice %input[7] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %28 = v_lshrrev_b32_src0_inline %26, 16
+  %29 = slice %input[8] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %31 = v_lshrrev_b32_src0_inline %29, 16
+  %32 = slice %input[9] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %34 = v_lshrrev_b32_src0_inline %32, 16
+  %35 = slice %input[10] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %37 = v_lshrrev_b32_src0_inline %35, 16
+  %38 = slice %input[11] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %40 = v_lshrrev_b32_src0_inline %38, 16
+  %41 = slice %input[12] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %43 = v_lshrrev_b32_src0_inline %41, 16
+  %44 = slice %input[13] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %46 = v_lshrrev_b32_src0_inline %44, 16
+  %47 = slice %input[14] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %49 = v_lshrrev_b32_src0_inline %47, 16
+  %50 = slice %input[15] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %52 = v_lshrrev_b32_src0_inline %50, 16
+  %53 = v_perm_b32_src2_lit %5, %7, 4
+  %54 = v_perm_b32_src2_lit %8, %10, 4
+  %55 = v_perm_b32_src2_lit %53, %54, 16778500
+  %56 = v_perm_b32_src2_lit %11, %13, 4
+  %57 = v_perm_b32_src2_lit %14, %16, 4
+  %58 = v_perm_b32_src2_lit %56, %57, 16778500
+  %59 = v_perm_b32_src2_lit %17, %19, 4
+  %60 = v_perm_b32_src2_lit %20, %22, 4
+  %61 = v_perm_b32_src2_lit %59, %60, 16778500
+  %62 = v_perm_b32_src2_lit %23, %25, 4
+  %63 = v_perm_b32_src2_lit %26, %28, 4
+  %64 = v_perm_b32_src2_lit %62, %63, 16778500
+  %65 = v_perm_b32_src2_lit %29, %31, 4
+  %66 = v_perm_b32_src2_lit %32, %34, 4
+  %67 = v_perm_b32_src2_lit %65, %66, 16778500
+  %68 = v_perm_b32_src2_lit %35, %37, 4
+  %69 = v_perm_b32_src2_lit %38, %40, 4
+  %70 = v_perm_b32_src2_lit %68, %69, 16778500
+  %71 = v_perm_b32_src2_lit %41, %43, 4
+  %72 = v_perm_b32_src2_lit %44, %46, 4
+  %73 = v_perm_b32_src2_lit %71, %72, 16778500
+  %74 = v_perm_b32_src2_lit %47, %49, 4
+  %75 = v_perm_b32_src2_lit %50, %52, 4
+  %76 = v_perm_b32_src2_lit %74, %75, 16778500
+  %converted = concat(%55, %58, %61, %64, %67, %70, %73, %76) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  return %converted
+}
+
+// ====
+
+// XFAIL: AMDGPU wide integer truncation has no target-low register mapping
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_trunci_i16x64_i8x64(%input: vector<64xi16>) -> (vector<64xi8>) {
+  %converted = vector.trunci %input : vector<64xi16> to vector<64xi8>
+  func.return %converted : vector<64xi8>
+}
+
+// ====
+
+// XFAIL: AMDGPU packed byte bitpack lacks target-low vector legalization
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_bitpack_i8x64_i4x64(%input: vector<64xi8>) -> (vector<32xi8>) {
+  %converted = vector.bitpack<4> %input : vector<64xi8> -> vector<32xi8>
+  func.return %converted : vector<32xi8>
+}
+
+// ====
+
+// XFAIL: AMDGPU packed byte bitpack lacks target-low vector legalization
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @vector_bitpack_i8x128_i4x128(%input: vector<128xi8>) -> (vector<64xi8>) {
+  %converted = vector.bitpack<4> %input : vector<128xi8> -> vector<64xi8>
+  func.return %converted : vector<64xi8>
+}

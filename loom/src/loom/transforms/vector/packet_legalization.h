@@ -25,6 +25,13 @@ typedef struct loom_vector_packet_policy_t {
   uint16_t maximum_unpacketized_bit_count;
 } loom_vector_packet_policy_t;
 
+// Packetizes a dense vector load into target-native widths and concatenates
+// the packets into the original logical vector. Returns false through
+// |out_rewritten| when the access or policy does not admit an exact split.
+iree_status_t loom_vector_packet_legalize_load(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    const loom_vector_packet_policy_t* policy, bool* out_rewritten);
+
 // Packetizes a dense vector store and its decomposable producer graph into
 // target-native widths. Returns false through |out_rewritten| when the graph or
 // policy does not admit an exact packetization.

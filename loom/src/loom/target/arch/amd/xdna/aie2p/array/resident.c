@@ -353,9 +353,9 @@ static iree_status_t loom_aie2p_array_resident_build_load_accumulator_f32x16(
   };
   return loom_aie2p_array_resident_build_op(
       builder, ir_builder,
-      AIE2P_CORE_DESCRIPTOR_REF_LOAD_ACCUMULATOR_F32X16_INDEXED_IMMEDIATE,
-      &address, 1, loom_make_named_attr_slice(&offset, 1),
-      &builder->accumulator512_type, location, out_value);
+      AIE2P_CORE_DESCRIPTOR_REF_LOAD_ACCUMULATOR_INDEXED_IMMEDIATE, &address, 1,
+      loom_make_named_attr_slice(&offset, 1), &builder->accumulator512_type,
+      location, out_value);
 }
 
 static iree_status_t loom_aie2p_array_resident_build_store_accumulator_f32x16(
@@ -369,9 +369,9 @@ static iree_status_t loom_aie2p_array_resident_build_store_accumulator_f32x16(
   const loom_value_id_t operands[] = {value, address};
   return loom_aie2p_array_resident_build_op(
       builder, ir_builder,
-      AIE2P_CORE_DESCRIPTOR_REF_STORE_ACCUMULATOR_F32X16_INDEXED_IMMEDIATE,
-      operands, IREE_ARRAYSIZE(operands),
-      loom_make_named_attr_slice(&offset, 1), /*result_type=*/NULL, location,
+      AIE2P_CORE_DESCRIPTOR_REF_STORE_ACCUMULATOR_INDEXED_IMMEDIATE, operands,
+      IREE_ARRAYSIZE(operands), loom_make_named_attr_slice(&offset, 1),
+      /*result_type=*/NULL, location,
       /*out_value=*/NULL);
 }
 

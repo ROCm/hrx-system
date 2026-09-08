@@ -431,7 +431,7 @@ static iree_status_t loom_aie2p_select_matrix_store(
       loom_low_lower_allocate_plan_data(context, sizeof(*plan), (void**)&plan));
   plan->store = loom_aie2p_matrix_descriptor(
       loom_low_lower_context_descriptor_set(context),
-      IREE_SV("amd.xdna.aie2p.store.accumulator.i32x16.indexed.immediate"));
+      IREE_SV("amd.xdna.aie2p.store.accumulator.indexed.immediate"));
   *out_plan =
       loom_low_lower_plan_make(LOOM_AIE2P_MATRIX_PLAN_STORE_I32_M8N8, plan);
   return iree_ok_status();

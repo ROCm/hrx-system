@@ -293,13 +293,13 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   %150 = mova.i32 60
   %product = mma.bf16bf16.m8n8k1 %accumulator_fragment, %146, %149, %150
   %152 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %152, %partial_view, 0
+  vst.acc %152, %partial_view, 0
   %153 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %153, %partial_view, 64
+  vst.acc %153, %partial_view, 64
   %154 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %154, %partial_view, 128
+  vst.acc %154, %partial_view, 128
   %155 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %155, %partial_view, 192
+  vst.acc %155, %partial_view, 192
   low.br ^_bb3
 ^_bb3:
   rel %release_delta, 53
@@ -346,13 +346,13 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   %189 = mova.i32 60
   %product = mma.bf16bf16.m8n8k1 %accumulator_fragment, %185, %188, %189
   %191 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %191, %partial_view, 0
+  vst.acc %191, %partial_view, 0
   %192 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %192, %partial_view, 64
+  vst.acc %192, %partial_view, 64
   %193 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %193, %partial_view, 128
+  vst.acc %193, %partial_view, 128
   %194 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %194, %partial_view, 192
+  vst.acc %194, %partial_view, 192
   low.br ^_bb3
 ^_bb3:
   rel %release_delta, 53
@@ -386,32 +386,32 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   acq %acquire_delta, 50
   low.br ^_bb2
 ^_bb2:
-  %217 = vlda.acc.f32x16 %partial0_view, 0
-  %218 = vlda.acc.f32x16 %partial0_view, 64
-  %219 = vlda.acc.f32x16 %partial0_view, 128
-  %220 = vlda.acc.f32x16 %partial0_view, 192
+  %217 = vlda.acc %partial0_view, 0
+  %218 = vlda.acc %partial0_view, 64
+  %219 = vlda.acc %partial0_view, 128
+  %220 = vlda.acc %partial0_view, 192
   %partial0_value = concat(%217, %218, %219, %220) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %222 = vlda.acc.f32x16 %partial1_view, 0
-  %223 = vlda.acc.f32x16 %partial1_view, 64
-  %224 = vlda.acc.f32x16 %partial1_view, 128
-  %225 = vlda.acc.f32x16 %partial1_view, 192
+  %222 = vlda.acc %partial1_view, 0
+  %223 = vlda.acc %partial1_view, 64
+  %224 = vlda.acc %partial1_view, 128
+  %225 = vlda.acc %partial1_view, 192
   %partial1_value = concat(%222, %223, %224, %225) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %227 = vlda.acc.f32x16 %bias_view, 0
-  %228 = vlda.acc.f32x16 %bias_view, 64
-  %229 = vlda.acc.f32x16 %bias_view, 128
-  %230 = vlda.acc.f32x16 %bias_view, 192
+  %227 = vlda.acc %bias_view, 0
+  %228 = vlda.acc %bias_view, 64
+  %229 = vlda.acc %bias_view, 128
+  %230 = vlda.acc %bias_view, 192
   %bias_value = concat(%227, %228, %229, %230) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
   %232 = mova.i32 60
   %sum = vadd.f32x64 %partial0_value, %partial1_value, %232
   %biased = vadd.f32x64 %sum, %bias_value, %232
   %235 = slice %biased[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %235, %output_view, 0
+  vst.acc %235, %output_view, 0
   %236 = slice %biased[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %236, %output_view, 64
+  vst.acc %236, %output_view, 64
   %237 = slice %biased[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %237, %output_view, 128
+  vst.acc %237, %output_view, 128
   %238 = slice %biased[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %238, %output_view, 192
+  vst.acc %238, %output_view, 192
   low.br ^_bb3
 ^_bb3:
   rel %release_delta, 51
@@ -1028,10 +1028,10 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@temporal_fold_array_tar
 low.func.def target<amd.xdna.aie2p.core>(@temporal_fold_core_target) abi(object_function) @copy_f32_record() asm {
   %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %low = vlda.acc.f32x16 %input, 0
-  %high = vlda.acc.f32x16 %input, 64
-  vst.acc.f32x16 %low, %output, 0
-  vst.acc.f32x16 %high, %output, 64
+  %low = vlda.acc %input, 0
+  %high = vlda.acc %input, 64
+  vst.acc %low, %output, 0
+  vst.acc %high, %output, 64
   return
 }
 
@@ -1104,14 +1104,14 @@ low.func.def retain target<amd.xdna.aie2p.core>(@temporal_fold_core_target) @tem
   acq %acquire_delta, 49
   low.br ^_bb3
 ^_bb3:
-  %low = vlda.acc.f32x16 %input, 0
-  %high = vlda.acc.f32x16 %input, 64
-  vst.acc.f32x16 %low, %output, 0
-  vst.acc.f32x16 %high, %output, 64
+  %low = vlda.acc %input, 0
+  %high = vlda.acc %input, 64
+  vst.acc %low, %output, 0
+  vst.acc %high, %output, 64
   low.br ^_bb4
 ^_bb4:
-  %43 = vlda.acc.f32x16 %output, 0
-  %44 = vlda.acc.f32x16 %output, 64
+  %43 = vlda.acc %output, 0
+  %44 = vlda.acc %output, 64
   %45 = concat(%43, %44, %41, %41) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
   %46 = nez %36
   low.cond_br %46, ^_bb5, ^_bb6 : reg<aie2p.er>
@@ -1133,9 +1133,9 @@ low.func.def retain target<amd.xdna.aie2p.core>(@temporal_fold_core_target) @tem
   low.br ^_bb2(%51: reg<aie2p.ep>, %output: reg<aie2p.ep>, %42: reg<aie2p.mbms x4>, %52: reg<aie2p.er>, %fold_zero: reg<aie2p.er>)
 ^_bb9:
   %54 = slice %42[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %54, %output, 0
+  vst.acc %54, %output, 0
   %55 = slice %42[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc.f32x16 %55, %output, 64
+  vst.acc %55, %output, 64
   rel %release_delta, 51
   %56 = mov.address-to-scalar %output
   %57 = mov.i32 16384

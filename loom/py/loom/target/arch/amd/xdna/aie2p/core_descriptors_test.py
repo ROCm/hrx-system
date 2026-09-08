@@ -1252,6 +1252,50 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
         ]
         assert [operand.unit_count for operand in unpack.operands] == [2, 1, 1, 1]
 
+    for shape, result_units, source_units in (
+        ("2x.w-to-b", 1, 1),
+        ("4x.w-to-c", 2, 1),
+        ("2x.x-to-c", 2, 2),
+        ("4x.x-to-d", 4, 2),
+    ):
+        for signedness, sign_bit in (("unsigned", 0), ("signed", 1)):
+            widen = descriptors[f"amd.xdna.aie2p.widen.{shape}.{signedness}.configured"]
+            assert [operand.field_name for operand in widen.operands] == [
+                "dst",
+                "src",
+                "su",
+                "implicit_def_srups_of",
+                "implicit_use_crsat",
+                "implicit_use_crupsmode",
+                f"implicit_use_upssign{sign_bit}",
+            ]
+            assert [
+                operand.reg_alts[0].reg_class for operand in widen.operands[:3]
+            ] == ["aie2p.mbms", "aie2p.vec256", "aie2p.es"]
+            assert [operand.unit_count for operand in widen.operands[:3]] == [
+                result_units,
+                source_units,
+                1,
+            ]
+
+    for width, result_units, source_units in (("w", 1, 2), ("x", 2, 4)):
+        pack = descriptors[f"amd.xdna.aie2p.pack.{width}.trunc.configured"]
+        assert [operand.field_name for operand in pack.operands] == [
+            "dst",
+            "src",
+            "implicit_use_crpacksize",
+            "implicit_use_crsat",
+            "implicit_use_packsign0",
+        ]
+        assert [operand.reg_alts[0].reg_class for operand in pack.operands[:2]] == [
+            "aie2p.vec256",
+            "aie2p.vec256",
+        ]
+        assert [operand.unit_count for operand in pack.operands[:2]] == [
+            result_units,
+            source_units,
+        ]
+
     bf16_outer_product = descriptors[
         "amd.xdna.aie2p.matrix.accumulate.bf16bf16.m8n8k1.configured"
     ]
@@ -1374,7 +1418,7 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
     assert float_accumulator_clear.operands[0].unit_count == 4
 
     accumulator_store = descriptors[
-        "amd.xdna.aie2p.store.accumulator.i32x16.indexed.immediate"
+        "amd.xdna.aie2p.store.accumulator.indexed.immediate"
     ]
     assert [
         operand.reg_alts[0].reg_class for operand in accumulator_store.operands
@@ -1384,26 +1428,24 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
     ]
     assert accumulator_store.effects[0].width_bits == 512
 
-    float_accumulator_load = descriptors[
-        "amd.xdna.aie2p.load.accumulator.f32x16.indexed.register"
+    accumulator_load = descriptors["amd.xdna.aie2p.load.accumulator.indexed.register"]
+    assert [operand.reg_alts[0].reg_class for operand in accumulator_load.operands] == [
+        "aie2p.mbms",
+        "aie2p.ep",
+        "aie2p.edj",
     ]
-    assert [
-        operand.reg_alts[0].reg_class for operand in float_accumulator_load.operands
-    ] == ["aie2p.mbms", "aie2p.ep", "aie2p.edj"]
-    assert [operand.unit_count for operand in float_accumulator_load.operands] == [
+    assert [operand.unit_count for operand in accumulator_load.operands] == [
         1,
         1,
         1,
     ]
-    assert float_accumulator_load.effects[0].width_bits == 512
+    assert accumulator_load.effects[0].width_bits == 512
 
-    float_accumulator_store = descriptors[
-        "amd.xdna.aie2p.store.accumulator.f32x16.indexed.register"
-    ]
+    accumulator_store = descriptors["amd.xdna.aie2p.store.accumulator.indexed.register"]
     assert [
-        operand.reg_alts[0].reg_class for operand in float_accumulator_store.operands
+        operand.reg_alts[0].reg_class for operand in accumulator_store.operands
     ] == ["aie2p.mbms", "aie2p.ep", "aie2p.edj"]
-    assert float_accumulator_store.effects[0].width_bits == 512
+    assert accumulator_store.effects[0].width_bits == 512
 
     narrow = descriptors["amd.xdna.aie2p.narrow.trunc.signed.i16x32"]
     assert [operand.reg_alts[0].reg_class for operand in narrow.operands[:3]] == [
@@ -1454,21 +1496,26 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
         assert DescriptorFlag.DEAD_REMOVABLE not in setter.flags
         assert narrow_state_classes[state_field] == register_class
 
-    unpack_size = descriptors["amd.xdna.aie2p.state.unpack-size.immediate"]
-    assert unpack_size.asm_forms[0].results == ()
-    assert len(unpack_size.operands) == 1
-    unpack_size_write = unpack_size.operands[0]
-    assert unpack_size_write.role is OperandRole.IMPLICIT
-    assert unpack_size_write.reg_alts[0].reg_class == "aie2p.mcrunpacksize"
-    assert set(unpack_size_write.flags) == {
-        OperandFlag.IMPLICIT,
-        OperandFlag.STATE_WRITE,
-    }
-    assert unpack_size_write.encoding_field_id == 0
-    assert len(unpack_size.encoding_field_values) == 1
-    assert unpack_size.encoding_field_values[0].value == 23
-    assert DescriptorFlag.SIDE_EFFECTING in unpack_size.flags
-    assert DescriptorFlag.DEAD_REMOVABLE not in unpack_size.flags
+    for key, register_class, encoded_register in (
+        ("state.unpack-size.immediate", "aie2p.mcrunpacksize", 23),
+        ("state.ups-mode.immediate", "aie2p.mcrupsmode", 103),
+        ("state.pack-size.immediate", "aie2p.mcrpacksize", 59),
+    ):
+        setter = descriptors[f"amd.xdna.aie2p.{key}"]
+        assert setter.asm_forms[0].results == ()
+        assert len(setter.operands) == 1
+        state_write = setter.operands[0]
+        assert state_write.role is OperandRole.IMPLICIT
+        assert state_write.reg_alts[0].reg_class == register_class
+        assert set(state_write.flags) == {
+            OperandFlag.IMPLICIT,
+            OperandFlag.STATE_WRITE,
+        }
+        assert state_write.encoding_field_id == 0
+        assert len(setter.encoding_field_values) == 1
+        assert setter.encoding_field_values[0].value == encoded_register
+        assert DescriptorFlag.SIDE_EFFECTING in setter.flags
+        assert DescriptorFlag.DEAD_REMOVABLE not in setter.flags
     unsigned_unpack = descriptors["amd.xdna.aie2p.unpack.u4x64.to.u8x64.configured"]
     unsigned_unpack_state = {
         operand.field_name: operand.reg_alts[0].reg_class

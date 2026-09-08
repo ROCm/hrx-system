@@ -152,6 +152,21 @@ _I32_F32_TRANSPOSE_4X4_CONTROL = 34
 # logical vector<8xi32> value domain.
 _I32_SLICE_HIGH_BYTE_OFFSET = 32
 
+# Two native X-register carriers concatenate into one ordinary 1024-bit
+# vector. These are the value shapes reachable from packetized wide loads;
+# F32x32 is excluded because it has an accumulator representation.
+_WIDE_VECTOR_CONCAT_SPECS = (
+    (
+        Vector(("i8", "f8E4M3", "f8E5M2"), lanes=64),
+        Vector(("i8", "f8E4M3", "f8E5M2"), lanes=128),
+    ),
+    (
+        Vector(("i16", "f16", "bf16"), lanes=32),
+        Vector(("i16", "f16", "bf16"), lanes=64),
+    ),
+    (Vector("i32", lanes=16), Vector("i32", lanes=32)),
+)
+
 
 def _descriptor(key: str) -> Descriptor:
     return descriptor_by_key(AIE2P_CORE_DESCRIPTOR_SET, key)
@@ -536,6 +551,30 @@ def _vector_concat_i8x32_pair_rule() -> DescriptorRule:
     )
 
 
+def _wide_vector_concat_pair_rule(
+    input_type: TypePattern,
+    result_type: TypePattern,
+) -> DescriptorRule:
+    return DescriptorRule(
+        source_op=vector.vector_concat,
+        guards=(
+            Guard.i64_range("axis", 0, 0),
+            Guard.operand_segment_count("inputs", 2),
+            Guard.value_type("inputs", input_type),
+            Guard.value_type("result", result_type),
+        ),
+        emit=(
+            EmitRegisterConcat(
+                sources=(
+                    ValueRef.operand("inputs", element=0),
+                    ValueRef.operand("inputs", element=1),
+                ),
+                result=ValueRef.result("result"),
+            ),
+        ),
+    )
+
+
 AIE2P_STRUCTURAL_RULES = (
     *(
         rule
@@ -579,6 +618,10 @@ AIE2P_STRUCTURAL_RULES = (
         )
     ),
     _vector_concat_i8x32_pair_rule(),
+    *(
+        _wide_vector_concat_pair_rule(input_type, result_type)
+        for input_type, result_type in _WIDE_VECTOR_CONCAT_SPECS
+    ),
     _vector_deinterleave_i8x64_rule(),
     _vector_transpose_i32_f32_4x4_rule(),
 )

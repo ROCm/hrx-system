@@ -71,8 +71,11 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
       return loom_low_lower_make_register_type(
           context, AIE2P_CORE_REG_CLASS_ID_AIE2P_EWL, 1, out_low_type);
     }
-    if (is_rank_one && element_count == 64 &&
-        element_type == LOOM_SCALAR_TYPE_I32) {
+    // Full-width integer matrix and VUPS results remain in the accumulator
+    // file so their 2048 payload bits do not require four vector-file moves.
+    if (is_rank_one &&
+        ((element_count == 64 && element_type == LOOM_SCALAR_TYPE_I32) ||
+         (element_count == 32 && element_type == LOOM_SCALAR_TYPE_I64))) {
       return loom_low_lower_make_register_type(
           context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMS, 4, out_low_type);
     }

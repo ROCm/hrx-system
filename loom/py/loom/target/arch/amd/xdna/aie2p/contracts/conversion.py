@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Exact scalar conversion contracts for AMD XDNA AIE2P."""
+"""Exact scalar and vector conversion contracts for AMD XDNA AIE2P."""
 
 from __future__ import annotations
 
@@ -19,13 +19,16 @@ from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
 )
 from loom.target.contracts import (
+    ContractEmit,
     DescriptorEmitForm,
+    DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
     EmitRegisterConcat,
     EmitRegisterSlice,
     Guard,
     Scalar,
+    TypePattern,
     ValueAliasRule,
     ValueRef,
     Vector,
@@ -50,6 +53,10 @@ _SIGNED_INTEGERS = (*_NARROW_INTEGERS, "i32")
 
 def _descriptor(key: str) -> Descriptor:
     return descriptor_by_key(AIE2P_CORE_DESCRIPTOR_SET, key)
+
+
+def _exact_vector(element: str, element_count: int) -> TypePattern:
+    return Vector(element, lanes=element_count)
 
 
 def emit_round_nearest_f32_to_i32(
@@ -1215,6 +1222,199 @@ def _bf16x32_to_f32x32_rule() -> DescriptorRule:
     )
 
 
+def _vector_integer_widen_rule(
+    source_op: Op,
+    input_type: TypePattern,
+    result_type: TypePattern,
+    descriptor_key: str,
+    ups_mode: int,
+    report_key: str,
+    *,
+    accumulator_unit_count: int,
+    direct_accumulator_result: bool,
+    slice_input: bool,
+) -> DescriptorRule:
+    shift_constant = _descriptor("amd.xdna.aie2p.constant.i32.shift")
+    set_saturation = _descriptor("amd.xdna.aie2p.state.saturation.immediate")
+    set_ups_mode = _descriptor("amd.xdna.aie2p.state.ups-mode.immediate")
+    widen = _descriptor(descriptor_key)
+    move_from_accumulator = _descriptor(
+        "amd.xdna.aie2p.move.accumulator512.to.vector512"
+    )
+    source = ValueRef.operand("input")
+    input_emits = ()
+    if slice_input:
+        source = ValueRef.temporary("source_w")
+        input_emits = (
+            EmitRegisterSlice(
+                source=ValueRef.operand("input"),
+                result=source,
+                unit_count=1,
+            ),
+        )
+    native_result = (
+        ValueRef.result("result")
+        if direct_accumulator_result
+        else ValueRef.temporary("wide_result")
+    )
+    output_emits: list[ContractEmit] = []
+    if not direct_accumulator_result:
+        vector_units = []
+        for unit in range(accumulator_unit_count):
+            accumulator_unit = native_result
+            if accumulator_unit_count > 1:
+                accumulator_unit = ValueRef.temporary(f"accumulator_unit_{unit}")
+                output_emits.append(
+                    EmitRegisterSlice(
+                        source=native_result,
+                        result=accumulator_unit,
+                        unit_offset=unit,
+                        unit_count=1,
+                    )
+                )
+            vector_unit = (
+                ValueRef.result("result")
+                if accumulator_unit_count == 1
+                else ValueRef.temporary(f"vector_unit_{unit}")
+            )
+            output_emits.append(
+                EmitDescriptorOp(
+                    descriptor=move_from_accumulator,
+                    operands={"src": accumulator_unit},
+                    results={"dst": vector_unit},
+                    result_types=(
+                        {"dst": DescriptorResultType()}
+                        if accumulator_unit_count > 1
+                        else None
+                    ),
+                    form=DescriptorEmitForm.OP,
+                )
+            )
+            vector_units.append(vector_unit)
+        if accumulator_unit_count > 1:
+            output_emits.append(
+                EmitRegisterConcat(
+                    sources=vector_units,
+                    result=ValueRef.result("result"),
+                )
+            )
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=widen,
+        guards=(
+            Guard.value_type("input", input_type),
+            Guard.value_type("result", result_type),
+        ),
+        emit=(
+            *input_emits,
+            EmitDescriptorOp(
+                descriptor=shift_constant,
+                results={"dst": ValueRef.temporary("shift")},
+                result_types={"dst": DescriptorResultType()},
+                immediates={"i": 0},
+                form=DescriptorEmitForm.CONST,
+            ),
+            EmitDescriptorOp(
+                descriptor=set_saturation,
+                immediates={"i": 0},
+                form=DescriptorEmitForm.OP,
+            ),
+            EmitDescriptorOp(
+                descriptor=set_ups_mode,
+                immediates={"i": ups_mode},
+                form=DescriptorEmitForm.OP,
+            ),
+            EmitDescriptorOp(
+                descriptor=widen,
+                operands={
+                    "src": source,
+                    "su": ValueRef.temporary("shift"),
+                },
+                results={"dst": native_result},
+                result_types=(
+                    None
+                    if direct_accumulator_result
+                    else {"dst": DescriptorResultType()}
+                ),
+                form=DescriptorEmitForm.OP,
+            ),
+            *output_emits,
+        ),
+        report_key=report_key,
+    )
+
+
+def _vector_integer_pack_rule(
+    source_op: Op,
+    source_field: str,
+    input_type: TypePattern,
+    result_type: TypePattern,
+    descriptor_key: str,
+    pack_size: int,
+    report_key: str,
+    *,
+    bit_width: int | None = None,
+    pad_result: bool,
+) -> DescriptorRule:
+    set_saturation = _descriptor("amd.xdna.aie2p.state.saturation.immediate")
+    set_pack_size = _descriptor("amd.xdna.aie2p.state.pack-size.immediate")
+    pack = _descriptor(descriptor_key)
+    packed_result = (
+        ValueRef.temporary("packed_w") if pad_result else ValueRef.result("result")
+    )
+    result_emits: tuple[ContractEmit, ...] = ()
+    if pad_result:
+        result_emits = (
+            EmitRegisterSlice(
+                source=ValueRef.operand(source_field),
+                result=ValueRef.temporary("unused_w"),
+                unit_offset=1,
+                unit_count=1,
+            ),
+            EmitRegisterConcat(
+                sources=(packed_result, ValueRef.temporary("unused_w")),
+                result=ValueRef.result("result"),
+            ),
+        )
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=pack,
+        guards=(
+            Guard.value_type(source_field, input_type),
+            Guard.value_type("result", result_type),
+            *(
+                (
+                    Guard.attr_kind("width", "i64"),
+                    Guard.i64_range("width", bit_width, bit_width),
+                )
+                if bit_width is not None
+                else ()
+            ),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=set_saturation,
+                immediates={"i": 0},
+                form=DescriptorEmitForm.OP,
+            ),
+            EmitDescriptorOp(
+                descriptor=set_pack_size,
+                immediates={"i": pack_size},
+                form=DescriptorEmitForm.OP,
+            ),
+            EmitDescriptorOp(
+                descriptor=pack,
+                operands={"src": ValueRef.operand(source_field)},
+                results={"dst": packed_result},
+                result_types=({"dst": DescriptorResultType()} if pad_result else None),
+                form=DescriptorEmitForm.OP,
+            ),
+            *result_emits,
+        ),
+        report_key=report_key,
+    )
+
+
 def _integer_extend_rule(
     source_op: Op,
     input_type: Scalar,
@@ -1299,6 +1499,119 @@ def _i64_truncate_rule(result_type: Scalar) -> DescriptorRule:
 
 
 AIE2P_CONVERSION_RULES = (
+    *(
+        _vector_integer_widen_rule(
+            source_op,
+            _exact_vector(input_element, lane_count),
+            _exact_vector(result_element, lane_count),
+            f"amd.xdna.aie2p.widen.{physical_shape}.{signedness}.configured",
+            ups_mode,
+            (
+                f"native_{signedness}_{input_element}x{lane_count}_to_"
+                f"{result_element}x{lane_count}"
+            ),
+            accumulator_unit_count=accumulator_unit_count,
+            direct_accumulator_result=direct_accumulator_result,
+            slice_input=slice_input,
+        )
+        for source_op, signedness in (
+            (vector.vector_extui, "unsigned"),
+            (vector.vector_extsi, "signed"),
+        )
+        for (
+            input_element,
+            result_element,
+            lane_count,
+            physical_shape,
+            ups_mode,
+            slice_input,
+            accumulator_unit_count,
+            direct_accumulator_result,
+        ) in (
+            ("i16", "i32", 16, "2x.w-to-b", 0, True, 1, False),
+            ("i32", "i64", 8, "2x.w-to-b", 1, True, 1, False),
+            ("i8", "i32", 32, "4x.w-to-c", 0, True, 2, False),
+            ("i16", "i64", 16, "4x.w-to-c", 1, True, 2, False),
+            ("i16", "i32", 32, "2x.x-to-c", 0, False, 2, False),
+            ("i32", "i64", 16, "2x.x-to-c", 1, False, 2, False),
+            ("i8", "i32", 64, "4x.x-to-d", 0, False, 4, True),
+            ("i16", "i64", 32, "4x.x-to-d", 1, False, 4, True),
+        )
+    ),
+    *(
+        _vector_integer_pack_rule(
+            source_op,
+            source_field,
+            _exact_vector(input_element, input_lanes),
+            _exact_vector("i8", result_lanes),
+            f"amd.xdna.aie2p.pack.{physical_width}.trunc.configured",
+            pack_size,
+            report_key,
+            bit_width=bit_width,
+            pad_result=pad_result,
+        )
+        for (
+            source_op,
+            source_field,
+            input_element,
+            input_lanes,
+            result_lanes,
+            physical_width,
+            pack_size,
+            bit_width,
+            report_key,
+            pad_result,
+        ) in (
+            (
+                vector.vector_trunci,
+                "input",
+                "i16",
+                32,
+                32,
+                "w",
+                1,
+                None,
+                "native_trunc_i16x32_to_i8x32",
+                True,
+            ),
+            (
+                vector.vector_trunci,
+                "input",
+                "i16",
+                64,
+                64,
+                "x",
+                1,
+                None,
+                "native_trunc_i16x64_to_i8x64",
+                False,
+            ),
+            (
+                vector.vector_bitpack,
+                "source",
+                "i8",
+                64,
+                32,
+                "w",
+                0,
+                4,
+                "native_bitpack_i8x64_to_i4x64",
+                True,
+            ),
+            (
+                vector.vector_bitpack,
+                "source",
+                "i8",
+                128,
+                64,
+                "x",
+                0,
+                4,
+                "native_bitpack_i8x128_to_i4x128",
+                False,
+            ),
+        )
+    ),
     *(
         _integer_extend_rule(source_op, input_type, result_type, operation)
         for source_op, input_type, result_type, operation in (
