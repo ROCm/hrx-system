@@ -69,7 +69,75 @@ typedef struct loom_pipeline_plan_group_t {
 
   // First callable instance belonging to the group.
   uint32_t instance_start;
+
+  // Number of logical stages scheduled onto each group lane.
+  uint32_t stage_count;
 } loom_pipeline_plan_group_t;
+
+typedef struct loom_pipeline_plan_stage_t {
+  // Scheduling group executing this logical stage.
+  uint32_t group_index;
+
+  // Callable implementing one logical stage firing.
+  loom_symbol_ref_t entry;
+
+  // First entry in the plan-wide stage-port table.
+  uint32_t port_start;
+
+  // Number of input buffer ports in the callable ABI.
+  uint16_t input_count;
+
+  // Number of output buffer ports in the callable ABI.
+  uint16_t output_count;
+
+  // Number of source records folded into one output record, or zero when the
+  // stage fires independently for every record.
+  uint32_t fold_record_count;
+
+  // Callable output port folded by the worker when fold_record_count is set.
+  uint32_t fold_output_port;
+
+  // Elementwise combining operation used by the temporal fold.
+  loom_combining_kind_t fold_kind;
+
+  // Floating-point permissions applied by the temporal fold.
+  uint8_t fold_fast_math_flags;
+} loom_pipeline_plan_stage_t;
+
+typedef struct loom_pipeline_plan_stage_port_t {
+  // Logical flow supplying or defined by this callable argument.
+  uint32_t flow_index;
+
+  // Exact producer lane for expanded reduction inputs, or UINT32_MAX for a
+  // pointwise input or output.
+  uint32_t source_lane;
+} loom_pipeline_plan_stage_port_t;
+
+typedef enum loom_pipeline_plan_group_port_direction_e {
+  // Records enter the resident group through this port.
+  LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_RECEIVE = 0,
+
+  // Records leave the resident group through this port.
+  LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_SEND = 1,
+} loom_pipeline_plan_group_port_direction_t;
+
+typedef struct loom_pipeline_plan_group_port_t {
+  // Resident scheduling group owning this physical port.
+  uint32_t group_index;
+
+  // Logical flow carried by the physical port.
+  uint32_t flow_index;
+
+  // Exact producer lane selected by a reduction receive port, or UINT32_MAX
+  // for pointwise receives and all send ports.
+  uint32_t source_lane;
+
+  // Dense physical port ordinal in the resident worker ABI.
+  uint32_t port;
+
+  // Direction of the physical port.
+  loom_pipeline_plan_group_port_direction_t direction;
+} loom_pipeline_plan_group_port_t;
 
 typedef struct loom_pipeline_plan_instance_t {
   // Scheduling group containing this instance.
@@ -78,7 +146,8 @@ typedef struct loom_pipeline_plan_instance_t {
   // Lane ordinal within the scheduling group.
   uint32_t lane;
 
-  // Callable implementing one record firing.
+  // Callable implementing one record firing, or null when the target must
+  // compose several logical stages scheduled onto this physical instance.
   loom_symbol_ref_t entry;
 
   // Number of source records folded into one output record, or zero when the
@@ -122,6 +191,10 @@ typedef struct loom_pipeline_plan_flow_t {
   // Minimum record capacity required by authored buffering.
   uint32_t minimum_capacity;
 
+  // Canonical flow storage identity. Transparent flow refinements preserve
+  // this index so same-group stages share one local buffer.
+  uint32_t storage_flow_index;
+
   // Kind of endpoint producing this flow.
   loom_pipeline_endpoint_kind_t producer_kind;
 
@@ -133,6 +206,12 @@ typedef struct loom_pipeline_plan_flow_t {
 
   // Number of producer instances, or zero for a binding producer.
   uint32_t instance_count;
+
+  // Logical producer stage when resident, or UINT32_MAX for a binding.
+  uint32_t producer_stage_index;
+
+  // Callable output argument ordinal on the logical producer stage.
+  uint32_t producer_stage_port;
 
   // Callable output port or external binding port.
   uint32_t producer_port;
@@ -199,11 +278,29 @@ typedef struct loom_pipeline_plan_t {
   // Number of scheduling groups.
   uint32_t group_count;
 
-  // Resident callable instances in stage and lane order.
+  // Resident callable instances in group and lane order.
   const loom_pipeline_plan_instance_t* instances;
 
   // Number of resident callable instances.
   uint32_t instance_count;
+
+  // Logical stages in source graph order.
+  const loom_pipeline_plan_stage_t* stages;
+
+  // Number of logical stages.
+  uint32_t stage_count;
+
+  // Contiguous callable-port flow mappings referenced by logical stages.
+  const loom_pipeline_plan_stage_port_t* stage_ports;
+
+  // Number of logical stage-port mappings.
+  uint32_t stage_port_count;
+
+  // Physical resident-worker boundary ports.
+  const loom_pipeline_plan_group_port_t* group_ports;
+
+  // Number of physical resident-worker boundary ports.
+  uint32_t group_port_count;
 
   // Typed logical flows in source definition order.
   const loom_pipeline_plan_flow_t* flows;

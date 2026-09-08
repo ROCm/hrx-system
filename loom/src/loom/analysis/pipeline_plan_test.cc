@@ -352,6 +352,186 @@ pipeline.def<kernel> @chain() launch(%input: buffer, %output: buffer) {
   EXPECT_EQ(second_binding_edge.target_index, 1u);
 }
 
+TEST_F(PipelinePlanTest, FusesPointwiseStagesInOneSchedulingGroup) {
+  ModulePtr module = Parse(R"(
+func.def @first(%input: buffer, %intermediate: buffer) {
+  func.return
+}
+
+func.def @second(%intermediate: buffer, %output: buffer) {
+  func.return
+}
+
+pipeline.def<kernel> @chain() launch(%input: buffer, %output: buffer) {
+  %lane_count = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lane_count : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %input_flow = pipeline.read %input_view on %workers : view<16xi8>, group -> pipeline.flow<tile<16xi8>>
+  %intermediate_flow = pipeline.stage @first on %workers(%input_flow) : (group, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
+  %output_flow = pipeline.stage @second on %workers(%intermediate_flow) : (group, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
+  pipeline.write %output_flow to %output_view : pipeline.flow<tile<16xi8>>, view<16xi8>
+  pipeline.return
+}
+)");
+
+  loom_pipeline_plan_t plan = {};
+  IREE_ASSERT_OK(BuildPlan(module.get(), IREE_SV("chain"), &plan));
+
+  ASSERT_EQ(plan.group_count, 1u);
+  EXPECT_EQ(plan.groups[0].stage_count, 2u);
+  ASSERT_EQ(plan.instance_count, 1u);
+  EXPECT_FALSE(loom_symbol_ref_is_valid(plan.instances[0].entry));
+  ASSERT_EQ(plan.stage_count, 2u);
+  EXPECT_EQ(plan.stages[0].group_index, 0u);
+  EXPECT_EQ(plan.stages[0].port_start, 0u);
+  EXPECT_EQ(plan.stages[0].input_count, 1u);
+  EXPECT_EQ(plan.stages[0].output_count, 1u);
+  EXPECT_EQ(plan.stages[1].group_index, 0u);
+  EXPECT_EQ(plan.stages[1].port_start, 2u);
+  ASSERT_EQ(plan.stage_port_count, 4u);
+  EXPECT_EQ(plan.stage_ports[0].flow_index, 0u);
+  EXPECT_EQ(plan.stage_ports[1].flow_index, 1u);
+  EXPECT_EQ(plan.stage_ports[2].flow_index, 1u);
+  EXPECT_EQ(plan.stage_ports[3].flow_index, 2u);
+
+  ASSERT_EQ(plan.group_port_count, 2u);
+  EXPECT_EQ(plan.group_ports[0].direction,
+            LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_RECEIVE);
+  EXPECT_EQ(plan.group_ports[0].flow_index, 0u);
+  EXPECT_EQ(plan.group_ports[0].port, 0u);
+  EXPECT_EQ(plan.group_ports[1].direction,
+            LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_SEND);
+  EXPECT_EQ(plan.group_ports[1].flow_index, 2u);
+  EXPECT_EQ(plan.group_ports[1].port, 1u);
+
+  ASSERT_EQ(plan.edge_count, 2u);
+  EXPECT_EQ(plan.edges[0].source_kind, LOOM_PIPELINE_ENDPOINT_KIND_BINDING);
+  EXPECT_EQ(plan.edges[0].target_kind, LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE);
+  EXPECT_EQ(plan.edges[0].target_port, 0u);
+  EXPECT_EQ(plan.edges[1].source_kind, LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE);
+  EXPECT_EQ(plan.edges[1].source_port, 1u);
+  EXPECT_EQ(plan.edges[1].target_kind, LOOM_PIPELINE_ENDPOINT_KIND_BINDING);
+}
+
+TEST_F(PipelinePlanTest, SharesCompositeBoundaryAndInternalFanoutStorage) {
+  ModulePtr module = Parse(R"(
+func.def @branch(%input: buffer, %output: buffer) {
+  func.return
+}
+
+func.def @join(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  func.return
+}
+
+pipeline.def<kernel> @fanout() launch(%input: buffer, %output: buffer) {
+  %lane_count = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lane_count : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %input_flow = pipeline.read %input_view on %workers : view<16xi8>, group -> pipeline.flow<tile<16xi8>>
+  %lhs_flow = pipeline.stage @branch on %workers(%input_flow) : (group, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
+  %rhs_flow = pipeline.stage @branch on %workers(%input_flow) : (group, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
+  %output_flow = pipeline.stage @join on %workers(%lhs_flow, %rhs_flow) : (group, pipeline.flow<tile<16xi8>>, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
+  pipeline.write %output_flow to %output_view : pipeline.flow<tile<16xi8>>, view<16xi8>
+  pipeline.return
+}
+)");
+
+  loom_pipeline_plan_t plan = {};
+  IREE_ASSERT_OK(BuildPlan(module.get(), IREE_SV("fanout"), &plan));
+
+  ASSERT_EQ(plan.group_count, 1u);
+  EXPECT_EQ(plan.groups[0].stage_count, 3u);
+  ASSERT_EQ(plan.instance_count, 1u);
+  EXPECT_FALSE(loom_symbol_ref_is_valid(plan.instances[0].entry));
+  ASSERT_EQ(plan.stage_count, 3u);
+  ASSERT_EQ(plan.stage_port_count, 7u);
+  EXPECT_EQ(plan.stage_ports[0].flow_index, 0u);
+  EXPECT_EQ(plan.stage_ports[2].flow_index, 0u);
+  EXPECT_EQ(plan.stage_ports[4].flow_index, 1u);
+  EXPECT_EQ(plan.stage_ports[5].flow_index, 2u);
+
+  ASSERT_EQ(plan.group_port_count, 2u);
+  EXPECT_EQ(plan.group_ports[0].flow_index, 0u);
+  EXPECT_EQ(plan.group_ports[0].port, 0u);
+  EXPECT_EQ(plan.group_ports[1].flow_index, 3u);
+  EXPECT_EQ(plan.group_ports[1].port, 1u);
+  ASSERT_EQ(plan.edge_count, 2u);
+}
+
+TEST_F(PipelinePlanTest, PreservesExpandedReductionLanesOnCompositePorts) {
+  ModulePtr module = Parse(R"(
+func.def @produce(%input: buffer, %output: buffer) {
+  func.return
+}
+
+func.def @prepare(%input: buffer, %output: buffer) {
+  func.return
+}
+
+func.def @reduce(%partial0: buffer, %partial1: buffer, %bias: buffer, %output: buffer) {
+  func.return
+}
+
+pipeline.def<kernel> @composite_reduce() launch(%input: buffer, %bias: buffer, %output: buffer) {
+  %producer_lanes = index.constant 2 : index
+  %reducer_lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %producers = group.create %producer_lanes : index -> group
+  %reducers = group.create %reducer_lanes : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<2x16xi8>
+  %bias_view = buffer.view %bias[%base] : buffer -> view<16xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %input_flow = pipeline.scatter %input_view across %producers : view<2x16xi8>, group -> pipeline.flow<tile<16xi8>>
+  %partial_flow = pipeline.stage @produce on %producers(%input_flow) : (group, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
+  %bias_flow = pipeline.read %bias_view on %reducers : view<16xi8>, group -> pipeline.flow<tile<16xi8>>
+  %prepared_bias = pipeline.stage @prepare on %reducers(%bias_flow) : (group, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
+  %result = pipeline.reduce @reduce from %producers(%partial_flow) to %reducers(%prepared_bias) : (group, pipeline.flow<tile<16xi8>>) to (group, pipeline.flow<tile<16xi8>>) -> (pipeline.flow<tile<16xi8>>)
+  pipeline.write %result to %output_view : pipeline.flow<tile<16xi8>>, view<16xi8>
+  pipeline.return
+}
+)");
+
+  loom_pipeline_plan_t plan = {};
+  IREE_ASSERT_OK(BuildPlan(module.get(), IREE_SV("composite_reduce"), &plan));
+
+  ASSERT_EQ(plan.group_count, 2u);
+  EXPECT_EQ(plan.groups[0].stage_count, 1u);
+  EXPECT_EQ(plan.groups[1].stage_count, 2u);
+  ASSERT_EQ(plan.instance_count, 3u);
+  EXPECT_TRUE(loom_symbol_ref_is_valid(plan.instances[0].entry));
+  EXPECT_TRUE(loom_symbol_ref_is_valid(plan.instances[1].entry));
+  EXPECT_FALSE(loom_symbol_ref_is_valid(plan.instances[2].entry));
+
+  ASSERT_EQ(plan.group_port_count, 6u);
+  EXPECT_EQ(plan.group_ports[1].group_index, 1u);
+  EXPECT_EQ(plan.group_ports[1].flow_index, 2u);
+  EXPECT_EQ(plan.group_ports[1].source_lane, UINT32_MAX);
+  EXPECT_EQ(plan.group_ports[1].port, 0u);
+  EXPECT_EQ(plan.group_ports[2].group_index, 1u);
+  EXPECT_EQ(plan.group_ports[2].flow_index, 1u);
+  EXPECT_EQ(plan.group_ports[2].source_lane, 0u);
+  EXPECT_EQ(plan.group_ports[2].port, 1u);
+  EXPECT_EQ(plan.group_ports[3].group_index, 1u);
+  EXPECT_EQ(plan.group_ports[3].flow_index, 1u);
+  EXPECT_EQ(plan.group_ports[3].source_lane, 1u);
+  EXPECT_EQ(plan.group_ports[3].port, 2u);
+  EXPECT_EQ(plan.group_ports[5].group_index, 1u);
+  EXPECT_EQ(plan.group_ports[5].flow_index, 4u);
+  EXPECT_EQ(plan.group_ports[5].port, 3u);
+
+  ASSERT_EQ(plan.edge_count, 6u);
+  EXPECT_EQ(plan.edges[3].source_index, 0u);
+  EXPECT_EQ(plan.edges[3].target_index, 2u);
+  EXPECT_EQ(plan.edges[3].target_port, 1u);
+  EXPECT_EQ(plan.edges[4].source_index, 1u);
+  EXPECT_EQ(plan.edges[4].target_index, 2u);
+  EXPECT_EQ(plan.edges[4].target_port, 2u);
+}
+
 TEST_F(PipelinePlanTest, BroadcastsMultiLaneReadsFromOneBindingPort) {
   ModulePtr module = Parse(R"(
 func.def @consume(%input: buffer) {
