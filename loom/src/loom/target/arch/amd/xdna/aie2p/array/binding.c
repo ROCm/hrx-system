@@ -107,7 +107,8 @@ static iree_status_t loom_aie2p_array_binding_address_dimension(
 iree_status_t loom_aie2p_array_plan_binding_transfer(
     const loom_module_t* module, const loom_value_fact_table_t* facts,
     const loom_xdna_array_family_t* family, loom_type_t source_type,
-    loom_type_t record_type, bool partitioned, uint32_t partition_lane,
+    loom_type_t record_type, uint64_t binding_view_byte_offset,
+    bool partitioned, uint32_t partition_lane,
     uint32_t logical_record_byte_length, uint32_t logical_record_count,
     const loom_xdna_dma_facts_t* dma_facts,
     loom_aie2p_array_binding_plan_t* binding_plan) {
@@ -118,7 +119,7 @@ iree_status_t loom_aie2p_array_plan_binding_transfer(
                             "AIE2P binding transfer size overflows");
   }
 
-  uint64_t binding_byte_offset = 0;
+  uint64_t binding_byte_offset = binding_view_byte_offset;
   uint64_t binding_span_byte_length = logical_transfer_byte_length;
   uint64_t transfer_byte_length = logical_transfer_byte_length;
   uint64_t task_repeat_count = 1;
@@ -136,11 +137,15 @@ iree_status_t loom_aie2p_array_plan_binding_transfer(
         "AIE2P binding source requires one exact address layout");
   }
   if (layout.kind == LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE) {
-    if (partitioned &&
-        !iree_checked_mul_u64(logical_transfer_byte_length, partition_lane,
-                              &binding_byte_offset)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AIE2P binding partition offset overflows");
+    if (partitioned) {
+      uint64_t partition_byte_offset = 0;
+      if (!iree_checked_mul_u64(logical_transfer_byte_length, partition_lane,
+                                &partition_byte_offset) ||
+          !iree_checked_add_u64(binding_byte_offset, partition_byte_offset,
+                                &binding_byte_offset)) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "AIE2P binding partition offset overflows");
+      }
     }
   } else if (layout.kind == LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED) {
     const uint8_t source_rank = loom_type_rank(source_type);
@@ -175,7 +180,11 @@ iree_status_t loom_aie2p_array_plan_binding_transfer(
             IREE_STATUS_INVALID_ARGUMENT,
             "AIE2P binding partition offset is not whole-byte addressable");
       }
-      binding_byte_offset = binding_bit_offset / 8u;
+      if (!iree_checked_add_u64(binding_byte_offset, binding_bit_offset / 8u,
+                                &binding_byte_offset)) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "AIE2P binding partition offset overflows");
+      }
     }
 
     uint8_t first_transfer_axis = first_source_axis;
@@ -310,6 +319,8 @@ iree_status_t loom_aie2p_array_plan_binding_transfer(
   if (binding_byte_offset > INT64_MAX ||
       binding_byte_offset % dma_facts->address_alignment != 0 ||
       binding_span_byte_length > dma_facts->address_maximum ||
+      binding_byte_offset >
+          dma_facts->address_maximum - binding_span_byte_length ||
       transfer_byte_length > dma_facts->address_maximum) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,

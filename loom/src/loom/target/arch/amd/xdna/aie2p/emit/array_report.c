@@ -166,8 +166,8 @@ static void loom_aie2p_array_report_query_tile_usage(
 static const loom_aie2p_array_endpoint_t* loom_aie2p_array_report_base_endpoint(
     const loom_aie2p_array_plan_t* plan,
     const loom_aie2p_array_endpoint_t* endpoint) {
-  if (endpoint->partition_source_endpoint_index != UINT32_MAX) {
-    return &plan->endpoints[endpoint->partition_source_endpoint_index];
+  if (endpoint->binding_view_source_endpoint_index != UINT32_MAX) {
+    return &plan->endpoints[endpoint->binding_view_source_endpoint_index];
   }
   return endpoint;
 }

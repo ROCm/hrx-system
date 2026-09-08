@@ -18,6 +18,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/binding.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/route.h"
+#include "loom/target/arch/amd/xdna/aie2p/array/topology.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/array_descriptors.h"
 #include "loom/util/fact_table.h"
 
@@ -188,6 +189,25 @@ static iree_status_t loom_aie2p_array_exact_u32(
   return iree_ok_status();
 }
 
+static iree_status_t loom_aie2p_array_exact_u64(
+    const loom_aie2p_array_plan_builder_t* builder, loom_value_id_t value_id,
+    const char* purpose, uint64_t* out_value) {
+  loom_value_facts_t element_facts = loom_value_facts_unknown();
+  int64_t value = 0;
+  if (!loom_value_facts_query_all_equal_element(
+          &builder->facts.context,
+          loom_value_fact_table_lookup(&builder->facts, value_id),
+          &element_facts) ||
+      !loom_value_facts_as_exact_i64(element_facts, &value) || value < 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AIE2P array %s must resolve to one exact non-negative i64 fact",
+        purpose);
+  }
+  *out_value = (uint64_t)value;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_aie2p_array_dimension_value(
     const loom_aie2p_array_plan_builder_t* builder, loom_type_t type,
     iree_host_size_t dimension, uint32_t* out_value) {
@@ -333,6 +353,7 @@ static iree_status_t loom_aie2p_array_count_topology(
     }
     switch (packet.descriptor_ordinal) {
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_CONSTANT_U32:
+      case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_CONSTANT_U64:
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_CONSTRAIN_LOCATION:
         break;
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_GROUP:
@@ -347,6 +368,8 @@ static iree_status_t loom_aie2p_array_count_topology(
         break;
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_SENDER:
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_RECEIVER:
+      case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_VIEW_SENDER:
+      case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_VIEW_RECEIVER:
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_PARTITION_SENDER:
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_PARTITION_RECEIVER:
         ++builder->plan->endpoint_count;
@@ -513,7 +536,9 @@ static iree_status_t loom_aie2p_array_extract_endpoint(
       loom_aie2p_array_attr(builder->module, op, IREE_SV("port")));
   endpoint->message_type =
       *loom_aie2p_array_result_value_type(builder->module, op);
-  endpoint->partition_source_endpoint_index = UINT32_MAX;
+  endpoint->binding_view_source_endpoint_index = UINT32_MAX;
+  endpoint->binding_byte_offset = 0;
+  endpoint->binding_view_partitioned = false;
   endpoint->partition_lane = 0;
   endpoint->partition_lane_count = 1;
 
@@ -536,28 +561,37 @@ static iree_status_t loom_aie2p_array_extract_endpoint(
   return iree_ok_status();
 }
 
-static iree_status_t loom_aie2p_array_extract_partition(
-    loom_aie2p_array_plan_builder_t* builder, const loom_op_t* op) {
+static iree_status_t loom_aie2p_array_extract_binding_view(
+    loom_aie2p_array_plan_builder_t* builder, const loom_op_t* op,
+    bool partitioned) {
   loom_aie2p_array_endpoint_t* endpoint =
       &builder->endpoints[builder->endpoint_cursor];
   endpoint->value_id = loom_op_results(op)[0];
   IREE_RETURN_IF_ERROR(loom_aie2p_array_lookup_entity(
       builder, loom_op_operands(op)[0], LOOM_AIE2P_ARRAY_ENTITY_ENDPOINT,
-      "partition source", &endpoint->partition_source_endpoint_index));
+      "binding view source", &endpoint->binding_view_source_endpoint_index));
   const loom_aie2p_array_endpoint_t* source =
-      &builder->endpoints[endpoint->partition_source_endpoint_index];
+      &builder->endpoints[endpoint->binding_view_source_endpoint_index];
   endpoint->direction = source->direction;
   endpoint->owner_kind = source->owner_kind;
   endpoint->owner_index = source->owner_index;
   endpoint->port = source->port;
   endpoint->message_type =
       *loom_aie2p_array_result_value_type(builder->module, op);
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_array_exact_u32(builder, loom_op_operands(op)[1],
-                                 "partition lane", &endpoint->partition_lane));
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_exact_u32(
-      builder, loom_op_operands(op)[2], "partition lane count",
-      &endpoint->partition_lane_count));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_exact_u64(
+      builder, loom_op_operands(op)[1], "binding view byte offset",
+      &endpoint->binding_byte_offset));
+  endpoint->binding_view_partitioned = partitioned;
+  endpoint->partition_lane = 0;
+  endpoint->partition_lane_count = 1;
+  if (partitioned) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_exact_u32(
+        builder, loom_op_operands(op)[2], "partition lane",
+        &endpoint->partition_lane));
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_exact_u32(
+        builder, loom_op_operands(op)[3], "partition lane count",
+        &endpoint->partition_lane_count));
+  }
   loom_aie2p_array_define_entity(builder, endpoint->value_id,
                                  LOOM_AIE2P_ARRAY_ENTITY_ENDPOINT,
                                  (uint32_t)builder->endpoint_cursor++);
@@ -627,6 +661,7 @@ static iree_status_t loom_aie2p_array_extract_topology(
     if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) continue;
     switch (packet.descriptor_ordinal) {
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_CONSTANT_U32:
+      case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_CONSTANT_U64:
         break;
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_GROUP: {
         IREE_RETURN_IF_ERROR(loom_aie2p_array_extract_group(builder, op));
@@ -656,9 +691,16 @@ static iree_status_t loom_aie2p_array_extract_topology(
             builder, op, LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE));
         break;
       }
+      case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_VIEW_SENDER:
+      case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_VIEW_RECEIVER: {
+        IREE_RETURN_IF_ERROR(
+            loom_aie2p_array_extract_binding_view(builder, op, false));
+        break;
+      }
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_PARTITION_SENDER:
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_PARTITION_RECEIVER: {
-        IREE_RETURN_IF_ERROR(loom_aie2p_array_extract_partition(builder, op));
+        IREE_RETURN_IF_ERROR(
+            loom_aie2p_array_extract_binding_view(builder, op, true));
         break;
       }
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_CHANNEL: {
@@ -675,458 +717,6 @@ static iree_status_t loom_aie2p_array_extract_topology(
     }
   }
   return iree_ok_status();
-}
-
-static const loom_aie2p_array_endpoint_t* loom_aie2p_array_base_endpoint(
-    const loom_aie2p_array_plan_builder_t* builder,
-    const loom_aie2p_array_endpoint_t* endpoint) {
-  if (endpoint->partition_source_endpoint_index == UINT32_MAX) return endpoint;
-  return &builder->endpoints[endpoint->partition_source_endpoint_index];
-}
-
-static const loom_aie2p_array_channel_t*
-loom_aie2p_array_first_endpoint_channel(
-    const loom_aie2p_array_plan_builder_t* builder, uint32_t endpoint_index) {
-  for (iree_host_size_t i = 0; i < builder->plan->channel_count; ++i) {
-    const loom_aie2p_array_channel_t* channel = &builder->channels[i];
-    if (channel->sender_endpoint_index == endpoint_index ||
-        channel->receiver_endpoint_index == endpoint_index) {
-      return channel;
-    }
-  }
-  IREE_ASSERT_UNREACHABLE(
-      "validated worker endpoint must belong to one channel");
-  return NULL;
-}
-
-static iree_status_t loom_aie2p_array_validate_worker_rates(
-    const loom_aie2p_array_plan_builder_t* builder) {
-  for (uint32_t worker_index = 0; worker_index < builder->plan->worker_count;
-       ++worker_index) {
-    const loom_aie2p_array_worker_t* worker = &builder->workers[worker_index];
-    uint32_t common_record_count = 0;
-    uint32_t output_record_count = 0;
-    uint32_t sender_count = 0;
-    for (uint32_t endpoint_index = 0;
-         endpoint_index < builder->plan->endpoint_count; ++endpoint_index) {
-      const loom_aie2p_array_endpoint_t* endpoint =
-          &builder->endpoints[endpoint_index];
-      if (endpoint->owner_kind != LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER ||
-          endpoint->owner_index != worker_index ||
-          endpoint->partition_source_endpoint_index != UINT32_MAX) {
-        continue;
-      }
-      const loom_aie2p_array_channel_t* channel =
-          loom_aie2p_array_first_endpoint_channel(builder, endpoint_index);
-      if (worker->fold_record_count == 0) {
-        if (common_record_count == 0)
-          common_record_count = channel->record_count;
-        if (common_record_count != channel->record_count) {
-          return iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "AIE2P recordwise worker channels must have one record count");
-        }
-        continue;
-      }
-
-      if (endpoint->direction == LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE) {
-        if (common_record_count == 0) {
-          common_record_count = channel->record_count;
-        } else if (common_record_count != channel->record_count) {
-          return iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "AIE2P folded worker inputs must have one record count");
-        }
-        continue;
-      }
-      ++sender_count;
-      if (endpoint->port != worker->fold_output_port) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P folded worker must use its folded output port");
-      }
-      output_record_count = channel->record_count;
-      const uint32_t record_byte_length = channel->record_byte_length;
-      const uint32_t accumulator_lane_byte_length = 16 * sizeof(float);
-      const bool supported_f32_shape =
-          record_byte_length == sizeof(float) ||
-          (record_byte_length >= accumulator_lane_byte_length &&
-           record_byte_length <= 4 * accumulator_lane_byte_length &&
-           record_byte_length % accumulator_lane_byte_length == 0);
-      if (loom_type_element_type(endpoint->message_type) !=
-              LOOM_SCALAR_TYPE_F32 ||
-          !supported_f32_shape) {
-        return iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "AIE2P temporal fold requires one F32 element or a native "
-            "16/32/48/64-element F32 accumulator tile");
-      }
-    }
-    if (worker->fold_record_count != 0) {
-      if (worker->fold_kind != LOOM_COMBINING_KIND_ADDF) {
-        return iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "AIE2P temporal fold currently supports floating-point addition");
-      }
-      if (sender_count != 1) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P folded worker must have exactly one sender port");
-      }
-      const uint64_t expected_input_record_count =
-          (uint64_t)worker->fold_record_count * output_record_count;
-      if (common_record_count != expected_input_record_count) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P folded worker must consume its fold record count for each "
-            "output record");
-      }
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_aie2p_array_validate_partition(
-    const loom_aie2p_array_plan_builder_t* builder,
-    const loom_aie2p_array_endpoint_t* endpoint, uint32_t* out_record_count) {
-  const loom_aie2p_array_endpoint_t* source =
-      loom_aie2p_array_base_endpoint(builder, endpoint);
-  if (source == endpoint ||
-      source->partition_source_endpoint_index != UINT32_MAX ||
-      source->owner_kind != LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_BINDING ||
-      endpoint->partition_lane_count == 0 ||
-      endpoint->partition_lane >= endpoint->partition_lane_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AIE2P channel partition is malformed");
-  }
-  const uint8_t source_rank = loom_type_rank(source->message_type);
-  const uint8_t endpoint_rank = loom_type_rank(endpoint->message_type);
-  if (loom_type_element_type(source->message_type) !=
-          loom_type_element_type(endpoint->message_type) ||
-      source_rank < endpoint_rank + 1u) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AIE2P partition must remove a leading lane dimension");
-  }
-  uint32_t leading_dimension = 0;
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_dimension_value(
-      builder, source->message_type, 0, &leading_dimension));
-  if (leading_dimension != endpoint->partition_lane_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AIE2P partition count must match the leading tile dimension");
-  }
-  const uint8_t suffix_start = source_rank - endpoint_rank;
-  uint64_t record_count = 1;
-  for (uint8_t i = 1; i < suffix_start; ++i) {
-    uint32_t sequence_dimension = 0;
-    IREE_RETURN_IF_ERROR(loom_aie2p_array_dimension_value(
-        builder, source->message_type, i, &sequence_dimension));
-    if (sequence_dimension == 0 ||
-        !iree_checked_mul_u64(record_count, sequence_dimension,
-                              &record_count) ||
-        record_count > UINT32_MAX) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AIE2P partition record sequence must have a non-empty u32 count");
-    }
-  }
-  for (iree_host_size_t i = 0; i < endpoint_rank; ++i) {
-    uint32_t source_dimension = 0;
-    uint32_t endpoint_dimension = 0;
-    IREE_RETURN_IF_ERROR(loom_aie2p_array_dimension_value(
-        builder, source->message_type, suffix_start + i, &source_dimension));
-    IREE_RETURN_IF_ERROR(loom_aie2p_array_dimension_value(
-        builder, endpoint->message_type, i, &endpoint_dimension));
-    if (source_dimension != endpoint_dimension) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AIE2P partition result shape must match the source suffix");
-    }
-  }
-  *out_record_count = (uint32_t)record_count;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_aie2p_array_validate_topology(
-    loom_aie2p_array_plan_builder_t* builder) {
-  if (builder->plan->worker_count == 0 || builder->plan->channel_count == 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AIE2P resident array requires at least one worker and channel");
-  }
-
-  for (iree_host_size_t i = 0; i < builder->plan->group_count; ++i) {
-    const loom_aie2p_array_group_t* group = &builder->groups[i];
-    if (group->lane_count == 0) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AIE2P worker group cannot be empty");
-    }
-    for (uint32_t lane = 0; lane < group->lane_count; ++lane) {
-      iree_host_size_t match_count = 0;
-      for (iree_host_size_t j = 0; j < builder->plan->worker_count; ++j) {
-        const loom_aie2p_array_worker_t* worker = &builder->workers[j];
-        if (worker->group_index == i && worker->lane == lane) ++match_count;
-      }
-      if (match_count != 1) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P worker group must instantiate every lane exactly once");
-      }
-    }
-  }
-
-  for (iree_host_size_t i = 0; i < builder->plan->binding_count; ++i) {
-    for (iree_host_size_t j = i + 1; j < builder->plan->binding_count; ++j) {
-      if (builder->bindings[i].ordinal == builder->bindings[j].ordinal) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "AIE2P binding ordinal is duplicated");
-      }
-    }
-  }
-
-  for (iree_host_size_t i = 0; i < builder->plan->worker_count; ++i) {
-    const loom_aie2p_array_worker_t* worker = &builder->workers[i];
-    if (worker->group_index >= builder->plan->group_count ||
-        worker->lane >= builder->groups[worker->group_index].lane_count ||
-        worker->coordinate.column == UINT16_MAX) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AIE2P worker is incompletely instantiated");
-    }
-    const loom_xdna_tile_facts_t* tile_facts = NULL;
-    IREE_RETURN_IF_ERROR(loom_xdna_array_tile_facts(
-        builder->family, worker->coordinate, &tile_facts));
-    if (tile_facts->kind != LOOM_XDNA_TILE_KIND_COMPUTE) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AIE2P worker must occupy a compute tile");
-    }
-    for (iree_host_size_t j = i + 1; j < builder->plan->worker_count; ++j) {
-      if (worker->coordinate.column == builder->workers[j].coordinate.column &&
-          worker->coordinate.row == builder->workers[j].coordinate.row) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "AIE2P workers cannot share a compute tile");
-      }
-    }
-  }
-
-  uint32_t* channel_use_counts = NULL;
-  uint32_t* partition_use_counts = NULL;
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
-      builder->arena, builder->plan->endpoint_count,
-      sizeof(*channel_use_counts), (void**)&channel_use_counts));
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
-      builder->arena, builder->plan->endpoint_count,
-      sizeof(*partition_use_counts), (void**)&partition_use_counts));
-  memset(channel_use_counts, 0,
-         builder->plan->endpoint_count * sizeof(*channel_use_counts));
-  memset(partition_use_counts, 0,
-         builder->plan->endpoint_count * sizeof(*partition_use_counts));
-
-  for (iree_host_size_t i = 0; i < builder->plan->endpoint_count; ++i) {
-    const loom_aie2p_array_endpoint_t* endpoint = &builder->endpoints[i];
-    if (endpoint->partition_source_endpoint_index != UINT32_MAX) {
-      uint32_t record_count = 0;
-      IREE_RETURN_IF_ERROR(loom_aie2p_array_validate_partition(
-          builder, endpoint, &record_count));
-      ++partition_use_counts[endpoint->partition_source_endpoint_index];
-    }
-    for (iree_host_size_t j = i + 1; j < builder->plan->endpoint_count; ++j) {
-      const loom_aie2p_array_endpoint_t* other = &builder->endpoints[j];
-      if (endpoint->partition_source_endpoint_index == UINT32_MAX &&
-          other->partition_source_endpoint_index == UINT32_MAX &&
-          endpoint->owner_kind == other->owner_kind &&
-          endpoint->owner_index == other->owner_index &&
-          endpoint->port == other->port) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "AIE2P owner port is defined more than once");
-      }
-    }
-  }
-
-  for (iree_host_size_t i = 0; i < builder->plan->channel_count; ++i) {
-    loom_aie2p_array_channel_t* channel = &builder->channels[i];
-    if (channel->capacity == 0 || channel->record_count == 0) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AIE2P channel capacity and record count cannot "
-                              "be zero");
-    }
-    const loom_aie2p_array_endpoint_t* sender =
-        &builder->endpoints[channel->sender_endpoint_index];
-    const loom_aie2p_array_endpoint_t* receiver =
-        &builder->endpoints[channel->receiver_endpoint_index];
-    if (sender->direction != LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND ||
-        receiver->direction != LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE ||
-        !loom_type_equal(sender->message_type, receiver->message_type)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AIE2P channel endpoints must have matching typed directions");
-    }
-    ++channel_use_counts[channel->sender_endpoint_index];
-    ++channel_use_counts[channel->receiver_endpoint_index];
-
-    const loom_aie2p_array_endpoint_t* partition_endpoint = NULL;
-    if (sender->partition_source_endpoint_index != UINT32_MAX) {
-      partition_endpoint = sender;
-    } else if (receiver->partition_source_endpoint_index != UINT32_MAX) {
-      partition_endpoint = receiver;
-    }
-    if (partition_endpoint != NULL) {
-      uint32_t partition_record_count = 0;
-      IREE_RETURN_IF_ERROR(loom_aie2p_array_validate_partition(
-          builder, partition_endpoint, &partition_record_count));
-      if (channel->record_count != partition_record_count) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P channel record count must match its binding partition");
-      }
-    }
-    const loom_aie2p_array_endpoint_t* base_sender =
-        loom_aie2p_array_base_endpoint(builder, sender);
-    if (base_sender->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_BINDING &&
-        receiver->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER) {
-      const loom_aie2p_array_binding_t* binding =
-          &builder->bindings[base_sender->owner_index];
-      if ((binding->access & LOOM_AIE2P_ARRAY_BINDING_ACCESS_READ) == 0) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P input channel uses a non-readable binding");
-      }
-      channel->transport = LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA;
-    } else if (sender->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
-               receiver->owner_kind ==
-                   LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_BINDING) {
-      const loom_aie2p_array_binding_t* binding =
-          &builder->bindings[receiver->owner_index];
-      if ((binding->access & LOOM_AIE2P_ARRAY_BINDING_ACCESS_WRITE) == 0) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P output channel uses a non-writable binding");
-      }
-      channel->transport = LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA;
-    } else if (sender->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
-               receiver->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER) {
-      const loom_aie2p_array_worker_t* sender_worker =
-          &builder->workers[sender->owner_index];
-      const loom_aie2p_array_worker_t* receiver_worker =
-          &builder->workers[receiver->owner_index];
-      const int row_delta = (int)sender_worker->coordinate.row -
-                            (int)receiver_worker->coordinate.row;
-      channel->transport =
-          sender_worker->coordinate.column ==
-                      receiver_worker->coordinate.column &&
-                  (row_delta == -1 || row_delta == 1)
-              ? LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_NEIGHBOR_MEMORY
-              : LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_ROUTED_DMA;
-    } else {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unsupported AIE2P channel ownership");
-    }
-  }
-
-  // A worker-produced value has one callable resource even when several
-  // consumers use it. Materialize that SSA fanout as one source DMA feeding
-  // several stream-switch masters. Neighbor-memory transport cannot preserve
-  // that single-ring contract across a mixed set of destinations, so promote
-  // adjacent worker branches to the same DMA-backed multicast path already
-  // required by remote workers and external bindings.
-  for (iree_host_size_t endpoint_index = 0;
-       endpoint_index < builder->plan->endpoint_count; ++endpoint_index) {
-    const loom_aie2p_array_endpoint_t* endpoint =
-        &builder->endpoints[endpoint_index];
-    if (endpoint->owner_kind != LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER ||
-        endpoint->direction != LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND ||
-        channel_use_counts[endpoint_index] <= 1) {
-      continue;
-    }
-    uint32_t source_channel_index = UINT32_MAX;
-    for (iree_host_size_t channel_index = 0;
-         channel_index < builder->plan->channel_count; ++channel_index) {
-      loom_aie2p_array_channel_t* channel = &builder->channels[channel_index];
-      if (channel->sender_endpoint_index != endpoint_index) continue;
-      if (source_channel_index == UINT32_MAX) {
-        source_channel_index = (uint32_t)channel_index;
-      } else if (channel->capacity !=
-                     builder->channels[source_channel_index].capacity ||
-                 channel->record_count !=
-                     builder->channels[source_channel_index].record_count ||
-                 channel->record_byte_length !=
-                     builder->channels[source_channel_index]
-                         .record_byte_length) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P worker multicast channels must have one ring shape");
-      }
-      channel->source_channel_index = source_channel_index;
-      if (channel->transport ==
-          LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_NEIGHBOR_MEMORY) {
-        channel->transport = LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_ROUTED_DMA;
-      }
-    }
-  }
-
-  for (iree_host_size_t i = 0; i < builder->plan->endpoint_count; ++i) {
-    const loom_aie2p_array_endpoint_t* endpoint = &builder->endpoints[i];
-    const loom_aie2p_array_endpoint_t* base_endpoint =
-        loom_aie2p_array_base_endpoint(builder, endpoint);
-    const bool is_multicast_sender =
-        endpoint->direction == LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND &&
-        (base_endpoint->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_BINDING ||
-         endpoint->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER);
-    if (endpoint->partition_source_endpoint_index != UINT32_MAX) {
-      if (channel_use_counts[i] == 0 || partition_use_counts[i] != 0 ||
-          (!is_multicast_sender && channel_use_counts[i] != 1)) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P partition endpoint must feed one channel or source "
-            "multicast");
-      }
-      continue;
-    }
-    if (partition_use_counts[i] == 0) {
-      if (channel_use_counts[i] == 0 ||
-          (!is_multicast_sender && channel_use_counts[i] != 1)) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P direct endpoint must feed one channel or source "
-            "multicast");
-      }
-      continue;
-    }
-    if (channel_use_counts[i] != 0) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AIE2P partition source cannot also feed a channel directly");
-    }
-    uint32_t partition_lane_count = 0;
-    for (iree_host_size_t j = 0; j < builder->plan->endpoint_count; ++j) {
-      const loom_aie2p_array_endpoint_t* partition = &builder->endpoints[j];
-      if (partition->partition_source_endpoint_index == i) {
-        partition_lane_count = partition->partition_lane_count;
-        break;
-      }
-    }
-    if (partition_use_counts[i] != partition_lane_count) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AIE2P partition source must materialize every lane exactly once");
-    }
-    for (uint32_t lane = 0; lane < partition_lane_count; ++lane) {
-      iree_host_size_t match_count = 0;
-      for (iree_host_size_t j = 0; j < builder->plan->endpoint_count; ++j) {
-        const loom_aie2p_array_endpoint_t* partition = &builder->endpoints[j];
-        if (partition->partition_source_endpoint_index == i &&
-            partition->partition_lane == lane) {
-          ++match_count;
-        }
-      }
-      if (match_count != 1) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P partition lanes must be unique and complete");
-      }
-    }
-  }
-  return loom_aie2p_array_validate_worker_rates(builder);
 }
 
 static const loom_aie2p_leaf_contribution_t* loom_aie2p_array_find_leaf(
@@ -1468,7 +1058,7 @@ static iree_status_t loom_aie2p_array_validate_worker_leaf(
 
   for (iree_host_size_t i = 0; i < builder->plan->endpoint_count; ++i) {
     const loom_aie2p_array_endpoint_t* endpoint = &builder->endpoints[i];
-    if (endpoint->partition_source_endpoint_index == UINT32_MAX &&
+    if (endpoint->binding_view_source_endpoint_index == UINT32_MAX &&
         endpoint->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
         endpoint->owner_index == worker_index) {
       iree_host_size_t import_match_count = 0;
@@ -1491,7 +1081,7 @@ static iree_status_t loom_aie2p_array_validate_worker_leaf(
     iree_host_size_t endpoint_match_count = 0;
     for (iree_host_size_t j = 0; j < builder->plan->endpoint_count; ++j) {
       const loom_aie2p_array_endpoint_t* endpoint = &builder->endpoints[j];
-      if (endpoint->partition_source_endpoint_index == UINT32_MAX &&
+      if (endpoint->binding_view_source_endpoint_index == UINT32_MAX &&
           endpoint->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
           endpoint->owner_index == worker_index &&
           endpoint->port == resource->index) {
@@ -1708,12 +1298,12 @@ static iree_status_t loom_aie2p_array_plan_external_channel(
     const loom_aie2p_array_endpoint_t* receiver, uint32_t first_slot) {
   const loom_aie2p_array_channel_t* channel = &builder->channels[channel_index];
   const bool ingress =
-      loom_aie2p_array_base_endpoint(builder, sender)->owner_kind ==
-      LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_BINDING;
+      loom_aie2p_array_topology_base_endpoint(builder->plan, sender)
+          ->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_BINDING;
   const loom_aie2p_array_endpoint_t* binding_endpoint =
       ingress ? sender : receiver;
   const loom_aie2p_array_endpoint_t* base_binding_endpoint =
-      loom_aie2p_array_base_endpoint(builder, binding_endpoint);
+      loom_aie2p_array_topology_base_endpoint(builder->plan, binding_endpoint);
   const loom_aie2p_array_endpoint_t* worker_endpoint =
       ingress ? receiver : sender;
   const loom_aie2p_array_worker_t* worker =
@@ -1812,14 +1402,13 @@ static iree_status_t loom_aie2p_array_plan_external_channel(
     const loom_xdna_tile_facts_t* shim_tile = NULL;
     IREE_RETURN_IF_ERROR(loom_xdna_array_tile_facts(
         builder->family, shim_coordinate, &shim_tile));
-    const bool partitioned =
-        binding_endpoint->partition_source_endpoint_index != UINT32_MAX;
     IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_binding_transfer(
         builder->module, &builder->facts, builder->family,
         base_binding_endpoint->message_type, binding_endpoint->message_type,
-        partitioned, binding_endpoint->partition_lane,
-        channel->record_byte_length, channel->record_count, &shim_tile->dma,
-        &binding_plan));
+        binding_endpoint->binding_byte_offset,
+        binding_endpoint->binding_view_partitioned,
+        binding_endpoint->partition_lane, channel->record_byte_length,
+        channel->record_count, &shim_tile->dma, &binding_plan));
     builder->binding_plans[builder->binding_plan_cursor++] = binding_plan;
   }
   if (owns_compute_dma) {
@@ -2163,7 +1752,8 @@ iree_status_t loom_aie2p_array_plan_build(
   IREE_RETURN_IF_ERROR(loom_aie2p_array_count_topology(&builder, block));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_topology(&builder));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_extract_topology(&builder, block));
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_validate_topology(&builder));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_topology_validate(
+      &builder.facts, arena, out_plan, builder.channels));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_physical_plan(&builder));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_workers(&builder));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_channels(&builder));

@@ -195,8 +195,8 @@ static iree_status_t loom_aie2p_array_plan_check_append_endpoint(
     const loom_aie2p_array_endpoint_t* endpoint,
     iree_string_builder_t* builder) {
   const loom_aie2p_array_endpoint_t* base = endpoint;
-  if (endpoint->partition_source_endpoint_index != UINT32_MAX) {
-    base = &plan->endpoints[endpoint->partition_source_endpoint_index];
+  if (endpoint->binding_view_source_endpoint_index != UINT32_MAX) {
+    base = &plan->endpoints[endpoint->binding_view_source_endpoint_index];
   }
   if (base->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_BINDING) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -207,7 +207,7 @@ static iree_status_t loom_aie2p_array_plan_check_append_endpoint(
         builder, "worker[%" PRIu32 "]:%" PRIu32, base->owner_index,
         base->port));
   }
-  if (endpoint->partition_source_endpoint_index != UINT32_MAX) {
+  if (endpoint->binding_view_partitioned) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, " partition=%" PRIu32 "/%" PRIu32, endpoint->partition_lane,
         endpoint->partition_lane_count));

@@ -44,6 +44,7 @@ _TARGET_KEY = "amd.xdna.aie2p"
 _DESCRIPTOR_SET_KEY = f"{_TARGET_KEY}.array"
 
 _REG_SCALAR = "aie2p.array.scalar"
+_REG_OFFSET = "aie2p.array.offset"
 _REG_BINDING = "aie2p.array.binding"
 _REG_GROUP = "aie2p.array.group"
 _REG_WORKER = "aie2p.array.worker"
@@ -59,10 +60,10 @@ _COMBINING_KIND_DOMAIN = "aie2p.array.combining_kind"
 _REFERENCE_BANK = 1
 
 
-def _reference_reg_class(name: str) -> RegClass:
+def _reference_reg_class(name: str, bit_width: int = 32) -> RegClass:
     return RegClass(
         name,
-        32,
+        bit_width,
         SpillSlotSpace.PRIVATE,
         flags=(
             RegClassFlag.VIRTUAL_ONLY,
@@ -107,6 +108,15 @@ def _u32(field_name: str) -> Immediate:
     )
 
 
+def _u64(field_name: str) -> Immediate:
+    return Immediate(
+        field_name,
+        ImmediateKind.UNSIGNED,
+        bit_width=64,
+        unsigned_max=(2**63) - 1,
+    )
+
+
 def _fast_math(field_name: str) -> Immediate:
     return Immediate(
         field_name,
@@ -148,6 +158,21 @@ _DESCRIPTORS = (
         immediates=(_u32("value"),),
         asm_forms=_asm(
             "constant.u32",
+            results=("result",),
+            immediates=("value",),
+        ),
+        schedule_class=_SCHEDULE_GRAPH,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
+    Descriptor(
+        key=f"{_DESCRIPTOR_SET_KEY}.constant.u64",
+        mnemonic="constant.u64",
+        semantic_tag="array.constant.u64",
+        operands=(_result(_REG_OFFSET),),
+        op_kind=DescriptorOpKind.CONST,
+        immediates=(_u64("value"),),
+        asm_forms=_asm(
+            "constant.u64",
             results=("result",),
             immediates=("value",),
         ),
@@ -295,19 +320,54 @@ _DESCRIPTORS = (
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     Descriptor(
+        key=f"{_DESCRIPTOR_SET_KEY}.view.sender",
+        mnemonic="view.sender",
+        semantic_tag="array.view.sender",
+        operands=(
+            _result(_REG_SENDER),
+            _operand(_REG_SENDER, "source"),
+            _operand(_REG_OFFSET, "offset"),
+        ),
+        asm_forms=_asm(
+            "view.sender",
+            results=("result",),
+            operands=("source", "offset"),
+        ),
+        schedule_class=_SCHEDULE_GRAPH,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
+    Descriptor(
+        key=f"{_DESCRIPTOR_SET_KEY}.view.receiver",
+        mnemonic="view.receiver",
+        semantic_tag="array.view.receiver",
+        operands=(
+            _result(_REG_RECEIVER),
+            _operand(_REG_RECEIVER, "source"),
+            _operand(_REG_OFFSET, "offset"),
+        ),
+        asm_forms=_asm(
+            "view.receiver",
+            results=("result",),
+            operands=("source", "offset"),
+        ),
+        schedule_class=_SCHEDULE_GRAPH,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
+    Descriptor(
         key=f"{_DESCRIPTOR_SET_KEY}.partition.sender",
         mnemonic="partition.sender",
         semantic_tag="array.partition.sender",
         operands=(
             _result(_REG_SENDER),
             _operand(_REG_SENDER, "source"),
+            _operand(_REG_OFFSET, "offset"),
             _operand(_REG_SCALAR, "lane"),
             _operand(_REG_SCALAR, "lanes"),
         ),
         asm_forms=_asm(
             "partition.sender",
             results=("result",),
-            operands=("source", "lane", "lanes"),
+            operands=("source", "offset", "lane", "lanes"),
         ),
         schedule_class=_SCHEDULE_GRAPH,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -319,13 +379,14 @@ _DESCRIPTORS = (
         operands=(
             _result(_REG_RECEIVER),
             _operand(_REG_RECEIVER, "source"),
+            _operand(_REG_OFFSET, "offset"),
             _operand(_REG_SCALAR, "lane"),
             _operand(_REG_SCALAR, "lanes"),
         ),
         asm_forms=_asm(
             "partition.receiver",
             results=("result",),
-            operands=("source", "lane", "lanes"),
+            operands=("source", "offset", "lane", "lanes"),
         ),
         schedule_class=_SCHEDULE_GRAPH,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -373,7 +434,7 @@ _DESCRIPTORS = (
 AIE2P_ARRAY_DESCRIPTOR_SET = DescriptorSet(
     key=_DESCRIPTOR_SET_KEY,
     target_key=_TARGET_KEY,
-    feature_key=f"{_DESCRIPTOR_SET_KEY}.v2",
+    feature_key=f"{_DESCRIPTOR_SET_KEY}.v3",
     c_header_path=Path(
         "loom/src/loom/target/arch/amd/xdna/aie2p/descriptors/array_descriptors.h"
     ),
@@ -388,6 +449,7 @@ AIE2P_ARRAY_DESCRIPTOR_SET = DescriptorSet(
     generator_version=2,
     reg_classes=(
         _reference_reg_class(_REG_SCALAR),
+        _reference_reg_class(_REG_OFFSET, bit_width=64),
         _reference_reg_class(_REG_BINDING),
         _reference_reg_class(_REG_GROUP),
         _reference_reg_class(_REG_WORKER),

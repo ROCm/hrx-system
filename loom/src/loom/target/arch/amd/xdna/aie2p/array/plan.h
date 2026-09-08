@@ -116,12 +116,16 @@ typedef struct loom_aie2p_array_endpoint_t {
   uint32_t port;
   // Typed tile value transported through this endpoint.
   loom_type_t message_type;
-  // Source endpoint index for a partition, or UINT32_MAX when direct.
-  uint32_t partition_source_endpoint_index;
-  // Selected partition lane, or zero for a direct endpoint.
+  // Exact byte offset from the runtime binding base.
+  uint64_t binding_byte_offset;
+  // Raw binding endpoint wrapped by this view, or UINT32_MAX when unwrapped.
+  uint32_t binding_view_source_endpoint_index;
+  // Selected partition lane, or zero for an unpartitioned binding view.
   uint32_t partition_lane;
-  // Number of source partitions, or one for a direct endpoint.
+  // Number of source partitions, or one for an unpartitioned binding view.
   uint32_t partition_lane_count;
+  // Whether the binding view selects one leading-dimension lane.
+  bool binding_view_partitioned;
 } loom_aie2p_array_endpoint_t;
 
 // One typed bounded channel connecting a sender to a receiver.

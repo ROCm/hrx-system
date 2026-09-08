@@ -52,10 +52,13 @@ typedef struct loom_pipeline_plan_binding_t {
   loom_pipeline_binding_access_flags_t access;
 } loom_pipeline_plan_binding_t;
 
-typedef struct loom_pipeline_plan_binding_partition_t {
-  // Full binding tile type before removing the leading lane dimension.
+typedef struct loom_pipeline_plan_binding_view_t {
+  // Full refined binding tile type before selecting record dimensions.
   loom_type_t binding_type;
-} loom_pipeline_plan_binding_partition_t;
+
+  // Exact byte offset from the launch binding base.
+  uint64_t byte_offset;
+} loom_pipeline_plan_binding_view_t;
 
 typedef struct loom_pipeline_plan_group_t {
   // Source SSA identity naming the scheduling group.
@@ -134,18 +137,18 @@ typedef struct loom_pipeline_plan_flow_t {
   // Callable output port or external binding port.
   uint32_t producer_port;
 
-  // Binding-partition table index when produced by a partitioned binding, or
-  // UINT32_MAX when the producer endpoint is direct.
-  uint32_t binding_partition_index;
+  // Binding-view table index when produced by an external binding, or
+  // UINT32_MAX when produced by a resident instance.
+  uint32_t binding_view_index;
 } loom_pipeline_plan_flow_t;
 
 typedef struct loom_pipeline_plan_edge_t {
   // Flow supplying the edge and its record contract.
   uint32_t flow_index;
 
-  // Binding-partition table index for the edge's binding endpoint, or
-  // UINT32_MAX when the endpoint is direct.
-  uint32_t binding_partition_index;
+  // Binding-view table index for the edge's external endpoint, or UINT32_MAX
+  // when both endpoints are resident instances.
+  uint32_t binding_view_index;
 
   // Kind of concrete producer endpoint.
   loom_pipeline_endpoint_kind_t source_kind;
@@ -156,8 +159,8 @@ typedef struct loom_pipeline_plan_edge_t {
   // Producer endpoint port.
   uint32_t source_port;
 
-  // Selected leading-dimension lane in a partitioned binding endpoint.
-  uint32_t binding_partition_lane;
+  // Selected leading-dimension lane when the binding view is partitioned.
+  uint32_t binding_view_lane;
 
   // Kind of concrete consumer endpoint.
   loom_pipeline_endpoint_kind_t target_kind;
@@ -184,11 +187,11 @@ typedef struct loom_pipeline_plan_t {
   // Number of launch binding slots.
   uint32_t binding_count;
 
-  // Typed leading-dimension partitions referenced by concrete edges.
-  const loom_pipeline_plan_binding_partition_t* binding_partitions;
+  // Typed launch-binding views referenced by concrete edges.
+  const loom_pipeline_plan_binding_view_t* binding_views;
 
-  // Number of binding partition records.
-  uint32_t binding_partition_count;
+  // Number of binding view records.
+  uint32_t binding_view_count;
 
   // Scheduling groups in source definition order.
   const loom_pipeline_plan_group_t* groups;

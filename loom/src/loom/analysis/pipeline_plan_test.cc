@@ -178,14 +178,13 @@ pipeline.def<kernel> @split_k() launch(%lhs: buffer, %rhs: buffer, %bias: buffer
     EXPECT_EQ(loom_type_dim_static_size_at(plan.flows[i].tile_type, 0), 8);
     EXPECT_EQ(loom_type_dim_static_size_at(plan.flows[i].tile_type, 1), 8);
   }
-  ASSERT_NE(plan.flows[0].binding_partition_index, UINT32_MAX);
-  const loom_type_t lhs_partition_type =
-      plan.binding_partitions[plan.flows[0].binding_partition_index]
-          .binding_type;
-  EXPECT_TRUE(loom_type_is_all_static(lhs_partition_type));
-  EXPECT_EQ(loom_type_dim_static_size_at(lhs_partition_type, 0), 2);
-  EXPECT_EQ(loom_type_dim_static_size_at(lhs_partition_type, 1), 2);
-  EXPECT_EQ(loom_type_dim_static_size_at(lhs_partition_type, 2), 2);
+  ASSERT_NE(plan.flows[0].binding_view_index, UINT32_MAX);
+  const loom_type_t lhs_binding_type =
+      plan.binding_views[plan.flows[0].binding_view_index].binding_type;
+  EXPECT_TRUE(loom_type_is_all_static(lhs_binding_type));
+  EXPECT_EQ(loom_type_dim_static_size_at(lhs_binding_type, 0), 2);
+  EXPECT_EQ(loom_type_dim_static_size_at(lhs_binding_type, 1), 2);
+  EXPECT_EQ(loom_type_dim_static_size_at(lhs_binding_type, 2), 2);
 
   const loom_pipeline_plan_edge_t& product0_to_reducer = plan.edges[4];
   EXPECT_EQ(product0_to_reducer.source_kind,
@@ -242,22 +241,20 @@ pipeline.def<kernel> @encoded() launch(%weight: buffer, %activation: buffer) {
   ASSERT_EQ(plan.flow_count, 2u);
   EXPECT_EQ(plan.flows[0].record_count, 3u);
   EXPECT_EQ(plan.flows[1].record_count, 3u);
-  const loom_type_t weight_partition_type =
-      plan.binding_partitions[plan.flows[0].binding_partition_index]
-          .binding_type;
-  const loom_type_t activation_partition_type =
-      plan.binding_partitions[plan.flows[1].binding_partition_index]
-          .binding_type;
+  const loom_type_t weight_binding_type =
+      plan.binding_views[plan.flows[0].binding_view_index].binding_type;
+  const loom_type_t activation_binding_type =
+      plan.binding_views[plan.flows[1].binding_view_index].binding_type;
   const loom_encoding_record_layout_t* weight_layout = nullptr;
   ASSERT_TRUE(loom_encoding_query_type_record_layout(
-      nullptr, module.get(), weight_partition_type, &weight_layout));
+      nullptr, module.get(), weight_binding_type, &weight_layout));
   ASSERT_NE(weight_layout, nullptr);
   EXPECT_EQ(weight_layout->geometry.logical_element_count, 256u);
   EXPECT_EQ(weight_layout->geometry.storage_byte_count, 176u);
   EXPECT_EQ(weight_layout->geometry.required_alignment, 2u);
   const loom_encoding_record_layout_t* activation_layout = nullptr;
   ASSERT_TRUE(loom_encoding_query_type_record_layout(
-      nullptr, module.get(), activation_partition_type, &activation_layout));
+      nullptr, module.get(), activation_binding_type, &activation_layout));
   ASSERT_NE(activation_layout, nullptr);
   EXPECT_EQ(activation_layout->geometry.logical_element_count, 128u);
   EXPECT_EQ(activation_layout->geometry.storage_byte_count, 144u);
@@ -265,7 +262,7 @@ pipeline.def<kernel> @encoded() launch(%weight: buffer, %activation: buffer) {
   loom_value_facts_t stride_storage[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK];
   loom_value_fact_address_layout_t address_layout = {};
   ASSERT_TRUE(loom_encoding_query_type_address_layout(
-      nullptr, module.get(), weight_partition_type, stride_storage,
+      nullptr, module.get(), weight_binding_type, stride_storage,
       IREE_ARRAYSIZE(stride_storage), &address_layout));
   EXPECT_EQ(address_layout.kind, LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE);
 }
@@ -363,7 +360,7 @@ func.def @consume(%input: buffer) {
 
 pipeline.def<kernel> @broadcast() launch(%input: buffer) {
   %lane_count = index.constant 2 : index
-  %base = index.constant 0 : offset
+  %base = index.constant 4294967360 : offset
   %workers = group.create %lane_count : index -> group
   %input_view = buffer.view %input[%base] : buffer -> view<3x4xi8>
   %input_records = pipeline.read %input_view on %workers : view<3x4xi8>, group -> pipeline.flow<tile<4xi8>>
@@ -380,7 +377,9 @@ pipeline.def<kernel> @broadcast() launch(%input: buffer) {
   ASSERT_EQ(plan.flow_count, 1u);
   EXPECT_EQ(plan.flows[0].record_count, 3u);
   EXPECT_EQ(plan.flows[0].producer_port, 0u);
-  EXPECT_EQ(plan.flows[0].binding_partition_index, UINT32_MAX);
+  ASSERT_EQ(plan.binding_view_count, 1u);
+  EXPECT_EQ(plan.flows[0].binding_view_index, 0u);
+  EXPECT_EQ(plan.binding_views[0].byte_offset, UINT64_C(4294967360));
   ASSERT_EQ(plan.edge_count, 2u);
   for (uint32_t lane = 0; lane < 2; ++lane) {
     const loom_pipeline_plan_edge_t& edge = plan.edges[lane];
@@ -388,7 +387,7 @@ pipeline.def<kernel> @broadcast() launch(%input: buffer) {
     EXPECT_EQ(edge.source_kind, LOOM_PIPELINE_ENDPOINT_KIND_BINDING);
     EXPECT_EQ(edge.source_index, 0u);
     EXPECT_EQ(edge.source_port, 0u);
-    EXPECT_EQ(edge.binding_partition_index, UINT32_MAX);
+    EXPECT_EQ(edge.binding_view_index, 0u);
     EXPECT_EQ(edge.target_kind, LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE);
     EXPECT_EQ(edge.target_index, lane);
     EXPECT_EQ(edge.target_port, 0u);
@@ -458,10 +457,11 @@ func.def @copy(%input: buffer, %output: buffer) {
 
 pipeline.def<kernel> @distributed_copy() launch(%input: buffer, %output: buffer) {
   %lane_count = index.constant 2 : index
-  %base = index.constant 0 : offset
+  %input_base = index.constant 32 : offset
+  %output_base = index.constant 64 : offset
   %workers = group.create %lane_count : index -> group
-  %input_view = buffer.view %input[%base] : buffer -> view<2x3x4xi8>
-  %output_view = buffer.view %output[%base] : buffer -> view<2x3x4xi8>
+  %input_view = buffer.view %input[%input_base] : buffer -> view<2x3x4xi8>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<2x3x4xi8>
   %input_records = pipeline.scatter %input_view across %workers : view<2x3x4xi8>, group -> pipeline.flow<tile<4xi8>>
   %output_records = pipeline.stage @copy on %workers(%input_records) : (group, pipeline.flow<tile<4xi8>>) -> (pipeline.flow<tile<4xi8>>)
   pipeline.write %output_records to %output_view : pipeline.flow<tile<4xi8>>, view<2x3x4xi8>
@@ -477,25 +477,27 @@ pipeline.def<kernel> @distributed_copy() launch(%input: buffer, %output: buffer)
   EXPECT_EQ(plan.bindings[1].access, LOOM_PIPELINE_BINDING_ACCESS_FLAG_WRITE);
   ASSERT_EQ(plan.flow_count, 2u);
   EXPECT_EQ(plan.flows[1].record_count, 3u);
-  ASSERT_EQ(plan.binding_partition_count, 2u);
+  ASSERT_EQ(plan.binding_view_count, 2u);
+  EXPECT_EQ(plan.binding_views[0].byte_offset, 32u);
+  EXPECT_EQ(plan.binding_views[1].byte_offset, 64u);
   ASSERT_EQ(plan.edge_count, 4u);
   for (uint32_t lane = 0; lane < 2; ++lane) {
     const loom_pipeline_plan_edge_t& input_edge = plan.edges[lane];
-    EXPECT_EQ(input_edge.binding_partition_lane, lane);
-    ASSERT_NE(input_edge.binding_partition_index, UINT32_MAX);
+    EXPECT_EQ(input_edge.binding_view_lane, lane);
+    ASSERT_NE(input_edge.binding_view_index, UINT32_MAX);
 
     const loom_pipeline_plan_edge_t& output_edge = plan.edges[2 + lane];
     EXPECT_EQ(output_edge.source_kind, LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE);
     EXPECT_EQ(output_edge.source_index, lane);
     EXPECT_EQ(output_edge.target_kind, LOOM_PIPELINE_ENDPOINT_KIND_BINDING);
     EXPECT_EQ(output_edge.target_index, 1u);
-    EXPECT_EQ(output_edge.binding_partition_lane, lane);
-    ASSERT_NE(output_edge.binding_partition_index, UINT32_MAX);
-    const loom_pipeline_plan_binding_partition_t& output_partition =
-        plan.binding_partitions[output_edge.binding_partition_index];
-    EXPECT_TRUE(loom_type_is_all_static(output_partition.binding_type));
-    EXPECT_EQ(loom_type_rank(output_partition.binding_type), 3u);
-    EXPECT_EQ(loom_type_dim_static_size_at(output_partition.binding_type, 0),
+    EXPECT_EQ(output_edge.binding_view_lane, lane);
+    ASSERT_NE(output_edge.binding_view_index, UINT32_MAX);
+    const loom_pipeline_plan_binding_view_t& output_binding_view =
+        plan.binding_views[output_edge.binding_view_index];
+    EXPECT_TRUE(loom_type_is_all_static(output_binding_view.binding_type));
+    EXPECT_EQ(loom_type_rank(output_binding_view.binding_type), 3u);
+    EXPECT_EQ(loom_type_dim_static_size_at(output_binding_view.binding_type, 0),
               2);
   }
 }

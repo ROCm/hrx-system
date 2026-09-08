@@ -213,6 +213,8 @@ loom_cc_library(
     "array/plan.c"
     "array/route.c"
     "array/route.h"
+    "array/topology.c"
+    "array/topology.h"
   DEPS
     ::array_descriptors
     ::leaf_object

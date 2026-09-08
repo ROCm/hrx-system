@@ -22,7 +22,7 @@ def test_array_descriptor_set_is_a_resident_topology_contract() -> None:
     descriptor_set = AIE2P_ARRAY_DESCRIPTOR_SET
 
     assert descriptor_set.key == "amd.xdna.aie2p.array"
-    assert descriptor_set.feature_key == "amd.xdna.aie2p.array.v2"
+    assert descriptor_set.feature_key == "amd.xdna.aie2p.array.v3"
     assert not descriptor_set.physical_registers
     assert not descriptor_set.physical_register_views
     assert not descriptor_set.register_parts
@@ -45,6 +45,9 @@ def test_topology_parameters_are_ssa_operands() -> None:
     constant = descriptors["amd.xdna.aie2p.array.constant.u32"]
     assert constant.op_kind is DescriptorOpKind.CONST
     assert constant.immediates[0].field_name == "value"
+    offset = descriptors["amd.xdna.aie2p.array.constant.u64"]
+    assert offset.op_kind is DescriptorOpKind.CONST
+    assert offset.immediates[0].bit_width == 64
 
     group = descriptors["amd.xdna.aie2p.array.group"]
     assert [operand.field_name for operand in group.operands] == ["result", "lanes"]
@@ -118,6 +121,8 @@ def test_channels_are_typed_persistent_topology_edges() -> None:
     receiver = descriptors["amd.xdna.aie2p.array.receiver"]
     sender_partition = descriptors["amd.xdna.aie2p.array.partition.sender"]
     receiver_partition = descriptors["amd.xdna.aie2p.array.partition.receiver"]
+    sender_view = descriptors["amd.xdna.aie2p.array.view.sender"]
+    receiver_view = descriptors["amd.xdna.aie2p.array.view.receiver"]
     channel = descriptors["amd.xdna.aie2p.array.channel"]
 
     assert {alternative.reg_class for alternative in sender.operands[1].reg_alts} == {
@@ -135,6 +140,7 @@ def test_channels_are_typed_persistent_topology_edges() -> None:
         assert [operand.field_name for operand in partition.operands] == [
             "result",
             "source",
+            "offset",
             "lane",
             "lanes",
         ]
@@ -142,6 +148,28 @@ def test_channels_are_typed_persistent_topology_edges() -> None:
             alternative.reg_class == register_class
             for operand in partition.operands[:2]
             for alternative in operand.reg_alts
+        )
+        assert all(
+            alternative.reg_class == "aie2p.array.offset"
+            for alternative in partition.operands[2].reg_alts
+        )
+    for view, register_class in (
+        (sender_view, "aie2p.array.sender"),
+        (receiver_view, "aie2p.array.receiver"),
+    ):
+        assert [operand.field_name for operand in view.operands] == [
+            "result",
+            "source",
+            "offset",
+        ]
+        assert all(
+            alternative.reg_class == register_class
+            for operand in view.operands[:2]
+            for alternative in operand.reg_alts
+        )
+        assert all(
+            alternative.reg_class == "aie2p.array.offset"
+            for alternative in view.operands[2].reg_alts
         )
     assert DescriptorFlag.SIDE_EFFECTING in channel.flags
 
@@ -155,6 +183,7 @@ def test_asm_mnemonics_are_target_relative() -> None:
     assert set(mnemonics) == {
         "binding",
         "channel",
+        "constant.u64",
         "constant.u32",
         "constrain.location",
         "group",
@@ -162,6 +191,8 @@ def test_asm_mnemonics_are_target_relative() -> None:
         "partition.sender",
         "receiver",
         "sender",
+        "view.receiver",
+        "view.sender",
         "worker",
         "worker.fold",
     }
