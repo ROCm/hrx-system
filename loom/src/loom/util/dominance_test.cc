@@ -560,6 +560,49 @@ TEST_F(DominanceTest, CfgImmediateDominatorsFollowLinearizedEdges) {
             then_block);
 }
 
+TEST_F(DominanceTest, CachedTraversalOrdersReverseChainsAndUnreachableBlocks) {
+  constexpr uint16_t kReachableCount = 129;
+  constexpr uint16_t kBlockCount = kReachableCount + 2;
+  loom_block_t* blocks[kBlockCount] = {loom_region_entry_block(body_)};
+  for (uint16_t i = 1; i < kBlockCount; ++i) blocks[i] = append_block();
+  set_block(blocks[0]);
+  build_branch(blocks[kReachableCount - 1]);
+  for (uint16_t i = kReachableCount - 1; i > 1; --i) {
+    set_block(blocks[i]);
+    build_branch(blocks[i - 1]);
+  }
+  // This island has edges but remains unreachable from the function entry.
+  set_block(blocks[kReachableCount]);
+  build_branch(blocks[kReachableCount + 1]);
+  set_block(blocks[kReachableCount + 1]);
+  build_branch(blocks[kReachableCount]);
+  finalize_region();
+
+  const iree_host_size_t used_bytes = dom_arena_.used_allocation_size;
+  const auto traversal = loom_dominance_region_traversal(&dom_info_, body_);
+  ASSERT_NE(traversal.graph, nullptr);
+  EXPECT_EQ(traversal.graph->block_count, kBlockCount);
+  EXPECT_EQ(traversal.block_order[0], 0u);
+  EXPECT_EQ(traversal.immediate_dominators[0], 0u);
+  for (uint16_t i = 1; i < kReachableCount; ++i) {
+    const uint16_t block_index = kReachableCount - i;
+    EXPECT_EQ(traversal.block_order[i], block_index);
+    EXPECT_EQ(traversal.immediate_dominators[block_index],
+              i == 1 ? 0u : block_index + 1u);
+  }
+  for (uint16_t i = kReachableCount; i < kBlockCount; ++i) {
+    EXPECT_EQ(traversal.block_order[i], i);
+    EXPECT_EQ(traversal.immediate_dominators[i], UINT16_MAX);
+  }
+  const auto repeated = loom_dominance_region_traversal(&dom_info_, body_);
+  EXPECT_EQ(repeated.graph, traversal.graph);
+  EXPECT_EQ(repeated.block_order, traversal.block_order);
+  EXPECT_EQ(dom_arena_.used_allocation_size, used_bytes);
+  // The scoped analysis does not inventory the enclosing module region.
+  EXPECT_EQ(loom_dominance_region_traversal(&dom_info_, module_->body).graph,
+            nullptr);
+}
+
 TEST_F(DominanceTest, CfgLoopDominanceUsesFixedPointDominators) {
   body_->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);

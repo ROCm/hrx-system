@@ -823,6 +823,41 @@ TEST_F(CSETest, NestedCFGRegionUsesEntryBlockDominance) {
             loom_test_constant_result(entry_const));
 }
 
+TEST_F(CSETest, ReusesDominatingExpressionAcrossReverseOrderedCFG) {
+  constexpr uint16_t kBlockCount = 65;
+  loom_block_t* blocks[kBlockCount] = {loom_region_entry_block(body_)};
+  for (uint16_t i = 1; i < kBlockCount; ++i) {
+    IREE_ASSERT_OK(loom_region_append_block(module_, body_, &blocks[i]));
+  }
+  loom_op_t* branch = nullptr;
+  IREE_ASSERT_OK(loom_test_br_build(&builder_, blocks[kBlockCount - 1],
+                                    LOOM_LOCATION_UNKNOWN, &branch));
+  const loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* first = nullptr;
+  loom_op_t* uses[kBlockCount - 1] = {};
+  for (uint16_t i = kBlockCount - 1; i > 0; --i) {
+    loom_builder_set_block(&builder_, blocks[i]);
+    loom_op_t* constant = nullptr;
+    IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(42), i32,
+                                            LOOM_LOCATION_UNKNOWN, &constant));
+    if (!first) first = constant;
+    loom_value_id_t value = loom_test_constant_result(constant);
+    IREE_ASSERT_OK(loom_test_use_build(&builder_, &value, 1,
+                                       LOOM_LOCATION_UNKNOWN, &uses[i - 1]));
+    if (i > 1) {
+      IREE_ASSERT_OK(loom_test_br_build(&builder_, blocks[i - 1],
+                                        LOOM_LOCATION_UNKNOWN, &branch));
+    }
+  }
+  IREE_ASSERT_OK(run_cse());
+  for (const auto* use : uses) {
+    EXPECT_EQ(loom_test_use_values(use).values[0],
+              loom_test_constant_result(first));
+  }
+  // Each block retains its real branch/use; only redundant constants vanish.
+  EXPECT_EQ(count_live_ops(), 2 * (kBlockCount - 1) + 1);
+}
+
 TEST_F(CSETest, StatefulReadCSEAcrossStraightLineCFGEdge) {
   loom_type_t pool_type = loom_type_pool(loom_dim_pack_static(4096));
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);

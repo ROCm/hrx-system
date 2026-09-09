@@ -42,6 +42,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
+#include "loom/util/cfg_graph.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -83,6 +84,26 @@ iree_status_t loom_dominance_info_initialize(const loom_module_t* module,
 iree_status_t loom_dominance_info_initialize_region(
     const loom_module_t* module, const loom_region_t* region,
     iree_arena_allocator_t* arena, loom_dominance_info_t* out_info);
+
+// Borrowed traversal facts for one cached CFG region. All arrays have
+// |graph->block_count| entries and share the dominance analysis lifetime.
+typedef struct loom_dominance_region_traversal_t {
+  // Cached predecessor/successor graph, or NULL for an uncached region.
+  const loom_cfg_graph_t* graph;
+  // Immediate dominator by block index. The entry dominates itself;
+  // unreachable blocks and unavailable dominance use UINT16_MAX.
+  const uint16_t* immediate_dominators;
+  // Reachable blocks in dominator-tree preorder, then unreachable blocks in
+  // region order. Unavailable dominance uses region order for all blocks.
+  const uint16_t* block_order;
+} loom_dominance_region_traversal_t;
+
+// Returns cached traversal facts without rebuilding the graph or allocating.
+// Single-block structured regions and regions outside the initialized tree
+// have no cache and return an empty view. Consumers walking every block should
+// query once per region instead of performing per-block cache lookups.
+loom_dominance_region_traversal_t loom_dominance_region_traversal(
+    const loom_dominance_info_t* info, const loom_region_t* region);
 
 //===----------------------------------------------------------------------===//
 // Dominance queries

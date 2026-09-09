@@ -26,6 +26,8 @@ struct loom_cfg_dominance_region_t {
   uint16_t* immediate_dominators;
   // Packed inclusive dominator-tree preorder ranges per dense block index.
   uint32_t* dominator_intervals;
+  // Reachable dominator preorder followed by unreachable region-order blocks.
+  uint16_t* block_order;
   // True when graph is well-formed enough for CFG dominance queries.
   bool available;
   // Next cached CFG region in loom_dominance_info_t::cfg_regions.
@@ -113,7 +115,8 @@ typedef struct loom_cfg_dominance_working_set_t {
 } loom_cfg_dominance_working_set_t;
 
 static iree_status_t loom_cfg_dominance_compute_rpo(
-    const loom_cfg_graph_t* graph, iree_arena_allocator_t* arena,
+    const loom_cfg_graph_t* graph, uint16_t* block_order,
+    iree_arena_allocator_t* arena,
     loom_cfg_dominance_working_set_t* out_working_set) {
   memset(out_working_set, 0, sizeof(*out_working_set));
   if (graph->block_count == 0) return iree_ok_status();
@@ -128,9 +131,7 @@ static iree_status_t loom_cfg_dominance_compute_rpo(
                                                  sizeof(*traversal_stack),
                                                  (void**)&traversal_stack));
 
-  uint16_t* rpo_order = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, graph->block_count, sizeof(*rpo_order), (void**)&rpo_order));
+  uint16_t* rpo_order = block_order;
 
   iree_host_size_t* rpo_numbers = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -263,6 +264,17 @@ static void loom_cfg_dominance_compute_intervals(
         (uint32_t)block_preorder | ((uint32_t)block_last_preorder << 16);
     --stack_count;
   }
+
+  // The compact child table is no longer needed. Retain the tree order in its
+  // storage so consumers do not have to reconstruct a dominance traversal.
+  iree_host_size_t unreachable_position = working_set->rpo_count;
+  for (uint16_t block_index = 0; block_index < block_count; ++block_index) {
+    const uint32_t interval = cache->dominator_intervals[block_index];
+    const iree_host_size_t position =
+        interval == LOOM_CFG_DOMINATOR_INTERVAL_INVALID ? unreachable_position++
+                                                        : (uint16_t)interval;
+    cache->block_order[position] = block_index;
+  }
 }
 
 static iree_status_t loom_cfg_dominance_compute(
@@ -276,16 +288,20 @@ static iree_status_t loom_cfg_dominance_compute(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, block_count, sizeof(*cache->dominator_intervals),
       (void**)&cache->dominator_intervals));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, block_count,
+                                                 sizeof(*cache->block_order),
+                                                 (void**)&cache->block_order));
   for (iree_host_size_t i = 0; i < block_count; ++i) {
     cache->immediate_dominators[i] = LOOM_CFG_DOMINATOR_INVALID;
     cache->dominator_intervals[i] = LOOM_CFG_DOMINATOR_INTERVAL_INVALID;
+    cache->block_order[i] = (uint16_t)i;
   }
 
   if (cache->graph.malformed) return iree_ok_status();
 
   loom_cfg_dominance_working_set_t working_set;
-  IREE_RETURN_IF_ERROR(
-      loom_cfg_dominance_compute_rpo(&cache->graph, arena, &working_set));
+  IREE_RETURN_IF_ERROR(loom_cfg_dominance_compute_rpo(
+      &cache->graph, cache->block_order, arena, &working_set));
   if (working_set.rpo_count == 0) return iree_ok_status();
 
   cache->immediate_dominators[0] = 0;
@@ -367,6 +383,18 @@ static const loom_cfg_dominance_region_t* loom_dominance_lookup_cfg_region(
     if (cache->region == region) return cache;
   }
   return NULL;
+}
+
+loom_dominance_region_traversal_t loom_dominance_region_traversal(
+    const loom_dominance_info_t* info, const loom_region_t* region) {
+  const loom_cfg_dominance_region_t* cache =
+      loom_dominance_lookup_cfg_region(info, region);
+  if (!cache) return (loom_dominance_region_traversal_t){0};
+  return (loom_dominance_region_traversal_t){
+      .graph = &cache->graph,
+      .immediate_dominators = cache->immediate_dominators,
+      .block_order = cache->block_order,
+  };
 }
 
 static bool loom_cfg_region_block_dominates(

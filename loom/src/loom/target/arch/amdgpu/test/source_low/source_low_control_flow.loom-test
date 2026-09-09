@@ -2403,7 +2403,8 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@wave64_target) workgroup_size(
   %98 = s_add_u32 %kk, %k_tile_size
   low.br ^_bb1(%98: reg<amdgpu.sgpr>, %inner_acc: reg<amdgpu.vgpr>)
 ^_bb6:
-  global_store_b32_saddr %77, %outer_acc, %dst_view
+  %99 = v_mov_b32 0
+  global_store_b32_saddr %99, %outer_acc, %dst_view
   return
 ^_bb7:
   %83 = s_mov_b64_exec_read
