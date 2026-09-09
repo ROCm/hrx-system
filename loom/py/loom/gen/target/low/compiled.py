@@ -51,6 +51,8 @@ class CompiledPhysicalRegisterView:
     reg_class_id: int
     unit_candidate_ordinal_start: int
     unit_count: int
+    # Lowest unit position in the class's aggregate-preserving search order.
+    packing_rank: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +106,8 @@ class CompiledDescriptorSet:
     reg_classes: list[RegClass]
     physical_registers: list[PhysicalRegister]
     physical_register_candidate_ids: list[int]
+    # Class-local semantic ordinals in aggregate-preserving search order.
+    physical_register_allocation_ordinals: list[int]
     physical_register_candidate_starts: list[int]
     physical_register_atomic_units: list[int]
     physical_register_atomic_unit_starts: list[int]

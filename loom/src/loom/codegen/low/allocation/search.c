@@ -353,11 +353,12 @@ bool loom_low_allocation_search_location_conflicts(
 typedef struct loom_low_allocation_search_location_choice_t {
   // Base location of the best legal candidate.
   uint32_t base;
-  // Search-order ordinal of the selected candidate.
+  // Semantic candidate ordinal of the selected location.
   uint32_t candidate_ordinal;
-  // Search-order ordinal of the first legal candidate under the release
-  // policy.
+  // Smallest legal semantic ordinal when comparing pressure-release policies.
   uint32_t first_candidate_ordinal;
+  // Aggregate-preserving rank used between equal-penalty physical candidates.
+  uint32_t packing_rank;
   // Soft placement penalty for base.
   uint32_t preference_penalty;
   // True when base and preference_penalty are populated.
@@ -467,18 +468,45 @@ loom_low_allocation_search_find_explicit_physical_register_for_release_policy(
     loom_low_allocation_storage_release_policy_t release_policy,
     loom_low_allocation_search_location_choice_t* out_choice) {
   *out_choice = (loom_low_allocation_search_location_choice_t){0};
-  for (uint32_t physical_register_id = 0;
-       physical_register_id < context->descriptor_set->physical_register_count;
-       ++physical_register_id) {
+  const loom_low_descriptor_set_t* descriptor_set = context->descriptor_set;
+  const uint16_t reg_class_id = candidate_template->descriptor_reg_class_id;
+  const loom_low_reg_class_t* reg_class =
+      &descriptor_set->reg_classes[reg_class_id];
+  const uint32_t unit_count = candidate_template->location_count;
+  const uint32_t candidate_count =
+      unit_count == 1 ? reg_class->allocatable_count
+                      : descriptor_set->physical_register_view_count;
+  for (uint32_t i = 0; i < candidate_count; ++i) {
+    uint32_t physical_register_id = 0;
     uint32_t candidate_ordinal = 0;
+    uint32_t packing_rank = i;
     uint32_t pressure_extent = 0;
-    if (!loom_low_allocation_storage_explicit_physical_register_view(
-            context->descriptor_set,
-            candidate_template->descriptor_reg_class_id, physical_register_id,
-            candidate_template->location_count, &candidate_ordinal,
-            &pressure_extent) ||
-        pressure_extent > maximum_pressure_extent) {
-      continue;
+    if (unit_count == 1) {
+      candidate_ordinal =
+          descriptor_set->physical_register_allocation_ordinals
+              [reg_class->physical_register_candidate_start + i];
+      if (candidate_ordinal >= maximum_pressure_extent) continue;
+      physical_register_id =
+          loom_low_descriptor_set_physical_register_candidate(
+              descriptor_set, reg_class_id, (uint16_t)candidate_ordinal);
+    } else {
+      const loom_low_physical_register_view_t* view =
+          &descriptor_set->physical_register_views[i];
+      if (view->reg_class_id != reg_class_id ||
+          view->unit_count != unit_count) {
+        continue;
+      }
+      const uint16_t* ordinals =
+          loom_low_descriptor_set_physical_register_view_unit_candidate_ordinals(
+              descriptor_set, view);
+      candidate_ordinal = ordinals[0];
+      packing_rank = view->packing_rank;
+      for (uint32_t unit = 0; unit < unit_count; ++unit) {
+        pressure_extent =
+            iree_max(pressure_extent, (uint32_t)ordinals[unit] + 1);
+      }
+      if (pressure_extent > maximum_pressure_extent) continue;
+      physical_register_id = view->physical_register_id;
     }
     loom_low_allocation_assignment_t candidate = *candidate_template;
     candidate.location_base = physical_register_id;
@@ -499,16 +527,26 @@ loom_low_allocation_search_find_explicit_physical_register_for_release_policy(
     if (!out_choice->found ||
         preference_penalty < out_choice->preference_penalty ||
         (preference_penalty == out_choice->preference_penalty &&
-         candidate_ordinal < out_choice->candidate_ordinal)) {
+         (packing_rank < out_choice->packing_rank ||
+          (packing_rank == out_choice->packing_rank &&
+           candidate_ordinal < out_choice->candidate_ordinal)))) {
       *out_choice = (loom_low_allocation_search_location_choice_t){
           .base = physical_register_id,
           .candidate_ordinal = candidate_ordinal,
           .first_candidate_ordinal = first_candidate_ordinal,
+          .packing_rank = packing_rank,
           .preference_penalty = preference_penalty,
           .found = true,
       };
     } else {
       out_choice->first_candidate_ordinal = first_candidate_ordinal;
+    }
+    // Scalars are visited in packing order, so the first zero-penalty choice
+    // is final unless pressure-release comparison also needs the minimum
+    // semantic ordinal. Views retain physical-ID order for indexed lookup.
+    if (unit_count == 1 && preference_penalty == 0 &&
+        !loom_low_allocation_search_has_pressure_release_records(context)) {
+      return;
     }
   }
 }

@@ -255,19 +255,35 @@ TEST_F(LowAllocationIntervalAssignmentTest,
           /*.atomic_unit_count=*/4,
           /*.reserved=*/0,
       },
+      {
+          /*.name_string_offset=*/0,
+          /*.atomic_unit_start=*/8,
+          /*.atomic_unit_count=*/4,
+          /*.reserved=*/0,
+      },
   };
   const uint16_t physical_register_candidates[] = {1, 0};
-  const uint16_t physical_register_atomic_units[] = {0, 1, 2, 3, 0, 1, 2, 3};
+  const uint16_t physical_register_atomic_units[] = {0, 1, 2, 3, 0, 1,
+                                                     2, 3, 0, 1, 2, 3};
   const loom_low_physical_register_view_t physical_register_views[] = {
       {
           /*.physical_register_id=*/2,
           /*.reg_class_id=*/0,
           /*.unit_candidate_ordinal_start=*/0,
           /*.unit_count=*/2,
-          /*.reserved=*/0,
+          /*.packing_rank=*/0,
+      },
+      {
+          /*.physical_register_id=*/3,
+          /*.reg_class_id=*/0,
+          /*.unit_candidate_ordinal_start=*/2,
+          /*.unit_count=*/2,
+          /*.packing_rank=*/0,
       },
   };
-  const uint16_t physical_register_view_unit_candidate_ordinals[] = {1, 0};
+  const uint16_t physical_register_view_unit_candidate_ordinals[] = {1, 0, 0,
+                                                                     1};
+  const uint16_t allocation_ordinals[] = {0, 1};
   loom_low_descriptor_set_t descriptor_set = {};
   descriptor_set.stable_id = descriptor_set_id;
   descriptor_set.reg_classes = &reg_class;
@@ -275,6 +291,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   descriptor_set.physical_registers = physical_registers;
   descriptor_set.physical_register_count = IREE_ARRAYSIZE(physical_registers);
   descriptor_set.physical_register_candidate_ids = physical_register_candidates;
+  descriptor_set.physical_register_allocation_ordinals = allocation_ordinals;
   descriptor_set.physical_register_candidate_count =
       IREE_ARRAYSIZE(physical_register_candidates);
   descriptor_set.physical_register_atomic_units =
@@ -282,8 +299,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   descriptor_set.physical_register_atomic_unit_count =
       IREE_ARRAYSIZE(physical_register_atomic_units);
   descriptor_set.physical_register_views = physical_register_views;
-  descriptor_set.physical_register_view_count =
-      IREE_ARRAYSIZE(physical_register_views);
+  descriptor_set.physical_register_view_count = 1;
   descriptor_set.physical_register_view_unit_candidate_ordinals =
       physical_register_view_unit_candidate_ordinals;
   descriptor_set.physical_register_view_unit_candidate_ordinal_count =
@@ -323,6 +339,18 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   EXPECT_EQ(result.assignments[1].location_base, 0u);
   EXPECT_EQ(result.assignments[1].location_count, 1u);
   EXPECT_EQ(result.assignments[2].location_base, 2u);
+  EXPECT_EQ(result.assignments[2].location_count, 2u);
+
+  // A later physical ID can have the preferred first-unit candidate ordinal.
+  // Aggregate search must inspect it even after finding a zero-penalty view.
+  descriptor_set.physical_register_view_count =
+      IREE_ARRAYSIZE(physical_register_views);
+  IREE_ASSERT_OK(
+      loom_low_allocation_interval_assignment_build(&context, &result));
+  ASSERT_EQ(result.assignment_count, 3u);
+  EXPECT_EQ(result.assignments[0].location_base, 1u);
+  EXPECT_EQ(result.assignments[1].location_base, 0u);
+  EXPECT_EQ(result.assignments[2].location_base, 3u);
   EXPECT_EQ(result.assignments[2].location_count, 2u);
 
   loom_module_value_ordinal_scratch_clear(module, first_value);

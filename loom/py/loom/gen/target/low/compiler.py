@@ -54,7 +54,9 @@ from loom.target.low_descriptors import (
     OperandForm,
     OperandFormImmediateAction,
     OperandRole,
+    PhysicalRegisterView,
     PressureDelta,
+    RegClass,
     RegClassAltFlag,
     Resource,
     ResourceKind,
@@ -89,6 +91,36 @@ class _CompiledImmediateRow:
     encoding_slice_start: int
     # Resolved enum-domain identifier, or None for non-enum immediates.
     enum_domain_id: int | None
+
+
+def _physical_register_packing_order(reg_class: RegClass, views: Sequence[PhysicalRegisterView]) -> list[int]:
+    """Groups candidates by containing views without changing semantic ordinals.
+
+    Larger views group the bank first, then smaller views group their pieces.
+    For nested register views this visits siblings before opening another
+    aggregate. Overlapping non-nested views use the first containing group at
+    each width as a deterministic preference, not a legality restriction.
+    """
+
+    ordinals = {name: index for index, name in enumerate(reg_class.physical_registers)}
+    groups_by_width: dict[int, list[tuple[int, ...]]] = {}
+    for view in views:
+        if view.reg_class == reg_class.name and len(view.units) > 1:
+            groups_by_width.setdefault(len(view.units), []).append(tuple(sorted(ordinals[unit] for unit in view.units)))
+    group_keys: list[dict[int, int]] = []
+    for width in sorted(groups_by_width, reverse=True):
+        keys: dict[int, int] = {}
+        for group_index, group in enumerate(sorted(set(groups_by_width[width]))):
+            for ordinal in group:
+                keys.setdefault(ordinal, group_index)
+        group_keys.append(keys)
+    return sorted(
+        range(len(ordinals)),
+        key=lambda ordinal: (
+            *(keys.get(ordinal, len(ordinals) + ordinal) for keys in group_keys),
+            ordinal,
+        ),
+    )
 
 
 _SEMANTIC_INSTRUCTION_CLASSES = (
@@ -1346,9 +1378,14 @@ def compile_descriptor_set(
 
     physical_register_candidate_ids: list[int] = []
     physical_register_candidate_starts: list[int] = []
+    physical_register_allocation_ordinals: list[int] = []
+    physical_register_packing_ranks: dict[str, dict[str, int]] = {}
     for reg_class in reg_classes:
         physical_register_candidate_starts.append(len(physical_register_candidate_ids))
         physical_register_candidate_ids.extend(physical_register_ids[name] for name in reg_class.physical_registers)
+        order = _physical_register_packing_order(reg_class, spec.physical_register_views)
+        physical_register_allocation_ordinals.extend(order)
+        physical_register_packing_ranks[reg_class.name] = {reg_class.physical_registers[ordinal]: rank for rank, ordinal in enumerate(order)}
 
     physical_register_views: list[CompiledPhysicalRegisterView] = []
     physical_register_view_unit_candidate_ordinals: list[int] = []
@@ -1370,6 +1407,7 @@ def compile_descriptor_set(
                 reg_class_id=reg_class_ids[view.reg_class],
                 unit_candidate_ordinal_start=unit_candidate_ordinal_start,
                 unit_count=len(view.units),
+                packing_rank=min(physical_register_packing_ranks[view.reg_class][unit] for unit in view.units),
             )
         )
     validation.validate_u32(
@@ -1598,6 +1636,7 @@ def compile_descriptor_set(
         reg_classes=reg_classes,
         physical_registers=physical_registers,
         physical_register_candidate_ids=physical_register_candidate_ids,
+        physical_register_allocation_ordinals=physical_register_allocation_ordinals,
         physical_register_candidate_starts=physical_register_candidate_starts,
         physical_register_atomic_units=physical_register_atomic_units,
         physical_register_atomic_unit_starts=physical_register_atomic_unit_starts,

@@ -585,8 +585,9 @@ typedef struct loom_low_physical_register_view_t {
   uint32_t unit_candidate_ordinal_start;
   // Number of ordered logical units in the aggregate register.
   uint16_t unit_count;
-  // Reserved for future physical-register-view flags.
-  uint16_t reserved;
+  // Lowest unit rank in the class's aggregate-preserving allocation order.
+  // This orders placement preferences, not operand encodings or budgets.
+  uint16_t packing_rank;
 } loom_low_physical_register_view_t;
 
 // One instantaneous shared physical-capacity constraint over register classes.
@@ -1351,6 +1352,10 @@ typedef struct loom_low_descriptor_set_t {
   uint32_t physical_register_count;
   // Packed physical-register IDs referenced by register-class slices.
   const uint16_t* physical_register_candidate_ids;
+  // Class-local candidate ordinals in aggregate-preserving allocation order.
+  // Uses the same ranges as |physical_register_candidate_ids|. Semantic
+  // candidate ordinals still define operand windows and pressure extents.
+  const uint16_t* physical_register_allocation_ordinals;
   // Number of packed physical-register candidate IDs owned by this set.
   uint32_t physical_register_candidate_count;
   // Packed atomic storage-unit IDs referenced by physical-register rows.

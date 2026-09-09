@@ -5,6 +5,9 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 from dataclasses import replace
+from itertools import permutations
+
+import pytest
 
 from loom.gen.target.low import compiler
 from loom.target.low_descriptors import EncodingFieldValue
@@ -13,6 +16,50 @@ from loom.target.test.descriptors import (
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
 )
+
+
+@pytest.mark.parametrize("candidate_names", permutations(("test.r0", "test.r1", "test.r2", "test.r3")))
+def test_physical_packing_order_preserves_pairs_and_semantic_ordinals(candidate_names) -> None:
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        reg_classes=tuple(replace(reg_class, physical_registers=candidate_names) if reg_class.name == "test.explicit32" else reg_class for reg_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes),
+    )
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+    class_id = compiled.reg_class_ids["test.explicit32"]
+    start = compiled.physical_register_candidate_starts[class_id]
+    semantic_ids = compiled.physical_register_candidate_ids[start : start + 4]
+    assert tuple(compiled.physical_registers[index].name for index in semantic_ids) == candidate_names
+    allocation_order = compiled.physical_register_allocation_ordinals[start : start + 4]
+    assert sorted(allocation_order) == list(range(4))
+    packed_names = [candidate_names[ordinal] for ordinal in allocation_order]
+    assert {frozenset(packed_names[:2]), frozenset(packed_names[2:])} == {frozenset(("test.r0", "test.r2")), frozenset(("test.r1", "test.r3"))}
+    ranks = {ordinal: rank for rank, ordinal in enumerate(allocation_order)}
+    for view in compiled.physical_register_views:
+        if view.reg_class_id != class_id:
+            continue
+        units = compiled.physical_register_view_unit_candidate_ordinals[view.unit_candidate_ordinal_start : view.unit_candidate_ordinal_start + view.unit_count]
+        assert view.packing_rank == min(ranks[ordinal] for ordinal in units)
+
+
+def test_physical_packing_order_is_independent_of_view_declaration_order() -> None:
+    compiled = compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
+    reversed_views = compiler.compile_descriptor_set(
+        replace(
+            TEST_LOW_CORE_DESCRIPTOR_SET,
+            physical_register_views=tuple(reversed(TEST_LOW_CORE_DESCRIPTOR_SET.physical_register_views)),
+        )
+    )
+    assert compiled.physical_register_allocation_ordinals == reversed_views.physical_register_allocation_ordinals
+    assert compiled.physical_register_views == reversed_views.physical_register_views
+    for class_id, reg_class in enumerate(compiled.reg_classes):
+        start = compiled.physical_register_candidate_starts[class_id]
+        count = len(reg_class.physical_registers)
+        order = compiled.physical_register_allocation_ordinals[start : start + count]
+        assert sorted(order) == list(range(count))
+        if reg_class.name == "test.packed.narrow":
+            # No aggregate spans this class's two candidates. Its source
+            # preference order is already the packing order.
+            assert order == [0, 1]
 
 
 def test_compiler_interns_exact_descriptor_and_asm_spans() -> None:

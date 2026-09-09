@@ -456,11 +456,11 @@ test.target<low_core> @test_target
 
 low.func.def target<test.low.core>(@test_target) @rematerialize_overlapping_view() -> (reg<test.packed.wide x2>, reg<test.i32>) asm {
   %block0 = test.const.explicit32 0
+  %block1 = test.const.explicit32 1
   %seed = test.const.packed.narrow 4
   %wide = test.packing.expand %seed
   %use0 = copy %block0 : reg<test.explicit32> -> reg<test.i32>
-  %block1_remat = test.const.explicit32 1
-  %use1 = copy %block1_remat : reg<test.explicit32> -> reg<test.i32>
+  %use1 = copy %block1 : reg<test.explicit32> -> reg<test.i32>
   %block2_remat = test.const.explicit32 2
   %use2 = copy %block2_remat : reg<test.explicit32> -> reg<test.i32>
   %block3_remat = test.const.explicit32 3

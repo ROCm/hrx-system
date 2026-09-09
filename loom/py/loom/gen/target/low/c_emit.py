@@ -467,6 +467,12 @@ def emit_source_for_views(
     c_arrays.append_value_array(
         lines,
         "uint16_t",
+        f"k{spec.c_table_prefix}PhysicalRegisterAllocationOrdinals",
+        [str(value) for value in compiled.physical_register_allocation_ordinals],
+    )
+    c_arrays.append_value_array(
+        lines,
+        "uint16_t",
         f"k{spec.c_table_prefix}PhysicalRegisterAtomicUnits",
         [str(value) for value in compiled.physical_register_atomic_units],
     )
@@ -481,7 +487,7 @@ def emit_source_for_views(
                 f".reg_class_id = {view.reg_class_id},",
                 ".unit_candidate_ordinal_start = " + str(view.unit_candidate_ordinal_start) + ",",
                 f".unit_count = {view.unit_count},",
-                ".reserved = 0,",
+                f".packing_rank = {view.packing_rank},",
             ]
             for view in compiled.physical_register_views
         ],
@@ -1101,6 +1107,8 @@ def emit_source_for_views(
             compiled.physical_register_candidate_ids,
             view_lines,
         )
+        if compiled.physical_register_allocation_ordinals:
+            view_lines.append(f"    .physical_register_allocation_ordinals = k{spec.c_table_prefix}PhysicalRegisterAllocationOrdinals,")
         append_optional_table(
             "physical_register_atomic_units",
             "PhysicalRegisterAtomicUnits",

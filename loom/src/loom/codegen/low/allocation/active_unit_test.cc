@@ -268,12 +268,14 @@ TEST(LowAllocationActiveUnitTest, IndexesExplicitRegisterAtomicUnits) {
       },
   };
   const uint16_t candidates[] = {0, 2, 1};
+  const uint16_t allocation_ordinals[] = {0, 1, 0};
   const uint16_t atomic_units[] = {0, 1, 0, 2, 3};
   loom_low_descriptor_set_t descriptor_set =
       DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
   descriptor_set.physical_registers = physical_registers;
   descriptor_set.physical_register_count = IREE_ARRAYSIZE(physical_registers);
   descriptor_set.physical_register_candidate_ids = candidates;
+  descriptor_set.physical_register_allocation_ordinals = allocation_ordinals;
   descriptor_set.physical_register_candidate_count = IREE_ARRAYSIZE(candidates);
   descriptor_set.physical_register_atomic_units = atomic_units;
   descriptor_set.physical_register_atomic_unit_count =

@@ -170,6 +170,7 @@ TEST(LowAllocationUnitLocationTest, WideScratchOverlapsEveryNarrowUnit) {
   reg_classes[1].allocatable_count = 1;
   reg_classes[1].physical_register_candidate_start = 2;
   const uint16_t candidates[] = {0, 1, 2};
+  const uint16_t allocation_ordinals[] = {0, 1, 0};
   const uint16_t atomic_units[] = {0, 1, 0, 1};
   const loom_low_physical_register_t registers[] = {
       {/*.name_string_offset=*/0, /*.atomic_unit_start=*/0,
@@ -190,6 +191,7 @@ TEST(LowAllocationUnitLocationTest, WideScratchOverlapsEveryNarrowUnit) {
   descriptor_set.physical_register_count = IREE_ARRAYSIZE(registers);
   descriptor_set.physical_register_candidate_ids = candidates;
   descriptor_set.physical_register_candidate_count = IREE_ARRAYSIZE(candidates);
+  descriptor_set.physical_register_allocation_ordinals = allocation_ordinals;
   descriptor_set.physical_register_atomic_units = atomic_units;
   descriptor_set.physical_register_atomic_unit_count =
       IREE_ARRAYSIZE(atomic_units);
