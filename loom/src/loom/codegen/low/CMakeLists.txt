@@ -827,11 +827,13 @@ loom_cc_test(
     "frame_test.cc"
   DEPS
     ::frame
+    ::packet
     ::text_asm
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
     loom::codegen::low::schedule
+    loom::codegen::low::schedule::physical_issue
     loom::error::error_defs
     loom::format::text::parser
     loom::ir

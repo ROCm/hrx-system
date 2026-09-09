@@ -892,6 +892,14 @@ typedef struct loom_low_resource_t {
 typedef struct loom_low_timing_event_t {
   // String-table offset for the stable timing-event name.
   loom_bstring_table_offset_t name_string_offset;
+  // First outgoing row in the event-separation table.
+  uint32_t separation_start;
+  // Number of outgoing event-separation rows.
+  uint16_t separation_count;
+  // Reserved; must be zero.
+  uint16_t reserved;
+  // Largest positive outgoing separation, or zero when none require a delay.
+  uint32_t maximum_issue_separation_cycles;
 } loom_low_timing_event_t;
 
 // Signed minimum separation between two target timing events.
@@ -1311,6 +1319,8 @@ typedef struct loom_low_descriptor_set_t {
   const loom_low_operand_t* operands;
   // Number of operand/result rows owned by this set.
   uint32_t operand_count;
+  // Maximum operand count of one native descriptor, including implicit state.
+  uint16_t maximum_descriptor_operand_count;
   // Dense immediate rows referenced by descriptors.
   const loom_low_immediate_t* immediates;
   // Number of immediate rows owned by this set.
@@ -1371,6 +1381,9 @@ typedef struct loom_low_descriptor_set_t {
   const uint16_t* physical_register_atomic_units;
   // Number of packed atomic storage-unit IDs owned by this set.
   uint32_t physical_register_atomic_unit_count;
+  // Exclusive upper bound of atomic storage-unit IDs, independent of how many
+  // aliases reference each unit in the packed table.
+  uint32_t physical_register_unit_count;
   // Sorted aggregate physical-register views.
   const loom_low_physical_register_view_t* physical_register_views;
   // Number of aggregate physical-register view rows owned by this set.

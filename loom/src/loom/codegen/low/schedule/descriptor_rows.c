@@ -284,7 +284,8 @@ iree_status_t loom_low_schedule_note_descriptor_rows_for_node(
     }
   }
   IREE_RETURN_IF_ERROR(loom_low_schedule_resource_calendar_commit(
-      &state->resource_calendar, schedule_class, state->current_issue_cycle));
+      &state->resource_calendar, &schedule_class, 1,
+      state->current_issue_cycle));
   for (uint16_t i = 0; i < schedule_class->issue_use_count; ++i) {
     const loom_low_issue_use_t* issue_use =
         &state->target.descriptor_set

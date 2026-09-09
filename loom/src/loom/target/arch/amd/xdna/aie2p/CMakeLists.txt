@@ -527,6 +527,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::frame
     loom::codegen::low::packet
+    loom::codegen::low::schedule::physical_issue
     loom::codegen::low::storage_layout
     loom::ir
     loom::ops::low

@@ -198,35 +198,39 @@ class Aie2pLeafObjectTest : public ::testing::Test {
 };
 
 TEST_F(Aie2pLeafObjectTest, LowFunctionsEmitOptimizedVectorLeaves) {
-  // RET advances over the five-bundle delay window so the final store occupies
-  // its last delay slot. The two loaded vectors occupy x0 and x1, preserving
-  // their containing y0 aggregate. The complete native leaf occupies 30 bytes.
+  // RET shares the add's bundle. Its five delay slots cover the final store's
+  // outgoing memory-event separation before arbitrary successor instructions,
+  // including lock operations, may execute.
+  // The two loaded vectors pack into x0/x1 within the same y0 aggregate.
   struct TestCase {
     std::string_view vector_shape;
     std::string_view mnemonic;
-    std::array<uint8_t, 30> expected;
+    std::array<uint8_t, 36> expected;
   };
   const TestCase test_cases[] = {
       {
           "i32x16",
           "vadd.32",
-          {0x3c, 0xe8, 0x08, 0x72, 0x83, 0x00, 0x00, 0x00, 0x00, 0x00,
-           0x00, 0x00, 0x18, 0x00, 0x28, 0x10, 0x00, 0x00, 0x00, 0x00,
-           0x78, 0x2d, 0x08, 0x18, 0x00, 0x00, 0x18, 0x13, 0x04, 0x0a},
+          {0x3c, 0xe8, 0x08, 0x72, 0x83, 0x00, 0x00, 0x00, 0x00,
+           0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+           0xe4, 0x5a, 0x10, 0x00, 0x00, 0x05, 0x00, 0x00, 0x18,
+           0x13, 0x04, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       },
       {
           "i16x32",
           "vadd.16",
-          {0x3c, 0xe8, 0x08, 0x72, 0x83, 0x00, 0x00, 0x00, 0x00, 0x00,
-           0x00, 0x00, 0x18, 0x00, 0x28, 0x10, 0x00, 0x00, 0x00, 0x00,
-           0x78, 0x1d, 0x08, 0x18, 0x00, 0x00, 0x18, 0x13, 0x04, 0x0a},
+          {0x3c, 0xe8, 0x08, 0x72, 0x83, 0x00, 0x00, 0x00, 0x00,
+           0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+           0xe4, 0x3a, 0x10, 0x00, 0x00, 0x05, 0x00, 0x00, 0x18,
+           0x13, 0x04, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       },
       {
           "i8x64",
           "vadd.8",
-          {0x3c, 0xe8, 0x08, 0x72, 0x83, 0x00, 0x00, 0x00, 0x00, 0x00,
-           0x00, 0x00, 0x18, 0x00, 0x28, 0x10, 0x00, 0x00, 0x00, 0x00,
-           0x78, 0x0d, 0x08, 0x18, 0x00, 0x00, 0x18, 0x13, 0x04, 0x0a},
+          {0x3c, 0xe8, 0x08, 0x72, 0x83, 0x00, 0x00, 0x00, 0x00,
+           0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+           0xe4, 0x1a, 0x10, 0x00, 0x00, 0x05, 0x00, 0x00, 0x18,
+           0x13, 0x04, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       },
   };
 
@@ -250,9 +254,9 @@ TEST_F(Aie2pLeafObjectTest, LowFunctionsEmitOptimizedVectorLeaves) {
     EXPECT_EQ(leaf.frame.schedule.issue_groups[1].issue_cycle, 7u);
     EXPECT_EQ(leaf.frame.schedule.issue_groups[2].issue_cycle, 9u);
     EXPECT_EQ(leaf.frame.schedule.issue_groups[3].issue_cycle, 10u);
-    ASSERT_EQ(leaf.plan.bundle_count, 10u);
-    ASSERT_EQ(leaf.plan.slot_count, 11u);
-    ASSERT_EQ(leaf.plan.encoded_byte_length, 30u);
+    ASSERT_EQ(leaf.plan.bundle_count, 13u);
+    ASSERT_EQ(leaf.plan.slot_count, 15u);
+    ASSERT_EQ(leaf.plan.encoded_byte_length, 36u);
     EXPECT_EQ(leaf.plan.bundles[0].slot_count, 2u);
 
     iree_host_size_t synthetic_nop_count = 0;
@@ -266,12 +270,12 @@ TEST_F(Aie2pLeafObjectTest, LowFunctionsEmitOptimizedVectorLeaves) {
       if (iree_any_bit_set(slot->flags,
                            LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_CONTROL)) {
         ++structural_control_count;
-        EXPECT_EQ(leaf.plan.bundles[4].slot_start, i);
+        EXPECT_EQ(leaf.plan.bundles[7].slot_start + 1, i);
         EXPECT_NE(slot->scheduled_packet_index,
                   LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE);
       }
     }
-    EXPECT_EQ(synthetic_nop_count, 6u);
+    EXPECT_EQ(synthetic_nop_count, 10u);
     EXPECT_EQ(structural_control_count, 1u);
 
     ASSERT_EQ(leaf.contribution.object.section_count, 1u);
@@ -288,7 +292,7 @@ TEST_F(Aie2pLeafObjectTest, LowFunctionsEmitOptimizedVectorLeaves) {
                   LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR);
     EXPECT_TRUE(iree_string_view_equal(leaf.contribution.object.symbols[0].name,
                                        IREE_SV("vector_add")));
-    EXPECT_EQ(leaf.contribution.object.symbols[0].size, 30u);
+    EXPECT_EQ(leaf.contribution.object.symbols[0].size, 36u);
 
     const loom_aie2p_leaf_realization_t& realization =
         leaf.contribution.realization;
@@ -301,7 +305,7 @@ TEST_F(Aie2pLeafObjectTest, LowFunctionsEmitOptimizedVectorLeaves) {
     EXPECT_EQ(realization.target_generation, LOOM_XDNA_TARGET_GENERATION_AIE2P);
     EXPECT_EQ(realization.elf_flags, LOOM_XDNA_ELF_AIE2P_FLAGS);
     EXPECT_EQ(realization.capability_flags, 0u);
-    EXPECT_EQ(realization.code.byte_length, 30u);
+    EXPECT_EQ(realization.code.byte_length, 36u);
     EXPECT_EQ(realization.code.minimum_alignment, 16u);
     EXPECT_EQ(realization.read_only_data.byte_length, 0u);
     EXPECT_EQ(realization.initialized_data.byte_length, 0u);
@@ -522,10 +526,10 @@ TEST_F(Aie2pLeafObjectTest, FifoStoresRetainPendingDataUntilFlush) {
 }
 
 TEST_F(Aie2pLeafObjectTest, ResourceImportsAnchorRegistersWithoutEmittingCode) {
-  constexpr std::array<uint8_t, 30> kExpected = {
-      0x3c, 0xe8, 0x08, 0x72, 0x83, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x18, 0x00, 0x28, 0x10, 0x00, 0x00, 0x00, 0x00,
-      0x78, 0xad, 0x00, 0x18, 0x00, 0x00, 0x18, 0x13, 0x04, 0x0a,
+  constexpr std::array<uint8_t, 36> kExpected = {
+      0x3c, 0xe8, 0x08, 0x72, 0x83, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xe4, 0x5a, 0x01, 0x00, 0x00, 0x05,
+      0x00, 0x00, 0x18, 0x13, 0x04, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
   };
   CompiledLeaf leaf;
   IREE_ASSERT_OK(CompileResourceVectorAdd(&leaf));
@@ -557,8 +561,8 @@ TEST_F(Aie2pLeafObjectTest, ResourceImportsAnchorRegistersWithoutEmittingCode) {
   EXPECT_EQ(rhs_load.node->source_descriptor, lhs_load.descriptor);
   EXPECT_NE(rhs_load.descriptor, lhs_load.descriptor);
 
-  ASSERT_EQ(leaf.plan.bundle_count, 10u);
-  ASSERT_EQ(leaf.plan.slot_count, 11u);
+  ASSERT_EQ(leaf.plan.bundle_count, 13u);
+  ASSERT_EQ(leaf.plan.slot_count, 15u);
   ASSERT_EQ(leaf.plan.encoded_byte_length, kExpected.size());
   EXPECT_EQ(leaf.plan.bundles[0].slot_count, 2u);
   for (iree_host_size_t slot_index = 0; slot_index < leaf.plan.slot_count;
@@ -1056,6 +1060,60 @@ TEST_F(Aie2pLeafObjectTest, MaterializesVec256ConcatsAsNativeMoves) {
   }
   EXPECT_GT(vec256_move_count, 0u);
 
+  ResetLeaf(&leaf);
+}
+
+TEST_F(Aie2pLeafObjectTest, AllocatedConcatMovesWaitForLoadedData) {
+  CompiledLeaf leaf;
+  IREE_ASSERT_OK(CompileSource(
+      "low.func.def target<amd.xdna.aie2p.core> @duplicate_load(\n"
+      "    %source: reg<aie2p.ep>, %destination: reg<aie2p.ep>) asm {\n"
+      "  %value = vlda.256.i32x8 %source, 0\n"
+      "  %pair = concat(%value, %value) : (reg<aie2p.vec256>, "
+      "reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>\n"
+      "  vst.512.i32x16 %pair, %destination, 0\n"
+      "  return\n"
+      "}\n",
+      &leaf, LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY));
+
+  uint32_t load_cycle = UINT32_MAX;
+  uint32_t move_count = 0;
+  for (iree_host_size_t i = 0; i < leaf.plan.bundle_count; ++i) {
+    const auto& bundle = leaf.plan.bundles[i];
+    for (uint8_t j = 0; j < bundle.slot_count; ++j) {
+      const auto& slot = leaf.plan.slots[bundle.slot_start + j];
+      if (slot.encoded_slot.slot == LOOM_AIE2P_SLOT_LDA) {
+        load_cycle = bundle.issue_cycle;
+      }
+      if (iree_any_bit_set(slot.flags,
+                           LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_MOVE)) {
+        ++move_count;
+        ASSERT_NE(load_cycle, UINT32_MAX);
+        // II_VLDA_dmw_lda_w_idx_imm writes at cycle 8; II_VMOV_alu_mv_mv_w
+        // reads at cycle 2, with no forwarding: 8 - 2 + 1 = 7 cycles.
+        EXPECT_GE(bundle.issue_cycle - load_cycle, 7u);
+      }
+    }
+  }
+  EXPECT_GT(move_count, 0u);
+  EXPECT_GT(leaf.plan.issue_cycle_count, leaf.plan.bundle_count);
+  const auto bytes = leaf.contribution.object.sections[0].contents;
+  uint32_t prior_end_offset = 0;
+  uint32_t prior_end_cycle = 0;
+  for (iree_host_size_t i = 0; i < leaf.plan.bundle_count; ++i) {
+    const auto& bundle = leaf.plan.bundles[i];
+    EXPECT_EQ(bundle.byte_offset - prior_end_offset,
+              2 * (bundle.issue_cycle - prior_end_cycle));
+    for (uint32_t offset = prior_end_offset; offset < bundle.byte_offset;
+         ++offset)
+      EXPECT_EQ(bytes.data[offset], 0);
+    loom_aie2p_bundle_format_info_t format;
+    ASSERT_TRUE(
+        loom_aie2p_encoding_query_bundle_format_info(bundle.format, &format));
+    prior_end_offset = bundle.byte_offset + format.bit_count / 8;
+    prior_end_cycle = bundle.issue_cycle + 1;
+  }
+  EXPECT_EQ(prior_end_cycle, leaf.plan.issue_cycle_count);
   ResetLeaf(&leaf);
 }
 

@@ -9,7 +9,9 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/schedule/diagnostics.h"
+#include "loom/codegen/low/schedule/physical_issue.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/parser.h"
@@ -101,6 +103,78 @@ low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm
   loom_target_low_descriptor_registry_t registry_ = {};
   iree_arena_allocator_t arena_ = {};
 };
+
+TEST_F(LowEmissionFrameTest, ReusedRegisterWaitsForPreviousPhysicalRead) {
+  const auto strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @physical_reuse(%seed: reg<test.phys>) -> (reg<test.phys>) asm {
+  %old = test.event.write.fast.phys %seed
+  test.event.read.late.phys %old
+  %next = test.event.write.fast.phys %seed
+  return %next
+}
+)");
+  loom_op_t* function = loom_block_op(loom_module_block(module.get()), 0);
+  loom_block_t* body =
+      loom_region_entry_block(loom_low_func_def_body(function));
+  const loom_low_allocation_fixed_value_t fixed_values[] = {
+      {body->arg_ids[0], LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 1, 1},
+      {loom_op_const_results(loom_block_op(body, 0))[0],
+       LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 0, 1},
+      {loom_op_const_results(loom_block_op(body, 2))[0],
+       LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 0, 1},
+  };
+  const loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = strategy,
+      .allocation_fixed_values = fixed_values,
+      .allocation_fixed_value_count = IREE_ARRAYSIZE(fixed_values),
+  };
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(loom_low_emission_frame_build(module.get(), function, &options,
+                                               &arena_, &frame));
+  ASSERT_EQ(frame.schedule.error_count, 0u);
+  ASSERT_EQ(frame.allocation.error_count, 0u);
+  loom_low_physical_issue_t issue = {};
+  IREE_ASSERT_OK(loom_low_physical_issue_initialize(frame.target.descriptor_set,
+                                                    &arena_, &issue));
+  uint32_t cycles[3] = {};
+  uint32_t next_cycle = 0;
+  for (uint32_t i = 0; i < frame.schedule.scheduled_node_count; ++i) {
+    const auto packet = loom_low_packet_at(&frame.schedule, i);
+    if (packet.descriptor == nullptr) continue;
+    uint16_t registers[2] = {};
+    ASSERT_LE(packet.descriptor->operand_count, IREE_ARRAYSIZE(registers));
+    for (uint16_t j = 0; j < packet.descriptor->operand_count; ++j) {
+      registers[j] = (uint16_t)loom_low_packet_descriptor_operand_assignment(
+                         &frame.allocation, &packet, j)
+                         ->location_base;
+    }
+    const loom_low_physical_instruction_t instruction = {
+        packet.descriptor_ordinal, registers};
+    uint32_t cycle = 0;
+    IREE_ASSERT_OK(loom_low_physical_issue_place(
+        &issue, &instruction, 1, iree_max(next_cycle, packet.node->issue_cycle),
+        &cycle));
+    cycles[packet.node->source_ordinal] = cycle;
+    next_cycle = cycle + 1;
+  }
+  // SSA lifetimes permit reuse, but the physical read has not finished.
+  EXPECT_GE(cycles[2], cycles[1] + 3);
+  const auto read_packet = loom_low_packet_at_node(&frame.schedule, 1);
+  const auto write_packet = loom_low_packet_at_node(&frame.schedule, 2);
+  const uint16_t read_registers[] = {0};
+  uint16_t write_registers[] = {0, 1};
+  const loom_low_physical_instruction_t pair[] = {
+      {read_packet.descriptor_ordinal, read_registers},
+      {write_packet.descriptor_ordinal, write_registers},
+  };
+  EXPECT_FALSE(
+      loom_low_physical_issue_group_fits(frame.target.descriptor_set, pair, 2));
+  write_registers[0] = 1;
+  EXPECT_TRUE(
+      loom_low_physical_issue_group_fits(frame.target.descriptor_set, pair, 2));
+}
 
 TEST_F(LowEmissionFrameTest, EveryStrategyEnforcesIssueResourceCapacity) {
   constexpr loom_low_schedule_strategy_t kStrategies[] = {

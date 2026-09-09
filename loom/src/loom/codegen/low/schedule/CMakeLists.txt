@@ -66,6 +66,36 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    event_frontier
+  HDRS
+    "event_frontier.h"
+  SRCS
+    "event_frontier.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::descriptors
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    physical_issue
+  HDRS
+    "physical_issue.h"
+  SRCS
+    "physical_issue.c"
+  DEPS
+    ::event_frontier
+    ::resource_calendar
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::descriptors
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     resource_calendar
   HDRS
     "resource_calendar.h"
@@ -209,6 +239,18 @@ loom_cc_test(
     ::dependencies
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    event_frontier_test
+  SRCS
+    "event_frontier_test.cc"
+  DEPS
+    ::event_frontier
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::test::descriptors
 )
 
 loom_cc_test(

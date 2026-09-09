@@ -663,17 +663,27 @@ def emit_source_for_views(
         "StorageLeases",
         _storage_lease_row_lines(compiled),
     )
+    event_separation_ranges = {}
+    for index, separation in enumerate(compiled.event_separations):
+        start, count, maximum = event_separation_ranges.get(separation.producer_event, (index, 0, 0))
+        event_separation_ranges[separation.producer_event] = (start, count + 1, max(maximum, separation.minimum_issue_separation_cycles))
+    timing_event_rows = []
+    for timing_event in compiled.timing_events:
+        start, count, maximum = event_separation_ranges.get(timing_event.name, (0, 0, 0))
+        timing_event_rows.append(
+            [
+                f".name_string_offset = {pool.ref(f'timing_event_{timing_event.name}')},",
+                f".separation_start = {start},",
+                f".separation_count = {count},",
+                f".maximum_issue_separation_cycles = {maximum},",
+            ]
+        )
     _emit_array(
         lines,
         "loom_low_timing_event_t",
         spec.c_table_prefix,
         "TimingEvents",
-        [
-            [
-                f".name_string_offset = {pool.ref(f'timing_event_{timing_event.name}')},",
-            ]
-            for timing_event in compiled.timing_events
-        ],
+        timing_event_rows,
     )
     _emit_array(
         lines,
@@ -1083,6 +1093,8 @@ def emit_source_for_views(
             f"    .descriptor_views = {descriptor_view_table_symbol},",
             f"    .descriptor_count = {view.descriptor_count},",
             f"    .resource_calendar_slot_count = {compiled.resource_calendar_slot_count},",
+            f"    .physical_register_unit_count = {max(compiled.physical_register_atomic_units, default=-1) + 1},",
+            f"    .maximum_descriptor_operand_count = {max((len(descriptor.operands) for descriptor in compiled.descriptors), default=0)},",
             f"    .descriptor_refs = {descriptor_ref_table_symbol},",
             f"    .descriptor_ref_count = IREE_ARRAYSIZE({descriptor_ref_table_symbol}),",
         ]

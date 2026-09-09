@@ -283,6 +283,10 @@ iree_status_t loom_aie2p_leaf_object_emit(
     loom_aie2p_encoding_packet_t packet;
     IREE_RETURN_IF_ERROR(loom_aie2p_encoding_pack_bundle(
         bundle->format, encoded_slots, bundle->slot_count, &packet));
+    // The shortest AIE2P NOP is the all-zero 16-bit bundle. Timing gaps stay
+    // sparse in the plan and become these words directly in the code section.
+    memset(code + code_offset, 0, bundle->byte_offset - code_offset);
+    code_offset = bundle->byte_offset;
     IREE_ASSERT(code_offset + packet.data_length <= plan->encoded_byte_length);
     memcpy(code + code_offset, packet.data, packet.data_length);
     code_offset += packet.data_length;

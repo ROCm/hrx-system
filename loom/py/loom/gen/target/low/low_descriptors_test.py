@@ -2877,10 +2877,13 @@ def test_generator_emits_compact_timing_event_tables() -> None:
         "test.read.early",
         "test.read.late",
     ]
-    assert [separation.minimum_issue_separation_cycles for separation in compiled.event_separations] == [0, -2]
+    assert [separation.minimum_issue_separation_cycles for separation in compiled.event_separations] == [0, -2, 3]
     assert "kTestLowCoreTimingEvents" in generated.source
     assert "kTestLowCoreEventSeparations" in generated.source
     assert ".minimum_issue_separation_cycles = -2," in generated.source
+    assert ".separation_start = 2," in generated.source
+    assert ".separation_count = 2," in generated.source
+    assert ".maximum_issue_separation_cycles = 3," in generated.source
 
 
 def test_generator_rejects_duplicate_schedule_resource() -> None:

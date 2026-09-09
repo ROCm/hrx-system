@@ -1857,3 +1857,85 @@ AIE2P_CORE_DESCRIPTOR_SET = DescriptorSet(
     descriptors=tuple(_descriptor(spec) for spec in descriptor_specs._DESCRIPTOR_SPECS),
     requires_explicit_asm_surface=True,
 )
+
+
+def _validate_control_issue_timing(descriptor_set: DescriptorSet) -> None:
+    """Proves the fixed native control-window contracts used by emission."""
+    descriptors = {
+        descriptor.key: descriptor for descriptor in descriptor_set.descriptors
+    }
+    classes = {row.name: row for row in descriptor_set.schedule_classes}
+    encodings = {
+        _INSTRUCTION_IDS[name]: row for name, row in _INSTRUCTION_ENCODINGS.items()
+    }
+    maximum_separations: dict[str, int] = {}
+    for separation in descriptor_set.event_separations:
+        maximum_separations[separation.producer_event] = max(
+            maximum_separations.get(separation.producer_event, 0),
+            separation.minimum_issue_separation_cycles,
+        )
+    for suffix in ("return", "branch.direct", "branch.zero", "branch.nonzero"):
+        descriptor = descriptors[f"{descriptor_specs._TARGET_KEY}.{suffix}"]
+        control_cycles = encodings[descriptor.encoding_id].delay_slot_count + 1
+        schedule = classes[descriptor.schedule_class]
+        events = [
+            event
+            for operand in descriptor.operands
+            for event in (operand.read_event, operand.write_event)
+        ]
+        events.extend(effect.producer_event for effect in descriptor.effects)
+        if any(
+            maximum_separations.get(event, 0) > control_cycles
+            for event in events
+            if event is not None
+        ):
+            raise ValueError(
+                f"{descriptor.key}: control window does not cover its outgoing events"
+            )
+        if any(use.stage + use.cycles > control_cycles for use in schedule.issue_uses):
+            raise ValueError(
+                f"{descriptor.key}: control window does not cover its resource stages"
+            )
+    returned = descriptors[f"{descriptor_specs._TARGET_KEY}.return"]
+    return_resources = {
+        use.resource for use in classes[returned.schedule_class].issue_uses
+    }
+    resources = {row.name: row for row in descriptor_set.resources}
+    return_groups = {
+        resources[name].contention_group_id for name in return_resources
+    } - {0}
+    for schedule in descriptor_set.schedule_classes:
+        for use in schedule.issue_uses:
+            if (
+                use.resource in return_resources
+                or resources[use.resource].contention_group_id in return_groups
+            ) and (use.stage != 0 or use.cycles != 1):
+                raise ValueError(
+                    f"{schedule.name}: RET sharing requires issue-stage-only resources"
+                )
+    if any(effect.kind is not EffectKind.CONTROL for effect in returned.effects) or any(
+        operand.write_event is not None
+        or any(
+            alternative.reg_class != "aie2p.state.lr"
+            for alternative in operand.reg_alts
+        )
+        for operand in returned.operands
+    ):
+        raise ValueError("RET tail placement requires only a link-register read")
+    nop = encodings[descriptors[f"{descriptor_specs._TARGET_KEY}.nop"].encoding_id]
+    nop_format = next(
+        row for row in CORE_ENCODING_TABLE.bundle_formats if row.name == "I16_NOP"
+    )
+    if (
+        nop.fixed_value != 0
+        or nop.fields
+        or nop_format.bit_count != 16
+        or nop_format.fixed_value != 0
+        or tuple(field.slot for field in nop_format.fields) != (nop.slot,)
+    ):
+        raise ValueError(
+            "sparse AIE2P issue gaps require an all-zero 16-bit NOP bundle"
+        )
+
+
+_validate_control_issue_timing(AIE2P_CORE_DESCRIPTOR_SET)

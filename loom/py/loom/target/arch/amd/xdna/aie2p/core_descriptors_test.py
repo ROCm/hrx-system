@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from itertools import combinations
+
+import pytest
 
 from loom.target.arch.amd.xdna.aie.machine import has_property
 from loom.target.arch.amd.xdna.aie.schedule import (
@@ -31,6 +34,7 @@ from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     _memory_event_name,
     _pipeline_resource_name,
     _slot_resource_name,
+    _validate_control_issue_timing,
 )
 from loom.target.arch.amd.xdna.aie2p.core_encoding_data import CORE_ENCODING_TABLE
 from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
@@ -52,6 +56,47 @@ from loom.target.low_descriptors import (
     ResourceKind,
     ScheduleClassFlag,
 )
+
+
+def test_control_timing_requires_issue_stage_only_return_resources() -> None:
+    descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
+    returned = next(
+        row for row in descriptor_set.descriptors if row.key.endswith(".return")
+    )
+    changed = tuple(
+        replace(
+            row, issue_uses=(replace(row.issue_uses[0], stage=1), *row.issue_uses[1:])
+        )
+        if row.name == returned.schedule_class
+        else row
+        for row in descriptor_set.schedule_classes
+    )
+    with pytest.raises(
+        ValueError, match="RET sharing requires issue-stage-only resources"
+    ):
+        _validate_control_issue_timing(
+            replace(descriptor_set, schedule_classes=changed)
+        )
+
+
+def test_control_window_covers_its_outgoing_register_events() -> None:
+    descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
+    returned = next(
+        row for row in descriptor_set.descriptors if row.key.endswith(".return")
+    )
+    event = returned.operands[0].read_event
+    changed = tuple(
+        replace(row, minimum_issue_separation_cycles=7)
+        if row.producer_event == event
+        else row
+        for row in descriptor_set.event_separations
+    )
+    with pytest.raises(
+        ValueError, match="control window does not cover its outgoing events"
+    ):
+        _validate_control_issue_timing(
+            replace(descriptor_set, event_separations=changed)
+        )
 
 
 def test_core_descriptor_closure_is_complete() -> None:

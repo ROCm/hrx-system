@@ -39,6 +39,8 @@ typedef struct loom_low_schedule_resource_calendar_t {
   // Only slots touched by an issued class are updated; advancing time neither
   // moves retained occupancy nor visits unrelated resources.
   loom_low_schedule_resource_calendar_slot_t* slots;
+  // First cycle after every committed resource stage has completed.
+  uint64_t quiescent_cycle;
 } loom_low_schedule_resource_calendar_t;
 
 // Allocates the exact target-declared occupancy storage. Resources with the
@@ -54,22 +56,33 @@ iree_status_t loom_low_schedule_resource_calendar_initialize(
 void loom_low_schedule_resource_calendar_reset(
     loom_low_schedule_resource_calendar_t* calendar);
 
+// Tests the intrinsic resource legality of simultaneous instruction classes.
+// Single descriptor classes already satisfy this during generation. Native
+// packet formation uses this query before admitting a multi-instruction group.
+bool loom_low_schedule_resource_group_fits(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_schedule_class_t* const* schedule_classes,
+    uint16_t schedule_class_count);
+
 // Returns the earliest issue cycle at or after |proposed_issue_cycle| where
-// all uses fit. Proposed cycles must not precede the most recently committed
-// cycle. |out_bottleneck_resource_id| identifies a resource involved in the
-// first rejected cycle, or LOOM_LOW_RESOURCE_NONE when no stall is needed.
+// all uses of an intrinsically legal group fit. Proposed cycles must not
+// precede the most recently committed cycle. |out_bottleneck_resource_id|
+// identifies a resource involved in the first rejected cycle, or
+// LOOM_LOW_RESOURCE_NONE when no stall is needed.
 uint32_t loom_low_schedule_resource_calendar_find_earliest_issue_cycle(
     const loom_low_schedule_resource_calendar_t* calendar,
-    const loom_low_schedule_class_t* schedule_class,
-    uint32_t proposed_issue_cycle, uint16_t* out_bottleneck_resource_id);
+    const loom_low_schedule_class_t* const* schedule_classes,
+    uint16_t schedule_class_count, uint32_t proposed_issue_cycle,
+    uint16_t* out_bottleneck_resource_id);
 
-// Commits all uses in |schedule_class| at a cycle admitted by find_earliest.
+// Commits all uses in the group at a cycle admitted by find_earliest.
 // No intervening commit may change that admission. Commit cycles must be
 // monotonically nondecreasing between resets. Reports cycle-domain overflow;
 // resource capacity is established by admission, not checked a second time.
 iree_status_t loom_low_schedule_resource_calendar_commit(
     loom_low_schedule_resource_calendar_t* calendar,
-    const loom_low_schedule_class_t* schedule_class, uint32_t issue_cycle);
+    const loom_low_schedule_class_t* const* schedule_classes,
+    uint16_t schedule_class_count, uint32_t issue_cycle);
 
 #ifdef __cplusplus
 }  // extern "C"

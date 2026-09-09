@@ -642,6 +642,32 @@ TEST_LOW_EVENT_FAST_I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_EVENT_FAST_PHYS_DESCRIPTOR = Descriptor(
+    key="test.event.write.fast.phys",
+    mnemonic="test.event.write.fast.phys",
+    semantic_tag="test.event.write.fast.phys",
+    operands=(
+        Operand("dst", OperandRole.RESULT, _PHYS_ALT, write_event=_EVENT_FAST_WRITE),
+        _phys_operand("source"),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("source",)),
+    schedule_class=_SCHEDULE_EVENT_FAST,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_EVENT_LATE_READ_PHYS_DESCRIPTOR = Descriptor(
+    key="test.event.read.late.phys",
+    mnemonic="test.event.read.late.phys",
+    semantic_tag="test.event.read.late.phys",
+    operands=(
+        Operand("source", OperandRole.OPERAND, _PHYS_ALT, read_event=_EVENT_LATE_READ),
+    ),
+    asm_forms=_asm(operands=("source",)),
+    effects=(_STORE_EFFECT,),
+    schedule_class=_SCHEDULE_EVENT_CONSUMER,
+    flags=(DescriptorFlag.SIDE_EFFECTING,),
+)
+
 TEST_LOW_EVENT_SLOW_I32_DESCRIPTOR = Descriptor(
     key="test.event.slow.i32",
     mnemonic="test.event.slow.i32",
@@ -1947,6 +1973,12 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             model_quality=ModelQuality.EXACT,
         ),
         EventSeparation(
+            _EVENT_LATE_READ,
+            _EVENT_FAST_WRITE,
+            minimum_issue_separation_cycles=3,
+            model_quality=ModelQuality.EXACT,
+        ),
+        EventSeparation(
             _EVENT_MEMORY_READ,
             _EVENT_MEMORY_WRITE,
             minimum_issue_separation_cycles=0,
@@ -2173,6 +2205,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_ADD_MUL_I32_DESCRIPTOR,
         TEST_LOW_MUL_ADD_I32_DESCRIPTOR,
         TEST_LOW_EVENT_FAST_I32_DESCRIPTOR,
+        TEST_LOW_EVENT_FAST_PHYS_DESCRIPTOR,
+        TEST_LOW_EVENT_LATE_READ_PHYS_DESCRIPTOR,
         TEST_LOW_EVENT_SLOW_I32_DESCRIPTOR,
         TEST_LOW_RESOURCE_REQUIRED_I32_DESCRIPTOR,
         TEST_LOW_RESOURCE_RESERVED_I32_DESCRIPTOR,

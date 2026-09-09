@@ -492,6 +492,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:storage_layout",
+        "//loom/src/loom/codegen/low/schedule:physical_issue",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",

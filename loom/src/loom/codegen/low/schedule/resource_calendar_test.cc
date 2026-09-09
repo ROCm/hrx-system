@@ -47,7 +47,7 @@ class ScheduleResourceCalendarTest : public ::testing::Test {
     uint16_t bottleneck_resource_id = LOOM_LOW_RESOURCE_NONE;
     const uint32_t issue_cycle =
         loom_low_schedule_resource_calendar_find_earliest_issue_cycle(
-            &calendar_, schedule_class, proposed_issue_cycle,
+            &calendar_, &schedule_class, 1, proposed_issue_cycle,
             &bottleneck_resource_id);
     if (out_bottleneck_resource_id != nullptr) {
       *out_bottleneck_resource_id = bottleneck_resource_id;
@@ -58,7 +58,7 @@ class ScheduleResourceCalendarTest : public ::testing::Test {
   void Commit(const loom_low_schedule_class_t* schedule_class,
               uint32_t issue_cycle) {
     IREE_ASSERT_OK(loom_low_schedule_resource_calendar_commit(
-        &calendar_, schedule_class, issue_cycle));
+        &calendar_, &schedule_class, 1, issue_cycle));
   }
 
   iree_arena_block_pool_t block_pool_;
@@ -172,9 +172,33 @@ TEST_F(ScheduleResourceCalendarTest, RejectsAnUnrepresentableResourceStage) {
   const auto* fast =
       ScheduleClass(TEST_LOW_CORE_DESCRIPTOR_REF_TEST_EVENT_FAST_I32);
   EXPECT_EQ(FindEarliest(fast, UINT32_MAX), UINT32_MAX);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_OUT_OF_RANGE,
-      loom_low_schedule_resource_calendar_commit(&calendar_, fast, UINT32_MAX));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_low_schedule_resource_calendar_commit(
+                            &calendar_, &fast, 1, UINT32_MAX));
+}
+
+TEST_F(ScheduleResourceCalendarTest, AdmitsCollectiveInstructionDemand) {
+  const auto* required =
+      ScheduleClass(TEST_LOW_CORE_DESCRIPTOR_REF_TEST_RESOURCE_SERIAL_I32);
+  const loom_low_schedule_class_t* pair[] = {required, required};
+  // Each instruction alone fills the resource. Delaying the pair cannot make
+  // their simultaneous demand legal, so packet formation must split them.
+  EXPECT_TRUE(loom_low_schedule_resource_group_fits(descriptor_set_, pair, 1));
+  EXPECT_FALSE(loom_low_schedule_resource_group_fits(descriptor_set_, pair, 2));
+  const auto* fast =
+      ScheduleClass(TEST_LOW_CORE_DESCRIPTOR_REF_TEST_EVENT_FAST_I32);
+  const auto* slow =
+      ScheduleClass(TEST_LOW_CORE_DESCRIPTOR_REF_TEST_EVENT_SLOW_I32);
+  const loom_low_schedule_class_t* group[] = {fast, slow};
+  ASSERT_TRUE(loom_low_schedule_resource_group_fits(descriptor_set_, group, 2));
+  uint16_t bottleneck = LOOM_LOW_RESOURCE_NONE;
+  const uint32_t cycle =
+      loom_low_schedule_resource_calendar_find_earliest_issue_cycle(
+          &calendar_, group, 2, 0, &bottleneck);
+  EXPECT_EQ(cycle, 0u);
+  IREE_ASSERT_OK(
+      loom_low_schedule_resource_calendar_commit(&calendar_, group, 2, cycle));
+  EXPECT_GT(calendar_.quiescent_cycle, cycle);
 }
 
 TEST_F(ScheduleResourceCalendarTest, MatchesDenseOccupancyAcrossRingWraps) {

@@ -1482,8 +1482,8 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
       uint16_t bottleneck_resource_id = LOOM_LOW_RESOURCE_NONE;
       issue_cycle =
           loom_low_schedule_resource_calendar_find_earliest_issue_cycle(
-              &state->resource_calendar, chosen->schedule_class, issue_cycle,
-              &bottleneck_resource_id);
+              &state->resource_calendar, &chosen->schedule_class, 1,
+              issue_cycle, &bottleneck_resource_id);
       state->current_issue_cycle = issue_cycle;
       chosen->scheduled_ordinal = scheduled_in_block++;
       chosen->issue_cycle = issue_cycle;

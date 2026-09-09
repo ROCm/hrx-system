@@ -48,7 +48,7 @@ typedef struct loom_aie2p_planned_slot_t {
 
 // One variable-width physical VLIW bundle.
 typedef struct loom_aie2p_planned_bundle_t {
-  // Physical issue cycle in the contiguous core program.
+  // Physical issue cycle in the core program, including implicit NOP gaps.
   uint32_t issue_cycle;
   // Source-order Low block containing this bundle.
   uint32_t block_index;
@@ -92,8 +92,10 @@ typedef struct loom_aie2p_bundle_plan_t {
   iree_host_size_t block_count;
   // Physical bundles in increasing issue-cycle order.
   const loom_aie2p_planned_bundle_t* bundles;
-  // Number of physical bundles.
+  // Number of explicitly stored bundles; implicit timing gaps have no rows.
   iree_host_size_t bundle_count;
+  // Total physical issue cycles, including NOPs represented by timing gaps.
+  uint32_t issue_cycle_count;
   // Encoded physical slots grouped by |bundles|.
   const loom_aie2p_planned_slot_t* slots;
   // Number of encoded physical slots.
@@ -122,10 +124,15 @@ typedef struct loom_aie2p_bundle_plan_t {
 // bundle formats because AIE2P's format domain is not downward closed.
 // Allocation-planned structural moves split a logical schedule cycle into
 // ordered physical bundles; later logical cycles retain or increase every
-// scheduled separation. Prebound live-ins and resource imports anchor physical
-// assignments without occupying an instruction slot. Empty non-terminator
-// issue cycles are materialized as NOP bundles.
-// The returned plan borrows |frame| and owns its tables in |arena|.
+// scheduled separation. Shared physical issue admission includes these moves,
+// concrete register aliases and collective bundle resource occupancy. Gaps
+// occupy code bytes without allocating per-cycle bundle or slot records.
+// Every control-flow edge reaches a quiescent event/resource boundary before
+// successor entry, including fallthrough and backedges. Native branch-delay
+// cycles contribute to this boundary. Prebound live-ins and resource imports
+// anchor physical assignments without occupying an instruction slot. Empty
+// non-terminator issue cycles are materialized as NOP bundles. The returned
+// plan borrows |frame| and owns its tables in |arena|.
 iree_status_t loom_aie2p_bundle_plan_build(
     const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,
     loom_aie2p_bundle_plan_t* out_plan);

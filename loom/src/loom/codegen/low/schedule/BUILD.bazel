@@ -59,6 +59,30 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "event_frontier",
+    srcs = ["event_frontier.c"],
+    hdrs = ["event_frontier.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:descriptors",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "physical_issue",
+    srcs = ["physical_issue.c"],
+    hdrs = ["physical_issue.h"],
+    deps = [
+        ":event_frontier",
+        ":resource_calendar",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "resource_calendar",
     srcs = ["resource_calendar.c"],
     hdrs = ["resource_calendar.h"],
@@ -193,6 +217,17 @@ loom_cc_test(
     srcs = ["dependencies_test.cc"],
     deps = [
         ":dependencies",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "event_frontier_test",
+    srcs = ["event_frontier_test.cc"],
+    deps = [
+        ":event_frontier",
+        "//loom/src/loom/target/test:descriptors",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

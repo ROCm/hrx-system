@@ -772,7 +772,7 @@ static void loom_low_schedule_score_candidate_resources(
       state->current_issue_cycle, prerequisite_stall_cycles);
   const uint32_t earliest_issue_cycle =
       loom_low_schedule_resource_calendar_find_earliest_issue_cycle(
-          &state->resource_calendar, schedule_class, proposed_issue_cycle,
+          &state->resource_calendar, &schedule_class, 1, proposed_issue_cycle,
           &score->bottleneck_resource_id);
   score->resource_stall_cycles = loom_low_schedule_positive_delta_u32(
       earliest_issue_cycle, proposed_issue_cycle);

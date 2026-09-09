@@ -86,7 +86,7 @@ iree_status_t loom_aie2p_leaf_compile(
   }
   if (iree_status_is_ok(status) && options->compile_report != NULL) {
     loom_target_compile_report_emission_breakdown_t emission_breakdown = {
-        .body_instruction_count = bundle_plan.bundle_count,
+        .body_instruction_count = bundle_plan.issue_cycle_count,
     };
     for (iree_host_size_t i = 0; i < bundle_plan.bundle_count; ++i) {
       const uint8_t slot_count = bundle_plan.bundles[i].slot_count;
@@ -95,7 +95,7 @@ iree_status_t loom_aie2p_leaf_compile(
       emission_breakdown.coissued_component_count += slot_count;
     }
     loom_target_compile_report_record_emission(
-        options->compile_report, bundle_plan.bundle_count,
+        options->compile_report, bundle_plan.issue_cycle_count,
         bundle_plan.encoded_byte_length, bundle_plan.encoded_byte_length);
     loom_target_compile_report_record_emission_breakdown(
         options->compile_report, &emission_breakdown);
