@@ -16,17 +16,20 @@
 extern "C" {
 #endif
 
-// One target-visible allocation unit.
+// One target-visible allocation unit within the owning plan's descriptor set.
+// Semantic value identity and type do not belong to a physical move: the
+// descriptor register class defines its storage and encoding.
 typedef struct loom_low_move_location_t {
-  // Target-visible storage kind.
-  loom_low_allocation_location_kind_t location_kind;
-  // Storage class for the unit.
-  loom_liveness_value_class_t value_class;
-  // Descriptor-set-local register class ID for |value_class|.
+  // Target-visible storage kind, a loom_low_allocation_location_kind_t value.
+  uint16_t location_kind;
+  // Register class in the owning plan's descriptor set.
   uint16_t descriptor_reg_class_id;
   // Physical register, target ID, or spill slot ordinal.
   uint32_t location;
 } loom_low_move_location_t;
+
+static_assert(sizeof(loom_low_move_location_t) == 8,
+              "physical unit locations must remain compact");
 
 // One physical move from an old source unit to a destination unit.
 typedef struct loom_low_move_t {

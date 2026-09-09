@@ -12,19 +12,9 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/codegen/low/allocation/storage.h"
 
 namespace loom {
 namespace {
-
-loom_liveness_value_class_t ValueClass(uint16_t register_class_id) {
-  return loom_liveness_value_class_t{
-      /*.type_kind=*/LOOM_TYPE_REGISTER,
-      /*.element_type=*/{},
-      /*.register_class_id=*/register_class_id,
-      /*.register_descriptor_set_stable_id=*/{},
-  };
-}
 
 const loom_low_descriptor_set_t* IndependentDescriptorSet() {
   static const loom_low_reg_class_t kRegClasses[3] = {};
@@ -75,7 +65,6 @@ loom_low_move_location_t Location(uint32_t ordinal,
                                   uint16_t register_class_id = 0) {
   return loom_low_move_location_t{
       /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-      /*.value_class=*/ValueClass(register_class_id),
       /*.descriptor_reg_class_id=*/register_class_id,
       /*.location=*/ordinal,
   };
@@ -126,8 +115,9 @@ class TestArena {
 };
 
 struct TemporaryResolver {
-  const loom_low_descriptor_set_t* descriptor_set = nullptr;
+  // Candidate scratch units supplied by the owning allocation.
   const loom_low_move_location_t* locations = nullptr;
+  // Number of candidate scratch units.
   iree_host_size_t count = 0;
 };
 
@@ -144,11 +134,8 @@ iree_status_t ResolveTemporary(void* user_data,
   for (iree_host_size_t i = 0; i < resolver->count; ++i) {
     const loom_low_move_location_t* location = &resolver->locations[i];
     if (location->location_kind == storage_class->location_kind &&
-        loom_low_allocation_storage_reg_classes_share(
-            resolver->descriptor_set, location->descriptor_reg_class_id,
-            storage_class->descriptor_reg_class_id) &&
-        loom_liveness_value_class_equal(location->value_class,
-                                        storage_class->value_class)) {
+        location->descriptor_reg_class_id ==
+            storage_class->descriptor_reg_class_id) {
       *out_temporary = *location;
       *out_resolved = true;
       break;
@@ -171,7 +158,6 @@ std::vector<std::string> ResolveMoves(
     scratch.moves[i] = input_moves[i];
   }
   TemporaryResolver resolver = {
-      descriptor_set,
       temporaries,
       temporary_count,
   };
@@ -283,6 +269,12 @@ TEST(LowMoveSequenceTest, UsesMatchingTemporaryForMixedClassCycles) {
                            IREE_ARRAYSIZE(temporaries)),
               ::testing::ElementsAre("0:9<-0", "0:0<-1", "0:1<-9", "1:11<-4",
                                      "1:4<-5", "1:5<-11"));
+  // Aliased classes still require their own encoding-compatible scratch
+  // locations; sharing storage alone does not make their move forms equal.
+  EXPECT_THAT(ResolveMoves(moves, IREE_ARRAYSIZE(moves), temporaries,
+                           IREE_ARRAYSIZE(temporaries), AliasDescriptorSet()),
+              ::testing::ElementsAre("0:9<-0", "0:0<-1", "0:1<-9", "1:11<-4",
+                                     "1:4<-5", "1:5<-11"));
 }
 
 TEST(LowMoveSequenceTest, ReusesBoundedSolverStorageAcrossIncreasingGroups) {
@@ -326,8 +318,7 @@ TEST(LowMoveSequenceTest, ReusesBoundedCycleStorageAcrossClassesAndGroups) {
       arena.arena(), kCapacity, &scratch));
   const loom_low_move_location_t temporaries[] = {
       Location(kCapacity, 0), Location(kCapacity, 1), Location(kCapacity, 2)};
-  TemporaryResolver resolver = {IndependentDescriptorSet(), temporaries,
-                                IREE_ARRAYSIZE(temporaries)};
+  TemporaryResolver resolver = {temporaries, IREE_ARRAYSIZE(temporaries)};
   loom_low_move_sequence_options_t options = {};
   options.descriptor_set = IndependentDescriptorSet();
   options.resolve_temporary = {ResolveTemporary, &resolver};

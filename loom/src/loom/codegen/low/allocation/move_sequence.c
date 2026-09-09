@@ -24,13 +24,9 @@ static bool loom_low_move_locations_share_target_storage(
 }
 
 static bool loom_low_move_locations_share_storage_class(
-    const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_move_location_t* lhs, const loom_low_move_location_t* rhs) {
   return lhs->location_kind == rhs->location_kind &&
-         loom_low_allocation_storage_reg_classes_share(
-             descriptor_set, lhs->descriptor_reg_class_id,
-             rhs->descriptor_reg_class_id) &&
-         loom_liveness_value_class_equal(lhs->value_class, rhs->value_class);
+         lhs->descriptor_reg_class_id == rhs->descriptor_reg_class_id;
 }
 
 #define LOOM_LOW_MOVE_SEQUENCE_INDEX_NONE IREE_HOST_SIZE_MAX
@@ -281,9 +277,8 @@ static iree_status_t loom_low_move_sequence_resolve_temporary(
   *out_first_use = false;
   loom_low_move_sequence_scratch_t* scratch = state->scratch;
   for (iree_host_size_t i = 0; i < scratch->temporary_count; ++i) {
-    if (loom_low_move_locations_share_storage_class(
-            state->options->descriptor_set, &scratch->temporaries[i],
-            storage_class)) {
+    if (loom_low_move_locations_share_storage_class(&scratch->temporaries[i],
+                                                    storage_class)) {
       *out_temporary = &scratch->temporaries[i];
       return iree_ok_status();
     }

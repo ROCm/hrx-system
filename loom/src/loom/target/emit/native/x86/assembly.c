@@ -162,7 +162,6 @@ static iree_status_t loom_x86_append_move_location(
     const loom_low_move_location_t* location) {
   const loom_low_allocation_assignment_t assignment = {
       .location_kind = location->location_kind,
-      .value_class = location->value_class,
       .descriptor_reg_class_id = location->descriptor_reg_class_id,
       .location_base = location->location,
       .location_count = 1,
@@ -1088,7 +1087,6 @@ static iree_status_t loom_x86_append_move(
   }
   const loom_low_allocation_assignment_t destination_assignment = {
       .location_kind = destination->location_kind,
-      .value_class = destination->value_class,
       .descriptor_reg_class_id = destination->descriptor_reg_class_id,
       .location_base = destination->location,
       .location_count = 1,

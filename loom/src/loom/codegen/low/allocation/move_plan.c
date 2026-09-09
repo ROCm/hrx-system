@@ -86,17 +86,19 @@ static iree_status_t loom_low_allocation_move_plan_resolve_temporary(
   if (!loom_low_allocation_location_kind_is_register_like(
           storage_class->location_kind)) {
     loom_low_allocation_target_constraints_record_move_failure(
-        context->target_constraints, op, storage_class->value_class, 0, 1,
-        IREE_SV("parallel-move-non-register-storage"));
+        context->target_constraints, op, storage_class->descriptor_reg_class_id,
+        0, 1, IREE_SV("parallel-move-non-register-storage"));
     return iree_ok_status();
   }
 
   loom_low_allocation_class_capacity_t capacity = {0};
-  IREE_RETURN_IF_ERROR(loom_low_allocation_target_constraints_class_capacity(
-      context->target_constraints, storage_class->value_class, &capacity));
+  IREE_RETURN_IF_ERROR(
+      loom_low_allocation_target_constraints_reg_class_capacity(
+          context->target_constraints, storage_class->descriptor_reg_class_id,
+          &capacity));
   if (capacity.location_kind != storage_class->location_kind) {
     loom_low_allocation_target_constraints_record_move_failure(
-        context->target_constraints, op, storage_class->value_class,
+        context->target_constraints, op, storage_class->descriptor_reg_class_id,
         capacity.is_bounded ? capacity.max_units : UINT32_MAX, 1,
         IREE_SV("parallel-move-storage-kind-mismatch"));
     return iree_ok_status();
@@ -112,8 +114,9 @@ static iree_status_t loom_low_allocation_move_plan_resolve_temporary(
   if (capacity.is_bounded) {
     if (capacity.max_units == 0) {
       loom_low_allocation_target_constraints_record_move_failure(
-          context->target_constraints, op, storage_class->value_class,
-          capacity.max_units, 1, IREE_SV("parallel-move-empty-budget"));
+          context->target_constraints, op,
+          storage_class->descriptor_reg_class_id, capacity.max_units, 1,
+          IREE_SV("parallel-move-empty-budget"));
       return iree_ok_status();
     }
     last_location = capacity.max_units - 1u;
@@ -124,8 +127,9 @@ static iree_status_t loom_low_allocation_move_plan_resolve_temporary(
             storage_class->location_kind);
     if (last_location == UINT32_MAX) {
       loom_low_allocation_target_constraints_record_move_failure(
-          context->target_constraints, op, storage_class->value_class,
-          UINT32_MAX, 1, IREE_SV("parallel-move-location-range-overflow"));
+          context->target_constraints, op,
+          storage_class->descriptor_reg_class_id, UINT32_MAX, 1,
+          IREE_SV("parallel-move-location-range-overflow"));
       return iree_ok_status();
     }
   }
@@ -147,7 +151,6 @@ static iree_status_t loom_low_allocation_move_plan_resolve_temporary(
             : candidate_ordinal;
     const loom_low_move_location_t temporary = {
         .location_kind = storage_class->location_kind,
-        .value_class = storage_class->value_class,
         .descriptor_reg_class_id = storage_class->descriptor_reg_class_id,
         .location = location,
     };
@@ -171,7 +174,7 @@ static iree_status_t loom_low_allocation_move_plan_resolve_temporary(
   }
 
   loom_low_allocation_target_constraints_record_move_failure(
-      context->target_constraints, op, storage_class->value_class,
+      context->target_constraints, op, storage_class->descriptor_reg_class_id,
       capacity.is_bounded ? capacity.max_units : UINT32_MAX, 1,
       IREE_SV("parallel-move-no-scratch-unit"));
 

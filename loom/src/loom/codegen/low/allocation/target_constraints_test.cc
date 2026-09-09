@@ -116,6 +116,29 @@ TEST_F(LowAllocationTargetConstraintsTest, AppliesBudgetToUnboundedClass) {
   EXPECT_EQ(capacity.max_units, 7u);
 }
 
+TEST_F(LowAllocationTargetConstraintsTest,
+       MoveFailureRetainsDescriptorClassIdentity) {
+  loom_low_allocation_target_constraints_t constraints = {};
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
+      &module_, &function_op_, &target_, nullptr, 0, nullptr, 0, {}, &arena_,
+      &constraints));
+  const uint16_t reg_class_id = RegisterClassId(IREE_SV("test.phys"));
+  loom_low_allocation_target_constraints_record_move_failure(
+      &constraints, &function_op_, reg_class_id, 2, 3,
+      IREE_SV("parallel-move-no-scratch-unit"));
+
+  EXPECT_EQ(constraints.error_count, 1u);
+  EXPECT_EQ(constraints.failure.op, &function_op_);
+  EXPECT_EQ(constraints.failure.value_id, LOOM_VALUE_ID_INVALID);
+  EXPECT_EQ(constraints.failure.descriptor_reg_class_id, reg_class_id);
+  EXPECT_EQ(constraints.failure.value_class.type_kind, LOOM_TYPE_REGISTER);
+  EXPECT_EQ(constraints.failure.value_class.register_class_id, reg_class_id);
+  EXPECT_EQ(constraints.failure.value_class.register_descriptor_set_stable_id,
+            target_.descriptor_set->stable_id);
+  EXPECT_EQ(constraints.failure.budget_units, 2u);
+  EXPECT_EQ(constraints.failure.required_unit_count, 3u);
+}
+
 TEST_F(LowAllocationTargetConstraintsTest, ReferenceClassCannotSpill) {
   const uint16_t reg_class_id = RegisterClassId(IREE_SV("test.i32"));
   loom_low_descriptor_set_t descriptor_set = *target_.descriptor_set;

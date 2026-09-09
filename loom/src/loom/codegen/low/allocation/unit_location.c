@@ -23,7 +23,6 @@ loom_low_move_location_t loom_low_allocation_assignment_unit_location(
   }
   return (loom_low_move_location_t){
       .location_kind = assignment->location_kind,
-      .value_class = assignment->value_class,
       .descriptor_reg_class_id = assignment->descriptor_reg_class_id,
       .location = location,
   };
@@ -43,7 +42,6 @@ bool loom_low_allocation_unit_storage_classes_equal(
   IREE_ASSERT_ARGUMENT(lhs);
   IREE_ASSERT_ARGUMENT(rhs);
   return lhs->location_kind == rhs->location_kind &&
-         loom_liveness_value_class_equal(lhs->value_class, rhs->value_class) &&
          lhs->descriptor_reg_class_id == rhs->descriptor_reg_class_id;
 }
 

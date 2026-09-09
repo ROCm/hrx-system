@@ -38,7 +38,6 @@ loom_low_move_location_t Location(
         LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
   loom_low_move_location_t unit_location = {};
   unit_location.location_kind = location_kind;
-  unit_location.value_class = ValueClass(reg_class_id);
   unit_location.descriptor_reg_class_id = reg_class_id;
   unit_location.location = location;
   return unit_location;
@@ -71,8 +70,6 @@ TEST(LowAllocationUnitLocationTest, MapsAssignmentUnitLocations) {
 
   EXPECT_EQ(unit_location.location_kind,
             LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
-  EXPECT_TRUE(loom_liveness_value_class_equal(unit_location.value_class,
-                                              assignment.value_class));
   EXPECT_EQ(unit_location.descriptor_reg_class_id, 3);
   EXPECT_EQ(unit_location.location, 8u);
 }

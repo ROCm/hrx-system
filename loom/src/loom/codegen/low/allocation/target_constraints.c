@@ -1147,14 +1147,20 @@ iree_status_t loom_low_allocation_target_constraints_resolve_fixed_values(
 
 void loom_low_allocation_target_constraints_record_move_failure(
     loom_low_allocation_target_constraints_t* constraints, const loom_op_t* op,
-    loom_liveness_value_class_t value_class, uint32_t budget_units,
-    uint32_t peak_units, iree_string_view_t failure_code) {
+    uint16_t reg_class_id, uint32_t budget_units, uint32_t peak_units,
+    iree_string_view_t failure_code) {
   constraints->failure = (loom_low_allocation_failure_t){
       .failure_code = failure_code,
       .op = op,
       .value_id = LOOM_VALUE_ID_INVALID,
-      .value_class = value_class,
-      .descriptor_reg_class_id = value_class.register_class_id,
+      .value_class =
+          {
+              .type_kind = LOOM_TYPE_REGISTER,
+              .register_class_id = reg_class_id,
+              .register_descriptor_set_stable_id =
+                  constraints->target->descriptor_set->stable_id,
+          },
+      .descriptor_reg_class_id = reg_class_id,
       .start_point = UINT32_MAX,
       .end_point = UINT32_MAX,
       .required_unit_count = peak_units,

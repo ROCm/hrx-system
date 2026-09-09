@@ -324,7 +324,6 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           {
               /*.location_kind=*/
               LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-              /*.value_class=*/pressure_summaries[0].value_class,
               /*.descriptor_reg_class_id=*/0,
               /*.location=*/1,
           },
@@ -332,7 +331,6 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           {
               /*.location_kind=*/
               LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-              /*.value_class=*/pressure_summaries[0].value_class,
               /*.descriptor_reg_class_id=*/0,
               /*.location=*/0,
           },
@@ -342,7 +340,6 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           {
               /*.location_kind=*/
               LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-              /*.value_class=*/pressure_summaries[0].value_class,
               /*.descriptor_reg_class_id=*/0,
               /*.location=*/2,
           },
@@ -350,7 +347,6 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           {
               /*.location_kind=*/
               LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-              /*.value_class=*/pressure_summaries[0].value_class,
               /*.descriptor_reg_class_id=*/0,
               /*.location=*/1,
           },
