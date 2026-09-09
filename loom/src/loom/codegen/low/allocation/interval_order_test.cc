@@ -76,7 +76,6 @@ TEST_F(LowAllocationIntervalOrderTest, FiltersNonAllocatableIntervals) {
       loom_low_allocation_interval_order_build(&liveness, &arena_, &order));
   EXPECT_EQ(order.intervals, nullptr);
   EXPECT_EQ(order.interval_count, 0u);
-  EXPECT_EQ(order.unit_count, 0u);
 }
 
 TEST_F(LowAllocationIntervalOrderTest, SortsByStartEndAndValueId) {
@@ -100,7 +99,6 @@ TEST_F(LowAllocationIntervalOrderTest, SortsByStartEndAndValueId) {
       loom_low_allocation_interval_order_build(&liveness, &arena_, &order));
   ASSERT_NE(order.intervals, nullptr);
   ASSERT_EQ(order.interval_count, 4u);
-  EXPECT_EQ(order.unit_count, 15u);
   const loom_value_id_t expected_value_ids[] = {1, 2, 3, 4};
   ExpectOrderedValueIds(order, expected_value_ids,
                         IREE_ARRAYSIZE(expected_value_ids));
@@ -126,7 +124,6 @@ TEST_F(LowAllocationIntervalOrderTest, SortsLargeReverseStartOrder) {
       loom_low_allocation_interval_order_build(&liveness, &arena_, &order));
   ASSERT_NE(order.intervals, nullptr);
   ASSERT_EQ(order.interval_count, kIntervalCount);
-  EXPECT_EQ(order.unit_count, kIntervalCount);
   for (iree_host_size_t i = 0; i < kIntervalCount; ++i) {
     EXPECT_EQ(order.intervals[i]->start_point, (uint32_t)(i + 1u)) << i;
   }

@@ -32,16 +32,10 @@ iree_status_t loom_low_allocation_interval_order_build(
     loom_low_allocation_interval_order_t* out_order) {
   *out_order = (loom_low_allocation_interval_order_t){0};
   iree_host_size_t interval_count = 0;
-  iree_host_size_t unit_count = 0;
   for (iree_host_size_t i = 0; i < liveness->interval_count; ++i) {
     const loom_liveness_interval_t* interval = &liveness->intervals[i];
     if (loom_low_allocation_live_range_interval_is_allocatable(interval)) {
       ++interval_count;
-      if (interval->unit_count > IREE_HOST_SIZE_MAX - unit_count) {
-        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "allocation unit count exceeds host size");
-      }
-      unit_count += interval->unit_count;
     }
   }
   if (interval_count == 0) {
@@ -63,7 +57,6 @@ iree_status_t loom_low_allocation_interval_order_build(
   *out_order = (loom_low_allocation_interval_order_t){
       .intervals = intervals,
       .interval_count = interval_count,
-      .unit_count = unit_count,
   };
   return iree_ok_status();
 }

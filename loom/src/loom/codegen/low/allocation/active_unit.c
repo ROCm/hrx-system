@@ -154,6 +154,27 @@ static bool loom_low_allocation_active_unit_index_can_insert_assignment(
   return true;
 }
 
+iree_host_size_t loom_low_allocation_active_unit_capacity(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_liveness_interval_t* const* intervals,
+    iree_host_size_t interval_count) {
+  iree_host_size_t capacity = 0;
+  for (iree_host_size_t i = 0; i < interval_count; ++i) {
+    const loom_liveness_interval_t* interval = intervals[i];
+    const loom_low_reg_class_t* reg_class =
+        &descriptor_set->reg_classes[interval->value_class.register_class_id];
+    const uint32_t width =
+        loom_low_reg_class_uses_explicit_physical_registers(reg_class)
+            ? reg_class->physical_atomic_unit_count
+            : 1;
+    if (interval->unit_count > (IREE_HOST_SIZE_MAX - capacity) / width) {
+      return IREE_HOST_SIZE_MAX;
+    }
+    capacity += (iree_host_size_t)interval->unit_count * width;
+  }
+  return capacity;
+}
+
 iree_status_t loom_low_allocation_active_unit_index_initialize(
     iree_host_size_t assignment_capacity, iree_host_size_t unit_capacity,
     iree_arena_allocator_t* arena,

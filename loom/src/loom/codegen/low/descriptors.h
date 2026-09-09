@@ -555,6 +555,10 @@ typedef struct loom_low_reg_class_t {
   loom_low_register_part_mask_t full_register_part_mask;
   // Storage space used when values from this class are spilled.
   uint8_t spill_slot_space;
+  // Atomic storage units occupied by each explicit physical candidate. All
+  // candidates in a class have equal width. Zero for linear register classes,
+  // whose locations each occupy one unit in their storage namespace.
+  uint16_t physical_atomic_unit_count;
 } loom_low_reg_class_t;
 
 // One named physical register and the atomic storage units it occupies.

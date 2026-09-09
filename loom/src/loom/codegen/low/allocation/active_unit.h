@@ -50,6 +50,15 @@ typedef struct loom_low_allocation_active_unit_index_t {
   uint32_t seen_generation;
 } loom_low_allocation_active_unit_index_t;
 
+// Bounds indexed storage for allocatable intervals in the resolved descriptor
+// set. Each logical unit is charged only for its own class's physical candidate
+// width, including aggregate views composed from those candidates. Returns
+// IREE_HOST_SIZE_MAX when the bound exceeds the host representation.
+iree_host_size_t loom_low_allocation_active_unit_capacity(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_liveness_interval_t* const* intervals,
+    iree_host_size_t interval_count);
+
 // Initializes |out_index| for up to |assignment_capacity| assignments and
 // |unit_capacity| indexed units. Tiny or oversized indexes are left disabled.
 iree_status_t loom_low_allocation_active_unit_index_initialize(

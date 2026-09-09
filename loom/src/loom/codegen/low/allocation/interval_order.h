@@ -23,8 +23,6 @@ typedef struct loom_low_allocation_interval_order_t {
   const loom_liveness_interval_t** intervals;
   // Number of entries in |intervals|.
   iree_host_size_t interval_count;
-  // Sum of allocatable units across |intervals|.
-  iree_host_size_t unit_count;
 } loom_low_allocation_interval_order_t;
 
 // Builds the allocatable interval order for |liveness|.

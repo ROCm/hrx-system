@@ -40,6 +40,40 @@ loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_classes,
   return descriptor_set;
 }
 
+TEST(LowAllocationActiveUnitTest, CapacityUsesEachIntervalsRegisterClass) {
+  loom_low_reg_class_t reg_classes[4] = {};
+  reg_classes[1].flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
+                         LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS;
+  reg_classes[1].physical_atomic_unit_count = 2;
+  reg_classes[2].flags = reg_classes[1].flags;
+  reg_classes[2].physical_atomic_unit_count = 8;
+  // An unused wide class must not inflate every scalar allocation.
+  reg_classes[3].flags = reg_classes[1].flags;
+  reg_classes[3].physical_atomic_unit_count = 64;
+  const loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
+  loom_liveness_interval_t intervals[3] = {};
+  for (uint16_t i = 0; i < IREE_ARRAYSIZE(intervals); ++i) {
+    intervals[i].value_class.type_kind = LOOM_TYPE_REGISTER;
+    intervals[i].value_class.register_class_id = i;
+  }
+  intervals[0].unit_count = 100;
+  intervals[1].unit_count = 3;
+  intervals[2].unit_count = 2;
+  const loom_liveness_interval_t* ordered_intervals[] = {
+      &intervals[0],
+      &intervals[1],
+      &intervals[2],
+  };
+  EXPECT_EQ(loom_low_allocation_active_unit_capacity(
+                &descriptor_set, ordered_intervals,
+                IREE_ARRAYSIZE(ordered_intervals)),
+            100u + 3u * 2u + 2u * 8u);
+  EXPECT_EQ(loom_low_allocation_active_unit_capacity(&descriptor_set, nullptr,
+                                                     /*interval_count=*/0),
+            0u);
+}
+
 TEST(LowAllocationActiveUnitTest, FindsAndRemovesIndexedConflicts) {
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(/*block_size=*/4096, iree_allocator_system(),

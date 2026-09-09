@@ -232,6 +232,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   loom_low_reg_class_t reg_class = {};
   reg_class.flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
                     LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS;
+  reg_class.physical_atomic_unit_count = 2;
   reg_class.alloc_unit_bits = 512;
   reg_class.allocatable_count = 2;
   reg_class.spill_class_id = LOOM_LOW_REG_CLASS_NONE;

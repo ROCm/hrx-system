@@ -388,6 +388,7 @@ def emit_source_for_views(
         lines.append("")
     _emit_string_table(compiled, lines)
 
+    physical_register_widths = {register.name: len(register.atomic_units) for register in compiled.physical_registers}
     _emit_array(
         lines,
         "loom_low_reg_class_t",
@@ -407,6 +408,7 @@ def emit_source_for_views(
                 ".spill_class_id = " + ("LOOM_LOW_REG_CLASS_NONE" if reg_class.spill_class is None else str(compiled.reg_class_ids[reg_class.spill_class])) + ",",
                 f".full_register_part_mask = {c_spelling.hex_u32_literal(reg_class.full_register_part_mask)},",
                 f".spill_slot_space = {reg_class.spill_slot_space.c_name},",
+                ".physical_atomic_unit_count = " + str(physical_register_widths[reg_class.physical_registers[0]] if reg_class.physical_registers else 0) + ",",
             ]
             for i, reg_class in enumerate(compiled.reg_classes)
         ],

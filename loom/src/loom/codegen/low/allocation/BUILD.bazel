@@ -431,6 +431,7 @@ loom_cc_library(
     hdrs = ["interval_assignment.h"],
     deps = [
         ":active_set",
+        ":active_unit",
         ":assignment",
         ":assignment_map",
         ":coalescing",

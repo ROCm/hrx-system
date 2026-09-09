@@ -644,6 +644,11 @@ def test_compiler_emits_explicit_physical_register_candidates() -> None:
         5,
     ]
     assert ".allocatable_count = 2," in generated.source
+    physical_class_source = generated.source.split(f".name_string_offset = {compiled.string_pool.ref('reg_test.phys')},", 1)[1].split("}", 1)[0]
+    # The pair occupies four atoms but is not a candidate of this class.
+    assert ".physical_atomic_unit_count = 2," in physical_class_source
+    linear_class_source = generated.source.split(f".name_string_offset = {compiled.string_pool.ref('reg_test.i32')},", 1)[1].split("}", 1)[0]
+    assert ".physical_atomic_unit_count = 0," in linear_class_source
     assert "kTestLowCorePhysicalRegisterCandidates" in generated.source
     assert "kTestLowCorePhysicalRegisterAtomicUnits" in generated.source
 
@@ -760,6 +765,20 @@ def test_compiler_rejects_mixed_width_explicit_register_candidates() -> None:
     with pytest.raises(
         ValueError,
         match=re.escape("descriptor set 'test.low.core' register class 'test.phys' explicit physical register candidates must occupy the same number of atomic storage units"),
+    ):
+        compiler.compile_descriptor_set(replace(descriptor_set, physical_registers=physical_registers))
+
+
+def test_compiler_rejects_oversized_physical_register_width() -> None:
+    descriptor_set = _explicit_physical_descriptor_set()
+    physical_registers = (
+        PhysicalRegister("test.r0", tuple(range(0x10000))),
+        *descriptor_set.physical_registers[1:],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' physical register 'test.r0' atomic storage unit count does not fit u16"),
     ):
         compiler.compile_descriptor_set(replace(descriptor_set, physical_registers=physical_registers))
 

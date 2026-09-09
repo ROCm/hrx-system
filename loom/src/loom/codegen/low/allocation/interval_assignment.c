@@ -10,6 +10,7 @@
 
 #include "loom/analysis/consumption.h"
 #include "loom/codegen/low/allocation/active_set.h"
+#include "loom/codegen/low/allocation/active_unit.h"
 #include "loom/codegen/low/allocation/coalescing.h"
 #include "loom/codegen/low/allocation/interval_order.h"
 #include "loom/codegen/low/allocation/live_range.h"
@@ -853,19 +854,10 @@ loom_low_allocation_interval_assignment_initialize_result_storage(
                                   (void**)&state->result.assignments));
     memset(state->result.assignments, 0,
            order->interval_count * sizeof(*state->result.assignments));
-    uint32_t maximum_atomic_units_per_register = 1;
-    const loom_low_descriptor_set_t* descriptor_set =
-        state->context->target->descriptor_set;
-    for (uint32_t i = 0; i < descriptor_set->physical_register_count; ++i) {
-      maximum_atomic_units_per_register = iree_max(
-          maximum_atomic_units_per_register,
-          (uint32_t)descriptor_set->physical_registers[i].atomic_unit_count);
-    }
     const iree_host_size_t active_unit_capacity =
-        order->unit_count >
-                IREE_HOST_SIZE_MAX / maximum_atomic_units_per_register
-            ? IREE_HOST_SIZE_MAX
-            : order->unit_count * maximum_atomic_units_per_register;
+        loom_low_allocation_active_unit_capacity(
+            state->context->target->descriptor_set, order->intervals,
+            order->interval_count);
     IREE_RETURN_IF_ERROR(loom_low_allocation_active_set_initialize(
         state->context->liveness, order->interval_count, active_unit_capacity,
         state->context->arena, &state->active));

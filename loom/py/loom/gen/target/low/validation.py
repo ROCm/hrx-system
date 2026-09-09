@@ -894,6 +894,7 @@ def validate_register_classes(
             raise ValueError(f"{description} is duplicated")
         if not physical_register.atomic_units:
             raise ValueError(f"{description} has no atomic storage units")
+        validate_u16(len(physical_register.atomic_units), f"{description} atomic storage unit count")
         if physical_register.atomic_units != tuple(sorted(set(physical_register.atomic_units))):
             raise ValueError(f"{description} atomic storage units must be sorted and unique")
         for atomic_unit in physical_register.atomic_units:
