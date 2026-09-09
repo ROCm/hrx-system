@@ -235,6 +235,15 @@ TEST_F(Aie2pLeafObjectTest, LowFunctionsEmitOptimizedVectorLeaves) {
     CompiledLeaf leaf;
     IREE_ASSERT_OK(
         CompileVectorAdd(test_case.vector_shape, test_case.mnemonic, &leaf));
+    ExpectPhysicalRegisters(leaf,
+                            loom_low_packet_at_node(&leaf.frame.schedule, 0),
+                            {IREE_SV("x0"), IREE_SV("p0")});
+    ExpectPhysicalRegisters(leaf,
+                            loom_low_packet_at_node(&leaf.frame.schedule, 1),
+                            {IREE_SV("x1"), IREE_SV("p1")});
+    ExpectPhysicalRegisters(leaf,
+                            loom_low_packet_at_node(&leaf.frame.schedule, 2),
+                            {IREE_SV("x0"), IREE_SV("x1"), IREE_SV("x0")});
 
     ASSERT_EQ(leaf.frame.schedule.issue_group_count, 4u);
     EXPECT_EQ(leaf.frame.schedule.issue_groups[0].issue_cycle, 0u);
