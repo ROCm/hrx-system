@@ -877,6 +877,15 @@ typedef struct loom_low_resource_t {
   loom_low_resource_kind_t kind;
   // Contention group identifier for related resources.
   uint16_t contention_group_id;
+  // Generated occupancy-ring layout. Resources in the same contention group
+  // share a ring; its power-of-two length covers every referenced stage plus
+  // duration. Resources without issue uses consume no calendar slots.
+  struct {
+    // First occupancy slot in the descriptor set's calendar storage.
+    uint32_t slot_start;
+    // Ring length minus one, used to index absolute issue cycles.
+    uint32_t slot_mask;
+  } calendar;
 } loom_low_resource_t;
 
 // Named target event used as an endpoint in dependency timing rules.
@@ -1407,6 +1416,8 @@ typedef struct loom_low_descriptor_set_t {
   const loom_low_resource_t* resources;
   // Number of resources owned by this set.
   uint32_t resource_count;
+  // Total occupancy slots for the generated resource calendars.
+  uint32_t resource_calendar_slot_count;
   // Dense hazard rows referenced by schedule classes.
   const loom_low_hazard_t* hazards;
   // Number of hazard rows owned by this set.

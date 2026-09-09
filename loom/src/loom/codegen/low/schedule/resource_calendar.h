@@ -24,40 +24,33 @@ typedef struct loom_low_schedule_resource_occupancy_t {
   uint16_t reserved_units;
 } loom_low_schedule_resource_occupancy_t;
 
-typedef struct loom_low_schedule_resource_calendar_row_t {
-  // Occupancy indexed relative to base_issue_cycle.
-  loom_low_schedule_resource_occupancy_t* cycles;
-  // Absolute issue cycle represented by cycles[0].
-  uint32_t base_issue_cycle;
-  // Number of meaningful entries in cycles.
-  uint32_t cycle_count;
-  // Allocated entries in cycles.
-  iree_host_size_t cycle_capacity;
-  // Units available in each cycle.
-  uint16_t capacity_per_cycle;
-} loom_low_schedule_resource_calendar_row_t;
+typedef struct loom_low_schedule_resource_calendar_slot_t {
+  // Absolute cycle owning this ring slot. Other cycles observe zero occupancy.
+  uint32_t issue_cycle;
+  // Required and reserved capacity at |issue_cycle|. Zero-initialized slots
+  // represent an empty calendar, including at issue cycle zero.
+  loom_low_schedule_resource_occupancy_t occupancy;
+} loom_low_schedule_resource_calendar_slot_t;
 
 typedef struct loom_low_schedule_resource_calendar_t {
   // Descriptor set owning all resource and issue-use rows.
   const loom_low_descriptor_set_t* descriptor_set;
-  // Arena owning the calendar and its lazily grown occupancy rows.
-  iree_arena_allocator_t* arena;
-  // Calendar row index keyed by descriptor resource identifier.
-  uint16_t* resource_row_indices;
-  // Independent resource calendars, including shared contention groups.
-  loom_low_schedule_resource_calendar_row_t* rows;
-  // Number of populated rows.
-  uint16_t row_count;
+  // Fixed occupancy storage indexed by generated resource calendar layouts.
+  // Only slots touched by an issued class are updated; advancing time neither
+  // moves retained occupancy nor visits unrelated resources.
+  loom_low_schedule_resource_calendar_slot_t* slots;
 } loom_low_schedule_resource_calendar_t;
 
-// Initializes the compact resource-to-calendar mapping. Resources with the
-// same nonzero contention group share one calendar row.
+// Allocates the exact target-declared occupancy storage. Resources with the
+// same nonzero contention group share a ring. Rings cover each group's maximum
+// stage plus duration, so monotonically advancing issue cycles only overwrite
+// expired occupancy. No allocations occur after initialization.
 iree_status_t loom_low_schedule_resource_calendar_initialize(
     const loom_low_descriptor_set_t* descriptor_set,
     iree_arena_allocator_t* arena,
     loom_low_schedule_resource_calendar_t* out_calendar);
 
-// Clears all occupancy while retaining arena-owned row capacity for reuse.
+// Clears all occupancy while retaining the fixed storage for reuse.
 void loom_low_schedule_resource_calendar_reset(
     loom_low_schedule_resource_calendar_t* calendar);
 
@@ -70,8 +63,10 @@ uint32_t loom_low_schedule_resource_calendar_find_earliest_issue_cycle(
     const loom_low_schedule_class_t* schedule_class,
     uint32_t proposed_issue_cycle, uint16_t* out_bottleneck_resource_id);
 
-// Commits all uses in |schedule_class| at |issue_cycle|. Commit cycles must be
-// monotonically nondecreasing between resets.
+// Commits all uses in |schedule_class| at a cycle admitted by find_earliest.
+// No intervening commit may change that admission. Commit cycles must be
+// monotonically nondecreasing between resets. Reports cycle-domain overflow;
+// resource capacity is established by admission, not checked a second time.
 iree_status_t loom_low_schedule_resource_calendar_commit(
     loom_low_schedule_resource_calendar_t* calendar,
     const loom_low_schedule_class_t* schedule_class, uint32_t issue_cycle);

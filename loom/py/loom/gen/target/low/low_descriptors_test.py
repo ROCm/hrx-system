@@ -2821,6 +2821,33 @@ def test_generator_derives_minimum_issue_cycles_from_resource_pressure() -> None
     # incorrectly serialized by summing their individual lower bounds.
     assert compiled.schedule_rows[0]["minimum_issue_cycles"] == 4
     assert ".minimum_issue_cycles = 4," in generated.source
+    # Calendar storage depends on the furthest stage, not throughput cycles.
+    assert [(row.slot_start, row.slot_mask) for row in compiled.resource_calendars] == [(0, 7), (8, 3)]
+    assert compiled.resource_calendar_slot_count == 12
+
+
+def test_generator_shares_resource_calendar_horizons() -> None:
+    schedule_classes = tuple(
+        replace(schedule, issue_uses=(IssueUse("test.shared_b", cycles=3, units=1, stage=4),)) if schedule.name == "test.event.slow" else schedule
+        for schedule in TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes
+    )
+    compiled = compiler.compile_descriptor_set(
+        replace(TEST_LOW_CORE_DESCRIPTOR_SET, schedule_classes=schedule_classes),
+        DescriptorAllowlist(keys=("test.event.fast.i32", "test.event.slow.i32")),
+    )
+    assert compiled.resource_calendars[compiled.resource_ids["test.shared_a"]] == compiled.resource_calendars[compiled.resource_ids["test.shared_b"]]
+    assert compiled.resource_calendars[compiled.resource_ids["test.shared_a"]].slot_mask == 7
+    assert compiled.resource_calendar_slot_count == 8
+
+
+@pytest.mark.parametrize(("stage", "cycles", "slot_count"), [(0, 1, 1), (3, 2, 8), (65535, 2, 131072)])
+def test_generator_bounds_resource_calendar_stage_and_duration(stage: int, cycles: int, slot_count: int) -> None:
+    resource = TEST_LOW_CORE_DESCRIPTOR_SET.resources[0]
+    schedule = replace(TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes[1], issue_uses=(IssueUse(resource.name, stage=stage, cycles=cycles, units=1),))
+    compiled = compiler.compile_descriptor_set(replace(TEST_LOW_CORE_DESCRIPTOR_SET, resources=(resource,), schedule_classes=(schedule,), descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR,)))
+    assert compiled.resource_calendar_slot_count == slot_count
+    assert compiled.resource_calendars[0].slot_start == 0
+    assert compiled.resource_calendars[0].slot_mask == slot_count - 1
 
 
 def test_generator_emits_compact_timing_event_tables() -> None:

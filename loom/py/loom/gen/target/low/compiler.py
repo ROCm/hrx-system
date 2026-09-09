@@ -25,6 +25,7 @@ from loom.gen.target.low.compiled import (
     CompiledPhysicalRegisterView,
     CompiledRegisterPackingResource,
     CompiledRegisterPackingResourceMember,
+    CompiledResourceCalendar,
     DescriptorAllowlist,
     append_interned_sequence,
 )
@@ -317,6 +318,28 @@ def derive_minimum_issue_cycles(
         f"schedule class '{schedule_class.name}' minimum issue cycles",
     )
     return minimum_issue_cycles
+
+
+def _compile_resource_calendars(
+    resources: Sequence[Resource],
+    schedule_classes: Sequence[ScheduleClass],
+) -> tuple[list[CompiledResourceCalendar], int]:
+    """Sizes fixed occupancy rings from validated target issue-use horizons."""
+
+    groups = {resource.name: resource.contention_group_id or -index - 1 for index, resource in enumerate(resources)}
+    horizons: dict[int, int] = dict.fromkeys(groups.values(), 0)
+    for schedule_class in schedule_classes:
+        for issue_use in schedule_class.issue_uses:
+            group = groups[issue_use.resource]
+            horizons[group] = max(horizons[group], issue_use.stage + issue_use.cycles)
+    calendars: dict[int, CompiledResourceCalendar] = {}
+    slot_count = 0
+    for group, horizon in horizons.items():
+        length = 1 << (horizon - 1).bit_length() if horizon else 0
+        calendars[group] = CompiledResourceCalendar(slot_start=slot_count, slot_mask=max(length - 1, 0))
+        slot_count += length
+    validation.validate_u32(slot_count, "resource calendar slot count")
+    return [calendars[groups[resource.name]] for resource in resources], slot_count
 
 
 def validate_schedule_alternative_instruction_classes(
@@ -1628,6 +1651,7 @@ def compile_descriptor_set(
             raise ValueError(f"descriptor '{descriptor.key}' stable ID collides with '{previous_key}'")
         seen_stable_ids[stable_id] = descriptor.key
 
+    resource_calendars, resource_calendar_slot_count = _compile_resource_calendars(resources, schedule_classes)
     return CompiledDescriptorSet(
         spec=spec,
         source_descriptors=source_descriptors,
@@ -1646,6 +1670,8 @@ def compile_descriptor_set(
         register_packing_resource_members=register_packing_resource_members,
         register_parts=register_parts,
         resources=resources,
+        resource_calendars=resource_calendars,
+        resource_calendar_slot_count=resource_calendar_slot_count,
         schedule_classes=schedule_classes,
         timing_events=timing_events,
         event_separations=event_separations,

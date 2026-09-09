@@ -70,6 +70,14 @@ class CompiledRegisterPackingResourceMember:
 
 
 @dataclass(frozen=True, slots=True)
+class CompiledResourceCalendar:
+    # First occupancy slot, shared by resources in one contention group.
+    slot_start: int
+    # Power-of-two ring length minus one.
+    slot_mask: int
+
+
+@dataclass(frozen=True, slots=True)
 class DescriptorAllowlist:
     keys: tuple[str, ...] = ()
     semantic_tags: tuple[str, ...] = ()
@@ -117,6 +125,10 @@ class CompiledDescriptorSet:
     register_packing_resource_members: list[CompiledRegisterPackingResourceMember]
     register_parts: list[RegisterPart]
     resources: list[Resource]
+    # Ring layouts paired with resources; shared groups have identical layouts.
+    resource_calendars: list[CompiledResourceCalendar]
+    # Total occupancy slots across distinct resource calendars.
+    resource_calendar_slot_count: int
     schedule_classes: list[ScheduleClass]
     timing_events: list[TimingEvent]
     event_separations: list[EventSeparation]

@@ -702,8 +702,12 @@ def emit_source_for_views(
                 f".flags = {c_spelling.flag_expr(resource.flags)},",
                 f".kind = {resource.kind.c_name},",
                 f".contention_group_id = {resource.contention_group_id},",
+                ".calendar = {",
+                f"    .slot_start = {calendar.slot_start},",
+                f"    .slot_mask = {calendar.slot_mask},",
+                "},",
             ]
-            for resource in compiled.resources
+            for resource, calendar in zip(compiled.resources, compiled.resource_calendars, strict=True)
         ],
     )
     _emit_array(
@@ -1078,6 +1082,7 @@ def emit_source_for_views(
             f"    .descriptors = {descriptor_table_symbol},",
             f"    .descriptor_views = {descriptor_view_table_symbol},",
             f"    .descriptor_count = {view.descriptor_count},",
+            f"    .resource_calendar_slot_count = {compiled.resource_calendar_slot_count},",
             f"    .descriptor_refs = {descriptor_ref_table_symbol},",
             f"    .descriptor_ref_count = IREE_ARRAYSIZE({descriptor_ref_table_symbol}),",
         ]
