@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "iree/base/internal/math.h"
+
 iree_status_t loom_low_schedule_completion_demand_initialize(
     const loom_low_schedule_dependency_index_t* index,
     const loom_low_schedule_node_t* nodes, uint16_t domain_count,
@@ -88,16 +90,84 @@ iree_status_t loom_low_schedule_completion_demand_initialize(
                                                  sizeof(*out_demand->roots),
                                                  (void**)&out_demand->roots));
   memset(out_demand->roots, 0xFF, domain_count * sizeof(*out_demand->roots));
+  out_demand->domain_count = domain_count;
+  uint32_t level_bit_count = node_count;
+  do {
+    const uint32_t level_word_count =
+        level_bit_count / 64 + (level_bit_count % 64 != 0);
+    out_demand->nominations
+        .level_starts[out_demand->nominations.level_count++] =
+        out_demand->nominations.words_per_domain;
+    out_demand->nominations.words_per_domain += level_word_count;
+    level_bit_count = level_word_count;
+  } while (level_bit_count > 1);
+  if (!iree_host_size_checked_mul(out_demand->nominations.words_per_domain,
+                                  domain_count, &word_count)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "low schedule completion nomination size overflow");
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, word_count, sizeof(*out_demand->nominations.bits),
+      (void**)&out_demand->nominations.bits));
+  memset(out_demand->nominations.bits, 0,
+         word_count * sizeof(*out_demand->nominations.bits));
   return iree_ok_status();
 }
 
-void loom_low_schedule_completion_demand_select(
+void loom_low_schedule_completion_demand_nominate(
+    loom_low_schedule_completion_demand_t* demand, uint16_t domain,
+    uint32_t consumer) {
+  uint64_t* bits =
+      demand->nominations.bits +
+      (iree_host_size_t)domain * demand->nominations.words_per_domain;
+  uint32_t bit_index = consumer;
+  for (uint8_t level = 0; level < demand->nominations.level_count; ++level) {
+    uint64_t* word =
+        &bits[demand->nominations.level_starts[level] + bit_index / 64];
+    const uint64_t previous = *word;
+    *word |= UINT64_C(1) << (bit_index % 64);
+    if (previous != 0) break;
+    bit_index /= 64;
+  }
+}
+
+void loom_low_schedule_completion_demand_complete(
+    loom_low_schedule_completion_demand_t* demand, uint32_t node) {
+  for (uint16_t domain = 0; domain < demand->domain_count; ++domain) {
+    uint64_t* bits =
+        demand->nominations.bits +
+        (iree_host_size_t)domain * demand->nominations.words_per_domain;
+    uint32_t bit_index = node;
+    for (uint8_t level = 0; level < demand->nominations.level_count; ++level) {
+      uint64_t* word =
+          &bits[demand->nominations.level_starts[level] + bit_index / 64];
+      const uint64_t previous = *word;
+      *word &= ~(UINT64_C(1) << (bit_index % 64));
+      if (previous == 0 || *word != 0) break;
+      bit_index /= 64;
+    }
+  }
+}
+
+uint32_t loom_low_schedule_completion_demand_select(
     loom_low_schedule_completion_demand_t* demand,
-    const loom_low_schedule_node_t* nodes, uint16_t domain, uint32_t root) {
+    const loom_low_schedule_node_t* nodes, uint16_t domain) {
   const uint32_t previous_root = demand->roots[domain];
   if (previous_root != LOOM_LOW_SCHEDULE_NODE_NONE &&
       nodes[previous_root].scheduled_ordinal == LOOM_LOW_SCHEDULE_NODE_NONE) {
-    return;
+    return previous_root;
+  }
+  const uint64_t* nominations =
+      demand->nominations.bits +
+      (iree_host_size_t)domain * demand->nominations.words_per_domain;
+  uint8_t level = demand->nominations.level_count - 1;
+  uint64_t word = nominations[demand->nominations.level_starts[level]];
+  if (word == 0) return LOOM_LOW_SCHEDULE_NODE_NONE;
+  uint32_t root = (uint32_t)iree_math_count_trailing_zeros_u64(word);
+  while (level != 0) {
+    --level;
+    word = nominations[demand->nominations.level_starts[level] + root];
+    root = root * 64 + (uint32_t)iree_math_count_trailing_zeros_u64(word);
   }
   demand->roots[domain] = root;
   uint64_t* bits = demand->demanded_bits +
@@ -120,4 +190,5 @@ void loom_low_schedule_completion_demand_select(
       demand->worklist[worklist_count++] = producer;
     }
   }
+  return root;
 }

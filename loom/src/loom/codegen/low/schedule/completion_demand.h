@@ -16,6 +16,9 @@
 extern "C" {
 #endif
 
+// Six 64-way summary levels cover every 32-bit schedule-node index.
+#define LOOM_LOW_SCHEDULE_COMPLETION_NOMINATION_LEVEL_CAPACITY 6u
+
 // One pinned completion per hardware pressure domain. A completion remains
 // selected until it is scheduled. Its same-block SSA ancestors are then also
 // scheduled, so their demand bits need not be cleared before selecting another
@@ -34,6 +37,20 @@ typedef struct loom_low_schedule_completion_demand_t {
   uint32_t* roots;
   // Number of 64-bit words in each domain's node bitset.
   uint32_t words_per_domain;
+  // Number of hardware pressure domains sharing the bitset layouts.
+  uint16_t domain_count;
+  // Fixed hierarchical nomination bitsets for ordered consumer selection.
+  struct {
+    // Consumer nominations and nonempty-word summaries, domain-major.
+    uint64_t* bits;
+    // Word offset of each summary level within one domain, leaves first.
+    uint32_t
+        level_starts[LOOM_LOW_SCHEDULE_COMPLETION_NOMINATION_LEVEL_CAPACITY];
+    // Total nomination and summary words in each domain.
+    uint32_t words_per_domain;
+    // Number of populated level_starts entries.
+    uint8_t level_count;
+  } nominations;
 } loom_low_schedule_completion_demand_t;
 
 // Builds the reverse same-block SSA index and empty domain demand sets.
@@ -43,13 +60,26 @@ iree_status_t loom_low_schedule_completion_demand_initialize(
     iree_arena_allocator_t* arena,
     loom_low_schedule_completion_demand_t* out_demand);
 
-// Requests an unscheduled completion that releases live storage in |domain|.
-// An earlier request remains pinned until its root is scheduled; new requests
+// Nominates the sole remaining consumer of a live value in |domain|. Several
+// values may nominate the same consumer without requiring reference counts:
+// each nomination remains valid until that consumer runs. Insertion is bounded
+// by the 32-bit node-index width, independently of the number of live values.
+void loom_low_schedule_completion_demand_nominate(
+    loom_low_schedule_completion_demand_t* demand, uint16_t domain,
+    uint32_t consumer);
+
+// Retires all nominations for a node when it is scheduled. Every scheduled
+// node must be reported, including nodes that were not selected completions.
+void loom_low_schedule_completion_demand_complete(
+    loom_low_schedule_completion_demand_t* demand, uint32_t node);
+
+// Pins the earliest nominated consumer, or returns NODE_NONE when none exists.
+// An earlier selection remains pinned until its root is scheduled; nominations
 // do not interrupt its dependency chain. Node scheduling is monotone for the
 // lifetime of the demand table. No allocation occurs after initialization.
-void loom_low_schedule_completion_demand_select(
+uint32_t loom_low_schedule_completion_demand_select(
     loom_low_schedule_completion_demand_t* demand,
-    const loom_low_schedule_node_t* nodes, uint16_t domain, uint32_t root);
+    const loom_low_schedule_node_t* nodes, uint16_t domain);
 
 // Returns whether an unscheduled node advances the domain's pinned completion.
 // Bits for scheduled nodes remain set and are not meaningful to this query.

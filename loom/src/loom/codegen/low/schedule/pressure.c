@@ -207,37 +207,6 @@ iree_status_t loom_low_schedule_pressure_initialize(
     memset(out_pressure_state->candidate_delta_touched_flags, 0,
            reg_class_count *
                sizeof(*out_pressure_state->candidate_delta_touched_flags));
-    if (node_count != 0 &&
-        state->pressure_limits.unspillable_completion_domain_count != 0) {
-      const uint16_t completion_domain_count =
-          state->pressure_limits.unspillable_completion_domain_count;
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          state->scratch_arena, completion_domain_count,
-          sizeof(*out_pressure_state->active_unspillable_completion_values),
-          (void**)&out_pressure_state->active_unspillable_completion_values));
-      memset(
-          out_pressure_state->active_unspillable_completion_values, 0xFF,
-          completion_domain_count *
-              sizeof(
-                  *out_pressure_state->active_unspillable_completion_values));
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          state->scratch_arena, completion_domain_count,
-          sizeof(
-              *out_pressure_state->released_unspillable_completion_domain_ids),
-          (void**)&out_pressure_state
-              ->released_unspillable_completion_domain_ids));
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          state->scratch_arena, completion_domain_count,
-          sizeof(*out_pressure_state
-                      ->released_unspillable_completion_domain_flags),
-          (void**)&out_pressure_state
-              ->released_unspillable_completion_domain_flags));
-      memset(out_pressure_state->released_unspillable_completion_domain_flags,
-             0,
-             completion_domain_count *
-                 sizeof(*out_pressure_state
-                             ->released_unspillable_completion_domain_flags));
-    }
   }
   const uint32_t register_packing_resource_count =
       state->target.descriptor_set->register_packing_resource_count;
@@ -501,29 +470,12 @@ static void loom_low_schedule_advance_source_pressure_cliff_floor(
   }
 }
 
-static void loom_low_schedule_note_released_unspillable_completion_domain(
-    loom_low_schedule_pressure_state_t* pressure_state,
-    uint16_t completion_domain_id) {
-  if (pressure_state->released_unspillable_completion_domain_flags == NULL ||
-      pressure_state->released_unspillable_completion_domain_flags
-          [completion_domain_id]) {
-    return;
-  }
-  pressure_state
-      ->released_unspillable_completion_domain_flags[completion_domain_id] = 1;
-  pressure_state->released_unspillable_completion_domain_ids
-      [pressure_state->released_unspillable_completion_domain_count++] =
-      completion_domain_id;
-}
-
-// Makes a live value with one distinct consumer the current completion anchor
-// for its hard storage domain. The earliest consumer wins so one transaction
-// determines the completion path nominated while the domain is full.
-static void loom_low_schedule_try_activate_unspillable_completion_value(
+// A live value's final consumer stays nominated until it runs. Multiple values
+// can nominate the same consumer; scheduling that node retires them together.
+static void loom_low_schedule_nominate_unspillable_completion(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state,
     loom_value_ordinal_t value_ordinal) {
-  if (pressure_state->active_unspillable_completion_values == NULL) return;
   const loom_low_schedule_value_record_t* value = &state->values[value_ordinal];
   const uint16_t reg_class_id = value->register_class_id;
   if (!iree_any_bit_set(value->flags, LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE) ||
@@ -535,49 +487,9 @@ static void loom_low_schedule_try_activate_unspillable_completion_value(
   if (completion_domain_id == UINT16_MAX) return;
   const uint32_t consumer_node =
       pressure_state->remaining_consumer_node_xors[value_ordinal];
-  loom_value_ordinal_t* active_value =
-      &pressure_state
-           ->active_unspillable_completion_values[completion_domain_id];
-  if (*active_value == LOOM_VALUE_ORDINAL_INVALID) {
-    *active_value = value_ordinal;
-    return;
-  }
-  const uint32_t active_consumer_node =
-      pressure_state->remaining_consumer_node_xors[*active_value];
-  if (consumer_node < active_consumer_node) {
-    *active_value = value_ordinal;
-  }
-}
-
-static void loom_low_schedule_repair_released_unspillable_completions(
-    const loom_low_schedule_build_state_t* state,
-    loom_low_schedule_pressure_state_t* pressure_state) {
-  if (pressure_state->released_unspillable_completion_domain_count == 0) {
-    return;
-  }
-  for (iree_host_size_t i = 0; i < pressure_state->block_value_count; ++i) {
-    const loom_value_ordinal_t value_ordinal =
-        pressure_state->block_value_ordinals[i];
-    const uint16_t completion_domain_id =
-        loom_low_schedule_unspillable_completion_domain_id(
-            state, state->values[value_ordinal].register_class_id);
-    if (completion_domain_id == UINT16_MAX ||
-        !pressure_state->released_unspillable_completion_domain_flags
-             [completion_domain_id]) {
-      continue;
-    }
-    loom_low_schedule_try_activate_unspillable_completion_value(
-        state, pressure_state, value_ordinal);
-  }
-  for (iree_host_size_t i = 0;
-       i < pressure_state->released_unspillable_completion_domain_count; ++i) {
-    const uint16_t completion_domain_id =
-        pressure_state->released_unspillable_completion_domain_ids[i];
-    pressure_state
-        ->released_unspillable_completion_domain_flags[completion_domain_id] =
-        0;
-  }
-  pressure_state->released_unspillable_completion_domain_count = 0;
+  loom_low_schedule_completion_demand_nominate(
+      &pressure_state->unspillable_completion_demand, completion_domain_id,
+      consumer_node);
 }
 
 static uint32_t loom_low_schedule_remove_live_pressure_value(
@@ -596,17 +508,6 @@ static uint32_t loom_low_schedule_remove_live_pressure_value(
   IREE_ASSERT_LE(transfer_units, value->live_unit_count);
   const uint32_t unit_count = value->live_unit_count - transfer_units;
   const uint16_t reg_class_id = value->register_class_id;
-  const uint16_t completion_domain_id =
-      loom_low_schedule_unspillable_completion_domain_id(state, reg_class_id);
-  if (completion_domain_id != UINT16_MAX &&
-      pressure_state
-              ->active_unspillable_completion_values[completion_domain_id] ==
-          value_ordinal) {
-    pressure_state->active_unspillable_completion_values[completion_domain_id] =
-        LOOM_VALUE_ORDINAL_INVALID;
-    loom_low_schedule_note_released_unspillable_completion_domain(
-        pressure_state, completion_domain_id);
-  }
   value->flags &= ~LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE;
   value->live_unit_count = 0;
   loom_low_schedule_pressure_alias_deactivate_result(state, pressure_state,
@@ -762,19 +663,6 @@ void loom_low_schedule_pressure_initialize_block(
   pressure_state->current_live_units = 0;
   loom_low_schedule_target_pressure_reset_packing_completions(state,
                                                               pressure_state);
-  pressure_state->released_unspillable_completion_domain_count = 0;
-  if (pressure_state->active_unspillable_completion_values != NULL) {
-    const uint16_t completion_domain_count =
-        state->pressure_limits.unspillable_completion_domain_count;
-    memset(pressure_state->active_unspillable_completion_values, 0xFF,
-           completion_domain_count *
-               sizeof(*pressure_state->active_unspillable_completion_values));
-    memset(
-        pressure_state->released_unspillable_completion_domain_flags, 0,
-        completion_domain_count *
-            sizeof(
-                *pressure_state->released_unspillable_completion_domain_flags));
-  }
   for (iree_host_size_t i = 0; i < pressure_state->block_reg_class_count; ++i) {
     const uint16_t reg_class_id = pressure_state->block_reg_class_ids[i];
     pressure_state->block_reg_class_touched_flags[reg_class_id] = 0;
@@ -861,9 +749,9 @@ void loom_low_schedule_pressure_initialize_block(
     loom_low_schedule_target_pressure_add_packing_completion_value(
         state, pressure_state, pressure_state->block_value_ordinals[i]);
   }
-  if (pressure_state->active_unspillable_completion_values != NULL) {
+  if (state->pressure_limits.unspillable_completion_domain_count != 0) {
     for (iree_host_size_t i = 0; i < pressure_state->block_value_count; ++i) {
-      loom_low_schedule_try_activate_unspillable_completion_value(
+      loom_low_schedule_nominate_unspillable_completion(
           state, pressure_state, pressure_state->block_value_ordinals[i]);
     }
   }
@@ -1825,13 +1713,13 @@ void loom_low_schedule_pressure_note_node_scheduled(
     }
     loom_low_schedule_target_pressure_add_packing_completion_value(
         state, pressure_state, result_ordinals[result_index]);
-    loom_low_schedule_try_activate_unspillable_completion_value(
+    loom_low_schedule_nominate_unspillable_completion(
         state, pressure_state, result_ordinals[result_index]);
   }
   loom_low_schedule_target_pressure_repair_packing_completions(
       state, pressure_state, node_index);
-  loom_low_schedule_repair_released_unspillable_completions(state,
-                                                            pressure_state);
+  loom_low_schedule_completion_demand_complete(
+      &pressure_state->unspillable_completion_demand, node_index);
   IREE_ASSERT_EQ(pressure_state->current_live_units,
                  score->projected_live_units);
   // The realized state excludes temporary overlap and downstream activation
@@ -1880,8 +1768,8 @@ void loom_low_schedule_pressure_update_ready_consumers(
     // A candidate can kill the value only when it is the sole distinct
     // consumer. The XOR identifies that consumer without walking the fan-out.
     if (*remaining_consumer_count == 1) {
-      loom_low_schedule_try_activate_unspillable_completion_value(
-          state, pressure_state, value_ordinal);
+      loom_low_schedule_nominate_unspillable_completion(state, pressure_state,
+                                                        value_ordinal);
       const uint32_t consumer_node = *remaining_consumer_node_xor;
       if (!loom_low_schedule_ready_frontier_contains(&ready_policy->frontier,
                                                      consumer_node)) {

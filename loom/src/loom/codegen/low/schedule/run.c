@@ -553,8 +553,8 @@ static iree_status_t loom_low_schedule_initialize_pressure_limits(
 
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       state->scratch_arena, completion_domain_count,
-      sizeof(*state->pressure_limits.unspillable_completion_capacities),
-      (void**)&state->pressure_limits.unspillable_completion_capacities));
+      sizeof(*state->pressure_limits.unspillable_completion_domains),
+      (void**)&state->pressure_limits.unspillable_completion_domains));
   for (uint32_t reg_class_id = 0;
        reg_class_id < descriptor_set->reg_class_count; ++reg_class_id) {
     const uint16_t completion_domain_id =
@@ -562,9 +562,12 @@ static iree_status_t loom_low_schedule_initialize_pressure_limits(
             .unspillable_completion_domain_ids_by_reg_class[reg_class_id];
     if (completion_domain_id == UINT16_MAX) continue;
     state->pressure_limits
-        .unspillable_completion_capacities[completion_domain_id] =
-        loom_low_schedule_unspillable_completion_capacity(
-            state, (uint16_t)reg_class_id);
+        .unspillable_completion_domains[completion_domain_id] =
+        (loom_low_schedule_completion_domain_t){
+            .capacity = loom_low_schedule_unspillable_completion_capacity(
+                state, (uint16_t)reg_class_id),
+            .reg_class_id = (uint16_t)reg_class_id,
+        };
   }
   state->pressure_limits.unspillable_completion_domain_count =
       (uint16_t)completion_domain_count;

@@ -192,6 +192,14 @@ typedef struct loom_low_schedule_alias_pressure_limit_t {
   uint8_t all_classes_unspillable;
 } loom_low_schedule_alias_pressure_limit_t;
 
+// One bounded unspillable register-pressure domain.
+typedef struct loom_low_schedule_completion_domain_t {
+  // Hard live-unit capacity, including any shared register alias set.
+  uint32_t capacity;
+  // Representative class selecting the live register or alias-set counter.
+  uint16_t reg_class_id;
+} loom_low_schedule_completion_domain_t;
+
 typedef struct loom_low_schedule_build_state_t {
   // Module containing the low function being scheduled.
   loom_module_t* module;
@@ -286,8 +294,8 @@ typedef struct loom_low_schedule_build_state_t {
     loom_low_schedule_alias_pressure_limit_t* alias_sets;
     // Highest dense one-based alias-set ID, or zero when none are present.
     uint16_t alias_set_count;
-    // Hard live-unit capacities indexed by completion-domain ID.
-    uint32_t* unspillable_completion_capacities;
+    // Hard limits and live-counter identities indexed by completion domain.
+    loom_low_schedule_completion_domain_t* unspillable_completion_domains;
     // Completion-domain IDs indexed by descriptor register-class ID.
     uint16_t* unspillable_completion_domain_ids_by_reg_class;
     // Number of bounded-unspillable completion domains.

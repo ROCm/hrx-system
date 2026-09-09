@@ -85,17 +85,8 @@ struct loom_low_schedule_pressure_state_t {
   uint32_t* active_register_packing_completion_sinks;
   // Number of live storage values retaining each active packing completion.
   uint32_t* active_register_packing_completion_value_counts;
-  // Live value whose sole remaining consumer nominates the next completion
-  // for each bounded unspillable domain. Demand pins the selected consumer
-  // until it executes, independently of subsequent nominations.
-  loom_value_ordinal_t* active_unspillable_completion_values;
   // Pinned completion dependencies for bounded unspillable storage domains.
   loom_low_schedule_completion_demand_t unspillable_completion_demand;
-  // Completion domains whose active value was just released.
-  uint16_t* released_unspillable_completion_domain_ids;
-  // True when a domain is present in
-  // released_unspillable_completion_domain_ids.
-  uint8_t* released_unspillable_completion_domain_flags;
   // True when a register class has candidate delta state to reset.
   uint8_t* candidate_delta_touched_flags;
   // Register-class IDs touched in candidate_delta_units_by_reg_class.
@@ -122,8 +113,6 @@ struct loom_low_schedule_pressure_state_t {
   loom_low_schedule_pressure_alias_state_t storage_aliases;
   // Number of touched candidate register classes.
   iree_host_size_t candidate_delta_touched_count;
-  // Number of domains requiring a replacement completion value.
-  uint16_t released_unspillable_completion_domain_count;
   // Current aggregate live register units in the simulated schedule.
   uint64_t current_live_units;
   // Persistent pressure-cliff penalty for the current schedule state.

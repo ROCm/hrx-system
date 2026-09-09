@@ -782,23 +782,17 @@ loom_low_schedule_target_pressure_active_unspillable_completion_capacity(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state,
     uint32_t candidate_node) {
-  if (pressure_state->active_unspillable_completion_values == NULL) {
-    return UINT32_MAX;
-  }
   uint32_t active_capacity = UINT32_MAX;
   const uint16_t completion_domain_count =
       state->pressure_limits.unspillable_completion_domain_count;
   for (uint16_t completion_domain_id = 0;
        completion_domain_id < completion_domain_count; ++completion_domain_id) {
-    const uint32_t capacity =
-        state->pressure_limits
-            .unspillable_completion_capacities[completion_domain_id];
+    const loom_low_schedule_completion_domain_t* domain =
+        &state->pressure_limits
+             .unspillable_completion_domains[completion_domain_id];
+    const uint32_t capacity = domain->capacity;
     if (capacity >= active_capacity) continue;
-    const loom_value_ordinal_t active_value =
-        pressure_state
-            ->active_unspillable_completion_values[completion_domain_id];
-    if (active_value == LOOM_VALUE_ORDINAL_INVALID) continue;
-    const uint16_t reg_class_id = state->values[active_value].register_class_id;
+    const uint16_t reg_class_id = domain->reg_class_id;
     const loom_low_reg_class_t* reg_class =
         &state->target.descriptor_set->reg_classes[reg_class_id];
     const uint64_t current_live_units =
@@ -808,10 +802,10 @@ loom_low_schedule_target_pressure_active_unspillable_completion_capacity(
             : pressure_state->current_live_units_by_reg_class[reg_class_id];
     if (current_live_units < capacity) continue;
     const uint32_t active_completion_sink =
-        pressure_state->remaining_consumer_node_xors[active_value];
-    loom_low_schedule_completion_demand_select(
-        &pressure_state->unspillable_completion_demand, state->nodes,
-        completion_domain_id, active_completion_sink);
+        loom_low_schedule_completion_demand_select(
+            &pressure_state->unspillable_completion_demand, state->nodes,
+            completion_domain_id);
+    if (active_completion_sink == LOOM_LOW_SCHEDULE_NODE_NONE) continue;
     if (loom_low_schedule_completion_demand_contains(
             &pressure_state->unspillable_completion_demand,
             completion_domain_id, candidate_node)) {
