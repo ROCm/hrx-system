@@ -60,6 +60,28 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    cse
+  HDRS
+    "cse.h"
+  SRCS
+    "cse.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::descriptors
+    loom::codegen::low::function
+    loom::codegen::low::pipeline::pass_environment
+    loom::codegen::low::target_binding
+    loom::ir
+    loom::ops::op_defs
+    loom::pass::types
+    loom::target::function_version
+    loom::transforms::cleanup::expression_scope
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     dce
   HDRS
     "dce.h"

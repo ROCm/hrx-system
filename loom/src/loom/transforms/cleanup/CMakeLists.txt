@@ -73,18 +73,12 @@ loom_cc_library(
   SRCS
     "cse.c"
   DEPS
+    ::expression_scope
     iree::base
-    loom::analysis::ownership
-    loom::codegen::low::function
-    loom::codegen::low::pipeline::pass_environment
-    loom::codegen::low::target_binding
+    iree::base::internal::arena
     loom::ir
     loom::ops::op_defs
     loom::pass::types
-    loom::target::function_version
-    loom::target::pass_environment
-    loom::util::cfg_graph
-    loom::util::dominance
   PUBLIC
 )
 
@@ -103,6 +97,23 @@ loom_cc_test(
     loom::ops::test
     loom::pass::types
     loom::rewrite::rewriter
+)
+
+loom_cc_library(
+  NAME
+    expression_scope
+  HDRS
+    "expression_scope.h"
+  SRCS
+    "expression_scope.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::ownership
+    loom::ir
+    loom::ops::op_defs
+    loom::util::dominance
+  PUBLIC
 )
 
 loom_cc_library(

@@ -12,6 +12,7 @@
 #include "loom/codegen/low/pipeline/pass_requirements.h"
 #include "loom/codegen/low/transforms/allocation.h"
 #include "loom/codegen/low/transforms/cfg_tuple_decomposition.h"
+#include "loom/codegen/low/transforms/cse.h"
 #include "loom/codegen/low/transforms/dce.h"
 #include "loom/codegen/low/transforms/operand_forms.h"
 #include "loom/codegen/low/transforms/pipeline/source_to_low.h"
@@ -96,30 +97,7 @@ static const loom_pass_option_schema_t kLowMaterializeAllocationOptionSchema[] =
         },
 };
 
-static const loom_pass_requirement_def_t
-    kLowMaterializeAllocationRequirements[] = {
-        {
-            .capability_type = &loom_low_pass_capability_type,
-            .key = IREE_SVL(
-                LOOM_LOW_PASS_REQUIREMENT_TARGET_LOW_DESCRIPTOR_REGISTRY),
-            .description =
-                IREE_SVL("Requires a pass environment target-low descriptor "
-                         "registry."),
-        },
-};
-
-static const loom_pass_requirement_def_t kLowDceRequirements[] = {
-    {
-        .capability_type = &loom_low_pass_capability_type,
-        .key =
-            IREE_SVL(LOOM_LOW_PASS_REQUIREMENT_TARGET_LOW_DESCRIPTOR_REGISTRY),
-        .description =
-            IREE_SVL("Requires a pass environment target-low descriptor "
-                     "registry."),
-    },
-};
-
-static const loom_pass_requirement_def_t kLowSelectOperandFormsRequirements[] =
+static const loom_pass_requirement_def_t kLowDescriptorRegistryRequirements[] =
     {
         {
             .capability_type = &loom_low_pass_capability_type,
@@ -400,11 +378,18 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .function_run = loom_loop_fusion_run,
     },
     {
+        .key = IREE_SVL("low-cse"),
+        .info = loom_low_cse_pass_info,
+        .function_run = loom_low_cse_run,
+        .requirement_defs = kLowDescriptorRegistryRequirements,
+        .requirement_count = IREE_ARRAYSIZE(kLowDescriptorRegistryRequirements),
+    },
+    {
         .key = IREE_SVL("low-dce"),
         .info = loom_low_dce_pass_info,
         .function_run = loom_low_dce_run,
-        .requirement_defs = kLowDceRequirements,
-        .requirement_count = IREE_ARRAYSIZE(kLowDceRequirements),
+        .requirement_defs = kLowDescriptorRegistryRequirements,
+        .requirement_count = IREE_ARRAYSIZE(kLowDescriptorRegistryRequirements),
     },
     {
         .key = IREE_SVL("low-decompose-cfg-tuples"),
@@ -419,9 +404,8 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .option_schema = kLowMaterializeAllocationOptionSchema,
         .option_schema_count =
             IREE_ARRAYSIZE(kLowMaterializeAllocationOptionSchema),
-        .requirement_defs = kLowMaterializeAllocationRequirements,
-        .requirement_count =
-            IREE_ARRAYSIZE(kLowMaterializeAllocationRequirements),
+        .requirement_defs = kLowDescriptorRegistryRequirements,
+        .requirement_count = IREE_ARRAYSIZE(kLowDescriptorRegistryRequirements),
     },
     {
         .key = IREE_SVL("low-select-operand-forms"),
@@ -431,8 +415,8 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .option_schema = kLowSelectOperandFormsOptionSchema,
         .option_schema_count =
             IREE_ARRAYSIZE(kLowSelectOperandFormsOptionSchema),
-        .requirement_defs = kLowSelectOperandFormsRequirements,
-        .requirement_count = IREE_ARRAYSIZE(kLowSelectOperandFormsRequirements),
+        .requirement_defs = kLowDescriptorRegistryRequirements,
+        .requirement_count = IREE_ARRAYSIZE(kLowDescriptorRegistryRequirements),
     },
     {
         .key = IREE_SVL("normalize-kernel-resources"),

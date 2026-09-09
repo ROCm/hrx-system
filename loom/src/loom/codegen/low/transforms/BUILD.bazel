@@ -59,6 +59,25 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "cse",
+    srcs = ["cse.c"],
+    hdrs = ["cse.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/transforms/cleanup:expression_scope",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "dce",
     srcs = ["dce.c"],
     hdrs = ["dce.h"],

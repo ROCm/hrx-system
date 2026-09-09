@@ -1353,6 +1353,30 @@ TEST_LOW_CONVERGENT_EXPLICIT_STATE_READ_I32_DESCRIPTOR = Descriptor(
     schedule_class=_SCHEDULE_SCALAR_ALU,
 )
 
+TEST_LOW_STATE_READ_I32_DESCRIPTOR = Descriptor(
+    key="test.state.read.i32",
+    mnemonic="test.state.read.i32",
+    semantic_tag="test.state.read.i32",
+    operands=(_i32_result(), _special_state_read()),
+    asm_forms=_asm(results=("dst",)),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_STATE_READ_BOTH_I32_DESCRIPTOR = Descriptor(
+    key="test.state.read.both.i32",
+    mnemonic="test.state.read.both.i32",
+    semantic_tag="test.state.read.both.i32",
+    operands=(
+        _i32_result(),
+        _special_state_read("special"),
+        _schedule_state_read("schedule"),
+    ),
+    asm_forms=_asm(results=("dst",)),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
 TEST_LOW_STATE_ADD_I32_DESCRIPTOR = Descriptor(
     key="test.state.add.i32",
     mnemonic="test.state.add.i32",
@@ -2184,6 +2208,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,
         TEST_LOW_EXPLICIT_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,
         TEST_LOW_CONVERGENT_EXPLICIT_STATE_READ_I32_DESCRIPTOR,
+        TEST_LOW_STATE_READ_I32_DESCRIPTOR,
+        TEST_LOW_STATE_READ_BOTH_I32_DESCRIPTOR,
         TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
         TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
         TEST_LOW_LOAD_V4I32_DESCRIPTOR,

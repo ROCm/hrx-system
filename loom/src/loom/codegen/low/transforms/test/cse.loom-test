@@ -1,0 +1,485 @@
+// Descriptor-backed low ops must expose their descriptor effects through the
+// generic op trait cache. test.add.i32 is pure even though low.op's static
+// vtable default is conservative.
+// RUN: with-low-asm pass low-cse
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_ops_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %a = test.add.i32 %lhs, %rhs
+  %b = test.add.i32 %lhs, %rhs
+  return %a, %b
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_ops_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %a = test.add.i32 %lhs, %rhs
+  return %a, %a
+}
+
+// ====
+
+// Descriptor-backed convergent low ops derive PURE and CONVERGENT from the
+// descriptor effect rows. The pure bit is not enough to make them CSE-able.
+// RUN: with-low-asm pass low-cse
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_convergent_ops_do_not_cse(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %a = test.convergent.i32 %value
+  %b = test.convergent.i32 %value
+  return %a, %b
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_convergent_ops_do_not_cse(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %a = test.convergent.i32 %value
+  %b = test.convergent.i32 %value
+  return %a, %b
+}
+
+// ====
+
+// Descriptor-backed packets that write target state are not value-CSE
+// candidates. The second packet may have identical operands, but erasing it
+// would erase its architectural state update.
+// RUN: with-low-asm pass low-cse
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_state_writes_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %a = test.state.add.i32 %lhs, %rhs
+  %b = test.state.add.i32 %lhs, %rhs
+  return %a, %b
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_state_writes_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %a = test.state.add.i32 %lhs, %rhs
+  %b = test.state.add.i32 %lhs, %rhs
+  return %a, %b
+}
+
+// ====
+
+// Descriptor-backed packets with hidden target-state reads must not CSE across
+// an intervening write to the same state register class.
+// RUN: with-low-asm pass low-cse
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %rhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %a = test.state.add.i32 %lhs, %rhs
+  %clobber = test.state.add.i32 %other, %rhs
+  %b = test.state.add.i32 %lhs, %rhs
+  return %a, %clobber, %b
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %rhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %a = test.state.add.i32 %lhs, %rhs
+  %clobber = test.state.add.i32 %other, %rhs
+  %b = test.state.add.i32 %lhs, %rhs
+  return %a, %clobber, %b
+}
+
+// ====
+
+// Operand-form rewrites must preserve descriptor-derived traits on the
+// replacement packet. The rhs-zero form still reads/writes hidden target state,
+// so an intervening state write keeps the two replacements in distinct state
+// epochs.
+// RUN: with-low-asm pass low-select-operand-forms,low-cse,low-dce
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_operand_form_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %zero0 = test.const.i32 0
+  %a = test.state.add.i32 %lhs, %zero0
+  %clobber = test.state.add.i32 %other, %lhs
+  %zero1 = test.const.i32 0
+  %b = test.state.add.i32 %lhs, %zero1
+  return %a, %clobber, %b
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_operand_form_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %a = test.state.add.i32.rhs_zero %lhs
+  %clobber = test.state.add.i32 %other, %lhs
+  %b = test.state.add.i32.rhs_zero %lhs
+  return %a, %clobber, %b
+}
+
+// ====
+
+// CSE must not merge producers whose results are later consumed by tied-result
+// ops. The tied users are linear ownership transfers: replacing %rhs_copy with
+// %lhs_copy would make both tied ops consume the same storage.
+// RUN: with-low-asm pass low-cse
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @consumed_results_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %lhs_copy = test.add.i32 %lhs, %rhs
+  %rhs_copy = test.add.i32 %lhs, %rhs
+  %lhs_tied = test.tied.any %lhs_copy
+  %rhs_tied = test.tied.any %rhs_copy
+  return %lhs_tied, %rhs_tied
+}
+
+// ====
+
+// Descriptor-backed reads are CSE candidates until a descriptor-backed write
+// invalidates the read scope.
+// RUN: with-low-asm pass low-cse
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_reads_cse(%ptr: reg<test.ptr>) -> (reg<test.i32 x4>) asm {
+  %a = test.load.v4i32 %ptr
+  %b = test.load.v4i32 %ptr
+  %out = test.add.v4i32 %a, %b
+  return %out
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_reads_cse(%ptr: reg<test.ptr>) -> (reg<test.i32 x4>) asm {
+  %a = test.load.v4i32 %ptr
+  %out = test.add.v4i32 %a, %a
+  return %out
+}
+
+// ====
+
+// Ordered descriptor reads represent distinct runtime observations and cannot
+// CSE even without an intervening write.
+// RUN: with-low-asm pass low-cse
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_ordered_reads_do_not_cse(%ptr: reg<test.ptr>) -> (reg<test.i32 x4>, reg<test.i32 x4>) asm {
+  %lhs = test.load.ordered.v4i32 %ptr
+  %rhs = test.load.ordered.v4i32 %ptr
+  return %lhs, %rhs
+}
+
+// ====
+
+// Descriptor-backed writes are barriers for descriptor-backed reads.
+// RUN: with-low-asm pass low-cse
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_write_blocks_read_cse(%ptr: reg<test.ptr>, %value: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  %before = test.load.v4i32 %ptr
+  test.store.v4i32 %ptr, %value
+  %after = test.load.v4i32 %ptr
+  %out = test.add.v4i32 %before, %after
+  return %out
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_write_blocks_read_cse(%ptr: reg<test.ptr>, %value: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  %before = test.load.v4i32 %ptr
+  test.store.v4i32 %ptr, %value
+  %after = test.load.v4i32 %ptr
+  %out = test.add.v4i32 %before, %after
+  return %out
+}
+
+// ====
+
+// low.const materializes a descriptor-backed semantic constant. Identical
+// constants may share one virtual register when no consumer ties or consumes
+// the result identity.
+// RUN: with-low-asm pass low-cse
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @low_constants_cse() -> (reg<test.i32>, reg<test.i32>) asm {
+  %lhs = test.const.i32 7
+  %rhs = test.const.i32 7
+  %sum = test.add.i32 %lhs, %rhs
+  return %sum, %rhs
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @low_constants_cse() -> (reg<test.i32>, reg<test.i32>) asm {
+  %lhs = test.const.i32 7
+  %sum = test.add.i32 %lhs, %lhs
+  return %sum, %lhs
+}
+
+// ====
+
+// Entry-block constants dominate CFG successor blocks and can be reused there.
+// Constants in sibling blocks remain independent because neither sibling
+// dominates the other.
+// RUN: with-low-asm pass low-cse
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @low_entry_constants_cse_into_cfg(%cond: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %entry_zero = test.const.i32 0
+  low.cond_br %cond, ^then, ^else : reg<test.i32>
+^then:
+  %then_zero = test.const.i32 0
+  %then_sum = test.add.i32 %entry_zero, %then_zero
+  low.br ^join(%then_sum: reg<test.i32>, %then_zero: reg<test.i32>)
+^else:
+  %else_seven = test.const.i32 7
+  low.br ^join(%entry_zero: reg<test.i32>, %else_seven: reg<test.i32>)
+^join(%lhs: reg<test.i32>, %rhs: reg<test.i32>):
+  %result = test.add.i32 %lhs, %rhs
+  return %result, %rhs
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @low_entry_constants_cse_into_cfg(%cond: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %entry_zero = test.const.i32 0
+  low.cond_br %cond, ^then, ^else : reg<test.i32>
+^then:
+  %then_sum = test.add.i32 %entry_zero, %entry_zero
+  low.br ^join(%then_sum: reg<test.i32>, %entry_zero: reg<test.i32>)
+^else:
+  %else_seven = test.const.i32 7
+  low.br ^join(%entry_zero: reg<test.i32>, %else_seven: reg<test.i32>)
+^join(%lhs: reg<test.i32>, %rhs: reg<test.i32>):
+  %result = test.add.i32 %lhs, %rhs
+  return %result, %rhs
+}
+
+// ====
+
+// Pure low ops in a non-entry CFG block can be reused by blocks dominated by
+// that block. This is ordinary CFG dominance CSE, not speculation.
+// RUN: with-low-asm pass low-cse
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @low_dominator_block_ops_cse_into_cfg(%cond: reg<test.i32>, %row: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  low.cond_br %cond, ^then, ^exit : reg<test.i32>
+^then:
+  %row_bytes = test.add.i32 %row, %row
+  low.br ^join(%row_bytes: reg<test.i32>)
+^exit:
+  return %row, %row
+^join(%value: reg<test.i32>):
+  %row_bytes_again = test.add.i32 %row, %row
+  %sum = test.add.i32 %value, %row_bytes_again
+  return %sum, %row_bytes_again
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @low_dominator_block_ops_cse_into_cfg(%cond: reg<test.i32>, %row: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  low.cond_br %cond, ^then, ^exit : reg<test.i32>
+^then:
+  %row_bytes = test.add.i32 %row, %row
+  low.br ^join(%row_bytes: reg<test.i32>)
+^exit:
+  return %row, %row
+^join(%value: reg<test.i32>):
+  %sum = test.add.i32 %value, %row_bytes
+  return %sum, %row_bytes
+}
+
+// ====
+
+// low.copy and low.concat are virtual-register identity constructors. They may
+// look structurally identical, but each instance names distinct storage and
+// must not be folded by value CSE.
+// RUN: with-low-asm pass low-cse
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @low_structural_identities_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32 x2>, reg<test.i32 x2>) asm {
+  %copy0 = copy %lhs : reg<test.i32> -> reg<test.i32>
+  %copy1 = copy %lhs : reg<test.i32> -> reg<test.i32>
+  %pair0 = concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %pair1 = concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  return %copy0, %copy1, %pair0, %pair1
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @low_structural_identities_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32 x2>, reg<test.i32 x2>) asm {
+  %copy0 = copy %lhs : reg<test.i32> -> reg<test.i32>
+  %copy1 = copy %lhs : reg<test.i32> -> reg<test.i32>
+  %pair0 = concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %pair1 = concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  return %copy0, %copy1, %pair0, %pair1
+}
+
+// ====
+
+// Implicit reads share only within the same architectural state epoch.
+// RUN: with-low-asm pass low-cse
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @state_epochs(%value: reg<test.i32>) -> (reg<test.i32 x4>) asm {
+  %before = test.state.read.i32
+  %same = test.state.read.i32
+  %write = test.state.add.i32 %value, %value
+  %after = test.state.read.i32
+  %again = test.state.read.i32
+  %result = concat(%before, %same, %after, %again) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  return %result
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @state_epochs(%value: reg<test.i32>) -> (reg<test.i32 x4>) asm {
+  %before = test.state.read.i32
+  %write = test.state.add.i32 %value, %value
+  %after = test.state.read.i32
+  %result = concat(%before, %before, %after, %after) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  return %result
+}
+
+// ====
+
+// Writing one class leaves independent state reusable, but not a multi-state read.
+// RUN: with-low-asm pass low-cse
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @independent_state_epochs(%state: reg<test.schedule_state>) -> (reg<test.i32 x4>) asm {
+  %before = test.state.read.i32
+  %both_before = test.state.read.both.i32
+  %write = test.state.add.schedule_state %state, %state
+  %after = test.state.read.i32
+  %both_after = test.state.read.both.i32
+  %result = concat(%before, %both_before, %after, %both_after) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  return %result
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @independent_state_epochs(%state: reg<test.schedule_state>) -> (reg<test.i32 x4>) asm {
+  %before = test.state.read.i32
+  %both_before = test.state.read.both.i32
+  %write = test.state.add.schedule_state %state, %state
+  %both_after = test.state.read.both.i32
+  %result = concat(%before, %both_before, %before, %both_after) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  return %result
+}
+
+// ====
+
+// Loop headers can observe a prior iteration's state despite structural dominance.
+// RUN: with-low-asm pass low-cse
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @loop_state_epochs(%again: reg<test.i32>) -> (reg<test.i32>) asm {
+  %before = test.state.read.i32
+  low.br ^loop
+^loop:
+  %inside = test.state.read.i32
+  %same = test.state.read.i32
+  %write = test.state.add.i32 %again, %again
+  low.cond_br %again, ^loop, ^exit : reg<test.i32>
+^exit:
+  %sum = test.add.i32 %inside, %same
+  return %sum
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @loop_state_epochs(%again: reg<test.i32>) -> (reg<test.i32>) asm {
+  %before = test.state.read.i32
+  low.br ^loop
+^loop:
+  %inside = test.state.read.i32
+  %write = test.state.add.i32 %again, %again
+  low.cond_br %again, ^loop, ^exit : reg<test.i32>
+^exit:
+  %sum = test.add.i32 %inside, %inside
+  return %sum
+}
+
+// ====
+
+// Source cleanup leaves Low definitions intact in a mixed module.
+// RUN: with-low-asm pass cse
+test.target<low_core> @target
+
+func.def @source(%value: i32) -> (i32, i32) {
+  %first = test.addi %value, %value : i32
+  %second = test.addi %value, %value : i32
+  func.return %first, %second : i32, i32
+}
+
+low.func.def target<test.low.core>(@target) @machine(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %first = test.add.i32 %value, %value
+  %second = test.add.i32 %value, %value
+  return %first, %second
+}
+
+// ----
+test.target<low_core> @target
+
+func.def @source(%value: i32) -> (i32, i32) {
+  %first = test.addi %value, %value : i32
+  func.return %first, %first : i32, i32
+}
+
+low.func.def target<test.low.core>(@target) @machine(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %first = test.add.i32 %value, %value
+  %second = test.add.i32 %value, %value
+  return %first, %second
+}
+
+// ====
+
+// Machine cleanup leaves source definitions intact in a mixed module.
+// RUN: with-low-asm pass low-cse
+test.target<low_core> @target
+
+func.def @source(%value: i32) -> (i32, i32) {
+  %first = test.addi %value, %value : i32
+  %second = test.addi %value, %value : i32
+  func.return %first, %second : i32, i32
+}
+
+low.func.def target<test.low.core>(@target) @machine(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %first = test.add.i32 %value, %value
+  %second = test.add.i32 %value, %value
+  return %first, %second
+}
+
+// ----
+test.target<low_core> @target
+
+func.def @source(%value: i32) -> (i32, i32) {
+  %first = test.addi %value, %value : i32
+  %second = test.addi %value, %value : i32
+  func.return %first, %second : i32, i32
+}
+
+low.func.def target<test.low.core>(@target) @machine(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %first = test.add.i32 %value, %value
+  return %first, %first
+}

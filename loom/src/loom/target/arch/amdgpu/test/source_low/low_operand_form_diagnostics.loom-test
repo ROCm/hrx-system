@@ -1,4 +1,4 @@
-// RUN: pass low-select-operand-forms{diagnostics=operand-forms},cse,low-dce
+// RUN: pass low-select-operand-forms{diagnostics=operand-forms},low-cse,low-dce
 
 amdgpu.target<gfx1100> @target
 

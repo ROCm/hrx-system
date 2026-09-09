@@ -8,7 +8,7 @@
 //
 // Low DCE removes ordinary trivially dead ops and descriptor packets whose
 // target descriptor explicitly marks them dead-removable. Generic redundancy
-// elimination remains the normal cse pass; this pass only owns the low-specific
+// elimination belongs to low-cse; this pass only owns the low-specific
 // deadness query needed to interpret descriptor-backed packets.
 
 #ifndef LOOM_CODEGEN_LOW_TRANSFORMS_DCE_H_

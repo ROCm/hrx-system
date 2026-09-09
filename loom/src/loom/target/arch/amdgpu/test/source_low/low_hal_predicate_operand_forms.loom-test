@@ -1,4 +1,4 @@
-// RUN: pass amdgpu-materialize-hal-kernel-abi,low-select-operand-forms,cse,low-dce
+// RUN: pass amdgpu-materialize-hal-kernel-abi,low-select-operand-forms,low-cse,low-dce
 
 amdgpu.target<gfx1100> @target
 

@@ -91,7 +91,7 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
       cfg-simplify
       low-decompose-cfg-tuples
       canonicalize
-      cse
+      low-cse
       low-dce
     }
   }
@@ -196,7 +196,7 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
       cfg-simplify
       low-decompose-cfg-tuples
       canonicalize
-      cse
+      low-cse
       low-dce
     }
   }
@@ -340,7 +340,7 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
       cfg-simplify
       low-decompose-cfg-tuples
       canonicalize
-      cse
+      low-cse
       low-dce
     }
   }
@@ -351,7 +351,7 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
         amdgpu-materialize-hal-kernel-abi
       }
       canonicalize
-      cse
+      low-cse
       low-select-operand-forms
       low-dce
     }

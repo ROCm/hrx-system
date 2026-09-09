@@ -368,7 +368,10 @@ static iree_status_t loom_target_pipeline_build_low_cleanup_body(
   }
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
       builder, IREE_SV("low-decompose-cfg-tuples")));
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup(builder));
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_run(builder, IREE_SV("canonicalize")));
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_run(builder, IREE_SV("low-cse")));
   return loom_target_pipeline_build_run(builder, IREE_SV("low-dce"));
 }
 

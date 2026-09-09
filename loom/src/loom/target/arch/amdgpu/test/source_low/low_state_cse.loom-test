@@ -1,4 +1,4 @@
-// RUN: pass cse
+// RUN: pass low-cse
 
 amdgpu.target<gfx942> @target
 

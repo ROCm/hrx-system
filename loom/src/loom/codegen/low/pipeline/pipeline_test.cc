@@ -78,8 +78,8 @@ TEST_F(LowPipelineTest, BuildsPacketizationPreparationFragment) {
 
   loom_op_t* cse_run = canonicalize_run->next_op;
   ASSERT_TRUE(loom_pass_run_isa(cse_run));
-  EXPECT_TRUE(
-      iree_string_view_equal(RunKey(module.get(), cse_run), IREE_SV("cse")));
+  EXPECT_TRUE(iree_string_view_equal(RunKey(module.get(), cse_run),
+                                     IREE_SV("low-cse")));
 
   loom_op_t* operand_forms_run = cse_run->next_op;
   ASSERT_TRUE(loom_pass_run_isa(operand_forms_run));

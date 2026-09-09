@@ -75,18 +75,12 @@ loom_cc_library(
     srcs = ["cse.c"],
     hdrs = ["cse.h"],
     deps = [
-        "//loom/src/loom/analysis:ownership",
-        "//loom/src/loom/codegen/low:function",
-        "//loom/src/loom/codegen/low:target_binding",
-        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        ":expression_scope",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/pass:types",
-        "//loom/src/loom/target:function_version",
-        "//loom/src/loom/target:pass_environment",
-        "//loom/src/loom/util:cfg_graph",
-        "//loom/src/loom/util:dominance",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -103,6 +97,20 @@ loom_cc_test(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "expression_scope",
+    srcs = ["expression_scope.c"],
+    hdrs = ["expression_scope.h"],
+    deps = [
+        "//loom/src/loom/analysis:ownership",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/util:dominance",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 

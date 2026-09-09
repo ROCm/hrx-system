@@ -1,0 +1,135 @@
+// Identical constants share SSA identity across separate copy consumers.
+// RUN: with-low-asm pass low-cse
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @disjoint() -> (reg<test.i32>, reg<test.i32>) asm {
+  %first = test.const.explicit32 7
+  %left = copy %first : reg<test.explicit32> -> reg<test.i32>
+  %second = test.const.explicit32 7
+  %right = copy %second : reg<test.explicit32> -> reg<test.i32>
+  return %left, %right
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @disjoint() -> (reg<test.i32>, reg<test.i32>) asm {
+  %first = test.const.explicit32 7
+  %left = copy %first : reg<test.explicit32> -> reg<test.i32>
+  %right = copy %first : reg<test.explicit32> -> reg<test.i32>
+  return %left, %right
+}
+
+// ====
+
+// Equal constants used together share one definition.
+// RUN: with-low-asm pass low-cse
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @overlapping() -> (reg<test.explicit32>, reg<test.explicit32>) asm {
+  %first = test.const.explicit32 7
+  %second = test.const.explicit32 7
+  return %first, %second
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @overlapping() -> (reg<test.explicit32>, reg<test.explicit32>) asm {
+  %first = test.const.explicit32 7
+  return %first, %first
+}
+
+// ====
+
+// Commoning preserves all uses across an overlapping chain.
+// RUN: with-low-asm pass low-cse
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @overlap_chain() -> (reg<test.i32>, reg<test.explicit32>, reg<test.explicit32>) asm {
+  %first = test.const.explicit32 7
+  %second = test.const.explicit32 7
+  %left = copy %first : reg<test.explicit32> -> reg<test.i32>
+  %third = test.const.explicit32 7
+  return %left, %second, %third
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @overlap_chain() -> (reg<test.i32>, reg<test.explicit32>, reg<test.explicit32>) asm {
+  %first = test.const.explicit32 7
+  %left = copy %first : reg<test.explicit32> -> reg<test.i32>
+  return %left, %first, %first
+}
+
+// ====
+
+// A disjoint prefix and later overlapping uses share the original constant.
+// RUN: with-low-asm pass low-cse
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @disjoint_prefix() -> (reg<test.i32>, reg<test.explicit32>, reg<test.explicit32>) asm {
+  %first = test.const.explicit32 7
+  %left = copy %first : reg<test.explicit32> -> reg<test.i32>
+  %second = test.const.explicit32 7
+  %third = test.const.explicit32 7
+  return %left, %second, %third
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @disjoint_prefix() -> (reg<test.i32>, reg<test.explicit32>, reg<test.explicit32>) asm {
+  %first = test.const.explicit32 7
+  %left = copy %first : reg<test.explicit32> -> reg<test.i32>
+  return %left, %first, %first
+}
+
+// ====
+
+// A dominating constant remains available across a straight-line CFG edge.
+// RUN: with-low-asm pass low-cse
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @cross_block() -> (reg<test.explicit32>, reg<test.explicit32>) asm {
+  %first = test.const.explicit32 7
+  low.br ^next
+^next:
+  %second = test.const.explicit32 7
+  return %first, %second
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @cross_block() -> (reg<test.explicit32>, reg<test.explicit32>) asm {
+  %first = test.const.explicit32 7
+  low.br ^next
+^next:
+  return %first, %first
+}
+
+// ====
+
+// Virtual constants use the same structural identity across distinct consumers.
+// RUN: with-low-asm pass low-cse
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @virtual(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %first = test.const.i32 7
+  %left = test.add.i32 %lhs, %first
+  %second = test.const.i32 7
+  %right = test.add.i32 %rhs, %second
+  return %left, %right
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @virtual(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %first = test.const.i32 7
+  %left = test.add.i32 %lhs, %first
+  %right = test.add.i32 %rhs, %first
+  return %left, %right
+}

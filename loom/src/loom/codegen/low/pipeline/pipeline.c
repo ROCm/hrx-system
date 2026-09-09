@@ -13,7 +13,7 @@ iree_status_t loom_low_pipeline_build_packetization_preparation(
       loom_pass_ir_build_run(builder, 0, IREE_SV("canonicalize"),
                              loom_named_attr_slice_empty(), &run_op));
   IREE_RETURN_IF_ERROR(loom_pass_ir_build_run(
-      builder, 0, IREE_SV("cse"), loom_named_attr_slice_empty(), &run_op));
+      builder, 0, IREE_SV("low-cse"), loom_named_attr_slice_empty(), &run_op));
   IREE_RETURN_IF_ERROR(
       loom_pass_ir_build_run(builder, 0, IREE_SV("low-select-operand-forms"),
                              loom_named_attr_slice_empty(), &run_op));
