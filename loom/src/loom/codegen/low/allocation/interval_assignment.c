@@ -288,8 +288,7 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
 
     bool saw_active_conflict = false;
     for (iree_host_size_t i = 0; i < state->active.count; ++i) {
-      const uint32_t assignment_index =
-          state->active.assignment_indices[state->active.start + i];
+      const uint32_t assignment_index = state->active.assignment_indices[i];
       IREE_ASSERT_LT(assignment_index, state->result.assignment_count);
       const loom_low_allocation_assignment_t* assignment =
           &state->result.assignments[assignment_index];
@@ -439,7 +438,7 @@ loom_low_allocation_interval_assignment_spill_active_assignment(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "allocation spill slots exceed uint32_t range");
   }
-  loom_low_allocation_active_set_remove_assignment_units(
+  loom_low_allocation_active_set_remove(
       &state->active, state->result.assignments, state->result.assignment_count,
       assignment_index);
   assignment->location_kind = LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT;
@@ -564,10 +563,14 @@ static iree_status_t loom_low_allocation_interval_assignment_append_assignment(
           state->context->storage_leases,
           state->context->target->descriptor_set, state->context->liveness,
           &stored_assignment, assignment_index, value_ordinal));
-  loom_low_allocation_active_set_insert(
-      &state->active, state->context->target->descriptor_set,
-      state->result.assignments, state->result.assignment_count,
-      assignment_index);
+  // Spill slots are unique, monotonically assigned storage. They cannot
+  // conflict with register candidates and need no active-set membership.
+  if (loom_low_allocation_assignment_is_register_like(&stored_assignment)) {
+    loom_low_allocation_active_set_insert(
+        &state->active, state->context->target->descriptor_set,
+        state->result.assignments, state->result.assignment_count,
+        assignment_index);
+  }
   if (out_assignment_index) {
     *out_assignment_index = assignment_index;
   }
@@ -881,8 +884,21 @@ loom_low_allocation_interval_assignment_initialize_result_storage(
         loom_low_allocation_active_unit_capacity(
             state->context->target->descriptor_set, order->intervals,
             order->interval_count);
+    uint32_t last_program_point = 0;
+    for (iree_host_size_t i = 0; i < order->interval_count; ++i) {
+      last_program_point =
+          iree_max(last_program_point,
+                   loom_low_allocation_live_range_interval_storage_end_point(
+                       order->intervals[i]));
+    }
+    for (iree_host_size_t i = 0; i < state->context->unit_liveness->point_count;
+         ++i) {
+      last_program_point = iree_max(
+          last_program_point, state->context->unit_liveness->end_points[i]);
+    }
     IREE_RETURN_IF_ERROR(loom_low_allocation_active_set_initialize(
-        state->context->liveness, order->interval_count, active_unit_capacity,
+        state->context->liveness, order->interval_count,
+        (iree_host_size_t)last_program_point + 1, active_unit_capacity,
         state->scratch_arena, &state->active));
   }
 

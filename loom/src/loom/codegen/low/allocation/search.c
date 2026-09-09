@@ -855,8 +855,7 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
   if (scan_all || scan_unindexed) {
     for (iree_host_size_t i = 0; i < context->active_set->count; ++i) {
       const uint32_t assignment_index =
-          context->active_set
-              ->assignment_indices[context->active_set->start + i];
+          context->active_set->assignment_indices[i];
       IREE_ASSERT_LT(assignment_index,
                      context->assignment_map->assignment_count);
       if (scan_unindexed &&

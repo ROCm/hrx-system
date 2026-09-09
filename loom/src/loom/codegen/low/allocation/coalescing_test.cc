@@ -262,8 +262,8 @@ TEST_F(LowAllocationCoalescingTest, AssignsTiedIntervalToSourceLocation) {
 
   loom_low_allocation_active_set_t active_set = {};
   IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
-      &kEmptyLiveness, /*assignment_capacity=*/2, /*unit_capacity=*/8, &arena_,
-      &active_set));
+      &kEmptyLiveness, /*assignment_capacity=*/2,
+      /*program_point_count=*/11, /*unit_capacity=*/8, &arena_, &active_set));
   loom_low_allocation_active_set_insert(&active_set, &descriptor_set,
                                         assignments, /*assignment_count=*/1,
                                         /*assignment_index=*/0);
