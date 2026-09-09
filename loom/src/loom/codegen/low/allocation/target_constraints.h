@@ -119,6 +119,10 @@ typedef struct loom_low_allocation_class_capacity_t {
   bool is_bounded;
 } loom_low_allocation_class_capacity_t;
 
+// Immutable interval-tree entry owned by the resolved target constraints.
+typedef struct loom_low_allocation_fixed_interval_t
+    loom_low_allocation_fixed_interval_t;
+
 // Resolved target-owned constraints used while assigning concrete storage.
 typedef struct loom_low_allocation_target_constraints_t {
   // Module containing the allocated low function.
@@ -143,6 +147,15 @@ typedef struct loom_low_allocation_target_constraints_t {
   iree_host_size_t preassigned_fixed_value_count;
   // Total number of entries in |fixed_values|.
   iree_host_size_t fixed_value_count;
+  // Invocation-local indexes over the immutable resolved fixed assignments.
+  struct {
+    // Acquired domain retained by the owning allocation frame.
+    const loom_local_value_domain_t* value_domain;
+    // One-based fixed-value indices by local ordinal; zero denotes no entry.
+    uint32_t* indices_by_ordinal;
+    // Balanced interval tree in start-point order, with implicit child ranges.
+    loom_low_allocation_fixed_interval_t* intervals;
+  } fixed_index;
   // Resolved whole-function target-owned location ranges.
   loom_low_allocation_resolved_reserved_range_t* reserved_ranges;
   // Number of entries in |reserved_ranges|.

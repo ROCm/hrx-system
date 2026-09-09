@@ -371,6 +371,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:adaptive_sort",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -531,6 +532,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:adaptive_sort",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -542,6 +544,7 @@ loom_cc_test(
     deps = [
         ":target_constraints",
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/target:facts_builder",
         "//loom/src/loom/target/test:descriptors",
