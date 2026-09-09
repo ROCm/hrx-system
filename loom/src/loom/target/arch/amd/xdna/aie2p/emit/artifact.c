@@ -8,7 +8,7 @@
 
 #include "iree/io/vec_stream.h"
 #include "loom/codegen/low/diagnostics.h"
-#include "loom/codegen/low/frame.h"
+#include "loom/codegen/low/function_requirements.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
@@ -135,7 +135,7 @@ static iree_status_t loom_aie2p_xdna_resolve_device_profile(
   return iree_ok_status();
 }
 
-static iree_status_t loom_aie2p_xdna_prepare_source_leaves(
+static iree_status_t loom_aie2p_xdna_collect_source_leaves(
     const loom_aie2p_xdna_artifact_request_t* request,
     loom_aie2p_array_leaf_t** out_leaves, iree_host_size_t* out_leaf_count) {
   *out_leaves = NULL;
@@ -166,34 +166,13 @@ static iree_status_t loom_aie2p_xdna_prepare_source_leaves(
                                       IREE_SV("amd.xdna.aie2p.core"))) {
       continue;
     }
-    // Prepare shared bodies once before resident cloning. Only their final
-    // resident instances need bundle planning and native object emission.
-    loom_target_compile_report_t leaf_report;
-    loom_target_compile_report_t* leaf_report_ptr = NULL;
-    if (request->compile_report != NULL) {
-      loom_target_compile_report_initialize(&leaf_report,
-                                            request->compile_report->allocator);
-      leaf_report.requested_detail_flags =
-          request->compile_report->requested_detail_flags;
-      leaf_report_ptr = &leaf_report;
-    }
-    const loom_aie2p_leaf_compile_options_t options = {
-        .descriptor_registry = request->low_descriptor_registry,
-        .function_target_facts =
-            loom_aie2p_xdna_function_target_facts(request, function_op),
-        .diagnostic_emitter = request->diagnostic_emitter,
-        .compile_report = leaf_report_ptr,
-    };
-    loom_low_emission_frame_t frame = {0};
-    iree_status_t status = loom_aie2p_leaf_build_frame(
-        request->module, function_op, &options, request->scratch_arena, &frame);
-    if (leaf_report_ptr != NULL) {
-      status = iree_status_join(status,
-                                loom_target_compile_report_record_entry_report(
-                                    request->compile_report, leaf_report_ptr));
-      loom_target_compile_report_deinitialize(leaf_report_ptr);
-    }
-    IREE_RETURN_IF_ERROR(status);
+    // Array planning consumes declared interfaces and storage. Physical
+    // lifetimes belong to the resident program after imports are bound and
+    // protocol operations are inserted, not to this shared source body.
+    loom_low_function_requirements_t requirements = {0};
+    IREE_RETURN_IF_ERROR(loom_low_function_requirements_build(
+        request->module, loom_low_func_def_body(function_op),
+        request->scratch_arena, &requirements));
     leaves[leaf_index] = (loom_aie2p_array_leaf_t){
         .entry =
             {
@@ -203,7 +182,7 @@ static iree_status_t loom_aie2p_xdna_prepare_source_leaves(
                                        request->module->symbols.entries),
             },
     };
-    leaves[leaf_index].requirements = frame.schedule.requirements;
+    leaves[leaf_index].requirements = requirements;
     ++leaf_index;
   }
   *out_leaves = leaves;
@@ -358,7 +337,7 @@ iree_status_t loom_aie2p_xdna_artifact_emit(
 
   loom_aie2p_array_leaf_t* source_leaves = NULL;
   iree_host_size_t source_leaf_count = 0;
-  IREE_RETURN_IF_ERROR(loom_aie2p_xdna_prepare_source_leaves(
+  IREE_RETURN_IF_ERROR(loom_aie2p_xdna_collect_source_leaves(
       request, &source_leaves, &source_leaf_count));
 
   loom_aie2p_array_plan_t* array_plans = NULL;

@@ -13,7 +13,6 @@
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/descriptors.h"
-#include "loom/codegen/low/frame.h"
 #include "loom/ir/ir.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_object.h"
 #include "loom/target/reporting/report.h"
@@ -33,18 +32,9 @@ typedef struct loom_aie2p_leaf_compile_options_t {
   loom_target_compile_report_t* compile_report;
 } loom_aie2p_leaf_compile_options_t;
 
-// Builds a spill-free emission frame, retaining allocation repair in source IR.
-// Shared worker bodies can be prepared once before resident cloning so their
-// instances do not independently repeat the same rematerialization. The frame
-// belongs to |arena|; discarding it does not discard the source IR edits. No
-// native code is emitted, and any report records planning without code bytes.
-iree_status_t loom_aie2p_leaf_build_frame(
-    loom_module_t* module, loom_op_t* function_op,
-    const loom_aie2p_leaf_compile_options_t* options,
-    iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame);
-
 // Compiles one verified amd.xdna.aie2p.core Low function into an arena-owned
-// detached native contribution and exact realization facts.
+// detached native contribution and exact realization facts. Temporary planning
+// storage is returned to the arena's block pool before this function returns.
 iree_status_t loom_aie2p_leaf_compile(
     loom_module_t* module, loom_op_t* function_op,
     const loom_aie2p_leaf_compile_options_t* options,

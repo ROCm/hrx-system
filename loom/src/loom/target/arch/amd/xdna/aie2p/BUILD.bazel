@@ -599,7 +599,7 @@ loom_cc_library(
         ":xdna_product",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
-        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:function_requirements",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:op_defs",

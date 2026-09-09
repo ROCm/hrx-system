@@ -11,7 +11,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/emit/bundle_plan.h"
 #include "loom/target/reporting/low.h"
 
-iree_status_t loom_aie2p_leaf_build_frame(
+static iree_status_t loom_aie2p_leaf_build_frame(
     loom_module_t* module, loom_op_t* function_op,
     const loom_aie2p_leaf_compile_options_t* options,
     iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame) {
@@ -70,12 +70,16 @@ iree_status_t loom_aie2p_leaf_compile(
     iree_arena_allocator_t* arena,
     loom_aie2p_leaf_contribution_t* out_contribution) {
   *out_contribution = (loom_aie2p_leaf_contribution_t){0};
+  // Only the detached contribution outlives this compilation. Schedule,
+  // allocation, and packet-planning storage is reusable by the next worker.
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(arena->block_pool, &scratch_arena);
   loom_low_emission_frame_t frame = {0};
-  iree_status_t status =
-      loom_aie2p_leaf_build_frame(module, function_op, options, arena, &frame);
+  iree_status_t status = loom_aie2p_leaf_build_frame(
+      module, function_op, options, &scratch_arena, &frame);
   loom_aie2p_bundle_plan_t bundle_plan = {0};
   if (iree_status_is_ok(status)) {
-    status = loom_aie2p_bundle_plan_build(&frame, arena, &bundle_plan);
+    status = loom_aie2p_bundle_plan_build(&frame, &scratch_arena, &bundle_plan);
   }
   if (iree_status_is_ok(status)) {
     status = loom_aie2p_leaf_object_emit(&bundle_plan, arena, out_contribution);
@@ -96,5 +100,6 @@ iree_status_t loom_aie2p_leaf_compile(
     loom_target_compile_report_record_emission_breakdown(
         options->compile_report, &emission_breakdown);
   }
+  iree_arena_deinitialize(&scratch_arena);
   return status;
 }
