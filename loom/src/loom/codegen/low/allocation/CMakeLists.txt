@@ -156,6 +156,7 @@ loom_cc_library(
     ::assignment
     ::assignment_map
     ::live_range
+    ::scalar_packing
     ::spill_plan
     ::spill_traffic
     ::storage
@@ -482,6 +483,35 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    scalar_packing
+  HDRS
+    "scalar_packing.h"
+  SRCS
+    "scalar_packing.c"
+  DEPS
+    ::interval_order
+    ::live_range
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::liveness
+    loom::codegen::low::descriptors
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    scalar_packing_test
+  SRCS
+    "scalar_packing_test.cc"
+  DEPS
+    ::scalar_packing
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
     loop_edge_relocation
   HDRS
     "loop_edge_relocation.h"
@@ -523,6 +553,7 @@ loom_cc_library(
     ::coalescing
     ::interval_order
     ::live_range
+    ::scalar_packing
     ::search
     ::spill_plan
     ::spill_traffic

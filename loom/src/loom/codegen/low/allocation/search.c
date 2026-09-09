@@ -415,11 +415,6 @@ static void loom_low_allocation_search_find_location_for_release_policy(
   }
 }
 
-static bool loom_low_allocation_search_intervals_overlap(
-    const loom_liveness_interval_t* lhs, const loom_liveness_interval_t* rhs) {
-  return lhs->start_point < rhs->end_point && rhs->start_point < lhs->end_point;
-}
-
 // Returns the exclusive upper frontier where scalar values should pack from
 // high to low. A bounded class only benefits from separating scalars from the
 // interiors of wider values when its liveness lower bound still fits the
@@ -428,35 +423,20 @@ static uint32_t loom_low_allocation_search_scalar_packing_frontier(
     const loom_low_allocation_search_context_t* context,
     const loom_liveness_interval_t* interval,
     const loom_low_allocation_class_capacity_t* capacity) {
-  if (context->strategy !=
-          LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR ||
-      interval->unit_count != 1 || !capacity->is_bounded) {
+  if (interval->unit_count != 1 || !capacity->is_bounded ||
+      context->scalar_packing.overlapping_intervals.bit_count == 0) {
     return 0;
   }
-  uint32_t frontier = 0;
-  for (iree_host_size_t i = 0; i < context->liveness->pressure_summary_count;
-       ++i) {
-    const loom_liveness_pressure_summary_t* summary =
-        &context->liveness->pressure_summaries[i];
-    if (loom_liveness_value_class_equal(summary->value_class,
-                                        interval->value_class)) {
-      frontier = summary->peak_live_units;
-      break;
-    }
-  }
-  if (frontier == 0 || frontier > capacity->max_units) {
+  const iree_host_size_t interval_index =
+      interval - context->liveness->intervals;
+  if (!iree_bitmap_test(context->scalar_packing.overlapping_intervals,
+                        interval_index)) {
     return 0;
   }
-  for (iree_host_size_t i = 0; i < context->liveness->interval_count; ++i) {
-    const loom_liveness_interval_t* other = &context->liveness->intervals[i];
-    if (other->unit_count > 1 &&
-        loom_liveness_value_class_equal(other->value_class,
-                                        interval->value_class) &&
-        loom_low_allocation_search_intervals_overlap(interval, other)) {
-      return frontier;
-    }
-  }
-  return 0;
+  const uint32_t frontier =
+      context->scalar_packing
+          .frontiers_by_reg_class[capacity->descriptor_reg_class_id];
+  return frontier <= capacity->max_units ? frontier : 0;
 }
 
 static void

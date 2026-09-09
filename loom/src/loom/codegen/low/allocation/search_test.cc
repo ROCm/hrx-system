@@ -520,7 +520,7 @@ TEST_F(LowAllocationSearchTest, ExplicitCandidateOrderAndSoftPreference) {
 }
 
 TEST_F(LowAllocationSearchTest,
-       FragmentationRepairPacksScalarBelowWidePressureFrontier) {
+       PlannedScalarPackingPreservesWidePressureFrontier) {
   loom_module_t* module = AllocateModule();
   const loom_value_id_t scalar_value = DefineValue(module);
   const loom_value_id_t wide_value = DefineValue(module);
@@ -611,13 +611,17 @@ TEST_F(LowAllocationSearchTest,
   context.active_set = &active_set;
   context.storage_leases = &storage_leases;
 
-  // Ordinary first-fit retains the lowest legal location.
+  // Without packing preferences the lowest legal location is authoritative.
   uint32_t location_base = UINT32_MAX;
   EXPECT_TRUE(loom_low_allocation_search_find_free_location(
       &context, &intervals[0], Capacity(/*max_units=*/8), &location_base));
   EXPECT_EQ(location_base, 0u);
 
-  context.strategy = LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR;
+  loom_low_allocation_interval_order_t order = {};
+  IREE_ASSERT_OK(
+      loom_low_allocation_interval_order_build(&liveness, &arena_, &order));
+  IREE_ASSERT_OK(loom_low_allocation_scalar_packing_build(
+      &descriptor_set, &liveness, &order, &arena_, &context.scalar_packing));
   location_base = UINT32_MAX;
   EXPECT_TRUE(loom_low_allocation_search_find_free_location(
       &context, &intervals[0], Capacity(/*max_units=*/8), &location_base));

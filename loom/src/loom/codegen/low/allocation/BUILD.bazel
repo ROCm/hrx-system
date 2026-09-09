@@ -142,6 +142,7 @@ loom_cc_library(
         ":assignment",
         ":assignment_map",
         ":live_range",
+        ":scalar_packing",
         ":spill_plan",
         ":spill_traffic",
         ":storage",
@@ -428,6 +429,31 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "scalar_packing",
+    srcs = ["scalar_packing.c"],
+    hdrs = ["scalar_packing.h"],
+    deps = [
+        ":interval_order",
+        ":live_range",
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "scalar_packing_test",
+    srcs = ["scalar_packing_test.cc"],
+    deps = [
+        ":scalar_packing",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "loop_edge_relocation",
     srcs = ["loop_edge_relocation.c"],
     hdrs = ["loop_edge_relocation.h"],
@@ -464,6 +490,7 @@ loom_cc_library(
         ":coalescing",
         ":interval_order",
         ":live_range",
+        ":scalar_packing",
         ":search",
         ":spill_plan",
         ":spill_traffic",

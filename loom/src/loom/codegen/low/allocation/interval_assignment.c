@@ -12,6 +12,7 @@
 #include "loom/codegen/low/allocation/coalescing.h"
 #include "loom/codegen/low/allocation/interval_order.h"
 #include "loom/codegen/low/allocation/live_range.h"
+#include "loom/codegen/low/allocation/scalar_packing.h"
 #include "loom/codegen/low/allocation/search.h"
 #include "loom/codegen/low/allocation/spill_plan.h"
 #include "loom/codegen/low/allocation/spill_traffic.h"
@@ -31,6 +32,8 @@ typedef struct loom_low_allocation_interval_assignment_state_t {
   const loom_low_allocation_interval_assignment_context_t* context;
   // Owns working indexes and decisions that do not escape assignment.
   iree_arena_allocator_t* scratch_arena;
+  // Scalar/aggregate lifetime preferences shared by every location query.
+  loom_low_allocation_scalar_packing_t scalar_packing;
   // Reusable consumed-value query for the allocated function body.
   loom_consumption_region_query_t function_consumption_query;
   // Reusable consumed-value query for the current nested relation region.
@@ -103,7 +106,7 @@ loom_low_allocation_interval_assignment_search_context(
       .storage_leases = state->context->storage_leases,
       .required_register_values = state->context->required_register_values,
       .spill_traffic_by_value_ordinal = state->spill_traffic_by_value_ordinal,
-      .strategy = state->context->search_strategy,
+      .scalar_packing = state->scalar_packing,
   };
 }
 
@@ -938,6 +941,12 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
           state, &order));
   if (order.interval_count == 0) {
     return iree_ok_status();
+  }
+  if (context->search_strategy ==
+      LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR) {
+    IREE_RETURN_IF_ERROR(loom_low_allocation_scalar_packing_build(
+        context->target->descriptor_set, context->liveness, &order,
+        state->scratch_arena, &state->scalar_packing));
   }
 
   for (iree_host_size_t i = 0; i < order.interval_count; ++i) {

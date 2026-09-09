@@ -15,7 +15,6 @@
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/assignment_map.h"
-#include "loom/codegen/low/allocation/search.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/table.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
@@ -31,6 +30,15 @@ extern "C" {
 
 struct loom_target_residency_model_t;
 struct loom_low_schedule_table_t;
+
+// Concrete-location ordering used for one whole-function assignment attempt.
+typedef enum loom_low_allocation_search_strategy_e {
+  // Searches legal locations from low to high.
+  LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FIRST_FIT = 0,
+  // Separates overlapping scalar and wide intervals across the feasible
+  // liveness-pressure frontier to repair first-fit fragmentation.
+  LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR = 1,
+} loom_low_allocation_search_strategy_t;
 
 typedef struct loom_low_allocation_interval_assignment_context_t {
   // Module containing the allocated low function.
