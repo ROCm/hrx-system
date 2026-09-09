@@ -17,6 +17,32 @@ package(
 )
 
 loom_cc_library(
+    name = "active_capacity",
+    srcs = ["active_capacity.c"],
+    hdrs = ["active_capacity.h"],
+    deps = [
+        ":live_range",
+        ":unit_liveness",
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:placement",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "active_capacity_test",
+    srcs = ["active_capacity_test.cc"],
+    deps = [
+        ":active_capacity",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "active_set",
     srcs = ["active_set.c"],
     hdrs = ["active_set.h"],
@@ -431,8 +457,8 @@ loom_cc_library(
     srcs = ["interval_assignment.c"],
     hdrs = ["interval_assignment.h"],
     deps = [
+        ":active_capacity",
         ":active_set",
-        ":active_unit",
         ":assignment",
         ":assignment_map",
         ":coalescing",

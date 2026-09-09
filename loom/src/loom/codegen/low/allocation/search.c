@@ -847,22 +847,12 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
             /*ignored_value_ids=*/NULL,
             /*ignored_value_count=*/0, assignment_indices,
             conflict_assignment_capacity, &conflict_assignment_count));
-  }
-  const bool scan_all = !active_unit_index_enabled;
-  const bool scan_unindexed =
-      !scan_all && loom_low_allocation_active_unit_index_unindexed_count(
-                       &context->active_set->units) != 0;
-  if (scan_all || scan_unindexed) {
+  } else {
     for (iree_host_size_t i = 0; i < context->active_set->count; ++i) {
       const uint32_t assignment_index =
           context->active_set->assignment_indices[i];
       IREE_ASSERT_LT(assignment_index,
                      context->assignment_map->assignment_count);
-      if (scan_unindexed &&
-          loom_low_allocation_active_unit_index_contains_assignment(
-              &context->active_set->units, assignment_index)) {
-        continue;
-      }
       const loom_low_allocation_assignment_t* assignment =
           &context->assignment_map->assignments[assignment_index];
       if (!loom_low_allocation_active_assignment_conflicts(

@@ -7,8 +7,8 @@
 #include "loom/codegen/low/allocation/interval_assignment.h"
 
 #include "loom/analysis/consumption.h"
+#include "loom/codegen/low/allocation/active_capacity.h"
 #include "loom/codegen/low/allocation/active_set.h"
-#include "loom/codegen/low/allocation/active_unit.h"
 #include "loom/codegen/low/allocation/coalescing.h"
 #include "loom/codegen/low/allocation/interval_order.h"
 #include "loom/codegen/low/allocation/live_range.h"
@@ -880,26 +880,15 @@ loom_low_allocation_interval_assignment_initialize_result_storage(
         iree_arena_allocate_array(state->context->arena, order->interval_count,
                                   sizeof(*state->result.assignments),
                                   (void**)&state->result.assignments));
-    const iree_host_size_t active_unit_capacity =
-        loom_low_allocation_active_unit_capacity(
-            state->context->target->descriptor_set, order->intervals,
-            order->interval_count);
-    uint32_t last_program_point = 0;
-    for (iree_host_size_t i = 0; i < order->interval_count; ++i) {
-      last_program_point =
-          iree_max(last_program_point,
-                   loom_low_allocation_live_range_interval_storage_end_point(
-                       order->intervals[i]));
-    }
-    for (iree_host_size_t i = 0; i < state->context->unit_liveness->point_count;
-         ++i) {
-      last_program_point = iree_max(
-          last_program_point, state->context->unit_liveness->end_points[i]);
-    }
+    loom_low_allocation_active_capacity_t capacity = {0};
+    IREE_RETURN_IF_ERROR(loom_low_allocation_active_capacity_calculate(
+        state->context->target->descriptor_set, state->context->liveness,
+        state->context->unit_liveness, state->context->placement,
+        state->scratch_arena->block_pool, &capacity));
     IREE_RETURN_IF_ERROR(loom_low_allocation_active_set_initialize(
         state->context->liveness, order->interval_count,
-        (iree_host_size_t)last_program_point + 1, active_unit_capacity,
-        state->scratch_arena, &state->active));
+        capacity.program_point_count, capacity.unit_count, state->scratch_arena,
+        &state->active));
   }
 
   state->result.assignment_map = (loom_low_allocation_assignment_map_t){

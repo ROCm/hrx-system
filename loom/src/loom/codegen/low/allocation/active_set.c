@@ -28,19 +28,12 @@ static bool loom_low_allocation_active_set_scan_conflicts(
     const loom_low_allocation_assignment_t* assignments,
     iree_host_size_t assignment_count,
     const loom_low_allocation_assignment_t* candidate,
-    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
-    bool unindexed_only) {
+    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count) {
   for (iree_host_size_t i = 0; i < active_set->count; ++i) {
     const uint32_t assignment_index = active_set->assignment_indices[i];
     IREE_ASSERT_LT(assignment_index, assignment_count);
     const loom_low_allocation_assignment_t* existing =
         &assignments[assignment_index];
-    const bool assignment_is_indexed =
-        loom_low_allocation_active_unit_index_contains_assignment(
-            &active_set->units, assignment_index);
-    if (unindexed_only && assignment_is_indexed) {
-      continue;
-    }
     if (loom_low_allocation_active_assignment_conflicts(
             descriptor_set, active_set->liveness, unit_liveness, existing,
             candidate, ignored_value_ids, ignored_value_count)) {
@@ -116,24 +109,14 @@ bool loom_low_allocation_active_set_conflicts(
   IREE_ASSERT_ARGUMENT(assignments);
   IREE_ASSERT_ARGUMENT(candidate);
   if (loom_low_allocation_active_unit_index_is_enabled(&active_set->units)) {
-    if (loom_low_allocation_active_unit_index_conflicts(
-            &active_set->units, descriptor_set, active_set->liveness,
-            unit_liveness, assignments, assignment_count, candidate,
-            ignored_value_ids, ignored_value_count)) {
-      return true;
-    }
-    return loom_low_allocation_active_unit_index_unindexed_count(
-               &active_set->units) != 0 &&
-           loom_low_allocation_active_set_scan_conflicts(
-               active_set, descriptor_set, unit_liveness, assignments,
-               assignment_count, candidate, ignored_value_ids,
-               ignored_value_count,
-               /*unindexed_only=*/true);
+    return loom_low_allocation_active_unit_index_conflicts(
+        &active_set->units, descriptor_set, active_set->liveness, unit_liveness,
+        assignments, assignment_count, candidate, ignored_value_ids,
+        ignored_value_count);
   }
   return loom_low_allocation_active_set_scan_conflicts(
       active_set, descriptor_set, unit_liveness, assignments, assignment_count,
-      candidate, ignored_value_ids, ignored_value_count,
-      /*unindexed_only=*/false);
+      candidate, ignored_value_ids, ignored_value_count);
 }
 
 void loom_low_allocation_active_set_remove(

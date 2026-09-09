@@ -28,39 +28,30 @@ typedef struct loom_low_allocation_active_unit_index_t {
   uint32_t* bucket_heads;
   // Power-of-two number of entries in |bucket_heads|.
   uint32_t bucket_count;
-  // Unit entries stored for active and previously-active assignments.
+  // Reusable unit entries for active assignments.
   loom_low_allocation_active_unit_entry_t* entries;
-  // Maximum number of entries that can be appended to |entries|.
-  iree_host_size_t entry_capacity;
-  // Number of initialized entries in |entries|.
-  iree_host_size_t entry_count;
-  // First entry for each assignment index. Unindexed assignments contain
+  // Fixed entry capacity, shared by active units and the free list.
+  uint32_t entry_capacity;
+  // High-water count of initialized entries in |entries|.
+  uint32_t entry_count;
+  // Number of entries currently indexed in unit buckets.
+  uint32_t active_entry_count;
+  // First reusable entry, or UINT32_MAX when the free list is empty.
+  uint32_t free_entry_head;
+  // First entry for each assignment index. Inactive assignments contain
   // UINT32_MAX.
   uint32_t* entry_starts_by_assignment_index;
-  // Number of indexed atomic-unit entries for each assignment. Unindexed
-  // assignments contain zero.
-  uint32_t* entry_counts_by_assignment_index;
   // Number of assignment-index entries tracked by this index.
   iree_host_size_t assignment_capacity;
-  // Currently active register-like assignments not represented in |entries|.
-  iree_host_size_t unindexed_count;
   // Per-assignment query generations used to skip duplicate range hits.
   uint32_t* seen_generations_by_assignment_index;
   // Current non-zero query generation.
   uint32_t seen_generation;
 } loom_low_allocation_active_unit_index_t;
 
-// Bounds indexed storage for allocatable intervals in the resolved descriptor
-// set. Each logical unit is charged only for its own class's physical candidate
-// width, including aggregate views composed from those candidates. Returns
-// IREE_HOST_SIZE_MAX when the bound exceeds the host representation.
-iree_host_size_t loom_low_allocation_active_unit_capacity(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_liveness_interval_t* const* intervals,
-    iree_host_size_t interval_count);
-
 // Initializes |out_index| for up to |assignment_capacity| assignments and
-// |unit_capacity| indexed units. Tiny or oversized indexes are left disabled.
+// |unit_capacity| simultaneously indexed units. Tiny indexes are left disabled
+// for bounded linear scans. Unrepresentable capacities fail initialization.
 iree_status_t loom_low_allocation_active_unit_index_initialize(
     iree_host_size_t assignment_capacity, iree_host_size_t unit_capacity,
     iree_arena_allocator_t* arena,
@@ -68,16 +59,6 @@ iree_status_t loom_low_allocation_active_unit_index_initialize(
 
 // Returns true when |index| has allocated storage and can answer hash queries.
 bool loom_low_allocation_active_unit_index_is_enabled(
-    const loom_low_allocation_active_unit_index_t* index);
-
-// Returns true when |assignment_index| is currently represented in |index|.
-bool loom_low_allocation_active_unit_index_contains_assignment(
-    const loom_low_allocation_active_unit_index_t* index,
-    uint32_t assignment_index);
-
-// Returns the number of currently active register-like assignments that could
-// not be represented in |index|.
-iree_host_size_t loom_low_allocation_active_unit_index_unindexed_count(
     const loom_low_allocation_active_unit_index_t* index);
 
 // Returns true when |candidate| conflicts with an indexed active assignment.
@@ -108,15 +89,15 @@ iree_status_t loom_low_allocation_active_unit_index_collect_conflicts(
     uint32_t* assignment_indices, uint16_t assignment_capacity,
     uint16_t* inout_assignment_count);
 
-// Inserts |assignment_index| into |index| when its units can be represented.
-// Register-like assignments that cannot fit are counted as unindexed.
+// Inserts a register-like |assignment_index| into an enabled |index|. The
+// caller's active-unit bound must cover all simultaneously inserted units.
 void loom_low_allocation_active_unit_index_insert_assignment(
     loom_low_allocation_active_unit_index_t* index,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_assignment_t* assignments,
     iree_host_size_t assignment_count, uint32_t assignment_index);
 
-// Removes |assignment_index| from |index| or from the unindexed active count.
+// Removes a previously inserted |assignment_index| from an enabled |index|.
 void loom_low_allocation_active_unit_index_remove_assignment(
     loom_low_allocation_active_unit_index_t* index,
     const loom_low_allocation_assignment_t* assignments,

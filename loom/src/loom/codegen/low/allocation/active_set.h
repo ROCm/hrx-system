@@ -32,8 +32,7 @@ typedef struct loom_low_allocation_active_entry_t {
 //
 // Insertion and removal take constant time. A monotone sweep visits each
 // calendar point and expiration entry once, independent of lifetime nesting.
-// Register conflicts use the unit index; unindexed storage scans only active
-// assignments, not expired or spilled history.
+// Register conflicts use the unit index; tiny active sets use bounded scans.
 typedef struct loom_low_allocation_active_set_t {
   // Sparse liveness segments used to reject false linear-interval conflicts.
   const loom_liveness_analysis_t* liveness;

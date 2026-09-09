@@ -11,6 +11,36 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    active_capacity
+  HDRS
+    "active_capacity.h"
+  SRCS
+    "active_capacity.c"
+  DEPS
+    ::live_range
+    ::unit_liveness
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::liveness
+    loom::codegen::low::descriptors
+    loom::codegen::low::placement
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    active_capacity_test
+  SRCS
+    "active_capacity_test.cc"
+  DEPS
+    ::active_capacity
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
     active_set
   HDRS
     "active_set.h"
@@ -486,8 +516,8 @@ loom_cc_library(
   SRCS
     "interval_assignment.c"
   DEPS
+    ::active_capacity
     ::active_set
-    ::active_unit
     ::assignment
     ::assignment_map
     ::coalescing
