@@ -115,20 +115,45 @@ static bool loom_expression_equal(const loom_module_t* module,
 // Dominance scopes
 //===----------------------------------------------------------------------===//
 
+enum loom_expression_scope_flag_bits_e {
+  // Incoming control flow can observe a different mutable state.
+  LOOM_EXPRESSION_SCOPE_FLAG_STATE_BARRIER = 1u << 0,
+  // The enclosing operation hides values from outside this region.
+  LOOM_EXPRESSION_SCOPE_FLAG_ISOLATED = 1u << 1,
+  // This scope's index checkpoints have been initialized.
+  LOOM_EXPRESSION_SCOPE_FLAG_ENTERED = 1u << 2,
+};
+typedef uint8_t loom_expression_scope_flags_t;
+
 struct loom_expression_scope_t {
-  // Fixed-capacity structural identity table for this block.
-  loom_expression_entry_t* entries;
-  // Power-of-two table capacity, with at least twice the block's op count.
-  iree_host_size_t capacity;
-  // Dominating block or non-isolated enclosing block.
+  // Dominating block or enclosing block, including across isolation boundaries.
   loom_expression_scope_t* parent;
   // Next pending block in the region traversal.
   loom_expression_scope_t* previous_frame;
   // Next operation in this block; saved before the caller can erase an op.
   loom_op_t* next_op;
-  // Whether incoming control flow can observe a different mutable state.
-  bool blocks_stateful_parent_lookup;
+  // First index entry owned by this block; also its rollback checkpoint.
+  uint32_t entry_start;
+  // Earliest visible entry after the nearest isolation boundary.
+  uint32_t visible_start;
+  // Earliest visible entry after isolation or a mutable-state CFG boundary.
+  uint32_t stateful_start;
+  // Scope availability and traversal state.
+  loom_expression_scope_flags_t flags;
 };
+
+// Entries double as the rollback log. Leaving a scope unlinks each insertion
+// once and reuses its storage; there is no separate undo allocation.
+typedef struct loom_expression_binding_t {
+  // Available producer and caller metadata.
+  loom_expression_entry_t entry;
+  // Previous visible binding for this key, or UINT32_MAX for a newly added key.
+  uint32_t previous;
+  // Linear-probe distance from entry.hash to the slot restored on scope exit.
+  // At most one slot per definition is occupied, bounding this by the u32
+  // definition count even when the half-full index has more than 2^32 slots.
+  uint32_t probe_distance;
+} loom_expression_binding_t;
 
 struct loom_expression_walk_t {
   // Module containing all visited operations.
@@ -139,6 +164,16 @@ struct loom_expression_walk_t {
   loom_dominance_info_t dominance;
   // Top pending block frame.
   loom_expression_scope_t* top;
+  // Innermost active dominance scope, including completed dominating blocks.
+  loom_expression_scope_t* active_scope;
+  // Fixed-capacity entries shared by all dominance scopes in this walk.
+  loom_expression_binding_t* bindings;
+  // Latest binding index per structural key, or UINT32_MAX for an empty slot.
+  uint32_t* bucket_heads;
+  // Power-of-two slot count minus one; the table stays at most half full.
+  iree_host_size_t bucket_mask;
+  // Number of active bindings; scopes retain checkpoints into this array.
+  uint32_t binding_count;
   // Definition frontier: counts value-producing ops, not result-less barriers.
   // Each counted op owns a distinct value-table entry, so the u32 value-ID
   // domain bounds this counter even when arbitrarily many writes intervene.
@@ -146,16 +181,17 @@ struct loom_expression_walk_t {
 };
 
 static iree_host_size_t loom_expression_scope_slot(
-    const loom_expression_scope_t* scope, const loom_module_t* module,
-    const loom_op_t* op, uint32_t hash) {
-  const iree_host_size_t mask = scope->capacity - 1;
-  iree_host_size_t slot = hash & mask;
-  while (scope->entries[slot].op) {
-    const loom_expression_entry_t* entry = &scope->entries[slot];
-    if (entry->hash == hash && loom_expression_equal(module, entry->op, op)) {
+    const loom_expression_cursor_t* cursor, uint32_t hash) {
+  const loom_expression_walk_t* walk = cursor->walk;
+  iree_host_size_t slot = hash & walk->bucket_mask;
+  while (walk->bucket_heads[slot] != UINT32_MAX) {
+    const loom_expression_entry_t* entry =
+        &walk->bindings[walk->bucket_heads[slot]].entry;
+    if (entry->hash == hash &&
+        loom_expression_equal(cursor->module, entry->op, cursor->op)) {
       break;
     }
-    slot = (slot + 1) & mask;
+    slot = (slot + 1) & walk->bucket_mask;
   }
   return slot;
 }
@@ -163,25 +199,75 @@ static iree_host_size_t loom_expression_scope_slot(
 loom_expression_entry_t* loom_expression_scope_find(
     const loom_expression_cursor_t* cursor, uint32_t hash,
     loom_expression_lookup_flags_t flags) {
-  for (loom_expression_scope_t* scope = cursor->scope; scope;
-       scope = scope->parent) {
-    const iree_host_size_t slot =
-        loom_expression_scope_slot(scope, cursor->module, cursor->op, hash);
-    loom_expression_entry_t* entry = &scope->entries[slot];
-    if (entry->op) return entry;
-    if (iree_any_bit_set(flags, LOOM_EXPRESSION_LOOKUP_FLAG_STATEFUL) &&
-        scope->blocks_stateful_parent_lookup) {
-      break;
-    }
-  }
-  return NULL;
+  loom_expression_walk_t* walk = cursor->walk;
+  const loom_expression_scope_t* scope = cursor->scope;
+  const uint32_t first =
+      iree_any_bit_set(flags, LOOM_EXPRESSION_LOOKUP_FLAG_STATEFUL)
+          ? scope->stateful_start
+          : scope->visible_start;
+  const uint32_t index =
+      walk->bucket_heads[loom_expression_scope_slot(cursor, hash)];
+  return index != UINT32_MAX && index >= first ? &walk->bindings[index].entry
+                                               : NULL;
 }
 
 void loom_expression_scope_insert(const loom_expression_cursor_t* cursor,
                                   loom_expression_entry_t entry) {
-  const iree_host_size_t slot = loom_expression_scope_slot(
-      cursor->scope, cursor->module, entry.op, entry.hash);
-  cursor->scope->entries[slot] = entry;
+  loom_expression_walk_t* walk = cursor->walk;
+  const iree_host_size_t slot = loom_expression_scope_slot(cursor, entry.hash);
+  const uint32_t previous = walk->bucket_heads[slot];
+  if (previous != UINT32_MAX && previous >= cursor->scope->entry_start) {
+    walk->bindings[previous].entry = entry;
+    return;
+  }
+  const uint32_t index = walk->binding_count++;
+  walk->bindings[index] = (loom_expression_binding_t){
+      .entry = entry,
+      .previous = previous,
+      .probe_distance = (uint32_t)((slot - entry.hash) & walk->bucket_mask),
+  };
+  walk->bucket_heads[slot] = index;
+}
+
+// The pending traversal includes completed dominators and suspended enclosing
+// blocks. Restore only the scopes being exited, then establish the new scope's
+// constant-time visibility cutoffs. Every insertion is unlinked at most once.
+// Strict LIFO removal preserves open-addressing probe chains without
+// tombstones: keys displaced by a new key are removed before that key's slot is
+// cleared.
+static void loom_expression_walk_activate(loom_expression_walk_t* walk,
+                                          loom_expression_scope_t* scope) {
+  if (walk->active_scope == scope) return;
+  const bool entered =
+      iree_any_bit_set(scope->flags, LOOM_EXPRESSION_SCOPE_FLAG_ENTERED);
+  loom_expression_scope_t* parent = entered ? scope : scope->parent;
+  while (walk->active_scope != parent) {
+    const uint32_t checkpoint = walk->active_scope->entry_start;
+    while (walk->binding_count > checkpoint) {
+      const loom_expression_binding_t* binding =
+          &walk->bindings[--walk->binding_count];
+      const iree_host_size_t slot =
+          ((iree_host_size_t)binding->entry.hash + binding->probe_distance) &
+          walk->bucket_mask;
+      walk->bucket_heads[slot] = binding->previous;
+    }
+    walk->active_scope = walk->active_scope->parent;
+  }
+  if (entered) return;
+  scope->entry_start = walk->binding_count;
+  scope->visible_start =
+      !parent || iree_any_bit_set(scope->flags,
+                                  LOOM_EXPRESSION_SCOPE_FLAG_ISOLATED)
+          ? scope->entry_start
+          : parent->visible_start;
+  scope->stateful_start =
+      !parent || iree_any_bit_set(scope->flags,
+                                  LOOM_EXPRESSION_SCOPE_FLAG_ISOLATED |
+                                      LOOM_EXPRESSION_SCOPE_FLAG_STATE_BARRIER)
+          ? scope->entry_start
+          : parent->stateful_start;
+  scope->flags |= LOOM_EXPRESSION_SCOPE_FLAG_ENTERED;
+  walk->active_scope = scope;
 }
 
 static bool loom_expression_cfg_state_barrier(
@@ -201,7 +287,7 @@ static bool loom_expression_cfg_state_barrier(
 
 static iree_status_t loom_expression_walk_push_region(
     loom_expression_walk_t* walk, loom_region_t* region,
-    loom_expression_scope_t* parent) {
+    loom_expression_scope_t* parent, loom_expression_scope_flags_t flags) {
   if (!region || region->block_count == 0) return iree_ok_status();
   loom_expression_scope_t* scopes = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -212,23 +298,20 @@ static iree_status_t loom_expression_walk_push_region(
     loom_block_t* block = loom_region_block(region, i);
     loom_expression_scope_t* scope = &scopes[i];
     *scope = (loom_expression_scope_t){
-        .capacity = iree_host_size_next_power_of_two(
-            iree_max((iree_host_size_t)block->op_count * 2, 16)),
         .parent = parent,
         .next_op = block->first_op,
+        .flags = flags,
     };
     if (traversal.graph) {
       const uint16_t immediate_dominator = traversal.immediate_dominators[i];
       if (immediate_dominator != UINT16_MAX && immediate_dominator != i) {
         scope->parent = &scopes[immediate_dominator];
+        scope->flags &= ~LOOM_EXPRESSION_SCOPE_FLAG_ISOLATED;
       }
-      scope->blocks_stateful_parent_lookup =
-          loom_expression_cfg_state_barrier(&traversal, i);
+      if (loom_expression_cfg_state_barrier(&traversal, i)) {
+        scope->flags |= LOOM_EXPRESSION_SCOPE_FLAG_STATE_BARRIER;
+      }
     }
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(walk->arena, scope->capacity,
-                                                   sizeof(*scope->entries),
-                                                   (void**)&scope->entries));
-    memset(scope->entries, 0, scope->capacity * sizeof(*scope->entries));
   }
   for (int32_t i = (int32_t)region->block_count - 1; i >= 0; --i) {
     const uint16_t block_index =
@@ -239,6 +322,67 @@ static iree_status_t loom_expression_walk_push_region(
   return iree_ok_status();
 }
 
+static loom_op_t* loom_expression_first_region_op(const loom_region_t* region,
+                                                  uint16_t block_start) {
+  if (!region) return NULL;
+  for (uint16_t i = block_start; i < region->block_count; ++i) {
+    loom_op_t* op = loom_region_const_block(region, i)->first_op;
+    if (op) return op;
+  }
+  return NULL;
+}
+
+static loom_op_t* loom_expression_first_nested_op(const loom_op_t* op,
+                                                  uint8_t region_start) {
+  for (uint8_t i = region_start; i < op->region_count; ++i) {
+    loom_op_t* nested =
+        loom_expression_first_region_op(loom_op_regions(op)[i], 0);
+    if (nested) return nested;
+  }
+  return NULL;
+}
+
+// Counts the index's maximum insertions before any rewriting. Parent pointers
+// provide the return path without recursive calls or an allocated stack. Each
+// operation and block is visited once; finding the next sibling region scans
+// only its owner's bounded region operands, never an enclosing subtree.
+static uint32_t loom_expression_definition_count(const loom_region_t* root) {
+  uint32_t count = 0;
+  loom_op_t* op = loom_expression_first_region_op(root, 0);
+  while (op) {
+    count += op->result_count != 0;
+    loom_op_t* nested = loom_expression_first_nested_op(op, 0);
+    if (nested) {
+      op = nested;
+      continue;
+    }
+    while (op) {
+      if (op->next_op) {
+        op = op->next_op;
+        break;
+      }
+      const loom_region_t* region = op->parent_block->parent_region;
+      loom_op_t* next = loom_expression_first_region_op(
+          region, op->parent_block->region_index + 1);
+      if (next) {
+        op = next;
+        break;
+      }
+      if (region == root) return count;
+      const loom_op_t* parent = op->parent_op;
+      for (uint8_t i = 0; i < parent->region_count; ++i) {
+        if (loom_op_regions(parent)[i] == region) {
+          next = loom_expression_first_nested_op(parent, i + 1);
+          break;
+        }
+      }
+      op = next ? next : (loom_op_t*)parent;
+      if (next) break;
+    }
+  }
+  return count;
+}
+
 iree_status_t loom_expression_walk_initialize(
     loom_module_t* module, loom_region_t* region, iree_arena_allocator_t* arena,
     loom_expression_walk_t** out_walk) {
@@ -247,9 +391,20 @@ iree_status_t loom_expression_walk_initialize(
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(arena, sizeof(*walk), (void**)&walk));
   *walk = (loom_expression_walk_t){.module = module, .arena = arena};
+  const uint32_t definition_count = loom_expression_definition_count(region);
+  const iree_host_size_t bucket_count = iree_host_size_next_power_of_two(
+      iree_max((iree_host_size_t)definition_count * 2, 1));
+  walk->bucket_mask = bucket_count - 1;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, definition_count,
+                                                 sizeof(*walk->bindings),
+                                                 (void**)&walk->bindings));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, bucket_count,
+                                                 sizeof(*walk->bucket_heads),
+                                                 (void**)&walk->bucket_heads));
+  memset(walk->bucket_heads, 0xFF, bucket_count * sizeof(*walk->bucket_heads));
   IREE_RETURN_IF_ERROR(loom_dominance_info_initialize_region(
       module, region, arena, &walk->dominance));
-  IREE_RETURN_IF_ERROR(loom_expression_walk_push_region(walk, region, NULL));
+  IREE_RETURN_IF_ERROR(loom_expression_walk_push_region(walk, region, NULL, 0));
   *out_walk = walk;
   return iree_ok_status();
 }
@@ -259,6 +414,7 @@ iree_status_t loom_expression_walk_next(loom_expression_walk_t* walk,
   *out_cursor = (loom_expression_cursor_t){0};
   while (walk->top) {
     loom_expression_scope_t* scope = walk->top;
+    loom_expression_walk_activate(walk, scope);
     loom_op_t* op = scope->next_op;
     if (!op) {
       walk->top = scope->previous_frame;
@@ -269,6 +425,7 @@ iree_status_t loom_expression_walk_next(loom_expression_walk_t* walk,
     const loom_trait_flags_t traits =
         loom_op_effective_traits(walk->module, op);
     *out_cursor = (loom_expression_cursor_t){
+        .walk = walk,
         .module = walk->module,
         .scope = scope,
         .op = op,
@@ -278,8 +435,9 @@ iree_status_t loom_expression_walk_next(loom_expression_walk_t* walk,
     walk->epoch += op->result_count != 0;
     for (int32_t r = (int32_t)op->region_count - 1; r >= 0; --r) {
       IREE_RETURN_IF_ERROR(loom_expression_walk_push_region(
-          walk, loom_op_regions(op)[r],
-          loom_traits_is_isolated(traits) ? NULL : scope));
+          walk, loom_op_regions(op)[r], scope,
+          loom_traits_is_isolated(traits) ? LOOM_EXPRESSION_SCOPE_FLAG_ISOLATED
+                                          : 0));
     }
     return iree_ok_status();
   }

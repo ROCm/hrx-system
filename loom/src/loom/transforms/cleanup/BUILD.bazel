@@ -114,6 +114,20 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "expression_scope_test",
+    srcs = ["expression_scope_test.cc"],
+    deps = [
+        ":expression_scope",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "dce",
     srcs = ["dce.c"],

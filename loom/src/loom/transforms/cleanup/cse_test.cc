@@ -1201,15 +1201,12 @@ TEST_F(CSETest, SameResultTypesCSEd) {
 }
 
 //===----------------------------------------------------------------------===//
-// Tombstone probe chain integrity
+// Independent expression availability
 //===----------------------------------------------------------------------===//
 
-TEST_F(CSETest, PureOpFoundThroughTombstone) {
-  // Regression test for the original probe chain corruption bug.
-  // Scenario: a non-PURE read and a PURE constant are inserted into
-  // the same table. A write fires, tombstoning the read. A duplicate
-  // of the constant must still be found and CSE'd — the tombstone
-  // must not terminate the probe chain.
+TEST_F(CSETest, PureOpSurvivesExpiredMemoryRead) {
+  // A write expires a memory read without affecting an independent pure
+  // constant. Both kinds of expression share the same structural index.
   loom_type_t pool_type = loom_type_pool(loom_dim_pack_static(4096));
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
 
@@ -1222,13 +1219,12 @@ TEST_F(CSETest, PureOpFoundThroughTombstone) {
   IREE_ASSERT_OK(loom_test_read_resource_build(
       &builder_, pool_id, i32, LOOM_LOCATION_UNKNOWN, &read_op));
 
-  // Insert a constant (PURE) that may share probe chain slots with
-  // the read due to hash collision.
+  // Insert a constant (PURE) alongside the read.
   loom_op_t* const1 = NULL;
   IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(77), i32,
                                           LOOM_LOCATION_UNKNOWN, &const1));
 
-  // Write — tombstones the read, must not break the constant's probe chain.
+  // The write changes memory state but not the constant's availability.
   loom_op_t* write_data = NULL;
   IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(0), i32,
                                           LOOM_LOCATION_UNKNOWN, &write_data));
@@ -1237,8 +1233,7 @@ TEST_F(CSETest, PureOpFoundThroughTombstone) {
       &builder_, pool_id, loom_test_constant_result(write_data),
       LOOM_LOCATION_UNKNOWN, &write_op));
 
-  // Duplicate of the PURE constant — should be CSE'd even after
-  // the write barrier tombstoned the read entry.
+  // The duplicate PURE constant remains reusable after the write.
   loom_op_t* const2 = NULL;
   IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(77), i32,
                                           LOOM_LOCATION_UNKNOWN, &const2));
@@ -1253,8 +1248,7 @@ TEST_F(CSETest, PureOpFoundThroughTombstone) {
   int before = count_live_ops();
   IREE_ASSERT_OK(run_cse());
   int after = count_live_ops();
-  // const2 should be eliminated: PURE ops survive write barriers,
-  // and tombstones must not break probe chain lookups.
+  // Only const2 is eliminated; the expired read remains observable.
   EXPECT_EQ(before - after, 1);
 }
 
@@ -1299,7 +1293,7 @@ TEST_F(CSETest, CSEAcrossMultipleNestingLevels) {
   // outer_const + map1 + map2 + map3 + inner_const = 5 total.
   EXPECT_EQ(count_all_live_ops(body_), 5);
   IREE_ASSERT_OK(run_cse());
-  // inner_const eliminated via scope chain walk.
+  // The outer constant is visible through all three nested scopes.
   EXPECT_EQ(count_all_live_ops(body_), 4);
 }
 

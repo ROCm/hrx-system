@@ -116,6 +116,21 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    expression_scope_test
+  SRCS
+    "expression_scope_test.cc"
+  DEPS
+    ::expression_scope
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::cfg
+    loom::ops::test
+)
+
 loom_cc_library(
   NAME
     dce

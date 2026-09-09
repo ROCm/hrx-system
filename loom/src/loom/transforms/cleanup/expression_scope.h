@@ -24,9 +24,10 @@ extern "C" {
 typedef struct loom_expression_walk_t loom_expression_walk_t;
 typedef struct loom_expression_scope_t loom_expression_scope_t;
 
-// One previously visited expression. The scope owns the record.
+// One available expression. The walk owns the record; leaving its dominance
+// scope invalidates borrowed pointers to it.
 typedef struct loom_expression_entry_t {
-  // Live producer; NULL marks an unused table slot.
+  // Live producer.
   loom_op_t* op;
   // Structural identity hash, including result types and attribute contents.
   uint32_t hash;
@@ -35,6 +36,8 @@ typedef struct loom_expression_entry_t {
 } loom_expression_entry_t;
 
 typedef struct loom_expression_cursor_t {
+  // Walk owning the shared availability index.
+  loom_expression_walk_t* walk;
   // Module containing the traversal.
   loom_module_t* module;
   // Dominance scope containing the operation.
@@ -61,10 +64,11 @@ typedef struct loom_expression_barriers_t {
   uint32_t memory;
 } loom_expression_barriers_t;
 
-// Initializes a root-region walk and its dominance scopes in |arena|. Scope
-// tables and traversal links are allocated once per block; there is no growing
-// traversal array. Erasing regionless operations preserves the walk. Changing
-// block structure, successor edges or nested regions invalidates it.
+// Initializes a root-region walk and its dominance scopes in |arena|. A
+// stackless inventory bounds the shared index by value-producing operations.
+// Index storage is allocated once; traversal links are allocated once per
+// block. Erasing regionless operations preserves the walk. Changing block
+// structure, successor edges or nested regions invalidates it.
 iree_status_t loom_expression_walk_initialize(
     loom_module_t* module, loom_region_t* region, iree_arena_allocator_t* arena,
     loom_expression_walk_t** out_walk);
@@ -79,13 +83,16 @@ iree_status_t loom_expression_walk_next(loom_expression_walk_t* walk,
 // Hashes regionless operations by their exact SSA structural identity.
 uint32_t loom_expression_hash(const loom_module_t* module, const loom_op_t* op);
 
-// Finds the nearest structurally equivalent producer visible from |cursor|.
-// Callers compare its epoch with their own invalidation epochs.
+// Finds the nearest structurally equivalent producer visible from |cursor| in
+// the shared index, without walking enclosing scopes. Callers compare its
+// epoch with their own invalidation epochs.
 loom_expression_entry_t* loom_expression_scope_find(
     const loom_expression_cursor_t* cursor, uint32_t hash,
     loom_expression_lookup_flags_t flags);
 
-// Inserts in the current block, replacing an older equivalent entry there.
+// Inserts at most one entry for the current value-producing operation,
+// replacing an older equivalent entry in this block. Scope exit restores the
+// prior bindings; no table clearing or allocation occurs during lookup/update.
 void loom_expression_scope_insert(const loom_expression_cursor_t* cursor,
                                   loom_expression_entry_t entry);
 
