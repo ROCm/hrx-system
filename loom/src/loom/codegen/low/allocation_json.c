@@ -230,6 +230,9 @@ static iree_status_t loom_low_allocation_json_write_value(
     const loom_low_allocation_table_t* table,
     const loom_text_print_options_t* type_print_options,
     loom_value_id_t value_id, loom_output_stream_t* stream) {
+  if (value_id == LOOM_VALUE_ID_INVALID) {
+    return loom_output_stream_write_cstring(stream, "null");
+  }
   const loom_module_t* module = table->module;
   loom_json_object_writer_t object;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
@@ -661,10 +664,14 @@ static iree_status_t loom_low_allocation_json_write_failure(
       loom_json_object_begin_field(&failure_object, IREE_SV("class")));
   IREE_RETURN_IF_ERROR(loom_low_allocation_json_write_value_class(
       table, failure->value_class, stream));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-      &failure_object, IREE_SV("start_point"), failure->start_point));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-      &failure_object, IREE_SV("end_point"), failure->end_point));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&failure_object, IREE_SV("start_point")));
+  IREE_RETURN_IF_ERROR(
+      loom_low_allocation_json_write_u32_or_null(failure->start_point, stream));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&failure_object, IREE_SV("end_point")));
+  IREE_RETURN_IF_ERROR(
+      loom_low_allocation_json_write_u32_or_null(failure->end_point, stream));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
       &failure_object, IREE_SV("required_units"),
       failure->required_unit_count));

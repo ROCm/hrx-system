@@ -301,6 +301,10 @@ static iree_status_t loom_wasm_module_build_function_allocation(
     status = loom_low_allocate_function(&model, &allocation_options, arena,
                                         out_allocation);
   }
+  if (iree_status_is_ok(status)) {
+    status = loom_low_allocation_diagnostics_emit(out_allocation, /*flags=*/0,
+                                                  diagnostic_emitter);
+  }
   loom_low_function_model_deinitialize(&model);
   if (iree_status_is_ok(status) &&
       out_allocation->target.descriptor_set !=

@@ -1236,10 +1236,6 @@ static iree_status_t loom_low_schedule_handle_dependency_cycle(
   IREE_RETURN_IF_ERROR(loom_low_schedule_record_dependency_cycle(
       state, block_record, node_count, scheduled_in_block, range_start,
       range_end));
-  if (state->options->emitter.fn != NULL) {
-    IREE_RETURN_IF_ERROR(
-        loom_low_schedule_emit_dependency_cycle(state, &state->failure));
-  }
   ++state->error_count;
   return iree_ok_status();
 }
@@ -1668,6 +1664,41 @@ static void loom_low_schedule_initialize_preferred_pair_index(
   }
 }
 
+// Retains the budget used to interpret a pressure summary while invocation
+// limits and residency policy are still available in the construction state.
+static uint32_t loom_low_schedule_pressure_summary_budget(
+    const loom_low_schedule_build_state_t* state,
+    loom_liveness_value_class_t value_class) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      state->target.descriptor_set;
+  if (value_class.type_kind != LOOM_TYPE_REGISTER ||
+      value_class.register_descriptor_set_stable_id !=
+          descriptor_set->stable_id) {
+    return UINT32_MAX;
+  }
+  const uint16_t reg_class_id = value_class.register_class_id;
+  const loom_low_reg_class_t* reg_class =
+      &descriptor_set->reg_classes[reg_class_id];
+  if (state->pressure_limits.by_reg_class != NULL) {
+    const uint32_t limit_units =
+        reg_class->alias_set_id != 0
+            ? state->pressure_limits.alias_sets[reg_class->alias_set_id]
+                  .live_unit_limit
+            : state->pressure_limits.by_reg_class[reg_class_id];
+    if (limit_units != UINT32_MAX) return limit_units;
+  }
+  if (state->pressure_cliffs != NULL) {
+    const loom_target_residency_cliff_range_t range =
+        loom_target_residency_direct_resource_cliff_range(
+            state->pressure_cliffs, reg_class_id);
+    if (range.count != 0) {
+      return state->pressure_cliffs->cliffs[range.start].cliff_units;
+    }
+  }
+  return reg_class->allocatable_count != 0 ? reg_class->allocatable_count
+                                           : UINT32_MAX;
+}
+
 iree_status_t loom_low_schedule_function(
     const loom_low_function_model_t* model,
     const loom_low_schedule_options_t* options, iree_arena_allocator_t* arena,
@@ -1760,30 +1791,19 @@ iree_status_t loom_low_schedule_function(
     loom_low_schedule_compact_model_summaries(&state);
     loom_low_schedule_compact_resource_summaries(&state);
   }
+  uint32_t* pressure_summary_budgets = NULL;
   if (iree_status_is_ok(status) && state.error_count == 0 &&
       iree_any_bit_set(options->diagnostic_flags,
                        LOOM_LOW_SCHEDULE_DIAGNOSTIC_PRESSURE_PEAKS)) {
-    status = loom_low_schedule_emit_pressure_diagnostics(&state, &liveness);
-  }
-  if (iree_status_is_ok(status) && state.error_count == 0 &&
-      iree_any_bit_set(options->diagnostic_flags,
-                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_CANDIDATE_DECISIONS)) {
-    status = loom_low_schedule_emit_candidate_decision_diagnostics(&state);
-  }
-  if (iree_status_is_ok(status) && state.error_count == 0 &&
-      iree_any_bit_set(options->diagnostic_flags,
-                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_MODEL_QUALITY)) {
-    status = loom_low_schedule_emit_model_diagnostics(&state);
-  }
-  if (iree_status_is_ok(status) && state.error_count == 0 &&
-      iree_any_bit_set(options->diagnostic_flags,
-                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_RESOURCE_BOTTLENECKS)) {
-    status = loom_low_schedule_emit_resource_diagnostics(&state);
-  }
-  if (iree_status_is_ok(status) && state.error_count == 0 &&
-      iree_any_bit_set(options->diagnostic_flags,
-                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_HAZARD_GAPS)) {
-    status = loom_low_schedule_emit_hazard_gap_diagnostics(&state);
+    status = iree_arena_allocate_array(arena, liveness.pressure_summary_count,
+                                       sizeof(*pressure_summary_budgets),
+                                       (void**)&pressure_summary_budgets);
+    if (iree_status_is_ok(status)) {
+      for (iree_host_size_t i = 0; i < liveness.pressure_summary_count; ++i) {
+        pressure_summary_budgets[i] = loom_low_schedule_pressure_summary_budget(
+            &state, liveness.pressure_summaries[i].value_class);
+      }
+    }
   }
 
   if (iree_status_is_ok(status)) {
@@ -1796,6 +1816,7 @@ iree_status_t loom_low_schedule_function(
         .value_ids = model->value_domain.value_ids,
         .value_count = model->value_domain.value_count,
         .liveness = liveness,
+        .pressure_summary_budgets = pressure_summary_budgets,
         .blocks = state.blocks,
         .block_count = state.body->block_count,
         .operation_order =
@@ -1844,6 +1865,8 @@ iree_status_t loom_low_schedule_function(
     };
     loom_low_schedule_dependency_graph_move(&state.dependencies,
                                             &out_table->dependencies);
+    status = loom_low_schedule_diagnostics_emit(
+        out_table, options->diagnostic_flags, options->emitter);
   }
   return status;
 }

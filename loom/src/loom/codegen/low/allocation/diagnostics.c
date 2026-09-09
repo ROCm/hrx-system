@@ -11,6 +11,32 @@
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 
+static iree_status_t loom_low_allocation_emit_failure(
+    const loom_low_allocation_table_t* table,
+    iree_diagnostic_emitter_t emitter) {
+  const loom_low_allocation_failure_t* failure = &table->failure;
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_low_diagnostic_target_key(&table->target)),
+      loom_param_string(loom_low_diagnostic_export_name(&table->target)),
+      loom_param_string(loom_low_diagnostic_config_key(&table->target)),
+      loom_param_string(
+          loom_low_diagnostic_function_name(table->module, table->function_op)),
+      loom_param_string(loom_low_diagnostic_value_class_name(
+          table->target.descriptor_set, failure->value_class)),
+      loom_param_u32(failure->budget_units),
+      loom_param_u32(failure->peak_live_units),
+      loom_param_string(failure->failure_code),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .module = table->module,
+      .op = failure->op,
+      .error = LOOM_ERR_BACKEND_005,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(emitter, &emission);
+}
+
 static iree_status_t loom_low_allocation_emit_predicted_spills(
     const loom_low_allocation_table_t* table,
     iree_diagnostic_emitter_t emitter) {
@@ -319,7 +345,12 @@ iree_status_t loom_low_allocation_diagnostics_emit(
     const loom_low_allocation_table_t* table,
     loom_low_allocation_diagnostic_flags_t flags,
     iree_diagnostic_emitter_t emitter) {
-  IREE_ASSERT_ARGUMENT(table);
+  if (emitter.fn == NULL) return iree_ok_status();
+  if (table->error_count != 0) {
+    return loom_low_allocation_failure_is_present(&table->failure)
+               ? loom_low_allocation_emit_failure(table, emitter)
+               : iree_ok_status();
+  }
   if (iree_any_bit_set(flags,
                        LOOM_LOW_ALLOCATION_DIAGNOSTIC_PREDICTED_SPILLS)) {
     IREE_RETURN_IF_ERROR(

@@ -57,10 +57,9 @@ typedef struct loom_low_allocation_options_t {
   iree_host_size_t reserved_range_count;
   // Optional target storage leases built over |schedule|.
   loom_low_storage_lease_table_t storage_leases;
-  // Structured diagnostic emitter for allocation failures and feedback.
+  // Structured diagnostic emitter for invalid input constraints. Planning
+  // failures are retained in the table for allocation_diagnostics_emit.
   iree_diagnostic_emitter_t emitter;
-  // Optional structured allocation feedback to emit.
-  loom_low_allocation_diagnostic_flags_t diagnostic_flags;
   // Optional target residency model. Direct resources are dense by descriptor
   // register-class ID for the resolved low target.
   const struct loom_target_residency_model_t* residency_model;
@@ -72,7 +71,9 @@ typedef struct loom_low_allocation_options_t {
 // Allocates one modeled target-low function body and writes an arena-owned
 // table. |model| must remain live and its function semantically immutable until
 // this function returns. The allocator performs deterministic per-class
-// interval assignment and reports spills as table facts without mutating IR.
+// interval assignment and records failures/spills as table facts without
+// mutating IR. The caller publishes terminal planning diagnostics by calling
+// loom_low_allocation_diagnostics_emit on the accepted table.
 iree_status_t loom_low_allocate_function(
     const loom_low_function_model_t* model,
     const loom_low_allocation_options_t* options, iree_arena_allocator_t* arena,

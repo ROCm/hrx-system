@@ -329,7 +329,6 @@ TEST(CompileReportFormatTest, FormatsAndAggregatesLowPlanningStatistics) {
     planning->frame_build_count = i;
     planning->allocation_run_count = i + 1;
     planning->repair.iteration_count = i + 2;
-    planning->repair.diagnostic_replay_count = i + 3;
     planning->memory.frame_arena.used_bytes_high_water = i * 100;
     planning->memory.frame_arena.owned_bytes_high_water = i * 200;
     planning->memory.block_system_allocation_count = i;

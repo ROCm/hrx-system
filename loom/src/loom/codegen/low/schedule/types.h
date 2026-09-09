@@ -716,6 +716,10 @@ typedef struct loom_low_schedule_table_t {
   loom_value_ordinal_t value_count;
   // Optional liveness analysis retained for table consumers that request it.
   loom_liveness_analysis_t liveness;
+  // Effective budgets for retained source-order pressure summaries. Entries
+  // correspond to liveness.pressure_summaries; UINT32_MAX means unbounded.
+  // Present when pressure diagnostics were requested during construction.
+  const uint32_t* pressure_summary_budgets;
   // Per-block schedule records in region block order.
   const loom_low_schedule_block_t* blocks;
   // Number of block records.

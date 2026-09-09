@@ -44,21 +44,6 @@ typedef enum loom_low_allocation_copy_kind_e {
   LOOM_LOW_ALLOCATION_COPY_MATERIALIZED = 2,
 } loom_low_allocation_copy_kind_t;
 
-typedef enum loom_low_allocation_failure_blocking_kind_e {
-  // No specific blocking constraint was recorded.
-  LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_UNKNOWN = 0,
-  // The failing interval itself is wider than the register-class budget.
-  LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_INTERVAL_EXCEEDS_BUDGET = 1,
-  // A live assignment occupies a candidate location and cannot be evicted.
-  LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_ACTIVE_ASSIGNMENT = 2,
-  // A fixed value, reserved range, or storage lease blocks a candidate
-  // location.
-  LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_LOCATION_CONSTRAINT = 3,
-  // The allocator scanned the candidate locations without finding a legal
-  // placement or a more specific blocking constraint.
-  LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_NO_ASSIGNABLE_LOCATION = 4,
-} loom_low_allocation_failure_blocking_kind_t;
-
 typedef enum loom_low_allocation_value_scratch_flag_bits_e {
   // The lease acquired the module value-ordinal scratch map and must release
   // it.
@@ -79,59 +64,6 @@ typedef struct loom_low_allocation_remark_t {
   // Units requested by the assignment.
   uint32_t required_units;
 } loom_low_allocation_remark_t;
-
-// Terminal hard-allocation failure for one interval.
-typedef struct loom_low_allocation_failure_t {
-  // Stable failure code emitted by the structured diagnostic.
-  iree_string_view_t failure_code;
-  // SSA value whose interval could not be assigned.
-  loom_value_id_t value_id;
-  // Pressure/allocation class for |value_id|.
-  loom_liveness_value_class_t value_class;
-  // Descriptor-set-local register class ID for |value_class|.
-  uint16_t descriptor_reg_class_id;
-  // Program point where the failed interval starts.
-  uint32_t start_point;
-  // One-past-last storage program point required by the failed interval.
-  uint32_t end_point;
-  // Allocation units required by the failed interval.
-  uint32_t required_unit_count;
-  // Maximum allocation units available, or UINT32_MAX when unbounded.
-  uint32_t budget_units;
-  // Maximum boundary-live units observed for this pressure class.
-  uint32_t peak_live_units;
-  // Candidate location kind used while diagnosing the failure.
-  loom_low_allocation_location_kind_t location_kind;
-  // Candidate base physical register or target ID used for conflict reporting,
-  // or UINT32_MAX when no concrete candidate was inspected.
-  uint32_t location_base;
-  // Candidate location width used for conflict reporting, or zero when no
-  // concrete candidate was inspected.
-  uint32_t location_count;
-  // Structured category describing the first blocking constraint found.
-  loom_low_allocation_failure_blocking_kind_t blocking_kind;
-  // Assignment index for an active-assignment conflict, or UINT32_MAX.
-  uint32_t conflict_assignment_index;
-  // SSA value occupying the conflicting assignment, or LOOM_VALUE_ID_INVALID.
-  loom_value_id_t conflict_value_id;
-  // Program point where the conflicting assignment starts, or UINT32_MAX.
-  uint32_t conflict_start_point;
-  // One-past-last storage program point for the conflicting assignment, or
-  // UINT32_MAX.
-  uint32_t conflict_end_point;
-  // Conflicting assignment location kind.
-  loom_low_allocation_location_kind_t conflict_location_kind;
-  // Conflicting assignment base physical register or target ID, or UINT32_MAX.
-  uint32_t conflict_location_base;
-  // Conflicting assignment location width, or zero when unavailable.
-  uint32_t conflict_location_count;
-} loom_low_allocation_failure_t;
-
-// Returns true when |failure| describes a terminal hard-allocation failure.
-static inline bool loom_low_allocation_failure_is_present(
-    const loom_low_allocation_failure_t* failure) {
-  return failure != NULL && !iree_string_view_is_empty(failure->failure_code);
-}
 
 // Spill materialization plan for one spilled assignment.
 typedef struct loom_low_allocation_spill_plan_t {

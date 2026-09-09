@@ -100,21 +100,23 @@ static iree_status_t loom_low_allocation_move_plan_resolve_temporary(
   *out_resolved = false;
   if (!loom_low_allocation_location_kind_is_register_like(
           storage_class->location_kind)) {
-    return loom_low_allocation_target_constraints_emit_failure(
+    loom_low_allocation_target_constraints_record_move_failure(
         context->target_constraints, group_context->op,
         storage_class->value_class, 0, 1,
         IREE_SV("parallel-move-non-register-storage"));
+    return iree_ok_status();
   }
 
   loom_low_allocation_class_capacity_t capacity = {0};
   IREE_RETURN_IF_ERROR(loom_low_allocation_target_constraints_class_capacity(
       context->target_constraints, storage_class->value_class, &capacity));
   if (capacity.location_kind != storage_class->location_kind) {
-    return loom_low_allocation_target_constraints_emit_failure(
+    loom_low_allocation_target_constraints_record_move_failure(
         context->target_constraints, group_context->op,
         storage_class->value_class,
         capacity.is_bounded ? capacity.max_units : UINT32_MAX, 1,
         IREE_SV("parallel-move-storage-kind-mismatch"));
+    return iree_ok_status();
   }
 
   const loom_low_reg_class_t* reg_class =
@@ -126,10 +128,11 @@ static iree_status_t loom_low_allocation_move_plan_resolve_temporary(
   uint32_t last_location = 0;
   if (capacity.is_bounded) {
     if (capacity.max_units == 0) {
-      return loom_low_allocation_target_constraints_emit_failure(
+      loom_low_allocation_target_constraints_record_move_failure(
           context->target_constraints, group_context->op,
           storage_class->value_class, capacity.max_units, 1,
           IREE_SV("parallel-move-empty-budget"));
+      return iree_ok_status();
     }
     last_location = capacity.max_units - 1u;
   } else {
@@ -138,10 +141,11 @@ static iree_status_t loom_low_allocation_move_plan_resolve_temporary(
             context->target_constraints, storage_class->descriptor_reg_class_id,
             storage_class->location_kind);
     if (last_location == UINT32_MAX) {
-      return loom_low_allocation_target_constraints_emit_failure(
+      loom_low_allocation_target_constraints_record_move_failure(
           context->target_constraints, group_context->op,
           storage_class->value_class, UINT32_MAX, 1,
           IREE_SV("parallel-move-location-range-overflow"));
+      return iree_ok_status();
     }
   }
 
@@ -186,11 +190,13 @@ static iree_status_t loom_low_allocation_move_plan_resolve_temporary(
     return iree_ok_status();
   }
 
-  return loom_low_allocation_target_constraints_emit_failure(
+  loom_low_allocation_target_constraints_record_move_failure(
       context->target_constraints, group_context->op,
       storage_class->value_class,
       capacity.is_bounded ? capacity.max_units : UINT32_MAX, 1,
       IREE_SV("parallel-move-no-scratch-unit"));
+
+  return iree_ok_status();
 }
 
 iree_status_t loom_low_allocation_move_plan_initialize(

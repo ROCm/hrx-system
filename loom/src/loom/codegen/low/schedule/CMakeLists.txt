@@ -82,6 +82,7 @@ loom_cc_library(
   NAME
     schedule
   HDRS
+    "diagnostics.h"
     "json.h"
     "run.h"
     "types.h"
@@ -92,7 +93,6 @@ loom_cc_library(
     "descriptor_rows.c"
     "descriptor_rows.h"
     "diagnostics.c"
-    "diagnostics.h"
     "effect_dependencies.c"
     "effect_dependencies.h"
     "graph.c"

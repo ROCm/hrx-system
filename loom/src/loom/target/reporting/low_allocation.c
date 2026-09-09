@@ -1334,8 +1334,7 @@ static iree_status_t loom_target_compile_report_record_allocation_failure_rows(
     return iree_ok_status();
   }
   const loom_low_allocation_failure_t* failure = &allocation->failure;
-  const loom_op_t* origin_op = loom_low_diagnostic_value_origin_op(
-      allocation->module, failure->value_id, allocation->function_op);
+  const loom_op_t* origin_op = failure->op;
   const loom_block_t* origin_block =
       loom_target_compile_report_allocation_failure_origin_block(
           allocation, failure, origin_op);

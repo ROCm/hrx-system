@@ -9,7 +9,9 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/schedule/diagnostics.h"
 #include "loom/codegen/low/text_asm.h"
+#include "loom/error/error_catalog.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -121,6 +123,223 @@ low.func.def target<test.low.core> @resource_capacity(%lhs: reg<test.i32>, %rhs:
     EXPECT_EQ(frame.schedule.nodes[0].issue_cycle, 0u);
     EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 4u);
   }
+}
+
+TEST_F(LowEmissionFrameTest, FeedbackConsumesTheAcceptedFrame) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @feedback(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %first = test.resource.serial.i32 %lhs, %rhs
+  %second = test.resource.serial.i32 %rhs, %lhs
+  %copy = copy %first : reg<test.i32> -> reg<test.i32>
+  %sum = test.add.i32 %copy, %second
+  return %sum
+}
+)");
+  struct CapturedDiagnostics {
+    // Total feedback records delivered by the frame.
+    uint32_t count = 0;
+    // Pressure budget retained independently of the caller's option storage.
+    uint32_t pressure_budget = 0;
+    // Number of allocation copy decisions observed.
+    uint32_t copy_count = 0;
+  } captured;
+  const iree_diagnostic_emitter_t emitter = {
+      .fn =
+          [](void* user_data, const loom_diagnostic_emission_t* emission) {
+            auto* captured = static_cast<CapturedDiagnostics*>(user_data);
+            ++captured->count;
+            if (emission->error == LOOM_ERR_BACKEND_003) {
+              captured->pressure_budget = emission->params[5].u32;
+            } else if (emission->error == LOOM_ERR_BACKEND_006) {
+              ++captured->copy_count;
+            }
+            return iree_ok_status();
+          },
+      .user_data = &captured,
+  };
+  loom_low_allocation_budget_t budget = {IREE_SV("test.i32"), 8};
+  loom_low_planning_statistics_t statistics = {};
+  const loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+      .schedule_diagnostic_flags =
+          LOOM_LOW_SCHEDULE_DIAGNOSTIC_PRESSURE_PEAKS |
+          LOOM_LOW_SCHEDULE_DIAGNOSTIC_RESOURCE_BOTTLENECKS |
+          LOOM_LOW_SCHEDULE_DIAGNOSTIC_HAZARD_GAPS |
+          LOOM_LOW_SCHEDULE_DIAGNOSTIC_CANDIDATE_DECISIONS |
+          LOOM_LOW_SCHEDULE_DIAGNOSTIC_MODEL_QUALITY,
+      .allocation_budgets = &budget,
+      .allocation_budget_count = 1,
+      .allocation_diagnostic_flags =
+          LOOM_LOW_ALLOCATION_DIAGNOSTIC_COPY_DECISIONS,
+      .emitter = emitter,
+      .statistics = &statistics,
+  };
+  const loom_low_emission_frame_spill_free_options_t spill_free_options = {
+      .materialization_options =
+          {
+              .has_supported_storage_spaces = true,
+              .supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_NONE,
+          },
+  };
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(loom_low_emission_frame_build_spill_free(
+      module.get(), loom_block_op(loom_module_block(module.get()), 0), &options,
+      &spill_free_options, &arena_, &frame));
+  ASSERT_EQ(frame.schedule.error_count, 0u);
+  ASSERT_EQ(frame.allocation.error_count, 0u);
+  EXPECT_EQ(statistics.frame_build_count, 1u);
+  EXPECT_EQ(statistics.allocation_run_count, 1u);
+  EXPECT_GT(captured.count, 1u);
+  EXPECT_EQ(captured.pressure_budget, 8u);
+  EXPECT_EQ(captured.copy_count, 1u);
+
+  loom_low_emission_frame_options_t quiet_options = options;
+  quiet_options.schedule_diagnostic_flags = 0;
+  quiet_options.allocation_diagnostic_flags = 0;
+  quiet_options.statistics = nullptr;
+  loom_low_emission_frame_t quiet_frame = {};
+  IREE_ASSERT_OK(loom_low_emission_frame_build_spill_free(
+      module.get(), loom_block_op(loom_module_block(module.get()), 0),
+      &quiet_options, &spill_free_options, &arena_, &quiet_frame));
+  ASSERT_EQ(quiet_frame.schedule.node_count, frame.schedule.node_count);
+  for (iree_host_size_t i = 0; i < frame.schedule.node_count; ++i) {
+    EXPECT_EQ(quiet_frame.schedule.scheduled_node_indices[i],
+              frame.schedule.scheduled_node_indices[i]);
+    EXPECT_EQ(quiet_frame.schedule.nodes[i].issue_cycle,
+              frame.schedule.nodes[i].issue_cycle);
+  }
+  ASSERT_EQ(quiet_frame.allocation.assignment_count,
+            frame.allocation.assignment_count);
+  for (iree_host_size_t i = 0; i < frame.allocation.assignment_count; ++i) {
+    const auto& quiet = quiet_frame.allocation.assignments[i];
+    const auto& verbose = frame.allocation.assignments[i];
+    EXPECT_EQ(quiet.value_id, verbose.value_id);
+    EXPECT_EQ(quiet.location_kind, verbose.location_kind);
+    EXPECT_EQ(quiet.location_base, verbose.location_base);
+    EXPECT_EQ(quiet.location_count, verbose.location_count);
+  }
+
+  // Formatting is a read-only consumer after the model and option scratch
+  // have gone away. Neither another plan nor another arena allocation occurs.
+  budget.max_units = 1;
+  captured = {};
+  const iree_host_size_t used_bytes = arena_.used_allocation_size;
+  IREE_ASSERT_OK(loom_low_schedule_diagnostics_emit(
+      &frame.schedule, options.schedule_diagnostic_flags, emitter));
+  EXPECT_GT(captured.count, 0u);
+  EXPECT_EQ(captured.pressure_budget, 8u);
+  EXPECT_EQ(arena_.used_allocation_size, used_bytes);
+  EXPECT_EQ(statistics.frame_build_count, 1u);
+}
+
+TEST_F(LowEmissionFrameTest, FeedbackConsumesTheRejectedFrame) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @too_wide(%wide: reg<test.special x2>) -> (reg<test.special x2>) asm {
+  return %wide
+}
+)");
+  struct CapturedFailure {
+    // Number of terminal allocation diagnostics.
+    uint32_t count = 0;
+    // Original operation anchoring the diagnostic.
+    const loom_op_t* op = nullptr;
+  } captured;
+  loom_low_allocation_budget_t budget = {IREE_SV("test.special"), 1};
+  loom_low_planning_statistics_t statistics = {};
+  const loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+      .allocation_budgets = &budget,
+      .allocation_budget_count = 1,
+      .emitter =
+          {
+              .fn =
+                  [](void* user_data,
+                     const loom_diagnostic_emission_t* emission) {
+                    auto* captured = static_cast<CapturedFailure*>(user_data);
+                    EXPECT_EQ(emission->error, LOOM_ERR_BACKEND_005);
+                    EXPECT_EQ(emission->params[5].u32, 1u);
+                    EXPECT_EQ(emission->params[6].u32, 2u);
+                    ++captured->count;
+                    captured->op = emission->op;
+                    return iree_ok_status();
+                  },
+              .user_data = &captured,
+          },
+      .statistics = &statistics,
+  };
+  const loom_low_emission_frame_spill_free_options_t spill_free_options = {
+      .materialization_options =
+          {
+              .has_supported_storage_spaces = true,
+              .supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_NONE,
+          },
+  };
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(loom_low_emission_frame_build_spill_free(
+      module.get(), loom_block_op(loom_module_block(module.get()), 0), &options,
+      &spill_free_options, &arena_, &frame));
+  ASSERT_EQ(frame.allocation.error_count, 1u);
+  EXPECT_EQ(captured.count, 1u);
+  EXPECT_EQ(captured.op, frame.allocation.failure.op);
+  EXPECT_EQ(statistics.frame_build_count, 1u);
+  EXPECT_EQ(statistics.allocation_run_count, 1u);
+
+  const iree_host_size_t used_bytes = arena_.used_allocation_size;
+  IREE_ASSERT_OK(loom_low_allocation_diagnostics_emit(
+      &frame.allocation, /*flags=*/0, options.emitter));
+  EXPECT_EQ(captured.count, 2u);
+  EXPECT_EQ(arena_.used_allocation_size, used_bytes);
+}
+
+TEST_F(LowEmissionFrameTest, InputErrorsAreNotDeferredOrReplayed) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @invalid_budget(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+)");
+  uint32_t diagnostic_count = 0;
+  const loom_low_allocation_budget_t budgets[] = {
+      {IREE_SV("test.i32"), 1},
+      {IREE_SV("test.i32"), 2},
+  };
+  loom_low_planning_statistics_t statistics = {};
+  const loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+      .allocation_budgets = budgets,
+      .allocation_budget_count = IREE_ARRAYSIZE(budgets),
+      .emitter =
+          {
+              .fn =
+                  [](void* user_data,
+                     const loom_diagnostic_emission_t* emission) {
+                    EXPECT_EQ(emission->error, LOOM_ERR_BACKEND_024);
+                    ++*static_cast<uint32_t*>(user_data);
+                    return iree_ok_status();
+                  },
+              .user_data = &diagnostic_count,
+          },
+      .statistics = &statistics,
+  };
+  const loom_low_emission_frame_spill_free_options_t spill_free_options = {
+      .materialization_options =
+          {
+              .has_supported_storage_spaces = true,
+              .supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_NONE,
+          },
+  };
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(loom_low_emission_frame_build_spill_free(
+      module.get(), loom_block_op(loom_module_block(module.get()), 0), &options,
+      &spill_free_options, &arena_, &frame));
+  ASSERT_EQ(frame.allocation.error_count, 1u);
+  EXPECT_FALSE(
+      loom_low_allocation_failure_is_present(&frame.allocation.failure));
+  EXPECT_EQ(diagnostic_count, 1u);
+  EXPECT_EQ(statistics.frame_build_count, 1u);
+  EXPECT_EQ(statistics.allocation_run_count, 1u);
 }
 
 TEST_F(LowEmissionFrameTest, SingletonReservationsPreserveTiedStateUpdates) {

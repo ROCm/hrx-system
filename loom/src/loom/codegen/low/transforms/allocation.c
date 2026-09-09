@@ -416,8 +416,6 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
       .budget_count = state ? state->budget_count : 0,
       .emitter = pass->diagnostic_emitter,
   };
-  loom_low_allocation_options_t allocation_probe_options = allocation_options;
-  allocation_probe_options.emitter = (iree_diagnostic_emitter_t){0};
   iree_host_size_t iteration_count = 0;
   iree_host_size_t iteration_limit = 0;
   iree_host_size_t rematerialization_iteration_count = 0;
@@ -426,7 +424,7 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
     loom_low_allocation_table_t table = {0};
     IREE_RETURN_IF_ERROR(loom_low_materialize_allocation_build_table(
         module, function.op, function_target_facts, descriptor_registry,
-        &allocation_probe_options, pass->arena, &table));
+        &allocation_options, pass->arena, &table));
     if (iteration_limit == 0) {
       if (table.liveness.value_count == IREE_HOST_SIZE_MAX) {
         return iree_make_status(
@@ -450,10 +448,8 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
           rematerialization_iteration_limit) {
         // Rematerialization is an optimization; preserve normal diagnostics
         // when pressure repair does not converge.
-        IREE_RETURN_IF_ERROR(loom_low_materialize_allocation_build_table(
-            module, function.op, function_target_facts, descriptor_registry,
-            &allocation_options, pass->arena, &table));
-        return iree_ok_status();
+        return loom_low_allocation_diagnostics_emit(&table, /*flags=*/0,
+                                                    pass->diagnostic_emitter);
       }
       loom_low_allocation_rematerialization_result_t result = {0};
       IREE_RETURN_IF_ERROR(loom_low_allocation_rematerialize_failure(
@@ -472,10 +468,8 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
         ++rematerialization_iteration_count;
         continue;
       }
-      IREE_RETURN_IF_ERROR(loom_low_materialize_allocation_build_table(
-          module, function.op, function_target_facts, descriptor_registry,
-          &allocation_options, pass->arena, &table));
-      return iree_ok_status();
+      return loom_low_allocation_diagnostics_emit(&table, /*flags=*/0,
+                                                  pass->diagnostic_emitter);
     }
     if (table.spill_plan_count == 0) {
       return iree_ok_status();

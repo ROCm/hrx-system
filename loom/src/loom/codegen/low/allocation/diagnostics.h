@@ -29,7 +29,9 @@ typedef enum loom_low_allocation_diagnostic_bits_e {
 // Bitset of loom_low_allocation_diagnostic_bits_t values.
 typedef uint32_t loom_low_allocation_diagnostic_flags_t;
 
-// Emits the requested structured diagnostic feedback for |table|.
+// Emits a retained terminal planning failure, or the requested feedback for a
+// successful table. Input-constraint errors were already emitted by allocation
+// and are not repeated. This does not rebuild or mutate the allocation.
 iree_status_t loom_low_allocation_diagnostics_emit(
     const loom_low_allocation_table_t* table,
     loom_low_allocation_diagnostic_flags_t flags,

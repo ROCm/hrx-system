@@ -257,6 +257,19 @@ low.func.def target<test.low.core>(@test_target) @edge_copy_tail_enters_cycle(%s
 
 // ====
 
+// RUN: emit low-allocation-json @edge_cycle_without_scratch test.phys=2 fixed=%lhs:physical_register:0:1 fixed=%rhs:physical_register:1:1 fixed=%dst_lhs:physical_register:1:1 fixed=%dst_rhs:physical_register:0:1 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @edge_cycle_without_scratch(%lhs: reg<test.phys>, %rhs: reg<test.phys>) -> (reg<test.phys>, reg<test.phys>) asm {
+  // ERROR@+1: BACKEND/005 {function_name="edge_cycle_without_scratch", value_class="test.phys", budget="2", peak="1", failure_code="parallel-move-no-scratch-unit"}
+  low.br ^join(%lhs: reg<test.phys>, %rhs: reg<test.phys>)
+^join(%dst_lhs: reg<test.phys>, %dst_rhs: reg<test.phys>):
+  return %dst_lhs, %dst_rhs
+}
+
+// ====
+
 // RUN: emit low-allocation-json @structural_physical_span_rebased_at_capacity fixed=%wide:physical_register:20:12 fixed=%tail:physical_register:0:1
 
 test.target<low_core> @test_target

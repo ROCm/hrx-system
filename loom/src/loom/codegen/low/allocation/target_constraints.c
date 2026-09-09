@@ -1145,32 +1145,29 @@ iree_status_t loom_low_allocation_target_constraints_resolve_fixed_values(
   return iree_ok_status();
 }
 
-iree_status_t loom_low_allocation_target_constraints_emit_failure(
+void loom_low_allocation_target_constraints_record_move_failure(
     loom_low_allocation_target_constraints_t* constraints, const loom_op_t* op,
     loom_liveness_value_class_t value_class, uint32_t budget_units,
     uint32_t peak_units, iree_string_view_t failure_code) {
-  IREE_ASSERT_ARGUMENT(constraints);
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_low_diagnostic_target_key(constraints->target)),
-      loom_param_string(loom_low_diagnostic_export_name(constraints->target)),
-      loom_param_string(loom_low_diagnostic_config_key(constraints->target)),
-      loom_param_string(loom_low_diagnostic_function_name(
-          constraints->module, constraints->function_op)),
-      loom_param_string(loom_low_diagnostic_value_class_name(
-          constraints->target->descriptor_set, value_class)),
-      loom_param_u32(budget_units),
-      loom_param_u32(peak_units),
-      loom_param_string(failure_code),
+  constraints->failure = (loom_low_allocation_failure_t){
+      .failure_code = failure_code,
+      .op = op,
+      .value_id = LOOM_VALUE_ID_INVALID,
+      .value_class = value_class,
+      .descriptor_reg_class_id = value_class.register_class_id,
+      .start_point = UINT32_MAX,
+      .end_point = UINT32_MAX,
+      .required_unit_count = peak_units,
+      .budget_units = budget_units,
+      .peak_live_units = peak_units,
+      .location_base = UINT32_MAX,
+      .conflict_assignment_index = UINT32_MAX,
+      .conflict_value_id = LOOM_VALUE_ID_INVALID,
+      .conflict_start_point = UINT32_MAX,
+      .conflict_end_point = UINT32_MAX,
+      .conflict_location_base = UINT32_MAX,
   };
-  loom_diagnostic_emission_t emission = {
-      .op = op ? op : constraints->function_op,
-      .error = LOOM_ERR_BACKEND_005,
-      .params = params,
-      .param_count = IREE_ARRAYSIZE(params),
-  };
-  IREE_RETURN_IF_ERROR(iree_diagnostic_emit(constraints->emitter, &emission));
   ++constraints->error_count;
-  return iree_ok_status();
 }
 
 const loom_low_allocation_resolved_fixed_value_t*

@@ -406,7 +406,7 @@ iree_status_t loom_low_allocate_function(
         .spill_plan_count = state.interval_assignment.spill_plan_count,
         .remarks = state.interval_assignment.remarks,
         .remark_count = state.interval_assignment.remark_count,
-        .failure = state.interval_assignment.failure,
+        .failure = state.target_constraints.failure,
         .copy_decisions = state.copy_decision_plan.decisions,
         .copy_decision_count = state.copy_decision_plan.decision_count,
         .edge_copies = state.edge_copy_plan.copies,
@@ -432,10 +432,6 @@ iree_status_t loom_low_allocate_function(
         .reserved_range_count = state.target_constraints.reserved_range_count,
         .cfg_graph = model->cfg_graph,
     };
-  }
-  if (iree_status_is_ok(status) && table.error_count == 0) {
-    status = loom_low_allocation_diagnostics_emit(
-        &table, options->diagnostic_flags, options->emitter);
   }
   if (iree_status_is_ok(status)) {
     *out_table = table;

@@ -9,31 +9,20 @@
 #ifndef LOOM_CODEGEN_LOW_SCHEDULE_DIAGNOSTICS_H_
 #define LOOM_CODEGEN_LOW_SCHEDULE_DIAGNOSTICS_H_
 
-#include "loom/codegen/low/schedule/context.h"
+#include "loom/codegen/low/schedule/types.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-iree_status_t loom_low_schedule_emit_dependency_cycle(
-    loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_failure_t* failure);
-
-iree_status_t loom_low_schedule_emit_pressure_diagnostics(
-    loom_low_schedule_build_state_t* state,
-    const loom_liveness_analysis_t* liveness);
-
-iree_status_t loom_low_schedule_emit_candidate_decision_diagnostics(
-    loom_low_schedule_build_state_t* state);
-
-iree_status_t loom_low_schedule_emit_model_diagnostics(
-    loom_low_schedule_build_state_t* state);
-
-iree_status_t loom_low_schedule_emit_resource_diagnostics(
-    loom_low_schedule_build_state_t* state);
-
-iree_status_t loom_low_schedule_emit_hazard_gap_diagnostics(
-    loom_low_schedule_build_state_t* state);
+// Emits a retained scheduling failure, or the requested feedback for a
+// successful schedule. Construction must have requested the same diagnostic
+// flags so optional pressure and candidate evidence is present. This consumes
+// only the completed table; it neither schedules nor allocates scratch.
+iree_status_t loom_low_schedule_diagnostics_emit(
+    const loom_low_schedule_table_t* table,
+    loom_low_schedule_diagnostic_flags_t flags,
+    iree_diagnostic_emitter_t emitter);
 
 #ifdef __cplusplus
 }  // extern "C"

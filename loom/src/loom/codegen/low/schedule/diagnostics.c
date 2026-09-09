@@ -16,25 +16,27 @@
 #define LOOM_LOW_SCHEDULE_MAX_PRESSURE_CONTRIBUTORS 16
 
 static iree_status_t loom_low_schedule_emit(
-    loom_low_schedule_build_state_t* state, const loom_op_t* op,
-    const loom_error_def_t* error, const loom_diagnostic_param_t* params,
-    iree_host_size_t param_count) {
+    const loom_low_schedule_table_t* table, iree_diagnostic_emitter_t emitter,
+    const loom_op_t* op, const loom_error_def_t* error,
+    const loom_diagnostic_param_t* params, iree_host_size_t param_count) {
   loom_diagnostic_emission_t emission = {
+      .module = table->module,
       .op = op,
       .error = error,
       .params = params,
       .param_count = param_count,
   };
-  return iree_diagnostic_emit(state->options->emitter, &emission);
+  return iree_diagnostic_emit(emitter, &emission);
 }
 
 static iree_status_t loom_low_schedule_emit_with_related(
-    loom_low_schedule_build_state_t* state, const loom_op_t* op,
-    const loom_error_def_t* error, const loom_diagnostic_param_t* params,
-    iree_host_size_t param_count,
+    const loom_low_schedule_table_t* table, iree_diagnostic_emitter_t emitter,
+    const loom_op_t* op, const loom_error_def_t* error,
+    const loom_diagnostic_param_t* params, iree_host_size_t param_count,
     const loom_diagnostic_related_op_t* related_ops,
     iree_host_size_t related_op_count) {
   loom_diagnostic_emission_t emission = {
+      .module = table->module,
       .op = op,
       .error = error,
       .params = params,
@@ -42,7 +44,7 @@ static iree_status_t loom_low_schedule_emit_with_related(
       .related_ops = related_ops,
       .related_op_count = related_op_count,
   };
-  return iree_diagnostic_emit(state->options->emitter, &emission);
+  return iree_diagnostic_emit(emitter, &emission);
 }
 
 static iree_string_view_t loom_low_schedule_dependency_kind_name(
@@ -61,44 +63,22 @@ static iree_string_view_t loom_low_schedule_dependency_kind_name(
   }
 }
 
-static bool loom_low_schedule_node_index_is_valid(
-    const loom_low_schedule_build_state_t* state, uint32_t node_index) {
-  if (node_index == LOOM_LOW_SCHEDULE_NODE_NONE) {
-    return false;
-  }
-  for (iree_host_size_t i = 0; i < state->body->block_count; ++i) {
-    const loom_low_schedule_block_t* block = &state->blocks[i];
-    const uint64_t block_end =
-        (uint64_t)block->node_start + (uint64_t)block->node_count;
-    if (node_index >= block->node_start && node_index < block_end) {
-      return true;
-    }
-  }
-  return false;
-}
-
 static const loom_low_schedule_node_t* loom_low_schedule_failure_node(
-    const loom_low_schedule_build_state_t* state, uint32_t node_index) {
-  if (!loom_low_schedule_node_index_is_valid(state, node_index)) {
+    const loom_low_schedule_table_t* table, uint32_t node_index) {
+  if (node_index == LOOM_LOW_SCHEDULE_NODE_NONE) {
     return NULL;
   }
-  return &state->nodes[node_index];
+  return &table->nodes[node_index];
 }
 
-static iree_status_t loom_low_schedule_node_diagnostic_label(
-    const loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_node_t* node, iree_string_view_t* out_label) {
-  *out_label = IREE_SV("<unknown>");
-  if (node == NULL) {
-    return iree_ok_status();
-  }
-  if (node->descriptor != NULL) {
-    *out_label = loom_low_descriptor_set_string(
-        state->target.descriptor_set, node->descriptor->key_string_offset);
-    return iree_ok_status();
-  }
-  *out_label = loom_op_name(state->module, node->op);
-  return iree_ok_status();
+static iree_string_view_t loom_low_schedule_node_diagnostic_label(
+    const loom_low_schedule_table_t* table,
+    const loom_low_schedule_node_t* node) {
+  if (node == NULL) return IREE_SV("<unknown>");
+  return node->descriptor != NULL ? loom_low_descriptor_set_string(
+                                        table->target.descriptor_set,
+                                        node->descriptor->key_string_offset)
+                                  : loom_op_name(table->module, node->op);
 }
 
 static iree_string_view_t loom_low_schedule_operand_index_name(
@@ -121,23 +101,21 @@ static iree_string_view_t loom_low_schedule_operand_index_name(
   return iree_make_string_view(buffer, size);
 }
 
-iree_status_t loom_low_schedule_emit_dependency_cycle(
-    loom_low_schedule_build_state_t* state,
+static iree_status_t loom_low_schedule_emit_dependency_cycle(
+    const loom_low_schedule_table_t* table, iree_diagnostic_emitter_t emitter,
     const loom_low_schedule_failure_t* failure) {
   if (!loom_low_schedule_failure_is_present(failure)) {
     return iree_ok_status();
   }
 
   const loom_low_schedule_node_t* producer_node =
-      loom_low_schedule_failure_node(state, failure->producer_node);
+      loom_low_schedule_failure_node(table, failure->producer_node);
   const loom_low_schedule_node_t* consumer_node =
-      loom_low_schedule_failure_node(state, failure->consumer_node);
-  iree_string_view_t producer_label = IREE_SV("<unknown>");
-  IREE_RETURN_IF_ERROR(loom_low_schedule_node_diagnostic_label(
-      state, producer_node, &producer_label));
-  iree_string_view_t consumer_label = IREE_SV("<unknown>");
-  IREE_RETURN_IF_ERROR(loom_low_schedule_node_diagnostic_label(
-      state, consumer_node, &consumer_label));
+      loom_low_schedule_failure_node(table, failure->consumer_node);
+  const iree_string_view_t producer_label =
+      loom_low_schedule_node_diagnostic_label(table, producer_node);
+  const iree_string_view_t consumer_label =
+      loom_low_schedule_node_diagnostic_label(table, consumer_node);
 
   iree_string_view_t
       cycle_labels[LOOM_LOW_SCHEDULE_FAILURE_CYCLE_NODE_CAPACITY];
@@ -147,28 +125,28 @@ iree_status_t loom_low_schedule_emit_dependency_cycle(
   }
   for (iree_host_size_t i = 0; i < cycle_label_count; ++i) {
     const loom_low_schedule_node_t* cycle_node =
-        loom_low_schedule_failure_node(state, failure->cycle_nodes[i]);
-    IREE_RETURN_IF_ERROR(loom_low_schedule_node_diagnostic_label(
-        state, cycle_node, &cycle_labels[i]));
+        loom_low_schedule_failure_node(table, failure->cycle_nodes[i]);
+    cycle_labels[i] =
+        loom_low_schedule_node_diagnostic_label(table, cycle_node);
   }
   if (cycle_label_count == 0) {
     cycle_labels[cycle_label_count++] = IREE_SV("<unavailable>");
   }
 
   const loom_block_t* block = NULL;
-  if (failure->block_index < state->body->block_count) {
-    block = state->blocks[failure->block_index].block;
+  if (failure->block_index < table->block_count) {
+    block = table->blocks[failure->block_index].block;
   }
   char operand_buffer[32];
   iree_string_view_t operand_index = loom_low_schedule_operand_index_name(
       failure->operand_index, operand_buffer, sizeof(operand_buffer));
   loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_low_diagnostic_target_key(&state->target)),
-      loom_param_string(loom_low_diagnostic_export_name(&state->target)),
-      loom_param_string(loom_low_diagnostic_config_key(&state->target)),
+      loom_param_string(loom_low_diagnostic_target_key(&table->target)),
+      loom_param_string(loom_low_diagnostic_export_name(&table->target)),
+      loom_param_string(loom_low_diagnostic_config_key(&table->target)),
       loom_param_string(
-          loom_low_diagnostic_function_name(state->module, state->function_op)),
-      loom_param_string(loom_low_diagnostic_block_name(state->module, block)),
+          loom_low_diagnostic_function_name(table->module, table->function_op)),
+      loom_param_string(loom_low_diagnostic_block_name(table->module, block)),
       loom_param_u32(failure->block_index),
       loom_param_u32(failure->scheduled_node_count),
       loom_param_u32(failure->block_node_count),
@@ -208,10 +186,10 @@ iree_status_t loom_low_schedule_emit_dependency_cycle(
     };
   }
   const loom_op_t* origin_op =
-      consumer_node != NULL ? consumer_node->op : state->function_op;
+      consumer_node != NULL ? consumer_node->op : table->function_op;
   return loom_low_schedule_emit_with_related(
-      state, origin_op, LOOM_ERR_BACKEND_044, params, IREE_ARRAYSIZE(params),
-      related_ops, related_op_count);
+      table, emitter, origin_op, LOOM_ERR_BACKEND_044, params,
+      IREE_ARRAYSIZE(params), related_ops, related_op_count);
 }
 
 static bool loom_low_schedule_interval_contains_point(
@@ -219,80 +197,11 @@ static bool loom_low_schedule_interval_contains_point(
   return interval->start_point <= point && point < interval->end_point;
 }
 
-static bool loom_low_schedule_first_pressure_cliff_for_reg_class(
-    const loom_low_schedule_build_state_t* state, uint16_t reg_class_id,
-    const loom_target_residency_cliff_t** out_cliff) {
-  *out_cliff = NULL;
-  if (state->pressure_cliffs == NULL ||
-      state->pressure_cliffs->cliff_count == 0 ||
-      reg_class_id == LOOM_LOW_REG_CLASS_NONE ||
-      reg_class_id >= state->target.descriptor_set->reg_class_count) {
-    return false;
-  }
-  const loom_target_residency_cliff_range_t range =
-      loom_target_residency_direct_resource_cliff_range(state->pressure_cliffs,
-                                                        reg_class_id);
-  if (range.count == 0) {
-    return false;
-  }
-  *out_cliff = &state->pressure_cliffs->cliffs[range.start];
-  return true;
-}
-
-static iree_status_t loom_low_schedule_pressure_budget_for_class(
-    const loom_low_schedule_build_state_t* state,
-    loom_liveness_value_class_t value_class, uint32_t* out_budget,
-    bool* out_has_budget) {
-  *out_budget = 0;
-  *out_has_budget = false;
-  if (value_class.type_kind != LOOM_TYPE_REGISTER ||
-      !state->target.descriptor_set ||
-      value_class.register_descriptor_set_stable_id !=
-          state->target.descriptor_set->stable_id ||
-      value_class.register_class_id >=
-          state->target.descriptor_set->reg_class_count) {
-    return iree_ok_status();
-  }
-  const uint16_t reg_class_id = value_class.register_class_id;
-  const loom_low_reg_class_t* reg_class =
-      &state->target.descriptor_set->reg_classes[reg_class_id];
-  if (state->pressure_limits.by_reg_class != NULL) {
-    const uint32_t limit_units =
-        reg_class->alias_set_id != 0
-            ? state->pressure_limits.alias_sets[reg_class->alias_set_id]
-                  .live_unit_limit
-            : state->pressure_limits.by_reg_class[reg_class_id];
-    if (limit_units != UINT32_MAX) {
-      *out_budget = limit_units;
-      *out_has_budget = true;
-      return iree_ok_status();
-    }
-  }
-  const loom_target_residency_cliff_t* first_cliff = NULL;
-  if (loom_low_schedule_first_pressure_cliff_for_reg_class(state, reg_class_id,
-                                                           &first_cliff)) {
-    *out_budget = first_cliff->cliff_units;
-    *out_has_budget = true;
-    return iree_ok_status();
-  }
-  if (reg_class->allocatable_count == 0) {
-    return iree_ok_status();
-  }
-  *out_budget = reg_class->allocatable_count;
-  *out_has_budget = true;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_schedule_collect_pressure_contributors(
-    loom_low_schedule_build_state_t* state,
+static iree_host_size_t loom_low_schedule_collect_pressure_contributors(
+    const loom_low_schedule_table_t* table,
     const loom_liveness_analysis_t* liveness,
     const loom_liveness_pressure_summary_t* summary,
-    const iree_string_view_t** out_contributors,
-    iree_host_size_t* out_contributor_count) {
-  iree_string_view_t* contributors = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->arena, LOOM_LOW_SCHEDULE_MAX_PRESSURE_CONTRIBUTORS,
-      sizeof(*contributors), (void**)&contributors));
+    iree_string_view_t* contributors) {
   iree_host_size_t contributor_count = 0;
   bool overflowed = false;
   for (uint32_t point_attempt = 0; point_attempt < 2; ++point_attempt) {
@@ -312,7 +221,7 @@ static iree_status_t loom_low_schedule_collect_pressure_contributors(
       }
       if (contributor_count < LOOM_LOW_SCHEDULE_MAX_PRESSURE_CONTRIBUTORS) {
         contributors[contributor_count++] =
-            loom_low_diagnostic_value_name(state->module, interval->value_id);
+            loom_low_diagnostic_value_name(table->module, interval->value_id);
       } else {
         overflowed = true;
       }
@@ -325,93 +234,86 @@ static iree_status_t loom_low_schedule_collect_pressure_contributors(
   if (contributor_count == 0) {
     contributors[contributor_count++] = IREE_SV("<none>");
   }
-  *out_contributors = contributors;
-  *out_contributor_count = contributor_count;
-  return iree_ok_status();
+  return contributor_count;
 }
 
 static iree_status_t loom_low_schedule_emit_pressure_summary(
-    loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_table_t* table, iree_diagnostic_emitter_t emitter,
     const loom_liveness_analysis_t* liveness,
-    const loom_liveness_pressure_summary_t* summary) {
-  uint32_t budget = 0;
-  bool has_budget = false;
-  IREE_RETURN_IF_ERROR(loom_low_schedule_pressure_budget_for_class(
-      state, summary->value_class, &budget, &has_budget));
-  if (!has_budget) {
+    const loom_liveness_pressure_summary_t* summary, uint32_t budget) {
+  if (budget == UINT32_MAX) {
     return iree_ok_status();
   }
 
-  const iree_string_view_t* contributors = NULL;
-  iree_host_size_t contributor_count = 0;
-  IREE_RETURN_IF_ERROR(loom_low_schedule_collect_pressure_contributors(
-      state, liveness, summary, &contributors, &contributor_count));
+  iree_string_view_t contributors[LOOM_LOW_SCHEDULE_MAX_PRESSURE_CONTRIBUTORS];
+  const iree_host_size_t contributor_count =
+      loom_low_schedule_collect_pressure_contributors(table, liveness, summary,
+                                                      contributors);
 
   const loom_op_t* origin_op =
-      summary->peak_op ? summary->peak_op : state->function_op;
+      summary->peak_op ? summary->peak_op : table->function_op;
   iree_string_view_t operation_name =
-      summary->peak_op ? loom_op_name(state->module, summary->peak_op)
+      summary->peak_op ? loom_op_name(table->module, summary->peak_op)
                        : IREE_SV("<block-boundary>");
   loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_low_diagnostic_target_key(&state->target)),
-      loom_param_string(loom_low_diagnostic_export_name(&state->target)),
-      loom_param_string(loom_low_diagnostic_config_key(&state->target)),
+      loom_param_string(loom_low_diagnostic_target_key(&table->target)),
+      loom_param_string(loom_low_diagnostic_export_name(&table->target)),
+      loom_param_string(loom_low_diagnostic_config_key(&table->target)),
       loom_param_string(
-          loom_low_diagnostic_function_name(state->module, state->function_op)),
+          loom_low_diagnostic_function_name(table->module, table->function_op)),
       loom_param_string(loom_low_diagnostic_value_class_name(
-          state->target.descriptor_set, summary->value_class)),
+          table->target.descriptor_set, summary->value_class)),
       loom_param_u32(budget),
       loom_param_u32(summary->peak_live_units),
       loom_param_string(
-          loom_low_diagnostic_block_name(state->module, summary->peak_block)),
+          loom_low_diagnostic_block_name(table->module, summary->peak_block)),
       loom_param_string(operation_name),
       loom_param_string_list(contributors, contributor_count),
   };
-  return loom_low_schedule_emit(state, origin_op, LOOM_ERR_BACKEND_003, params,
-                                IREE_ARRAYSIZE(params));
+  return loom_low_schedule_emit(table, emitter, origin_op, LOOM_ERR_BACKEND_003,
+                                params, IREE_ARRAYSIZE(params));
 }
 
-iree_status_t loom_low_schedule_emit_pressure_diagnostics(
-    loom_low_schedule_build_state_t* state,
+static iree_status_t loom_low_schedule_emit_pressure_diagnostics(
+    const loom_low_schedule_table_t* table, iree_diagnostic_emitter_t emitter,
     const loom_liveness_analysis_t* liveness) {
   for (iree_host_size_t i = 0; i < liveness->pressure_summary_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_low_schedule_emit_pressure_summary(
-        state, liveness, &liveness->pressure_summaries[i]));
+        table, emitter, liveness, &liveness->pressure_summaries[i],
+        table->pressure_summary_budgets[i]));
   }
   return iree_ok_status();
 }
 
 static iree_status_t loom_low_schedule_emit_candidate_decision(
-    loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_table_t* table, iree_diagnostic_emitter_t emitter,
     const loom_low_schedule_candidate_decision_t* decision) {
   if (decision->rejected_node == LOOM_LOW_SCHEDULE_NODE_NONE) {
     return iree_ok_status();
   }
   const loom_low_schedule_node_t* chosen_node = NULL;
-  if (decision->chosen_node < state->scheduled_node_count) {
-    chosen_node = &state->nodes[decision->chosen_node];
+  if (decision->chosen_node < table->scheduled_node_count) {
+    chosen_node = &table->nodes[decision->chosen_node];
   }
   const loom_low_schedule_node_t* rejected_node = NULL;
-  if (decision->rejected_node < state->scheduled_node_count) {
-    rejected_node = &state->nodes[decision->rejected_node];
+  if (decision->rejected_node < table->scheduled_node_count) {
+    rejected_node = &table->nodes[decision->rejected_node];
   }
   const loom_block_t* block = NULL;
-  if (decision->block_index < state->body->block_count) {
-    block = state->blocks[decision->block_index].block;
+  if (decision->block_index < table->block_count) {
+    block = table->blocks[decision->block_index].block;
   }
-  iree_string_view_t chosen_label = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_low_schedule_node_diagnostic_label(
-      state, chosen_node, &chosen_label));
-  iree_string_view_t rejected_label = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_low_schedule_node_diagnostic_label(
-      state, rejected_node, &rejected_label));
+  const iree_string_view_t chosen_label =
+      loom_low_schedule_node_diagnostic_label(table, chosen_node);
+  const iree_string_view_t rejected_label =
+      loom_low_schedule_node_diagnostic_label(table, rejected_node);
   loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_low_diagnostic_target_key(&state->target)),
-      loom_param_string(loom_low_diagnostic_export_name(&state->target)),
-      loom_param_string(loom_low_diagnostic_config_key(&state->target)),
+      loom_param_string(loom_low_diagnostic_target_key(&table->target)),
+      loom_param_string(loom_low_diagnostic_export_name(&table->target)),
+      loom_param_string(loom_low_diagnostic_config_key(&table->target)),
       loom_param_string(
-          loom_low_diagnostic_function_name(state->module, state->function_op)),
-      loom_param_string(loom_low_diagnostic_block_name(state->module, block)),
+          loom_low_diagnostic_function_name(table->module, table->function_op)),
+      loom_param_string(loom_low_diagnostic_block_name(table->module, block)),
       loom_param_u32(decision->scheduled_ordinal),
       loom_param_u32(decision->ready_candidate_count),
       loom_param_u32(decision->scored_candidate_count),
@@ -449,36 +351,36 @@ static iree_status_t loom_low_schedule_emit_candidate_decision(
       loom_param_u32(decision->rejected_units_until_pressure_cliff),
   };
   const loom_op_t* origin_op =
-      chosen_node && chosen_node->op ? chosen_node->op : state->function_op;
-  return loom_low_schedule_emit(state, origin_op, LOOM_ERR_BACKEND_015, params,
-                                IREE_ARRAYSIZE(params));
+      chosen_node && chosen_node->op ? chosen_node->op : table->function_op;
+  return loom_low_schedule_emit(table, emitter, origin_op, LOOM_ERR_BACKEND_015,
+                                params, IREE_ARRAYSIZE(params));
 }
 
-iree_status_t loom_low_schedule_emit_candidate_decision_diagnostics(
-    loom_low_schedule_build_state_t* state) {
-  for (iree_host_size_t i = 0; i < state->candidate_decision_count; ++i) {
+static iree_status_t loom_low_schedule_emit_candidate_decision_diagnostics(
+    const loom_low_schedule_table_t* table, iree_diagnostic_emitter_t emitter) {
+  for (iree_host_size_t i = 0; i < table->candidate_decision_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_low_schedule_emit_candidate_decision(
-        state, &state->candidate_decisions[i]));
+        table, emitter, &table->candidate_decisions[i]));
   }
   return iree_ok_status();
 }
 
 static iree_status_t loom_low_schedule_emit_model_summary(
-    loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_table_t* table, iree_diagnostic_emitter_t emitter,
     const loom_low_schedule_model_summary_t* summary) {
   if (summary->model_quality == LOOM_LOW_MODEL_QUALITY_EXACT) {
     return iree_ok_status();
   }
   const loom_low_schedule_node_t* first_node = NULL;
-  if (summary->first_node < state->scheduled_node_count) {
-    first_node = &state->nodes[summary->first_node];
+  if (summary->first_node < table->scheduled_node_count) {
+    first_node = &table->nodes[summary->first_node];
   }
   loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_low_diagnostic_target_key(&state->target)),
-      loom_param_string(loom_low_diagnostic_export_name(&state->target)),
-      loom_param_string(loom_low_diagnostic_config_key(&state->target)),
+      loom_param_string(loom_low_diagnostic_target_key(&table->target)),
+      loom_param_string(loom_low_diagnostic_export_name(&table->target)),
+      loom_param_string(loom_low_diagnostic_config_key(&table->target)),
       loom_param_string(
-          loom_low_diagnostic_function_name(state->module, state->function_op)),
+          loom_low_diagnostic_function_name(table->module, table->function_op)),
       loom_param_string(summary->schedule_class_name),
       loom_param_string(loom_low_model_quality_name(summary->model_quality)),
       loom_param_string(loom_low_latency_kind_name(summary->latency_kind)),
@@ -488,29 +390,29 @@ static iree_status_t loom_low_schedule_emit_model_summary(
       loom_param_u32(summary->use_count),
   };
   const loom_op_t* origin_op =
-      first_node && first_node->op ? first_node->op : state->function_op;
-  return loom_low_schedule_emit(state, origin_op, LOOM_ERR_BACKEND_016, params,
-                                IREE_ARRAYSIZE(params));
+      first_node && first_node->op ? first_node->op : table->function_op;
+  return loom_low_schedule_emit(table, emitter, origin_op, LOOM_ERR_BACKEND_016,
+                                params, IREE_ARRAYSIZE(params));
 }
 
-iree_status_t loom_low_schedule_emit_model_diagnostics(
-    loom_low_schedule_build_state_t* state) {
-  for (iree_host_size_t i = 0; i < state->model_summary_count; ++i) {
+static iree_status_t loom_low_schedule_emit_model_diagnostics(
+    const loom_low_schedule_table_t* table, iree_diagnostic_emitter_t emitter) {
+  for (iree_host_size_t i = 0; i < table->model_summary_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_low_schedule_emit_model_summary(
-        state, &state->model_summaries[i]));
+        table, emitter, &table->model_summaries[i]));
   }
   return iree_ok_status();
 }
 
 static iree_status_t loom_low_schedule_emit_resource_bottleneck(
-    loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_table_t* table, iree_diagnostic_emitter_t emitter,
     const loom_low_schedule_resource_summary_t* summary) {
   loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_low_diagnostic_target_key(&state->target)),
-      loom_param_string(loom_low_diagnostic_export_name(&state->target)),
-      loom_param_string(loom_low_diagnostic_config_key(&state->target)),
+      loom_param_string(loom_low_diagnostic_target_key(&table->target)),
+      loom_param_string(loom_low_diagnostic_export_name(&table->target)),
+      loom_param_string(loom_low_diagnostic_config_key(&table->target)),
       loom_param_string(
-          loom_low_diagnostic_function_name(state->module, state->function_op)),
+          loom_low_diagnostic_function_name(table->module, table->function_op)),
       loom_param_string(summary->resource_name),
       loom_param_u32(summary->capacity_per_cycle),
       loom_param_u32(summary->contention_group_id),
@@ -519,16 +421,17 @@ static iree_status_t loom_low_schedule_emit_resource_bottleneck(
       loom_param_u64(summary->estimated_min_cycles),
       loom_param_u32(summary->peak_units_per_cycle),
   };
-  return loom_low_schedule_emit(state, state->function_op, LOOM_ERR_BACKEND_013,
-                                params, IREE_ARRAYSIZE(params));
+  return loom_low_schedule_emit(table, emitter, table->function_op,
+                                LOOM_ERR_BACKEND_013, params,
+                                IREE_ARRAYSIZE(params));
 }
 
-iree_status_t loom_low_schedule_emit_resource_diagnostics(
-    loom_low_schedule_build_state_t* state) {
+static iree_status_t loom_low_schedule_emit_resource_diagnostics(
+    const loom_low_schedule_table_t* table, iree_diagnostic_emitter_t emitter) {
   uint64_t maximum_estimated_min_cycles = 0;
-  for (iree_host_size_t i = 0; i < state->resource_summary_count; ++i) {
+  for (iree_host_size_t i = 0; i < table->resource_summary_count; ++i) {
     const loom_low_schedule_resource_summary_t* summary =
-        &state->resource_summaries[i];
+        &table->resource_summaries[i];
     if (summary->estimated_min_cycles > maximum_estimated_min_cycles) {
       maximum_estimated_min_cycles = summary->estimated_min_cycles;
     }
@@ -536,27 +439,27 @@ iree_status_t loom_low_schedule_emit_resource_diagnostics(
   if (maximum_estimated_min_cycles == 0) {
     return iree_ok_status();
   }
-  for (iree_host_size_t i = 0; i < state->resource_summary_count; ++i) {
+  for (iree_host_size_t i = 0; i < table->resource_summary_count; ++i) {
     const loom_low_schedule_resource_summary_t* summary =
-        &state->resource_summaries[i];
+        &table->resource_summaries[i];
     if (summary->estimated_min_cycles != maximum_estimated_min_cycles) {
       continue;
     }
     IREE_RETURN_IF_ERROR(
-        loom_low_schedule_emit_resource_bottleneck(state, summary));
+        loom_low_schedule_emit_resource_bottleneck(table, emitter, summary));
   }
   return iree_ok_status();
 }
 
 static uint32_t loom_low_schedule_hazard_gap_packet_index(
-    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_table_t* table,
     const loom_low_schedule_hazard_gap_t* hazard_gap,
     uint32_t scheduled_ordinal) {
-  if (hazard_gap->block_index >= state->body->block_count) {
+  if (hazard_gap->block_index >= table->block_count) {
     return UINT32_MAX;
   }
   const loom_low_schedule_block_t* block =
-      &state->blocks[hazard_gap->block_index];
+      &table->blocks[hazard_gap->block_index];
   const uint64_t packet_index =
       (uint64_t)block->scheduled_node_start + scheduled_ordinal;
   return packet_index <= UINT32_MAX ? (uint32_t)packet_index : UINT32_MAX;
@@ -587,28 +490,27 @@ static iree_string_view_t loom_low_schedule_hazard_reference_name(
 }
 
 static iree_status_t loom_low_schedule_emit_hazard_gap(
-    loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_table_t* table, iree_diagnostic_emitter_t emitter,
     const loom_low_schedule_hazard_gap_t* hazard_gap) {
   const loom_low_schedule_node_t* consumer_node = NULL;
-  if (hazard_gap->consumer_node < state->scheduled_node_count) {
-    consumer_node = &state->nodes[hazard_gap->consumer_node];
+  if (hazard_gap->consumer_node < table->scheduled_node_count) {
+    consumer_node = &table->nodes[hazard_gap->consumer_node];
   }
-  iree_string_view_t descriptor_key = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_low_schedule_node_diagnostic_label(
-      state, consumer_node, &descriptor_key));
+  const iree_string_view_t descriptor_key =
+      loom_low_schedule_node_diagnostic_label(table, consumer_node);
   char reference_buffer[32];
   iree_string_view_t reference_name = loom_low_schedule_hazard_reference_name(
       hazard_gap, reference_buffer, sizeof(reference_buffer));
   uint32_t producer_packet = loom_low_schedule_hazard_gap_packet_index(
-      state, hazard_gap, hazard_gap->producer_scheduled_ordinal);
+      table, hazard_gap, hazard_gap->producer_scheduled_ordinal);
   uint32_t consumer_packet = loom_low_schedule_hazard_gap_packet_index(
-      state, hazard_gap, hazard_gap->consumer_scheduled_ordinal);
+      table, hazard_gap, hazard_gap->consumer_scheduled_ordinal);
   loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_low_diagnostic_target_key(&state->target)),
-      loom_param_string(loom_low_diagnostic_export_name(&state->target)),
-      loom_param_string(loom_low_diagnostic_config_key(&state->target)),
+      loom_param_string(loom_low_diagnostic_target_key(&table->target)),
+      loom_param_string(loom_low_diagnostic_export_name(&table->target)),
+      loom_param_string(loom_low_diagnostic_config_key(&table->target)),
       loom_param_string(
-          loom_low_diagnostic_function_name(state->module, state->function_op)),
+          loom_low_diagnostic_function_name(table->module, table->function_op)),
       loom_param_string(loom_low_diagnostic_string_or_placeholder(
           descriptor_key, IREE_SV("<unknown>"))),
       loom_param_string(loom_low_hazard_kind_name(hazard_gap->kind)),
@@ -622,16 +524,50 @@ static iree_status_t loom_low_schedule_emit_hazard_gap(
       loom_param_u32(consumer_packet),
   };
   const loom_op_t* origin_op =
-      consumer_node ? consumer_node->op : state->function_op;
-  return loom_low_schedule_emit(state, origin_op, LOOM_ERR_BACKEND_014, params,
-                                IREE_ARRAYSIZE(params));
+      consumer_node ? consumer_node->op : table->function_op;
+  return loom_low_schedule_emit(table, emitter, origin_op, LOOM_ERR_BACKEND_014,
+                                params, IREE_ARRAYSIZE(params));
 }
 
-iree_status_t loom_low_schedule_emit_hazard_gap_diagnostics(
-    loom_low_schedule_build_state_t* state) {
-  for (iree_host_size_t i = 0; i < state->hazard_gap_count; ++i) {
+static iree_status_t loom_low_schedule_emit_hazard_gap_diagnostics(
+    const loom_low_schedule_table_t* table, iree_diagnostic_emitter_t emitter) {
+  for (iree_host_size_t i = 0; i < table->hazard_gap_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_low_schedule_emit_hazard_gap(
+        table, emitter, &table->hazard_gaps[i]));
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_schedule_diagnostics_emit(
+    const loom_low_schedule_table_t* table,
+    loom_low_schedule_diagnostic_flags_t flags,
+    iree_diagnostic_emitter_t emitter) {
+  if (emitter.fn == NULL) return iree_ok_status();
+  if (table->error_count != 0) {
+    return loom_low_schedule_emit_dependency_cycle(table, emitter,
+                                                   &table->failure);
+  }
+  if (iree_any_bit_set(flags, LOOM_LOW_SCHEDULE_DIAGNOSTIC_PRESSURE_PEAKS)) {
+    IREE_RETURN_IF_ERROR(loom_low_schedule_emit_pressure_diagnostics(
+        table, emitter, &table->liveness));
+  }
+  if (iree_any_bit_set(flags,
+                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_CANDIDATE_DECISIONS)) {
     IREE_RETURN_IF_ERROR(
-        loom_low_schedule_emit_hazard_gap(state, &state->hazard_gaps[i]));
+        loom_low_schedule_emit_candidate_decision_diagnostics(table, emitter));
+  }
+  if (iree_any_bit_set(flags, LOOM_LOW_SCHEDULE_DIAGNOSTIC_MODEL_QUALITY)) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_schedule_emit_model_diagnostics(table, emitter));
+  }
+  if (iree_any_bit_set(flags,
+                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_RESOURCE_BOTTLENECKS)) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_schedule_emit_resource_diagnostics(table, emitter));
+  }
+  if (iree_any_bit_set(flags, LOOM_LOW_SCHEDULE_DIAGNOSTIC_HAZARD_GAPS)) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_schedule_emit_hazard_gap_diagnostics(table, emitter));
   }
   return iree_ok_status();
 }

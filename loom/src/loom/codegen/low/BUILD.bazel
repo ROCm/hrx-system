@@ -759,6 +759,8 @@ loom_cc_test(
     deps = [
         ":frame",
         ":text_asm",
+        "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/error:error_defs",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",

@@ -119,6 +119,77 @@ typedef struct loom_low_allocation_class_capacity_t {
   bool is_bounded;
 } loom_low_allocation_class_capacity_t;
 
+typedef enum loom_low_allocation_failure_blocking_kind_e {
+  // No specific blocking constraint was recorded.
+  LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_UNKNOWN = 0,
+  // The failing interval itself is wider than the register-class budget.
+  LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_INTERVAL_EXCEEDS_BUDGET = 1,
+  // A live assignment occupies a candidate location and cannot be evicted.
+  LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_ACTIVE_ASSIGNMENT = 2,
+  // A fixed value, reserved range, or storage lease blocks a candidate
+  // location.
+  LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_LOCATION_CONSTRAINT = 3,
+  // The allocator scanned the candidate locations without finding a legal
+  // placement or a more specific blocking constraint.
+  LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_NO_ASSIGNABLE_LOCATION = 4,
+} loom_low_allocation_failure_blocking_kind_t;
+
+// Terminal storage-planning failure. Interval failures retain the conflicting
+// value and storage witness; move failures retain the operation needing
+// scratch.
+typedef struct loom_low_allocation_failure_t {
+  // Stable failure code emitted by the structured diagnostic.
+  iree_string_view_t failure_code;
+  // Operation whose value or required move could not be assigned storage.
+  const loom_op_t* op;
+  // SSA value whose interval could not be assigned, or INVALID for a move.
+  loom_value_id_t value_id;
+  // Pressure/allocation class requiring storage.
+  loom_liveness_value_class_t value_class;
+  // Descriptor-set-local register class ID for |value_class|.
+  uint16_t descriptor_reg_class_id;
+  // Program point where the failed interval starts, or UINT32_MAX for a move.
+  uint32_t start_point;
+  // Exclusive storage end of the failed interval, or UINT32_MAX for a move.
+  uint32_t end_point;
+  // Allocation units required by the failed interval.
+  uint32_t required_unit_count;
+  // Maximum allocation units available, or UINT32_MAX when unbounded.
+  uint32_t budget_units;
+  // Maximum boundary-live units observed for this pressure class.
+  uint32_t peak_live_units;
+  // Candidate location kind used while diagnosing the failure.
+  loom_low_allocation_location_kind_t location_kind;
+  // Candidate base physical register or target ID used for conflict reporting,
+  // or UINT32_MAX when no concrete candidate was inspected.
+  uint32_t location_base;
+  // Candidate location width used for conflict reporting, or zero when no
+  // concrete candidate was inspected.
+  uint32_t location_count;
+  // Structured category describing the first blocking constraint found.
+  loom_low_allocation_failure_blocking_kind_t blocking_kind;
+  // Assignment index for an active-assignment conflict, or UINT32_MAX.
+  uint32_t conflict_assignment_index;
+  // SSA value occupying the conflicting assignment, or LOOM_VALUE_ID_INVALID.
+  loom_value_id_t conflict_value_id;
+  // Program point where the conflicting assignment starts, or UINT32_MAX.
+  uint32_t conflict_start_point;
+  // One-past-last storage program point for the conflicting assignment, or
+  // UINT32_MAX.
+  uint32_t conflict_end_point;
+  // Conflicting assignment location kind.
+  loom_low_allocation_location_kind_t conflict_location_kind;
+  // Conflicting assignment base physical register or target ID, or UINT32_MAX.
+  uint32_t conflict_location_base;
+  // Conflicting assignment location width, or zero when unavailable.
+  uint32_t conflict_location_count;
+} loom_low_allocation_failure_t;
+
+// Returns true when |failure| describes a terminal hard-allocation failure.
+static inline bool loom_low_allocation_failure_is_present(
+    const loom_low_allocation_failure_t* failure) {
+  return failure != NULL && !iree_string_view_is_empty(failure->failure_code);
+}
 // Immutable interval-tree entry owned by the resolved target constraints.
 typedef struct loom_low_allocation_fixed_interval_t
     loom_low_allocation_fixed_interval_t;
@@ -135,6 +206,8 @@ typedef struct loom_low_allocation_target_constraints_t {
   iree_diagnostic_emitter_t emitter;
   // Number of error diagnostics emitted while resolving target constraints.
   uint32_t error_count;
+  // Terminal allocation or move failure retained for table consumers.
+  loom_low_allocation_failure_t failure;
   // Resolved explicit per-class register budgets.
   loom_low_allocation_resolved_budget_t* budgets;
   // Number of entries in |budgets|.
@@ -226,8 +299,9 @@ loom_low_allocation_target_constraints_validate_register_location_capacity(
     iree_string_view_t request_kind, const loom_op_t* diagnostic_op,
     bool* out_valid);
 
-// Emits a structured allocation-capacity failure for |value_class|.
-iree_status_t loom_low_allocation_target_constraints_emit_failure(
+// Records a terminal move-capacity failure without emitting diagnostics. The
+// completed allocation table owns the diagnostic publication boundary.
+void loom_low_allocation_target_constraints_record_move_failure(
     loom_low_allocation_target_constraints_t* constraints, const loom_op_t* op,
     loom_liveness_value_class_t value_class, uint32_t budget_units,
     uint32_t peak_units, iree_string_view_t failure_code);

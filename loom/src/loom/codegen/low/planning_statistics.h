@@ -33,8 +33,6 @@ typedef struct loom_low_planning_arena_statistics_t {
 typedef struct loom_low_planning_repair_statistics_t {
   // Number of complete repair iterations performed.
   uint64_t iteration_count;
-  // Number of diagnostic frame builds replayed after a rejected silent build.
-  uint64_t diagnostic_replay_count;
   // Number of spill-traffic lowering runs.
   uint64_t spill_traffic_lowering_count;
   // Number of operands rewritten by rematerialization.

@@ -1197,7 +1197,6 @@ static iree_status_t loom_check_emit_build_low_allocation_table(
       .fixed_values = fixed_values,
       .fixed_value_count = fixed_value_count,
       .emitter = emitter,
-      .diagnostic_flags = diagnostic_flags,
   };
   loom_low_function_model_t model = {0};
   iree_status_t status = loom_low_function_model_initialize(
@@ -1207,6 +1206,10 @@ static iree_status_t loom_check_emit_build_low_allocation_table(
   if (iree_status_is_ok(status)) {
     status =
         loom_low_allocate_function(&model, &options, analysis_arena, out_table);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_low_allocation_diagnostics_emit(out_table, diagnostic_flags,
+                                                  emitter);
   }
   if (iree_status_is_ok(status)) *out_built = true;
   loom_low_function_model_deinitialize(&model);

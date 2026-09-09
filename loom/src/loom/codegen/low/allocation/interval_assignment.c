@@ -180,6 +180,9 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
     bool interval_requires_register, iree_string_view_t failure_code) {
   loom_low_allocation_failure_t failure = {
       .failure_code = failure_code,
+      .op = loom_low_diagnostic_value_origin_op(state->context->module,
+                                                interval->value_id,
+                                                state->context->function_op),
       .value_id = interval->value_id,
       .value_class = interval->value_class,
       .descriptor_reg_class_id = capacity->descriptor_reg_class_id,
@@ -209,7 +212,7 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
   if (capacity->is_bounded && interval->unit_count > capacity->max_units) {
     failure.blocking_kind =
         LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_INTERVAL_EXCEEDS_BUDGET;
-    state->result.failure = failure;
+    state->context->target_constraints->failure = failure;
     return iree_ok_status();
   }
 
@@ -232,7 +235,7 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
             search_limit, alignment, &last_base)) {
       failure.blocking_kind =
           LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_NO_ASSIGNABLE_LOCATION;
-      state->result.failure = failure;
+      state->context->target_constraints->failure = failure;
       return iree_ok_status();
     }
   }
@@ -299,7 +302,7 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
             LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_ACTIVE_ASSIGNMENT;
         loom_low_allocation_interval_assignment_failure_set_conflict(
             &failure, assignment_index, assignment);
-        state->result.failure = failure;
+        state->context->target_constraints->failure = failure;
         return iree_ok_status();
       }
     }
@@ -321,21 +324,21 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
             LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN)) {
       failure.blocking_kind =
           LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_LOCATION_CONSTRAINT;
-      state->result.failure = failure;
+      state->context->target_constraints->failure = failure;
       return iree_ok_status();
     }
 
     if (!saw_active_conflict) {
       failure.blocking_kind =
           LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_NO_ASSIGNABLE_LOCATION;
-      state->result.failure = failure;
+      state->context->target_constraints->failure = failure;
       return iree_ok_status();
     }
   }
 
   failure.blocking_kind =
       LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_NO_ASSIGNABLE_LOCATION;
-  state->result.failure = failure;
+  state->context->target_constraints->failure = failure;
   return iree_ok_status();
 }
 
@@ -1050,12 +1053,7 @@ iree_status_t loom_low_allocation_interval_assignment_build(
           loom_low_allocation_interval_assignment_record_failure(
               &state, interval, value_ordinal, &capacity, budget_units,
               requires_register, failure_code));
-      IREE_RETURN_IF_ERROR(loom_low_allocation_target_constraints_emit_failure(
-          context->target_constraints,
-          loom_low_diagnostic_value_origin_op(
-              context->module, interval->value_id, context->function_op),
-          interval->value_class, budget_units,
-          state.result.failure.peak_live_units, failure_code));
+      ++context->target_constraints->error_count;
       *out_result = state.result;
       return iree_ok_status();
     }

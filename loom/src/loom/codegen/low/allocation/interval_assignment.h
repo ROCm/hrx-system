@@ -83,8 +83,6 @@ typedef struct loom_low_allocation_interval_assignment_result_t {
   loom_low_allocation_remark_t* remarks;
   // Number of initialized allocation remark records.
   iree_host_size_t remark_count;
-  // Terminal hard-allocation failure, when one was emitted.
-  loom_low_allocation_failure_t failure;
   // Number of assignments whose location kind is SPILL_SLOT.
   iree_host_size_t spill_count;
 } loom_low_allocation_interval_assignment_result_t;
