@@ -12,6 +12,7 @@
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/encoding/encoding.h"
+#include "loom/target/arch/amd/xdna/aie2p/machine/machine.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,6 +28,15 @@ loom_aie2p_encoded_slot_t loom_aie2p_descriptor_encode(
     uint32_t descriptor_ordinal,
     const loom_low_allocation_assignment_t* const* operand_assignments,
     const int64_t* immediate_values);
+
+// Selects the native descriptor for one allocation move between valid AIE2P
+// physical registers. Returns LOOM_LOW_DESCRIPTOR_ORDINAL_NONE when no direct
+// move is declared. When several moves apply, descriptor order determines the
+// selected encoding. The result also identifies the move's operand timing and
+// resource requirements for physical scheduling.
+uint32_t loom_aie2p_descriptor_select_move(
+    loom_aie2p_physical_register_id_t source,
+    loom_aie2p_physical_register_id_t destination);
 
 #ifdef __cplusplus
 }  // extern "C"

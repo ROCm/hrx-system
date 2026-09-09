@@ -22,6 +22,7 @@ iree_py_library(
     loom::py::loom::gen::support::support
     loom::py::loom::gen::target::arch::amd::xdna::package
     loom::py::loom::gen::target::low::low_descriptors
+    loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amd::xdna::aie::encoding
     loom::py::loom::target::arch::amd::xdna::aie::machine
     loom::py::loom::target::arch::amd::xdna::aie2p::descriptors

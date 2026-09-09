@@ -21,6 +21,7 @@ loom_generated_file_family(
     "descriptors/core_descriptors.h"
     "encoding/encoding_tables.inl"
     "machine/machine_tables.inl"
+    "descriptors/move_tables.inl"
   OUTPUT_FLAGS
     "--array-descriptor-source-output"
     "--array-descriptor-header-output"
@@ -28,6 +29,7 @@ loom_generated_file_family(
     "--descriptor-header-output"
     "--encoding-output"
     "--machine-output"
+    "--move-output"
 )
 
 loom_cc_library(
@@ -123,12 +125,15 @@ loom_cc_library(
     descriptor_encoding
   HDRS
     "descriptors/encoding.h"
+  TEXTUAL_HDRS
+    "descriptors/move_tables.inl"
   SRCS
     "descriptors/encoding.c"
   DEPS
     ::encoding
     ::machine
     iree::base
+    iree::base::internal
     loom::codegen::low::allocation::assignment
     loom::codegen::low::descriptors
   PUBLIC

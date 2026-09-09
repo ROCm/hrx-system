@@ -707,6 +707,53 @@ TEST(DescriptorEncodingTest, PredicatePartsMatchOracleInstructionEncodings) {
   EXPECT_EQ(complete_program, (std::vector<uint8_t>{0x18, 0x88, 0x00, 0x00}));
 }
 
+TEST(DescriptorEncodingTest, MoveLookupMatchesEveryPhysicalRegisterPair) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_aie2p_core_descriptor_set();
+  std::vector<uint32_t> move_descriptors;
+  for (uint32_t ordinal = 0; ordinal < descriptor_set->descriptor_count;
+       ++ordinal) {
+    if (iree_any_bit_set(descriptor_set->descriptors[ordinal].flags,
+                         LOOM_LOW_DESCRIPTOR_FLAG_ALLOCATION_MOVE)) {
+      move_descriptors.push_back(ordinal);
+    }
+  }
+  ASSERT_FALSE(move_descriptors.empty());
+  // The reference interprets the actual descriptor register classes instead
+  // of reproducing the generated mask representation. Include unsupported
+  // pairs, overlapping classes, singleton selectors, and aggregate registers.
+  for (uint32_t source = 0; source < descriptor_set->physical_register_count;
+       ++source) {
+    for (uint32_t destination = 0;
+         destination < descriptor_set->physical_register_count; ++destination) {
+      uint32_t expected = LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
+      for (uint32_t ordinal : move_descriptors) {
+        const auto* operands =
+            descriptor_set->operands +
+            descriptor_set->descriptors[ordinal].operand_start;
+        const uint16_t destination_class =
+            descriptor_set->reg_class_alts[operands[0].reg_class_alt_start]
+                .reg_class_id;
+        const uint16_t source_class =
+            descriptor_set->reg_class_alts[operands[1].reg_class_alt_start]
+                .reg_class_id;
+        if (loom_low_descriptor_set_find_physical_register_candidate(
+                descriptor_set, source_class, source, nullptr) &&
+            loom_low_descriptor_set_find_physical_register_candidate(
+                descriptor_set, destination_class, destination, nullptr)) {
+          expected = ordinal;
+          break;
+        }
+      }
+      EXPECT_EQ(loom_aie2p_descriptor_select_move(
+                    (loom_aie2p_physical_register_id_t)source,
+                    (loom_aie2p_physical_register_id_t)destination),
+                expected)
+          << "source=" << source << " destination=" << destination;
+    }
+  }
+}
+
 TEST(DescriptorEncodingTest, PhysicalRegisterRowsAlignWithMachineTable) {
   const loom_low_descriptor_set_t* descriptor_set =
       loom_aie2p_core_descriptor_set();

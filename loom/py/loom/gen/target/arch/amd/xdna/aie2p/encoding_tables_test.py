@@ -16,6 +16,7 @@ def test_outputs_contain_owned_tables() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         encoding_path = Path(temp_dir) / "encoding_tables.inl"
         machine_path = Path(temp_dir) / "machine_tables.inl"
+        move_path = Path(temp_dir) / "move_tables.inl"
         descriptor_header_path = Path(temp_dir) / "core_descriptors.h"
         descriptor_source_path = Path(temp_dir) / "core_descriptors.c"
         array_descriptor_header_path = Path(temp_dir) / "array_descriptors.h"
@@ -27,6 +28,8 @@ def test_outputs_contain_owned_tables() -> None:
                     str(encoding_path),
                     "--machine-output",
                     str(machine_path),
+                    "--move-output",
+                    str(move_path),
                     "--descriptor-header-output",
                     str(descriptor_header_path),
                     "--descriptor-source-output",
@@ -41,6 +44,7 @@ def test_outputs_contain_owned_tables() -> None:
         )
         encoding_contents = encoding_path.read_text(encoding="utf-8")
         machine_contents = machine_path.read_text(encoding="utf-8")
+        move_contents = move_path.read_text(encoding="utf-8")
         descriptor_header_contents = descriptor_header_path.read_text(encoding="utf-8")
         descriptor_source_contents = descriptor_source_path.read_text(encoding="utf-8")
         array_descriptor_header_contents = array_descriptor_header_path.read_text(encoding="utf-8")
@@ -53,6 +57,7 @@ def test_outputs_contain_owned_tables() -> None:
     assert "MOV_OR" not in encoding_contents
     assert "ce8c0f8fd66bff15b347351c67e9fb4fe0a17205" in encoding_contents
     assert "kLoomAie2pPhysicalRegisters" in machine_contents
+    assert "kMoveDescriptorOrdinals" in move_contents
     assert "kLoomAie2pRegisterClasses" in machine_contents
     assert "kLoomAie2pMachineForms" in machine_contents
     assert "MOV_OR" not in machine_contents

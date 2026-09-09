@@ -39,6 +39,7 @@ from loom.target.arch.amd.xdna.aie2p.core_encoding_data import (
     SLOT_BIT_COUNTS,
 )
 from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
+from loom.target.low_descriptors import DescriptorFlag
 
 _NATIVE_MAX_PACKET_SIZE = 16
 _NATIVE_MAX_BUNDLE_SLOT_COUNT = 8
@@ -352,6 +353,34 @@ def _emit_encoding_tables() -> str:
     return "\n".join(lines)
 
 
+def _emit_move_tables() -> str:
+    """Indexes validated allocation moves by physical-register membership."""
+    spec = AIE2P_CORE_DESCRIPTOR_SET
+    moves = tuple((ordinal, descriptor) for ordinal, descriptor in enumerate(spec.descriptors) if DescriptorFlag.ALLOCATION_MOVE in descriptor.flags)
+    if not moves or len(moves) > 8:
+        raise ValueError("AIE2P allocation moves must fit nonempty uint8 route masks")
+    if moves[-1][0] > 0xFFFF:
+        raise ValueError("AIE2P allocation move ordinals exceed uint16")
+    register_ids = {register.name: ordinal for ordinal, register in enumerate(spec.physical_registers)}
+    classes = {row.name: row for row in spec.reg_classes}
+    masks = [[0] * len(register_ids) for _ in range(2)]
+    for move_index, (_ordinal, descriptor) in enumerate(moves):
+        for operand_index, operand in enumerate(descriptor.operands):
+            register_class = classes[operand.reg_alts[0].reg_class]
+            for register_name in register_class.physical_registers:
+                masks[operand_index][register_ids[register_name]] |= 1 << move_index
+    lines = [
+        *line_comment_header("//", generator="loom.gen.target.arch.amd.xdna.aie2p.encoding_tables"),
+        "static const uint16_t kMoveDescriptorOrdinals[] = {",
+        *(f"    {ordinal}," for ordinal, _descriptor in moves),
+        "};",
+        "",
+    ]
+    for name, values in zip(("Destination", "Source"), masks, strict=True):
+        lines.extend((f"static const uint8_t kMove{name}Masks[] = {{", *(f"    0x{value:02x}," for value in values), "};", ""))
+    return "\n".join(lines)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate AIE2P target tables.")
     parser.add_argument(
@@ -363,6 +392,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--machine-output",
         type=Path,
         help="Path to write the native AIE2P machine table include.",
+    )
+    parser.add_argument(
+        "--move-output",
+        type=Path,
+        help="Path to write the AIE2P allocation move lookup tables.",
     )
     parser.add_argument(
         "--descriptor-header-output",
@@ -393,6 +427,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_paths = (
         args.encoding_output,
         args.machine_output,
+        args.move_output,
         args.descriptor_header_output,
         args.descriptor_source_output,
         args.array_descriptor_header_output,
@@ -410,9 +445,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     generated_descriptors = generate_descriptor_set(AIE2P_CORE_DESCRIPTOR_SET)
     generated_array_descriptors = generate_descriptor_set(AIE2P_ARRAY_DESCRIPTOR_SET)
+    move_contents = _emit_move_tables()
     if args.encoding_output is not None:
         write_text_file(args.encoding_output, encoding_contents)
         write_text_file(args.machine_output, machine_contents)
+        write_text_file(args.move_output, move_contents)
         write_text_file(args.descriptor_header_output, generated_descriptors.header)
         write_text_file(args.descriptor_source_output, generated_descriptors.source)
         write_text_file(

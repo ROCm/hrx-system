@@ -32,6 +32,7 @@ loom_generated_file_family(
         "--descriptor-header-output",
         "--encoding-output",
         "--machine-output",
+        "--move-output",
     ],
     outputs = [
         "descriptors/array_descriptors.c",
@@ -40,6 +41,7 @@ loom_generated_file_family(
         "descriptors/core_descriptors.h",
         "encoding/encoding_tables.inl",
         "machine/machine_tables.inl",
+        "descriptors/move_tables.inl",
     ],
 )
 
@@ -115,6 +117,7 @@ loom_cc_library(
     name = "descriptor_encoding",
     srcs = ["descriptors/encoding.c"],
     hdrs = ["descriptors/encoding.h"],
+    textual_hdrs = [":descriptors/move_tables.inl"],
     visibility = ["//visibility:public"],
     deps = [
         ":encoding",
@@ -122,6 +125,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low/allocation:assignment",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )
 

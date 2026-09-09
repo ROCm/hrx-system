@@ -6,9 +6,25 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/encoding.h"
 
-#include "loom/target/arch/amd/xdna/aie2p/machine/machine.h"
+#include "iree/base/internal/math.h"
+
+// Each physical register has a byte mask of applicable allocation moves in
+// descriptor order. Intersecting the source and destination masks selects the
+// first legal instruction without searching descriptors or register classes.
+#include "loom/target/arch/amd/xdna/aie2p/descriptors/move_tables.inl"
 
 #define LOOM_AIE2P_DESCRIPTOR_MAX_ENCODING_FIELD_COUNT 16u
+
+uint32_t loom_aie2p_descriptor_select_move(
+    loom_aie2p_physical_register_id_t source,
+    loom_aie2p_physical_register_id_t destination) {
+  const uint32_t candidates =
+      kMoveSourceMasks[source] & kMoveDestinationMasks[destination];
+  return candidates != 0
+             ? kMoveDescriptorOrdinals[iree_math_count_trailing_zeros_u32(
+                   candidates)]
+             : LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
+}
 
 static void loom_aie2p_descriptor_append_field(
     loom_aie2p_encoding_field_id_t field_id, uint64_t value,

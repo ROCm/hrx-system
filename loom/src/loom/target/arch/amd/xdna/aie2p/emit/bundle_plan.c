@@ -528,53 +528,6 @@ loom_aie2p_bundle_plan_encode_structural_descriptor(
                                       NULL);
 }
 
-typedef struct loom_aie2p_physical_move_route_t {
-  // Native encoding register class read by the move.
-  uint16_t source_encoding_reg_class_id;
-  // Native encoding register class written by the move.
-  uint16_t destination_encoding_reg_class_id;
-  // Native descriptor encoding the move.
-  uint32_t descriptor_ordinal;
-} loom_aie2p_physical_move_route_t;
-
-static bool loom_aie2p_bundle_plan_select_physical_move_route(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_move_t* move, loom_aie2p_physical_move_route_t* out_route) {
-  for (uint32_t descriptor_ordinal = 0;
-       descriptor_ordinal < descriptor_set->descriptor_count;
-       ++descriptor_ordinal) {
-    const loom_low_descriptor_t* descriptor =
-        &descriptor_set->descriptors[descriptor_ordinal];
-    if (!iree_any_bit_set(descriptor->flags,
-                          LOOM_LOW_DESCRIPTOR_FLAG_ALLOCATION_MOVE)) {
-      continue;
-    }
-    const loom_low_operand_t* destination_operand =
-        &descriptor_set->operands[descriptor->operand_start];
-    const loom_low_operand_t* source_operand = destination_operand + 1;
-    const uint16_t destination_reg_class_id =
-        descriptor_set->reg_class_alts[destination_operand->reg_class_alt_start]
-            .reg_class_id;
-    const uint16_t source_reg_class_id =
-        descriptor_set->reg_class_alts[source_operand->reg_class_alt_start]
-            .reg_class_id;
-    if (!loom_low_descriptor_set_find_physical_register_candidate(
-            descriptor_set, source_reg_class_id, move->source.location, NULL) ||
-        !loom_low_descriptor_set_find_physical_register_candidate(
-            descriptor_set, destination_reg_class_id,
-            move->destination.location, NULL)) {
-      continue;
-    }
-    *out_route = (loom_aie2p_physical_move_route_t){
-        .source_encoding_reg_class_id = source_reg_class_id,
-        .destination_encoding_reg_class_id = destination_reg_class_id,
-        .descriptor_ordinal = descriptor_ordinal,
-    };
-    return true;
-  }
-  return false;
-}
-
 static iree_status_t loom_aie2p_bundle_plan_encode_move(
     const loom_low_emission_frame_t* frame, const loom_low_move_t* move,
     loom_aie2p_encoded_slot_t* out_encoded_slot) {
@@ -589,9 +542,10 @@ static iree_status_t loom_aie2p_bundle_plan_encode_move(
   IREE_ASSERT_LT(move->source.location,
                  descriptor_set->physical_register_count);
 
-  loom_aie2p_physical_move_route_t route;
-  if (!loom_aie2p_bundle_plan_select_physical_move_route(descriptor_set, move,
-                                                         &route)) {
+  const uint32_t descriptor_ordinal = loom_aie2p_descriptor_select_move(
+      (loom_aie2p_physical_register_id_t)move->source.location,
+      (loom_aie2p_physical_register_id_t)move->destination.location);
+  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
     const iree_string_view_t destination_name = loom_low_descriptor_set_string(
         descriptor_set,
         descriptor_set->physical_registers[move->destination.location]
@@ -621,14 +575,14 @@ static iree_status_t loom_aie2p_bundle_plan_encode_move(
   }
 
   const loom_low_allocation_assignment_t destination_assignment = {
-      .descriptor_reg_class_id = route.destination_encoding_reg_class_id,
+      .descriptor_reg_class_id = move->destination.descriptor_reg_class_id,
       .unit_count = 1,
       .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
       .location_base = move->destination.location,
       .location_count = 1,
   };
   const loom_low_allocation_assignment_t source_assignment = {
-      .descriptor_reg_class_id = route.source_encoding_reg_class_id,
+      .descriptor_reg_class_id = move->source.descriptor_reg_class_id,
       .unit_count = 1,
       .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
       .location_base = move->source.location,
@@ -639,7 +593,7 @@ static iree_status_t loom_aie2p_bundle_plan_encode_move(
       &source_assignment,
   };
   *out_encoded_slot = loom_aie2p_descriptor_encode(
-      descriptor_set, route.descriptor_ordinal, operand_assignments, NULL);
+      descriptor_set, descriptor_ordinal, operand_assignments, NULL);
   return iree_ok_status();
 }
 
