@@ -505,6 +505,19 @@ TEST_LOW_CONST_ZERO_I32_DESCRIPTOR = Descriptor(
     instruction_classes=(InstructionClass.OTHER,),
 )
 
+TEST_LOW_CONST_ISSUED_I32_DESCRIPTOR = Descriptor(
+    key="test.const.issued.i32",
+    mnemonic="test.const.issued.i32",
+    semantic_tag="test.integer.const.issued.i32",
+    operands=(_i32_result(),),
+    op_kind=DescriptorOpKind.CONST,
+    immediates=(_I32_VALUE_IMMEDIATE,),
+    constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
+    asm_forms=_asm(results=("dst",), immediates=("i32_value",)),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
 TEST_LOW_CONST_PACKED_NARROW_DESCRIPTOR = Descriptor(
     key="test.const.packed.narrow",
     mnemonic="test.const.packed.narrow",
@@ -2234,6 +2247,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_PROJECTABLE_EFFECT_I32_DESCRIPTOR,
         TEST_LOW_SCHEDULE_ALTERNATIVE_A_I32_DESCRIPTOR,
         TEST_LOW_SCHEDULE_ALTERNATIVE_B_I32_DESCRIPTOR,
+        TEST_LOW_CONST_ISSUED_I32_DESCRIPTOR,
     ),
 )
 

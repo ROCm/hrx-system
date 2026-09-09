@@ -127,6 +127,91 @@ low.func.def target<test.low.core> @resource_capacity(%lhs: reg<test.i32>, %rhs:
   }
 }
 
+TEST_F(LowEmissionFrameTest, MaterializationPreservesReadyDescriptorPair) {
+  constexpr loom_low_schedule_strategy_t kScheduleStrategies[] = {
+      LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+      LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE,
+      LOOM_LOW_SCHEDULE_STRATEGY_LATENCY_HIDING,
+      LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+  };
+  for (const loom_low_schedule_strategy_t strategy : kScheduleStrategies) {
+    SCOPED_TRACE(static_cast<int>(strategy));
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @constant_pair(%input: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %first = test.const.issued.i32 1
+  %second = test.const.issued.i32 2
+  %first_result = test.add.i32 %input, %first
+  %second_result = test.add.i32 %input, %second
+  return %first_result, %second_result
+}
+)");
+    const loom_low_descriptor_set_t* descriptor_set =
+        loom_test_low_core_descriptor_set();
+    const loom_low_descriptor_t* constant =
+        loom_low_descriptor_set_descriptor_at(
+            descriptor_set, TEST_LOW_CORE_DESCRIPTOR_REF_TEST_CONST_ISSUED_I32);
+    const loom_low_schedule_pair_affinity_t affinity = {
+        .first_descriptor = constant,
+        .second_descriptor = constant,
+        .priority = 1,
+    };
+    const loom_low_emission_frame_options_t options = {
+        .descriptor_registry = &registry_.registry,
+        .schedule_pair_affinities = {&affinity, 1},
+        .schedule_strategy = strategy,
+    };
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(loom_low_emission_frame_build(
+        module.get(), loom_block_op(loom_module_block(module.get()), 0),
+        &options, &arena_, &frame));
+    ASSERT_EQ(frame.schedule.error_count, 0u);
+    EXPECT_EQ(frame.schedule.nodes[1].scheduled_ordinal,
+              frame.schedule.nodes[0].scheduled_ordinal + 1);
+    EXPECT_LT(frame.schedule.nodes[1].scheduled_ordinal,
+              frame.schedule.nodes[2].scheduled_ordinal);
+  }
+}
+
+TEST_F(LowEmissionFrameTest, MaterializationPairCannotExceedRegisterBudget) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @bounded_pair(%address: reg<test.ptr>, %value: reg<test.i32 x4>) asm {
+  %first = test.const.issued.i32 0
+  %second = test.const.issued.i32 4
+  test.store.index.v4i32 %address, %first, %value
+  test.store.index.v4i32 %address, %second, %value
+  return
+}
+)");
+  const loom_low_descriptor_t* constant = loom_low_descriptor_set_descriptor_at(
+      loom_test_low_core_descriptor_set(),
+      TEST_LOW_CORE_DESCRIPTOR_REF_TEST_CONST_ISSUED_I32);
+  const loom_low_schedule_pair_affinity_t affinity = {
+      .first_descriptor = constant,
+      .second_descriptor = constant,
+      .priority = 1,
+  };
+  const loom_low_allocation_budget_t budget = {
+      .register_class = IREE_SV("test.i32"),
+      .max_units = 5,
+  };
+  const loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_pair_affinities = {&affinity, 1},
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+      .allocation_budgets = &budget,
+      .allocation_budget_count = 1,
+  };
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(loom_low_emission_frame_build(
+      module.get(), loom_block_op(loom_module_block(module.get()), 0), &options,
+      &arena_, &frame));
+  ASSERT_EQ(frame.schedule.error_count, 0u);
+  EXPECT_LT(frame.schedule.nodes[2].scheduled_ordinal,
+            frame.schedule.nodes[1].scheduled_ordinal);
+  EXPECT_EQ(frame.allocation.error_count, 0u);
+  EXPECT_EQ(frame.allocation.spill_count, 0u);
+}
+
 TEST_F(LowEmissionFrameTest, RetainsOnlyDecidedSpillsAfterAllocation) {
   ModulePtr module = ParseModule(R"(
 low.func.def target<test.low.core> @spills(%first: reg<test.i32>, %second: reg<test.i32>, %third: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
