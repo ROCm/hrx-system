@@ -119,6 +119,8 @@ low.func.def target<test.low.core> @resource_capacity(%lhs: reg<test.i32>, %rhs:
 )");
     loom_low_emission_frame_t frame = {};
     IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame, strategy));
+    // Emission consumers retain the frame after scheduler scratch is freed.
+    iree_arena_block_pool_trim(&block_pool_);
     ASSERT_GE(frame.schedule.node_count, 2u);
     EXPECT_EQ(frame.schedule.nodes[0].issue_cycle, 0u);
     EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 4u);
@@ -202,6 +204,9 @@ low.func.def target<test.low.core> @feedback(%lhs: reg<test.i32>, %rhs: reg<test
   IREE_ASSERT_OK(loom_low_emission_frame_build_spill_free(
       module.get(), loom_block_op(loom_module_block(module.get()), 0),
       &quiet_options, &spill_free_options, &arena_, &quiet_frame));
+  // Release pooled scratch before comparing schedules and formatting retained
+  // diagnostics. ASAN catches any accidental result borrowing from that state.
+  iree_arena_block_pool_trim(&block_pool_);
   ASSERT_EQ(quiet_frame.schedule.node_count, frame.schedule.node_count);
   for (iree_host_size_t i = 0; i < frame.schedule.node_count; ++i) {
     EXPECT_EQ(quiet_frame.schedule.scheduled_node_indices[i],

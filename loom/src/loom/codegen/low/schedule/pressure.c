@@ -98,27 +98,27 @@ iree_status_t loom_low_schedule_pressure_initialize(
   const loom_value_ordinal_t value_count = state->value_domain->value_count;
   if (value_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, value_count,
+        state->scratch_arena, value_count,
         sizeof(*out_pressure_state->block_value_ordinals),
         (void**)&out_pressure_state->block_value_ordinals));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, value_count,
+        state->scratch_arena, value_count,
         sizeof(*out_pressure_state->candidate_operand_use_counts),
         (void**)&out_pressure_state->candidate_operand_use_counts));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, value_count,
+        state->scratch_arena, value_count,
         sizeof(*out_pressure_state->candidate_operand_ordinals),
         (void**)&out_pressure_state->candidate_operand_ordinals));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, value_count,
+        state->scratch_arena, value_count,
         sizeof(*out_pressure_state->candidate_scratch_counts),
         (void**)&out_pressure_state->candidate_scratch_counts));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, value_count,
+        state->scratch_arena, value_count,
         sizeof(*out_pressure_state->remaining_consumer_counts),
         (void**)&out_pressure_state->remaining_consumer_counts));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, value_count,
+        state->scratch_arena, value_count,
         sizeof(*out_pressure_state->remaining_consumer_node_xors),
         (void**)&out_pressure_state->remaining_consumer_node_xors));
     memset(out_pressure_state->candidate_operand_use_counts, 0,
@@ -139,47 +139,47 @@ iree_status_t loom_low_schedule_pressure_initialize(
       state->target.descriptor_set->reg_class_count;
   if (reg_class_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, reg_class_count,
+        state->scratch_arena, reg_class_count,
         sizeof(*out_pressure_state->current_live_units_by_reg_class),
         (void**)&out_pressure_state->current_live_units_by_reg_class));
     memset(out_pressure_state->current_live_units_by_reg_class, 0,
            reg_class_count *
                sizeof(*out_pressure_state->current_live_units_by_reg_class));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, reg_class_count,
+        state->scratch_arena, reg_class_count,
         sizeof(*out_pressure_state->packing_reserve_units_by_reg_class),
         (void**)&out_pressure_state->packing_reserve_units_by_reg_class));
     memset(out_pressure_state->packing_reserve_units_by_reg_class, 0,
            reg_class_count *
                sizeof(*out_pressure_state->packing_reserve_units_by_reg_class));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, reg_class_count,
+        state->scratch_arena, reg_class_count,
         sizeof(*out_pressure_state->block_reg_class_ids),
         (void**)&out_pressure_state->block_reg_class_ids));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, reg_class_count,
+        state->scratch_arena, reg_class_count,
         sizeof(*out_pressure_state->block_reg_class_touched_flags),
         (void**)&out_pressure_state->block_reg_class_touched_flags));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, reg_class_count,
+        state->scratch_arena, reg_class_count,
         sizeof(*out_pressure_state->candidate_delta_units_by_reg_class),
         (void**)&out_pressure_state->candidate_delta_units_by_reg_class));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, reg_class_count,
+        state->scratch_arena, reg_class_count,
         sizeof(*out_pressure_state->candidate_early_added_units_by_reg_class),
         (void**)&out_pressure_state->candidate_early_added_units_by_reg_class));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, reg_class_count,
+        state->scratch_arena, reg_class_count,
         sizeof(*out_pressure_state->candidate_delta_touched_flags),
         (void**)&out_pressure_state->candidate_delta_touched_flags));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, reg_class_count,
+        state->scratch_arena, reg_class_count,
         sizeof(*out_pressure_state->candidate_delta_touched_reg_class_ids),
         (void**)&out_pressure_state->candidate_delta_touched_reg_class_ids));
     if (state->pressure_cliffs != NULL &&
         state->pressure_cliffs->cliff_count != 0) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          state->arena, reg_class_count,
+          state->scratch_arena, reg_class_count,
           sizeof(*out_pressure_state->first_actionable_pressure_cliff_indices),
           (void**)&out_pressure_state
               ->first_actionable_pressure_cliff_indices));
@@ -211,7 +211,7 @@ iree_status_t loom_low_schedule_pressure_initialize(
       const uint16_t completion_domain_count =
           state->pressure_limits.unspillable_completion_domain_count;
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          state->arena, completion_domain_count,
+          state->scratch_arena, completion_domain_count,
           sizeof(*out_pressure_state->active_unspillable_completion_values),
           (void**)&out_pressure_state->active_unspillable_completion_values));
       memset(
@@ -220,7 +220,7 @@ iree_status_t loom_low_schedule_pressure_initialize(
               sizeof(
                   *out_pressure_state->active_unspillable_completion_values));
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          state->arena, completion_domain_count,
+          state->scratch_arena, completion_domain_count,
           sizeof(*out_pressure_state->cached_unspillable_completion_sinks),
           (void**)&out_pressure_state->cached_unspillable_completion_sinks));
       memset(
@@ -228,13 +228,13 @@ iree_status_t loom_low_schedule_pressure_initialize(
           completion_domain_count *
               sizeof(*out_pressure_state->cached_unspillable_completion_sinks));
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          state->arena, completion_domain_count,
+          state->scratch_arena, completion_domain_count,
           sizeof(
               *out_pressure_state->released_unspillable_completion_domain_ids),
           (void**)&out_pressure_state
               ->released_unspillable_completion_domain_ids));
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          state->arena, completion_domain_count,
+          state->scratch_arena, completion_domain_count,
           sizeof(*out_pressure_state
                       ->released_unspillable_completion_domain_flags),
           (void**)&out_pressure_state
@@ -250,7 +250,7 @@ iree_status_t loom_low_schedule_pressure_initialize(
       state->target.descriptor_set->register_packing_resource_count;
   if (register_packing_resource_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, register_packing_resource_count,
+        state->scratch_arena, register_packing_resource_count,
         sizeof(
             *out_pressure_state->candidate_register_packing_activation_units),
         (void**)&out_pressure_state
@@ -260,7 +260,7 @@ iree_status_t loom_low_schedule_pressure_initialize(
                sizeof(*out_pressure_state
                            ->candidate_register_packing_activation_units));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, register_packing_resource_count,
+        state->scratch_arena, register_packing_resource_count,
         sizeof(*out_pressure_state->active_register_packing_completion_sinks),
         (void**)&out_pressure_state->active_register_packing_completion_sinks));
     memset(
@@ -269,7 +269,7 @@ iree_status_t loom_low_schedule_pressure_initialize(
             sizeof(
                 *out_pressure_state->active_register_packing_completion_sinks));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, register_packing_resource_count,
+        state->scratch_arena, register_packing_resource_count,
         sizeof(*out_pressure_state
                     ->active_register_packing_completion_value_counts),
         (void**)&out_pressure_state
@@ -285,7 +285,7 @@ iree_status_t loom_low_schedule_pressure_initialize(
     const iree_host_size_t alias_set_slot_count =
         (iree_host_size_t)alias_set_count + 1;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, alias_set_slot_count,
+        state->scratch_arena, alias_set_slot_count,
         sizeof(*out_pressure_state->alias_sets.records),
         (void**)&out_pressure_state->alias_sets.records));
     memset(
@@ -293,7 +293,7 @@ iree_status_t loom_low_schedule_pressure_initialize(
         alias_set_slot_count * sizeof(*out_pressure_state->alias_sets.records));
     uint16_t* touched_ids = NULL;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, (iree_host_size_t)alias_set_count * 2,
+        state->scratch_arena, (iree_host_size_t)alias_set_count * 2,
         sizeof(*touched_ids), (void**)&touched_ids));
     out_pressure_state->alias_sets.block_ids = touched_ids;
     out_pressure_state->alias_sets.candidate_delta_touched_ids =
@@ -302,7 +302,7 @@ iree_status_t loom_low_schedule_pressure_initialize(
   if (state->pressure_resources != NULL) {
     const uint16_t resource_count = state->pressure_resources->resource_count;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, reg_class_count,
+        state->scratch_arena, reg_class_count,
         sizeof(*out_pressure_state->resources.peak_live_units_by_reg_class),
         (void**)&out_pressure_state->resources.peak_live_units_by_reg_class));
     memset(
@@ -311,7 +311,7 @@ iree_status_t loom_low_schedule_pressure_initialize(
             sizeof(
                 *out_pressure_state->resources.peak_live_units_by_reg_class));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, resource_count,
+        state->scratch_arena, resource_count,
         sizeof(*out_pressure_state->resources.records),
         (void**)&out_pressure_state->resources.records));
     memset(out_pressure_state->resources.records, 0,
@@ -322,7 +322,7 @@ iree_status_t loom_low_schedule_pressure_initialize(
           state->pressure_resources->resources[resource_id].cliff_start;
     }
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, resource_count,
+        state->scratch_arena, resource_count,
         sizeof(*out_pressure_state->resources.candidate_touched_ids),
         (void**)&out_pressure_state->resources.candidate_touched_ids));
   }
@@ -1331,12 +1331,13 @@ iree_status_t loom_low_schedule_pressure_initialize_unlock_summaries(
     loom_low_schedule_build_state_t* state, uint32_t node_count,
     loom_low_schedule_pressure_state_t* pressure_state) {
   IREE_RETURN_IF_ERROR(loom_low_schedule_dependency_frontier_initialize(
-      &state->dependency_index, state->arena,
+      &state->dependency_index, state->scratch_arena,
       &pressure_state->unlocks.frontier));
   if (node_count == 0) return iree_ok_status();
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->arena, node_count, sizeof(*pressure_state->unlocks.records),
-      (void**)&pressure_state->unlocks.records));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(state->scratch_arena, node_count,
+                                sizeof(*pressure_state->unlocks.records),
+                                (void**)&pressure_state->unlocks.records));
   memset(pressure_state->unlocks.records, 0,
          node_count * sizeof(*pressure_state->unlocks.records));
   if (state->node_register_packing_activation_units != NULL) {
@@ -1351,7 +1352,7 @@ iree_status_t loom_low_schedule_pressure_initialize_unlock_summaries(
           "overflow");
     }
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, activation_entry_count,
+        state->scratch_arena, activation_entry_count,
         sizeof(*pressure_state->unlocks.register_packing_activation_units),
         (void**)&pressure_state->unlocks.register_packing_activation_units));
     memset(
@@ -1361,11 +1362,11 @@ iree_status_t loom_low_schedule_pressure_initialize_unlock_summaries(
   }
   if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, node_count,
+        state->scratch_arena, node_count,
         sizeof(*pressure_state->unlocks.descriptor_heads),
         (void**)&pressure_state->unlocks.descriptor_heads));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, node_count,
+        state->scratch_arena, node_count,
         sizeof(*pressure_state->unlocks.descriptor_next_nodes),
         (void**)&pressure_state->unlocks.descriptor_next_nodes));
     memset(pressure_state->unlocks.descriptor_heads, 0xFF,

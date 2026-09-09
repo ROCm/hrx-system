@@ -63,14 +63,15 @@ iree_status_t loom_low_schedule_ready_policy_initialize(
   *out_policy = (loom_low_schedule_ready_policy_t){0};
   IREE_RETURN_IF_ERROR(loom_low_schedule_ready_frontier_initialize(
       node_count, state->target.descriptor_set->descriptor_count, view_count,
-      state->arena, &out_policy->frontier));
+      state->scratch_arena, &out_policy->frontier));
   if (node_count == 0 || state->pair_affinity_reverse_heads == NULL ||
       state->detached_transfer_node_count == 0) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->arena, node_count, sizeof(*out_policy->setup_dependency_counts),
-      (void**)&out_policy->setup_dependency_counts));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(state->scratch_arena, node_count,
+                                sizeof(*out_policy->setup_dependency_counts),
+                                (void**)&out_policy->setup_dependency_counts));
   memset(out_policy->setup_dependency_counts, 0,
          node_count * sizeof(*out_policy->setup_dependency_counts));
   return iree_ok_status();

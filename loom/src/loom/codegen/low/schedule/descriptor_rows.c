@@ -108,7 +108,7 @@ static iree_status_t loom_low_schedule_update_hazard_state(
                                         ? 4
                                         : state->hazard_state_capacity * 2;
     IREE_RETURN_IF_ERROR(
-        iree_arena_grow_array(state->arena, state->hazard_state_count,
+        iree_arena_grow_array(state->scratch_arena, state->hazard_state_count,
                               new_capacity, sizeof(*state->hazard_states),
                               &new_capacity, (void**)&state->hazard_states));
     state->hazard_state_capacity = new_capacity;

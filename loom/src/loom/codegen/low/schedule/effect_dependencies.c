@@ -614,10 +614,10 @@ iree_status_t loom_low_schedule_build_effect_dependencies(
   const bool has_cfg_edges = state->cfg_graph->edge_count != 0;
   if (has_cfg_edges) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, state->body->block_count, sizeof(*traversal_stack),
-        (void**)&traversal_stack));
+        state->scratch_arena, state->body->block_count,
+        sizeof(*traversal_stack), (void**)&traversal_stack));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, state->body->block_count, sizeof(*visit_epochs),
+        state->scratch_arena, state->body->block_count, sizeof(*visit_epochs),
         (void**)&visit_epochs));
     memset(visit_epochs, 0, state->body->block_count * sizeof(*visit_epochs));
   }

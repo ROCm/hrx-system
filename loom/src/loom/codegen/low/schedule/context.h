@@ -201,8 +201,10 @@ typedef struct loom_low_schedule_build_state_t {
   const loom_target_residency_direct_resource_table_t* pressure_cliffs;
   // Derived target pressure resources from |options|, or NULL.
   const loom_target_residency_derived_resource_table_t* pressure_resources;
-  // Arena owning all table storage produced by this schedule.
+  // Arena owning schedule results retained by downstream consumers.
   iree_arena_allocator_t* arena;
+  // Working state released when scheduling returns, before allocation starts.
+  iree_arena_allocator_t* scratch_arena;
   // Low function definition operation being scheduled.
   const loom_op_t* function_op;
   // Body region of function_op.

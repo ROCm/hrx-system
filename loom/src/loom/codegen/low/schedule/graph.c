@@ -490,7 +490,7 @@ static iree_status_t loom_low_schedule_add_state_read(
                                         ? 16
                                         : state->state_read_record_capacity * 2;
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        state->arena, state->state_read_record_count, new_capacity,
+        state->scratch_arena, state->state_read_record_count, new_capacity,
         sizeof(*state->state_read_records), &new_capacity,
         (void**)&state->state_read_records));
     state->state_read_record_capacity = new_capacity;
@@ -524,8 +524,8 @@ static iree_status_t loom_low_schedule_add_state_chain_read(
             ? 16
             : state->state_chain_read_record_capacity * 2;
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        state->arena, state->state_chain_read_record_count, new_capacity,
-        sizeof(*state->state_chain_read_records), &new_capacity,
+        state->scratch_arena, state->state_chain_read_record_count,
+        new_capacity, sizeof(*state->state_chain_read_records), &new_capacity,
         (void**)&state->state_chain_read_records));
     state->state_chain_read_record_capacity = new_capacity;
   }
@@ -661,7 +661,7 @@ static iree_status_t loom_low_schedule_add_storage_read(
             ? 16
             : state->storage_reads.record_capacity * 2;
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        state->arena, state->storage_reads.record_count, new_capacity,
+        state->scratch_arena, state->storage_reads.record_count, new_capacity,
         sizeof(*state->storage_reads.records), &new_capacity,
         (void**)&state->storage_reads.records));
     state->storage_reads.record_capacity = new_capacity;
@@ -807,8 +807,8 @@ static iree_status_t loom_low_schedule_push_edge_source(
       state->storage_reads.edge_source_worklist_capacity) {
     const iree_host_size_t minimum_capacity = *inout_worklist_count + 1;
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        state->arena, *inout_worklist_count, minimum_capacity, sizeof(record),
-        &state->storage_reads.edge_source_worklist_capacity,
+        state->scratch_arena, *inout_worklist_count, minimum_capacity,
+        sizeof(record), &state->storage_reads.edge_source_worklist_capacity,
         (void**)&state->storage_reads.edge_source_worklist));
   }
   state->storage_reads.edge_source_worklist[(*inout_worklist_count)++] = record;

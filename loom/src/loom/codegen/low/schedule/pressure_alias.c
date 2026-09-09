@@ -85,20 +85,22 @@ iree_status_t loom_low_schedule_pressure_alias_initialize(
 
   const loom_value_ordinal_t value_count = state->value_domain->value_count;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->arena, value_count, sizeof(*out_alias_state->source_heads),
+      state->scratch_arena, value_count, sizeof(*out_alias_state->source_heads),
       (void**)&out_alias_state->source_heads));
   memset(out_alias_state->source_heads, 0xFF,
          value_count * sizeof(*out_alias_state->source_heads));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->arena, value_count, sizeof(*out_alias_state->source_ordinals),
-      (void**)&out_alias_state->source_ordinals));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->arena, value_count, sizeof(*out_alias_state->source_unit_counts),
-      (void**)&out_alias_state->source_unit_counts));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(state->scratch_arena, value_count,
+                                sizeof(*out_alias_state->source_ordinals),
+                                (void**)&out_alias_state->source_ordinals));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(state->scratch_arena, value_count,
+                                sizeof(*out_alias_state->source_unit_counts),
+                                (void**)&out_alias_state->source_unit_counts));
   memset(out_alias_state->source_unit_counts, 0,
          value_count * sizeof(*out_alias_state->source_unit_counts));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->arena, relation_count, sizeof(*out_alias_state->records),
+      state->scratch_arena, relation_count, sizeof(*out_alias_state->records),
       (void**)&out_alias_state->records));
   memset(out_alias_state->records, 0,
          relation_count * sizeof(*out_alias_state->records));
