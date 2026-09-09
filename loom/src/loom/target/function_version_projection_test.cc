@@ -645,6 +645,51 @@ func.def public @right() {
 }
 
 TEST_F(TargetFunctionVersionProjectionTest,
+       ErasurePreservesSparseContextIdentityThroughProjection) {
+  ModulePtr source = Parse(R"(
+func.def @left() { func.return }
+func.def public @right() { func.return }
+)");
+  const TestTargetProfile left_profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const TestTargetProfile right_profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_QUIRKY);
+  const loom_target_specialization_request_t requests[] = {
+      {IREE_SV("left"), &left_profile.base},
+      {IREE_SV("right"), &right_profile.base},
+  };
+  loom_target_specialization_result_t specialization =
+      Specialize(source.get(), requests, IREE_ARRAYSIZE(requests));
+  auto* owner = &specialization.function_versions;
+  ASSERT_EQ(owner->list.count, 2u);
+  const auto* survivor =
+      loom_target_function_version_const_cast(owner->list.values[1]);
+  ASSERT_NE(survivor, nullptr);
+  const auto context_ordinal = survivor->target_context_ordinal;
+  ASSERT_GT(context_ordinal, 0u);
+
+  IREE_ASSERT_OK(loom_op_erase(source.get(),
+                               FindFunction(source.get(), IREE_SV("left")).op));
+  EXPECT_EQ(loom_function_version_owner_prune_erased(owner), 1u);
+  iree_host_size_t removed_symbol_count = 0;
+  IREE_ASSERT_OK(loom_module_compact_symbols(source.get(), &version_arena_,
+                                             &removed_symbol_count));
+  EXPECT_EQ(removed_symbol_count, 1u);
+  ASSERT_EQ(owner->list.count, 1u);
+  EXPECT_EQ(owner->list.values[0], &survivor->base);
+  EXPECT_EQ(survivor->target_context_ordinal, context_ordinal);
+  EXPECT_GE(context_ordinal, owner->list.count);
+
+  ModulePtr projected = Project(source.get(), &owner->list);
+
+  EXPECT_EQ(CountTestTargets(projected.get()), 1u);
+  EXPECT_EQ(
+      loom_test_target_kind(FunctionTarget(projected.get(), IREE_SV("right"))),
+      LOOM_TEST_TARGET_KIND_QUIRKY);
+  EXPECT_EQ(survivor->target_context_ordinal, context_ordinal);
+}
+
+TEST_F(TargetFunctionVersionProjectionTest,
        HeterogeneousTargetsUseDeterministicSourceSymbolOrder) {
   ModulePtr source = Parse(R"(
 func.def public @low_entry() {

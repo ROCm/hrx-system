@@ -47,7 +47,8 @@ typedef struct loom_target_function_version_t {
   // export overlays.
   loom_resolved_target_t resolved_target;
 
-  // Dense compilation-local identity of |resolved_target|.
+  // Stable compilation-local identity of |resolved_target|. Erasing function
+  // versions can leave gaps in the ordinal space.
   loom_target_context_ordinal_t target_context_ordinal;
 
   // True when the live function's authored target definition is an exact IR
@@ -106,6 +107,10 @@ typedef struct loom_target_function_version_snapshot_t {
 
   // Number of module symbols represented by |version_handles_by_symbol|.
   iree_host_size_t symbol_count;
+
+  // Ordinal-space capacity required to index the surviving target contexts.
+  // Includes gaps left by erased versions; zero when no target versions remain.
+  iree_host_size_t target_context_capacity;
 } loom_target_function_version_snapshot_t;
 
 // Observes |function_versions| against the current |module| symbol table.

@@ -81,6 +81,9 @@ iree_status_t loom_target_function_version_snapshot_build(
     }
     out_snapshot->version_handles_by_symbol[function_ref.symbol_id] =
         version_handle;
+    out_snapshot->target_context_capacity = iree_max(
+        out_snapshot->target_context_capacity,
+        (iree_host_size_t)function_version->target_context_ordinal + 1);
   }
   return iree_ok_status();
 }

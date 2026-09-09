@@ -163,7 +163,7 @@ static iree_status_t loom_target_function_version_projection_plan_build(
       source_module, function_versions, arena, &out_plan->version_snapshot));
 
   const iree_host_size_t context_capacity =
-      function_versions != NULL ? function_versions->count : 0;
+      out_plan->version_snapshot.target_context_capacity;
   IREE_RETURN_IF_ERROR(
       loom_target_function_version_projection_context_table_initialize(
           context_capacity, arena, &out_plan->contexts));

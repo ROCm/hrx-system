@@ -570,17 +570,13 @@ static iree_status_t loom_target_callgraph_seed_versions(
   IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
       state->module, loom_function_version_owner_list(state->version_owner),
       state->pass->arena, &snapshot));
+  state->next_target_context_ordinal = snapshot.target_context_capacity;
 
   for (iree_host_size_t i = 0; i < snapshot.symbol_count; ++i) {
     const loom_symbol_id_t symbol_id = (loom_symbol_id_t)i;
     loom_target_function_version_t* version = loom_target_function_version_cast(
         loom_target_function_version_snapshot_handle_at(&snapshot, symbol_id));
     if (version == NULL) continue;
-    const iree_host_size_t next_target_context_ordinal =
-        (iree_host_size_t)version->target_context_ordinal + 1;
-    if (next_target_context_ordinal > state->next_target_context_ordinal) {
-      state->next_target_context_ordinal = next_target_context_ordinal;
-    }
     IREE_RETURN_IF_ERROR(
         loom_target_callgraph_prepare_symbol(state, symbol_id));
     loom_target_callgraph_context_t* context = NULL;
