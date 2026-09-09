@@ -777,74 +777,14 @@ uint32_t loom_low_schedule_target_pressure_active_packing_completion_capacity(
   return active_capacity;
 }
 
-// Materializes the exact same-block SSA ancestors of |completion_sink| into
-// one cached completion-domain column. Node order is topological within a low
-// block, so a single reverse scan resolves the transitive relation.
-static void loom_low_schedule_prepare_unspillable_completion_ancestors(
-    const loom_low_schedule_build_state_t* state,
-    loom_low_schedule_pressure_state_t* pressure_state,
-    uint16_t completion_domain_id, uint32_t completion_sink) {
-  uint32_t* cached_sink =
-      &pressure_state
-           ->cached_unspillable_completion_sinks[completion_domain_id];
-  if (*cached_sink == completion_sink) return;
-  *cached_sink = completion_sink;
-
-  const uint32_t node_count = state->dependency_index.node_count;
-  const uint32_t sink_block_index = state->nodes[completion_sink].block_index;
-  for (uint32_t i = node_count; i > 0; --i) {
-    const uint32_t node_index = i - 1;
-    uint32_t* completion_ancestors =
-        loom_low_schedule_unspillable_completion_signature_row(
-            state, state->node_unspillable_completion_signatures, node_index);
-    bool reaches_completion = node_index == completion_sink;
-    if (!reaches_completion &&
-        state->nodes[node_index].block_index == sink_block_index) {
-      const uint32_t group_begin =
-          loom_low_schedule_dependency_index_group_begin(
-              &state->dependency_index, node_index);
-      const uint32_t group_end = loom_low_schedule_dependency_index_group_end(
-          &state->dependency_index, node_index);
-      for (uint32_t group_index = group_begin; group_index < group_end;
-           ++group_index) {
-        if (!loom_low_schedule_dependency_index_group_has_ssa(
-                &state->dependency_index, group_index)) {
-          continue;
-        }
-        const loom_low_schedule_dependency_group_t* group =
-            loom_low_schedule_dependency_index_group_at(
-                &state->dependency_index, group_index);
-        const uint32_t consumer_node = group->consumer_node;
-        if (consumer_node >= node_count ||
-            state->nodes[consumer_node].block_index != sink_block_index) {
-          continue;
-        }
-        const uint32_t* consumer_ancestors =
-            loom_low_schedule_const_unspillable_completion_signature_row(
-                state, state->node_unspillable_completion_signatures,
-                consumer_node);
-        if (consumer_ancestors[completion_domain_id] != 0) {
-          reaches_completion = true;
-          break;
-        }
-      }
-    }
-    completion_ancestors[completion_domain_id] = reaches_completion ? 1u : 0u;
-  }
-}
-
 uint32_t
 loom_low_schedule_target_pressure_active_unspillable_completion_capacity(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state,
     uint32_t candidate_node) {
-  if (state->node_unspillable_completion_signatures == NULL ||
-      pressure_state->active_unspillable_completion_values == NULL) {
+  if (pressure_state->active_unspillable_completion_values == NULL) {
     return UINT32_MAX;
   }
-  const uint32_t* candidate_completion_signatures =
-      loom_low_schedule_const_unspillable_completion_signature_row(
-          state, state->node_unspillable_completion_signatures, candidate_node);
   uint32_t active_capacity = UINT32_MAX;
   const uint16_t completion_domain_count =
       state->pressure_limits.unspillable_completion_domain_count;
@@ -869,9 +809,12 @@ loom_low_schedule_target_pressure_active_unspillable_completion_capacity(
     if (current_live_units < capacity) continue;
     const uint32_t active_completion_sink =
         pressure_state->remaining_consumer_node_xors[active_value];
-    loom_low_schedule_prepare_unspillable_completion_ancestors(
-        state, pressure_state, completion_domain_id, active_completion_sink);
-    if (candidate_completion_signatures[completion_domain_id] != 0) {
+    loom_low_schedule_completion_demand_select(
+        &pressure_state->unspillable_completion_demand, state->nodes,
+        completion_domain_id, active_completion_sink);
+    if (loom_low_schedule_completion_demand_contains(
+            &pressure_state->unspillable_completion_demand,
+            completion_domain_id, candidate_node)) {
       active_capacity = capacity;
     }
   }

@@ -1350,25 +1350,6 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
           (void**)&state->node_pressure_activation_units));
       memset(state->node_pressure_activation_units, 0,
              node_count * sizeof(*state->node_pressure_activation_units));
-      const uint16_t unspillable_completion_domain_count =
-          state->pressure_limits.unspillable_completion_domain_count;
-      if (unspillable_completion_domain_count != 0) {
-        iree_host_size_t completion_entry_count = 0;
-        if (!iree_host_size_checked_mul(node_count,
-                                        unspillable_completion_domain_count,
-                                        &completion_entry_count)) {
-          return iree_make_status(
-              IREE_STATUS_RESOURCE_EXHAUSTED,
-              "low schedule unspillable completion table size overflow");
-        }
-        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-            state->scratch_arena, completion_entry_count,
-            sizeof(*state->node_unspillable_completion_signatures),
-            (void**)&state->node_unspillable_completion_signatures));
-        memset(state->node_unspillable_completion_signatures, 0xFF,
-               completion_entry_count *
-                   sizeof(*state->node_unspillable_completion_signatures));
-      }
       if (state->target.descriptor_set->register_packing_resource_count != 0) {
         iree_host_size_t packing_entry_count = 0;
         if (!iree_host_size_checked_mul(
@@ -1413,6 +1394,10 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
   iree_arena_deinitialize(&dependency_scratch_arena);
   IREE_RETURN_IF_ERROR(dependency_index_status);
   if (loom_low_schedule_strategy_uses_pressure(state->options->strategy)) {
+    IREE_RETURN_IF_ERROR(loom_low_schedule_completion_demand_initialize(
+        &state->dependency_index, state->nodes,
+        state->pressure_limits.unspillable_completion_domain_count,
+        state->scratch_arena, &pressure_state.unspillable_completion_demand));
     IREE_RETURN_IF_ERROR(loom_low_schedule_pressure_initialize_unlock_summaries(
         state, (uint32_t)node_count, &pressure_state));
   }

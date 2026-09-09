@@ -273,9 +273,6 @@ typedef struct loom_low_schedule_build_state_t {
   // Earliest downstream packing-resource exit in source order, indexed by
   // schedule node then register-packing resource.
   uint32_t* node_register_packing_completion_sinks;
-  // Downstream-consumer reachability signatures for each bounded unspillable
-  // completion domain, indexed by schedule node then dense domain ID.
-  uint32_t* node_unspillable_completion_signatures;
   // Most recent producer state for each minimum-distance hazard key.
   loom_low_schedule_hazard_state_t* hazard_states;
   // Descriptor register-class state read/write bits, dense by register class.

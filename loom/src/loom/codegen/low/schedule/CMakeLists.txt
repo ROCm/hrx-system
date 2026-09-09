@@ -82,6 +82,7 @@ loom_cc_library(
   NAME
     schedule
   HDRS
+    "completion_demand.h"
     "diagnostics.h"
     "json.h"
     "run.h"
@@ -89,6 +90,7 @@ loom_cc_library(
   SRCS
     "candidate_policy.c"
     "candidate_policy.h"
+    "completion_demand.c"
     "context.h"
     "descriptor_rows.c"
     "descriptor_rows.h"
@@ -148,6 +150,20 @@ loom_cc_library(
     loom::util::segmented_storage
     loom::util::stream
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    completion_demand_test
+  SRCS
+    "completion_demand_test.cc"
+  DEPS
+    ::dependencies
+    ::dependency_index
+    ::schedule
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(

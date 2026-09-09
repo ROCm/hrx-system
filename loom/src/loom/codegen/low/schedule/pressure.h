@@ -9,6 +9,7 @@
 #ifndef LOOM_CODEGEN_LOW_SCHEDULE_PRESSURE_H_
 #define LOOM_CODEGEN_LOW_SCHEDULE_PRESSURE_H_
 
+#include "loom/codegen/low/schedule/completion_demand.h"
 #include "loom/codegen/low/schedule/context.h"
 #include "loom/codegen/low/schedule/dependency_index.h"
 #include "loom/codegen/low/schedule/pressure_alias.h"
@@ -84,12 +85,12 @@ struct loom_low_schedule_pressure_state_t {
   uint32_t* active_register_packing_completion_sinks;
   // Number of live storage values retaining each active packing completion.
   uint32_t* active_register_packing_completion_value_counts;
-  // Live value whose sole remaining consumer anchors each bounded
-  // unspillable completion domain.
+  // Live value whose sole remaining consumer nominates the next completion
+  // for each bounded unspillable domain. Demand pins the selected consumer
+  // until it executes, independently of subsequent nominations.
   loom_value_ordinal_t* active_unspillable_completion_values;
-  // Completion sink whose exact ancestor column is cached for each bounded
-  // unspillable completion domain.
-  uint32_t* cached_unspillable_completion_sinks;
+  // Pinned completion dependencies for bounded unspillable storage domains.
+  loom_low_schedule_completion_demand_t unspillable_completion_demand;
   // Completion domains whose active value was just released.
   uint16_t* released_unspillable_completion_domain_ids;
   // True when a domain is present in
@@ -151,23 +152,6 @@ static inline const uint32_t* loom_low_schedule_const_register_packing_row(
   return table +
          (iree_host_size_t)node_index *
              state->target.descriptor_set->register_packing_resource_count;
-}
-
-// Returns the row for |node_index| in a completion-signature table.
-static inline uint32_t* loom_low_schedule_unspillable_completion_signature_row(
-    const loom_low_schedule_build_state_t* state, uint32_t* table,
-    uint32_t node_index) {
-  return table + (iree_host_size_t)node_index *
-                     state->pressure_limits.unspillable_completion_domain_count;
-}
-
-// Returns the const row for |node_index| in a completion-signature table.
-static inline const uint32_t*
-loom_low_schedule_const_unspillable_completion_signature_row(
-    const loom_low_schedule_build_state_t* state, const uint32_t* table,
-    uint32_t node_index) {
-  return table + (iree_host_size_t)node_index *
-                     state->pressure_limits.unspillable_completion_domain_count;
 }
 
 // Returns the bounded completion domain containing |reg_class_id|.

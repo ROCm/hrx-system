@@ -74,6 +74,7 @@ loom_cc_library(
     srcs = [
         "candidate_policy.c",
         "candidate_policy.h",
+        "completion_demand.c",
         "context.h",
         "descriptor_rows.c",
         "descriptor_rows.h",
@@ -97,6 +98,7 @@ loom_cc_library(
         "target_pressure.h",
     ],
     hdrs = [
+        "completion_demand.h",
         "diagnostics.h",
         "json.h",
         "run.h",
@@ -139,6 +141,19 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "completion_demand_test",
+    srcs = ["completion_demand_test.cc"],
+    deps = [
+        ":dependencies",
+        ":dependency_index",
+        ":schedule",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

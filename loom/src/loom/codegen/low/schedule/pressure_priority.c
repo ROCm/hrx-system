@@ -16,15 +16,6 @@ static uint32_t loom_low_schedule_saturate_u64_to_u32(uint64_t value) {
   return value > UINT32_MAX ? UINT32_MAX : (uint32_t)value;
 }
 
-// Selects the earliest exact downstream completion identity. Completion
-// anchors use the same order, keeping each hard domain on one coherent path.
-static uint32_t loom_low_schedule_merge_completion_sink(uint32_t lhs,
-                                                        uint32_t rhs) {
-  if (lhs == LOOM_LOW_SCHEDULE_NODE_NONE) return rhs;
-  if (rhs == LOOM_LOW_SCHEDULE_NODE_NONE) return lhs;
-  return iree_min(lhs, rhs);
-}
-
 // Returns a static nomination tier for materializations that may open live
 // storage before it becomes actionable. Ordinary work comes first, followed by
 // rematerializable leaves that can unlock ordinary consumers, and finally
@@ -179,7 +170,6 @@ void loom_low_schedule_pressure_compute_node_priorities(
       state->node_pressure_demand_units == NULL &&
       state->node_pressure_activation_units == NULL &&
       state->node_register_packing_activation_units == NULL &&
-      state->node_unspillable_completion_signatures == NULL &&
       pressure_state->first_actionable_pressure_cliff_indices == NULL) {
     return;
   }
@@ -215,30 +205,6 @@ void loom_low_schedule_pressure_compute_node_priorities(
     uint32_t pressure_demand_units = 0;
     uint32_t pressure_activation_units = 0;
     bool has_effect_consumer = false;
-    uint32_t* unspillable_completion_signatures =
-        state->node_unspillable_completion_signatures != NULL
-            ? loom_low_schedule_unspillable_completion_signature_row(
-                  state, state->node_unspillable_completion_signatures,
-                  node_index)
-            : NULL;
-    if (unspillable_completion_signatures != NULL) {
-      const loom_value_ordinal_t* operand_ordinals =
-          loom_low_schedule_node_const_operand_ordinals(node);
-      for (uint16_t operand_index = 0; operand_index < node->operand_count;
-           ++operand_index) {
-        const uint16_t reg_class_id =
-            state->values[operand_ordinals[operand_index]].register_class_id;
-        const uint16_t completion_domain_id =
-            loom_low_schedule_unspillable_completion_domain_id(state,
-                                                               reg_class_id);
-        if (completion_domain_id != UINT16_MAX) {
-          unspillable_completion_signatures[completion_domain_id] =
-              loom_low_schedule_merge_completion_sink(
-                  unspillable_completion_signatures[completion_domain_id],
-                  node_index);
-        }
-      }
-    }
     uint32_t* register_packing_activation_units =
         state->node_register_packing_activation_units != NULL
             ? loom_low_schedule_register_packing_row(
@@ -270,23 +236,6 @@ void loom_low_schedule_pressure_compute_node_priorities(
             &state->nodes[dependency->consumer_node];
         if (consumer->block_index != node->block_index) {
           continue;
-        }
-        if (unspillable_completion_signatures != NULL &&
-            dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_SSA) {
-          const uint32_t* consumer_completion_signatures =
-              loom_low_schedule_const_unspillable_completion_signature_row(
-                  state, state->node_unspillable_completion_signatures,
-                  dependency->consumer_node);
-          const uint16_t completion_domain_count =
-              state->pressure_limits.unspillable_completion_domain_count;
-          for (uint16_t completion_domain_id = 0;
-               completion_domain_id < completion_domain_count;
-               ++completion_domain_id) {
-            unspillable_completion_signatures[completion_domain_id] =
-                loom_low_schedule_merge_completion_sink(
-                    unspillable_completion_signatures[completion_domain_id],
-                    consumer_completion_signatures[completion_domain_id]);
-          }
         }
         has_effect_consumer |=
             dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT;
