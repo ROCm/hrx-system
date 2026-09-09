@@ -75,11 +75,13 @@ typedef struct loom_low_allocation_interval_assignment_result_t {
   uint32_t* assignment_indices_by_value_ordinal;
   // Lookup table over assignments and liveness-local value ordinals.
   loom_low_allocation_assignment_map_t assignment_map;
-  // Spill materialization plan records in assignment order.
+  // Spill materialization plan records in spill-decision order. Null when no
+  // assignment spills; otherwise sized to |spill_count|.
   loom_low_allocation_spill_plan_t* spill_plans;
   // Number of initialized spill materialization plan records.
   iree_host_size_t spill_plan_count;
-  // Allocation remark records in assignment order.
+  // Allocation remark records in spill-decision order. Null when no assignment
+  // spills; otherwise sized to |spill_count|.
   loom_low_allocation_remark_t* remarks;
   // Number of initialized allocation remark records.
   iree_host_size_t remark_count;
@@ -88,7 +90,8 @@ typedef struct loom_low_allocation_interval_assignment_result_t {
 } loom_low_allocation_interval_assignment_result_t;
 
 // Assigns concrete locations for allocatable intervals in |context| and writes
-// arena-owned assignment, spill-plan, remark, and lookup table state.
+// arena-owned assignment, spill-plan, remark, and lookup table state. Working
+// indexes and decision storage are released before returning.
 iree_status_t loom_low_allocation_interval_assignment_build(
     const loom_low_allocation_interval_assignment_context_t* context,
     loom_low_allocation_interval_assignment_result_t* out_result);

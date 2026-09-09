@@ -147,6 +147,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   IREE_ASSERT_OK(
       loom_low_allocation_interval_assignment_build(&context, &result));
 
+  // The returned tables remain valid after assignment scratch is reclaimed.
+  iree_arena_block_pool_trim(&block_pool_);
   ASSERT_EQ(result.assignment_count, 1u);
   ASSERT_NE(result.assignments, nullptr);
   EXPECT_EQ(result.assignment_indices_by_value_ordinal[0], 0u);
@@ -158,6 +160,11 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   EXPECT_EQ(result.assignments[0].location_count, 2u);
   EXPECT_EQ(result.assignments[0].unit_point_start, 0u);
   EXPECT_EQ(result.assignments[0].end_point, 8u);
+  EXPECT_EQ(result.spill_count, 0u);
+  EXPECT_EQ(result.spill_plan_count, 0u);
+  EXPECT_EQ(result.remark_count, 0u);
+  EXPECT_EQ(result.spill_plans, nullptr);
+  EXPECT_EQ(result.remarks, nullptr);
 
   loom_module_value_ordinal_scratch_clear(module, value);
   loom_module_value_ordinal_scratch_release(module);

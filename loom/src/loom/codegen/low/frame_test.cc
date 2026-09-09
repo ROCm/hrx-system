@@ -127,6 +127,47 @@ low.func.def target<test.low.core> @resource_capacity(%lhs: reg<test.i32>, %rhs:
   }
 }
 
+TEST_F(LowEmissionFrameTest, RetainsOnlyDecidedSpillsAfterAllocation) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @spills(%first: reg<test.i32>, %second: reg<test.i32>, %third: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  return %first, %second, %third
+}
+)");
+  const loom_low_allocation_budget_t budget = {
+      .register_class = IREE_SV("test.i32"),
+      .max_units = 1,
+  };
+  const loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+      .allocation_budgets = &budget,
+      .allocation_budget_count = 1,
+  };
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(loom_low_emission_frame_build(
+      module.get(), loom_block_op(loom_module_block(module.get()), 0), &options,
+      &arena_, &frame));
+  iree_arena_block_pool_trim(&block_pool_);
+  const loom_low_allocation_table_t& allocation = frame.allocation;
+  ASSERT_EQ(allocation.error_count, 0u);
+  ASSERT_EQ(allocation.assignment_count, 3u);
+  ASSERT_EQ(allocation.spill_count, 2u);
+  ASSERT_EQ(allocation.spill_plan_count, 2u);
+  ASSERT_EQ(allocation.remark_count, 2u);
+  for (uint32_t i = 0; i < 2; ++i) {
+    const loom_low_allocation_spill_plan_t& plan = allocation.spill_plans[i];
+    EXPECT_EQ(plan.assignment_index, i + 1);
+    EXPECT_EQ(plan.value_id, allocation.assignments[i + 1].value_id);
+    EXPECT_EQ(plan.slot_index, i);
+    EXPECT_EQ(plan.byte_size, 4u);
+    EXPECT_EQ(plan.store_count, 1u);
+    EXPECT_EQ(plan.reload_count, 1u);
+    EXPECT_EQ(allocation.remarks[i].assignment_index, plan.assignment_index);
+    EXPECT_EQ(allocation.remarks[i].budget_units, 1u);
+    EXPECT_EQ(allocation.remarks[i].required_units, 1u);
+  }
+}
+
 TEST_F(LowEmissionFrameTest, FeedbackConsumesTheAcceptedFrame) {
   ModulePtr module = ParseModule(R"(
 low.func.def target<test.low.core> @feedback(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
