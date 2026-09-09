@@ -23,8 +23,9 @@ typedef struct loom_low_move_sequence_location_entry_t
     loom_low_move_sequence_location_entry_t;
 
 // Reusable arena-backed state for sequencing one parallel move group at a
-// time. |moves| is caller-populated and every other array is solver scratch
-// retained at the largest group observed.
+// time. |moves| is caller-populated. Solver arrays are allocated once at the
+// declared group bound when first needed, then reused without growth. Trivial
+// groups need no solver storage; acyclic groups need no cycle temporaries.
 typedef struct loom_low_move_sequence_scratch_t {
   // Arena that owns all scratch arrays.
   iree_arena_allocator_t* arena;
@@ -32,22 +33,17 @@ typedef struct loom_low_move_sequence_scratch_t {
   loom_low_move_t* moves;
   // Number of entries available in |moves|.
   iree_host_size_t move_capacity;
-  // Per-move solver rows indexed by move ordinal.
+  // Per-move solver rows with |move_capacity| entries.
   loom_low_move_sequence_node_t* nodes;
-  // Number of entries available in |nodes|.
-  iree_host_size_t node_capacity;
-  // Ready queue storage indexed by queue ordinal.
+  // Ready queue storage with |move_capacity| entries.
   iree_host_size_t* ready_queue;
-  // Number of entries available in |ready_queue|.
-  iree_host_size_t ready_queue_capacity;
   // Open-addressed location table used for destination and source-use lookup.
   loom_low_move_sequence_location_entry_t* location_entries;
   // Power-of-two entry count available in |location_entries|.
   iree_host_size_t location_entry_capacity;
-  // Cycle temporaries resolved for the current move group.
+  // Cycle temporaries resolved for the current move group. Storage is bounded
+  // by the smaller of half the move capacity and the descriptor class count.
   loom_low_move_location_t* temporaries;
-  // Number of entries available in |temporaries|.
-  iree_host_size_t temporary_capacity;
   // Number of initialized entries in |temporaries| for the current group.
   iree_host_size_t temporary_count;
 } loom_low_move_sequence_scratch_t;
@@ -87,7 +83,8 @@ typedef struct loom_low_move_sequence_options_t {
   loom_low_move_sequence_record_scratch_callback_t record_scratch;
 } loom_low_move_sequence_options_t;
 
-// Initializes |out_scratch| with exact caller-populated move capacity.
+// Initializes |out_scratch| with the maximum caller-populated move count of any
+// group in the surrounding plan. Later groups must fit this immutable bound.
 iree_status_t loom_low_move_sequence_scratch_initialize(
     iree_arena_allocator_t* arena, iree_host_size_t move_capacity,
     loom_low_move_sequence_scratch_t* out_scratch);
@@ -96,6 +93,8 @@ iree_status_t loom_low_move_sequence_scratch_initialize(
 // an ordered move list in |out_moves|. Identity moves are elided and each
 // cycle adds one scratch-save move. |out_complete| is false only when the
 // temporary resolver emitted an allocation diagnostic.
+// All groups sharing |scratch| use the same descriptor set and its resolved
+// storage classes.
 iree_status_t loom_low_move_sequence_resolve(
     loom_low_move_sequence_scratch_t* scratch, iree_host_size_t move_count,
     const loom_low_move_sequence_options_t* options,

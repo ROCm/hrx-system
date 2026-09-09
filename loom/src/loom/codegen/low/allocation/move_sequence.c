@@ -61,29 +61,6 @@ struct loom_low_move_sequence_location_entry_t {
   loom_low_move_sequence_location_flags_t flags;
 };
 
-static iree_status_t loom_low_move_sequence_reserve_array(
-    loom_low_move_sequence_scratch_t* scratch,
-    iree_host_size_t minimum_capacity, iree_host_size_t element_size,
-    iree_host_size_t* inout_capacity, void** inout_ptr) {
-  if (*inout_capacity >= minimum_capacity) {
-    return iree_ok_status();
-  }
-  iree_host_size_t new_capacity = minimum_capacity;
-  if (*inout_capacity != 0) {
-    iree_host_size_t doubled_capacity = 0;
-    if (iree_host_size_checked_mul(*inout_capacity, 2, &doubled_capacity) &&
-        doubled_capacity > new_capacity) {
-      new_capacity = doubled_capacity;
-    }
-  }
-  void* new_ptr = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(scratch->arena, new_capacity,
-                                                 element_size, &new_ptr));
-  *inout_capacity = new_capacity;
-  *inout_ptr = new_ptr;
-  return iree_ok_status();
-}
-
 iree_status_t loom_low_move_sequence_scratch_initialize(
     iree_arena_allocator_t* arena, iree_host_size_t move_capacity,
     loom_low_move_sequence_scratch_t* out_scratch) {
@@ -163,26 +140,31 @@ static iree_status_t loom_low_move_sequence_next_power_of_two(
 static iree_status_t loom_low_move_sequence_prepare_solver_scratch(
     loom_low_move_sequence_state_t* state) {
   loom_low_move_sequence_scratch_t* scratch = state->scratch;
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_reserve_array(
-      scratch, state->move_count, sizeof(*scratch->nodes),
-      &scratch->node_capacity, (void**)&scratch->nodes));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_reserve_array(
-      scratch, state->move_count, sizeof(*scratch->ready_queue),
-      &scratch->ready_queue_capacity, (void**)&scratch->ready_queue));
-  iree_host_size_t minimum_location_count = 0;
-  if (!iree_host_size_checked_mul(state->move_count, 4,
-                                  &minimum_location_count)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "parallel move location table exceeds host size");
+  if (!scratch->nodes) {
+    iree_host_size_t minimum_location_count = 0;
+    if (!iree_host_size_checked_mul(scratch->move_capacity, 4,
+                                    &minimum_location_count)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "parallel move location table exceeds host size");
+    }
+    IREE_RETURN_IF_ERROR(loom_low_move_sequence_next_power_of_two(
+        minimum_location_count, &scratch->location_entry_capacity));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch->arena, scratch->move_capacity, sizeof(*scratch->nodes),
+        (void**)&scratch->nodes));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch->arena, scratch->move_capacity, sizeof(*scratch->ready_queue),
+        (void**)&scratch->ready_queue));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch->arena, scratch->location_entry_capacity,
+        sizeof(*scratch->location_entries),
+        (void**)&scratch->location_entries));
   }
-  iree_host_size_t location_entry_capacity = 0;
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_next_power_of_two(
-      minimum_location_count, &location_entry_capacity));
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_reserve_array(
-      scratch, location_entry_capacity, sizeof(*scratch->location_entries),
-      &scratch->location_entry_capacity, (void**)&scratch->location_entries));
-  state->location_entry_count = location_entry_capacity;
-  return iree_ok_status();
+  // Only touch the prefix needed by this group, even though a later group can
+  // use the complete fixed allocation. The product is bounded above by the
+  // checked capacity used to allocate that storage.
+  return loom_low_move_sequence_next_power_of_two(state->move_count * 4,
+                                                  &state->location_entry_count);
 }
 
 static loom_low_move_sequence_location_entry_t*
@@ -307,12 +289,16 @@ static iree_status_t loom_low_move_sequence_resolve_temporary(
     }
   }
 
-  if (scratch->temporary_count == 0) {
-    IREE_RETURN_IF_ERROR(loom_low_move_sequence_reserve_array(
-        scratch, state->move_count, sizeof(*scratch->temporaries),
-        &scratch->temporary_capacity, (void**)&scratch->temporaries));
+  if (!scratch->temporaries) {
+    // Each nontrivial cycle needs at least two input rows. A register class
+    // reuses its temporary across all its cycles within a group.
+    const iree_host_size_t temporary_capacity =
+        iree_min(scratch->move_capacity / 2,
+                 state->options->descriptor_set->reg_class_count);
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch->arena, temporary_capacity, sizeof(*scratch->temporaries),
+        (void**)&scratch->temporaries));
   }
-  IREE_ASSERT_LT(scratch->temporary_count, scratch->temporary_capacity);
   loom_low_move_location_t* temporary =
       &scratch->temporaries[scratch->temporary_count];
   bool resolved = false;

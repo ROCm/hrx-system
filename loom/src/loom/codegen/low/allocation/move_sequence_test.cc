@@ -285,5 +285,86 @@ TEST(LowMoveSequenceTest, UsesMatchingTemporaryForMixedClassCycles) {
                                      "1:4<-5", "1:5<-11"));
 }
 
+TEST(LowMoveSequenceTest, ReusesBoundedSolverStorageAcrossIncreasingGroups) {
+  TestArena arena;
+  constexpr uint32_t kCapacity = 128;
+  loom_low_move_sequence_scratch_t scratch = {};
+  IREE_ASSERT_OK(loom_low_move_sequence_scratch_initialize(
+      arena.arena(), kCapacity, &scratch));
+  loom_low_move_sequence_options_t options = {};
+  options.descriptor_set = IndependentDescriptorSet();
+  loom_low_move_t output[kCapacity] = {};
+  iree_host_size_t storage_bytes = arena.arena()->used_allocation_size;
+  for (uint32_t count = 0; count <= kCapacity; ++count) {
+    SCOPED_TRACE(count);
+    for (uint32_t i = 0; i < count; ++i) {
+      scratch.moves[i] = Move(kCapacity + i, i);
+    }
+    iree_host_size_t output_count = 0;
+    bool complete = false;
+    IREE_ASSERT_OK(loom_low_move_sequence_resolve(&scratch, count, &options,
+                                                  kCapacity, output,
+                                                  &output_count, &complete));
+    ASSERT_TRUE(complete);
+    ASSERT_EQ(output_count, count);
+    for (uint32_t i = 0; i < count; ++i) {
+      EXPECT_EQ(output[i].destination.location, kCapacity + i);
+      EXPECT_EQ(output[i].source.location, i);
+    }
+    if (count < 2) EXPECT_EQ(scratch.nodes, nullptr);
+    if (count == 2) storage_bytes = arena.arena()->used_allocation_size;
+    EXPECT_EQ(arena.arena()->used_allocation_size, storage_bytes);
+    EXPECT_EQ(scratch.temporaries, nullptr);
+  }
+}
+
+TEST(LowMoveSequenceTest, ReusesBoundedCycleStorageAcrossClassesAndGroups) {
+  TestArena arena;
+  constexpr uint32_t kCapacity = 128;
+  loom_low_move_sequence_scratch_t scratch = {};
+  IREE_ASSERT_OK(loom_low_move_sequence_scratch_initialize(
+      arena.arena(), kCapacity, &scratch));
+  const loom_low_move_location_t temporaries[] = {
+      Location(kCapacity, 0), Location(kCapacity, 1), Location(kCapacity, 2)};
+  TemporaryResolver resolver = {IndependentDescriptorSet(), temporaries,
+                                IREE_ARRAYSIZE(temporaries)};
+  loom_low_move_sequence_options_t options = {};
+  options.descriptor_set = IndependentDescriptorSet();
+  options.resolve_temporary = {ResolveTemporary, &resolver};
+  loom_low_move_t output[kCapacity + kCapacity / 2] = {};
+  iree_host_size_t storage_bytes = 0;
+  for (uint32_t count = 2; count <= kCapacity; count += 2) {
+    SCOPED_TRACE(count);
+    for (uint32_t i = 0; i < count; ++i) {
+      scratch.moves[i] = Move(i, i ^ 1u, (i / 2) % 3);
+    }
+    iree_host_size_t output_count = 0;
+    bool complete = false;
+    IREE_ASSERT_OK(loom_low_move_sequence_resolve(
+        &scratch, count, &options, IREE_ARRAYSIZE(output), output,
+        &output_count, &complete));
+    ASSERT_TRUE(complete);
+    ASSERT_EQ(output_count, count + count / 2);
+    uint32_t values[3][kCapacity + 1];
+    for (uint32_t class_id = 0; class_id < 3; ++class_id) {
+      for (uint32_t i = 0; i <= kCapacity; ++i) {
+        values[class_id][i] = class_id * (kCapacity + 1) + i;
+      }
+    }
+    for (iree_host_size_t i = 0; i < output_count; ++i) {
+      const auto& move = output[i];
+      values[move.destination.descriptor_reg_class_id][move.destination
+                                                           .location] =
+          values[move.source.descriptor_reg_class_id][move.source.location];
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+      const uint32_t class_id = (i / 2) % 3;
+      EXPECT_EQ(values[class_id][i], class_id * (kCapacity + 1) + (i ^ 1u));
+    }
+    if (count == 2) storage_bytes = arena.arena()->used_allocation_size;
+    EXPECT_EQ(arena.arena()->used_allocation_size, storage_bytes);
+  }
+}
+
 }  // namespace
 }  // namespace loom

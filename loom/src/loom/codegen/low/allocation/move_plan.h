@@ -49,7 +49,8 @@ typedef struct loom_low_allocation_move_plan_t {
   iree_host_size_t* scratch_move_indices;
   // Number of initialized records in |scratch_move_indices|.
   iree_host_size_t scratch_move_index_count;
-  // Number of records available in |scratch_move_indices|.
+  // Maximum scratch records across the plan; storage is allocated only when
+  // the first cycle needs a temporary and never grows afterward.
   iree_host_size_t scratch_move_index_capacity;
   // Reusable caller-populated and solver scratch.
   loom_low_move_sequence_scratch_t sequence_scratch;

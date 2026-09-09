@@ -76,11 +76,10 @@ static iree_status_t loom_low_allocation_move_plan_record_scratch(
   loom_low_allocation_move_plan_group_context_t* group_context =
       (loom_low_allocation_move_plan_group_context_t*)user_data;
   loom_low_allocation_move_plan_t* plan = group_context->plan;
-  if (plan->scratch_move_index_count == plan->scratch_move_index_capacity) {
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        plan->sequence_scratch.arena, plan->scratch_move_index_count,
-        plan->scratch_move_index_count + 1, sizeof(*plan->scratch_move_indices),
-        &plan->scratch_move_index_capacity,
+  if (!plan->scratch_move_indices) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        plan->sequence_scratch.arena, plan->scratch_move_index_capacity,
+        sizeof(*plan->scratch_move_indices),
         (void**)&plan->scratch_move_indices));
   }
   plan->scratch_move_indices[plan->scratch_move_index_count++] =
@@ -206,12 +205,17 @@ iree_status_t loom_low_allocation_move_plan_initialize(
     loom_low_allocation_move_plan_t* out_plan) {
   *out_plan = (loom_low_allocation_move_plan_t){
       .context = *context,
+      .scratch_move_index_capacity = move_input_capacity / 2,
   };
   if (move_input_capacity == 0) {
     return iree_ok_status();
   }
-  const iree_host_size_t move_capacity =
-      move_input_capacity + move_input_capacity / 2;
+  iree_host_size_t move_capacity = 0;
+  if (!iree_host_size_checked_add(move_input_capacity, move_input_capacity / 2,
+                                  &move_capacity)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parallel move output capacity exceeds host size");
+  }
   out_plan->move_capacity = move_capacity;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, move_capacity,
                                                  sizeof(*out_plan->moves),
