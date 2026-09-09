@@ -15,6 +15,8 @@ typedef struct loom_low_allocation_packet_move_builder_t {
   const loom_low_allocation_packet_move_context_t* context;
   // Plan receiving final move groups.
   loom_low_allocation_packet_move_plan_t plan;
+  // Source-preorder position shared by the recursive region walk.
+  loom_low_allocation_move_cursor_t cursor;
 } loom_low_allocation_packet_move_builder_t;
 
 static const loom_low_allocation_assignment_t*
@@ -68,9 +70,11 @@ static loom_low_placement_cause_t loom_low_allocation_packet_move_cause(
 }
 
 static iree_status_t loom_low_allocation_packet_move_record_group(
-    loom_low_allocation_packet_move_builder_t* builder, const loom_op_t* op,
+    loom_low_allocation_packet_move_builder_t* builder,
+    const loom_liveness_operation_point_t* operation_point,
     uint32_t source_ordinal,
     loom_low_allocation_packet_move_op_kind_t packet_move_kind) {
+  const loom_op_t* op = operation_point->op;
   const loom_low_allocation_packet_move_context_t* context = builder->context;
   loom_value_ordinal_t result_ordinal = LOOM_VALUE_ORDINAL_INVALID;
   const bool result_found =
@@ -125,7 +129,7 @@ static iree_status_t loom_low_allocation_packet_move_record_group(
 
   loom_low_move_group_t move_group = {0};
   IREE_RETURN_IF_ERROR(loom_low_allocation_move_plan_append_group(
-      context->move_plan, op, raw_move_count, &move_group));
+      context->move_plan, operation_point, raw_move_count, &move_group));
   builder->plan.move_count += move_group.moves.count;
   if (move_group.moves.count != 0) {
     builder->plan.groups[builder->plan.group_count++] =
@@ -147,6 +151,9 @@ static iree_status_t loom_low_allocation_packet_move_record_region(
   loom_region_for_each_block(region, block) {
     const loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
+      const loom_liveness_operation_point_t* operation_point =
+          loom_low_allocation_move_plan_next_operation(
+              builder->context->move_plan, op, &builder->cursor);
       const loom_low_allocation_packet_move_op_kind_t packet_move_kind =
           loom_low_allocation_move_topology_packet_move_op_kind(op);
       const bool has_move_relations =
@@ -155,7 +162,7 @@ static iree_status_t loom_low_allocation_packet_move_record_region(
            loom_low_concat_sources(op).count != 0);
       if (has_move_relations) {
         IREE_RETURN_IF_ERROR(loom_low_allocation_packet_move_record_group(
-            builder, op, *inout_source_ordinal, packet_move_kind));
+            builder, operation_point, *inout_source_ordinal, packet_move_kind));
         if (move_context->target_constraints->error_count != 0) {
           return iree_ok_status();
         }

@@ -179,6 +179,8 @@ typedef struct loom_low_placement_table_t {
   uint32_t edge_copy_group_count;
   // Total units covered by low.br relations.
   iree_host_size_t branch_unit_count;
+  // Maximum raw move units contributed by any one packet or branch operation.
+  iree_host_size_t max_move_group_unit_count;
   // Relation ranges into |relations| indexed by result value ordinal.
   const loom_low_placement_relation_range_t* ranges_by_result_ordinal;
   // Relation indices grouped by source value ordinal. Each entry indexes

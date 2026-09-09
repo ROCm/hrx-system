@@ -185,6 +185,52 @@ static iree_status_t loom_low_allocation_fragmentation_repair_eliminates_spills(
   return status;
 }
 
+// Structural moves consume final assignments. Their permutation index and
+// sequencing workspace are private to this construction; only completed move
+// rows and scratch-write indices survive in the allocation result.
+static iree_status_t loom_low_allocation_build_moves(
+    loom_low_allocation_build_state_t* state) {
+  if (state->placement.packet_move_group_count == 0 &&
+      state->placement.edge_copy_group_count == 0) {
+    return iree_ok_status();
+  }
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(state->arena->block_pool, &scratch_arena);
+  const loom_low_allocation_move_plan_context_t move_plan_context = {
+      .descriptor_set = state->target.descriptor_set,
+      .target_constraints = &state->target_constraints,
+      .unit_liveness = &state->unit_liveness,
+      .assignment_map = state->interval_assignment.assignment_map,
+      .schedule = state->options->schedule,
+  };
+  const iree_host_size_t move_input_capacity =
+      state->placement.branch_unit_count +
+      state->placement.packet_move_unit_count;
+  const iree_host_size_t raw_group_capacity =
+      state->placement.max_move_group_unit_count;
+  iree_status_t status = loom_low_allocation_move_plan_initialize(
+      &move_plan_context, move_input_capacity, raw_group_capacity, state->arena,
+      &scratch_arena, &state->move_plan);
+  if (iree_status_is_ok(status)) {
+    const loom_low_allocation_edge_copy_context_t edge_copy_context = {
+        .placement = &state->placement,
+        .move_plan = &state->move_plan,
+    };
+    status = loom_low_allocation_edge_copy_plan_build(
+        &edge_copy_context, state->arena, &state->edge_copy_plan);
+  }
+  if (iree_status_is_ok(status) && state->target_constraints.error_count == 0) {
+    const loom_low_allocation_packet_move_context_t packet_move_context = {
+        .placement = &state->placement,
+        .move_plan = &state->move_plan,
+    };
+    status = loom_low_allocation_packet_move_plan_build(
+        &packet_move_context, state->arena, &state->packet_move_plan);
+  }
+  iree_arena_deinitialize(&scratch_arena);
+  return status;
+}
+
 iree_status_t loom_low_allocate_function(
     const loom_low_function_model_t* model,
     const loom_low_allocation_options_t* options, iree_arena_allocator_t* arena,
@@ -341,39 +387,7 @@ iree_status_t loom_low_allocate_function(
   // against registers that repair will release.
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0 &&
       assignment_is_final) {
-    const loom_low_allocation_move_plan_context_t move_plan_context = {
-        .descriptor_set = state.target.descriptor_set,
-        .target_constraints = &state.target_constraints,
-        .unit_liveness = &state.unit_liveness,
-        .assignment_map = state.interval_assignment.assignment_map,
-    };
-    const iree_host_size_t move_input_capacity =
-        state.placement.branch_unit_count +
-        state.placement.packet_move_unit_count;
-    const iree_host_size_t raw_group_capacity =
-        iree_max(state.placement.branch_unit_count,
-                 state.placement.packet_move_unit_count);
-    status = loom_low_allocation_move_plan_initialize(
-        &move_plan_context, arena, move_input_capacity, raw_group_capacity,
-        &state.move_plan);
-  }
-  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0 &&
-      assignment_is_final) {
-    const loom_low_allocation_edge_copy_context_t edge_copy_context = {
-        .placement = &state.placement,
-        .move_plan = &state.move_plan,
-    };
-    status = loom_low_allocation_edge_copy_plan_build(&edge_copy_context, arena,
-                                                      &state.edge_copy_plan);
-  }
-  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0 &&
-      assignment_is_final) {
-    const loom_low_allocation_packet_move_context_t packet_move_context = {
-        .placement = &state.placement,
-        .move_plan = &state.move_plan,
-    };
-    status = loom_low_allocation_packet_move_plan_build(
-        &packet_move_context, arena, &state.packet_move_plan);
+    status = loom_low_allocation_build_moves(&state);
   }
 
   loom_low_allocation_table_t table = {0};

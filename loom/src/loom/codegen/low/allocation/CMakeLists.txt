@@ -769,8 +769,28 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::codegen::low::descriptors
+    loom::codegen::low::schedule
     loom::ir
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    move_plan_test
+  SRCS
+    "move_plan_test.cc"
+  DEPS
+    ::move_plan
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::frame
+    loom::codegen::low::text_asm
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::target::test::low_registry
+    loom::testing::module_ptr
 )
 
 loom_cc_library(

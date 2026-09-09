@@ -16,6 +16,8 @@ typedef struct loom_low_allocation_edge_copy_builder_t {
   loom_low_allocation_edge_copy_plan_t plan;
   // Number of raw rows populated for the current branch group.
   iree_host_size_t raw_move_count;
+  // Source-preorder position shared by the recursive region walk.
+  loom_low_allocation_move_cursor_t cursor;
 } loom_low_allocation_edge_copy_builder_t;
 
 static loom_value_ordinal_t loom_low_allocation_edge_copy_value_ordinal(
@@ -166,8 +168,10 @@ static void loom_low_allocation_edge_copy_record_branch_payload_segments(
 }
 
 static iree_status_t loom_low_allocation_edge_copy_record_group(
-    loom_low_allocation_edge_copy_builder_t* builder, const loom_op_t* op,
+    loom_low_allocation_edge_copy_builder_t* builder,
+    const loom_liveness_operation_point_t* operation_point,
     uint32_t source_ordinal) {
+  const loom_op_t* op = operation_point->op;
   const loom_value_slice_t args = loom_low_br_args(op);
   if (args.count == 0) {
     return iree_ok_status();
@@ -193,7 +197,8 @@ static iree_status_t loom_low_allocation_edge_copy_record_group(
 
   const loom_low_allocation_edge_copy_context_t* context = builder->context;
   return loom_low_allocation_move_plan_append_group(
-      context->move_plan, op, builder->raw_move_count, &group->move_group);
+      context->move_plan, operation_point, builder->raw_move_count,
+      &group->move_group);
 }
 
 static iree_status_t loom_low_allocation_edge_copy_record_region(
@@ -205,9 +210,12 @@ static iree_status_t loom_low_allocation_edge_copy_record_region(
   loom_region_for_each_block(region, block) {
     loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
+      const loom_liveness_operation_point_t* operation_point =
+          loom_low_allocation_move_plan_next_operation(
+              builder->context->move_plan, op, &builder->cursor);
       if (loom_low_br_isa(op)) {
         IREE_RETURN_IF_ERROR(loom_low_allocation_edge_copy_record_group(
-            builder, op, *inout_source_ordinal));
+            builder, operation_point, *inout_source_ordinal));
         if (move_context->target_constraints->error_count != 0) {
           return iree_ok_status();
         }

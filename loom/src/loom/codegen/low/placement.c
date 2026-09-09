@@ -55,6 +55,8 @@ typedef struct loom_low_placement_build_state_t {
   uint32_t edge_copy_group_count;
   // Total units covered by low.br relations.
   iree_host_size_t branch_unit_count;
+  // Maximum raw move units contributed by one operation during collection.
+  iree_host_size_t max_move_group_unit_count;
   // Number of relation records appended after range prefixing.
   iree_host_size_t appended_relation_count;
   // Number of source relation indices appended after range prefixing.
@@ -328,6 +330,8 @@ static loom_value_id_t loom_low_placement_descriptor_operand_value_id(
 
 static iree_status_t loom_low_placement_collect_op_relations(
     loom_low_placement_build_state_t* state, const loom_op_t* op) {
+  const iree_host_size_t move_unit_start =
+      state->packet_move_unit_count + state->branch_unit_count;
   loom_low_placement_move_group_flags_t move_group_flags = 0;
   loom_low_storage_relation_iterator_t iterator;
   loom_low_storage_relation_iterator_initialize(state->module, op, &iterator);
@@ -361,6 +365,12 @@ static iree_status_t loom_low_placement_collect_op_relations(
     IREE_RETURN_IF_ERROR(
         loom_low_placement_collect_relation(state, &placement_relation));
   }
+
+  const iree_host_size_t move_unit_count = state->packet_move_unit_count +
+                                           state->branch_unit_count -
+                                           move_unit_start;
+  state->max_move_group_unit_count =
+      iree_max(state->max_move_group_unit_count, move_unit_count);
 
   loom_low_descriptor_packet_t packet;
   loom_low_descriptor_packet_initialize(state->descriptor_set, op, &packet);
@@ -684,6 +694,7 @@ static iree_status_t loom_low_placement_build(
       .packet_move_unit_count = state->packet_move_unit_count,
       .edge_copy_group_count = state->edge_copy_group_count,
       .branch_unit_count = state->branch_unit_count,
+      .max_move_group_unit_count = state->max_move_group_unit_count,
       .ranges_by_result_ordinal = state->ranges_by_result_ordinal,
       .relation_indices_by_source_ordinal =
           state->relation_indices_by_source_ordinal,
