@@ -207,9 +207,10 @@ void InitializeAddressabilityTestState(
       /*.value_class=*/
       {
           /*.type_kind=*/LOOM_TYPE_REGISTER,
-          /*.element_type=*/{}, /*.register_descriptor_set_stable_id=*/
-          state->descriptor_set.stable_id,
+          /*.element_type=*/{},
           /*.register_class_id=*/0,
+          /*.register_descriptor_set_stable_id=*/
+          state->descriptor_set.stable_id,
       },
       /*.descriptor_reg_class_id=*/0,
       /*.flags=*/{},
@@ -225,9 +226,10 @@ void InitializeAddressabilityTestState(
       /*.value_class=*/
       {
           /*.type_kind=*/LOOM_TYPE_REGISTER,
-          /*.element_type=*/{}, /*.register_descriptor_set_stable_id=*/
-          state->descriptor_set.stable_id,
+          /*.element_type=*/{},
           /*.register_class_id=*/0,
+          /*.register_descriptor_set_stable_id=*/
+          state->descriptor_set.stable_id,
       },
       /*.descriptor_reg_class_id=*/0,
       /*.flags=*/{},

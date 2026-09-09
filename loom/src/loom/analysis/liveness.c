@@ -297,8 +297,8 @@ static loom_liveness_value_class_t loom_liveness_classify_value(
   loom_liveness_value_class_t value_class = {
       .type_kind = loom_type_kind(type),
       .element_type = loom_type_element_type(type),
-      .register_descriptor_set_stable_id = 0,
       .register_class_id = LOOM_LOW_REGISTER_CLASS_ID_INVALID,
+      .register_descriptor_set_stable_id = 0,
   };
   if (loom_type_is_register(type)) {
     value_class.register_descriptor_set_stable_id =

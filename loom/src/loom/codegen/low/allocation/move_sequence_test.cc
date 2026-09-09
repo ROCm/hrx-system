@@ -21,8 +21,8 @@ loom_liveness_value_class_t ValueClass(uint16_t register_class_id) {
   return loom_liveness_value_class_t{
       /*.type_kind=*/LOOM_TYPE_REGISTER,
       /*.element_type=*/{},
-      /*.register_descriptor_set_stable_id=*/{},
       /*.register_class_id=*/register_class_id,
+      /*.register_descriptor_set_stable_id=*/{},
   };
 }
 

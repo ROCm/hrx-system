@@ -210,8 +210,8 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.value_class=*/{
               /*.type_kind=*/LOOM_TYPE_REGISTER,
               /*.element_type=*/LOOM_SCALAR_TYPE_I32,
-              /*.register_descriptor_set_stable_id=*/1,
               /*.register_class_id=*/0,
+              /*.register_descriptor_set_stable_id=*/1,
           },
           /*.peak_live_units=*/7,
           /*.peak_live_values=*/5,
@@ -223,8 +223,8 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.value_class=*/{
               /*.type_kind=*/LOOM_TYPE_REGISTER,
               /*.element_type=*/LOOM_SCALAR_TYPE_F32,
-              /*.register_descriptor_set_stable_id=*/1,
               /*.register_class_id=*/0,
+              /*.register_descriptor_set_stable_id=*/1,
           },
           /*.peak_live_units=*/11,
           /*.peak_live_values=*/2,

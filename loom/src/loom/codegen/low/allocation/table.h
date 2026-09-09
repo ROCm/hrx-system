@@ -219,11 +219,11 @@ typedef struct loom_low_allocation_table_t {
   const uint32_t* unit_end_points;
   // Number of records in |unit_start_points| and |unit_end_points|.
   iree_host_size_t unit_point_count;
-  // Spill materialization plans in assignment order.
+  // Spill materialization plans in spill-decision order.
   const loom_low_allocation_spill_plan_t* spill_plans;
   // Number of records in |spill_plans|.
   iree_host_size_t spill_plan_count;
-  // Allocation remarks in assignment order.
+  // Allocation remarks in spill-decision order.
   const loom_low_allocation_remark_t* remarks;
   // Number of records in |remarks|.
   iree_host_size_t remark_count;

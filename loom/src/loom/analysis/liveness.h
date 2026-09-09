@@ -41,11 +41,14 @@ typedef struct loom_liveness_value_class_t {
   loom_type_kind_t type_kind;
   // Element/scalar type for scalar and shaped semantic values.
   loom_scalar_type_t element_type;
-  // Low descriptor-set stable ID for LOOM_TYPE_REGISTER, otherwise zero.
-  uint64_t register_descriptor_set_stable_id;
   // Descriptor-set-local register class for LOOM_TYPE_REGISTER.
   uint16_t register_class_id;
+  // Low descriptor-set stable ID for LOOM_TYPE_REGISTER, otherwise zero.
+  uint64_t register_descriptor_set_stable_id;
 } loom_liveness_value_class_t;
+
+static_assert(sizeof(loom_liveness_value_class_t) <= 16,
+              "value classes must remain compact within per-value records");
 
 // Returns true when two values contribute to the same pressure class.
 bool loom_liveness_value_class_equal(loom_liveness_value_class_t lhs,
