@@ -14,6 +14,7 @@
 #include "loom/codegen/low/descriptors.h"
 #include "loom/target/arch/amd/xdna/device/profile.h"
 #include "loom/target/function_version.h"
+#include "loom/target/provider.h"
 #include "loom/target/reporting/report.h"
 
 #ifdef __cplusplus
@@ -50,6 +51,11 @@ typedef struct loom_aie2p_xdna_artifact_request_t {
 iree_status_t loom_aie2p_xdna_artifact_emit(
     const loom_aie2p_xdna_artifact_request_t* request,
     iree_byte_sequence_t** out_contents);
+
+// Canonical XDNA emission for in-process target environments. Device identity
+// comes from the prepared array function versions; no emission-time target
+// override or intermediate tile artifacts are required.
+extern const loom_target_provider_t loom_aie2p_xdna_artifact_provider;
 
 #ifdef __cplusplus
 }  // extern "C"

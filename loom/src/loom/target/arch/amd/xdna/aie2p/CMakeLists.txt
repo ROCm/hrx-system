@@ -664,6 +664,7 @@ loom_cc_library(
     loom::ops::op_defs
     loom::target::arch::amd::xdna::device_profile
     loom::target::function_version
+    loom::target::provider
     loom::target::reporting::low
     loom::target::reporting::report
     loom::util::fact_table

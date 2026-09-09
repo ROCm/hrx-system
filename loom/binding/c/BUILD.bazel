@@ -77,6 +77,12 @@ LOOMC_TARGET_LLVMIR_PUBLIC_HDRS = [
     "include/loomc/target/llvmir/emit.h",
 ]
 
+LOOMC_TARGET_XDNA_PUBLIC_HDRS = [
+    "include/loomc/target/amd/xdna.h",
+    "include/loomc/target/amd/xdna/base.h",
+    "include/loomc/target/amd/xdna/profile.h",
+]
+
 LOOMC_TARGET_CMD_PUBLIC_HDRS = [
     "include/loomc/target/cmd.h",
     "include/loomc/target/cmd/program.h",
@@ -115,7 +121,8 @@ exports_files(
     LOOMC_TARGET_SPIRV_PUBLIC_HDRS +
     LOOMC_TARGET_SPIRV_IREE_HAL_PUBLIC_HDRS +
     LOOMC_TARGET_SPIRV_VULKANINFO_PUBLIC_HDRS +
-    LOOMC_TARGET_SPIRV_VULKAN_PUBLIC_HDRS,
+    LOOMC_TARGET_SPIRV_VULKAN_PUBLIC_HDRS +
+    LOOMC_TARGET_XDNA_PUBLIC_HDRS,
     visibility = _TARGET_EXTENSION_VISIBILITY,
 )
 

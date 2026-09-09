@@ -593,7 +593,10 @@ loom_cc_library(
         "emit/artifact.c",
     ],
     hdrs = ["emit/artifact.h"],
-    visibility = ["//loom/src/loom/tooling/target/amd/xdna:__pkg__"],
+    visibility = [
+        "//loom/binding/c/target/amd/xdna:__pkg__",
+        "//loom/src/loom/tooling/target/amd/xdna:__pkg__",
+    ],
     deps = [
         ":array_plan",
         ":array_program",
@@ -611,6 +614,7 @@ loom_cc_library(
         "//loom/src/loom/ops/encoding",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/amd/xdna:device_profile",
         "//loom/src/loom/target/reporting:low",
         "//loom/src/loom/target/reporting:report",

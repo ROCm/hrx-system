@@ -417,3 +417,49 @@ iree_status_t loom_aie2p_xdna_artifact_emit(
   iree_io_stream_release(stream);
   return status;
 }
+
+static iree_status_t loom_aie2p_xdna_emit_target_artifact(
+    const loom_target_emit_request_t* request,
+    loom_target_emit_artifact_t* out_artifact) {
+  *out_artifact = (loom_target_emit_artifact_t){0};
+  if (request->artifact_manifest.mode !=
+      LOOM_TARGET_ARTIFACT_MANIFEST_MODE_NONE) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "XDNA entry metadata is embedded in the canonical ELF; sidecar "
+        "artifact manifests are not supported");
+  }
+  const loom_aie2p_xdna_artifact_request_t artifact_request = {
+      .module = request->module,
+      .function_versions = request->function_versions,
+      .low_descriptor_registry = request->low_descriptor_registry,
+      .compile_report = request->compile_report,
+      .diagnostic_emitter = request->diagnostic_emitter,
+      .scratch_arena = request->scratch_arena,
+      .allocator = request->allocator,
+  };
+  IREE_RETURN_IF_ERROR(loom_aie2p_xdna_artifact_emit(&artifact_request,
+                                                     &out_artifact->contents));
+  out_artifact->target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
+  return iree_ok_status();
+}
+
+static const loom_target_emitter_t loom_aie2p_xdna_artifact_emitter = {
+    .name = IREE_SVL("xdna"),
+    .public_artifact_format = IREE_SVL("xdna"),
+    .default_identifier = IREE_SVL("module.xdna"),
+    .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+    .emit = loom_aie2p_xdna_emit_target_artifact,
+};
+
+static const loom_target_emitter_t* const kXdnaArtifactEmitters[] = {
+    &loom_aie2p_xdna_artifact_emitter,
+};
+
+const loom_target_provider_t loom_aie2p_xdna_artifact_provider = {
+    .emitter_list =
+        {
+            .values = kXdnaArtifactEmitters,
+            .count = IREE_ARRAYSIZE(kXdnaArtifactEmitters),
+        },
+};
