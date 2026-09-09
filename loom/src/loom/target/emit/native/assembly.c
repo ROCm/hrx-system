@@ -223,9 +223,6 @@ iree_status_t loom_native_assembly_format_fragment(
     const loom_native_assembly_format_options_t* options,
     iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
   (void)scratch_arena;
-  loom_low_allocation_value_scratch_t value_scratch = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_low_allocation_acquire_value_scratch(allocation, &value_scratch));
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t block_index = 0;
        block_index < schedule->block_count && iree_status_is_ok(status);
@@ -233,6 +230,5 @@ iree_status_t loom_native_assembly_format_fragment(
     status = loom_native_assembly_append_block(schedule, allocation, options,
                                                builder, block_index);
   }
-  loom_low_allocation_release_value_scratch(&value_scratch);
   return status;
 }

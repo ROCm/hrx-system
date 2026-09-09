@@ -255,16 +255,11 @@ static const loom_named_attr_t* loom_amdgpu_find_packet_attr_by_name_id(
   return NULL;
 }
 
-static const loom_low_allocation_assignment_t* loom_amdgpu_map_assignment(
-    const loom_low_allocation_table_t* allocation, loom_value_id_t value_id) {
-  return loom_low_allocation_map_active_value_assignment(allocation, value_id,
-                                                         NULL);
-}
-
 static iree_status_t loom_amdgpu_verify_scc_assignment(
-    const loom_low_allocation_table_t* allocation, loom_value_id_t value_id) {
+    const loom_low_allocation_table_t* allocation,
+    const loom_low_packet_view_t* packet) {
   const loom_low_allocation_assignment_t* assignment =
-      loom_amdgpu_map_assignment(allocation, value_id);
+      loom_low_packet_operand_assignment(allocation, packet, 0);
   if (assignment->descriptor_reg_class_id != LOOM_AMDGPU_REG_CLASS_ID_SCC) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -1671,8 +1666,8 @@ static iree_status_t loom_amdgpu_encode_branch_packet(
 static iree_status_t loom_amdgpu_encode_cond_branch_packet(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
   const loom_op_t* op = packet->node->op;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_verify_scc_assignment(
-      state->inputs.allocation, loom_low_cond_br_condition(op)));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_verify_scc_assignment(state->inputs.allocation, packet));
   const loom_block_t* true_dest = loom_low_cond_br_true_dest(op);
   const loom_block_t* false_dest = loom_low_cond_br_false_dest(op);
   const uint32_t current_block_index = packet->node->block_index;
@@ -1759,8 +1754,7 @@ static iree_status_t loom_amdgpu_encode_storage_address_packet(
         "AMDGPU native encoding low.storage.address byte offset exceeds u32");
   }
   const loom_low_allocation_assignment_t* assignment =
-      loom_amdgpu_map_assignment(state->inputs.allocation,
-                                 loom_low_storage_address_result(op));
+      loom_low_packet_result_assignment(state->inputs.allocation, packet, 0);
   return loom_amdgpu_encode_vgpr_move_immediate(
       state, assignment->location_base, (uint32_t)(byte_offset + offset));
 }
@@ -2254,9 +2248,7 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
                                                    (void**)&branch_blocks));
   }
 
-  loom_low_allocation_value_scratch_t scratch = {0};
-  iree_status_t status =
-      loom_low_allocation_acquire_value_scratch(allocation, &scratch);
+  iree_status_t status = iree_ok_status();
   const loom_amdgpu_encode_inputs_t inputs = {
       .schedule = schedule,
       .allocation = allocation,
@@ -2427,7 +2419,6 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
         .native_insertion_count = writing_state.native_insertions.count,
     };
   }
-  loom_low_allocation_release_value_scratch(&scratch);
   return status;
 }
 

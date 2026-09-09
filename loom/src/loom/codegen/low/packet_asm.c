@@ -17,7 +17,7 @@
 typedef struct loom_low_packet_asm_state_t {
   // Schedule table being rendered.
   const loom_low_schedule_table_t* schedule;
-  // Allocation table supplying locations for SSA values.
+  // Allocation table supplying locations for packet occurrences.
   const loom_low_allocation_table_t* allocation;
   // Optional per-packet selected asm-form table.
   const loom_low_packet_asm_form_table_t* selected_asm_forms;
@@ -49,25 +49,40 @@ static iree_status_t loom_low_packet_asm_append_descriptor_string(
 }
 
 static iree_status_t loom_low_packet_asm_append_value(
-    loom_low_packet_asm_state_t* state, loom_value_id_t value_id) {
-  uint32_t assignment_index = UINT32_MAX;
-  const loom_low_allocation_assignment_t* assignment =
-      loom_low_allocation_map_active_value_assignment(
-          state->allocation, value_id, &assignment_index);
+    loom_low_packet_asm_state_t* state,
+    const loom_low_allocation_assignment_t* assignment) {
+  IREE_ASSERT(assignment != NULL);
+  const uint32_t assignment_index =
+      (uint32_t)(assignment - state->allocation->assignments);
   return state->options->format_value.fn(
-      state->options->format_value.user_data, state->allocation, value_id,
-      assignment, assignment_index, state->builder);
+      state->options->format_value.user_data, state->allocation,
+      assignment->value_id, assignment, assignment_index, state->builder);
 }
 
-static iree_status_t loom_low_packet_asm_append_value_list(
-    loom_low_packet_asm_state_t* state, const loom_value_id_t* values,
-    iree_host_size_t value_count) {
-  for (iree_host_size_t i = 0; i < value_count; ++i) {
+static iree_status_t loom_low_packet_asm_append_operand(
+    loom_low_packet_asm_state_t* state, const loom_low_packet_view_t* packet,
+    uint16_t operand_index) {
+  return loom_low_packet_asm_append_value(
+      state, loom_low_packet_operand_assignment(state->allocation, packet,
+                                                operand_index));
+}
+
+static iree_status_t loom_low_packet_asm_append_result(
+    loom_low_packet_asm_state_t* state, const loom_low_packet_view_t* packet,
+    uint16_t result_index) {
+  return loom_low_packet_asm_append_value(
+      state, loom_low_packet_result_assignment(state->allocation, packet,
+                                               result_index));
+}
+
+static iree_status_t loom_low_packet_asm_append_operands(
+    loom_low_packet_asm_state_t* state, const loom_low_packet_view_t* packet) {
+  for (uint16_t i = 0; i < packet->node->operand_count; ++i) {
     if (i > 0) {
       IREE_RETURN_IF_ERROR(
           iree_string_builder_append_cstring(state->builder, ", "));
     }
-    IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_value(state, values[i]));
+    IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_operand(state, packet, i));
   }
   return iree_ok_status();
 }
@@ -95,8 +110,9 @@ static iree_status_t loom_low_packet_asm_append_block_arguments(
       IREE_RETURN_IF_ERROR(
           iree_string_builder_append_cstring(state->builder, ", "));
     }
-    IREE_RETURN_IF_ERROR(
-        loom_low_packet_asm_append_value(state, loom_block_arg_id(block, i)));
+    IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_value(
+        state, loom_low_allocation_map_active_value_assignment(
+                   state->allocation, loom_block_arg_id(block, i), NULL)));
   }
   return iree_string_builder_append_cstring(state->builder, ")");
 }
@@ -192,50 +208,9 @@ static iree_status_t loom_low_packet_asm_append_immediates(
   return iree_string_builder_append_cstring(state->builder, "}");
 }
 
-static iree_status_t loom_low_packet_asm_append_asm_form_value(
-    loom_low_packet_asm_state_t* state, const loom_low_descriptor_t* descriptor,
-    uint16_t descriptor_operand_index, bool is_result,
-    const loom_value_id_t* results, iree_host_size_t result_count,
-    const loom_value_id_t* operands, iree_host_size_t operand_count) {
-  if (descriptor_operand_index >= descriptor->operand_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low packet asm descriptor operand index is out "
-                            "of range");
-  }
-  if (is_result) {
-    if (descriptor_operand_index >= descriptor->result_count ||
-        descriptor_operand_index >= result_count) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "low packet asm result field does not name an emitted result");
-    }
-    return loom_low_packet_asm_append_value(state,
-                                            results[descriptor_operand_index]);
-  }
-  if (descriptor_operand_index < descriptor->result_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "low packet asm operand field unexpectedly names a descriptor result");
-  }
-  const loom_low_descriptor_set_t* descriptor_set =
-      state->schedule->target.descriptor_set;
-  const loom_low_operand_t* descriptor_operand =
-      &descriptor_set
-           ->operands[descriptor->operand_start + descriptor_operand_index];
-  const uint16_t operand_index = descriptor_operand->source_value_index;
-  if (operand_index >= operand_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "low packet asm operand field does not name an emitted operand");
-  }
-  return loom_low_packet_asm_append_value(state, operands[operand_index]);
-}
-
 static iree_status_t loom_low_packet_asm_append_asm_form_values(
-    loom_low_packet_asm_state_t* state, const loom_low_descriptor_t* descriptor,
-    uint32_t start, uint16_t count, bool is_result,
-    const loom_value_id_t* results, iree_host_size_t result_count,
-    const loom_value_id_t* operands, iree_host_size_t operand_count) {
+    loom_low_packet_asm_state_t* state, const loom_low_packet_view_t* packet,
+    uint32_t start, uint16_t count) {
   const loom_low_descriptor_set_t* descriptor_set =
       state->schedule->target.descriptor_set;
   for (uint16_t i = 0; i < count; ++i) {
@@ -243,15 +218,10 @@ static iree_status_t loom_low_packet_asm_append_asm_form_values(
       IREE_RETURN_IF_ERROR(
           iree_string_builder_append_cstring(state->builder, ", "));
     }
-    const uint32_t asm_operand_index = start + i;
-    if (asm_operand_index >= descriptor_set->asm_operand_index_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "low packet asm operand row is out of range");
-    }
-    IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_asm_form_value(
-        state, descriptor,
-        descriptor_set->asm_operand_indices[asm_operand_index], is_result,
-        results, result_count, operands, operand_count));
+    IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_value(
+        state, loom_low_packet_descriptor_operand_assignment(
+                   state->allocation, packet,
+                   descriptor_set->asm_operand_indices[start + i])));
   }
   return iree_ok_status();
 }
@@ -272,10 +242,6 @@ static iree_status_t loom_low_packet_asm_append_descriptor_packet(
   }
 
   const loom_op_t* op = packet->node->op;
-  const loom_value_id_t* results = loom_op_const_results(op);
-  const loom_value_id_t* operands = loom_op_const_operands(op);
-  const iree_host_size_t result_count = op->result_count;
-  const iree_host_size_t operand_count = op->operand_count;
   loom_named_attr_slice_t attrs = loom_make_named_attr_slice(NULL, 0);
   if (!loom_low_packet_try_op_attrs(op, &attrs, NULL)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -285,9 +251,8 @@ static iree_status_t loom_low_packet_asm_append_descriptor_packet(
 
   if (asm_form->result_operand_index_count > 0) {
     IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_asm_form_values(
-        state, packet->descriptor, asm_form->result_operand_index_start,
-        asm_form->result_operand_index_count, /*is_result=*/true, results,
-        result_count, operands, operand_count));
+        state, packet, asm_form->result_operand_index_start,
+        asm_form->result_operand_index_count));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(state->builder, " = "));
   }
@@ -297,97 +262,77 @@ static iree_status_t loom_low_packet_asm_append_descriptor_packet(
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(state->builder, " "));
     IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_asm_form_values(
-        state, packet->descriptor, asm_form->operand_index_start,
-        asm_form->operand_index_count, /*is_result=*/false, results,
-        result_count, operands, operand_count));
+        state, packet, asm_form->operand_index_start,
+        asm_form->operand_index_count));
   }
   return loom_low_packet_asm_append_immediates(state, packet->descriptor,
                                                asm_form, attrs);
 }
 
 static iree_status_t loom_low_packet_asm_append_return(
-    loom_low_packet_asm_state_t* state, const loom_op_t* op) {
+    loom_low_packet_asm_state_t* state, const loom_low_packet_view_t* packet) {
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(state->builder, "return"));
-  loom_value_slice_t values = loom_low_return_values(op);
-  if (values.count == 0) {
+  if (packet->node->operand_count == 0) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(state->builder, " "));
-  return loom_low_packet_asm_append_value_list(state, values.values,
-                                               values.count);
+  return loom_low_packet_asm_append_operands(state, packet);
 }
 
 static iree_status_t loom_low_packet_asm_append_copy(
-    loom_low_packet_asm_state_t* state, const loom_op_t* op) {
-  IREE_RETURN_IF_ERROR(
-      loom_low_packet_asm_append_value(state, loom_low_copy_result(op)));
+    loom_low_packet_asm_state_t* state, const loom_low_packet_view_t* packet) {
+  IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_result(state, packet, 0));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(state->builder, " = copy "));
-  return loom_low_packet_asm_append_value(state, loom_low_copy_source(op));
+  return loom_low_packet_asm_append_operand(state, packet, 0);
 }
 
 static iree_status_t loom_low_packet_asm_append_move(
-    loom_low_packet_asm_state_t* state, const loom_op_t* op) {
-  IREE_RETURN_IF_ERROR(
-      loom_low_packet_asm_append_value(state, loom_low_move_result(op)));
+    loom_low_packet_asm_state_t* state, const loom_low_packet_view_t* packet) {
+  IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_result(state, packet, 0));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(state->builder, " = move "));
-  return loom_low_packet_asm_append_value(state, loom_low_move_source(op));
+  return loom_low_packet_asm_append_operand(state, packet, 0);
 }
 
 static iree_status_t loom_low_packet_asm_append_concat(
-    loom_low_packet_asm_state_t* state, const loom_op_t* op) {
-  IREE_RETURN_IF_ERROR(
-      loom_low_packet_asm_append_value(state, loom_low_concat_result(op)));
+    loom_low_packet_asm_state_t* state, const loom_low_packet_view_t* packet) {
+  IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_result(state, packet, 0));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(state->builder, " = concat("));
-  loom_value_slice_t sources = loom_low_concat_sources(op);
-  IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_value_list(
-      state, sources.values, sources.count));
+  IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_operands(state, packet));
   return iree_string_builder_append_cstring(state->builder, ")");
 }
 
 static iree_status_t loom_low_packet_asm_append_slice(
-    loom_low_packet_asm_state_t* state, const loom_op_t* op) {
-  IREE_RETURN_IF_ERROR(
-      loom_low_packet_asm_append_value(state, loom_low_slice_result(op)));
+    loom_low_packet_asm_state_t* state, const loom_low_packet_view_t* packet) {
+  IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_result(state, packet, 0));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(state->builder, " = slice "));
-  IREE_RETURN_IF_ERROR(
-      loom_low_packet_asm_append_value(state, loom_low_slice_source(op)));
-  return iree_string_builder_append_format(state->builder, "[%" PRId64 "]",
-                                           loom_low_slice_offset(op));
-}
-
-static iree_status_t loom_low_packet_asm_append_branch_args(
-    loom_low_packet_asm_state_t* state, const loom_value_id_t* values,
-    iree_host_size_t value_count) {
-  if (value_count == 0) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(state->builder, "("));
-  IREE_RETURN_IF_ERROR(
-      loom_low_packet_asm_append_value_list(state, values, value_count));
-  return iree_string_builder_append_cstring(state->builder, ")");
+  IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_operand(state, packet, 0));
+  return iree_string_builder_append_format(
+      state->builder, "[%" PRId64 "]", loom_low_slice_offset(packet->node->op));
 }
 
 static iree_status_t loom_low_packet_asm_append_br(
-    loom_low_packet_asm_state_t* state, const loom_op_t* op) {
+    loom_low_packet_asm_state_t* state, const loom_low_packet_view_t* packet) {
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(state->builder, "br "));
-  IREE_RETURN_IF_ERROR(
-      loom_low_packet_asm_append_block_label(state, loom_low_br_dest(op)));
-  loom_value_slice_t args = loom_low_br_args(op);
-  return loom_low_packet_asm_append_branch_args(state, args.values, args.count);
+  IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_block_label(
+      state, loom_low_br_dest(packet->node->op)));
+  if (packet->node->operand_count == 0) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(state->builder, "("));
+  IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_operands(state, packet));
+  return iree_string_builder_append_cstring(state->builder, ")");
 }
 
 static iree_status_t loom_low_packet_asm_append_cond_br(
-    loom_low_packet_asm_state_t* state, const loom_op_t* op) {
+    loom_low_packet_asm_state_t* state, const loom_low_packet_view_t* packet) {
+  const loom_op_t* op = packet->node->op;
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(state->builder, "cond_br "));
-  IREE_RETURN_IF_ERROR(
-      loom_low_packet_asm_append_value(state, loom_low_cond_br_condition(op)));
+  IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_operand(state, packet, 0));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(state->builder, ", "));
   IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_block_label(
@@ -399,7 +344,7 @@ static iree_status_t loom_low_packet_asm_append_cond_br(
 }
 
 typedef iree_status_t (*loom_low_packet_asm_append_structural_fn_t)(
-    loom_low_packet_asm_state_t* state, const loom_op_t* op);
+    loom_low_packet_asm_state_t* state, const loom_low_packet_view_t* packet);
 
 typedef struct loom_low_packet_asm_structural_dispatch_t {
   // Structural op handled by this row.
@@ -420,7 +365,8 @@ static const loom_low_packet_asm_structural_dispatch_t
 };
 
 static iree_status_t loom_low_packet_asm_append_structural_packet(
-    loom_low_packet_asm_state_t* state, const loom_op_t* op) {
+    loom_low_packet_asm_state_t* state, const loom_low_packet_view_t* packet) {
+  const loom_op_t* op = packet->node->op;
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(kLoomLowPacketAsmStructuralDispatch); ++i) {
     const loom_low_packet_asm_structural_dispatch_t* row =
@@ -428,7 +374,7 @@ static iree_status_t loom_low_packet_asm_append_structural_packet(
     if (op->kind != row->op_kind) {
       continue;
     }
-    return row->append(state, op);
+    return row->append(state, packet);
   }
   const loom_op_vtable_t* vtable = loom_op_vtable(state->schedule->module, op);
   iree_string_view_t op_name =
@@ -443,7 +389,7 @@ static iree_status_t loom_low_packet_asm_append_packet(
   if (packet->descriptor != NULL) {
     return loom_low_packet_asm_append_descriptor_packet(state, packet);
   }
-  return loom_low_packet_asm_append_structural_packet(state, packet->node->op);
+  return loom_low_packet_asm_append_structural_packet(state, packet);
 }
 
 static iree_status_t loom_low_packet_asm_append_block(

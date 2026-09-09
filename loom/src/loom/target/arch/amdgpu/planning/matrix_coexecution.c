@@ -635,30 +635,25 @@ static void loom_amdgpu_matrix_coexecution_query_assignment(
       channel, preceding_issue_count, query_flags, inout_match);
 }
 
-static void loom_amdgpu_matrix_coexecution_query_node(
+static void loom_amdgpu_matrix_coexecution_query_packet_values(
     loom_amdgpu_matrix_coexecution_t* coexecution,
-    const loom_low_schedule_node_t* node, bool retain_consumers,
+    const loom_low_packet_view_t* packet, bool retain_consumers,
     loom_amdgpu_matrix_coexecution_match_t* inout_match) {
   const loom_amdgpu_matrix_coexecution_query_flags_t query_flags =
       retain_consumers
           ? LOOM_AMDGPU_MATRIX_COEXECUTION_QUERY_FLAG_RETAIN_CONSUMER
           : 0;
-  const loom_value_ordinal_t* operand_ordinals =
-      loom_low_schedule_node_const_operand_ordinals(node);
+  const loom_low_schedule_node_t* node = packet->node;
   for (uint16_t i = 0; i < node->operand_count; ++i) {
     loom_amdgpu_matrix_coexecution_query_assignment(
         coexecution,
-        loom_low_allocation_assignment_for_value_ordinal(
-            coexecution->allocation, operand_ordinals[i], NULL),
+        loom_low_packet_operand_assignment(coexecution->allocation, packet, i),
         LOOM_AMDGPU_MATRIX_COEXECUTION_CHANNEL_VALU_RESULT, 0, query_flags,
         inout_match);
   }
-  const loom_value_ordinal_t* result_ordinals =
-      loom_low_schedule_node_const_result_ordinals(node);
   for (uint16_t i = 0; i < node->result_count; ++i) {
     const loom_low_allocation_assignment_t* assignment =
-        loom_low_allocation_assignment_for_value_ordinal(
-            coexecution->allocation, result_ordinals[i], NULL);
+        loom_low_packet_result_assignment(coexecution->allocation, packet, i);
     loom_amdgpu_matrix_coexecution_query_assignment(
         coexecution, assignment,
         LOOM_AMDGPU_MATRIX_COEXECUTION_CHANNEL_VALU_RESULT, 0, query_flags,
@@ -761,16 +756,16 @@ static void loom_amdgpu_matrix_coexecution_inspect_packet_impl(
                               LOOM_LOW_INSTRUCTION_CLASS_FLAG_SWMMAC |
                               LOOM_LOW_INSTRUCTION_CLASS_FLAG_LDSDMA);
     if (is_ordinary_vector) {
-      loom_amdgpu_matrix_coexecution_query_node(coexecution, packet->node,
-                                                retain_consumers, inout_match);
+      loom_amdgpu_matrix_coexecution_query_packet_values(
+          coexecution, packet, retain_consumers, inout_match);
     }
     return;
   }
 
   IREE_ASSERT(structural_info != NULL);
   if (structural_info->vector_alu_instruction_count != 0) {
-    loom_amdgpu_matrix_coexecution_query_node(coexecution, packet->node,
-                                              retain_consumers, inout_match);
+    loom_amdgpu_matrix_coexecution_query_packet_values(
+        coexecution, packet, retain_consumers, inout_match);
   }
   const uint16_t move_issue_count = loom_amdgpu_matrix_coexecution_query_moves(
       coexecution, structural_info->moves, retain_consumers, inout_match);

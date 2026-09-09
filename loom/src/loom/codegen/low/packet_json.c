@@ -141,7 +141,9 @@ static iree_status_t loom_low_packet_json_write_location(
 static iree_status_t loom_low_packet_json_write_value(
     const loom_low_allocation_table_t* allocation,
     const loom_text_print_options_t* type_print_options,
-    loom_value_id_t value_id, loom_output_stream_t* stream) {
+    loom_value_id_t value_id,
+    const loom_low_allocation_assignment_t* assignment,
+    loom_output_stream_t* stream) {
   const loom_module_t* module = allocation->module;
   loom_json_object_writer_t object;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
@@ -163,10 +165,9 @@ static iree_status_t loom_low_packet_json_write_value(
     IREE_RETURN_IF_ERROR(
         loom_json_object_write_null_field(&object, IREE_SV("type")));
   }
-  uint32_t assignment_index = UINT32_MAX;
-  const loom_low_allocation_assignment_t* assignment =
-      loom_low_allocation_try_map_active_value_assignment(allocation, value_id,
-                                                          &assignment_index);
+  const uint32_t assignment_index =
+      assignment ? (uint32_t)(assignment - allocation->assignments)
+                 : UINT32_MAX;
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&object, IREE_SV("location")));
   IREE_RETURN_IF_ERROR(loom_low_packet_json_write_location(
@@ -174,17 +175,44 @@ static iree_status_t loom_low_packet_json_write_value(
   return loom_json_object_end(&object);
 }
 
-static iree_status_t loom_low_packet_json_write_value_array(
+static iree_status_t loom_low_packet_json_write_block_arguments(
     const loom_low_allocation_table_t* allocation,
     const loom_text_print_options_t* type_print_options,
-    const loom_value_id_t* values, iree_host_size_t value_count,
-    loom_output_stream_t* stream) {
+    const loom_block_t* block, loom_output_stream_t* stream) {
   loom_json_array_writer_t array;
   IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
-  for (iree_host_size_t i = 0; i < value_count; ++i) {
+  for (uint16_t i = 0; i < block->arg_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array));
+    const loom_value_id_t value_id = loom_block_arg_id(block, i);
     IREE_RETURN_IF_ERROR(loom_low_packet_json_write_value(
-        allocation, type_print_options, values[i], stream));
+        allocation, type_print_options, value_id,
+        loom_low_allocation_try_map_active_value_assignment(allocation,
+                                                            value_id, NULL),
+        stream));
+  }
+  return loom_json_array_end(&array);
+}
+
+static iree_status_t loom_low_packet_json_write_packet_values(
+    const loom_low_allocation_table_t* allocation,
+    const loom_text_print_options_t* type_print_options,
+    const loom_low_packet_view_t* packet, bool is_result,
+    loom_output_stream_t* stream) {
+  const uint16_t count =
+      is_result ? packet->node->result_count : packet->node->operand_count;
+  const loom_value_ordinal_t* ordinals =
+      is_result ? loom_low_schedule_node_const_result_ordinals(packet->node)
+                : loom_low_schedule_node_const_operand_ordinals(packet->node);
+  loom_json_array_writer_t array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
+  for (uint16_t i = 0; i < count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array));
+    const loom_low_allocation_assignment_t* assignment =
+        is_result ? loom_low_packet_result_assignment(allocation, packet, i)
+                  : loom_low_packet_operand_assignment(allocation, packet, i);
+    IREE_RETURN_IF_ERROR(loom_low_packet_json_write_value(
+        allocation, type_print_options,
+        allocation->liveness.value_ids[ordinals[i]], assignment, stream));
   }
   return loom_json_array_end(&array);
 }
@@ -817,14 +845,12 @@ static iree_status_t loom_low_packet_json_write_packet(
       descriptor ? descriptor->effect_count : 0));
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&object, IREE_SV("results")));
-  IREE_RETURN_IF_ERROR(loom_low_packet_json_write_value_array(
-      allocation, type_print_options, loom_op_const_results(node->op),
-      node->op->result_count, stream));
+  IREE_RETURN_IF_ERROR(loom_low_packet_json_write_packet_values(
+      allocation, type_print_options, packet, /*is_result=*/true, stream));
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&object, IREE_SV("operands")));
-  IREE_RETURN_IF_ERROR(loom_low_packet_json_write_value_array(
-      allocation, type_print_options, loom_op_const_operands(node->op),
-      node->op->operand_count, stream));
+  IREE_RETURN_IF_ERROR(loom_low_packet_json_write_packet_values(
+      allocation, type_print_options, packet, /*is_result=*/false, stream));
   if (loom_low_packet_try_op_attrs(node->op, NULL, NULL)) {
     IREE_RETURN_IF_ERROR(loom_low_packet_json_write_low_packet_attrs(
         schedule, type_print_options, node, &object));
@@ -904,9 +930,8 @@ static iree_status_t loom_low_packet_json_write(
         block_record->scheduled_node_count));
     IREE_RETURN_IF_ERROR(
         loom_json_object_begin_field(&block_object, IREE_SV("args")));
-    IREE_RETURN_IF_ERROR(loom_low_packet_json_write_value_array(
-        allocation, &type_print_context.options, block_record->block->arg_ids,
-        block_record->block->arg_count, &stream));
+    IREE_RETURN_IF_ERROR(loom_low_packet_json_write_block_arguments(
+        allocation, &type_print_context.options, block_record->block, &stream));
     IREE_RETURN_IF_ERROR(loom_json_object_end(&block_object));
   }
   IREE_RETURN_IF_ERROR(loom_json_array_end(&blocks));

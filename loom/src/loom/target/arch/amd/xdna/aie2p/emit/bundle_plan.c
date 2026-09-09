@@ -459,11 +459,8 @@ static iree_status_t loom_aie2p_bundle_plan_encode_storage_address(
   const loom_low_schedule_node_t* node = packet->node;
   IREE_ASSERT(loom_low_storage_address_isa(node->op));
   IREE_ASSERT_EQ(node->result_count, 1u);
-  const loom_value_ordinal_t result_ordinal =
-      loom_low_schedule_node_const_result_ordinals(node)[0];
   const loom_low_allocation_assignment_t* result_assignment =
-      loom_low_allocation_assignment_for_value_ordinal(
-          &builder->frame->allocation, result_ordinal, NULL);
+      loom_low_packet_result_assignment(&builder->frame->allocation, packet, 0);
   if (result_assignment == NULL ||
       result_assignment->location_kind !=
           LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER ||
@@ -974,11 +971,9 @@ static iree_status_t loom_aie2p_bundle_plan_encode_branch(
     const loom_low_packet_view_t packet =
         loom_low_packet_at(&builder->frame->schedule, scheduled_packet_index);
     IREE_ASSERT(loom_low_cond_br_isa(packet.node->op));
-    const loom_value_ordinal_t condition_ordinal =
-        loom_low_schedule_node_const_operand_ordinals(packet.node)[0];
     const loom_low_allocation_assignment_t* condition_assignment =
-        loom_low_allocation_assignment_for_value_ordinal(
-            &builder->frame->allocation, condition_ordinal, NULL);
+        loom_low_packet_operand_assignment(&builder->frame->allocation, &packet,
+                                           0);
     if (condition_assignment == NULL ||
         condition_assignment->location_kind !=
             LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER ||

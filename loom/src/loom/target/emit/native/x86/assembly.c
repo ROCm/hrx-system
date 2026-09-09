@@ -65,13 +65,6 @@ static iree_status_t loom_x86_append_mnemonic(
   return iree_string_builder_append_string(context->builder, mnemonic);
 }
 
-static const loom_low_allocation_assignment_t* loom_x86_map_assignment(
-    const loom_native_assembly_packet_context_t* context,
-    loom_value_id_t value_id) {
-  return loom_low_allocation_map_active_value_assignment(context->allocation,
-                                                         value_id, NULL);
-}
-
 static bool loom_x86_assignments_match(
     const loom_low_allocation_assignment_t* lhs,
     const loom_low_allocation_assignment_t* rhs) {
@@ -177,43 +170,25 @@ static iree_status_t loom_x86_append_move_location(
   return loom_x86_append_assignment(context, &assignment);
 }
 
-static iree_status_t loom_x86_append_value(
-    const loom_native_assembly_packet_context_t* context,
-    loom_value_id_t value_id) {
-  const loom_low_allocation_assignment_t* assignment =
-      loom_x86_map_assignment(context, value_id);
-  return loom_x86_append_assignment(context, assignment);
-}
-
 static iree_status_t loom_x86_append_result(
     const loom_native_assembly_packet_context_t* context,
-    iree_host_size_t result_index) {
-  const loom_op_t* op = context->packet->node->op;
-  if (result_index >= op->result_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "x86 assembly result index is out of range");
-  }
-  return loom_x86_append_value(context,
-                               loom_op_const_results(op)[result_index]);
+    uint16_t result_index) {
+  return loom_x86_append_assignment(
+      context, loom_low_packet_result_assignment(
+                   context->allocation, context->packet, result_index));
 }
 
 static iree_status_t loom_x86_append_operand(
     const loom_native_assembly_packet_context_t* context,
-    iree_host_size_t operand_index) {
-  const loom_op_t* op = context->packet->node->op;
-  if (operand_index >= op->operand_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "x86 assembly operand index is out of range");
-  }
-  return loom_x86_append_value(context,
-                               loom_op_const_operands(op)[operand_index]);
+    uint16_t operand_index) {
+  return loom_x86_append_assignment(
+      context, loom_low_packet_operand_assignment(
+                   context->allocation, context->packet, operand_index));
 }
 
-static iree_status_t loom_x86_append_gpr32_value(
+static iree_status_t loom_x86_append_gpr32_assignment(
     const loom_native_assembly_packet_context_t* context,
-    loom_value_id_t value_id) {
-  const loom_low_allocation_assignment_t* assignment =
-      loom_x86_map_assignment(context, value_id);
+    const loom_low_allocation_assignment_t* assignment) {
   if (assignment->location_count != 1) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "x86 assembly multi-register i32 value %" PRIu32
@@ -240,21 +215,15 @@ static iree_status_t loom_x86_append_gpr32_value(
 
 static iree_status_t loom_x86_append_gpr32_operand(
     const loom_native_assembly_packet_context_t* context,
-    iree_host_size_t operand_index) {
-  const loom_op_t* op = context->packet->node->op;
-  if (operand_index >= op->operand_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "x86 assembly operand index is out of range");
-  }
-  return loom_x86_append_gpr32_value(context,
-                                     loom_op_const_operands(op)[operand_index]);
+    uint16_t operand_index) {
+  return loom_x86_append_gpr32_assignment(
+      context, loom_low_packet_operand_assignment(
+                   context->allocation, context->packet, operand_index));
 }
 
-static iree_status_t loom_x86_append_gpr8_value(
+static iree_status_t loom_x86_append_gpr8_assignment(
     const loom_native_assembly_packet_context_t* context,
-    loom_value_id_t value_id) {
-  const loom_low_allocation_assignment_t* assignment =
-      loom_x86_map_assignment(context, value_id);
+    const loom_low_allocation_assignment_t* assignment) {
   if (assignment->location_count != 1) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "x86 assembly multi-register byte value %" PRIu32
@@ -280,26 +249,18 @@ static iree_status_t loom_x86_append_gpr8_value(
 
 static iree_status_t loom_x86_append_gpr8_result(
     const loom_native_assembly_packet_context_t* context,
-    iree_host_size_t result_index) {
-  const loom_op_t* op = context->packet->node->op;
-  if (result_index >= op->result_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "x86 assembly result index is out of range");
-  }
-  return loom_x86_append_gpr8_value(context,
-                                    loom_op_const_results(op)[result_index]);
+    uint16_t result_index) {
+  return loom_x86_append_gpr8_assignment(
+      context, loom_low_packet_result_assignment(
+                   context->allocation, context->packet, result_index));
 }
 
 static iree_status_t loom_x86_append_gpr8_operand(
     const loom_native_assembly_packet_context_t* context,
-    iree_host_size_t operand_index) {
-  const loom_op_t* op = context->packet->node->op;
-  if (operand_index >= op->operand_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "x86 assembly operand index is out of range");
-  }
-  return loom_x86_append_gpr8_value(context,
-                                    loom_op_const_operands(op)[operand_index]);
+    uint16_t operand_index) {
+  return loom_x86_append_gpr8_assignment(
+      context, loom_low_packet_operand_assignment(
+                   context->allocation, context->packet, operand_index));
 }
 
 static loom_named_attr_slice_t loom_x86_packet_attrs(
@@ -433,10 +394,10 @@ static iree_status_t loom_x86_read_packet_address_scale_attr(
 
 static iree_status_t loom_x86_append_memory_operand(
     const loom_native_assembly_packet_context_t* context,
-    loom_value_id_t base_value_id, loom_value_id_t index_value_id,
-    int64_t scale, int64_t displacement) {
-  if (base_value_id == LOOM_VALUE_ID_INVALID &&
-      index_value_id == LOOM_VALUE_ID_INVALID && displacement == 0) {
+    uint16_t base_operand_index, uint16_t index_operand_index, int64_t scale,
+    int64_t displacement) {
+  if (base_operand_index == UINT16_MAX && index_operand_index == UINT16_MAX &&
+      displacement == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "x86 memory operand requires a base register, "
                             "index register, or displacement");
@@ -444,16 +405,16 @@ static iree_status_t loom_x86_append_memory_operand(
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, "["));
   bool has_component = false;
-  if (base_value_id != LOOM_VALUE_ID_INVALID) {
-    IREE_RETURN_IF_ERROR(loom_x86_append_value(context, base_value_id));
+  if (base_operand_index != UINT16_MAX) {
+    IREE_RETURN_IF_ERROR(loom_x86_append_operand(context, base_operand_index));
     has_component = true;
   }
-  if (index_value_id != LOOM_VALUE_ID_INVALID) {
+  if (index_operand_index != UINT16_MAX) {
     if (has_component) {
       IREE_RETURN_IF_ERROR(
           iree_string_builder_append_cstring(context->builder, " + "));
     }
-    IREE_RETURN_IF_ERROR(loom_x86_append_value(context, index_value_id));
+    IREE_RETURN_IF_ERROR(loom_x86_append_operand(context, index_operand_index));
     if (scale != 1) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           context->builder, " * %" PRId64, scale));
@@ -494,61 +455,17 @@ static iree_status_t loom_x86_append_asm_form_separator(
   return iree_ok_status();
 }
 
-static iree_status_t loom_x86_append_asm_form_value(
-    const loom_native_assembly_packet_context_t* context,
-    const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index,
-    bool is_result) {
-  const loom_op_t* op = context->packet->node->op;
-  if (descriptor_operand_index >= descriptor->operand_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "x86 assembly asm-form operand index is outside the descriptor");
-  }
-  if (is_result) {
-    if (descriptor_operand_index >= descriptor->result_count ||
-        descriptor_operand_index >= op->result_count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "x86 assembly asm-form result field does not "
-                              "name an emitted result");
-    }
-    return loom_x86_append_result(context, descriptor_operand_index);
-  }
-  if (descriptor_operand_index < descriptor->result_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "x86 assembly asm-form operand field unexpectedly "
-                            "names a descriptor result");
-  }
-  const loom_low_descriptor_set_t* descriptor_set =
-      context->schedule->target.descriptor_set;
-  const loom_low_operand_t* descriptor_operand =
-      &descriptor_set
-           ->operands[descriptor->operand_start + descriptor_operand_index];
-  const uint16_t operand_index = descriptor_operand->source_value_index;
-  if (operand_index >= op->operand_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "x86 assembly asm-form operand field does not "
-                            "name an emitted operand");
-  }
-  return loom_x86_append_operand(context, operand_index);
-}
-
 static iree_status_t loom_x86_append_asm_form_values(
-    const loom_native_assembly_packet_context_t* context,
-    const loom_low_descriptor_t* descriptor, uint32_t start, uint16_t count,
-    bool is_result, bool* in_list) {
+    const loom_native_assembly_packet_context_t* context, uint32_t start,
+    uint16_t count, bool* in_list) {
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
   for (uint16_t i = 0; i < count; ++i) {
-    const uint32_t asm_operand_index = start + i;
-    if (asm_operand_index >= descriptor_set->asm_operand_index_count) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "x86 assembly asm-form operand row is outside the descriptor set");
-    }
     IREE_RETURN_IF_ERROR(loom_x86_append_asm_form_separator(context, in_list));
-    IREE_RETURN_IF_ERROR(loom_x86_append_asm_form_value(
-        context, descriptor,
-        descriptor_set->asm_operand_indices[asm_operand_index], is_result));
+    IREE_RETURN_IF_ERROR(loom_x86_append_assignment(
+        context, loom_low_packet_descriptor_operand_assignment(
+                     context->allocation, context->packet,
+                     descriptor_set->asm_operand_indices[start + i])));
   }
   return iree_ok_status();
 }
@@ -614,23 +531,23 @@ static iree_status_t loom_x86_append_canonical_asm_form_packet(
   IREE_RETURN_IF_ERROR(loom_x86_append_mnemonic(context));
   bool in_list = false;
   IREE_RETURN_IF_ERROR(loom_x86_append_asm_form_values(
-      context, descriptor, form->result_operand_index_start,
-      form->result_operand_index_count, /*is_result=*/true, &in_list));
+      context, form->result_operand_index_start,
+      form->result_operand_index_count, &in_list));
   IREE_RETURN_IF_ERROR(loom_x86_append_asm_form_values(
-      context, descriptor, form->operand_index_start, form->operand_index_count,
-      /*is_result=*/false, &in_list));
+      context, form->operand_index_start, form->operand_index_count, &in_list));
   return loom_x86_append_asm_form_immediates(context, descriptor, form,
                                              &in_list);
 }
 
 static iree_status_t loom_x86_append_tied_unary_packet(
     const loom_native_assembly_packet_context_t* context) {
-  const loom_op_t* op = context->packet->node->op;
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
   const loom_low_allocation_assignment_t* result_assignment =
-      loom_x86_map_assignment(context, loom_op_const_results(op)[0]);
+      loom_low_packet_result_assignment(context->allocation, context->packet,
+                                        0);
   const loom_low_allocation_assignment_t* source_assignment =
-      loom_x86_map_assignment(context, loom_op_const_operands(op)[0]);
+      loom_low_packet_operand_assignment(context->allocation, context->packet,
+                                         0);
   if (!loom_x86_assignments_match(result_assignment, source_assignment)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -649,19 +566,20 @@ static iree_status_t loom_x86_append_tied_unary_packet(
   IREE_RETURN_IF_ERROR(loom_x86_append_mnemonic(context));
   bool in_list = false;
   IREE_RETURN_IF_ERROR(loom_x86_append_asm_form_values(
-      context, descriptor, form->result_operand_index_start,
-      form->result_operand_index_count, /*is_result=*/true, &in_list));
+      context, form->result_operand_index_start,
+      form->result_operand_index_count, &in_list));
   return loom_x86_append_asm_form_immediates(context, descriptor, form,
                                              &in_list);
 }
 
 static iree_status_t loom_x86_append_tied_ternary_packet(
     const loom_native_assembly_packet_context_t* context) {
-  const loom_op_t* op = context->packet->node->op;
   const loom_low_allocation_assignment_t* result_assignment =
-      loom_x86_map_assignment(context, loom_op_const_results(op)[0]);
+      loom_low_packet_result_assignment(context->allocation, context->packet,
+                                        0);
   const loom_low_allocation_assignment_t* accumulator_assignment =
-      loom_x86_map_assignment(context, loom_op_const_operands(op)[0]);
+      loom_low_packet_operand_assignment(context->allocation, context->packet,
+                                         0);
   if (!loom_x86_assignments_match(result_assignment, accumulator_assignment)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -681,11 +599,12 @@ static iree_status_t loom_x86_append_tied_ternary_packet(
 
 static iree_status_t loom_x86_append_tied_binary_packet(
     const loom_native_assembly_packet_context_t* context) {
-  const loom_op_t* op = context->packet->node->op;
   const loom_low_allocation_assignment_t* result_assignment =
-      loom_x86_map_assignment(context, loom_op_const_results(op)[0]);
+      loom_low_packet_result_assignment(context->allocation, context->packet,
+                                        0);
   const loom_low_allocation_assignment_t* lhs_assignment =
-      loom_x86_map_assignment(context, loom_op_const_operands(op)[0]);
+      loom_low_packet_operand_assignment(context->allocation, context->packet,
+                                         0);
   if (!loom_x86_assignments_match(result_assignment, lhs_assignment)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -770,9 +689,11 @@ static iree_status_t loom_x86_append_select_packet(
                             (int)key.size, key.data);
   }
   const loom_low_allocation_assignment_t* result_assignment =
-      loom_x86_map_assignment(context, loom_op_const_results(op)[0]);
+      loom_low_packet_result_assignment(context->allocation, context->packet,
+                                        0);
   const loom_low_allocation_assignment_t* false_assignment =
-      loom_x86_map_assignment(context, loom_op_const_operands(op)[2]);
+      loom_low_packet_operand_assignment(context->allocation, context->packet,
+                                         2);
   if (!loom_x86_assignments_match(result_assignment, false_assignment)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -816,15 +737,15 @@ static iree_status_t loom_x86_append_lea_packet(
       context, descriptor, IREE_SV("scale"), 1, &scale, &has_scale));
   IREE_RETURN_IF_ERROR(loom_x86_validate_address_scale(scale));
 
-  loom_value_id_t base_value_id = LOOM_VALUE_ID_INVALID;
-  loom_value_id_t index_value_id = LOOM_VALUE_ID_INVALID;
+  uint16_t base_operand_index = UINT16_MAX;
+  uint16_t index_operand_index = UINT16_MAX;
   if (op->operand_count == 2) {
-    base_value_id = loom_op_const_operands(op)[0];
-    index_value_id = loom_op_const_operands(op)[1];
+    base_operand_index = 0;
+    index_operand_index = 1;
   } else if (has_scale) {
-    index_value_id = loom_op_const_operands(op)[0];
+    index_operand_index = 0;
   } else {
-    base_value_id = loom_op_const_operands(op)[0];
+    base_operand_index = 0;
   }
   if (op->operand_count == 1 && !has_scale && !has_displacement) {
     const iree_string_view_t key = loom_x86_descriptor_key(context);
@@ -840,8 +761,8 @@ static iree_status_t loom_x86_append_lea_packet(
   IREE_RETURN_IF_ERROR(loom_x86_append_result(context, 0));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, ", "));
-  return loom_x86_append_memory_operand(context, base_value_id, index_value_id,
-                                        scale, displacement);
+  return loom_x86_append_memory_operand(
+      context, base_operand_index, index_operand_index, scale, displacement);
 }
 
 static iree_status_t loom_x86_descriptor_has_constraint(
@@ -998,10 +919,10 @@ static iree_status_t loom_x86_append_load_packet(
   IREE_RETURN_IF_ERROR(
       loom_x86_read_packet_i64_attr(context, IREE_SV("disp32"), &displacement));
   const loom_op_t* op = context->packet->node->op;
-  loom_value_id_t index_value_id = LOOM_VALUE_ID_INVALID;
+  uint16_t index_operand_index = UINT16_MAX;
   int64_t scale = 1;
   if (op->operand_count == 2) {
-    index_value_id = loom_op_const_operands(op)[1];
+    index_operand_index = 1;
     IREE_RETURN_IF_ERROR(
         loom_x86_read_packet_address_scale_attr(context, &scale));
   } else if (op->operand_count != 1) {
@@ -1026,8 +947,8 @@ static iree_status_t loom_x86_append_load_packet(
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(context->builder, "byte ptr "));
   }
-  return loom_x86_append_memory_operand(context, loom_op_const_operands(op)[0],
-                                        index_value_id, scale, displacement);
+  return loom_x86_append_memory_operand(context, 0, index_operand_index, scale,
+                                        displacement);
 }
 
 static iree_status_t loom_x86_append_store_packet(
@@ -1036,17 +957,13 @@ static iree_status_t loom_x86_append_store_packet(
   IREE_RETURN_IF_ERROR(
       loom_x86_read_packet_i64_attr(context, IREE_SV("disp32"), &displacement));
   const loom_op_t* op = context->packet->node->op;
-  loom_value_id_t base_value_id = LOOM_VALUE_ID_INVALID;
-  loom_value_id_t index_value_id = LOOM_VALUE_ID_INVALID;
+  uint16_t index_operand_index = UINT16_MAX;
   int64_t scale = 1;
-  if (op->operand_count == 2) {
-    base_value_id = loom_op_const_operands(op)[1];
-  } else if (op->operand_count == 3) {
-    base_value_id = loom_op_const_operands(op)[1];
-    index_value_id = loom_op_const_operands(op)[2];
+  if (op->operand_count == 3) {
+    index_operand_index = 2;
     IREE_RETURN_IF_ERROR(
         loom_x86_read_packet_address_scale_attr(context, &scale));
-  } else {
+  } else if (op->operand_count != 2) {
     const iree_string_view_t key = loom_x86_descriptor_key(context);
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "x86 assembly store descriptor '%.*s' has an "
@@ -1067,7 +984,7 @@ static iree_status_t loom_x86_append_store_packet(
         iree_string_builder_append_cstring(context->builder, "byte ptr "));
   }
   IREE_RETURN_IF_ERROR(loom_x86_append_memory_operand(
-      context, base_value_id, index_value_id, scale, displacement));
+      context, 1, index_operand_index, scale, displacement));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, ", "));
   return is_byte_store ? loom_x86_append_gpr8_operand(context, 0)
@@ -1118,11 +1035,12 @@ static iree_status_t loom_x86_append_const_packet(
 
 static iree_status_t loom_x86_append_transfer_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
-  const loom_op_t* op = context->packet->node->op;
   const loom_low_allocation_assignment_t* source_assignment =
-      loom_x86_map_assignment(context, loom_op_const_operands(op)[0]);
+      loom_low_packet_operand_assignment(context->allocation, context->packet,
+                                         0);
   const loom_low_allocation_assignment_t* result_assignment =
-      loom_x86_map_assignment(context, loom_op_const_results(op)[0]);
+      loom_low_packet_result_assignment(context->allocation, context->packet,
+                                        0);
   if (loom_x86_assignments_match(source_assignment, result_assignment)) {
     return iree_ok_status();
   }
@@ -1296,7 +1214,8 @@ static iree_status_t loom_x86_append_cond_branch_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
   const loom_op_t* op = context->packet->node->op;
   const loom_low_allocation_assignment_t* condition_assignment =
-      loom_x86_map_assignment(context, loom_low_cond_br_condition(op));
+      loom_low_packet_operand_assignment(context->allocation, context->packet,
+                                         0);
   loom_x86_register_class_t register_class_kind = 0;
   IREE_RETURN_IF_ERROR(loom_x86_register_class_kind(
       context, condition_assignment, &register_class_kind));

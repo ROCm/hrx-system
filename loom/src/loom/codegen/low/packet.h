@@ -71,14 +71,12 @@ loom_low_packet_count(const loom_low_schedule_table_t* schedule) {
   return schedule->scheduled_node_count;
 }
 
-// Returns the packet at |packet_index| in a successful schedule.
-//
-// |packet_index| must be derived from |schedule|.
+// Constructs a view from corresponding node and packet indices in a successful
+// schedule. Indexed accessors supply the known index directly rather than
+// reconstructing it through the inverse mapping.
 IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_low_packet_view_t
-loom_low_packet_at(const loom_low_schedule_table_t* schedule,
-                   iree_host_size_t packet_index) {
-  IREE_ASSERT_LT(packet_index, schedule->scheduled_node_count);
-  const uint32_t node_index = schedule->scheduled_node_indices[packet_index];
+loom_low_packet_make_view(const loom_low_schedule_table_t* schedule,
+                          uint32_t node_index, iree_host_size_t packet_index) {
   IREE_ASSERT_LT(node_index, schedule->node_count);
   const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
   const uint32_t descriptor_ordinal =
@@ -93,6 +91,32 @@ loom_low_packet_at(const loom_low_schedule_table_t* schedule,
       /*.node=*/node,
       /*.descriptor=*/node->descriptor,
   };
+}
+
+// Returns the packet for |node_index| in a successful schedule.
+//
+// |node_index| must name a scheduled node in |schedule|.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_low_packet_view_t
+loom_low_packet_at_node(const loom_low_schedule_table_t* schedule,
+                        uint32_t node_index) {
+  IREE_ASSERT_LT(node_index, schedule->node_count);
+  const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
+  return loom_low_packet_make_view(
+      schedule, node_index,
+      (iree_host_size_t)schedule->blocks[node->block_index]
+              .scheduled_node_start +
+          node->scheduled_ordinal);
+}
+
+// Returns the packet at |packet_index| in a successful schedule.
+//
+// |packet_index| must be derived from |schedule|.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_low_packet_view_t
+loom_low_packet_at(const loom_low_schedule_table_t* schedule,
+                   iree_host_size_t packet_index) {
+  IREE_ASSERT_LT(packet_index, schedule->scheduled_node_count);
+  return loom_low_packet_make_view(
+      schedule, schedule->scheduled_node_indices[packet_index], packet_index);
 }
 
 // Returns the packet at |scheduled_ordinal| in |block_index|.
@@ -110,9 +134,40 @@ loom_low_packet_at_block_ordinal(const loom_low_schedule_table_t* schedule,
   return loom_low_packet_at(schedule, packet_index);
 }
 
-// Returns the allocation assignment for a descriptor operand in a verified
-// packet from a successful allocation. The packet and allocation must describe
-// the same immutable low function.
+// Returns the allocation assignment read by this packet operand, or NULL for a
+// value without register storage. The index is in packet operand order, not
+// descriptor operand order. The packet and allocation must describe the same
+// successfully planned low function.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_allocation_assignment_t*
+loom_low_packet_operand_assignment(
+    const loom_low_allocation_table_t* allocation,
+    const loom_low_packet_view_t* packet, uint16_t operand_index) {
+  IREE_ASSERT_LT(operand_index, packet->node->operand_count);
+  return loom_low_allocation_assignment_for_value_ordinal(
+      allocation,
+      loom_low_schedule_node_const_operand_ordinals(
+          packet->node)[operand_index],
+      NULL);
+}
+
+// Returns the allocation assignment written by this packet result, or NULL for
+// a value without register storage. The packet and allocation must describe the
+// same successfully planned low function.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_allocation_assignment_t*
+loom_low_packet_result_assignment(const loom_low_allocation_table_t* allocation,
+                                  const loom_low_packet_view_t* packet,
+                                  uint16_t result_index) {
+  IREE_ASSERT_LT(result_index, packet->node->result_count);
+  return loom_low_allocation_assignment_for_value_ordinal(
+      allocation,
+      loom_low_schedule_node_const_result_ordinals(packet->node)[result_index],
+      NULL);
+}
+
+// Returns the allocation assignment for a register descriptor operand in a
+// verified packet from a successful allocation. Descriptor operands include
+// results and implicit operands; their generated source mapping selects the
+// corresponding packet occurrence.
 IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_allocation_assignment_t*
 loom_low_packet_descriptor_operand_assignment(
     const loom_low_allocation_table_t* allocation,
@@ -123,28 +178,14 @@ loom_low_packet_descriptor_operand_assignment(
   const loom_low_operand_t* descriptor_operand =
       &descriptor_set
            ->operands[descriptor->operand_start + descriptor_operand_index];
-  if (descriptor_operand_index < descriptor->result_count) {
-    const uint16_t result_index = descriptor_operand->source_value_index;
-    IREE_ASSERT_LT(result_index, packet->node->result_count);
-    const loom_value_ordinal_t value_ordinal =
-        loom_low_schedule_node_const_result_ordinals(
-            packet->node)[result_index];
-    const loom_low_allocation_assignment_t* assignment =
-        loom_low_allocation_assignment_for_value_ordinal(allocation,
-                                                         value_ordinal, NULL);
-    IREE_ASSERT(assignment != NULL);
-    return assignment;
-  }
-  const uint16_t packet_operand_index =
-      loom_low_descriptor_operand_packet_index(descriptor_set, descriptor,
-                                               descriptor_operand_index);
-  IREE_ASSERT_LT(packet_operand_index, packet->node->operand_count);
-  const loom_value_ordinal_t value_ordinal =
-      loom_low_schedule_node_const_operand_ordinals(
-          packet->node)[packet_operand_index];
   const loom_low_allocation_assignment_t* assignment =
-      loom_low_allocation_assignment_for_value_ordinal(allocation,
-                                                       value_ordinal, NULL);
+      descriptor_operand_index < descriptor->result_count
+          ? loom_low_packet_result_assignment(
+                allocation, packet, descriptor_operand->source_value_index)
+          : loom_low_packet_operand_assignment(
+                allocation, packet,
+                loom_low_descriptor_operand_packet_index(
+                    descriptor_set, descriptor, descriptor_operand_index));
   IREE_ASSERT(assignment != NULL);
   return assignment;
 }

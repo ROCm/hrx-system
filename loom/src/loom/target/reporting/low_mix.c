@@ -514,12 +514,15 @@ static bool loom_target_compile_report_low_edge_copy_branch_arg(
   for (iree_host_size_t i = group->copy_start; i < copy_end; ++i) {
     const loom_low_allocation_edge_copy_t* copy = &allocation->edge_copies[i];
     if (copy->payload_index != arg_index ||
-        copy->destination_value_id != destination_value_id) {
+        allocation->liveness.value_ids[copy->destination_ordinal] !=
+            destination_value_id) {
       continue;
     }
-    if (found && copy->source_value_id != source_value_id) return false;
+    const loom_value_id_t copy_source_value_id =
+        allocation->liveness.value_ids[copy->source_ordinal];
+    if (found && copy_source_value_id != source_value_id) return false;
     found = true;
-    source_value_id = copy->source_value_id;
+    source_value_id = copy_source_value_id;
   }
   if (!found) return false;
   *out_value_id = source_value_id;

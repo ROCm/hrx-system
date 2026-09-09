@@ -10,6 +10,7 @@
 
 #include "iree/base/internal/math.h"
 #include "loom/codegen/low/memory_access.h"
+#include "loom/codegen/low/packet.h"
 #include "loom/util/cfg_graph.h"
 
 enum {
@@ -388,14 +389,11 @@ static void loom_amdgpu_wait_frontier_publish_node_vmem_results(
       LOOM_AMDGPU_VMEM_RESULT_ORDER_NONE) {
     return;
   }
-  const loom_low_schedule_node_t* schedule_node =
-      &frontier->schedule->nodes[node_index];
-  const loom_value_ordinal_t* result_ordinals =
-      loom_low_schedule_node_const_result_ordinals(schedule_node);
-  for (uint16_t i = 0; i < schedule_node->result_count; ++i) {
+  const loom_low_packet_view_t packet =
+      loom_low_packet_at_node(frontier->schedule, node_index);
+  for (uint16_t i = 0; i < packet.node->result_count; ++i) {
     const loom_low_allocation_assignment_t* assignment =
-        loom_low_allocation_assignment_for_value_ordinal(
-            frontier->allocation, result_ordinals[i], NULL);
+        loom_low_packet_result_assignment(frontier->allocation, &packet, i);
     iree_host_size_t unit_base = 0;
     iree_host_size_t unit_count = 0;
     if (!loom_amdgpu_wait_frontier_map_vector_assignment(

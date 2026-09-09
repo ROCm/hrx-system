@@ -132,11 +132,10 @@ static iree_status_t loom_aie2p_leaf_object_collect_resources(
     const loom_low_schedule_node_t* node =
         loom_low_schedule_node_for_op(&frame->schedule, op);
     IREE_ASSERT(node != NULL && node->result_count == 1);
-    const loom_value_ordinal_t result_ordinal =
-        loom_low_schedule_node_const_result_ordinals(node)[0];
+    const loom_low_packet_view_t packet = loom_low_packet_at_node(
+        &frame->schedule, (uint32_t)(node - frame->schedule.nodes));
     const loom_low_allocation_assignment_t* result_assignment =
-        loom_low_allocation_assignment_for_value_ordinal(&frame->allocation,
-                                                         result_ordinal, NULL);
+        loom_low_packet_result_assignment(&frame->allocation, &packet, 0);
     IREE_ASSERT(result_assignment != NULL);
     IREE_ASSERT_EQ(result_assignment->location_kind,
                    LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
@@ -163,11 +162,8 @@ static iree_status_t loom_aie2p_leaf_object_collect_resources(
     uint32_t extent_physical_register_count = 0;
     if (loom_low_resource_extent_value_is_present(op)) {
       flags |= LOOM_AIE2P_LEAF_RESOURCE_FLAG_DYNAMIC_EXTENT;
-      const loom_value_ordinal_t extent_ordinal =
-          loom_low_schedule_node_const_operand_ordinals(node)[0];
       const loom_low_allocation_assignment_t* extent_assignment =
-          loom_low_allocation_assignment_for_value_ordinal(
-              &frame->allocation, extent_ordinal, NULL);
+          loom_low_packet_operand_assignment(&frame->allocation, &packet, 0);
       IREE_ASSERT(extent_assignment != NULL);
       IREE_ASSERT_EQ(extent_assignment->location_kind,
                      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);

@@ -104,10 +104,8 @@ static void loom_low_allocation_edge_copy_record_segment(
   builder->plan.copies[builder->plan.copy_count++] =
       (loom_low_allocation_edge_copy_t){
           .payload_index = payload_index,
-          .source_value_id =
-              loom_low_placement_value_id(context->placement, source_ordinal),
-          .destination_value_id = loom_low_placement_value_id(
-              context->placement, destination_ordinal),
+          .source_ordinal = source_ordinal,
+          .destination_ordinal = destination_ordinal,
           .source_assignment_index = source_assignment_index,
           .destination_assignment_index = destination_assignment_index,
           .source_unit_offset = source_unit_offset,

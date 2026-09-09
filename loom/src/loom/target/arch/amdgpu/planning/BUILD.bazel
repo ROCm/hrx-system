@@ -185,6 +185,7 @@ loom_cc_library(
     deps = [
         ":wait_counters",
         "//loom/src/loom/codegen/low:memory_access",
+        "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low/allocation:table",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",

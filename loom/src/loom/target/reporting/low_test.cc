@@ -373,8 +373,8 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   const loom_low_allocation_edge_copy_t edge_copies[kEdgeCopyCount] = {
       {
           /*.payload_index=*/0,
-          /*.source_value_id=*/4,
-          /*.destination_value_id=*/5,
+          /*.source_ordinal=*/0,
+          /*.destination_ordinal=*/1,
           /*.source_assignment_index=*/kSourceAssignmentIndex,
           /*.destination_assignment_index=*/kResultAssignmentIndex,
           /*.source_unit_offset=*/0,

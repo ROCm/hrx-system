@@ -211,6 +211,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::allocation::table
     loom::codegen::low::memory_access
+    loom::codegen::low::packet
     loom::codegen::low::schedule
     loom::target::arch::amdgpu::refs::target_refs
     loom::util::cfg_graph

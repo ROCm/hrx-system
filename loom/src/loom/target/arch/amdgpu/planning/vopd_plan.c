@@ -572,12 +572,6 @@ static iree_status_t loom_amdgpu_vopd_plan_allocate(
   return iree_ok_status();
 }
 
-static const loom_low_allocation_assignment_t* loom_amdgpu_vopd_map_assignment(
-    const loom_low_allocation_table_t* allocation, loom_value_id_t value_id) {
-  return loom_low_allocation_try_map_active_value_assignment(allocation,
-                                                             value_id, NULL);
-}
-
 static bool loom_amdgpu_vopd_assignment_single_physical_vgpr(
     const loom_low_allocation_assignment_t* assignment,
     uint16_t* out_register) {
@@ -783,10 +777,9 @@ static void loom_amdgpu_vopd_clear_trans_result_packet_results(
     return;
   }
   const loom_op_t* op = packet->node->op;
-  const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     const loom_low_allocation_assignment_t* assignment =
-        loom_amdgpu_vopd_map_assignment(builder->allocation, results[i]);
+        loom_low_packet_result_assignment(builder->allocation, packet, i);
     loom_amdgpu_vopd_clear_trans_result_assignment(builder, assignment);
   }
 }
@@ -799,10 +792,9 @@ static void loom_amdgpu_vopd_record_trans_result_packet_results(
     return;
   }
   const loom_op_t* op = packet->node->op;
-  const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     const loom_low_allocation_assignment_t* assignment =
-        loom_amdgpu_vopd_map_assignment(builder->allocation, results[i]);
+        loom_low_packet_result_assignment(builder->allocation, packet, i);
     loom_amdgpu_vopd_record_trans_result_assignment(builder, assignment);
   }
 }
@@ -1112,19 +1104,17 @@ static bool loom_amdgpu_vopd_read_tied_accumulate_component(
       rule->operands.vsrc1_index >= op->operand_count) {
     return false;
   }
-  const loom_value_id_t* results = loom_op_const_results(op);
-  const loom_value_id_t* operands = loom_op_const_operands(op);
   const loom_low_allocation_assignment_t* result_assignment =
-      loom_amdgpu_vopd_map_assignment(builder->allocation, results[0]);
+      loom_low_packet_result_assignment(builder->allocation, packet, 0);
   const loom_low_allocation_assignment_t* accumulator_assignment =
-      loom_amdgpu_vopd_map_assignment(
-          builder->allocation, operands[rule->operands.accumulator_index]);
+      loom_low_packet_operand_assignment(builder->allocation, packet,
+                                         rule->operands.accumulator_index);
   const loom_low_allocation_assignment_t* src0_assignment =
-      loom_amdgpu_vopd_map_assignment(builder->allocation,
-                                      operands[rule->operands.src0_index]);
+      loom_low_packet_operand_assignment(builder->allocation, packet,
+                                         rule->operands.src0_index);
   const loom_low_allocation_assignment_t* vsrc1_assignment =
-      loom_amdgpu_vopd_map_assignment(builder->allocation,
-                                      operands[rule->operands.vsrc1_index]);
+      loom_low_packet_operand_assignment(builder->allocation, packet,
+                                         rule->operands.vsrc1_index);
   if (!loom_amdgpu_vopd_assignments_match(result_assignment,
                                           accumulator_assignment)) {
     return false;
@@ -1159,14 +1149,12 @@ static bool loom_amdgpu_vopd_read_literal_fma_component(
                                                 &literal_immediate_index)) {
     return false;
   }
-  const loom_value_id_t* results = loom_op_const_results(op);
-  const loom_value_id_t* operands = loom_op_const_operands(op);
   const loom_low_allocation_assignment_t* result_assignment =
-      loom_amdgpu_vopd_map_assignment(builder->allocation, results[0]);
+      loom_low_packet_result_assignment(builder->allocation, packet, 0);
   const loom_low_allocation_assignment_t* src0_assignment =
-      loom_amdgpu_vopd_map_assignment(builder->allocation, operands[0]);
+      loom_low_packet_operand_assignment(builder->allocation, packet, 0);
   const loom_low_allocation_assignment_t* vsrc1_assignment =
-      loom_amdgpu_vopd_map_assignment(builder->allocation, operands[1]);
+      loom_low_packet_operand_assignment(builder->allocation, packet, 1);
   if (!loom_amdgpu_vopd_assignment_single_physical_vgpr(result_assignment,
                                                         &out_component->vdst)) {
     return false;
@@ -1196,14 +1184,12 @@ static bool loom_amdgpu_vopd_read_binary_vgpr_component_with_operand_count(
       packet->descriptor->immediate_count != 0) {
     return false;
   }
-  const loom_value_id_t* results = loom_op_const_results(op);
-  const loom_value_id_t* operands = loom_op_const_operands(op);
   const loom_low_allocation_assignment_t* result_assignment =
-      loom_amdgpu_vopd_map_assignment(builder->allocation, results[0]);
+      loom_low_packet_result_assignment(builder->allocation, packet, 0);
   const loom_low_allocation_assignment_t* src0_assignment =
-      loom_amdgpu_vopd_map_assignment(builder->allocation, operands[0]);
+      loom_low_packet_operand_assignment(builder->allocation, packet, 0);
   const loom_low_allocation_assignment_t* vsrc1_assignment =
-      loom_amdgpu_vopd_map_assignment(builder->allocation, operands[1]);
+      loom_low_packet_operand_assignment(builder->allocation, packet, 1);
   if (!loom_amdgpu_vopd_assignment_single_physical_vgpr(result_assignment,
                                                         &out_component->vdst)) {
     return false;
@@ -1248,9 +1234,8 @@ static bool loom_amdgpu_vopd_read_inline_mov_component(
                                                 &literal_immediate_index)) {
     return false;
   }
-  const loom_value_id_t* results = loom_op_const_results(op);
   const loom_low_allocation_assignment_t* result_assignment =
-      loom_amdgpu_vopd_map_assignment(builder->allocation, results[0]);
+      loom_low_packet_result_assignment(builder->allocation, packet, 0);
   if (!loom_amdgpu_vopd_assignment_single_physical_vgpr(result_assignment,
                                                         &out_component->vdst)) {
     return false;
@@ -1275,12 +1260,10 @@ static bool loom_amdgpu_vopd_read_register_mov_component(
       packet->descriptor->immediate_count != 0) {
     return false;
   }
-  const loom_value_id_t* results = loom_op_const_results(op);
-  const loom_value_id_t* operands = loom_op_const_operands(op);
   const loom_low_allocation_assignment_t* result_assignment =
-      loom_amdgpu_vopd_map_assignment(builder->allocation, results[0]);
+      loom_low_packet_result_assignment(builder->allocation, packet, 0);
   const loom_low_allocation_assignment_t* source_assignment =
-      loom_amdgpu_vopd_map_assignment(builder->allocation, operands[0]);
+      loom_low_packet_operand_assignment(builder->allocation, packet, 0);
   if (!loom_amdgpu_vopd_assignment_single_physical_vgpr(result_assignment,
                                                         &out_component->vdst)) {
     return false;
@@ -1637,16 +1620,12 @@ static iree_status_t loom_amdgpu_vopd_plan_block(
 
 static iree_status_t loom_amdgpu_vopd_plan_build_pairs(
     loom_amdgpu_vopd_plan_builder_t* builder) {
-  loom_low_allocation_value_scratch_t scratch = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_low_allocation_acquire_value_scratch(builder->allocation, &scratch));
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < builder->schedule->block_count && iree_status_is_ok(status); ++i) {
     status = loom_amdgpu_vopd_plan_block(builder, (uint16_t)i,
                                          &builder->schedule->blocks[i]);
   }
-  loom_low_allocation_release_value_scratch(&scratch);
   return status;
 }
 

@@ -106,13 +106,14 @@ typedef struct loom_low_allocation_copy_decision_t {
 typedef struct loom_low_allocation_edge_copy_t {
   // Operand index in the owning low.br payload.
   uint16_t payload_index;
-  // SSA value providing this copied segment.
-  loom_value_id_t source_value_id;
-  // Destination block argument receiving this copied segment.
-  loom_value_id_t destination_value_id;
-  // Assignment index for |source_value_id|.
+  // Function-local value ordinal providing this copied segment. A decomposed
+  // aggregate may name a constituent rather than the entire branch operand.
+  loom_value_ordinal_t source_ordinal;
+  // Function-local ordinal of the destination block argument.
+  loom_value_ordinal_t destination_ordinal;
+  // Assignment index for |source_ordinal|.
   uint32_t source_assignment_index;
-  // Assignment index for |destination_value_id|.
+  // Assignment index for |destination_ordinal|.
   uint32_t destination_assignment_index;
   // Unit offset inside the source assignment.
   uint32_t source_unit_offset;
