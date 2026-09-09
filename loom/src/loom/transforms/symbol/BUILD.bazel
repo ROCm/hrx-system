@@ -295,6 +295,8 @@ loom_cc_test(
         "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:pass_environment",
         "//loom/src/loom/target/test:descriptors",
         "//loom/src/loom/testing:module_ptr",
         "//loom/src/loom/verify",

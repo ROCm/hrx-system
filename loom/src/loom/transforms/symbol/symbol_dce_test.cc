@@ -25,6 +25,8 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/target/function_version.h"
+#include "loom/target/pass_environment.h"
 #include "loom/target/test/descriptors.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/verify/verify.h"
@@ -104,7 +106,8 @@ class SymbolDCETest : public ::testing::Test {
   }
 
   void RunSymbolDCE(loom_module_t* module, int64_t expected_symbols_eliminated,
-                    int64_t expected_functions_eliminated) {
+                    int64_t expected_functions_eliminated,
+                    loom_function_version_owner_t* versions = nullptr) {
     iree_arena_allocator_t pass_arena;
     iree_arena_initialize(&block_pool_, &pass_arena);
     const loom_pass_info_t* pass_info = loom_symbol_dce_pass_info();
@@ -116,6 +119,14 @@ class SymbolDCETest : public ::testing::Test {
     pass.instance_arena = &pass_arena;
     pass.arena = &pass_arena;
     pass.statistic_storage = statistic_storage.data();
+    const auto target_capability =
+        loom_target_pass_capability_make_mutable(nullptr, versions);
+    const loom_pass_environment_capability_t* capabilities[] = {
+        &target_capability.base,
+    };
+    const loom_pass_environment_t environment =
+        loom_pass_environment_make(capabilities, IREE_ARRAYSIZE(capabilities));
+    pass.environment = &environment;
     IREE_EXPECT_OK(loom_symbol_dce_run(&pass, module));
     const uint8_t* storage = statistic_storage.data();
     const int64_t symbols_eliminated = *reinterpret_cast<const int64_t*>(
@@ -180,6 +191,52 @@ class SymbolDCETest : public ::testing::Test {
   loom_context_t context_;
   loom_low_descriptor_registry_t low_descriptor_registry_;
 };
+
+TEST_F(SymbolDCETest, PrunesErasedVersionsBeforeCompactingSymbols) {
+  ModulePtr module(Parse(IREE_SV(R"(
+func.def @dead_before() { func.return }
+func.def public @first() { func.return }
+func.def @dead_between() { func.return }
+func.def public @second() { func.return }
+)")));
+  ASSERT_NE(module.get(), nullptr);
+
+  loom_function_version_owner_t owner;
+  loom_function_version_owner_initialize(&module->arena, &owner);
+  loom_target_function_version_t versions[4] = {};
+  ASSERT_EQ(module->symbols.count, IREE_ARRAYSIZE(versions));
+  for (size_t i = 0; i < IREE_ARRAYSIZE(versions); ++i) {
+    versions[i].base.type = &loom_target_function_version_type;
+    versions[i].base.function = loom_func_like_cast(
+        module.get(), module->symbols.entries[i].defining_op);
+    IREE_ASSERT_OK(
+        loom_function_version_owner_append(&owner, &versions[i].base));
+  }
+  const auto* list = loom_function_version_owner_list(&owner);
+  auto* storage = owner.storage;
+  RunSymbolDCE(module.get(), 2, 2, &owner);
+
+  EXPECT_EQ(loom_function_version_owner_list(&owner), list);
+  EXPECT_EQ(owner.storage, storage);
+  ASSERT_EQ(list->count, 2u);
+  EXPECT_EQ(list->values[0], &versions[1].base);
+  EXPECT_EQ(list->values[1], &versions[3].base);
+  loom_target_function_version_snapshot_t snapshot = {};
+  IREE_ASSERT_OK(loom_target_function_version_snapshot_build(
+      module.get(), list, &module->arena, &snapshot));
+  for (size_t i = 0; i < list->count; ++i) {
+    EXPECT_EQ(list->values[i]->function.op,
+              module->symbols.entries[i].defining_op);
+    EXPECT_EQ(loom_func_like_callee(list->values[i]->function).symbol_id, i);
+    EXPECT_EQ(loom_target_function_version_snapshot_handle_at(
+                  &snapshot, (loom_symbol_id_t)i),
+              list->values[i]);
+  }
+  EXPECT_EQ(storage[2], nullptr);
+  EXPECT_EQ(storage[3], nullptr);
+  EXPECT_EQ(loom_function_version_owner_prune_erased(&owner), 0u);
+  VerifyOk(module.get());
+}
 
 TEST_F(SymbolDCETest, PrunedLowIslandRoundTripsThroughBytecode) {
   const char* source = R"(

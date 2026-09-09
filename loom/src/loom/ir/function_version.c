@@ -61,6 +61,27 @@ iree_status_t loom_function_version_owner_append(
   return iree_ok_status();
 }
 
+iree_host_size_t loom_function_version_owner_prune_erased(
+    loom_function_version_owner_t* owner) {
+  if (owner == NULL) return 0;
+  iree_host_size_t write_index = 0;
+  const iree_host_size_t original_count = owner->list.count;
+  for (iree_host_size_t read_index = 0; read_index < original_count;
+       ++read_index) {
+    loom_function_version_t* version = owner->storage[read_index];
+    if (version->function.op != NULL &&
+        iree_any_bit_set(version->function.op->flags, LOOM_OP_FLAG_DEAD)) {
+      continue;
+    }
+    owner->storage[write_index++] = version;
+  }
+  for (iree_host_size_t i = write_index; i < original_count; ++i) {
+    owner->storage[i] = NULL;
+  }
+  owner->list.count = write_index;
+  return original_count - write_index;
+}
+
 loom_function_version_t* loom_function_version_list_find(
     const loom_function_version_list_t* list, loom_func_like_t function) {
   if (list == NULL || function.op == NULL) {

@@ -1596,8 +1596,9 @@ iree_status_t loom_template_selection_run(loom_pass_t* pass,
 
   loom_symbol_pruning_result_t pruning_result = {0};
   IREE_RETURN_IF_ERROR(loom_symbol_pruning_erase_unreachable(
-      module, &state.liveness, &state.pruning_options, pass->arena,
-      &pruning_result));
+      module, &state.liveness, &state.pruning_options,
+      loom_target_pass_capability_function_version_owner(target_capability),
+      pass->arena, &pruning_result));
   if (pruning_result.symbol_count > 0) {
     loom_pass_mark_changed(pass);
     state.statistics->symbols_pruned += pruning_result.symbol_count;

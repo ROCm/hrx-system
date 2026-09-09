@@ -73,8 +73,10 @@ static iree_status_t loom_symbol_dce_erase_unreachable_symbols(
     loom_symbol_dce_state_t* state) {
   loom_symbol_pruning_result_t result = {0};
   IREE_RETURN_IF_ERROR(loom_symbol_pruning_erase_unreachable(
-      state->module, &state->liveness, /*options=*/NULL, state->pass->arena,
-      &result));
+      state->module, &state->liveness, /*options=*/NULL,
+      loom_target_pass_capability_function_version_owner(
+          loom_target_pass_capability_from_pass(state->pass)),
+      state->pass->arena, &result));
   if (result.symbol_count == 0) {
     return iree_ok_status();
   }

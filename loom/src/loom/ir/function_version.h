@@ -83,6 +83,14 @@ iree_status_t loom_function_version_owner_reserve(
 iree_status_t loom_function_version_owner_append(
     loom_function_version_owner_t* owner, loom_function_version_t* version);
 
+// Removes versions whose implementing operations were erased by a rewrite.
+// Surviving handles retain their order and identity. Module transforms
+// reconcile the owner at the erasure boundary, before compacting or reusing
+// symbol IDs. Returns the number removed; a NULL owner has no versions to
+// reconcile.
+iree_host_size_t loom_function_version_owner_prune_erased(
+    loom_function_version_owner_t* owner);
+
 // Returns the stable borrowed list view owned by |owner|.
 static inline const loom_function_version_list_t*
 loom_function_version_owner_list(const loom_function_version_owner_t* owner) {

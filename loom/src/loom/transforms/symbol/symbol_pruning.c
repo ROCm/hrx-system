@@ -85,7 +85,8 @@ typedef struct loom_symbol_pruning_erasure_t {
 
 iree_status_t loom_symbol_pruning_erase_unreachable(
     loom_module_t* module, const loom_symbol_liveness_t* liveness,
-    const loom_symbol_pruning_options_t* options, iree_arena_allocator_t* arena,
+    const loom_symbol_pruning_options_t* options,
+    loom_function_version_owner_t* version_owner, iree_arena_allocator_t* arena,
     loom_symbol_pruning_result_t* out_result) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(liveness);
@@ -128,6 +129,9 @@ iree_status_t loom_symbol_pruning_erase_unreachable(
     if (erasures[i].is_function_like) {
       ++result.function_like_count;
     }
+  }
+  if (result.function_like_count > 0) {
+    loom_function_version_owner_prune_erased(version_owner);
   }
   *out_result = result;
   return iree_ok_status();

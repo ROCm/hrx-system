@@ -1135,31 +1135,6 @@ static iree_status_t loom_inline_execute_entry(
   }
 }
 
-// Reconciles the mutable owner once after the rewrite batch. Stable compaction
-// keeps version observation order while avoiding a linear search and tail move
-// for every erased helper.
-static iree_host_size_t loom_inline_prune_erased_function_versions(
-    loom_function_version_owner_t* owner) {
-  if (owner == NULL) return 0;
-  iree_host_size_t write_index = 0;
-  iree_host_size_t removed_count = 0;
-  for (iree_host_size_t read_index = 0; read_index < owner->list.count;
-       ++read_index) {
-    loom_function_version_t* version = owner->storage[read_index];
-    if (version->function.op != NULL &&
-        iree_any_bit_set(version->function.op->flags, LOOM_OP_FLAG_DEAD)) {
-      ++removed_count;
-      continue;
-    }
-    owner->storage[write_index++] = version;
-  }
-  for (iree_host_size_t i = write_index; i < owner->list.count; ++i) {
-    owner->storage[i] = NULL;
-  }
-  owner->list.count = write_index;
-  return removed_count;
-}
-
 // Makes a locked Low function's per-block source order explicit before its
 // body crosses a callable boundary. Each nonempty block receives a leading
 // fence and a fence after every non-terminator operation. The now-redundant
@@ -1450,7 +1425,7 @@ static iree_status_t loom_inline_execute_plan(loom_inline_state_t* state) {
 
   const iree_host_size_t removed_version_count =
       state->erased_version_count > 0
-          ? loom_inline_prune_erased_function_versions(state->version_owner)
+          ? loom_function_version_owner_prune_erased(state->version_owner)
           : 0;
   IREE_ASSERT_EQ(removed_version_count, state->erased_version_count);
   loom_rewriter_deinitialize(&rewriter);

@@ -15,6 +15,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/symbol_liveness.h"
+#include "loom/ir/function_version.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -56,10 +57,14 @@ bool loom_symbol_pruning_symbol_is_root(void* user_data,
                                         loom_symbol_id_t symbol_id,
                                         const loom_symbol_t* symbol);
 
-// Erases private symbols that are not live according to |liveness|.
+// Erases private symbols that are not live according to |liveness| and removes
+// erased function versions from |version_owner| before symbol IDs may be
+// reused. |version_owner| may be NULL when no compiler function versions are
+// tracked.
 iree_status_t loom_symbol_pruning_erase_unreachable(
     loom_module_t* module, const loom_symbol_liveness_t* liveness,
-    const loom_symbol_pruning_options_t* options, iree_arena_allocator_t* arena,
+    const loom_symbol_pruning_options_t* options,
+    loom_function_version_owner_t* version_owner, iree_arena_allocator_t* arena,
     loom_symbol_pruning_result_t* out_result);
 
 #ifdef __cplusplus

@@ -331,6 +331,8 @@ loom_cc_test(
     loom::ops::low
     loom::ops::target
     loom::ops::test
+    loom::target::function_version
+    loom::target::pass_environment
     loom::target::test::descriptors
     loom::testing::module_ptr
     loom::verify
