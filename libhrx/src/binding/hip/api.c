@@ -8139,36 +8139,38 @@ static hipError_t iree_hip_array_row_device_pointer(
 
 static hipError_t iree_hip_array_enqueue_packed_row_copy(
     bool array_is_destination, iree_hal_streaming_deviceptr_t array_ptr,
-    void* external_ptr, size_t byte_count, hipMemcpyKind kind) {
+    void* external_ptr, size_t byte_count, hipMemcpyKind kind,
+    hipStream_t stream) {
   if (array_is_destination) {
     return hipMemcpyAsync((void*)array_ptr, external_ptr, byte_count, kind,
-                          NULL);
+                          stream);
   }
   return hipMemcpyAsync(external_ptr, (const void*)array_ptr, byte_count, kind,
-                        NULL);
+                        stream);
 }
 
 static hipError_t iree_hip_array_enqueue_packed_rows_copy(
     bool array_is_destination, iree_hal_streaming_deviceptr_t array_ptr,
     size_t array_pitch, void* external_ptr, size_t row_width, size_t row_count,
-    hipMemcpyKind kind) {
+    hipMemcpyKind kind, hipStream_t stream) {
   if (array_is_destination) {
     return hipMemcpy2DAsync((void*)array_ptr, array_pitch, external_ptr,
-                            row_width, row_width, row_count, kind, NULL);
+                            row_width, row_width, row_count, kind, stream);
   }
   return hipMemcpy2DAsync(external_ptr, row_width, (const void*)array_ptr,
-                          array_pitch, row_width, row_count, kind, NULL);
+                          array_pitch, row_width, row_count, kind, stream);
 }
 
 // Copies the selected 2D array slice as a packed byte stream. The allocation
 // pitch is an implementation detail, so a range spanning rows must skip its
-// padding rather than expose that padding to the caller. The synchronous APIs
-// enqueue a prefix, complete-row range, and suffix on the default stream, then
-// synchronize once after all successfully queued work has completed.
+// padding rather than expose that padding to the caller. A null stream
+// preserves legacy synchronous completion across the device; other streams
+// synchronize only their own timeline after all successfully queued work has
+// completed.
 static hipError_t iree_hip_array_copy_packed_rows(
     hipArray_const_t array, size_t byte_offset, size_t row_offset,
     void* external_ptr, size_t byte_count, hipMemcpyKind kind,
-    bool array_is_destination) {
+    bool array_is_destination, hipStream_t stream) {
   struct hipArray_st* array_info = NULL;
   hipError_t result = iree_hip_array_retain(array, &array_info);
   if (result != hipSuccess) return result;
@@ -8212,7 +8214,7 @@ static hipError_t iree_hip_array_copy_packed_rows(
       may_have_enqueued_work = true;
       result = iree_hip_array_enqueue_packed_row_copy(
           array_is_destination, array_ptr, (uint8_t*)external_ptr,
-          first_row_byte_count, kind);
+          first_row_byte_count, kind, stream);
     }
     external_offset = first_row_byte_count;
     remaining -= first_row_byte_count;
@@ -8229,7 +8231,7 @@ static hipError_t iree_hip_array_copy_packed_rows(
       result = iree_hip_array_enqueue_packed_rows_copy(
           array_is_destination, array_ptr, array_info->pitch,
           (uint8_t*)external_ptr + external_offset, array_info->width_bytes,
-          full_row_count, kind);
+          full_row_count, kind, stream);
     }
     const size_t full_row_byte_count = full_row_count * array_info->width_bytes;
     external_offset += full_row_byte_count;
@@ -8245,12 +8247,13 @@ static hipError_t iree_hip_array_copy_packed_rows(
       may_have_enqueued_work = true;
       result = iree_hip_array_enqueue_packed_row_copy(
           array_is_destination, array_ptr,
-          (uint8_t*)external_ptr + external_offset, remaining, kind);
+          (uint8_t*)external_ptr + external_offset, remaining, kind, stream);
     }
   }
 
   if (may_have_enqueued_work) {
-    hipError_t synchronize_result = hipDeviceSynchronize();
+    hipError_t synchronize_result =
+        stream ? hipStreamSynchronize(stream) : hipDeviceSynchronize();
     if (result == hipSuccess) result = synchronize_result;
   }
   iree_hip_array_release(array_info);
@@ -8763,7 +8766,7 @@ HIPAPI hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset,
   if (!src) HIP_RETURN_ERROR(hipErrorInvalidValue);
   hipError_t result = iree_hip_array_copy_packed_rows(
       (hipArray_const_t)dst, wOffset, hOffset, (void*)src, count, kind,
-      /*array_is_destination=*/true);
+      /*array_is_destination=*/true, /*stream=*/NULL);
   if (result != hipSuccess) HIP_RETURN_ERROR(result);
   return hipSuccess;
 }
@@ -8774,7 +8777,18 @@ HIPAPI hipError_t hipMemcpyFromArray(void* dst, hipArray_const_t srcArray,
   if (!dst) HIP_RETURN_ERROR(hipErrorInvalidValue);
   hipError_t result = iree_hip_array_copy_packed_rows(
       srcArray, wOffset, hOffset, dst, count, kind,
-      /*array_is_destination=*/false);
+      /*array_is_destination=*/false, /*stream=*/NULL);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipSuccess;
+}
+
+HIPAPI hipError_t hipMemcpyFromArray_spt(void* dst, hipArray_const_t srcArray,
+                                         size_t wOffset, size_t hOffset,
+                                         size_t count, hipMemcpyKind kind) {
+  if (!dst) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  hipError_t result = iree_hip_array_copy_packed_rows(
+      srcArray, wOffset, hOffset, dst, count, kind,
+      /*array_is_destination=*/false, hipStreamPerThread);
   if (result != hipSuccess) HIP_RETURN_ERROR(result);
   return hipSuccess;
 }
