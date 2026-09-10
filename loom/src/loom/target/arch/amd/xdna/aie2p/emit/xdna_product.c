@@ -15,15 +15,25 @@ enum {
 };
 
 typedef struct loom_aie2p_xdna_payloads_t {
+  // Encoded target profile and loader ABI requirements.
   iree_const_byte_span_t abi_note;
+  // Export directory with product-global program-header and binding ordinals.
   iree_const_byte_span_t entries;
+  // External buffer requirements in product-global binding order.
   iree_const_byte_span_t bindings;
+  // Typed runtime fixups targeting array or control payloads.
   iree_const_byte_span_t relocations;
+  // ELF symbols naming entry points and placed tile contributions.
   iree_const_byte_span_t symbols;
+  // ELF symbol-name string table, including its initial empty string.
   iree_const_byte_span_t strings;
+  // Union of loader capabilities required by all product entries.
   loom_xdna_elf_capabilities_t required_capabilities;
+  // Physical partition width covering every entry's placed resources.
   uint16_t partition_column_count;
+  // Physical partition height for the selected array family.
   uint16_t partition_row_count;
+  // Whether the product requires a runtime relocation segment.
   bool has_relocations;
 } loom_aie2p_xdna_payloads_t;
 
