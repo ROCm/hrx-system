@@ -745,12 +745,20 @@ static iree_status_t loom_aie2p_array_validate_worker_rates(
             "AIE2P folded worker must produce one record on its folded output "
             "port");
       }
+      const uint32_t record_byte_length = channel->record_byte_length;
+      const uint32_t accumulator_lane_byte_length = 16 * sizeof(float);
+      const bool supported_f32_shape =
+          record_byte_length == sizeof(float) ||
+          (record_byte_length >= accumulator_lane_byte_length &&
+           record_byte_length <= 4 * accumulator_lane_byte_length &&
+           record_byte_length % accumulator_lane_byte_length == 0);
       if (loom_type_element_type(endpoint->message_type) !=
               LOOM_SCALAR_TYPE_F32 ||
-          channel->record_byte_length != sizeof(float)) {
+          !supported_f32_shape) {
         return iree_make_status(
             IREE_STATUS_UNIMPLEMENTED,
-            "AIE2P temporal fold currently requires one F32 output element");
+            "AIE2P temporal fold requires one F32 element or a native "
+            "16/32/48/64-element F32 accumulator tile");
       }
     }
     if (worker->fold_record_count != 0) {

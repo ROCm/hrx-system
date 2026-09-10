@@ -341,6 +341,38 @@ static iree_status_t loom_aie2p_array_resident_build_store_i32(
       /*result_type=*/NULL, location, /*out_value=*/NULL);
 }
 
+static iree_status_t loom_aie2p_array_resident_build_load_accumulator_f32x16(
+    loom_aie2p_array_resident_builder_t* builder, loom_builder_t* ir_builder,
+    loom_value_id_t address, uint32_t byte_offset, loom_location_id_t location,
+    loom_value_id_t* out_value) {
+  const loom_named_attr_t offset = {
+      .name_id = builder->memory_immediate_name,
+      .value = loom_attr_i64(byte_offset),
+  };
+  return loom_aie2p_array_resident_build_op(
+      builder, ir_builder,
+      AIE2P_CORE_DESCRIPTOR_REF_LOAD_ACCUMULATOR_F32X16_INDEXED_IMMEDIATE,
+      &address, 1, loom_make_named_attr_slice(&offset, 1),
+      &builder->accumulator512_type, location, out_value);
+}
+
+static iree_status_t loom_aie2p_array_resident_build_store_accumulator_f32x16(
+    loom_aie2p_array_resident_builder_t* builder, loom_builder_t* ir_builder,
+    loom_value_id_t value, loom_value_id_t address, uint32_t byte_offset,
+    loom_location_id_t location) {
+  const loom_named_attr_t offset = {
+      .name_id = builder->memory_immediate_name,
+      .value = loom_attr_i64(byte_offset),
+  };
+  const loom_value_id_t operands[] = {value, address};
+  return loom_aie2p_array_resident_build_op(
+      builder, ir_builder,
+      AIE2P_CORE_DESCRIPTOR_REF_STORE_ACCUMULATOR_F32X16_INDEXED_IMMEDIATE,
+      operands, IREE_ARRAYSIZE(operands),
+      loom_make_named_attr_slice(&offset, 1), /*result_type=*/NULL, location,
+      /*out_value=*/NULL);
+}
+
 static iree_status_t loom_aie2p_array_resident_build_f32_accumulator(
     loom_aie2p_array_resident_builder_t* builder, loom_builder_t* ir_builder,
     loom_value_id_t scalar_value, loom_value_id_t zero_accumulator_lane,
@@ -404,6 +436,69 @@ static iree_status_t loom_aie2p_array_resident_build_extract_f32(
       builder, ir_builder, AIE2P_CORE_DESCRIPTOR_REF_EXTRACT_I32_IMMEDIATE,
       &sum_vector, 1, loom_make_named_attr_slice(&lane, 1),
       &builder->lock_delta_type, location, out_value);
+}
+
+static iree_status_t loom_aie2p_array_resident_build_fold_contribution(
+    loom_aie2p_array_resident_builder_t* builder, loom_builder_t* ir_builder,
+    loom_value_id_t address, uint32_t byte_length,
+    loom_value_id_t zero_accumulator_lane, loom_location_id_t location,
+    loom_value_id_t* out_accumulator) {
+  if (byte_length == sizeof(float)) {
+    loom_value_id_t scalar_value = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_load_i32(
+        builder, ir_builder, address, location, &scalar_value));
+    return loom_aie2p_array_resident_build_f32_accumulator(
+        builder, ir_builder, scalar_value, zero_accumulator_lane, location,
+        out_accumulator);
+  }
+
+  const uint32_t accumulator_lane_byte_length = 16 * sizeof(float);
+  const uint32_t lane_count = byte_length / accumulator_lane_byte_length;
+  loom_value_id_t lanes[4] = {
+      zero_accumulator_lane,
+      zero_accumulator_lane,
+      zero_accumulator_lane,
+      zero_accumulator_lane,
+  };
+  for (uint32_t i = 0; i < lane_count; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_array_resident_build_load_accumulator_f32x16(
+            builder, ir_builder, address, i * accumulator_lane_byte_length,
+            location, &lanes[i]));
+  }
+  loom_op_t* concat_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_concat_build(
+      ir_builder, lanes, IREE_ARRAYSIZE(lanes), builder->accumulator2048_type,
+      location, &concat_op));
+  *out_accumulator = loom_low_concat_result(concat_op);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_array_resident_build_fold_store(
+    loom_aie2p_array_resident_builder_t* builder, loom_builder_t* ir_builder,
+    loom_value_id_t accumulator, loom_value_id_t address, uint32_t byte_length,
+    loom_location_id_t location) {
+  if (byte_length == sizeof(float)) {
+    loom_value_id_t result = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_extract_f32(
+        builder, ir_builder, accumulator, location, &result));
+    return loom_aie2p_array_resident_build_store_i32(builder, ir_builder,
+                                                     result, address, location);
+  }
+
+  const uint32_t accumulator_lane_byte_length = 16 * sizeof(float);
+  const uint32_t lane_count = byte_length / accumulator_lane_byte_length;
+  for (uint32_t i = 0; i < lane_count; ++i) {
+    loom_op_t* slice_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_slice_build(ir_builder, accumulator, i,
+                                              builder->accumulator512_type,
+                                              location, &slice_op));
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_array_resident_build_store_accumulator_f32x16(
+            builder, ir_builder, loom_low_slice_result(slice_op), address,
+            i * accumulator_lane_byte_length, location));
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_aie2p_array_resident_build_lock_op(
@@ -1053,13 +1148,12 @@ static iree_status_t loom_aie2p_array_resident_materialize_folded_body(
   loom_aie2p_array_resident_port_state_t* output_state =
       loom_aie2p_array_resident_find_fold_output(worker, record_states,
                                                  port_state_count);
-  loom_value_id_t contribution = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_load_i32(
-      builder, ir_builder, output_state->current_address, location,
-      &contribution));
+  const loom_aie2p_array_channel_t* output_channel =
+      &builder->plan->channels[output_state->port->channel_index];
   loom_value_id_t contribution_accumulator = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_f32_accumulator(
-      builder, ir_builder, contribution, zero_accumulator_lane, location,
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_fold_contribution(
+      builder, ir_builder, output_state->current_address,
+      output_channel->record_byte_length, zero_accumulator_lane, location,
       &contribution_accumulator));
   loom_value_id_t initialize_accumulator = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_unary(
@@ -1119,11 +1213,9 @@ static iree_status_t loom_aie2p_array_resident_materialize_folded_body(
       IREE_ARRAYSIZE(next_record_state), location));
 
   loom_builder_set_block(ir_builder, completion_block);
-  loom_value_id_t result = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_extract_f32(
-      builder, ir_builder, sum, location, &result));
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_store_i32(
-      builder, ir_builder, result, output_state->current_address, location));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_fold_store(
+      builder, ir_builder, sum, output_state->current_address,
+      output_channel->record_byte_length, location));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_releases(
       builder, ir_builder, worker_index,
       LOOM_AIE2P_ARRAY_PORT_DIRECTION_FLAG_SEND, release_delta, location));
