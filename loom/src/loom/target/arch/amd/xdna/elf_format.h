@@ -150,10 +150,6 @@ iree_status_t loom_xdna_elf_pack_tile_destination(
     const loom_xdna_elf_tile_destination_t* destination,
     uint32_t* out_physical_address);
 
-// Decodes one ELF p_paddr value without validating profile coordinates.
-loom_xdna_elf_tile_destination_t loom_xdna_elf_unpack_tile_destination(
-    uint32_t physical_address);
-
 enum {
   // ELF note type scoped by the `LOOM` owner string.
   LOOM_XDNA_ELF_NOTE_TYPE_ABI = 1,

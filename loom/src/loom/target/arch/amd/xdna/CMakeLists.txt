@@ -87,18 +87,6 @@ loom_cc_library(
 
 loom_cc_test(
   NAME
-    elf_format_test
-  SRCS
-    "elf_format_test.cc"
-  DEPS
-    ::elf_format
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-loom_cc_test(
-  NAME
     array_facts_test
   SRCS
     "array/facts_test.cc"

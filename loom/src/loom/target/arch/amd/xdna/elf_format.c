@@ -49,22 +49,6 @@ iree_status_t loom_xdna_elf_pack_tile_destination(
   return iree_ok_status();
 }
 
-loom_xdna_elf_tile_destination_t loom_xdna_elf_unpack_tile_destination(
-    uint32_t physical_address) {
-  return (loom_xdna_elf_tile_destination_t){
-      .column = (uint8_t)((physical_address & LOOM_XDNA_ELF_TILE_COLUMN_MASK) >>
-                          LOOM_XDNA_ELF_TILE_COLUMN_SHIFT),
-      .row = (uint8_t)((physical_address & LOOM_XDNA_ELF_TILE_ROW_MASK) >>
-                       LOOM_XDNA_ELF_TILE_ROW_SHIFT),
-      .memory_space =
-          (loom_xdna_elf_tile_memory_space_t)((physical_address &
-                                               LOOM_XDNA_ELF_TILE_MEMORY_SPACE_MASK) >>
-                                              LOOM_XDNA_ELF_TILE_MEMORY_SPACE_SHIFT),
-      .flags = (uint8_t)((physical_address & LOOM_XDNA_ELF_TILE_FLAGS_MASK) >>
-                         LOOM_XDNA_ELF_TILE_FLAGS_SHIFT),
-  };
-}
-
 iree_status_t loom_xdna_elf_encode_abi_note(
     const loom_xdna_elf_abi_note_t* note, iree_byte_span_t storage) {
   IREE_ASSERT_ARGUMENT(note);
