@@ -376,7 +376,9 @@ static iree_status_t loom_aie2p_array_plan_check_format(
         " tile=(%u,%u) side=%s direction=%s"
         " engine-channel=%u bd-start=%u bd-count=%u\n",
         dma->channel_index, dma->coordinate.column, dma->coordinate.row,
-        dma->shim_side ? "shim" : "compute",
+        iree_any_bit_set(dma->flags, LOOM_AIE2P_ARRAY_DMA_FLAG_SHIM)
+            ? "shim"
+            : "compute",
         loom_aie2p_array_plan_check_dma_direction_name(dma->direction),
         dma->dma_channel, dma->buffer_descriptor_start,
         dma->buffer_descriptor_count));
@@ -397,6 +399,8 @@ static iree_status_t loom_aie2p_array_plan_check_format(
   }
   for (iree_host_size_t i = 0; i < plan->binding_plan_count; ++i) {
     const loom_aie2p_array_binding_plan_t* binding = &plan->binding_plans[i];
+    const loom_aie2p_array_dma_plan_t* dma =
+        &plan->dma_channels[binding->dma_index];
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         "binding-patch ordinal=%" PRIu32 " channel=%" PRIu32
@@ -404,9 +408,9 @@ static iree_status_t loom_aie2p_array_plan_check_format(
         "/%" PRIu32 " offset=%" PRIu64 " span=%" PRIu64 " transfer=%" PRIu32
         " repeat=%u\n",
         plan->bindings[binding->binding_index].ordinal, binding->channel_index,
-        binding->shim_coordinate.column, binding->shim_coordinate.row,
-        loom_aie2p_array_plan_check_dma_direction_name(binding->direction),
-        binding->dma_channel, binding->partition_lane,
+        dma->coordinate.column, dma->coordinate.row,
+        loom_aie2p_array_plan_check_dma_direction_name(dma->direction),
+        dma->dma_channel, binding->partition_lane,
         binding->partition_lane_count, binding->binding_byte_offset,
         binding->binding_span_byte_length, binding->transfer_byte_length,
         binding->task_repeat_count));

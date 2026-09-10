@@ -655,10 +655,11 @@ static iree_status_t loom_aie2p_program_build_routes(
   for (iree_host_size_t i = 0; i < builder->plan->binding_plan_count; ++i) {
     const loom_aie2p_array_binding_plan_t* binding_plan =
         &builder->plan->binding_plans[i];
-    if (binding_plan->direction ==
-        LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY) {
+    const loom_aie2p_array_dma_plan_t* dma =
+        &builder->plan->dma_channels[binding_plan->dma_index];
+    if (dma->direction == LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY) {
       IREE_RETURN_IF_ERROR(loom_aie2p_program_accumulate_task_completion_route(
-          builder, binding_plan->shim_coordinate));
+          builder, dma->coordinate));
     }
   }
   for (iree_host_size_t i = 0; i < builder->route_update_count; ++i) {
@@ -712,47 +713,6 @@ static_assert(IREE_ARRAYSIZE(loom_aie2p_program_shim_dma_wrap_fields) + 1u ==
                   LOOM_AIE2P_ARRAY_BINDING_DMA_DIMENSION_COUNT,
               "the outermost shim DMA address dimension does not wrap");
 
-static const loom_aie2p_array_channel_slot_t*
-loom_aie2p_program_find_channel_slot(const loom_aie2p_array_plan_t* plan,
-                                     uint32_t channel_index, uint32_t slot) {
-  for (iree_host_size_t i = 0; i < plan->channel_slot_count; ++i) {
-    const loom_aie2p_array_channel_slot_t* candidate = &plan->channel_slots[i];
-    if (candidate->channel_index == channel_index && candidate->slot == slot) {
-      return candidate;
-    }
-  }
-  IREE_ASSERT_UNREACHABLE("planned AIE2P channel slot must exist");
-  return NULL;
-}
-
-static const loom_aie2p_array_lock_plan_t* loom_aie2p_program_find_channel_lock(
-    const loom_aie2p_array_plan_t* plan, uint32_t channel_index,
-    loom_aie2p_array_endpoint_direction_t ring_endpoint_direction,
-    bool consumer_ready) {
-  for (iree_host_size_t i = 0; i < plan->lock_count; ++i) {
-    const loom_aie2p_array_lock_plan_t* candidate = &plan->locks[i];
-    if (candidate->channel_index == channel_index &&
-        candidate->ring_endpoint_direction == ring_endpoint_direction &&
-        candidate->consumer_ready == consumer_ready) {
-      return candidate;
-    }
-  }
-  IREE_ASSERT_UNREACHABLE("planned AIE2P channel lock must exist");
-  return NULL;
-}
-
-static const loom_aie2p_array_dma_plan_t* loom_aie2p_program_find_shim_dma(
-    const loom_aie2p_array_plan_t* plan, uint32_t channel_index) {
-  for (iree_host_size_t i = 0; i < plan->dma_channel_count; ++i) {
-    const loom_aie2p_array_dma_plan_t* candidate = &plan->dma_channels[i];
-    if (candidate->channel_index == channel_index && candidate->shim_side) {
-      return candidate;
-    }
-  }
-  IREE_ASSERT_UNREACHABLE("planned AIE2P shim DMA must exist");
-  return NULL;
-}
-
 static iree_status_t loom_aie2p_program_compute_dma_buffer_descriptor_address(
     const loom_aie2p_array_plan_t* plan, loom_xdna_tile_coordinate_t coordinate,
     uint16_t buffer_descriptor, uint32_t* out_address) {
@@ -772,18 +732,15 @@ static iree_status_t loom_aie2p_program_build_compute_dma_descriptor(
   const loom_aie2p_array_channel_t* channel =
       &plan->channels[dma->channel_index];
   const loom_aie2p_array_channel_slot_t* slot =
-      loom_aie2p_program_find_channel_slot(plan, dma->channel_index,
-                                           slot_ordinal);
+      &plan->channel_slots[channel->first_channel_slot + slot_ordinal];
   const loom_aie2p_array_endpoint_direction_t ring_endpoint_direction =
       dma->direction == LOOM_AIE2P_ARRAY_DMA_DIRECTION_MEMORY_TO_STREAM
           ? LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND
           : LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE;
   const loom_aie2p_array_lock_plan_t* credit_lock =
-      loom_aie2p_program_find_channel_lock(plan, dma->channel_index,
-                                           ring_endpoint_direction, false);
+      &plan->locks[dma->credit_lock_index];
   const loom_aie2p_array_lock_plan_t* ready_lock =
-      loom_aie2p_program_find_channel_lock(plan, dma->channel_index,
-                                           ring_endpoint_direction, true);
+      &plan->locks[dma->credit_lock_index + 1u];
   const loom_aie2p_array_lock_plan_t* acquire_lock =
       dma->direction == LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY
           ? credit_lock
@@ -1030,8 +987,8 @@ static iree_status_t loom_aie2p_program_build_control(
   for (iree_host_size_t i = 0; i < builder->plan->binding_plan_count; ++i) {
     const loom_aie2p_array_binding_plan_t* binding_plan =
         &builder->plan->binding_plans[i];
-    const loom_aie2p_array_dma_plan_t* dma = loom_aie2p_program_find_shim_dma(
-        builder->plan, binding_plan->channel_index);
+    const loom_aie2p_array_dma_plan_t* dma =
+        &builder->plan->dma_channels[binding_plan->dma_index];
     IREE_RETURN_IF_ERROR(loom_aie2p_program_build_shim_dma_descriptor(
         builder, binding_plan, dma));
     IREE_RETURN_IF_ERROR(
@@ -1040,60 +997,23 @@ static iree_status_t loom_aie2p_program_build_control(
   for (iree_host_size_t i = 0; i < builder->plan->binding_plan_count; ++i) {
     const loom_aie2p_array_binding_plan_t* binding_plan =
         &builder->plan->binding_plans[i];
-    if (binding_plan->direction !=
-        LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY) {
+    const loom_aie2p_array_dma_plan_t* dma =
+        &builder->plan->dma_channels[binding_plan->dma_index];
+    if (dma->direction != LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY) {
       continue;
     }
-    loom_aie2p_program_append_dma_task_wait(
-        &builder->control, binding_plan->shim_coordinate,
-        binding_plan->direction, binding_plan->dma_channel);
+    loom_aie2p_program_append_dma_task_wait(&builder->control, dma->coordinate,
+                                            dma->direction, dma->dma_channel);
   }
   return iree_ok_status();
-}
-
-static bool loom_aie2p_program_coordinates_equal(
-    loom_xdna_tile_coordinate_t lhs, loom_xdna_tile_coordinate_t rhs) {
-  return lhs.column == rhs.column && lhs.row == rhs.row;
-}
-
-static bool loom_aie2p_program_coordinate_has_worker(
-    const loom_aie2p_array_plan_t* plan,
-    loom_xdna_tile_coordinate_t coordinate) {
-  for (iree_host_size_t i = 0; i < plan->worker_plan_count; ++i) {
-    if (loom_aie2p_program_coordinates_equal(plan->worker_plans[i].coordinate,
-                                             coordinate)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool loom_aie2p_program_is_first_compute_dma_coordinate(
-    const loom_aie2p_array_plan_t* plan, iree_host_size_t dma_index) {
-  const loom_aie2p_array_dma_plan_t* dma = &plan->dma_channels[dma_index];
-  for (iree_host_size_t i = 0; i < dma_index; ++i) {
-    const loom_aie2p_array_dma_plan_t* previous = &plan->dma_channels[i];
-    if (!previous->shim_side && loom_aie2p_program_coordinates_equal(
-                                    previous->coordinate, dma->coordinate)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-static bool loom_aie2p_program_is_dma_service_coordinate(
-    const loom_aie2p_array_plan_t* plan, iree_host_size_t dma_index) {
-  const loom_aie2p_array_dma_plan_t* dma = &plan->dma_channels[dma_index];
-  return !dma->shim_side &&
-         loom_aie2p_program_is_first_compute_dma_coordinate(plan, dma_index) &&
-         !loom_aie2p_program_coordinate_has_worker(plan, dma->coordinate);
 }
 
 static iree_status_t loom_aie2p_program_append_dma_service_core_resets(
     loom_aie2p_array_program_builder_t* builder) {
   for (iree_host_size_t i = 0; i < builder->plan->dma_channel_count; ++i) {
     const loom_aie2p_array_dma_plan_t* dma = &builder->plan->dma_channels[i];
-    if (!loom_aie2p_program_is_dma_service_coordinate(builder->plan, i))
+    if (!iree_any_bit_set(dma->flags,
+                          LOOM_AIE2P_ARRAY_DMA_FLAG_SERVICE_TILE_LIFECYCLE))
       continue;
     IREE_RETURN_IF_ERROR(
         loom_aie2p_program_append_core_reset(builder, dma->coordinate));
@@ -1110,7 +1030,8 @@ static iree_status_t loom_aie2p_program_append_owned_compute_dma_resets(
   }
   for (iree_host_size_t i = 0; i < builder->plan->dma_channel_count; ++i) {
     const loom_aie2p_array_dma_plan_t* dma = &builder->plan->dma_channels[i];
-    if (!loom_aie2p_program_is_dma_service_coordinate(builder->plan, i))
+    if (!iree_any_bit_set(dma->flags,
+                          LOOM_AIE2P_ARRAY_DMA_FLAG_SERVICE_TILE_LIFECYCLE))
       continue;
     IREE_RETURN_IF_ERROR(loom_aie2p_program_append_compute_dma_reset(
         builder, dma->coordinate, reset_state));
@@ -1132,12 +1053,13 @@ static iree_status_t loom_aie2p_program_count_storage(
   iree_host_size_t dma_service_tile_count = 0;
   for (iree_host_size_t i = 0; i < plan->dma_channel_count; ++i) {
     const loom_aie2p_array_dma_plan_t* dma = &plan->dma_channels[i];
-    if (!dma->shim_side) {
+    if (!iree_any_bit_set(dma->flags, LOOM_AIE2P_ARRAY_DMA_FLAG_SHIM)) {
       IREE_RETURN_IF_ERROR(
           loom_aie2p_program_add_capacity(1, &compute_dma_count));
       IREE_RETURN_IF_ERROR(loom_aie2p_program_add_capacity(
           dma->buffer_descriptor_count, &compute_buffer_descriptor_count));
-      if (loom_aie2p_program_is_dma_service_coordinate(plan, i)) {
+      if (iree_any_bit_set(dma->flags,
+                           LOOM_AIE2P_ARRAY_DMA_FLAG_SERVICE_TILE_LIFECYCLE)) {
         IREE_RETURN_IF_ERROR(
             loom_aie2p_program_add_capacity(1, &dma_service_tile_count));
         const loom_xdna_tile_facts_t* tile = NULL;
@@ -1151,8 +1073,9 @@ static iree_status_t loom_aie2p_program_count_storage(
     }
   }
   for (iree_host_size_t i = 0; i < plan->binding_plan_count; ++i) {
-    if (plan->binding_plans[i].direction ==
-        LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY) {
+    const loom_aie2p_array_dma_plan_t* dma =
+        &plan->dma_channels[plan->binding_plans[i].dma_index];
+    if (dma->direction == LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY) {
       IREE_RETURN_IF_ERROR(
           loom_aie2p_program_add_capacity(1, &completion_binding_count));
     }
@@ -1230,7 +1153,7 @@ static iree_status_t loom_aie2p_program_build_array(
   IREE_RETURN_IF_ERROR(loom_aie2p_program_build_routes(builder));
   for (iree_host_size_t i = 0; i < builder->plan->dma_channel_count; ++i) {
     const loom_aie2p_array_dma_plan_t* dma = &builder->plan->dma_channels[i];
-    if (!dma->shim_side) {
+    if (!iree_any_bit_set(dma->flags, LOOM_AIE2P_ARRAY_DMA_FLAG_SHIM)) {
       IREE_RETURN_IF_ERROR(
           loom_aie2p_program_build_compute_dma_descriptors(builder, dma));
     }
@@ -1242,7 +1165,7 @@ static iree_status_t loom_aie2p_program_build_array(
       builder, LOOM_AIE2P_COMPUTE_DMA_RESET_RELEASED));
   for (iree_host_size_t i = 0; i < builder->plan->dma_channel_count; ++i) {
     const loom_aie2p_array_dma_plan_t* dma = &builder->plan->dma_channels[i];
-    if (!dma->shim_side) {
+    if (!iree_any_bit_set(dma->flags, LOOM_AIE2P_ARRAY_DMA_FLAG_SHIM)) {
       IREE_RETURN_IF_ERROR(loom_aie2p_program_start_compute_dma(builder, dma));
     }
   }

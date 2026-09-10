@@ -160,32 +160,6 @@ static uint32_t loom_aie2p_array_resident_port_slot_address(
   return address;
 }
 
-static const loom_aie2p_array_lock_plan_t* loom_aie2p_array_resident_find_lock(
-    const loom_aie2p_array_plan_t* plan,
-    const loom_aie2p_array_worker_port_plan_t* port,
-    loom_aie2p_array_lock_role_t role) {
-  const loom_aie2p_array_channel_t* channel =
-      &plan->channels[port->channel_index];
-  const loom_aie2p_array_endpoint_direction_t ring_endpoint_direction =
-      channel->transport == LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_NEIGHBOR_MEMORY
-          ? LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND
-          : port->direction;
-  const loom_aie2p_array_lock_plan_t* result = NULL;
-  for (iree_host_size_t i = 0; i < plan->lock_count; ++i) {
-    const loom_aie2p_array_lock_plan_t* lock = &plan->locks[i];
-    if (lock->channel_index == port->channel_index &&
-        lock->ring_endpoint_direction == ring_endpoint_direction &&
-        lock->consumer_ready == (role == LOOM_AIE2P_ARRAY_LOCK_ROLE_READY)) {
-      IREE_ASSERT(result == NULL &&
-                  "channel role must have exactly one canonical ring lock");
-      result = lock;
-    }
-  }
-  IREE_ASSERT(result != NULL &&
-              "channel role must have exactly one canonical ring lock");
-  return result;
-}
-
 static iree_status_t loom_aie2p_array_resident_add_symbol(
     loom_aie2p_array_resident_builder_t* builder, uint32_t worker_index,
     loom_symbol_ref_t* out_ref) {
@@ -584,7 +558,7 @@ static iree_status_t loom_aie2p_array_resident_build_port_lock(
     loom_aie2p_array_lock_role_t role, uint32_t descriptor_ordinal,
     loom_value_id_t delta, loom_location_id_t location) {
   const loom_aie2p_array_lock_plan_t* lock =
-      loom_aie2p_array_resident_find_lock(builder->plan, port, role);
+      &builder->plan->locks[port->credit_lock_index + role];
   uint16_t selector = 0;
   IREE_RETURN_IF_ERROR(loom_xdna_array_form_lock_selector(
       builder->plan->family,

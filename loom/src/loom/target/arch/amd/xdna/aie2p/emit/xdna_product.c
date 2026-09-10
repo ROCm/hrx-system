@@ -148,10 +148,6 @@ static iree_status_t loom_aie2p_xdna_measure_partition(
   for (iree_host_size_t i = 0; i < plan->route_count; ++i) {
     LOOM_AIE2P_XDNA_ACCUMULATE_COORDINATE(plan->routes[i].coordinate);
   }
-  for (iree_host_size_t i = 0; i < plan->binding_plan_count; ++i) {
-    LOOM_AIE2P_XDNA_ACCUMULATE_COORDINATE(
-        plan->binding_plans[i].shim_coordinate);
-  }
 #undef LOOM_AIE2P_XDNA_ACCUMULATE_COORDINATE
   if (column_count == 0 || column_count > plan->family->column_count) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -209,7 +205,8 @@ static iree_status_t loom_aie2p_xdna_build_binding_records(
         iree_max(record->minimum_byte_length, minimum_byte_length);
     const loom_xdna_tile_facts_t* shim_tile = NULL;
     IREE_RETURN_IF_ERROR(loom_xdna_array_tile_facts(
-        plan->family, binding->shim_coordinate, &shim_tile));
+        plan->family, plan->dma_channels[binding->dma_index].coordinate,
+        &shim_tile));
     record->minimum_alignment = iree_max(
         record->minimum_alignment, (uint64_t)shim_tile->dma.address_alignment);
   }

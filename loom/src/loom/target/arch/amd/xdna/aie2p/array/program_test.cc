@@ -49,6 +49,8 @@ TEST(Aie2pArrayProgramTest, ResetsComputeDmaBeforePlannedQueueStarts) {
       /*.sender_endpoint_index=*/0,
       /*.receiver_endpoint_index=*/0,
       /*.source_channel_index=*/0,
+      /*.first_channel_slot=*/0,
+      /*.sender_dma_index=*/UINT32_MAX,
       /*.capacity=*/1,
       /*.record_count=*/1,
       /*.record_byte_length=*/64,
@@ -91,9 +93,10 @@ TEST(Aie2pArrayProgramTest, ResetsComputeDmaBeforePlannedQueueStarts) {
       /*.coordinate=*/{0, 2},
       /*.direction=*/LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY,
       /*.dma_channel=*/0,
+      /*.flags=*/0,
       /*.buffer_descriptor_start=*/0,
       /*.buffer_descriptor_count=*/1,
-      /*.shim_side=*/0,
+      /*.credit_lock_index=*/0,
   };
   loom_aie2p_array_plan_t plan = {};
   plan.family = loom_xdna_npu2_array_family();
@@ -168,6 +171,8 @@ TEST(Aie2pArrayProgramTest, KeepsDmaServiceCoreReset) {
       /*.sender_endpoint_index=*/0,
       /*.receiver_endpoint_index=*/0,
       /*.source_channel_index=*/0,
+      /*.first_channel_slot=*/0,
+      /*.sender_dma_index=*/UINT32_MAX,
       /*.capacity=*/1,
       /*.record_count=*/1,
       /*.record_byte_length=*/64,
@@ -210,9 +215,10 @@ TEST(Aie2pArrayProgramTest, KeepsDmaServiceCoreReset) {
       /*.coordinate=*/{0, 3},
       /*.direction=*/LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY,
       /*.dma_channel=*/0,
+      /*.flags=*/LOOM_AIE2P_ARRAY_DMA_FLAG_SERVICE_TILE_LIFECYCLE,
       /*.buffer_descriptor_start=*/0,
       /*.buffer_descriptor_count=*/1,
-      /*.shim_side=*/0,
+      /*.credit_lock_index=*/0,
   };
   loom_aie2p_array_plan_t plan = {};
   plan.family = loom_xdna_npu2_array_family();
@@ -286,9 +292,7 @@ TEST(Aie2pArrayProgramTest, RoutesShimCompletionTokensToFirmware) {
   const loom_aie2p_array_binding_plan_t binding_plan = {
       /*.binding_index=*/0,
       /*.channel_index=*/0,
-      /*.shim_coordinate=*/{0, 0},
-      /*.direction=*/LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY,
-      /*.dma_channel=*/0,
+      /*.dma_index=*/0,
       /*.partition_lane=*/0,
       /*.partition_lane_count=*/1,
       /*.binding_byte_offset=*/0,
@@ -301,9 +305,10 @@ TEST(Aie2pArrayProgramTest, RoutesShimCompletionTokensToFirmware) {
       /*.coordinate=*/{0, 0},
       /*.direction=*/LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY,
       /*.dma_channel=*/0,
+      /*.flags=*/LOOM_AIE2P_ARRAY_DMA_FLAG_SHIM,
       /*.buffer_descriptor_start=*/0,
       /*.buffer_descriptor_count=*/1,
-      /*.shim_side=*/1,
+      /*.credit_lock_index=*/UINT32_MAX,
   };
   loom_aie2p_array_plan_t plan = {};
   plan.family = loom_xdna_npu2_array_family();

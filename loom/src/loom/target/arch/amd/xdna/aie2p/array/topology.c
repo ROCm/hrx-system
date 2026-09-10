@@ -529,18 +529,17 @@ iree_status_t loom_aie2p_array_topology_validate(
     }
   }
 
-  // A worker-produced value has one callable resource even when several
-  // consumers use it. Materialize that SSA fanout as one source DMA feeding
-  // several stream-switch masters. Neighbor-memory transport cannot preserve
-  // that single-ring contract across a mixed set of destinations, so promote
-  // adjacent worker branches to the same DMA-backed multicast path already
-  // required by remote workers and external bindings.
+  // One sending endpoint owns one physical source even when several consumers
+  // use it. Retain the canonical source channel while this traversal owns the
+  // endpoint fanout. Worker fanout shares its storage, locks, and compute DMA;
+  // binding fanout shares its host-facing shim DMA and runtime patch. Neighbor
+  // memory cannot preserve a worker's single-ring contract across a mixed set
+  // of destinations, so promote those branches to routed DMA.
   for (iree_host_size_t endpoint_index = 0;
        endpoint_index < plan->endpoint_count; ++endpoint_index) {
     const loom_aie2p_array_endpoint_t* endpoint =
         &plan->endpoints[endpoint_index];
-    if (endpoint->owner_kind != LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER ||
-        endpoint->direction != LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND ||
+    if (endpoint->direction != LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND ||
         channel_use_counts[endpoint_index] <= 1) {
       continue;
     }
@@ -551,13 +550,15 @@ iree_status_t loom_aie2p_array_topology_validate(
       if (channel->sender_endpoint_index != endpoint_index) continue;
       if (source_channel_index == UINT32_MAX) {
         source_channel_index = (uint32_t)channel_index;
-      } else if (channel->capacity !=
-                     topology->channels[source_channel_index].capacity ||
-                 channel->record_count !=
-                     topology->channels[source_channel_index].record_count ||
-                 channel->record_byte_length !=
-                     topology->channels[source_channel_index]
-                         .record_byte_length) {
+      } else if (endpoint->owner_kind ==
+                     LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
+                 (channel->capacity !=
+                      topology->channels[source_channel_index].capacity ||
+                  channel->record_count !=
+                      topology->channels[source_channel_index].record_count ||
+                  channel->record_byte_length !=
+                      topology->channels[source_channel_index]
+                          .record_byte_length)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "AIE2P worker multicast channels must have one ring shape");

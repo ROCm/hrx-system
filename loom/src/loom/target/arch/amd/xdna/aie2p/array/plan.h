@@ -56,6 +56,14 @@ typedef enum loom_aie2p_array_dma_direction_e {
   LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY = 2,
 } loom_aie2p_array_dma_direction_t;
 
+typedef uint8_t loom_aie2p_array_dma_flags_t;
+enum loom_aie2p_array_dma_flag_bits_e {
+  // The DMA engine resides on a shim tile instead of a compute tile.
+  LOOM_AIE2P_ARRAY_DMA_FLAG_SHIM = 1u << 0,
+  // This row owns core and DMA lifecycle programming for a worker-free tile.
+  LOOM_AIE2P_ARRAY_DMA_FLAG_SERVICE_TILE_LIFECYCLE = 1u << 1,
+};
+
 // Physical switch container programmed by a route connection.
 typedef enum loom_aie2p_array_switch_kind_e {
   LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH = 1,
@@ -139,8 +147,14 @@ typedef struct loom_aie2p_array_channel_t {
   // Index of the receiving endpoint.
   uint32_t receiver_endpoint_index;
   // Channel owning shared producer storage, DMA, and locks. Equal to this
-  // channel's index for a canonical multicast branch or a single consumer.
+  // channel's index for a canonical sender or a single consumer. Worker
+  // fanout shares producer storage, DMA, and locks. Binding fanout shares the
+  // host-facing shim DMA and runtime binding patch.
   uint32_t source_channel_index;
+  // First record in channel_slots for this channel's contiguous ring.
+  uint32_t first_channel_slot;
+  // DMA row serving the sending endpoint, or UINT32_MAX for memory transport.
+  uint32_t sender_dma_index;
   // Number of records held by the channel ring.
   uint32_t capacity;
   // Number of ordered records transferred per activation.
@@ -195,6 +209,8 @@ typedef struct loom_aie2p_array_worker_port_plan_t {
   uint32_t channel_index;
   // First record in channel_slots for the channel ring.
   uint32_t first_channel_slot;
+  // First row of the credit/ready lock pair used by the resident worker.
+  uint32_t credit_lock_index;
 } loom_aie2p_array_worker_port_plan_t;
 
 // One endpoint's physical view of a channel record.
@@ -248,12 +264,14 @@ typedef struct loom_aie2p_array_dma_plan_t {
   loom_aie2p_array_dma_direction_t direction;
   // Direction-local DMA channel ordinal.
   uint8_t dma_channel;
+  // Engine placement and lifecycle ownership flags.
+  loom_aie2p_array_dma_flags_t flags;
   // First tile-local buffer descriptor allocated to the channel.
   uint16_t buffer_descriptor_start;
   // Number of buffer descriptors allocated to the ring.
   uint16_t buffer_descriptor_count;
-  // Zero for the compute-side engine and one for the shim-side engine.
-  uint8_t shim_side;
+  // First row of the credit/ready lock pair, or UINT32_MAX for a shim DMA.
+  uint32_t credit_lock_index;
 } loom_aie2p_array_dma_plan_t;
 
 // One programmed source-to-destination stream-switch connection.
@@ -294,12 +312,8 @@ typedef struct loom_aie2p_array_binding_plan_t {
   uint32_t binding_index;
   // Index of the logical channel using the binding.
   uint32_t channel_index;
-  // Physical shim tile containing the host-facing DMA engine.
-  loom_xdna_tile_coordinate_t shim_coordinate;
-  // Shim DMA transfer direction.
-  loom_aie2p_array_dma_direction_t direction;
-  // Direction-local shim DMA channel ordinal.
-  uint8_t dma_channel;
+  // Exact shim DMA row patched and queued by this binding.
+  uint32_t dma_index;
   // Selected partition lane in the external tile, or zero when direct.
   uint32_t partition_lane;
   // External tile partition count, or one when direct.
