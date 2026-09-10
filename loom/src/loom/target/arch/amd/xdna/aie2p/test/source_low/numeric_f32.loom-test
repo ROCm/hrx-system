@@ -606,3 +606,35 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f
   %product = vinsert.32.reg %346, %348, %345
   return %product
 }
+
+// ====
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @integer_to_f32_signedness(%input: i32) -> (f32, f32) {
+  %signed_value = scalar.sitofp %input : i32 to f32
+  %unsigned_value = scalar.uitofp %input : i32 to f32
+  func.return %signed_value, %unsigned_value : f32, f32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @integer_to_f32_signedness(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+  %8 = mov.fx2flt-scale 0
+  %signed_value = convert.signed.i32.to.f32 %input, %8
+  %10 = mov.short 0
+  %11 = mov.short 1
+  %12 = mov.short -1
+  %13 = mov.i32 8388608
+  %14 = lt %input, %10
+  %15 = lshl %input, %12
+  %16 = and %input, %11
+  %17 = or %15, %16
+  %18 = copy %14 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %19 = sel.nez %17, %input, %18
+  %21 = convert.signed.i32.to.f32 %19, %8
+  %22 = copy %14 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %23 = sel.nez %13, %10, %22
+  %unsigned_value = add.rr %21, %23
+  return %signed_value, %unsigned_value
+}

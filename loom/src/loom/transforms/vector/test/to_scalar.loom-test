@@ -1588,3 +1588,33 @@ func.def @paired_integer_extension_i32_to_i64(%input: vector<2xi32>) -> (vector<
   %unsigned_values = vector.from_elements %6, %8 : vector<2xi64>
   func.return %signed_values, %unsigned_values : vector<2xi64>, vector<2xi64>
 }
+
+// ====
+// RUN: pass vector-to-scalar,canonicalize
+
+func.def @fma_preserves_lane_operands(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %accumulator: vector<4xf32>) -> (vector<4xf32>) {
+  %result = vector.fmaf %lhs, %rhs, %accumulator : vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+func.def @fma_preserves_lane_operands(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %accumulator: vector<4xf32>) -> (vector<4xf32>) {
+  %5 = vector.extract %lhs[0] : vector<4xf32> -> f32
+  %6 = vector.extract %rhs[0] : vector<4xf32> -> f32
+  %7 = vector.extract %accumulator[0] : vector<4xf32> -> f32
+  %8 = scalar.fmaf %5, %6, %7 : f32
+  %9 = vector.extract %lhs[1] : vector<4xf32> -> f32
+  %10 = vector.extract %rhs[1] : vector<4xf32> -> f32
+  %11 = vector.extract %accumulator[1] : vector<4xf32> -> f32
+  %12 = scalar.fmaf %9, %10, %11 : f32
+  %13 = vector.extract %lhs[2] : vector<4xf32> -> f32
+  %14 = vector.extract %rhs[2] : vector<4xf32> -> f32
+  %15 = vector.extract %accumulator[2] : vector<4xf32> -> f32
+  %16 = scalar.fmaf %13, %14, %15 : f32
+  %17 = vector.extract %lhs[3] : vector<4xf32> -> f32
+  %18 = vector.extract %rhs[3] : vector<4xf32> -> f32
+  %19 = vector.extract %accumulator[3] : vector<4xf32> -> f32
+  %20 = scalar.fmaf %17, %18, %19 : f32
+  %result = vector.from_elements %8, %12, %16, %20 : vector<4xf32>
+  func.return %result : vector<4xf32>
+}
