@@ -24,6 +24,7 @@ COMMON_TOOLS = (
     ("clang-format", "--version", r"\b22\.1\.3\b"),
 )
 SEMGREP_WARNING_FILTER = "ignore:pkg_resources is deprecated as an API:UserWarning"
+SEMGREP_VERSION_PATTERN = r"\b1\.96\.0\b"
 SEMGREP_SETUP_HINT = (
     "run python dev.py bazel setup --venv to install the managed tool environment"
 )
@@ -35,7 +36,7 @@ OPTIONAL_COMMON_TOOLS = (
     (
         "semgrep",
         ("--disable-version-check", "--version"),
-        r"\b1\.96\.0\b",
+        SEMGREP_VERSION_PATTERN,
         SEMGREP_SETUP_HINT,
         SEMGREP_WARNING_FILTER,
     ),

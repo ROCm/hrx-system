@@ -110,13 +110,13 @@ class CliTest(unittest.TestCase):
     def test_importers_setup_uses_locked_python_abi(self):
         with (
             mock.patch(
-                "build_tools.devtools.importers._interpreter_version",
+                "build_tools.devtools.environment.interpreter_version",
                 side_effect=lambda command: (
                     "3.12" if command == ("/tools/python3.12",) else "3.13"
                 ),
             ),
             mock.patch(
-                "build_tools.devtools.importers.shutil.which",
+                "build_tools.devtools.environment.shutil.which",
                 return_value="/tools/python3.12",
             ),
         ):

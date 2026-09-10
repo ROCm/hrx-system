@@ -291,6 +291,56 @@ def script_name(name: str) -> str:
     return name
 
 
+def interpreter_version(command: tuple[str, ...]) -> str | None:
+    """Returns the major.minor version reported by a Python command."""
+    try:
+        result = subprocess.run(
+            [
+                *command,
+                "-c",
+                (
+                    "import sys; "
+                    "print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+                ),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def resolve_python_interpreter(
+    required_version: str,
+    tool_env: ToolEnvironment,
+) -> tuple[str, ...]:
+    """Resolves an interpreter with the requested major.minor version."""
+    path = tool_env.path_env().get("PATH")
+    candidates = [(tool_env.python,), (sys.executable,)]
+    versioned_python = shutil.which(f"python{required_version}", path=path)
+    if versioned_python is not None:
+        candidates.append((versioned_python,))
+    if os.name == "nt":
+        py_launcher = shutil.which("py", path=path)
+        if py_launcher is not None:
+            candidates.append((py_launcher, f"-{required_version}"))
+
+    seen_commands = set()
+    for command in candidates:
+        if command in seen_commands:
+            continue
+        seen_commands.add(command)
+        if interpreter_version(command) == required_version:
+            return command
+    raise ValueError(
+        f"Python {required_version} is required; install that interpreter and retry"
+    )
+
+
 def default_venv_root() -> Path:
     return REPO_ROOT / ".venv"
 

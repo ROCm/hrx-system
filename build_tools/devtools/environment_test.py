@@ -15,6 +15,27 @@ from build_tools.devtools import environment
 
 
 class EnvironmentTest(unittest.TestCase):
+    def test_resolve_python_interpreter_selects_required_version(self):
+        with (
+            mock.patch.object(
+                environment,
+                "interpreter_version",
+                side_effect=lambda command: (
+                    "3.12" if command == ("/tools/python3.12",) else "3.14"
+                ),
+            ),
+            mock.patch.object(
+                environment.shutil,
+                "which",
+                return_value="/tools/python3.12",
+            ),
+        ):
+            command = environment.resolve_python_interpreter(
+                "3.12", environment.ToolEnvironment(environment.ToolMode.SYSTEM, None)
+            )
+
+        self.assertEqual(command, ("/tools/python3.12",))
+
     def test_windows_bazel_shell_follows_git_for_windows_install(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             git_root = Path(temporary_directory) / "Git"

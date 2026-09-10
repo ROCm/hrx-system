@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -26,6 +25,7 @@ from build_tools.devtools.environment import (
     LOCAL_TMP_ROOT,
     REPO_ROOT,
     ToolEnvironment,
+    resolve_python_interpreter,
     venv_bin_dir,
 )
 
@@ -344,66 +344,9 @@ class ImporterManifestStep:
         return 0
 
 
-def _interpreter_version(command: tuple[str, ...]) -> str | None:
-    try:
-        result = subprocess.run(
-            [
-                *command,
-                "-c",
-                (
-                    "import sys; "
-                    "print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-                ),
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
-    except OSError:
-        return None
-    if result.returncode != 0:
-        return None
-    return result.stdout.strip()
-
-
-def resolve_python_interpreter(
-    importer_spec: ImporterEnvironmentSpec,
-    tool_env: ToolEnvironment,
-) -> tuple[str, ...]:
-    """Resolve the Python ABI used by Bazel and the importer package locks."""
-    path = tool_env.path_env().get("PATH")
-    candidates = [
-        (tool_env.python,),
-        (sys.executable,),
-    ]
-    versioned_python = shutil.which(
-        f"python{importer_spec.python_version}",
-        path=path,
-    )
-    if versioned_python is not None:
-        candidates.append((versioned_python,))
-    if os.name == "nt":
-        py_launcher = shutil.which("py", path=path)
-        if py_launcher is not None:
-            candidates.append((py_launcher, f"-{importer_spec.python_version}"))
-
-    seen_commands = set()
-    for command in candidates:
-        if command in seen_commands:
-            continue
-        seen_commands.add(command)
-        if _interpreter_version(command) == importer_spec.python_version:
-            return command
-    raise ValueError(
-        f"importer environment {importer_spec.name!r} requires Python "
-        f"{importer_spec.python_version}, matching the Bazel Python toolchain; "
-        f"install that interpreter and retry"
-    )
-
-
 def setup_plan(importer_name: str, tool_env: ToolEnvironment) -> CommandPlan:
     importer_spec = spec(importer_name)
-    python_command = resolve_python_interpreter(importer_spec, tool_env)
+    python_command = resolve_python_interpreter(importer_spec.python_version, tool_env)
     return CommandPlan(
         [
             EnsureDirectoryStep(importer_spec.state_dir),
