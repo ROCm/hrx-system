@@ -1811,7 +1811,7 @@ iree_status_t loom_aie2p_array_plan_build(
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_topology(&builder));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_extract_topology(&builder, block));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_topology_validate(
-      &builder.facts, arena, out_plan, builder.channels));
+      &builder.facts, diagnostic_emitter, arena, out_plan, builder.channels));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_physical_plan(&builder));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_workers(&builder));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_channels(&builder));

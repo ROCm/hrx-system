@@ -1,0 +1,34 @@
+// RUN: emit aie2p-array-plan @cyclic_worker_array
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+// The source stages form a DAG, but coalescing the first and last stages
+// creates a worker cycle. Each resident worker waits for all of its inputs
+// before publishing any output, so this grouping cannot make progress.
+// ERROR@+1: TARGET/087 {worker="1", group="1", lane="0"}
+pipeline.def<kernel> public retain target(@array_target) @cyclic_worker_array() launch(%input: buffer, %output: buffer) {
+  %lane_count = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %outer_workers = group.create %lane_count : index -> group
+  %middle_workers = group.create %lane_count : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi32>
+  %input_flow = pipeline.read %input_view on %outer_workers : view<16xi32>, group -> pipeline.flow<tile<16xi32>>
+  %first_flow = pipeline.stage @copy_i32x16 on %outer_workers(%input_flow) : (group, pipeline.flow<tile<16xi32>>) -> (pipeline.flow<tile<16xi32>>)
+  %middle_flow = pipeline.stage @copy_i32x16 on %middle_workers(%first_flow) : (group, pipeline.flow<tile<16xi32>>) -> (pipeline.flow<tile<16xi32>>)
+  %output_flow = pipeline.stage @copy_i32x16 on %outer_workers(%middle_flow) : (group, pipeline.flow<tile<16xi32>>) -> (pipeline.flow<tile<16xi32>>)
+  pipeline.write %output_flow to %output_view : pipeline.flow<tile<16xi32>>, view<16xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @copy_i32x16(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16xi32>
+  %value = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
+  vector.store %value, %output_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}

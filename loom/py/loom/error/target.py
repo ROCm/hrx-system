@@ -1569,6 +1569,24 @@ ERR_TARGET_086 = ErrorDef(
     fix_hint="Place the buffered flow producer and consumer in separate groups.",
 )
 
+# ERR_TARGET_087: AIE2P worker channel cycle requires interleaved phases.
+ERR_TARGET_087 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=87,
+    severity=Severity.ERROR,
+    summary="AIE2P worker channel cycle requires interleaved phases.",
+    message=(
+        "AIE2P worker {worker} (group {group} lane {lane}) participates in a "
+        "channel cycle but waits for all inputs before publishing any output"
+    ),
+    params=(
+        ErrorParam("worker", ParamKind.U32),
+        ErrorParam("group", ParamKind.U32),
+        ErrorParam("lane", ParamKind.U32),
+    ),
+    fix_hint="Place the stages in groups whose worker dependencies are acyclic.",
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1646,4 +1664,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_084,
     ERR_TARGET_085,
     ERR_TARGET_086,
+    ERR_TARGET_087,
 )

@@ -9,12 +9,16 @@
 #include <string.h>
 
 #include "loom/analysis/scc.h"
+#include "loom/error/error_catalog.h"
 #include "loom/ir/facts.h"
 
 // Mutable logical topology under validation before physical planning begins.
 typedef struct loom_aie2p_array_topology_t {
   // Exact function-local facts used to resolve dynamic dimensions.
   const loom_value_fact_table_t* facts;
+
+  // Receives diagnostics for unsupported worker dependencies.
+  iree_diagnostic_emitter_t diagnostic_emitter;
 
   // Arena used for validation scratch storage.
   iree_arena_allocator_t* arena;
@@ -91,12 +95,20 @@ static iree_status_t loom_aie2p_array_topology_validate_worker_dependencies(
     if (components.values[i].is_cycle) {
       const uint32_t worker_index = (uint32_t)components.values[i].nodes[0];
       const loom_aie2p_array_worker_t* worker = &plan->workers[worker_index];
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "AIE2P worker channel cycle requires interleaved channel phases; "
-          "worker %u (group %u lane %u) waits for all inputs before publishing "
-          "any output",
-          worker_index, worker->group_index, worker->lane);
+      const loom_diagnostic_param_t params[] = {
+          loom_param_u32(worker_index),
+          loom_param_u32(worker->group_index),
+          loom_param_u32(worker->lane),
+      };
+      const loom_diagnostic_emission_t emission = {
+          .op = plan->function_op,
+          .error = LOOM_ERR_TARGET_087,
+          .params = params,
+          .param_count = IREE_ARRAYSIZE(params),
+      };
+      IREE_RETURN_IF_ERROR(
+          iree_diagnostic_emit(topology->diagnostic_emitter, &emission));
+      return iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT);
     }
   }
   return iree_ok_status();
@@ -332,11 +344,13 @@ static iree_status_t loom_aie2p_array_topology_validate_binding_view(
 }
 
 iree_status_t loom_aie2p_array_topology_validate(
-    const loom_value_fact_table_t* facts, iree_arena_allocator_t* arena,
+    const loom_value_fact_table_t* facts,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
     loom_aie2p_array_plan_t* plan,
     loom_aie2p_array_channel_t* mutable_channels) {
   const loom_aie2p_array_topology_t topology_storage = {
       .facts = facts,
+      .diagnostic_emitter = diagnostic_emitter,
       .arena = arena,
       .plan = plan,
       .channels = mutable_channels,
