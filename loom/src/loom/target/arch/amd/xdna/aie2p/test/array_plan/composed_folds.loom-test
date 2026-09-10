@@ -1,0 +1,280 @@
+// RUN: emit aie2p-array-plan @parallel_folded_composite_array
+
+// Two folded outputs share record work but occupy distinct accumulator lanes
+// and retain their own output rings and binding relocations.
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+pipeline.def<kernel> public retain target(@array_target) @parallel_folded_composite_array() launch(%left: buffer, %right: buffer, %shared: buffer, %left_output: buffer, %right_output: buffer) {
+  %lane_count = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lane_count : index -> group
+  %left_view = buffer.view %left[%base] : buffer -> view<2x1xf32>
+  %right_view = buffer.view %right[%base] : buffer -> view<2x1xf32>
+  %shared_view = buffer.view %shared[%base] : buffer -> view<2x1xf32>
+  %left_output_view = buffer.view %left_output[%base] : buffer -> view<1xf32>
+  %right_output_view = buffer.view %right_output[%base] : buffer -> view<1xf32>
+  %left_flow = pipeline.read %left_view on %workers : view<2x1xf32>, group -> pipeline.flow<tile<1xf32>>
+  %right_flow = pipeline.read %right_view on %workers : view<2x1xf32>, group -> pipeline.flow<tile<1xf32>>
+  %shared_flow = pipeline.read %shared_view on %workers : view<2x1xf32>, group -> pipeline.flow<tile<1xf32>>
+  %mapped_shared = pipeline.stage @copy_f32_record on %workers(%shared_flow) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %left_records = pipeline.stage @add_f32_record on %workers(%left_flow, %mapped_shared) : (group, pipeline.flow<tile<1xf32>>, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %right_records = pipeline.stage @add_f32_record on %workers(%right_flow, %mapped_shared) : (group, pipeline.flow<tile<1xf32>>, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %left_sum = pipeline.fold<addf> %left_records : pipeline.flow<tile<1xf32>>
+  %right_sum = pipeline.fold<addf> %right_records : pipeline.flow<tile<1xf32>>
+  pipeline.write %left_sum to %left_output_view : pipeline.flow<tile<1xf32>>, view<1xf32>
+  pipeline.write %right_sum to %right_output_view : pipeline.flow<tile<1xf32>>, view<1xf32>
+  pipeline.return
+}
+
+func.def target(@core_target) @copy_f32_record(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xf32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xf32>
+  %value = view.load %input_view[0] : view<1xf32> -> f32
+  view.store %value, %output_view[0] : f32, view<1xf32>
+  func.return
+}
+
+func.def target(@core_target) @add_f32_record(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<1xf32>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<1xf32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xf32>
+  %lhs_value = view.load %lhs_view[0] : view<1xf32> -> f32
+  %rhs_value = view.load %rhs_view[0] : view<1xf32> -> f32
+  %sum = scalar.addf %lhs_value, %rhs_value : f32
+  view.store %sum, %output_view[0] : f32, view<1xf32>
+  func.return
+}
+
+// ----
+array @parallel_folded_composite_array family=amd.xdna.npu2 groups=1 workers=1 bindings=5 channels=5 slots=10 locks=10 dma=10 routes=22
+binding index=0 ordinal=0 access=read
+binding index=1 ordinal=1 access=read
+binding index=2 ordinal=2 access=read
+binding index=3 ordinal=3 access=write
+binding index=4 ordinal=4 access=write
+worker index=0 group=0 lane=0 entry=@parallel_folded_composite_array$group$0 tile=(0,2) fold-records=2 fold-output=3+2 fold-kind=1 fold-fast-math=0x00 resources=5 storage-domains=1
+channel index=0 transport=external-dma record-bytes=4 capacity=2 records=2 sender=binding[2]:0 receiver=worker[0]:0
+channel index=1 transport=external-dma record-bytes=4 capacity=2 records=2 sender=binding[0]:0 receiver=worker[0]:1
+channel index=2 transport=external-dma record-bytes=4 capacity=2 records=2 sender=binding[1]:0 receiver=worker[0]:2
+channel index=3 transport=external-dma record-bytes=4 capacity=2 records=1 sender=worker[0]:3 receiver=binding[3]:0
+channel index=4 transport=external-dma record-bytes=4 capacity=2 records=1 sender=worker[0]:4 receiver=binding[4]:0
+worker-storage worker=0 space=2 offset=0x0c000 load-address=0x7c000 bytes=4
+worker-port worker=0 port=0 direction=receive channel=0 first-slot=0
+worker-port worker=0 port=1 direction=receive channel=1 first-slot=2
+worker-port worker=0 port=2 direction=receive channel=2 first-slot=4
+worker-port worker=0 port=3 direction=send channel=3 first-slot=6
+worker-port worker=0 port=4 direction=send channel=4 first-slot=8
+slot channel=0 index=0 owner=(0,2) offset=0x00000 bytes=4 sender=external receiver=0x70000
+slot channel=0 index=1 owner=(0,2) offset=0x04000 bytes=4 sender=external receiver=0x74000
+slot channel=1 index=0 owner=(0,2) offset=0x08000 bytes=4 sender=external receiver=0x78000
+slot channel=1 index=1 owner=(0,2) offset=0x0c040 bytes=4 sender=external receiver=0x7c040
+slot channel=2 index=0 owner=(0,3) offset=0x00000 bytes=4 sender=external receiver=0x60000
+slot channel=2 index=1 owner=(0,3) offset=0x04000 bytes=4 sender=external receiver=0x64000
+slot channel=3 index=0 owner=(0,2) offset=0x00040 bytes=4 sender=0x70040 receiver=external
+slot channel=3 index=1 owner=(0,2) offset=0x04040 bytes=4 sender=0x74040 receiver=external
+slot channel=4 index=0 owner=(0,2) offset=0x08040 bytes=4 sender=0x78040 receiver=external
+slot channel=4 index=1 owner=(0,2) offset=0x0c080 bytes=4 sender=0x7c080 receiver=external
+lock channel=0 tile=(0,2) id=0 ring=receive role=credit initial=2
+lock channel=0 tile=(0,2) id=1 ring=receive role=ready initial=0
+lock channel=1 tile=(0,2) id=2 ring=receive role=credit initial=2
+lock channel=1 tile=(0,2) id=3 ring=receive role=ready initial=0
+lock channel=2 tile=(0,3) id=0 ring=receive role=credit initial=2
+lock channel=2 tile=(0,3) id=1 ring=receive role=ready initial=0
+lock channel=3 tile=(0,2) id=4 ring=send role=credit initial=2
+lock channel=3 tile=(0,2) id=5 ring=send role=ready initial=0
+lock channel=4 tile=(0,2) id=6 ring=send role=credit initial=2
+lock channel=4 tile=(0,2) id=7 ring=send role=ready initial=0
+dma channel=0 tile=(0,2) side=compute direction=stream-to-memory engine-channel=0 bd-start=0 bd-count=2
+dma channel=0 tile=(0,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=1
+dma channel=1 tile=(0,2) side=compute direction=stream-to-memory engine-channel=1 bd-start=2 bd-count=2
+dma channel=1 tile=(0,0) side=shim direction=memory-to-stream engine-channel=1 bd-start=1 bd-count=1
+dma channel=2 tile=(0,3) side=compute direction=stream-to-memory engine-channel=0 bd-start=0 bd-count=2
+dma channel=2 tile=(1,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=1
+dma channel=3 tile=(0,2) side=compute direction=memory-to-stream engine-channel=0 bd-start=4 bd-count=2
+dma channel=3 tile=(0,0) side=shim direction=stream-to-memory engine-channel=0 bd-start=2 bd-count=1
+dma channel=4 tile=(0,2) side=compute direction=memory-to-stream engine-channel=1 bd-start=6 bd-count=2
+dma channel=4 tile=(0,0) side=shim direction=stream-to-memory engine-channel=1 bd-start=3 bd-count=1
+route channel=0 tile=(0,0) kind=shim-mux source=dma[0] destination=north[3]
+route channel=0 tile=(0,0) kind=switch source=south[3] destination=north[0]
+route channel=0 tile=(0,1) kind=switch source=south[0] destination=north[0]
+route channel=0 tile=(0,2) kind=switch source=south[0] destination=dma[0]
+route channel=1 tile=(0,0) kind=shim-mux source=dma[1] destination=north[7]
+route channel=1 tile=(0,0) kind=switch source=south[7] destination=north[1]
+route channel=1 tile=(0,1) kind=switch source=south[1] destination=north[1]
+route channel=1 tile=(0,2) kind=switch source=south[1] destination=dma[1]
+route channel=2 tile=(1,0) kind=shim-mux source=dma[0] destination=north[3]
+route channel=2 tile=(1,0) kind=switch source=south[3] destination=west[0]
+route channel=2 tile=(0,0) kind=switch source=east[0] destination=north[2]
+route channel=2 tile=(0,1) kind=switch source=south[2] destination=north[2]
+route channel=2 tile=(0,2) kind=switch source=south[2] destination=north[0]
+route channel=2 tile=(0,3) kind=switch source=south[0] destination=dma[0]
+route channel=3 tile=(0,2) kind=switch source=dma[0] destination=south[0]
+route channel=3 tile=(0,1) kind=switch source=north[0] destination=south[0]
+route channel=3 tile=(0,0) kind=switch source=north[0] destination=south[2]
+route channel=3 tile=(0,0) kind=shim-mux source=north[2] destination=dma[0]
+route channel=4 tile=(0,2) kind=switch source=dma[1] destination=south[1]
+route channel=4 tile=(0,1) kind=switch source=north[1] destination=south[1]
+route channel=4 tile=(0,0) kind=switch source=north[1] destination=south[3]
+route channel=4 tile=(0,0) kind=shim-mux source=north[3] destination=dma[1]
+binding-patch ordinal=2 channel=0 shim=(0,0) direction=memory-to-stream dma-channel=0 partition=0/1 offset=0 span=8 transfer=8 repeat=1
+binding-patch ordinal=0 channel=1 shim=(0,0) direction=memory-to-stream dma-channel=1 partition=0/1 offset=0 span=8 transfer=8 repeat=1
+binding-patch ordinal=1 channel=2 shim=(1,0) direction=memory-to-stream dma-channel=0 partition=0/1 offset=0 span=8 transfer=8 repeat=1
+binding-patch ordinal=3 channel=3 shim=(0,0) direction=stream-to-memory dma-channel=0 partition=0/1 offset=0 span=4 transfer=4 repeat=1
+binding-patch ordinal=4 channel=4 shim=(0,0) direction=stream-to-memory dma-channel=1 partition=0/1 offset=0 span=4 transfer=4 repeat=1
+
+array-program records=86 payload-bytes=1736 writes=52 masked-writes=23 block-writes=10 tile-loads=1 waits=0
+array-block record=60 address=0x0021d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=61 address=0x0021d020 words=[0x04000001,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=62 address=0x0021d040 words=[0x08000001,0x00000000,0x00000000,0x00000000,0x00000000,0x1e047fe2]
+array-block record=63 address=0x0021d060 words=[0x0c040001,0x00000000,0x00000000,0x00000000,0x00000000,0x16047fe2]
+array-block record=64 address=0x0031d000 words=[0x00000001,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=65 address=0x0031d020 words=[0x04000001,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=66 address=0x0021d080 words=[0x00040001,0x00000000,0x00000000,0x00000000,0x00000000,0x2e049fe5]
+array-block record=67 address=0x0021d0a0 words=[0x04040001,0x00000000,0x00000000,0x00000000,0x00000000,0x26049fe5]
+array-block record=68 address=0x0021d0c0 words=[0x08040001,0x00000000,0x00000000,0x00000000,0x00000000,0x3e04dfe7]
+array-block record=69 address=0x0021d0e0 words=[0x0c080001,0x00000000,0x00000000,0x00000000,0x00000000,0x3604dfe7]
+array-tile-load record=70 tile-program=0
+control-program records=14 payload-bytes=416 writes=5 masked-writes=2 block-writes=5 tile-loads=0 waits=2 relocations=5
+control-block record=0 address=0x0001d000 words=[0x00000002,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=1 address=0x0001d214 value=0x00000000
+control-block record=2 address=0x0001d020 words=[0x00000002,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=3 address=0x0001d21c value=0x00000001
+control-block record=4 address=0x0201d000 words=[0x00000002,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=5 address=0x0201d214 value=0x00000000
+control-block record=6 address=0x0001d040 words=[0x00000001,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-mask-write record=7 address=0x0001d200 mask=0x00001f00 value=0x00000f00
+control-write record=8 address=0x0001d204 value=0x80000002
+control-block record=9 address=0x0001d060 words=[0x00000001,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-mask-write record=10 address=0x0001d208 mask=0x00001f00 value=0x00000f00
+control-write record=11 address=0x0001d20c value=0x80000003
+control-wait record=12 tile=(0,0) direction=stream-to-memory dma-channel=0 columns=1 rows=1
+control-wait record=13 tile=(0,0) direction=stream-to-memory dma-channel=1 columns=1 rows=1
+control-relocation index=0 record=0 word=1 payload-offset=44 binding=2 addend=0 width=8 alignment=4
+control-relocation index=1 record=2 word=1 payload-offset=108 binding=0 addend=0 width=8 alignment=4
+control-relocation index=2 record=4 word=1 payload-offset=172 binding=1 addend=0 width=8 alignment=4
+control-relocation index=3 record=6 word=1 payload-offset=236 binding=3 addend=0 width=8 alignment=4
+control-relocation index=4 record=9 word=1 payload-offset=320 binding=4 addend=0 width=8 alignment=4
+
+resident-program workers=1
+resident worker=0 entry=@parallel_folded_composite_array$worker$0 tile=(0,2) code-bytes=768 resources=0 fixups=6
+
+low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @parallel_folded_composite_array$worker$0() asm {
+  %acquire_delta = mov.short -1
+  %release_delta = mov.short 1
+  %fold_zero = mov.short 0
+  %fold_record_count = mov.i32 2
+  %fold_mode = mova.i32 60
+  %230 = acc.clear.f32x64
+  %268 = mov.local-address 458752
+  %269 = mov.local-address 491520
+  %270 = mov.local-address 393216
+  %271 = mov.local-address 458816
+  %272 = mov.local-address 491584
+  low.br ^_bb1(%268: reg<aie2p.ep>, %269: reg<aie2p.ep>, %270: reg<aie2p.ep>, %271: reg<aie2p.ep>, %272: reg<aie2p.ep>)
+^_bb1(%219: reg<aie2p.ep>, %220: reg<aie2p.ep>, %221: reg<aie2p.ep>, %222: reg<aie2p.ep>, %223: reg<aie2p.ep>):
+  acq %acquire_delta, 52
+  acq %acquire_delta, 54
+  low.br ^_bb2(%219: reg<aie2p.ep>, %220: reg<aie2p.ep>, %221: reg<aie2p.ep>, %222: reg<aie2p.ep>, %223: reg<aie2p.ep>, %230: reg<aie2p.mbms x4>, %fold_record_count: reg<aie2p.er>, %release_delta: reg<aie2p.er>)
+^_bb2(%input_view: reg<aie2p.ep>, %lhs_view$215: reg<aie2p.ep>, %lhs_view$216: reg<aie2p.ep>, %output_view$217: reg<aie2p.ep>, %output_view$218: reg<aie2p.ep>, %224: reg<aie2p.mbms x4>, %225: reg<aie2p.er>, %226: reg<aie2p.er>):
+  acq %acquire_delta, 49
+  acq %acquire_delta, 51
+  acq %acquire_delta, 33
+  low.br ^_bb3
+^_bb3:
+  %184 = storage {byte_alignment = 64, byte_length = 4} : low.storage<private>
+  %rhs_view = storage_address %184 : low.storage<private> -> reg<aie2p.ep>
+  %value = lda %input_view, 0
+  st %value, %rhs_view, 0
+  %lhs_value$187 = lda %lhs_view$215, 0
+  %rhs_value$188 = lda %rhs_view, 0
+  %189 = vbcst.32 %lhs_value$187
+  %190 = vbcst.32 %rhs_value$188
+  %191 = acc.clear.f32x64
+  %192 = slice %191[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %193 = vmov.vector512.to.accumulator512 %189
+  %194 = concat(%193, %192, %192, %192) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %195 = vmov.vector512.to.accumulator512 %190
+  %196 = concat(%195, %192, %192, %192) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %197 = mova.i32 60
+  %198 = vadd.f32x64 %194, %196, %197
+  %199 = slice %198[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %200 = vmov.accumulator512.to.vector512 %199
+  %sum$201 = vextract.32.imm %200, 0
+  st %sum$201, %output_view$217, 0
+  %lhs_value$202 = lda %lhs_view$216, 0
+  %rhs_value$203 = lda %rhs_view, 0
+  %204 = vbcst.32 %lhs_value$202
+  %205 = vbcst.32 %rhs_value$203
+  %206 = vmov.vector512.to.accumulator512 %204
+  %207 = concat(%206, %192, %192, %192) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %208 = vmov.vector512.to.accumulator512 %205
+  %209 = concat(%208, %192, %192, %192) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %210 = vadd.f32x64 %207, %209, %197
+  %211 = slice %210[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %212 = vmov.accumulator512.to.vector512 %211
+  %sum$213 = vextract.32.imm %212, 0
+  st %sum$213, %output_view$218, 0
+  low.br ^_bb4
+^_bb4:
+  %232 = lda %output_view$217, 0
+  %233 = vbcst.32 %232
+  %234 = lda %output_view$218, 0
+  %235 = mov.short 1
+  %236 = vinsert.32.reg %233, %235, %234
+  %237 = vmov.vector512.to.accumulator512 %236
+  %238 = concat(%237, %237, %237, %237) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %239 = nez %226
+  low.cond_br %239, ^_bb5, ^_bb6 : reg<aie2p.er>
+^_bb5:
+  low.br ^_bb7(%238: reg<aie2p.mbms x4>)
+^_bb6:
+  %240 = vadd.f32x64 %224, %238, %fold_mode
+  low.br ^_bb7(%240: reg<aie2p.mbms x4>)
+^_bb7(%231: reg<aie2p.mbms x4>):
+  rel %release_delta, 48
+  rel %release_delta, 50
+  rel %release_delta, 32
+  %241 = mov.address-to-scalar %input_view
+  %242 = mov.i32 16384
+  %243 = xor %241, %242
+  %244 = mov.scalar-to-address %243
+  %245 = mov.address-to-scalar %lhs_view$215
+  %246 = mov.i32 16448
+  %247 = xor %245, %246
+  %248 = mov.scalar-to-address %247
+  %249 = mov.address-to-scalar %lhs_view$216
+  %250 = xor %249, %242
+  %251 = mov.scalar-to-address %250
+  %252 = sub %225, %release_delta
+  %253 = nez %252
+  low.cond_br %253, ^_bb8, ^_bb9 : reg<aie2p.er>
+^_bb8:
+  low.br ^_bb2(%244: reg<aie2p.ep>, %248: reg<aie2p.ep>, %251: reg<aie2p.ep>, %output_view$217: reg<aie2p.ep>, %output_view$218: reg<aie2p.ep>, %231: reg<aie2p.mbms x4>, %252: reg<aie2p.er>, %fold_zero: reg<aie2p.er>)
+^_bb9:
+  %254 = slice %231[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %255 = vmov.accumulator512.to.vector512 %254
+  %256 = vextract.32.imm %255, 0
+  st %256, %output_view$217, 0
+  %257 = slice %231[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %258 = vmov.accumulator512.to.vector512 %257
+  %259 = vextract.32.imm %258, 1
+  st %259, %output_view$218, 0
+  rel %release_delta, 53
+  rel %release_delta, 55
+  %260 = mov.address-to-scalar %output_view$217
+  %261 = mov.i32 16384
+  %262 = xor %260, %261
+  %263 = mov.scalar-to-address %262
+  %264 = mov.address-to-scalar %output_view$218
+  %265 = mov.i32 16576
+  %266 = xor %264, %265
+  %267 = mov.scalar-to-address %266
+  low.br ^_bb1(%244: reg<aie2p.ep>, %248: reg<aie2p.ep>, %251: reg<aie2p.ep>, %263: reg<aie2p.ep>, %267: reg<aie2p.ep>)
+}
