@@ -1,0 +1,499 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_bitfield.loom-test
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @i32_bitfield_extractu(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
+  %loaded = vector.load %input_view[0] : view<1xi32> -> vector<1xi32>
+  %nibble = vector.bitfield.extractu %loaded {offset = 4, width = 4} : vector<1xi32> -> vector<1xi32>
+  vector.store %nibble, %output_view[0] : vector<1xi32>, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32_bitfield_extractu() asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %17 = lda.u8 %input_view, 0
+  %18 = lda.u8 %input_view, 1
+  %19 = lda.u8 %input_view, 2
+  %20 = lda.u8 %input_view, 3
+  %21 = mov.short 8
+  %22 = lshl %18, %21
+  %23 = mov.short 16
+  %24 = lshl %19, %23
+  %25 = mov.short 24
+  %26 = lshl %20, %25
+  %27 = or %17, %22
+  %28 = or %24, %26
+  %29 = or %27, %28
+  %30 = mov.short 4
+  %31 = mov.short 0
+  %32 = sub %31, %30
+  %33 = lshl %29, %32
+  %34 = mov.short 15
+  %35 = and %33, %34
+  %36 = mov.short -8
+  st.s8 %35, %output_view, 0
+  %37 = lshl %35, %36
+  st.s8 %37, %output_view, 1
+  %38 = lshl %37, %36
+  st.s8 %38, %output_view, 2
+  %39 = lshl %38, %36
+  st.s8 %39, %output_view, 3
+  return
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i32_bitfield_extracts(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
+  %loaded = vector.load %input_view[0] : view<1xi32> -> vector<1xi32>
+  %nibble = vector.bitfield.extracts %loaded {offset = 4, width = 4} : vector<1xi32> -> vector<1xi32>
+  vector.store %nibble, %output_view[0] : vector<1xi32>, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32_bitfield_extracts() asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %17 = lda.u8 %input_view, 0
+  %18 = lda.u8 %input_view, 1
+  %19 = lda.u8 %input_view, 2
+  %20 = lda.u8 %input_view, 3
+  %21 = mov.short 8
+  %22 = lshl %18, %21
+  %23 = mov.short 16
+  %24 = lshl %19, %23
+  %25 = mov.short 24
+  %26 = lshl %20, %25
+  %27 = or %17, %22
+  %28 = or %24, %26
+  %29 = or %27, %28
+  %31 = lshl %29, %25
+  %32 = mov.short 28
+  %33 = mov.short 0
+  %34 = sub %33, %32
+  %35 = ashl %31, %34
+  %36 = mov.short -8
+  st.s8 %35, %output_view, 0
+  %37 = lshl %35, %36
+  st.s8 %37, %output_view, 1
+  %38 = lshl %37, %36
+  st.s8 %38, %output_view, 2
+  %39 = lshl %38, %36
+  st.s8 %39, %output_view, 3
+  return
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i32_bitfield_extractu_full_width_alias(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
+  %loaded = vector.load %input_view[0] : view<1xi32> -> vector<1xi32>
+  %bits = vector.bitfield.extractu %loaded {offset = 0, width = 32} : vector<1xi32> -> vector<1xi32>
+  vector.store %bits, %output_view[0] : vector<1xi32>, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32_bitfield_extractu_full_width_alias() asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %13 = lda.u8 %input_view, 0
+  %14 = lda.u8 %input_view, 1
+  %15 = lda.u8 %input_view, 2
+  %16 = lda.u8 %input_view, 3
+  %17 = mov.short 8
+  %18 = lshl %14, %17
+  %19 = mov.short 16
+  %20 = lshl %15, %19
+  %21 = mov.short 24
+  %22 = lshl %16, %21
+  %23 = or %13, %18
+  %24 = or %20, %22
+  %25 = or %23, %24
+  %26 = mov.short -8
+  st.s8 %25, %output_view, 0
+  %27 = lshl %25, %26
+  st.s8 %27, %output_view, 1
+  %28 = lshl %27, %26
+  st.s8 %28, %output_view, 2
+  %29 = lshl %28, %26
+  st.s8 %29, %output_view, 3
+  return
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i32_bitfield_extracts_top_aligned(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
+  %loaded = vector.load %input_view[0] : view<1xi32> -> vector<1xi32>
+  %nibble = vector.bitfield.extracts %loaded {offset = 28, width = 4} : vector<1xi32> -> vector<1xi32>
+  vector.store %nibble, %output_view[0] : vector<1xi32>, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32_bitfield_extracts_top_aligned() asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %15 = lda.u8 %input_view, 0
+  %16 = lda.u8 %input_view, 1
+  %17 = lda.u8 %input_view, 2
+  %18 = lda.u8 %input_view, 3
+  %19 = mov.short 8
+  %20 = lshl %16, %19
+  %21 = mov.short 16
+  %22 = lshl %17, %21
+  %23 = mov.short 24
+  %24 = lshl %18, %23
+  %25 = or %15, %20
+  %26 = or %22, %24
+  %27 = or %25, %26
+  %28 = mov.short 28
+  %29 = mov.short 0
+  %30 = sub %29, %28
+  %31 = ashl %27, %30
+  %32 = mov.short -8
+  st.s8 %31, %output_view, 0
+  %33 = lshl %31, %32
+  st.s8 %33, %output_view, 1
+  %34 = lshl %33, %32
+  st.s8 %34, %output_view, 2
+  %35 = lshl %34, %32
+  st.s8 %35, %output_view, 3
+  return
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i32_bitfield_insert(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %field_view = buffer.view %field_buffer[%buffer_base] : buffer -> view<1xi32>
+  %base_view = buffer.view %base_buffer[%buffer_base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
+  %field = vector.load %field_view[0] : view<1xi32> -> vector<1xi32>
+  %base = vector.load %base_view[0] : view<1xi32> -> vector<1xi32>
+  %inserted = vector.bitfield.insert %field into %base {offset = 8, width = 4} : vector<1xi32>, vector<1xi32>
+  vector.store %inserted, %output_view[0] : vector<1xi32>, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32_bitfield_insert() asm {
+  %field_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %base_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %31 = lda.u8 %field_view, 0
+  %32 = lda.u8 %field_view, 1
+  %33 = lda.u8 %field_view, 2
+  %34 = lda.u8 %field_view, 3
+  %35 = mov.short 8
+  %36 = lshl %32, %35
+  %37 = mov.short 16
+  %38 = lshl %33, %37
+  %39 = mov.short 24
+  %40 = lshl %34, %39
+  %41 = or %31, %36
+  %42 = or %38, %40
+  %43 = or %41, %42
+  %44 = lda.u8 %base_view, 0
+  %45 = lda.u8 %base_view, 1
+  %46 = lda.u8 %base_view, 2
+  %47 = lda.u8 %base_view, 3
+  %49 = lshl %45, %35
+  %51 = lshl %46, %37
+  %53 = lshl %47, %39
+  %54 = or %44, %49
+  %55 = or %51, %53
+  %56 = or %54, %55
+  %57 = mov.short 15
+  %58 = and %43, %57
+  %60 = lshl %58, %35
+  %61 = mov.i32 -3841
+  %62 = and %56, %61
+  %63 = or %62, %60
+  %64 = mov.short -8
+  st.s8 %63, %output_view, 0
+  %65 = lshl %63, %64
+  st.s8 %65, %output_view, 1
+  %66 = lshl %65, %64
+  st.s8 %66, %output_view, 2
+  %67 = lshl %66, %64
+  st.s8 %67, %output_view, 3
+  return
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i32_bitfield_insert_offset0(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %field_view = buffer.view %field_buffer[%buffer_base] : buffer -> view<1xi32>
+  %base_view = buffer.view %base_buffer[%buffer_base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
+  %field = vector.load %field_view[0] : view<1xi32> -> vector<1xi32>
+  %base = vector.load %base_view[0] : view<1xi32> -> vector<1xi32>
+  %inserted = vector.bitfield.insert %field into %base {offset = 0, width = 4} : vector<1xi32>, vector<1xi32>
+  vector.store %inserted, %output_view[0] : vector<1xi32>, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32_bitfield_insert_offset0() asm {
+  %field_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %base_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %29 = lda.u8 %field_view, 0
+  %30 = lda.u8 %field_view, 1
+  %31 = lda.u8 %field_view, 2
+  %32 = lda.u8 %field_view, 3
+  %33 = mov.short 8
+  %34 = lshl %30, %33
+  %35 = mov.short 16
+  %36 = lshl %31, %35
+  %37 = mov.short 24
+  %38 = lshl %32, %37
+  %39 = or %29, %34
+  %40 = or %36, %38
+  %41 = or %39, %40
+  %42 = lda.u8 %base_view, 0
+  %43 = lda.u8 %base_view, 1
+  %44 = lda.u8 %base_view, 2
+  %45 = lda.u8 %base_view, 3
+  %47 = lshl %43, %33
+  %49 = lshl %44, %35
+  %51 = lshl %45, %37
+  %52 = or %42, %47
+  %53 = or %49, %51
+  %54 = or %52, %53
+  %55 = mov.short 15
+  %56 = and %41, %55
+  %57 = mov.short -16
+  %58 = and %54, %57
+  %59 = or %58, %56
+  %60 = mov.short -8
+  st.s8 %59, %output_view, 0
+  %61 = lshl %59, %60
+  st.s8 %61, %output_view, 1
+  %62 = lshl %61, %60
+  st.s8 %62, %output_view, 2
+  %63 = lshl %62, %60
+  st.s8 %63, %output_view, 3
+  return
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i32_bitfield_insert_full_width_alias(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %field_view = buffer.view %field_buffer[%buffer_base] : buffer -> view<1xi32>
+  %base_view = buffer.view %base_buffer[%buffer_base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
+  %field = vector.load %field_view[0] : view<1xi32> -> vector<1xi32>
+  %base = vector.load %base_view[0] : view<1xi32> -> vector<1xi32>
+  %inserted = vector.bitfield.insert %field into %base {offset = 0, width = 32} : vector<1xi32>, vector<1xi32>
+  vector.store %inserted, %output_view[0] : vector<1xi32>, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32_bitfield_insert_full_width_alias() asm {
+  %field_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %17 = lda.u8 %field_view, 0
+  %18 = lda.u8 %field_view, 1
+  %19 = lda.u8 %field_view, 2
+  %20 = lda.u8 %field_view, 3
+  %21 = mov.short 8
+  %22 = lshl %18, %21
+  %23 = mov.short 16
+  %24 = lshl %19, %23
+  %25 = mov.short 24
+  %26 = lshl %20, %25
+  %27 = or %17, %22
+  %28 = or %24, %26
+  %29 = or %27, %28
+  %30 = mov.short -8
+  st.s8 %29, %output_view, 0
+  %31 = lshl %29, %30
+  st.s8 %31, %output_view, 1
+  %32 = lshl %31, %30
+  st.s8 %32, %output_view, 2
+  %33 = lshl %32, %30
+  st.s8 %33, %output_view, 3
+  return
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i32_bitfield_b128_shape(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<4xi32>
+  %loaded = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
+  %low = vector.bitfield.extractu %loaded {offset = 0, width = 4} : vector<4xi32> -> vector<4xi32>
+  %high = vector.bitfield.extractu %loaded {offset = 4, width = 2} : vector<4xi32> -> vector<4xi32>
+  %merged = vector.bitfield.insert %high into %low {offset = 4, width = 2} : vector<4xi32>, vector<4xi32>
+  %bias = vector.constant 32 : vector<4xi32>
+  %result = vector.subi %merged, %bias : vector<4xi32>
+  vector.store %result, %output_view[0] : vector<4xi32>, view<4xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32_bitfield_b128_shape() asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %122 = lda.u8 %input_view, 0
+  %123 = lda.u8 %input_view, 1
+  %124 = lda.u8 %input_view, 2
+  %125 = lda.u8 %input_view, 3
+  %126 = mov.short 8
+  %127 = lshl %123, %126
+  %128 = mov.short 16
+  %129 = lshl %124, %128
+  %130 = mov.short 24
+  %131 = lshl %125, %130
+  %132 = or %122, %127
+  %133 = or %129, %131
+  %134 = or %132, %133
+  %135 = lda.u8 %input_view, 4
+  %136 = lda.u8 %input_view, 5
+  %137 = lda.u8 %input_view, 6
+  %138 = lda.u8 %input_view, 7
+  %140 = lshl %136, %126
+  %142 = lshl %137, %128
+  %144 = lshl %138, %130
+  %145 = or %135, %140
+  %146 = or %142, %144
+  %147 = or %145, %146
+  %148 = mov.static-byte-offset 8
+  %149 = mov.address-index %148
+  %150 = lda.i8.index %input_view, %149
+  %151 = mov.static-byte-offset 9
+  %152 = mov.address-index %151
+  %153 = lda.i8.index %input_view, %152
+  %154 = mov.static-byte-offset 10
+  %155 = mov.address-index %154
+  %156 = lda.i8.index %input_view, %155
+  %157 = mov.static-byte-offset 11
+  %158 = mov.address-index %157
+  %159 = lda.i8.index %input_view, %158
+  %161 = lshl %153, %126
+  %163 = lshl %156, %128
+  %165 = lshl %159, %130
+  %166 = or %150, %161
+  %167 = or %163, %165
+  %168 = or %166, %167
+  %169 = mov.static-byte-offset 12
+  %170 = mov.address-index %169
+  %171 = lda.i8.index %input_view, %170
+  %172 = mov.static-byte-offset 13
+  %173 = mov.address-index %172
+  %174 = lda.i8.index %input_view, %173
+  %175 = mov.static-byte-offset 14
+  %176 = mov.address-index %175
+  %177 = lda.i8.index %input_view, %176
+  %178 = mov.static-byte-offset 15
+  %179 = mov.address-index %178
+  %180 = lda.i8.index %input_view, %179
+  %182 = lshl %174, %126
+  %184 = lshl %177, %128
+  %186 = lshl %180, %130
+  %187 = or %171, %182
+  %188 = or %184, %186
+  %189 = or %187, %188
+  %190 = mov.short 4
+  %191 = mov.short 0
+  %192 = sub %191, %190
+  %193 = lshl %134, %192
+  %194 = mov.short 3
+  %195 = and %193, %194
+  %196 = mov.short 15
+  %197 = and %134, %196
+  %198 = lshl %195, %190
+  %199 = mov.short -49
+  %200 = and %197, %199
+  %201 = or %200, %198
+  %202 = mov.short -32
+  %203 = add.rr %201, %202
+  %204 = mov.short -8
+  st.s8 %203, %output_view, 0
+  %205 = lshl %203, %204
+  st.s8 %205, %output_view, 1
+  %206 = lshl %205, %204
+  st.s8 %206, %output_view, 2
+  %207 = lshl %206, %204
+  st.s8 %207, %output_view, 3
+  %209 = sub %191, %190
+  %210 = lshl %147, %209
+  %211 = and %210, %194
+  %212 = and %147, %196
+  %213 = lshl %211, %190
+  %214 = and %212, %199
+  %215 = or %214, %213
+  %216 = add.rr %215, %202
+  st.s8 %216, %output_view, 4
+  %218 = lshl %216, %204
+  st.s8 %218, %output_view, 5
+  %219 = lshl %218, %204
+  st.s8 %219, %output_view, 6
+  %220 = lshl %219, %204
+  st.s8 %220, %output_view, 7
+  %222 = sub %191, %190
+  %223 = lshl %168, %222
+  %224 = and %223, %194
+  %225 = and %168, %196
+  %226 = lshl %224, %190
+  %227 = and %225, %199
+  %228 = or %227, %226
+  %229 = add.rr %228, %202
+  st.i8.index %229, %output_view, %149
+  %233 = lshl %229, %204
+  st.i8.index %233, %output_view, %152
+  %236 = lshl %233, %204
+  st.i8.index %236, %output_view, %155
+  %239 = lshl %236, %204
+  st.i8.index %239, %output_view, %158
+  %243 = sub %191, %190
+  %244 = lshl %189, %243
+  %245 = and %244, %194
+  %246 = and %189, %196
+  %247 = lshl %245, %190
+  %248 = and %246, %199
+  %249 = or %248, %247
+  %250 = add.rr %249, %202
+  st.i8.index %250, %output_view, %170
+  %254 = lshl %250, %204
+  st.i8.index %254, %output_view, %173
+  %257 = lshl %254, %204
+  st.i8.index %257, %output_view, %176
+  %260 = lshl %257, %204
+  st.i8.index %260, %output_view, %179
+  return
+}

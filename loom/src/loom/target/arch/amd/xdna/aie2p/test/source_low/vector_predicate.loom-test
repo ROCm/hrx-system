@@ -189,3 +189,25 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @predicat
   %word_result = vsel.32.mask64 %word_false, %word_true, %word_mask
   return %byte_result, %half_result, %word_result
 }
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @predicate_extract(%mask: vector<64xi1>, %lane0: index) -> (i1, i1) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %static = vector.extract %mask[63] : vector<64xi1> -> i1
+  %dynamic = vector.extract %mask[%lane] : vector<64xi1> -> i1
+  func.return %static, %dynamic : i1, i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @predicate_extract(%mask: reg<aie2p.elpredicate>, %lane: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+  %11 = mov.short 1
+  %12 = vbcst.8 %11
+  %13 = vsub.8 %12, %12
+  %14 = vsel.8 %13, %12, %mask
+  %static = vextract.8.imm %14, 63
+  %dynamic = vextract.8.reg %14, %lane
+  return %static, %dynamic
+}

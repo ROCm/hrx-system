@@ -167,3 +167,58 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @extract_
   %high_last = vextract.32.imm %16, 15
   return %low_last, %high_first, %high_next, %high_last
 }
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i32x32_extract_dynamic(%values: vector<32xi32>, %lane: index) -> (i32) {
+  %result = vector.extract %values[%lane] : vector<32xi32> -> i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x32_extract_dynamic(%values: reg<aie2p.vec256 x4>, %lane: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %7 = slice %values[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %8 = slice %values[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %9 = mov.short 15
+  %10 = mov.short 16
+  %11 = and %lane, %9
+  %12 = and %lane, %10
+  %13 = vextract.32.reg %7, %11
+  %14 = vextract.32.reg %8, %11
+  %15 = copy %12 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %result = sel.nez %14, %13, %15
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i64x16_extract_dynamic(%values: vector<16xi64>, %lane: index) -> (i64) {
+  %result = vector.extract %values[%lane] : vector<16xi64> -> i64
+  func.return %result : i64
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i64x16_extract_dynamic(%values: reg<aie2p.vec256 x4>, %lane: reg<aie2p.er>) -> (reg<aie2p.er x2>) asm {
+  %7 = slice %values[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %8 = slice %values[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %9 = mov.short 7
+  %10 = mov.short 8
+  %11 = and %lane, %9
+  %12 = and %lane, %10
+  %13 = vextract.64.reg %7, %11
+  %14 = vextract.64.reg %8, %11
+  %15 = slice %13[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %16 = slice %14[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %17 = copy %12 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %18 = sel.nez %16, %15, %17
+  %19 = slice %13[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %20 = slice %14[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %21 = copy %12 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %22 = sel.nez %20, %19, %21
+  %result = concat(%18, %22) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %result
+}

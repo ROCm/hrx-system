@@ -1,0 +1,312 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/lookup_table.loom-test
+// RUN: emit source-low output=low
+
+// XFAIL: AIE2P has no GPU workitem-addressed global memory surface
+aie2p.target<core> @target
+
+kernel.def target(@target) @f32_table_lookup_i8_codes() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%codes_buffer: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base_offset = index.constant 0 : offset
+  %code_stride = index.constant 4 : index
+  %base = index.mul %lane, %code_stride : index
+  %codes_view = buffer.view %codes_buffer[%base_offset] : buffer -> view<8xi8>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<8xf32>
+  %codes = vector.load %codes_view[%base] : view<8xi8> -> vector<4xi8>
+  %g0 = scalar.constant -1.0 : f32
+  %g1 = scalar.constant -0.5 : f32
+  %g2 = scalar.constant 0.5 : f32
+  %g3 = scalar.constant 1.5 : f32
+  %grid = vector.from_elements %g0, %g1, %g2, %g3 : vector<4xf32>
+  %decoded = vector.table.lookup %grid[%codes] : vector<4xf32>, vector<4xi8> -> vector<4xf32>
+  vector.store %decoded, %output_view[%base] : vector<4xf32>, view<8xf32>
+  kernel.return
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @f32_table_lookup_i32_codes(%codes: vector<2xi32>) -> (vector<2xf32>) {
+  %g0 = scalar.constant 2.0 : f32
+  %g1 = scalar.constant -3.0 : f32
+  %g2 = scalar.constant 5.0 : f32
+  %grid = vector.from_elements %g0, %g1, %g2 : vector<3xf32>
+  %decoded = vector.table.lookup %grid[%codes] : vector<3xf32>, vector<2xi32> -> vector<2xf32>
+  func.return %decoded : vector<2xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @f32_table_lookup_i32_codes(%codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %g1 = mov.i32 -1069547520
+  %g2 = mov.i32 1084227584
+  %24 = mov.i32 1073741824
+  %25 = vbcst.32 %24
+  %26 = mov.short 1
+  %27 = copy %26 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %28 = vinsert.32.reg %25, %27, %g1
+  %29 = mov.short 2
+  %30 = copy %29 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %grid = vinsert.32.reg %28, %30, %g2
+  %32 = vextract.32.imm %codes, 0
+  %33 = vextract.32.reg %grid, %32
+  %34 = vextract.32.imm %codes, 1
+  %35 = vextract.32.reg %grid, %34
+  %36 = vbcst.32 %33
+  %38 = copy %26 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %decoded = vinsert.32.reg %36, %38, %35
+  return %decoded
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @f32_table_lookup_dynamic_grid(%grid: vector<3xf32>, %codes: vector<2xi32>) -> (vector<2xf32>) {
+  %decoded = vector.table.lookup %grid[%codes] : vector<3xf32>, vector<2xi32> -> vector<2xf32>
+  func.return %decoded : vector<2xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @f32_table_lookup_dynamic_grid(%grid: reg<aie2p.vec256 x2>, %codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %16 = vextract.32.imm %codes, 0
+  %17 = vextract.32.reg %grid, %16
+  %18 = vextract.32.imm %codes, 1
+  %19 = vextract.32.reg %grid, %18
+  %20 = vbcst.32 %17
+  %21 = mov.short 1
+  %22 = copy %21 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %decoded = vinsert.32.reg %20, %22, %19
+  return %decoded
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i8_table_lookup_fact_known_codes(%grid: vector<4xi8>) -> (vector<4xi8>) {
+  %c0 = scalar.constant 0 : i8
+  %c1 = scalar.constant 1 : i8
+  %c2 = scalar.constant 2 : i8
+  %c3 = scalar.constant 3 : i8
+  %codes = vector.from_elements %c2, %c0, %c3, %c1 : vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<4xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8_table_lookup_fact_known_codes(%grid: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %27 = vextract.8.imm %grid, 2
+  %28 = vextract.8.imm %grid, 0
+  %29 = vextract.8.imm %grid, 3
+  %30 = vextract.8.imm %grid, 1
+  %31 = vbcst.8 %27
+  %32 = mov.short 1
+  %33 = copy %32 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %34 = vinsert.8.reg %31, %33, %28
+  %35 = mov.short 2
+  %36 = copy %35 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %37 = vinsert.8.reg %34, %36, %29
+  %38 = mov.short 3
+  %39 = copy %38 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %decoded = vinsert.8.reg %37, %39, %30
+  return %decoded
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i8_table_lookup_constant_table() -> (vector<4xi8>) {
+  %g0 = scalar.constant -4 : i8
+  %g1 = scalar.constant -1 : i8
+  %g2 = scalar.constant 2 : i8
+  %g3 = scalar.constant 7 : i8
+  %grid = vector.from_elements %g0, %g1, %g2, %g3 : vector<4xi8>
+  %c0 = scalar.constant 0 : i8
+  %c1 = scalar.constant 1 : i8
+  %c2 = scalar.constant 2 : i8
+  %c3 = scalar.constant 3 : i8
+  %codes = vector.from_elements %c3, %c2, %c1, %c0 : vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<4xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8_table_lookup_constant_table() -> (reg<aie2p.vec256 x2>) asm {
+  %38 = mov.short 2
+  %39 = mov.short -1
+  %40 = mov.short -4
+  %41 = mov.short 7
+  %42 = vbcst.8 %41
+  %43 = mov.short 1
+  %44 = copy %43 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %45 = vinsert.8.reg %42, %44, %38
+  %47 = copy %38 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %48 = vinsert.8.reg %45, %47, %39
+  %49 = mov.short 3
+  %50 = copy %49 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %decoded = vinsert.8.reg %48, %50, %40
+  return %decoded
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i8_table_lookup_u4_dynamic_table(%grid: vector<16xi8>, %packed: vector<2xi8>) -> (vector<4xi8>) {
+  %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8_table_lookup_u4_dynamic_table(%grid: reg<aie2p.vec256 x2>, %packed: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %53 = vextract.8.imm %packed, 0
+  %54 = extend.u8 %53
+  %55 = mov.short 15
+  %56 = and %54, %55
+  %57 = extend.s8 %56
+  %58 = vextract.8.reg %grid, %57
+  %59 = mov.short 4
+  %60 = mov.short 0
+  %61 = sub %60, %59
+  %62 = lshl %54, %61
+  %63 = extend.s8 %62
+  %64 = vextract.8.reg %grid, %63
+  %65 = vextract.8.imm %packed, 1
+  %66 = extend.u8 %65
+  %67 = and %66, %55
+  %68 = extend.s8 %67
+  %69 = vextract.8.reg %grid, %68
+  %71 = sub %60, %59
+  %72 = lshl %66, %71
+  %73 = extend.s8 %72
+  %74 = vextract.8.reg %grid, %73
+  %75 = vbcst.8 %58
+  %76 = mov.short 1
+  %77 = copy %76 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %78 = vinsert.8.reg %75, %77, %64
+  %79 = mov.short 2
+  %80 = copy %79 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %81 = vinsert.8.reg %78, %80, %69
+  %82 = mov.short 3
+  %83 = copy %82 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %decoded = vinsert.8.reg %81, %83, %74
+  return %decoded
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i8_table_lookup_u4_constant_table(%packed: vector<2xi8>) -> (vector<4xi8>) {
+  %g0 = scalar.constant 0 : i8
+  %g1 = scalar.constant -1 : i8
+  %g2 = scalar.constant 2 : i8
+  %g3 = scalar.constant -3 : i8
+  %g4 = scalar.constant 4 : i8
+  %g5 = scalar.constant -5 : i8
+  %g6 = scalar.constant 6 : i8
+  %g7 = scalar.constant -7 : i8
+  %g8 = scalar.constant 8 : i8
+  %g9 = scalar.constant -9 : i8
+  %g10 = scalar.constant 10 : i8
+  %g11 = scalar.constant -11 : i8
+  %g12 = scalar.constant 12 : i8
+  %g13 = scalar.constant -13 : i8
+  %g14 = scalar.constant 14 : i8
+  %g15 = scalar.constant -15 : i8
+  %grid = vector.from_elements %g0, %g1, %g2, %g3, %g4, %g5, %g6, %g7, %g8, %g9, %g10, %g11, %g12, %g13, %g14, %g15 : vector<16xi8>
+  %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8_table_lookup_u4_constant_table(%packed: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %g1 = mov.short -1
+  %g2 = mov.short 2
+  %g3 = mov.short -3
+  %g4 = mov.short 4
+  %g5 = mov.short -5
+  %g6 = mov.short 6
+  %g7 = mov.short -7
+  %g8 = mov.short 8
+  %g9 = mov.short -9
+  %g10 = mov.short 10
+  %g11 = mov.short -11
+  %g12 = mov.short 12
+  %g13 = mov.short -13
+  %g14 = mov.short 14
+  %g15 = mov.short -15
+  %100 = mov.short 0
+  %101 = vbcst.8 %100
+  %102 = mov.short 1
+  %103 = copy %102 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %104 = vinsert.8.reg %101, %103, %g1
+  %106 = copy %g2 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %107 = vinsert.8.reg %104, %106, %g2
+  %108 = mov.short 3
+  %109 = copy %108 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %110 = vinsert.8.reg %107, %109, %g3
+  %112 = copy %g4 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %113 = vinsert.8.reg %110, %112, %g4
+  %114 = mov.short 5
+  %115 = copy %114 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %116 = vinsert.8.reg %113, %115, %g5
+  %118 = copy %g6 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %119 = vinsert.8.reg %116, %118, %g6
+  %120 = mov.short 7
+  %121 = copy %120 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %122 = vinsert.8.reg %119, %121, %g7
+  %124 = copy %g8 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %125 = vinsert.8.reg %122, %124, %g8
+  %126 = mov.short 9
+  %127 = copy %126 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %128 = vinsert.8.reg %125, %127, %g9
+  %130 = copy %g10 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %131 = vinsert.8.reg %128, %130, %g10
+  %132 = mov.short 11
+  %133 = copy %132 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %134 = vinsert.8.reg %131, %133, %g11
+  %136 = copy %g12 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %137 = vinsert.8.reg %134, %136, %g12
+  %138 = mov.short 13
+  %139 = copy %138 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %140 = vinsert.8.reg %137, %139, %g13
+  %142 = copy %g14 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %143 = vinsert.8.reg %140, %142, %g14
+  %144 = mov.short 15
+  %145 = copy %144 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %grid = vinsert.8.reg %143, %145, %g15
+  %147 = vextract.8.imm %packed, 0
+  %148 = extend.u8 %147
+  %150 = and %148, %144
+  %151 = extend.s8 %150
+  %152 = vextract.8.reg %grid, %151
+  %155 = sub %100, %g4
+  %156 = lshl %148, %155
+  %157 = extend.s8 %156
+  %158 = vextract.8.reg %grid, %157
+  %159 = vextract.8.imm %packed, 1
+  %160 = extend.u8 %159
+  %161 = and %160, %144
+  %162 = extend.s8 %161
+  %163 = vextract.8.reg %grid, %162
+  %165 = sub %100, %g4
+  %166 = lshl %160, %165
+  %167 = extend.s8 %166
+  %168 = vextract.8.reg %grid, %167
+  %169 = vbcst.8 %152
+  %171 = copy %102 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %172 = vinsert.8.reg %169, %171, %158
+  %174 = copy %g2 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %175 = vinsert.8.reg %172, %174, %163
+  %177 = copy %108 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %decoded = vinsert.8.reg %175, %177, %168
+  return %decoded
+}

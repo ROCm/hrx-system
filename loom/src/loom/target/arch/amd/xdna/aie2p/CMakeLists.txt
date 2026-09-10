@@ -147,6 +147,7 @@ loom_cc_library(
     loom::ops::vector
     loom::target::legalization
     loom::transforms::vector::packet_legalization
+    loom::transforms::vector::target_legalization
     loom::transforms::vector::to_scalar
   PUBLIC
 )
@@ -420,27 +421,55 @@ loom_check_test_suite(
     "test/module_contracts.loom-test"
     "test/source_low/function_storage.loom-test"
     "test/source_low/index_conversion.loom-test"
+    "test/source_low/lookup_table.loom-test"
     "test/source_low/matrix_multiply.loom-test"
     "test/source_low/memory_scalar_addressing.loom-test"
+    "test/source_low/numeric_conversion_float8.loom-test"
+    "test/source_low/numeric_conversion_wide.loom-test"
     "test/source_low/numeric_f32.loom-test"
     "test/source_low/numeric_index.loom-test"
+    "test/source_low/numeric_index_conversion.loom-test"
+    "test/source_low/numeric_minmax.loom-test"
+    "test/source_low/numeric_nonlinear.loom-test"
+    "test/source_low/numeric_reduce.loom-test"
+    "test/source_low/numeric_scalar_f32.loom-test"
     "test/source_low/numeric_scalar_i32.loom-test"
+    "test/source_low/numeric_scalar_i64.loom-test"
+    "test/source_low/packed_bitfield.loom-test"
+    "test/source_low/packed_bitpack.loom-test"
     "test/source_low/packed_dot_integer.loom-test"
     "test/source_low/packed_i8_arithmetic.loom-test"
     "test/source_low/packed_integer_arithmetic.loom-test"
+    "test/source_low/vector_bitcast.loom-test"
+    "test/source_low/vector_mask_select.loom-test"
     "test/source_low/vector_memory.loom-test"
     "test/source_low/vector_predicate.loom-test"
+    "test/source_low/vector_slice.loom-test"
     "test/source_low/vector_structural.loom-test"
   RUNNER
     ::loom-check
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/lookup_table.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/matrix_multiply.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_scalar_addressing.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_conversion_float8.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_conversion_wide.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_index.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_index_conversion.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_minmax.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_nonlinear.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_reduce.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_f32.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i64.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/packed_bitfield.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/packed_bitpack.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/packed_dot_integer.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/packed_i8_arithmetic.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/packed_integer_arithmetic.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_bitcast.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_mask_select.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_slice.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/source_low/"
 )

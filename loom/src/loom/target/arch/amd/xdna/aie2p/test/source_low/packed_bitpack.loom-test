@@ -1,0 +1,335 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_bitpack.loom-test
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @i32x4_to_i8x4_bitpack(%codes: vector<4xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x4_to_i8x4_bitpack(%codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %34 = vextract.32.imm %codes, 0
+  %35 = mov.short 255
+  %36 = and %34, %35
+  %37 = vextract.32.imm %codes, 1
+  %38 = and %37, %35
+  %39 = vextract.32.imm %codes, 2
+  %40 = and %39, %35
+  %41 = vextract.32.imm %codes, 3
+  %42 = and %41, %35
+  %43 = vbcst.8 %36
+  %44 = mov.short 1
+  %45 = copy %44 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %46 = vinsert.8.reg %43, %45, %38
+  %47 = mov.short 2
+  %48 = copy %47 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %49 = vinsert.8.reg %46, %48, %40
+  %50 = mov.short 3
+  %51 = copy %50 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %packed = vinsert.8.reg %49, %51, %42
+  return %packed
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i32x8_to_i4x8_bitpack(%codes: vector<8xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<4> %codes : vector<8xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x8_to_i4x8_bitpack(%codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %58 = vextract.32.imm %codes, 0
+  %59 = mov.short 15
+  %60 = and %58, %59
+  %61 = vextract.32.imm %codes, 1
+  %62 = and %61, %59
+  %63 = mov.short 4
+  %64 = lshl %62, %63
+  %65 = or %60, %64
+  %66 = vextract.32.imm %codes, 2
+  %67 = and %66, %59
+  %68 = vextract.32.imm %codes, 3
+  %69 = and %68, %59
+  %70 = lshl %69, %63
+  %71 = or %67, %70
+  %72 = vextract.32.imm %codes, 4
+  %73 = and %72, %59
+  %74 = vextract.32.imm %codes, 5
+  %75 = and %74, %59
+  %76 = lshl %75, %63
+  %77 = or %73, %76
+  %78 = vextract.32.imm %codes, 6
+  %79 = and %78, %59
+  %80 = vextract.32.imm %codes, 7
+  %81 = and %80, %59
+  %82 = lshl %81, %63
+  %83 = or %79, %82
+  %84 = vbcst.8 %65
+  %85 = mov.short 1
+  %86 = copy %85 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %87 = vinsert.8.reg %84, %86, %71
+  %88 = mov.short 2
+  %89 = copy %88 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %90 = vinsert.8.reg %87, %89, %77
+  %91 = mov.short 3
+  %92 = copy %91 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %packed = vinsert.8.reg %90, %92, %83
+  return %packed
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i32x16_to_i2x16_bitpack(%codes: vector<16xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<2> %codes : vector<16xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x16_to_i2x16_bitpack(%codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %106 = vextract.32.imm %codes, 0
+  %107 = mov.short 3
+  %108 = and %106, %107
+  %109 = vextract.32.imm %codes, 1
+  %110 = and %109, %107
+  %111 = mov.short 2
+  %112 = lshl %110, %111
+  %113 = or %108, %112
+  %114 = vextract.32.imm %codes, 2
+  %115 = and %114, %107
+  %116 = mov.short 4
+  %117 = lshl %115, %116
+  %118 = or %113, %117
+  %119 = vextract.32.imm %codes, 3
+  %120 = and %119, %107
+  %121 = mov.short 6
+  %122 = lshl %120, %121
+  %123 = or %118, %122
+  %124 = vextract.32.imm %codes, 4
+  %125 = and %124, %107
+  %126 = vextract.32.imm %codes, 5
+  %127 = and %126, %107
+  %128 = lshl %127, %111
+  %129 = or %125, %128
+  %130 = vextract.32.imm %codes, 6
+  %131 = and %130, %107
+  %132 = lshl %131, %116
+  %133 = or %129, %132
+  %134 = vextract.32.imm %codes, 7
+  %135 = and %134, %107
+  %136 = lshl %135, %121
+  %137 = or %133, %136
+  %138 = vextract.32.imm %codes, 8
+  %139 = and %138, %107
+  %140 = vextract.32.imm %codes, 9
+  %141 = and %140, %107
+  %142 = lshl %141, %111
+  %143 = or %139, %142
+  %144 = vextract.32.imm %codes, 10
+  %145 = and %144, %107
+  %146 = lshl %145, %116
+  %147 = or %143, %146
+  %148 = vextract.32.imm %codes, 11
+  %149 = and %148, %107
+  %150 = lshl %149, %121
+  %151 = or %147, %150
+  %152 = vextract.32.imm %codes, 12
+  %153 = and %152, %107
+  %154 = vextract.32.imm %codes, 13
+  %155 = and %154, %107
+  %156 = lshl %155, %111
+  %157 = or %153, %156
+  %158 = vextract.32.imm %codes, 14
+  %159 = and %158, %107
+  %160 = lshl %159, %116
+  %161 = or %157, %160
+  %162 = vextract.32.imm %codes, 15
+  %163 = and %162, %107
+  %164 = lshl %163, %121
+  %165 = or %161, %164
+  %166 = vbcst.8 %123
+  %167 = mov.short 1
+  %168 = copy %167 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %169 = vinsert.8.reg %166, %168, %137
+  %171 = copy %111 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %172 = vinsert.8.reg %169, %171, %151
+  %174 = copy %107 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %packed = vinsert.8.reg %172, %174, %165
+  return %packed
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @i32x32_to_i1x32_bitpack(%mask: vector<32xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<1> %mask : vector<32xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x32_to_i1x32_bitpack(%mask: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x2>) asm {
+  %202 = slice %mask[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %203 = vextract.32.imm %202, 0
+  %204 = mov.short 1
+  %205 = and %203, %204
+  %207 = vextract.32.imm %202, 1
+  %208 = and %207, %204
+  %209 = lshl %208, %204
+  %210 = or %205, %209
+  %212 = vextract.32.imm %202, 2
+  %213 = and %212, %204
+  %214 = mov.short 2
+  %215 = lshl %213, %214
+  %216 = or %210, %215
+  %218 = vextract.32.imm %202, 3
+  %219 = and %218, %204
+  %220 = mov.short 3
+  %221 = lshl %219, %220
+  %222 = or %216, %221
+  %224 = vextract.32.imm %202, 4
+  %225 = and %224, %204
+  %226 = mov.short 4
+  %227 = lshl %225, %226
+  %228 = or %222, %227
+  %230 = vextract.32.imm %202, 5
+  %231 = and %230, %204
+  %232 = mov.short 5
+  %233 = lshl %231, %232
+  %234 = or %228, %233
+  %236 = vextract.32.imm %202, 6
+  %237 = and %236, %204
+  %238 = mov.short 6
+  %239 = lshl %237, %238
+  %240 = or %234, %239
+  %242 = vextract.32.imm %202, 7
+  %243 = and %242, %204
+  %244 = mov.short 7
+  %245 = lshl %243, %244
+  %246 = or %240, %245
+  %248 = vextract.32.imm %202, 8
+  %249 = and %248, %204
+  %251 = vextract.32.imm %202, 9
+  %252 = and %251, %204
+  %253 = lshl %252, %204
+  %254 = or %249, %253
+  %256 = vextract.32.imm %202, 10
+  %257 = and %256, %204
+  %258 = lshl %257, %214
+  %259 = or %254, %258
+  %261 = vextract.32.imm %202, 11
+  %262 = and %261, %204
+  %263 = lshl %262, %220
+  %264 = or %259, %263
+  %266 = vextract.32.imm %202, 12
+  %267 = and %266, %204
+  %268 = lshl %267, %226
+  %269 = or %264, %268
+  %271 = vextract.32.imm %202, 13
+  %272 = and %271, %204
+  %273 = lshl %272, %232
+  %274 = or %269, %273
+  %276 = vextract.32.imm %202, 14
+  %277 = and %276, %204
+  %278 = lshl %277, %238
+  %279 = or %274, %278
+  %281 = vextract.32.imm %202, 15
+  %282 = and %281, %204
+  %283 = lshl %282, %244
+  %284 = or %279, %283
+  %285 = slice %mask[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %286 = vextract.32.imm %285, 0
+  %287 = and %286, %204
+  %289 = vextract.32.imm %285, 1
+  %290 = and %289, %204
+  %291 = lshl %290, %204
+  %292 = or %287, %291
+  %294 = vextract.32.imm %285, 2
+  %295 = and %294, %204
+  %296 = lshl %295, %214
+  %297 = or %292, %296
+  %299 = vextract.32.imm %285, 3
+  %300 = and %299, %204
+  %301 = lshl %300, %220
+  %302 = or %297, %301
+  %304 = vextract.32.imm %285, 4
+  %305 = and %304, %204
+  %306 = lshl %305, %226
+  %307 = or %302, %306
+  %309 = vextract.32.imm %285, 5
+  %310 = and %309, %204
+  %311 = lshl %310, %232
+  %312 = or %307, %311
+  %314 = vextract.32.imm %285, 6
+  %315 = and %314, %204
+  %316 = lshl %315, %238
+  %317 = or %312, %316
+  %319 = vextract.32.imm %285, 7
+  %320 = and %319, %204
+  %321 = lshl %320, %244
+  %322 = or %317, %321
+  %324 = vextract.32.imm %285, 8
+  %325 = and %324, %204
+  %327 = vextract.32.imm %285, 9
+  %328 = and %327, %204
+  %329 = lshl %328, %204
+  %330 = or %325, %329
+  %332 = vextract.32.imm %285, 10
+  %333 = and %332, %204
+  %334 = lshl %333, %214
+  %335 = or %330, %334
+  %337 = vextract.32.imm %285, 11
+  %338 = and %337, %204
+  %339 = lshl %338, %220
+  %340 = or %335, %339
+  %342 = vextract.32.imm %285, 12
+  %343 = and %342, %204
+  %344 = lshl %343, %226
+  %345 = or %340, %344
+  %347 = vextract.32.imm %285, 13
+  %348 = and %347, %204
+  %349 = lshl %348, %232
+  %350 = or %345, %349
+  %352 = vextract.32.imm %285, 14
+  %353 = and %352, %204
+  %354 = lshl %353, %238
+  %355 = or %350, %354
+  %357 = vextract.32.imm %285, 15
+  %358 = and %357, %204
+  %359 = lshl %358, %244
+  %360 = or %355, %359
+  %361 = vbcst.8 %246
+  %363 = copy %204 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %364 = vinsert.8.reg %361, %363, %284
+  %366 = copy %214 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %367 = vinsert.8.reg %364, %366, %322
+  %369 = copy %220 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %packed = vinsert.8.reg %367, %369, %360
+  return %packed
+}
+
+// ====
+
+// XFAIL: AIE2P has no GPU workitem-addressed global memory surface
+aie2p.target<core> @target
+
+kernel.def target(@target) @uniform_global_i32x4_to_i8x4_bitpack_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%values: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %values_noalias, %output_noalias = buffer.assume.noalias %values, %output : buffer, buffer
+  %values_view = buffer.view %values_noalias[%base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xi8>
+  %codes = vector.load %values_view[%index] : view<4xi32> -> vector<4xi32>
+  %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
+  vector.store %packed, %output_view[%index] : vector<4xi8>, view<4xi8>
+  kernel.return
+}

@@ -1,0 +1,31 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_conversion_wide.loom-test
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @vector_extf_bf16x32(%input: vector<32xbf16>) -> (vector<32xf32>) {
+  %converted = vector.extf %input : vector<32xbf16> to vector<32xf32>
+  func.return %converted : vector<32xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_extf_bf16x32(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.mbms x2>) asm {
+  %converted = vconv.fp32.bf16 %input
+  return %converted
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @vector_fptrunc_bf16x32(%input: vector<32xf32>) -> (vector<32xbf16>) {
+  %converted = vector.fptrunc %input : vector<32xf32> to vector<32xbf16>
+  func.return %converted : vector<32xbf16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_fptrunc_bf16x32(%input: reg<aie2p.mbms x2>) -> (reg<aie2p.vec256 x2>) asm {
+  set.rounding 12
+  %converted = vconv.bf16.fp32 %input
+  return %converted
+}

@@ -22,6 +22,15 @@ static loom_target_math_policy_decision_t loom_aie2p_math_reject(
   };
 }
 
+static loom_target_math_policy_decision_t loom_aie2p_math_rewrite(
+    loom_target_math_recipe_t recipe, iree_string_view_t constraint_key) {
+  return (loom_target_math_policy_decision_t){
+      .action = LOOM_TARGET_MATH_POLICY_ACTION_REWRITE,
+      .recipe = recipe,
+      .constraint_key = constraint_key,
+  };
+}
+
 typedef struct loom_aie2p_math_form_t {
   // Semantic math operation implemented by the lowering form.
   loom_target_math_op_t math_op;
@@ -36,9 +45,103 @@ typedef struct loom_aie2p_math_form_t {
   iree_string_view_t shape_constraint_key;
   // Stable diagnostic constraint naming the selected lowering form.
   iree_string_view_t form_constraint_key;
+  // Fast-math permissions required by the selected lowering form.
+  loom_target_math_fastmath_flags_t required_fastmath_flags;
+  // Stable diagnostic constraint reported when permissions are absent.
+  iree_string_view_t permission_constraint_key;
+  // Target-independent rewrite recipe, or UNKNOWN when the op stays intact.
+  loom_target_math_recipe_t recipe;
 } loom_aie2p_math_form_t;
 
 static const loom_aie2p_math_form_t kAie2pMathForms[] = {
+    {
+        .math_op = LOOM_TARGET_MATH_OP_SINF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_trig"),
+        .form_constraint_key = IREE_SVL("math.op.native_bf16_mac_trig"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+        .permission_constraint_key = IREE_SVL("math.trig.exact_f32"),
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_COSF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_trig"),
+        .form_constraint_key = IREE_SVL("math.op.native_bf16_mac_trig"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+        .permission_constraint_key = IREE_SVL("math.trig.exact_f32"),
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_SINTURNSF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_trig"),
+        .form_constraint_key = IREE_SVL("math.op.native_bf16_mac_trig"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+        .permission_constraint_key = IREE_SVL("math.trig.exact_f32"),
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_COSTURNSF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_trig"),
+        .form_constraint_key = IREE_SVL("math.op.native_bf16_mac_trig"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+        .permission_constraint_key = IREE_SVL("math.trig.exact_f32"),
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_EXPF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_exp"),
+        .form_constraint_key = IREE_SVL("math.op.native_bf16_exp"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+        .permission_constraint_key = IREE_SVL("math.exp.exact_f32"),
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_EXPF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 16,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_exp"),
+        .form_constraint_key = IREE_SVL("math.op.native_bf16_exp"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+        .permission_constraint_key = IREE_SVL("math.exp.exact_f32"),
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_TANHF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_tanh"),
+        .form_constraint_key = IREE_SVL("math.op.native_bf16_tanh"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+        .permission_constraint_key = IREE_SVL("math.tanh.exact_f32"),
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_TANHF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 16,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_tanh"),
+        .form_constraint_key = IREE_SVL("math.op.native_bf16_tanh"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+        .permission_constraint_key = IREE_SVL("math.tanh.exact_f32"),
+    },
     {
         .math_op = LOOM_TARGET_MATH_OP_MULF,
         .element_type = LOOM_SCALAR_TYPE_BF16,
@@ -47,6 +150,71 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
         .maximum_lane_count = 32,
         .shape_constraint_key = IREE_SVL("math.shape.vector_bf16x32"),
         .form_constraint_key = IREE_SVL("math.op.native_vector_bf16x32"),
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_MULF,
+        .element_type = LOOM_SCALAR_TYPE_F16,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f16_multiply"),
+        .form_constraint_key = IREE_SVL("math.op.exact_binary16"),
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_ROUNDF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_round"),
+        .form_constraint_key = IREE_SVL("math.recipe.round_away_f32"),
+        .recipe = LOOM_TARGET_MATH_RECIPE_ROUND_AWAY_F32,
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_ROUNDF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 16,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_round"),
+        .form_constraint_key = IREE_SVL("math.recipe.round_away_f32"),
+        .recipe = LOOM_TARGET_MATH_RECIPE_ROUND_AWAY_F32,
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_ROUNDEVENF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_round"),
+        .form_constraint_key = IREE_SVL("math.op.exact_binary32_roundeven"),
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_ROUNDEVENF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 16,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_round"),
+        .form_constraint_key = IREE_SVL("math.op.exact_binary32_roundeven"),
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_TRUNCF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_round"),
+        .form_constraint_key = IREE_SVL("math.op.exact_binary32_trunc"),
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_TRUNCF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 16,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_round"),
+        .form_constraint_key = IREE_SVL("math.op.exact_binary32_trunc"),
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_MULF,
@@ -126,7 +294,15 @@ static void loom_aie2p_math_policy_query(
     if (query->math_op != form->math_op) continue;
     constraint_key = form->shape_constraint_key;
     if (loom_aie2p_math_query_matches_form(query, form)) {
-      *out_decision = loom_aie2p_math_keep(form->form_constraint_key);
+      if (!iree_all_bits_set(query->fastmath_flags,
+                             form->required_fastmath_flags)) {
+        *out_decision = loom_aie2p_math_reject(form->permission_constraint_key);
+        return;
+      }
+      *out_decision = form->recipe == LOOM_TARGET_MATH_RECIPE_UNKNOWN
+                          ? loom_aie2p_math_keep(form->form_constraint_key)
+                          : loom_aie2p_math_rewrite(form->recipe,
+                                                    form->form_constraint_key);
       return;
     }
   }

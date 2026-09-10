@@ -534,19 +534,17 @@ static iree_status_t loom_vector_to_scalar_lower_deinterleave(
 
   loom_value_id_t replacements[2] = {LOOM_VALUE_ID_INVALID,
                                      LOOM_VALUE_ID_INVALID};
-  loom_vector_to_scalar_state_t first_state = {0};
+  // Each state may point into its own statistics storage and stays in place
+  // until both results have been built and the source operation is replaced.
+  loom_vector_to_scalar_state_t states[2] = {0};
   for (uint16_t i = 0; i < 2; ++i) {
-    loom_vector_to_scalar_state_t state = {0};
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_prepare_state(
-        pass, rewriter, op, &descriptor, i, &state));
-    if (i == 0) {
-      first_state = state;
-    }
+        pass, rewriter, op, &descriptor, i, &states[i]));
     IREE_RETURN_IF_ERROR(
-        loom_vector_to_scalar_lower_aggregate(&state, &replacements[i]));
+        loom_vector_to_scalar_lower_aggregate(&states[i], &replacements[i]));
     if (loom_pass_has_error_diagnostics(pass)) return iree_ok_status();
   }
-  return loom_vector_to_scalar_replace_results(&first_state, replacements,
+  return loom_vector_to_scalar_replace_results(&states[0], replacements,
                                                IREE_ARRAYSIZE(replacements));
 }
 
