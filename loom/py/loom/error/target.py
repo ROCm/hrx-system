@@ -1523,6 +1523,52 @@ ERR_TARGET_083 = ErrorDef(
     fix_hint="Provide a non-empty record sequence for the worker fold.",
 )
 
+# ERR_TARGET_084: AIE2P worker requires a frame-completion phase.
+ERR_TARGET_084 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=84,
+    severity=Severity.ERROR,
+    summary="AIE2P worker requires a frame-completion phase.",
+    message=(
+        "AIE2P pipeline group {group} has frame-completion stages that "
+        "require a phased worker program"
+    ),
+    params=(ErrorParam("group", ParamKind.U32),),
+    fix_hint="Place completion stages in a separate group.",
+)
+
+# ERR_TARGET_085: AIE2P worker outputs require different firing phases.
+ERR_TARGET_085 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=85,
+    severity=Severity.ERROR,
+    summary="AIE2P worker outputs require different firing phases.",
+    message=(
+        "AIE2P pipeline group {group} requires compatible folds on every "
+        "boundary output; mixed cadences require a phased worker program"
+    ),
+    params=(ErrorParam("group", ParamKind.U32),),
+    fix_hint="Place recordwise and folded outputs in separate groups.",
+)
+
+# ERR_TARGET_086: AIE2P internal buffered flow requires a ring state machine.
+ERR_TARGET_086 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=86,
+    severity=Severity.ERROR,
+    summary="AIE2P internal buffered flow requires a ring state machine.",
+    message=(
+        "AIE2P pipeline group {group} flow {flow} has capacity {capacity}; "
+        "buffered same-group flow requires a composite ring state machine"
+    ),
+    params=(
+        ErrorParam("group", ParamKind.U32),
+        ErrorParam("flow", ParamKind.U32),
+        ErrorParam("capacity", ParamKind.U32),
+    ),
+    fix_hint="Place the buffered flow producer and consumer in separate groups.",
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1597,4 +1643,7 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_081,
     ERR_TARGET_082,
     ERR_TARGET_083,
+    ERR_TARGET_084,
+    ERR_TARGET_085,
+    ERR_TARGET_086,
 )

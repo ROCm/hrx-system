@@ -489,6 +489,8 @@ loom_cc_library(
     ::pipeline_plan
     iree::base
     iree::base::internal::arena
+    loom::error::emitter
+    loom::error::error_defs
   PUBLIC
 )
 

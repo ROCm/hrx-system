@@ -298,8 +298,10 @@ pipeline.def<kernel> @frames() launch(%input: buffer, %output: buffer) {
   EXPECT_EQ(plan.instances[0].fold_record_count, 0u);
   EXPECT_EQ(plan.instances[0].fold_output_count, 0u);
   loom_pipeline_firing_plan_t firing = {};
-  IREE_ASSERT_OK(
-      loom_pipeline_firing_plan_build(&plan, &analysis_arena_, &firing));
+  bool valid = false;
+  IREE_ASSERT_OK(loom_pipeline_firing_plan_build(&plan, {}, &analysis_arena_,
+                                                 &firing, &valid));
+  ASSERT_TRUE(valid);
   const auto& group = firing.groups[0];
   EXPECT_EQ(group.frame_count, 3u);
   EXPECT_EQ(group.records_per_frame, 8u);
@@ -339,48 +341,16 @@ pipeline.def<kernel> @one_record() launch(%input: buffer, %output: buffer) {
   loom_pipeline_plan_t plan = {};
   IREE_ASSERT_OK(BuildPlan(module.get(), IREE_SV("one_record"), &plan));
   loom_pipeline_firing_plan_t firing = {};
-  IREE_ASSERT_OK(
-      loom_pipeline_firing_plan_build(&plan, &analysis_arena_, &firing));
+  bool valid = false;
+  IREE_ASSERT_OK(loom_pipeline_firing_plan_build(&plan, {}, &analysis_arena_,
+                                                 &firing, &valid));
+  ASSERT_TRUE(valid);
   EXPECT_EQ(firing.groups[0].frame_count, 1u);
   EXPECT_EQ(firing.groups[0].records_per_frame, 1u);
   EXPECT_EQ(firing.groups[0].fold_count, 1u);
   EXPECT_EQ(firing.groups[0].record_stage_count, 2u);
   EXPECT_EQ(firing.groups[0].completion_stage_count, 1u);
   EXPECT_EQ(firing.stage_indices[2], 2u);
-}
-
-TEST_F(PipelinePlanTest, RejectsEqualCountsWithDifferentFrameBoundaries) {
-  ModulePtr module = Parse(R"(
-func.def @copy(%input: buffer, %output: buffer) {
-  func.return
-}
-pipeline.def<kernel> @cadences() launch(%lhs: buffer, %rhs: buffer, %lhs_output: buffer, %rhs_output: buffer) {
-  %lanes = index.constant 1 : index
-  %base = index.constant 0 : offset
-  %workers = group.create %lanes : index -> group
-  %lhs_view = buffer.view %lhs[%base] : buffer -> view<2x4x1xf32>
-  %rhs_view = buffer.view %rhs[%base] : buffer -> view<4x2x1xf32>
-  %lhs_output_view = buffer.view %lhs_output[%base] : buffer -> view<2x1xf32>
-  %rhs_output_view = buffer.view %rhs_output[%base] : buffer -> view<4x1xf32>
-  %left = pipeline.read %lhs_view on %workers : view<2x4x1xf32>, group -> pipeline.flow<tile<1xf32>>
-  %right = pipeline.read %rhs_view on %workers : view<4x2x1xf32>, group -> pipeline.flow<tile<1xf32>>
-  %left_records = pipeline.stage @copy on %workers(%left) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
-  %right_records = pipeline.stage @copy on %workers(%right) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
-  %left_sum = pipeline.fold<addf> %left_records : pipeline.flow<tile<1xf32>>
-  %right_sum = pipeline.fold<addf> %right_records : pipeline.flow<tile<1xf32>>
-  pipeline.write %left_sum to %lhs_output_view : pipeline.flow<tile<1xf32>>, view<2x1xf32>
-  pipeline.write %right_sum to %rhs_output_view : pipeline.flow<tile<1xf32>>, view<4x1xf32>
-  pipeline.return
-}
-)");
-  loom_pipeline_plan_t plan = {};
-  IREE_ASSERT_OK(BuildPlan(module.get(), IREE_SV("cadences"), &plan));
-  loom_pipeline_firing_plan_t firing = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_UNIMPLEMENTED,
-      loom_pipeline_firing_plan_build(&plan, &analysis_arena_, &firing));
-  EXPECT_EQ(firing.groups, nullptr);
-  EXPECT_EQ(firing.stage_indices, nullptr);
 }
 
 TEST_F(PipelinePlanTest, PreservesFixedRecordStorageAcrossPartitions) {

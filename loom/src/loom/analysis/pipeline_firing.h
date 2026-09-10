@@ -8,6 +8,7 @@
 #define LOOM_ANALYSIS_PIPELINE_FIRING_H_
 
 #include "loom/analysis/pipeline_plan.h"
+#include "loom/error/emitter.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,9 +56,12 @@ typedef struct loom_pipeline_firing_plan_t {
 // arena; all new storage belongs to |arena|. The source plan must outlive the
 // firing plan. Independent cadences and nested frame reductions require a
 // richer firing schedule and are rejected here, not guessed by a materializer.
+// Unsupported cadences emit a diagnostic and leave |out_valid| false and
+// |out_firing| empty. Status carries allocation or diagnostic-sink failures.
 iree_status_t loom_pipeline_firing_plan_build(
-    const loom_pipeline_plan_t* plan, iree_arena_allocator_t* arena,
-    loom_pipeline_firing_plan_t* out_firing);
+    const loom_pipeline_plan_t* plan,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    loom_pipeline_firing_plan_t* out_firing, bool* out_valid);
 
 #ifdef __cplusplus
 }  // extern "C"

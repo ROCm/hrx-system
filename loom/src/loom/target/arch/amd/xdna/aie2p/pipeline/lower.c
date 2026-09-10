@@ -998,7 +998,9 @@ static iree_status_t loom_aie2p_pipeline_emit_low_function(
 
 iree_status_t loom_aie2p_pipeline_lower_to_array_low(
     loom_module_t* module, loom_func_like_t pipeline,
-    const loom_value_fact_table_t* facts, loom_op_t** out_low_function) {
+    const loom_value_fact_table_t* facts,
+    iree_diagnostic_emitter_t diagnostic_emitter,
+    loom_op_t** out_low_function) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT(loom_func_like_isa(pipeline));
   IREE_ASSERT_ARGUMENT(facts);
@@ -1037,17 +1039,19 @@ iree_status_t loom_aie2p_pipeline_lower_to_array_low(
   if (iree_status_is_ok(status)) {
     status = loom_aie2p_pipeline_place_instances(&placement);
   }
+  bool valid = false;
   if (iree_status_is_ok(status)) {
     status = loom_aie2p_pipeline_composition_materialize(
-        module, &plan, &scratch_arena, &composition);
+        module, &plan, diagnostic_emitter, &scratch_arena, &composition,
+        &valid);
   }
   loom_op_t* low_function = NULL;
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && valid) {
     status = loom_aie2p_pipeline_emit_low_function(
         module, &plan, composition.instance_entries, &placement, &scratch_arena,
         &low_function);
   }
-  if (!iree_status_is_ok(status)) {
+  if (!iree_status_is_ok(status) || !valid) {
     if (low_function != NULL) {
       status = iree_status_join(status, loom_op_erase(module, low_function));
       low_function = NULL;
@@ -1055,7 +1059,7 @@ iree_status_t loom_aie2p_pipeline_lower_to_array_low(
     status = iree_status_join(
         status, loom_aie2p_pipeline_composition_erase(module, &composition));
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && valid) {
     status = loom_op_erase(module, pipeline.op);
     if (!iree_status_is_ok(status)) {
       status = iree_status_join(status, loom_op_erase(module, low_function));
@@ -1064,7 +1068,7 @@ iree_status_t loom_aie2p_pipeline_lower_to_array_low(
           status, loom_aie2p_pipeline_composition_erase(module, &composition));
     }
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && valid) {
     loom_module_link_symbol_defining_op(module, low_function,
                                         loom_op_vtable(module, low_function));
     *out_low_function = low_function;

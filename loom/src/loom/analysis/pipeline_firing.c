@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "loom/error/error_catalog.h"
+
 enum {
   LOOM_PIPELINE_FIRING_RECORD = 0,
   LOOM_PIPELINE_FIRING_COMPLETION = 1,
@@ -30,7 +32,10 @@ static const loom_pipeline_plan_flow_t* loom_pipeline_firing_stage_flow(
 }
 
 static iree_status_t loom_pipeline_firing_define_groups(
-    const loom_pipeline_plan_t* plan, loom_pipeline_firing_group_t* groups) {
+    const loom_pipeline_plan_t* plan,
+    iree_diagnostic_emitter_t diagnostic_emitter,
+    loom_pipeline_firing_group_t* groups, bool* out_valid) {
+  *out_valid = false;
   for (uint32_t i = 0; i < plan->stage_count; ++i) {
     const loom_pipeline_plan_stage_t* stage = &plan->stages[i];
     loom_pipeline_firing_group_t* group = &groups[stage->group_index];
@@ -43,11 +48,17 @@ static iree_status_t loom_pipeline_firing_define_groups(
     if (stage->fold_record_count != 0) {
       if (group->fold_count != 0 &&
           !loom_pipeline_firing_shapes_equal(group->record_shape, shape)) {
-        return iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "pipeline group %u folds require one record shape; stage %u "
-            "requires a separate or nested frame",
-            stage->group_index, i);
+        const loom_diagnostic_param_t params[] = {
+            loom_param_u32(stage->group_index),
+            loom_param_u32(i),
+        };
+        const loom_diagnostic_emission_t emission = {
+            .op = plan->pipeline.op,
+            .error = LOOM_ERR_LOWERING_056,
+            .params = params,
+            .param_count = IREE_ARRAYSIZE(params),
+        };
+        return iree_diagnostic_emit(diagnostic_emitter, &emission);
       }
       group->record_shape = shape;
       group->records_per_frame = stage->fold_record_count;
@@ -59,12 +70,16 @@ static iree_status_t loom_pipeline_firing_define_groups(
       group->frame_count = record_count;
     }
   }
+  *out_valid = true;
   return iree_ok_status();
 }
 
 static iree_status_t loom_pipeline_firing_classify_stages(
-    const loom_pipeline_plan_t* plan, loom_pipeline_firing_group_t* groups,
-    uint8_t* stage_phases) {
+    const loom_pipeline_plan_t* plan,
+    iree_diagnostic_emitter_t diagnostic_emitter,
+    loom_pipeline_firing_group_t* groups, uint8_t* stage_phases,
+    bool* out_valid) {
+  *out_valid = false;
   for (uint32_t i = 0; i < plan->stage_count; ++i) {
     const loom_pipeline_plan_stage_t* stage = &plan->stages[i];
     loom_pipeline_firing_group_t* group = &groups[stage->group_index];
@@ -92,21 +107,34 @@ static iree_status_t loom_pipeline_firing_classify_stages(
     if (!loom_pipeline_firing_shapes_equal(shape, group->record_shape)) {
       if (group->fold_count == 0 ||
           !loom_pipeline_firing_shapes_equal(shape, frame_shape)) {
-        return iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "pipeline group %u stage %u record shape is neither the shared "
-            "record cadence nor its completed frame",
-            stage->group_index, i);
+        const loom_diagnostic_param_t params[] = {
+            loom_param_u32(stage->group_index),
+            loom_param_u32(i),
+        };
+        const loom_diagnostic_emission_t emission = {
+            .op = plan->pipeline.op,
+            .error = LOOM_ERR_LOWERING_057,
+            .params = params,
+            .param_count = IREE_ARRAYSIZE(params),
+        };
+        return iree_diagnostic_emit(diagnostic_emitter, &emission);
       }
       is_completion = true;
     }
     if (is_completion &&
         (stage->fold_record_count != 0 ||
          !loom_pipeline_firing_shapes_equal(shape, frame_shape))) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "pipeline group %u stage %u requires nested frame execution",
-          stage->group_index, i);
+      const loom_diagnostic_param_t params[] = {
+          loom_param_u32(stage->group_index),
+          loom_param_u32(i),
+      };
+      const loom_diagnostic_emission_t emission = {
+          .op = plan->pipeline.op,
+          .error = LOOM_ERR_LOWERING_058,
+          .params = params,
+          .param_count = IREE_ARRAYSIZE(params),
+      };
+      return iree_diagnostic_emit(diagnostic_emitter, &emission);
     }
     stage_phases[i] = is_completion ? LOOM_PIPELINE_FIRING_COMPLETION
                                     : LOOM_PIPELINE_FIRING_RECORD;
@@ -116,13 +144,16 @@ static iree_status_t loom_pipeline_firing_classify_stages(
       ++group->record_stage_count;
     }
   }
+  *out_valid = true;
   return iree_ok_status();
 }
 
 iree_status_t loom_pipeline_firing_plan_build(
-    const loom_pipeline_plan_t* plan, iree_arena_allocator_t* arena,
-    loom_pipeline_firing_plan_t* out_firing) {
+    const loom_pipeline_plan_t* plan,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    loom_pipeline_firing_plan_t* out_firing, bool* out_valid) {
   *out_firing = (loom_pipeline_firing_plan_t){0};
+  *out_valid = false;
   loom_pipeline_firing_group_t* groups = NULL;
   uint32_t* stage_indices = NULL;
   uint8_t* stage_phases = NULL;
@@ -137,9 +168,13 @@ iree_status_t loom_pipeline_firing_plan_build(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, plan->group_count, 2 * sizeof(*positions), (void**)&positions));
   memset(groups, 0, plan->group_count * sizeof(*groups));
-  IREE_RETURN_IF_ERROR(loom_pipeline_firing_define_groups(plan, groups));
-  IREE_RETURN_IF_ERROR(
-      loom_pipeline_firing_classify_stages(plan, groups, stage_phases));
+  bool valid = false;
+  IREE_RETURN_IF_ERROR(loom_pipeline_firing_define_groups(
+      plan, diagnostic_emitter, groups, &valid));
+  if (!valid) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_pipeline_firing_classify_stages(
+      plan, diagnostic_emitter, groups, stage_phases, &valid));
+  if (!valid) return iree_ok_status();
   uint32_t stage_start = 0;
   for (uint32_t i = 0; i < plan->group_count; ++i) {
     groups[i].stage_start = stage_start;
@@ -155,5 +190,6 @@ iree_status_t loom_pipeline_firing_plan_build(
       .groups = groups,
       .stage_indices = stage_indices,
   };
+  *out_valid = true;
   return iree_ok_status();
 }

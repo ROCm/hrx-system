@@ -37,9 +37,9 @@ iree_status_t loom_aie2p_pipeline_lower_run(loom_pass_t* pass,
 
   loom_op_t* low_function = NULL;
   iree_status_t status = loom_aie2p_pipeline_lower_to_array_low(
-      module, function, facts, &low_function);
+      module, function, facts, pass->diagnostic_emitter, &low_function);
   loom_pass_value_fact_owner_invalidate(pass->value_facts);
-  if (!iree_status_is_ok(status)) return status;
+  if (!iree_status_is_ok(status) || low_function == NULL) return status;
 
   if (pass->function_version != NULL) {
     loom_function_version_update(pass->function_version,

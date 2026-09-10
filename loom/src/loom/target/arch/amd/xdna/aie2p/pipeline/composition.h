@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/pipeline_plan.h"
+#include "loom/error/emitter.h"
 #include "loom/ir/module.h"
 
 #ifdef __cplusplus
@@ -36,10 +37,12 @@ typedef struct loom_aie2p_pipeline_composition_t {
 // inline logical stage bodies in graph order, and use private local buffers for
 // internal pointwise flows. Composition happens in source IR so target entry
 // buffers remain ordinary values until the composite reaches source-to-Low.
+// Unsupported firing contracts emit a diagnostic and leave |out_valid| false.
+// Status carries construction or diagnostic-sink failures.
 iree_status_t loom_aie2p_pipeline_composition_materialize(
     loom_module_t* module, const loom_pipeline_plan_t* plan,
-    iree_arena_allocator_t* arena,
-    loom_aie2p_pipeline_composition_t* out_composition);
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    loom_aie2p_pipeline_composition_t* out_composition, bool* out_valid);
 
 // Erases source callables synthesized by |composition|.
 iree_status_t loom_aie2p_pipeline_composition_erase(

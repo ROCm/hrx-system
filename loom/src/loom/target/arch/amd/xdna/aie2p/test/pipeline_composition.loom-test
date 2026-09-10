@@ -1,0 +1,204 @@
+// RUN: pass aie2p-lower-pipeline
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+// ERROR@+1: TARGET/086 {group="0", flow="2", capacity="2"}
+pipeline.def<kernel> public retain target(@array_target) @buffered_composite_array() launch(%input: buffer, %output: buffer) {
+  %lane_count = index.constant 1 : index
+  %ring_capacity = index.constant 2 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lane_count : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<2x16xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<2x16xi32>
+  %input_flow = pipeline.read %input_view on %workers : view<2x16xi32>, group -> pipeline.flow<tile<16xi32>>
+  %intermediate_flow = pipeline.stage @copy_i32x16 on %workers(%input_flow) : (group, pipeline.flow<tile<16xi32>>) -> (pipeline.flow<tile<16xi32>>)
+  %buffered_flow = pipeline.buffer %intermediate_flow capacity %ring_capacity : (pipeline.flow<tile<16xi32>>, index) -> pipeline.flow<tile<16xi32>>
+  %output_flow = pipeline.stage @copy_i32x16 on %workers(%buffered_flow) : (group, pipeline.flow<tile<16xi32>>) -> (pipeline.flow<tile<16xi32>>)
+  pipeline.write %output_flow to %output_view : pipeline.flow<tile<16xi32>>, view<2x16xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @copy_i32x16(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16xi32>
+  %value = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
+  vector.store %value, %output_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+// ====
+// RUN: pass aie2p-lower-pipeline
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+// ERROR@+1: TARGET/084 {group="0"}
+pipeline.def<kernel> public retain target(@array_target) @folded_composite_array() launch(%input: buffer, %output: buffer) {
+  %lane_count = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lane_count : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<2x16xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi32>
+  %input_flow = pipeline.read %input_view on %workers : view<2x16xi32>, group -> pipeline.flow<tile<16xi32>>
+  %record_flow = pipeline.stage @copy_i32x16 on %workers(%input_flow) : (group, pipeline.flow<tile<16xi32>>) -> (pipeline.flow<tile<16xi32>>)
+  %folded_flow = pipeline.fold<addi> %record_flow : pipeline.flow<tile<16xi32>>
+  %output_flow = pipeline.stage @copy_i32x16 on %workers(%folded_flow) : (group, pipeline.flow<tile<16xi32>>) -> (pipeline.flow<tile<16xi32>>)
+  pipeline.write %output_flow to %output_view : pipeline.flow<tile<16xi32>>, view<16xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @copy_i32x16(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16xi32>
+  %value = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
+  vector.store %value, %output_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+// ====
+// RUN: pass aie2p-lower-pipeline
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+// ERROR@+1: LOWERING/057 {group="0", stage="1"}
+pipeline.def<kernel> public retain target(@array_target) @rate_changed_composite_array() launch(%short_input: buffer, %long_input: buffer, %short_output: buffer, %long_output: buffer) {
+  %lane_count = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lane_count : index -> group
+  %short_input_view = buffer.view %short_input[%base] : buffer -> view<2x16xi32>
+  %long_input_view = buffer.view %long_input[%base] : buffer -> view<3x16xi32>
+  %short_output_view = buffer.view %short_output[%base] : buffer -> view<2x16xi32>
+  %long_output_view = buffer.view %long_output[%base] : buffer -> view<3x16xi32>
+  %short_input_flow = pipeline.read %short_input_view on %workers : view<2x16xi32>, group -> pipeline.flow<tile<16xi32>>
+  %long_input_flow = pipeline.read %long_input_view on %workers : view<3x16xi32>, group -> pipeline.flow<tile<16xi32>>
+  %short_output_flow = pipeline.stage @copy_i32x16 on %workers(%short_input_flow) : (group, pipeline.flow<tile<16xi32>>) -> (pipeline.flow<tile<16xi32>>)
+  %long_output_flow = pipeline.stage @copy_i32x16 on %workers(%long_input_flow) : (group, pipeline.flow<tile<16xi32>>) -> (pipeline.flow<tile<16xi32>>)
+  pipeline.write %short_output_flow to %short_output_view : pipeline.flow<tile<16xi32>>, view<2x16xi32>
+  pipeline.write %long_output_flow to %long_output_view : pipeline.flow<tile<16xi32>>, view<3x16xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @copy_i32x16(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16xi32>
+  %value = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
+  vector.store %value, %output_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+// ====
+// RUN: pass aie2p-lower-pipeline
+
+// Equal element counts do not make different frame boundaries compatible.
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+func.def target(@core_target) @copy(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 4} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xf32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xf32>
+  %value = view.load %input_view[0] : view<1xf32> -> f32
+  view.store %value, %output_view[0] : f32, view<1xf32>
+  func.return
+}
+
+// ERROR@+1: LOWERING/056 {group="0", stage="1"}
+pipeline.def<kernel> public retain target(@array_target) @cadences() launch(%lhs: buffer, %rhs: buffer, %lhs_output: buffer, %rhs_output: buffer) {
+  %lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lanes : index -> group
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<2x4x1xf32>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<4x2x1xf32>
+  %lhs_output_view = buffer.view %lhs_output[%base] : buffer -> view<2x1xf32>
+  %rhs_output_view = buffer.view %rhs_output[%base] : buffer -> view<4x1xf32>
+  %left = pipeline.read %lhs_view on %workers : view<2x4x1xf32>, group -> pipeline.flow<tile<1xf32>>
+  %right = pipeline.read %rhs_view on %workers : view<4x2x1xf32>, group -> pipeline.flow<tile<1xf32>>
+  %left_records = pipeline.stage @copy on %workers(%left) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %right_records = pipeline.stage @copy on %workers(%right) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %left_sum = pipeline.fold<addf> %left_records : pipeline.flow<tile<1xf32>>
+  %right_sum = pipeline.fold<addf> %right_records : pipeline.flow<tile<1xf32>>
+  pipeline.write %left_sum to %lhs_output_view : pipeline.flow<tile<1xf32>>, view<2x1xf32>
+  pipeline.write %right_sum to %rhs_output_view : pipeline.flow<tile<1xf32>>, view<4x1xf32>
+  pipeline.return
+}
+
+// ====
+// RUN: pass aie2p-lower-pipeline
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+func.def target(@core_target) @copy(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 4} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xf32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xf32>
+  %value = view.load %input_view[0] : view<1xf32> -> f32
+  view.store %value, %output_view[0] : f32, view<1xf32>
+  func.return
+}
+
+// ERROR@+1: LOWERING/058 {group="0", stage="1"}
+pipeline.def<kernel> public retain target(@array_target) @nested_frame() launch(%input: buffer, %output: buffer) {
+  %lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lanes : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32>
+  %input_flow = pipeline.read %input_view on %workers : view<1xf32>, group -> pipeline.flow<tile<1xf32>>
+  %first = pipeline.stage @copy on %workers(%input_flow) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %first_sum = pipeline.fold<addf> %first : pipeline.flow<tile<1xf32>>
+  %second = pipeline.stage @copy on %workers(%first_sum) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %second_sum = pipeline.fold<addf> %second : pipeline.flow<tile<1xf32>>
+  pipeline.write %second_sum to %output_view : pipeline.flow<tile<1xf32>>, view<1xf32>
+  pipeline.return
+}
+
+// ====
+// RUN: pass aie2p-lower-pipeline
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+func.def target(@core_target) @copy(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 4} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xf32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xf32>
+  %value = view.load %input_view[0] : view<1xf32> -> f32
+  view.store %value, %output_view[0] : f32, view<1xf32>
+  func.return
+}
+
+// ERROR@+1: TARGET/085 {group="0"}
+pipeline.def<kernel> public retain target(@array_target) @mixed_outputs() launch(%input: buffer, %records_output: buffer, %sum_output: buffer) {
+  %lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lanes : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<2x1xf32>
+  %records_view = buffer.view %records_output[%base] : buffer -> view<2x1xf32>
+  %sum_view = buffer.view %sum_output[%base] : buffer -> view<1xf32>
+  %input_flow = pipeline.read %input_view on %workers : view<2x1xf32>, group -> pipeline.flow<tile<1xf32>>
+  %left = pipeline.stage @copy on %workers(%input_flow) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %right = pipeline.stage @copy on %workers(%input_flow) : (group, pipeline.flow<tile<1xf32>>) -> (pipeline.flow<tile<1xf32>>)
+  %sum = pipeline.fold<addf> %right : pipeline.flow<tile<1xf32>>
+  pipeline.write %left to %records_view : pipeline.flow<tile<1xf32>>, view<2x1xf32>
+  pipeline.write %sum to %sum_view : pipeline.flow<tile<1xf32>>, view<1xf32>
+  pipeline.return
+}

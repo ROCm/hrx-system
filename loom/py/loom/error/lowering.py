@@ -655,6 +655,54 @@ ERR_LOWERING_055 = ErrorDef(
     ),
 )
 
+# ERR_LOWERING_056: Pipeline folds require different record shapes.
+ERR_LOWERING_056 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=56,
+    severity=Severity.ERROR,
+    summary="Pipeline folds require different record shapes.",
+    message=(
+        "pipeline group {group} folds require one record shape; stage "
+        "{stage} requires a separate or nested frame"
+    ),
+    params=(
+        ErrorParam("group", ParamKind.U32),
+        ErrorParam("stage", ParamKind.U32),
+    ),
+    fix_hint="Place folds with different record shapes in separate groups.",
+)
+
+# ERR_LOWERING_057: Pipeline stage has an incompatible record cadence.
+ERR_LOWERING_057 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=57,
+    severity=Severity.ERROR,
+    summary="Pipeline stage has an incompatible record cadence.",
+    message=(
+        "pipeline group {group} stage {stage} record shape is neither the "
+        "shared record cadence nor its completed frame"
+    ),
+    params=(
+        ErrorParam("group", ParamKind.U32),
+        ErrorParam("stage", ParamKind.U32),
+    ),
+    fix_hint="Place stages with independent record cadences in separate groups.",
+)
+
+# ERR_LOWERING_058: Pipeline stage requires nested frame execution.
+ERR_LOWERING_058 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=58,
+    severity=Severity.ERROR,
+    summary="Pipeline stage requires nested frame execution.",
+    message="pipeline group {group} stage {stage} requires nested frame execution",
+    params=(
+        ErrorParam("group", ParamKind.U32),
+        ErrorParam("stage", ParamKind.U32),
+    ),
+    fix_hint="Place nested folds in separate groups.",
+)
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -688,4 +736,7 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_053,
     ERR_LOWERING_054,
     ERR_LOWERING_055,
+    ERR_LOWERING_056,
+    ERR_LOWERING_057,
+    ERR_LOWERING_058,
 )

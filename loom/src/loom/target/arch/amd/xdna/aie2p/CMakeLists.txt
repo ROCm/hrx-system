@@ -364,6 +364,8 @@ loom_cc_library(
     loom::analysis::pipeline_firing
     loom::analysis::pipeline_plan
     loom::codegen::low::builder
+    loom::error::emitter
+    loom::error::error_defs
     loom::ir
     loom::ops::buffer
     loom::ops::func
@@ -458,6 +460,7 @@ loom_check_test_suite(
     "test/descriptors/fifo.loom-test"
     "test/descriptors/fused_vector_memory.loom-test"
     "test/module_contracts.loom-test"
+    "test/pipeline_composition.loom-test"
     "test/source_low/function_storage.loom-test"
     "test/source_low/fused_packet_memory.loom-test"
     "test/source_low/index_conversion.loom-test"

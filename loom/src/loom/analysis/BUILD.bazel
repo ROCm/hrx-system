@@ -430,6 +430,8 @@ loom_cc_library(
     hdrs = ["pipeline_firing.h"],
     deps = [
         ":pipeline_plan",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

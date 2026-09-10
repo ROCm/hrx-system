@@ -10,6 +10,7 @@
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_LOWER_H_
 
 #include "iree/base/api.h"
+#include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 #include "loom/util/fact_table.h"
 
@@ -21,9 +22,12 @@ extern "C" {
 // program. Exact SSA facts select group cardinalities, buffer capacities, and
 // dynamic tile dimensions. The source function is replaced only after the
 // complete array Low function has been constructed successfully.
+// A diagnosed unsupported firing contract leaves |out_low_function| NULL and
+// preserves the source function; status carries construction or sink failures.
 iree_status_t loom_aie2p_pipeline_lower_to_array_low(
     loom_module_t* module, loom_func_like_t pipeline,
-    const loom_value_fact_table_t* facts, loom_op_t** out_low_function);
+    const loom_value_fact_table_t* facts,
+    iree_diagnostic_emitter_t diagnostic_emitter, loom_op_t** out_low_function);
 
 #ifdef __cplusplus
 }  // extern "C"

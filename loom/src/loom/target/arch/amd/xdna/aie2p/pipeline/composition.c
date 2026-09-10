@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "loom/analysis/pipeline_firing.h"
+#include "loom/error/error_catalog.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
@@ -39,13 +40,20 @@ static bool loom_aie2p_pipeline_composition_flow_is_internal(
 
 static iree_status_t loom_aie2p_pipeline_composition_validate_group(
     const loom_pipeline_plan_t* plan, const loom_pipeline_firing_plan_t* firing,
-    uint32_t group_index) {
+    uint32_t group_index, iree_diagnostic_emitter_t diagnostic_emitter,
+    bool* out_valid) {
+  *out_valid = false;
   const loom_pipeline_firing_group_t* group_firing =
       &firing->groups[group_index];
   if (group_firing->completion_stage_count != 0) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "AIE2P frame-completion stages require a phased worker program");
+    const loom_diagnostic_param_t params[] = {loom_param_u32(group_index)};
+    const loom_diagnostic_emission_t emission = {
+        .op = plan->pipeline.op,
+        .error = LOOM_ERR_TARGET_084,
+        .params = params,
+        .param_count = IREE_ARRAYSIZE(params),
+    };
+    return iree_diagnostic_emit(diagnostic_emitter, &emission);
   }
   const loom_pipeline_plan_group_t* group = &plan->groups[group_index];
   const loom_pipeline_plan_instance_t* instance =
@@ -53,10 +61,14 @@ static iree_status_t loom_aie2p_pipeline_composition_validate_group(
   if (group_firing->fold_count != 0 &&
       (instance->fold_record_count != group_firing->records_per_frame ||
        instance->fold_output_count != group_firing->fold_count)) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "AIE2P folded worker requires compatible folds on every boundary "
-        "output; mixed cadences require a phased worker program");
+    const loom_diagnostic_param_t params[] = {loom_param_u32(group_index)};
+    const loom_diagnostic_emission_t emission = {
+        .op = plan->pipeline.op,
+        .error = LOOM_ERR_TARGET_085,
+        .params = params,
+        .param_count = IREE_ARRAYSIZE(params),
+    };
+    return iree_diagnostic_emit(diagnostic_emitter, &emission);
   }
   for (uint32_t i = 0; i < group_firing->record_stage_count; ++i) {
     const uint32_t stage_index =
@@ -69,13 +81,22 @@ static iree_status_t loom_aie2p_pipeline_composition_validate_group(
       const loom_pipeline_plan_flow_t* flow = &plan->flows[flow_index];
       if (loom_aie2p_pipeline_composition_flow_is_internal(flow, group_index) &&
           flow->minimum_capacity > 1) {
-        return iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "AIE2P buffered same-group pipeline flow requires a composite "
-            "ring state machine");
+        const loom_diagnostic_param_t params[] = {
+            loom_param_u32(group_index),
+            loom_param_u32(flow_index),
+            loom_param_u32(flow->minimum_capacity),
+        };
+        const loom_diagnostic_emission_t emission = {
+            .op = plan->pipeline.op,
+            .error = LOOM_ERR_TARGET_086,
+            .params = params,
+            .param_count = IREE_ARRAYSIZE(params),
+        };
+        return iree_diagnostic_emit(diagnostic_emitter, &emission);
       }
     }
   }
+  *out_valid = true;
   return iree_ok_status();
 }
 
@@ -414,11 +435,15 @@ iree_status_t loom_aie2p_pipeline_composition_erase(
 
 iree_status_t loom_aie2p_pipeline_composition_materialize(
     loom_module_t* module, const loom_pipeline_plan_t* plan,
-    iree_arena_allocator_t* arena,
-    loom_aie2p_pipeline_composition_t* out_composition) {
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    loom_aie2p_pipeline_composition_t* out_composition, bool* out_valid) {
   *out_composition = (loom_aie2p_pipeline_composition_t){0};
+  *out_valid = false;
   loom_pipeline_firing_plan_t firing = {0};
-  IREE_RETURN_IF_ERROR(loom_pipeline_firing_plan_build(plan, arena, &firing));
+  bool valid = false;
+  IREE_RETURN_IF_ERROR(loom_pipeline_firing_plan_build(plan, diagnostic_emitter,
+                                                       arena, &firing, &valid));
+  if (!valid) return iree_ok_status();
   loom_symbol_ref_t* instance_entries = NULL;
   IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_composition_allocate_array(
       arena, plan->instance_count, sizeof(*instance_entries),
@@ -445,7 +470,8 @@ iree_status_t loom_aie2p_pipeline_composition_materialize(
     group_targets[group_index] = loom_symbol_ref_null();
     if (plan->groups[group_index].stage_count == 1) continue;
     IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_composition_validate_group(
-        plan, &firing, group_index));
+        plan, &firing, group_index, diagnostic_emitter, &valid));
+    if (!valid) return iree_ok_status();
     IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_composition_group_target(
         module, plan, group_index, &group_targets[group_index]));
   }
@@ -470,7 +496,9 @@ iree_status_t loom_aie2p_pipeline_composition_materialize(
     }
   }
   loom_rewriter_deinitialize(&rewriter);
-  if (!iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status)) {
+    *out_valid = true;
+  } else {
     status = iree_status_join(
         status, loom_aie2p_pipeline_composition_erase(module, out_composition));
   }
