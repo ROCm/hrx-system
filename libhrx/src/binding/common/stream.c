@@ -314,6 +314,7 @@ iree_status_t iree_hal_streaming_stream_create(
   stream->queue = queue;
   iree_hal_queue_retain(stream->queue);
   stream->cooperative_queue = NULL;
+  stream->value_wait_queue = NULL;
   stream->memory_reuse_dependencies = NULL;
   stream->memory_reuse_dependency_count = 0;
   stream->memory_reuse_dependency_capacity = 0;
@@ -405,11 +406,14 @@ static void iree_hal_streaming_stream_destroy(
     if (stream->context == context) {
       iree_hal_queue_t* queue = stream->queue;
       iree_hal_queue_t* cooperative_queue = stream->cooperative_queue;
+      iree_hal_queue_t* value_wait_queue = stream->value_wait_queue;
       stream->queue = NULL;
       stream->cooperative_queue = NULL;
+      stream->value_wait_queue = NULL;
       stream->context = NULL;
       iree_slim_mutex_unlock(&stream->mutex);
       iree_hal_queue_release(cooperative_queue);
+      iree_hal_queue_release(value_wait_queue);
       iree_hal_queue_release(queue);
     } else {
       iree_slim_mutex_unlock(&stream->mutex);

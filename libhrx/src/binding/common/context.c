@@ -147,7 +147,6 @@ iree_status_t iree_hal_streaming_context_create(
   context->stream_wait_frontier = NULL;
   context->event_record_timeline = (iree_hal_streaming_operation_timeline_t){0};
   iree_slim_mutex_initialize(&context->event_record_mutex);
-  context->stream_value_wait_queue = NULL;
 
   // Initialize default limits.
   // These are typical defaults matching CUDA/HIP behavior.
@@ -303,16 +302,20 @@ static void iree_hal_streaming_context_destroy(
     iree_hal_streaming_stream_t* stream = context->streams[i];
     iree_hal_queue_t* queue = NULL;
     iree_hal_queue_t* cooperative_queue = NULL;
+    iree_hal_queue_t* value_wait_queue = NULL;
     iree_slim_mutex_lock(&stream->mutex);
     if (stream->context == context) {
       queue = stream->queue;
       cooperative_queue = stream->cooperative_queue;
+      value_wait_queue = stream->value_wait_queue;
       stream->queue = NULL;
       stream->cooperative_queue = NULL;
+      stream->value_wait_queue = NULL;
       stream->context = NULL;
     }
     iree_slim_mutex_unlock(&stream->mutex);
     iree_hal_queue_release(cooperative_queue);
+    iree_hal_queue_release(value_wait_queue);
     iree_hal_queue_release(queue);
   }
   for (iree_host_size_t i = 0; i < detached_stream_count; ++i) {
@@ -322,11 +325,6 @@ static void iree_hal_streaming_context_destroy(
 
   // Now release the context's reference to default stream.
   iree_hal_streaming_stream_release(default_stream);
-
-  // The value-wait queue is acquired lazily and can only be released after all
-  // stream work that may reference it has completed.
-  iree_hal_queue_release(context->stream_value_wait_queue);
-  context->stream_value_wait_queue = NULL;
 
   // Free stream tracking resources.
   if (context->streams) {

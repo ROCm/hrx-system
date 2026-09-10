@@ -84,6 +84,15 @@ hrx_status_t hrx_buffer_table_find_range(hrx_buffer_table_t* table,
                                          size_t* out_offset,
                                          void** out_user_data);
 
+// Looks up a buffer containing the entire range [any_ptr, any_ptr + size) and
+// retains it before releasing the table lock. On success, |out_buffer| must be
+// released by the caller. This is the lookup form for operations that continue
+// using allocation metadata after the lookup returns.
+hrx_status_t hrx_buffer_table_find_range_retain(hrx_buffer_table_t* table,
+                                                uint64_t any_ptr, size_t size,
+                                                hrx_buffer_t* out_buffer,
+                                                size_t* out_offset);
+
 #ifdef __cplusplus
 }
 #endif

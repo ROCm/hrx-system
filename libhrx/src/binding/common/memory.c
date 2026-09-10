@@ -514,6 +514,74 @@ iree_status_t iree_hal_streaming_memory_lookup_range_across_contexts(
                : iree_status_from_code(IREE_STATUS_NOT_FOUND);
 }
 
+iree_status_t iree_hal_streaming_memory_lookup_range_retain(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_deviceptr_t device_ptr, iree_device_size_t size,
+    iree_hal_streaming_retained_buffer_ref_t* out_ref) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(out_ref);
+  memset(out_ref, 0, sizeof(*out_ref));
+
+  size_t offset = 0;
+  hrx_buffer_t owner = NULL;
+  IREE_RETURN_IF_ERROR(HRX_CALL(hrx_buffer_table_find_range_retain(
+      &context->buffer_table, device_ptr, (size_t)size, &owner, &offset)));
+  if (IREE_UNLIKELY(!owner || !owner->hal_buffer)) {
+    hrx_buffer_release(owner);
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "registered allocation has no HAL buffer");
+  }
+
+  out_ref->owner = owner;
+  out_ref->buffer = owner->hal_buffer;
+  out_ref->offset = (iree_device_size_t)offset;
+  out_ref->memory_type = iree_hal_buffer_memory_type(owner->hal_buffer);
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_memory_lookup_range_retain_across_contexts(
+    iree_hal_streaming_deviceptr_t device_ptr, iree_device_size_t size,
+    iree_hal_streaming_retained_buffer_ref_t* out_ref) {
+  IREE_ASSERT_ARGUMENT(out_ref);
+  memset(out_ref, 0, sizeof(*out_ref));
+
+  iree_hal_streaming_device_registry_t* device_registry =
+      iree_hal_streaming_device_registry();
+  if (!device_registry) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "HAL stream layer not initialized");
+  }
+
+  iree_status_t result = iree_status_from_code(IREE_STATUS_NOT_FOUND);
+  iree_slim_mutex_lock(&device_registry->context_list.mutex);
+  for (iree_hal_streaming_context_t* context =
+           device_registry->context_list.head;
+       context; context = context->context_list_entry.next) {
+    iree_status_t status = iree_hal_streaming_memory_lookup_range_retain(
+        context, device_ptr, size, out_ref);
+    if (iree_status_is_ok(status)) {
+      iree_status_free(result);
+      result = iree_ok_status();
+      break;
+    }
+    if (iree_status_code(status) != IREE_STATUS_NOT_FOUND) {
+      iree_status_free(result);
+      result = status;
+      break;
+    }
+    iree_status_ignore(status);
+  }
+  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
+  return result;
+}
+
+void iree_hal_streaming_retained_buffer_ref_deinitialize(
+    iree_hal_streaming_retained_buffer_ref_t* ref) {
+  if (!ref) return;
+  hrx_buffer_release(ref->owner);
+  memset(ref, 0, sizeof(*ref));
+}
+
 iree_status_t iree_hal_streaming_memory_allocate_device(
     iree_hal_streaming_context_t* context, iree_device_size_t size,
     iree_hal_streaming_memory_flags_t flags,

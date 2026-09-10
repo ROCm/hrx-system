@@ -14,8 +14,7 @@ iree_hal_queue_family_spec_t MakeValueWaitFamily(uint32_t queue_count = 1) {
   iree_hal_queue_family_spec_t family = {};
   family.provisioned_queue_count = queue_count;
   family.physical_device_affinity = UINT64_C(1) << 0;
-  family.role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL |
-                      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC;
+  family.role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC;
   family.zero_compute_atomic_capabilities.operations.device_scope_32 =
       IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
   family.zero_compute_atomic_capabilities.operations.device_scope_64 =
@@ -78,12 +77,14 @@ TEST(StreamQueueCapabilitiesTest, RejectsComputeBackedWaits) {
   EXPECT_FALSE(iree_hal_streaming_queue_family_supports_value_waits(&family));
 }
 
-TEST(StreamQueueCapabilitiesTest, RequiresAtomicAndHostCallRoles) {
+TEST(StreamQueueCapabilitiesTest, DoesNotRequireHostCallRole) {
   iree_hal_queue_family_spec_t family = MakeValueWaitFamily();
-  family.role_flags &= ~IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL;
-  EXPECT_FALSE(iree_hal_streaming_queue_family_supports_value_waits(&family));
+  family.role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL;
+  EXPECT_TRUE(iree_hal_streaming_queue_family_supports_value_waits(&family));
+}
 
-  family = MakeValueWaitFamily();
+TEST(StreamQueueCapabilitiesTest, RequiresAtomicRole) {
+  iree_hal_queue_family_spec_t family = MakeValueWaitFamily();
   family.role_flags &= ~IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC;
   EXPECT_FALSE(iree_hal_streaming_queue_family_supports_value_waits(&family));
 }
