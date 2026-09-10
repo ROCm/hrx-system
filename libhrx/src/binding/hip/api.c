@@ -82,6 +82,34 @@ static void iree_hip_sanitize_device_name(char* name) {
   }
 }
 
+static const iree_hal_physical_device_identity_t*
+iree_hip_physical_device_identity(const iree_hal_streaming_device_t* device) {
+  const iree_hal_device_identity_spec_t* logical_identity =
+      iree_hal_device_spec_identity(iree_hal_device_spec(device->hal_device));
+  if (!logical_identity || logical_identity->physical_device_count == 0) {
+    return NULL;
+  }
+  for (iree_host_size_t i = 0; i < logical_identity->physical_device_count;
+       ++i) {
+    const iree_hal_physical_device_spec_t* physical_device =
+        &logical_identity->physical_devices[i];
+    if (physical_device->physical_ordinal == device->ordinal) {
+      return &physical_device->identity;
+    }
+  }
+  // A logical device containing one physical device has an unambiguous
+  // identity even when its backend ordinal differs from the HIP ordinal.
+  if (logical_identity->physical_device_count == 1) {
+    return &logical_identity->physical_devices[0].identity;
+  }
+  return NULL;
+}
+
+static void iree_hip_copy_device_uuid(const iree_hal_uuid_t* source,
+                                      hipUUID* target) {
+  memcpy(target->bytes, source->bytes, sizeof(target->bytes));
+}
+
 HIPAPI int hrx_hip_binding_active(void) { return 1; }
 
 HIPAPI void hrx_hip_binding_info(hrx_hip_info_t* out_info) {
@@ -954,6 +982,7 @@ static hipError_t iree_hip_get_per_thread_stream_state(
 }
 
 static void iree_hip_thread_error_set(hipError_t error, bool sticky) {
+  if (iree_hip_thread_error.sticky && !sticky) return;
   iree_hip_thread_error.last_error = error;
   iree_hip_thread_error.sticky = sticky;
 }
@@ -1080,6 +1109,8 @@ static hipError_t iree_status_to_hip_result(iree_status_t status) {
       return hipErrorNotReady;
     case IREE_STATUS_FAILED_PRECONDITION:
       return hipErrorNotInitialized;
+    case IREE_STATUS_ABORTED:
+      return hipErrorIllegalAddress;
     default:
       return hipErrorUnknown;
   }
@@ -1429,6 +1460,9 @@ static bool iree_hip_no_visible_devices_requested(void) {
 }
 
 static hipError_t iree_hip_ensure_initialized(void) {
+  if (iree_hip_thread_error.sticky) {
+    return iree_hip_thread_error_peek();
+  }
   if (iree_hip_no_visible_devices_requested()) {
     return hipErrorNoDevice;
   }
@@ -1858,6 +1892,41 @@ HIPAPI hipError_t hipGetDevice(int* device) {
   return hipSuccess;
 }
 
+static IREE_THREAD_LOCAL bool iree_hip_device_was_explicitly_selected = false;
+
+static hipError_t iree_hip_set_current_device(int device,
+                                              bool explicit_selection) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  hipError_t init_result = iree_hip_ensure_initialized();
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
+  }
+
+  iree_hal_streaming_device_t* device_obj =
+      iree_hal_streaming_device_entry(device);
+  if (!device_obj) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  }
+
+  iree_hal_streaming_context_t* primary_context = NULL;
+  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_streaming_device_get_or_create_primary_context(device_obj,
+                                                              &primary_context),
+      hipErrorOutOfMemory);
+
+  iree_hal_streaming_context_set_current(primary_context);
+  if (explicit_selection) {
+    iree_hip_device_was_explicitly_selected = true;
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return hipSuccess;
+}
+
 // Sets the current device for the calling thread.
 //
 // Parameters:
@@ -1886,37 +1955,29 @@ HIPAPI hipError_t hipGetDevice(int* device) {
 //
 // See also: hipGetDevice, hipGetDeviceCount, hipDeviceReset.
 HIPAPI hipError_t hipSetDevice(int device) {
-  IREE_TRACE_ZONE_BEGIN(z0);
+  return iree_hip_set_current_device(device, /*explicit_selection=*/true);
+}
 
-  // First ensure runtime is initialized.
-  // hipSetDevice() is often the first HIP call in applications.
-  hipError_t init_result = iree_hip_ensure_initialized();
-  if (init_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+HIPAPI hipError_t hipSetValidDevices(int* device_arr, int len) {
+  int device_count = 0;
+  hipError_t result = hipGetDeviceCount(&device_count);
+  if (result != hipSuccess) return result;
+  if (len < 0 || len > device_count || (len > 0 && !device_arr)) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Get the device.
-  iree_hal_streaming_device_t* device_obj =
-      iree_hal_streaming_device_entry(device);
-  if (!device_obj) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  for (int i = 0; i < len; ++i) {
+    if (device_arr[i] < 0 || device_arr[i] >= device_count) {
+      HIP_RETURN_ERROR(hipErrorInvalidDevice);
+    }
   }
 
-  // Get or create the primary context lazily.
-  iree_hal_streaming_context_t* primary_context = NULL;
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_device_get_or_create_primary_context(device_obj,
-                                                              &primary_context),
-      hipErrorOutOfMemory);
-
-  // Switch to the primary context for the device.
-  iree_hal_streaming_context_set_current(primary_context);
-
-  IREE_TRACE_ZONE_END(z0);
-  return hipSuccess;
+  // The valid-device list selects the initial device for this thread. An
+  // explicit hipSetDevice call takes precedence over later preference lists.
+  if (iree_hip_device_was_explicitly_selected) return hipSuccess;
+  const int selected_device = len > 0 ? device_arr[0] : 0;
+  return iree_hip_set_current_device(selected_device,
+                                     /*explicit_selection=*/false);
 }
 
 // Gets the number of HIP-capable devices.
@@ -2143,6 +2204,8 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
 
   const bool is_gfx1100 = strncmp(prop->gcnArchName, "gfx1100", 7) == 0;
   const bool is_gfx942 = strncmp(prop->gcnArchName, "gfx942", 6) == 0;
+  const iree_hal_physical_device_identity_t* physical_identity =
+      iree_hip_physical_device_identity(device_obj);
   prop->totalGlobalMem = (size_t)total_memory;
   prop->sharedMemPerBlock = device_obj->max_shared_memory_per_block;
   prop->regsPerBlock = device_obj->max_registers_per_block;
@@ -2211,9 +2274,18 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->surfaceAlignment = 0;
   prop->concurrentKernels = 1;
   prop->ECCEnabled = 0;
-  prop->pciBusID = is_gfx1100 ? 227 : device;
-  prop->pciDeviceID = 0;
-  prop->pciDomainID = 0;
+  if (physical_identity &&
+      iree_all_bits_set(physical_identity->flags,
+                        IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS)) {
+    prop->pciBusID = physical_identity->pci.bus;
+    prop->pciDeviceID = physical_identity->pci.device;
+    prop->pciDomainID = physical_identity->pci.domain;
+  }
+  if (physical_identity &&
+      iree_all_bits_set(physical_identity->flags,
+                        IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_UUID)) {
+    iree_hip_copy_device_uuid(&physical_identity->uuid, &prop->uuid);
+  }
   prop->tccDriver = 0;
   prop->asyncEngineCount = 2;
   prop->unifiedAddressing = 1;
@@ -2326,14 +2398,14 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
                                         int device) {
   HIP_DEBUG_LOG("[HIP_API] hipDeviceGetAttribute(attr=%d, device=%d)\n",
                 (int)attr, device);
-  if (!value) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-
   // Ensure HIP is initialized.
   hipError_t init_result = iree_hip_ensure_initialized();
   if (init_result != hipSuccess) {
     HIP_RETURN_ERROR(init_result);
+  }
+
+  if (!value) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   iree_hal_streaming_device_t* device_obj =
@@ -2345,7 +2417,14 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
   // Map attributes to device properties.
   const bool is_gfx1100 = strncmp(device_obj->gcn_arch_name, "gfx1100", 7) == 0;
   const bool is_gfx942 = strncmp(device_obj->gcn_arch_name, "gfx942", 6) == 0;
+  const iree_hal_physical_device_identity_t* physical_identity =
+      iree_hip_physical_device_identity(device_obj);
   switch (attr) {
+    case hipDeviceAttributeAccessPolicyMaxWindowSize:
+      // A zero maximum advertises that persisting access-policy windows are
+      // disabled.
+      *value = 0;
+      break;
     case hipDeviceAttributeMaxThreadsPerBlock:
       *value = device_obj->max_threads_per_block;
       break;
@@ -2374,6 +2453,9 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = 1;
       break;
     case hipDeviceAttributeCanUseHostPointerForRegisteredMem:
+      *value = 1;
+      break;
+    case hipDeviceAttributeConcurrentKernels:
       *value = 1;
       break;
     case hipDeviceAttributeHostNativeAtomicSupported:
@@ -2426,6 +2508,29 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = device_obj->total_memory > 2147483647ull
                    ? 2147483647
                    : (int)device_obj->total_memory;
+      break;
+    case hipDeviceAttributeTotalConstantMemory:
+      *value = 64 * 1024;
+      break;
+    case hipDeviceAttributePciBusId:
+    case hipDeviceAttributePciDeviceId:
+    case hipDeviceAttributePciDomainID:
+      if (!physical_identity ||
+          !iree_all_bits_set(
+              physical_identity->flags,
+              IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS)) {
+        HIP_RETURN_ERROR(hipErrorNotSupported);
+      }
+      if (attr == hipDeviceAttributePciBusId) {
+        *value = physical_identity->pci.bus;
+      } else if (attr == hipDeviceAttributePciDeviceId) {
+        *value = physical_identity->pci.device;
+      } else {
+        *value = physical_identity->pci.domain;
+      }
+      break;
+    case hipDeviceAttributeUnifiedAddressing:
+      *value = 1;
       break;
     case hipDeviceAttributeManagedMemory:
       *value = 1;
@@ -2519,9 +2624,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = IREE_HIP_ARRAY_MAX_3D_DEPTH;
       break;
     default:
-      // Return sensible defaults for other attributes.
-      *value = 0;
-      break;
+      HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   return hipSuccess;
@@ -2571,6 +2674,10 @@ HIPAPI hipError_t hipDeviceGetName(char* name, int len, int device) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
+  if (!iree_hal_streaming_device_entry(device)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  }
 
   iree_status_t status = iree_hal_streaming_device_name(
       (iree_hal_streaming_device_ordinal_t)device, name, (size_t)len);
@@ -2593,7 +2700,7 @@ HIPAPI hipError_t hipDeviceGetName(char* name, int len, int device) {
 //  - hipSuccess: UUID retrieved successfully.
 //  - hipErrorInvalidValue: uuid is NULL.
 //  - hipErrorInvalidDevice: Invalid device handle.
-//  - hipErrorNotSupported: UUID not supported (current implementation).
+//  - hipErrorNotSupported: The backend did not publish a stable UUID.
 //
 // Synchronization: This operation is synchronous.
 //
@@ -2605,14 +2712,22 @@ HIPAPI hipError_t hipDeviceGetName(char* name, int len, int device) {
 //
 // Multi-GPU: Each physical device has a unique UUID.
 //
-// Note: Currently not implemented in StreamHAL.
-//
 // See also: hipDeviceGet, hipGetDeviceProperties.
 HIPAPI hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t dev) {
-  // UUID support is not currently implemented.
-  (void)uuid;
-  (void)dev;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  if (!uuid) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  hipError_t init_result = iree_hip_ensure_initialized();
+  if (init_result != hipSuccess) return init_result;
+  iree_hal_streaming_device_t* device = iree_hal_streaming_device_entry(dev);
+  if (!device) HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  const iree_hal_physical_device_identity_t* physical_identity =
+      iree_hip_physical_device_identity(device);
+  if (!physical_identity ||
+      !iree_all_bits_set(physical_identity->flags,
+                         IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_UUID)) {
+    HIP_RETURN_ERROR(hipErrorNotSupported);
+  }
+  iree_hip_copy_device_uuid(&physical_identity->uuid, uuid);
+  return hipSuccess;
 }
 
 // Gets the total memory of a compute device.
@@ -2842,6 +2957,11 @@ HIPAPI hipError_t hipDeviceEnablePeerAccess(int peerDevice,
                                             unsigned int flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  if (flags != 0) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
   // Get the current context.
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
@@ -2947,7 +3067,6 @@ HIPAPI hipError_t hipDeviceDisablePeerAccess(int peerDevice) {
 }
 
 // Gets the PCI bus ID string for a device.
-// Returns a placeholder string since we don't have real PCI info.
 HIPAPI hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device) {
   if (!pciBusId || len <= 0) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
@@ -2963,9 +3082,18 @@ HIPAPI hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device) {
     HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
 
-  // Return a placeholder PCI bus ID.
-  // Format: domain:bus:device.function (e.g., "0000:00:00.0")
-  int written = snprintf(pciBusId, len, "0000:00:0%d.0", device);
+  const iree_hal_physical_device_identity_t* physical_identity =
+      iree_hip_physical_device_identity(
+          iree_hal_streaming_device_entry(device));
+  if (!physical_identity ||
+      !iree_all_bits_set(physical_identity->flags,
+                         IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS)) {
+    HIP_RETURN_ERROR(hipErrorNotSupported);
+  }
+  int written =
+      snprintf(pciBusId, len, "%04x:%02x:%02x.%01x",
+               physical_identity->pci.domain, physical_identity->pci.bus,
+               physical_identity->pci.device, physical_identity->pci.function);
   if (written < 0 || written >= len) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -2973,16 +3101,41 @@ HIPAPI hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device) {
 }
 
 // Gets the device ordinal for a PCI bus ID string.
-// We return device 0 for any valid-looking bus ID.
 HIPAPI hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId) {
   if (!device || !pciBusId) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // For simplicity, just return device 0.
-  // A proper implementation would parse the bus ID and match it.
-  *device = 0;
-  return hipSuccess;
+  int device_count = 0;
+  hipError_t count_result = hipGetDeviceCount(&device_count);
+  if (count_result != hipSuccess) return count_result;
+
+  unsigned int domain = 0;
+  unsigned int bus = 0;
+  unsigned int pci_device = 0;
+  unsigned int function = 0;
+  int consumed = 0;
+  if (sscanf(pciBusId, "%4x:%2x:%2x.%1x%n", &domain, &bus, &pci_device,
+             &function, &consumed) != 4 ||
+      pciBusId[consumed] != '\0') {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  for (int i = 0; i < device_count; ++i) {
+    const iree_hal_physical_device_identity_t* physical_identity =
+        iree_hip_physical_device_identity(iree_hal_streaming_device_entry(i));
+    if (physical_identity &&
+        iree_all_bits_set(physical_identity->flags,
+                          IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS) &&
+        physical_identity->pci.domain == domain &&
+        physical_identity->pci.bus == bus &&
+        physical_identity->pci.device == pci_device &&
+        physical_identity->pci.function == function) {
+      *device = i;
+      return hipSuccess;
+    }
+  }
+  HIP_RETURN_ERROR(hipErrorInvalidValue);
 }
 
 // Gets the range of stream priorities supported by the device.
@@ -3500,7 +3653,10 @@ HIPAPI hipError_t hipDeviceSynchronize(void) {
       "[HIP_API] hipDeviceSynchronize() returned %d (sync_count=%d)\n", result,
       sync_count);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  if (result == hipErrorIllegalAddress) {
+    HIP_RETURN_STICKY_ERROR(result);
+  }
+  HIP_RETURN_ERROR(result);
 }
 
 // Resets the current device and destroys all allocations.
@@ -3562,6 +3718,12 @@ HIPAPI hipError_t hipDeviceReset(void) {
 // Device flags
 //===----------------------------------------------------------------------===//
 
+static bool iree_hip_context_flags_are_valid(unsigned int flags);
+static iree_hal_streaming_context_flags_t
+iree_hal_streaming_hip_context_flags_to_internal(unsigned int hip_flags);
+static unsigned int iree_hip_context_flags_from_internal(
+    iree_hal_streaming_context_flags_t flags);
+
 // Sets flags for the current device.
 //
 // Parameters:
@@ -3585,24 +3747,29 @@ HIPAPI hipError_t hipDeviceReset(void) {
 HIPAPI hipError_t hipSetDeviceFlags(unsigned int flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Ensure initialization.
-  hipError_t init_result = iree_hip_ensure_initialized();
+  if (!iree_hip_context_flags_are_valid(flags)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t init_result = iree_hip_ensure_context(&context);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
 
-  // Get current context to check if device is already active.
-  iree_hal_streaming_context_t* context = iree_hal_streaming_context_current();
-  if (context != NULL) {
-    // Device already has an active context - can't change flags.
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorSetOnActiveProcess);
-  }
-
-  // For now, we accept the flags but don't enforce them.
-  // The streaming backend uses its own scheduling model.
-  (void)flags;
+  // Host mapping and local-memory resize are fixed backend properties. Device
+  // flag updates retain only the scheduling mode, as reported by HIP on this
+  // architecture.
+  const iree_hal_streaming_context_flags_t internal_flags =
+      iree_hal_streaming_hip_context_flags_to_internal(flags &
+                                                       hipDeviceScheduleMask);
+  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_streaming_device_set_primary_context_flags(
+          context->device_ordinal, &internal_flags),
+      hipErrorInvalidValue);
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -3629,16 +3796,14 @@ HIPAPI hipError_t hipGetDeviceFlags(unsigned int* flags) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Ensure initialization.
-  hipError_t init_result = iree_hip_ensure_initialized();
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t init_result = iree_hip_ensure_context(&context);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
 
-  // Return default flags (auto scheduling).
-  // The streaming backend doesn't currently track user-set flags.
-  *flags = 0;  // hipDeviceScheduleAuto
+  *flags = iree_hip_context_flags_from_internal(context->flags);
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -3651,12 +3816,25 @@ HIPAPI hipError_t hipGetDeviceFlags(unsigned int* flags) {
 // Sets the preferred cache configuration for the current device.
 // Note: These hints are ignored on AMD devices per the HIP documentation.
 HIPAPI hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig) {
-  (void)cacheConfig;
+  hipError_t init_result = iree_hip_ensure_context(NULL);
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
+  }
+  if (cacheConfig != hipFuncCachePreferNone &&
+      cacheConfig != hipFuncCachePreferShared &&
+      cacheConfig != hipFuncCachePreferL1 &&
+      cacheConfig != hipFuncCachePreferEqual) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   return hipSuccess;  // No-op on AMD
 }
 
 // Gets the current cache configuration for the current device.
 HIPAPI hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig) {
+  hipError_t init_result = iree_hip_ensure_context(NULL);
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
+  }
   if (!cacheConfig) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -3666,16 +3844,28 @@ HIPAPI hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig) {
 
 // Sets the shared memory configuration for the current device.
 HIPAPI hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config) {
-  (void)config;
+  hipError_t init_result = iree_hip_ensure_context(NULL);
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
+  }
+  if (config != hipSharedMemBankSizeDefault &&
+      config != hipSharedMemBankSizeFourByte &&
+      config != hipSharedMemBankSizeEightByte) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   return hipSuccess;  // No-op on AMD
 }
 
 // Gets the shared memory configuration for the current device.
 HIPAPI hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* config) {
+  hipError_t init_result = iree_hip_ensure_context(NULL);
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
+  }
   if (!config) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  *config = hipSharedMemBankSizeDefault;
+  *config = hipSharedMemBankSizeFourByte;
   return hipSuccess;
 }
 
@@ -3828,34 +4018,13 @@ HIPAPI hipError_t hipDevicePrimaryCtxSetFlags(hipDevice_t dev,
     HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
 
-  // Convert HIP flags to strongly-typed internal flags.
-  iree_hal_streaming_context_flags_t internal_flags = {0};
-
-  // Extract scheduling mode from lower bits.
-  unsigned int sched_flags = flags & 0x07;
-  switch (sched_flags) {
-    case hipDeviceScheduleAuto:
-      internal_flags.scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO;
-      break;
-    case hipDeviceScheduleSpin:
-      internal_flags.scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN;
-      break;
-    case hipDeviceScheduleYield:
-      internal_flags.scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_YIELD;
-      break;
-    case hipDeviceScheduleBlockingSync:
-      internal_flags.scheduling_mode =
-          IREE_HAL_STREAMING_SCHEDULING_MODE_BLOCKING_SYNC;
-      break;
-    default:
-      internal_flags.scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO;
-      break;
+  if (!iree_hip_context_flags_are_valid(flags)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Extract other flags.
-  internal_flags.map_host_memory = (flags & hipDeviceMapHost) != 0;
-  internal_flags.resize_local_mem_to_max =
-      (flags & hipDeviceLmemResizeToMax) != 0;
+  const iree_hal_streaming_context_flags_t internal_flags =
+      iree_hal_streaming_hip_context_flags_to_internal(flags);
 
   // Set the primary context flags.
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
@@ -3918,34 +4087,7 @@ HIPAPI hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev,
       hipErrorInvalidDevice);
 
   if (flags) {
-    // Convert internal flags back to HIP flags.
-    unsigned int hip_flags = 0;
-
-    // Set scheduling mode.
-    switch (internal_flags.scheduling_mode) {
-      case IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO:
-        hip_flags |= hipDeviceScheduleAuto;
-        break;
-      case IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN:
-        hip_flags |= hipDeviceScheduleSpin;
-        break;
-      case IREE_HAL_STREAMING_SCHEDULING_MODE_YIELD:
-        hip_flags |= hipDeviceScheduleYield;
-        break;
-      case IREE_HAL_STREAMING_SCHEDULING_MODE_BLOCKING_SYNC:
-        hip_flags |= hipDeviceScheduleBlockingSync;
-        break;
-    }
-
-    // Set other flags.
-    if (internal_flags.map_host_memory) {
-      hip_flags |= hipDeviceMapHost;
-    }
-    if (internal_flags.resize_local_mem_to_max) {
-      hip_flags |= hipDeviceLmemResizeToMax;
-    }
-
-    *flags = hip_flags;
+    *flags = iree_hip_context_flags_from_internal(internal_flags);
   }
 
   if (active) {
@@ -4067,6 +4209,21 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
 //===----------------------------------------------------------------------===//
 
 // Helper function to convert HIP context flags to internal flags.
+static bool iree_hip_context_flags_are_valid(unsigned int flags) {
+  const unsigned int known_flags =
+      hipDeviceScheduleMask | hipDeviceMapHost | hipDeviceLmemResizeToMax;
+  if ((flags & ~known_flags) != 0) return false;
+  switch (flags & hipDeviceScheduleMask) {
+    case hipDeviceScheduleAuto:
+    case hipDeviceScheduleSpin:
+    case hipDeviceScheduleYield:
+    case hipDeviceScheduleBlockingSync:
+      return true;
+    default:
+      return false;
+  }
+}
+
 static iree_hal_streaming_context_flags_t
 iree_hal_streaming_hip_context_flags_to_internal(unsigned int hip_flags) {
   iree_hal_streaming_context_flags_t flags = {0};
@@ -4097,6 +4254,28 @@ iree_hal_streaming_hip_context_flags_to_internal(unsigned int hip_flags) {
   }
 
   return flags;
+}
+
+static unsigned int iree_hip_context_flags_from_internal(
+    iree_hal_streaming_context_flags_t flags) {
+  unsigned int hip_flags = 0;
+  switch (flags.scheduling_mode) {
+    case IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO:
+      hip_flags = hipDeviceScheduleAuto;
+      break;
+    case IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN:
+      hip_flags = hipDeviceScheduleSpin;
+      break;
+    case IREE_HAL_STREAMING_SCHEDULING_MODE_YIELD:
+      hip_flags = hipDeviceScheduleYield;
+      break;
+    case IREE_HAL_STREAMING_SCHEDULING_MODE_BLOCKING_SYNC:
+      hip_flags = hipDeviceScheduleBlockingSync;
+      break;
+  }
+  if (flags.map_host_memory) hip_flags |= hipDeviceMapHost;
+  if (flags.resize_local_mem_to_max) hip_flags |= hipDeviceLmemResizeToMax;
+  return hip_flags;
 }
 
 // Creates a new HIP context for a device.
@@ -4624,6 +4803,15 @@ HIPAPI hipError_t hipDeviceGetLimit(size_t* pValue, hipLimit_t limit) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  if (limit == hipLimitRange) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (iree_hip_limit_to_internal(limit) ==
+      (iree_hal_streaming_context_limit_t)-1) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorUnsupportedLimit);
+  }
 
   // Get current context.
   // Ensure initialization and get context.
@@ -4673,6 +4861,16 @@ HIPAPI hipError_t hipDeviceGetLimit(size_t* pValue, hipLimit_t limit) {
 // See also: hipDeviceGetLimit, hipFuncSetAttribute.
 HIPAPI hipError_t hipDeviceSetLimit(hipLimit_t limit, size_t value) {
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (limit == hipLimitRange) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (iree_hip_limit_to_internal(limit) ==
+      (iree_hal_streaming_context_limit_t)-1) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorUnsupportedLimit);
+  }
 
   // Get current context.
   // Ensure initialization and get context.
@@ -8993,7 +9191,7 @@ HIPAPI hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value,
       hipError_t result = iree_memset_status_to_hip_result(status);
       iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
-      return result;
+      HIP_RETURN_ERROR(result);
     }
   }
 
@@ -9048,7 +9246,7 @@ HIPAPI hipError_t hipMemset2D(void* dst, size_t pitch, int value, size_t width,
   }
 
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 static hipError_t iree_hip_validate_memset3d_shape(
@@ -9150,7 +9348,7 @@ HIPAPI hipError_t hipMemset3DAsync(hipPitchedPtr pitchedDevPtr, int value,
     hipError_t linear_result =
         hipMemsetAsync(pitchedDevPtr.ptr, value, byte_count, stream);
     IREE_TRACE_ZONE_END(z0);
-    return linear_result;
+    HIP_RETURN_ERROR(linear_result);
   }
 
   uint8_t* base = (uint8_t*)pitchedDevPtr.ptr;
@@ -9204,7 +9402,7 @@ HIPAPI hipError_t hipMemset3D(hipPitchedPtr pitchedDevPtr, int value,
     result = hipDeviceSynchronize();
   }
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 // Allocates 3D device memory.
@@ -10175,10 +10373,10 @@ HIPAPI hipError_t hipMemset(void* dst, int value, size_t sizeBytes) {
     HIP_DEBUG_LOG("[HIP_API] hipMemset sync done\n");
   }
 
-  hipError_t result = iree_status_to_hip_result(status);
+  hipError_t result = iree_memset_status_to_hip_result(status);
   HIP_DEBUG_LOG("[HIP_API] hipMemset EXIT result=%d\n", result);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 // Sets device memory to a value asynchronously.
@@ -10249,10 +10447,10 @@ HIPAPI hipError_t hipMemsetAsync(void* dst, int value, size_t sizeBytes,
       resolved_stream.context, (iree_hal_streaming_deviceptr_t)dst, sizeBytes,
       &value, 1, resolved_stream.stream);
 
-  hipError_t result = iree_status_to_hip_result(status);
+  hipError_t result = iree_memset_status_to_hip_result(status);
   iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 // Sets device memory to an 8-bit value.
@@ -10315,9 +10513,9 @@ HIPAPI hipError_t hipMemsetD8(hipDeviceptr_t dstDevice, unsigned char uc,
     status = iree_hal_streaming_stream_synchronize(context->default_stream);
   }
 
-  hipError_t result = iree_status_to_hip_result(status);
+  hipError_t result = iree_memset_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 // Sets device memory to a 16-bit value.
@@ -10389,9 +10587,9 @@ HIPAPI hipError_t hipMemsetD16(hipDeviceptr_t dstDevice, unsigned short us,
     status = iree_hal_streaming_stream_synchronize(context->default_stream);
   }
 
-  hipError_t result = iree_status_to_hip_result(status);
+  hipError_t result = iree_memset_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 // Sets device memory to a 32-bit value.
@@ -10462,9 +10660,9 @@ HIPAPI hipError_t hipMemsetD32(hipDeviceptr_t dstDevice, int i, size_t N) {
     status = iree_hal_streaming_stream_synchronize(context->default_stream);
   }
 
-  hipError_t result = iree_status_to_hip_result(status);
+  hipError_t result = iree_memset_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 // Sets device memory to an 8-bit value asynchronously.
@@ -10530,10 +10728,10 @@ HIPAPI hipError_t hipMemsetD8Async(hipDeviceptr_t dstDevice, unsigned char uc,
       resolved_stream.context, (iree_hal_streaming_deviceptr_t)dstDevice, N,
       &uc, 1, resolved_stream.stream);
 
-  hipError_t result = iree_status_to_hip_result(status);
+  hipError_t result = iree_memset_status_to_hip_result(status);
   iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 // Asynchronously sets memory to a 16-bit value.
@@ -10611,10 +10809,10 @@ HIPAPI hipError_t hipMemsetD16Async(hipDeviceptr_t dstDevice, unsigned short us,
       resolved_stream.context, (iree_hal_streaming_deviceptr_t)dstDevice,
       byte_count, &us, sizeof(us), resolved_stream.stream);
 
-  hipError_t result = iree_status_to_hip_result(status);
+  hipError_t result = iree_memset_status_to_hip_result(status);
   iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 // Asynchronously sets memory to a 32-bit value.
@@ -10693,10 +10891,10 @@ HIPAPI hipError_t hipMemsetD32Async(hipDeviceptr_t dstDevice, int i, size_t N,
       resolved_stream.context, (iree_hal_streaming_deviceptr_t)dstDevice,
       byte_count, &i, sizeof(i), resolved_stream.stream);
 
-  hipError_t result = iree_status_to_hip_result(status);
+  hipError_t result = iree_memset_status_to_hip_result(status);
   iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 //===----------------------------------------------------------------------===//
@@ -13324,7 +13522,9 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
       iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(init_result == hipErrorInvalidResourceHandle
+                         ? hipErrorInvalidValue
+                         : init_result);
   }
   iree_hal_streaming_context_t* context = resolved_stream.context;
   iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
@@ -23881,7 +24081,7 @@ HIPAPI hipError_t hipDeviceSetMemPool(int device, hipMemPool_t pool) {
       iree_hal_streaming_device_entry(device);
   if (!device_obj) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   iree_status_t status =
@@ -23937,7 +24137,7 @@ HIPAPI hipError_t hipDeviceGetMemPool(hipMemPool_t* pool, int device) {
   iree_hal_streaming_device_t* device_obj =
       iree_hal_streaming_device_entry(device);
   if (!device_obj) {
-    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   iree_status_t status =
@@ -24563,172 +24763,157 @@ HIPAPI hipError_t hipMemRetainAllocationHandle(
 // Error handling
 //===----------------------------------------------------------------------===//
 
-// - String remains valid for program lifetime.
-// - Returns "unknown error" for unrecognized codes.
-// - String is in English.
-//
-// Usage pattern:
-// ```c
-// hipError_t err = hipMalloc(&ptr, size);
-// if (err != hipSuccess) {
-//   printf("HIP error: %s\n", hipGetErrorString(err));
-// }
-// ```
-//
-// See also: hipGetErrorName, hipGetLastError.
-HIPAPI const char* hipGetErrorString(hipError_t error) {
+// Error names and descriptions are process-lifetime constants. Keeping the
+// pairs in one list prevents the runtime and driver entry points from assigning
+// different meanings to the same numeric code.
+#define IREE_HIP_ERROR_LIST(X)                                                \
+  X(hipSuccess, "no error")                                                   \
+  X(hipErrorInvalidValue, "invalid argument")                                 \
+  X(hipErrorOutOfMemory, "out of memory")                                     \
+  X(hipErrorNotInitialized, "initialization error")                           \
+  X(hipErrorDeinitialized, "driver shutting down")                            \
+  X(hipErrorProfilerDisabled,                                                 \
+    "profiler disabled while using external profiling tool")                  \
+  X(hipErrorProfilerNotInitialized, "profiler is not initialized")            \
+  X(hipErrorProfilerAlreadyStarted, "profiler already started")               \
+  X(hipErrorProfilerAlreadyStopped, "profiler already stopped")               \
+  X(hipErrorInvalidConfiguration, "invalid configuration argument")           \
+  X(hipErrorInvalidPitchValue, "invalid pitch argument")                      \
+  X(hipErrorInvalidSymbol, "invalid device symbol")                           \
+  X(hipErrorInvalidDevicePointer, "invalid device pointer")                   \
+  X(hipErrorInvalidMemcpyDirection, "invalid copy direction for memcpy")      \
+  X(hipErrorInsufficientDriver,                                               \
+    "driver version is insufficient for runtime version")                     \
+  X(hipErrorMissingConfiguration,                                             \
+    "__global__ function call is not configured")                             \
+  X(hipErrorPriorLaunchFailure, "unspecified launch failure in prior launch") \
+  X(hipErrorInvalidDeviceFunction, "invalid device function")                 \
+  X(hipErrorNoDevice, "no ROCm-capable device is detected")                   \
+  X(hipErrorInvalidDevice, "invalid device ordinal")                          \
+  X(hipErrorInvalidImage, "device kernel image is invalid")                   \
+  X(hipErrorInvalidContext, "invalid device context")                         \
+  X(hipErrorContextAlreadyCurrent, "context is already current context")      \
+  X(hipErrorMapFailed, "mapping of buffer object failed")                     \
+  X(hipErrorUnmapFailed, "unmapping of buffer object failed")                 \
+  X(hipErrorArrayIsMapped, "array is mapped")                                 \
+  X(hipErrorAlreadyMapped, "resource already mapped")                         \
+  X(hipErrorNoBinaryForGpu,                                                   \
+    "no kernel image is available for execution on the device")               \
+  X(hipErrorAlreadyAcquired, "resource already acquired")                     \
+  X(hipErrorNotMapped, "resource not mapped")                                 \
+  X(hipErrorNotMappedAsArray, "resource not mapped as array")                 \
+  X(hipErrorNotMappedAsPointer, "resource not mapped as pointer")             \
+  X(hipErrorECCNotCorrectable, "uncorrectable ECC error encountered")         \
+  X(hipErrorUnsupportedLimit, "limit is not supported on this architecture")  \
+  X(hipErrorContextAlreadyInUse,                                              \
+    "exclusive-thread device already in use by a different thread")           \
+  X(hipErrorPeerAccessUnsupported,                                            \
+    "peer access is not supported between these two devices")                 \
+  X(hipErrorInvalidKernelFile, "invalid kernel file")                         \
+  X(hipErrorInvalidGraphicsContext, "invalid OpenGL or DirectX context")      \
+  X(hipErrorInvalidSource, "device kernel image is invalid")                  \
+  X(hipErrorFileNotFound, "file not found")                                   \
+  X(hipErrorSharedObjectSymbolNotFound, "shared object symbol not found")     \
+  X(hipErrorSharedObjectInitFailed, "shared object initialization failed")    \
+  X(hipErrorOperatingSystem,                                                  \
+    "OS call failed or operation not supported on this OS")                   \
+  X(hipErrorInvalidHandle, "invalid resource handle")                         \
+  X(hipErrorIllegalState,                                                     \
+    "the operation cannot be performed in the present state")                 \
+  X(hipErrorNotFound, "named symbol not found")                               \
+  X(hipErrorNotReady, "device not ready")                                     \
+  X(hipErrorIllegalAddress, "an illegal memory access was encountered")       \
+  X(hipErrorLaunchOutOfResources, "too many resources requested for launch")  \
+  X(hipErrorLaunchTimeOut, "the launch timed out and was terminated")         \
+  X(hipErrorPeerAccessAlreadyEnabled, "peer access is already enabled")       \
+  X(hipErrorPeerAccessNotEnabled, "peer access has not been enabled")         \
+  X(hipErrorSetOnActiveProcess,                                               \
+    "cannot set while device is active in this process")                      \
+  X(hipErrorContextIsDestroyed, "context is destroyed")                       \
+  X(hipErrorAssert, "device-side assert triggered")                           \
+  X(hipErrorHostMemoryAlreadyRegistered,                                      \
+    "part or all of the requested memory range is already mapped")            \
+  X(hipErrorHostMemoryNotRegistered,                                          \
+    "pointer does not correspond to a registered memory region")              \
+  X(hipErrorLaunchFailure, "unspecified launch failure")                      \
+  X(hipErrorCooperativeLaunchTooLarge,                                        \
+    "too many blocks in cooperative launch")                                  \
+  X(hipErrorNotSupported, "operation not supported")                          \
+  X(hipErrorStreamCaptureUnsupported,                                         \
+    "operation not permitted when stream is capturing")                       \
+  X(hipErrorStreamCaptureInvalidated,                                         \
+    "operation failed due to a previous error during capture")                \
+  X(hipErrorStreamCaptureMerge,                                               \
+    "operation would result in a merge of separate capture sequences")        \
+  X(hipErrorStreamCaptureUnmatched,                                           \
+    "capture was not ended in the same stream as it began")                   \
+  X(hipErrorStreamCaptureUnjoined, "capturing stream has unjoined work")      \
+  X(hipErrorStreamCaptureIsolation,                                           \
+    "dependency created on uncaptured work in another stream")                \
+  X(hipErrorStreamCaptureImplicit,                                            \
+    "operation would make the legacy stream depend on a capturing blocking "  \
+    "stream")                                                                 \
+  X(hipErrorCapturedEvent,                                                    \
+    "operation not permitted on an event last recorded in a capturing "       \
+    "stream")                                                                 \
+  X(hipErrorStreamCaptureWrongThread,                                         \
+    "attempt to terminate a thread-local capture sequence from another "      \
+    "thread")                                                                 \
+  X(hipErrorGraphExecUpdateFailure,                                           \
+    "the graph update was not performed because it included changes which "   \
+    "violated constraints specific to instantiated graph update")             \
+  X(hipErrorInvalidResourceType,                                              \
+    "resource type is not valid for the operation")                           \
+  X(hipErrorInvalidResourceConfiguration,                                     \
+    "resource configuration is not valid for the operation")                  \
+  X(hipErrorStreamDetached, "stream is detached")                             \
+  X(hipErrorUnknown, "unknown error")                                         \
+  X(hipErrorRuntimeMemory, "runtime memory call returned error")              \
+  X(hipErrorRuntimeOther, "runtime call other than memory returned error")
+
+static const char* iree_hip_lookup_error_name(hipError_t error,
+                                              bool* out_is_known) {
   switch (error) {
-    case hipSuccess:
-      return "hipSuccess";
-    case hipErrorInvalidValue:
-      return "hipErrorInvalidValue";
-    case hipErrorOutOfMemory:
-      return "hipErrorOutOfMemory";
-    case hipErrorNotInitialized:
-      return "hipErrorNotInitialized";
-    case hipErrorDeinitialized:
-      return "hipErrorDeinitialized";
-    case hipErrorProfilerDisabled:
-      return "hipErrorProfilerDisabled";
-    case hipErrorProfilerNotInitialized:
-      return "hipErrorProfilerNotInitialized";
-    case hipErrorProfilerAlreadyStarted:
-      return "hipErrorProfilerAlreadyStarted";
-    case hipErrorProfilerAlreadyStopped:
-      return "hipErrorProfilerAlreadyStopped";
-    case hipErrorInvalidConfiguration:
-      return "hipErrorInvalidConfiguration";
-    case hipErrorInvalidSymbol:
-      return "hipErrorInvalidSymbol";
-    case hipErrorInvalidDevicePointer:
-      return "hipErrorInvalidDevicePointer";
-    case hipErrorInvalidMemcpyDirection:
-      return "hipErrorInvalidMemcpyDirection";
-    case hipErrorInsufficientDriver:
-      return "hipErrorInsufficientDriver";
-    case hipErrorMissingConfiguration:
-      return "hipErrorMissingConfiguration";
-    case hipErrorPriorLaunchFailure:
-      return "hipErrorPriorLaunchFailure";
-    case hipErrorInvalidDeviceFunction:
-      return "hipErrorInvalidDeviceFunction";
-    case hipErrorNoDevice:
-      return "hipErrorNoDevice";
-    case hipErrorInvalidDevice:
-      return "hipErrorInvalidDevice";
-    case hipErrorInvalidImage:
-      return "hipErrorInvalidImage";
-    case hipErrorInvalidContext:
-      return "hipErrorInvalidContext";
-    case hipErrorContextAlreadyCurrent:
-      return "hipErrorContextAlreadyCurrent";
-    case hipErrorMapFailed:
-      return "hipErrorMapFailed";
-    case hipErrorUnmapFailed:
-      return "hipErrorUnmapFailed";
-    case hipErrorArrayIsMapped:
-      return "hipErrorArrayIsMapped";
-    case hipErrorAlreadyMapped:
-      return "hipErrorAlreadyMapped";
-    case hipErrorNoBinaryForGpu:
-      return "hipErrorNoBinaryForGpu";
-    case hipErrorAlreadyAcquired:
-      return "hipErrorAlreadyAcquired";
-    case hipErrorNotMapped:
-      return "hipErrorNotMapped";
-    case hipErrorNotMappedAsArray:
-      return "hipErrorNotMappedAsArray";
-    case hipErrorNotMappedAsPointer:
-      return "hipErrorNotMappedAsPointer";
-    case hipErrorECCNotCorrectable:
-      return "hipErrorECCNotCorrectable";
-    case hipErrorUnsupportedLimit:
-      return "hipErrorUnsupportedLimit";
-    case hipErrorContextAlreadyInUse:
-      return "hipErrorContextAlreadyInUse";
-    case hipErrorPeerAccessUnsupported:
-      return "hipErrorPeerAccessUnsupported";
-    case hipErrorInvalidKernelFile:
-      return "hipErrorInvalidKernelFile";
-    case hipErrorInvalidGraphicsContext:
-      return "hipErrorInvalidGraphicsContext";
-    case hipErrorInvalidSource:
-      return "hipErrorInvalidSource";
-    case hipErrorFileNotFound:
-      return "hipErrorFileNotFound";
-    case hipErrorSharedObjectSymbolNotFound:
-      return "hipErrorSharedObjectSymbolNotFound";
-    case hipErrorSharedObjectInitFailed:
-      return "hipErrorSharedObjectInitFailed";
-    case hipErrorOperatingSystem:
-      return "hipErrorOperatingSystem";
-    case hipErrorInvalidHandle:
-      return "hipErrorInvalidHandle";
-    case hipErrorNotFound:
-      return "hipErrorNotFound";
-    case hipErrorNotReady:
-      return "hipErrorNotReady";
-    case hipErrorIllegalAddress:
-      return "hipErrorIllegalAddress";
-    case hipErrorLaunchOutOfResources:
-      return "hipErrorLaunchOutOfResources";
-    case hipErrorLaunchTimeOut:
-      return "hipErrorLaunchTimeOut";
-    case hipErrorPeerAccessAlreadyEnabled:
-      return "hipErrorPeerAccessAlreadyEnabled";
-    case hipErrorPeerAccessNotEnabled:
-      return "hipErrorPeerAccessNotEnabled";
-    case hipErrorSetOnActiveProcess:
-      return "hipErrorSetOnActiveProcess";
-    case hipErrorContextIsDestroyed:
-      return "hipErrorContextIsDestroyed";
-    case hipErrorAssert:
-      return "hipErrorAssert";
-    case hipErrorHostMemoryAlreadyRegistered:
-      return "hipErrorHostMemoryAlreadyRegistered";
-    case hipErrorHostMemoryNotRegistered:
-      return "hipErrorHostMemoryNotRegistered";
-    case hipErrorLaunchFailure:
-      return "hipErrorLaunchFailure";
-    case hipErrorCooperativeLaunchTooLarge:
-      return "hipErrorCooperativeLaunchTooLarge";
-    case hipErrorNotSupported:
-      return "hipErrorNotSupported";
-    case hipErrorStreamCaptureUnsupported:
-      return "hipErrorStreamCaptureUnsupported";
-    case hipErrorStreamCaptureInvalidated:
-      return "hipErrorStreamCaptureInvalidated";
-    case hipErrorStreamCaptureMerge:
-      return "hipErrorStreamCaptureMerge";
-    case hipErrorStreamCaptureUnmatched:
-      return "hipErrorStreamCaptureUnmatched";
-    case hipErrorStreamCaptureUnjoined:
-      return "hipErrorStreamCaptureUnjoined";
-    case hipErrorStreamCaptureIsolation:
-      return "hipErrorStreamCaptureIsolation";
-    case hipErrorStreamCaptureImplicit:
-      return "hipErrorStreamCaptureImplicit";
-    case hipErrorCapturedEvent:
-      return "hipErrorCapturedEvent";
-    case hipErrorStreamCaptureWrongThread:
-      return "hipErrorStreamCaptureWrongThread";
-    case hipErrorGraphExecUpdateFailure:
-      return "hipErrorGraphExecUpdateFailure";
-    case hipErrorInvalidResourceType:
-      return "hipErrorInvalidResourceType";
-    case hipErrorInvalidResourceConfiguration:
-      return "hipErrorInvalidResourceConfiguration";
-    case hipErrorStreamDetached:
-      return "hipErrorStreamDetached";
-    case hipErrorUnknown:
+#define IREE_HIP_ERROR_NAME_CASE(error_code, description) \
+  case error_code:                                        \
+    *out_is_known = true;                                 \
+    return #error_code;
+    IREE_HIP_ERROR_LIST(IREE_HIP_ERROR_NAME_CASE)
+#undef IREE_HIP_ERROR_NAME_CASE
+    case hipErrorTbd:
+      *out_is_known = true;
+      return "hipErrorTbd";
     default:
+      *out_is_known = false;
       return "hipErrorUnknown";
   }
 }
 
+static const char* iree_hip_lookup_error_string(hipError_t error,
+                                                bool* out_is_known) {
+  switch (error) {
+#define IREE_HIP_ERROR_STRING_CASE(error_code, description) \
+  case error_code:                                          \
+    *out_is_known = true;                                   \
+    return description;
+    IREE_HIP_ERROR_LIST(IREE_HIP_ERROR_STRING_CASE)
+#undef IREE_HIP_ERROR_STRING_CASE
+    default:
+      *out_is_known = false;
+      return "unknown error";
+  }
+}
+
+#undef IREE_HIP_ERROR_LIST
+
+HIPAPI const char* hipGetErrorString(hipError_t error) {
+  bool is_known = false;
+  return iree_hip_lookup_error_string(error, &is_known);
+}
+
 HIPAPI const char* hipGetErrorName(hipError_t error) {
-  // Return the same as hipGetErrorString for simplicity.
-  return hipGetErrorString(error);
+  bool is_known = false;
+  return iree_hip_lookup_error_name(error, &is_known);
 }
 
 // Handle scoped to THIS shared object (the HIP shim), resolved once. See the
@@ -24752,13 +24937,32 @@ void* iree_hip_self_dl_handle(void) {
   return iree_hip_self_dl_handle_cached;
 }
 
+enum {
+  IREE_HIP_PROC_ADDRESS_DEFAULT = 0,
+  IREE_HIP_PROC_ADDRESS_LEGACY_STREAM = 1,
+  IREE_HIP_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM = 2,
+  IREE_HIP_DEVICE_PROPERTIES_R0600_VERSION = 600,
+};
+
 HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
                                     int hipVersion, uint64_t flags,
                                     void* symbolStatus) {
-  (void)hipVersion;
-  (void)flags;
-  if (!symbol || !pfn) {
+  if (!symbol || symbol[0] == '\0' || !pfn ||
+      flags > IREE_HIP_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  const char* resolved_symbol = symbol;
+  if (strcmp(symbol, "hipGetDeviceProperties") == 0) {
+    resolved_symbol = hipVersion >= IREE_HIP_DEVICE_PROPERTIES_R0600_VERSION
+                          ? "hipGetDevicePropertiesR0600"
+                          : "hipGetDevicePropertiesR0000";
+    flags = IREE_HIP_PROC_ADDRESS_DEFAULT;
+  } else if (strcmp(symbol, "hipChooseDevice") == 0) {
+    resolved_symbol = hipVersion >= IREE_HIP_DEVICE_PROPERTIES_R0600_VERSION
+                          ? "hipChooseDeviceR0600"
+                          : "hipChooseDeviceR0000";
+    flags = IREE_HIP_PROC_ADDRESS_DEFAULT;
   }
 
   // Resolve symbols against this library, not the process-global scope. A
@@ -24778,7 +24982,18 @@ HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
     if (symbolStatus) *(int*)symbolStatus = 1;
     HIP_RETURN_ERROR(hipErrorSharedObjectInitFailed);
   }
-  *pfn = dlsym(handle, symbol);
+  char stream_per_thread_symbol[256];
+  *pfn = NULL;
+  size_t symbol_length = strlen(resolved_symbol);
+  if (flags == IREE_HIP_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM &&
+      symbol_length <= sizeof(stream_per_thread_symbol) - sizeof("_spt") &&
+      (symbol_length < 4 ||
+       strcmp(resolved_symbol + symbol_length - 4, "_spt") != 0)) {
+    snprintf(stream_per_thread_symbol, sizeof(stream_per_thread_symbol),
+             "%s_spt", resolved_symbol);
+    *pfn = dlsym(handle, stream_per_thread_symbol);
+  }
+  if (!*pfn) *pfn = dlsym(handle, resolved_symbol);
   if (close_handle) dlclose(handle);
   if (symbolStatus) *(int*)symbolStatus = *pfn ? 0 : 1;
   HIP_RETURN_ERROR(*pfn ? hipSuccess : hipErrorNotFound);
@@ -24796,16 +25011,14 @@ HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
 //
 // Synchronization: This operation is synchronous.
 //
-// Note: Unlike hipGetErrorString, this returns the string via output pointer.
-//       This is the driver API equivalent for compatibility with CUDA driver
-//       API.
 HIPAPI hipError_t hipDrvGetErrorString(hipError_t hipError,
                                        const char** errorString) {
   if (!errorString) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  *errorString = hipGetErrorString(hipError);
-  HIP_RETURN_ERROR(hipSuccess);
+  bool is_known = false;
+  *errorString = iree_hip_lookup_error_string(hipError, &is_known);
+  HIP_RETURN_ERROR(is_known ? hipSuccess : hipErrorInvalidValue);
 }
 
 // Driver API version of hipGetErrorName.
@@ -24820,16 +25033,14 @@ HIPAPI hipError_t hipDrvGetErrorString(hipError_t hipError,
 //
 // Synchronization: This operation is synchronous.
 //
-// Note: Unlike hipGetErrorName, this returns the name via output pointer.
-//       This is the driver API equivalent for compatibility with CUDA driver
-//       API.
 HIPAPI hipError_t hipDrvGetErrorName(hipError_t hipError,
                                      const char** errorName) {
   if (!errorName) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  *errorName = hipGetErrorName(hipError);
-  HIP_RETURN_ERROR(hipSuccess);
+  bool is_known = false;
+  *errorName = iree_hip_lookup_error_name(hipError, &is_known);
+  HIP_RETURN_ERROR(is_known ? hipSuccess : hipErrorInvalidValue);
 }
 
 // Gets and clears the last error from HIP runtime calls.
