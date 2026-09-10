@@ -198,7 +198,7 @@ func.def @atomic_memory_stays_vector(%buffer: buffer, %origin: index, %offsets: 
 
 // ====
 
-func.def @masked_store_rematerializes_ordinary_read(%input: buffer, %output: buffer, %origin: index, %mask: vector<2xi1>) {
+func.def @masked_store_preserves_input_snapshot(%input: buffer, %output: buffer, %origin: index, %mask: vector<2xi1>) {
   %base = index.constant 0 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<32xf16>
   %output_view = buffer.view %output[%base] : buffer -> view<32xf32>
@@ -209,24 +209,25 @@ func.def @masked_store_rematerializes_ordinary_read(%input: buffer, %output: buf
 }
 
 // ----
-func.def @masked_store_rematerializes_ordinary_read(%input: buffer, %output: buffer, %origin: index, %mask: vector<2xi1>) {
+func.def @masked_store_preserves_input_snapshot(%input: buffer, %output: buffer, %origin: index, %mask: vector<2xi1>) {
   %base = index.constant 0 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<32xf16>
   %output_view = buffer.view %output[%base] : buffer -> view<32xf32>
+  %loaded = vector.load %input_view[%origin] : view<32xf16> -> vector<2xf16>
   %9 = vector.extract %mask[0] : vector<2xi1> -> i1
   scf.if %9 {
-    %10 = view.load %input_view[%origin] : view<32xf16> -> f16
+    %10 = vector.extract %loaded[0] : vector<2xf16> -> f16
     %11 = scalar.extf %10 : f16 to f32
     view.store %11, %output_view[%origin] : f32, view<32xf32>
   } else {
   }
   %12 = vector.extract %mask[1] : vector<2xi1> -> i1
   scf.if %12 {
-    %13 = index.constant 1 : index
-    %14 = index.add %origin, %13 : index
-    %15 = view.load %input_view[%14] : view<32xf16> -> f16
-    %16 = scalar.extf %15 : f16 to f32
-    view.store %16, %output_view[%14] : f32, view<32xf32>
+    %13 = vector.extract %loaded[1] : vector<2xf16> -> f16
+    %14 = scalar.extf %13 : f16 to f32
+    %15 = index.constant 1 : index
+    %16 = index.add %origin, %15 : index
+    view.store %14, %output_view[%16] : f32, view<32xf32>
   } else {
   }
   func.return
@@ -273,4 +274,33 @@ func.def @masked_store_preserves_effecting_producer_position(%storage: buffer, %
   } else {
   }
   func.return
+}
+
+// ====
+
+// RUN: pass vector-to-scalar,canonicalize,cse
+
+func.def @overlapping_vector_copy(%buffer: buffer) -> (vector<3xf16>) {
+  %base = index.constant 0 : offset
+  %aligned = buffer.assume.alignment %buffer {minimum_alignment = 2} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<4xf16>
+  %value = vector.load %view[0] : view<4xf16> -> vector<3xf16>
+  vector.store %value, %view[1] : vector<3xf16>, view<4xf16>
+  func.return %value : vector<3xf16>
+}
+
+// ----
+func.def @overlapping_vector_copy(%buffer: buffer) -> (vector<3xf16>) {
+  %base = index.constant 0 : offset
+  %aligned = buffer.assume.alignment %buffer {minimum_alignment = 2} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<4xf16>
+  %10 = view.load %view[0] : view<4xf16> -> f16
+  %14 = vector.load %view[1] : view<4xf16> -> vector<2xf16>
+  %15 = vector.extract %14[0] : vector<2xf16> -> f16
+  %16 = vector.extract %14[1] : vector<2xf16> -> f16
+  %value = vector.from_elements %10, %15, %16 : vector<3xf16>
+  view.store %10, %view[1] : f16, view<4xf16>
+  view.store %15, %view[2] : f16, view<4xf16>
+  view.store %16, %view[3] : f16, view<4xf16>
+  func.return %value : vector<3xf16>
 }

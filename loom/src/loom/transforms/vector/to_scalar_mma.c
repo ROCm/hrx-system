@@ -30,7 +30,6 @@ typedef enum loom_vector_to_scalar_mma_payload_layout_e {
   LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_UNSUPPORTED = 0,
   LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_FLAT_ROW_MAJOR = 1,
   LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_MATRIX_ROW_MAJOR = 2,
-  LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_LOGICAL_MEMORY = 3,
 } loom_vector_to_scalar_mma_payload_layout_t;
 
 typedef struct loom_vector_to_scalar_mma_fragment_t {
@@ -293,13 +292,6 @@ static bool loom_vector_to_scalar_mma_type_is_dense_payload(
   return false;
 }
 
-static bool loom_vector_to_scalar_mma_value_is_fragment_load(
-    loom_vector_to_scalar_state_t* state, loom_value_id_t value) {
-  loom_op_t* def_op =
-      loom_vector_to_scalar_value_def_op(state->rewriter->module, value);
-  return def_op != NULL && loom_vector_fragment_load_isa(def_op);
-}
-
 static loom_vector_to_scalar_encoded_operand_t
 loom_vector_to_scalar_mma_encoded_operand(
     const loom_vector_to_scalar_mma_fragment_t* fragment,
@@ -324,20 +316,12 @@ static bool loom_vector_to_scalar_mma_fragment_supports_logical_lanes(
           LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES) {
     return false;
   }
-  if (loom_vector_to_scalar_mma_type_is_dense_payload(
-          state, fragment->type, fragment->fact.shape_rank, fragment->blocks,
-          fragment->rows, fragment->columns, &fragment->layout)) {
-    return true;
-  }
-  if (loom_vector_to_scalar_mma_fragment_has_schema(&fragment->fact)) {
-    return false;
-  }
-  if (loom_vector_to_scalar_mma_value_is_fragment_load(state,
-                                                       fragment->payload)) {
-    fragment->layout = LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_LOGICAL_MEMORY;
-    return true;
-  }
-  return false;
+  // Logical extraction requires the complete payload. A physical fragment's
+  // load origin does not establish its lane ownership or permit replaying
+  // memory reads while a consumer writes its results.
+  return loom_vector_to_scalar_mma_type_is_dense_payload(
+      state, fragment->type, fragment->fact.shape_rank, fragment->blocks,
+      fragment->rows, fragment->columns, &fragment->layout);
 }
 
 static uint32_t loom_vector_to_scalar_mma_fragment_logical_lane_rejection_bits(
@@ -357,10 +341,6 @@ static uint32_t loom_vector_to_scalar_mma_fragment_logical_lane_rejection_bits(
   }
   if (loom_vector_to_scalar_mma_fragment_has_schema(&fragment->fact)) {
     return LOOM_CONTRACT_REJECTION_SCHEMA | LOOM_CONTRACT_REJECTION_SHAPE;
-  }
-  if (loom_vector_to_scalar_mma_value_is_fragment_load(state,
-                                                       fragment->payload)) {
-    return LOOM_CONTRACT_REJECTION_NONE;
   }
   return LOOM_CONTRACT_REJECTION_FRAGMENT;
 }
@@ -695,12 +675,6 @@ static iree_status_t loom_vector_to_scalar_mma_build_matrix_indices(
                                                        out_indices);
     }
     case LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_MATRIX_ROW_MAJOR: {
-      loom_vector_to_scalar_index_term_t terms[3] = {block, row, column};
-      return loom_vector_to_scalar_terms_to_index_list(
-          state, &terms[3 - fragment->fact.shape_rank],
-          fragment->fact.shape_rank, out_indices);
-    }
-    case LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_LOGICAL_MEMORY: {
       loom_vector_to_scalar_index_term_t terms[3] = {block, row, column};
       return loom_vector_to_scalar_terms_to_index_list(
           state, &terms[3 - fragment->fact.shape_rank],
@@ -1856,7 +1830,6 @@ static iree_status_t loom_vector_to_scalar_mma_result_lane_terms(
   }
   switch (init->layout) {
     case LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_MATRIX_ROW_MAJOR:
-    case LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_LOGICAL_MEMORY:
       return iree_ok_status();
     case LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_FLAT_ROW_MAJOR: {
       if (indices.rank != 1) {

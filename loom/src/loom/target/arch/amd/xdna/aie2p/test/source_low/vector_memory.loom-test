@@ -2,6 +2,43 @@
 
 aie2p.target<core> @target
 
+func.def target(@target) @overlapping_vector_copy(%buffer: buffer) -> (vector<3xf16>) {
+  %base = index.constant 0 : offset
+  %aligned = buffer.assume.alignment %buffer {minimum_alignment = 2} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<4xf16>
+  %value = vector.load %view[0] : view<4xf16> -> vector<3xf16>
+  vector.store %value, %view[1] : vector<3xf16>, view<4xf16>
+  func.return %value : vector<3xf16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @overlapping_vector_copy() -> (reg<aie2p.vec256 x2>) asm {
+  %view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %24 = lda.u16 %view, 0
+  %25 = lda.u16 %view, 2
+  %26 = lda.u16 %view, 4
+  %27 = vbcst.16 %25
+  %28 = mov.short 1
+  %29 = copy %28 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %30 = vinsert.16.reg %27, %29, %26
+  %31 = vextract.16.imm %30, 0
+  %32 = vextract.16.imm %30, 1
+  %33 = vbcst.16 %24
+  %35 = copy %28 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %36 = vinsert.16.reg %33, %35, %31
+  %37 = mov.short 2
+  %38 = copy %37 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %value = vinsert.16.reg %36, %38, %32
+  st.s16 %24, %view, 2
+  st.s16 %31, %view, 4
+  st.s16 %32, %view, 6
+  return %value
+}
+
+// ====
+
+aie2p.target<core> @target
+
 func.def target(@target) @volatile_copy_i8x64(%source: buffer, %output: buffer) {
   %source_aligned, %output_aligned = buffer.assume.alignment %source, %output {minimum_alignment = 64} : buffer, buffer
   %base = index.constant 0 : offset

@@ -806,7 +806,10 @@ bool loom_vector_to_scalar_can_materialize_def_lane(
 static bool loom_vector_to_scalar_read_can_rematerialize_through(
     const loom_module_t* module, const loom_op_t* read_op,
     const loom_op_t* consumer_op, const loom_op_t* source_predecessor_op) {
+  // Lane expansion may interleave reads with the consumer's own effects.
+  // A writing consumer must use the original input snapshot throughout.
   if (!loom_motion_op_is_ordinary_load(module, read_op) || !consumer_op ||
+      !loom_motion_read_can_cross_op(module, consumer_op) ||
       read_op->parent_block != consumer_op->parent_block ||
       !source_predecessor_op ||
       source_predecessor_op->parent_block != consumer_op->parent_block ||

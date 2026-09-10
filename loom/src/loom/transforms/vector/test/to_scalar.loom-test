@@ -47,7 +47,7 @@ func.def @scalarizes_fragment_store_splat_source(%buffer: buffer, %base: offset,
 
 // ====
 
-func.def @scalarizes_fragment_store_loaded_source(%source_buffer: buffer, %target_buffer: buffer, %source_base: offset, %target_base: offset, %row: index, %column: index, %m: index, %n: index) {
+func.def @preserves_fragment_load_snapshot_before_store(%source_buffer: buffer, %target_buffer: buffer, %source_base: offset, %target_base: offset, %row: index, %column: index, %m: index, %n: index) {
   %layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %source_buffer[%source_base] : buffer -> view<[%m]x[%n]xf32, %layout>
   %target = buffer.view %target_buffer[%target_base] : buffer -> view<[%m]x[%n]xf32, %layout>
@@ -57,30 +57,18 @@ func.def @scalarizes_fragment_store_loaded_source(%source_buffer: buffer, %targe
 }
 
 // ----
-func.def @scalarizes_fragment_store_loaded_source(%source_buffer: buffer, %target_buffer: buffer, %source_base: offset, %target_base: offset, %row: index, %column: index, %m: index, %n: index) {
+func.def @preserves_fragment_load_snapshot_before_store(%source_buffer: buffer, %target_buffer: buffer, %source_base: offset, %target_base: offset, %row: index, %column: index, %m: index, %n: index) {
   %layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %source_buffer[%source_base] : buffer -> view<[%m]x[%n]xf32, %layout>
   %target = buffer.view %target_buffer[%target_base] : buffer -> view<[%m]x[%n]xf32, %layout>
-  %12 = index.constant 0 : index
-  %13 = index.constant 1 : index
-  scf.for %14 = [%12 to %m step %13] {
-    %15 = index.constant 0 : index
-    %16 = index.constant 1 : index
-    scf.for %17 = [%15 to %n step %16] {
-      %18 = index.add %row, %14 : index
-      %19 = index.add %column, %17 : index
-      %20 = view.load %source[%18, %19] : view<[%m]x[%n]xf32, %layout> -> f32
-      %21 = index.add %row, %14 : index
-      %22 = index.add %column, %17 : index
-      view.store %20, %target[%21, %22] : f32, view<[%m]x[%n]xf32, %layout>
-    }
-  }
+  %loaded = vector.fragment.load<result> %source[%row, %column] shape [%m, %n] : view<[%m]x[%n]xf32, %layout> -> vector<[%m]x[%n]xf32>
+  vector.fragment.store<result> %loaded, %target[%row, %column] shape [%m, %n] : vector<[%m]x[%n]xf32>, view<[%m]x[%n]xf32, %layout>
   func.return
 }
 
 // ====
 
-func.def @scalarizes_fragment_store_bf16_epilogue_source(%source_buffer: buffer, %gate_buffer: buffer, %target_buffer: buffer, %source_base: offset, %gate_base: offset, %target_base: offset, %row: index, %column: index, %m: index, %n: index) {
+func.def @preserves_bf16_epilogue_snapshot_before_store(%source_buffer: buffer, %gate_buffer: buffer, %target_buffer: buffer, %source_base: offset, %gate_base: offset, %target_base: offset, %row: index, %column: index, %m: index, %n: index) {
   %layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %source_buffer[%source_base] : buffer -> view<[%m]x[%n]xbf16, %layout>
   %gate = buffer.view %gate_buffer[%gate_base] : buffer -> view<[%m]x[%n]xf32, %layout>
@@ -96,32 +84,34 @@ func.def @scalarizes_fragment_store_bf16_epilogue_source(%source_buffer: buffer,
 }
 
 // ----
-func.def @scalarizes_fragment_store_bf16_epilogue_source(%source_buffer: buffer, %gate_buffer: buffer, %target_buffer: buffer, %source_base: offset, %gate_base: offset, %target_base: offset, %row: index, %column: index, %m: index, %n: index) {
+func.def @preserves_bf16_epilogue_snapshot_before_store(%source_buffer: buffer, %gate_buffer: buffer, %target_buffer: buffer, %source_base: offset, %gate_base: offset, %target_base: offset, %row: index, %column: index, %m: index, %n: index) {
   %layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %source_buffer[%source_base] : buffer -> view<[%m]x[%n]xbf16, %layout>
   %gate = buffer.view %gate_buffer[%gate_base] : buffer -> view<[%m]x[%n]xf32, %layout>
   %target = buffer.view %target_buffer[%target_base] : buffer -> view<[%m]x[%n]xbf16, %layout>
-  %20 = index.constant 0 : index
-  %21 = index.constant 1 : index
-  scf.for %22 = [%20 to %m step %21] {
-    %23 = index.constant 0 : index
-    %24 = index.constant 1 : index
-    scf.for %25 = [%23 to %n step %24] {
-      %26 = index.add %row, %22 : index
-      %27 = index.add %column, %25 : index
-      %28 = view.load %source[%26, %27] : view<[%m]x[%n]xbf16, %layout> -> bf16
-      %29 = scalar.extf %28 : bf16 to f32
-      %30 = scalar.siluf %29 : f32
-      %31 = index.add %row, %22 : index
-      %32 = index.add %column, %25 : index
-      %33 = view.load %gate[%31, %32] : view<[%m]x[%n]xf32, %layout> -> f32
-      %34 = scalar.mulf %30, %33 : f32
-      %35 = scalar.fptrunc %34 : f32 to bf16
-      %36 = index.add %row, %22 : index
-      %37 = index.add %column, %25 : index
-      view.store %35, %target[%36, %37] : bf16, view<[%m]x[%n]xbf16, %layout>
+  %20 = vector.constant 0.0 : vector<[%m]x[%n]xbf16>
+  %21 = index.constant 0 : index
+  %22 = index.constant 1 : index
+  %narrow = scf.for %23 = [%21 to %m step %22](%24 = %20 : vector<[%m]x[%n]xbf16>) -> (vector<[%m]x[%n]xbf16>) {
+    %26 = index.constant 0 : index
+    %27 = index.constant 1 : index
+    %30 = scf.for %28 = [%26 to %n step %27](%29 = %24 : vector<[%m]x[%n]xbf16>) -> (vector<[%m]x[%n]xbf16>) {
+      %31 = index.add %row, %23 : index
+      %32 = index.add %column, %28 : index
+      %33 = view.load %source[%31, %32] : view<[%m]x[%n]xbf16, %layout> -> bf16
+      %34 = scalar.extf %33 : bf16 to f32
+      %35 = scalar.siluf %34 : f32
+      %36 = index.add %row, %23 : index
+      %37 = index.add %column, %28 : index
+      %38 = view.load %gate[%36, %37] : view<[%m]x[%n]xf32, %layout> -> f32
+      %39 = scalar.mulf %35, %38 : f32
+      %40 = scalar.fptrunc %39 : f32 to bf16
+      %41 = vector.insert %40 into %29[%23, %28] : bf16, vector<[%m]x[%n]xbf16>
+      scf.yield %41 : vector<[%m]x[%n]xbf16>
     }
+    scf.yield %30 : vector<[%m]x[%n]xbf16>
   }
+  vector.fragment.store<result> %narrow, %target[%row, %column] shape [%m, %n] : vector<[%m]x[%n]xbf16>, view<[%m]x[%n]xbf16, %layout>
   func.return
 }
 
@@ -878,7 +868,7 @@ func.def @scalarizes_dynamic_blocked_f32_mma(%blocks: index, %m: index, %n: inde
 
 // ====
 
-func.def @scalarizes_dynamic_blocked_fragment_copy(%source_buffer: buffer, %target_buffer: buffer, %source_base: offset, %target_base: offset, %block: index, %row: index, %column: index, %blocks: index, %m: index, %n: index) {
+func.def @preserves_blocked_fragment_load_snapshot_before_store(%source_buffer: buffer, %target_buffer: buffer, %source_base: offset, %target_base: offset, %block: index, %row: index, %column: index, %blocks: index, %m: index, %n: index) {
   %layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %source_buffer[%source_base] : buffer -> view<[%blocks]x[%m]x[%n]xf32, %layout>
   %target = buffer.view %target_buffer[%target_base] : buffer -> view<[%blocks]x[%m]x[%n]xf32, %layout>
@@ -888,30 +878,12 @@ func.def @scalarizes_dynamic_blocked_fragment_copy(%source_buffer: buffer, %targ
 }
 
 // ----
-func.def @scalarizes_dynamic_blocked_fragment_copy(%source_buffer: buffer, %target_buffer: buffer, %source_base: offset, %target_base: offset, %block: index, %row: index, %column: index, %blocks: index, %m: index, %n: index) {
+func.def @preserves_blocked_fragment_load_snapshot_before_store(%source_buffer: buffer, %target_buffer: buffer, %source_base: offset, %target_base: offset, %block: index, %row: index, %column: index, %blocks: index, %m: index, %n: index) {
   %layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %source_buffer[%source_base] : buffer -> view<[%blocks]x[%m]x[%n]xf32, %layout>
   %target = buffer.view %target_buffer[%target_base] : buffer -> view<[%blocks]x[%m]x[%n]xf32, %layout>
-  %14 = index.constant 0 : index
-  %15 = index.constant 1 : index
-  scf.for %16 = [%14 to %blocks step %15] {
-    %17 = index.constant 0 : index
-    %18 = index.constant 1 : index
-    scf.for %19 = [%17 to %m step %18] {
-      %20 = index.constant 0 : index
-      %21 = index.constant 1 : index
-      scf.for %22 = [%20 to %n step %21] {
-        %23 = index.add %block, %16 : index
-        %24 = index.add %row, %19 : index
-        %25 = index.add %column, %22 : index
-        %26 = view.load %source[%23, %24, %25] : view<[%blocks]x[%m]x[%n]xf32, %layout> -> f32
-        %27 = index.add %block, %16 : index
-        %28 = index.add %row, %19 : index
-        %29 = index.add %column, %22 : index
-        view.store %26, %target[%27, %28, %29] : f32, view<[%blocks]x[%m]x[%n]xf32, %layout>
-      }
-    }
-  }
+  %loaded = vector.fragment.load<result> %source[%block, %row, %column] shape [blocks(%blocks), %m, %n] : view<[%blocks]x[%m]x[%n]xf32, %layout> -> vector<[%blocks]x[%m]x[%n]xf32>
+  vector.fragment.store<result> %loaded, %target[%block, %row, %column] shape [blocks(%blocks), %m, %n] : vector<[%blocks]x[%m]x[%n]xf32>, view<[%blocks]x[%m]x[%n]xf32, %layout>
   func.return
 }
 
@@ -1410,4 +1382,118 @@ func.def @f32x2x4_insert_static(%values: vector<2x4xf32>, %value: f32) -> (vecto
   %10 = vector.extract %values[1, 3] : vector<2x4xf32> -> f32
   %result = vector.from_elements %4, %5, %6, %7, %8, %9, %value, %10 : vector<2x4xf32>
   func.return %result : vector<2x4xf32>
+}
+
+// ====
+
+// RUN: pass vector-to-scalar,canonicalize
+
+func.def @preserves_dynamic_rank2_mma_store_snapshots(%m: index, %n: index, %k: index, %lhs_buffer: buffer, %rhs_buffer: buffer, %init_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %origin = index.constant 0 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<[%m]x[%k]xf32, %layout>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<[%k]x[%n]xf32, %layout>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<[%m]x[%n]xf32, %layout>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<[%m]x[%n]xf32, %layout>
+  %lhs_data = vector.load %lhs_view[%origin, %origin] : view<[%m]x[%k]xf32, %layout> -> vector<[%m]x[%k]xf32>
+  %rhs_data = vector.load %rhs_view[%origin, %origin] : view<[%k]x[%n]xf32, %layout> -> vector<[%k]x[%n]xf32>
+  %init_data = vector.load %init_view[%origin, %origin] : view<[%m]x[%n]xf32, %layout> -> vector<[%m]x[%n]xf32>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<[%m]x[%k]xf32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<[%k]x[%n]xf32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<[%m]x[%n]xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<[%m]x[%k]xf32>, vector<[%k]x[%n]xf32>, vector<[%m]x[%n]xf32>
+  vector.store %result, %out_view[%origin, %origin] : vector<[%m]x[%n]xf32>, view<[%m]x[%n]xf32, %layout>
+  func.return
+}
+
+// ----
+func.def @preserves_dynamic_rank2_mma_store_snapshots(%m: index, %n: index, %k: index, %lhs_buffer: buffer, %rhs_buffer: buffer, %init_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<[%m]x[%k]xf32, %layout>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<[%k]x[%n]xf32, %layout>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<[%m]x[%n]xf32, %layout>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<[%m]x[%n]xf32, %layout>
+  %62 = vector.constant 0.0 : vector<[%m]x[%k]xf32>
+  %63 = index.constant 0 : index
+  %64 = index.constant 1 : index
+  %lhs_data = scf.for %65 = [%63 to %m step %64](%66 = %62 : vector<[%m]x[%k]xf32>) -> (vector<[%m]x[%k]xf32>) {
+    %68 = index.constant 0 : index
+    %69 = index.constant 1 : index
+    %72 = scf.for %70 = [%68 to %k step %69](%71 = %66 : vector<[%m]x[%k]xf32>) -> (vector<[%m]x[%k]xf32>) {
+      %73 = view.load %lhs_view[%65, %70] : view<[%m]x[%k]xf32, %layout> -> f32
+      %74 = vector.insert %73 into %71[%65, %70] : f32, vector<[%m]x[%k]xf32>
+      scf.yield %74 : vector<[%m]x[%k]xf32>
+    }
+    scf.yield %72 : vector<[%m]x[%k]xf32>
+  }
+  %49 = vector.constant 0.0 : vector<[%k]x[%n]xf32>
+  %50 = index.constant 0 : index
+  %51 = index.constant 1 : index
+  %rhs_data = scf.for %52 = [%50 to %k step %51](%53 = %49 : vector<[%k]x[%n]xf32>) -> (vector<[%k]x[%n]xf32>) {
+    %55 = index.constant 0 : index
+    %56 = index.constant 1 : index
+    %59 = scf.for %57 = [%55 to %n step %56](%58 = %53 : vector<[%k]x[%n]xf32>) -> (vector<[%k]x[%n]xf32>) {
+      %60 = view.load %rhs_view[%52, %57] : view<[%k]x[%n]xf32, %layout> -> f32
+      %61 = vector.insert %60 into %58[%52, %57] : f32, vector<[%k]x[%n]xf32>
+      scf.yield %61 : vector<[%k]x[%n]xf32>
+    }
+    scf.yield %59 : vector<[%k]x[%n]xf32>
+  }
+  %36 = vector.constant 0.0 : vector<[%m]x[%n]xf32>
+  %37 = index.constant 0 : index
+  %38 = index.constant 1 : index
+  %init_data = scf.for %39 = [%37 to %m step %38](%40 = %36 : vector<[%m]x[%n]xf32>) -> (vector<[%m]x[%n]xf32>) {
+    %42 = index.constant 0 : index
+    %43 = index.constant 1 : index
+    %46 = scf.for %44 = [%42 to %n step %43](%45 = %40 : vector<[%m]x[%n]xf32>) -> (vector<[%m]x[%n]xf32>) {
+      %47 = view.load %init_view[%39, %44] : view<[%m]x[%n]xf32, %layout> -> f32
+      %48 = vector.insert %47 into %45[%39, %44] : f32, vector<[%m]x[%n]xf32>
+      scf.yield %48 : vector<[%m]x[%n]xf32>
+    }
+    scf.yield %46 : vector<[%m]x[%n]xf32>
+  }
+  %21 = index.constant 0 : index
+  %22 = index.constant 1 : index
+  scf.for %23 = [%21 to %m step %22] {
+    %24 = index.constant 0 : index
+    %25 = index.constant 1 : index
+    scf.for %26 = [%24 to %n step %25] {
+      %27 = vector.extract %init_data[%23, %26] : vector<[%m]x[%n]xf32> -> f32
+      %28 = index.constant 0 : index
+      %29 = index.constant 1 : index
+      %32 = scf.for %30 = [%28 to %k step %29](%31 = %27 : f32) -> (f32) {
+        %33 = vector.extract %lhs_data[%23, %30] : vector<[%m]x[%k]xf32> -> f32
+        %34 = vector.extract %rhs_data[%30, %26] : vector<[%k]x[%n]xf32> -> f32
+        %35 = scalar.fmaf %33, %34, %31 : f32
+        scf.yield %35 : f32
+      }
+      view.store %32, %out_view[%23, %26] : f32, view<[%m]x[%n]xf32, %layout>
+    }
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-to-scalar,canonicalize
+
+func.def @preserves_target_shaped_fragment_mma_store_snapshots(%lhs_buffer: buffer, %rhs_buffer: buffer, %init_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %origin = index.constant 0 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xf16, %layout>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xf16, %layout>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32, %layout>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, %layout>
+  %lhs = vector.fragment.load<lhs> %lhs_view[%origin, %origin] shape [%m, %k] : view<16x16xf16, %layout> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[%origin, %origin] shape [%k, %n] : view<16x16xf16, %layout> -> vector<16xf16>
+  %init = vector.fragment.load<init> %init_view[%origin, %origin] shape [%m, %n] : view<16x16xf32, %layout> -> vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %out_view[%origin, %origin] shape [%m, %n] : vector<8xf32>, view<16x16xf32, %layout>
+  func.return
 }
