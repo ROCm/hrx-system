@@ -448,6 +448,7 @@ loom_check_test_suite(
     "test/array_plan/endpoint_storage.loom-test"
     "test/array_plan/multicast.loom-test"
     "test/array_plan/packed_record.loom-test"
+    "test/array_plan/pipeline_views.loom-test"
     "test/array_plan/record_contracts.loom-test"
     "test/array_plan/ring_wrap.loom-test"
     "test/array_plan/split_k.loom-test"
