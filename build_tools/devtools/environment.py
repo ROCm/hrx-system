@@ -37,28 +37,6 @@ def _environment_value(
     return None
 
 
-def _read_windows_short_path(path: str) -> str | None:
-    """Returns the Win32 short spelling of an existing path when available."""
-    import ctypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    get_short_path_name = kernel32.GetShortPathNameW
-    get_short_path_name.argtypes = [
-        ctypes.c_wchar_p,
-        ctypes.c_wchar_p,
-        ctypes.c_uint32,
-    ]
-    get_short_path_name.restype = ctypes.c_uint32
-    required_length = get_short_path_name(path, None, 0)
-    if required_length == 0:
-        return None
-    buffer = ctypes.create_unicode_buffer(required_length)
-    written_length = get_short_path_name(path, buffer, required_length)
-    if written_length == 0 or written_length >= required_length:
-        return None
-    return buffer.value
-
-
 def _create_windows_directory_junction(link: Path, target: Path) -> None:
     """Creates a Windows directory junction without requiring symlink rights."""
     command_interpreter = os.environ.get("COMSPEC", "cmd.exe")
@@ -99,21 +77,19 @@ def bazel_compatible_windows_shell_path(
     path: str,
     *,
     platform_name: str | None = None,
-    short_path_reader: Callable[[str], str | None] | None = None,
     alias_root: Path | None = None,
     junction_creator: Callable[[Path, Path], None] | None = None,
 ) -> str:
     """Returns a shell path safe for Bazel's generated Windows batch files."""
     platform_name = os.name if platform_name is None else platform_name
-    if platform_name != "nt" or not any(character.isspace() for character in path):
+    if platform_name != "nt":
         return path
-    if short_path_reader is None:
-        short_path_reader = _read_windows_short_path
-    short_path = short_path_reader(path)
-    if short_path and not any(character.isspace() for character in short_path):
-        return short_path
 
+    # Bazel expands Windows short names before writing the unquoted shell path
+    # into its batch launcher. A directory junction preserves a space-free path.
     shell_path = Path(path).resolve()
+    if not any(character.isspace() for character in str(shell_path)):
+        return path
     install_root = _windows_shell_install_root(shell_path)
     relative_shell_path = shell_path.relative_to(install_root)
     if alias_root is None:
@@ -289,6 +265,56 @@ def script_name(name: str) -> str:
     if os.name == "nt" and not name.lower().endswith((".cmd", ".ps1")):
         return name + ".cmd"
     return name
+
+
+def interpreter_version(command: tuple[str, ...]) -> str | None:
+    """Returns the major.minor version reported by a Python command."""
+    try:
+        result = subprocess.run(
+            [
+                *command,
+                "-c",
+                (
+                    "import sys; "
+                    "print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+                ),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def resolve_python_interpreter(
+    required_version: str,
+    tool_env: ToolEnvironment,
+) -> tuple[str, ...]:
+    """Resolves an interpreter with the requested major.minor version."""
+    path = tool_env.path_env().get("PATH")
+    candidates = [(tool_env.python,), (sys.executable,)]
+    versioned_python = shutil.which(f"python{required_version}", path=path)
+    if versioned_python is not None:
+        candidates.append((versioned_python,))
+    if os.name == "nt":
+        py_launcher = shutil.which("py", path=path)
+        if py_launcher is not None:
+            candidates.append((py_launcher, f"-{required_version}"))
+
+    seen_commands = set()
+    for command in candidates:
+        if command in seen_commands:
+            continue
+        seen_commands.add(command)
+        if interpreter_version(command) == required_version:
+            return command
+    raise ValueError(
+        f"Python {required_version} is required; install that interpreter and retry"
+    )
 
 
 def default_venv_root() -> Path:

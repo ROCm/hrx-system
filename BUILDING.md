@@ -17,6 +17,11 @@ conversion is an explicit source-generation and presubmit step.
 
 ## Quick Start
 
+Developer environment setup selects Python 3.12, shared by the tested tool
+and importer environments. Install that interpreter before setup. Setup rejects
+an incompatible populated environment; move it aside or choose a new
+`--tool-root` before retrying.
+
 Bazel source-tree build:
 
 ```bash

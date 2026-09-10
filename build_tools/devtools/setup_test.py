@@ -9,12 +9,17 @@ from __future__ import annotations
 import re
 import tempfile
 import unittest
+import venv
 from pathlib import Path
 from unittest import mock
 
 from build_tools.devtools.command_plan import CommandStep, WriteFileStep
 from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment, ToolMode
-from build_tools.devtools.setup import common_setup_plan, setup_plan
+from build_tools.devtools.setup import (
+    common_setup_plan,
+    setup_plan,
+    setup_python_command,
+)
 
 
 def locked_versions(path: Path) -> dict[str, str]:
@@ -28,6 +33,58 @@ def locked_versions(path: Path) -> dict[str, str]:
 
 
 class SetupPlanTest(unittest.TestCase):
+    def test_setup_reuses_the_populated_environment_interpreter(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            tool_env = ToolEnvironment(
+                ToolMode.VENV, Path(temporary_directory) / "venv"
+            )
+            venv.EnvBuilder(with_pip=False).create(tool_env.root)
+
+            plan = common_setup_plan(tool_env)
+            self.assertFalse(any("venv" in step.argv for step in plan.steps))
+
+    def test_setup_rejects_populated_directory_without_an_interpreter(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            (root / "retained.txt").write_text("caller data")
+            with self.assertRaisesRegex(ValueError, "no usable interpreter"):
+                common_setup_plan(ToolEnvironment(ToolMode.TOOL_ROOT, root))
+
+            self.assertEqual((root / "retained.txt").read_text(), "caller data")
+            self.assertEqual([path.name for path in root.iterdir()], ["retained.txt"])
+
+    def test_setup_selects_exact_managed_python_for_new_environment(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            tool_env = ToolEnvironment(
+                ToolMode.VENV, Path(temporary_directory) / "venv"
+            )
+            with mock.patch(
+                "build_tools.devtools.setup.resolve_python_interpreter",
+                return_value=("/tools/python3.12",),
+            ) as resolve_python:
+                command = setup_python_command(tool_env)
+
+        self.assertEqual(command, ("/tools/python3.12",))
+        resolve_python.assert_called_once_with(
+            "3.12",
+            tool_env,
+        )
+
+    def test_setup_rejects_populated_environment_with_wrong_python(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            venv_root = Path(temporary_directory) / "venv"
+            venv_root.mkdir()
+            (venv_root / "pyvenv.cfg").write_text("version = 3.14\n")
+            tool_env = ToolEnvironment(ToolMode.VENV, venv_root)
+            with (
+                mock.patch(
+                    "build_tools.devtools.setup.interpreter_version",
+                    return_value="3.14",
+                ),
+                self.assertRaisesRegex(ValueError, "requires Python 3.12; found 3.14"),
+            ):
+                setup_python_command(tool_env)
+
     def test_system_mode_does_not_create_venv_or_aliases_by_default(self):
         plan = setup_plan("bazel", ToolEnvironment(ToolMode.SYSTEM, None), None)
 
@@ -76,6 +133,11 @@ class SetupPlanTest(unittest.TestCase):
             self.assertTrue(
                 any("--only-binary=:all:" in step.describe() for step in commands)
             )
+            semgrep_probe = next(
+                step for step in plan.steps if step.label == "check semgrep"
+            )
+            self.assertIn("--disable-version-check", semgrep_probe.argv)
+            self.assertEqual(semgrep_probe.expected_pattern, r"\b1\.96\.0\b")
             self.assertTrue(
                 any("--group bazel" in step.describe() for step in commands)
             )

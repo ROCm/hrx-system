@@ -15,6 +15,27 @@ from build_tools.devtools import environment
 
 
 class EnvironmentTest(unittest.TestCase):
+    def test_resolve_python_interpreter_selects_required_version(self):
+        with (
+            mock.patch.object(
+                environment,
+                "interpreter_version",
+                side_effect=lambda command: (
+                    "3.12" if command == ("/tools/python3.12",) else "3.14"
+                ),
+            ),
+            mock.patch.object(
+                environment.shutil,
+                "which",
+                return_value="/tools/python3.12",
+            ),
+        ):
+            command = environment.resolve_python_interpreter(
+                "3.12", environment.ToolEnvironment(environment.ToolMode.SYSTEM, None)
+            )
+
+        self.assertEqual(command, ("/tools/python3.12",))
+
     def test_windows_bazel_shell_follows_git_for_windows_install(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             git_root = Path(temporary_directory) / "Git"
@@ -70,25 +91,7 @@ class EnvironmentTest(unittest.TestCase):
 
         self.assertEqual(result, "C:/tools/bash.exe")
 
-    def test_windows_bazel_shell_uses_space_free_short_path(self):
-        long_path = "C:/Program Files/Git/bin/bash.exe"
-        short_path = "C:/PROGRA~1/Git/bin/bash.exe"
-        with mock.patch.object(
-            environment,
-            "_read_windows_short_path",
-            return_value=short_path,
-        ) as read_short_path:
-            result = environment.find_windows_bazel_sh(
-                {environment.BAZEL_SH_ENV: long_path},
-                platform_name="nt",
-            )
-
-        self.assertEqual(result, short_path)
-        read_short_path.assert_called_once_with(long_path)
-
-    def test_windows_bazel_shell_aliases_installation_when_short_names_are_disabled(
-        self,
-    ):
+    def test_windows_bazel_shell_aliases_installation_with_spaces(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
             git_root = temporary_path / "Program Files" / "Git"
@@ -108,7 +111,6 @@ class EnvironmentTest(unittest.TestCase):
             result = environment.bazel_compatible_windows_shell_path(
                 str(bash_executable),
                 platform_name="nt",
-                short_path_reader=lambda _path: None,
                 alias_root=alias_root,
                 junction_creator=create_test_junction,
             )
@@ -120,9 +122,8 @@ class EnvironmentTest(unittest.TestCase):
             self.assertEqual(created_junctions[0][1], git_root)
 
             repeated_result = environment.bazel_compatible_windows_shell_path(
-                str(bash_executable),
+                result,
                 platform_name="nt",
-                short_path_reader=lambda _path: None,
                 alias_root=alias_root,
                 junction_creator=create_test_junction,
             )

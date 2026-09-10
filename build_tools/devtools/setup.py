@@ -11,14 +11,43 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from build_tools.devtools import hooks
+from build_tools.devtools import doctor, hooks
 from build_tools.devtools.aliases import alias_steps
 from build_tools.devtools.command_plan import (
+    CheckCommandStep,
     CommandPlan,
     CommandStep,
     EnsureDirectoryStep,
 )
-from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment, ToolMode
+from build_tools.devtools.environment import (
+    REPO_ROOT,
+    ToolEnvironment,
+    ToolMode,
+    interpreter_version,
+    resolve_python_interpreter,
+)
+
+MANAGED_PYTHON_VERSION = "3.12"
+
+
+def setup_python_command(tool_env: ToolEnvironment) -> tuple[str, ...] | None:
+    """Selects Python for a new environment, or returns None to reuse it."""
+    if tool_env.root.exists():
+        if not tool_env.root.is_dir():
+            raise ValueError(
+                f"managed tool environment path is not a directory: {tool_env.root}"
+            )
+        if any(tool_env.root.iterdir()):
+            actual_version = interpreter_version((tool_env.python,))
+            if actual_version != MANAGED_PYTHON_VERSION:
+                raise ValueError(
+                    f"managed tool environment {tool_env.root} requires Python "
+                    f"{MANAGED_PYTHON_VERSION}; found "
+                    f"{actual_version or 'no usable interpreter'}. "
+                    "Move it aside or choose a new --tool-root before setup."
+                )
+            return None
+    return resolve_python_interpreter(MANAGED_PYTHON_VERSION, tool_env)
 
 
 def common_setup_plan(
@@ -42,14 +71,16 @@ def common_setup_plan(
 
     if tool_env.root is None or tool_env.bin_dir is None:
         raise ValueError("managed setup requires a tool environment root")
+    python_command = setup_python_command(tool_env)
 
-    plan.add(
-        CommandStep(
-            [sys.executable, "-m", "venv", str(tool_env.root)],
-            cwd=REPO_ROOT,
-            label=f"create {tool_env.mode.value} tool environment",
+    if python_command is not None:
+        plan.add(
+            CommandStep(
+                [*python_command, "-m", "venv", str(tool_env.root)],
+                cwd=REPO_ROOT,
+                label=f"create {tool_env.mode.value} tool environment",
+            )
         )
-    )
     plan.add(
         CommandStep(
             [
@@ -98,6 +129,22 @@ def common_setup_plan(
                     if include_docs
                     else "install static-analysis tools"
                 ),
+            )
+        )
+        plan.add(
+            CheckCommandStep(
+                [
+                    tool_env.tool("semgrep"),
+                    "--disable-version-check",
+                    "--version",
+                ],
+                cwd=REPO_ROOT,
+                env={
+                    **tool_env.path_env(),
+                    "PYTHONWARNINGS": doctor.SEMGREP_WARNING_FILTER,
+                },
+                expected_pattern=doctor.SEMGREP_VERSION_PATTERN,
+                label="check semgrep",
             )
         )
     elif include_docs:

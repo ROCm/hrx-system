@@ -29,6 +29,7 @@ GLOBAL_TEST_TRIGGERS = (
     "requirements",
 )
 RESOURCE_TEST_TAG_FILTERS = ("-iree-run-requirement=runtime.resource.amd_gpu",)
+CTEST_RESOURCE_LABEL_EXCLUDE_REGEX = "runtime-resource="
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -100,6 +101,8 @@ def run_cmake_tests() -> bool:
             "--output-on-failure",
             "-R",
             CMAKE_TEST_REGEX,
+            "-LE",
+            CTEST_RESOURCE_LABEL_EXCLUDE_REGEX,
         ],
         "CTest tests",
     )

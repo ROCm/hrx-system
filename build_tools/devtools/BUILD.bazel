@@ -300,6 +300,7 @@ py_test(
         "__init__.py",
         "aliases.py",
         "command_plan.py",
+        "doctor.py",
         "environment.py",
         "hooks.py",
         "setup.py",
