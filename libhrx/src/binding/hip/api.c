@@ -105,13 +105,9 @@ iree_hip_physical_device_identity(const iree_hal_streaming_device_t* device) {
   return NULL;
 }
 
-static void iree_hip_format_device_uuid(const iree_hal_uuid_t* source,
-                                        hipUUID* target) {
-  static const char kHexDigits[] = "0123456789abcdef";
-  for (iree_host_size_t i = 0; i < sizeof(target->bytes) / 2; ++i) {
-    target->bytes[i * 2] = kHexDigits[source->bytes[i] >> 4];
-    target->bytes[i * 2 + 1] = kHexDigits[source->bytes[i] & 0x0F];
-  }
+static void iree_hip_copy_device_uuid(const iree_hal_uuid_t* source,
+                                      hipUUID* target) {
+  memcpy(target->bytes, source->bytes, sizeof(target->bytes));
 }
 
 HIPAPI int hrx_hip_binding_active(void) { return 1; }
@@ -2288,7 +2284,7 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   if (physical_identity &&
       iree_all_bits_set(physical_identity->flags,
                         IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_UUID)) {
-    iree_hip_format_device_uuid(&physical_identity->uuid, &prop->uuid);
+    iree_hip_copy_device_uuid(&physical_identity->uuid, &prop->uuid);
   }
   prop->tccDriver = 0;
   prop->asyncEngineCount = 2;
@@ -2730,7 +2726,7 @@ HIPAPI hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t dev) {
                          IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_UUID)) {
     HIP_RETURN_ERROR(hipErrorNotSupported);
   }
-  iree_hip_format_device_uuid(&physical_identity->uuid, uuid);
+  iree_hip_copy_device_uuid(&physical_identity->uuid, uuid);
   return hipSuccess;
 }
 
@@ -13540,13 +13536,6 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
     iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(symbol_result);
-  }
-
-  if (stream_obj->context->device_entry->max_shared_memory_per_block != 0 &&
-      sharedMemBytes >
-          stream_obj->context->device_entry->max_shared_memory_per_block) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   hipError_t launch_config_result = iree_hip_validate_launch_configuration(

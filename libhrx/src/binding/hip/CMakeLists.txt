@@ -362,31 +362,6 @@ iree_cc_test(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_HAL_DRIVER_AMDGPU)
-iree_cc_test(
-  NAME
-    hip_execution_resource_api_test
-  SRCS
-    "hip_execution_resource_api_test.cc"
-  DATA
-    ::amdhip64
-  DEPS
-    ${CMAKE_DL_LIBS}
-    ::execution_resource
-    iree::testing::gtest
-    iree::testing::gtest_main
-    libhrx_defs
-  ENV
-    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "runtime-resource=amd-gpu"
-  SANITIZER_SUPPRESSIONS
-    lsan
-    hsa
-)
-endif()
-
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_test(
   NAME
@@ -455,6 +430,31 @@ iree_cc_test(
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    hip_execution_resource_api_test
+  SRCS
+    "hip_execution_resource_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    ::execution_resource
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    hsa
 )
 endif()
 
