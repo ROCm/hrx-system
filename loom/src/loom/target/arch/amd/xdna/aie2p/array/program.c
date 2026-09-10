@@ -733,10 +733,13 @@ static iree_status_t loom_aie2p_program_build_shim_dma_descriptor(
   const loom_xdna_tile_facts_t* tile = NULL;
   IREE_RETURN_IF_ERROR(loom_xdna_array_tile_facts(builder->plan->family,
                                                   dma->coordinate, &tile));
-  if (channel->record_byte_length % tile->dma.transfer_length_granularity !=
-      0) {
+  uint64_t transfer_byte_length = 0;
+  if (!iree_checked_mul_u64(channel->record_byte_length, channel->record_count,
+                            &transfer_byte_length) ||
+      transfer_byte_length > UINT32_MAX ||
+      transfer_byte_length % tile->dma.transfer_length_granularity != 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AIE2P shim DMA length violates engine alignment");
+                            "AIE2P shim DMA span is not representable");
   }
   uint32_t descriptor_address = 0;
   IREE_RETURN_IF_ERROR(loom_aie2p_program_shim_dma_buffer_descriptor_address(
@@ -749,7 +752,7 @@ static iree_status_t loom_aie2p_program_build_shim_dma_descriptor(
   memset(words, 0,
          LOOM_AIE2P_SHIM_DMA_BUFFER_DESCRIPTOR_WORD_COUNT * sizeof(*words));
   const uint32_t encoded_length =
-      channel->record_byte_length / tile->dma.transfer_length_granularity -
+      (uint32_t)transfer_byte_length / tile->dma.transfer_length_granularity -
       tile->dma.transfer_length_offset;
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
       "shim_noc.dma.bd.word0.buffer_length", encoded_length, &words[0]));
@@ -763,16 +766,16 @@ static iree_status_t loom_aie2p_program_build_shim_dma_descriptor(
       "shim_noc.dma.bd.word7.valid_bd", 1, &words[7]));
 
   const uint64_t addend =
-      (uint64_t)binding_plan->partition_lane * channel->record_byte_length;
+      (uint64_t)binding_plan->partition_lane * transfer_byte_length;
   if (addend > INT64_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AIE2P binding partition offset overflows");
   }
   const uint32_t binding_ordinal =
       builder->plan->bindings[binding_plan->binding_index].ordinal;
-  loom_aie2p_program_append_relocation(builder, target_record_index,
-                                       binding_ordinal, (int64_t)addend,
-                                       channel->record_byte_length, &tile->dma);
+  loom_aie2p_program_append_relocation(
+      builder, target_record_index, binding_ordinal, (int64_t)addend,
+      (uint32_t)transfer_byte_length, &tile->dma);
   return iree_ok_status();
 }
 

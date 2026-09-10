@@ -320,7 +320,7 @@ iree_status_t loom_aie2p_xdna_artifact_emit(
   loom_aie2p_array_plan_t array_plan = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_build(
       request->module, array_function, source_leaves, source_leaf_count,
-      request->scratch_arena, &array_plan));
+      request->diagnostic_emitter, request->scratch_arena, &array_plan));
   loom_aie2p_array_program_t array_program = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_array_program_build(
       &array_plan, request->scratch_arena, &array_program));

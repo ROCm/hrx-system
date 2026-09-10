@@ -384,6 +384,15 @@ typedef struct loom_aie2p_pipeline_emitter_t {
   // Interned immediate name `port`.
   loom_string_id_t port_attr_name;
 
+  // Interned immediate name `output_port`.
+  loom_string_id_t output_port_attr_name;
+
+  // Interned immediate name `kind`.
+  loom_string_id_t kind_attr_name;
+
+  // Interned immediate name `fast_math`.
+  loom_string_id_t fast_math_attr_name;
+
   // Scalar register carrying index values.
   loom_type_t scalar_type;
 
@@ -434,6 +443,12 @@ static iree_status_t loom_aie2p_pipeline_emitter_initialize(
                                                  &emitter->entry_attr_name));
   IREE_RETURN_IF_ERROR(loom_module_intern_string(module, IREE_SV("port"),
                                                  &emitter->port_attr_name));
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      module, IREE_SV("output_port"), &emitter->output_port_attr_name));
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(module, IREE_SV("kind"),
+                                                 &emitter->kind_attr_name));
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      module, IREE_SV("fast_math"), &emitter->fast_math_attr_name));
   IREE_RETURN_IF_ERROR(loom_low_build_typed_register_type(
       module, emitter->descriptor_set,
       AIE2P_ARRAY_REG_CLASS_ID_AIE2P_ARRAY_SCALAR, 1,
@@ -536,18 +551,52 @@ static iree_status_t loom_aie2p_pipeline_emit_instances(
     loom_value_id_t lane = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_constant(
         emitter, instance->lane, location, &lane));
-    const loom_value_id_t operands[] = {
-        emitter->group_values[instance->group_index],
-        lane,
-    };
-    const loom_named_attr_t entry_attr = {
-        .name_id = emitter->entry_attr_name,
-        .value = loom_attr_symbol(instance->entry),
-    };
-    IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_op(
-        emitter, AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_WORKER, operands,
-        IREE_ARRAYSIZE(operands), loom_make_named_attr_slice(&entry_attr, 1),
-        &emitter->worker_type, location, &emitter->instance_values[i]));
+    if (instance->fold_record_count == 0) {
+      const loom_value_id_t operands[] = {
+          emitter->group_values[instance->group_index],
+          lane,
+      };
+      const loom_named_attr_t entry_attr = {
+          .name_id = emitter->entry_attr_name,
+          .value = loom_attr_symbol(instance->entry),
+      };
+      IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_op(
+          emitter, AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_WORKER, operands,
+          IREE_ARRAYSIZE(operands), loom_make_named_attr_slice(&entry_attr, 1),
+          &emitter->worker_type, location, &emitter->instance_values[i]));
+    } else {
+      loom_value_id_t record_count = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_constant(
+          emitter, instance->fold_record_count, location, &record_count));
+      const loom_value_id_t operands[] = {
+          emitter->group_values[instance->group_index],
+          lane,
+          record_count,
+      };
+      const loom_named_attr_t attrs[] = {
+          {
+              .name_id = emitter->entry_attr_name,
+              .value = loom_attr_symbol(instance->entry),
+          },
+          {
+              .name_id = emitter->output_port_attr_name,
+              .value = loom_attr_i64(instance->fold_output_port),
+          },
+          {
+              .name_id = emitter->kind_attr_name,
+              .value = loom_attr_i64(instance->fold_kind),
+          },
+          {
+              .name_id = emitter->fast_math_attr_name,
+              .value = loom_attr_i64(instance->fold_fast_math_flags),
+          },
+      };
+      IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_op(
+          emitter, AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_WORKER_FOLD, operands,
+          IREE_ARRAYSIZE(operands),
+          loom_make_named_attr_slice(attrs, IREE_ARRAYSIZE(attrs)),
+          &emitter->worker_type, location, &emitter->instance_values[i]));
+    }
   }
   return iree_ok_status();
 }
@@ -679,12 +728,16 @@ static iree_status_t loom_aie2p_pipeline_emit_edge(
           ? flow->minimum_capacity
           : LOOM_AIE2P_PIPELINE_DEFAULT_CHANNEL_CAPACITY;
   loom_value_id_t capacity_value = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t record_count_value = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_constant(
       emitter, capacity, location, &capacity_value));
+  IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_constant(
+      emitter, flow->record_count, location, &record_count_value));
   const loom_value_id_t channel_operands[] = {
       sender,
       receiver,
       capacity_value,
+      record_count_value,
   };
   loom_type_t channel_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_emit_typed_resource_type(

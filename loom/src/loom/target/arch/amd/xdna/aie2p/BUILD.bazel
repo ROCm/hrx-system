@@ -191,8 +191,11 @@ loom_cc_library(
         ":leaf_object",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:combining",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amd/xdna:array_facts",
@@ -381,6 +384,7 @@ loom_cc_binary(
 loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
+        "test/array_plan/record_contracts.loom-test",
         "test/array_plan/split_k.loom-test",
         "test/module_contracts.loom-test",
         "test/source_low/function_storage.loom-test",

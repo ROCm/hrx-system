@@ -11,7 +11,9 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/ops/combining.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_object.h"
 #include "loom/target/arch/amd/xdna/array/facts.h"
 
@@ -88,6 +90,14 @@ typedef struct loom_aie2p_array_worker_t {
   uint32_t lane;
   // Core function executed by the worker.
   loom_symbol_ref_t entry;
+  // Number of source records folded into one output, or zero when recordwise.
+  uint32_t fold_record_count;
+  // Callable output port carrying the folded result.
+  uint32_t fold_output_port;
+  // Elementwise combining operation used by the temporal fold.
+  loom_combining_kind_t fold_kind;
+  // Floating-point permissions applied by the temporal fold.
+  uint8_t fold_fast_math_flags;
   // Physical compute tile selected by the authored placement constraint.
   loom_xdna_tile_coordinate_t coordinate;
 } loom_aie2p_array_worker_t;
@@ -124,6 +134,8 @@ typedef struct loom_aie2p_array_channel_t {
   uint32_t receiver_endpoint_index;
   // Number of records held by the channel ring.
   uint32_t capacity;
+  // Number of ordered records transferred per activation.
+  uint32_t record_count;
   // Byte length of one statically shaped tile record.
   uint32_t record_byte_length;
   // Physical transport selected by planning.
@@ -342,12 +354,13 @@ typedef struct loom_aie2p_array_plan_t {
 // planner maps external binding channels through shim DMA, vertically adjacent
 // workers through neighbor-visible memory, and all other worker channels
 // through compute DMA and the stream network.
-iree_status_t loom_aie2p_array_plan_build(const loom_module_t* module,
-                                          const loom_op_t* function_op,
-                                          const loom_aie2p_array_leaf_t* leaves,
-                                          iree_host_size_t leaf_count,
-                                          iree_arena_allocator_t* arena,
-                                          loom_aie2p_array_plan_t* out_plan);
+// Invalid user input returns an error; structured diagnostics, when available,
+// are delivered through |diagnostic_emitter| before returning.
+iree_status_t loom_aie2p_array_plan_build(
+    const loom_module_t* module, const loom_op_t* function_op,
+    const loom_aie2p_array_leaf_t* leaves, iree_host_size_t leaf_count,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    loom_aie2p_array_plan_t* out_plan);
 
 #ifdef __cplusplus
 }  // extern "C"

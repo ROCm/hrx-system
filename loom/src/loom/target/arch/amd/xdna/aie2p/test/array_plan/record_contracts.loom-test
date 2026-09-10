@@ -1,0 +1,37 @@
+// RUN: emit aie2p-array-plan @temporal_fold_array
+
+aie2p.target<array> @temporal_fold_array_target
+
+aie2p.target<core> @temporal_fold_core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@temporal_fold_array_target) abi(array_program) @temporal_fold_array() asm {
+  %lanes = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %lane = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %capacity = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %input_records = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %output_records = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %column = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %row = constant.u32 2 : reg<aie2p.array.scalar : index>
+
+  %group = group %lanes
+  // ERROR@+1: TARGET/083 {record_count="0"}
+  %worker = worker.fold %group, %lane, %lane, @copy_f32_record, 1, 1, 0
+  %input = binding 0, "read"
+  %output = binding 1, "write"
+  %input_sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xf32>>
+  %worker_input = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xf32>>
+  %worker_output = sender %worker, 1 : reg<aie2p.array.sender : tile<1xf32>>
+  %output_receiver = receiver %output, 0 : reg<aie2p.array.receiver : tile<1xf32>>
+  %input_channel = channel %input_sender, %worker_input, %capacity, %input_records : reg<aie2p.array.channel : tile<1xf32>>
+  %output_channel = channel %worker_output, %output_receiver, %capacity, %output_records : reg<aie2p.array.channel : tile<1xf32>>
+  constrain.location %worker, %column, %row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@temporal_fold_core_target) abi(object_function) @copy_f32_record() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %value = lda %input, 0
+  st %value, %output, 0
+  return
+}

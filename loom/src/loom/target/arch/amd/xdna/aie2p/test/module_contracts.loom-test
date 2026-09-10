@@ -8,6 +8,7 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array
   %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
   %one = constant.u32 1 : reg<aie2p.array.scalar : index>
   %capacity = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %records = constant.u32 1 : reg<aie2p.array.scalar : index>
   %row = constant.u32 2 : reg<aie2p.array.scalar : index>
   %workers = group %one
   %worker = worker %workers, %zero, @vector_add_core
@@ -20,9 +21,9 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array
   %lhs_receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<16xi32>>
   %rhs_receiver = receiver %worker, 1 : reg<aie2p.array.receiver : tile<16xi32>>
   %output_sender = sender %worker, 2 : reg<aie2p.array.sender : tile<16xi32>>
-  %lhs_channel = channel %lhs_sender, %lhs_receiver, %capacity : reg<aie2p.array.channel : tile<16xi32>>
-  %rhs_channel = channel %rhs_sender, %rhs_receiver, %capacity : reg<aie2p.array.channel : tile<16xi32>>
-  %output_channel = channel %output_sender, %output_receiver, %capacity : reg<aie2p.array.channel : tile<16xi32>>
+  %lhs_channel = channel %lhs_sender, %lhs_receiver, %capacity, %records : reg<aie2p.array.channel : tile<16xi32>>
+  %rhs_channel = channel %rhs_sender, %rhs_receiver, %capacity, %records : reg<aie2p.array.channel : tile<16xi32>>
+  %output_channel = channel %output_sender, %output_receiver, %capacity, %records : reg<aie2p.array.channel : tile<16xi32>>
   constrain.location %worker, %zero, %row
   return
 }
@@ -55,9 +56,9 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array
   %lhs_receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<16xi32>>
   %rhs_receiver = receiver %worker, 1 : reg<aie2p.array.receiver : tile<16xi32>>
   %output_sender = sender %worker, 2 : reg<aie2p.array.sender : tile<16xi32>>
-  %lhs_channel = channel %lhs_sender, %lhs_receiver, %capacity : reg<aie2p.array.channel : tile<16xi32>>
-  %rhs_channel = channel %rhs_sender, %rhs_receiver, %capacity : reg<aie2p.array.channel : tile<16xi32>>
-  %output_channel = channel %output_sender, %output_receiver, %capacity : reg<aie2p.array.channel : tile<16xi32>>
+  %lhs_channel = channel %lhs_sender, %lhs_receiver, %capacity, %one : reg<aie2p.array.channel : tile<16xi32>>
+  %rhs_channel = channel %rhs_sender, %rhs_receiver, %capacity, %one : reg<aie2p.array.channel : tile<16xi32>>
+  %output_channel = channel %output_sender, %output_receiver, %capacity, %one : reg<aie2p.array.channel : tile<16xi32>>
   constrain.location %worker, %zero, %capacity
   return
 }
@@ -167,4 +168,22 @@ pass.pipeline<module> @array_cleanup_pipeline pipeline {
       low-dce
     }
   }
+}
+
+// ====
+// RUN: verify
+
+aie2p.target<array> @array_target
+
+low.func.def target<amd.xdna.aie2p.array>(@array_target) @wrong_entry() asm {
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.array>(@array_target) @bad_fold_entry() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %workers = group %one
+  // ERROR@+1: TARGET/079 {function_name="bad_fold_entry", descriptor_key="amd.xdna.aie2p.array.worker.fold", immediate_name="entry", symbol_name="wrong_entry", actual_contract="amd.xdna.aie2p.array", expected_contract="amd.xdna.aie2p.core"}
+  %worker = worker.fold %workers, %zero, %one, @wrong_entry, 0, 1, 0
+  return
 }

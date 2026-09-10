@@ -58,6 +58,7 @@ def test_topology_parameters_are_ssa_operands() -> None:
         "sender",
         "receiver",
         "capacity",
+        "records",
     ]
     assert not channel.immediates
 
@@ -70,20 +71,42 @@ def test_topology_parameters_are_ssa_operands() -> None:
     assert not location.immediates
 
 
-def test_worker_entry_is_an_explicit_symbolic_product_edge() -> None:
-    worker = next(
+def test_worker_entries_are_explicit_symbolic_product_edges() -> None:
+    workers = [
         descriptor
         for descriptor in AIE2P_ARRAY_DESCRIPTOR_SET.descriptors
-        if descriptor.key == "amd.xdna.aie2p.array.worker"
-    )
+        if descriptor.key
+        in {"amd.xdna.aie2p.array.worker", "amd.xdna.aie2p.array.worker.fold"}
+    ]
 
-    assert worker.asm_forms[0].mnemonic == "worker"
-    entry = next(
-        immediate for immediate in worker.immediates if immediate.field_name == "entry"
-    )
-    assert entry.kind is ImmediateKind.ORDINAL
-    assert entry.flags == (ImmediateFlag.SYMBOLIC,)
-    assert DescriptorFlag.SIDE_EFFECTING in worker.flags
+    assert [worker.asm_forms[0].mnemonic for worker in workers] == [
+        "worker",
+        "worker.fold",
+    ]
+    for worker in workers:
+        entry = next(
+            immediate
+            for immediate in worker.immediates
+            if immediate.field_name == "entry"
+        )
+        assert entry.kind is ImmediateKind.ORDINAL
+        assert entry.flags == (ImmediateFlag.SYMBOLIC,)
+        assert DescriptorFlag.SIDE_EFFECTING in worker.flags
+
+    fold = workers[1]
+    assert [operand.field_name for operand in fold.operands] == [
+        "result",
+        "group",
+        "lane",
+        "records",
+    ]
+    assert [immediate.field_name for immediate in fold.immediates] == [
+        "entry",
+        "output_port",
+        "kind",
+        "fast_math",
+    ]
+    assert fold.immediates[2].kind is ImmediateKind.ENUM
 
 
 def test_channels_are_typed_persistent_topology_edges() -> None:
@@ -127,4 +150,5 @@ def test_asm_mnemonics_are_target_relative() -> None:
         "receiver",
         "sender",
         "worker",
+        "worker.fold",
     }

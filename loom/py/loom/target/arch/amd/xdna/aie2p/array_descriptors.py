@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from loom.dialect.combining import CombiningKind
 from loom.target.low_descriptors import (
     AsmForm,
     AsmImmediate,
@@ -53,6 +54,7 @@ _REG_CHANNEL = "aie2p.array.channel"
 _RESOURCE_GRAPH = "aie2p.array.graph"
 _SCHEDULE_GRAPH = "aie2p.array.schedule.graph"
 _BINDING_ACCESS_DOMAIN = "aie2p.array.binding_access"
+_COMBINING_KIND_DOMAIN = "aie2p.array.combining_kind"
 
 _REFERENCE_BANK = 1
 
@@ -102,6 +104,15 @@ def _u32(field_name: str) -> Immediate:
         ImmediateKind.UNSIGNED,
         bit_width=32,
         unsigned_max=(2**32) - 1,
+    )
+
+
+def _fast_math(field_name: str) -> Immediate:
+    return Immediate(
+        field_name,
+        ImmediateKind.UNSIGNED,
+        bit_width=7,
+        unsigned_max=(2**7) - 1,
     )
 
 
@@ -212,6 +223,42 @@ _DESCRIPTORS = (
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     ),
     Descriptor(
+        key=f"{_DESCRIPTOR_SET_KEY}.worker.fold",
+        mnemonic="worker.fold",
+        semantic_tag="array.resident_worker.fold",
+        operands=(
+            _result(_REG_WORKER),
+            _operand(_REG_GROUP, "group"),
+            _operand(_REG_SCALAR, "lane"),
+            _operand(_REG_SCALAR, "records"),
+        ),
+        immediates=(
+            Immediate(
+                "entry",
+                ImmediateKind.ORDINAL,
+                flags=(ImmediateFlag.SYMBOLIC,),
+                bit_width=32,
+                unsigned_max=(2**32) - 1,
+            ),
+            _u32("output_port"),
+            Immediate(
+                "kind",
+                ImmediateKind.ENUM,
+                enum_domain=_COMBINING_KIND_DOMAIN,
+            ),
+            _fast_math("fast_math"),
+        ),
+        asm_forms=_asm(
+            "worker.fold",
+            results=("result",),
+            operands=("group", "lane", "records"),
+            immediates=("entry", "output_port", "kind", "fast_math"),
+        ),
+        effects=(_TOPOLOGY_EFFECT,),
+        schedule_class=_SCHEDULE_GRAPH,
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
+    ),
+    Descriptor(
         key=f"{_DESCRIPTOR_SET_KEY}.sender",
         mnemonic="sender",
         semantic_tag="array.sender",
@@ -274,11 +321,12 @@ _DESCRIPTORS = (
             _operand(_REG_SENDER, "sender"),
             _operand(_REG_RECEIVER, "receiver"),
             _operand(_REG_SCALAR, "capacity"),
+            _operand(_REG_SCALAR, "records"),
         ),
         asm_forms=_asm(
             "channel",
             results=("result",),
-            operands=("sender", "receiver", "capacity"),
+            operands=("sender", "receiver", "capacity", "records"),
         ),
         effects=(_TOPOLOGY_EFFECT,),
         schedule_class=_SCHEDULE_GRAPH,
@@ -352,6 +400,12 @@ AIE2P_ARRAY_DESCRIPTOR_SET = DescriptorSet(
                 EnumValue("read", 1),
                 EnumValue("write", 2),
                 EnumValue("read_write", 3),
+            ),
+        ),
+        EnumDomain(
+            _COMBINING_KIND_DOMAIN,
+            values=tuple(
+                EnumValue(case.keyword, case.value) for case in CombiningKind.cases
             ),
         ),
     ),

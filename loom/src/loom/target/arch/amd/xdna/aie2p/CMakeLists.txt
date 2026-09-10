@@ -216,8 +216,11 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::packet
     loom::codegen::low::target_binding
+    loom::error::emitter
+    loom::error::error_defs
     loom::ir
     loom::ir::facts
+    loom::ops::combining
     loom::ops::low
     loom::ops::op_defs
     loom::target::arch::amd::xdna::array_facts
@@ -417,6 +420,7 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "test/array_plan/record_contracts.loom-test"
     "test/array_plan/split_k.loom-test"
     "test/module_contracts.loom-test"
     "test/source_low/function_storage.loom-test"

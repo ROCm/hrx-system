@@ -108,7 +108,9 @@ static iree_status_t loom_aie2p_low_verify_worker(
     loom_low_verify_context_t* context,
     const loom_aie2p_low_verify_state_t* state,
     const loom_low_descriptor_packet_t* packet) {
-  if (packet->descriptor_ordinal != AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_WORKER) {
+  if (packet->descriptor_ordinal != AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_WORKER &&
+      packet->descriptor_ordinal !=
+          AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_WORKER_FOLD) {
     return iree_ok_status();
   }
 

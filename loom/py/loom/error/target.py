@@ -1512,6 +1512,17 @@ ERR_TARGET_082 = ErrorDef(
     fix_hint="Select a device profile provided by this target family.",
 )
 
+# ERR_TARGET_083: Array worker fold has an empty record sequence.
+ERR_TARGET_083 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=83,
+    severity=Severity.ERROR,
+    summary="Array worker fold has an empty record sequence.",
+    message=("array worker fold requires a positive record count; got {record_count}"),
+    params=(ErrorParam("record_count", ParamKind.U32),),
+    fix_hint="Provide a non-empty record sequence for the worker fold.",
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1585,4 +1596,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_080,
     ERR_TARGET_081,
     ERR_TARGET_082,
+    ERR_TARGET_083,
 )

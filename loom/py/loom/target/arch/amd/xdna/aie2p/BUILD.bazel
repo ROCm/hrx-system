@@ -75,6 +75,7 @@ iree_py_library(
         ":encoding_data",
         ":machine_data",
         ":schedule_data",
+        "//loom/py/loom/dialect:shared",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/amd/xdna/aie:machine",
         "//loom/py/loom/target/arch/amd/xdna/aie:schedule",

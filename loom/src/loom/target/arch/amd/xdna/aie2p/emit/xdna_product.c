@@ -170,10 +170,12 @@ static iree_status_t loom_aie2p_xdna_build_binding_records(
     IREE_ASSERT_LT(binding->binding_index, plan->binding_count);
     const loom_aie2p_array_channel_t* channel =
         &plan->channels[binding->channel_index];
+    uint64_t lane_byte_length = 0;
     uint64_t minimum_byte_length = 0;
-    if (!iree_checked_mul_u64((uint64_t)binding->partition_lane + 1u,
-                              channel->record_byte_length,
-                              &minimum_byte_length)) {
+    if (!iree_checked_mul_u64(channel->record_byte_length,
+                              channel->record_count, &lane_byte_length) ||
+        !iree_checked_mul_u64((uint64_t)binding->partition_lane + 1u,
+                              lane_byte_length, &minimum_byte_length)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "AIE2P binding extent overflows");
     }

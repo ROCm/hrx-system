@@ -72,6 +72,7 @@ iree_py_library(
     loom::py::loom::target::arch::amd::xdna::aie2p::encoding_data
     loom::py::loom::target::arch::amd::xdna::aie2p::machine_data
     loom::py::loom::target::arch::amd::xdna::aie2p::schedule_data
+    loom::py::loom::dialect::shared
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amd::xdna::aie::machine
     loom::py::loom::target::arch::amd::xdna::aie::schedule
