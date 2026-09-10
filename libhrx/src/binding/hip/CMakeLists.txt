@@ -289,9 +289,10 @@ iree_cc_library(
     ::execution_resource_descriptor
     ::handle_registry
     ::launch_params
-    ::stream
     ::spirv_linker_compiler
+    ::stream
     iree::base
+    iree::base::internal
     iree::base::threading
     iree::hal
     iree::hal::drivers::amdgpu
