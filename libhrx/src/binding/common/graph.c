@@ -2665,14 +2665,42 @@ iree_status_t iree_hal_streaming_update_capture_dependencies(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_streaming_capture_set_last_node_locked(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_graph_node_t* node) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(node);
+  if (IREE_UNLIKELY(stream->capture_status !=
+                    IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "stream is not actively capturing");
+  }
+  if (IREE_UNLIKELY(!iree_hal_streaming_graph_node_is_active_in_graph(
+          stream->capture_graph, node))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "capture frontier node does not belong to the active graph");
+  }
+  if (stream->capture_dependency_capacity == 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_streaming_grow_capture_dependencies(stream, 1));
+  }
+  if (!stream->capture_origin) {
+    stream->capture_joined_to_origin = false;
+  }
+  stream->capture_dependencies[0] = node;
+  stream->capture_dependency_count = 1;
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_streaming_capture_set_last_node(
     iree_hal_streaming_stream_t* stream,
     iree_hal_streaming_graph_node_t* node) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_ASSERT_ARGUMENT(node);
-  if (!stream->capture_origin) {
-    stream->capture_joined_to_origin = false;
-  }
-  return iree_hal_streaming_update_capture_dependencies(
-      stream, &node, 1, IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_SET);
+  iree_slim_mutex_lock(&stream->mutex);
+  iree_status_t status =
+      iree_hal_streaming_capture_set_last_node_locked(stream, node);
+  iree_slim_mutex_unlock(&stream->mutex);
+  return status;
 }

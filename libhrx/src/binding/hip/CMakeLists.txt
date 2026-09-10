@@ -154,6 +154,23 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    stream_value
+  HDRS
+    "stream_value.h"
+  SRCS
+    "stream_value.c"
+  DEPS
+    iree::base
+    iree::hal
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     handle_registry
   HDRS
     "handle_registry.h"
@@ -269,6 +286,7 @@ iree_cc_library(
     ::handle_registry
     ::launch_params
     ::stream
+    ::stream_value
     iree::base
     iree::base::threading
     iree::hal
@@ -324,6 +342,18 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    stream_value_test
+  SRCS
+    "stream_value_test.cc"
+  DEPS
+    ::stream_value
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
     handle_registry_test
   SRCS
     "handle_registry_test.cc"
@@ -373,6 +403,31 @@ iree_cc_test(
   DEPS
     ${CMAKE_DL_LIBS}
     ::execution_resource
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    hsa
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    hip_stream_value_api_test
+  SRCS
+    "hip_stream_value_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    ::launch_params
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx_defs

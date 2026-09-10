@@ -271,6 +271,40 @@ TEST(BufferTableTest, LookupRangeOverflow) {
   iree_hal_streaming_buffer_table_free(table);
 }
 
+TEST(BufferTableTest, RetainedRangeSurvivesTableRemoval) {
+  iree_allocator_t allocator = iree_allocator_system();
+  iree_hal_streaming_buffer_table_t* table = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
+
+  hrx_buffer_t buffer = nullptr;
+  IREE_ASSERT_OK(
+      iree_allocator_malloc(allocator, sizeof(*buffer), (void**)&buffer));
+  memset(buffer, 0, sizeof(*buffer));
+  iree_atomic_ref_count_init(&buffer->ref_count);
+  buffer->size = 4096;
+
+  constexpr uint64_t kDevicePointer = UINT64_C(0x100000000);
+  IREE_ASSERT_OK(BufferTableStatus(hrx_buffer_table_insert(
+      table, kDevicePointer, /*host_ptr=*/nullptr, buffer->size, buffer,
+      /*user_data=*/nullptr)));
+
+  hrx_buffer_t retained_buffer = nullptr;
+  size_t offset = 0;
+  IREE_ASSERT_OK(BufferTableStatus(hrx_buffer_table_find_range_retain(
+      table, kDevicePointer + 32, /*size=*/8, &retained_buffer, &offset)));
+  EXPECT_EQ(buffer, retained_buffer);
+  EXPECT_EQ(32u, offset);
+  EXPECT_EQ(2, iree_atomic_ref_count_load(&buffer->ref_count));
+
+  IREE_ASSERT_OK(
+      BufferTableStatus(hrx_buffer_table_remove(table, kDevicePointer)));
+  hrx_buffer_release(buffer);
+  EXPECT_EQ(4096u, retained_buffer->size);
+  EXPECT_EQ(1, iree_atomic_ref_count_load(&retained_buffer->ref_count));
+  hrx_buffer_release(retained_buffer);
+  iree_hal_streaming_buffer_table_free(table);
+}
+
 //===----------------------------------------------------------------------===//
 // Multiple operations
 //===----------------------------------------------------------------------===//

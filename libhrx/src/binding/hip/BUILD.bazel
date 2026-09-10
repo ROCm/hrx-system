@@ -134,6 +134,17 @@ hrx_cc_library(
 )
 
 hrx_cc_library(
+    name = "stream_value",
+    srcs = ["stream_value.c"],
+    hdrs = ["stream_value.h"],
+    includes = ["../.."],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_library(
     name = "handle_registry",
     srcs = ["handle_registry.c"],
     hdrs = ["handle_registry.h"],
@@ -240,6 +251,7 @@ hrx_cc_shared_library(
         ":handle_registry",
         ":launch_params",
         ":stream",
+        ":stream_value",
         "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
@@ -271,6 +283,16 @@ hrx_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "stream_value_test",
+    srcs = ["stream_value_test.cc"],
+    deps = [
+        ":stream_value",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -336,6 +358,28 @@ hrx_cc_test(
     deps = [
         ":execution_resource",
         "//build_tools/bazel:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_stream_value_api_test",
+    srcs = ["hip_stream_value_api_test.cc"],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    sanitizer_suppressions = hsa_suppressions,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    deps = [
+        ":launch_params",
+        "//build_tools/bazel:dl",
+        "//build_tools/bazel:pthreads",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

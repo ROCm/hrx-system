@@ -550,6 +550,11 @@ typedef struct iree_hal_streaming_stream_t {
   // family, priority, and execution-resource set. NULL until first use.
   iree_hal_queue_t* cooperative_queue;
 
+  // Lazily acquired exact queue dedicated to value operations that may block
+  // on an externally produced memory predicate. Each stream owns a distinct
+  // queue so one unresolved predicate cannot stall another logical stream.
+  iree_hal_queue_t* value_wait_queue;
+
   // Event dependencies that establish safe cross-stream allocation reuse.
   iree_hal_streaming_memory_reuse_dependency_t* memory_reuse_dependencies;
   // Number of valid entries in |memory_reuse_dependencies|.
@@ -601,7 +606,7 @@ static inline iree_status_t iree_hal_streaming_stream_reserve_next_value_locked(
     iree_hal_streaming_stream_t* stream, uint64_t* out_wait_value,
     uint64_t* out_signal_value) {
   const uint64_t wait_value = stream->pending_value;
-  if (IREE_UNLIKELY(wait_value == UINT64_MAX)) {
+  if (IREE_UNLIKELY(wait_value >= IREE_HAL_SEMAPHORE_MAX_VALUE)) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "stream timeline value overflow");
   }
@@ -1039,6 +1044,19 @@ typedef struct iree_hal_streaming_buffer_ref_t {
   iree_hal_streaming_buffer_t* buffer;
   iree_device_size_t offset;
 } iree_hal_streaming_buffer_ref_t;
+
+// Immutable allocation metadata retained independently of the streaming
+// wrapper and buffer-table entry from which it was resolved.
+typedef struct iree_hal_streaming_retained_buffer_ref_t {
+  // HRX allocation retaining the HAL buffer and its physical backing.
+  hrx_buffer_t owner;
+  // HAL buffer borrowed from |owner|.
+  iree_hal_buffer_t* buffer;
+  // Byte offset of the requested pointer into |buffer|.
+  iree_device_size_t offset;
+  // Memory type captured while the allocation is retained.
+  iree_hal_memory_type_t memory_type;
+} iree_hal_streaming_retained_buffer_ref_t;
 
 static inline iree_hal_buffer_ref_t iree_hal_streaming_convert_buffer_ref(
     iree_hal_streaming_buffer_ref_t ref) {
@@ -2052,6 +2070,23 @@ iree_status_t iree_hal_streaming_memory_lookup_range_across_contexts(
     iree_hal_streaming_context_t** out_context,
     iree_hal_streaming_buffer_ref_t* out_ref);
 
+// Looks up and retains immutable allocation metadata for an address range.
+// |out_ref| must be deinitialized by the caller on success.
+iree_status_t iree_hal_streaming_memory_lookup_range_retain(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_deviceptr_t device_ptr, iree_device_size_t size,
+    iree_hal_streaming_retained_buffer_ref_t* out_ref);
+
+// Searches every live context and retains immutable allocation metadata for an
+// address range. |out_ref| must be deinitialized by the caller on success.
+iree_status_t iree_hal_streaming_memory_lookup_range_retain_across_contexts(
+    iree_hal_streaming_deviceptr_t device_ptr, iree_device_size_t size,
+    iree_hal_streaming_retained_buffer_ref_t* out_ref);
+
+// Releases a retained allocation reference and clears its metadata.
+void iree_hal_streaming_retained_buffer_ref_deinitialize(
+    iree_hal_streaming_retained_buffer_ref_t* ref);
+
 // Synchronization: none (allocates memory).
 iree_status_t iree_hal_streaming_memory_allocate_device(
     iree_hal_streaming_context_t* context, iree_device_size_t size,
@@ -2489,6 +2524,11 @@ iree_status_t iree_hal_streaming_update_capture_dependencies(
     iree_hal_streaming_capture_dependencies_mode_t mode);
 
 iree_status_t iree_hal_streaming_capture_set_last_node(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_graph_node_t* node);
+
+// Updates the stream capture frontier to |node|. The caller must hold
+// |stream->mutex| and the stream must be actively capturing.
+iree_status_t iree_hal_streaming_capture_set_last_node_locked(
     iree_hal_streaming_stream_t* stream, iree_hal_streaming_graph_node_t* node);
 
 //===----------------------------------------------------------------------===//

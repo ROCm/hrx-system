@@ -247,6 +247,32 @@ hrx_status_t hrx_buffer_table_find(hrx_buffer_table_t* table, uint64_t any_ptr,
   return hrx_ok_status();
 }
 
+// Returns the matching entry while |table->mutex| is held by the caller.
+static hrx_buffer_table_entry_t* hrx_buffer_table_find_range_locked(
+    hrx_buffer_table_t* table, uint64_t any_ptr, size_t size) {
+  for (size_t i = 0; i < table->count; ++i) {
+    hrx_buffer_table_entry_t* entry = &table->entries[i];
+    if (any_ptr >= entry->device_ptr) {
+      const uint64_t offset = any_ptr - entry->device_ptr;
+      if (offset <= (uint64_t)entry->size &&
+          (uint64_t)size <= (uint64_t)entry->size - offset) {
+        return entry;
+      }
+    }
+    if (entry->host_ptr) {
+      const uint64_t host_start = (uint64_t)(uintptr_t)entry->host_ptr;
+      if (any_ptr >= host_start) {
+        const uint64_t offset = any_ptr - host_start;
+        if (offset <= (uint64_t)entry->size &&
+            (uint64_t)size <= (uint64_t)entry->size - offset) {
+          return entry;
+        }
+      }
+    }
+  }
+  return NULL;
+}
+
 hrx_status_t hrx_buffer_table_find_range(hrx_buffer_table_t* table,
                                          uint64_t any_ptr, size_t size,
                                          hrx_buffer_t* out_buffer,
@@ -264,31 +290,44 @@ hrx_status_t hrx_buffer_table_find_range(hrx_buffer_table_t* table,
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "range would overflow");
   }
   iree_slim_mutex_lock(&table->mutex);
+  hrx_buffer_table_entry_t* entry =
+      hrx_buffer_table_find_range_locked(table, any_ptr, size);
+  if (entry) {
+    hrx_buffer_table_fill_result(entry, any_ptr, out_buffer, out_offset,
+                                 out_user_data);
+    iree_slim_mutex_unlock(&table->mutex);
+    return hrx_ok_status();
+  }
 
-  for (size_t i = 0; i < table->count; ++i) {
-    hrx_buffer_table_entry_t* e = &table->entries[i];
-    if (any_ptr >= e->device_ptr) {
-      const uint64_t offset = any_ptr - e->device_ptr;
-      if (offset <= (uint64_t)e->size &&
-          (uint64_t)size <= (uint64_t)e->size - offset) {
-        hrx_buffer_table_fill_result(e, any_ptr, out_buffer, out_offset,
-                                     out_user_data);
-        iree_slim_mutex_unlock(&table->mutex);
-        return hrx_ok_status();
-      }
-    }
-    if (e->host_ptr) {
-      const uint64_t host_start = (uint64_t)(uintptr_t)e->host_ptr;
-      if (any_ptr < host_start) continue;
-      const uint64_t offset = any_ptr - host_start;
-      if (offset <= (uint64_t)e->size &&
-          (uint64_t)size <= (uint64_t)e->size - offset) {
-        hrx_buffer_table_fill_result(e, any_ptr, out_buffer, out_offset,
-                                     out_user_data);
-        iree_slim_mutex_unlock(&table->mutex);
-        return hrx_ok_status();
-      }
-    }
+  iree_slim_mutex_unlock(&table->mutex);
+  return hrx_make_status(HRX_STATUS_NOT_FOUND,
+                         "no buffer contains the requested range");
+}
+
+hrx_status_t hrx_buffer_table_find_range_retain(hrx_buffer_table_t* table,
+                                                uint64_t any_ptr, size_t size,
+                                                hrx_buffer_t* out_buffer,
+                                                size_t* out_offset) {
+  IREE_ASSERT_ARGUMENT(out_buffer);
+  *out_buffer = NULL;
+  if (out_offset) *out_offset = 0;
+
+  if (size == 0) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "range size must be > 0");
+  }
+  if ((uint64_t)size > UINT64_MAX - any_ptr) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "range would overflow");
+  }
+
+  iree_slim_mutex_lock(&table->mutex);
+  hrx_buffer_table_entry_t* entry =
+      hrx_buffer_table_find_range_locked(table, any_ptr, size);
+  if (entry) {
+    hrx_buffer_retain(entry->buffer);
+    hrx_buffer_table_fill_result(entry, any_ptr, out_buffer, out_offset, NULL);
+    iree_slim_mutex_unlock(&table->mutex);
+    return hrx_ok_status();
   }
 
   iree_slim_mutex_unlock(&table->mutex);

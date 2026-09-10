@@ -67,6 +67,7 @@ hrx_cc_library(
         "registry.c",
         "stream.c",
         "stream_host_call.c",
+        "stream_value.c",
         "tls.c",
     ],
     hdrs = [
@@ -82,6 +83,7 @@ hrx_cc_library(
         "module.h",
         "occupancy.h",
         "stream.h",
+        "stream_value.h",
         "tls.h",
     ],
     includes = [
@@ -151,6 +153,17 @@ hrx_cc_test(
         ":common",
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "stream_value_test",
+    srcs = ["stream_value_test.cc"],
+    deps = [
+        ":common",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
