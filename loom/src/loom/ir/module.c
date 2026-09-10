@@ -2400,22 +2400,13 @@ iree_status_t loom_module_intern_string(loom_module_t* module,
         module->strings.count, (unsigned)(LOOM_STRING_ID_INVALID - 1));
   }
 
-  // Ensure the string table has capacity before inserting into the
-  // intern hash table. This guarantees the entry slot exists if the
-  // hash table insert succeeds.
+  // Reserve both tables before preparing the new string. The duplicate probe
+  // established uniqueness, so publishing its index requires no equality check
+  // or fallible work after the string row is populated.
   IREE_RETURN_IF_ERROR(
       loom_string_table_ensure_capacity(&module->arena, &module->strings));
-
-  uint32_t new_index = (uint32_t)module->strings.count;
-  uint32_t result_index = 0;
-  IREE_RETURN_IF_ERROR(loom_intern_table_find_or_insert(
-      &module->arena, &module->string_intern, hash, new_index,
-      loom_string_equal_fn, &equal_context, &result_index));
-
-  if (result_index != new_index) {
-    *out_string_id = (loom_string_id_t)result_index;
-    return iree_ok_status();
-  }
+  IREE_RETURN_IF_ERROR(
+      loom_intern_table_reserve_insert(&module->arena, &module->string_intern));
 
   // New entry: arena-allocate a copy of the string data.
   char* copy = NULL;
@@ -2424,8 +2415,10 @@ iree_status_t loom_module_intern_string(loom_module_t* module,
         iree_arena_allocate(&module->arena, string.size, (void**)&copy));
     memcpy(copy, string.data, string.size);
   }
+  const uint32_t new_index = (uint32_t)module->strings.count;
   module->strings.entries[new_index] = iree_make_string_view(copy, string.size);
   module->strings.count++;
+  loom_intern_table_insert_unique(&module->string_intern, hash, new_index);
 
   *out_string_id = (loom_string_id_t)new_index;
   return iree_ok_status();
