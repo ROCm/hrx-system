@@ -12,7 +12,6 @@ import json
 import os
 import re
 import secrets
-import shlex
 import shutil
 import signal
 import subprocess
@@ -727,7 +726,7 @@ def create_bazel_argument_separator() -> str:
 
 def bazel_run_under_command(target_executable: Path) -> str:
     launcher_path = Path(bazel_launcher.__file__).resolve()
-    return shlex.join(
+    return quote_command(
         [
             Path(sys.executable).as_posix(),
             launcher_path.as_posix(),
