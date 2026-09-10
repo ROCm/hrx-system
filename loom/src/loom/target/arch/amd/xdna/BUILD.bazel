@@ -23,12 +23,14 @@ loom_generated_file_family(
     output_flags = [
         "--array-output",
         "--register-output",
+        "--register-field-output",
         "--profile-output",
         "--aie2p-profile-output",
     ],
     outputs = [
         "array/facts_tables.inl",
         "array/register_tables.inl",
+        "array/register_field_ids.inl",
         "device/profile_tables.inl",
         "device/aie2p_profile_tables.inl",
     ],
@@ -48,7 +50,10 @@ loom_cc_library(
     name = "array_registers",
     srcs = ["array/registers.c"],
     hdrs = ["array/registers.h"],
-    textual_hdrs = [":array/register_tables.inl"],
+    textual_hdrs = [
+        ":array/register_field_ids.inl",
+        ":array/register_tables.inl",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":array_facts",

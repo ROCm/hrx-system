@@ -11,16 +11,10 @@
 
 namespace {
 
-loom_xdna_register_field_id_t ResolveField(iree_string_view_t key) {
-  loom_xdna_register_field_id_t field_id = 0;
-  IREE_EXPECT_OK(loom_xdna_register_field_lookup(key, &field_id));
-  return field_id;
-}
-
 TEST(XdnaRegisterFactsTest, ExposesCrossVerifiedSemanticCorpus) {
   EXPECT_EQ(loom_xdna_register_field_count(), 173u);
   const loom_xdna_register_field_id_t field_id =
-      ResolveField(IREE_SV("compute_memory.dma.bd.word5.lock_acquire_value"));
+      LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD5_LOCK_ACQUIRE_VALUE;
   loom_xdna_register_field_info_t info = {};
   IREE_ASSERT_OK(loom_xdna_register_field_info(field_id, &info));
   EXPECT_TRUE(iree_string_view_equal(
@@ -43,7 +37,7 @@ TEST(XdnaRegisterFactsTest, ExposesCrossVerifiedSemanticCorpus) {
 
 TEST(XdnaRegisterFactsTest, FormsIndexedAbsoluteAddresses) {
   const loom_xdna_register_field_id_t field_id =
-      ResolveField(IREE_SV("shim_noc.dma.bd.word7.valid_bd"));
+      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD7_VALID_BD;
   const uint16_t indices[] = {3};
   uint64_t address = 0;
   IREE_ASSERT_OK(loom_xdna_register_field_address(
@@ -65,7 +59,7 @@ TEST(XdnaRegisterFactsTest, FormsIndexedAbsoluteAddresses) {
 
 TEST(XdnaRegisterFactsTest, EncodesExactSignedAndUnsignedDomains) {
   const loom_xdna_register_field_id_t signed_field =
-      ResolveField(IREE_SV("compute_memory.dma.bd.word5.lock_acquire_value"));
+      LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD5_LOCK_ACQUIRE_VALUE;
   uint32_t bits = 0;
   IREE_ASSERT_OK(loom_xdna_register_field_encode(signed_field, -1, &bits));
   EXPECT_EQ(bits, UINT32_C(0x00000FE0));
@@ -79,7 +73,7 @@ TEST(XdnaRegisterFactsTest, EncodesExactSignedAndUnsignedDomains) {
       loom_xdna_register_field_encode(signed_field, 64, &bits));
 
   const loom_xdna_register_field_id_t unsigned_field =
-      ResolveField(IREE_SV("core.control.enable"));
+      LOOM_XDNA_REGISTER_FIELD_CORE_CONTROL_ENABLE;
   IREE_ASSERT_OK(loom_xdna_register_field_encode(unsigned_field, 1, &bits));
   EXPECT_EQ(bits, 1u);
   IREE_EXPECT_STATUS_IS(
@@ -89,7 +83,7 @@ TEST(XdnaRegisterFactsTest, EncodesExactSignedAndUnsignedDomains) {
 
 TEST(XdnaRegisterFactsTest, ResolvesTwoDimensionalStreamSlotPattern) {
   const loom_xdna_register_field_id_t field_id =
-      ResolveField(IREE_SV("memory_tile.stream.slave_slot.packet_id"));
+      LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_STREAM_SLAVE_SLOT_PACKET_ID;
   const uint16_t indices[] = {13, 2};
   uint64_t address = 0;
   IREE_ASSERT_OK(loom_xdna_register_field_address(

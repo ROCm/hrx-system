@@ -16,8 +16,17 @@
 extern "C" {
 #endif
 
-// Dense process-local register-field identifier. Zero is invalid.
+// Dense process-local register-field identifier. Zero is invalid. Identifiers
+// index the generated NPU2 corpus and are not part of the serialized ABI.
 typedef uint16_t loom_xdna_register_field_id_t;
+
+// Compile-time field selection from the same corpus as the encoding tables.
+enum {
+  LOOM_XDNA_REGISTER_FIELD_INVALID = 0,
+#define LOOM_XDNA_REGISTER_FIELD(symbol, value) symbol = value,
+#include "loom/target/arch/amd/xdna/array/register_field_ids.inl"
+#undef LOOM_XDNA_REGISTER_FIELD
+};
 
 // Software-visible access contract of a configuration register.
 typedef enum loom_xdna_register_access_e {
@@ -57,10 +66,6 @@ typedef struct loom_xdna_register_dimension_info_t {
 
 // Returns the number of semantic fields in the selected NPU2 corpus.
 iree_host_size_t loom_xdna_register_field_count(void);
-
-// Resolves one stable field key to a dense process-local identifier.
-iree_status_t loom_xdna_register_field_lookup(
-    iree_string_view_t key, loom_xdna_register_field_id_t* out_field_id);
 
 // Returns public facts for one resolved field identifier.
 iree_status_t loom_xdna_register_field_info(

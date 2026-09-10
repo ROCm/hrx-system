@@ -13,13 +13,15 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from loom.gen.support.c import c_string_literal
+from loom.gen.support.c import CIdentifierCase, c_identifier, c_string_literal
 from loom.gen.support.files import write_text_file
 from loom.gen.support.generated_file import line_comment_header
 from loom.target.arch.amd.xdna.array.model import (
     Architecture,
     RegisterAccess,
+    RegisterField,
     RegisterModule,
+    RegisterPattern,
     StreamDirection,
     StreamPort,
     TileKind,
@@ -232,12 +234,14 @@ def _build_string_table(strings: Sequence[str]) -> tuple[dict[str, int], list[st
     return offsets, lines
 
 
-def emit_register_facts() -> str:
-    """Emits deduplicated native NPU2 register-pattern and field tables."""
+def _register_rows() -> tuple[
+    tuple[RegisterPattern, ...],
+    tuple[tuple[str, RegisterPattern, RegisterField], ...],
+]:
+    """Orders the corpus shared by field identifiers and native tables."""
     family = NPU2_ARRAY_FAMILY
     validate_array_family(family)
     patterns = tuple(sorted(family.registers, key=lambda row: row.key))
-    pattern_ids = {pattern.key: index for index, pattern in enumerate(patterns)}
     fields = tuple(
         sorted(
             ((f"{pattern.key}.{field.name}", pattern, field) for pattern in patterns for field in pattern.fields),
@@ -246,6 +250,27 @@ def emit_register_facts() -> str:
     )
     if len(patterns) > 0x100 or len(fields) > 0xFFFF:
         raise ValueError("XDNA register tables exceed compact identifiers")
+    return patterns, fields
+
+
+def emit_register_field_ids() -> str:
+    """Emits symbol/value rows for the C-owned register-field identifiers."""
+    _patterns, fields = _register_rows()
+    lines = _header()
+    identifiers: set[str] = set()
+    for field_id, (key, _pattern, _field) in enumerate(fields, start=1):
+        suffix = c_identifier(key, case=CIdentifierCase.UPPER)
+        if suffix in identifiers:
+            raise ValueError(f"XDNA register field identifier collision: {key}")
+        identifiers.add(suffix)
+        lines.append(f"LOOM_XDNA_REGISTER_FIELD(LOOM_XDNA_REGISTER_FIELD_{suffix}, {field_id})")
+    return "\n".join(lines) + "\n"
+
+
+def emit_register_facts() -> str:
+    """Emits deduplicated native NPU2 register-pattern and field tables."""
+    patterns, fields = _register_rows()
+    pattern_ids = {pattern.key: index for index, pattern in enumerate(patterns)}
     strings = [key for key, _pattern_row, _field_row in fields]
     strings.extend(dimension.name for pattern in patterns for dimension in pattern.dimensions)
     string_offsets, string_lines = _build_string_table(strings)
@@ -383,6 +408,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate XDNA hardware tables.")
     parser.add_argument("--array-output", type=Path)
     parser.add_argument("--register-output", type=Path)
+    parser.add_argument("--register-field-output", type=Path)
     parser.add_argument("--profile-output", type=Path)
     parser.add_argument("--aie2p-profile-output", type=Path)
     parser.add_argument("--check", action="store_true")
@@ -390,6 +416,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_paths = (
         args.array_output,
         args.register_output,
+        args.register_field_output,
         args.profile_output,
         args.aie2p_profile_output,
     )
@@ -400,11 +427,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     array_contents = emit_array_facts()
     register_contents = emit_register_facts()
+    register_field_contents = emit_register_field_ids()
     profile_contents = emit_device_profiles()
     aie2p_profile_contents = emit_aie2p_target_profiles()
     if args.array_output is not None:
         write_text_file(args.array_output, array_contents)
         write_text_file(args.register_output, register_contents)
+        write_text_file(args.register_field_output, register_field_contents)
         write_text_file(args.profile_output, profile_contents)
         write_text_file(args.aie2p_profile_output, aie2p_profile_contents)
     return 0

@@ -37,9 +37,10 @@ typedef enum loom_aie2p_compute_dma_reset_state_e {
 } loom_aie2p_compute_dma_reset_state_t;
 
 // Compute-memory DMA reset fields in architectural register order.
-static const char* const loom_aie2p_compute_dma_reset_keys[] = {
-    "compute_memory.dma.channel.s2mm.control.reset",
-    "compute_memory.dma.channel.mm2s.control.reset",
+static const loom_xdna_register_field_id_t
+    loom_aie2p_compute_dma_reset_fields[] = {
+        LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_S2MM_CONTROL_RESET,
+        LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_MM2S_CONTROL_RESET,
 };
 
 typedef struct loom_aie2p_program_record_builder_t {
@@ -100,22 +101,12 @@ static iree_status_t loom_aie2p_program_add_scaled_capacity(
   return loom_aie2p_program_add_capacity(amount, inout_capacity);
 }
 
-static loom_xdna_register_field_id_t loom_aie2p_program_required_field(
-    const char* key) {
-  loom_xdna_register_field_id_t field_id = 0;
-  IREE_CHECK_OK(
-      loom_xdna_register_field_lookup(iree_make_cstring_view(key), &field_id));
-  return field_id;
-}
-
 static iree_status_t loom_aie2p_program_resolve_field_update(
-    const loom_aie2p_array_plan_t* plan, const char* key,
+    const loom_aie2p_array_plan_t* plan, loom_xdna_register_field_id_t field_id,
     loom_xdna_tile_coordinate_t coordinate, iree_host_size_t index_count,
     const uint16_t* indices, int64_t value,
     loom_aie2p_register_update_t* out_update) {
   *out_update = (loom_aie2p_register_update_t){0};
-  const loom_xdna_register_field_id_t field_id =
-      loom_aie2p_program_required_field(key);
   loom_xdna_register_field_info_t field_info = {0};
   IREE_CHECK_OK(loom_xdna_register_field_info(field_id, &field_info));
   uint32_t register_bits = 0;
@@ -164,13 +155,13 @@ static iree_status_t loom_aie2p_program_merge_register_update(
 }
 
 static iree_status_t loom_aie2p_program_merge_field_update(
-    const loom_aie2p_array_plan_t* plan, const char* key,
+    const loom_aie2p_array_plan_t* plan, loom_xdna_register_field_id_t field_id,
     loom_xdna_tile_coordinate_t coordinate, iree_host_size_t index_count,
     const uint16_t* indices, int64_t value,
     loom_aie2p_register_update_t* target) {
   loom_aie2p_register_update_t field = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
-      plan, key, coordinate, index_count, indices, value, &field));
+      plan, field_id, coordinate, index_count, indices, value, &field));
   return loom_aie2p_program_merge_register_update(&field, target);
 }
 
@@ -263,116 +254,122 @@ static void loom_aie2p_program_append_dma_task_wait(
   };
 }
 
-static const char* loom_aie2p_program_stream_master_enable_key(
+static loom_xdna_register_field_id_t
+loom_aie2p_program_stream_master_enable_field(loom_xdna_tile_kind_t tile_kind) {
+  switch (tile_kind) {
+    case LOOM_XDNA_TILE_KIND_SHIM_NOC:
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_MASTER_CONFIG_ENABLE;
+    case LOOM_XDNA_TILE_KIND_MEMORY:
+      return LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_STREAM_MASTER_CONFIG_ENABLE;
+    case LOOM_XDNA_TILE_KIND_COMPUTE:
+      return LOOM_XDNA_REGISTER_FIELD_CORE_STREAM_MASTER_CONFIG_ENABLE;
+  }
+  IREE_ASSERT_UNREACHABLE("validated AIE2P tile kind");
+  return LOOM_XDNA_REGISTER_FIELD_INVALID;
+}
+
+static loom_xdna_register_field_id_t
+loom_aie2p_program_stream_master_configuration_field(
     loom_xdna_tile_kind_t tile_kind) {
   switch (tile_kind) {
     case LOOM_XDNA_TILE_KIND_SHIM_NOC:
-      return "shim_noc.stream.master_config.enable";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_MASTER_CONFIG_CONFIGURATION;
     case LOOM_XDNA_TILE_KIND_MEMORY:
-      return "memory_tile.stream.master_config.enable";
+      return LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_STREAM_MASTER_CONFIG_CONFIGURATION;
     case LOOM_XDNA_TILE_KIND_COMPUTE:
-      return "core.stream.master_config.enable";
+      return LOOM_XDNA_REGISTER_FIELD_CORE_STREAM_MASTER_CONFIG_CONFIGURATION;
   }
   IREE_ASSERT_UNREACHABLE("validated AIE2P tile kind");
-  return NULL;
+  return LOOM_XDNA_REGISTER_FIELD_INVALID;
 }
 
-static const char* loom_aie2p_program_stream_master_configuration_key(
-    loom_xdna_tile_kind_t tile_kind) {
+static loom_xdna_register_field_id_t
+loom_aie2p_program_stream_slave_enable_field(loom_xdna_tile_kind_t tile_kind) {
   switch (tile_kind) {
     case LOOM_XDNA_TILE_KIND_SHIM_NOC:
-      return "shim_noc.stream.master_config.configuration";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_SLAVE_CONFIG_ENABLE;
     case LOOM_XDNA_TILE_KIND_MEMORY:
-      return "memory_tile.stream.master_config.configuration";
+      return LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_STREAM_SLAVE_CONFIG_ENABLE;
     case LOOM_XDNA_TILE_KIND_COMPUTE:
-      return "core.stream.master_config.configuration";
+      return LOOM_XDNA_REGISTER_FIELD_CORE_STREAM_SLAVE_CONFIG_ENABLE;
   }
   IREE_ASSERT_UNREACHABLE("validated AIE2P tile kind");
-  return NULL;
+  return LOOM_XDNA_REGISTER_FIELD_INVALID;
 }
 
-static const char* loom_aie2p_program_stream_slave_enable_key(
-    loom_xdna_tile_kind_t tile_kind) {
-  switch (tile_kind) {
-    case LOOM_XDNA_TILE_KIND_SHIM_NOC:
-      return "shim_noc.stream.slave_config.enable";
-    case LOOM_XDNA_TILE_KIND_MEMORY:
-      return "memory_tile.stream.slave_config.enable";
-    case LOOM_XDNA_TILE_KIND_COMPUTE:
-      return "core.stream.slave_config.enable";
-  }
-  IREE_ASSERT_UNREACHABLE("validated AIE2P tile kind");
-  return NULL;
-}
-
-static const char* loom_aie2p_program_compute_dma_queue_key(
+static loom_xdna_register_field_id_t loom_aie2p_program_compute_dma_queue_field(
     loom_aie2p_array_dma_direction_t direction) {
   switch (direction) {
     case LOOM_AIE2P_ARRAY_DMA_DIRECTION_MEMORY_TO_STREAM:
-      return "compute_memory.dma.channel.mm2s.start_queue.start_bd_id";
+      return LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_MM2S_START_QUEUE_START_BD_ID;
     case LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY:
-      return "compute_memory.dma.channel.s2mm.start_queue.start_bd_id";
+      return LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_CHANNEL_S2MM_START_QUEUE_START_BD_ID;
   }
   IREE_ASSERT_UNREACHABLE("validated AIE2P DMA direction");
-  return NULL;
+  return LOOM_XDNA_REGISTER_FIELD_INVALID;
 }
 
-static const char* loom_aie2p_program_shim_dma_control_controller_key(
+static loom_xdna_register_field_id_t
+loom_aie2p_program_shim_dma_control_controller_field(
     loom_aie2p_array_dma_direction_t direction) {
   switch (direction) {
     case LOOM_AIE2P_ARRAY_DMA_DIRECTION_MEMORY_TO_STREAM:
-      return "shim_noc.dma.channel.mm2s.control.controller_id";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_CONTROL_CONTROLLER_ID;
     case LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY:
-      return "shim_noc.dma.channel.s2mm.control.controller_id";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_CONTROL_CONTROLLER_ID;
   }
   IREE_ASSERT_UNREACHABLE("validated AIE2P DMA direction");
-  return NULL;
+  return LOOM_XDNA_REGISTER_FIELD_INVALID;
 }
 
-static const char* loom_aie2p_program_shim_dma_queue_start_key(
+static loom_xdna_register_field_id_t
+loom_aie2p_program_shim_dma_queue_start_field(
     loom_aie2p_array_dma_direction_t direction) {
   switch (direction) {
     case LOOM_AIE2P_ARRAY_DMA_DIRECTION_MEMORY_TO_STREAM:
-      return "shim_noc.dma.channel.mm2s.task_queue.start_bd_id";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_TASK_QUEUE_START_BD_ID;
     case LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY:
-      return "shim_noc.dma.channel.s2mm.task_queue.start_bd_id";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_TASK_QUEUE_START_BD_ID;
   }
   IREE_ASSERT_UNREACHABLE("validated AIE2P DMA direction");
-  return NULL;
+  return LOOM_XDNA_REGISTER_FIELD_INVALID;
 }
 
-static const char* loom_aie2p_program_shim_dma_queue_token_key(
+static loom_xdna_register_field_id_t
+loom_aie2p_program_shim_dma_queue_token_field(
     loom_aie2p_array_dma_direction_t direction) {
   switch (direction) {
     case LOOM_AIE2P_ARRAY_DMA_DIRECTION_MEMORY_TO_STREAM:
-      return "shim_noc.dma.channel.mm2s.task_queue.enable_token_issue";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_TASK_QUEUE_ENABLE_TOKEN_ISSUE;
     case LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY:
-      return "shim_noc.dma.channel.s2mm.task_queue.enable_token_issue";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_TASK_QUEUE_ENABLE_TOKEN_ISSUE;
   }
   IREE_ASSERT_UNREACHABLE("validated AIE2P DMA direction");
-  return NULL;
+  return LOOM_XDNA_REGISTER_FIELD_INVALID;
 }
 
-static const char* loom_aie2p_program_shim_dma_queue_repeat_key(
+static loom_xdna_register_field_id_t
+loom_aie2p_program_shim_dma_queue_repeat_field(
     loom_aie2p_array_dma_direction_t direction) {
   switch (direction) {
     case LOOM_AIE2P_ARRAY_DMA_DIRECTION_MEMORY_TO_STREAM:
-      return "shim_noc.dma.channel.mm2s.task_queue.repeat_count";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_TASK_QUEUE_REPEAT_COUNT;
     case LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY:
-      return "shim_noc.dma.channel.s2mm.task_queue.repeat_count";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_TASK_QUEUE_REPEAT_COUNT;
   }
   IREE_ASSERT_UNREACHABLE("validated AIE2P DMA direction");
-  return NULL;
+  return LOOM_XDNA_REGISTER_FIELD_INVALID;
 }
 
 static iree_status_t loom_aie2p_program_append_masked_field(
     const loom_aie2p_array_plan_t* plan,
-    loom_aie2p_program_record_builder_t* records, const char* key,
+    loom_aie2p_program_record_builder_t* records,
+    loom_xdna_register_field_id_t field_id,
     loom_xdna_tile_coordinate_t coordinate, iree_host_size_t index_count,
     const uint16_t* indices, int64_t value) {
   loom_aie2p_register_update_t update = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
-      plan, key, coordinate, index_count, indices, value, &update));
+      plan, field_id, coordinate, index_count, indices, value, &update));
   loom_aie2p_program_append_register_mask_write32(records, update.address,
                                                   update.mask, update.value);
   return iree_ok_status();
@@ -384,9 +381,11 @@ static iree_status_t loom_aie2p_program_append_core_reset(
   loom_aie2p_register_update_t reset = {0};
   loom_aie2p_register_update_t disable = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
-      builder->plan, "core.control.reset", coordinate, 0, NULL, 1, &reset));
+      builder->plan, LOOM_XDNA_REGISTER_FIELD_CORE_CONTROL_RESET, coordinate, 0,
+      NULL, 1, &reset));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
-      builder->plan, "core.control.enable", coordinate, 0, NULL, 0, &disable));
+      builder->plan, LOOM_XDNA_REGISTER_FIELD_CORE_CONTROL_ENABLE, coordinate,
+      0, NULL, 0, &disable));
   IREE_RETURN_IF_ERROR(
       loom_aie2p_program_merge_register_update(&disable, &reset));
   loom_aie2p_program_append_register_mask_write32(
@@ -402,13 +401,14 @@ static iree_status_t loom_aie2p_program_append_compute_dma_reset(
   IREE_RETURN_IF_ERROR(
       loom_xdna_array_tile_facts(builder->plan->family, coordinate, &tile));
   for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(loom_aie2p_compute_dma_reset_keys); ++i) {
+       i < IREE_ARRAYSIZE(loom_aie2p_compute_dma_reset_fields); ++i) {
     for (uint16_t channel = 0; channel < tile->dma.channel_count_per_direction;
          ++channel) {
       const uint16_t indices[] = {channel};
       IREE_RETURN_IF_ERROR(loom_aie2p_program_append_masked_field(
-          builder->plan, &builder->array, loom_aie2p_compute_dma_reset_keys[i],
-          coordinate, IREE_ARRAYSIZE(indices), indices, reset_state));
+          builder->plan, &builder->array,
+          loom_aie2p_compute_dma_reset_fields[i], coordinate,
+          IREE_ARRAYSIZE(indices), indices, reset_state));
     }
   }
   return iree_ok_status();
@@ -420,8 +420,9 @@ static iree_status_t loom_aie2p_program_append_lock_initialization(
   const uint16_t indices[] = {lock->lock_id};
   loom_aie2p_register_update_t update = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
-      builder->plan, "compute_memory.lock.value.value", lock->coordinate,
-      IREE_ARRAYSIZE(indices), indices, lock->initial_value, &update));
+      builder->plan, LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_LOCK_VALUE_VALUE,
+      lock->coordinate, IREE_ARRAYSIZE(indices), indices, lock->initial_value,
+      &update));
   loom_aie2p_program_append_register_write32(&builder->array, update.address,
                                              update.value);
   return iree_ok_status();
@@ -464,12 +465,12 @@ static iree_status_t loom_aie2p_program_accumulate_stream_route(
   loom_aie2p_register_update_t master = {0};
   loom_aie2p_register_update_t field = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
-      builder->plan, loom_aie2p_program_stream_master_enable_key(tile->kind),
+      builder->plan, loom_aie2p_program_stream_master_enable_field(tile->kind),
       route->coordinate, IREE_ARRAYSIZE(master_indices), master_indices, 1,
       &master));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
       builder->plan,
-      loom_aie2p_program_stream_master_configuration_key(tile->kind),
+      loom_aie2p_program_stream_master_configuration_field(tile->kind),
       route->coordinate, IREE_ARRAYSIZE(master_indices), master_indices,
       source_ordinal, &field));
   IREE_RETURN_IF_ERROR(
@@ -480,7 +481,7 @@ static iree_status_t loom_aie2p_program_accumulate_stream_route(
   const uint16_t slave_indices[] = {source_ordinal};
   loom_aie2p_register_update_t slave = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
-      builder->plan, loom_aie2p_program_stream_slave_enable_key(tile->kind),
+      builder->plan, loom_aie2p_program_stream_slave_enable_field(tile->kind),
       route->coordinate, IREE_ARRAYSIZE(slave_indices), slave_indices, 1,
       &slave));
   return loom_aie2p_program_accumulate_route_update(builder, &slave);
@@ -503,11 +504,13 @@ static iree_status_t loom_aie2p_program_accumulate_task_completion_route(
   const uint16_t master_indices[] = {destination_ordinal};
   loom_aie2p_register_update_t master = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
-      builder->plan, "shim_noc.stream.master_config.enable", coordinate,
+      builder->plan,
+      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_MASTER_CONFIG_ENABLE, coordinate,
       IREE_ARRAYSIZE(master_indices), master_indices, 1, &master));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_merge_field_update(
-      builder->plan, "shim_noc.stream.master_config.packet_enable", coordinate,
-      IREE_ARRAYSIZE(master_indices), master_indices, 1, &master));
+      builder->plan,
+      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_MASTER_CONFIG_PACKET_ENABLE,
+      coordinate, IREE_ARRAYSIZE(master_indices), master_indices, 1, &master));
   const uint32_t master_select_enable =
       UINT32_C(1) << LOOM_AIE2P_TASK_COMPLETION_ROUTE_MASTER_SELECT;
   const uint32_t master_configuration =
@@ -515,20 +518,23 @@ static iree_status_t loom_aie2p_program_accumulate_task_completion_route(
       (master_select_enable
        << LOOM_AIE2P_TASK_COMPLETION_ROUTE_MASTER_SELECT_SHIFT);
   IREE_RETURN_IF_ERROR(loom_aie2p_program_merge_field_update(
-      builder->plan, "shim_noc.stream.master_config.configuration", coordinate,
-      IREE_ARRAYSIZE(master_indices), master_indices, master_configuration,
-      &master));
+      builder->plan,
+      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_MASTER_CONFIG_CONFIGURATION,
+      coordinate, IREE_ARRAYSIZE(master_indices), master_indices,
+      master_configuration, &master));
   IREE_RETURN_IF_ERROR(
       loom_aie2p_program_accumulate_route_update(builder, &master));
 
   const uint16_t slave_indices[] = {source_ordinal};
   loom_aie2p_register_update_t slave = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
-      builder->plan, "shim_noc.stream.slave_config.enable", coordinate,
+      builder->plan,
+      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_SLAVE_CONFIG_ENABLE, coordinate,
       IREE_ARRAYSIZE(slave_indices), slave_indices, 1, &slave));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_merge_field_update(
-      builder->plan, "shim_noc.stream.slave_config.packet_enable", coordinate,
-      IREE_ARRAYSIZE(slave_indices), slave_indices, 1, &slave));
+      builder->plan,
+      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_SLAVE_CONFIG_PACKET_ENABLE,
+      coordinate, IREE_ARRAYSIZE(slave_indices), slave_indices, 1, &slave));
   IREE_RETURN_IF_ERROR(
       loom_aie2p_program_accumulate_route_update(builder, &slave));
 
@@ -538,68 +544,74 @@ static iree_status_t loom_aie2p_program_accumulate_task_completion_route(
   const uint16_t slot_indices[] = {source_ordinal, 0};
   loom_aie2p_register_update_t slot = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
-      builder->plan, "shim_noc.stream.slave_slot.packet_id", coordinate,
+      builder->plan,
+      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_SLAVE_SLOT_PACKET_ID, coordinate,
       IREE_ARRAYSIZE(slot_indices), slot_indices, controller_id, &slot));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_merge_field_update(
-      builder->plan, "shim_noc.stream.slave_slot.packet_mask", coordinate,
-      IREE_ARRAYSIZE(slot_indices), slot_indices,
+      builder->plan,
+      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_SLAVE_SLOT_PACKET_MASK,
+      coordinate, IREE_ARRAYSIZE(slot_indices), slot_indices,
       LOOM_AIE2P_TASK_COMPLETION_PACKET_MASK, &slot));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_merge_field_update(
-      builder->plan, "shim_noc.stream.slave_slot.enable", coordinate,
-      IREE_ARRAYSIZE(slot_indices), slot_indices, 1, &slot));
+      builder->plan, LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_SLAVE_SLOT_ENABLE,
+      coordinate, IREE_ARRAYSIZE(slot_indices), slot_indices, 1, &slot));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_merge_field_update(
-      builder->plan, "shim_noc.stream.slave_slot.master_select", coordinate,
-      IREE_ARRAYSIZE(slot_indices), slot_indices,
+      builder->plan,
+      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_SLAVE_SLOT_MASTER_SELECT,
+      coordinate, IREE_ARRAYSIZE(slot_indices), slot_indices,
       LOOM_AIE2P_TASK_COMPLETION_ROUTE_MASTER_SELECT, &slot));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_merge_field_update(
-      builder->plan, "shim_noc.stream.slave_slot.arbiter", coordinate,
+      builder->plan,
+      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_SLAVE_SLOT_ARBITER, coordinate,
       IREE_ARRAYSIZE(slot_indices), slot_indices,
       LOOM_AIE2P_TASK_COMPLETION_ROUTE_ARBITER, &slot));
   return loom_aie2p_program_accumulate_route_update(builder, &slot);
 }
 
-static const char* loom_aie2p_program_shim_mux_key(uint8_t south_channel) {
+static loom_xdna_register_field_id_t loom_aie2p_program_shim_mux_field(
+    uint8_t south_channel) {
   switch (south_channel) {
     case 2:
-      return "shim_noc.mux_config.south2";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH2;
     case 3:
-      return "shim_noc.mux_config.south3";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH3;
     case 6:
-      return "shim_noc.mux_config.south6";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH6;
     case 7:
-      return "shim_noc.mux_config.south7";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH7;
     default:
-      return NULL;
+      return LOOM_XDNA_REGISTER_FIELD_INVALID;
   }
 }
 
-static const char* loom_aie2p_program_shim_demux_key(uint8_t south_channel) {
+static loom_xdna_register_field_id_t loom_aie2p_program_shim_demux_field(
+    uint8_t south_channel) {
   switch (south_channel) {
     case 2:
-      return "shim_noc.demux_config.south2";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH2;
     case 3:
-      return "shim_noc.demux_config.south3";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH3;
     case 4:
-      return "shim_noc.demux_config.south4";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH4;
     case 5:
-      return "shim_noc.demux_config.south5";
+      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH5;
     default:
-      return NULL;
+      return LOOM_XDNA_REGISTER_FIELD_INVALID;
   }
 }
 
 static iree_status_t loom_aie2p_program_accumulate_shim_mux_route(
     loom_aie2p_array_program_builder_t* builder,
     const loom_aie2p_array_route_plan_t* route) {
-  const char* key = NULL;
+  loom_xdna_register_field_id_t field_id = LOOM_XDNA_REGISTER_FIELD_INVALID;
   if (route->source_port == LOOM_XDNA_STREAM_PORT_DMA &&
       route->destination_port == LOOM_XDNA_STREAM_PORT_NORTH) {
-    key = loom_aie2p_program_shim_mux_key(route->destination_channel);
+    field_id = loom_aie2p_program_shim_mux_field(route->destination_channel);
   } else if (route->source_port == LOOM_XDNA_STREAM_PORT_NORTH &&
              route->destination_port == LOOM_XDNA_STREAM_PORT_DMA) {
-    key = loom_aie2p_program_shim_demux_key(route->source_channel);
+    field_id = loom_aie2p_program_shim_demux_field(route->source_channel);
   }
-  if (key == NULL) {
+  if (field_id == LOOM_XDNA_REGISTER_FIELD_INVALID) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AIE2P shim mux route has unsupported ports %u[%u] -> %u[%u]",
@@ -609,7 +621,7 @@ static iree_status_t loom_aie2p_program_accumulate_shim_mux_route(
   }
   loom_aie2p_register_update_t update = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
-      builder->plan, key, route->coordinate, 0, NULL,
+      builder->plan, field_id, route->coordinate, 0, NULL,
       LOOM_AIE2P_SHIM_MUX_DMA_SELECTION, &update));
   update.requires_mask = true;
   return loom_aie2p_program_accumulate_route_update(builder, &update);
@@ -664,11 +676,9 @@ static iree_status_t loom_aie2p_program_build_routes(
   return iree_ok_status();
 }
 
-static iree_status_t loom_aie2p_program_encode_field(const char* key,
-                                                     int64_t value,
-                                                     uint32_t* inout_word) {
-  const loom_xdna_register_field_id_t field_id =
-      loom_aie2p_program_required_field(key);
+static iree_status_t loom_aie2p_program_encode_field(
+    loom_xdna_register_field_id_t field_id, int64_t value,
+    uint32_t* inout_word) {
   uint32_t register_bits = 0;
   IREE_RETURN_IF_ERROR(
       loom_xdna_register_field_encode(field_id, value, &register_bits));
@@ -682,21 +692,23 @@ static uint32_t loom_aie2p_program_encode_dma_wrap(uint32_t wrap,
   return wrap & field_mask;
 }
 
-static const char* const loom_aie2p_program_shim_dma_step_keys[] = {
-    "shim_noc.dma.bd.word3.d0_step_size",
-    "shim_noc.dma.bd.word4.d1_step_size",
-    "shim_noc.dma.bd.word5.d2_step_size",
+static const loom_xdna_register_field_id_t
+    loom_aie2p_program_shim_dma_step_fields[] = {
+        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD3_D0_STEP_SIZE,
+        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD4_D1_STEP_SIZE,
+        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD5_D2_STEP_SIZE,
 };
 
-static const char* const loom_aie2p_program_shim_dma_wrap_keys[] = {
-    "shim_noc.dma.bd.word3.d0_wrap",
-    "shim_noc.dma.bd.word4.d1_wrap",
+static const loom_xdna_register_field_id_t
+    loom_aie2p_program_shim_dma_wrap_fields[] = {
+        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD3_D0_WRAP,
+        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD4_D1_WRAP,
 };
 
-static_assert(IREE_ARRAYSIZE(loom_aie2p_program_shim_dma_step_keys) ==
+static_assert(IREE_ARRAYSIZE(loom_aie2p_program_shim_dma_step_fields) ==
                   LOOM_AIE2P_ARRAY_BINDING_DMA_DIMENSION_COUNT,
               "one shim DMA step field is required per address dimension");
-static_assert(IREE_ARRAYSIZE(loom_aie2p_program_shim_dma_wrap_keys) + 1u ==
+static_assert(IREE_ARRAYSIZE(loom_aie2p_program_shim_dma_wrap_fields) + 1u ==
                   LOOM_AIE2P_ARRAY_BINDING_DMA_DIMENSION_COUNT,
               "the outermost shim DMA address dimension does not wrap");
 
@@ -747,8 +759,8 @@ static iree_status_t loom_aie2p_program_compute_dma_buffer_descriptor_address(
   const uint16_t indices[] = {buffer_descriptor};
   loom_aie2p_register_update_t update = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
-      plan, "compute_memory.dma.bd.word0.buffer_length", coordinate,
-      IREE_ARRAYSIZE(indices), indices, 0, &update));
+      plan, LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD0_BUFFER_LENGTH,
+      coordinate, IREE_ARRAYSIZE(indices), indices, 0, &update));
   *out_address = update.address;
   return iree_ok_status();
 }
@@ -817,32 +829,38 @@ static iree_status_t loom_aie2p_program_build_compute_dma_descriptor(
       channel->record_byte_length / tile->dma.transfer_length_granularity -
       tile->dma.transfer_length_offset;
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
-      "compute_memory.dma.bd.word0.base_address",
+      LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD0_BASE_ADDRESS,
       local_address >> tile->dma.address_encoding_shift, &words[0]));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
-      "compute_memory.dma.bd.word0.buffer_length", encoded_length, &words[0]));
+      LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD0_BUFFER_LENGTH,
+      encoded_length, &words[0]));
   const uint16_t next_buffer_descriptor =
       dma->buffer_descriptor_start +
       (uint16_t)((slot_ordinal + 1) % dma->buffer_descriptor_count);
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_program_encode_field("compute_memory.dma.bd.word5.next_bd",
-                                      next_buffer_descriptor, &words[5]));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
-      "compute_memory.dma.bd.word5.use_next_bd", 1, &words[5]));
+      LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD5_NEXT_BD,
+      next_buffer_descriptor, &words[5]));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
-      "compute_memory.dma.bd.word5.valid_bd", 1, &words[5]));
-  IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
-      "compute_memory.dma.bd.word5.lock_release_value", 1, &words[5]));
-  IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
-      "compute_memory.dma.bd.word5.lock_release_id", release_lock->lock_id,
+      LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD5_USE_NEXT_BD, 1,
       &words[5]));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
-      "compute_memory.dma.bd.word5.lock_acquire_enable", 1, &words[5]));
+      LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD5_VALID_BD, 1,
+      &words[5]));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
-      "compute_memory.dma.bd.word5.lock_acquire_value", -1, &words[5]));
+      LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD5_LOCK_RELEASE_VALUE,
+      1, &words[5]));
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
+      LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD5_LOCK_RELEASE_ID,
+      release_lock->lock_id, &words[5]));
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
+      LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD5_LOCK_ACQUIRE_ENABLE,
+      1, &words[5]));
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
+      LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD5_LOCK_ACQUIRE_VALUE,
+      -1, &words[5]));
   return loom_aie2p_program_encode_field(
-      "compute_memory.dma.bd.word5.lock_acquire_id", acquire_lock->lock_id,
-      &words[5]);
+      LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD5_LOCK_ACQUIRE_ID,
+      acquire_lock->lock_id, &words[5]);
 }
 
 static iree_status_t loom_aie2p_program_build_compute_dma_descriptors(
@@ -861,7 +879,7 @@ static iree_status_t loom_aie2p_program_start_compute_dma(
   const uint16_t indices[] = {dma->dma_channel};
   loom_aie2p_register_update_t queue = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
-      builder->plan, loom_aie2p_program_compute_dma_queue_key(dma->direction),
+      builder->plan, loom_aie2p_program_compute_dma_queue_field(dma->direction),
       dma->coordinate, IREE_ARRAYSIZE(indices), indices,
       dma->buffer_descriptor_start, &queue));
   loom_aie2p_program_append_register_write32(&builder->array, queue.address,
@@ -875,8 +893,8 @@ static iree_status_t loom_aie2p_program_shim_dma_buffer_descriptor_address(
   const uint16_t indices[] = {buffer_descriptor};
   loom_aie2p_register_update_t update = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
-      plan, "shim_noc.dma.bd.word0.buffer_length", coordinate,
-      IREE_ARRAYSIZE(indices), indices, 0, &update));
+      plan, LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD0_BUFFER_LENGTH,
+      coordinate, IREE_ARRAYSIZE(indices), indices, 0, &update));
   *out_address = update.address;
   return iree_ok_status();
 }
@@ -922,30 +940,31 @@ static iree_status_t loom_aie2p_program_build_shim_dma_descriptor(
                                       tile->dma.transfer_length_granularity -
                                   tile->dma.transfer_length_offset;
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
-      "shim_noc.dma.bd.word0.buffer_length", encoded_length, &words[0]));
+      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD0_BUFFER_LENGTH,
+      encoded_length, &words[0]));
   for (uint8_t i = 0; i < binding_plan->dma_dimension_count; ++i) {
     const loom_aie2p_array_binding_dma_dimension_t* dimension =
         &binding_plan->dma_dimensions[i];
     const uint8_t word_index = i + 3u;
     IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
-        loom_aie2p_program_shim_dma_step_keys[i], dimension->step_size - 1u,
+        loom_aie2p_program_shim_dma_step_fields[i], dimension->step_size - 1u,
         &words[word_index]));
     if (dimension->wrap != 0) {
       IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
-          loom_aie2p_program_shim_dma_wrap_keys[i],
+          loom_aie2p_program_shim_dma_wrap_fields[i],
           loom_aie2p_program_encode_dma_wrap(dimension->wrap,
                                              tile->dma.wrap_bits),
           &words[word_index]));
     }
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
-      "shim_noc.dma.bd.word4.burst_length",
+      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD4_BURST_LENGTH,
       LOOM_AIE2P_SHIM_DMA_BURST_LENGTH_ENCODING, &words[4]));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
-      "shim_noc.dma.bd.word5.axi_cache", LOOM_AIE2P_SHIM_DMA_AXI_CACHE_ENCODING,
-      &words[5]));
+      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD5_AXI_CACHE,
+      LOOM_AIE2P_SHIM_DMA_AXI_CACHE_ENCODING, &words[5]));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_encode_field(
-      "shim_noc.dma.bd.word7.valid_bd", 1, &words[7]));
+      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD7_VALID_BD, 1, &words[7]));
 
   const uint32_t binding_ordinal =
       builder->plan->bindings[binding_plan->binding_index].ordinal;
@@ -970,7 +989,7 @@ static iree_status_t loom_aie2p_program_build_shim_dma_queue(
     loom_aie2p_register_update_t controller = {0};
     IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
         builder->plan,
-        loom_aie2p_program_shim_dma_control_controller_key(dma->direction),
+        loom_aie2p_program_shim_dma_control_controller_field(dma->direction),
         dma->coordinate, IREE_ARRAYSIZE(indices), indices, controller_id,
         &controller));
     loom_aie2p_program_append_register_mask_write32(
@@ -981,13 +1000,13 @@ static iree_status_t loom_aie2p_program_build_shim_dma_queue(
   loom_aie2p_register_update_t queue = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
       builder->plan,
-      loom_aie2p_program_shim_dma_queue_start_key(dma->direction),
+      loom_aie2p_program_shim_dma_queue_start_field(dma->direction),
       dma->coordinate, IREE_ARRAYSIZE(indices), indices,
       dma->buffer_descriptor_start, &queue));
   loom_aie2p_register_update_t repeat = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
       builder->plan,
-      loom_aie2p_program_shim_dma_queue_repeat_key(dma->direction),
+      loom_aie2p_program_shim_dma_queue_repeat_field(dma->direction),
       dma->coordinate, IREE_ARRAYSIZE(indices), indices,
       binding_plan->task_repeat_count - 1u, &repeat));
   IREE_RETURN_IF_ERROR(
@@ -996,7 +1015,7 @@ static iree_status_t loom_aie2p_program_build_shim_dma_queue(
     loom_aie2p_register_update_t token = {0};
     IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
         builder->plan,
-        loom_aie2p_program_shim_dma_queue_token_key(dma->direction),
+        loom_aie2p_program_shim_dma_queue_token_field(dma->direction),
         dma->coordinate, IREE_ARRAYSIZE(indices), indices, 1, &token));
     IREE_RETURN_IF_ERROR(
         loom_aie2p_program_merge_register_update(&token, &queue));
@@ -1126,7 +1145,7 @@ static iree_status_t loom_aie2p_program_count_storage(
             loom_xdna_array_tile_facts(plan->family, dma->coordinate, &tile));
         IREE_RETURN_IF_ERROR(loom_aie2p_program_add_scaled_capacity(
             tile->dma.channel_count_per_direction,
-            2 * IREE_ARRAYSIZE(loom_aie2p_compute_dma_reset_keys),
+            2 * IREE_ARRAYSIZE(loom_aie2p_compute_dma_reset_fields),
             &compute_dma_lifecycle_record_count));
       }
     }
@@ -1145,7 +1164,7 @@ static iree_status_t loom_aie2p_program_count_storage(
     // Each reset field is emitted once to assert and once to release reset.
     IREE_RETURN_IF_ERROR(loom_aie2p_program_add_scaled_capacity(
         tile->dma.channel_count_per_direction,
-        2 * IREE_ARRAYSIZE(loom_aie2p_compute_dma_reset_keys),
+        2 * IREE_ARRAYSIZE(loom_aie2p_compute_dma_reset_fields),
         &compute_dma_lifecycle_record_count));
   }
   iree_host_size_t array_record_capacity = 0;
@@ -1229,12 +1248,14 @@ static iree_status_t loom_aie2p_program_build_array(
   }
   for (iree_host_size_t i = 0; i < builder->plan->worker_plan_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_aie2p_program_append_masked_field(
-        builder->plan, &builder->array, "core.control.reset",
+        builder->plan, &builder->array,
+        LOOM_XDNA_REGISTER_FIELD_CORE_CONTROL_RESET,
         builder->plan->worker_plans[i].coordinate, 0, NULL, 0));
   }
   for (iree_host_size_t i = 0; i < builder->plan->worker_plan_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_aie2p_program_append_masked_field(
-        builder->plan, &builder->array, "core.control.enable",
+        builder->plan, &builder->array,
+        LOOM_XDNA_REGISTER_FIELD_CORE_CONTROL_ENABLE,
         builder->plan->worker_plans[i].coordinate, 0, NULL, 1));
   }
   return iree_ok_status();

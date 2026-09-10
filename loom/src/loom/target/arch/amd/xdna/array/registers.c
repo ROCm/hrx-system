@@ -53,32 +53,6 @@ iree_host_size_t loom_xdna_register_field_count(void) {
   return kLoomXdnaRegisterFieldCount;
 }
 
-iree_status_t loom_xdna_register_field_lookup(
-    iree_string_view_t key, loom_xdna_register_field_id_t* out_field_id) {
-  IREE_ASSERT_ARGUMENT(out_field_id);
-  *out_field_id = 0;
-  iree_host_size_t low = 1;
-  iree_host_size_t high = kLoomXdnaRegisterFieldCount + 1;
-  while (low < high) {
-    const iree_host_size_t mid = low + (high - low) / 2;
-    const loom_xdna_register_field_t* field = &kLoomXdnaRegisterFields[mid];
-    const iree_string_view_t field_key =
-        iree_make_cstring_view(kLoomXdnaRegisterStrings + field->name_offset);
-    const int comparison = iree_string_view_compare(key, field_key);
-    if (comparison < 0) {
-      high = mid;
-    } else if (comparison > 0) {
-      low = mid + 1;
-    } else {
-      *out_field_id = (loom_xdna_register_field_id_t)mid;
-      return iree_ok_status();
-    }
-  }
-  return iree_make_status(IREE_STATUS_NOT_FOUND,
-                          "unknown XDNA register field '%.*s'", (int)key.size,
-                          key.data);
-}
-
 iree_status_t loom_xdna_register_field_info(
     loom_xdna_register_field_id_t field_id,
     loom_xdna_register_field_info_t* out_info) {
