@@ -226,10 +226,7 @@ static iree_string_view_t loom_aie2p_array_report_fold_kind_name(
 static void loom_aie2p_array_report_worker_record_counts(
     const loom_aie2p_array_plan_t* plan, uint32_t worker_index,
     loom_target_compile_report_pipeline_worker_row_t* row) {
-  for (iree_host_size_t i = 0; i < plan->worker_port_count; ++i) {
-    const loom_aie2p_array_worker_port_plan_t* port = &plan->worker_ports[i];
-    if (port->worker_index == worker_index) ++row->ring_state_count;
-  }
+  row->ring_state_count = plan->worker_plans[worker_index].port_count;
   for (iree_host_size_t i = 0; i < plan->channel_count; ++i) {
     const loom_aie2p_array_channel_t* channel = &plan->channels[i];
     const loom_aie2p_array_endpoint_t* sender =

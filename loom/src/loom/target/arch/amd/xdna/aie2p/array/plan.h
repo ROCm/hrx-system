@@ -124,6 +124,8 @@ typedef struct loom_aie2p_array_endpoint_t {
   uint32_t owner_index;
   // Port ordinal in the owner ABI.
   uint32_t port;
+  // Matched leaf resource ordinal for a worker endpoint; unused for bindings.
+  uint32_t worker_resource_ordinal;
   // Typed tile value transported through this endpoint.
   loom_type_t message_type;
   // Exact byte offset from the runtime binding base.
@@ -181,6 +183,10 @@ typedef struct loom_aie2p_array_worker_plan_t {
   loom_xdna_tile_coordinate_t coordinate;
   // Immutable source requirements used to assign ports and storage.
   const loom_low_function_requirements_t* requirements;
+  // First worker_ports row and worker_resource_ports entry for this worker.
+  uint32_t first_port;
+  // Number of contiguous ports, ordered by their first channel binding.
+  uint32_t port_count;
 } loom_aie2p_array_worker_plan_t;
 
 // Final local-data placement for one compiled worker storage domain.
@@ -207,8 +213,6 @@ typedef struct loom_aie2p_array_worker_port_plan_t {
   loom_aie2p_array_endpoint_direction_t direction;
   // Index of the logical channel bound to the port.
   uint32_t channel_index;
-  // First record in channel_slots for the channel ring.
-  uint32_t first_channel_slot;
   // First row of the credit/ready lock pair used by the resident worker.
   uint32_t credit_lock_index;
 } loom_aie2p_array_worker_port_plan_t;
@@ -375,6 +379,10 @@ typedef struct loom_aie2p_array_plan_t {
   const loom_aie2p_array_worker_port_plan_t* worker_ports;
   // Number of worker ABI port bindings.
   iree_host_size_t worker_port_count;
+  // Worker port row indices in each worker's leaf resource declaration order.
+  // Uses the same worker ranges as worker_ports and shares its arena
+  // allocation.
+  const uint32_t* worker_resource_ports;
   // Logical channel slots with endpoint-local storage views.
   const loom_aie2p_array_channel_slot_t* channel_slots;
   // Number of logical channel slots.

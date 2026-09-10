@@ -122,13 +122,13 @@ channel index=6 transport=neighbor-memory record-bytes=256 capacity=2 records=1 
 channel index=7 transport=routed-dma record-bytes=256 capacity=2 records=1 sender=worker[1]:2 receiver=worker[2]:1
 worker-port worker=0 port=0 direction=receive channel=0 first-slot=0
 worker-port worker=0 port=1 direction=receive channel=1 first-slot=2
+worker-port worker=0 port=2 direction=send channel=6 first-slot=12
 worker-port worker=1 port=0 direction=receive channel=2 first-slot=4
 worker-port worker=1 port=1 direction=receive channel=3 first-slot=6
+worker-port worker=1 port=2 direction=send channel=7 first-slot=14
 worker-port worker=2 port=2 direction=receive channel=4 first-slot=8
 worker-port worker=2 port=3 direction=send channel=5 first-slot=10
-worker-port worker=0 port=2 direction=send channel=6 first-slot=12
 worker-port worker=2 port=0 direction=receive channel=6 first-slot=12
-worker-port worker=1 port=2 direction=send channel=7 first-slot=14
 worker-port worker=2 port=1 direction=receive channel=7 first-slot=14
 slot channel=0 index=0 owner=(0,2) offset=0x00000 bytes=16 sender=external receiver=0x70000
 slot channel=0 index=1 owner=(0,2) offset=0x04000 bytes=16 sender=external receiver=0x74000

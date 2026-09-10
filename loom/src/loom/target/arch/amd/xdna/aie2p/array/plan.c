@@ -96,6 +96,8 @@ typedef struct loom_aie2p_array_plan_builder_t {
   loom_aie2p_array_worker_plan_t* worker_plans;
   loom_aie2p_array_worker_storage_plan_t* worker_storage;
   loom_aie2p_array_worker_port_plan_t* worker_ports;
+  // Source-resource ordinals mapped to the corresponding physical port row.
+  uint32_t* worker_resource_ports;
   loom_aie2p_array_channel_slot_t* channel_slots;
   loom_aie2p_array_lock_plan_t* locks;
   loom_aie2p_array_dma_plan_t* dma_channels;
@@ -1111,7 +1113,7 @@ static iree_status_t loom_aie2p_array_validate_worker_leaf(
         "AIE2P worker entry must return after one channel firing");
   }
   for (iree_host_size_t i = 0; i < builder->plan->endpoint_count; ++i) {
-    const loom_aie2p_array_endpoint_t* endpoint = &builder->endpoints[i];
+    loom_aie2p_array_endpoint_t* endpoint = &builder->endpoints[i];
     if (endpoint->binding_view_source_endpoint_index == UINT32_MAX &&
         endpoint->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
         endpoint->owner_index == worker_index) {
@@ -1120,6 +1122,7 @@ static iree_status_t loom_aie2p_array_validate_worker_leaf(
         if ((uint64_t)loom_low_resource_index(requirements->resources[j]) ==
             endpoint->port) {
           ++import_match_count;
+          endpoint->worker_resource_ordinal = (uint32_t)j;
         }
       }
       if (import_match_count != 1) {
@@ -1163,7 +1166,9 @@ static iree_status_t loom_aie2p_array_plan_workers(
         .worker_index = (uint32_t)i,
         .coordinate = worker->coordinate,
         .requirements = requirements,
+        .first_port = (uint32_t)builder->worker_port_cursor,
     };
+    builder->worker_port_cursor += requirements->resource_count;
 
     loom_aie2p_array_tile_state_t* tile_state =
         loom_aie2p_array_tile_state(builder, worker->coordinate);
@@ -1208,16 +1213,20 @@ static void loom_aie2p_array_bind_worker_port(
     const loom_aie2p_array_endpoint_t* endpoint, uint32_t channel_index,
     uint32_t credit_lock_index) {
   if (endpoint->owner_kind != LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER) return;
-  builder->worker_ports[builder->worker_port_cursor++] =
-      (loom_aie2p_array_worker_port_plan_t){
-          .worker_index = endpoint->owner_index,
-          .port = endpoint->port,
-          .direction = endpoint->direction,
-          .channel_index = channel_index,
-          .first_channel_slot =
-              builder->channels[channel_index].first_channel_slot,
-          .credit_lock_index = credit_lock_index,
-      };
+  loom_aie2p_array_worker_plan_t* worker_plan =
+      &builder->worker_plans[endpoint->owner_index];
+  const uint32_t port_index =
+      worker_plan->first_port + worker_plan->port_count++;
+  builder->worker_resource_ports[worker_plan->first_port +
+                                 endpoint->worker_resource_ordinal] =
+      port_index;
+  builder->worker_ports[port_index] = (loom_aie2p_array_worker_port_plan_t){
+      .worker_index = endpoint->owner_index,
+      .port = endpoint->port,
+      .direction = endpoint->direction,
+      .channel_index = channel_index,
+      .credit_lock_index = credit_lock_index,
+  };
 }
 
 // Returns the canonical channel owning a shared sender, or NULL when this
@@ -1627,9 +1636,11 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
       ++routed_channel_count;
     }
   }
-  if (channel_slot_count > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "AIE2P channel slot count is too large");
+  if (channel_slot_count > UINT32_MAX ||
+      builder->plan->endpoint_count > UINT32_MAX) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "AIE2P channel slot or endpoint count is too large");
   }
 
   uint64_t worker_storage_count = 0;
@@ -1683,7 +1694,14 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
       sizeof(*builder->worker_storage), (void**)&builder->worker_storage));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
       builder->arena, builder->plan->worker_port_count,
-      sizeof(*builder->worker_ports), (void**)&builder->worker_ports));
+      sizeof(*builder->worker_ports) + sizeof(*builder->worker_resource_ports),
+      (void**)&builder->worker_ports));
+  // The two u32-aligned arrays share one allocation. Physical ports retain
+  // channel order; the trailing index array retains source resource order.
+  if (builder->plan->worker_port_count != 0) {
+    builder->worker_resource_ports =
+        (uint32_t*)(builder->worker_ports + builder->plan->worker_port_count);
+  }
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
       builder->arena, builder->plan->channel_slot_count,
       sizeof(*builder->channel_slots), (void**)&builder->channel_slots));
@@ -1704,6 +1722,7 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
   builder->plan->worker_plans = builder->worker_plans;
   builder->plan->worker_storage = builder->worker_storage;
   builder->plan->worker_ports = builder->worker_ports;
+  builder->plan->worker_resource_ports = builder->worker_resource_ports;
   builder->plan->channel_slots = builder->channel_slots;
   builder->plan->locks = builder->locks;
   builder->plan->dma_channels = builder->dma_channels;

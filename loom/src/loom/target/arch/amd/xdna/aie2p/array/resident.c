@@ -100,15 +100,6 @@ static bool loom_aie2p_array_resident_direction_selected(
   return iree_any_bit_set(flags, direction_flag);
 }
 
-static iree_host_size_t loom_aie2p_array_resident_worker_port_count(
-    const loom_aie2p_array_plan_t* plan, uint32_t worker_index) {
-  iree_host_size_t count = 0;
-  for (iree_host_size_t i = 0; i < plan->worker_port_count; ++i) {
-    if (plan->worker_ports[i].worker_index == worker_index) ++count;
-  }
-  return count;
-}
-
 static iree_host_size_t loom_aie2p_array_resident_state_argument_count(
     const loom_aie2p_array_plan_t* plan,
     const loom_aie2p_array_resident_port_state_t* port_states,
@@ -122,24 +113,6 @@ static iree_host_size_t loom_aie2p_array_resident_state_argument_count(
   return count;
 }
 
-static const loom_aie2p_array_worker_port_plan_t*
-loom_aie2p_array_resident_find_port(const loom_aie2p_array_plan_t* plan,
-                                    uint32_t worker_index,
-                                    uint64_t resource_index) {
-  const loom_aie2p_array_worker_port_plan_t* result = NULL;
-  for (iree_host_size_t i = 0; i < plan->worker_port_count; ++i) {
-    const loom_aie2p_array_worker_port_plan_t* port = &plan->worker_ports[i];
-    if (port->worker_index == worker_index && port->port == resource_index) {
-      IREE_ASSERT(result == NULL &&
-                  "worker resource must have exactly one planned port");
-      result = port;
-    }
-  }
-  IREE_ASSERT(result != NULL &&
-              "worker resource must have exactly one planned port");
-  return result;
-}
-
 static uint32_t loom_aie2p_array_resident_port_slot_address(
     const loom_aie2p_array_plan_t* plan,
     const loom_aie2p_array_worker_port_plan_t* port, uint32_t slot) {
@@ -148,7 +121,7 @@ static uint32_t loom_aie2p_array_resident_port_slot_address(
       &plan->channels[port->channel_index];
   IREE_ASSERT_LT(slot, channel->capacity);
   const iree_host_size_t slot_index =
-      (iree_host_size_t)port->first_channel_slot + slot;
+      (iree_host_size_t)channel->first_channel_slot + slot;
   IREE_ASSERT_LT(slot_index, plan->channel_slot_count);
   const loom_aie2p_array_channel_slot_t* channel_slot =
       &plan->channel_slots[slot_index];
@@ -572,6 +545,8 @@ static iree_status_t loom_aie2p_array_resident_build_acquires(
     loom_aie2p_array_resident_builder_t* builder, loom_builder_t* ir_builder,
     uint32_t worker_index, loom_aie2p_array_port_direction_flags_t flags,
     loom_value_id_t delta, loom_location_id_t location) {
+  const loom_aie2p_array_worker_plan_t* worker_plan =
+      &builder->plan->worker_plans[worker_index];
   const loom_aie2p_array_endpoint_direction_t direction_order[] = {
       LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE,
       LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND,
@@ -583,12 +558,10 @@ static iree_status_t loom_aie2p_array_resident_build_acquires(
     if (!loom_aie2p_array_resident_direction_selected(direction, flags)) {
       continue;
     }
-    for (iree_host_size_t i = 0; i < builder->plan->worker_port_count; ++i) {
+    for (uint32_t i = 0; i < worker_plan->port_count; ++i) {
       const loom_aie2p_array_worker_port_plan_t* port =
-          &builder->plan->worker_ports[i];
-      if (port->worker_index != worker_index || port->direction != direction) {
-        continue;
-      }
+          &builder->plan->worker_ports[worker_plan->first_port + i];
+      if (port->direction != direction) continue;
       const loom_aie2p_array_lock_role_t role =
           direction == LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE
               ? LOOM_AIE2P_ARRAY_LOCK_ROLE_READY
@@ -605,6 +578,8 @@ static iree_status_t loom_aie2p_array_resident_build_releases(
     loom_aie2p_array_resident_builder_t* builder, loom_builder_t* ir_builder,
     uint32_t worker_index, loom_aie2p_array_port_direction_flags_t flags,
     loom_value_id_t delta, loom_location_id_t location) {
+  const loom_aie2p_array_worker_plan_t* worker_plan =
+      &builder->plan->worker_plans[worker_index];
   const loom_aie2p_array_endpoint_direction_t direction_order[] = {
       LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND,
       LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE,
@@ -616,12 +591,10 @@ static iree_status_t loom_aie2p_array_resident_build_releases(
     if (!loom_aie2p_array_resident_direction_selected(direction, flags)) {
       continue;
     }
-    for (iree_host_size_t i = 0; i < builder->plan->worker_port_count; ++i) {
+    for (uint32_t i = 0; i < worker_plan->port_count; ++i) {
       const loom_aie2p_array_worker_port_plan_t* port =
-          &builder->plan->worker_ports[i];
-      if (port->worker_index != worker_index || port->direction != direction) {
-        continue;
-      }
+          &builder->plan->worker_ports[worker_plan->first_port + i];
+      if (port->direction != direction) continue;
       const loom_aie2p_array_lock_role_t role =
           direction == LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND
               ? LOOM_AIE2P_ARRAY_LOCK_ROLE_READY
@@ -640,6 +613,8 @@ static iree_status_t loom_aie2p_array_resident_bind_resources(
     loom_block_t* source_entry,
     loom_aie2p_array_resident_port_state_t* port_states,
     iree_host_size_t port_state_count) {
+  const loom_aie2p_array_worker_plan_t* worker_plan =
+      &builder->plan->worker_plans[worker_index];
   iree_host_size_t port_state_index = 0;
   loom_op_t* op = source_entry->first_op;
   while (op != NULL) {
@@ -648,9 +623,12 @@ static iree_status_t loom_aie2p_array_resident_bind_resources(
       IREE_ASSERT_LT(port_state_index, port_state_count);
       const int64_t resource_index = loom_low_resource_index(op);
       IREE_ASSERT_GE(resource_index, 0);
+      const uint32_t port_index =
+          builder->plan->worker_resource_ports[worker_plan->first_port +
+                                               port_state_index];
       const loom_aie2p_array_worker_port_plan_t* port =
-          loom_aie2p_array_resident_find_port(builder->plan, worker_index,
-                                              (uint64_t)resource_index);
+          &builder->plan->worker_ports[port_index];
+      IREE_ASSERT_EQ(port->port, (uint64_t)resource_index);
       IREE_ASSERT_LT(port->channel_index, builder->plan->channel_count);
       const loom_aie2p_array_channel_t* channel =
           &builder->plan->channels[port->channel_index];
@@ -1427,7 +1405,7 @@ static iree_status_t loom_aie2p_array_resident_materialize_worker(
       loom_region_block(resident_body, source_block_start);
 
   const iree_host_size_t port_state_count =
-      loom_aie2p_array_resident_worker_port_count(builder->plan, worker_index);
+      builder->plan->worker_plans[worker_index].port_count;
   loom_aie2p_array_resident_port_state_t* port_states = NULL;
   if (port_state_count != 0) {
     IREE_RETURN_IF_ERROR(

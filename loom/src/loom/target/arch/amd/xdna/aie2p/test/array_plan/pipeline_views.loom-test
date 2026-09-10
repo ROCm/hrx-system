@@ -42,8 +42,8 @@ channel index=1 transport=external-dma record-bytes=4 capacity=2 records=3 sende
 channel index=2 transport=external-dma record-bytes=4 capacity=2 records=3 sender=worker[0]:1 receiver=binding[1]:0 partition=0/2
 channel index=3 transport=external-dma record-bytes=4 capacity=2 records=3 sender=worker[1]:1 receiver=binding[1]:0 partition=1/2
 worker-port worker=0 port=0 direction=receive channel=0 first-slot=0
-worker-port worker=1 port=0 direction=receive channel=1 first-slot=2
 worker-port worker=0 port=1 direction=send channel=2 first-slot=4
+worker-port worker=1 port=0 direction=receive channel=1 first-slot=2
 worker-port worker=1 port=1 direction=send channel=3 first-slot=6
 slot channel=0 index=0 owner=(0,2) offset=0x00000 bytes=4 sender=external receiver=0x70000
 slot channel=0 index=1 owner=(0,2) offset=0x04000 bytes=4 sender=external receiver=0x74000
@@ -220,8 +220,8 @@ channel index=1 transport=external-dma record-bytes=4 capacity=2 records=3 sende
 channel index=2 transport=external-dma record-bytes=4 capacity=2 records=3 sender=worker[0]:1 receiver=binding[1]:0 partition=0/2
 channel index=3 transport=external-dma record-bytes=4 capacity=2 records=3 sender=worker[1]:1 receiver=binding[1]:0 partition=1/2
 worker-port worker=0 port=0 direction=receive channel=0 first-slot=0
-worker-port worker=1 port=0 direction=receive channel=1 first-slot=2
 worker-port worker=0 port=1 direction=send channel=2 first-slot=4
+worker-port worker=1 port=0 direction=receive channel=1 first-slot=2
 worker-port worker=1 port=1 direction=send channel=3 first-slot=6
 slot channel=0 index=0 owner=(0,2) offset=0x00000 bytes=4 sender=external receiver=0x70000
 slot channel=0 index=1 owner=(0,2) offset=0x04000 bytes=4 sender=external receiver=0x74000

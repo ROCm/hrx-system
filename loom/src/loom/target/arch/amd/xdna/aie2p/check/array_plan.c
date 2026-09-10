@@ -299,7 +299,8 @@ static iree_status_t loom_aie2p_array_plan_check_format(
         " channel=%" PRIu32 " first-slot=%" PRIu32 "\n",
         port->worker_index, port->port,
         loom_aie2p_array_plan_check_direction_name(port->direction),
-        port->channel_index, port->first_channel_slot));
+        port->channel_index,
+        plan->channels[port->channel_index].first_channel_slot));
   }
   for (iree_host_size_t i = 0; i < plan->channel_slot_count; ++i) {
     const loom_aie2p_array_channel_slot_t* slot = &plan->channel_slots[i];
