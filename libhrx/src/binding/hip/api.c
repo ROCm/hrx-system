@@ -13639,6 +13639,13 @@ static hipError_t iree_hip_launch_kernel(const void* function_address,
   return result;
 }
 
+HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
+                                  dim3 dimBlocks, void** args,
+                                  size_t sharedMemBytes, hipStream_t stream) {
+  return iree_hip_launch_kernel(function_address, numBlocks, dimBlocks, args,
+                                sharedMemBytes, stream, NULL, NULL);
+}
+
 // Enqueues one matching registered kernel launch on each participating device.
 // This AMD extension is not a cooperative multi-grid launch: the launches are
 // independent device operations whose host enqueue is serialized as one
