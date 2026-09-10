@@ -110,13 +110,9 @@ iree_hip_physical_device_identity(const iree_hal_streaming_device_t* device) {
   return NULL;
 }
 
-static void iree_hip_format_device_uuid(const iree_hal_uuid_t* source,
-                                        hipUUID* target) {
-  static const char kHexDigits[] = "0123456789abcdef";
-  for (iree_host_size_t i = 0; i < sizeof(target->bytes) / 2; ++i) {
-    target->bytes[i * 2] = kHexDigits[source->bytes[i] >> 4];
-    target->bytes[i * 2 + 1] = kHexDigits[source->bytes[i] & 0x0F];
-  }
+static void iree_hip_copy_device_uuid(const iree_hal_uuid_t* source,
+                                      hipUUID* target) {
+  memcpy(target->bytes, source->bytes, sizeof(target->bytes));
 }
 
 HIPAPI int hrx_hip_binding_active(void) { return 1; }
@@ -2411,7 +2407,7 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   if (physical_identity &&
       iree_all_bits_set(physical_identity->flags,
                         IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_UUID)) {
-    iree_hip_format_device_uuid(&physical_identity->uuid, &prop->uuid);
+    iree_hip_copy_device_uuid(&physical_identity->uuid, &prop->uuid);
   }
   prop->tccDriver = 0;
   prop->asyncEngineCount = 2;
@@ -2853,7 +2849,7 @@ HIPAPI hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t dev) {
                          IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_UUID)) {
     HIP_RETURN_ERROR(hipErrorNotSupported);
   }
-  iree_hip_format_device_uuid(&physical_identity->uuid, uuid);
+  iree_hip_copy_device_uuid(&physical_identity->uuid, uuid);
   return hipSuccess;
 }
 
