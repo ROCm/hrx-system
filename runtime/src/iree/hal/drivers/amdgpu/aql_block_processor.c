@@ -270,7 +270,8 @@ iree_hal_amdgpu_aql_block_processor_validate_dispatch_encoding(
       IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_INDIRECT_PARAMETERS |
       IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_QUEUE_SCOPED_KERNEL_OBJECT |
       IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_WORKGROUP_CLUSTER |
-      IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_COOPERATIVE;
+      IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_COOPERATIVE |
+      IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_EXACT_WORKITEM_COUNT;
   if (IREE_UNLIKELY(iree_any_bit_set(dispatch_command->dispatch_flags,
                                      ~known_dispatch_flags))) {
     return iree_make_status(
@@ -392,9 +393,18 @@ iree_hal_amdgpu_aql_block_processor_write_dispatch_packet_body(
   for (iree_host_size_t i = 0; i < 3; ++i) {
     params.workgroup_size[i] = dispatch_command->workgroup_size[i];
     params.workgroup_count[i] = dispatch_command->workgroup_count[i];
+    params.workitem_count[i] =
+        iree_any_bit_set(
+            dispatch_command->dispatch_flags,
+            IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_EXACT_WORKITEM_COUNT)
+            ? dispatch_command->workitem_count[i]
+            : 0;
     params.workgroup_cluster_size[i] =
         dispatch_command->workgroup_cluster_size[i];
   }
+  params.uses_exact_workitem_count = iree_any_bit_set(
+      dispatch_command->dispatch_flags,
+      IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_EXACT_WORKITEM_COUNT);
   return iree_hal_amdgpu_aql_emit_dispatch_packet(
       &packet->dispatch, &packet->extended_dispatch, &params, out_header,
       out_setup);

@@ -178,6 +178,7 @@ TEST(ExecutableMetadataHsacoTest, PopulatesSparseInterleavedKernelLayout) {
                  ViewFromCodeObjectData(source_code_object_data, "test.kd"),
                  /*kernarg_segment_size=*/40, args);
   kernel.has_required_workgroup_size = true;
+  kernel.uniform_workgroup_size = true;
   kernel.required_workgroup_size[0] = 4;
   kernel.required_workgroup_size[1] = 2;
   kernel.required_workgroup_size[2] = 1;
@@ -217,8 +218,10 @@ TEST(ExecutableMetadataHsacoTest, PopulatesSparseInterleavedKernelLayout) {
             loaded_code_object_data.data_length);
 
   const iree_hal_amdgpu_executable_export_t& export_info = metadata->exports[0];
-  EXPECT_EQ(export_info.flags,
-            IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_HAS_RESOURCE_METADATA);
+  EXPECT_EQ(
+      export_info.flags,
+      IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_HAS_RESOURCE_METADATA |
+          IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_REQUIRES_UNIFORM_WORKGROUPS);
   EXPECT_EQ(export_info.workgroup_size[0], 4);
   EXPECT_EQ(export_info.workgroup_size[1], 2);
   EXPECT_EQ(export_info.workgroup_size[2], 1);

@@ -1559,6 +1559,9 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_export_infos(
     const bool custom_direct_only = iree_any_bit_set(
         metadata_export->flags,
         IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_CUSTOM_DIRECT_ONLY);
+    const bool requires_uniform_workgroups = iree_any_bit_set(
+        metadata_export->flags,
+        IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_REQUIRES_UNIFORM_WORKGROUPS);
 
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_validate_export_limits(
         limits, reflection->symbol_name, metadata_export));
@@ -1575,9 +1578,14 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_export_infos(
 
     memset(info, 0, sizeof(*info));
     info->name = reflection->name;
-    info->flags = requires_dispatch_workgroup_size
-                      ? IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC
-                      : IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE;
+    info->flags = IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE;
+    if (requires_dispatch_workgroup_size) {
+      info->flags |= IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC;
+    }
+    if (requires_uniform_workgroups) {
+      info->flags |=
+          IREE_HAL_EXECUTABLE_FUNCTION_FLAG_REQUIRES_UNIFORM_WORKGROUPS;
+    }
     info->constant_byte_length = layout ? layout->constant_byte_length : 0;
     info->binding_count = layout ? layout->binding_count : 0;
     info->parameter_count = reflection->parameter_count;

@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "common/internal.h"
+#include "common/module.h"
 #include "iree/base/internal/math.h"
 #include "iree/base/threading/call_once.h"
 #include "iree/base/threading/mutex.h"
@@ -16,6 +16,41 @@
 static void iree_hal_streaming_context_symbol_map_expunge_module(
     iree_hal_streaming_context_symbol_map_t* map,
     iree_hal_streaming_module_registration_t* registration);
+
+static iree_status_t iree_hal_streaming_managed_storage_create(
+    iree_allocator_t host_allocator, iree_host_size_t size,
+    iree_host_size_t alignment,
+    iree_hal_streaming_managed_storage_t** out_storage) {
+  *out_storage = NULL;
+  iree_hal_streaming_managed_storage_t* storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*storage),
+                                             (void**)&storage));
+  iree_atomic_ref_count_init(&storage->ref_count);
+  storage->host_allocator = host_allocator;
+  iree_status_t status = iree_allocator_malloc_aligned(
+      host_allocator, size, alignment, /*offset=*/0, &storage->data);
+  if (iree_status_is_ok(status)) {
+    *out_storage = storage;
+  } else {
+    iree_allocator_free(host_allocator, storage);
+  }
+  return status;
+}
+
+void iree_hal_streaming_managed_storage_retain(
+    iree_hal_streaming_managed_storage_t* storage) {
+  if (!storage) return;
+  iree_atomic_ref_count_inc(&storage->ref_count);
+}
+
+void iree_hal_streaming_managed_storage_release(
+    iree_hal_streaming_managed_storage_t* storage) {
+  if (storage && iree_atomic_ref_count_dec(&storage->ref_count) == 1) {
+    iree_allocator_t host_allocator = storage->host_allocator;
+    iree_allocator_free_aligned(host_allocator, storage->data);
+    iree_allocator_free(host_allocator, storage);
+  }
+}
 
 //===----------------------------------------------------------------------===//
 // Utilities
@@ -114,6 +149,20 @@ void iree_hal_streaming_global_symbol_registry_free(
   // Free module registrations and their symbols.
   for (iree_host_size_t i = 0; i < registry->module_count; ++i) {
     if (registry->modules[i]) {
+      for (iree_host_size_t j = 0; j < registry->modules[i]->symbol_count;
+           ++j) {
+        iree_hal_streaming_symbol_registration_t* symbol =
+            &registry->modules[i]->symbols[j];
+        if (symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_DATA) continue;
+        iree_hal_streaming_managed_storage_t* managed_storage =
+            symbol->params.variable.managed_storage;
+        if (managed_storage && symbol->params.variable.publication_slot &&
+            *symbol->params.variable.publication_slot ==
+                managed_storage->data) {
+          *symbol->params.variable.publication_slot = symbol->host_pointer;
+        }
+        iree_hal_streaming_managed_storage_release(managed_storage);
+      }
       iree_allocator_free(host_allocator, registry->modules[i]->symbols);
       iree_allocator_free(host_allocator, registry->modules[i]);
     }
@@ -131,10 +180,16 @@ static iree_status_t iree_hal_streaming_global_symbol_registry_grow_unsafe(
     iree_host_size_t new_capacity) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_host_size_t allocation_size = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+          new_capacity, sizeof(registry->modules[0]), &allocation_size))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "global symbol registry size overflow");
+  }
   iree_hal_streaming_module_registration_t** new_modules = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(registry->host_allocator,
-                                new_capacity * sizeof(new_modules[0]),
+      z0, iree_allocator_malloc(registry->host_allocator, allocation_size,
                                 (void**)&new_modules));
   memcpy(new_modules, registry->modules,
          registry->module_count * sizeof(new_modules[0]));
@@ -161,10 +216,15 @@ iree_status_t iree_hal_streaming_global_symbol_registry_register_module(
   // Grow the module table if needed.
   iree_status_t status = iree_ok_status();
   if (registry->module_count >= registry->module_capacity) {
-    const iree_host_size_t new_capacity =
-        iree_max(registry->module_capacity + 1, registry->module_capacity * 2);
-    status = iree_hal_streaming_global_symbol_registry_grow_unsafe(
-        registry, new_capacity);
+    iree_host_size_t new_capacity = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_mul(registry->module_capacity, 2,
+                                                  &new_capacity))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "global symbol registry capacity overflow");
+    } else {
+      status = iree_hal_streaming_global_symbol_registry_grow_unsafe(
+          registry, new_capacity);
+    }
   }
 
   // Allocate a new module registration dynamically.
@@ -231,6 +291,20 @@ iree_status_t iree_hal_streaming_global_symbol_registry_unregister_module(
     context_map = context_map->next;
   }
 
+  // Context modules have released their imports, so the shared host backing is
+  // no longer visible to a device. Restore the compiler slot before freeing it.
+  for (iree_host_size_t i = 0; i < module->symbol_count; ++i) {
+    iree_hal_streaming_symbol_registration_t* symbol = &module->symbols[i];
+    if (symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_DATA) continue;
+    iree_hal_streaming_managed_storage_t* managed_storage =
+        symbol->params.variable.managed_storage;
+    if (managed_storage && symbol->params.variable.publication_slot &&
+        *symbol->params.variable.publication_slot == managed_storage->data) {
+      *symbol->params.variable.publication_slot = symbol->host_pointer;
+    }
+    iree_hal_streaming_managed_storage_release(managed_storage);
+  }
+
   // Free the module registration.
   iree_allocator_free(registry->host_allocator, module->symbols);
   iree_allocator_free(registry->host_allocator, module);
@@ -254,10 +328,16 @@ static iree_status_t iree_hal_streaming_module_registration_grow_unsafe(
     iree_host_size_t new_capacity, iree_allocator_t host_allocator) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_host_size_t allocation_size = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+          new_capacity, sizeof(module->symbols[0]), &allocation_size))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "module symbol registry size overflow");
+  }
   iree_hal_streaming_symbol_registration_t* new_symbols = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(host_allocator,
-                                new_capacity * sizeof(new_symbols[0]),
+      z0, iree_allocator_malloc(host_allocator, allocation_size,
                                 (void**)&new_symbols));
   memcpy(new_symbols, module->symbols,
          module->symbol_count * sizeof(module->symbols[0]));
@@ -285,10 +365,15 @@ iree_status_t iree_hal_streaming_global_symbol_registry_insert_function(
   // Check if we need to grow the module's symbols array.
   iree_status_t status = iree_ok_status();
   if (module->symbol_count >= module->symbol_capacity) {
-    const iree_host_size_t new_capacity =
-        iree_max(module->symbol_capacity + 1, module->symbol_capacity * 2);
-    status = iree_hal_streaming_module_registration_grow_unsafe(
-        module, new_capacity, registry->host_allocator);
+    iree_host_size_t new_capacity = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_mul(module->symbol_capacity, 2,
+                                                  &new_capacity))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "module symbol registry capacity overflow");
+    } else {
+      status = iree_hal_streaming_module_registration_grow_unsafe(
+          module, new_capacity, registry->host_allocator);
+    }
   }
 
   if (iree_status_is_ok(status)) {
@@ -315,7 +400,7 @@ iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
     iree_hal_streaming_global_symbol_registry_t* registry,
     iree_hal_streaming_module_registration_t* module, void* host_variable,
     const char* device_name, size_t size, uint32_t alignment,
-    iree_hal_streaming_symbol_type_t symbol_type) {
+    iree_hal_streaming_symbol_type_t symbol_type, void** publication_slot) {
   IREE_ASSERT_ARGUMENT(registry);
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(host_variable);
@@ -329,10 +414,43 @@ iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
   // Check if we need to grow the module's symbols array.
   iree_status_t status = iree_ok_status();
   if (module->symbol_count >= module->symbol_capacity) {
-    const iree_host_size_t new_capacity =
-        iree_max(module->symbol_capacity + 1, module->symbol_capacity * 2);
-    status = iree_hal_streaming_module_registration_grow_unsafe(
-        module, new_capacity, registry->host_allocator);
+    iree_host_size_t new_capacity = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_mul(module->symbol_capacity, 2,
+                                                  &new_capacity))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "module symbol registry capacity overflow");
+    } else {
+      status = iree_hal_streaming_module_registration_grow_unsafe(
+          module, new_capacity, registry->host_allocator);
+    }
+  }
+
+  iree_hal_streaming_managed_storage_t* managed_storage = NULL;
+  if (iree_status_is_ok(status) &&
+      symbol_type == IREE_HAL_STREAMING_SYMBOL_TYPE_DATA) {
+    if (IREE_UNLIKELY(!publication_slot || size == 0)) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "managed variable requires a publication slot and nonzero size");
+    } else if (IREE_UNLIKELY(alignment != 0 &&
+                             !iree_host_size_is_power_of_two(
+                                 (iree_host_size_t)alignment))) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "managed variable alignment must be a power of "
+                                "two");
+    }
+    const iree_host_size_t allocation_size =
+        iree_max((iree_host_size_t)size, (iree_host_size_t)8);
+    const iree_host_size_t allocation_alignment =
+        iree_max((iree_host_size_t)alignment, (iree_host_size_t)4096);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_managed_storage_create(
+          registry->host_allocator, allocation_size, allocation_alignment,
+          &managed_storage);
+    }
+    if (iree_status_is_ok(status)) {
+      memcpy(managed_storage->data, host_variable, size);
+    }
   }
 
   if (iree_status_is_ok(status)) {
@@ -345,9 +463,15 @@ iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
     symbol->type = symbol_type;
     symbol->device_name = device_name;  // direct pointer, no copy
     symbol->module = module;
+    symbol->params.variable.publication_slot = publication_slot;
+    symbol->params.variable.managed_storage = managed_storage;
     symbol->params.variable.size = size;
     symbol->params.variable.alignment = alignment;
+    managed_storage = NULL;
+    if (publication_slot)
+      *publication_slot = symbol->params.variable.managed_storage->data;
   }
+  iree_hal_streaming_managed_storage_release(managed_storage);
 
   iree_slim_mutex_unlock(&registry->mutex);
   IREE_TRACE_ZONE_END(z0);
@@ -360,16 +484,18 @@ iree_status_t iree_hal_streaming_global_symbol_registry_insert_variable(
     const char* device_name, size_t size, uint32_t alignment) {
   return iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
       registry, module, host_variable, device_name, size, alignment,
-      IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL);
+      IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL, /*publication_slot=*/NULL);
 }
 
 iree_status_t iree_hal_streaming_global_symbol_registry_insert_managed_variable(
     iree_hal_streaming_global_symbol_registry_t* registry,
     iree_hal_streaming_module_registration_t* module, void* host_variable,
-    const char* device_name, size_t size, uint32_t alignment) {
+    void** publication_slot, const char* device_name, size_t size,
+    uint32_t alignment) {
+  IREE_ASSERT_ARGUMENT(publication_slot);
   return iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
       registry, module, host_variable, device_name, size, alignment,
-      IREE_HAL_STREAMING_SYMBOL_TYPE_DATA);
+      IREE_HAL_STREAMING_SYMBOL_TYPE_DATA, publication_slot);
 }
 
 bool iree_hal_streaming_global_symbol_registry_query_variable(
@@ -387,7 +513,12 @@ bool iree_hal_streaming_global_symbol_registry_query_variable(
     for (iree_host_size_t j = 0; j < module->symbol_count; ++j) {
       const iree_hal_streaming_symbol_registration_t* symbol =
           &module->symbols[j];
-      if (symbol->host_pointer != host_variable ||
+      const iree_hal_streaming_managed_storage_t* managed_storage =
+          symbol->params.variable.managed_storage;
+      const bool is_managed_storage =
+          symbol->type == IREE_HAL_STREAMING_SYMBOL_TYPE_DATA &&
+          managed_storage && managed_storage->data == host_variable;
+      if ((symbol->host_pointer != host_variable && !is_managed_storage) ||
           (symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL &&
            symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_DATA)) {
         continue;
@@ -406,13 +537,11 @@ bool iree_hal_streaming_global_symbol_registry_query_variable(
 // We assume that this only ever happens on a context map miss and that we have
 // very few of those after startup.
 // Returns NULL if not found.
-// Thread-safe (takes lock internally).
+// The caller must hold |registry->mutex|.
 static const iree_hal_streaming_symbol_registration_t*
-iree_hal_streaming_global_symbol_registry_lookup(
+iree_hal_streaming_global_symbol_registry_lookup_unsafe(
     iree_hal_streaming_global_symbol_registry_t* registry, void* host_pointer) {
   if (!registry || !host_pointer) return NULL;
-
-  iree_slim_mutex_lock(&registry->mutex);
 
   // Linear scan through all modules and their symbols.
   const iree_hal_streaming_symbol_registration_t* result = NULL;
@@ -420,7 +549,14 @@ iree_hal_streaming_global_symbol_registry_lookup(
     iree_hal_streaming_module_registration_t* module = registry->modules[i];
     if (!module) continue;
     for (iree_host_size_t j = 0; j < module->symbol_count; ++j) {
-      if (module->symbols[j].host_pointer == host_pointer) {
+      const iree_hal_streaming_symbol_registration_t* symbol =
+          &module->symbols[j];
+      const iree_hal_streaming_managed_storage_t* managed_storage =
+          symbol->params.variable.managed_storage;
+      const bool is_managed_storage =
+          symbol->type == IREE_HAL_STREAMING_SYMBOL_TYPE_DATA &&
+          managed_storage && managed_storage->data == host_pointer;
+      if (symbol->host_pointer == host_pointer || is_managed_storage) {
         result = &module->symbols[j];
         break;
       }
@@ -428,7 +564,6 @@ iree_hal_streaming_global_symbol_registry_lookup(
     if (result) break;
   }
 
-  iree_slim_mutex_unlock(&registry->mutex);
   return result;
 }
 
@@ -457,10 +592,20 @@ iree_status_t iree_hal_streaming_context_symbol_map_initialize(
   // Round capacity up to the next power of 2 (if not already).
   out_map->capacity =
       (iree_host_size_t)iree_math_round_up_to_pow2_u64(initial_capacity);
+  iree_host_size_t entries_size = 0;
+  if (IREE_UNLIKELY(out_map->capacity == 0 ||
+                    !iree_host_size_checked_mul(out_map->capacity,
+                                                sizeof(out_map->entries[0]),
+                                                &entries_size))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "symbol map allocation size overflow");
+  }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(host_allocator,
-                                out_map->capacity * sizeof(out_map->entries[0]),
+      z0, iree_allocator_malloc(host_allocator, entries_size,
                                 (void**)&out_map->entries));
+  memset(out_map->entries, 0, entries_size);
+  iree_slim_mutex_initialize(&out_map->mutex);
 
   // Register with the global registry (so we can listen for notifications).
   iree_slim_mutex_lock(&registry->mutex);
@@ -484,6 +629,20 @@ void iree_hal_streaming_context_symbol_map_deinitialize(
   iree_allocator_t host_allocator = map->host_allocator;
   iree_hal_streaming_global_symbol_registry_t* registry = map->registry;
 
+  // Unlink before releasing map-owned state. The registry lock excludes module
+  // unregistration while the map lock drains active lookups.
+  if (registry) iree_slim_mutex_lock(&registry->mutex);
+  iree_slim_mutex_lock(&map->mutex);
+
+  if (registry) {
+    if (map->prev) {
+      map->prev->next = map->next;
+    } else if (registry->context_maps_head == map) {
+      registry->context_maps_head = map->next;
+    }
+    if (map->next) map->next->prev = map->prev;
+  }
+
   // Release all loaded modules.
   iree_hal_streaming_context_module_entry_t* module_entry = map->modules;
   while (module_entry) {
@@ -493,21 +652,11 @@ void iree_hal_streaming_context_symbol_map_deinitialize(
     module_entry = next;
   }
 
-  // Unregister from global registry, if registered.
-  if (registry) {
-    iree_slim_mutex_lock(&registry->mutex);
-    if (map->prev) {
-      map->prev->next = map->next;
-    } else if (registry->context_maps_head == map) {
-      registry->context_maps_head = map->next;
-    }
-    if (map->next) {
-      map->next->prev = map->prev;
-    }
-    iree_slim_mutex_unlock(&registry->mutex);
-  }
-
   iree_allocator_free(host_allocator, map->entries);
+  map->entries = NULL;
+  iree_slim_mutex_unlock(&map->mutex);
+  if (registry) iree_slim_mutex_unlock(&registry->mutex);
+  iree_slim_mutex_deinitialize(&map->mutex);
 
   IREE_TRACE_ZONE_END(z0);
 }
@@ -524,16 +673,29 @@ static iree_status_t iree_hal_streaming_context_symbol_map_grow(
   iree_host_size_t new_capacity =
       (iree_host_size_t)iree_math_round_up_to_pow2_u64(new_min_capacity);
   if (new_capacity <= map->capacity) {
-    new_capacity = map->capacity * 2;
+    if (IREE_UNLIKELY(
+            !iree_host_size_checked_mul(map->capacity, 2, &new_capacity))) {
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "context symbol map capacity overflow");
+    }
   }
 
   // Allocate the new table.
+  iree_host_size_t allocation_size = 0;
+  if (IREE_UNLIKELY(new_capacity == 0 ||
+                    !iree_host_size_checked_mul(new_capacity,
+                                                sizeof(map->entries[0]),
+                                                &allocation_size))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "context symbol map size overflow");
+  }
   iree_hal_streaming_context_symbol_entry_t* new_entries = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(map->host_allocator,
-                                new_capacity * sizeof(new_entries[0]),
+      z0, iree_allocator_malloc(map->host_allocator, allocation_size,
                                 (void**)&new_entries));
-  memset(new_entries, 0, new_capacity * sizeof(new_entries[0]));
+  memset(new_entries, 0, allocation_size);
 
   // Rehash all existing entries into the new table.
   for (iree_host_size_t i = 0; i < map->capacity; ++i) {
@@ -544,7 +706,7 @@ static iree_status_t iree_hal_streaming_context_symbol_map_grow(
 
     // Find a slot in the new table.
     const uint64_t hash = iree_hal_streaming_symbol_pointer_hash(key);
-    uint32_t index = hash & (new_capacity - 1);
+    iree_host_size_t index = hash & (new_capacity - 1);
     for (iree_host_size_t j = 0; j < new_capacity; ++j) {
       if (new_entries[index].key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY) {
         new_entries[index].key = key;
@@ -564,6 +726,35 @@ static iree_status_t iree_hal_streaming_context_symbol_map_grow(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_streaming_context_symbol_map_insert(
+    iree_hal_streaming_context_symbol_map_t* map, void* host_pointer,
+    iree_hal_streaming_symbol_t* symbol) {
+  if (IREE_UNLIKELY(
+          !iree_hal_streaming_symbol_map_is_valid_key(host_pointer))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "registered symbol has an invalid host pointer");
+  }
+
+  const uint64_t hash = iree_hal_streaming_symbol_pointer_hash(host_pointer);
+  iree_host_size_t index = hash & (map->capacity - 1);
+  for (iree_host_size_t i = 0; i < map->capacity; ++i) {
+    iree_hal_streaming_context_symbol_entry_t* entry = &map->entries[index];
+    if (entry->key == host_pointer && entry->symbol == symbol) {
+      return iree_ok_status();
+    }
+    if (entry->key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY ||
+        entry->key == IREE_HAL_STREAMING_SYMBOL_MAP_TOMBSTONE_KEY) {
+      entry->key = host_pointer;
+      entry->symbol = symbol;
+      ++map->count;
+      return iree_ok_status();
+    }
+    index = (index + 1) & (map->capacity - 1);
+  }
+  return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          "symbol map has no free entries");
+}
+
 // Loads a module and populates the context symbol map with its symbols.
 // This is called when a symbol is requested for use in a context but the module
 // hasn't been instantiated in it yet.
@@ -578,22 +769,48 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
   for (iree_hal_streaming_context_module_entry_t* module_entry = map->modules;
        module_entry != NULL; module_entry = module_entry->next) {
     if (module_entry->registration == registration) {
-      // Module already loaded - no-op.
-      // We could instead try to see if there are any new registered symbols and
-      // process those (keeping track of a symbol count we last prepared with).
-      // It's not really expected that static initializers will re-register
-      // binaries, though.
+      // Registrations are immutable after their containing module has finished
+      // initialization, so an existing module entry is already complete.
       IREE_TRACE_ZONE_END(z0);
       return iree_ok_status();
     }
   }
 
+  // Managed registrations have a stable allocation distinct from the initial
+  // host key. Reserve one extra alias for each such registration.
+  iree_host_size_t insertion_count = registration->symbol_count;
+  for (iree_host_size_t i = 0; i < registration->symbol_count; ++i) {
+    if (registration->symbols[i].type == IREE_HAL_STREAMING_SYMBOL_TYPE_DATA &&
+        registration->symbols[i].params.variable.managed_storage &&
+        IREE_UNLIKELY(!iree_host_size_checked_add(insertion_count, 1,
+                                                  &insertion_count))) {
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "context symbol count overflow");
+    }
+  }
+
   // Grow the hash table to fit our new total count, if needed.
-  const iree_host_size_t new_count = map->count + registration->symbol_count;
-  if (new_count > map->capacity * 3 / 4) {
+  iree_host_size_t new_count = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_add(map->count, insertion_count,
+                                                &new_count))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "context symbol count overflow");
+  }
+  const iree_host_size_t maximum_count = map->capacity - map->capacity / 4;
+  if (new_count > maximum_count) {
     // Need to resize the hash table to maintain good load factor.
     // We want to keep the load factor below 75% for good performance.
-    iree_host_size_t new_min_capacity = (new_count * 4) / 3;
+    const iree_host_size_t growth =
+        new_count / 3 + (new_count % 3 != 0 ? 1 : 0);
+    iree_host_size_t new_min_capacity = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(new_count, growth,
+                                                  &new_min_capacity))) {
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "context symbol map capacity overflow");
+    }
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_streaming_context_symbol_map_grow(map, new_min_capacity));
   }
@@ -606,20 +823,16 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
   entry->registration = registration;
   entry->module = NULL;
 
-  // Module not loaded yet - load it now.
-  // This requires creating the module from the fat binary.
-  // fprintf(stderr, "[REGISTRY] lazy module load from binary %p\n",
-  //         registration->module_binary);
+  // Module not loaded yet - load it from the registered fat binary.
   iree_hal_executable_load_flags_t load_flags =
       IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION;
   iree_const_byte_span_t module_data =
       iree_make_const_byte_span((const uint8_t*)registration->module_binary,
                                 /*infer*/ 0);
-  iree_status_t status = iree_hal_streaming_module_create_from_memory(
-      map->context, load_flags, module_data, map->host_allocator,
-      &entry->module);
-  // fprintf(stderr, "[REGISTRY] module load %s\n",
-  //         iree_status_is_ok(status) ? "OK" : "FAILED");
+  iree_status_t status =
+      iree_hal_streaming_module_create_from_memory_borrowing_context(
+          map->context, load_flags, module_data, map->host_allocator,
+          &entry->module);
   if (iree_status_is_ok(status)) {
     // Insert all symbols from the module into the hash table.
     for (iree_host_size_t i = 0;
@@ -670,9 +883,9 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
         }
       }
       if (!symbol) {
-        // Registered symbol not found - log a warning but don't fail.
-        // Some PyTorch modules may register functions that aren't in the fat
-        // binary.
+        // A fat binary may register stubs for symbols omitted from the selected
+        // target image. Leave those stubs unresolved without rejecting the
+        // other symbols in the image.
         fprintf(stderr,
                 "[WARN] registered symbol `%.*s` not found in module with %zu "
                 "symbols\n",
@@ -682,29 +895,22 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
         continue;
       }
 
-      // Debug: print symbol metadata when inserting
-#if 0
-      if (strstr(registered_name.data, "indexSelect")) {
-        fprintf(stderr, "[DEBUG] Inserting symbol '%.*s' copy=%u bind=%u const=%u\n",
-                (int)registered_name.size, registered_name.data,
-                symbol->parameters.copy_count, symbol->parameters.binding_count,
-                (unsigned)symbol->parameters.constant_bytes);
+      iree_hal_streaming_managed_storage_t* managed_storage =
+          registration->symbols[i].params.variable.managed_storage;
+      if (managed_storage) {
+        status = iree_hal_streaming_module_bind_registered_managed_global(
+            entry->module, registration->symbols[i].device_name,
+            managed_storage, registration->symbols[i].params.variable.size,
+            &symbol);
+        if (!iree_status_is_ok(status)) break;
       }
-#endif
-      // Insert into hash table.
-      const uint64_t hash =
-          iree_hal_streaming_symbol_pointer_hash(symbol_host_ptr);
-      uint32_t idx = hash & (map->capacity - 1);
-      for (iree_host_size_t j = 0; j < map->capacity; ++j) {
-        if (map->entries[idx].key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY ||
-            map->entries[idx].key ==
-                IREE_HAL_STREAMING_SYMBOL_MAP_TOMBSTONE_KEY) {
-          map->entries[idx].key = symbol_host_ptr;
-          map->entries[idx].symbol = symbol;
-          ++map->count;
-          break;
-        }
-        idx = (idx + 1) & (map->capacity - 1);
+
+      status = iree_hal_streaming_context_symbol_map_insert(
+          map, symbol_host_ptr, symbol);
+      if (iree_status_is_ok(status) && managed_storage &&
+          managed_storage->data != symbol_host_ptr) {
+        status = iree_hal_streaming_context_symbol_map_insert(
+            map, managed_storage->data, symbol);
       }
     }
   }
@@ -714,6 +920,20 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
     entry->next = map->modules;
     map->modules = entry;
   } else {
+    // Module population is transactional. Remove entries inserted before the
+    // failure while their owning compiled module is still alive.
+    for (iree_host_size_t i = 0; i < map->capacity; ++i) {
+      iree_hal_streaming_context_symbol_entry_t* symbol_entry =
+          &map->entries[i];
+      if (!iree_hal_streaming_symbol_map_is_valid_key(symbol_entry->key) ||
+          !symbol_entry->symbol ||
+          symbol_entry->symbol->module != entry->module) {
+        continue;
+      }
+      symbol_entry->key = IREE_HAL_STREAMING_SYMBOL_MAP_TOMBSTONE_KEY;
+      symbol_entry->symbol = NULL;
+      --map->count;
+    }
     iree_hal_streaming_module_release(entry->module);
     iree_allocator_free(map->host_allocator, entry);
   }
@@ -721,7 +941,7 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
   return status;
 }
 
-// Removes all symbols from a module and unloads it from the context map.
+// Removes all host-pointer mappings for a retired module registration.
 // Called when a module is unregistered from the global registry.
 // Returns without mutation if the module was never registered.
 static void iree_hal_streaming_context_symbol_map_expunge_module(
@@ -730,62 +950,58 @@ static void iree_hal_streaming_context_symbol_map_expunge_module(
   IREE_ASSERT_ARGUMENT(map);
   IREE_ASSERT_ARGUMENT(registration);
   IREE_TRACE_ZONE_BEGIN(z0);
+  iree_slim_mutex_lock(&map->mutex);
 
-  // Find the module in the loaded modules list and unlink it.
-  iree_hal_streaming_context_module_entry_t* prev_entry = NULL;
-  iree_hal_streaming_context_module_entry_t* module_entry = map->modules;
-  while (module_entry) {
-    if (module_entry->registration == registration) {
-      // Found the module - remove it from the list.
-      if (prev_entry) {
-        prev_entry->next = module_entry->next;
-      } else {
-        map->modules = module_entry->next;
-      }
+  // Find and unlink the module from the loaded modules list.
+  iree_hal_streaming_context_module_entry_t** module_link = &map->modules;
+  while (*module_link) {
+    if ((*module_link)->registration == registration) {
       break;
     }
-    prev_entry = module_entry;
-    module_entry = module_entry->next;
+    module_link = &(*module_link)->next;
   }
+  iree_hal_streaming_context_module_entry_t* module_entry = *module_link;
   if (!module_entry) {
     // Module was not loaded in this context, no-op.
+    iree_slim_mutex_unlock(&map->mutex);
     IREE_TRACE_ZONE_END(z0);
     return;
   }
 
-  // Walk all symbols in the module registration and remove them from the hash
-  // table.
-  for (iree_host_size_t i = 0; i < registration->symbol_count; ++i) {
-    void* host_pointer = registration->symbols[i].host_pointer;
-    const uint64_t hash = iree_hal_streaming_symbol_pointer_hash(host_pointer);
-    uint32_t index = hash & (map->capacity - 1);
-    for (iree_host_size_t j = 0; j < map->capacity; ++j) {
-      if (map->entries[index].key == host_pointer) {
-        // Found it - replace with tombstone.
-        map->entries[index].key = IREE_HAL_STREAMING_SYMBOL_MAP_TOMBSTONE_KEY;
-        map->entries[index].symbol = NULL;
-        --map->count;
-        break;
-      } else if (map->entries[index].key ==
-                 IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY) {
-        break;  // not in the table
-      }
-      index = (index + 1) & (map->capacity - 1);  // continue linear probe
+  // Remove every key backed by the module, including the initial and published
+  // aliases of managed variables. Weak host stubs may be shared by multiple
+  // images, so module ownership rather than key identity selects entries.
+  for (iree_host_size_t i = 0; i < map->capacity; ++i) {
+    iree_hal_streaming_context_symbol_entry_t* entry = &map->entries[i];
+    if (!iree_hal_streaming_symbol_map_is_valid_key(entry->key) ||
+        !entry->symbol || entry->symbol->module != module_entry->module) {
+      continue;
     }
+    entry->key = IREE_HAL_STREAMING_SYMBOL_MAP_TOMBSTONE_KEY;
+    entry->symbol = NULL;
+    --map->count;
   }
 
-  // Release the module and free the entry.
+  // Lookups and graph nodes retain the module explicitly, while recorded
+  // command buffers retain the executable. Remove the cache's ownership now
+  // that no new host-pointer lookup can find this module.
+  *module_link = module_entry->next;
+
+  iree_slim_mutex_unlock(&map->mutex);
   iree_hal_streaming_module_release(module_entry->module);
   iree_allocator_free(map->host_allocator, module_entry);
-
   IREE_TRACE_ZONE_END(z0);
 }
 
 iree_status_t iree_hal_streaming_context_symbol_map_lookup(
     iree_hal_streaming_context_symbol_map_t* map, void* host_pointer,
-    iree_hal_streaming_symbol_t** out_symbol) {
+    iree_hal_streaming_symbol_t** out_symbol,
+    iree_hal_streaming_module_t** out_module) {
   IREE_ASSERT_ARGUMENT(map);
   IREE_ASSERT_ARGUMENT(out_symbol);
+  IREE_ASSERT_ARGUMENT(out_module);
+  *out_symbol = NULL;
+  *out_module = NULL;
 
   // Check for invalid keys.
   if (!host_pointer ||
@@ -795,48 +1011,67 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
                             "invalid host pointer");
   }
 
-  // Fast path: check context-local map (no locks).
+  // Fast path: check the context-local map without touching the process-wide
+  // registry.
   const uint64_t hash = iree_hal_streaming_symbol_pointer_hash(host_pointer);
-  uint32_t index = hash & (map->capacity - 1);
+  iree_slim_mutex_lock(&map->mutex);
+  iree_host_size_t index = hash & (map->capacity - 1);
   for (iree_host_size_t i = 0; i < map->capacity; ++i) {
     const void* entry_key = map->entries[index].key;
     if (entry_key == host_pointer) {
-      *out_symbol = map->entries[index].symbol;  // hit
-#if 0
-      // Debug: check if this is an indexSelect kernel by looking at name
-      if ((*out_symbol)->name.data && strstr((*out_symbol)->name.data, "indexSelect")) {
-        fprintf(stderr, "[DEBUG_FAST] Found indexSelect: copy=%u bind=%u const=%u name=%.*s\n",
-                (*out_symbol)->parameters.copy_count, (*out_symbol)->parameters.binding_count,
-                (unsigned)(*out_symbol)->parameters.constant_bytes,
-                (int)((*out_symbol)->name.size > 80 ? 80 : (*out_symbol)->name.size),
-                (*out_symbol)->name.data);
-      }
-#endif
+      *out_symbol = map->entries[index].symbol;
+      *out_module = (*out_symbol)->module;
+      iree_hal_streaming_module_retain(*out_module);
+      iree_slim_mutex_unlock(&map->mutex);
       return iree_ok_status();
     } else if (entry_key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY) {
       break;  // not found in local map
     }
     index = (index + 1) & (map->capacity - 1);  // continue linear probe
   }
+  iree_slim_mutex_unlock(&map->mutex);
 
-  // Slow path: check global registry.
+  // Slow path lock order is registry then map, matching module unregistration.
+  // Recheck the map after acquiring both locks because another thread may have
+  // loaded the module while this thread was waiting.
+  iree_slim_mutex_lock(&map->registry->mutex);
+  iree_slim_mutex_lock(&map->mutex);
+  index = hash & (map->capacity - 1);
+  for (iree_host_size_t i = 0; i < map->capacity; ++i) {
+    const void* entry_key = map->entries[index].key;
+    if (entry_key == host_pointer) {
+      *out_symbol = map->entries[index].symbol;
+      *out_module = (*out_symbol)->module;
+      iree_hal_streaming_module_retain(*out_module);
+      iree_slim_mutex_unlock(&map->mutex);
+      iree_slim_mutex_unlock(&map->registry->mutex);
+      return iree_ok_status();
+    } else if (entry_key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY) {
+      break;
+    }
+    index = (index + 1) & (map->capacity - 1);
+  }
+
   const iree_hal_streaming_symbol_registration_t* registration =
-      iree_hal_streaming_global_symbol_registry_lookup(map->registry,
-                                                       host_pointer);
+      iree_hal_streaming_global_symbol_registry_lookup_unsafe(map->registry,
+                                                              host_pointer);
   if (!registration) {
-    // Not found - return identity.
-    fprintf(
-        stderr,
-        "[WARN] Symbol %p not found in global registry, returning identity\n",
-        host_pointer);
-    *out_symbol = (iree_hal_streaming_symbol_t*)host_pointer;
-    return iree_ok_status();
+    *out_symbol = NULL;
+    iree_slim_mutex_unlock(&map->mutex);
+    iree_slim_mutex_unlock(&map->registry->mutex);
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "host pointer is not a registered symbol");
   }
 
   // Ensure the module is loaded and its symbols are in the hash table.
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_context_symbol_map_prepare_module(
-                           map, registration->module),
-                       "preparing statically registered module for context");
+  iree_status_t status = iree_hal_streaming_context_symbol_map_prepare_module(
+      map, registration->module);
+  if (!iree_status_is_ok(status)) {
+    iree_slim_mutex_unlock(&map->mutex);
+    iree_slim_mutex_unlock(&map->registry->mutex);
+    return iree_status_annotate_f(
+        status, "preparing statically registered module for context");
+  }
 
   // Now look up again in the hash table using the original hash.
   // The symbol should be there now after module preparation.
@@ -846,14 +1081,11 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
   for (iree_host_size_t i = 0; i < map->capacity; ++i) {
     const void* entry_key = map->entries[index].key;
     if (entry_key == host_pointer) {
-      *out_symbol = map->entries[index].symbol;  // hit
-#if 0
-      if (strstr(registration->device_name, "indexSelect")) {
-        fprintf(stderr, "[DEBUG] Found indexSelect in hash: copy=%u bind=%u const=%u\n",
-                (*out_symbol)->parameters.copy_count, (*out_symbol)->parameters.binding_count,
-                (unsigned)(*out_symbol)->parameters.constant_bytes);
-      }
-#endif
+      *out_symbol = map->entries[index].symbol;
+      *out_module = (*out_symbol)->module;
+      iree_hal_streaming_module_retain(*out_module);
+      iree_slim_mutex_unlock(&map->mutex);
+      iree_slim_mutex_unlock(&map->registry->mutex);
       return iree_ok_status();
     } else if (entry_key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY) {
       break;  // still not found (shouldn't happen)
@@ -861,11 +1093,10 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
     index = (index + 1) & (map->capacity - 1);  // continue linear probe
   }
 
-  // Symbol not found even after loading module (shouldn't happen).
-  fprintf(stderr,
-          "[WARN] Symbol %p (name=%s) not found in hash table after "
-          "prepare_module\n",
-          host_pointer, registration->device_name);
-  *out_symbol = (iree_hal_streaming_symbol_t*)host_pointer;
-  return iree_ok_status();
+  *out_symbol = NULL;
+  iree_slim_mutex_unlock(&map->mutex);
+  iree_slim_mutex_unlock(&map->registry->mutex);
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "registered symbol `%s` is absent from the module",
+                          registration->device_name);
 }

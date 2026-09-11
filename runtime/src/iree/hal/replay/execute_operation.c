@@ -1369,6 +1369,8 @@ static iree_status_t iree_hal_replay_executor_command_buffer_dispatch(
            sizeof(config.workgroup_size));
     memcpy(config.workgroup_count, payload.workgroup_count,
            sizeof(config.workgroup_count));
+    memcpy(config.workitem_count, payload.workitem_count,
+           sizeof(config.workitem_count));
     config.dynamic_workgroup_local_memory =
         payload.dynamic_workgroup_local_memory;
     iree_hal_executable_function_t function =
@@ -1464,6 +1466,8 @@ static iree_status_t iree_hal_replay_executor_queue_dispatch(
            sizeof(config.workgroup_size));
     memcpy(config.workgroup_count, payload.workgroup_count,
            sizeof(config.workgroup_count));
+    memcpy(config.workitem_count, payload.workitem_count,
+           sizeof(config.workitem_count));
     config.dynamic_workgroup_local_memory =
         payload.dynamic_workgroup_local_memory;
     iree_hal_executable_function_t function =

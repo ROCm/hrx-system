@@ -19,6 +19,11 @@ static void iree_hal_streaming_graph_destroy(iree_hal_streaming_graph_t* graph);
 static void iree_hal_streaming_graph_node_deinitialize_attrs(
     iree_hal_streaming_graph_node_t* node) {
   switch (node->type) {
+    case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL:
+      iree_hal_streaming_module_release(node->attrs.kernel.module);
+      node->attrs.kernel.module = NULL;
+      node->attrs.kernel.symbol = NULL;
+      break;
     case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH:
       iree_hal_streaming_graph_release(node->attrs.child_graph.graph);
       node->attrs.child_graph.graph = NULL;
@@ -802,6 +807,7 @@ iree_status_t iree_hal_streaming_graph_clone(
       clone_node->attrs = source_node->attrs;
 
       if (source_node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL) {
+        iree_hal_streaming_module_retain(source_node->attrs.kernel.module);
         void* constants = extra_data_size ? extra_data : NULL;
         if (source_node->attrs.kernel.constants.data_length > 0) {
           memcpy(constants, source_node->attrs.kernel.constants.data,
@@ -1141,8 +1147,12 @@ iree_status_t iree_hal_streaming_graph_add_kernel_node(
   // Copy kernel dispatch parameters.
   iree_hal_streaming_graph_kernel_node_attrs_t* attrs = &node->attrs.kernel;
   attrs->symbol = symbol;
+  attrs->module = symbol->module;
+  iree_hal_streaming_module_retain(attrs->module);
   memcpy(attrs->grid_dim, params->grid_dim, sizeof(params->grid_dim));
   memcpy(attrs->block_dim, params->block_dim, sizeof(params->block_dim));
+  memcpy(attrs->workitem_count, params->workitem_count,
+         sizeof(params->workitem_count));
   attrs->shared_memory_bytes = params->shared_memory_bytes;
   attrs->cooperative = iree_any_bit_set(
       params->flags, IREE_HAL_STREAMING_DISPATCH_FLAG_COOPERATIVE);
@@ -1385,16 +1395,24 @@ iree_status_t iree_hal_streaming_graph_set_kernel_node_params(
     memcpy(binding_storage, temporary_binding_values,
            attrs->binding_capacity * sizeof(*temporary_binding_values));
   }
+  iree_hal_streaming_module_t* previous_module = attrs->module;
   attrs->symbol = symbol;
+  attrs->module = symbol->module;
+  iree_hal_streaming_module_retain(attrs->module);
   memcpy(attrs->grid_dim, params->grid_dim, sizeof(params->grid_dim));
   memcpy(attrs->block_dim, params->block_dim, sizeof(params->block_dim));
+  memcpy(attrs->workitem_count, params->workitem_count,
+         sizeof(params->workitem_count));
   attrs->shared_memory_bytes = params->shared_memory_bytes;
+  attrs->cooperative = iree_any_bit_set(
+      params->flags, IREE_HAL_STREAMING_DISPATCH_FLAG_COOPERATIVE);
   attrs->constants = iree_make_const_byte_span(attrs->constants.data,
                                                constants_span.data_length);
   attrs->bindings = (iree_hal_buffer_ref_list_t){
       .count = bindings.count,
       .values = binding_storage,
   };
+  iree_hal_streaming_module_release(previous_module);
   iree_allocator_free(node->graph->host_allocator, temporary_storage);
   return iree_ok_status();
 }

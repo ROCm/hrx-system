@@ -17,6 +17,11 @@ extern "C" {
 hipError_t iree_hip_parse_launch_extra(void** extra, void** out_buffer,
                                        size_t* out_buffer_size);
 
+hipError_t iree_hip_validate_launch_block_configuration(
+    iree_hal_streaming_device_t* device, iree_hal_streaming_symbol_t* symbol,
+    unsigned int block_dim_x, unsigned int block_dim_y,
+    unsigned int block_dim_z, size_t shared_memory_bytes);
+
 hipError_t iree_hip_validate_launch_configuration(
     iree_hal_streaming_device_t* device, iree_hal_streaming_symbol_t* symbol,
     unsigned int grid_dim_x, unsigned int grid_dim_y, unsigned int grid_dim_z,

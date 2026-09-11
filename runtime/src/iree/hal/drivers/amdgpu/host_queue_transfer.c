@@ -418,14 +418,11 @@ static void iree_hal_amdgpu_transfer_child_complete(
   // that context with a NULL entry. Finish them directly so terminal signal
   // publication does not wait for another drain that may never occur.
   if (!entry) {
-    iree_hal_amdgpu_transfer_child_finish(
-        child, iree_status_is_ok(status) ? iree_ok_status()
-                                         : iree_status_clone(status));
+    iree_hal_amdgpu_transfer_child_finish(child, iree_status_clone(status));
     return;
   }
 
-  child->completion_status =
-      iree_status_is_ok(status) ? iree_ok_status() : iree_status_clone(status);
+  child->completion_status = iree_status_clone(status);
   iree_hal_resource_retain(&child->transaction->resource);
   iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
       child->transaction->queue, &child->completion_post_drain,
@@ -616,8 +613,7 @@ static void iree_hal_amdgpu_transfer_waits_complete(
     iree_hal_amdgpu_transfer_publish_signals(transaction);
     return;
   }
-  transaction->start_status =
-      iree_status_is_ok(status) ? iree_ok_status() : iree_status_clone(status);
+  transaction->start_status = iree_status_clone(status);
   iree_hal_resource_retain(&transaction->resource);
   iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
       transaction->queue, &transaction->start_post_drain,

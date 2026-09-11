@@ -823,14 +823,14 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
     const iree_hal_amdgpu_host_queue_params_t* params,
     iree_hal_amdgpu_host_queue_t* out_queue);
 
-// Allocates and initializes an independently releasable host queue.
+// Creates an independently releasable host queue.
 //
 // Execution-resource ordinals in |params| are copied into queue-owned storage.
 // The queue is published to |system_event_target| only after initialization is
 // complete. |release_slot| is captured only on success; callers retain
 // responsibility for returning the slot when allocation fails. |out_queue| is
 // unchanged on failure.
-iree_status_t iree_hal_amdgpu_host_queue_allocate(
+iree_status_t iree_hal_amdgpu_host_queue_create(
     const iree_hal_amdgpu_host_queue_params_t* params,
     iree_hal_amdgpu_system_event_agent_target_t* system_event_target,
     iree_hal_amdgpu_host_queue_release_slot_callback_t release_slot,
