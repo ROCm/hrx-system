@@ -336,42 +336,60 @@ void loom_low_schedule_ready_frontier_remove(
   state->descriptor_next_node = LOOM_LOW_SCHEDULE_READY_NODE_NONE;
 }
 
-static bool loom_low_schedule_ready_heap_position_less(
-    const loom_low_schedule_ready_frontier_t* frontier,
-    loom_low_schedule_ready_view_t view,
-    const loom_low_schedule_ready_heap_t* heap, uint32_t left_position,
-    uint32_t right_position) {
-  return loom_low_schedule_ready_node_less(
-      frontier, view, loom_low_schedule_ready_heap_get(heap, left_position),
-      loom_low_schedule_ready_heap_get(heap, right_position));
+// A discovered position retains its immutable comparison key for the duration
+// of one copy query, avoiding segmented storage lookups during heap
+// comparisons.
+typedef struct loom_low_schedule_ready_position_t {
+  // Nomination key in the selected ready view.
+  uint64_t key;
+  // Node index used for stable key ties and copied to the caller.
+  uint32_t node_index;
+  // Position in the ready heap, used to discover its children.
+  uint32_t heap_position;
+} loom_low_schedule_ready_position_t;
+
+static bool loom_low_schedule_ready_position_less(
+    loom_low_schedule_ready_position_t left,
+    loom_low_schedule_ready_position_t right) {
+  return left.key != right.key ? left.key < right.key
+                               : left.node_index < right.node_index;
 }
 
 static void loom_low_schedule_ready_position_heap_insert(
     const loom_low_schedule_ready_frontier_t* frontier,
     loom_low_schedule_ready_view_t view,
     const loom_low_schedule_ready_heap_t* heap, uint32_t position,
-    uint32_t* position_heap, uint8_t* position_count) {
+    loom_low_schedule_ready_position_t* position_heap,
+    uint8_t* position_count) {
+  uint32_t node_index = loom_low_schedule_ready_heap_get(heap, position);
+  loom_low_schedule_ready_position_t entry = {
+      .key = loom_low_schedule_ready_frontier_const_node_state(frontier,
+                                                               node_index)
+                 ->keys[view],
+      .node_index = node_index,
+      .heap_position = position,
+  };
   IREE_ASSERT_LT(*position_count, LOOM_LOW_SCHEDULE_READY_COPY_CAPACITY);
   uint8_t insertion_index = (*position_count)++;
   while (insertion_index != 0) {
     const uint8_t parent_index = (insertion_index - 1u) / 2u;
-    if (loom_low_schedule_ready_heap_position_less(
-            frontier, view, heap, position_heap[parent_index], position)) {
+    if (loom_low_schedule_ready_position_less(position_heap[parent_index],
+                                              entry)) {
       break;
     }
     position_heap[insertion_index] = position_heap[parent_index];
     insertion_index = parent_index;
   }
-  position_heap[insertion_index] = position;
+  position_heap[insertion_index] = entry;
 }
 
-static uint32_t loom_low_schedule_ready_position_heap_pop(
-    const loom_low_schedule_ready_frontier_t* frontier,
-    loom_low_schedule_ready_view_t view,
-    const loom_low_schedule_ready_heap_t* heap, uint32_t* position_heap,
+static loom_low_schedule_ready_position_t
+loom_low_schedule_ready_position_heap_pop(
+    loom_low_schedule_ready_position_t* position_heap,
     uint8_t* position_count) {
-  const uint32_t result = position_heap[0];
-  const uint32_t replacement = position_heap[--*position_count];
+  const loom_low_schedule_ready_position_t result = position_heap[0];
+  const loom_low_schedule_ready_position_t replacement =
+      position_heap[--*position_count];
   if (*position_count == 0) return result;
   uint8_t insertion_index = 0;
   while (true) {
@@ -380,13 +398,12 @@ static uint32_t loom_low_schedule_ready_position_heap_pop(
     const uint8_t right_index = left_index + 1u;
     uint8_t child_index = left_index;
     if (right_index < *position_count &&
-        loom_low_schedule_ready_heap_position_less(frontier, view, heap,
-                                                   position_heap[right_index],
-                                                   position_heap[left_index])) {
+        loom_low_schedule_ready_position_less(position_heap[right_index],
+                                              position_heap[left_index])) {
       child_index = right_index;
     }
-    if (loom_low_schedule_ready_heap_position_less(
-            frontier, view, heap, replacement, position_heap[child_index])) {
+    if (loom_low_schedule_ready_position_less(replacement,
+                                              position_heap[child_index])) {
       break;
     }
     position_heap[insertion_index] = position_heap[child_index];
@@ -408,15 +425,13 @@ uint8_t loom_low_schedule_ready_frontier_copy_best(
   const loom_low_schedule_ready_heap_t* heap = &frontier->views[view];
   if (heap->count == 0) return 0;
   capacity = (uint8_t)iree_min((uint32_t)capacity, heap->count);
-  uint32_t position_heap[LOOM_LOW_SCHEDULE_READY_COPY_CAPACITY] = {0};
-  uint8_t position_count = 1;
-  uint8_t output_count = 0;
+  loom_low_schedule_ready_position_t
+      position_heap[LOOM_LOW_SCHEDULE_READY_COPY_CAPACITY];
+  uint8_t position_count = 0;
+  uint32_t position = 0;
+  out_node_indices[0] = loom_low_schedule_ready_heap_get(heap, position);
+  uint8_t output_count = 1;
   while (output_count < capacity) {
-    const uint32_t position = loom_low_schedule_ready_position_heap_pop(
-        frontier, view, heap, position_heap, &position_count);
-    out_node_indices[output_count++] =
-        loom_low_schedule_ready_heap_get(&frontier->views[view], position);
-    if (output_count == capacity) break;
     const uint32_t left_position = position * 2u + 1u;
     if (left_position < heap->count) {
       loom_low_schedule_ready_position_heap_insert(
@@ -427,6 +442,11 @@ uint8_t loom_low_schedule_ready_frontier_copy_best(
       loom_low_schedule_ready_position_heap_insert(
           frontier, view, heap, right_position, position_heap, &position_count);
     }
+    const loom_low_schedule_ready_position_t entry =
+        loom_low_schedule_ready_position_heap_pop(position_heap,
+                                                  &position_count);
+    out_node_indices[output_count++] = entry.node_index;
+    position = entry.heap_position;
   }
   return output_count;
 }
