@@ -377,52 +377,6 @@ static void iree_hal_streaming_deinitialize_device(
   IREE_TRACE_ZONE_END(z0);
 }
 
-// Queries device P2P capabilities and populates topology.
-static iree_status_t iree_hal_streaming_query_p2p_capabilities(
-    iree_hal_streaming_device_registry_t* registry) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Allocate P2P topology array.
-  registry->p2p_link_count = registry->device_count * registry->device_count;
-  const iree_host_size_t topology_size =
-      registry->p2p_link_count * sizeof(iree_hal_streaming_p2p_link_t);
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(registry->host_allocator, topology_size,
-                                (void**)&registry->p2p_topology));
-  memset(registry->p2p_topology, 0, topology_size);
-
-  // Populate P2P links for all device pairs.
-  iree_host_size_t link_index = 0;
-  for (iree_host_size_t i = 0; i < registry->device_count; ++i) {
-    for (iree_host_size_t j = 0; j < registry->device_count; ++j) {
-      iree_hal_streaming_p2p_link_t* link =
-          &registry->p2p_topology[link_index++];
-      link->src_device = i;
-      link->dst_device = j;
-      if (i == j) {
-        // Device can always access itself with best performance.
-        link->access_supported = true;
-        link->native_atomic_supported = true;
-        link->cuda_array_access_supported = true;
-        link->performance_rank = 100;   // Highest rank for same device.
-        link->bandwidth_mbps = 900000;  // 900 GB/s typical for device memory.
-        link->latency_ns = 10;          // Very low latency.
-      } else {
-        // TODO: Query actual P2P capabilities from pyre/HSA.
-        link->access_supported = false;
-        link->native_atomic_supported = false;
-        link->cuda_array_access_supported = false;
-        link->performance_rank = -1;  // Not supported.
-        link->bandwidth_mbps = 0;
-        link->latency_ns = 0;
-      }
-    }
-  }
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
-}
-
 //===----------------------------------------------------------------------===//
 // Context registration
 //===----------------------------------------------------------------------===//
@@ -594,11 +548,6 @@ iree_status_t iree_hal_streaming_init_global(
                               "no GPU devices found via pyre");
   }
 
-  // Query P2P capabilities.
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_query_p2p_capabilities(device_registry);
-  }
-
   if (iree_status_is_ok(status)) {
     device_registry->initialized = true;
   } else {
@@ -644,10 +593,6 @@ void iree_hal_streaming_cleanup_global(void) {
   for (iree_host_size_t i = 0; i < device_registry->device_count; ++i) {
     iree_hal_streaming_deinitialize_device(&device_registry->devices[i]);
   }
-
-  // Free P2P topology.
-  iree_allocator_free(device_registry->host_allocator,
-                      device_registry->p2p_topology);
 
   // Shutdown pyre GPU subsystem.
   hrx_status_ignore(hrx_gpu_shutdown());

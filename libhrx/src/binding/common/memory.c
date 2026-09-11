@@ -11,6 +11,7 @@
 #include "common/direct_transfer.h"
 #include "common/graph.h"
 #include "common/internal.h"
+#include "common/peer.h"
 #include "common/stream.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/base/threading/call_once.h"
