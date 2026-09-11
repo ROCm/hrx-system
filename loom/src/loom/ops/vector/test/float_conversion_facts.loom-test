@@ -1,0 +1,101 @@
+// RUN: pass canonicalize
+
+// Uniform narrowing rounds before subsequent widening and arithmetic.
+func.def @bf16_residual_constant() -> (vector<16xbf16>) {
+  %input = vector.constant 0.5 : vector<16xf32>
+  %high = vector.fptrunc %input : vector<16xf32> to vector<16xbf16>
+  %back = vector.extf %high : vector<16xbf16> to vector<16xf32>
+  %residual = vector.subf %input, %back : vector<16xf32>
+  %low = vector.fptrunc %residual : vector<16xf32> to vector<16xbf16>
+  func.return %low : vector<16xbf16>
+}
+
+// ----
+func.def @bf16_residual_constant() -> (vector<16xbf16>) {
+  %low = vector.constant 0.0 : vector<16xbf16>
+  func.return %low : vector<16xbf16>
+}
+
+// ====
+
+// Small static lanes keep distinct ties-to-even outcomes and signed zero.
+func.def @bf16_rounding_lanes() -> (f32, f32, i16) {
+  %even_midpoint = scalar.constant 1.00390625 : f32
+  %odd_midpoint = scalar.constant 1.01171875 : f32
+  %sign_input = scalar.constant -0.0 : f32
+  %input = vector.from_elements %even_midpoint, %odd_midpoint, %sign_input : vector<3xf32>
+  %narrow = vector.fptrunc %input : vector<3xf32> to vector<3xbf16>
+  %back = vector.extf %narrow : vector<3xbf16> to vector<3xf32>
+  %even = vector.extract %back[0] : vector<3xf32> -> f32
+  %odd = vector.extract %back[1] : vector<3xf32> -> f32
+  %bits = vector.bitcast %narrow : vector<3xbf16> to vector<3xi16>
+  %sign = vector.extract %bits[2] : vector<3xi16> -> i16
+  func.return %even, %odd, %sign : f32, f32, i16
+}
+
+// ----
+func.def @bf16_rounding_lanes() -> (f32, f32, i16) {
+  %even = scalar.constant 1.0 : f32
+  %odd = scalar.constant 1.015625 : f32
+  %sign = scalar.constant -32768 : i16
+  func.return %even, %odd, %sign : f32, f32, i16
+}
+
+// ====
+
+// Destination formats distinguish overflow to infinity from saturation.
+func.def @narrow_overflow() -> (i1, f32) {
+  %large_half = vector.constant 65520.0 : vector<4xf32>
+  %half = vector.fptrunc %large_half : vector<4xf32> to vector<4xf16>
+  %half_inf = vector.isinff %half : vector<4xf16> -> vector<4xi1>
+  %is_inf = vector.extract %half_inf[0] : vector<4xi1> -> i1
+  %large_fp8 = vector.constant 500.0 : vector<4xf32>
+  %fp8 = vector.fptrunc %large_fp8 : vector<4xf32> to vector<4xf8E4M3>
+  %back = vector.extf %fp8 : vector<4xf8E4M3> to vector<4xf32>
+  %saturated = vector.extract %back[0] : vector<4xf32> -> f32
+  func.return %is_inf, %saturated : i1, f32
+}
+
+// ----
+func.def @narrow_overflow() -> (i1, f32) {
+  %is_inf = scalar.constant true : i1
+  %saturated = scalar.constant 448.0 : f32
+  func.return %is_inf, %saturated : i1, f32
+}
+
+// ====
+
+// A NaN discovered by bitcast retains classification without inventing payload.
+func.def @narrow_nan() -> (vector<4xbf16>, i1) {
+  %bits = vector.constant 2139095041 : vector<4xi32>
+  %input = vector.bitcast %bits : vector<4xi32> to vector<4xf32>
+  %narrow = vector.fptrunc %input : vector<4xf32> to vector<4xbf16>
+  %classes = vector.isnanf %narrow : vector<4xbf16> -> vector<4xi1>
+  %is_nan = vector.extract %classes[0] : vector<4xi1> -> i1
+  func.return %narrow, %is_nan : vector<4xbf16>, i1
+}
+
+// ----
+func.def @narrow_nan() -> (vector<4xbf16>, i1) {
+  %bits = vector.constant 2139095041 : vector<4xi32>
+  %input = vector.bitcast %bits : vector<4xi32> to vector<4xf32>
+  %narrow = vector.fptrunc %input : vector<4xf32> to vector<4xbf16>
+  %is_nan = scalar.constant true : i1
+  func.return %narrow, %is_nan : vector<4xbf16>, i1
+}
+
+// ====
+
+// Values just above a BF16 midpoint cannot be folded through F32 rounding.
+func.def @f64_above_bf16_midpoint() -> (vector<4xbf16>) {
+  %input = vector.constant 1.0039062500000002 : vector<4xf64>
+  %narrow = vector.fptrunc %input : vector<4xf64> to vector<4xbf16>
+  func.return %narrow : vector<4xbf16>
+}
+
+// ----
+func.def @f64_above_bf16_midpoint() -> (vector<4xbf16>) {
+  %input = vector.constant 1.0039062500000002 : vector<4xf64>
+  %narrow = vector.fptrunc %input : vector<4xf64> to vector<4xbf16>
+  func.return %narrow : vector<4xbf16>
+}

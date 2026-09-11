@@ -18,6 +18,7 @@ loom_check_test_suite(
     "bytecode.loom-test"
     "canonicalize.loom-test"
     "facts.loom-test"
+    "float_conversion_facts.loom-test"
     "roundtrip.loom-test"
     "vector_to_scalar.loom-test"
     "vector_to_scalar_atomics.loom-test"

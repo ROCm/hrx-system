@@ -3239,17 +3239,38 @@ iree_status_t loom_vector_extf_facts(loom_fact_context_t* context,
       context, module, loom_vector_extf_result(op), loom_vector_extf_input(op));
 }
 
+static void loom_vector_float_truncate_transfer(loom_scalar_type_t result_type,
+                                                const loom_value_facts_t* input,
+                                                const void* user_data,
+                                                loom_value_facts_t* out) {
+  const loom_scalar_type_t source_type = *(const loom_scalar_type_t*)user_data;
+  double value = 0.0;
+  if (loom_value_facts_is_nan(*input)) {
+    *out = loom_value_facts_known_nan();
+  } else if (!loom_value_facts_as_exact_float(source_type, *input, &value)) {
+    *out = loom_value_facts_unknown();
+  } else if (source_type == LOOM_SCALAR_TYPE_F64 &&
+             result_type != LOOM_SCALAR_TYPE_F32 &&
+             value != (double)(float)value) {
+    // Narrow-format helpers round through F32. A non-representable F64 value
+    // can double-round across a destination midpoint, so it is not foldable.
+    *out = loom_value_facts_unknown();
+  } else {
+    *out = loom_value_facts_exact_float(result_type, value);
+  }
+  loom_value_facts_propagate_unary_distribution(*input, out);
+}
+
 iree_status_t loom_vector_fptrunc_facts(loom_fact_context_t* context,
                                         const loom_module_t* module,
                                         const loom_op_t* op,
                                         const loom_value_facts_t* operand_facts,
                                         loom_value_facts_t* result_facts) {
-  bool fragment_handled = false;
-  IREE_RETURN_IF_ERROR(loom_vector_try_preserve_lanewise_fragment_facts(
-      context, operand_facts, 1, result_facts, &fragment_handled));
-  if (!fragment_handled) {
-    IREE_RETURN_IF_ERROR(loom_vector_make_unknown_facts(result_facts));
-  }
+  const loom_scalar_type_t source_type = loom_type_element_type(
+      loom_module_value_type(module, loom_vector_fptrunc_input(op)));
+  IREE_RETURN_IF_ERROR(loom_vector_float_unary_summary_facts(
+      context, loom_vector_result_element_type(module, op), operand_facts,
+      result_facts, loom_vector_float_truncate_transfer, &source_type));
   return loom_vector_try_define_same_lane_origin(context, module,
                                                  loom_vector_fptrunc_result(op),
                                                  loom_vector_fptrunc_input(op));
