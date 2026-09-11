@@ -1335,7 +1335,9 @@ iree_status_t loom_low_lower_rule_set_select_rule_range_with_match_context(
     const loom_op_t* diagnostic_source_op = source_op;
     bool source_memory_compatible = false;
     bool uses_source_memory_access = false;
-    const loom_op_t* source_nodes[LOOM_LOW_LOWER_MAX_SOURCE_NODES] = {NULL};
+    // Matching writes the root and each related node before reading it. Only
+    // the populated prefix is published after a successful match.
+    const loom_op_t* source_nodes[LOOM_LOW_LOWER_MAX_SOURCE_NODES];
     uint8_t source_node_count = 0;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_matches(
         match_context, rule_set, source_op, rule, &rule_matches,
