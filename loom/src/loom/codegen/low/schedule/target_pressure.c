@@ -827,32 +827,30 @@ static void loom_low_schedule_score_candidate_register_packing_resources(
       const uint16_t reg_class_id = member->reg_class_id;
       const uint64_t current_live_units =
           pressure_state->current_live_units_by_reg_class[reg_class_id];
-      const int64_t candidate_delta_units =
-          pressure_state->candidate_delta_touched_flags[reg_class_id]
-              ? pressure_state->candidate_delta_units_by_reg_class[reg_class_id]
-              : 0;
-      const uint64_t projected_live_units =
-          loom_low_schedule_project_live_units(current_live_units,
-                                               candidate_delta_units);
-      uint64_t early_live_units = projected_live_units;
+      const uint64_t current_contribution =
+          loom_low_schedule_register_packing_contribution(current_live_units,
+                                                          member);
+      uint64_t persistent_contribution = current_contribution;
+      uint64_t early_required_contribution = current_contribution;
       if (pressure_state->candidate_delta_touched_flags[reg_class_id]) {
-        early_live_units = iree_max(
-            early_live_units,
+        const uint64_t projected_live_units =
+            loom_low_schedule_project_live_units(
+                current_live_units,
+                pressure_state
+                    ->candidate_delta_units_by_reg_class[reg_class_id]);
+        const uint64_t early_live_units = iree_max(
+            projected_live_units,
             iree_math_saturating_add_u64(
                 current_live_units,
                 pressure_state
                     ->candidate_early_added_units_by_reg_class[reg_class_id]));
+        persistent_contribution =
+            loom_low_schedule_register_packing_contribution(
+                projected_live_units, member);
+        early_required_contribution =
+            loom_low_schedule_register_packing_contribution(early_live_units,
+                                                            member);
       }
-
-      const uint64_t persistent_contribution =
-          loom_low_schedule_register_packing_contribution(projected_live_units,
-                                                          member);
-      const uint64_t current_contribution =
-          loom_low_schedule_register_packing_contribution(current_live_units,
-                                                          member);
-      const uint64_t early_required_contribution =
-          loom_low_schedule_register_packing_contribution(early_live_units,
-                                                          member);
       current_units =
           iree_math_saturating_add_u64(current_units, current_contribution);
       persistent_units = iree_math_saturating_add_u64(persistent_units,
