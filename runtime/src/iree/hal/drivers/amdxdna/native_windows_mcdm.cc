@@ -8,7 +8,6 @@
 #include <array>
 #include <atomic>
 #include <condition_variable>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -144,13 +143,8 @@ iree_status_t status_from_mcdm_error(const char* label,
 }
 
 bool mcdm_error_is_context_pool_exhausted(const mcdm::Error& error) {
-  if (!error.has_nt_status) return false;
-  // Generic memory/resource statuses can originate from context-private data,
-  // context creation, or hardware-queue allocation and do not prove that the
-  // hardware-context pool is full. Retry only the unambiguous context-ID limit
-  // until specific operation/status pairs are characterized on real drivers.
-  return static_cast<uint32_t>(error.nt_status) ==
-         0xC000015A;  // STATUS_TOO_MANY_CONTEXT_IDS
+  return iree_hal_amdxdna_native_windows_nt_status_is_context_pool_exhausted(
+      error.has_nt_status, static_cast<uint32_t>(error.nt_status));
 }
 
 iree_status_t validate_device_size_fits_u64(iree_device_size_t size) {
@@ -377,6 +371,24 @@ void close_mcdm_adapter_handle(const mcdm::KmtApi& api,
 }
 
 }  // namespace
+
+bool iree_hal_amdxdna_native_windows_nt_status_is_context_pool_exhausted(
+    bool has_nt_status, uint32_t nt_status) {
+  if (!has_nt_status) return false;
+  // STATUS_TOO_MANY_CONTEXT_IDS is the documented context-ID ceiling.
+  // IPU KMD remaps CreateHwContext failures, including pool exhaustion, to
+  // STATUS_GRAPHICS_DRIVER_MISMATCH (D3DKMTCreateContextVirtual 0xc01e0009).
+  return nt_status == 0xC000015A ||  // STATUS_TOO_MANY_CONTEXT_IDS
+         nt_status == 0xC01E0009;    // STATUS_GRAPHICS_DRIVER_MISMATCH
+}
+
+uint32_t iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+    uint32_t architecture_budget) {
+  // One below the architecture table. See the header: XRS non-RT cap is
+  // max_ctx - nreserved_rt_ctx, not a live reserved context.
+  return architecture_budget > 1 ? architecture_budget - 1
+                                 : architecture_budget;
+}
 
 struct iree_hal_amdxdna_native_device_t {
   iree_allocator_t host_allocator;
@@ -2481,18 +2493,6 @@ iree_status_t iree_hal_amdxdna_native_device_create(
             device->driver_stack.pci_revision_id);
   }
 
-  const char* debug_caps = getenv("HRX_AMDXDNA_DEBUG_CAPS");
-  if (debug_caps && debug_caps[0] && debug_caps[0] != '0') {
-    std::fprintf(
-        stderr,
-        "[hrx][caps] has_pci=%d vendor=0x%04x device=0x%04x revision=0x%02x "
-        "budget=%u\n",
-        device->driver_stack.has_pci_ids ? 1 : 0,
-        device->driver_stack.pci_vendor_id, device->driver_stack.pci_device_id,
-        device->driver_stack.pci_revision_id, device->hardware_context_budget);
-    std::fflush(stderr);
-  }
-
   *out_device = device;
   return iree_ok_status();
 }
@@ -2565,7 +2565,12 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
   caps.max_command_chain_slots = chain_slot_capacity(chain_exec_bo_size);
   caps.max_cached_chain_child_commands =
       kWindowsChainCacheChildCommandBudget;
-  caps.max_hardware_contexts = device->hardware_context_budget;
+  // Publish budget-1 so LRU evicts before CreateContext hits the XRS non-RT
+  // cap. 0xc01e0009 retry remains for destroy lag. See
+  // iree_hal_amdxdna_native_windows_hardware_context_cache_capacity.
+  caps.max_hardware_contexts =
+      iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+          device->hardware_context_budget);
   caps.context_image_models =
       IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_XCLBIN;
   caps.dispatch_models = IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_CU |

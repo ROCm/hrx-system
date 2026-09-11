@@ -360,4 +360,28 @@ TEST(NativeWindowsMcdmCodeSlotTest, ShrinksHighWatermarkAfterTailRelease) {
             0u);
 }
 
+TEST(NativeWindowsMcdmContextPoolTest,
+     ClassifiesIpuRemappedCreateContextFailure) {
+  EXPECT_TRUE(iree_hal_amdxdna_native_windows_nt_status_is_context_pool_exhausted(
+      true, 0xC000015A));
+  EXPECT_TRUE(iree_hal_amdxdna_native_windows_nt_status_is_context_pool_exhausted(
+      true, 0xC01E0009));
+  EXPECT_FALSE(iree_hal_amdxdna_native_windows_nt_status_is_context_pool_exhausted(
+      false, 0xC01E0009));
+  EXPECT_FALSE(iree_hal_amdxdna_native_windows_nt_status_is_context_pool_exhausted(
+      true, 0xC0000001));
+}
+
+TEST(NativeWindowsMcdmContextPoolTest,
+     SizesCacheOneBelowArchitectureBudget) {
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(32),
+            31u);
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(6),
+            5u);
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(1),
+            1u);
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(0),
+            0u);
+}
+
 }  // namespace

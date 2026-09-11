@@ -78,4 +78,31 @@ bool iree_hal_amdxdna_native_windows_release_code_slots(
 size_t iree_hal_amdxdna_native_windows_code_slot_high_watermark(
     const uint8_t* slots_in_use, size_t slot_capacity);
 
+// True when a CreateContext NTSTATUS is the hardware-context pool ceiling.
+// IPU KMD remaps that failure to STATUS_GRAPHICS_DRIVER_MISMATCH (0xC01E0009)
+// in addition to STATUS_TOO_MANY_CONTEXT_IDS (0xC000015A).
+bool iree_hal_amdxdna_native_windows_nt_status_is_context_pool_exhausted(
+    bool has_nt_status, uint32_t nt_status);
+
+// Maps the architecture hardware-context budget to the Windows HAL cache
+// capacity.
+//
+// The architecture table (32 Strix / Strix Halo / Krackan, 6 Phoenix) is
+// the SW virtual-context list the HAL aims at. CheckCtxResources still
+// allows that many m_ctxList entries. Separately, XRS ContextNodeCheck
+// caps non-realtime allocations at max_ctx - nreserved_rt_ctx.
+// nreserved_rt_ctx is PRIV_NUM_RESERVED_RT_CONTEXTS (1): solver headroom
+// for a realtime client, not a pre-created context in the list. HAL
+// Windows CreateContext does not set QoS priority, so the KMD treats
+// these as non-RT (0 maps to XRS_PRIORITY_NORMAL).
+//
+// On Strix Halo that means the 32nd concurrent non-RT CreateContext can
+// fail (STATUS_INSUFFICIENT_RESOURCES remapped to 0xc01e0009) with 31
+// HAL contexts live and one list slot still empty. Return budget-1 so
+// LRU evicts before that create. Keep 0xc01e0009 evict+retry for destroy
+// lag. Budget 0 stays 0 so the cache uses
+// IREE_HAL_AMDXDNA_CONTEXT_CACHE_DEFAULT_CAPACITY.
+uint32_t iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+    uint32_t architecture_budget);
+
 #endif  // IREE_HAL_DRIVERS_AMDXDNA_NATIVE_WINDOWS_MCDM_INTERNAL_H_

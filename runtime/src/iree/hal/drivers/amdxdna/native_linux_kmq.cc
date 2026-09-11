@@ -612,6 +612,10 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
           : 0;
   // Zero selects the common conservative chain-cache retention budget.
   caps.max_cached_chain_child_commands = 0;
+  // Linux keys contexts by PDI+CU and publishes the architecture table. Do
+  // not subtract the Windows XRS non-RT reserved slot here; that mapping is
+  // Windows MCDM CreateContext / 0xc01e0009, and the Linux create-hwctx
+  // pool signal is ENOENT/ENOSPC/EINVAL, not EAGAIN.
   caps.max_hardware_contexts = device->hardware_context_budget;
   caps.context_image_models = IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_PDI;
   // START_NPU is used for command-chain children and is correct on Linux KMQ.

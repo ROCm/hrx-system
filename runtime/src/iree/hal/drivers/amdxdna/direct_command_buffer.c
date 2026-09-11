@@ -2981,26 +2981,21 @@ iree_status_t iree_hal_amdxdna_direct_command_buffer_dispatch_plan(
       if (kernel_params->cached_context_valid) {
         context_ref = iree_hal_amdxdna_context_cache_lease_retain_context(
             kernel_params->cached_context_lease);
-        if (!context_ref) {
-          status = iree_make_status(
-              IREE_STATUS_RESOURCE_EXHAUSTED,
-              "amdxdna executable context lease could not retain context");
+        if (context_ref) {
+          cu_idx = kernel_params->cached_cu_index;
+        } else {
+          // LRU force-evicted this leased context; re-pin below.
+          iree_hal_amdxdna_context_cache_lease_release(
+              kernel_params->cached_context_lease);
+          kernel_params->cached_context_lease = NULL;
+          kernel_params->cached_context_valid = false;
         }
-        cu_idx = kernel_params->cached_cu_index;
-      } else {
+      }
+      if (!context_ref) {
         iree_hal_amdxdna_context_cache_lease_t* context_lease = NULL;
         status = iree_hal_amdxdna_device_pin_context(
             command_buffer->device, plan->pdi_span, plan->xclbin_span,
-            plan->kernel_name, &context_lease);
-        if (iree_status_is_ok(status)) {
-          context_ref = iree_hal_amdxdna_context_cache_lease_retain_context(
-              context_lease);
-          if (!context_ref) {
-            status = iree_make_status(
-                IREE_STATUS_RESOURCE_EXHAUSTED,
-                "amdxdna executable context lease could not retain context");
-          }
-        }
+            plan->kernel_name, &context_ref, &context_lease);
         if (iree_status_is_ok(status)) {
           status = iree_hal_amdxdna_native_context_ref_open_cu(
               context_ref, plan->kernel_name, &cu_idx);

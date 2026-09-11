@@ -99,14 +99,18 @@ iree_status_t iree_hal_amdxdna_context_cache_get_or_create(
     iree_const_byte_span_t xclbin, iree_string_view_t kernel_name,
     iree_hal_amdxdna_native_context_ref_t** out_context_ref);
 
-// Like get_or_create, but returns a lease that pins the cache entry against LRU
-// eviction until released. The lease itself is not a dispatch reference; callers
-// must retain a context ref from the lease while submitting work.
+// Like get_or_create, but returns a lease. Unleased LRU entries are evicted
+// first; if the cap is full of leases (FLM pinning executables across model
+// switches), the LRU leased entry is force-evicted and later retain returns
+// NULL. When requested, |out_context_ref| is retained atomically with lease
+// creation so force-eviction cannot invalidate the lease between pinning and
+// acquiring the dispatch reference.
 iree_status_t iree_hal_amdxdna_context_cache_pin(
     iree_hal_amdxdna_device_context_cache_t* context_cache,
     iree_hal_amdxdna_native_device_t* native_device,
     uint32_t context_image_models, iree_const_byte_span_t pdi,
     iree_const_byte_span_t xclbin, iree_string_view_t kernel_name,
+    iree_hal_amdxdna_native_context_ref_t** out_context_ref,
     iree_hal_amdxdna_context_cache_lease_t** out_lease);
 
 // Retains the native context referenced by |lease| for one dispatch or CU-open
@@ -132,6 +136,7 @@ iree_status_t iree_hal_amdxdna_device_get_or_create_context(
 iree_status_t iree_hal_amdxdna_device_pin_context(
     iree_hal_amdxdna_device* device, iree_const_byte_span_t pdi,
     iree_const_byte_span_t xclbin, iree_string_view_t kernel_name,
+    iree_hal_amdxdna_native_context_ref_t** out_context_ref,
     iree_hal_amdxdna_context_cache_lease_t** out_lease);
 
 #ifdef __cplusplus

@@ -116,12 +116,13 @@ typedef struct iree_hal_amdxdna_native_c_device_caps_t {
   // Maximum number of native child commands that the device-level chain cache
   // may retain. Zero selects the common conservative default.
   uint32_t max_cached_chain_child_commands;
-  // Concurrent hardware-context budget for this NPU, i.e. how many native
-  // hardware contexts may be kept alive at once before the driver refuses to
-  // create more. The amdxdna KMD exposes no query for this ceiling, so backends
-  // derive it from the device architecture (see
-  // iree_hal_amdxdna_hardware_context_budget_for_arch). 0 means "unknown"; the
-  // context cache then falls back to a conservative default.
+  // Concurrent hardware-context cache target for this NPU. Backends derive it
+  // from iree_hal_amdxdna_hardware_context_budget_for_arch. Linux publishes
+  // that table value. Windows MCDM publishes one below it so non-RT HAL
+  // creates stay under the XRS reserved-realtime headroom (see
+  // iree_hal_amdxdna_native_windows_hardware_context_cache_capacity). 0 means
+  // unknown; the context cache then uses a conservative default. Evict+retry
+  // on pool-exhaustion CreateContext stays for destroy lag.
   uint32_t max_hardware_contexts;
   uint32_t context_image_models;
   uint32_t dispatch_models;
@@ -149,13 +150,13 @@ typedef struct iree_hal_amdxdna_native_c_device_caps_t {
 } iree_hal_amdxdna_native_c_device_caps_t;
 
 // Maps an NPU architecture name (e.g. "Phoenix", "Strix", "Strix Halo",
-// "Krackan") to a soft concurrent hardware-context budget: how many native
-// contexts the cache aims to keep alive. The KMD exposes no query for the true
-// ceiling, which also varies with the part and its array partitioning, so this
-// is a target, not a hard limit -- the context cache evicts and retries on
-// creation failure to back off to whatever the driver accepts. The budget is
-// architecture-keyed (identical on Linux and Windows for a given part). Returns
-// 0 for an unknown architecture, signaling the caller to use a default.
+// "Krackan") to the architecture hardware-context table (6 Phoenix, 32
+// Strix / Strix Halo / Krackan). That is the SW virtual-context list size
+// the HAL aims at, not the XRS non-realtime cap. The table is architecture-
+// keyed and identical on Linux and Windows; Windows query_caps then
+// publishes budget-1 as max_hardware_contexts. The cache still evicts and
+// retries on pool-exhaustion CreateContext (destroy lag). Returns 0 for an
+// unknown architecture, signaling the caller to use a default.
 static inline uint32_t iree_hal_amdxdna_hardware_context_budget_for_arch(
     iree_string_view_t arch) {
   // Phoenix (npu1).

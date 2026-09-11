@@ -76,21 +76,12 @@ iree_status_t iree_hal_amdxdna_executable_preload_contexts(
     if (params->pdi.count == 0 && params->xclbin.count == 0) continue;
 
     iree_hal_amdxdna_context_cache_lease_t* context_lease = NULL;
+    iree_hal_amdxdna_native_context_ref_t* context_ref = NULL;
     iree_status_t status = iree_hal_amdxdna_device_pin_context(
         device,
         iree_make_const_byte_span(params->pdi.data, params->pdi.count),
         iree_make_const_byte_span(params->xclbin.data, params->xclbin.count),
-        params->kernel_name, &context_lease);
-    iree_hal_amdxdna_native_context_ref_t* context_ref = NULL;
-    if (iree_status_is_ok(status)) {
-      context_ref =
-          iree_hal_amdxdna_context_cache_lease_retain_context(context_lease);
-      if (!context_ref) {
-        status = iree_make_status(
-            IREE_STATUS_RESOURCE_EXHAUSTED,
-            "amdxdna executable context lease could not retain context");
-      }
-    }
+        params->kernel_name, &context_ref, &context_lease);
     iree_hal_amdxdna_native_c_cu_index_t cu_idx;
     memset(&cu_idx, 0, sizeof(cu_idx));
     if (iree_status_is_ok(status)) {

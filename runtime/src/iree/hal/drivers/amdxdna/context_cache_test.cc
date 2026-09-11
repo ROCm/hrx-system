@@ -144,7 +144,7 @@ class ContextCachePolicyTest : public ::testing::Test {
     return iree_hal_amdxdna_context_cache_pin(
         cache_, nullptr, IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_PDI,
         iree_make_const_byte_span(&key, 1), iree_const_byte_span_empty(),
-        IREE_SV("MLIR_AIE"), out_lease);
+        IREE_SV("MLIR_AIE"), nullptr, out_lease);
   }
 
   iree_hal_amdxdna_native_context_ref_t* GetAndExpectOk(uint8_t key) {
@@ -266,6 +266,42 @@ TEST_F(ContextCachePolicyTest, PoolExhaustionEvictsLruAndRetries) {
   EXPECT_EQ(factory_.create_counts[3].load(), 1);
 }
 
+TEST_F(ContextCachePolicyTest, PoolExhaustionBelowSoftCapEvictsAndRetries) {
+  CreateCache(32);
+  auto* one = GetAndExpectOk(1);
+  factory_.ReleaseCaller(one);
+
+  // A driver's actual process pool may be smaller than the architecture-derived
+  // cache budget. Its explicit create-ioctl exhaustion signal must take
+  // precedence over the soft cap.
+  factory_.ScriptFailure(IREE_STATUS_INVALID_ARGUMENT, true);
+  auto* two = GetAndExpectOk(2);
+  factory_.ReleaseCaller(two);
+
+  EXPECT_EQ(factory_.create_calls.load(), 3);
+  EXPECT_EQ(factory_.destroy_counts[1].load(), 1);
+  EXPECT_EQ(factory_.create_counts[2].load(), 1);
+}
+
+TEST_F(ContextCachePolicyTest, PoolFailureRetryEvictsOnlyOneEntry) {
+  CreateCache(3);
+  auto* one = GetAndExpectOk(1);
+  factory_.ReleaseCaller(one);
+  auto* two = GetAndExpectOk(2);
+  factory_.ReleaseCaller(two);
+
+  factory_.ScriptFailure(IREE_STATUS_INTERNAL, true);
+  factory_.ScriptFailure(IREE_STATUS_INTERNAL, true);
+  iree_hal_amdxdna_native_context_ref_t* three = nullptr;
+  iree_status_t status = Get(3, &three);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INTERNAL);
+  iree_status_ignore(status);
+  EXPECT_EQ(three, nullptr);
+  EXPECT_EQ(factory_.create_calls.load(), 4);
+  EXPECT_EQ(factory_.destroy_counts[1].load(), 1);
+  EXPECT_EQ(factory_.destroy_counts[2].load(), 0);
+}
+
 TEST_F(ContextCachePolicyTest, NonPoolFailureDoesNotEvictOrRetry) {
   CreateCache(3);
   auto* one = GetAndExpectOk(1);
@@ -324,23 +360,20 @@ TEST_F(ContextCachePolicyTest, LeasedEntryIsSkippedByLruEviction) {
       << "released leases become normal LRU candidates again";
 }
 
-TEST_F(ContextCachePolicyTest, CapacityFullOfLeasedEntriesRejectsMiss) {
+TEST_F(ContextCachePolicyTest, CapacityFullOfLeasedEntriesForceEvicts) {
   CreateCache(1);
   auto* one_lease = PinAndExpectOk(1);
 
-  iree_hal_amdxdna_native_context_ref_t* two = nullptr;
-  iree_status_t status = Get(2, &two);
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_RESOURCE_EXHAUSTED);
-  iree_status_ignore(status);
-  EXPECT_EQ(two, nullptr);
-  EXPECT_EQ(factory_.create_calls.load(), 1)
-      << "the cache must not create past the bound when all entries are leased";
-  EXPECT_EQ(factory_.destroy_counts[1].load(), 0);
+  auto* two = GetAndExpectOk(2);
+  factory_.ReleaseCaller(two);
+  EXPECT_EQ(factory_.create_calls.load(), 2)
+      << "leased LRU entries must be force-evicted when the cap is full";
+  EXPECT_EQ(factory_.destroy_counts[1].load(), 1);
+  EXPECT_EQ(iree_hal_amdxdna_context_cache_lease_retain_context(one_lease),
+            nullptr)
+      << "force-eviction must invalidate surviving leases";
 
   iree_hal_amdxdna_context_cache_lease_release(one_lease);
-  two = GetAndExpectOk(2);
-  factory_.ReleaseCaller(two);
-  EXPECT_EQ(factory_.destroy_counts[1].load(), 1);
 }
 
 TEST_F(ContextCachePolicyTest, LeaseCanRetainDispatchReference) {
