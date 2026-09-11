@@ -400,6 +400,7 @@ loom_cc_library(
         "//loom/src/loom/ops/pipeline",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )

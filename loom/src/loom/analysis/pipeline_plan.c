@@ -8,8 +8,10 @@
 
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/analysis/type_refinement.h"
 #include "loom/ir/context.h"
+#include "loom/ir/structural_hash.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/encoding/storage.h"
 #include "loom/ops/group/ops.h"
@@ -130,8 +132,8 @@ typedef struct loom_pipeline_plan_builder_t {
   // Number of defined physical resident-worker boundary ports.
   uint32_t group_port_count;
 
-  // Maximum physical resident-worker boundary ports allocated.
-  uint32_t group_port_capacity;
+  // Group-major membership indices into the physical boundary port table.
+  uint32_t* group_port_indices;
 
   // Typed logical flow table.
   loom_pipeline_plan_flow_t* flows;
@@ -621,6 +623,7 @@ static void loom_pipeline_plan_append_stage_port(
     loom_pipeline_plan_builder_t* builder,
     loom_pipeline_plan_stage_port_t port) {
   IREE_ASSERT_LT(builder->stage_port_count, builder->stage_port_capacity);
+  port.receive_port_index = UINT32_MAX;
   builder->stage_ports[builder->stage_port_count++] = port;
 }
 
@@ -699,7 +702,7 @@ static iree_status_t loom_pipeline_plan_define_stage_outputs(
             .instance_count = instance_count,
             .producer_stage_index = stage_index,
             .producer_stage_port = stage->input_count + i,
-            .producer_port = stage->input_count + i,
+            .producer_port = UINT32_MAX,
             .binding_view_index = UINT32_MAX,
         },
         &flow_index);
@@ -1007,102 +1010,136 @@ static bool loom_pipeline_plan_flow_is_internal_to_group(
          flow->group_index == group_index;
 }
 
-static uint32_t loom_pipeline_plan_group_next_port(
-    const loom_pipeline_plan_builder_t* builder, uint32_t group_index) {
-  uint32_t next_port = 0;
-  for (uint32_t i = 0; i < builder->group_port_count; ++i) {
-    const loom_pipeline_plan_group_port_t* port = &builder->group_ports[i];
-    if (port->group_index == group_index && port->port >= next_port) {
-      next_port = port->port + 1;
+// Scratch index for exact composite receive identities. Slots store physical
+// port row indices; keys remain in their owning rows. The index is used only
+// while constructing receive assignments, before any consumer sees the plan.
+typedef struct loom_pipeline_plan_receive_index_t {
+  // Open-addressed row indices, with UINT32_MAX marking an empty slot.
+  uint32_t* slots;
+
+  // Power-of-two slot count minus one.
+  iree_host_size_t mask;
+} loom_pipeline_plan_receive_index_t;
+
+static iree_status_t loom_pipeline_plan_receive_index_initialize(
+    loom_pipeline_plan_builder_t* builder,
+    loom_pipeline_plan_receive_index_t* out_index) {
+  uint64_t input_count = 0;
+  for (uint32_t i = 0; i < builder->stage_count; ++i) {
+    const loom_pipeline_plan_stage_t* stage = &builder->stages[i];
+    if (builder->groups[stage->group_index].stage_count > 1) {
+      input_count += stage->input_count;
     }
   }
-  return next_port;
+  *out_index = (loom_pipeline_plan_receive_index_t){0};
+  if (input_count == 0) return iree_ok_status();
+  // At most one unique receive per input keeps the table at most half full.
+  const uint64_t slot_count = iree_math_round_up_to_pow2_u64(input_count * 2);
+  if (slot_count > SIZE_MAX / sizeof(*out_index->slots)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "pipeline receive index is too large");
+  }
+  IREE_RETURN_IF_ERROR(loom_pipeline_plan_allocate_array(
+      builder->arena, (iree_host_size_t)slot_count, sizeof(*out_index->slots),
+      (void**)&out_index->slots));
+  memset(out_index->slots, 0xFF,
+         (iree_host_size_t)slot_count * sizeof(*out_index->slots));
+  out_index->mask = (iree_host_size_t)slot_count - 1;
+  return iree_ok_status();
 }
 
-static bool loom_pipeline_plan_group_port_matches_flow(
+static uint32_t* loom_pipeline_plan_receive_index_slot(
     const loom_pipeline_plan_builder_t* builder,
-    const loom_pipeline_plan_group_port_t* port, uint32_t flow_index,
-    uint32_t source_lane, loom_pipeline_plan_group_port_direction_t direction) {
-  if (port->direction != direction) return false;
-  if (direction == LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_RECEIVE) {
-    return port->flow_index == flow_index && port->source_lane == source_lane;
-  }
-  return builder->flows[port->flow_index].storage_flow_index ==
-         builder->flows[flow_index].storage_flow_index;
-}
-
-static bool loom_pipeline_plan_find_group_port(
-    const loom_pipeline_plan_builder_t* builder, uint32_t group_index,
-    uint32_t flow_index, uint32_t source_lane,
-    loom_pipeline_plan_group_port_direction_t direction, uint32_t* out_port) {
-  for (uint32_t i = 0; i < builder->group_port_count; ++i) {
-    const loom_pipeline_plan_group_port_t* port = &builder->group_ports[i];
-    if (port->group_index == group_index &&
-        loom_pipeline_plan_group_port_matches_flow(builder, port, flow_index,
-                                                   source_lane, direction)) {
-      *out_port = port->port;
-      return true;
+    const loom_pipeline_plan_receive_index_t* index, uint32_t group_index,
+    uint32_t flow_index, uint32_t source_lane) {
+  uint32_t hash = loom_structural_hash_initialize();
+  hash = loom_structural_hash_mix_u32(hash, group_index);
+  hash = loom_structural_hash_mix_u32(hash, flow_index);
+  hash = loom_structural_hash_mix_u32(hash, source_lane);
+  iree_host_size_t slot = loom_structural_hash_finalize(hash) & index->mask;
+  while (index->slots[slot] != UINT32_MAX) {
+    const loom_pipeline_plan_group_port_t* port =
+        &builder->group_ports[index->slots[slot]];
+    if (port->group_index == group_index && port->flow_index == flow_index &&
+        port->source_lane == source_lane) {
+      break;
     }
+    slot = (slot + 1) & index->mask;
   }
-  return false;
+  return &index->slots[slot];
 }
 
 static uint32_t loom_pipeline_plan_add_group_port(
     loom_pipeline_plan_builder_t* builder, uint32_t group_index,
     uint32_t flow_index, uint32_t source_lane,
     loom_pipeline_plan_group_port_direction_t direction,
-    uint32_t requested_port, bool deduplicate) {
-  uint32_t port = 0;
-  if (deduplicate &&
-      loom_pipeline_plan_find_group_port(builder, group_index, flow_index,
-                                         source_lane, direction, &port)) {
-    return port;
-  }
-  IREE_ASSERT_LT(builder->group_port_count, builder->group_port_capacity);
-  port = requested_port != UINT32_MAX
-             ? requested_port
-             : loom_pipeline_plan_group_next_port(builder, group_index);
-  builder->group_ports[builder->group_port_count++] =
-      (loom_pipeline_plan_group_port_t){
-          .group_index = group_index,
-          .flow_index = flow_index,
-          .source_lane = source_lane,
-          .port = port,
-          .direction = direction,
-      };
-  return port;
+    uint32_t requested_port) {
+  loom_pipeline_plan_group_t* group = &builder->groups[group_index];
+  const uint32_t port =
+      requested_port != UINT32_MAX ? requested_port : group->ports.abi_extent;
+  const uint32_t port_index = builder->group_port_count++;
+  builder->group_ports[port_index] = (loom_pipeline_plan_group_port_t){
+      .group_index = group_index,
+      .flow_index = flow_index,
+      .source_lane = source_lane,
+      .port = port,
+      .direction = direction,
+  };
+  ++group->ports.count;
+  group->ports.abi_extent = iree_max(group->ports.abi_extent, port + 1);
+  return port_index;
 }
 
-static uint32_t loom_pipeline_plan_add_group_receive_port(
-    loom_pipeline_plan_builder_t* builder, uint32_t stage_index,
+static void loom_pipeline_plan_add_group_receive_port(
+    loom_pipeline_plan_builder_t* builder,
+    const loom_pipeline_plan_receive_index_t* index, uint32_t stage_index,
     uint16_t input_index) {
   const loom_pipeline_plan_stage_t* stage = &builder->stages[stage_index];
-  const loom_pipeline_plan_stage_port_t* stage_port =
+  loom_pipeline_plan_stage_port_t* stage_port =
       &builder->stage_ports[stage->port_start + input_index];
-  const bool composite = builder->groups[stage->group_index].stage_count > 1;
-  return loom_pipeline_plan_add_group_port(
-      builder, stage->group_index, stage_port->flow_index,
-      stage_port->source_lane, LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_RECEIVE,
-      composite ? UINT32_MAX : input_index, composite);
+  if (builder->groups[stage->group_index].stage_count == 1) {
+    stage_port->receive_port_index = loom_pipeline_plan_add_group_port(
+        builder, stage->group_index, stage_port->flow_index,
+        stage_port->source_lane,
+        LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_RECEIVE, input_index);
+    return;
+  }
+  uint32_t* slot = loom_pipeline_plan_receive_index_slot(
+      builder, index, stage->group_index, stage_port->flow_index,
+      stage_port->source_lane);
+  if (*slot == UINT32_MAX) {
+    *slot = loom_pipeline_plan_add_group_port(
+        builder, stage->group_index, stage_port->flow_index,
+        stage_port->source_lane,
+        LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_RECEIVE, UINT32_MAX);
+  }
+  stage_port->receive_port_index = *slot;
 }
 
-static uint32_t loom_pipeline_plan_add_group_send_port(
+static void loom_pipeline_plan_add_group_send_port(
     loom_pipeline_plan_builder_t* builder, uint32_t flow_index) {
-  loom_pipeline_plan_flow_t* flow = &builder->flows[flow_index];
-  IREE_ASSERT_EQ(flow->producer_kind, LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE);
-  IREE_ASSERT_LT(flow->producer_stage_index, builder->stage_count);
+  const loom_pipeline_plan_flow_t* flow = &builder->flows[flow_index];
+  loom_pipeline_plan_flow_t* storage =
+      &builder->flows[flow->storage_flow_index];
+  if (storage->producer_port != UINT32_MAX) return;
   const bool composite = builder->groups[flow->group_index].stage_count > 1;
-  const uint32_t port = loom_pipeline_plan_add_group_port(
+  const uint32_t port_index = loom_pipeline_plan_add_group_port(
       builder, flow->group_index, flow_index, UINT32_MAX,
       LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_SEND,
-      composite ? UINT32_MAX : flow->producer_stage_port,
-      /*deduplicate=*/true);
-  flow->producer_port = port;
-  return port;
+      composite ? UINT32_MAX : flow->producer_stage_port);
+  storage->producer_port = builder->group_ports[port_index].port;
 }
 
 static iree_status_t loom_pipeline_plan_prepare_group_ports(
     loom_pipeline_plan_builder_t* builder) {
+  // Each logical input contributes at most one receive and each logical output
+  // at most one canonical send, including all aliases and deferred writes.
+  IREE_RETURN_IF_ERROR(loom_pipeline_plan_allocate_array(
+      builder->arena, builder->stage_port_count, sizeof(*builder->group_ports),
+      (void**)&builder->group_ports));
+  loom_pipeline_plan_receive_index_t receive_index = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_pipeline_plan_receive_index_initialize(builder, &receive_index));
   for (uint32_t stage_index = 0; stage_index < builder->stage_count;
        ++stage_index) {
     const loom_pipeline_plan_stage_t* stage = &builder->stages[stage_index];
@@ -1115,28 +1152,45 @@ static iree_status_t loom_pipeline_plan_prepare_group_ports(
                                                        stage->group_index)) {
         continue;
       }
-      loom_pipeline_plan_add_group_receive_port(builder, stage_index,
-                                                input_index);
+      loom_pipeline_plan_add_group_receive_port(builder, &receive_index,
+                                                stage_index, input_index);
     }
   }
 
-  for (uint32_t stage_index = 0; stage_index < builder->stage_count;
-       ++stage_index) {
-    const loom_pipeline_plan_stage_t* stage = &builder->stages[stage_index];
-    for (uint16_t input_index = 0; input_index < stage->input_count;
-         ++input_index) {
-      const uint32_t flow_index =
-          builder->stage_ports[stage->port_start + input_index].flow_index;
-      const loom_pipeline_plan_flow_t* flow = &builder->flows[flow_index];
-      if (flow->producer_kind == LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE &&
-          flow->group_index != stage->group_index) {
-        loom_pipeline_plan_add_group_send_port(builder, flow_index);
-      }
+  // Receives precede sends. Their first-demand order also preserves concrete
+  // input-edge ordering when each unique receive is expanded below.
+  const uint32_t receive_count = builder->group_port_count;
+  for (uint32_t i = 0; i < receive_count; ++i) {
+    const uint32_t flow_index = builder->group_ports[i].flow_index;
+    if (builder->flows[flow_index].producer_kind ==
+        LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE) {
+      loom_pipeline_plan_add_group_send_port(builder, flow_index);
     }
   }
   for (uint32_t i = 0; i < builder->write_count; ++i) {
     loom_pipeline_plan_add_group_send_port(builder,
                                            builder->writes[i].flow_index);
+  }
+
+  IREE_RETURN_IF_ERROR(loom_pipeline_plan_allocate_array(
+      builder->arena, builder->group_port_count,
+      sizeof(*builder->group_port_indices),
+      (void**)&builder->group_port_indices));
+  // Assign exact group slices, then populate them without moving port rows or
+  // changing the first-demand order used by the worker ABI and edge emission.
+  uint32_t index_start = 0;
+  for (uint32_t i = 0; i < builder->group_count; ++i) {
+    loom_pipeline_plan_group_t* group = &builder->groups[i];
+    group->ports.index_start = index_start;
+    index_start += group->ports.count;
+    group->ports.count = 0;
+  }
+  for (uint32_t i = 0; i < builder->group_port_count; ++i) {
+    loom_pipeline_plan_group_t* group =
+        &builder->groups[builder->group_ports[i].group_index];
+    builder
+        ->group_port_indices[group->ports.index_start + group->ports.count++] =
+        i;
   }
   return iree_ok_status();
 }
@@ -1171,12 +1225,14 @@ static bool loom_pipeline_plan_group_has_terminal_folds(
   uint32_t first_output_port = UINT32_MAX;
   uint32_t last_output_port = 0;
   uint32_t output_count = 0;
-  for (uint32_t i = 0; i < builder->group_port_count; ++i) {
-    const loom_pipeline_plan_group_port_t* port = &builder->group_ports[i];
-    if (port->group_index != group_index ||
-        port->direction != LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_SEND) {
+  const loom_pipeline_plan_group_t* group = &builder->groups[group_index];
+  for (uint32_t i = 0; i < group->ports.count; ++i) {
+    const uint32_t port_index =
+        builder->group_port_indices[group->ports.index_start + i];
+    const loom_pipeline_plan_group_port_t* port =
+        &builder->group_ports[port_index];
+    if (port->direction != LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_SEND)
       continue;
-    }
     const loom_pipeline_plan_flow_t* flow = &builder->flows[port->flow_index];
     if (flow->producer_stage_index >= builder->stage_count ||
         builder->stages[flow->producer_stage_index].fold_record_count == 0) {
@@ -1240,53 +1296,19 @@ static void loom_pipeline_plan_finalize_instance_behaviors(
   }
 }
 
-static bool loom_pipeline_plan_has_edge_target(
-    const loom_pipeline_plan_builder_t* builder, uint32_t flow_index,
-    uint32_t target_index, uint32_t target_port) {
-  for (uint32_t i = 0; i < builder->edge_count; ++i) {
-    const loom_pipeline_plan_edge_t* edge = &builder->edges[i];
-    if (edge->flow_index == flow_index &&
-        edge->target_kind == LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE &&
-        edge->target_index == target_index &&
-        edge->target_port == target_port) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static iree_status_t loom_pipeline_plan_emit_stage_input_edges(
-    loom_pipeline_plan_builder_t* builder, uint32_t stage_index) {
-  const loom_pipeline_plan_stage_t* stage = &builder->stages[stage_index];
-  const loom_pipeline_plan_group_t* target_group =
-      &builder->groups[stage->group_index];
-  const bool composite = target_group->stage_count > 1;
-  for (uint16_t input_index = 0; input_index < stage->input_count;
-       ++input_index) {
-    const loom_pipeline_plan_stage_port_t* port =
-        &builder->stage_ports[stage->port_start + input_index];
+static void loom_pipeline_plan_emit_receive_edges(
+    loom_pipeline_plan_builder_t* builder) {
+  for (uint32_t port_index = 0; port_index < builder->group_port_count;
+       ++port_index) {
+    const loom_pipeline_plan_group_port_t* port =
+        &builder->group_ports[port_index];
+    if (port->direction != LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_RECEIVE)
+      break;
     const loom_pipeline_plan_flow_t* flow = &builder->flows[port->flow_index];
-    if (loom_pipeline_plan_flow_is_internal_to_group(flow,
-                                                     stage->group_index)) {
-      continue;
-    }
-
-    uint32_t target_port = input_index;
-    if (composite &&
-        !loom_pipeline_plan_find_group_port(
-            builder, stage->group_index, port->flow_index, port->source_lane,
-            LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_RECEIVE, &target_port)) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "composite pipeline input port was not planned");
-    }
-    uint32_t source_port = flow->producer_port;
-    if (flow->producer_kind == LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE &&
-        !loom_pipeline_plan_find_group_port(
-            builder, flow->group_index, port->flow_index, UINT32_MAX,
-            LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_SEND, &source_port)) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "pipeline output port was not planned");
-    }
+    const loom_pipeline_plan_group_t* target_group =
+        &builder->groups[port->group_index];
+    const uint32_t source_port =
+        builder->flows[flow->storage_flow_index].producer_port;
     const bool binding_is_partitioned =
         loom_pipeline_plan_flow_binding_is_partitioned(builder, flow);
     const uint32_t target_lane_count =
@@ -1295,13 +1317,6 @@ static iree_status_t loom_pipeline_plan_emit_stage_input_edges(
          ++target_lane) {
       const uint32_t source_lane =
           port->source_lane == UINT32_MAX ? target_lane : port->source_lane;
-      const uint32_t target_instance =
-          target_group->instance_start + target_lane;
-      if (composite &&
-          loom_pipeline_plan_has_edge_target(builder, port->flow_index,
-                                             target_instance, target_port)) {
-        continue;
-      }
       loom_pipeline_plan_append_edge(
           builder,
           (loom_pipeline_plan_edge_t){
@@ -1315,26 +1330,20 @@ static iree_status_t loom_pipeline_plan_emit_stage_input_edges(
               .source_port = source_port,
               .binding_view_lane = binding_is_partitioned ? source_lane : 0,
               .target_kind = LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE,
-              .target_index = target_instance,
-              .target_port = target_port,
+              .target_index = target_group->instance_start + target_lane,
+              .target_port = port->port,
           });
     }
   }
-  return iree_ok_status();
 }
 
-static iree_status_t loom_pipeline_plan_emit_write_edges(
+static void loom_pipeline_plan_emit_write_edges(
     loom_pipeline_plan_builder_t* builder) {
   for (uint32_t i = 0; i < builder->write_count; ++i) {
     const loom_pipeline_plan_write_t* write = &builder->writes[i];
     const loom_pipeline_plan_flow_t* flow = &builder->flows[write->flow_index];
-    uint32_t source_port = flow->producer_port;
-    if (!loom_pipeline_plan_find_group_port(
-            builder, flow->group_index, write->flow_index, UINT32_MAX,
-            LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_SEND, &source_port)) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "pipeline write port was not planned");
-    }
+    const uint32_t source_port =
+        builder->flows[flow->storage_flow_index].producer_port;
     const uint32_t lane_count = builder->groups[flow->group_index].lane_count;
     for (uint32_t lane = 0; lane < lane_count; ++lane) {
       loom_pipeline_plan_append_edge(
@@ -1351,19 +1360,15 @@ static iree_status_t loom_pipeline_plan_emit_write_edges(
                    });
     }
   }
-  return iree_ok_status();
 }
 
 static iree_status_t loom_pipeline_plan_finalize_graph(
     loom_pipeline_plan_builder_t* builder) {
   IREE_RETURN_IF_ERROR(loom_pipeline_plan_prepare_group_ports(builder));
   loom_pipeline_plan_finalize_instance_behaviors(builder);
-  for (uint32_t stage_index = 0; stage_index < builder->stage_count;
-       ++stage_index) {
-    IREE_RETURN_IF_ERROR(
-        loom_pipeline_plan_emit_stage_input_edges(builder, stage_index));
-  }
-  return loom_pipeline_plan_emit_write_edges(builder);
+  loom_pipeline_plan_emit_receive_edges(builder);
+  loom_pipeline_plan_emit_write_edges(builder);
+  return iree_ok_status();
 }
 
 static bool loom_pipeline_plan_op_is_compile_time(
@@ -1593,16 +1598,6 @@ static iree_status_t loom_pipeline_plan_builder_initialize(
                             "pipeline edge domain is too large");
   }
   builder->edge_capacity = (uint32_t)edge_capacity;
-  iree_host_size_t group_port_capacity = 0;
-  if (!iree_host_size_checked_mul(stage_port_capacity, 2,
-                                  &group_port_capacity) ||
-      !iree_host_size_checked_add(group_port_capacity, write_capacity,
-                                  &group_port_capacity) ||
-      group_port_capacity > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "pipeline group-port domain is too large");
-  }
-  builder->group_port_capacity = (uint32_t)group_port_capacity;
 
 #define LOOM_PIPELINE_PLAN_ALLOCATE(field, count)         \
   IREE_RETURN_IF_ERROR(loom_pipeline_plan_allocate_array( \
@@ -1614,7 +1609,6 @@ static iree_status_t loom_pipeline_plan_builder_initialize(
   LOOM_PIPELINE_PLAN_ALLOCATE(instances, builder->instance_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(stages, builder->stage_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(stage_ports, builder->stage_port_capacity);
-  LOOM_PIPELINE_PLAN_ALLOCATE(group_ports, builder->group_port_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(flows, builder->flow_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(flow_usage, builder->flow_capacity);
   LOOM_PIPELINE_PLAN_ALLOCATE(edges, builder->edge_capacity);
@@ -1669,6 +1663,7 @@ iree_status_t loom_pipeline_plan_build(const loom_module_t* module,
       .stage_port_count = builder.stage_port_count,
       .group_ports = builder.group_ports,
       .group_port_count = builder.group_port_count,
+      .group_port_indices = builder.group_port_indices,
       .flows = builder.flows,
       .flow_count = builder.flow_count,
       .edges = builder.edges,

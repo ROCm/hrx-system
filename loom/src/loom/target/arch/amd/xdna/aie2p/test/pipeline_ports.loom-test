@@ -1,0 +1,251 @@
+// RUN: pass aie2p-lower-pipeline
+
+// Interleaved groups retain first-demand port order. Repeated uses of %partial
+// share a receive, while %buffered has its own receive contract. Both versions
+// use one producer send. The later producer stage reads that exported storage;
+// the consumer stages share a private intermediate.
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+func.def target(@core_target) @copy(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def target(@core_target) @add(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<1xi32>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %left = view.load %lhs_view[0] : view<1xi32> -> i32
+  %right = view.load %rhs_view[0] : view<1xi32> -> i32
+  %sum = scalar.addi %left, %right : i32
+  view.store %sum, %output_view[0] : i32, view<1xi32>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @interleaved_aliases() launch(%input: buffer, %copy_output: buffer, %sum_output: buffer, %alias_output: buffer) {
+  %c1 = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %producer = group.create %c1 : index -> group
+  %consumer = group.create %c1 : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi32>
+  %copy_view = buffer.view %copy_output[%base] : buffer -> view<1xi32>
+  %sum_view = buffer.view %sum_output[%base] : buffer -> view<1xi32>
+  %alias_view = buffer.view %alias_output[%base] : buffer -> view<1xi32>
+  %source = pipeline.read %input_view on %producer : view<1xi32>, group -> pipeline.flow<tile<1xi32>>
+  %partial = pipeline.stage @copy on %producer(%source) : (group, pipeline.flow<tile<1xi32>>) -> (pipeline.flow<tile<1xi32>>)
+  %buffered = pipeline.buffer %partial capacity %c1 : (pipeline.flow<tile<1xi32>>, index) -> pipeline.flow<tile<1xi32>>
+  %doubled = pipeline.stage @add on %consumer(%partial, %partial) : (group, pipeline.flow<tile<1xi32>>, pipeline.flow<tile<1xi32>>) -> (pipeline.flow<tile<1xi32>>)
+  %copied = pipeline.stage @copy on %producer(%partial) : (group, pipeline.flow<tile<1xi32>>) -> (pipeline.flow<tile<1xi32>>)
+  %sum = pipeline.stage @add on %consumer(%buffered, %doubled) : (group, pipeline.flow<tile<1xi32>>, pipeline.flow<tile<1xi32>>) -> (pipeline.flow<tile<1xi32>>)
+  pipeline.write %copied to %copy_view : pipeline.flow<tile<1xi32>>, view<1xi32>
+  pipeline.write %sum to %sum_view : pipeline.flow<tile<1xi32>>, view<1xi32>
+  pipeline.write %buffered to %alias_view : pipeline.flow<tile<1xi32>>, view<1xi32>
+  pipeline.return
+}
+
+// ----
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+func.def target(@core_target) @copy(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def target(@core_target) @add(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<1xi32>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %left = view.load %lhs_view[0] : view<1xi32> -> i32
+  %right = view.load %rhs_view[0] : view<1xi32> -> i32
+  %sum = scalar.addi %left, %right : i32
+  view.store %sum, %output_view[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def target(@core_target) @interleaved_aliases$group$0(%34: buffer, %35: buffer, %36: buffer) {
+  %base$37 = index.constant 0 : offset
+  %input_view$38 = buffer.view %34[%base$37] : buffer -> view<1xi32>
+  %output_view$39 = buffer.view %35[%base$37] : buffer -> view<1xi32>
+  %value$40 = view.load %input_view$38[0] : view<1xi32> -> i32
+  view.store %value$40, %output_view$39[0] : i32, view<1xi32>
+  %base$41 = index.constant 0 : offset
+  %input_view$42 = buffer.view %35[%base$41] : buffer -> view<1xi32>
+  %output_view$43 = buffer.view %36[%base$41] : buffer -> view<1xi32>
+  %value$44 = view.load %input_view$42[0] : view<1xi32> -> i32
+  view.store %value$44, %output_view$43[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def target(@core_target) @interleaved_aliases$group$1(%45: buffer, %46: buffer, %47: buffer) {
+  %48 = index.constant 4 : offset
+  %49 = buffer.alloca<private> align(64) %48 : buffer
+  %base$50 = index.constant 0 : offset
+  %lhs_view$51 = buffer.view %45[%base$50] : buffer -> view<1xi32>
+  %rhs_view$52 = buffer.view %45[%base$50] : buffer -> view<1xi32>
+  %output_view$53 = buffer.view %49[%base$50] : buffer -> view<1xi32>
+  %left$54 = view.load %lhs_view$51[0] : view<1xi32> -> i32
+  %right$55 = view.load %rhs_view$52[0] : view<1xi32> -> i32
+  %sum$56 = scalar.addi %left$54, %right$55 : i32
+  view.store %sum$56, %output_view$53[0] : i32, view<1xi32>
+  %base$57 = index.constant 0 : offset
+  %lhs_view$58 = buffer.view %46[%base$57] : buffer -> view<1xi32>
+  %rhs_view$59 = buffer.view %49[%base$57] : buffer -> view<1xi32>
+  %output_view$60 = buffer.view %47[%base$57] : buffer -> view<1xi32>
+  %left$61 = view.load %lhs_view$58[0] : view<1xi32> -> i32
+  %right$62 = view.load %rhs_view$59[0] : view<1xi32> -> i32
+  %sum$63 = scalar.addi %left$61, %right$62 : i32
+  view.store %sum$63, %output_view$60[0] : i32, view<1xi32>
+  func.return
+}
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @interleaved_aliases() {
+  %64 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 1} : reg<aie2p.array.scalar : index>
+  %65 = low.op<amd.xdna.aie2p.array.group>(%64) : (reg<aie2p.array.scalar : index>) -> reg<aie2p.array.group>
+  %66 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 1} : reg<aie2p.array.scalar : index>
+  %67 = low.op<amd.xdna.aie2p.array.group>(%66) : (reg<aie2p.array.scalar : index>) -> reg<aie2p.array.group>
+  %68 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 0} : reg<aie2p.array.scalar : index>
+  %69 = low.op<amd.xdna.aie2p.array.worker>(%65, %68) {entry = @interleaved_aliases$group$0} : (reg<aie2p.array.group>, reg<aie2p.array.scalar : index>) -> reg<aie2p.array.worker>
+  %70 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 0} : reg<aie2p.array.scalar : index>
+  %71 = low.op<amd.xdna.aie2p.array.worker>(%67, %70) {entry = @interleaved_aliases$group$1} : (reg<aie2p.array.group>, reg<aie2p.array.scalar : index>) -> reg<aie2p.array.worker>
+  %72 = low.op<amd.xdna.aie2p.array.binding>() {access = 1, ordinal = 0} : () -> reg<aie2p.array.binding>
+  %73 = low.op<amd.xdna.aie2p.array.binding>() {access = 2, ordinal = 1} : () -> reg<aie2p.array.binding>
+  %74 = low.op<amd.xdna.aie2p.array.binding>() {access = 2, ordinal = 2} : () -> reg<aie2p.array.binding>
+  %75 = low.op<amd.xdna.aie2p.array.binding>() {access = 2, ordinal = 3} : () -> reg<aie2p.array.binding>
+  %76 = low.op<amd.xdna.aie2p.array.sender>(%72) {port = 0} : (reg<aie2p.array.binding>) -> reg<aie2p.array.sender : tile<1xi32>>
+  %77 = low.op<amd.xdna.aie2p.array.receiver>(%69) {port = 0} : (reg<aie2p.array.worker>) -> reg<aie2p.array.receiver : tile<1xi32>>
+  %78 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 2} : reg<aie2p.array.scalar : index>
+  %79 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 1} : reg<aie2p.array.scalar : index>
+  %80 = low.op<amd.xdna.aie2p.array.channel>(%76, %77, %78, %79) : (reg<aie2p.array.sender : tile<1xi32>>, reg<aie2p.array.receiver : tile<1xi32>>, reg<aie2p.array.scalar : index>, reg<aie2p.array.scalar : index>) -> reg<aie2p.array.channel : tile<1xi32>>
+  %81 = low.op<amd.xdna.aie2p.array.sender>(%69) {port = 1} : (reg<aie2p.array.worker>) -> reg<aie2p.array.sender : tile<1xi32>>
+  %82 = low.op<amd.xdna.aie2p.array.receiver>(%71) {port = 0} : (reg<aie2p.array.worker>) -> reg<aie2p.array.receiver : tile<1xi32>>
+  %83 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 2} : reg<aie2p.array.scalar : index>
+  %84 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 1} : reg<aie2p.array.scalar : index>
+  %85 = low.op<amd.xdna.aie2p.array.channel>(%81, %82, %83, %84) : (reg<aie2p.array.sender : tile<1xi32>>, reg<aie2p.array.receiver : tile<1xi32>>, reg<aie2p.array.scalar : index>, reg<aie2p.array.scalar : index>) -> reg<aie2p.array.channel : tile<1xi32>>
+  %86 = low.op<amd.xdna.aie2p.array.sender>(%69) {port = 1} : (reg<aie2p.array.worker>) -> reg<aie2p.array.sender : tile<1xi32>>
+  %87 = low.op<amd.xdna.aie2p.array.receiver>(%71) {port = 1} : (reg<aie2p.array.worker>) -> reg<aie2p.array.receiver : tile<1xi32>>
+  %88 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 2} : reg<aie2p.array.scalar : index>
+  %89 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 1} : reg<aie2p.array.scalar : index>
+  %90 = low.op<amd.xdna.aie2p.array.channel>(%86, %87, %88, %89) : (reg<aie2p.array.sender : tile<1xi32>>, reg<aie2p.array.receiver : tile<1xi32>>, reg<aie2p.array.scalar : index>, reg<aie2p.array.scalar : index>) -> reg<aie2p.array.channel : tile<1xi32>>
+  %91 = low.op<amd.xdna.aie2p.array.sender>(%69) {port = 2} : (reg<aie2p.array.worker>) -> reg<aie2p.array.sender : tile<1xi32>>
+  %92 = low.op<amd.xdna.aie2p.array.receiver>(%73) {port = 0} : (reg<aie2p.array.binding>) -> reg<aie2p.array.receiver : tile<1xi32>>
+  %93 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 2} : reg<aie2p.array.scalar : index>
+  %94 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 1} : reg<aie2p.array.scalar : index>
+  %95 = low.op<amd.xdna.aie2p.array.channel>(%91, %92, %93, %94) : (reg<aie2p.array.sender : tile<1xi32>>, reg<aie2p.array.receiver : tile<1xi32>>, reg<aie2p.array.scalar : index>, reg<aie2p.array.scalar : index>) -> reg<aie2p.array.channel : tile<1xi32>>
+  %96 = low.op<amd.xdna.aie2p.array.sender>(%71) {port = 2} : (reg<aie2p.array.worker>) -> reg<aie2p.array.sender : tile<1xi32>>
+  %97 = low.op<amd.xdna.aie2p.array.receiver>(%74) {port = 0} : (reg<aie2p.array.binding>) -> reg<aie2p.array.receiver : tile<1xi32>>
+  %98 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 2} : reg<aie2p.array.scalar : index>
+  %99 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 1} : reg<aie2p.array.scalar : index>
+  %100 = low.op<amd.xdna.aie2p.array.channel>(%96, %97, %98, %99) : (reg<aie2p.array.sender : tile<1xi32>>, reg<aie2p.array.receiver : tile<1xi32>>, reg<aie2p.array.scalar : index>, reg<aie2p.array.scalar : index>) -> reg<aie2p.array.channel : tile<1xi32>>
+  %101 = low.op<amd.xdna.aie2p.array.receiver>(%75) {port = 0} : (reg<aie2p.array.binding>) -> reg<aie2p.array.receiver : tile<1xi32>>
+  %102 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 2} : reg<aie2p.array.scalar : index>
+  %103 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 1} : reg<aie2p.array.scalar : index>
+  %104 = low.op<amd.xdna.aie2p.array.channel>(%86, %101, %102, %103) : (reg<aie2p.array.sender : tile<1xi32>>, reg<aie2p.array.receiver : tile<1xi32>>, reg<aie2p.array.scalar : index>, reg<aie2p.array.scalar : index>) -> reg<aie2p.array.channel : tile<1xi32>>
+  %105 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 0} : reg<aie2p.array.scalar : index>
+  %106 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 2} : reg<aie2p.array.scalar : index>
+  low.op<amd.xdna.aie2p.array.constrain.location>(%69, %105, %106) : (reg<aie2p.array.worker>, reg<aie2p.array.scalar : index>, reg<aie2p.array.scalar : index>)
+  %107 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 0} : reg<aie2p.array.scalar : index>
+  %108 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 3} : reg<aie2p.array.scalar : index>
+  low.op<amd.xdna.aie2p.array.constrain.location>(%71, %107, %108) : (reg<aie2p.array.worker>, reg<aie2p.array.scalar : index>, reg<aie2p.array.scalar : index>)
+  low.return
+}
+
+// ====
+// RUN: pass aie2p-lower-pipeline
+
+// A single-stage callable retains both input arguments even when they carry
+// the same flow. Writes of the result and its buffer alias share output port 2
+// and remain separate edges to the two launch bindings.
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+func.def target(@core_target) @add(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<1xi32>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %left = view.load %lhs_view[0] : view<1xi32> -> i32
+  %right = view.load %rhs_view[0] : view<1xi32> -> i32
+  %sum = scalar.addi %left, %right : i32
+  view.store %sum, %output_view[0] : i32, view<1xi32>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @single_stage_aliases() launch(%input: buffer, %output: buffer, %alias_output: buffer) {
+  %c1 = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %worker = group.create %c1 : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %alias_view = buffer.view %alias_output[%base] : buffer -> view<1xi32>
+  %source = pipeline.read %input_view on %worker : view<1xi32>, group -> pipeline.flow<tile<1xi32>>
+  %result = pipeline.stage @add on %worker(%source, %source) : (group, pipeline.flow<tile<1xi32>>, pipeline.flow<tile<1xi32>>) -> (pipeline.flow<tile<1xi32>>)
+  %buffered = pipeline.buffer %result capacity %c1 : (pipeline.flow<tile<1xi32>>, index) -> pipeline.flow<tile<1xi32>>
+  pipeline.write %result to %output_view : pipeline.flow<tile<1xi32>>, view<1xi32>
+  pipeline.write %buffered to %alias_view : pipeline.flow<tile<1xi32>>, view<1xi32>
+  pipeline.return
+}
+
+// ----
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+func.def target(@core_target) @add(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<1xi32>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %left = view.load %lhs_view[0] : view<1xi32> -> i32
+  %right = view.load %rhs_view[0] : view<1xi32> -> i32
+  %sum = scalar.addi %left, %right : i32
+  view.store %sum, %output_view[0] : i32, view<1xi32>
+  func.return
+}
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @single_stage_aliases() {
+  %22 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 1} : reg<aie2p.array.scalar : index>
+  %23 = low.op<amd.xdna.aie2p.array.group>(%22) : (reg<aie2p.array.scalar : index>) -> reg<aie2p.array.group>
+  %24 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 0} : reg<aie2p.array.scalar : index>
+  %25 = low.op<amd.xdna.aie2p.array.worker>(%23, %24) {entry = @add} : (reg<aie2p.array.group>, reg<aie2p.array.scalar : index>) -> reg<aie2p.array.worker>
+  %26 = low.op<amd.xdna.aie2p.array.binding>() {access = 1, ordinal = 0} : () -> reg<aie2p.array.binding>
+  %27 = low.op<amd.xdna.aie2p.array.binding>() {access = 2, ordinal = 1} : () -> reg<aie2p.array.binding>
+  %28 = low.op<amd.xdna.aie2p.array.binding>() {access = 2, ordinal = 2} : () -> reg<aie2p.array.binding>
+  %29 = low.op<amd.xdna.aie2p.array.sender>(%26) {port = 0} : (reg<aie2p.array.binding>) -> reg<aie2p.array.sender : tile<1xi32>>
+  %30 = low.op<amd.xdna.aie2p.array.receiver>(%25) {port = 0} : (reg<aie2p.array.worker>) -> reg<aie2p.array.receiver : tile<1xi32>>
+  %31 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 2} : reg<aie2p.array.scalar : index>
+  %32 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 1} : reg<aie2p.array.scalar : index>
+  %33 = low.op<amd.xdna.aie2p.array.channel>(%29, %30, %31, %32) : (reg<aie2p.array.sender : tile<1xi32>>, reg<aie2p.array.receiver : tile<1xi32>>, reg<aie2p.array.scalar : index>, reg<aie2p.array.scalar : index>) -> reg<aie2p.array.channel : tile<1xi32>>
+  %34 = low.op<amd.xdna.aie2p.array.receiver>(%25) {port = 1} : (reg<aie2p.array.worker>) -> reg<aie2p.array.receiver : tile<1xi32>>
+  %35 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 2} : reg<aie2p.array.scalar : index>
+  %36 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 1} : reg<aie2p.array.scalar : index>
+  %37 = low.op<amd.xdna.aie2p.array.channel>(%29, %34, %35, %36) : (reg<aie2p.array.sender : tile<1xi32>>, reg<aie2p.array.receiver : tile<1xi32>>, reg<aie2p.array.scalar : index>, reg<aie2p.array.scalar : index>) -> reg<aie2p.array.channel : tile<1xi32>>
+  %38 = low.op<amd.xdna.aie2p.array.sender>(%25) {port = 2} : (reg<aie2p.array.worker>) -> reg<aie2p.array.sender : tile<1xi32>>
+  %39 = low.op<amd.xdna.aie2p.array.receiver>(%27) {port = 0} : (reg<aie2p.array.binding>) -> reg<aie2p.array.receiver : tile<1xi32>>
+  %40 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 2} : reg<aie2p.array.scalar : index>
+  %41 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 1} : reg<aie2p.array.scalar : index>
+  %42 = low.op<amd.xdna.aie2p.array.channel>(%38, %39, %40, %41) : (reg<aie2p.array.sender : tile<1xi32>>, reg<aie2p.array.receiver : tile<1xi32>>, reg<aie2p.array.scalar : index>, reg<aie2p.array.scalar : index>) -> reg<aie2p.array.channel : tile<1xi32>>
+  %43 = low.op<amd.xdna.aie2p.array.sender>(%25) {port = 2} : (reg<aie2p.array.worker>) -> reg<aie2p.array.sender : tile<1xi32>>
+  %44 = low.op<amd.xdna.aie2p.array.receiver>(%28) {port = 0} : (reg<aie2p.array.binding>) -> reg<aie2p.array.receiver : tile<1xi32>>
+  %45 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 2} : reg<aie2p.array.scalar : index>
+  %46 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 1} : reg<aie2p.array.scalar : index>
+  %47 = low.op<amd.xdna.aie2p.array.channel>(%43, %44, %45, %46) : (reg<aie2p.array.sender : tile<1xi32>>, reg<aie2p.array.receiver : tile<1xi32>>, reg<aie2p.array.scalar : index>, reg<aie2p.array.scalar : index>) -> reg<aie2p.array.channel : tile<1xi32>>
+  %48 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 0} : reg<aie2p.array.scalar : index>
+  %49 = low.const<amd.xdna.aie2p.array.constant.u32> {value = 2} : reg<aie2p.array.scalar : index>
+  low.op<amd.xdna.aie2p.array.constrain.location>(%25, %48, %49) : (reg<aie2p.array.worker>, reg<aie2p.array.scalar : index>, reg<aie2p.array.scalar : index>)
+  low.return
+}

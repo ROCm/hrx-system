@@ -72,6 +72,20 @@ typedef struct loom_pipeline_plan_group_t {
 
   // Number of logical stages scheduled onto each group lane.
   uint32_t stage_count;
+
+  // Boundary bindings for this plan's chosen resident realization, not a
+  // language-level interface or a placement constraint on the source group.
+  struct {
+    // First entry in the plan's group_port_indices membership table.
+    uint32_t index_start;
+
+    // Number of realized boundary ports belonging to this group.
+    uint32_t count;
+
+    // One past the highest assigned callable ABI ordinal. Single-stage
+    // callables may have argument positions without a boundary port.
+    uint32_t abi_extent;
+  } ports;
 } loom_pipeline_plan_group_t;
 
 typedef struct loom_pipeline_plan_stage_t {
@@ -111,6 +125,11 @@ typedef struct loom_pipeline_plan_stage_port_t {
   // Exact producer lane for expanded reduction inputs, or UINT32_MAX for a
   // pointwise input or output.
   uint32_t source_lane;
+
+  // Assigned receive row in group_ports for this execution realization, or
+  // UINT32_MAX for an internal input or an output. The row's ABI ordinal is
+  // distinct from both this stage argument and the row index.
+  uint32_t receive_port_index;
 } loom_pipeline_plan_stage_port_t;
 
 typedef enum loom_pipeline_plan_group_port_direction_e {
@@ -132,7 +151,8 @@ typedef struct loom_pipeline_plan_group_port_t {
   // for pointwise receives and all send ports.
   uint32_t source_lane;
 
-  // Dense physical port ordinal in the resident worker ABI.
+  // Callable ABI ordinal, dense for composed workers and preserving the
+  // original argument position for single-stage workers.
   uint32_t port;
 
   // Direction of the physical port.
@@ -217,7 +237,9 @@ typedef struct loom_pipeline_plan_flow_t {
   // Callable output argument ordinal on the logical producer stage.
   uint32_t producer_stage_port;
 
-  // Callable output port or external binding port.
+  // Producer endpoint ordinal owned by the canonical storage flow. Consumers
+  // read flows[storage_flow_index].producer_port, including for aliases.
+  // UINT32_MAX denotes resident storage without a boundary send.
   uint32_t producer_port;
 
   // Binding-view table index when produced by an external binding, or
@@ -300,11 +322,16 @@ typedef struct loom_pipeline_plan_t {
   // Number of logical stage-port mappings.
   uint32_t stage_port_count;
 
-  // Physical resident-worker boundary ports.
+  // Physical boundary ports for the chosen resident realization. Receives
+  // precede sends, with each direction retaining first-demand order.
   const loom_pipeline_plan_group_port_t* group_ports;
 
   // Number of physical resident-worker boundary ports.
   uint32_t group_port_count;
+
+  // Group-major membership indices into group_ports, in assignment order
+  // within each group. Contains group_port_count entries; groups own slices.
+  const uint32_t* group_port_indices;
 
   // Typed logical flows in source definition order.
   const loom_pipeline_plan_flow_t* flows;

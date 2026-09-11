@@ -100,28 +100,6 @@ static iree_status_t loom_aie2p_pipeline_composition_validate_group(
   return iree_ok_status();
 }
 
-static bool loom_aie2p_pipeline_composition_find_group_port(
-    const loom_pipeline_plan_t* plan, uint32_t group_index, uint32_t flow_index,
-    uint32_t source_lane, loom_pipeline_plan_group_port_direction_t direction,
-    uint32_t* out_port) {
-  for (uint32_t i = 0; i < plan->group_port_count; ++i) {
-    const loom_pipeline_plan_group_port_t* port = &plan->group_ports[i];
-    if (port->group_index != group_index || port->direction != direction ||
-        port->source_lane != source_lane) {
-      continue;
-    }
-    if (direction == LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_RECEIVE) {
-      if (port->flow_index != flow_index) continue;
-    } else if (plan->flows[port->flow_index].storage_flow_index !=
-               plan->flows[flow_index].storage_flow_index) {
-      continue;
-    }
-    *out_port = port->port;
-    return true;
-  }
-  return false;
-}
-
 static iree_status_t loom_aie2p_pipeline_composition_group_target(
     const loom_module_t* module, const loom_pipeline_plan_t* plan,
     uint32_t group_index, loom_symbol_ref_t* out_target) {
@@ -209,18 +187,6 @@ static iree_status_t loom_aie2p_pipeline_composition_add_symbol(
   return loom_module_add_symbol(module, name_id, &out_ref->symbol_id);
 }
 
-static uint32_t loom_aie2p_pipeline_composition_group_port_count(
-    const loom_pipeline_plan_t* plan, uint32_t group_index) {
-  uint32_t port_count = 0;
-  for (uint32_t i = 0; i < plan->group_port_count; ++i) {
-    const loom_pipeline_plan_group_port_t* port = &plan->group_ports[i];
-    if (port->group_index == group_index && port->port >= port_count) {
-      port_count = port->port + 1;
-    }
-  }
-  return port_count;
-}
-
 static iree_status_t loom_aie2p_pipeline_composition_record_byte_length(
     const loom_pipeline_plan_flow_t* flow, uint64_t* out_byte_length) {
   uint64_t element_count = 0;
@@ -272,8 +238,8 @@ static iree_status_t loom_aie2p_pipeline_composition_build_group(
     loom_op_t** out_function) {
   *out_entry = loom_symbol_ref_null();
   *out_function = NULL;
-  const uint32_t port_count =
-      loom_aie2p_pipeline_composition_group_port_count(plan, group_index);
+  const loom_pipeline_plan_group_t* group = &plan->groups[group_index];
+  const uint32_t port_count = group->ports.abi_extent;
   if (port_count > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "AIE2P composite worker has too many ports");
@@ -340,12 +306,13 @@ static iree_status_t loom_aie2p_pipeline_composition_build_group(
   loom_builder_enter_region(&builder, function_op,
                             loom_func_like_body(function));
 
-  for (uint32_t i = 0; i < plan->group_port_count; ++i) {
-    const loom_pipeline_plan_group_port_t* port = &plan->group_ports[i];
-    if (port->group_index != group_index ||
-        port->direction != LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_SEND) {
+  for (uint32_t i = 0; i < group->ports.count; ++i) {
+    const uint32_t port_index =
+        plan->group_port_indices[group->ports.index_start + i];
+    const loom_pipeline_plan_group_port_t* port =
+        &plan->group_ports[port_index];
+    if (port->direction != LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_SEND)
       continue;
-    }
     IREE_ASSERT_LT(port->port, port_count);
     const uint32_t storage_flow_index =
         plan->flows[port->flow_index].storage_flow_index;
@@ -365,19 +332,9 @@ static iree_status_t loom_aie2p_pipeline_composition_build_group(
           &plan->stage_ports[stage->port_start + port_index];
       const uint32_t flow_index = stage_port->flow_index;
       const loom_pipeline_plan_flow_t* flow = &plan->flows[flow_index];
-      if (port_index < stage->input_count &&
-          !loom_aie2p_pipeline_composition_flow_is_internal(flow,
-                                                            group_index)) {
-        uint32_t group_port = 0;
-        if (!loom_aie2p_pipeline_composition_find_group_port(
-                plan, group_index, flow_index, stage_port->source_lane,
-                LOOM_PIPELINE_PLAN_GROUP_PORT_DIRECTION_RECEIVE, &group_port)) {
-          return iree_make_status(
-              IREE_STATUS_FAILED_PRECONDITION,
-              "AIE2P composite stage input has no physical group port");
-        }
-        IREE_ASSERT_LT(group_port, port_count);
-        operands[port_index] = arguments[group_port];
+      if (stage_port->receive_port_index != UINT32_MAX) {
+        operands[port_index] =
+            arguments[plan->group_ports[stage_port->receive_port_index].port];
         continue;
       }
       const uint32_t storage_flow_index = flow->storage_flow_index;

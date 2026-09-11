@@ -443,6 +443,7 @@ loom_cc_library(
   DEPS
     ::type_refinement
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::ir
     loom::ir::facts
