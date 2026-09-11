@@ -405,7 +405,7 @@ static uint32_t loom_low_schedule_value_register_packing_completion_sink(
     return LOOM_LOW_SCHEDULE_NODE_NONE;
   }
   return loom_low_schedule_const_register_packing_row(
-      state, state->node_register_packing_completion_sinks,
+      state, state->node_register_packing.completion_sinks,
       producer_node)[resource_id];
 }
 
@@ -610,48 +610,26 @@ uint64_t loom_low_schedule_node_register_packing_operand_units(
 }
 
 uint64_t loom_low_schedule_node_register_packing_result_units(
-    const loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_node_t* node,
-    const loom_low_register_packing_resource_t* resource) {
-  uint64_t resource_units = 0;
-  const loom_value_ordinal_t* result_ordinals =
-      loom_low_schedule_node_const_result_ordinals(node);
-  const uint16_t member_end = resource->member_start + resource->member_count;
-  for (uint16_t member_index = resource->member_start;
-       member_index < member_end; ++member_index) {
-    const loom_low_register_packing_resource_member_t* member =
-        &state->target.descriptor_set
-             ->register_packing_resource_members[member_index];
-    uint64_t register_units = 0;
-    for (uint16_t result_index = 0; result_index < node->result_count;
-         ++result_index) {
-      const loom_low_schedule_value_record_t* value =
-          &state->values[result_ordinals[result_index]];
-      if (value->register_class_id == member->reg_class_id) {
-        register_units =
-            iree_math_saturating_add_u64(register_units, value->unit_count);
-      }
-    }
-    resource_units = iree_math_saturating_add_u64(
-        resource_units, loom_low_schedule_register_packing_contribution(
-                            register_units, member));
-  }
-  return resource_units;
+    const loom_low_schedule_build_state_t* state, uint32_t node_index,
+    uint16_t resource_id) {
+  return state->node_register_packing.result_units
+      [(iree_host_size_t)node_index *
+           state->target.descriptor_set->register_packing_resource_count +
+       resource_id];
 }
 
 static uint64_t loom_low_schedule_node_register_packing_working_set(
     const loom_low_schedule_build_state_t* state, uint32_t node_index,
     const loom_low_register_packing_resource_t* resource,
     uint64_t* out_activation_units) {
-  const loom_low_schedule_node_t* node = &state->nodes[node_index];
   const uint16_t resource_id =
       (uint16_t)(resource -
                  state->target.descriptor_set->register_packing_resources);
   const uint64_t result_units =
-      loom_low_schedule_node_register_packing_result_units(state, node,
-                                                           resource);
+      loom_low_schedule_node_register_packing_result_units(state, node_index,
+                                                           resource_id);
   const uint64_t activation_units =
-      state->node_register_packing_activation_units
+      state->node_register_packing.activation_units
           [(iree_host_size_t)node_index *
                state->target.descriptor_set->register_packing_resource_count +
            resource_id];
@@ -667,7 +645,7 @@ static bool loom_low_schedule_candidate_advances_register_packing_completion(
       (uint16_t)(resource -
                  state->target.descriptor_set->register_packing_resources);
   const uint32_t completion_sink =
-      state->node_register_packing_completion_sinks
+      state->node_register_packing.completion_sinks
           [(iree_host_size_t)candidate_node_index *
                state->target.descriptor_set->register_packing_resource_count +
            resource_id];
@@ -744,7 +722,7 @@ static bool loom_low_schedule_candidate_reaches_active_packing_completion(
   if (active_completion_sink == LOOM_LOW_SCHEDULE_NODE_NONE) return false;
   const uint32_t candidate_completion_sink =
       loom_low_schedule_const_register_packing_row(
-          state, state->node_register_packing_completion_sinks,
+          state, state->node_register_packing.completion_sinks,
           candidate_node)[resource_id];
   return candidate_node == active_completion_sink ||
          candidate_completion_sink == active_completion_sink;

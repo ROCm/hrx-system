@@ -160,6 +160,36 @@ loom_low_schedule_ready_keys_t loom_low_schedule_pressure_ready_keys(
   };
 }
 
+static uint64_t loom_low_schedule_compute_register_packing_result_units(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_node_t* node,
+    const loom_low_register_packing_resource_t* resource) {
+  uint64_t resource_units = 0;
+  const loom_value_ordinal_t* result_ordinals =
+      loom_low_schedule_node_const_result_ordinals(node);
+  const uint16_t member_end = resource->member_start + resource->member_count;
+  for (uint16_t member_index = resource->member_start;
+       member_index < member_end; ++member_index) {
+    const loom_low_register_packing_resource_member_t* member =
+        &state->target.descriptor_set
+             ->register_packing_resource_members[member_index];
+    uint64_t register_units = 0;
+    for (uint16_t result_index = 0; result_index < node->result_count;
+         ++result_index) {
+      const loom_low_schedule_value_record_t* value =
+          &state->values[result_ordinals[result_index]];
+      if (value->register_class_id == member->reg_class_id) {
+        register_units =
+            iree_math_saturating_add_u64(register_units, value->unit_count);
+      }
+    }
+    resource_units = iree_math_saturating_add_u64(
+        resource_units, loom_low_schedule_register_packing_contribution(
+                            register_units, member));
+  }
+  return resource_units;
+}
+
 void loom_low_schedule_pressure_compute_node_priorities(
     loom_low_schedule_build_state_t* state, iree_host_size_t node_count,
     const loom_low_schedule_dependency_detail_index_t* dependency_details,
@@ -169,7 +199,7 @@ void loom_low_schedule_pressure_compute_node_priorities(
       state->node_opened_completion_latency_cycles == NULL &&
       state->node_pressure_demand_units == NULL &&
       state->node_pressure_activation_units == NULL &&
-      state->node_register_packing_activation_units == NULL &&
+      state->node_register_packing.activation_units == NULL &&
       pressure_state->first_actionable_pressure_cliff_indices == NULL) {
     return;
   }
@@ -178,6 +208,23 @@ void loom_low_schedule_pressure_compute_node_priorities(
     loom_low_schedule_node_t* node = &state->nodes[node_index];
     const bool is_storage_setup = iree_any_bit_set(
         node->flags, LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP);
+    // Same-block SSA consumers follow their producers in source order. Their
+    // result footprints are already retained when this reverse sweep reaches
+    // the producer and propagates downstream demand through its dependencies.
+    if (state->node_register_packing.result_units != NULL) {
+      const uint16_t resource_count =
+          state->target.descriptor_set->register_packing_resource_count;
+      uint64_t* result_units = state->node_register_packing.result_units +
+                               (iree_host_size_t)node_index * resource_count;
+      for (uint16_t resource_id = 0; resource_id < resource_count;
+           ++resource_id) {
+        result_units[resource_id] =
+            loom_low_schedule_compute_register_packing_result_units(
+                state, node,
+                &state->target.descriptor_set
+                     ->register_packing_resources[resource_id]);
+      }
+    }
     uint16_t dependency_latency_cycles = 0;
     if (state->node_dependency_latency_cycles != NULL) {
       const loom_value_ordinal_t* operand_ordinals =
@@ -206,15 +253,15 @@ void loom_low_schedule_pressure_compute_node_priorities(
     uint32_t pressure_activation_units = 0;
     bool has_effect_consumer = false;
     uint32_t* register_packing_activation_units =
-        state->node_register_packing_activation_units != NULL
+        state->node_register_packing.activation_units != NULL
             ? loom_low_schedule_register_packing_row(
-                  state, state->node_register_packing_activation_units,
+                  state, state->node_register_packing.activation_units,
                   node_index)
             : NULL;
     uint32_t* register_packing_completion_sinks =
-        state->node_register_packing_completion_sinks != NULL
+        state->node_register_packing.completion_sinks != NULL
             ? loom_low_schedule_register_packing_row(
-                  state, state->node_register_packing_completion_sinks,
+                  state, state->node_register_packing.completion_sinks,
                   node_index)
             : NULL;
     if (dependency_details->dependency_count != 0) {
@@ -280,11 +327,11 @@ void loom_low_schedule_pressure_compute_node_priorities(
           if (register_packing_activation_units != NULL) {
             const uint32_t* consumer_activation_units =
                 loom_low_schedule_const_register_packing_row(
-                    state, state->node_register_packing_activation_units,
+                    state, state->node_register_packing.activation_units,
                     dependency->consumer_node);
             const uint32_t* consumer_completion_sinks =
                 loom_low_schedule_const_register_packing_row(
-                    state, state->node_register_packing_completion_sinks,
+                    state, state->node_register_packing.completion_sinks,
                     dependency->consumer_node);
             const uint16_t resource_count =
                 state->target.descriptor_set->register_packing_resource_count;
@@ -295,13 +342,13 @@ void loom_low_schedule_pressure_compute_node_priorities(
                        ->register_packing_resources[resource_id];
               const uint64_t node_result_units =
                   loom_low_schedule_node_register_packing_result_units(
-                      state, node, resource);
+                      state, node_index, resource_id);
               const uint64_t consumer_operand_units =
                   loom_low_schedule_node_register_packing_operand_units(
                       state, consumer, resource);
               const uint64_t consumer_result_units =
                   loom_low_schedule_node_register_packing_result_units(
-                      state, consumer, resource);
+                      state, dependency->consumer_node, resource_id);
               const uint64_t consumer_required_units =
                   iree_math_saturating_add_u64(
                       consumer_result_units,

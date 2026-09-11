@@ -1365,18 +1365,22 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
         }
         IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
             state->scratch_arena, packing_entry_count,
-            sizeof(*state->node_register_packing_activation_units),
-            (void**)&state->node_register_packing_activation_units));
-        memset(state->node_register_packing_activation_units, 0,
-               packing_entry_count *
-                   sizeof(*state->node_register_packing_activation_units));
+            sizeof(*state->node_register_packing.result_units),
+            (void**)&state->node_register_packing.result_units));
         IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
             state->scratch_arena, packing_entry_count,
-            sizeof(*state->node_register_packing_completion_sinks),
-            (void**)&state->node_register_packing_completion_sinks));
-        memset(state->node_register_packing_completion_sinks, 0xFF,
+            sizeof(*state->node_register_packing.activation_units),
+            (void**)&state->node_register_packing.activation_units));
+        memset(state->node_register_packing.activation_units, 0,
                packing_entry_count *
-                   sizeof(*state->node_register_packing_completion_sinks));
+                   sizeof(*state->node_register_packing.activation_units));
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            state->scratch_arena, packing_entry_count,
+            sizeof(*state->node_register_packing.completion_sinks),
+            (void**)&state->node_register_packing.completion_sinks));
+        memset(state->node_register_packing.completion_sinks, 0xFF,
+               packing_entry_count *
+                   sizeof(*state->node_register_packing.completion_sinks));
       }
     }
   }

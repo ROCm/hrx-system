@@ -1173,7 +1173,7 @@ void loom_low_schedule_pressure_publish_unlock_consumer(
         producer_node);
     const uint32_t* consumer_activation =
         loom_low_schedule_const_register_packing_row(
-            state, state->node_register_packing_activation_units,
+            state, state->node_register_packing.activation_units,
             consumer_node);
     const uint16_t resource_count =
         state->target.descriptor_set->register_packing_resource_count;
@@ -1221,7 +1221,7 @@ iree_status_t loom_low_schedule_pressure_initialize_unlock_summaries(
                                 (void**)&pressure_state->unlocks.records));
   memset(pressure_state->unlocks.records, 0,
          node_count * sizeof(*pressure_state->unlocks.records));
-  if (state->node_register_packing_activation_units != NULL) {
+  if (state->node_register_packing.activation_units != NULL) {
     const iree_host_size_t register_packing_resource_count =
         state->target.descriptor_set->register_packing_resource_count;
     iree_host_size_t activation_entry_count = 0;
@@ -1292,7 +1292,7 @@ loom_low_schedule_score_candidate_pressure_demand(
   if (pressure_state->candidate_register_packing_activation_units != NULL) {
     const uint32_t* node_activation =
         loom_low_schedule_const_register_packing_row(
-            state, state->node_register_packing_activation_units, node_index);
+            state, state->node_register_packing.activation_units, node_index);
     const uint32_t* unlock_activation =
         loom_low_schedule_const_register_packing_row(
             state, pressure_state->unlocks.register_packing_activation_units,

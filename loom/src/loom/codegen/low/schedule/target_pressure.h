@@ -63,11 +63,10 @@ uint64_t loom_low_schedule_node_register_packing_operand_units(
     const loom_low_schedule_node_t* node,
     const loom_low_register_packing_resource_t* resource);
 
-// Returns the packing-resource units defined by node results.
+// Returns the retained packing-resource footprint of the node results.
 uint64_t loom_low_schedule_node_register_packing_result_units(
-    const loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_node_t* node,
-    const loom_low_register_packing_resource_t* resource);
+    const loom_low_schedule_build_state_t* state, uint32_t node_index,
+    uint16_t resource_id);
 
 // Resets live packing-resource completion state for |block_record|.
 void loom_low_schedule_target_pressure_reset_packing_completions(
