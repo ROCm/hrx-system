@@ -699,6 +699,8 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_dispatch(
          sizeof(payload.workgroup_size));
   memcpy(payload.workgroup_count, config.workgroup_count,
          sizeof(payload.workgroup_count));
+  memcpy(payload.workitem_count, config.workitem_count,
+         sizeof(payload.workitem_count));
   iree_hal_replay_recorder_buffer_ref_make_payload(
       config.workgroup_count_ref, &payload.workgroup_count_ref);
   payload.dynamic_workgroup_local_memory =

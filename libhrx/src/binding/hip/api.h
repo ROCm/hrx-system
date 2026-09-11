@@ -922,7 +922,10 @@ typedef enum hipJitInputType {
   hipJitNumInputTypes = 10,
 } hipJitInputType;
 
-typedef int hipLibraryOption;
+typedef enum hipLibraryOption_e {
+  hipLibraryHostUniversalFunctionAndDataTable = 0,
+  hipLibraryBinaryIsPreserved = 1,
+} hipLibraryOption;
 
 typedef void (*hipHostFn_t)(void* userData);
 

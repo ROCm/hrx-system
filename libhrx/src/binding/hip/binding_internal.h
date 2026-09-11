@@ -29,4 +29,9 @@ hipError_t iree_hip_status_to_result(iree_status_t status);
 hipError_t iree_hip_module_registry_take(
     hipModule_t handle, iree_hal_streaming_module_t** out_module);
 
+// Loads a module from a sized in-memory image and registers its public handle.
+// The image is borrowed only for the duration of the call.
+hipError_t iree_hip_module_load_data_span(iree_const_byte_span_t image,
+                                          hipModule_t* out_module);
+
 #endif  // HRX_BINDING_HIP_BINDING_INTERNAL_H_

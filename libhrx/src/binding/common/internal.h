@@ -706,6 +706,23 @@ static inline bool iree_hal_streaming_parameter_info_is_empty(
          parameters->copy_count == 0;
 }
 
+// Process-wide backing for a statically registered managed variable. The
+// registration and every context-specific module import retain one reference.
+typedef struct iree_hal_streaming_managed_storage_t {
+  // Reference count shared by the registration and module imports.
+  iree_atomic_ref_count_t ref_count;
+  // Allocator used for this object and its aligned data allocation.
+  iree_allocator_t host_allocator;
+  // Host/device-visible variable contents.
+  void* data;
+} iree_hal_streaming_managed_storage_t;
+
+// Retains/releases shared managed-variable backing. Release accepts NULL.
+void iree_hal_streaming_managed_storage_retain(
+    iree_hal_streaming_managed_storage_t* storage);
+void iree_hal_streaming_managed_storage_release(
+    iree_hal_streaming_managed_storage_t* storage);
+
 // Symbol metadata structure.
 typedef struct iree_hal_streaming_symbol_t {
   // Parent module. Unowned.
@@ -733,6 +750,9 @@ typedef struct iree_hal_streaming_symbol_t {
   // Runtime-owned host/device-visible storage for a managed global pointer
   // slot, or NULL when this global is not managed or has not been resolved.
   iree_hal_streaming_buffer_t* managed_buffer;
+  // Shared backing retained while |managed_buffer| imports a static managed
+  // registration, or NULL for module-owned managed allocations.
+  iree_hal_streaming_managed_storage_t* managed_storage;
   // HIP-visible device pointer for the global storage.
   iree_hal_streaming_deviceptr_t device_address;
   // Byte length of the global storage.
@@ -764,6 +784,10 @@ typedef struct iree_hal_streaming_module_t {
 
   // Context that loaded this module.
   iree_hal_streaming_context_t* context;
+  // True when this module owns a reference to |context|. Modules cached inside
+  // a context borrow it because the cache cannot outlive its containing
+  // context.
+  bool retains_context;
 
   // Host allocator.
   iree_allocator_t host_allocator;
@@ -1109,10 +1133,14 @@ typedef struct iree_hal_streaming_graph_kernel_node_attrs_t {
   void** hip_extra;
   // Resolved executable symbol used for graph launch.
   iree_hal_streaming_symbol_t* symbol;
+  // Module retained to keep |symbol| and its executable metadata alive.
+  iree_hal_streaming_module_t* module;
   // Grid dimensions in workgroups.
   uint32_t grid_dim[3];
   // Block dimensions in workitems.
   uint32_t block_dim[3];
+  // Exact workitem dimensions, or zeroes when every workgroup is full.
+  uint32_t workitem_count[3];
   // Dynamic shared memory byte count.
   uint32_t shared_memory_bytes;
   // Packed constant argument bytes.
@@ -1699,6 +1727,14 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
     iree_hal_executable_load_flags_t load_flags, iree_const_byte_span_t image,
     iree_allocator_t host_allocator, iree_hal_streaming_module_t** out_module);
 
+// Loads a module owned by a cache embedded in |context|. The returned module
+// borrows |context|; the caller must release the module before context
+// teardown. Synchronization: none (creates new module).
+iree_status_t iree_hal_streaming_module_create_from_memory_borrowing_context(
+    iree_hal_streaming_context_t* context,
+    iree_hal_executable_load_flags_t load_flags, iree_const_byte_span_t image,
+    iree_allocator_t host_allocator, iree_hal_streaming_module_t** out_module);
+
 // Loads module from a file at the given path.
 // Synchronization: none (creates new module).
 iree_status_t iree_hal_streaming_module_create_from_file(
@@ -2125,6 +2161,12 @@ iree_status_t iree_hal_streaming_memory_allocate_managed(
     iree_hal_streaming_context_t* context, iree_host_size_t size,
     unsigned int allocation_flags, iree_hal_streaming_buffer_t** out_buffer);
 
+// Imports shared process-owned storage as managed memory in |context|. The
+// returned wrapper borrows |context| and owns only the HAL import.
+iree_status_t iree_hal_streaming_memory_import_managed(
+    iree_hal_streaming_context_t* context, void* host_pointer,
+    iree_host_size_t size, iree_hal_streaming_buffer_t** out_buffer);
+
 // Synchronization: all active contexts.
 iree_status_t iree_hal_streaming_memory_free_host(
     iree_hal_streaming_context_t* context, void* ptr);
@@ -2527,7 +2569,15 @@ typedef struct iree_hal_streaming_symbol_registration_t {
     } function;
     // Variable-specific metadata (only valid if type == GLOBAL/DATA).
     struct {
+      // Compiler-owned host pointer slot receiving |managed_storage->data|, or
+      // NULL for ordinary globals.
+      void** publication_slot;
+      // Process-wide host backing shared by every context import, or NULL for
+      // ordinary globals. Retained by this registration.
+      iree_hal_streaming_managed_storage_t* managed_storage;
+      // Logical byte length of the variable.
       size_t size;
+      // Required byte alignment of the variable.
       uint32_t alignment;
     } variable;
   } params;
@@ -2607,7 +2657,8 @@ iree_status_t iree_hal_streaming_global_symbol_registry_insert_variable(
 iree_status_t iree_hal_streaming_global_symbol_registry_insert_managed_variable(
     iree_hal_streaming_global_symbol_registry_t* registry,
     iree_hal_streaming_module_registration_t* module, void* host_variable,
-    const char* device_name, size_t size, uint32_t alignment);
+    void** publication_slot, const char* device_name, size_t size,
+    uint32_t alignment);
 
 // Looks up the registration type for a host-side variable pointer.
 bool iree_hal_streaming_global_symbol_registry_query_variable(
@@ -2635,7 +2686,8 @@ void iree_hal_streaming_context_symbol_map_deinitialize(
 // Returns NOT_FOUND if the host pointer has no live registration.
 iree_status_t iree_hal_streaming_context_symbol_map_lookup(
     iree_hal_streaming_context_symbol_map_t* map, void* host_pointer,
-    iree_hal_streaming_symbol_t** out_symbol);
+    iree_hal_streaming_symbol_t** out_symbol,
+    iree_hal_streaming_module_t** out_module);
 
 #ifdef __cplusplus
 }

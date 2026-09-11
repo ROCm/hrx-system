@@ -986,6 +986,60 @@ TEST(AqlBlockProcessorTest,
             IREE_HSA_PACKET_TYPE_VENDOR_SPECIFIC);
 }
 
+TEST(AqlBlockProcessorTest,
+     ProfiledExactDispatchMatchesUnprofiledReplayPacketBody) {
+  DirectDispatchBlock block = MakeDirectDispatchBlock();
+  block.dispatch_command.dispatch_flags =
+      IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_EXACT_WORKITEM_COUNT;
+  block.dispatch_command.workitem_count[0] = 63;
+  block.dispatch_command.workitem_count[1] = 7;
+  block.dispatch_command.workitem_count[2] = 1;
+
+  alignas(64) iree_hal_amdgpu_aql_packet_t ordinary_packets[8] = {};
+  iree_hal_amdgpu_aql_ring_t ordinary_ring = {};
+  ordinary_ring.base = ordinary_packets;
+  ordinary_ring.mask = 7;
+  uint16_t ordinary_headers[1] = {};
+  uint16_t ordinary_setups[1] = {};
+  iree_hal_amdgpu_kernarg_block_t kernarg_blocks[1] = {};
+  iree_hal_amdgpu_aql_block_processor_t ordinary_processor = MakeProcessor(
+      &ordinary_ring, /*packet_count=*/1, ordinary_headers, ordinary_setups,
+      kernarg_blocks, /*kernarg_block_count=*/1,
+      IREE_HAL_AMDGPU_AQL_BLOCK_PROCESSOR_FLAG_FINAL_PAYLOAD_PACKET);
+  iree_hal_amdgpu_aql_block_processor_result_t ordinary_result;
+  IREE_ASSERT_OK(iree_hal_amdgpu_aql_block_processor_invoke(
+      &ordinary_processor, &block.header, &ordinary_result));
+
+  alignas(64) iree_hal_amdgpu_aql_packet_t profiled_packets[8] = {};
+  iree_hal_amdgpu_host_queue_t queue = {};
+  queue.aql_ring.base = profiled_packets;
+  queue.aql_ring.mask = 7;
+  iree_hal_amdgpu_wait_resolution_t resolution = {};
+  uint16_t profiled_headers[1] = {};
+  uint16_t profiled_setups[1] = {};
+  iree_hal_amdgpu_aql_block_processor_profile_t profiled_processor = {};
+  profiled_processor.queue = &queue;
+  profiled_processor.block = &block.header;
+  profiled_processor.submission.resolution = &resolution;
+  profiled_processor.packets.first_payload_id = 4;
+  profiled_processor.packets.count = 1;
+  profiled_processor.packets.headers = profiled_headers;
+  profiled_processor.packets.setups = profiled_setups;
+  profiled_processor.kernargs.blocks = kernarg_blocks;
+  profiled_processor.kernargs.count = 1;
+  iree_hal_amdgpu_aql_block_processor_profile_result_t profiled_result;
+  IREE_ASSERT_OK(iree_hal_amdgpu_aql_block_processor_profile_invoke(
+      &profiled_processor, &profiled_result));
+
+  EXPECT_EQ(std::memcmp(&ordinary_packets[4], &profiled_packets[4],
+                        sizeof(ordinary_packets[4])),
+            0);
+  EXPECT_EQ(ordinary_packets[4].dispatch.grid_size[0], 63u);
+  EXPECT_EQ(ordinary_packets[4].dispatch.grid_size[1], 7u);
+  EXPECT_EQ(ordinary_packets[4].dispatch.grid_size[2], 1u);
+  EXPECT_EQ(ordinary_setups[0], profiled_setups[0]);
+}
+
 TEST(AqlBlockProcessorTest, RejectsClusteredIndirectDispatch) {
   const uint32_t workgroup_count[3] = {4, 2, 1};
   IndirectDispatchBlock block = MakeIndirectDispatchBlock(workgroup_count);

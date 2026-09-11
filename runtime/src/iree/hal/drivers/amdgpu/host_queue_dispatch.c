@@ -44,6 +44,8 @@ typedef struct iree_hal_amdgpu_host_queue_dispatch_plan_t {
   uint32_t workgroup_cluster_count[3];
   // True when workgroup counts are read from a device buffer before dispatch.
   bool uses_indirect_parameters;
+  // True when the direct packet uses the exact work-item extents from config.
+  bool uses_exact_workitem_count;
   // Per-dispatch cooperative grid synchronization state. A zero |grid_count|
   // means the dispatch requires no grid synchronization preparation.
   iree_amdgpu_grid_sync_info_t grid_sync_info;
@@ -64,7 +66,8 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_flags(
       IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS |
       IREE_HAL_DISPATCH_FLAG_ALLOW_INLINE_EXECUTION |
       IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES |
-      IREE_HAL_DISPATCH_FLAG_COOPERATIVE;
+      IREE_HAL_DISPATCH_FLAG_COOPERATIVE |
+      IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT;
   if (IREE_UNLIKELY(iree_any_bit_set(flags, ~supported_flags))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported dispatch flags: 0x%" PRIx64, flags);
@@ -119,6 +122,13 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_shape(
   memset(out_cluster_count, 0, sizeof(uint32_t[3]));
   const bool uses_indirect_parameters =
       iree_hal_dispatch_uses_indirect_parameters(flags);
+  const bool uses_exact_workitem_count =
+      iree_any_bit_set(flags, IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT);
+  if (IREE_UNLIKELY(uses_indirect_parameters && uses_exact_workitem_count)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "exact work-item counts require static workgroup counts");
+  }
   const bool has_workgroup_size_override =
       iree_hal_amdgpu_dispatch_config_has_workgroup_size_override(config);
   if (IREE_UNLIKELY(descriptor->custom_direct_only &&
@@ -171,15 +181,20 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_shape(
         IREE_STATUS_UNIMPLEMENTED,
         "clustered AMDGPU dispatch does not support indirect workgroup counts");
   }
-  if (uses_workgroup_clusters) {
+  if (uses_workgroup_clusters || uses_exact_workitem_count) {
     iree_hal_amdgpu_aql_dispatch_params_t params = {0};
     for (iree_host_size_t i = 0; i < 3; ++i) {
       params.workgroup_size[i] = kernel_args->workgroup_size[i];
       params.workgroup_count[i] = config.workgroup_count[i];
+      params.workitem_count[i] =
+          uses_exact_workitem_count ? config.workitem_count[i] : 0;
       params.workgroup_cluster_size[i] = cluster_size[i];
     }
+    params.uses_exact_workitem_count = uses_exact_workitem_count;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_aql_validate_dispatch_params(
         &params, out_cluster_count));
+  }
+  if (uses_workgroup_clusters) {
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_validate_workgroup_cluster_dispatch(
         cluster_size, config.workgroup_count,
         descriptor->physical_device_ordinal,
@@ -433,6 +448,8 @@ static iree_status_t iree_hal_amdgpu_host_queue_prepare_dispatch_plan(
       out_plan->workgroup_cluster_count));
   out_plan->uses_indirect_parameters =
       iree_hal_dispatch_uses_indirect_parameters(flags);
+  out_plan->uses_exact_workitem_count =
+      iree_any_bit_set(flags, IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT);
 
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_validate_dispatch_kernargs(
       queue, out_plan->descriptor, constants, bindings, flags,
@@ -867,12 +884,15 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_dispatch_packets(
       .private_segment_size = plan->kernel_args->private_segment_size,
       .group_segment_size = plan->kernel_args->group_segment_size +
                             config.dynamic_workgroup_local_memory,
+      .uses_exact_workitem_count = plan->uses_exact_workitem_count,
       .packet_control = dispatch_packet_control,
       .completion_signal = dispatch_completion_signal,
   };
   for (iree_host_size_t i = 0; i < 3; ++i) {
     dispatch_params.workgroup_size[i] = plan->kernel_args->workgroup_size[i];
     dispatch_params.workgroup_count[i] = target_workgroup_count[i];
+    dispatch_params.workitem_count[i] =
+        plan->uses_exact_workitem_count ? config.workitem_count[i] : 0;
     dispatch_params.workgroup_cluster_size[i] =
         plan->kernel_args->workgroup_cluster_size[i];
   }

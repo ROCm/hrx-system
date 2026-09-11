@@ -122,6 +122,13 @@ typedef struct hrx_ccob_header_v3_t {
   uint64_t hash;
 } hrx_ccob_header_v3_t;
 
+static iree_status_t hrx_fat_parse_ccob(iree_const_byte_span_t data,
+                                        uint16_t* out_version,
+                                        uint16_t* out_method,
+                                        uint64_t* out_uncompressed_size,
+                                        uint64_t* out_file_size,
+                                        iree_host_size_t* out_payload_offset);
+
 typedef struct hrx_elf64_header_t {
   uint8_t magic[4];
   uint8_t elf_class;
@@ -249,6 +256,149 @@ static bool hrx_fat_is_wrapper(iree_const_byte_span_t data) {
 bool iree_hal_streaming_fat_binary_is_supported(iree_const_byte_span_t data) {
   return hrx_fat_is_elf(data) || hrx_fat_is_uncompressed_bundle(data) ||
          hrx_fat_is_ccob(data) || hrx_fat_is_wrapper(data);
+}
+
+static iree_status_t hrx_fat_measure_bundle(iree_const_byte_span_t data,
+                                            iree_host_size_t* out_data_length) {
+  const uint8_t* cursor = data.data + HRX_OFFLOAD_BUNDLE_MAGIC_SIZE;
+  uint64_t entry_count = 0;
+  memcpy(&entry_count, cursor, sizeof(entry_count));
+  cursor += sizeof(entry_count);
+  if (IREE_UNLIKELY(entry_count > UINT16_MAX)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "offload bundle entry count is too large");
+  }
+
+  iree_host_size_t metadata_length =
+      HRX_OFFLOAD_BUNDLE_MAGIC_SIZE + sizeof(entry_count);
+  iree_host_size_t data_length = metadata_length;
+  for (uint64_t i = 0; i < entry_count; ++i) {
+    hrx_bundle_entry_t entry;
+    memcpy(&entry, cursor, sizeof(entry));
+    cursor += sizeof(entry);
+
+    if (IREE_UNLIKELY(entry.triple_size > IREE_HOST_SIZE_MAX ||
+                      entry.offset > IREE_HOST_SIZE_MAX ||
+                      entry.size > IREE_HOST_SIZE_MAX)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "offload bundle entry range exceeds host size");
+    }
+    iree_host_size_t metadata_end = 0;
+    iree_host_size_t payload_end = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(
+                          metadata_length, sizeof(entry), &metadata_length) ||
+                      !iree_host_size_checked_add(
+                          metadata_length, (iree_host_size_t)entry.triple_size,
+                          &metadata_end) ||
+                      !iree_host_size_checked_add(
+                          (iree_host_size_t)entry.offset,
+                          (iree_host_size_t)entry.size, &payload_end))) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "offload bundle size overflow");
+    }
+    cursor += (iree_host_size_t)entry.triple_size;
+    metadata_length = metadata_end;
+    data_length = iree_max(data_length, iree_max(metadata_end, payload_end));
+  }
+
+  *out_data_length = data_length;
+  return iree_ok_status();
+}
+
+static iree_status_t hrx_fat_measure_unwrapped(
+    iree_const_byte_span_t data, iree_host_size_t* out_data_length) {
+  if (data.data_length > 0) {
+    *out_data_length = data.data_length;
+    return iree_ok_status();
+  }
+  if (hrx_fat_is_elf(data)) {
+    char target_key[HRX_FAT_TARGET_KEY_CAPACITY] = {0};
+    return iree_hal_streaming_fat_binary_describe_amdgpu_elf(
+        data, sizeof(target_key), target_key, out_data_length);
+  }
+  if (hrx_fat_is_uncompressed_bundle(data)) {
+    return hrx_fat_measure_bundle(data, out_data_length);
+  }
+  if (hrx_fat_is_ccob(data)) {
+    uint16_t version = 0;
+    uint16_t method = 0;
+    uint64_t uncompressed_size = 0;
+    uint64_t file_size = 0;
+    iree_host_size_t payload_offset = 0;
+    IREE_RETURN_IF_ERROR(hrx_fat_parse_ccob(data, &version, &method,
+                                            &uncompressed_size, &file_size,
+                                            &payload_offset));
+    if (file_size > 0) {
+      if (IREE_UNLIKELY(file_size > IREE_HOST_SIZE_MAX ||
+                        file_size < payload_offset)) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "CCOB file size is invalid");
+      }
+      *out_data_length = (iree_host_size_t)file_size;
+      return iree_ok_status();
+    }
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "CCOB v%u does not encode a clonable source length",
+                            version);
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "unrecognized module binary");
+}
+
+iree_status_t iree_hal_streaming_fat_binary_clone(
+    iree_const_byte_span_t data, iree_allocator_t host_allocator,
+    void** out_data, iree_host_size_t* out_data_length) {
+  IREE_ASSERT_ARGUMENT(out_data);
+  IREE_ASSERT_ARGUMENT(out_data_length);
+  *out_data = NULL;
+  *out_data_length = 0;
+  if (!data.data) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "module binary is NULL");
+  }
+
+  if (!hrx_fat_is_wrapper(data)) {
+    iree_host_size_t data_length = 0;
+    IREE_RETURN_IF_ERROR(hrx_fat_measure_unwrapped(data, &data_length));
+    void* clone = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_allocator_malloc(host_allocator, data_length, &clone));
+    memcpy(clone, data.data, data_length);
+    *out_data = clone;
+    *out_data_length = data_length;
+    return iree_ok_status();
+  }
+
+  hrx_hip_fat_binary_header_t header;
+  memcpy(&header, data.data, sizeof(header));
+  if (header.version != HRX_HIP_FAT_VERSION || !header.binary) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid HIP fat-binary wrapper");
+  }
+  if (header.magic == HRX_HIP_FAT_MAGIC_HIPK) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "HIPK source ownership depends on its original file mapping");
+  }
+
+  iree_host_size_t payload_length = 0;
+  IREE_RETURN_IF_ERROR(hrx_fat_measure_unwrapped(
+      iree_make_const_byte_span(header.binary, 0), &payload_length));
+  iree_host_size_t clone_length = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_add(sizeof(header), payload_length,
+                                                &clone_length))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "HIP fat-binary clone size overflow");
+  }
+  uint8_t* clone = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, clone_length, (void**)&clone));
+  memcpy(clone + sizeof(header), header.binary, payload_length);
+  header.binary = clone + sizeof(header);
+  memcpy(clone, &header, sizeof(header));
+  *out_data = clone;
+  *out_data_length = clone_length;
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//

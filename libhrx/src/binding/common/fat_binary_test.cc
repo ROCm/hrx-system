@@ -24,6 +24,16 @@ struct BundleEntry {
   uint64_t triple_size;
 };
 
+struct HipFatBinaryHeader {
+  uint32_t magic;
+  uint32_t version;
+  void* binary;
+  void* reserved;
+};
+
+static_assert(sizeof(HipFatBinaryHeader) == 24,
+              "HIP fat-binary wrapper must be 24 bytes");
+
 struct Elf64Header {
   uint8_t magic[4];
   uint8_t elf_class;
@@ -438,6 +448,81 @@ TEST(FatBinaryTest, FiltersIncompatibleConcatenatedElfFeatures) {
   EXPECT_STREQ(extract.matches[0].code_object_target_key,
                "gfx942:sramecc+:xnack-");
   iree_hal_streaming_fat_binary_extract_reset(&extract);
+}
+
+TEST(FatBinaryTest, ClonesSizeLessBundleIntoOwnedStorage) {
+  const auto elf = MakeMinimalAmdgpuElf(/*machine=*/0x041);
+  std::vector<uint8_t> bundle =
+      MakeBundle({{"hipv4-amdgcn-amd-amdhsa--gfx1100", elf}});
+
+  void* clone = nullptr;
+  iree_host_size_t clone_length = 0;
+  IREE_ASSERT_OK(iree_hal_streaming_fat_binary_clone(
+      iree_make_const_byte_span(bundle.data(), /*data_length=*/0),
+      iree_allocator_system(), &clone, &clone_length));
+  ASSERT_EQ(bundle.size(), clone_length);
+  ASSERT_NE(bundle.data(), clone);
+
+  std::fill(bundle.begin(), bundle.end(), uint8_t{0xA5});
+  const iree_hal_executable_target_t executable_target = MakeExecutableTarget(
+      IREE_SV("gfx1100"), IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100);
+  const iree_hal_streaming_fat_binary_target_t target = {
+      /*.executable_target=*/&executable_target,
+  };
+  iree_hal_streaming_fat_binary_extract_t extract = {};
+  IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
+      iree_make_const_byte_span(clone, clone_length), 1, &target,
+      iree_allocator_system(), &extract));
+  ASSERT_EQ(1, extract.match_count);
+  EXPECT_EQ(TripleString(extract.matches[0]),
+            "hipv4-amdgcn-amd-amdhsa--gfx1100");
+
+  iree_hal_streaming_fat_binary_extract_reset(&extract);
+  iree_allocator_free(iree_allocator_system(), clone);
+}
+
+TEST(FatBinaryTest, ClonesWrapperAndRebasesPayloadPointer) {
+  constexpr uint32_t kHipFatBinaryMagic = 0x48495046u;
+  const auto elf = MakeMinimalAmdgpuElf(/*machine=*/0x041);
+  std::vector<uint8_t> bundle =
+      MakeBundle({{"hipv4-amdgcn-amd-amdhsa--gfx1100", elf}});
+  HipFatBinaryHeader wrapper = {
+      /*.magic=*/kHipFatBinaryMagic,
+      /*.version=*/1,
+      /*.binary=*/bundle.data(),
+      /*.reserved=*/nullptr,
+  };
+
+  void* clone = nullptr;
+  iree_host_size_t clone_length = 0;
+  IREE_ASSERT_OK(iree_hal_streaming_fat_binary_clone(
+      iree_make_const_byte_span(&wrapper, /*data_length=*/0),
+      iree_allocator_system(), &clone, &clone_length));
+  ASSERT_EQ(sizeof(wrapper) + bundle.size(), clone_length);
+
+  HipFatBinaryHeader cloned_wrapper = {};
+  memcpy(&cloned_wrapper, clone, sizeof(cloned_wrapper));
+  EXPECT_EQ(kHipFatBinaryMagic, cloned_wrapper.magic);
+  EXPECT_EQ(static_cast<uint8_t*>(clone) + sizeof(cloned_wrapper),
+            cloned_wrapper.binary);
+
+  wrapper.binary = nullptr;
+  std::fill(bundle.begin(), bundle.end(), uint8_t{0xA5});
+  const iree_hal_executable_target_t executable_target = MakeExecutableTarget(
+      IREE_SV("gfx1100"), IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100);
+  const iree_hal_streaming_fat_binary_target_t target = {
+      /*.executable_target=*/&executable_target,
+  };
+  iree_hal_streaming_fat_binary_extract_t extract = {};
+  IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
+      iree_make_const_byte_span(clone, clone_length), 1, &target,
+      iree_allocator_system(), &extract));
+  ASSERT_EQ(1, extract.match_count);
+  EXPECT_EQ(TripleString(extract.matches[0]),
+            "hipv4-amdgcn-amd-amdhsa--gfx1100");
+
+  iree_hal_streaming_fat_binary_extract_reset(&extract);
+  iree_allocator_free(iree_allocator_system(), clone);
 }
 
 }  // namespace

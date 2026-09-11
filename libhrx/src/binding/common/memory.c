@@ -1674,10 +1674,11 @@ iree_status_t iree_hal_streaming_memory_free_host(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_streaming_memory_register_host(
+static iree_status_t iree_hal_streaming_memory_register_host_with_context_mode(
     iree_hal_streaming_context_t* context, void* ptr, iree_host_size_t size,
     iree_hal_streaming_host_register_flags_t flags,
-    iree_hal_streaming_buffer_t** out_buffer) {
+    iree_hal_streaming_buffer_context_ownership_t context_ownership,
+    bool is_managed, iree_hal_streaming_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(ptr);
   IREE_ASSERT_ARGUMENT(out_buffer);
@@ -1706,13 +1707,14 @@ iree_status_t iree_hal_streaming_memory_register_host(
   iree_hal_streaming_buffer_t* wrapper = NULL;
   iree_status_t status = iree_hal_streaming_buffer_wrap(
       context, buffer, (int)params.type, ptr, /*allocation_pool=*/NULL,
-      IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED, &wrapper);
+      context_ownership, &wrapper);
   iree_hal_buffer_release(buffer);
 
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_managed_metadata_allocate(context, wrapper);
   }
   if (iree_status_is_ok(status)) {
+    wrapper->is_managed = is_managed;
     wrapper->host_register_flags = flags;
     *out_buffer = wrapper;
   } else {
@@ -1724,6 +1726,25 @@ iree_status_t iree_hal_streaming_memory_register_host(
 
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+iree_status_t iree_hal_streaming_memory_register_host(
+    iree_hal_streaming_context_t* context, void* ptr, iree_host_size_t size,
+    iree_hal_streaming_host_register_flags_t flags,
+    iree_hal_streaming_buffer_t** out_buffer) {
+  return iree_hal_streaming_memory_register_host_with_context_mode(
+      context, ptr, size, flags, IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED,
+      /*is_managed=*/false, out_buffer);
+}
+
+iree_status_t iree_hal_streaming_memory_import_managed(
+    iree_hal_streaming_context_t* context, void* host_pointer,
+    iree_host_size_t size, iree_hal_streaming_buffer_t** out_buffer) {
+  return iree_hal_streaming_memory_register_host_with_context_mode(
+      context, host_pointer, size,
+      IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
+      IREE_HAL_STREAMING_BUFFER_CONTEXT_BORROWED,
+      /*is_managed=*/true, out_buffer);
 }
 
 iree_status_t iree_hal_streaming_memory_unregister_host(

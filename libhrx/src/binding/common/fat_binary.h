@@ -74,6 +74,18 @@ typedef struct iree_hal_streaming_fat_binary_extract_t {
 // Raw ELF also counts as "supported" (trivially passthrough).
 bool iree_hal_streaming_fat_binary_is_supported(iree_const_byte_span_t data);
 
+// Clones an in-memory module container into one self-contained allocation.
+// Wrapper inputs are rewritten so their embedded binary pointer targets the
+// cloned payload. Inputs whose representation depends on the source mapping
+// cannot be cloned and return IREE_STATUS_UNIMPLEMENTED.
+//
+// When |data.data_length| is zero the encoded container length is derived from
+// its headers. The caller owns |*out_data| and must free it with
+// |host_allocator|. On failure the outputs are cleared.
+iree_status_t iree_hal_streaming_fat_binary_clone(
+    iree_const_byte_span_t data, iree_allocator_t host_allocator,
+    void** out_data, iree_host_size_t* out_data_length);
+
 // Validates a raw AMDGPU HSACO ELF and derives the HAL AMDGPU target key from
 // its code-object target metadata.
 iree_status_t iree_hal_streaming_fat_binary_describe_amdgpu_elf(

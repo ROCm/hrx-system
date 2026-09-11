@@ -292,6 +292,10 @@ typedef struct iree_hal_dispatch_config_t {
   // This is added on top of the static workgroup local memory declared by the
   // function metadata.
   uint32_t dynamic_workgroup_local_memory;
+  // Exact work-item count when IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT is
+  // specified. Each dimension may populate only part of its final workgroup
+  // and must be greater than zero. Otherwise these fields must be zero.
+  uint32_t workitem_count[3];
 } iree_hal_dispatch_config_t;
 
 // Creates a default dispatch config with the given static workgroup count.

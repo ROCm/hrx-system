@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "common/internal.h"
+#include "common/module.h"
 #include "iree/base/internal/math.h"
 #include "iree/base/threading/call_once.h"
 #include "iree/base/threading/mutex.h"
@@ -16,6 +16,40 @@
 static void iree_hal_streaming_context_symbol_map_expunge_module(
     iree_hal_streaming_context_symbol_map_t* map,
     iree_hal_streaming_module_registration_t* registration);
+
+static iree_status_t iree_hal_streaming_managed_storage_allocate(
+    iree_allocator_t host_allocator, iree_host_size_t size,
+    iree_host_size_t alignment,
+    iree_hal_streaming_managed_storage_t** out_storage) {
+  *out_storage = NULL;
+  iree_hal_streaming_managed_storage_t* storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*storage),
+                                             (void**)&storage));
+  iree_atomic_ref_count_init(&storage->ref_count);
+  storage->host_allocator = host_allocator;
+  iree_status_t status = iree_allocator_malloc_aligned(
+      host_allocator, size, alignment, /*offset=*/0, &storage->data);
+  if (iree_status_is_ok(status)) {
+    *out_storage = storage;
+  } else {
+    iree_allocator_free(host_allocator, storage);
+  }
+  return status;
+}
+
+void iree_hal_streaming_managed_storage_retain(
+    iree_hal_streaming_managed_storage_t* storage) {
+  if (storage) iree_atomic_ref_count_inc(&storage->ref_count);
+}
+
+void iree_hal_streaming_managed_storage_release(
+    iree_hal_streaming_managed_storage_t* storage) {
+  if (storage && iree_atomic_ref_count_dec(&storage->ref_count) == 1) {
+    iree_allocator_t host_allocator = storage->host_allocator;
+    iree_allocator_free_aligned(host_allocator, storage->data);
+    iree_allocator_free(host_allocator, storage);
+  }
+}
 
 //===----------------------------------------------------------------------===//
 // Utilities
@@ -114,6 +148,20 @@ void iree_hal_streaming_global_symbol_registry_free(
   // Free module registrations and their symbols.
   for (iree_host_size_t i = 0; i < registry->module_count; ++i) {
     if (registry->modules[i]) {
+      for (iree_host_size_t j = 0; j < registry->modules[i]->symbol_count;
+           ++j) {
+        iree_hal_streaming_symbol_registration_t* symbol =
+            &registry->modules[i]->symbols[j];
+        if (symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_DATA) continue;
+        iree_hal_streaming_managed_storage_t* managed_storage =
+            symbol->params.variable.managed_storage;
+        if (managed_storage && symbol->params.variable.publication_slot &&
+            *symbol->params.variable.publication_slot ==
+                managed_storage->data) {
+          *symbol->params.variable.publication_slot = symbol->host_pointer;
+        }
+        iree_hal_streaming_managed_storage_release(managed_storage);
+      }
       iree_allocator_free(host_allocator, registry->modules[i]->symbols);
       iree_allocator_free(host_allocator, registry->modules[i]);
     }
@@ -242,6 +290,20 @@ iree_status_t iree_hal_streaming_global_symbol_registry_unregister_module(
     context_map = context_map->next;
   }
 
+  // Context modules have released their imports, so the shared host backing is
+  // no longer visible to a device. Restore the compiler slot before freeing it.
+  for (iree_host_size_t i = 0; i < module->symbol_count; ++i) {
+    iree_hal_streaming_symbol_registration_t* symbol = &module->symbols[i];
+    if (symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_DATA) continue;
+    iree_hal_streaming_managed_storage_t* managed_storage =
+        symbol->params.variable.managed_storage;
+    if (managed_storage && symbol->params.variable.publication_slot &&
+        *symbol->params.variable.publication_slot == managed_storage->data) {
+      *symbol->params.variable.publication_slot = symbol->host_pointer;
+    }
+    iree_hal_streaming_managed_storage_release(managed_storage);
+  }
+
   // Free the module registration.
   iree_allocator_free(registry->host_allocator, module->symbols);
   iree_allocator_free(registry->host_allocator, module);
@@ -337,7 +399,7 @@ iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
     iree_hal_streaming_global_symbol_registry_t* registry,
     iree_hal_streaming_module_registration_t* module, void* host_variable,
     const char* device_name, size_t size, uint32_t alignment,
-    iree_hal_streaming_symbol_type_t symbol_type) {
+    iree_hal_streaming_symbol_type_t symbol_type, void** publication_slot) {
   IREE_ASSERT_ARGUMENT(registry);
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(host_variable);
@@ -362,6 +424,34 @@ iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
     }
   }
 
+  iree_hal_streaming_managed_storage_t* managed_storage = NULL;
+  if (iree_status_is_ok(status) &&
+      symbol_type == IREE_HAL_STREAMING_SYMBOL_TYPE_DATA) {
+    if (IREE_UNLIKELY(!publication_slot || size == 0)) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "managed variable requires a publication slot and nonzero size");
+    } else if (IREE_UNLIKELY(alignment != 0 &&
+                             !iree_host_size_is_power_of_two(
+                                 (iree_host_size_t)alignment))) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "managed variable alignment must be a power of "
+                                "two");
+    }
+    const iree_host_size_t allocation_size =
+        iree_max((iree_host_size_t)size, (iree_host_size_t)8);
+    const iree_host_size_t allocation_alignment =
+        iree_max((iree_host_size_t)alignment, (iree_host_size_t)4096);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_managed_storage_allocate(
+          registry->host_allocator, allocation_size, allocation_alignment,
+          &managed_storage);
+    }
+    if (iree_status_is_ok(status)) {
+      memcpy(managed_storage->data, host_variable, size);
+    }
+  }
+
   if (iree_status_is_ok(status)) {
     // Add symbol to module's symbols array.
     iree_hal_streaming_symbol_registration_t* symbol =
@@ -372,9 +462,15 @@ iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
     symbol->type = symbol_type;
     symbol->device_name = device_name;  // direct pointer, no copy
     symbol->module = module;
+    symbol->params.variable.publication_slot = publication_slot;
+    symbol->params.variable.managed_storage = managed_storage;
     symbol->params.variable.size = size;
     symbol->params.variable.alignment = alignment;
+    managed_storage = NULL;
+    if (publication_slot)
+      *publication_slot = symbol->params.variable.managed_storage->data;
   }
+  iree_hal_streaming_managed_storage_release(managed_storage);
 
   iree_slim_mutex_unlock(&registry->mutex);
   IREE_TRACE_ZONE_END(z0);
@@ -387,16 +483,18 @@ iree_status_t iree_hal_streaming_global_symbol_registry_insert_variable(
     const char* device_name, size_t size, uint32_t alignment) {
   return iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
       registry, module, host_variable, device_name, size, alignment,
-      IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL);
+      IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL, /*publication_slot=*/NULL);
 }
 
 iree_status_t iree_hal_streaming_global_symbol_registry_insert_managed_variable(
     iree_hal_streaming_global_symbol_registry_t* registry,
     iree_hal_streaming_module_registration_t* module, void* host_variable,
-    const char* device_name, size_t size, uint32_t alignment) {
+    void** publication_slot, const char* device_name, size_t size,
+    uint32_t alignment) {
+  IREE_ASSERT_ARGUMENT(publication_slot);
   return iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
       registry, module, host_variable, device_name, size, alignment,
-      IREE_HAL_STREAMING_SYMBOL_TYPE_DATA);
+      IREE_HAL_STREAMING_SYMBOL_TYPE_DATA, publication_slot);
 }
 
 bool iree_hal_streaming_global_symbol_registry_query_variable(
@@ -414,7 +512,12 @@ bool iree_hal_streaming_global_symbol_registry_query_variable(
     for (iree_host_size_t j = 0; j < module->symbol_count; ++j) {
       const iree_hal_streaming_symbol_registration_t* symbol =
           &module->symbols[j];
-      if (symbol->host_pointer != host_variable ||
+      const iree_hal_streaming_managed_storage_t* managed_storage =
+          symbol->params.variable.managed_storage;
+      const bool is_managed_storage =
+          symbol->type == IREE_HAL_STREAMING_SYMBOL_TYPE_DATA &&
+          managed_storage && managed_storage->data == host_variable;
+      if ((symbol->host_pointer != host_variable && !is_managed_storage) ||
           (symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL &&
            symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_DATA)) {
         continue;
@@ -445,7 +548,14 @@ iree_hal_streaming_global_symbol_registry_lookup_unsafe(
     iree_hal_streaming_module_registration_t* module = registry->modules[i];
     if (!module) continue;
     for (iree_host_size_t j = 0; j < module->symbol_count; ++j) {
-      if (module->symbols[j].host_pointer == host_pointer) {
+      const iree_hal_streaming_symbol_registration_t* symbol =
+          &module->symbols[j];
+      const iree_hal_streaming_managed_storage_t* managed_storage =
+          symbol->params.variable.managed_storage;
+      const bool is_managed_storage =
+          symbol->type == IREE_HAL_STREAMING_SYMBOL_TYPE_DATA &&
+          managed_storage && managed_storage->data == host_pointer;
+      if (symbol->host_pointer == host_pointer || is_managed_storage) {
         result = &module->symbols[j];
         break;
       }
@@ -615,6 +725,35 @@ static iree_status_t iree_hal_streaming_context_symbol_map_grow(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_streaming_context_symbol_map_insert(
+    iree_hal_streaming_context_symbol_map_t* map, void* host_pointer,
+    iree_hal_streaming_symbol_t* symbol) {
+  if (IREE_UNLIKELY(
+          !iree_hal_streaming_symbol_map_is_valid_key(host_pointer))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "registered symbol has an invalid host pointer");
+  }
+
+  const uint64_t hash = iree_hal_streaming_symbol_pointer_hash(host_pointer);
+  iree_host_size_t index = hash & (map->capacity - 1);
+  for (iree_host_size_t i = 0; i < map->capacity; ++i) {
+    iree_hal_streaming_context_symbol_entry_t* entry = &map->entries[index];
+    if (entry->key == host_pointer && entry->symbol == symbol) {
+      return iree_ok_status();
+    }
+    if (entry->key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY ||
+        entry->key == IREE_HAL_STREAMING_SYMBOL_MAP_TOMBSTONE_KEY) {
+      entry->key = host_pointer;
+      entry->symbol = symbol;
+      ++map->count;
+      return iree_ok_status();
+    }
+    index = (index + 1) & (map->capacity - 1);
+  }
+  return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          "symbol map has no free entries");
+}
+
 // Loads a module and populates the context symbol map with its symbols.
 // This is called when a symbol is requested for use in a context but the module
 // hasn't been instantiated in it yet.
@@ -636,10 +775,24 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
     }
   }
 
+  // Managed registrations have a stable allocation distinct from the initial
+  // host key. Reserve one extra alias for each such registration.
+  iree_host_size_t insertion_count = registration->symbol_count;
+  for (iree_host_size_t i = 0; i < registration->symbol_count; ++i) {
+    if (registration->symbols[i].type == IREE_HAL_STREAMING_SYMBOL_TYPE_DATA &&
+        registration->symbols[i].params.variable.managed_storage &&
+        IREE_UNLIKELY(!iree_host_size_checked_add(insertion_count, 1,
+                                                  &insertion_count))) {
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "context symbol count overflow");
+    }
+  }
+
   // Grow the hash table to fit our new total count, if needed.
   iree_host_size_t new_count = 0;
-  if (IREE_UNLIKELY(!iree_host_size_checked_add(
-          map->count, registration->symbol_count, &new_count))) {
+  if (IREE_UNLIKELY(!iree_host_size_checked_add(map->count, insertion_count,
+                                                &new_count))) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "context symbol count overflow");
@@ -675,9 +828,10 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
   iree_const_byte_span_t module_data =
       iree_make_const_byte_span((const uint8_t*)registration->module_binary,
                                 /*infer*/ 0);
-  iree_status_t status = iree_hal_streaming_module_create_from_memory(
-      map->context, load_flags, module_data, map->host_allocator,
-      &entry->module);
+  iree_status_t status =
+      iree_hal_streaming_module_create_from_memory_borrowing_context(
+          map->context, load_flags, module_data, map->host_allocator,
+          &entry->module);
   if (iree_status_is_ok(status)) {
     // Insert all symbols from the module into the hash table.
     for (iree_host_size_t i = 0;
@@ -740,26 +894,22 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
         continue;
       }
 
-      // Insert into hash table.
-      const uint64_t hash =
-          iree_hal_streaming_symbol_pointer_hash(symbol_host_ptr);
-      iree_host_size_t idx = hash & (map->capacity - 1);
-      bool inserted = false;
-      for (iree_host_size_t j = 0; j < map->capacity; ++j) {
-        if (map->entries[idx].key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY ||
-            map->entries[idx].key ==
-                IREE_HAL_STREAMING_SYMBOL_MAP_TOMBSTONE_KEY) {
-          map->entries[idx].key = symbol_host_ptr;
-          map->entries[idx].symbol = symbol;
-          ++map->count;
-          inserted = true;
-          break;
-        }
-        idx = (idx + 1) & (map->capacity - 1);
+      iree_hal_streaming_managed_storage_t* managed_storage =
+          registration->symbols[i].params.variable.managed_storage;
+      if (managed_storage) {
+        status = iree_hal_streaming_module_bind_registered_managed_global(
+            entry->module, registration->symbols[i].device_name,
+            managed_storage, registration->symbols[i].params.variable.size,
+            &symbol);
+        if (!iree_status_is_ok(status)) break;
       }
-      if (!inserted) {
-        status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                  "symbol map has no free entries");
+
+      status = iree_hal_streaming_context_symbol_map_insert(
+          map, symbol_host_ptr, symbol);
+      if (iree_status_is_ok(status) && managed_storage &&
+          managed_storage->data != symbol_host_ptr) {
+        status = iree_hal_streaming_context_symbol_map_insert(
+            map, managed_storage->data, symbol);
       }
     }
   }
@@ -801,14 +951,15 @@ static void iree_hal_streaming_context_symbol_map_expunge_module(
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_slim_mutex_lock(&map->mutex);
 
-  // Find the module in the loaded modules list.
-  iree_hal_streaming_context_module_entry_t* module_entry = map->modules;
-  while (module_entry) {
-    if (module_entry->registration == registration) {
+  // Find and unlink the module from the loaded modules list.
+  iree_hal_streaming_context_module_entry_t** module_link = &map->modules;
+  while (*module_link) {
+    if ((*module_link)->registration == registration) {
       break;
     }
-    module_entry = module_entry->next;
+    module_link = &(*module_link)->next;
   }
+  iree_hal_streaming_context_module_entry_t* module_entry = *module_link;
   if (!module_entry) {
     // Module was not loaded in this context, no-op.
     iree_slim_mutex_unlock(&map->mutex);
@@ -816,46 +967,40 @@ static void iree_hal_streaming_context_symbol_map_expunge_module(
     return;
   }
 
-  // Walk all symbols in the module registration and remove them from the hash
-  // table.
-  for (iree_host_size_t i = 0; i < registration->symbol_count; ++i) {
-    void* host_pointer = registration->symbols[i].host_pointer;
-    const uint64_t hash = iree_hal_streaming_symbol_pointer_hash(host_pointer);
-    iree_host_size_t index = hash & (map->capacity - 1);
-    for (iree_host_size_t j = 0; j < map->capacity; ++j) {
-      if (map->entries[index].key == host_pointer &&
-          map->entries[index].symbol &&
-          map->entries[index].symbol->module == module_entry->module) {
-        // Remove only the entry backed by the module being unloaded. Weak host
-        // stubs can be coalesced across images, producing multiple entries with
-        // the same key but different compiled-module owners.
-        map->entries[index].key = IREE_HAL_STREAMING_SYMBOL_MAP_TOMBSTONE_KEY;
-        map->entries[index].symbol = NULL;
-        --map->count;
-        break;
-      } else if (map->entries[index].key ==
-                 IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY) {
-        break;  // not in the table
-      }
-      index = (index + 1) & (map->capacity - 1);  // continue linear probe
+  // Remove every key backed by the module, including the initial and published
+  // aliases of managed variables. Weak host stubs may be shared by multiple
+  // images, so module ownership rather than key identity selects entries.
+  for (iree_host_size_t i = 0; i < map->capacity; ++i) {
+    iree_hal_streaming_context_symbol_entry_t* entry = &map->entries[i];
+    if (!iree_hal_streaming_symbol_map_is_valid_key(entry->key) ||
+        !entry->symbol || entry->symbol->module != module_entry->module) {
+      continue;
     }
+    entry->key = IREE_HAL_STREAMING_SYMBOL_MAP_TOMBSTONE_KEY;
+    entry->symbol = NULL;
+    --map->count;
   }
 
-  // Existing function handles, queued launches, and graph nodes may still
-  // refer to executable metadata after the host registration disappears.
-  // Retire the registration now but retain its compiled module with the
-  // context, which owns all of those operations.
-  module_entry->registration = NULL;
+  // Lookups and graph nodes retain the module explicitly, while recorded
+  // command buffers retain the executable. Remove the cache's ownership now
+  // that no new host-pointer lookup can find this module.
+  *module_link = module_entry->next;
 
   iree_slim_mutex_unlock(&map->mutex);
+  iree_hal_streaming_module_release(module_entry->module);
+  iree_allocator_free(map->host_allocator, module_entry);
   IREE_TRACE_ZONE_END(z0);
 }
 
 iree_status_t iree_hal_streaming_context_symbol_map_lookup(
     iree_hal_streaming_context_symbol_map_t* map, void* host_pointer,
-    iree_hal_streaming_symbol_t** out_symbol) {
+    iree_hal_streaming_symbol_t** out_symbol,
+    iree_hal_streaming_module_t** out_module) {
   IREE_ASSERT_ARGUMENT(map);
   IREE_ASSERT_ARGUMENT(out_symbol);
+  IREE_ASSERT_ARGUMENT(out_module);
+  *out_symbol = NULL;
+  *out_module = NULL;
 
   // Check for invalid keys.
   if (!host_pointer ||
@@ -873,7 +1018,9 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
   for (iree_host_size_t i = 0; i < map->capacity; ++i) {
     const void* entry_key = map->entries[index].key;
     if (entry_key == host_pointer) {
-      *out_symbol = map->entries[index].symbol;  // hit
+      *out_symbol = map->entries[index].symbol;
+      *out_module = (*out_symbol)->module;
+      iree_hal_streaming_module_retain(*out_module);
       iree_slim_mutex_unlock(&map->mutex);
       return iree_ok_status();
     } else if (entry_key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY) {
@@ -893,6 +1040,8 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
     const void* entry_key = map->entries[index].key;
     if (entry_key == host_pointer) {
       *out_symbol = map->entries[index].symbol;
+      *out_module = (*out_symbol)->module;
+      iree_hal_streaming_module_retain(*out_module);
       iree_slim_mutex_unlock(&map->mutex);
       iree_slim_mutex_unlock(&map->registry->mutex);
       return iree_ok_status();
@@ -931,7 +1080,9 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
   for (iree_host_size_t i = 0; i < map->capacity; ++i) {
     const void* entry_key = map->entries[index].key;
     if (entry_key == host_pointer) {
-      *out_symbol = map->entries[index].symbol;  // hit
+      *out_symbol = map->entries[index].symbol;
+      *out_module = (*out_symbol)->module;
+      iree_hal_streaming_module_retain(*out_module);
       iree_slim_mutex_unlock(&map->mutex);
       iree_slim_mutex_unlock(&map->registry->mutex);
       return iree_ok_status();

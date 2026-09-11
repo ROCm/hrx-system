@@ -260,7 +260,6 @@ hrx_cc_shared_library(
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/amdgpu",
     ],
 )
 

@@ -295,7 +295,6 @@ iree_cc_library(
     iree::base::internal
     iree::base::threading
     iree::hal
-    iree::hal::drivers::amdgpu
     libhrx::src::binding::common
     libhrx_defs
   SHARED

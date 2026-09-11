@@ -1611,16 +1611,27 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
                     attrs->grid_dim[1],
                     attrs->grid_dim[2],
                 },
+            .workitem_count =
+                {
+                    attrs->workitem_count[0],
+                    attrs->workitem_count[1],
+                    attrs->workitem_count[2],
+                },
             .dynamic_workgroup_local_memory = attrs->shared_memory_bytes,
         };
         const iree_hal_dispatch_flags_t flags =
             attrs->bindings.count
                 ? IREE_HAL_DISPATCH_FLAG_NONE
                 : IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
+        const iree_hal_dispatch_flags_t exact_flags =
+            (attrs->workitem_count[0] || attrs->workitem_count[1] ||
+             attrs->workitem_count[2])
+                ? IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT
+                : IREE_HAL_DISPATCH_FLAG_NONE;
         status = iree_hal_command_buffer_dispatch(
             command_buffer, symbol->executable,
             iree_hal_executable_function_from_index(symbol->export_ordinal),
-            config, attrs->constants, attrs->bindings, flags);
+            config, attrs->constants, attrs->bindings, flags | exact_flags);
         break;
       }
       case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY: {
@@ -1900,6 +1911,12 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
                     attrs->grid_dim[1],
                     attrs->grid_dim[2],
                 },
+            .workitem_count =
+                {
+                    attrs->workitem_count[0],
+                    attrs->workitem_count[1],
+                    attrs->workitem_count[2],
+                },
             .dynamic_workgroup_local_memory = attrs->shared_memory_bytes,
         };
         iree_hal_dispatch_flags_t flags =
@@ -1907,6 +1924,10 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
                                : IREE_HAL_DISPATCH_FLAG_NONE;
         if (attrs->bindings.count == 0) {
           flags |= IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
+        }
+        if (attrs->workitem_count[0] || attrs->workitem_count[1] ||
+            attrs->workitem_count[2]) {
+          flags |= IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT;
         }
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
             z0, iree_hal_streaming_graph_create_dispatch_block(

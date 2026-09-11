@@ -30,6 +30,14 @@ iree_status_t iree_hal_streaming_module_try_initialize_managed_global(
     const char* initializer_name, bool* out_found, void** out_host_pointer,
     iree_device_size_t* out_size);
 
+// Imports process-owned host storage for a statically registered managed
+// global and writes its context-specific device address into the executable's
+// pointer slot. The module owns the resulting context import.
+iree_status_t iree_hal_streaming_module_bind_registered_managed_global(
+    iree_hal_streaming_module_t* module, const char* pointer_name,
+    iree_hal_streaming_managed_storage_t* managed_storage,
+    iree_device_size_t size, iree_hal_streaming_symbol_t** out_symbol);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
