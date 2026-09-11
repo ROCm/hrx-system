@@ -114,6 +114,16 @@ class CompiledPhysicalRegisterCandidateLookup:
 
 
 @dataclass(slots=True)
+class CompiledPhysicalRegisterViewLookup:
+    # First row in the packed view ordinal table.
+    ordinal_start: int
+    # Register-class ID represented by the first row.
+    class_base: int
+    # Number of register-class IDs covered by the range.
+    class_count: int
+
+
+@dataclass(slots=True)
 class CompiledDescriptorSet:
     spec: DescriptorSet
     # Selected, validated descriptors before compact runtime projections.
@@ -134,6 +144,10 @@ class CompiledDescriptorSet:
     physical_register_atomic_units: list[int]
     physical_register_atomic_unit_starts: list[int]
     physical_register_views: list[CompiledPhysicalRegisterView]
+    # View ordinals indexed by class ID, with 0xFFFFFFFF for absent views.
+    physical_register_view_ordinals: list[int]
+    # Class-ID intervals paired positionally with physical registers.
+    physical_register_view_lookups: list[CompiledPhysicalRegisterViewLookup]
     physical_register_view_unit_candidate_ordinals: list[int]
     register_packing_resources: list[CompiledRegisterPackingResource]
     register_packing_resource_members: list[CompiledRegisterPackingResourceMember]

@@ -179,9 +179,15 @@ TEST(LowAllocationUnitLocationTest, WideScratchOverlapsEveryNarrowUnit) {
        /*.atomic_unit_count=*/1},
       {/*.name_string_offset=*/0, /*.atomic_unit_start=*/1,
        /*.atomic_unit_count=*/1},
-      {/*.name_string_offset=*/0, /*.atomic_unit_start=*/2,
-       /*.atomic_unit_count=*/2},
+      {/*.name_string_offset=*/0,
+       /*.atomic_unit_start=*/2,
+       /*.atomic_unit_count=*/2,
+       /*.reserved=*/0,
+       /*.view_lookup=*/
+       {/*.ordinal_start=*/0, /*.class_base=*/0,
+        /*.class_count=*/1}},
   };
+  const uint32_t view_ordinals[] = {0};
   const uint16_t view_units[] = {0, 1};
   const loom_low_physical_register_view_t views[] = {
       {/*.physical_register_id=*/2, /*.reg_class_id=*/0,
@@ -200,6 +206,9 @@ TEST(LowAllocationUnitLocationTest, WideScratchOverlapsEveryNarrowUnit) {
   descriptor_set.physical_register_atomic_units = atomic_units;
   descriptor_set.physical_register_atomic_unit_count =
       IREE_ARRAYSIZE(atomic_units);
+  descriptor_set.physical_register_view_ordinals = view_ordinals;
+  descriptor_set.physical_register_view_ordinal_count =
+      IREE_ARRAYSIZE(view_ordinals);
   descriptor_set.physical_register_views = views;
   descriptor_set.physical_register_view_count = IREE_ARRAYSIZE(views);
   descriptor_set.physical_register_view_unit_candidate_ordinals = view_units;

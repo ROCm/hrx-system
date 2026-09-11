@@ -243,7 +243,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   reg_class.alloc_unit_bits = 512;
   reg_class.allocatable_count = 2;
   reg_class.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
-  const loom_low_physical_register_t physical_registers[] = {
+  loom_low_physical_register_t physical_registers[] = {
       {
           /*.name_string_offset=*/0,
           /*.atomic_unit_start=*/0,
@@ -261,12 +261,18 @@ TEST_F(LowAllocationIntervalAssignmentTest,
           /*.atomic_unit_start=*/4,
           /*.atomic_unit_count=*/4,
           /*.reserved=*/0,
+          /*.view_lookup=*/
+          {/*.ordinal_start=*/0, /*.class_base=*/0,
+           /*.class_count=*/1},
       },
       {
           /*.name_string_offset=*/0,
           /*.atomic_unit_start=*/8,
           /*.atomic_unit_count=*/4,
           /*.reserved=*/0,
+          /*.view_lookup=*/
+          {/*.ordinal_start=*/1, /*.class_base=*/0,
+           /*.class_count=*/0},
       },
   };
   reg_class.candidate_lookup.register_count = 2;
@@ -274,6 +280,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   const uint16_t physical_register_candidates[] = {1, 0};
   const uint16_t physical_register_atomic_units[] = {0, 1, 2, 3, 0, 1,
                                                      2, 3, 0, 1, 2, 3};
+  const uint32_t view_ordinals[] = {0, 1};
   const loom_low_physical_register_view_t physical_register_views[] = {
       {
           /*.physical_register_id=*/2,
@@ -310,6 +317,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       physical_register_atomic_units;
   descriptor_set.physical_register_atomic_unit_count =
       IREE_ARRAYSIZE(physical_register_atomic_units);
+  descriptor_set.physical_register_view_ordinals = view_ordinals;
+  descriptor_set.physical_register_view_ordinal_count = 1;
   descriptor_set.physical_register_views = physical_register_views;
   descriptor_set.physical_register_view_count = 1;
   descriptor_set.physical_register_view_unit_candidate_ordinals =
@@ -355,6 +364,9 @@ TEST_F(LowAllocationIntervalAssignmentTest,
 
   // A later physical ID can have the preferred first-unit candidate ordinal.
   // Aggregate search must inspect it even after finding a zero-penalty view.
+  physical_registers[3].view_lookup.class_count = 1;
+  descriptor_set.physical_register_view_ordinal_count =
+      IREE_ARRAYSIZE(view_ordinals);
   descriptor_set.physical_register_view_count =
       IREE_ARRAYSIZE(physical_register_views);
   IREE_ASSERT_OK(

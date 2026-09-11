@@ -135,34 +135,22 @@ const loom_low_physical_register_view_t*
 loom_low_descriptor_set_find_physical_register_view(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id,
     uint32_t physical_register_id, uint32_t unit_count) {
-  if (descriptor_set == NULL || physical_register_id > UINT16_MAX ||
-      unit_count > UINT16_MAX) {
+  if (descriptor_set == NULL ||
+      physical_register_id >= descriptor_set->physical_register_count) {
     return NULL;
   }
-  uint32_t begin = 0;
-  uint32_t end = descriptor_set->physical_register_view_count;
-  while (begin < end) {
-    const uint32_t mid = begin + (end - begin) / 2;
-    const loom_low_physical_register_view_t* candidate =
-        &descriptor_set->physical_register_views[mid];
-    if (candidate->physical_register_id < physical_register_id ||
-        (candidate->physical_register_id == physical_register_id &&
-         candidate->reg_class_id < reg_class_id)) {
-      begin = mid + 1;
-    } else {
-      end = mid;
-    }
-  }
-  if (begin == descriptor_set->physical_register_view_count) {
-    return NULL;
-  }
-  const loom_low_physical_register_view_t* candidate =
-      &descriptor_set->physical_register_views[begin];
-  return candidate->physical_register_id == physical_register_id &&
-                 candidate->reg_class_id == reg_class_id &&
-                 candidate->unit_count == unit_count
-             ? candidate
-             : NULL;
+  const loom_low_physical_register_t* physical_register =
+      &descriptor_set->physical_registers[physical_register_id];
+  const uint32_t class_offset =
+      (uint32_t)reg_class_id - physical_register->view_lookup.class_base;
+  if (class_offset >= physical_register->view_lookup.class_count) return NULL;
+  const uint32_t view_ordinal =
+      descriptor_set->physical_register_view_ordinals
+          [physical_register->view_lookup.ordinal_start + class_offset];
+  if (view_ordinal == UINT32_MAX) return NULL;
+  const loom_low_physical_register_view_t* view =
+      &descriptor_set->physical_register_views[view_ordinal];
+  return view->unit_count == unit_count ? view : NULL;
 }
 
 const uint16_t*

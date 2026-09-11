@@ -24,6 +24,7 @@ from loom.gen.target.low.compiled import (
     CompiledOperandFormMatch,
     CompiledPhysicalRegisterCandidateLookup,
     CompiledPhysicalRegisterView,
+    CompiledPhysicalRegisterViewLookup,
     CompiledRegisterPackingResource,
     CompiledRegisterPackingResourceMember,
     CompiledResourceCalendar,
@@ -1441,7 +1442,9 @@ def compile_descriptor_set(
             reg_class_ids[view.reg_class],
         ),
     )
+    view_ordinals_by_register: list[dict[int, int]] = [{} for _ in physical_registers]
     for view in selected_physical_register_views:
+        view_ordinals_by_register[physical_register_ids[view.physical_register]][reg_class_ids[view.reg_class]] = len(physical_register_views)
         reg_class = reg_class_inputs[view.reg_class]
         candidate_ordinals = {physical_register: ordinal for ordinal, physical_register in enumerate(reg_class.physical_registers)}
         unit_candidate_ordinal_start = len(physical_register_view_unit_candidate_ordinals)
@@ -1462,6 +1465,24 @@ def compile_descriptor_set(
     validation.validate_u32(
         len(physical_register_view_unit_candidate_ordinals),
         f"descriptor set '{spec.key}' physical register view unit count",
+    )
+
+    physical_register_view_ordinals: list[int] = []
+    physical_register_view_lookups: list[CompiledPhysicalRegisterViewLookup] = []
+    for view_ordinals in view_ordinals_by_register:
+        class_base = min(view_ordinals, default=0)
+        class_count = max(view_ordinals, default=-1) - class_base + 1
+        physical_register_view_lookups.append(
+            CompiledPhysicalRegisterViewLookup(
+                ordinal_start=len(physical_register_view_ordinals),
+                class_base=class_base,
+                class_count=class_count,
+            )
+        )
+        physical_register_view_ordinals.extend(view_ordinals.get(class_id, 0xFFFFFFFF) for class_id in range(class_base, class_base + class_count))
+    validation.validate_u32(
+        len(physical_register_view_ordinals),
+        f"descriptor set '{spec.key}' physical register view lookup count",
     )
 
     register_packing_resources: list[CompiledRegisterPackingResource] = []
@@ -1689,6 +1710,8 @@ def compile_descriptor_set(
         physical_register_atomic_units=physical_register_atomic_units,
         physical_register_atomic_unit_starts=physical_register_atomic_unit_starts,
         physical_register_views=physical_register_views,
+        physical_register_view_ordinals=physical_register_view_ordinals,
+        physical_register_view_lookups=physical_register_view_lookups,
         physical_register_view_unit_candidate_ordinals=physical_register_view_unit_candidate_ordinals,
         register_packing_resources=register_packing_resources,
         register_packing_resource_members=register_packing_resource_members,

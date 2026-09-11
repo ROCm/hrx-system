@@ -56,6 +56,8 @@ def test_physical_packing_order_is_independent_of_view_declaration_order() -> No
     )
     assert compiled.physical_register_allocation_ordinals == reversed_views.physical_register_allocation_ordinals
     assert compiled.physical_register_views == reversed_views.physical_register_views
+    assert compiled.physical_register_view_lookups == reversed_views.physical_register_view_lookups
+    assert compiled.physical_register_view_ordinals == reversed_views.physical_register_view_ordinals
     for class_id, reg_class in enumerate(compiled.reg_classes):
         start = compiled.physical_register_candidate_starts[class_id]
         count = len(reg_class.physical_registers)
@@ -146,3 +148,14 @@ def test_compiler_interns_exact_descriptor_and_asm_spans() -> None:
     assert const_form.immediate_start == const_copy_form.immediate_start
     assert compiled.asm_table_storage.operand_indices == [0, 1, 2]
     assert len(compiled.asm_table_storage.immediates) == 1
+
+
+def test_physical_view_lookup_preserves_exact_class_and_unit_relations() -> None:
+    compiled = compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
+    expected = {(view.physical_register_id, view.reg_class_id): ordinal for ordinal, view in enumerate(compiled.physical_register_views)}
+    for physical_id, lookup in enumerate(compiled.physical_register_view_lookups):
+        ordinals = compiled.physical_register_view_ordinals[lookup.ordinal_start : lookup.ordinal_start + lookup.class_count]
+        for class_id in range(len(compiled.reg_classes)):
+            offset = class_id - lookup.class_base
+            actual = ordinals[offset] if 0 <= offset < lookup.class_count else 0xFFFFFFFF
+            assert actual == expected.get((physical_id, class_id), 0xFFFFFFFF)

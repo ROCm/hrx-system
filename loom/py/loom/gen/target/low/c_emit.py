@@ -429,6 +429,11 @@ def emit_source_for_views(
                 ".atomic_unit_start = " + str(compiled.physical_register_atomic_unit_starts[i]) + ",",
                 f".atomic_unit_count = {len(physical_register.atomic_units)},",
                 ".reserved = 0,",
+                ".view_lookup = {",
+                f"  .ordinal_start = {compiled.physical_register_view_lookups[i].ordinal_start},",
+                f"  .class_base = {compiled.physical_register_view_lookups[i].class_base},",
+                f"  .class_count = {compiled.physical_register_view_lookups[i].class_count},",
+                "},",
             ]
             for i, physical_register in enumerate(compiled.physical_registers)
         ],
@@ -486,6 +491,12 @@ def emit_source_for_views(
         "uint16_t",
         f"k{spec.c_table_prefix}PhysicalRegisterAtomicUnits",
         [str(value) for value in compiled.physical_register_atomic_units],
+    )
+    c_arrays.append_value_array(
+        lines,
+        "uint32_t",
+        f"k{spec.c_table_prefix}PhysicalRegisterViewOrdinals",
+        ["UINT32_MAX" if value == 0xFFFFFFFF else str(value) for value in compiled.physical_register_view_ordinals],
     )
     _emit_array(
         lines,
@@ -1036,6 +1047,7 @@ def emit_source_for_views(
         "physical_register_candidate_ordinals": "physical_register_candidate_ordinal_count",
         "physical_register_atomic_units": "physical_register_atomic_unit_count",
         "physical_register_views": "physical_register_view_count",
+        "physical_register_view_ordinals": "physical_register_view_ordinal_count",
         "physical_register_view_unit_candidate_ordinals": "physical_register_view_unit_candidate_ordinal_count",
         "register_packing_resources": "register_packing_resource_count",
         "register_packing_resource_members": "register_packing_resource_member_count",
@@ -1148,6 +1160,12 @@ def emit_source_for_views(
             "physical_register_atomic_units",
             "PhysicalRegisterAtomicUnits",
             compiled.physical_register_atomic_units,
+            view_lines,
+        )
+        append_optional_table(
+            "physical_register_view_ordinals",
+            "PhysicalRegisterViewOrdinals",
+            compiled.physical_register_view_ordinals,
             view_lines,
         )
         append_optional_table(

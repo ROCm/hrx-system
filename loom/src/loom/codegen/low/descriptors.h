@@ -582,6 +582,15 @@ typedef struct loom_low_physical_register_t {
   uint16_t atomic_unit_count;
   // Reserved for future physical-register flags.
   uint16_t reserved;
+  // Direct register-class lookup into the packed physical view ordinal table.
+  struct {
+    // First row in the descriptor set's packed view ordinal table.
+    uint32_t ordinal_start;
+    // Register-class ID represented by the first row.
+    uint16_t class_base;
+    // Number of register-class IDs in the interval, including absent views.
+    uint16_t class_count;
+  } view_lookup;
 } loom_low_physical_register_t;
 
 // Ordered decomposition of an aggregate physical register into logical units
@@ -1399,6 +1408,11 @@ typedef struct loom_low_descriptor_set_t {
   // Exclusive upper bound of atomic storage-unit IDs, independent of how many
   // aliases reference each unit in the packed table.
   uint32_t physical_register_unit_count;
+  // View ordinals indexed by each physical register's class-ID interval.
+  // UINT32_MAX denotes a class with no view for that physical register.
+  const uint32_t* physical_register_view_ordinals;
+  // Number of rows in the packed physical view ordinal table.
+  uint32_t physical_register_view_ordinal_count;
   // Sorted aggregate physical-register views.
   const loom_low_physical_register_view_t* physical_register_views;
   // Number of aggregate physical-register view rows owned by this set.
