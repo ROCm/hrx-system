@@ -143,6 +143,9 @@ _WIDE_VECTOR_EXTRACT_SPECS = (
 # carrier, with the remaining lanes outside the source vector's value domain.
 _I8_DEINTERLEAVE_CONTROLS = (0, 1)
 
+# T16_2x32_lo interleaves the low sixteen 16-bit lanes of two X carriers.
+_I16_INTERLEAVE_CONTROL = 18
+
 # AIE2P's T32_4x4 VSHUFFLE mode transposes the sixteen 32-bit lanes carried
 # by one X register.
 _I32_F32_TRANSPOSE_4X4_CONTROL = 34
@@ -414,6 +417,43 @@ def _vector_deinterleave_i8x64_rule() -> DescriptorRule:
     )
 
 
+def _vector_interleave_16bit_rule() -> DescriptorRule:
+    constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
+    shuffle = _descriptor("amd.xdna.aie2p.shuffle.x.configured")
+    input_type = Vector(("i16", "f16", "bf16"), lanes=16)
+    result_type = Vector(("i16", "f16", "bf16"), lanes=32)
+    control = ValueRef.temporary("control")
+    return DescriptorRule(
+        source_op=vector.vector_interleave,
+        descriptor=shuffle,
+        guards=(
+            Guard.value_type("even", input_type),
+            Guard.value_type("odd", input_type),
+            Guard.value_type("result", result_type),
+            Guard.i64_range("axis", 0, 0),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=constant,
+                results={"dst": control},
+                result_types={"dst": DescriptorResultType()},
+                immediates={"i": _I16_INTERLEAVE_CONTROL},
+                form=DescriptorEmitForm.CONST,
+            ),
+            EmitDescriptorOp(
+                descriptor=shuffle,
+                operands={
+                    "s1": ValueRef.operand("even"),
+                    "s2": ValueRef.operand("odd"),
+                    "mod": control,
+                },
+                results={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+    )
+
+
 def _vector_transpose_i32_f32_4x4_rule() -> DescriptorRule:
     constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
     shuffle = _descriptor("amd.xdna.aie2p.shuffle.x.configured")
@@ -623,5 +663,6 @@ AIE2P_STRUCTURAL_RULES = (
         for input_type, result_type in _WIDE_VECTOR_CONCAT_SPECS
     ),
     _vector_deinterleave_i8x64_rule(),
+    _vector_interleave_16bit_rule(),
     _vector_transpose_i32_f32_4x4_rule(),
 )

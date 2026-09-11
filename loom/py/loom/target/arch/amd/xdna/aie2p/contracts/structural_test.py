@@ -9,6 +9,7 @@
 from loom.dialect.vector import defs as vector
 from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
     _HALF_CARRIER_SLICE_SPECS,
+    _I16_INTERLEAVE_CONTROL,
     _I32_F32_TRANSPOSE_4X4_CONTROL,
     _I32_SLICE_HIGH_BYTE_OFFSET,
     _WIDE_VECTOR_EXTRACT_SPECS,
@@ -173,3 +174,19 @@ def test_i32_f32_4x4_transpose_uses_native_shuffle_mode() -> None:
         "amd.xdna.aie2p.shuffle.x.configured",
     ]
     assert rule.emit[0].immediates == {"i": _I32_F32_TRANSPOSE_4X4_CONTROL}
+
+
+def test_16bit_interleave_uses_alternating_native_shuffle() -> None:
+    rule = next(
+        rule
+        for rule in AIE2P_STRUCTURAL_RULES
+        if isinstance(rule, DescriptorRule)
+        and rule.source_op is vector.vector_interleave
+    )
+    assert len(rule.emit) == 2
+    assert rule.emit[0].immediates == {"i": _I16_INTERLEAVE_CONTROL}
+    assert _I16_INTERLEAVE_CONTROL == 18
+    assert rule.emit[1].descriptor.key == "amd.xdna.aie2p.shuffle.x.configured"
+    assert rule.emit[1].operands["s1"].field == "even"
+    assert rule.emit[1].operands["s2"].field == "odd"
+    assert Guard.i64_range("axis", 0, 0) in rule.guards

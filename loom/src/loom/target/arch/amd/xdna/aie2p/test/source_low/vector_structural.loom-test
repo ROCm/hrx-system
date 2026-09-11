@@ -222,3 +222,51 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i64x16_e
   %result = concat(%18, %22) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
   return %result
 }
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @interleave_bf16x16(%even: vector<16xbf16>, %odd: vector<16xbf16>) -> (vector<32xbf16>) {
+  %result = vector.interleave<0> %even, %odd : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @interleave_bf16x16(%even: reg<aie2p.vec256 x2>, %odd: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %7 = mova.i32 18
+  %result = vshuffle %even, %odd, %7
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @interleave_i16x16(%even: vector<16xi16>, %odd: vector<16xi16>) -> (vector<32xi16>) {
+  %result = vector.interleave<0> %even, %odd : vector<16xi16>, vector<16xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @interleave_i16x16(%even: reg<aie2p.vec256 x2>, %odd: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %7 = mova.i32 18
+  %result = vshuffle %even, %odd, %7
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @interleave_f16x16(%even: vector<16xf16>, %odd: vector<16xf16>) -> (vector<32xf16>) {
+  %result = vector.interleave<0> %even, %odd : vector<16xf16>, vector<16xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @interleave_f16x16(%even: reg<aie2p.vec256 x2>, %odd: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %7 = mova.i32 18
+  %result = vshuffle %even, %odd, %7
+  return %result
+}
