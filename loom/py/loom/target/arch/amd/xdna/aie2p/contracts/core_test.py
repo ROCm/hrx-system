@@ -852,8 +852,26 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert bf16_multiply.emit[3].immediates == {"i": BF16_CONVERSION_ROUNDING}
 
     bf16_dot2_rules = [rule for rule in rules if rule.source_op is vector.vector_dot2f]
-    assert len(bf16_dot2_rules) == 2
-    bf16_dot2_x8, bf16_dot2 = bf16_dot2_rules
+    assert len(bf16_dot2_rules) == 4
+    bf16_dot2_x8_zero, bf16_dot2_x8, bf16_dot2_zero, bf16_dot2 = bf16_dot2_rules
+    for zero_rule, source_rule in (
+        (bf16_dot2_x8_zero, bf16_dot2_x8),
+        (bf16_dot2_zero, bf16_dot2),
+    ):
+        assert zero_rule.guards == (
+            *source_rule.guards,
+            Guard.value_float_equals("acc", 0.0),
+        )
+        assert not any(isinstance(emit, EmitRegisterConcat) for emit in zero_rule.emit)
+        accumulates = [
+            emit
+            for emit in zero_rule.emit
+            if not isinstance(emit, EmitRegisterSlice)
+            and emit.descriptor.key == "amd.xdna.aie2p.accumulate.bf16x32.configured"
+        ]
+        assert len(accumulates) == 2
+        assert accumulates[0].operands["acc1"].field == "zero_accumulator"
+        assert accumulates[1].operands["acc1"].field == "even_accumulator"
     assert bf16_dot2_x8.report_key == "bf16_dot2_x8_broadcast"
     assert bf16_dot2.report_key == "bf16_dot2"
     assert Guard.value_type("lhs", Vector("bf16", lanes=8)) in bf16_dot2_x8.guards

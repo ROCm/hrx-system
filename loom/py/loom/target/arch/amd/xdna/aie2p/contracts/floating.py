@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from typing import Literal
 
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.vector import defs as vector
@@ -210,6 +211,7 @@ def _vector_dot2f_bf16_rule(
     result_type: TypePattern,
     *,
     broadcast_inputs: bool,
+    initial_accumulator: Literal["source", "zero"],
     report_key: str,
 ) -> DescriptorRule:
     config_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
@@ -259,38 +261,57 @@ def _vector_dot2f_bf16_rule(
             for operand_name in ("lhs", "rhs")
         )
 
+    emits.append(
+        _op_emit(
+            clear,
+            results={"dst": ValueRef.temporary("zero_accumulator")},
+            result_types={"dst": DescriptorResultType()},
+        )
+    )
+    accumulator = ValueRef.temporary("zero_accumulator")
+    guards = (
+        Guard.value_type("lhs", input_type),
+        Guard.value_type("rhs", input_type),
+        Guard.value_type("acc", result_type),
+        Guard.value_type("result", result_type),
+    )
+    if initial_accumulator == "zero":
+        # Exact floating facts distinguish positive zero from negative zero.
+        # The cleared accumulator already supplies every source and padding lane.
+        guards += (Guard.value_float_equals("acc", 0.0),)
+    else:
+        accumulator = ValueRef.temporary("initial_accumulator")
+        emits.extend(
+            (
+                *(
+                    EmitRegisterSlice(
+                        source=ValueRef.temporary("zero_accumulator"),
+                        result=ValueRef.temporary(f"zero_accumulator_unit_{unit}"),
+                        unit_offset=unit,
+                        unit_count=1,
+                    )
+                    for unit in range(1, 4)
+                ),
+                _op_emit(
+                    move_to_accumulator,
+                    operands={"src": ValueRef.operand("acc")},
+                    results={"dst": ValueRef.temporary("initial_accumulator_unit")},
+                    result_types={"dst": DescriptorResultType()},
+                ),
+                EmitRegisterConcat(
+                    sources=(
+                        ValueRef.temporary("initial_accumulator_unit"),
+                        ValueRef.temporary("zero_accumulator_unit_1"),
+                        ValueRef.temporary("zero_accumulator_unit_2"),
+                        ValueRef.temporary("zero_accumulator_unit_3"),
+                    ),
+                    result=ValueRef.temporary("initial_accumulator"),
+                    result_type=_F32X64_ACCUMULATOR,
+                ),
+            )
+        )
     emits.extend(
         (
-            _op_emit(
-                clear,
-                results={"dst": ValueRef.temporary("zero_accumulator")},
-                result_types={"dst": DescriptorResultType()},
-            ),
-            *(
-                EmitRegisterSlice(
-                    source=ValueRef.temporary("zero_accumulator"),
-                    result=ValueRef.temporary(f"zero_accumulator_unit_{unit}"),
-                    unit_offset=unit,
-                    unit_count=1,
-                )
-                for unit in range(1, 4)
-            ),
-            _op_emit(
-                move_to_accumulator,
-                operands={"src": ValueRef.operand("acc")},
-                results={"dst": ValueRef.temporary("initial_accumulator_unit")},
-                result_types={"dst": DescriptorResultType()},
-            ),
-            EmitRegisterConcat(
-                sources=(
-                    ValueRef.temporary("initial_accumulator_unit"),
-                    ValueRef.temporary("zero_accumulator_unit_1"),
-                    ValueRef.temporary("zero_accumulator_unit_2"),
-                    ValueRef.temporary("zero_accumulator_unit_3"),
-                ),
-                result=ValueRef.temporary("initial_accumulator"),
-                result_type=_F32X64_ACCUMULATOR,
-            ),
             _constant_emit(
                 config_constant,
                 ValueRef.temporary("accumulate_control"),
@@ -299,7 +320,7 @@ def _vector_dot2f_bf16_rule(
             _op_emit(
                 accumulate,
                 operands={
-                    "acc1": ValueRef.temporary("initial_accumulator"),
+                    "acc1": accumulator,
                     "s1": ValueRef.temporary("lhs_even"),
                     "s2": ValueRef.temporary("rhs_even"),
                     "acc": ValueRef.temporary("accumulate_control"),
@@ -333,12 +354,7 @@ def _vector_dot2f_bf16_rule(
     return DescriptorRule(
         source_op=vector.vector_dot2f,
         descriptor=accumulate,
-        guards=(
-            Guard.value_type("lhs", input_type),
-            Guard.value_type("rhs", input_type),
-            Guard.value_type("acc", result_type),
-            Guard.value_type("result", result_type),
-        ),
+        guards=guards,
         emit=tuple(emits),
         report_key=report_key,
     )
@@ -709,12 +725,28 @@ AIE2P_FLOATING_RULES = (
         _BF16X8_VECTOR,
         _F32X4_VECTOR,
         broadcast_inputs=True,
+        initial_accumulator="zero",
+        report_key="bf16_dot2_x8_zero",
+    ),
+    _vector_dot2f_bf16_rule(
+        _BF16X8_VECTOR,
+        _F32X4_VECTOR,
+        broadcast_inputs=True,
+        initial_accumulator="source",
         report_key="bf16_dot2_x8_broadcast",
     ),
     _vector_dot2f_bf16_rule(
         _BF16_DOT2_VECTOR,
         _F32_VECTOR,
         broadcast_inputs=False,
+        initial_accumulator="zero",
+        report_key="bf16_dot2_zero",
+    ),
+    _vector_dot2f_bf16_rule(
+        _BF16_DOT2_VECTOR,
+        _F32_VECTOR,
+        broadcast_inputs=False,
+        initial_accumulator="source",
         report_key="bf16_dot2",
     ),
 )
