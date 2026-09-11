@@ -1,0 +1,89 @@
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @dot_interleaved_source(%lhs: vector<32xbf16>, %even: vector<16xbf16>, %odd: vector<16xbf16>, %initial: vector<16xf32>) -> (vector<16xf32>) {
+  %rhs = vector.interleave<0> %even, %odd : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %result = vector.dot2f %lhs, %rhs, %initial : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot_interleaved_source(%lhs: reg<aie2p.vec256 x2>, %even: reg<aie2p.vec256 x2>, %odd: reg<aie2p.vec256 x2>, %initial: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %12 = mova.i32 2
+  %13 = vshuffle %lhs, %lhs, %12
+  %14 = mova.i32 3
+  %15 = vshuffle %lhs, %lhs, %14
+  %16 = acc.clear.f32x64
+  %17 = slice %16[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %18 = slice %16[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %19 = slice %16[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %20 = vmov.vector512.to.accumulator512 %initial
+  %21 = concat(%20, %17, %18, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %22 = mova.i32 60
+  %23 = vmac.bf16x32 %21, %13, %even, %22
+  %24 = vmac.bf16x32 %23, %15, %odd, %22
+  %25 = slice %24[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %result = vmov.accumulator512.to.vector512 %25
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @dot_interleaved_zero(%lhs: vector<32xbf16>, %even: vector<16xbf16>, %odd: vector<16xbf16>) -> (vector<16xf32>) {
+  %initial = vector.constant 0.0 : vector<16xf32>
+  %rhs = vector.interleave<0> %even, %odd : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %result = vector.dot2f %lhs, %rhs, %initial : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot_interleaved_zero(%lhs: reg<aie2p.vec256 x2>, %even: reg<aie2p.vec256 x2>, %odd: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %11 = mova.i32 2
+  %12 = vshuffle %lhs, %lhs, %11
+  %13 = mova.i32 3
+  %14 = vshuffle %lhs, %lhs, %13
+  %15 = acc.clear.f32x64
+  %16 = mova.i32 60
+  %17 = vmac.bf16x32 %15, %12, %even, %16
+  %18 = vmac.bf16x32 %17, %14, %odd, %16
+  %19 = slice %18[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %result = vmov.accumulator512.to.vector512 %19
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @dot_interleaved_shared(%lhs: vector<32xbf16>, %even: vector<16xbf16>, %odd: vector<16xbf16>, %initial: vector<16xf32>) -> (vector<16xf32>, vector<32xbf16>) {
+  %rhs = vector.interleave<0> %even, %odd : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %result = vector.dot2f %lhs, %rhs, %initial : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  func.return %result, %rhs : vector<16xf32>, vector<32xbf16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot_interleaved_shared(%lhs: reg<aie2p.vec256 x2>, %even: reg<aie2p.vec256 x2>, %odd: reg<aie2p.vec256 x2>, %initial: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
+  %14 = mova.i32 18
+  %rhs = vshuffle %even, %odd, %14
+  %16 = mova.i32 2
+  %17 = vshuffle %lhs, %lhs, %16
+  %18 = vshuffle %rhs, %rhs, %16
+  %19 = mova.i32 3
+  %20 = vshuffle %lhs, %lhs, %19
+  %21 = vshuffle %rhs, %rhs, %19
+  %22 = acc.clear.f32x64
+  %23 = slice %22[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %24 = slice %22[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %25 = slice %22[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %26 = vmov.vector512.to.accumulator512 %initial
+  %27 = concat(%26, %23, %24, %25) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %28 = mova.i32 60
+  %29 = vmac.bf16x32 %27, %17, %18, %28
+  %30 = vmac.bf16x32 %29, %20, %21, %28
+  %31 = slice %30[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %result = vmov.accumulator512.to.vector512 %31
+  return %result, %rhs
+}

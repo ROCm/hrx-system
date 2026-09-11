@@ -38,6 +38,7 @@ from loom.target.contracts import (
     Guard,
     ResultTypeBinding,
     Scalar,
+    SourceNode,
     TypePattern,
     ValueRef,
     Vector,
@@ -213,6 +214,7 @@ def _vector_dot2f_bf16_rule(
     broadcast_inputs: bool,
     initial_accumulator: Literal["source", "zero"],
     report_key: str,
+    rhs_form: Literal["packed", "interleaved"] = "packed",
 ) -> DescriptorRule:
     config_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
     broadcast = _descriptor("amd.xdna.aie2p.broadcast.bf16x8.to.bf16x32")
@@ -258,9 +260,22 @@ def _vector_dot2f_bf16_rule(
                 results={"dst": ValueRef.temporary(f"{operand_name}_{lane_group}")},
                 result_types={"dst": DescriptorResultType()},
             )
-            for operand_name in ("lhs", "rhs")
+            for operand_name in (
+                ("lhs",) if rhs_form == "interleaved" else ("lhs", "rhs")
+            )
         )
 
+    # An interleave supplies the low sixteen even/odd lanes directly. Only
+    # those accumulator lanes belong to the source result; carrier padding
+    # does not participate in the returned dot product.
+    rhs_values = {
+        lane_group: (
+            ValueRef.operand(lane_group, source_node="interleave")
+            if rhs_form == "interleaved"
+            else ValueRef.temporary(f"rhs_{lane_group}")
+        )
+        for lane_group in ("even", "odd")
+    }
     emits.append(
         _op_emit(
             clear,
@@ -322,7 +337,7 @@ def _vector_dot2f_bf16_rule(
                 operands={
                     "acc1": accumulator,
                     "s1": ValueRef.temporary("lhs_even"),
-                    "s2": ValueRef.temporary("rhs_even"),
+                    "s2": rhs_values["even"],
                     "acc": ValueRef.temporary("accumulate_control"),
                 },
                 results={"dst": ValueRef.temporary("even_accumulator")},
@@ -333,7 +348,7 @@ def _vector_dot2f_bf16_rule(
                 operands={
                     "acc1": ValueRef.temporary("even_accumulator"),
                     "s1": ValueRef.temporary("lhs_odd"),
-                    "s2": ValueRef.temporary("rhs_odd"),
+                    "s2": rhs_values["odd"],
                     "acc": ValueRef.temporary("accumulate_control"),
                 },
                 results={"dst": ValueRef.temporary("result_accumulator")},
@@ -354,6 +369,24 @@ def _vector_dot2f_bf16_rule(
     return DescriptorRule(
         source_op=vector.vector_dot2f,
         descriptor=accumulate,
+        source_nodes=(
+            (
+                SourceNode.adjacent_definition(
+                    "interleave",
+                    source_op=vector.vector_interleave,
+                    parent_operand=ValueRef.operand("rhs"),
+                    node_result=ValueRef.result("result"),
+                    guards=(
+                        Guard.value_type("even", Vector("bf16", lanes=16)),
+                        Guard.value_type("odd", Vector("bf16", lanes=16)),
+                        Guard.i64_range("axis", 0, 0),
+                    ),
+                ),
+            )
+            if rhs_form == "interleaved"
+            else ()
+        ),
+        priority=1 if rhs_form == "interleaved" else 0,
         guards=guards,
         emit=tuple(emits),
         report_key=report_key,
@@ -734,6 +767,22 @@ AIE2P_FLOATING_RULES = (
         broadcast_inputs=True,
         initial_accumulator="source",
         report_key="bf16_dot2_x8_broadcast",
+    ),
+    _vector_dot2f_bf16_rule(
+        _BF16X32_VECTOR,
+        _F32X16_VECTOR,
+        broadcast_inputs=False,
+        initial_accumulator="zero",
+        rhs_form="interleaved",
+        report_key="bf16_dot2_interleaved_rhs_zero",
+    ),
+    _vector_dot2f_bf16_rule(
+        _BF16X32_VECTOR,
+        _F32X16_VECTOR,
+        broadcast_inputs=False,
+        initial_accumulator="source",
+        rhs_form="interleaved",
+        report_key="bf16_dot2_interleaved_rhs",
     ),
     _vector_dot2f_bf16_rule(
         _BF16_DOT2_VECTOR,

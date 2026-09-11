@@ -851,7 +851,11 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert BF16_CONVERSION_ROUNDING == 12
     assert bf16_multiply.emit[3].immediates == {"i": BF16_CONVERSION_ROUNDING}
 
-    bf16_dot2_rules = [rule for rule in rules if rule.source_op is vector.vector_dot2f]
+    bf16_dot2_rules = [
+        rule
+        for rule in rules
+        if rule.source_op is vector.vector_dot2f and not rule.source_nodes
+    ]
     assert len(bf16_dot2_rules) == 4
     bf16_dot2_x8_zero, bf16_dot2_x8, bf16_dot2_zero, bf16_dot2 = bf16_dot2_rules
     for zero_rule, source_rule in (

@@ -488,6 +488,7 @@ loom_check_test_suite(
     "test/source_low/packed_i8_arithmetic.loom-test"
     "test/source_low/packed_integer_arithmetic.loom-test"
     "test/source_low/vector_bitcast.loom-test"
+    "test/source_low/vector_dot_interleave.loom-test"
     "test/source_low/vector_mask_select.loom-test"
     "test/source_low/vector_memory.loom-test"
     "test/source_low/vector_predicate.loom-test"
