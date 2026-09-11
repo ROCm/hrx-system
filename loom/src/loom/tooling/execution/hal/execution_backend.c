@@ -14,6 +14,7 @@
 #include "loom/target/entry_selection.h"
 #include "loom/tooling/compile/pipeline.h"
 #include "loom/tooling/compile/report_capture.h"
+#include "loom/tooling/execution/hal/artifact.h"
 #include "loom/tooling/execution/hal/candidate.h"
 #include "loom/tooling/execution/hal/invocation.h"
 #include "loom/tooling/execution/hal/runtime.h"
@@ -285,10 +286,14 @@ iree_status_t loom_run_hal_execution_backend_run_one_shot(
   }
   if (iree_status_is_ok(status) && candidate.artifact_candidate.compiled &&
       !request->options->hal_emit_only) {
+    const loom_device_artifact_t device_artifact = {
+        .executable_target = candidate.device_target.executable_target,
+        .artifact = &candidate.artifact_candidate.artifact,
+    };
     loom_run_hal_invocation_request_t invocation_request = {0};
     loom_run_hal_invocation_request_initialize(&invocation_request);
     invocation_request.runtime = &runtime;
-    invocation_request.artifact = &candidate.device_artifact;
+    invocation_request.artifact = &device_artifact;
     invocation_request.options.function_name =
         request->options->hal_function_name;
     invocation_request.options.workgroup_count[0] =

@@ -27,6 +27,7 @@
 #include "loom/tooling/compile/report_capture.h"
 #include "loom/tooling/config/config.h"
 #include "loom/tooling/execution/execution_backend.h"
+#include "loom/tooling/execution/hal/artifact.h"
 #include "loom/util/fact_table.h"
 
 typedef struct loom_run_hal_testbench_actual_sequence_span_t
@@ -771,8 +772,12 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
         provider->context->device_provider->artifact_provider->name.data);
   }
 
+  const loom_device_artifact_t device_artifact = {
+      .executable_target = provider->candidate.device_target.executable_target,
+      .artifact = &provider->candidate.artifact_candidate.artifact,
+  };
   status = loom_run_hal_prepared_candidate_prepare(
-      &provider->context->runtime, &provider->candidate.device_artifact,
+      &provider->context->runtime, &device_artifact,
       provider->context->host_allocator, &provider->prepared_candidate);
   if (iree_status_is_ok(status)) {
     provider->prepared_candidate_initialized = true;

@@ -69,8 +69,8 @@ loom_cc_library(
     srcs = ["candidate.c"],
     hdrs = ["candidate.h"],
     deps = [
-        ":artifact",
         ":device_provider",
+        "//loom/src/loom/tooling/compile:artifact",
         "//loom/src/loom/tooling/compile:options",
         "//loom/src/loom/tooling/execution:session",
         "//runtime/src/iree/base",

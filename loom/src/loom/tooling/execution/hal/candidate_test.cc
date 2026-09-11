@@ -251,9 +251,6 @@ TEST_F(HalCandidateTest, EmitHalExecutableCandidate) {
             &kFakeTargetProfile);
   EXPECT_EQ(loom_device_target_bundle(&candidate.device_target),
             &kFakeTargetBundle);
-  EXPECT_EQ(candidate.device_artifact.executable_target, nullptr);
-  EXPECT_EQ(candidate.device_artifact.artifact,
-            &candidate.artifact_candidate.artifact);
   const loom_artifact_t& artifact = candidate.artifact_candidate.artifact;
   EXPECT_EQ(artifact.target_bundle, &kFakeTargetBundle);
   EXPECT_TRUE(

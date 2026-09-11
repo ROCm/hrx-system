@@ -10,8 +10,8 @@
 #define LOOM_TOOLING_EXECUTION_HAL_CANDIDATE_H_
 
 #include "iree/base/api.h"
+#include "loom/tooling/compile/artifact.h"
 #include "loom/tooling/compile/options.h"
-#include "loom/tooling/execution/hal/artifact.h"
 #include "loom/tooling/execution/hal/device_provider.h"
 #include "loom/tooling/execution/session.h"
 
@@ -22,14 +22,12 @@ extern "C" {
 typedef struct loom_run_hal_candidate_t {
   // Host allocator used for owned candidate storage.
   iree_allocator_t host_allocator;
-  // Device provider that selected |device_target|.
+  // Device provider used for artifact emission.
   const loom_device_provider_t* provider;
   // Device target selected by the caller for artifact emission.
   loom_device_target_t device_target;
   // Offline compiler candidate emitted through |provider|.
   loom_artifact_candidate_t artifact_candidate;
-  // Device-loadable view of |artifact_candidate|.
-  loom_device_artifact_t device_artifact;
 } loom_run_hal_candidate_t;
 
 // Emits |run_module| to a HAL artifact candidate using |target| as the

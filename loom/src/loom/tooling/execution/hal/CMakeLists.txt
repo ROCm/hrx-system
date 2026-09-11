@@ -62,9 +62,9 @@ loom_cc_library(
   SRCS
     "candidate.c"
   DEPS
-    ::artifact
     ::device_provider
     iree::base
+    loom::tooling::compile::artifact
     loom::tooling::compile::options
     loom::tooling::execution::session
   PUBLIC

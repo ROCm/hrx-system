@@ -15,22 +15,6 @@ static void loom_run_hal_candidate_initialize(
   };
 }
 
-static iree_status_t loom_run_hal_candidate_emit_selected_target(
-    loom_run_module_t* run_module, const loom_compile_options_t* options,
-    loom_run_hal_candidate_t* candidate) {
-  iree_status_t status = loom_artifact_candidate_emit_target(
-      candidate->provider->artifact_provider,
-      &candidate->device_target.artifact_target, run_module->module, options,
-      candidate->host_allocator, &candidate->artifact_candidate);
-  if (iree_status_is_ok(status) && candidate->artifact_candidate.compiled) {
-    candidate->device_artifact = (loom_device_artifact_t){
-        .executable_target = candidate->device_target.executable_target,
-        .artifact = &candidate->artifact_candidate.artifact,
-    };
-  }
-  return status;
-}
-
 iree_status_t loom_run_hal_candidate_emit_target(
     const loom_device_provider_t* provider, const loom_device_target_t* target,
     loom_run_module_t* run_module, const loom_compile_options_t* options,
@@ -42,8 +26,10 @@ iree_status_t loom_run_hal_candidate_emit_target(
   }
   loom_run_hal_candidate_initialize(provider, allocator, out_candidate);
   out_candidate->device_target = *target;
-  iree_status_t status = loom_run_hal_candidate_emit_selected_target(
-      run_module, options, out_candidate);
+  iree_status_t status = loom_artifact_candidate_emit_target(
+      provider->artifact_provider,
+      &out_candidate->device_target.artifact_target, run_module->module,
+      options, allocator, &out_candidate->artifact_candidate);
   if (!iree_status_is_ok(status)) {
     loom_run_hal_candidate_deinitialize(out_candidate);
   }
