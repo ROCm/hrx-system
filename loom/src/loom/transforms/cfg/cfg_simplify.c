@@ -20,6 +20,7 @@
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/function_version.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/dominance.h"
 
@@ -2257,7 +2258,10 @@ iree_status_t loom_cfg_simplify_run(loom_pass_t* pass, loom_module_t* module,
 
     loom_value_fact_table_t* fact_table = NULL;
     status = loom_pass_value_facts_acquire(
-        pass, module, loom_pass_value_fact_scope_function(function),
+        pass, module,
+        loom_pass_value_fact_scope_function_for_target(
+            function,
+            loom_target_function_version_target_facts(pass->function_version)),
         &fact_table);
     if (!iree_status_is_ok(status)) break;
 

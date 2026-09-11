@@ -16,6 +16,7 @@
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/function_version.h"
 
 //===----------------------------------------------------------------------===//
 // Statistics
@@ -851,7 +852,11 @@ iree_status_t loom_loop_fusion_run(loom_pass_t* pass, loom_module_t* module,
       loom_rewriter_initialize(&rewriter, module, pass->arena));
   loom_value_fact_table_t* facts = NULL;
   iree_status_t status = loom_pass_value_facts_prepare(
-      pass, module, loom_pass_value_fact_scope_function(function), &facts);
+      pass, module,
+      loom_pass_value_fact_scope_function_for_target(
+          function,
+          loom_target_function_version_target_facts(pass->function_version)),
+      &facts);
   if (iree_status_is_ok(status)) {
     status = loom_rewriter_enable_analysis(&rewriter, function, facts);
   }

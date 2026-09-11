@@ -212,6 +212,7 @@ loom_cc_library(
     loom::ops::op_defs
     loom::pass::types
     loom::pass::value_facts
+    loom::target::function_version
   PUBLIC
 )
 

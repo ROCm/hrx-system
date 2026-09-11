@@ -20,6 +20,7 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/function_version.h"
 #include "loom/transforms/vector/to_scalar_aggregates.h"
 #include "loom/transforms/vector/to_scalar_core.h"
 #include "loom/transforms/vector/to_scalar_descriptors.h"
@@ -1233,7 +1234,11 @@ static iree_status_t loom_vector_to_scalar_run_with_lowerer(
       loom_rewriter_initialize(&rewriter, module, pass->arena));
   loom_value_fact_table_t* facts = NULL;
   iree_status_t status = loom_pass_value_facts_prepare(
-      pass, module, loom_pass_value_fact_scope_function(function), &facts);
+      pass, module,
+      loom_pass_value_fact_scope_function_for_target(
+          function,
+          loom_target_function_version_target_facts(pass->function_version)),
+      &facts);
   if (iree_status_is_ok(status)) {
     status = loom_rewriter_enable_analysis(&rewriter, function, facts);
   }

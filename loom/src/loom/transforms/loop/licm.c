@@ -13,6 +13,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/function_version.h"
 
 #define LOOM_LICM_STATISTICS(V, statistics_type)     \
   V(statistics_type, loops_visited, "loops-visited", \
@@ -237,7 +238,10 @@ iree_status_t loom_licm_run(loom_pass_t* pass, loom_module_t* module,
   }
   if (iree_status_is_ok(status)) {
     status = loom_pass_value_facts_acquire(
-        pass, module, loom_pass_value_fact_scope_function(function),
+        pass, module,
+        loom_pass_value_fact_scope_function_for_target(
+            function,
+            loom_target_function_version_target_facts(pass->function_version)),
         &context.fact_table);
   }
   if (iree_status_is_ok(status)) {

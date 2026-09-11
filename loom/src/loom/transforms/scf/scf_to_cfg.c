@@ -22,6 +22,7 @@
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/function_version.h"
 
 //===----------------------------------------------------------------------===//
 // Statistics
@@ -1321,7 +1322,10 @@ iree_status_t loom_scf_to_cfg_run(loom_pass_t* pass, loom_module_t* module,
   bool any_changed = false;
   while (iree_status_is_ok(status) && !loom_pass_has_error_diagnostics(pass)) {
     status = loom_pass_value_facts_acquire(
-        pass, module, loom_pass_value_fact_scope_function(function),
+        pass, module,
+        loom_pass_value_fact_scope_function_for_target(
+            function,
+            loom_target_function_version_target_facts(pass->function_version)),
         &state.fact_table);
     if (!iree_status_is_ok(status)) break;
     status = loom_scf_to_cfg_collect_frontier(&state, function);

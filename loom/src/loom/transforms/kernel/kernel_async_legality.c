@@ -10,6 +10,7 @@
 #include "loom/ir/local_value_domain.h"
 #include "loom/ops/op_defs.h"
 #include "loom/pass/value_facts.h"
+#include "loom/target/function_version.h"
 
 #define LOOM_KERNEL_ASYNC_LEGALITY_STATISTICS(V, statistics_type) \
   V(statistics_type, blocks_checked, "blocks-checked",            \
@@ -51,7 +52,10 @@ iree_status_t loom_kernel_async_legality_run(loom_pass_t* pass,
   loom_value_fact_table_t* fact_table = NULL;
   if (iree_status_is_ok(status)) {
     status = loom_pass_value_facts_acquire(
-        pass, module, loom_pass_value_fact_scope_function(function),
+        pass, module,
+        loom_pass_value_fact_scope_function_for_target(
+            function,
+            loom_target_function_version_target_facts(pass->function_version)),
         &fact_table);
   }
   loom_kernel_async_legality_options_t options = {

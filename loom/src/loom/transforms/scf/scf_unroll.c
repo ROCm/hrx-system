@@ -27,6 +27,7 @@
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/function_version.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/walk.h"
 
@@ -3031,7 +3032,10 @@ static iree_status_t loom_scf_unroll_process_function_once(
   }
   IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
       context->pass, context->module,
-      loom_pass_value_fact_scope_function(function), &context->fact_table));
+      loom_pass_value_fact_scope_function_for_target(
+          function, loom_target_function_version_target_facts(
+                        context->pass->function_version)),
+      &context->fact_table));
 
   for (iree_host_size_t i = 0;
        i < loops.count && !loom_pass_has_error_diagnostics(context->pass);

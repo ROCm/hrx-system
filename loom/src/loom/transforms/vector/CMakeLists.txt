@@ -139,6 +139,7 @@ loom_cc_library(
     loom::pass::types
     loom::pass::value_facts
     loom::rewrite::rewriter
+    loom::target::function_version
     loom::util::numeric_format
   PUBLIC
 )

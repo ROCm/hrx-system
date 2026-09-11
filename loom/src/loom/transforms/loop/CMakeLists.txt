@@ -24,6 +24,7 @@ loom_cc_library(
     loom::pass::types
     loom::pass::value_facts
     loom::rewrite::rewriter
+    loom::target::function_version
   PUBLIC
 )
 
@@ -47,6 +48,7 @@ loom_cc_library(
     loom::rewrite::materialize
     loom::rewrite::remap
     loom::rewrite::rewriter
+    loom::target::function_version
   PUBLIC
 )
 
