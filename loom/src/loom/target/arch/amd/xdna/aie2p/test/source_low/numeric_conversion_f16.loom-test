@@ -1,0 +1,41 @@
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @scalar_extf_f16_f32(%input: f16) -> (f32) {
+  %converted = scalar.extf %input : f16 to f32
+  func.return %converted : f32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_extf_f16_f32(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %5 = mov.i32 32768
+  %6 = mov.i32 32767
+  %7 = mov.short 16
+  %8 = and %input, %5
+  %9 = lshl %8, %7
+  %10 = and %input, %6
+  %11 = clz %10
+  %12 = add %11, -21
+  %13 = mov.short 0
+  %14 = lt %12, %13
+  %15 = copy %14 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %16 = sel.nez %13, %12, %15
+  %17 = lshl %10, %16
+  %18 = mov.short 13
+  %19 = lshl %17, %18
+  %20 = mov.i32 31744
+  %21 = geu %10, %20
+  %22 = mov.short 112
+  %23 = mov.short 224
+  %24 = copy %21 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %25 = sel.nez %23, %22, %24
+  %26 = sub %25, %16
+  %27 = mov.short 23
+  %28 = lshl %26, %27
+  %29 = add.rr %19, %28
+  %30 = copy %10 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %31 = sel.nez %29, %13, %30
+  %converted = or %9, %31
+  return %converted
+}

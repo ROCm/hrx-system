@@ -565,81 +565,45 @@ def emit_f16_to_f32(
 
     sign_mask = program.constant("sign_mask", 0x8000)
     nonsign_mask = program.constant("nonsign_mask", 0x7FFF)
-    exponent_mask = program.constant("exponent_mask", 0x7C00)
-    fraction_mask = program.constant("fraction_mask", 0x03FF)
-    shift_13 = program.constant("shift_13", 13)
     shift_16 = program.constant("shift_16", 16)
-    shift_23 = program.constant("shift_23", 23)
-
     sign = program.binary("sign", "and.i32", input_value, sign_mask)
     sign = program.binary("positioned_sign", "lshl.i32", sign, shift_16)
-    nonsign = program.binary("nonsign", "and.i32", input_value, nonsign_mask)
-    exponent = program.binary("exponent", "and.i32", input_value, exponent_mask)
-    fraction = program.binary("fraction", "and.i32", input_value, fraction_mask)
+    payload = program.binary("payload", "and.i32", input_value, nonsign_mask)
+
+    # Subnormal payloads shift their leading bit into the implicit-bit position.
+    # Normal and special payloads already include exponent bits and stay put.
+    leading_zeros = program.unary("leading_zeros", "clz.i32", payload)
+    normalization_shift = program.add_immediate(
+        "normalization_shift", leading_zeros, -21
+    )
+    zero = program.constant("zero", 0)
+    shift_is_negative = program.binary(
+        "shift_is_negative", "cmp.slt.i32", normalization_shift, zero
+    )
+    normalization_shift = program.select(
+        "clamped_shift", zero, normalization_shift, shift_is_negative
+    )
+    normalized = program.binary("normalized", "lshl.i32", payload, normalization_shift)
+    shift_13 = program.constant("shift_13", 13)
     positioned_payload = program.binary(
-        "positioned_payload", "lshl.i32", nonsign, shift_13
+        "positioned_payload", "lshl.i32", normalized, shift_13
     )
-    normal_bias = program.constant("normal_bias", 0x38000000)
-    normal_unsigned = program.binary(
-        "normal_unsigned", "add.i32", positioned_payload, normal_bias
-    )
-    normal = program.binary("normal", "or.i32", sign, normal_unsigned)
 
-    special_bias = program.constant("special_bias", 0x70000000)
-    special_unsigned = program.binary(
-        "special_unsigned", "add.i32", positioned_payload, special_bias
+    # The shifted implicit bit contributes one exponent unit for subnormals.
+    # Infinities and NaNs need an additional bias while retaining their payload.
+    exponent_mask = program.constant("exponent_mask", 0x7C00)
+    is_special = program.binary("is_special", "cmp.uge.i32", payload, exponent_mask)
+    normal_bias = program.constant("normal_bias", 112)
+    special_bias = program.constant("special_bias", 224)
+    bias = program.select("bias", special_bias, normal_bias, is_special)
+    bias = program.binary("adjusted_bias", "sub.i32", bias, normalization_shift)
+    shift_23 = program.constant("shift_23", 23)
+    positioned_bias = program.binary("positioned_bias", "lshl.i32", bias, shift_23)
+    unsigned_result = program.binary(
+        "unsigned_result", "add.i32", positioned_payload, positioned_bias
     )
-    special = program.binary("special", "or.i32", sign, special_unsigned)
-
-    leading_zeros = program.unary("leading_zeros", "clz.i32", fraction)
-    normalization_bias = program.constant("normalization_bias", -21)
-    normalization_shift = program.binary(
-        "normalization_shift", "add.i32", leading_zeros, normalization_bias
-    )
-    normalized_fraction = program.binary(
-        "normalized_fraction", "lshl.i32", fraction, normalization_shift
-    )
-    normalized_payload = program.binary(
-        "normalized_payload", "and.i32", normalized_fraction, fraction_mask
-    )
-    normalized_payload = program.binary(
-        "positioned_normalized_payload",
-        "lshl.i32",
-        normalized_payload,
-        shift_13,
-    )
-    subnormal_exponent_bias = program.constant("subnormal_exponent_bias", 113)
-    subnormal_exponent = program.binary(
-        "subnormal_exponent",
-        "sub.i32",
-        subnormal_exponent_bias,
-        normalization_shift,
-    )
-    subnormal_exponent = program.binary(
-        "positioned_subnormal_exponent",
-        "lshl.i32",
-        subnormal_exponent,
-        shift_23,
-    )
-    subnormal_unsigned = program.binary(
-        "subnormal_unsigned",
-        "or.i32",
-        subnormal_exponent,
-        normalized_payload,
-    )
-    subnormal = program.binary("subnormal", "or.i32", sign, subnormal_unsigned)
-    zero_exponent = program.select("zero_exponent", subnormal, sign, fraction)
-
-    exponent_is_zero = program.unary("exponent_is_zero", "cmp.eqz.i32", exponent)
-    exponent_is_special = program.binary(
-        "exponent_is_special", "cmp.eq.i32", exponent, exponent_mask
-    )
-    nonzero_exponent = program.select(
-        "nonzero_exponent", special, normal, exponent_is_special
-    )
-    return program.select(
-        result_name, zero_exponent, nonzero_exponent, exponent_is_zero
-    )
+    unsigned_result = program.select("nonzero_result", unsigned_result, zero, payload)
+    return program.binary(result_name, "or.i32", sign, unsigned_result)
 
 
 def _f16_to_f32_rule() -> DescriptorRule:
@@ -648,7 +612,7 @@ def _f16_to_f32_rule() -> DescriptorRule:
 
     return DescriptorRule(
         source_op=scalar_conversion.scalar_extf,
-        descriptor=_descriptor("amd.xdna.aie2p.select.nonzero.i32"),
+        descriptor=program.emits[-1].descriptor,
         guards=(
             Guard.value_type("input", _F16),
             Guard.value_type("result", _F32),

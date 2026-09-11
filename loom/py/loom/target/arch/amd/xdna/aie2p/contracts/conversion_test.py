@@ -792,19 +792,11 @@ def test_integer_to_f32_programs_match_binary32_oracle() -> None:
         assert _evaluate(unsigned_i32, value) == _float_bits(float(value))
 
 
-def test_16bit_float_widening_programs_cover_complete_magnitudes() -> None:
+def test_16bit_float_widening_programs_match_exhaustive_oracles() -> None:
     f16 = _rule("exact_f16_to_binary32")
     bf16 = _rule("exact_bf16_to_binary32")
-    for bits in range(1 << 15):
-        assert _evaluate(f16, bits) == _reference_f16_to_f32(bits)
-    negative_payloads = {
-        0x8000 | (exponent << 10) | mantissa
-        for exponent in range(32)
-        for mantissa in (0, 1, 2, 0x1FF, 0x200, 0x3FE, 0x3FF)
-    }
-    for bits in negative_payloads:
-        assert _evaluate(f16, bits) == _reference_f16_to_f32(bits)
     for bits in range(1 << 16):
+        assert _evaluate(f16, bits) == _reference_f16_to_f32(bits)
         assert _evaluate(bf16, bits) == bits << 16
 
 
