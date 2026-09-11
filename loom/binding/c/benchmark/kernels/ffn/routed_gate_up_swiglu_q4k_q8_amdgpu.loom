@@ -1,9 +1,9 @@
 // Routed Q4_K gate/up SwiGLU compiler workload.
 //
-// One wave computes one routed output channel. Each unrolled iteration consumes
-// a 1024-element K stripe through paired Q4_K decode, Q8_1 dot products, and
-// gate/up accumulation. Varying input_size scales one production function body
-// without manufacturing unrelated operations.
+// One wave computes one routed output channel. Each loop iteration consumes a
+// 1024-element K stripe through paired Q4_K decode, Q8_1 dot products, and
+// gate/up accumulation. Varying input_size changes the loop bound while keeping
+// the compiled body bounded.
 
 config.decl @ffn_routed_gate_up.input_size : %value: index where [range(%value, 512, 32768), mul(%value, 512)]
 
@@ -192,7 +192,7 @@ template.def<@ffn_routed_gate_up.q4k_q8.body> device @ffn_routed_gate_up_swiglu_
   %q8_high_word_index = index.assume %q8_high_word_index0 [range(%q8_high_word_index0, 8, 28)] : index
   %q8_low_ds_index0 = index.mul %q8_low_inner_block, %c2 : index
   %q8_low_ds_index = index.assume %q8_low_ds_index0 [range(%q8_low_ds_index0, 0, 4)] : index
-  %gate_acc, %up_acc = scf.for %iteration = [%c0 to %iteration_count step %c1](%gate_iter = %c0_f32 : f32, %up_iter = %c0_f32 : f32) -> (f32, f32) unroll {
+  %gate_acc, %up_acc = scf.for %iteration = [%c0 to %iteration_count step %c1](%gate_iter = %c0_f32 : f32, %up_iter = %c0_f32 : f32) -> (f32, f32) {
     %iteration_q4_block = index.mul %iteration, %c4 : index
     %q4_block0 = index.add %iteration_q4_block, %lane_q4_block : index
     %valid_q4_block = index.cmp ult, %q4_block0, %q4_block_count : index
