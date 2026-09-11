@@ -985,3 +985,92 @@ func.def @preserves_effectful_forward_block(%cond: i1, %buffer: buffer, %offset:
 ^exit:
   func.return
 }
+
+// ====
+
+func.def @fuses_disjoint_paths(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^left, ^right
+^left:
+  test.use %a : i32
+  cfg.br ^left_tail(%a: i32)
+^left_tail(%x: i32):
+  %sum = test.addi %x, %b : i32
+  cfg.br ^join(%sum: i32)
+^right:
+  test.use %b : i32
+  cfg.br ^right_tail(%b: i32)
+^right_tail(%y: i32):
+  %double = test.addi %y, %b : i32
+  cfg.br ^join(%double: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @fuses_disjoint_paths(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^left, ^right
+^left:
+  test.use %a : i32
+  %sum = test.addi %a, %b : i32
+  cfg.br ^join(%sum: i32)
+^right:
+  test.use %b : i32
+  %double = test.addi %b, %b : i32
+  cfg.br ^join(%double: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @fuses_cross_pair_dependent_args(%cond: i1, %layout: encoding<layout>, %view: view<4xf32, %layout>) {
+  cfg.br ^setup(%layout: encoding<layout>, %view: view<4xf32, %layout>)
+^setup(%arg_layout: encoding<layout>, %arg_view: view<4xf32, %arg_layout>):
+  test.use %arg_view : view<4xf32, %arg_layout>
+  cfg.cond_br %cond, ^body, ^exit
+^body:
+  test.use %arg_view : view<4xf32, %arg_layout>
+  cfg.br ^consume(%arg_layout: encoding<layout>, %arg_view: view<4xf32, %arg_layout>)
+^consume(%local_layout: encoding<layout>, %local_view: view<4xf32, %local_layout>):
+  test.use %local_view : view<4xf32, %local_layout>
+  cfg.br ^exit
+^exit:
+  test.use %arg_view : view<4xf32, %arg_layout>
+  func.return
+}
+
+// ----
+func.def @fuses_cross_pair_dependent_args(%cond: i1, %layout: encoding<layout>, %view: view<4xf32, %layout>) {
+  test.use %view : view<4xf32, %layout>
+  cfg.cond_br %cond, ^body, ^exit
+^body:
+  test.use %view : view<4xf32, %layout>
+  test.use %view : view<4xf32, %layout>
+  cfg.br ^exit
+^exit:
+  test.use %view : view<4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @fuses_chain_in_reverse_block_order(%a: i32, %b: i32) -> (i32) {
+  cfg.br ^first(%a: i32)
+^third(%z: i32):
+  %result = test.addi %z, %b : i32
+  func.return %result : i32
+^second(%y: i32):
+  %second_sum = test.addi %y, %b : i32
+  cfg.br ^third(%second_sum: i32)
+^first(%x: i32):
+  %first_sum = test.addi %x, %b : i32
+  cfg.br ^second(%first_sum: i32)
+}
+
+// ----
+func.def @fuses_chain_in_reverse_block_order(%a: i32, %b: i32) -> (i32) {
+  %first_sum = test.addi %a, %b : i32
+  %second_sum = test.addi %first_sum, %b : i32
+  %result = test.addi %second_sum, %b : i32
+  func.return %result : i32
+}

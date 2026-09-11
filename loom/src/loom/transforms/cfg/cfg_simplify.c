@@ -1113,35 +1113,32 @@ static iree_status_t loom_cfg_simplify_forward_trivial_blocks(
 // Block fusion
 //===----------------------------------------------------------------------===//
 
-static bool loom_cfg_simplify_find_fusable_predecessor(
-    const loom_cfg_graph_t* graph, uint16_t block_index,
-    loom_op_t** out_predecessor_br, loom_value_slice_t* out_args) {
-  *out_predecessor_br = NULL;
-  *out_args = (loom_value_slice_t){0};
+static uint16_t loom_cfg_simplify_find_fusable_predecessor(
+    const loom_cfg_graph_t* graph, uint16_t block_index) {
   if (block_index == 0 ||
       !loom_cfg_graph_block_is_reachable(graph, block_index)) {
-    return false;
+    return LOOM_BLOCK_REGION_INDEX_INVALID;
   }
 
   const loom_block_t* block = graph->blocks[block_index].block;
   loom_cfg_block_index_span_t predecessors =
       loom_cfg_graph_predecessors(graph, block_index);
-  if (predecessors.count != 1) return false;
+  if (predecessors.count != 1) return LOOM_BLOCK_REGION_INDEX_INVALID;
 
   const loom_block_t* predecessor = graph->blocks[predecessors.values[0]].block;
-  if (!predecessor || predecessor == block) return false;
+  if (!predecessor || predecessor == block) {
+    return LOOM_BLOCK_REGION_INDEX_INVALID;
+  }
 
   loom_op_t* terminator = ((loom_block_t*)predecessor)->last_op;
   if (!terminator || !loom_cfg_br_isa(terminator) ||
       loom_cfg_br_dest(terminator) != block) {
-    return false;
+    return LOOM_BLOCK_REGION_INDEX_INVALID;
   }
 
   loom_value_slice_t args = loom_cfg_br_args(terminator);
-  if (args.count != block->arg_count) return false;
-  *out_predecessor_br = terminator;
-  *out_args = args;
-  return true;
+  if (args.count != block->arg_count) return LOOM_BLOCK_REGION_INDEX_INVALID;
+  return predecessors.values[0];
 }
 
 static iree_status_t loom_cfg_simplify_move_block_ops_before(
@@ -1174,39 +1171,90 @@ static iree_status_t loom_cfg_simplify_remove_cfg_block(
   return iree_ok_status();
 }
 
+typedef struct loom_cfg_simplify_block_fusion_t {
+  // Predecessor retained in the region after fusion.
+  uint16_t predecessor_index;
+  // Single-predecessor block moved into its predecessor and removed.
+  uint16_t block_index;
+} loom_cfg_simplify_block_fusion_t;
+
 static iree_status_t loom_cfg_simplify_fuse_single_predecessor_blocks(
     loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
     bool* out_changed) {
   if (graph->malformed) return iree_ok_status();
+  loom_cfg_simplify_block_fusion_t* fusions = NULL;
+  uint16_t fusion_count = 0;
+  bool* participating_blocks = NULL;
+  bool* remove_blocks = NULL;
+
+  // Validate disjoint pairs before changing the IR. Graph connectivity and
+  // dominance remain valid throughout selection; each block moves at most once
+  // during application, and chains are reconsidered in the next iteration.
   for (uint16_t block_index = 1; block_index < graph->block_count;
        ++block_index) {
+    if (participating_blocks && participating_blocks[block_index]) continue;
     loom_block_t* block = (loom_block_t*)graph->blocks[block_index].block;
     if (!block || !block->first_op) continue;
 
-    loom_op_t* predecessor_br = NULL;
-    loom_value_slice_t replacements = {0};
-    if (!loom_cfg_simplify_find_fusable_predecessor(
-            graph, block_index, &predecessor_br, &replacements)) {
+    uint16_t predecessor_index =
+        loom_cfg_simplify_find_fusable_predecessor(graph, block_index);
+    if (predecessor_index == LOOM_BLOCK_REGION_INDEX_INVALID ||
+        (participating_blocks && participating_blocks[predecessor_index])) {
       continue;
     }
 
+    loom_op_t* predecessor_br = graph->blocks[predecessor_index].block->last_op;
     bool valid_replacements = false;
     IREE_RETURN_IF_ERROR(loom_cfg_simplify_validate_block_arg_replacements(
-        state, block, predecessor_br, replacements, &valid_replacements));
+        state, block, predecessor_br, loom_cfg_br_args(predecessor_br),
+        &valid_replacements));
     if (!valid_replacements) continue;
 
-    IREE_RETURN_IF_ERROR(
-        loom_cfg_simplify_replace_block_args(state, block, replacements));
+    if (!fusions) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          state->analysis_arena, graph->block_count / 2, sizeof(*fusions),
+          (void**)&fusions));
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          state->analysis_arena, graph->block_count,
+          sizeof(*participating_blocks), (void**)&participating_blocks));
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          state->analysis_arena, graph->block_count, sizeof(*remove_blocks),
+          (void**)&remove_blocks));
+      memset(participating_blocks, 0,
+             graph->block_count * sizeof(*participating_blocks));
+      memset(remove_blocks, 0, graph->block_count * sizeof(*remove_blocks));
+    }
+    fusions[fusion_count++] = (loom_cfg_simplify_block_fusion_t){
+        .predecessor_index = predecessor_index,
+        .block_index = block_index,
+    };
+    participating_blocks[predecessor_index] = true;
+    participating_blocks[block_index] = true;
+    remove_blocks[block_index] = true;
+  }
+  if (fusion_count == 0) return iree_ok_status();
+
+  for (uint16_t fusion_index = 0; fusion_index < fusion_count; ++fusion_index) {
+    loom_cfg_simplify_block_fusion_t fusion = fusions[fusion_index];
+    loom_block_t* block =
+        (loom_block_t*)graph->blocks[fusion.block_index].block;
+    loom_op_t* predecessor_br =
+        graph->blocks[fusion.predecessor_index].block->last_op;
+    // Earlier substitutions may update this branch's operands, including
+    // references embedded in their types. Consume the live operand slice.
+    IREE_RETURN_IF_ERROR(loom_cfg_simplify_replace_block_args(
+        state, block, loom_cfg_br_args(predecessor_br)));
     IREE_RETURN_IF_ERROR(
         loom_cfg_simplify_move_block_ops_before(state, block, predecessor_br));
     IREE_RETURN_IF_ERROR(loom_rewriter_erase(state->rewriter, predecessor_br));
-    IREE_RETURN_IF_ERROR(
-        loom_cfg_simplify_remove_cfg_block(state, graph, block_index));
-    ++state->statistics->blocks_fused;
-    state->rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
-    *out_changed = true;
-    return iree_ok_status();
   }
+  uint16_t removed_count = 0;
+  IREE_RETURN_IF_ERROR(loom_region_remove_blocks(
+      state->module, (loom_region_t*)graph->region, remove_blocks,
+      (uint16_t)graph->block_count, &removed_count));
+  state->statistics->blocks_fused += removed_count;
+  state->rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
+  *out_changed = true;
   return iree_ok_status();
 }
 
