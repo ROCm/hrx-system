@@ -1011,8 +1011,13 @@ TEST_F(HipModuleLibraryExecutionTest,
 
   void* linked_binary = nullptr;
   size_t linked_binary_size = 0;
-  ASSERT_EQ(hipSuccess,
-            api_.link_complete(state, &linked_binary, &linked_binary_size));
+  const hipError_t link_result =
+      api_.link_complete(state, &linked_binary, &linked_binary_size);
+  if (link_result == hipErrorNotSupported) {
+    ASSERT_EQ(hipSuccess, api_.link_destroy(state));
+    GTEST_SKIP() << "HIP linker compiler support is unavailable";
+  }
+  ASSERT_EQ(hipSuccess, link_result);
   ASSERT_NE(nullptr, linked_binary);
   ASSERT_GT(linked_binary_size, 0u);
   hipModule_t module = nullptr;
