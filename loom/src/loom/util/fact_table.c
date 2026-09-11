@@ -12,6 +12,7 @@
 #include "iree/base/internal/math.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ir/structural_hash.h"
 #include "loom/ops/op_defs.h"
 #include "loom/util/cfg_graph.h"
 
@@ -268,67 +269,39 @@ loom_value_fact_table_append_touched_contextual_query_origin(
   return iree_ok_status();
 }
 
-static uint32_t loom_value_fact_hash_bytes(const void* data,
-                                           iree_host_size_t length,
-                                           uint32_t hash) {
-  const uint8_t* bytes = (const uint8_t*)data;
-  for (iree_host_size_t i = 0; i < length; ++i) {
-    hash ^= bytes[i];
-    hash *= 16777619u;
-  }
-  return hash;
-}
-
-static uint32_t loom_value_fact_hash_u32(uint32_t value, uint32_t hash) {
-  return loom_value_fact_hash_bytes(&value, sizeof(value), hash);
-}
-
-static uint32_t loom_value_fact_hash_host_size(iree_host_size_t value,
-                                               uint32_t hash) {
-  return loom_value_fact_hash_bytes(&value, sizeof(value), hash);
-}
-
-static uint32_t loom_value_fact_hash_i64(int64_t value, uint32_t hash) {
-  return loom_value_fact_hash_bytes(&value, sizeof(value), hash);
-}
-
-static uint32_t loom_value_fact_hash_u64(uint64_t value, uint32_t hash) {
-  return loom_value_fact_hash_bytes(&value, sizeof(value), hash);
-}
-
 static uint32_t loom_value_fact_hash_facts(loom_value_facts_t facts,
                                            uint32_t hash) {
-  return loom_value_fact_hash_bytes(&facts, sizeof(facts), hash);
+  return loom_structural_hash_mix_bytes(hash, &facts, sizeof(facts));
 }
 
 static uint32_t loom_value_fact_hash_address_layout(
     loom_value_fact_address_layout_t layout, uint32_t hash) {
-  hash = loom_value_fact_hash_u32((uint32_t)layout.kind, hash);
-  hash = loom_value_fact_hash_u32(layout.rank, hash);
+  hash = loom_structural_hash_mix_u32(hash, (uint32_t)layout.kind);
+  hash = loom_structural_hash_mix_u32(hash, layout.rank);
   if (layout.kind == LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED &&
       layout.rank > 0 && layout.strides) {
-    hash = loom_value_fact_hash_bytes(
-        layout.strides, layout.rank * sizeof(loom_value_facts_t), hash);
+    hash = loom_structural_hash_mix_bytes(
+        hash, layout.strides, layout.rank * sizeof(loom_value_facts_t));
   }
   return hash;
 }
 
 static uint32_t loom_value_fact_hash_encoded_operand_schema(
     loom_value_fact_encoded_operand_schema_t schema, uint32_t hash) {
-  return loom_value_fact_hash_bytes(&schema, sizeof(schema), hash);
+  return loom_structural_hash_mix_bytes(hash, &schema, sizeof(schema));
 }
 
 static uint32_t loom_value_fact_hash_storage_schema(
     loom_value_fact_storage_schema_t schema, uint32_t hash) {
-  hash = loom_value_fact_hash_u32(schema.static_spec_encoding_id, hash);
+  hash = loom_structural_hash_mix_u32(hash, schema.static_spec_encoding_id);
   return loom_value_fact_hash_encoded_operand_schema(schema.encoded_operand,
                                                      hash);
 }
 
 static uint32_t loom_value_fact_hash_encoding_summary(
     loom_value_fact_encoding_summary_t summary, uint32_t hash) {
-  hash = loom_value_fact_hash_u32((uint32_t)summary.role, hash);
-  hash = loom_value_fact_hash_u32(summary.static_spec_encoding_id, hash);
+  hash = loom_structural_hash_mix_u32(hash, (uint32_t)summary.role);
+  hash = loom_structural_hash_mix_u32(hash, summary.static_spec_encoding_id);
   hash = loom_value_fact_hash_address_layout(summary.address_layout, hash);
   return loom_value_fact_hash_storage_schema(summary.storage_schema, hash);
 }
@@ -336,31 +309,32 @@ static uint32_t loom_value_fact_hash_encoding_summary(
 static uint32_t loom_value_fact_hash_buffer_reference(
     loom_value_fact_buffer_reference_t reference, uint32_t hash) {
   hash = loom_value_fact_hash_facts(reference.maximum_byte_extent, hash);
-  hash = loom_value_fact_hash_u64(reference.minimum_alignment, hash);
-  hash = loom_value_fact_hash_u32((uint32_t)reference.memory_space, hash);
-  hash = loom_value_fact_hash_u32(reference.root_value_id, hash);
-  hash = loom_value_fact_hash_u32(reference.alias_scope_id, hash);
-  return loom_value_fact_hash_u32(reference.nullability, hash);
+  hash = loom_structural_hash_mix_u64(hash, reference.minimum_alignment);
+  hash = loom_structural_hash_mix_u32(hash, (uint32_t)reference.memory_space);
+  hash = loom_structural_hash_mix_u32(hash, reference.root_value_id);
+  hash = loom_structural_hash_mix_u32(hash, reference.alias_scope_id);
+  return loom_structural_hash_mix_u32(hash, reference.nullability);
 }
 
 static uint32_t loom_value_fact_hash_view_reference(
     loom_value_fact_view_reference_t reference, uint32_t hash) {
   hash = loom_value_fact_hash_facts(reference.base_byte_offset, hash);
   hash = loom_value_fact_hash_facts(reference.footprint_byte_length, hash);
-  hash = loom_value_fact_hash_u64(reference.minimum_alignment, hash);
-  hash = loom_value_fact_hash_u64(reference.root_minimum_alignment, hash);
-  hash = loom_value_fact_hash_i64(reference.static_element_byte_count, hash);
-  hash = loom_value_fact_hash_u32((uint32_t)reference.memory_space, hash);
-  hash = loom_value_fact_hash_u32(reference.root_value_id, hash);
-  hash = loom_value_fact_hash_u32(reference.alias_scope_id, hash);
-  return loom_value_fact_hash_u32(reference.nullability, hash);
+  hash = loom_structural_hash_mix_u64(hash, reference.minimum_alignment);
+  hash = loom_structural_hash_mix_u64(hash, reference.root_minimum_alignment);
+  hash =
+      loom_structural_hash_mix_u64(hash, reference.static_element_byte_count);
+  hash = loom_structural_hash_mix_u32(hash, (uint32_t)reference.memory_space);
+  hash = loom_structural_hash_mix_u32(hash, reference.root_value_id);
+  hash = loom_structural_hash_mix_u32(hash, reference.alias_scope_id);
+  return loom_structural_hash_mix_u32(hash, reference.nullability);
 }
 
 static uint32_t loom_value_fact_hash_raw_payload(
     loom_value_fact_raw_payload_t payload, uint32_t hash) {
-  hash = loom_value_fact_hash_u32(payload.tag, hash);
-  hash = loom_value_fact_hash_host_size(payload.length, hash);
-  return loom_value_fact_hash_bytes(payload.data, payload.length, hash);
+  hash = loom_structural_hash_mix_u32(hash, payload.tag);
+  hash = loom_structural_hash_mix_u64(hash, payload.length);
+  return loom_structural_hash_mix_bytes(hash, payload.data, payload.length);
 }
 
 static bool loom_value_fact_buffer_reference_equal(
@@ -480,28 +454,26 @@ static bool loom_value_fact_encoding_summary_equal(
 
 static uint32_t loom_value_fact_extension_hash(
     const loom_value_fact_extension_entry_t* entry) {
-  uint32_t hash = 2166136261u;
-  hash = loom_value_fact_hash_u32((uint32_t)entry->kind, hash);
+  uint32_t hash = loom_structural_hash_initialize();
+  hash = loom_structural_hash_mix_u32(hash, (uint32_t)entry->kind);
   switch (entry->kind) {
     case LOOM_VALUE_FACT_EXTENSION_UNIFORM_ELEMENT:
-      return loom_value_fact_hash_bytes(&entry->payload.uniform_element,
-                                        sizeof(entry->payload.uniform_element),
-                                        hash);
+      return loom_structural_hash_mix_bytes(
+          hash, &entry->payload.uniform_element,
+          sizeof(entry->payload.uniform_element));
     case LOOM_VALUE_FACT_EXTENSION_SMALL_STATIC_LANES:
-      hash = loom_value_fact_hash_host_size(
-          entry->payload.small_static_lanes.count, hash);
-      return loom_value_fact_hash_bytes(
-          entry->payload.small_static_lanes.lanes,
-          entry->payload.small_static_lanes.count * sizeof(loom_value_facts_t),
-          hash);
+      hash = loom_structural_hash_mix_u64(
+          hash, entry->payload.small_static_lanes.count);
+      return loom_structural_hash_mix_bytes(
+          hash, entry->payload.small_static_lanes.lanes,
+          entry->payload.small_static_lanes.count * sizeof(loom_value_facts_t));
     case LOOM_VALUE_FACT_EXTENSION_VECTOR_IOTA:
-      return loom_value_fact_hash_bytes(&entry->payload.vector_iota,
-                                        sizeof(entry->payload.vector_iota),
-                                        hash);
+      return loom_structural_hash_mix_bytes(hash, &entry->payload.vector_iota,
+                                            sizeof(entry->payload.vector_iota));
     case LOOM_VALUE_FACT_EXTENSION_VECTOR_PREFIX_MASK:
-      return loom_value_fact_hash_bytes(
-          &entry->payload.vector_prefix_mask,
-          sizeof(entry->payload.vector_prefix_mask), hash);
+      return loom_structural_hash_mix_bytes(
+          hash, &entry->payload.vector_prefix_mask,
+          sizeof(entry->payload.vector_prefix_mask));
     case LOOM_VALUE_FACT_EXTENSION_ENCODING_SUMMARY:
       return loom_value_fact_hash_encoding_summary(
           entry->payload.encoding_summary, hash);
@@ -688,7 +660,8 @@ static iree_status_t loom_value_fact_table_intern_extension_impl(
     const loom_value_fact_extension_entry_t* candidate,
     bool materialize_payload, loom_value_fact_extension_id_t* out_id) {
   loom_value_fact_extension_entry_t entry = *candidate;
-  entry.content_hash = loom_value_fact_extension_hash(&entry);
+  entry.content_hash =
+      loom_structural_hash_finalize(loom_value_fact_extension_hash(&entry));
   entry.next_id = LOOM_VALUE_FACT_EXTENSION_ID_NONE;
 
   IREE_RETURN_IF_ERROR(loom_value_fact_table_ensure_extension_buckets(
