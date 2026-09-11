@@ -469,12 +469,14 @@ TEST_F(LowAllocationSearchTest, ExplicitCandidateOrderAndSoftPreference) {
   loom_module_t* module = AllocateModule();
   const loom_value_id_t candidate_value = DefineValue(module);
   const loom_value_id_t counterpart_value = DefineValue(module);
-  const loom_low_reg_class_t reg_class =
+  loom_low_reg_class_t reg_class =
       RegClass(4, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
                       LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS);
   const loom_low_physical_register_t registers[] = {
       {0, 0, 1, 0}, {0, 1, 1, 0}, {0, 2, 1, 0}, {0, 3, 1, 0}};
   const uint16_t atomic_units[] = {0, 1, 2, 3};
+  reg_class.candidate_lookup.register_count = 4;
+  const uint16_t candidate_ordinals[] = {2, 3, 0, 1};
   const uint16_t candidates[] = {2, 3, 0, 1};
   uint16_t allocation_ordinals[] = {0, 1, 2, 3};
   loom_low_descriptor_set_t descriptor_set = DescriptorSet(&reg_class, 5);
@@ -483,6 +485,9 @@ TEST_F(LowAllocationSearchTest, ExplicitCandidateOrderAndSoftPreference) {
   descriptor_set.physical_register_atomic_units = atomic_units;
   descriptor_set.physical_register_atomic_unit_count =
       IREE_ARRAYSIZE(atomic_units);
+  descriptor_set.physical_register_candidate_ordinals = candidate_ordinals;
+  descriptor_set.physical_register_candidate_ordinal_count =
+      IREE_ARRAYSIZE(candidate_ordinals);
   descriptor_set.physical_register_candidate_ids = candidates;
   descriptor_set.physical_register_allocation_ordinals = allocation_ordinals;
   descriptor_set.physical_register_candidate_count = IREE_ARRAYSIZE(candidates);

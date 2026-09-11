@@ -104,6 +104,16 @@ class GeneratedDescriptorSetFamily:
 
 
 @dataclass(slots=True)
+class CompiledPhysicalRegisterCandidateLookup:
+    # First row in the packed reverse candidate table.
+    ordinal_start: int
+    # Physical-register ID represented by the first row.
+    register_base: int
+    # Number of physical-register IDs covered by the range.
+    register_count: int
+
+
+@dataclass(slots=True)
 class CompiledDescriptorSet:
     spec: DescriptorSet
     # Selected, validated descriptors before compact runtime projections.
@@ -117,6 +127,10 @@ class CompiledDescriptorSet:
     # Class-local semantic ordinals in aggregate-preserving search order.
     physical_register_allocation_ordinals: list[int]
     physical_register_candidate_starts: list[int]
+    # Semantic ordinals indexed by physical ID, with 0xFFFF for nonmembers.
+    physical_register_candidate_ordinals: list[int]
+    # Reverse candidate ranges paired positionally with register classes.
+    physical_register_candidate_lookups: list[CompiledPhysicalRegisterCandidateLookup]
     physical_register_atomic_units: list[int]
     physical_register_atomic_unit_starts: list[int]
     physical_register_views: list[CompiledPhysicalRegisterView]

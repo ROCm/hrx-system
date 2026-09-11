@@ -22,6 +22,7 @@ from loom.gen.target.low.compiled import (
     CompiledNativeAsmValue,
     CompiledOperandForm,
     CompiledOperandFormMatch,
+    CompiledPhysicalRegisterCandidateLookup,
     CompiledPhysicalRegisterView,
     CompiledRegisterPackingResource,
     CompiledRegisterPackingResourceMember,
@@ -1401,14 +1402,35 @@ def compile_descriptor_set(
 
     physical_register_candidate_ids: list[int] = []
     physical_register_candidate_starts: list[int] = []
+    physical_register_candidate_ordinals: list[int] = []
+    physical_register_candidate_lookups: list[CompiledPhysicalRegisterCandidateLookup] = []
     physical_register_allocation_ordinals: list[int] = []
     physical_register_packing_ranks: dict[str, dict[str, int]] = {}
     for reg_class in reg_classes:
         physical_register_candidate_starts.append(len(physical_register_candidate_ids))
-        physical_register_candidate_ids.extend(physical_register_ids[name] for name in reg_class.physical_registers)
+        candidate_ids = [physical_register_ids[name] for name in reg_class.physical_registers]
+        physical_register_candidate_ids.extend(candidate_ids)
+        register_base = min(candidate_ids, default=0)
+        register_count = max(candidate_ids, default=-1) - register_base + 1
+        physical_register_candidate_lookups.append(
+            CompiledPhysicalRegisterCandidateLookup(
+                ordinal_start=len(physical_register_candidate_ordinals),
+                register_base=register_base,
+                register_count=register_count,
+            )
+        )
+        candidate_ordinals = [0xFFFF] * register_count
+        for ordinal, physical_register_id in enumerate(candidate_ids):
+            candidate_ordinals[physical_register_id - register_base] = ordinal
+        physical_register_candidate_ordinals.extend(candidate_ordinals)
         order = _physical_register_packing_order(reg_class, spec.physical_register_views)
         physical_register_allocation_ordinals.extend(order)
         physical_register_packing_ranks[reg_class.name] = {reg_class.physical_registers[ordinal]: rank for rank, ordinal in enumerate(order)}
+
+    validation.validate_u32(
+        len(physical_register_candidate_ordinals),
+        f"descriptor set '{spec.key}' reverse candidate count",
+    )
 
     physical_register_views: list[CompiledPhysicalRegisterView] = []
     physical_register_view_unit_candidate_ordinals: list[int] = []
@@ -1662,6 +1684,8 @@ def compile_descriptor_set(
         physical_register_candidate_ids=physical_register_candidate_ids,
         physical_register_allocation_ordinals=physical_register_allocation_ordinals,
         physical_register_candidate_starts=physical_register_candidate_starts,
+        physical_register_candidate_ordinals=physical_register_candidate_ordinals,
+        physical_register_candidate_lookups=physical_register_candidate_lookups,
         physical_register_atomic_units=physical_register_atomic_units,
         physical_register_atomic_unit_starts=physical_register_atomic_unit_starts,
         physical_register_views=physical_register_views,

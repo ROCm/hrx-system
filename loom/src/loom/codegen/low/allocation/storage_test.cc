@@ -205,7 +205,7 @@ TEST(LowAllocationStorageTest, SharesRegisterClassAliasSets) {
 }
 
 TEST(LowAllocationStorageTest, MatchesExplicitRegisterAtomicStorage) {
-  const loom_low_reg_class_t reg_classes[2] = {
+  loom_low_reg_class_t reg_classes[2] = {
       RegClass(/*alias_set_id=*/0, /*allocatable_count=*/2,
                LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
                    LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS),
@@ -234,12 +234,20 @@ TEST(LowAllocationStorageTest, MatchesExplicitRegisterAtomicStorage) {
           /*.reserved=*/0,
       },
   };
+  reg_classes[0].candidate_lookup.register_count = 3;
+  reg_classes[1].candidate_lookup.ordinal_start = 3;
+  reg_classes[1].candidate_lookup.register_base = 1;
+  reg_classes[1].candidate_lookup.register_count = 1;
+  const uint16_t candidate_ordinals[] = {0, UINT16_MAX, 1, 0};
   const uint16_t candidates[] = {0, 2, 1};
   const uint16_t allocation_ordinals[] = {0, 1, 0};
   loom_low_descriptor_set_t descriptor_set =
       DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
   descriptor_set.physical_registers = physical_registers;
   descriptor_set.physical_register_count = IREE_ARRAYSIZE(physical_registers);
+  descriptor_set.physical_register_candidate_ordinals = candidate_ordinals;
+  descriptor_set.physical_register_candidate_ordinal_count =
+      IREE_ARRAYSIZE(candidate_ordinals);
   descriptor_set.physical_register_candidate_ids = candidates;
   descriptor_set.physical_register_allocation_ordinals = allocation_ordinals;
   descriptor_set.physical_register_candidate_count = IREE_ARRAYSIZE(candidates);

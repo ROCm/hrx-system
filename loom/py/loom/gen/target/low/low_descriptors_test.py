@@ -631,6 +631,10 @@ def test_compiler_emits_explicit_physical_register_candidates() -> None:
     candidate_start = compiled.physical_register_candidate_starts[physical_class_index]
     candidate_count = len(compiled.reg_classes[physical_class_index].physical_registers)
     assert compiled.physical_register_candidate_ids[candidate_start : candidate_start + candidate_count] == [2, 0]
+    lookup = compiled.physical_register_candidate_lookups[physical_class_index]
+    assert lookup.register_base == 0
+    assert lookup.register_count == 3
+    assert compiled.physical_register_candidate_ordinals[lookup.ordinal_start : lookup.ordinal_start + lookup.register_count] == [1, 0xFFFF, 0]
     assert compiled.physical_register_atomic_units == [
         0,
         1,
@@ -644,10 +648,10 @@ def test_compiler_emits_explicit_physical_register_candidates() -> None:
         5,
     ]
     assert ".allocatable_count = 2," in generated.source
-    physical_class_source = generated.source.split(f".name_string_offset = {compiled.string_pool.ref('reg_test.phys')},", 1)[1].split("}", 1)[0]
+    physical_class_source = generated.source.split(f".name_string_offset = {compiled.string_pool.ref('reg_test.phys')},", 1)[1].split("\n  }", 1)[0]
     # The pair occupies four atoms but is not a candidate of this class.
     assert ".physical_atomic_unit_count = 2," in physical_class_source
-    linear_class_source = generated.source.split(f".name_string_offset = {compiled.string_pool.ref('reg_test.i32')},", 1)[1].split("}", 1)[0]
+    linear_class_source = generated.source.split(f".name_string_offset = {compiled.string_pool.ref('reg_test.i32')},", 1)[1].split("\n  }", 1)[0]
     assert ".physical_atomic_unit_count = 0," in linear_class_source
     assert "kTestLowCorePhysicalRegisterCandidates" in generated.source
     assert "kTestLowCorePhysicalRegisterAtomicUnits" in generated.source

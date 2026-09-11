@@ -546,6 +546,16 @@ typedef struct loom_low_reg_class_t {
   // classes use |allocatable_count| rows beginning here; linear classes leave
   // this zero.
   uint32_t physical_register_candidate_start;
+  // Direct physical-register ID to semantic candidate-ordinal lookup. Linear
+  // classes have an empty range; holes in explicit classes contain UINT16_MAX.
+  struct {
+    // First row in the descriptor set's packed reverse candidate table.
+    uint32_t ordinal_start;
+    // Physical-register ID represented by the first row.
+    uint16_t register_base;
+    // Number of physical-register IDs covered by this range.
+    uint16_t register_count;
+  } candidate_lookup;
   // Dense one-based alias-set identifier shared by overlapping register
   // classes, or zero when this class has a disjoint storage namespace.
   uint16_t alias_set_id;
@@ -1377,6 +1387,11 @@ typedef struct loom_low_descriptor_set_t {
   const uint16_t* physical_register_allocation_ordinals;
   // Number of packed physical-register candidate IDs owned by this set.
   uint32_t physical_register_candidate_count;
+  // Packed reverse candidate ordinals indexed by register-class lookup ranges.
+  // UINT16_MAX marks a physical register that is not a candidate in the class.
+  const uint16_t* physical_register_candidate_ordinals;
+  // Number of rows in the packed reverse candidate table.
+  uint32_t physical_register_candidate_ordinal_count;
   // Packed atomic storage-unit IDs referenced by physical-register rows.
   const uint16_t* physical_register_atomic_units;
   // Number of packed atomic storage-unit IDs owned by this set.

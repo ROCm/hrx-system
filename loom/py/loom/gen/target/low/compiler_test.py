@@ -29,6 +29,11 @@ def test_physical_packing_order_preserves_pairs_and_semantic_ordinals(candidate_
     start = compiled.physical_register_candidate_starts[class_id]
     semantic_ids = compiled.physical_register_candidate_ids[start : start + 4]
     assert tuple(compiled.physical_registers[index].name for index in semantic_ids) == candidate_names
+    lookup = compiled.physical_register_candidate_lookups[class_id]
+    reverse = compiled.physical_register_candidate_ordinals[lookup.ordinal_start : lookup.ordinal_start + lookup.register_count]
+    for physical_id in range(lookup.register_base, lookup.register_base + lookup.register_count):
+        expected = semantic_ids.index(physical_id) if physical_id in semantic_ids else 0xFFFF
+        assert reverse[physical_id - lookup.register_base] == expected
     allocation_order = compiled.physical_register_allocation_ordinals[start : start + 4]
     assert sorted(allocation_order) == list(range(4))
     packed_names = [candidate_names[ordinal] for ordinal in allocation_order]
@@ -56,6 +61,9 @@ def test_physical_packing_order_is_independent_of_view_declaration_order() -> No
         count = len(reg_class.physical_registers)
         order = compiled.physical_register_allocation_ordinals[start : start + count]
         assert sorted(order) == list(range(count))
+        lookup = compiled.physical_register_candidate_lookups[class_id]
+        if not count:
+            assert lookup.register_count == 0
         if reg_class.name == "test.packed.narrow":
             # No aggregate spans this class's two candidates. Its source
             # preference order is already the packing order.

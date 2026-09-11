@@ -269,6 +269,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
           /*.reserved=*/0,
       },
   };
+  reg_class.candidate_lookup.register_count = 2;
+  const uint16_t candidate_ordinals[] = {1, 0};
   const uint16_t physical_register_candidates[] = {1, 0};
   const uint16_t physical_register_atomic_units[] = {0, 1, 2, 3, 0, 1,
                                                      2, 3, 0, 1, 2, 3};
@@ -297,6 +299,9 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   descriptor_set.reg_class_count = 1;
   descriptor_set.physical_registers = physical_registers;
   descriptor_set.physical_register_count = IREE_ARRAYSIZE(physical_registers);
+  descriptor_set.physical_register_candidate_ordinals = candidate_ordinals;
+  descriptor_set.physical_register_candidate_ordinal_count =
+      IREE_ARRAYSIZE(candidate_ordinals);
   descriptor_set.physical_register_candidate_ids = physical_register_candidates;
   descriptor_set.physical_register_allocation_ordinals = allocation_ordinals;
   descriptor_set.physical_register_candidate_count =

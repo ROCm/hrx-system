@@ -166,6 +166,11 @@ TEST(LowAllocationUnitLocationTest, WideScratchOverlapsEveryNarrowUnit) {
   reg_classes[0].allocatable_count = 2;
   reg_classes[1].allocatable_count = 1;
   reg_classes[1].physical_register_candidate_start = 2;
+  reg_classes[0].candidate_lookup.register_count = 2;
+  reg_classes[1].candidate_lookup.ordinal_start = 2;
+  reg_classes[1].candidate_lookup.register_base = 2;
+  reg_classes[1].candidate_lookup.register_count = 1;
+  const uint16_t candidate_ordinals[] = {0, 1, 0};
   const uint16_t candidates[] = {0, 1, 2};
   const uint16_t allocation_ordinals[] = {0, 1, 0};
   const uint16_t atomic_units[] = {0, 1, 0, 1};
@@ -186,6 +191,9 @@ TEST(LowAllocationUnitLocationTest, WideScratchOverlapsEveryNarrowUnit) {
       DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
   descriptor_set.physical_registers = registers;
   descriptor_set.physical_register_count = IREE_ARRAYSIZE(registers);
+  descriptor_set.physical_register_candidate_ordinals = candidate_ordinals;
+  descriptor_set.physical_register_candidate_ordinal_count =
+      IREE_ARRAYSIZE(candidate_ordinals);
   descriptor_set.physical_register_candidate_ids = candidates;
   descriptor_set.physical_register_candidate_count = IREE_ARRAYSIZE(candidates);
   descriptor_set.physical_register_allocation_ordinals = allocation_ordinals;

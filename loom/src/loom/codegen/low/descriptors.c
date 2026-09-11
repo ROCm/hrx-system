@@ -95,20 +95,21 @@ bool loom_low_descriptor_set_find_physical_register_candidate(
   }
   const loom_low_reg_class_t* reg_class =
       &descriptor_set->reg_classes[reg_class_id];
-  if (!loom_low_reg_class_uses_explicit_physical_registers(reg_class) ||
-      physical_register_id > UINT16_MAX) {
+  const uint32_t register_offset =
+      physical_register_id - reg_class->candidate_lookup.register_base;
+  if (register_offset >= reg_class->candidate_lookup.register_count) {
     return false;
   }
-  for (uint16_t i = 0; i < reg_class->allocatable_count; ++i) {
-    if (loom_low_descriptor_set_physical_register_candidate(
-            descriptor_set, reg_class_id, i) == physical_register_id) {
-      if (out_candidate_ordinal) {
-        *out_candidate_ordinal = i;
-      }
-      return true;
-    }
+  const uint16_t candidate_ordinal =
+      descriptor_set->physical_register_candidate_ordinals
+          [reg_class->candidate_lookup.ordinal_start + register_offset];
+  if (candidate_ordinal == UINT16_MAX) {
+    return false;
   }
-  return false;
+  if (out_candidate_ordinal) {
+    *out_candidate_ordinal = candidate_ordinal;
+  }
+  return true;
 }
 
 const uint16_t* loom_low_descriptor_set_physical_register_atomic_units(

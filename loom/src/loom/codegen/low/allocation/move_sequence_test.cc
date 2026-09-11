@@ -38,6 +38,7 @@ const loom_low_descriptor_set_t* AliasDescriptorSet() {
           /*.fixed_location_base=*/{},
           /*.fixed_location_count=*/{},
           /*.physical_register_candidate_start=*/{},
+          /*.candidate_lookup=*/{},
           /*.alias_set_id=*/1,
       },
       {
@@ -49,6 +50,7 @@ const loom_low_descriptor_set_t* AliasDescriptorSet() {
           /*.fixed_location_base=*/{},
           /*.fixed_location_count=*/{},
           /*.physical_register_candidate_start=*/{},
+          /*.candidate_lookup=*/{},
           /*.alias_set_id=*/1,
       },
       {},

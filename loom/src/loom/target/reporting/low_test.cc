@@ -112,6 +112,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.fixed_location_base=*/{},
           /*.fixed_location_count=*/{},
           /*.physical_register_candidate_start=*/{},
+          /*.candidate_lookup=*/{},
           /*.alias_set_id=*/{},
           /*.spill_class_id=*/LOOM_LOW_REG_CLASS_NONE,
           /*.full_register_part_mask=*/1,

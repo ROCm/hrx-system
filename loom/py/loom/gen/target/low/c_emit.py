@@ -404,6 +404,11 @@ def emit_source_for_views(
                 f".fixed_location_base = {reg_class.fixed_location_base},",
                 f".fixed_location_count = {reg_class.fixed_location_count},",
                 ".physical_register_candidate_start = " + str(compiled.physical_register_candidate_starts[i] if reg_class.physical_registers else 0) + ",",
+                ".candidate_lookup = {",
+                f"  .ordinal_start = {compiled.physical_register_candidate_lookups[i].ordinal_start},",
+                f"  .register_base = {compiled.physical_register_candidate_lookups[i].register_base},",
+                f"  .register_count = {compiled.physical_register_candidate_lookups[i].register_count},",
+                "},",
                 f".alias_set_id = {reg_class.alias_set_id},",
                 ".spill_class_id = " + ("LOOM_LOW_REG_CLASS_NONE" if reg_class.spill_class is None else str(compiled.reg_class_ids[reg_class.spill_class])) + ",",
                 f".full_register_part_mask = {c_spelling.hex_u32_literal(reg_class.full_register_part_mask)},",
@@ -463,6 +468,12 @@ def emit_source_for_views(
         "uint16_t",
         f"k{spec.c_table_prefix}PhysicalRegisterCandidates",
         [str(value) for value in compiled.physical_register_candidate_ids],
+    )
+    c_arrays.append_value_array(
+        lines,
+        "uint16_t",
+        f"k{spec.c_table_prefix}PhysicalRegisterCandidateOrdinals",
+        [str(value) for value in compiled.physical_register_candidate_ordinals],
     )
     c_arrays.append_value_array(
         lines,
@@ -1022,6 +1033,7 @@ def emit_source_for_views(
         "reg_classes": "reg_class_count",
         "physical_registers": "physical_register_count",
         "physical_register_candidate_ids": "physical_register_candidate_count",
+        "physical_register_candidate_ordinals": "physical_register_candidate_ordinal_count",
         "physical_register_atomic_units": "physical_register_atomic_unit_count",
         "physical_register_views": "physical_register_view_count",
         "physical_register_view_unit_candidate_ordinals": "physical_register_view_unit_candidate_ordinal_count",
@@ -1126,6 +1138,12 @@ def emit_source_for_views(
         )
         if compiled.physical_register_allocation_ordinals:
             view_lines.append(f"    .physical_register_allocation_ordinals = k{spec.c_table_prefix}PhysicalRegisterAllocationOrdinals,")
+        append_optional_table(
+            "physical_register_candidate_ordinals",
+            "PhysicalRegisterCandidateOrdinals",
+            compiled.physical_register_candidate_ordinals,
+            view_lines,
+        )
         append_optional_table(
             "physical_register_atomic_units",
             "PhysicalRegisterAtomicUnits",
