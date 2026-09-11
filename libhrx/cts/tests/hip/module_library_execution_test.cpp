@@ -36,6 +36,7 @@ T ResolveHipSymbol(void* library, const char* name) {
 }
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
+using HipHalDeinitFn = hipError_t (*)(void);
 using HipGetDeviceFn = hipError_t (*)(int* device);
 using HipSetDeviceFn = hipError_t (*)(int device);
 using HipGetDeviceCountFn = hipError_t (*)(int* device_count);
@@ -178,6 +179,7 @@ struct HipApi {
 #define HRX_RESOLVE_HIP_API(field, type, symbol) \
   field = ResolveHipSymbol<type>(library, symbol)
     HRX_RESOLVE_HIP_API(init, HipInitFn, "hipInit");
+    HRX_RESOLVE_HIP_API(deinit, HipHalDeinitFn, "hipHALDeinit");
     HRX_RESOLVE_HIP_API(get_device, HipGetDeviceFn, "hipGetDevice");
     HRX_RESOLVE_HIP_API(set_device, HipSetDeviceFn, "hipSetDevice");
     HRX_RESOLVE_HIP_API(get_device_count, HipGetDeviceCountFn,
@@ -266,7 +268,7 @@ struct HipApi {
     HRX_RESOLVE_HIP_API(register_managed_variable, HipRegisterManagedVarFn,
                         "__hipRegisterManagedVar");
 #undef HRX_RESOLVE_HIP_API
-    return init && get_device && set_device && get_device_count &&
+    return init && deinit && get_device && set_device && get_device_count &&
            get_device_properties && device_synchronize && malloc && free &&
            memcpy && stream_create && stream_destroy && stream_synchronize &&
            event_create && event_destroy && stream_begin_capture &&
@@ -287,6 +289,7 @@ struct HipApi {
   }
 
   HipInitFn init = nullptr;
+  HipHalDeinitFn deinit = nullptr;
   HipGetDeviceFn get_device = nullptr;
   HipSetDeviceFn set_device = nullptr;
   HipGetDeviceCountFn get_device_count = nullptr;
@@ -367,7 +370,11 @@ class HipModuleLibraryExecutionTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    if (library_) dlclose(library_);
+    if (!library_) return;
+    if (api_.deinit) {
+      EXPECT_EQ(hipSuccess, api_.deinit());
+    }
+    dlclose(library_);
   }
 
   void* library_ = nullptr;

@@ -5,7 +5,11 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/amdgpu:binary.bzl", "iree_amdgpu_binary_variants_embed_data")
-load("//build_tools/sanitizer:suppressions.bzl", "hsa_suppressions")
+load(
+    "//build_tools/sanitizer:suppressions.bzl",
+    "hsa_suppressions",
+    "rocm_suppressions",
+)
 load(
     "//libhrx/build_tools/bazel:cc.bzl",
     "hrx_cc_library",
@@ -260,9 +264,13 @@ hrx_cc_test(
     copts = ["-Wno-attributes"],
     data = ["//libhrx/src/binding/hip:amdhip64"],
     env = {
+        # The linker keeps COMGR's process-global LLVM registrations resident
+        # because they cannot be reconstructed after unloading. ASAN continues
+        # to instrument accesses; only its process-exit leak scan is disabled.
+        "ASAN_OPTIONS": "detect_leaks=0",
         "HRX_TEST_LIBAMDHIP64": "$(location //libhrx/src/binding/hip:amdhip64)",
     },
-    sanitizer_suppressions = hsa_suppressions,
+    sanitizer_suppressions = rocm_suppressions,
     tags = AMD_GPU_CTS_TAGS,
     target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [

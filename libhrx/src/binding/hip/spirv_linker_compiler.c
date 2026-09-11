@@ -141,7 +141,10 @@ static iree_status_t iree_hip_comgr_load(iree_allocator_t host_allocator,
   };
   iree_status_t status = iree_dynamic_library_load_from_files(
       IREE_ARRAYSIZE(kLibraryNames), kLibraryNames,
-      IREE_DYNAMIC_LIBRARY_FLAG_NONE, host_allocator, &out_comgr->library);
+      // COMGR loads compiler plugins whose process-wide LLVM registrations
+      // cannot be reconstructed safely after the module is unloaded. Keep the
+      // module resident so independent HIP link states can compile in turn.
+      IREE_DYNAMIC_LIBRARY_FLAG_NODELETE, host_allocator, &out_comgr->library);
   if (iree_status_is_not_found(status)) {
     iree_status_ignore(status);
     return iree_make_status(IREE_STATUS_UNAVAILABLE,

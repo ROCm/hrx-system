@@ -1,3 +1,7 @@
 # ROCr is not TSAN-instrumented, so interceptor accesses originating within it
 # cannot be analyzed against its internal synchronization.
 called_from_lib:libhsa-runtime64.so
+
+# ROCr owns worker threads for the lifetime of an initialized HSA process and
+# does not expose their join handles to clients.
+thread:libhsa-runtime64.so

@@ -426,13 +426,14 @@ iree_cc_test(
     libhrx::src::binding::hip::launch_params
     libhrx_defs
   ENV
+    "ASAN_OPTIONS=detect_leaks=0"
     "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
   SANITIZER_SUPPRESSIONS
     lsan
-    hsa
+    rocm
 )
 endif()
 
