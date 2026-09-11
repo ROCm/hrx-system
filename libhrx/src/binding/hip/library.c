@@ -92,6 +92,7 @@ static void iree_hip_library_destroy(hipLibrary_t library) {
 }
 
 static void iree_hip_library_retain(hipLibrary_t library) {
+  if (!library) return;
   iree_atomic_ref_count_inc(&library->ref_count);
 }
 

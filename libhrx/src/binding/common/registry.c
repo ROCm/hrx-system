@@ -17,7 +17,7 @@ static void iree_hal_streaming_context_symbol_map_expunge_module(
     iree_hal_streaming_context_symbol_map_t* map,
     iree_hal_streaming_module_registration_t* registration);
 
-static iree_status_t iree_hal_streaming_managed_storage_allocate(
+static iree_status_t iree_hal_streaming_managed_storage_create(
     iree_allocator_t host_allocator, iree_host_size_t size,
     iree_host_size_t alignment,
     iree_hal_streaming_managed_storage_t** out_storage) {
@@ -39,7 +39,8 @@ static iree_status_t iree_hal_streaming_managed_storage_allocate(
 
 void iree_hal_streaming_managed_storage_retain(
     iree_hal_streaming_managed_storage_t* storage) {
-  if (storage) iree_atomic_ref_count_inc(&storage->ref_count);
+  if (!storage) return;
+  iree_atomic_ref_count_inc(&storage->ref_count);
 }
 
 void iree_hal_streaming_managed_storage_release(
@@ -443,7 +444,7 @@ iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
     const iree_host_size_t allocation_alignment =
         iree_max((iree_host_size_t)alignment, (iree_host_size_t)4096);
     if (iree_status_is_ok(status)) {
-      status = iree_hal_streaming_managed_storage_allocate(
+      status = iree_hal_streaming_managed_storage_create(
           registry->host_allocator, allocation_size, allocation_alignment,
           &managed_storage);
     }

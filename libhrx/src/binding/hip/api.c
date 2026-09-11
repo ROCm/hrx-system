@@ -13643,6 +13643,52 @@ static hipError_t iree_hip_launch_event_record(
 #ifndef IREE_HIP_SYNC_AFTER_EVERY_LAUNCH
 #define IREE_HIP_SYNC_AFTER_EVERY_LAUNCH 0
 #endif
+
+static hipError_t iree_hip_launch_kernel_on_stream(
+    const void* function_address, dim3 numBlocks, dim3 dimBlocks, void** args,
+    size_t sharedMemBytes, const iree_hip_resolved_stream_t* resolved_stream,
+    const iree_hip_launch_events_t* events) {
+  iree_hal_streaming_context_t* context = resolved_stream->context;
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream->stream;
+  iree_hal_streaming_symbol_t* symbol = NULL;
+  iree_hal_streaming_module_t* module = NULL;
+  hipError_t result = iree_hip_resolve_function_symbol(
+      context, function_address, &symbol, &module);
+  if (result == hipSuccess &&
+      (!symbol->module || symbol->module->context != context)) {
+    result = hipErrorInvalidDevice;
+  }
+  if (result == hipSuccess) {
+    result = iree_hip_validate_launch_configuration(
+        context->device_entry, symbol, numBlocks.x, numBlocks.y, numBlocks.z,
+        dimBlocks.x, dimBlocks.y, dimBlocks.z, sharedMemBytes);
+  }
+
+  if (result == hipSuccess) {
+    const iree_hal_streaming_dispatch_params_t params = {
+        .grid_dim = {numBlocks.x, numBlocks.y, numBlocks.z},
+        .block_dim = {dimBlocks.x, dimBlocks.y, dimBlocks.z},
+        .shared_memory_bytes = (uint32_t)sharedMemBytes,
+        .buffer = args,  // args is already the kernelParams array
+        .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
+    };
+    result = iree_hip_order_legacy_stream_dependencies(context, stream_obj);
+    if (result == hipSuccess) {
+      result = iree_hip_launch_event_record(events->start, stream_obj);
+    }
+    if (result == hipSuccess) {
+      result = iree_status_to_hip_result(
+          iree_hal_streaming_launch_kernel(symbol, &params, stream_obj));
+    }
+    if (result == hipSuccess) {
+      result = iree_hip_launch_event_record(events->stop, stream_obj);
+    }
+  }
+
+  iree_hal_streaming_module_release(module);
+  return result;
+}
+
 static hipError_t iree_hip_launch_kernel(const void* function_address,
                                          dim3 numBlocks, dim3 dimBlocks,
                                          void** args, size_t sharedMemBytes,
@@ -13664,50 +13710,21 @@ static hipError_t iree_hip_launch_kernel(const void* function_address,
   hipError_t result = hipSuccess;
   iree_hip_resolved_stream_t resolved_stream = {0};
   iree_hip_launch_events_t events = {0};
-  iree_hal_streaming_module_t* module = NULL;
   result = iree_hip_resolve_registered_stream(stream, &resolved_stream);
-  if (result != hipSuccess) goto cleanup;
-  iree_hal_streaming_context_t* context = resolved_stream.context;
-  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
-
-  result =
-      iree_hip_launch_events_acquire(start_event, stop_event, context, &events);
-  if (result != hipSuccess) goto cleanup;
-
-  iree_hal_streaming_symbol_t* symbol = NULL;
-  result = iree_hip_resolve_function_symbol(context, function_address, &symbol,
-                                            &module);
-  if (result != hipSuccess) goto cleanup;
-  if (!symbol->module || symbol->module->context != context) {
-    result = hipErrorInvalidDevice;
-    goto cleanup;
-  }
-
-  result = iree_hip_validate_launch_configuration(
-      context->device_entry, symbol, numBlocks.x, numBlocks.y, numBlocks.z,
-      dimBlocks.x, dimBlocks.y, dimBlocks.z, sharedMemBytes);
-  if (result != hipSuccess) goto cleanup;
-
-  const iree_hal_streaming_dispatch_params_t params = {
-      .grid_dim = {numBlocks.x, numBlocks.y, numBlocks.z},
-      .block_dim = {dimBlocks.x, dimBlocks.y, dimBlocks.z},
-      .shared_memory_bytes = (uint32_t)sharedMemBytes,
-      .buffer = args,  // args is already the kernelParams array
-      .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
-  };
-  result = iree_hip_order_legacy_stream_dependencies(context, stream_obj);
-  if (result != hipSuccess) goto cleanup;
-  result = iree_hip_launch_event_record(events.start, stream_obj);
-  if (result != hipSuccess) goto cleanup;
-  result = iree_status_to_hip_result(
-      iree_hal_streaming_launch_kernel(symbol, &params, stream_obj));
   if (result == hipSuccess) {
-    result = iree_hip_launch_event_record(events.stop, stream_obj);
+    result = iree_hip_launch_events_acquire(start_event, stop_event,
+                                            resolved_stream.context, &events);
+  }
+  if (result == hipSuccess) {
+    result = iree_hip_launch_kernel_on_stream(function_address, numBlocks,
+                                              dimBlocks, args, sharedMemBytes,
+                                              &resolved_stream, &events);
   }
 
 #if IREE_HIP_SYNC_AFTER_EVERY_LAUNCH
   if (result == hipSuccess) {
-    iree_status_t sync_status = iree_hal_streaming_context_synchronize(context);
+    iree_status_t sync_status =
+        iree_hal_streaming_context_synchronize(resolved_stream.context);
     if (!iree_status_is_ok(sync_status)) {
       HIP_DEBUG_LOG(
           "[HIP_API] Warning: device sync after hipLaunchKernel failed\n");
@@ -13716,8 +13733,6 @@ static hipError_t iree_hip_launch_kernel(const void* function_address,
   }
 #endif
 
-cleanup:
-  iree_hal_streaming_module_release(module);
   iree_hip_launch_events_release(&events);
   iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
@@ -14091,50 +14106,48 @@ static hipError_t iree_hip_module_launch_kernel(
   hipError_t result = hipSuccess;
   iree_hip_resolved_stream_t resolved_stream = {0};
   iree_hip_launch_events_t events = {0};
+  iree_hal_streaming_context_t* context = NULL;
+  iree_hal_streaming_stream_t* stream_obj = NULL;
   iree_hal_streaming_module_t* module = NULL;
   result = iree_hip_resolve_registered_stream(stream, &resolved_stream);
-  if (result != hipSuccess) goto cleanup;
-  iree_hal_streaming_context_t* context = resolved_stream.context;
-  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
-
-  result =
-      iree_hip_launch_events_acquire(start_event, stop_event, context, &events);
-  if (result != hipSuccess) goto cleanup;
+  if (result == hipSuccess) {
+    context = resolved_stream.context;
+    stream_obj = resolved_stream.stream;
+    result = iree_hip_launch_events_acquire(start_event, stop_event, context,
+                                            &events);
+  }
 
   iree_hal_streaming_symbol_t* symbol = NULL;
-  result = iree_hip_resolve_function_symbol(context, f, &symbol, &module);
-  if (result != hipSuccess) {
-    result = hipErrorInvalidHandle;
-    goto cleanup;
+  if (result == hipSuccess) {
+    result = iree_hip_resolve_function_symbol(context, f, &symbol, &module);
+    if (result != hipSuccess) result = hipErrorInvalidHandle;
   }
-  if (!symbol->module || symbol->module->context != context) {
+  if (result == hipSuccess &&
+      (!symbol->module || symbol->module->context != context)) {
     result = hipErrorInvalidDevice;
-    goto cleanup;
   }
 
-  if (kernelParams && extra) {
+  if (result == hipSuccess && kernelParams && extra) {
     result = hipErrorInvalidValue;
-    goto cleanup;
   }
-  if (!kernelParams && !extra &&
+  if (result == hipSuccess && !kernelParams && !extra &&
       (symbol->parameters.copy_count || symbol->parameters.binding_count)) {
     result = hipErrorInvalidValue;
-    goto cleanup;
   }
 
-  result = iree_hip_validate_launch_configuration(
-      context->device_entry, symbol, gridDimX, gridDimY, gridDimZ,
-      validation_block_dim ? validation_block_dim[0] : blockDimX,
-      validation_block_dim ? validation_block_dim[1] : blockDimY,
-      validation_block_dim ? validation_block_dim[2] : blockDimZ,
-      sharedMemBytes);
-  if (result != hipSuccess) goto cleanup;
-  if (exact_workitem_count &&
+  if (result == hipSuccess) {
+    result = iree_hip_validate_launch_configuration(
+        context->device_entry, symbol, gridDimX, gridDimY, gridDimZ,
+        validation_block_dim ? validation_block_dim[0] : blockDimX,
+        validation_block_dim ? validation_block_dim[1] : blockDimY,
+        validation_block_dim ? validation_block_dim[2] : blockDimZ,
+        sharedMemBytes);
+  }
+  if (result == hipSuccess && exact_workitem_count &&
       iree_any_bit_set(
           symbol->function_flags,
           IREE_HAL_EXECUTABLE_FUNCTION_FLAG_REQUIRES_UNIFORM_WORKGROUPS)) {
     result = hipErrorInvalidValue;
-    goto cleanup;
   }
 
   // Extract params pointer and size from HIP's parameter format.
@@ -14142,41 +14155,46 @@ static hipError_t iree_hip_module_launch_kernel(
   size_t params_size = 0;
   iree_hal_streaming_dispatch_flags_t dispatch_flags =
       IREE_HAL_STREAMING_DISPATCH_FLAG_NONE;
-  if (extra) {
+  if (result == hipSuccess && extra) {
     result = iree_hip_parse_launch_extra(extra, &params_ptr, &params_size);
-    if (result != hipSuccess) goto cleanup;
-    // The extra buffer is already laid out in the kernel's native kernarg ABI.
-    // Preserve it byte-for-byte: HIP device pointers may appear in formal
-    // pointer parameters or inside opaque data copied by the caller.
-    dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
-  } else if (kernelParams) {
+    if (result == hipSuccess) {
+      // The extra buffer is already laid out in the kernel's native kernarg
+      // ABI. Preserve it byte-for-byte: HIP device pointers may appear in
+      // formal pointer parameters or inside opaque data copied by the caller.
+      dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
+    }
+  } else if (result == hipSuccess && kernelParams) {
     // kernelParams is an array of pointers to the actual parameters.
     params_ptr = kernelParams;
     dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY;
   }
 
-  const iree_hal_streaming_dispatch_params_t params = {
-      .grid_dim = {gridDimX, gridDimY, gridDimZ},
-      .block_dim = {blockDimX, blockDimY, blockDimZ},
-      .workitem_count =
-          {
-              exact_workitem_count ? exact_workitem_count[0] : 0,
-              exact_workitem_count ? exact_workitem_count[1] : 0,
-              exact_workitem_count ? exact_workitem_count[2] : 0,
-          },
-      .shared_memory_bytes = sharedMemBytes,
-      .buffer = params_ptr,
-      .buffer_size = params_size,
-      .flags = dispatch_flags,
-  };
-  result = iree_hip_order_legacy_stream_dependencies(context, stream_obj);
-  if (result != hipSuccess) goto cleanup;
-  result = iree_hip_launch_event_record(events.start, stream_obj);
-  if (result != hipSuccess) goto cleanup;
-  result = iree_status_to_hip_result(
-      iree_hal_streaming_launch_kernel(symbol, &params, stream_obj));
   if (result == hipSuccess) {
-    result = iree_hip_launch_event_record(events.stop, stream_obj);
+    const iree_hal_streaming_dispatch_params_t params = {
+        .grid_dim = {gridDimX, gridDimY, gridDimZ},
+        .block_dim = {blockDimX, blockDimY, blockDimZ},
+        .workitem_count =
+            {
+                exact_workitem_count ? exact_workitem_count[0] : 0,
+                exact_workitem_count ? exact_workitem_count[1] : 0,
+                exact_workitem_count ? exact_workitem_count[2] : 0,
+            },
+        .shared_memory_bytes = sharedMemBytes,
+        .buffer = params_ptr,
+        .buffer_size = params_size,
+        .flags = dispatch_flags,
+    };
+    result = iree_hip_order_legacy_stream_dependencies(context, stream_obj);
+    if (result == hipSuccess) {
+      result = iree_hip_launch_event_record(events.start, stream_obj);
+    }
+    if (result == hipSuccess) {
+      result = iree_status_to_hip_result(
+          iree_hal_streaming_launch_kernel(symbol, &params, stream_obj));
+    }
+    if (result == hipSuccess) {
+      result = iree_hip_launch_event_record(events.stop, stream_obj);
+    }
   }
   HIP_DEBUG_LOG("[HIP_API] hipModuleLaunchKernel: returned result=%d\n",
                 result);
@@ -14191,7 +14209,6 @@ static hipError_t iree_hip_module_launch_kernel(
   }
 #endif
 
-cleanup:
   iree_hal_streaming_module_release(module);
   iree_hip_launch_events_release(&events);
   iree_hip_resolved_stream_release(&resolved_stream);
