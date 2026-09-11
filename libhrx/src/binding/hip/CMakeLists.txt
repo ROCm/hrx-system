@@ -257,10 +257,12 @@ iree_cc_library(
   HDRS
     "api.h"
     "binding_internal.h"
+    "vmm.h"
   SRCS
     "abi_stubs.c"
     "api.c"
     "api_metadata.c"
+    "vmm.c"
   DEPS
     ::blocking_printf_provider
     ::execution_context
