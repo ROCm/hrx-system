@@ -340,22 +340,6 @@ static inline void iree_hal_streaming_context_leave_capture(
 // This avoids dynamic enumeration overhead during initialization.
 #define IREE_HAL_STREAMING_MAX_DEVICES 64
 
-// P2P link information between two devices.
-typedef struct iree_hal_streaming_p2p_link_t {
-  iree_host_size_t src_device;
-  iree_host_size_t dst_device;
-
-  // P2P attributes.
-  bool access_supported;             // Basic P2P access.
-  bool native_atomic_supported;      // Native atomic operations.
-  bool cuda_array_access_supported;  // HIP array access.
-  int32_t performance_rank;          // Performance ranking (higher is better).
-
-  // Additional link properties.
-  uint64_t bandwidth_mbps;  // Estimated bandwidth in MB/s.
-  uint64_t latency_ns;      // Estimated latency in nanoseconds.
-} iree_hal_streaming_p2p_link_t;
-
 // Device registry entry for multi-device support.
 typedef struct iree_hal_streaming_device_t {
   // Device ordinal in the global registry.
@@ -458,11 +442,6 @@ typedef struct iree_hal_streaming_device_registry_t {
   bool initialized;
 
   iree_slim_mutex_t mutex;
-
-  // P2P topology: array of links between all device pairs.
-  iree_hal_streaming_p2p_link_t* p2p_topology;
-  // Total size of the topology: device_count * device_count.
-  iree_host_size_t p2p_link_count;
 
   // Fixed-size array of registered devices.
   iree_hal_streaming_device_t devices[IREE_HAL_STREAMING_MAX_DEVICES];
@@ -1427,18 +1406,6 @@ iree_status_t iree_hal_streaming_device_get_string_property(
 iree_status_t iree_hal_streaming_device_memory_info(
     iree_hal_streaming_device_ordinal_t ordinal,
     iree_device_size_t* out_free_memory, iree_device_size_t* out_total_memory);
-
-// Synchronization: none (queries P2P capability).
-iree_status_t iree_hal_streaming_device_can_access_peer(
-    iree_hal_streaming_device_ordinal_t device_ordinal,
-    iree_hal_streaming_device_ordinal_t peer_device_ordinal, bool* can_access);
-
-// Looks up a P2P link between two devices.
-// Returns NULL if no link exists.
-// Synchronization: none (queries static link info).
-iree_hal_streaming_p2p_link_t* iree_hal_streaming_device_lookup_p2p_link(
-    iree_hal_streaming_device_ordinal_t src_device,
-    iree_hal_streaming_device_ordinal_t dst_device);
 
 // Synchronization: none (queries context state).
 iree_status_t iree_hal_streaming_device_primary_context_state(

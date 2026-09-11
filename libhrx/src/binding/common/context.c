@@ -644,25 +644,6 @@ iree_status_t iree_hal_streaming_context_enable_peer_access(
   iree_hal_streaming_context_retain(peer_context);
   context->peer_contexts[context->peer_count++] = peer_context;
 
-  // Update P2P topology if we have the registry.
-  iree_hal_streaming_device_registry_t* device_registry =
-      iree_hal_streaming_device_registry();
-  if (device_registry && device_registry->p2p_topology) {
-    const iree_host_size_t src_ordinal = context->device_ordinal;
-    const iree_host_size_t dst_ordinal = peer_context->device_ordinal;
-    const iree_host_size_t device_count = device_registry->device_count;
-    if (src_ordinal < device_count && dst_ordinal < device_count) {
-      // Find the link in topology.
-      const iree_host_size_t link_index =
-          src_ordinal * device_count + dst_ordinal;
-      iree_hal_streaming_p2p_link_t* link =
-          &device_registry->p2p_topology[link_index];
-      // Enable P2P access.
-      link->access_supported = true;
-      // TODO: Query actual P2P capabilities.
-    }
-  }
-
   iree_slim_mutex_unlock(&context->mutex);
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -680,8 +661,6 @@ iree_status_t iree_hal_streaming_context_disable_peer_access(
   // Find and remove peer.
   for (iree_host_size_t i = 0; i < context->peer_count; ++i) {
     if (context->peer_contexts[i] == peer_context) {
-      const iree_host_size_t dst_ordinal = peer_context->device_ordinal;
-
       // Release peer context.
       iree_hal_streaming_context_release(peer_context);
 
@@ -690,23 +669,6 @@ iree_status_t iree_hal_streaming_context_disable_peer_access(
         context->peer_contexts[j - 1] = context->peer_contexts[j];
       }
       context->peer_count--;
-
-      // Update P2P topology.
-      iree_hal_streaming_device_registry_t* device_registry =
-          iree_hal_streaming_device_registry();
-      if (device_registry && device_registry->p2p_topology) {
-        const iree_host_size_t src_ordinal = context->device_ordinal;
-        const iree_host_size_t device_count = device_registry->device_count;
-        if (src_ordinal < device_count && dst_ordinal < device_count) {
-          // Find the link in topology.
-          const iree_host_size_t link_index =
-              src_ordinal * device_count + dst_ordinal;
-          iree_hal_streaming_p2p_link_t* link =
-              &device_registry->p2p_topology[link_index];
-          // Disable P2P access.
-          link->access_supported = false;
-        }
-      }
 
       iree_slim_mutex_unlock(&context->mutex);
       IREE_TRACE_ZONE_END(z0);

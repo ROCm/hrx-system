@@ -38,6 +38,7 @@
 #include "common/graph.h"
 #include "common/internal.h"
 #include "common/occupancy.h"
+#include "common/peer.h"
 #include "common/stream.h"
 #include "common/tls.h"
 #include "hrx_runtime.h"
@@ -2724,9 +2725,49 @@ HIPAPI hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int device,
     return hipSuccess;
   }
 
-  // Direct peer access is not advertised until backend topology reports it.
-  // Copy APIs may still stage transfers through host memory.
+  bool can_access = false;
+  iree_status_t status = iree_hal_streaming_device_can_access_peer(
+      (iree_host_size_t)device, (iree_host_size_t)peerDevice, &can_access);
+  if (!iree_status_is_ok(status)) {
+    HIP_RETURN_ERROR(iree_status_to_hip_result(status));
+  }
+  *canAccessPeer = can_access ? 1 : 0;
   return hipSuccess;
+}
+
+typedef enum iree_hip_peer_link_type_e {
+  IREE_HIP_PEER_LINK_TYPE_HYPERTRANSPORT = 0,
+  IREE_HIP_PEER_LINK_TYPE_QPI = 1,
+  IREE_HIP_PEER_LINK_TYPE_PCIE = 2,
+  IREE_HIP_PEER_LINK_TYPE_INFINIBAND = 3,
+  IREE_HIP_PEER_LINK_TYPE_XGMI = 4,
+} iree_hip_peer_link_type_t;
+
+// HIP exposes the native link ABI values, which intentionally differ from the
+// generic HAL enum because UNKNOWN occupies zero in the HAL representation.
+static bool iree_hip_peer_link_type_from_topology(
+    iree_hal_topology_link_type_t topology_link_type,
+    iree_hip_peer_link_type_t* out_link_type) {
+  IREE_ASSERT_ARGUMENT(out_link_type);
+  switch (topology_link_type) {
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_HYPERTRANSPORT:
+      *out_link_type = IREE_HIP_PEER_LINK_TYPE_HYPERTRANSPORT;
+      return true;
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_QPI:
+      *out_link_type = IREE_HIP_PEER_LINK_TYPE_QPI;
+      return true;
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_PCIE:
+      *out_link_type = IREE_HIP_PEER_LINK_TYPE_PCIE;
+      return true;
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_INFINIBAND:
+      *out_link_type = IREE_HIP_PEER_LINK_TYPE_INFINIBAND;
+      return true;
+    case IREE_HAL_TOPOLOGY_LINK_TYPE_XGMI:
+      *out_link_type = IREE_HIP_PEER_LINK_TYPE_XGMI;
+      return true;
+    default:
+      return false;
+  }
 }
 
 // Gets peer-to-peer attributes between two devices.
@@ -2736,7 +2777,7 @@ HIPAPI hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int device,
 //  - attrib: [IN] P2P attribute to query (hipDevP2PAttrPerformanceRank,
 //                 hipDevP2PAttrAccessSupported,
 //                 hipDevP2PAttrNativeAtomicSupported,
-//                 hipDevP2PAttrCudaArrayAccessSupported).
+//                 hipDevP2PAttrHipArrayAccessSupported).
 //  - srcDevice: [IN] Source device in P2P pair.
 //  - dstDevice: [IN] Destination device in P2P pair.
 //
@@ -2748,10 +2789,10 @@ HIPAPI hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int device,
 // Synchronization: This operation is synchronous.
 //
 // P2P attributes:
-// - hipDevP2PAttrPerformanceRank: Relative performance (higher is better).
+// - hipDevP2PAttrPerformanceRank: Native physical link category.
 // - hipDevP2PAttrAccessSupported: 1 if P2P access is supported.
 // - hipDevP2PAttrNativeAtomicSupported: 1 if atomic operations supported.
-// - hipDevP2PAttrCudaArrayAccessSupported: 1 if array access supported.
+// - hipDevP2PAttrHipArrayAccessSupported: 1 if array access supported.
 //
 // Multi-GPU:
 // - Queries capabilities of direct GPU-to-GPU communication.
@@ -2767,6 +2808,7 @@ HIPAPI hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attrib,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  *value = 0;
 
   // Ensure HIP is initialized.
   hipError_t init_result = iree_hip_ensure_initialized();
@@ -2775,36 +2817,83 @@ HIPAPI hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attrib,
     HIP_RETURN_ERROR(init_result);
   }
 
-  // Look up P2P link.
-  iree_hal_streaming_p2p_link_t* link =
-      iree_hal_streaming_device_lookup_p2p_link(srcDevice, dstDevice);
-  if (!link) {
-    *value = 0;
+  iree_hal_streaming_device_registry_t* device_registry =
+      iree_hal_streaming_device_registry();
+  if (!device_registry || srcDevice < 0 || dstDevice < 0 ||
+      srcDevice >= (int)device_registry->device_count ||
+      dstDevice >= (int)device_registry->device_count ||
+      srcDevice == dstDevice) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
 
-  // Map HIP P2P attribute enum to the appropriate link field.
+  iree_hal_streaming_peer_properties_t properties;
+  iree_status_t status = iree_hal_streaming_device_query_peer_properties(
+      (iree_host_size_t)srcDevice, (iree_host_size_t)dstDevice, &properties);
+  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(z0, status);
+
   switch (attrib) {
     case hipDevP2PAttrAccessSupported:
-      *value = link->access_supported ? 1 : 0;
+      *value = properties.access_supported ? 1 : 0;
       break;
     case hipDevP2PAttrNativeAtomicSupported:
-      *value = link->native_atomic_supported ? 1 : 0;
+      *value = properties.native_atomic_supported ? 1 : 0;
       break;
     case hipDevP2PAttrHipArrayAccessSupported:
-      *value = link->cuda_array_access_supported ? 1 : 0;
+      *value = properties.array_access_supported ? 1 : 0;
       break;
-    case hipDevP2PAttrPerformanceRank:
-      *value = link->performance_rank;
+    case hipDevP2PAttrPerformanceRank: {
+      iree_hip_peer_link_type_t link_type;
+      if (!iree_hip_peer_link_type_from_topology(properties.link_type,
+                                                 &link_type)) {
+        IREE_TRACE_ZONE_END(z0);
+        HIP_RETURN_ERROR(hipErrorNotSupported);
+      }
+      *value = (int)link_type;
       break;
+    }
     default:
-      // Unsupported attribute.
-      *value = 0;
-      break;
+      IREE_TRACE_ZONE_END(z0);
+      HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   IREE_TRACE_ZONE_END(z0);
+  return hipSuccess;
+}
+
+HIPAPI hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2,
+                                               uint32_t* linktype,
+                                               uint32_t* hopcount) {
+  if (!linktype || !hopcount || device1 < 0 || device2 < 0 ||
+      device1 == device2) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  hipError_t init_result = iree_hip_ensure_initialized();
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
+  }
+  iree_hal_streaming_device_registry_t* device_registry =
+      iree_hal_streaming_device_registry();
+  if (!device_registry || device1 >= (int)device_registry->device_count ||
+      device2 >= (int)device_registry->device_count) {
+    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  }
+
+  iree_hal_streaming_peer_properties_t properties;
+  iree_status_t status = iree_hal_streaming_device_query_peer_properties(
+      (iree_host_size_t)device1, (iree_host_size_t)device2, &properties);
+  if (!iree_status_is_ok(status)) {
+    HIP_RETURN_ERROR(iree_status_to_hip_result(status));
+  }
+  iree_hip_peer_link_type_t hip_link_type;
+  if (!iree_hip_peer_link_type_from_topology(properties.link_type,
+                                             &hip_link_type)) {
+    HIP_RETURN_ERROR(hipErrorNotSupported);
+  }
+
+  *linktype = (uint32_t)hip_link_type;
+  *hopcount = properties.hop_count;
   return hipSuccess;
 }
 
