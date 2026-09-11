@@ -2299,7 +2299,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_allocate_dynamic_queue(
       .queue_index = queue_index,
   };
   iree_hal_amdgpu_host_queue_t* queue = NULL;
-  iree_status_t status = iree_hal_amdgpu_physical_device_allocate_host_queue(
+  iree_status_t status = iree_hal_amdgpu_physical_device_create_host_queue(
       physical_device, params, queue_axis, release_slot, &queue);
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_logical_device_check_failure(logical_device);

@@ -1108,7 +1108,7 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
   return status;
 }
 
-iree_status_t iree_hal_amdgpu_host_queue_allocate(
+iree_status_t iree_hal_amdgpu_host_queue_create(
     const iree_hal_amdgpu_host_queue_params_t* params,
     iree_hal_amdgpu_system_event_agent_target_t* system_event_target,
     iree_hal_amdgpu_host_queue_release_slot_callback_t release_slot,
