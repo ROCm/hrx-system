@@ -226,6 +226,31 @@ static void hrx_buffer_table_fill_result(hrx_buffer_table_entry_t* e,
   if (out_user_data) *out_user_data = e->user_data;
 }
 
+hrx_status_t hrx_buffer_table_visit(hrx_buffer_table_t* table, uint64_t any_ptr,
+                                    hrx_buffer_table_visit_fn_t visit_fn,
+                                    void* user_data) {
+  if (!visit_fn) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "buffer table visitor is required");
+  }
+
+  iree_slim_mutex_lock(&table->mutex);
+  const size_t index = hrx_buffer_table_find_index(table, any_ptr);
+  if (index >= table->count) {
+    iree_slim_mutex_unlock(&table->mutex);
+    return hrx_make_status(HRX_STATUS_NOT_FOUND,
+                           "pointer not found in buffer table");
+  }
+
+  size_t offset = 0;
+  hrx_buffer_table_fill_result(&table->entries[index], any_ptr,
+                               /*out_buffer=*/NULL, &offset,
+                               /*out_user_data=*/NULL);
+  visit_fn(&table->entries[index], offset, user_data);
+  iree_slim_mutex_unlock(&table->mutex);
+  return hrx_ok_status();
+}
+
 hrx_status_t hrx_buffer_table_find(hrx_buffer_table_t* table, uint64_t any_ptr,
                                    hrx_buffer_t* out_buffer, size_t* out_offset,
                                    void** out_user_data) {

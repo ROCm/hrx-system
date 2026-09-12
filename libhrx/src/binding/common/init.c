@@ -668,6 +668,8 @@ iree_status_t iree_hal_streaming_init_global(
   iree_notification_initialize(&device_registry->context_list.changed);
   device_registry->context_list.head = NULL;
   device_registry->context_list.tail = NULL;
+  iree_hal_streaming_ipc_memory_registry_initialize(
+      &device_registry->ipc_memory_registry, host_allocator);
 
   // Enumerate GPU devices from pyre.
   int gpu_count = 0;
@@ -737,6 +739,9 @@ void iree_hal_streaming_cleanup_global(void) {
   // destructors finish and publish completion.
   iree_status_ignore(iree_hal_streaming_context_list_drain(
       device_registry, iree_infinite_timeout()));
+
+  iree_hal_streaming_ipc_memory_registry_deinitialize(
+      &device_registry->ipc_memory_registry);
 
   iree_slim_mutex_lock(&device_registry->mutex);
 

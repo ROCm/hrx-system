@@ -34,6 +34,11 @@ typedef struct hrx_buffer_table_t {
   size_t reserved_insert_count;
 } hrx_buffer_table_t;
 
+// Visits one table entry while the table mutex keeps its storage and user data
+// stable. The entry and offset are borrowed for the callback duration only.
+typedef void (*hrx_buffer_table_visit_fn_t)(
+    const hrx_buffer_table_entry_t* entry, size_t offset, void* user_data);
+
 void hrx_buffer_table_initialize(hrx_buffer_table_t* table);
 void hrx_buffer_table_deinitialize(hrx_buffer_table_t* table);
 
@@ -68,6 +73,14 @@ void hrx_buffer_table_cancel_reserved_insert(hrx_buffer_table_t* table);
 
 hrx_status_t hrx_buffer_table_remove(hrx_buffer_table_t* table,
                                      uint64_t any_ptr);
+
+// Resolves the entry containing |any_ptr| and invokes |visit_fn| before
+// releasing the table mutex. This is a cold-path snapshot hook for callers
+// that must retain entry-owned resources before concurrent removal can destroy
+// them. The callback must not reenter or mutate |table|.
+hrx_status_t hrx_buffer_table_visit(hrx_buffer_table_t* table, uint64_t any_ptr,
+                                    hrx_buffer_table_visit_fn_t visit_fn,
+                                    void* user_data);
 
 // Looks up a buffer containing |any_ptr| (device or host).
 // Returns the buffer, byte offset within it, and optional user_data.

@@ -57,6 +57,7 @@ hrx_cc_library(
         "graph_analysis.c",
         "graph_exec.c",
         "init.c",
+        "ipc_memory.c",
         "kernel_arguments.c",
         "kpack.c",
         "mem_pool.c",
@@ -77,6 +78,7 @@ hrx_cc_library(
         "graph.h",
         "hrx_bridge.h",
         "internal.h",
+        "ipc_memory.h",
         "kernel_arguments.h",
         "kpack.h",
         "memory.h",
@@ -161,6 +163,19 @@ hrx_cc_test(
 hrx_cc_test(
     name = "event_timestamp_pool_test",
     srcs = ["event_timestamp_pool_test.cc"],
+    deps = [
+        ":common",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "ipc_memory_test",
+    srcs = ["ipc_memory_test.cc"],
     deps = [
         ":common",
         "//libhrx/src/libhrx:hrx_static",

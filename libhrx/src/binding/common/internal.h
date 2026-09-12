@@ -13,6 +13,7 @@
 #include "common/fat_binary.h"
 #include "common/function_attributes.h"
 #include "common/hrx_bridge.h"
+#include "common/ipc_memory.h"
 #include "common/stream.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
@@ -483,6 +484,9 @@ typedef struct iree_hal_streaming_device_registry_t {
     iree_hal_streaming_context_t* head;
     iree_hal_streaming_context_t* tail;
   } context_list;
+
+  // Process-wide ownership and duplicate-open registry for IPC memory imports.
+  iree_hal_streaming_ipc_memory_registry_t ipc_memory_registry;
 } iree_hal_streaming_device_registry_t;
 
 //===----------------------------------------------------------------------===//
@@ -1019,8 +1023,9 @@ typedef struct iree_hal_streaming_buffer_t {
   // Per-context imported wrappers over the same HIP-visible allocation.
   iree_hal_streaming_context_import_t* context_imports;
 
-  // Platform-specific IPC handle, if the buffer is IPC enabled.
-  void* ipc_handle;
+  // True when this wrapper owns an allocation that hipFree/hipFreeAsync may
+  // release.
+  bool is_device_freeable;
 
   // Read-mostly hint for optimizing memory duplication across devices.
   bool read_mostly_hint;
@@ -2070,6 +2075,8 @@ typedef enum iree_hal_streaming_memory_flag_bits_e {
   IREE_HAL_STREAMING_MEMORY_FLAG_PORTABLE = 1ull << 1,
   IREE_HAL_STREAMING_MEMORY_FLAG_WRITE_COMBINED = 1ull << 2,
   IREE_HAL_STREAMING_MEMORY_FLAG_UNCACHED = 1ull << 3,
+  // Requests a dedicated allocation suitable for later external export.
+  IREE_HAL_STREAMING_MEMORY_FLAG_SHARING_EXPORT = 1ull << 4,
 } iree_hal_streaming_memory_flags_t;
 
 // Synchronization: none (returns pointer value).
