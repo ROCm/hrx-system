@@ -55,6 +55,32 @@ int import_fd_checked(pid_t pid, int ehdl, int* out_fd) {
 // query.
 const size_t dev_mem_size = (64 << 20);
 
+std::mutex shared_pdev_mutex;
+std::map<std::filesystem::path, std::weak_ptr<shim_xdna::pdev>> shared_pdevs;
+
+std::shared_ptr<shim_xdna::pdev> find_shared_pdev(
+    const std::filesystem::path& device_path) {
+  const std::lock_guard<std::mutex> lock(shared_pdev_mutex);
+  auto it = shared_pdevs.find(device_path);
+  return it == shared_pdevs.end() ? nullptr : it->second.lock();
+}
+
+std::shared_ptr<shim_xdna::pdev> acquire_shared_pdev(
+    const std::filesystem::path& device_path) {
+  const std::filesystem::path resolved_path =
+      device_path.empty() ? shim_xdna::find_default_accel_device_path()
+                          : device_path;
+  const std::lock_guard<std::mutex> lock(shared_pdev_mutex);
+  auto& weak_pdev = shared_pdevs[resolved_path];
+  if (auto pdev = weak_pdev.lock()) return pdev;
+
+  auto pdev = std::make_shared<shim_xdna::pdev>(resolved_path);
+  // Do not retain failed initialization: a later attempt may run after a
+  // transient KMD resource owner has exited.
+  if (pdev->init_errno() == 0) weak_pdev = pdev;
+  return pdev;
+}
+
 std::filesystem::path try_find_npu_device() {
   const std::filesystem::path drvpath = "/sys/bus/pci/drivers/amdxdna";
   std::error_code ec;
@@ -271,6 +297,16 @@ int resolve_core_grid_size(const std::filesystem::path& device_path,
 
   const std::filesystem::path resolved_device_path =
       device_path.empty() ? find_default_accel_device_path() : device_path;
+  if (auto pdev = find_shared_pdev(resolved_device_path)) {
+    core_grid_size grid{};
+    const int err =
+        resolve_core_grid_size(*pdev, requested_rows, requested_cols, &grid);
+    if (err != 0) return err;
+    *out_rows = grid.rows;
+    *out_cols = grid.cols;
+    return 0;
+  }
+
   const int fd = ::open(resolved_device_path.c_str(), O_RDWR | O_CLOEXEC);
   if (fd < 0) return errno;
 
@@ -301,15 +337,14 @@ device::device(uint32_t n_rows, uint32_t n_cols)
 
 device::device(uint32_t n_rows, uint32_t n_cols,
                const std::filesystem::path& device_path)
-    : m_pdev(device_path.empty() ? find_default_accel_device_path()
-                                 : device_path),
+    : m_pdev(acquire_shared_pdev(device_path)),
       n_rows(n_rows),
       n_cols(n_cols) {
-  m_init_errno = m_pdev.init_errno();
+  m_init_errno = m_pdev->init_errno();
   if (m_init_errno) return;
   core_grid_size grid{};
   m_init_errno =
-      resolve_core_grid_size(m_pdev, this->n_rows, this->n_cols, &grid);
+      resolve_core_grid_size(*m_pdev, this->n_rows, this->n_cols, &grid);
   if (m_init_errno) return;
   this->n_rows = grid.rows;
   this->n_cols = grid.cols;
@@ -348,7 +383,7 @@ int device::create(uint32_t n_rows, uint32_t n_cols,
 
 int device::init_errno() const { return m_init_errno; }
 
-const pdev& device::get_pdev() const { return m_pdev; }
+const pdev& device::get_pdev() const { return *m_pdev; }
 
 int device::create_hw_context(const std::vector<uint8_t>& pdi,
                               const std::string& cu_name,
@@ -383,7 +418,7 @@ int device::create_hw_context(const std::vector<uint8_t>& pdi,
 
 int device::alloc_bo(uint32_t ctx_id, size_t size, shim_amdxdna_bo_flags flags,
                      std::unique_ptr<bo>* out_bo) {
-  return bo::create(this->m_pdev, ctx_id, size, flags, out_bo);
+  return bo::create(*m_pdev, ctx_id, size, flags, out_bo);
 }
 
 int device::alloc_bo(size_t size, shim_amdxdna_bo_flags flags,
@@ -421,7 +456,7 @@ int device::read_aie_mem(uint16_t col, uint16_t row, uint32_t offset,
   amdxdna_drm_get_info arg = {.param = DRM_AMDXDNA_READ_AIE_MEM,
                               .buffer_size = sizeof(mem),
                               .buffer = reinterpret_cast<uintptr_t>(&mem)};
-  int err = m_pdev.try_ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+  int err = m_pdev->try_ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
   if (err) return err;
   *out_buf = std::move(store_buf);
   return 0;
@@ -437,7 +472,7 @@ int device::read_aie_reg(uint16_t col, uint16_t row, uint32_t reg_addr,
   amdxdna_drm_get_info arg = {.param = DRM_AMDXDNA_READ_AIE_REG,
                               .buffer_size = sizeof(reg),
                               .buffer = reinterpret_cast<uintptr_t>(&reg)};
-  int err = m_pdev.try_ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+  int err = m_pdev->try_ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
   if (err) return err;
   *out_reg_val = reg.val;
   return 0;
@@ -455,7 +490,7 @@ int device::write_aie_mem(uint16_t col, uint16_t row, uint32_t offset,
   amdxdna_drm_get_info arg = {.param = DRM_AMDXDNA_WRITE_AIE_MEM,
                               .buffer_size = sizeof(mem),
                               .buffer = reinterpret_cast<uintptr_t>(&mem)};
-  int err = m_pdev.try_ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+  int err = m_pdev->try_ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
   if (err) return err;
   *out_size = size;
   return 0;
@@ -471,7 +506,7 @@ int device::write_aie_reg_checked(uint16_t col, uint16_t row, uint32_t reg_addr,
   amdxdna_drm_get_info arg = {.param = DRM_AMDXDNA_WRITE_AIE_REG,
                               .buffer_size = sizeof(reg),
                               .buffer = reinterpret_cast<uintptr_t>(&reg)};
-  return m_pdev.try_ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+  return m_pdev->try_ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
 }
 
 int device::get_power_mode(power_mode* out_mode) const {
@@ -480,7 +515,7 @@ int device::get_power_mode(power_mode* out_mode) const {
                               .buffer_size = sizeof(state),
                               .buffer = reinterpret_cast<uintptr_t>(&state)};
 
-  int err = m_pdev.try_ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+  int err = m_pdev->try_ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
   if (err) return err;
   return from_amdxdna_power_mode(state.power_mode, out_mode);
 }
@@ -491,7 +526,7 @@ int device::set_power_mode(power_mode mode) const {
   amdxdna_drm_set_state arg = {.param = DRM_AMDXDNA_SET_POWER_MODE,
                                .buffer_size = sizeof(state),
                                .buffer = reinterpret_cast<uintptr_t>(&state)};
-  const int err = m_pdev.try_ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+  const int err = m_pdev->try_ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
   if (err != 0) return err;
   SHIM_DEBUG("set power_mode to %s", stringify_power_mode(mode).c_str());
   return 0;

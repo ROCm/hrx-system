@@ -51,7 +51,10 @@ struct pdev {
 
 struct device {
   enum class access_mode : uint8_t { exclusive = 0, shared = 1 };
-  pdev m_pdev;
+  // The KMD permits one process-wide 64 MiB DEV heap. Share its owning device
+  // handle across HAL device instances instead of attempting one heap per
+  // instance.
+  std::shared_ptr<pdev> m_pdev;
   uint32_t n_rows;
   uint32_t n_cols;
   int m_init_errno = 0;
