@@ -7,6 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 #define IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 
+#include "common/context_handle.h"
 #include "common/event_timestamp_pool.h"
 #include "common/execution_resource.h"
 #include "common/fat_binary.h"
@@ -276,6 +277,9 @@ struct iree_hal_streaming_context_t {
 
   // Synchronization.
   iree_slim_mutex_t mutex;
+
+  // Ownership state of the raw binding handle, guarded by |mutex|.
+  iree_hal_streaming_context_handle_state_t handle_state;
 
   // Host allocator.
   iree_allocator_t host_allocator;
@@ -1498,12 +1502,20 @@ iree_status_t iree_hal_streaming_context_create(
     iree_hal_streaming_context_flags_t flags, iree_allocator_t host_allocator,
     iree_hal_streaming_context_t** out_context);
 
+// Creates a device-managed primary context whose raw handle cannot be consumed
+// by an explicit context-destroy API.
+// Synchronization: none (creates new context).
+iree_status_t iree_hal_streaming_context_create_primary(
+    iree_hal_streaming_device_t* device_entry,
+    iree_hal_streaming_context_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_streaming_context_t** out_context);
+
 // Synchronization: none (reference counting).
 void iree_hal_streaming_context_retain(iree_hal_streaming_context_t* context);
 void iree_hal_streaming_context_release(iree_hal_streaming_context_t* context);
 
 // Attempts to form a reference without resurrecting a context whose final
-// release has begun. Returns false when the reference count has reached zero.
+// release has begun. Returns false when the count is zero or already saturated.
 bool iree_hal_streaming_context_try_retain(
     iree_hal_streaming_context_t* context);
 

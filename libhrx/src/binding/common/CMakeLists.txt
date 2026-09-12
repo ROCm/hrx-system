@@ -52,6 +52,7 @@ iree_cc_library(
   NAME
     common
   HDRS
+    "context_handle.h"
     "direct_transfer.h"
     "event_timestamp_pool.h"
     "fat_binary.h"

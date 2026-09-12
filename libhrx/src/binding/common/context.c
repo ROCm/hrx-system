@@ -87,9 +87,10 @@ iree_hal_streaming_timestamp_domain_t iree_hal_streaming_query_timestamp_domain(
   return domain;
 }
 
-iree_status_t iree_hal_streaming_context_create(
+static iree_status_t iree_hal_streaming_context_create_with_handle_state(
     iree_hal_streaming_device_t* device_entry,
     iree_hal_streaming_context_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_streaming_context_handle_state_t handle_state,
     iree_hal_streaming_context_t** out_context) {
   IREE_ASSERT_ARGUMENT(device_entry);
   IREE_ASSERT_ARGUMENT(out_context);
@@ -118,6 +119,7 @@ iree_status_t iree_hal_streaming_context_create(
   context->timestamp_domain = iree_hal_streaming_query_timestamp_domain(
       iree_hal_device_spec(device_entry->hal_device));
   context->flags = flags;
+  context->handle_state = handle_state;
   context->default_stream = NULL;
   context->next_capture_id = 1;
   context->peer_contexts = NULL;
@@ -219,6 +221,24 @@ iree_status_t iree_hal_streaming_context_create(
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+iree_status_t iree_hal_streaming_context_create(
+    iree_hal_streaming_device_t* device_entry,
+    iree_hal_streaming_context_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_streaming_context_t** out_context) {
+  return iree_hal_streaming_context_create_with_handle_state(
+      device_entry, flags, host_allocator,
+      IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_LIVE, out_context);
+}
+
+iree_status_t iree_hal_streaming_context_create_primary(
+    iree_hal_streaming_device_t* device_entry,
+    iree_hal_streaming_context_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_streaming_context_t** out_context) {
+  return iree_hal_streaming_context_create_with_handle_state(
+      device_entry, flags, host_allocator,
+      IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_PRIMARY, out_context);
 }
 
 static void iree_hal_streaming_context_destroy(
@@ -362,6 +382,7 @@ bool iree_hal_streaming_context_try_retain(
   if (!context) return false;
   int32_t reference_count = iree_atomic_ref_count_load(&context->ref_count);
   while (reference_count > 0) {
+    if (IREE_UNLIKELY(reference_count == INT32_MAX)) return false;
     if (iree_atomic_compare_exchange_weak(
             &context->ref_count, &reference_count, reference_count + 1,
             iree_memory_order_acq_rel, iree_memory_order_acquire)) {
@@ -369,6 +390,90 @@ bool iree_hal_streaming_context_try_retain(
     }
   }
   return false;
+}
+
+iree_status_t iree_hal_streaming_context_begin_handle_destroy(
+    iree_hal_streaming_context_t* handle,
+    iree_hal_streaming_context_t** out_context) {
+  IREE_ASSERT_ARGUMENT(handle);
+  IREE_ASSERT_ARGUMENT(out_context);
+  *out_context = NULL;
+
+  iree_hal_streaming_device_registry_t* device_registry =
+      iree_hal_streaming_device_registry();
+  if (!device_registry) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "device registry not initialized");
+  }
+
+  // Compare the untrusted raw handle only as an address. The registry owns
+  // every listed context, and promotion while the list lock is held couples
+  // membership validation to the operation reference used below.
+  iree_hal_streaming_context_t* retained_context = NULL;
+  iree_slim_mutex_lock(&device_registry->context_list.mutex);
+  for (iree_hal_streaming_context_t* context =
+           device_registry->context_list.head;
+       context; context = context->context_list_entry.next) {
+    if (context == handle) {
+      if (iree_hal_streaming_context_try_retain(context)) {
+        retained_context = context;
+      }
+      break;
+    }
+  }
+  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
+  if (!retained_context) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "context handle is not live");
+  }
+
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&retained_context->mutex);
+  switch (retained_context->handle_state) {
+    case IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_LIVE:
+      retained_context->handle_state =
+          IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_DESTROYING;
+      break;
+    case IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_PRIMARY:
+      status = iree_make_status(
+          IREE_STATUS_PERMISSION_DENIED,
+          "primary context handles must be released by the device API");
+      break;
+    case IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_DESTROYING:
+    case IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_DESTROYED:
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "context handle is already destroyed");
+      break;
+  }
+  iree_slim_mutex_unlock(&retained_context->mutex);
+
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_context_release(retained_context);
+    return status;
+  }
+  *out_context = retained_context;
+  return iree_ok_status();
+}
+
+void iree_hal_streaming_context_cancel_handle_destroy(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  iree_slim_mutex_lock(&context->mutex);
+  IREE_ASSERT(context->handle_state ==
+              IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_DESTROYING);
+  context->handle_state = IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_LIVE;
+  iree_slim_mutex_unlock(&context->mutex);
+}
+
+void iree_hal_streaming_context_commit_handle_destroy(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  iree_slim_mutex_lock(&context->mutex);
+  IREE_ASSERT(context->handle_state ==
+              IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_DESTROYING);
+  context->handle_state =
+      IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_DESTROYED;
+  iree_slim_mutex_unlock(&context->mutex);
 }
 
 void iree_hal_streaming_context_release(iree_hal_streaming_context_t* context) {

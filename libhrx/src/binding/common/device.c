@@ -361,7 +361,7 @@ static iree_status_t iree_hal_streaming_device_create_primary_context_locked(
   const bool had_default_mem_pool = device->default_mem_pool != NULL;
   const bool had_current_mem_pool = device->current_mem_pool != NULL;
   iree_hal_streaming_context_t* context = NULL;
-  iree_status_t status = iree_hal_streaming_context_create(
+  iree_status_t status = iree_hal_streaming_context_create_primary(
       device, device->primary_context_flags, device_registry->host_allocator,
       &context);
   if (iree_status_is_ok(status)) {

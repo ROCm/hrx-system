@@ -4196,22 +4196,21 @@ HIPAPI hipError_t hipCtxCreate(hipCtx_t* pctx, unsigned int flags,
 //  - hipSuccess: Context destroyed successfully.
 //  - hipErrorInvalidValue: ctx is NULL.
 //  - hipErrorInvalidContext: Invalid context handle.
-//  - hipErrorContextIsDestroyed: Context already destroyed.
 //
-// Synchronization: This operation is synchronous. Waits for all operations
-// in the context to complete before destroying.
+// Synchronization: Public-handle invalidation is synchronous. Final resource
+// teardown occurs after retained owners drain. Callers must exclude concurrent
+// context use and must not begin new use after destruction.
 //
 // Context behavior:
-// - All resources associated with the context are released.
+// - The public context handle is invalidated and its owning reference released.
+// - Refcounted teardown completes after outstanding retained users release it.
 // - If context is current, it is popped from the stack.
-// - All memory allocations in the context are freed.
-// - All streams and events in the context are destroyed.
-// - Using a destroyed context results in undefined behavior.
+// - Using the context or its resources after destruction is undefined behavior.
 //
 // Multi-GPU: Only affects the specified context on its device.
 //
-// Warning: Ensure all operations using this context have completed.
-// Destroying a context with active operations may cause errors.
+// Warning: Ensure all operations using this context have completed before
+// destroying it.
 //
 // See also: hipCtxCreate, hipCtxPushCurrent, hipCtxPopCurrent.
 HIPAPI hipError_t hipCtxDestroy(hipCtx_t ctx) {
@@ -4220,6 +4219,20 @@ HIPAPI hipError_t hipCtxDestroy(hipCtx_t ctx) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+
+  // Resolve the untrusted raw handle through the live registry before reading
+  // any context fields. This also claims the explicit public owner exactly
+  // once and rejects device-managed primary handles.
+  iree_hal_streaming_context_t* retained_context = NULL;
+  iree_status_t status = iree_hal_streaming_context_begin_handle_destroy(
+      (iree_hal_streaming_context_t*)ctx, &retained_context);
+  if (!iree_status_is_ok(status)) {
+    iree_status_ignore(status);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidContext);
+  }
+
+  iree_hal_streaming_context_commit_handle_destroy(retained_context);
 
   // Check if this is the current context.
   // If so, clear it from TLS to avoid a dangling reference.
@@ -4230,6 +4243,7 @@ HIPAPI hipError_t hipCtxDestroy(hipCtx_t ctx) {
 
   // Release the context.
   iree_hal_streaming_context_release((iree_hal_streaming_context_t*)ctx);
+  iree_hal_streaming_context_release(retained_context);
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
