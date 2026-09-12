@@ -10,7 +10,7 @@
 
 // Maps common event-operation status without changing the generic HIP status
 // conversion used by unrelated entry points. Query and synchronize expose an
-// aborted event operation as a destroyed context; elapsed-time failures keep
+// abandoned IPC generation as a destroyed context; elapsed-time failures keep
 // the generic unknown result for that otherwise unreachable status.
 static hipError_t iree_hip_event_status_to_result(iree_status_t status,
                                                   bool map_aborted) {

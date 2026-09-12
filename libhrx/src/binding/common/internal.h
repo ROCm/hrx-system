@@ -50,6 +50,7 @@ typedef struct iree_hal_streaming_deferred_device_free_t
     iree_hal_streaming_deferred_device_free_t;
 typedef struct iree_hal_streaming_device_t iree_hal_streaming_device_t;
 typedef struct iree_hal_streaming_event_t iree_hal_streaming_event_t;
+typedef struct iree_hal_streaming_ipc_event_t iree_hal_streaming_ipc_event_t;
 typedef struct iree_hal_streaming_global_symbol_registry_t
     iree_hal_streaming_global_symbol_registry_t;
 typedef struct iree_hal_streaming_graph_t iree_hal_streaming_graph_t;
@@ -909,8 +910,8 @@ typedef struct iree_hal_streaming_event_t {
   // Context that created the event, retained.
   iree_hal_streaming_context_t* context;
 
-  // Platform-specific IPC handle, if the event is IPC enabled.
-  void* ipc_handle;
+  // Binding-specific IPC implementation owned by this event, or NULL.
+  iree_hal_streaming_ipc_event_t* ipc_event;
 
   // Graph a capture-time record last associated this event with, retained, or
   // NULL when the event's last record was submitted. Guarded by |mutex|.
@@ -1942,6 +1943,13 @@ iree_status_t iree_hal_streaming_event_create(
 void iree_hal_streaming_event_retain(iree_hal_streaming_event_t* event);
 void iree_hal_streaming_event_release(iree_hal_streaming_event_t* event);
 
+// Returns true when |event| can be recorded directly on a stream belonging to
+// |context|. Ordinary events require their creating context. An event with an
+// IPC adapter may additionally use another context on the same device.
+bool iree_hal_streaming_event_can_record_in_context(
+    const iree_hal_streaming_event_t* event,
+    const iree_hal_streaming_context_t* context);
+
 // Synchronization: none (queries event status, non-blocking).
 iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
                                              int* status);
@@ -2044,6 +2052,8 @@ iree_status_t iree_hal_streaming_event_record_after_streams(
 // holds, and nothing the point names keeps that pool alive: only the reference
 // the event holds on its own context does. This is the streaming layer's own
 // enforcement of the rule, covering callers that have not already decided it.
+// IPC events are rejected before submission; direct stream recording uses a
+// private adapter-aware path instead.
 //
 // |point| arrives describing the timeline point that record signals and owning
 // nothing. On success it additionally names the slot the device writes this
@@ -2073,14 +2083,16 @@ IREE_MUST_USE_RESULT iree_status_t iree_hal_streaming_event_enqueue_record(
 // Records |event| at the point |stream| has reached. On a stream that is not
 // capturing that point is a queue point: |stream| is flushed so the record
 // lands behind everything already recorded on it, and the record is enqueued
-// there. |stream| must then belong to |event|'s context, or the record is
-// refused with IREE_STATUS_INCOMPATIBLE.
+// there. |stream| must then belong to |event|'s context, unless the event has
+// an IPC adapter and the stream belongs to another context on the same device.
+// Every other pair is refused with IREE_STATUS_INCOMPATIBLE.
 //
 // A capturing stream is the exception on both counts. Such a record names the
 // stream's dependency frontier and no queue point, so nothing is flushed or
-// enqueued and it is accepted from any context. A binding may be stricter:
-// hipEventRecord holds a capturing stream to the context rule too, refusing
-// the pair before it reaches here.
+// enqueued and it is accepted from any context. An IPC event is also refused
+// during capture because its adapter has no graph integration in this path. A
+// binding may be stricter for ordinary events: hipEventRecord holds a capturing
+// stream to the exact-context rule.
 // Synchronization: stream flush (flushes a stream that is not capturing).
 iree_status_t iree_hal_streaming_event_record(
     iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream);

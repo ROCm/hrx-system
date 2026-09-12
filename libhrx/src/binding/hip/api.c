@@ -12086,8 +12086,7 @@ HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
 //  - hipSuccess: Event recorded successfully.
 //  - hipErrorInvalidValue: A queue operation this record submits was rejected.
 //  - hipErrorInvalidHandle: The event or the stream is not a live handle, or
-//    the stream belongs to a context other than the one that created the
-//    event.
+//    their contexts differ without a same-device IPC event adapter.
 //  - hipErrorContextIsDestroyed: The stream's context has been destroyed.
 //  - hipErrorNoDevice: No device is visible to the runtime.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
@@ -12106,10 +12105,9 @@ HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
 //   enqueueing itself, so a failure to submit that work is reported here.
 //   Neither step happens while the stream is capturing.
 // - If stream is NULL, uses the current context's default stream.
-// - The stream must belong to the context that created the event, whether or
-//   not it is capturing. This binding refuses the pair itself, ahead of the
-//   record, so a capturing stream is held to the rule as well even though the
-//   streaming layer's record accepts one from any context.
+// - The stream must belong to the context that created an ordinary event. An
+//   IPC event may instead use another context on the same device. Every other
+//   pair is refused before capture or submission.
 // - Graph capture: Supported. A record made on a capturing stream snapshots
 //   the stream's dependency frontier onto the event and associates the event
 //   with the graph being captured, so that a later wait on the event joins
@@ -12145,7 +12143,8 @@ HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  if (event_object->context != resolved_stream.context) {
+  if (!iree_hal_streaming_event_can_record_in_context(
+          event_object, resolved_stream.context)) {
     iree_hip_resolved_stream_release(&resolved_stream);
     iree_hal_streaming_event_release(event_object);
     IREE_TRACE_ZONE_END(z0);
