@@ -38,6 +38,9 @@ typedef struct iree_hal_amdxdna_single_command_cache_entry_t {
   iree_hal_amdxdna_native_buffer_t* ctrl_code_buffer;
   void* ctrl_code_mapped_ptr;
   iree_hal_amdxdna_native_command_t* command;
+  // Native code bytes retained by |ctrl_code_buffer|. Kept separately from
+  // ctrl_word_count so cache-wide accounting remains exact during teardown.
+  iree_host_size_t retained_code_bytes;
   // Static descriptor identity for late-bound START_NPU template reuse. The
   // cached command owns the mutable control-code BO/native command, while these
   // fields identify which run template it came from. They point into the owned
@@ -72,6 +75,8 @@ typedef struct iree_hal_amdxdna_device_single_command_cache_t {
       entries[kAmdxdnaSingleCommandCacheCapacity];
   iree_host_size_t entry_count;
   uint64_t use_clock;
+  // Lock-free snapshot used by chain-cache admission on every chain lookup.
+  iree_atomic_int64_t retained_code_bytes;
 } iree_hal_amdxdna_device_single_command_cache_t;
 
 typedef struct iree_hal_amdxdna_device iree_hal_amdxdna_device;
@@ -164,6 +169,20 @@ void iree_hal_amdxdna_single_command_cache_entry_release_in_flight(
 void iree_hal_amdxdna_single_command_cache_entry_discard(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
     iree_hal_amdxdna_single_command_cache_entry_t* entry);
+
+// Drops every non-in-flight cached instruction BO. In-flight entries are
+// marked invalidated and discarded when completion releases them.
+void iree_hal_amdxdna_single_command_cache_evict_idle(
+    iree_hal_amdxdna_device_single_command_cache_t* cache);
+
+// Returns native code bytes retained by all single-command cache entries.
+// O(1) and lock-free; callers use this as an admission snapshot.
+iree_host_size_t iree_hal_amdxdna_single_command_cache_retained_code_bytes(
+    iree_hal_amdxdna_device_single_command_cache_t* cache);
+
+// Same as evict_idle; the caller must already hold cache->mutex.
+void iree_hal_amdxdna_single_command_cache_evict_idle_locked(
+    iree_hal_amdxdna_device_single_command_cache_t* cache);
 
 #ifdef __cplusplus
 }  // extern "C"

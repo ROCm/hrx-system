@@ -13,6 +13,9 @@
 
 namespace {
 
+constexpr iree_host_size_t kTestSharedCodeMemoryBytes = 64u * 1024u * 1024u;
+constexpr iree_host_size_t kTestMissReserveBytes = 4u * 1024u * 1024u;
+
 iree_allocator_t TestAllocator() { return iree_allocator_system(); }
 
 iree_hal_amdxdna_native_buffer_t* FakeBuffer(uintptr_t value) {
@@ -110,10 +113,17 @@ iree_hal_amdxdna_chain_group_t MakeResourceGroup(
 }
 
 void SetResourceEntry(iree_hal_amdxdna_chain_command_cache_entry_t* entry,
-                      iree_host_size_t cmd_count, uint64_t last_use) {
-  iree_hal_amdxdna_chain_group_t group = MakeResourceGroup(cmd_count);
+                      iree_host_size_t cmd_count, uint64_t last_use,
+                      iree_host_size_t ctrl_word_count = 1) {
+  iree_hal_amdxdna_chain_group_t group =
+      MakeResourceGroup(cmd_count, ctrl_word_count);
   iree_hal_amdxdna_chain_group_move(&entry->group, &group);
   entry->last_use = last_use;
+}
+
+iree_host_size_t CtrlWordsForBytes(iree_host_size_t bytes) {
+  EXPECT_EQ(bytes % sizeof(uint32_t), 0u);
+  return bytes / sizeof(uint32_t);
 }
 
 iree_hal_amdxdna_chain_group_t MakeGroup1(iree_hal_amdxdna_chain_cmd_t* cmd) {
@@ -715,6 +725,102 @@ TEST(ChainCommandCacheTest, AllocateEntryUsesConfiguredChildBudget) {
     iree_hal_amdxdna_chain_group_deinitialize(TestAllocator(),
                                               &cache.entries[i].group);
   }
+}
+
+// Half of a shared 64MiB code-memory domain is occupied by live context images,
+// leaving a 28MiB command budget after the miss-construction reserve. A cached
+// 20MiB chain plus a 12MiB miss exceeds that remainder, so LRU must evict
+// before native allocation.
+TEST(ChainCommandCacheTest,
+     AllocateEntryEvictsIdleCommandsToFitSharedCodeMemory) {
+  const iree_host_size_t live_context_image_bytes = 32u * 1024u * 1024u;
+  const iree_host_size_t budget =
+      iree_hal_amdxdna_shared_code_memory_command_budget(
+          kTestSharedCodeMemoryBytes, kTestMissReserveBytes,
+          live_context_image_bytes, 0);
+  ASSERT_EQ(budget, 28u * 1024u * 1024u);
+
+  const iree_host_size_t cached_bytes = 20u * 1024u * 1024u;
+  const iree_host_size_t request_bytes = 12u * 1024u * 1024u;
+  ASSERT_GT(cached_bytes + request_bytes, budget);
+  ASSERT_LE(cached_bytes + request_bytes,
+            (iree_host_size_t)kAmdxdnaChainCommandCacheMaxInstructionBytes);
+
+  iree_hal_amdxdna_device_chain_command_cache_t cache = {};
+  cache.host_allocator = TestAllocator();
+  cache.max_instruction_bytes = budget;
+  cache.entry_count = 1;
+  iree_hal_amdxdna_chain_group_initialize(&cache.entries[0].group);
+  SetResourceEntry(&cache.entries[0], /*cmd_count=*/1, /*last_use=*/1,
+                   CtrlWordsForBytes(cached_bytes));
+  auto request_group =
+      MakeResourceGroup(/*cmd_count=*/1, CtrlWordsForBytes(request_bytes));
+
+  iree_hal_amdxdna_chain_command_cache_entry_t* entry =
+      iree_hal_amdxdna_chain_command_cache_allocate_entry(
+          &cache, &request_group, /*max_slots=*/24);
+
+  EXPECT_EQ(entry, &cache.entries[0]);
+  EXPECT_EQ(cache.entries[0].group.cmd_count, 0u);
+  EXPECT_EQ(cache.entry_count, 1u);
+
+  iree_hal_amdxdna_chain_group_deinitialize(TestAllocator(), &request_group);
+  for (iree_host_size_t i = 0; i < cache.entry_count; ++i) {
+    iree_hal_amdxdna_chain_group_deinitialize(TestAllocator(),
+                                              &cache.entries[i].group);
+  }
+}
+
+TEST(ChainCommandCacheTest,
+     DefaultInstructionCapRetainsFillThatExceedsSharedCodeMemory) {
+  const iree_host_size_t cached_bytes = 20u * 1024u * 1024u;
+  const iree_host_size_t request_bytes = 12u * 1024u * 1024u;
+  ASSERT_EQ(cached_bytes + request_bytes,
+            (iree_host_size_t)kAmdxdnaChainCommandCacheMaxInstructionBytes);
+
+  iree_hal_amdxdna_device_chain_command_cache_t cache = {};
+  cache.host_allocator = TestAllocator();
+  cache.entry_count = 1;
+  iree_hal_amdxdna_chain_group_initialize(&cache.entries[0].group);
+  SetResourceEntry(&cache.entries[0], /*cmd_count=*/1, /*last_use=*/1,
+                   CtrlWordsForBytes(cached_bytes));
+  auto request_group =
+      MakeResourceGroup(/*cmd_count=*/1, CtrlWordsForBytes(request_bytes));
+
+  iree_hal_amdxdna_chain_command_cache_entry_t* entry =
+      iree_hal_amdxdna_chain_command_cache_allocate_entry(
+          &cache, &request_group, /*max_slots=*/24);
+
+  EXPECT_EQ(entry, &cache.entries[1]);
+  EXPECT_EQ(cache.entry_count, 2u);
+  EXPECT_EQ(cache.entries[0].group.cmd_count, 1u);
+  EXPECT_EQ(cache.entries[0].group.cmds[0].ctrl_word_count,
+            CtrlWordsForBytes(cached_bytes));
+
+  iree_hal_amdxdna_chain_group_deinitialize(TestAllocator(), &request_group);
+  for (iree_host_size_t i = 0; i < cache.entry_count; ++i) {
+    iree_hal_amdxdna_chain_group_deinitialize(TestAllocator(),
+                                              &cache.entries[i].group);
+  }
+}
+
+TEST(ChainCommandCacheTest,
+     AllocateEntryRejectsRequestOverSharedCodeMemoryBudget) {
+  const iree_host_size_t budget =
+      iree_hal_amdxdna_shared_code_memory_command_budget(
+          kTestSharedCodeMemoryBytes, kTestMissReserveBytes,
+          32u * 1024u * 1024u, 0);
+  iree_hal_amdxdna_device_chain_command_cache_t cache = {};
+  cache.host_allocator = TestAllocator();
+  cache.max_instruction_bytes = budget;
+  auto request_group = MakeResourceGroup(
+      /*cmd_count=*/1, CtrlWordsForBytes(budget + sizeof(uint32_t)));
+
+  EXPECT_EQ(iree_hal_amdxdna_chain_command_cache_allocate_entry(
+                &cache, &request_group, /*max_slots=*/24),
+            nullptr);
+
+  iree_hal_amdxdna_chain_group_deinitialize(TestAllocator(), &request_group);
 }
 
 }  // namespace

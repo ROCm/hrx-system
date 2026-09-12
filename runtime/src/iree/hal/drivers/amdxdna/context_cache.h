@@ -40,6 +40,10 @@ typedef struct iree_hal_amdxdna_context_cache_ops_t {
   // context/queue lifetime. The callback must not retain |context_ref|.
   void (*before_release_context)(
       void* user_data, iree_hal_amdxdna_native_context_ref_t* context_ref);
+  // Optional native resource-pressure recovery hook. Called once after context
+  // creation returns UNAVAILABLE so idle command resources can be dropped
+  // before retrying. Runs with the context-cache mutex held.
+  void (*reclaim_create_unavailable)(void* user_data);
 } iree_hal_amdxdna_context_cache_ops_t;
 
 // Full identity of a cached hardware context. Two contexts are interchangeable
@@ -88,6 +92,18 @@ void iree_hal_amdxdna_device_context_cache_destroy(
 
 void iree_hal_amdxdna_device_context_cache_clear(
     iree_hal_amdxdna_device_context_cache_t* context_cache);
+
+// Sum of native context-image bytes represented by cache entries. Exported for
+// hermetic policy tests; production admission uses native live ownership so
+// evicted contexts retained by in-flight work remain charged.
+iree_host_size_t iree_hal_amdxdna_context_cache_cached_image_bytes(
+    iree_hal_amdxdna_device_context_cache_t* context_cache);
+
+// Evicts idle (unleased) LRU contexts, freeing their native context resources.
+// If |force_leased| is true, also force-evicts one leased LRU entry after idle
+// entries are gone.
+void iree_hal_amdxdna_context_cache_reclaim(
+    iree_hal_amdxdna_device_context_cache_t* context_cache, bool force_leased);
 
 // Implements lookup/create independently of the HAL device wrapper. Exported
 // for hermetic cache-policy tests; production callers use

@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
@@ -43,6 +43,7 @@ iree_runtime_cc_library(
     hdrs = [
         "api.h",
         "native.h",
+        "native_linux_kmq_internal.h",
         "util.h",
     ],
     target_compatible_with = ["@platforms//os:linux"],
@@ -374,6 +375,41 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "context_cache_capacity_test",
     srcs = ["context_cache_capacity_test.cc"],
+    tags = _AMDXDNA_UNIT_TEST_TAGS,
+    target_compatible_with = _AMDXDNA_COMPATIBLE_WITH,
+    deps = [
+        ":amdxdna",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "native_linux_kmq_test",
+    srcs = ["native_linux_kmq_test.cc"],
+    tags = _AMDXDNA_UNIT_TEST_TAGS,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":native_linux_kmq",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_binary(
+    name = "resource_pressure_test_tool",
+    srcs = ["resource_pressure_test_tool.cc"],
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = _AMDXDNA_COMPATIBLE_WITH,
+    deps = [
+        ":amdxdna",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "linux_dev_heap_e2e_test",
+    srcs = ["linux_dev_heap_e2e_test.cc"],
     tags = _AMDXDNA_UNIT_TEST_TAGS,
     target_compatible_with = _AMDXDNA_COMPATIBLE_WITH,
     deps = [

@@ -85,6 +85,11 @@ void iree_hal_amdxdna_device_destroy_chain_command_cache(
 void iree_hal_amdxdna_device_invalidate_command_caches_for_queue(
     iree_hal_amdxdna_device* device, iree_hal_amdxdna_native_queue_t* queue);
 
+// Drops idle cached command resources and unleased hardware contexts so a
+// subsequent native allocation can succeed after resource pressure.
+void iree_hal_amdxdna_device_reclaim_native_resources(
+    iree_hal_amdxdna_device* device);
+
 // Returns true when a cached chain command's already staged control-code words
 // must be rewritten to match a freshly recorded command. Generic allocator
 // caching may legally change HAL buffer wrapper/native BO identity between

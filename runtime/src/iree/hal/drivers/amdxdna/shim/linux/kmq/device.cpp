@@ -50,7 +50,9 @@ int import_fd_checked(pid_t pid, int ehdl, int* out_fd) {
 }
 
 // Device memory heap needs to be within one 64MB page. The maximum size is
-// 64MB.
+// 64MB. The native backend publishes this allocation-domain budget so retained
+// command code and context images can be bounded without a KMD free-space
+// query.
 const size_t dev_mem_size = (64 << 20);
 
 std::filesystem::path try_find_npu_device() {

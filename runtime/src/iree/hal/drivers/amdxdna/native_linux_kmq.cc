@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cinttypes>
 #include <cstdlib>
 #include <cstring>
@@ -21,6 +22,7 @@
 
 #include "iree/base/internal/atomics.h"
 #include "iree/hal/drivers/amdxdna/native.h"
+#include "iree/hal/drivers/amdxdna/native_linux_kmq_internal.h"
 #include "iree/hal/drivers/amdxdna/shim/linux/kmq/amdxdna_accel.h"
 #include "iree/hal/drivers/amdxdna/shim/linux/kmq/bo.h"
 #include "iree/hal/drivers/amdxdna/shim/linux/kmq/device.h"
@@ -43,6 +45,7 @@ struct iree_hal_amdxdna_native_device_t {
   // creation from the NPU architecture (the KMD has no query for it). 0 when
   // the architecture is unrecognized. See query_caps.
   uint32_t hardware_context_budget = 0;
+  std::atomic<iree_host_size_t> live_context_image_bytes{0};
   std::mutex command_pool_mutex;
   std::vector<std::unique_ptr<shim_xdna::kernel>> start_npu_command_pool;
 
@@ -95,6 +98,8 @@ struct iree_hal_amdxdna_native_command_t {
 
 struct iree_hal_amdxdna_native_context_ref_t {
   iree_atomic_ref_count_t ref_count;
+  iree_hal_amdxdna_native_device_t* device;
+  iree_host_size_t pdi_bytes;
   iree_hal_amdxdna_native_context_t* context;
 };
 
@@ -108,6 +113,10 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
 namespace {
 
 constexpr size_t kMaxExecBoSize = 4096;
+// Linux KMQ allocates instruction and PDI BOs from one process-wide device
+// heap. Keep one command-construction reserve outside retained cache budgets.
+constexpr uint32_t kSharedCodeMemoryBytes = 64u * 1024u * 1024u;
+constexpr uint32_t kSharedCodeMemoryMissReserveBytes = 4u * 1024u * 1024u;
 
 // The exec BO is large enough to hold many chain slots, but XRT's runlist
 // implementation chunks native command chains at 24 children. Match that
@@ -444,6 +453,18 @@ iree_status_t validate_device_size_fits_size_t(iree_device_size_t size) {
 
 }  // namespace
 
+iree_status_code_t iree_hal_amdxdna_native_linux_bo_allocation_status_code(
+    int error_number) {
+  const int normalized_error = error_number < 0 ? -error_number : error_number;
+  // Drivers report a full shared device heap as either EAGAIN or ENOSPC.
+  // Treat both as transient so the common HAL can reclaim idle native
+  // resources and retry the allocation once.
+  if (normalized_error == EAGAIN || normalized_error == ENOSPC) {
+    return IREE_STATUS_UNAVAILABLE;
+  }
+  return iree_status_code_from_errno(normalized_error);
+}
+
 iree_status_t iree_hal_amdxdna_native_resolve_device_options(
     const iree_hal_amdxdna_device_params* options,
     iree_hal_amdxdna_device_params* out_options,
@@ -617,6 +638,9 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
   // Windows MCDM CreateContext / 0xc01e0009, and the Linux create-hwctx
   // pool signal is ENOENT/ENOSPC/EINVAL, not EAGAIN.
   caps.max_hardware_contexts = device->hardware_context_budget;
+  caps.max_shared_code_memory_bytes = kSharedCodeMemoryBytes;
+  caps.shared_code_memory_miss_reserve_bytes =
+      kSharedCodeMemoryMissReserveBytes;
   caps.context_image_models = IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_PDI;
   // START_NPU is used for command-chain children and is correct on Linux KMQ.
   // Do not advertise PARTIAL_ELF here: its resident-instruction path currently
@@ -662,7 +686,7 @@ iree_status_t iree_hal_amdxdna_native_device_alloc_buffer(
   if (err != 0) {
     const int normalized_err = err < 0 ? -err : err;
     return iree_make_status(
-        iree_status_code_from_errno(normalized_err),
+        iree_hal_amdxdna_native_linux_bo_allocation_status_code(normalized_err),
         "amdxdna native BO allocation failed: type=%d size=%" PRIu64
         " flags=0x%08x errno %d",
         (int)type, (uint64_t)size, to_shim_buffer_flags(type), normalized_err);
@@ -1439,11 +1463,23 @@ extern "C" iree_status_t iree_hal_amdxdna_native_device_c_create_context_ref(
     iree_hal_amdxdna_native_context_ref_t** out_context_ref) {
   *out_context_pool_exhausted = false;
   *out_context_ref = nullptr;
+  const iree_host_size_t pdi_bytes = image->pdi.data_length;
+  // Charge before creation because the native constructor allocates the PDI BO
+  // internally. Undo the charge on failure.
+  device->live_context_image_bytes.fetch_add(pdi_bytes,
+                                             std::memory_order_relaxed);
   iree_hal_amdxdna_native_context_t* raw_context = nullptr;
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_device_create_context(
-      device, image, out_context_pool_exhausted, &raw_context));
+  iree_status_t status = iree_hal_amdxdna_native_device_create_context(
+      device, image, out_context_pool_exhausted, &raw_context);
+  if (!iree_status_is_ok(status)) {
+    device->live_context_image_bytes.fetch_sub(pdi_bytes,
+                                               std::memory_order_relaxed);
+    return status;
+  }
   auto* context_ref = new iree_hal_amdxdna_native_context_ref_t();
   iree_atomic_ref_count_init(&context_ref->ref_count);
+  context_ref->device = device;
+  context_ref->pdi_bytes = pdi_bytes;
   context_ref->context = raw_context;
   *out_context_ref = context_ref;
   return iree_ok_status();
@@ -1462,8 +1498,18 @@ extern "C" void iree_hal_amdxdna_native_context_ref_release(
   if (!context_ref) return;
   if (iree_atomic_ref_count_dec(&context_ref->ref_count) == 1) {
     iree_hal_amdxdna_native_context_destroy(context_ref->context);
+    context_ref->device->live_context_image_bytes.fetch_sub(
+        context_ref->pdi_bytes, std::memory_order_relaxed);
     delete context_ref;
   }
+}
+
+extern "C" iree_host_size_t
+iree_hal_amdxdna_native_device_c_live_context_image_bytes(
+    iree_hal_amdxdna_native_device_t* device) {
+  return device
+             ? device->live_context_image_bytes.load(std::memory_order_relaxed)
+             : 0;
 }
 
 extern "C" iree_hal_amdxdna_native_context_t*

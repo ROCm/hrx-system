@@ -71,6 +71,16 @@ static void iree_hal_amdxdna_device_before_release_context(
   iree_hal_amdxdna_device_invalidate_command_caches_for_queue(device, queue);
 }
 
+static void iree_hal_amdxdna_device_reclaim_context_create_unavailable(
+    void* user_data) {
+  iree_hal_amdxdna_device* device = (iree_hal_amdxdna_device*)user_data;
+  // Called with the context-cache mutex held. Preserve the global lock order:
+  // context -> single -> chain.
+  iree_hal_amdxdna_single_command_cache_evict_idle(
+      device->single_command_cache);
+  iree_hal_amdxdna_chain_command_cache_evict_idle(device->chain_command_cache);
+}
+
 static void iree_hal_amdxdna_device_deinitialize(
     iree_hal_amdxdna_device* device) {
   iree_hal_amdxdna_device_destroy_single_command_cache(device);
@@ -231,8 +241,8 @@ static iree_status_t iree_hal_amdxdna_device_load_executable(
       out_executable);
   if (iree_status_is_ok(status) &&
       device->native_caps.requires_executable_context_cache) {
-    status = iree_hal_amdxdna_executable_preload_contexts(device,
-                                                          *out_executable);
+    status =
+        iree_hal_amdxdna_executable_preload_contexts(device, *out_executable);
     if (!iree_status_is_ok(status)) {
       iree_hal_executable_release(*out_executable);
       *out_executable = NULL;
@@ -542,8 +552,7 @@ static iree_status_t iree_hal_amdxdna_queue_execute_op_create(
                                            &op->signal_list);
   }
   if (iree_status_is_ok(status) &&
-      device->native_caps.submit_completion_is_deferred &&
-      command_buffer) {
+      device->native_caps.submit_completion_is_deferred && command_buffer) {
     status = iree_hal_amdxdna_completion_batch_create(
         device->completion_queue, signal_list, &op->completion_batch);
   }
@@ -1911,10 +1920,14 @@ iree_status_t iree_hal_amdxdna_device_create(
     // Now that caps are known, size the context cache to the device's
     // hardware-context budget (adaptive per architecture; falls back to a
     // conservative default when the budget is unknown).
-    const iree_hal_amdxdna_context_cache_ops_t context_cache_ops = {
+    iree_hal_amdxdna_context_cache_ops_t context_cache_ops = {
         .before_release_context =
             iree_hal_amdxdna_device_before_release_context,
     };
+    if (device->native_caps.max_shared_code_memory_bytes != 0) {
+      context_cache_ops.reclaim_create_unavailable =
+          iree_hal_amdxdna_device_reclaim_context_create_unavailable;
+    }
     device->context_cache =
         iree_hal_amdxdna_device_context_cache_create_with_ops(
             device->host_allocator, device->native_caps.max_hardware_contexts,

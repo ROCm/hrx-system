@@ -10,17 +10,17 @@
 iree_add_all_subdirs()
 
 if(IREE_HAL_DRIVER_AMDXDNA AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
-  iree_cc_library(
-    NAME
-      planning
-    HDRS
-      "direct_command_buffer_planning.h"
-    SRCS
-      "direct_command_buffer_planning.c"
-    DEPS
-      iree::base
-    PUBLIC
-  )
+iree_cc_library(
+  NAME
+    planning
+  HDRS
+    "direct_command_buffer_planning.h"
+  SRCS
+    "direct_command_buffer_planning.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_HAL_DRIVER_AMDXDNA)
@@ -30,6 +30,7 @@ iree_cc_library(
   HDRS
     "api.h"
     "native.h"
+    "native_linux_kmq_internal.h"
     "util.h"
   SRCS
     "native_linux_kmq.cc"
@@ -63,6 +64,22 @@ iree_cc_library(
 )
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND IREE_HAL_DRIVER_AMDXDNA)
+iree_cc_test(
+  NAME
+    native_windows_mcdm_test
+  SRCS
+    "native_windows_mcdm_test.cc"
+  DEPS
+    ::native_windows_mcdm
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "driver=amdxdna"
+    "iree-build-requirement=runtime.hal.amdxdna"
+)
+endif()
+
 if(IREE_HAL_DRIVER_AMDXDNA AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
 set(_amdxdna_platform_deps "")
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -80,13 +97,13 @@ iree_cc_library(
     "buffer.h"
     "command_buffer.h"
     "completion_queue.h"
-    "dispatch.h"
     "context_cache.h"
     "device.h"
     "device_internal.h"
     "direct_command_buffer.h"
     "direct_command_buffer_chain_cache.h"
     "direct_command_buffer_single_cache.h"
+    "dispatch.h"
     "executable.h"
     "executable_internal.h"
     "native.h"
@@ -423,6 +440,54 @@ endif()
 if(IREE_HAL_DRIVER_AMDXDNA AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
 iree_cc_test(
   NAME
+    context_cache_capacity_test
+  SRCS
+    "context_cache_capacity_test.cc"
+  DEPS
+    ::amdxdna
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "driver=amdxdna"
+    "iree-build-requirement=runtime.hal.amdxdna"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_HAL_DRIVER_AMDXDNA)
+iree_cc_test(
+  NAME
+    native_linux_kmq_test
+  SRCS
+    "native_linux_kmq_test.cc"
+  DEPS
+    ::native_linux_kmq
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "driver=amdxdna"
+    "iree-build-requirement=runtime.hal.amdxdna"
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDXDNA AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+iree_cc_test(
+  NAME
+    linux_dev_heap_e2e_test
+  SRCS
+    "linux_dev_heap_e2e_test.cc"
+  DEPS
+    ::amdxdna
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "driver=amdxdna"
+    "iree-build-requirement=runtime.hal.amdxdna"
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDXDNA AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+iree_cc_test(
+  NAME
     semaphore_test
   SRCS
     "semaphore_test.cc"
@@ -439,36 +504,30 @@ iree_cc_test(
 )
 endif()
 
-if(IREE_HAL_DRIVER_AMDXDNA AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
-iree_cc_test(
-  NAME
-    context_cache_capacity_test
-  SRCS
-    "context_cache_capacity_test.cc"
-  DEPS
-    ::amdxdna
-    iree::testing::gtest
-    iree::testing::gtest_main
-  LABELS
-    "driver=amdxdna"
-    "iree-build-requirement=runtime.hal.amdxdna"
-)
-endif()
-
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND IREE_HAL_DRIVER_AMDXDNA)
-iree_cc_test(
-  NAME
-    native_windows_mcdm_test
-  SRCS
-    "native_windows_mcdm_test.cc"
-  DEPS
-    ::native_windows_mcdm
-    iree::testing::gtest
-    iree::testing::gtest_main
-  LABELS
-    "driver=amdxdna"
-    "iree-build-requirement=runtime.hal.amdxdna"
+option(IREE_HAL_DRIVER_AMDXDNA_BUILD_QUALIFICATION_TOOLS
+  "Build AMDXDNA qualification executables"
+  OFF
 )
+
+if(IREE_HAL_DRIVER_AMDXDNA_BUILD_QUALIFICATION_TOOLS AND
+   IREE_HAL_DRIVER_AMDXDNA AND
+   (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+  iree_cc_binary(
+    NAME
+      resource_pressure_test_tool
+    SRCS
+      "resource_pressure_test_tool.cc"
+    DEPS
+      ::amdxdna
+      iree::base
+  )
+  set_target_properties(
+    iree_hal_drivers_amdxdna_resource_pressure_test_tool
+    PROPERTIES OUTPUT_NAME "hrx-amdxdna-resource-pressure")
+  install(
+    TARGETS iree_hal_drivers_amdxdna_resource_pressure_test_tool
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}")
 endif()

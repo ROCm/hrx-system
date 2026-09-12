@@ -66,11 +66,14 @@ static bool iree_hal_amdxdna_chain_cache_resources_fit(
       cache->max_child_commands
           ? cache->max_child_commands
           : kAmdxdnaChainCommandCacheDefaultMaxChildCommands;
+  const iree_host_size_t max_instruction_bytes =
+      cache->max_instruction_bytes
+          ? cache->max_instruction_bytes
+          : kAmdxdnaChainCommandCacheMaxInstructionBytes;
   return resources->child_command_count <= max_child_commands &&
          resources->parent_command_count <=
              kAmdxdnaChainCommandCacheMaxParentCommands &&
-         resources->instruction_bytes <=
-             kAmdxdnaChainCommandCacheMaxInstructionBytes;
+         resources->instruction_bytes <= max_instruction_bytes;
 }
 
 static iree_host_size_t iree_hal_amdxdna_chain_cmd_instruction_word_count(
@@ -692,6 +695,31 @@ void iree_hal_amdxdna_chain_command_cache_entry_discard(
   iree_hal_amdxdna_chain_command_cache_entry_deinitialize(cache->host_allocator,
                                                           entry);
   iree_hal_amdxdna_chain_command_cache_entry_prepare_empty(entry);
+}
+
+void iree_hal_amdxdna_chain_command_cache_evict_idle_locked(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache) {
+  IREE_ASSERT_ARGUMENT(cache);
+  for (iree_host_size_t i = 0; i < cache->entry_count; ++i) {
+    iree_hal_amdxdna_chain_command_cache_entry_t* entry = &cache->entries[i];
+    if (!iree_hal_amdxdna_chain_command_cache_entry_has_resources(entry) &&
+        entry->in_flight_count == 0) {
+      continue;
+    }
+    if (entry->in_flight_count != 0) {
+      entry->invalidated = true;
+      continue;
+    }
+    iree_hal_amdxdna_chain_command_cache_entry_discard(cache, entry);
+  }
+}
+
+void iree_hal_amdxdna_chain_command_cache_evict_idle(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache) {
+  if (!cache) return;
+  iree_slim_mutex_lock(&cache->mutex);
+  iree_hal_amdxdna_chain_command_cache_evict_idle_locked(cache);
+  iree_slim_mutex_unlock(&cache->mutex);
 }
 
 void iree_hal_amdxdna_device_destroy_chain_command_cache(

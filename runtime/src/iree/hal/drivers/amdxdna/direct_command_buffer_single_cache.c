@@ -42,6 +42,13 @@ static bool iree_hal_amdxdna_device_size_span_equal(
 static void iree_hal_amdxdna_single_command_cache_entry_deinitialize(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
     iree_hal_amdxdna_single_command_cache_entry_t* entry) {
+  if (entry->retained_code_bytes != 0) {
+    const int64_t previous = iree_atomic_fetch_sub(
+        &cache->retained_code_bytes, (int64_t)entry->retained_code_bytes,
+        iree_memory_order_relaxed);
+    IREE_ASSERT(previous >= (int64_t)entry->retained_code_bytes,
+                "amdxdna single command cache byte accounting underflow");
+  }
   iree_hal_amdxdna_native_command_c_destroy(entry->command);
   iree_hal_amdxdna_native_buffer_c_destroy(entry->ctrl_code_buffer);
   iree_allocator_free(cache->host_allocator, entry->ctrl_words);
@@ -61,6 +68,37 @@ void iree_hal_amdxdna_single_command_cache_entry_discard(
   IREE_ASSERT_ARGUMENT(entry);
   IREE_ASSERT(entry->in_flight_count == 0);
   iree_hal_amdxdna_single_command_cache_entry_deinitialize(cache, entry);
+}
+
+void iree_hal_amdxdna_single_command_cache_evict_idle_locked(
+    iree_hal_amdxdna_device_single_command_cache_t* cache) {
+  IREE_ASSERT_ARGUMENT(cache);
+  for (iree_host_size_t i = 0; i < cache->entry_count; ++i) {
+    iree_hal_amdxdna_single_command_cache_entry_t* entry = &cache->entries[i];
+    if (!entry->command) continue;
+    if (entry->in_flight_count != 0) {
+      entry->invalidated = true;
+      continue;
+    }
+    iree_hal_amdxdna_single_command_cache_entry_deinitialize(cache, entry);
+  }
+}
+
+void iree_hal_amdxdna_single_command_cache_evict_idle(
+    iree_hal_amdxdna_device_single_command_cache_t* cache) {
+  if (!cache) return;
+  iree_slim_mutex_lock(&cache->mutex);
+  iree_hal_amdxdna_single_command_cache_evict_idle_locked(cache);
+  iree_slim_mutex_unlock(&cache->mutex);
+}
+
+iree_host_size_t iree_hal_amdxdna_single_command_cache_retained_code_bytes(
+    iree_hal_amdxdna_device_single_command_cache_t* cache) {
+  if (!cache) return 0;
+  const int64_t retained_code_bytes =
+      iree_atomic_load(&cache->retained_code_bytes, iree_memory_order_relaxed);
+  IREE_ASSERT(retained_code_bytes >= 0);
+  return (iree_host_size_t)retained_code_bytes;
 }
 
 // Clones |src| into cache-owned storage. On failure |dst| is left empty.
@@ -128,6 +166,7 @@ iree_status_t iree_hal_amdxdna_single_command_cache_create(
       iree_allocator_malloc(host_allocator, sizeof(*cache), (void**)&cache));
   memset(cache, 0, sizeof(*cache));
   cache->host_allocator = host_allocator;
+  iree_atomic_store(&cache->retained_code_bytes, 0, iree_memory_order_relaxed);
   iree_slim_mutex_initialize(&cache->mutex);
   *out_cache = cache;
   return iree_ok_status();
@@ -418,6 +457,13 @@ iree_hal_amdxdna_store_single_command_cache_entry(
   }
   entry->ctrl_code_buffer = ctrl_code_buffer;
   entry->command = command;
+  if (ctrl_code_buffer) {
+    entry->retained_code_bytes =
+        ctrl_word_count * (iree_host_size_t)sizeof(*ctrl_words);
+    iree_atomic_fetch_add(&cache->retained_code_bytes,
+                          (int64_t)entry->retained_code_bytes,
+                          iree_memory_order_relaxed);
+  }
   entry->last_use = ++cache->use_clock;
   return entry;
 }

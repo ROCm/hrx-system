@@ -66,6 +66,31 @@ TEST(SingleCommandCacheTest, ExactHitReturnsPreparedEntry) {
   FreeSignature(&cache, stored);
 }
 
+TEST(SingleCommandCacheTest, RetainedCodeBytesAreTrackedWithoutScanning) {
+  iree_hal_amdxdna_device_single_command_cache_t cache = {};
+  cache.host_allocator = TestAllocator();
+  iree_atomic_store(&cache.retained_code_bytes, 0, iree_memory_order_relaxed);
+  const uint32_t ctrl_words[] = {1, 2, 3};
+
+  auto* stored = iree_hal_amdxdna_store_single_command_cache_entry(
+      &cache, FakeQueue(0x201), /*cu_index=*/7, ctrl_words,
+      IREE_ARRAYSIZE(ctrl_words), /*binding_buffers=*/nullptr,
+      /*binding_device_addrs=*/nullptr, /*binding_offsets=*/nullptr,
+      /*binding_lengths=*/nullptr, /*binding_count=*/0, FakeBuffer(0x301),
+      FakeCommand(0x401));
+  ASSERT_NE(stored, nullptr);
+  EXPECT_EQ(iree_hal_amdxdna_single_command_cache_retained_code_bytes(&cache),
+            sizeof(ctrl_words));
+
+  // Avoid invoking native destruction for test-only opaque sentinels. Byte
+  // ownership remains on the entry and must still be removed by teardown.
+  stored->ctrl_code_buffer = nullptr;
+  stored->command = nullptr;
+  iree_hal_amdxdna_single_command_cache_entry_discard(&cache, stored);
+  EXPECT_EQ(iree_hal_amdxdna_single_command_cache_retained_code_bytes(&cache),
+            0u);
+}
+
 TEST(SingleCommandCacheTest, DifferentQueueMissesWithoutUpdatingNativeCommand) {
   iree_hal_amdxdna_device_single_command_cache_t cache = {};
   cache.host_allocator = TestAllocator();

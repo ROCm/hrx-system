@@ -2571,6 +2571,10 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
   caps.max_hardware_contexts =
       iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
           device->hardware_context_budget);
+  // Prepared commands and context images are independent KMT allocations, not
+  // consumers of one bounded allocation domain.
+  caps.max_shared_code_memory_bytes = 0;
+  caps.shared_code_memory_miss_reserve_bytes = 0;
   caps.context_image_models =
       IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_XCLBIN;
   caps.dispatch_models = IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_CU |
@@ -4632,6 +4636,13 @@ extern "C" void iree_hal_amdxdna_native_context_ref_release(
     iree_hal_amdxdna_native_context_destroy(context_ref->context);
     iree_allocator_free(host_allocator, context_ref);
   }
+}
+
+extern "C" iree_host_size_t
+iree_hal_amdxdna_native_device_c_live_context_image_bytes(
+    iree_hal_amdxdna_native_device_t* device) {
+  (void)device;
+  return 0;
 }
 
 extern "C" iree_hal_amdxdna_native_context_t*

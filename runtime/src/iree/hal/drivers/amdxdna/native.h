@@ -147,7 +147,34 @@ typedef struct iree_hal_amdxdna_native_c_device_caps_t {
   iree_hal_amdxdna_native_c_command_opcode_t default_dispatch_opcode;
   iree_hal_amdxdna_native_c_command_chain_status_t command_chain_status;
   iree_hal_amdxdna_native_c_driver_stack_t driver_stack;
+  // Optional backend-wide memory budget shared by prepared command code and
+  // native context images. Zero means these resources do not share a bounded
+  // allocation domain. Nonzero backends use this to bound idle command-cache
+  // retention before asking the native allocator to admit new code.
+  uint32_t max_shared_code_memory_bytes;
+  // Portion of the shared code-memory budget kept free while trimming caches
+  // so one cache miss can construct its native resources. Ignored when
+  // max_shared_code_memory_bytes is zero.
+  uint32_t shared_code_memory_miss_reserve_bytes;
 } iree_hal_amdxdna_native_c_device_caps_t;
+
+// Returns how many prepared-command bytes may remain cached after accounting
+// for other live consumers of a backend's shared code-memory allocation
+// domain. Keeping the miss reserve outside the cache budget allows the next
+// command to be constructed before the native allocator is exhausted.
+static inline iree_host_size_t
+iree_hal_amdxdna_shared_code_memory_command_budget(
+    iree_host_size_t max_shared_code_memory_bytes,
+    iree_host_size_t miss_reserve_bytes,
+    iree_host_size_t live_context_image_bytes,
+    iree_host_size_t live_other_code_bytes) {
+  const iree_host_size_t reserved =
+      live_context_image_bytes + live_other_code_bytes + miss_reserve_bytes;
+  if (reserved >= max_shared_code_memory_bytes) {
+    return 0;
+  }
+  return max_shared_code_memory_bytes - reserved;
+}
 
 // Maps an NPU architecture name (e.g. "Phoenix", "Strix", "Strix Halo",
 // "Krackan") to the architecture hardware-context table (6 Phoenix, 32
@@ -266,6 +293,12 @@ iree_hal_amdxdna_native_context_ref_retain(
 
 void iree_hal_amdxdna_native_context_ref_release(
     iree_hal_amdxdna_native_context_ref_t* context_ref);
+
+// Returns bytes charged to the shared code-memory budget by live native
+// context images, including cache-evicted contexts retained by in-flight work.
+// Backends without a shared code-memory allocation domain return 0.
+iree_host_size_t iree_hal_amdxdna_native_device_c_live_context_image_bytes(
+    iree_hal_amdxdna_native_device_t* device);
 
 iree_hal_amdxdna_native_context_t* iree_hal_amdxdna_native_context_ref_borrow(
     iree_hal_amdxdna_native_context_ref_t* context_ref);

@@ -135,6 +135,122 @@ void iree_hal_amdxdna_device_invalidate_command_caches_for_queue(
       device->chain_command_cache, queue);
 }
 
+// Native code allocations may run while a command-cache mutex is already held.
+// Track that ownership so resource-pressure recovery can evict under the same
+// lock instead of deadlocking on a second acquire.
+static IREE_THREAD_LOCAL int
+    iree_hal_amdxdna_tls_single_command_cache_lock_depth = 0;
+static IREE_THREAD_LOCAL int
+    iree_hal_amdxdna_tls_chain_command_cache_lock_depth = 0;
+
+static void iree_hal_amdxdna_lock_single_command_cache(
+    iree_hal_amdxdna_device_single_command_cache_t* cache) {
+  iree_slim_mutex_lock(&cache->mutex);
+  ++iree_hal_amdxdna_tls_single_command_cache_lock_depth;
+}
+
+static void iree_hal_amdxdna_unlock_single_command_cache(
+    iree_hal_amdxdna_device_single_command_cache_t* cache) {
+  --iree_hal_amdxdna_tls_single_command_cache_lock_depth;
+  iree_slim_mutex_unlock(&cache->mutex);
+}
+
+static void iree_hal_amdxdna_lock_chain_command_cache(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache) {
+  iree_slim_mutex_lock(&cache->mutex);
+  ++iree_hal_amdxdna_tls_chain_command_cache_lock_depth;
+}
+
+static void iree_hal_amdxdna_unlock_chain_command_cache(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache) {
+  --iree_hal_amdxdna_tls_chain_command_cache_lock_depth;
+  iree_slim_mutex_unlock(&cache->mutex);
+}
+
+// Size the retained chain-command cache against a native backend's shared
+// code-memory allocation domain. Clamped to the existing 32MiB command-code
+// ceiling. 0 is not a valid cache field (it means "use default"), so a fully
+// reserved domain saturates to 1.
+static void iree_hal_amdxdna_chain_cache_apply_shared_code_memory_budget(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache,
+    iree_host_size_t max_shared_code_memory_bytes,
+    iree_host_size_t miss_reserve_bytes,
+    iree_host_size_t live_context_image_bytes,
+    iree_host_size_t single_cache_code_bytes) {
+  iree_host_size_t budget = iree_hal_amdxdna_shared_code_memory_command_budget(
+      max_shared_code_memory_bytes, miss_reserve_bytes,
+      live_context_image_bytes, single_cache_code_bytes);
+  if (budget > (iree_host_size_t)kAmdxdnaChainCommandCacheMaxInstructionBytes) {
+    budget = kAmdxdnaChainCommandCacheMaxInstructionBytes;
+  }
+  cache->max_instruction_bytes = budget ? budget : 1;
+}
+
+void iree_hal_amdxdna_device_reclaim_native_resources(
+    iree_hal_amdxdna_device* device) {
+  if (!device) return;
+
+  // Cache lock order is context -> single -> chain. If called by an allocation
+  // made while the chain cache is locked, reclaim only that cache: acquiring
+  // single here would invert single -> chain and can deadlock with context
+  // eviction. Context reclaim is likewise unsafe while either cache is held.
+  if (iree_hal_amdxdna_tls_chain_command_cache_lock_depth > 0) {
+    iree_hal_amdxdna_chain_command_cache_evict_idle_locked(
+        device->chain_command_cache);
+    return;
+  }
+
+  if (device->single_command_cache) {
+    if (iree_hal_amdxdna_tls_single_command_cache_lock_depth > 0) {
+      iree_hal_amdxdna_single_command_cache_evict_idle_locked(
+          device->single_command_cache);
+    } else {
+      iree_hal_amdxdna_single_command_cache_evict_idle(
+          device->single_command_cache);
+    }
+  }
+  if (device->chain_command_cache) {
+    if (iree_hal_amdxdna_tls_chain_command_cache_lock_depth > 0) {
+      iree_hal_amdxdna_chain_command_cache_evict_idle_locked(
+          device->chain_command_cache);
+    } else {
+      iree_hal_amdxdna_chain_command_cache_evict_idle(
+          device->chain_command_cache);
+    }
+  }
+  // Context eviction invalidates command caches and would deadlock if those
+  // mutexes are already held on this thread.
+  if (iree_hal_amdxdna_tls_single_command_cache_lock_depth == 0 &&
+      iree_hal_amdxdna_tls_chain_command_cache_lock_depth == 0) {
+    iree_hal_amdxdna_context_cache_reclaim(device->context_cache,
+                                           /*force_leased=*/false);
+  }
+}
+
+static iree_status_t iree_hal_amdxdna_alloc_buffer_with_reclaim(
+    iree_hal_amdxdna_device* device, iree_device_size_t size,
+    iree_hal_amdxdna_native_buffer_c_type_t type,
+    iree_hal_amdxdna_native_buffer_t** out_buffer) {
+  IREE_ASSERT_ARGUMENT(device);
+  iree_status_t status = iree_hal_amdxdna_native_device_c_alloc_buffer(
+      device->native_device, size, type, out_buffer);
+  if (!iree_status_is_unavailable(status)) return status;
+  iree_status_ignore(status);
+  iree_hal_amdxdna_device_reclaim_native_resources(device);
+  status = iree_hal_amdxdna_native_device_c_alloc_buffer(
+      device->native_device, size, type, out_buffer);
+  if (!iree_status_is_unavailable(status)) return status;
+  if (iree_hal_amdxdna_tls_single_command_cache_lock_depth != 0 ||
+      iree_hal_amdxdna_tls_chain_command_cache_lock_depth != 0) {
+    return status;
+  }
+  iree_status_ignore(status);
+  iree_hal_amdxdna_context_cache_reclaim(device->context_cache,
+                                         /*force_leased=*/true);
+  return iree_hal_amdxdna_native_device_c_alloc_buffer(device->native_device,
+                                                       size, type, out_buffer);
+}
+
 static iree_status_t
 iree_hal_amdxdna_direct_command_buffer_defer_single_cache_release(
     iree_hal_amdxdna_direct_command_buffer* command_buffer,
@@ -638,8 +754,8 @@ iree_status_t iree_hal_amdxdna_make_npu_cmd(
     bool use_native_partial_elf, bool retain_signature,
     iree_hal_amdxdna_chain_cmd_t* out_cmd) {
   size_t bytes = txn->count * sizeof(uint32_t);
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_device_c_alloc_buffer(
-      command_buffer->device->native_device, bytes,
+  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_alloc_buffer_with_reclaim(
+      command_buffer->device, bytes,
       IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_INSTRUCTION, &out_cmd->ctrl_code));
 
   void* mapped_ptr = NULL;
@@ -1619,7 +1735,7 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
       }
     }
     if (iree_status_is_ok(status) && single_command_cache) {
-      iree_slim_mutex_lock(&single_command_cache->mutex);
+      iree_hal_amdxdna_lock_single_command_cache(single_command_cache);
       single_cache_locked = true;
       status =
           iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
@@ -1700,7 +1816,7 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
       }
     }
     if (single_cache_locked) {
-      iree_slim_mutex_unlock(&single_command_cache->mutex);
+      iree_hal_amdxdna_unlock_single_command_cache(single_command_cache);
       single_cache_locked = false;
     }
 
@@ -1733,7 +1849,7 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
                          "failed to allocate amdxdna single command cache");
   }
   if (iree_status_is_ok(status)) {
-    iree_slim_mutex_lock(&single_command_cache->mutex);
+    iree_hal_amdxdna_lock_single_command_cache(single_command_cache);
     single_cache_locked = true;
     status =
         iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
@@ -1786,7 +1902,7 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
     submit_command = single_cache_entry->command;
   }
   if (single_cache_locked) {
-    iree_slim_mutex_unlock(&single_command_cache->mutex);
+    iree_hal_amdxdna_unlock_single_command_cache(single_command_cache);
     single_cache_locked = false;
   }
   if (iree_status_is_ok(status) && submit_command) {
@@ -1826,7 +1942,7 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
                          "failed to allocate amdxdna single command cache");
   }
   if (iree_status_is_ok(status)) {
-    iree_slim_mutex_lock(&single_command_cache->mutex);
+    iree_hal_amdxdna_lock_single_command_cache(single_command_cache);
     single_cache_locked = true;
     status =
         iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
@@ -1867,8 +1983,8 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
   } else if (iree_status_is_ok(status)) {
     const size_t ctrl_code_size =
         cmd->src_asm_inst->count * sizeof(*prepared_ctrl_words);
-    status = iree_hal_amdxdna_native_device_c_alloc_buffer(
-        command_buffer->device->native_device, ctrl_code_size,
+    status = iree_hal_amdxdna_alloc_buffer_with_reclaim(
+        command_buffer->device, ctrl_code_size,
         IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_INSTRUCTION, &ctrl_code_buffer);
     void* instr_buffer_ptr = NULL;
     if (iree_status_is_ok(status)) {
@@ -1939,7 +2055,7 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
     }
   }
   if (single_cache_locked) {
-    iree_slim_mutex_unlock(&single_command_cache->mutex);
+    iree_hal_amdxdna_unlock_single_command_cache(single_command_cache);
     single_cache_locked = false;
   }
 
@@ -1948,7 +2064,9 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
         command_buffer, group->queue, submit_command, IREE_SV("dispatch"));
   }
 
-  if (single_cache_locked) iree_slim_mutex_unlock(&single_command_cache->mutex);
+  if (single_cache_locked) {
+    iree_hal_amdxdna_unlock_single_command_cache(single_command_cache);
+  }
   iree_hal_amdxdna_native_command_c_destroy(command);
   iree_hal_amdxdna_native_buffer_c_destroy(ctrl_code_buffer);
   iree_allocator_free(command_buffer->host_allocator, prepared_ctrl_words);
@@ -2091,6 +2209,23 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
               : iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
                     command_buffer, group);
     } else {
+      iree_host_size_t live_context_image_bytes = 0;
+      iree_host_size_t single_cache_code_bytes = 0;
+      if (command_buffer->device->native_caps.max_shared_code_memory_bytes !=
+          0) {
+        // Sample exact native context-image ownership before taking the
+        // chain-cache mutex; this includes evicted contexts retained by
+        // in-flight work.
+        live_context_image_bytes =
+            iree_hal_amdxdna_native_device_c_live_context_image_bytes(
+                command_buffer->device->native_device);
+        // Sample the single cache before chain locking, preserving single ->
+        // chain order and charging entries that cannot be reclaimed in the
+        // chain-held resource-pressure path.
+        single_cache_code_bytes =
+            iree_hal_amdxdna_single_command_cache_retained_code_bytes(
+                command_buffer->device->single_command_cache);
+      }
       iree_hal_amdxdna_chain_command_cache_entry_t* chain_cache = NULL;
       {
         iree_hal_amdxdna_device_chain_command_cache_t* device_chain_cache =
@@ -2102,7 +2237,16 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
               "failed to allocate amdxdna chain command cache");
           break;
         }
-        iree_slim_mutex_lock(&device_chain_cache->mutex);
+        iree_hal_amdxdna_lock_chain_command_cache(device_chain_cache);
+        if (command_buffer->device->native_caps.max_shared_code_memory_bytes !=
+            0) {
+          iree_hal_amdxdna_chain_cache_apply_shared_code_memory_budget(
+              device_chain_cache,
+              command_buffer->device->native_caps.max_shared_code_memory_bytes,
+              command_buffer->device->native_caps
+                  .shared_code_memory_miss_reserve_bytes,
+              live_context_image_bytes, single_cache_code_bytes);
+        }
         bool exact_cache_hit = false;
         bool device_cache_hit = false;
         bool template_cache_hit = false;
@@ -2253,8 +2397,12 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
           }
         }
         // Only a genuine cache miss requires native children for a new
-        // retained entry or an uncached fallback submission.
+        // retained entry or an uncached fallback submission. Evict idle
+        // cached instruction BOs first so miss construction does not allocate
+        // from a native allocation domain the cache already filled.
         if (iree_status_is_ok(status) && !chain_cache) {
+          (void)iree_hal_amdxdna_chain_command_cache_trim_for_group(
+              device_chain_cache, group, max_slots);
           for (iree_host_size_t i = 0;
                i < group->cmd_count && iree_status_is_ok(status); ++i) {
             iree_hal_amdxdna_chain_cmd_t* cmd = &group->cmds[i];
@@ -2349,7 +2497,7 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
               command_buffer, group->queue, chain_cache->chains,
               chain_cache->chain_count, IREE_SV("ERT_CMD_CHAIN"));
         }
-        iree_slim_mutex_unlock(&device_chain_cache->mutex);
+        iree_hal_amdxdna_unlock_chain_command_cache(device_chain_cache);
         if (iree_status_is_ok(status) && fallback_uncached) {
           if (iree_status_is_ok(status)) {
             status =
@@ -2467,7 +2615,7 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_normal_run(
                              "failed to allocate amdxdna single command cache");
       }
       if (iree_status_is_ok(status)) {
-        iree_slim_mutex_lock(&single_command_cache->mutex);
+        iree_hal_amdxdna_lock_single_command_cache(single_command_cache);
         single_cache_locked = true;
         status = iree_hal_amdxdna_find_single_command_cache_entry(
             single_command_cache, queue, cu_idx.index, prepared_ctrl_words,
@@ -2489,7 +2637,7 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_normal_run(
         }
         submit_command = single_cache_entry->command;
       } else if (iree_status_is_ok(status)) {
-        iree_slim_mutex_unlock(&single_command_cache->mutex);
+        iree_hal_amdxdna_unlock_single_command_cache(single_command_cache);
         single_cache_locked = false;
       }
     }
@@ -2502,8 +2650,8 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_normal_run(
         use_single_partial_elf ||
         (command_buffer->device->native_caps.dispatch_models &
          IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_NPU) != 0;
-    status = iree_hal_amdxdna_native_device_c_alloc_buffer(
-        command_buffer->device->native_device, ctrl_code_size,
+    status = iree_hal_amdxdna_alloc_buffer_with_reclaim(
+        command_buffer->device, ctrl_code_size,
         uses_native_instruction_buffer
             ? IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_INSTRUCTION
             : IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_CACHEABLE,
@@ -2613,7 +2761,7 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_normal_run(
       }
     }
     if (iree_status_is_ok(status) && !single_cache_locked) {
-      iree_slim_mutex_lock(&single_command_cache->mutex);
+      iree_hal_amdxdna_lock_single_command_cache(single_command_cache);
       single_cache_locked = true;
     }
     // Another queue worker may have populated the entry while this thread was
@@ -2664,7 +2812,9 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_normal_run(
     status = iree_hal_amdxdna_direct_command_buffer_submit(
         command_buffer, queue, submit_command, IREE_SV("dispatch"));
   }
-  if (single_cache_locked) iree_slim_mutex_unlock(&single_command_cache->mutex);
+  if (single_cache_locked) {
+    iree_hal_amdxdna_unlock_single_command_cache(single_command_cache);
+  }
   iree_hal_amdxdna_native_command_c_destroy(command);
   iree_hal_amdxdna_native_buffer_c_destroy(ctrl_code_buffer);
   iree_allocator_free(command_buffer->host_allocator, prepared_ctrl_words);
@@ -2742,8 +2892,8 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_reconfigure(
   const bool uses_native_instruction_buffer =
       (command_buffer->device->native_caps.dispatch_models &
        IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_NPU) != 0;
-  status = iree_hal_amdxdna_native_device_c_alloc_buffer(
-      command_buffer->device->native_device, ctrlpkt_inst_size,
+  status = iree_hal_amdxdna_alloc_buffer_with_reclaim(
+      command_buffer->device, ctrlpkt_inst_size,
       uses_native_instruction_buffer
           ? IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_INSTRUCTION
           : IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_CACHEABLE,

@@ -148,6 +148,10 @@ typedef struct iree_hal_amdxdna_device_chain_command_cache_t {
   iree_hal_amdxdna_chain_command_cache_entry_t
       entries[kAmdxdnaChainCommandCacheCapacity];
   iree_host_size_t max_child_commands;
+  // 0 selects kAmdxdnaChainCommandCacheMaxInstructionBytes. Backends with a
+  // shared code-memory allocation domain dynamically lower this so retained
+  // command code plus live context images stay within the native budget.
+  iree_host_size_t max_instruction_bytes;
   iree_host_size_t entry_count;
   uint64_t use_clock;
 } iree_hal_amdxdna_device_chain_command_cache_t;
@@ -290,6 +294,16 @@ void iree_hal_amdxdna_chain_command_cache_entry_release_in_flight(
 void iree_hal_amdxdna_chain_command_cache_entry_discard(
     iree_hal_amdxdna_device_chain_command_cache_t* cache,
     iree_hal_amdxdna_chain_command_cache_entry_t* entry);
+
+// Drops every non-in-flight cached chain, freeing instruction/control BOs.
+// In-flight entries are marked invalidated and discarded when completion
+// releases them.
+void iree_hal_amdxdna_chain_command_cache_evict_idle(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache);
+
+// Same as evict_idle; the caller must already hold cache->mutex.
+void iree_hal_amdxdna_chain_command_cache_evict_idle_locked(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache);
 
 // Always re-map a cached control-code BO before rewriting it.
 //

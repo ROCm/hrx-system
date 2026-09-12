@@ -13,16 +13,20 @@
 #include <thread>
 #include <vector>
 
+#include "iree/hal/drivers/amdxdna/direct_command_buffer_chain_cache.h"
 #include "iree/testing/gtest.h"
 
 namespace {
+
+constexpr iree_host_size_t kTestSharedCodeMemoryBytes = 64u * 1024u * 1024u;
+constexpr iree_host_size_t kTestMissReserveBytes = 4u * 1024u * 1024u;
 
 iree_const_byte_span_t Bytes(const std::vector<uint8_t>& data) {
   return iree_make_const_byte_span(data.data(), data.size());
 }
 
-iree_hal_amdxdna_context_cache_key_t Key(
-    iree_const_byte_span_t pdi, const char* kernel_name) {
+iree_hal_amdxdna_context_cache_key_t Key(iree_const_byte_span_t pdi,
+                                         const char* kernel_name) {
   iree_hal_amdxdna_context_cache_key_t key = {};
   key.pdi = pdi;
   key.xclbin = iree_const_byte_span_empty();
@@ -54,6 +58,7 @@ class FakeContextFactory {
     ops.create_context = Create;
     ops.retain_context = Retain;
     ops.release_context = Release;
+    ops.reclaim_create_unavailable = ReclaimCreateUnavailable;
     return ops;
   }
 
@@ -67,6 +72,7 @@ class FakeContextFactory {
   }
 
   std::atomic<int> create_calls{0};
+  std::atomic<int> reclaim_create_unavailable_calls{0};
   std::array<std::atomic<int>, 256> create_counts;
   std::array<std::atomic<int>, 256> destroy_counts;
 
@@ -115,6 +121,11 @@ class FakeContextFactory {
     if (fake_context_ref->reference_count.fetch_sub(1) == 1) {
       self->destroy_counts[fake_context_ref->key].fetch_add(1);
     }
+  }
+
+  static void ReclaimCreateUnavailable(void* user_data) {
+    auto* self = static_cast<FakeContextFactory*>(user_data);
+    self->reclaim_create_unavailable_calls.fetch_add(1);
   }
 
   std::vector<ScriptedCreateResult> scripted_results;
@@ -179,8 +190,8 @@ class ContextCachePolicyTest : public ::testing::Test {
 };
 
 // Cross-executable reuse: two distinct executables that reference byte-for-byte
-// identical native context-image inputs through independent backing storage must
-// be treated as the same context so the cache is shared.
+// identical native context-image inputs through independent backing storage
+// must be treated as the same context so the cache is shared.
 TEST(ContextCacheKeyTest, IdenticalContentThroughDistinctStorageMatches) {
   std::vector<uint8_t> pdi_a = {1, 2, 3, 4};
   std::vector<uint8_t> pdi_b = {1, 2, 3, 4};  // distinct storage, same bytes
@@ -192,8 +203,9 @@ TEST(ContextCacheKeyTest, IdenticalContentThroughDistinctStorageMatches) {
 }
 
 // Dispatch control code is not hardware-context identity. Linux KMQ creates a
-// native hwctx from PDI + CU name only; command/run-list differences are handled
-// by the dispatch command cache and must not create duplicate hwctx objects.
+// native hwctx from PDI + CU name only; command/run-list differences are
+// handled by the dispatch command cache and must not create duplicate hwctx
+// objects.
 TEST(ContextCacheKeyTest, SameImageIgnoresDispatchControlCodeByConstruction) {
   std::vector<uint8_t> pdi = {9, 8, 7, 6};
 
@@ -300,6 +312,32 @@ TEST_F(ContextCachePolicyTest, PoolFailureRetryEvictsOnlyOneEntry) {
   EXPECT_EQ(factory_.create_calls.load(), 4);
   EXPECT_EQ(factory_.destroy_counts[1].load(), 1);
   EXPECT_EQ(factory_.destroy_counts[2].load(), 0);
+}
+
+TEST_F(ContextCachePolicyTest, UnavailableReclaimsDevHeapAndRetriesOnce) {
+  CreateCache(3);
+  factory_.ScriptFailure(IREE_STATUS_UNAVAILABLE, false);
+
+  auto* one = GetAndExpectOk(1);
+  factory_.ReleaseCaller(one);
+  EXPECT_EQ(factory_.create_calls.load(), 2);
+  EXPECT_EQ(factory_.reclaim_create_unavailable_calls.load(), 1);
+  EXPECT_EQ(factory_.create_counts[1].load(), 1);
+}
+
+TEST_F(ContextCachePolicyTest, RepeatedUnavailableReclaimsCachedPdis) {
+  CreateCache(3);
+  auto* one = GetAndExpectOk(1);
+  factory_.ReleaseCaller(one);
+  factory_.ScriptFailure(IREE_STATUS_UNAVAILABLE, false);
+  factory_.ScriptFailure(IREE_STATUS_UNAVAILABLE, false);
+
+  auto* two = GetAndExpectOk(2);
+  factory_.ReleaseCaller(two);
+  EXPECT_EQ(factory_.create_calls.load(), 4);
+  EXPECT_EQ(factory_.reclaim_create_unavailable_calls.load(), 1);
+  EXPECT_EQ(factory_.destroy_counts[1].load(), 1);
+  EXPECT_EQ(factory_.create_counts[2].load(), 1);
 }
 
 TEST_F(ContextCachePolicyTest, NonPoolFailureDoesNotEvictOrRetry) {
@@ -435,6 +473,103 @@ TEST_F(ContextCachePolicyTest, ConcurrentCallersPinEvictedContext) {
   release_callers.store(true);
   for (auto& caller : callers) caller.join();
   EXPECT_EQ(factory_.destroy_counts[1].load(), 1);
+}
+
+TEST_F(ContextCachePolicyTest, CachedImageBytesSumsCachedImages) {
+  CreateCache(4);
+  EXPECT_EQ(iree_hal_amdxdna_context_cache_cached_image_bytes(nullptr), 0u);
+  EXPECT_EQ(iree_hal_amdxdna_context_cache_cached_image_bytes(cache_), 0u);
+
+  std::vector<uint8_t> pdi_a(1024, 1);
+  std::vector<uint8_t> pdi_b(4096, 2);
+  iree_hal_amdxdna_native_context_ref_t* a = nullptr;
+  iree_status_t status = iree_hal_amdxdna_context_cache_get_or_create(
+      cache_, nullptr, IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_PDI,
+      Bytes(pdi_a), iree_const_byte_span_empty(), IREE_SV("MLIR_AIE"), &a);
+  EXPECT_TRUE(iree_status_is_ok(status));
+  iree_status_ignore(status);
+  factory_.ReleaseCaller(a);
+  EXPECT_EQ(iree_hal_amdxdna_context_cache_cached_image_bytes(cache_), 1024u);
+
+  iree_hal_amdxdna_native_context_ref_t* b = nullptr;
+  status = iree_hal_amdxdna_context_cache_get_or_create(
+      cache_, nullptr, IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_PDI,
+      Bytes(pdi_b), iree_const_byte_span_empty(), IREE_SV("MLIR_AIE"), &b);
+  EXPECT_TRUE(iree_status_is_ok(status));
+  iree_status_ignore(status);
+  factory_.ReleaseCaller(b);
+  EXPECT_EQ(iree_hal_amdxdna_context_cache_cached_image_bytes(cache_), 5120u);
+}
+
+// Drive the real context cache (with injected native creation) until context
+// images occupy half a shared code-memory domain. The command-cache budget
+// must then drop below its default cap so a 20+12MiB fill evicts before the
+// next native allocation. Command bytes are represented by ctrl_word_count.
+TEST_F(ContextCachePolicyTest,
+       LiveContextImagesForceCommandEvictionToFitSharedMemory) {
+  CreateCache(32);
+  const iree_host_size_t pdi_size = 1u << 20;
+  for (int i = 0; i < 32; ++i) {
+    std::vector<uint8_t> pdi(pdi_size, static_cast<uint8_t>(i + 1));
+    iree_hal_amdxdna_native_context_ref_t* context_ref = nullptr;
+    iree_status_t status = iree_hal_amdxdna_context_cache_get_or_create(
+        cache_, nullptr, IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_PDI,
+        Bytes(pdi), iree_const_byte_span_empty(), IREE_SV("MLIR_AIE"),
+        &context_ref);
+    EXPECT_TRUE(iree_status_is_ok(status));
+    iree_status_ignore(status);
+    factory_.ReleaseCaller(context_ref);
+  }
+
+  const iree_host_size_t live_context_image_bytes =
+      iree_hal_amdxdna_context_cache_cached_image_bytes(cache_);
+  EXPECT_EQ(live_context_image_bytes, 32u << 20);
+  const iree_host_size_t budget =
+      iree_hal_amdxdna_shared_code_memory_command_budget(
+          kTestSharedCodeMemoryBytes, kTestMissReserveBytes,
+          live_context_image_bytes, 0);
+  EXPECT_EQ(budget, 28u << 20);
+  EXPECT_LT(budget,
+            (iree_host_size_t)kAmdxdnaChainCommandCacheMaxInstructionBytes);
+
+  const iree_host_size_t cached_bytes = 20u << 20;
+  const iree_host_size_t request_bytes = 12u << 20;
+  ASSERT_GT(cached_bytes + request_bytes, budget);
+
+  iree_hal_amdxdna_device_chain_command_cache_t chain_cache = {};
+  chain_cache.host_allocator = iree_allocator_system();
+  chain_cache.max_instruction_bytes = budget;
+  chain_cache.entry_count = 1;
+  iree_hal_amdxdna_chain_group_initialize(&chain_cache.entries[0].group);
+  iree_hal_amdxdna_chain_cmd_t cached_cmd;
+  iree_hal_amdxdna_chain_cmd_initialize(&cached_cmd);
+  cached_cmd.ctrl_word_count = cached_bytes / sizeof(uint32_t);
+  IREE_CHECK_OK(iree_hal_amdxdna_chain_group_append_cmd_move(
+      iree_allocator_system(), &chain_cache.entries[0].group, &cached_cmd));
+  chain_cache.entries[0].last_use = 1;
+
+  iree_hal_amdxdna_chain_group_t request_group;
+  iree_hal_amdxdna_chain_group_initialize(&request_group);
+  request_group.queue =
+      reinterpret_cast<iree_hal_amdxdna_native_queue_t*>(0x3000);
+  iree_hal_amdxdna_chain_cmd_t request_cmd;
+  iree_hal_amdxdna_chain_cmd_initialize(&request_cmd);
+  request_cmd.ctrl_word_count = request_bytes / sizeof(uint32_t);
+  IREE_CHECK_OK(iree_hal_amdxdna_chain_group_append_cmd_move(
+      iree_allocator_system(), &request_group, &request_cmd));
+
+  iree_hal_amdxdna_chain_command_cache_entry_t* entry =
+      iree_hal_amdxdna_chain_command_cache_allocate_entry(
+          &chain_cache, &request_group, /*max_slots=*/24);
+  EXPECT_EQ(entry, &chain_cache.entries[0]);
+  EXPECT_EQ(chain_cache.entries[0].group.cmd_count, 0u);
+
+  iree_hal_amdxdna_chain_group_deinitialize(iree_allocator_system(),
+                                            &request_group);
+  for (iree_host_size_t i = 0; i < chain_cache.entry_count; ++i) {
+    iree_hal_amdxdna_chain_group_deinitialize(iree_allocator_system(),
+                                              &chain_cache.entries[i].group);
+  }
 }
 
 }  // namespace
