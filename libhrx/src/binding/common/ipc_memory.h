@@ -25,6 +25,37 @@ typedef struct iree_hal_streaming_device_registry_t
 typedef struct iree_hal_streaming_ipc_memory_import_t
     iree_hal_streaming_ipc_memory_import_t;
 
+// Reserves one IPC import publication against concurrent context retirement.
+// The caller must hold a context reference until the matching end call.
+// Synchronization: thread-safe internal locking.
+iree_status_t iree_hal_streaming_context_try_begin_ipc_import(
+    iree_hal_streaming_context_t* context);
+
+// Releases one successful IPC import reservation.
+// Synchronization: thread-safe internal locking.
+void iree_hal_streaming_context_end_ipc_import(
+    iree_hal_streaming_context_t* context);
+
+// Permanently closes IPC-import admission and waits for every import admitted
+// before the gate closed to complete or roll back. One retirement transaction
+// owns the gate until it commits or aborts.
+// Synchronization: thread-safe internal locking; may block.
+void iree_hal_streaming_context_begin_ipc_import_retirement(
+    iree_hal_streaming_context_t* context);
+
+// Commits the current IPC-import retirement transaction, leaving admission
+// permanently closed for this materialized context.
+// Synchronization: thread-safe internal locking.
+void iree_hal_streaming_context_commit_ipc_import_retirement(
+    iree_hal_streaming_context_t* context);
+
+// Reopens IPC-import admission when the teardown that began retirement aborts
+// and leaves the context live, but only if this transaction closed admission.
+// No import reservation may remain active.
+// Synchronization: thread-safe internal locking.
+void iree_hal_streaming_context_cancel_ipc_import_retirement(
+    iree_hal_streaming_context_t* context);
+
 // Backend-neutral identity and placement metadata for one exported allocation
 // view. The fixed token width matches the interprocess handle contract used by
 // the streaming API bindings.
@@ -118,6 +149,19 @@ iree_status_t iree_hal_streaming_ipc_memory_import(
 iree_status_t iree_hal_streaming_ipc_memory_close(
     iree_hal_streaming_ipc_memory_registry_t* registry,
     iree_hal_streaming_context_t* context, void* device_ptr);
+
+// Permanently closes IPC-import admission for |context|, waits for imports
+// admitted before that gate to finish, and revokes every context-owned open
+// reference and wrapper. Shared attachments and aliases owned by other
+// contexts remain live. A final context-owned reference detaches the
+// process-wide attachment. A failed drain reopens admission because the caller
+// must leave the context live, and leaves every affected registry entry and
+// mapping unchanged. Each affected import serializes with concurrent open,
+// close, and context release. The caller must separately exclude ordinary
+// pointer use or submission through the context being retired.
+iree_status_t iree_hal_streaming_ipc_memory_release_context(
+    iree_hal_streaming_ipc_memory_registry_t* registry,
+    iree_hal_streaming_context_t* context);
 
 #ifdef __cplusplus
 }  // extern "C"

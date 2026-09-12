@@ -393,6 +393,21 @@ class IpcMemoryTest : public ::testing::Test {
         AliasMemory, out_device_ptr);
   }
 
+  void WaitForIpcImportRetirement(iree_hal_streaming_context_t* context) {
+    for (;;) {
+      iree_slim_mutex_lock(&context->ipc_import_mutex);
+      if (context->ipc_imports_retiring) {
+        iree_slim_mutex_unlock(&context->ipc_import_mutex);
+        return;
+      }
+      const iree_wait_token_t wait_token =
+          iree_notification_prepare_wait(&context->ipc_import_notification);
+      iree_slim_mutex_unlock(&context->ipc_import_mutex);
+      (void)iree_notification_commit_wait(&context->ipc_import_notification,
+                                          wait_token, IREE_DURATION_ZERO,
+                                          IREE_TIME_INFINITE_FUTURE);
+    }
+  }
 
   void InsertCollision(iree_hal_streaming_context_t* context, void* device_ptr,
                        void* marker) {
@@ -451,6 +466,51 @@ class IpcMemoryTest : public ::testing::Test {
   iree_hal_streaming_ipc_memory_registry_t registry_ = {};
   iree_hal_streaming_ipc_memory_descriptor_t descriptor_ = {};
 };
+
+TEST_F(IpcMemoryTest,
+       ExplicitDestroyReleasesIpcAndContextResourcesBeforeRegistryCleanup) {
+  iree_hal_streaming_context_t* context = nullptr;
+  IREE_ASSERT_OK(
+      CreateRegisteredContextOnDevice(/*device_ordinal=*/0, &context));
+  InstallTrackedContextResource(context);
+
+  void* imported_ptr = nullptr;
+  IREE_ASSERT_OK(Import(context, &imported_ptr));
+  ASSERT_EQ(state_.shared_storage.data(), imported_ptr);
+  iree_hal_streaming_context_t* raw_handle = context;
+
+  iree_hal_streaming_context_t* retained_context = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_context_begin_handle_destroy(
+      &device_registry_, raw_handle, &retained_context));
+  ASSERT_EQ(context, retained_context);
+  IREE_ASSERT_OK(iree_hal_streaming_ipc_memory_release_context(
+      &registry_, retained_context));
+  EXPECT_EQ(
+      1, state_.attached_buffer_release_count.load(std::memory_order_acquire));
+  EXPECT_EQ(nullptr, registry_.imports);
+
+  iree_hal_streaming_context_commit_handle_destroy(retained_context);
+  iree_hal_streaming_context_release(context);
+  context = nullptr;
+  EXPECT_EQ(
+      0, state_.context_resource_release_count.load(std::memory_order_acquire));
+  iree_hal_streaming_context_release(retained_context);
+  retained_context = nullptr;
+
+  EXPECT_EQ(
+      1, state_.context_resource_release_count.load(std::memory_order_acquire));
+  EXPECT_TRUE(
+      state_.context_resource_saw_ipc_release.load(std::memory_order_acquire));
+  EXPECT_FALSE(RegistryContains(raw_handle));
+
+  iree_hal_streaming_context_t* rejected_context = nullptr;
+  iree_status_t repeated_status =
+      iree_hal_streaming_context_begin_handle_destroy(
+          &device_registry_, raw_handle, &rejected_context);
+  EXPECT_EQ(IREE_STATUS_NOT_FOUND, iree_status_code(repeated_status));
+  iree_status_free(repeated_status);
+  EXPECT_EQ(nullptr, rejected_context);
+}
 
 TEST_F(IpcMemoryTest,
        FinalDestructorPublishesUnlinkAfterContextResourceTeardown) {
@@ -1120,6 +1180,410 @@ TEST_F(IpcMemoryTest, ConcurrentDuplicateUsesOneAttachAndTwoReferences) {
   ExpectNoMapping(contexts_[0], second_ptr);
 }
 
+TEST_F(IpcMemoryTest,
+       ReleaseContextDrainsReservedImportAndRejectsPostGateOpen) {
+  state_.blocked_attach_attempt.store(1, std::memory_order_release);
+
+  void* admitted_ptr = nullptr;
+  iree_status_code_t admitted_status_code = IREE_STATUS_OK;
+  std::thread import_thread([&] {
+    admitted_status_code =
+        iree_status_consume_code(Import(contexts_[0], &admitted_ptr));
+  });
+  state_.attach_blocked.Wait();
+
+  TestSignal release_started;
+  TestSignal release_completed;
+  iree_status_code_t release_status_code = IREE_STATUS_OK;
+  std::thread release_thread([&] {
+    release_started.Set();
+    release_status_code =
+        iree_status_consume_code(iree_hal_streaming_ipc_memory_release_context(
+            &registry_, contexts_[0]));
+    release_completed.Set();
+  });
+  release_started.Wait();
+  WaitForIpcImportRetirement(contexts_[0]);
+  EXPECT_FALSE(release_completed.IsSet());
+
+  void* rejected_ptr = reinterpret_cast<void*>(uintptr_t{1});
+  iree_status_t rejected_status = Import(contexts_[0], &rejected_ptr);
+  EXPECT_EQ(IREE_STATUS_ABORTED, iree_status_code(rejected_status));
+  iree_status_free(rejected_status);
+  EXPECT_EQ(nullptr, rejected_ptr);
+  EXPECT_EQ(1, state_.attach_count.load(std::memory_order_acquire));
+
+  state_.allow_attach.Set();
+  import_thread.join();
+  release_thread.join();
+
+  EXPECT_EQ(IREE_STATUS_OK, admitted_status_code);
+  EXPECT_EQ(state_.shared_storage.data(), admitted_ptr);
+  EXPECT_EQ(IREE_STATUS_OK, release_status_code);
+  EXPECT_TRUE(release_completed.IsSet());
+  EXPECT_EQ(
+      1, state_.attached_buffer_release_count.load(std::memory_order_acquire));
+  EXPECT_EQ(nullptr, registry_.imports);
+  ExpectNoMapping(contexts_[0], admitted_ptr);
+}
+
+TEST_F(IpcMemoryTest, ConcurrentRetirementAbortCannotReopenCommittedAdmission) {
+  TestSignal first_started;
+  TestSignal first_has_gate;
+  TestSignal allow_first_commit;
+  std::thread first_thread([&] {
+    first_started.Set();
+    iree_hal_streaming_context_begin_ipc_import_retirement(contexts_[0]);
+    first_has_gate.Set();
+    allow_first_commit.Wait();
+    iree_hal_streaming_context_commit_ipc_import_retirement(contexts_[0]);
+  });
+  first_started.Wait();
+  first_has_gate.Wait();
+
+  TestSignal second_started;
+  TestSignal second_has_gate;
+  std::thread second_thread([&] {
+    second_started.Set();
+    iree_hal_streaming_context_begin_ipc_import_retirement(contexts_[0]);
+    second_has_gate.Set();
+    iree_hal_streaming_context_cancel_ipc_import_retirement(contexts_[0]);
+  });
+  second_started.Wait();
+
+  EXPECT_FALSE(second_has_gate.IsSet());
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      iree_hal_streaming_context_try_begin_ipc_import(contexts_[0]));
+  allow_first_commit.Set();
+  first_thread.join();
+  second_thread.join();
+
+  EXPECT_TRUE(second_has_gate.IsSet());
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      iree_hal_streaming_context_try_begin_ipc_import(contexts_[0]));
+}
+
+TEST_F(IpcMemoryTest, ReleaseContextRevokesDuplicateOpens) {
+  const int32_t context_references_before =
+      iree_atomic_ref_count_load(&contexts_[0]->ref_count);
+  void* first_ptr = nullptr;
+  void* second_ptr = nullptr;
+  IREE_ASSERT_OK(Import(contexts_[0], &first_ptr));
+  IREE_ASSERT_OK(Import(contexts_[0], &second_ptr));
+  ASSERT_EQ(state_.shared_storage.data(), first_ptr);
+  ASSERT_EQ(first_ptr, second_ptr);
+  EXPECT_EQ(context_references_before + 1,
+            iree_atomic_ref_count_load(&contexts_[0]->ref_count));
+  ExpectIpcMapping(contexts_[0], first_ptr);
+
+  IREE_ASSERT_OK(
+      iree_hal_streaming_ipc_memory_release_context(&registry_, contexts_[0]));
+
+  EXPECT_EQ(1, state_.attach_count.load(std::memory_order_acquire));
+  EXPECT_EQ(
+      1, state_.attached_buffer_release_count.load(std::memory_order_acquire));
+  EXPECT_EQ(0,
+            state_.alias_buffer_release_count.load(std::memory_order_acquire));
+  EXPECT_EQ(nullptr, registry_.imports);
+  EXPECT_EQ(context_references_before,
+            iree_atomic_ref_count_load(&contexts_[0]->ref_count));
+  ExpectNoMapping(contexts_[0], first_ptr);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_streaming_ipc_memory_close(&registry_, contexts_[0], first_ptr));
+}
+
+TEST_F(IpcMemoryTest, ReleaseContextPreservesCrossDeviceAlias) {
+  const int32_t anchor_references_before =
+      iree_atomic_ref_count_load(&contexts_[0]->ref_count);
+  const int32_t alias_references_before =
+      iree_atomic_ref_count_load(&contexts_[1]->ref_count);
+  void* anchor_ptr = nullptr;
+  void* duplicate_anchor_ptr = nullptr;
+  void* alias_ptr = nullptr;
+  IREE_ASSERT_OK(Import(contexts_[0], &anchor_ptr));
+  IREE_ASSERT_OK(Import(contexts_[0], &duplicate_anchor_ptr));
+  IREE_ASSERT_OK(Import(contexts_[1], &alias_ptr));
+  ASSERT_EQ(state_.shared_storage.data(), anchor_ptr);
+  ASSERT_EQ(anchor_ptr, duplicate_anchor_ptr);
+  ASSERT_EQ(anchor_ptr, alias_ptr);
+  EXPECT_EQ(anchor_references_before + 1,
+            iree_atomic_ref_count_load(&contexts_[0]->ref_count));
+  EXPECT_EQ(alias_references_before + 1,
+            iree_atomic_ref_count_load(&contexts_[1]->ref_count));
+
+  IREE_ASSERT_OK(
+      iree_hal_streaming_ipc_memory_release_context(&registry_, contexts_[0]));
+
+  EXPECT_NE(nullptr, registry_.imports);
+  EXPECT_EQ(
+      0, state_.attached_buffer_release_count.load(std::memory_order_acquire));
+  EXPECT_EQ(0,
+            state_.alias_buffer_release_count.load(std::memory_order_acquire));
+  EXPECT_EQ(anchor_references_before,
+            iree_atomic_ref_count_load(&contexts_[0]->ref_count));
+  EXPECT_EQ(alias_references_before + 1,
+            iree_atomic_ref_count_load(&contexts_[1]->ref_count));
+  ExpectNoMapping(contexts_[0], anchor_ptr);
+  ExpectIpcMapping(contexts_[1], alias_ptr);
+
+  IREE_ASSERT_OK(
+      iree_hal_streaming_ipc_memory_close(&registry_, contexts_[1], alias_ptr));
+  EXPECT_EQ(nullptr, registry_.imports);
+  EXPECT_EQ(
+      1, state_.attached_buffer_release_count.load(std::memory_order_acquire));
+  EXPECT_EQ(1,
+            state_.alias_buffer_release_count.load(std::memory_order_acquire));
+  EXPECT_EQ(alias_references_before,
+            iree_atomic_ref_count_load(&contexts_[1]->ref_count));
+  ExpectNoMapping(contexts_[1], alias_ptr);
+}
+
+TEST_F(IpcMemoryTest, ReleaseContextDoesNotConsumePeerOpen) {
+  void* anchor_ptr = nullptr;
+  void* alias_ptr = nullptr;
+  IREE_ASSERT_OK(Import(contexts_[0], &anchor_ptr));
+  IREE_ASSERT_OK(Import(contexts_[1], &alias_ptr));
+  ASSERT_EQ(anchor_ptr, alias_ptr);
+
+  // Attribute the first close to device 0. Its zero-count wrapper remains
+  // cached while device 1 still owns a process-wide open reference.
+  IREE_ASSERT_OK(iree_hal_streaming_ipc_memory_close(&registry_, contexts_[0],
+                                                     anchor_ptr));
+  EXPECT_NE(nullptr, registry_.imports);
+  ExpectIpcMapping(contexts_[0], anchor_ptr);
+  ExpectIpcMapping(contexts_[1], alias_ptr);
+
+  IREE_ASSERT_OK(
+      iree_hal_streaming_ipc_memory_release_context(&registry_, contexts_[0]));
+
+  EXPECT_NE(nullptr, registry_.imports);
+  EXPECT_EQ(
+      0, state_.attached_buffer_release_count.load(std::memory_order_acquire));
+  ExpectNoMapping(contexts_[0], anchor_ptr);
+  ExpectIpcMapping(contexts_[1], alias_ptr);
+  IREE_ASSERT_OK(
+      iree_hal_streaming_ipc_memory_close(&registry_, contexts_[1], alias_ptr));
+  EXPECT_EQ(nullptr, registry_.imports);
+  EXPECT_EQ(
+      1, state_.attached_buffer_release_count.load(std::memory_order_acquire));
+  EXPECT_EQ(1,
+            state_.alias_buffer_release_count.load(std::memory_order_acquire));
+}
+
+TEST_F(IpcMemoryTest, ConcurrentCloseWaitsForContextReleaseDetach) {
+  void* imported_ptr = nullptr;
+  IREE_ASSERT_OK(Import(contexts_[0], &imported_ptr));
+  ASSERT_EQ(state_.shared_storage.data(), imported_ptr);
+  state_.block_attached_buffer_release.store(true, std::memory_order_release);
+
+  iree_status_code_t release_status_code = IREE_STATUS_OK;
+  std::thread release_thread([&] {
+    release_status_code =
+        iree_status_consume_code(iree_hal_streaming_ipc_memory_release_context(
+            &registry_, contexts_[0]));
+  });
+  state_.attached_buffer_release_blocked.Wait();
+
+  TestSignal close_started;
+  TestSignal close_completed;
+  iree_status_code_t close_status_code = IREE_STATUS_OK;
+  std::thread close_thread([&] {
+    close_started.Set();
+    close_status_code =
+        iree_status_consume_code(iree_hal_streaming_ipc_memory_close(
+            &registry_, contexts_[0], imported_ptr));
+    close_completed.Set();
+  });
+  close_started.Wait();
+
+  EXPECT_FALSE(close_completed.IsSet());
+  state_.allow_attached_buffer_release.Set();
+  release_thread.join();
+  close_thread.join();
+
+  EXPECT_EQ(IREE_STATUS_OK, release_status_code);
+  EXPECT_EQ(IREE_STATUS_INVALID_ARGUMENT, close_status_code);
+  EXPECT_TRUE(close_completed.IsSet());
+  EXPECT_EQ(
+      1, state_.attached_buffer_release_count.load(std::memory_order_acquire));
+  EXPECT_EQ(nullptr, registry_.imports);
+  ExpectNoMapping(contexts_[0], imported_ptr);
+}
+
+TEST_F(IpcMemoryTest, ContextReleaseWaitsForConcurrentCloseDetach) {
+  void* imported_ptr = nullptr;
+  IREE_ASSERT_OK(Import(contexts_[0], &imported_ptr));
+  ASSERT_EQ(state_.shared_storage.data(), imported_ptr);
+  state_.block_attached_buffer_release.store(true, std::memory_order_release);
+
+  iree_status_code_t close_status_code = IREE_STATUS_OK;
+  std::thread close_thread([&] {
+    close_status_code =
+        iree_status_consume_code(iree_hal_streaming_ipc_memory_close(
+            &registry_, contexts_[0], imported_ptr));
+  });
+  state_.attached_buffer_release_blocked.Wait();
+
+  TestSignal release_started;
+  TestSignal release_completed;
+  iree_status_code_t release_status_code = IREE_STATUS_OK;
+  std::thread release_thread([&] {
+    release_started.Set();
+    release_status_code =
+        iree_status_consume_code(iree_hal_streaming_ipc_memory_release_context(
+            &registry_, contexts_[0]));
+    release_completed.Set();
+  });
+  release_started.Wait();
+
+  EXPECT_FALSE(release_completed.IsSet());
+  state_.allow_attached_buffer_release.Set();
+  close_thread.join();
+  release_thread.join();
+
+  EXPECT_EQ(IREE_STATUS_OK, close_status_code);
+  EXPECT_EQ(IREE_STATUS_OK, release_status_code);
+  EXPECT_TRUE(release_completed.IsSet());
+  EXPECT_EQ(
+      1, state_.attached_buffer_release_count.load(std::memory_order_acquire));
+  EXPECT_EQ(nullptr, registry_.imports);
+  ExpectNoMapping(contexts_[0], imported_ptr);
+}
+
+TEST_F(IpcMemoryTest, ReleaseContextFailureReopensImportAdmission) {
+  void* imported_ptr = nullptr;
+  IREE_ASSERT_OK(Import(contexts_[0], &imported_ptr));
+  ASSERT_EQ(state_.shared_storage.data(), imported_ptr);
+
+  iree_hal_semaphore_t* failed_semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      contexts_[0]->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_NONE, &failed_semaphore));
+  iree_hal_semaphore_fail(
+      failed_semaphore,
+      iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                       "injected IPC context-release synchronization failure"));
+
+  iree_slim_mutex_lock(&contexts_[0]->event_record_mutex);
+  iree_hal_semaphore_t* original_semaphore =
+      contexts_[0]->event_record_timeline.semaphore;
+  const uint64_t original_pending_value =
+      contexts_[0]->event_record_timeline.pending_value;
+  contexts_[0]->event_record_timeline.semaphore = failed_semaphore;
+  contexts_[0]->event_record_timeline.pending_value = 1;
+  iree_slim_mutex_unlock(&contexts_[0]->event_record_mutex);
+
+  iree_status_t release_status =
+      iree_hal_streaming_ipc_memory_release_context(&registry_, contexts_[0]);
+
+  iree_slim_mutex_lock(&contexts_[0]->event_record_mutex);
+  contexts_[0]->event_record_timeline.semaphore = original_semaphore;
+  contexts_[0]->event_record_timeline.pending_value = original_pending_value;
+  iree_slim_mutex_unlock(&contexts_[0]->event_record_mutex);
+  iree_hal_semaphore_release(failed_semaphore);
+
+  EXPECT_EQ(IREE_STATUS_RESOURCE_EXHAUSTED, iree_status_code(release_status));
+  iree_status_free(release_status);
+  EXPECT_NE(nullptr, registry_.imports);
+  ExpectIpcMapping(contexts_[0], imported_ptr);
+
+  void* reopened_ptr = nullptr;
+  IREE_ASSERT_OK(Import(contexts_[0], &reopened_ptr));
+  EXPECT_EQ(imported_ptr, reopened_ptr);
+  IREE_ASSERT_OK(iree_hal_streaming_ipc_memory_close(&registry_, contexts_[0],
+                                                     imported_ptr));
+  IREE_ASSERT_OK(iree_hal_streaming_ipc_memory_close(&registry_, contexts_[0],
+                                                     reopened_ptr));
+  EXPECT_EQ(nullptr, registry_.imports);
+  EXPECT_EQ(
+      1, state_.attached_buffer_release_count.load(std::memory_order_acquire));
+  ExpectNoMapping(contexts_[0], imported_ptr);
+}
+
+TEST_F(IpcMemoryTest, ReleaseContextFailureRollsBackEarlierHandles) {
+  // The first handle is shared by the retiring context and a peer context.
+  // Its peer will fail synchronization after the second handle has already
+  // synchronized successfully in registry traversal order.
+  void* first_ptr0 = nullptr;
+  IREE_ASSERT_OK(Import(contexts_[0], &first_ptr0));
+  void* first_ptr1 = nullptr;
+  IREE_ASSERT_OK(Import(contexts_[1], &first_ptr1));
+  ASSERT_EQ(state_.shared_storage.data(), first_ptr0);
+  ASSERT_EQ(first_ptr0, first_ptr1);
+
+  iree_hal_streaming_ipc_memory_descriptor_t second_descriptor = descriptor_;
+  second_descriptor.token[0] ^= 0x80;
+  state_.attach_uses_other_storage.store(true, std::memory_order_release);
+  void* second_ptr = nullptr;
+  IREE_ASSERT_OK(
+      ImportDescriptor(contexts_[0], second_descriptor, &second_ptr));
+  ASSERT_EQ(state_.other_storage.data(), second_ptr);
+  ASSERT_NE(first_ptr0, second_ptr);
+
+  iree_hal_semaphore_t* failed_semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      contexts_[1]->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_NONE, &failed_semaphore));
+  iree_hal_semaphore_fail(
+      failed_semaphore,
+      iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                       "injected later peer-context synchronization failure"));
+
+  iree_slim_mutex_lock(&contexts_[1]->event_record_mutex);
+  iree_hal_semaphore_t* original_semaphore =
+      contexts_[1]->event_record_timeline.semaphore;
+  const uint64_t original_pending_value =
+      contexts_[1]->event_record_timeline.pending_value;
+  contexts_[1]->event_record_timeline.semaphore = failed_semaphore;
+  contexts_[1]->event_record_timeline.pending_value = 1;
+  iree_slim_mutex_unlock(&contexts_[1]->event_record_mutex);
+
+  iree_status_t release_status =
+      iree_hal_streaming_ipc_memory_release_context(&registry_, contexts_[0]);
+
+  iree_slim_mutex_lock(&contexts_[1]->event_record_mutex);
+  contexts_[1]->event_record_timeline.semaphore = original_semaphore;
+  contexts_[1]->event_record_timeline.pending_value = original_pending_value;
+  iree_slim_mutex_unlock(&contexts_[1]->event_record_mutex);
+  iree_hal_semaphore_release(failed_semaphore);
+
+  EXPECT_EQ(IREE_STATUS_RESOURCE_EXHAUSTED, iree_status_code(release_status));
+  iree_status_free(release_status);
+  EXPECT_EQ(
+      0, state_.attached_buffer_release_count.load(std::memory_order_acquire));
+  EXPECT_EQ(0,
+            state_.alias_buffer_release_count.load(std::memory_order_acquire));
+  ExpectIpcMapping(contexts_[0], first_ptr0);
+  ExpectIpcMapping(contexts_[1], first_ptr1);
+  ExpectIpcMapping(contexts_[0], second_ptr);
+
+  // Failure must also reopen admission without reattaching either handle.
+  void* reopened_second_ptr = nullptr;
+  IREE_ASSERT_OK(
+      ImportDescriptor(contexts_[0], second_descriptor, &reopened_second_ptr));
+  EXPECT_EQ(second_ptr, reopened_second_ptr);
+  EXPECT_EQ(2, state_.attach_count.load(std::memory_order_acquire));
+
+  IREE_ASSERT_OK(iree_hal_streaming_ipc_memory_close(&registry_, contexts_[0],
+                                                     first_ptr0));
+  IREE_ASSERT_OK(iree_hal_streaming_ipc_memory_close(&registry_, contexts_[1],
+                                                     first_ptr1));
+  IREE_ASSERT_OK(iree_hal_streaming_ipc_memory_close(&registry_, contexts_[0],
+                                                     second_ptr));
+  IREE_ASSERT_OK(iree_hal_streaming_ipc_memory_close(&registry_, contexts_[0],
+                                                     reopened_second_ptr));
+  EXPECT_EQ(nullptr, registry_.imports);
+  EXPECT_EQ(
+      2, state_.attached_buffer_release_count.load(std::memory_order_acquire));
+  EXPECT_EQ(1,
+            state_.alias_buffer_release_count.load(std::memory_order_acquire));
+  ExpectNoMapping(contexts_[0], first_ptr0);
+  ExpectNoMapping(contexts_[1], first_ptr1);
+  ExpectNoMapping(contexts_[0], second_ptr);
+}
 
 TEST_F(IpcMemoryTest, SynchronizeFailureRestoresReadyWithoutClosing) {
   void* imported_ptr = nullptr;

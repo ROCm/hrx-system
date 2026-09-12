@@ -65,6 +65,20 @@ struct iree_hal_streaming_ipc_memory_import_t {
   iree_hal_streaming_ipc_memory_import_state_t state;
 };
 
+// One registry entry reserved by a context-retirement transaction. The target
+// binding and import remain DETACHING from reservation until rollback or
+// commit, keeping their pointers and binding lists stable without retaining
+// any extra objects.
+typedef struct iree_hal_streaming_ipc_memory_context_release_entry_t {
+  // Registry import borrowed while its DETACHING reservation keeps it live.
+  iree_hal_streaming_ipc_memory_import_t* import;
+  // Exact context binding removed if the transaction commits.
+  iree_hal_streaming_ipc_memory_binding_t* released_binding;
+  // Populated during commit only when the target binding held the final opens.
+  iree_hal_streaming_ipc_memory_binding_t* remaining_bindings;
+  // Whether commit consumed the import's final process-wide open references.
+  bool is_final_detach;
+} iree_hal_streaming_ipc_memory_context_release_entry_t;
 
 void iree_hal_streaming_ipc_memory_registry_initialize(
     iree_hal_streaming_ipc_memory_registry_t* registry,
@@ -737,9 +751,13 @@ iree_status_t iree_hal_streaming_ipc_memory_import(
   IREE_ASSERT_ARGUMENT(out_device_ptr);
   *out_device_ptr = NULL;
 
-  return iree_hal_streaming_ipc_memory_import_reserved(
+  IREE_RETURN_IF_ERROR(
+      iree_hal_streaming_context_try_begin_ipc_import(context));
+  iree_status_t status = iree_hal_streaming_ipc_memory_import_reserved(
       registry, context, descriptor, view_size, attach_fn, alias_fn,
       out_device_ptr);
+  iree_hal_streaming_context_end_ipc_import(context);
+  return status;
 }
 
 iree_status_t iree_hal_streaming_ipc_memory_close(
@@ -822,4 +840,220 @@ iree_status_t iree_hal_streaming_ipc_memory_close(
     iree_hal_streaming_ipc_memory_complete_detach(registry, import);
     return iree_ok_status();
   }
+}
+
+iree_status_t iree_hal_streaming_ipc_memory_release_context(
+    iree_hal_streaming_ipc_memory_registry_t* registry,
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(registry);
+  IREE_ASSERT_ARGUMENT(context);
+
+  // Close admission before scanning the registry. Imports already past the
+  // gate finish or roll back before the scan, and later attempts cannot add a
+  // binding behind it.
+  iree_hal_streaming_context_begin_ipc_import_retirement(context);
+
+  // Wait for a stable registry snapshot and count every binding that this
+  // context retirement must remove. Admission is closed and drained, so this
+  // count can only decrease before reservation if a concurrent close wins.
+  iree_host_size_t release_capacity = 0;
+  for (;;) {
+    iree_slim_mutex_lock(&registry->mutex);
+    bool is_transitioning = false;
+    release_capacity = 0;
+    for (iree_hal_streaming_ipc_memory_import_t* candidate = registry->imports;
+         candidate; candidate = candidate->next) {
+      // A final close unlinks its bindings before releasing their wrappers and
+      // the backend attachment. Wait for every in-flight registry transition
+      // before declaring this context clean so reset cannot publish free-memory
+      // accounting while a concurrent detach is still running.
+      if (candidate->state !=
+          IREE_HAL_STREAMING_IPC_MEMORY_IMPORT_STATE_READY) {
+        is_transitioning = true;
+        continue;
+      }
+      bool has_context_binding = false;
+      for (iree_hal_streaming_ipc_memory_binding_t* binding =
+               candidate->bindings;
+           binding; binding = binding->next) {
+        if (binding->state !=
+            IREE_HAL_STREAMING_IPC_MEMORY_IMPORT_STATE_READY) {
+          is_transitioning = true;
+          break;
+        }
+        if (binding->context == context) {
+          IREE_ASSERT(!has_context_binding);
+          has_context_binding = true;
+          ++release_capacity;
+        }
+      }
+    }
+    if (!is_transitioning) {
+      iree_slim_mutex_unlock(&registry->mutex);
+      break;
+    }
+    const iree_wait_token_t wait_token =
+        iree_notification_prepare_wait(&registry->changed);
+    iree_slim_mutex_unlock(&registry->mutex);
+    (void)iree_notification_commit_wait(&registry->changed, wait_token,
+                                        IREE_DURATION_ZERO,
+                                        IREE_TIME_INFINITE_FUTURE);
+  }
+  if (release_capacity == 0) {
+    iree_hal_streaming_context_commit_ipc_import_retirement(context);
+    return iree_ok_status();
+  }
+
+  iree_host_size_t release_entries_size = 0;
+  iree_status_t status = iree_ok_status();
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+          release_capacity,
+          sizeof(iree_hal_streaming_ipc_memory_context_release_entry_t),
+          &release_entries_size))) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "IPC context release plan size overflow");
+  }
+  iree_hal_streaming_ipc_memory_context_release_entry_t* release_entries = NULL;
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_allocator_malloc(registry->host_allocator, release_entries_size,
+                              (void**)&release_entries);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_context_cancel_ipc_import_retirement(context);
+    return status;
+  }
+
+  // Reserve every affected registry entry in one locked transaction. If a
+  // close changed the snapshot while storage was allocated, wait for it and
+  // rescan; closed admission guarantees the original capacity remains enough.
+  iree_host_size_t release_count = 0;
+  for (;;) {
+    iree_slim_mutex_lock(&registry->mutex);
+    bool is_transitioning = false;
+    release_count = 0;
+    for (iree_hal_streaming_ipc_memory_import_t* import = registry->imports;
+         import; import = import->next) {
+      if (import->state != IREE_HAL_STREAMING_IPC_MEMORY_IMPORT_STATE_READY) {
+        is_transitioning = true;
+        continue;
+      }
+      bool has_context_binding = false;
+      for (iree_hal_streaming_ipc_memory_binding_t* binding = import->bindings;
+           binding; binding = binding->next) {
+        if (binding->state !=
+            IREE_HAL_STREAMING_IPC_MEMORY_IMPORT_STATE_READY) {
+          is_transitioning = true;
+          break;
+        }
+        if (binding->context != context) continue;
+        IREE_ASSERT(!has_context_binding);
+        has_context_binding = true;
+        IREE_ASSERT_LT(release_count, release_capacity);
+        release_entries[release_count++] =
+            (iree_hal_streaming_ipc_memory_context_release_entry_t){
+                .import = import,
+                .released_binding = binding,
+                .remaining_bindings = NULL,
+                .is_final_detach = false,
+            };
+      }
+    }
+    if (is_transitioning) {
+      const iree_wait_token_t wait_token =
+          iree_notification_prepare_wait(&registry->changed);
+      iree_slim_mutex_unlock(&registry->mutex);
+      (void)iree_notification_commit_wait(&registry->changed, wait_token,
+                                          IREE_DURATION_ZERO,
+                                          IREE_TIME_INFINITE_FUTURE);
+      continue;
+    }
+    for (iree_host_size_t i = 0; i < release_count; ++i) {
+      release_entries[i].import->state =
+          IREE_HAL_STREAMING_IPC_MEMORY_IMPORT_STATE_DETACHING;
+      release_entries[i].released_binding->state =
+          IREE_HAL_STREAMING_IPC_MEMORY_IMPORT_STATE_DETACHING;
+    }
+    iree_slim_mutex_unlock(&registry->mutex);
+    break;
+  }
+
+  // Synchronization is the only fallible phase after reservation. No registry
+  // counts, bindings, wrappers, or attachments change unless already-submitted
+  // work has completed in every affected import's binding contexts.
+  for (iree_host_size_t i = 0; i < release_count; ++i) {
+    status = iree_hal_streaming_ipc_memory_synchronize_bindings(
+        release_entries[i].import->bindings);
+    if (!iree_status_is_ok(status)) break;
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&registry->mutex);
+    for (iree_host_size_t i = 0; i < release_count; ++i) {
+      IREE_ASSERT(release_entries[i].import->state ==
+                  IREE_HAL_STREAMING_IPC_MEMORY_IMPORT_STATE_DETACHING);
+      IREE_ASSERT(release_entries[i].released_binding->state ==
+                  IREE_HAL_STREAMING_IPC_MEMORY_IMPORT_STATE_DETACHING);
+      release_entries[i].released_binding->state =
+          IREE_HAL_STREAMING_IPC_MEMORY_IMPORT_STATE_READY;
+      release_entries[i].import->state =
+          IREE_HAL_STREAMING_IPC_MEMORY_IMPORT_STATE_READY;
+    }
+    iree_slim_mutex_unlock(&registry->mutex);
+    iree_notification_post(&registry->changed, IREE_ALL_WAITERS);
+    iree_allocator_free(registry->host_allocator, release_entries);
+    iree_hal_streaming_context_cancel_ipc_import_retirement(context);
+    return status;
+  }
+
+  // Commit all registry mutations together now that no operation can fail.
+  iree_slim_mutex_lock(&registry->mutex);
+  for (iree_host_size_t i = 0; i < release_count; ++i) {
+    iree_hal_streaming_ipc_memory_context_release_entry_t* entry =
+        &release_entries[i];
+    IREE_ASSERT(entry->import->state ==
+                IREE_HAL_STREAMING_IPC_MEMORY_IMPORT_STATE_DETACHING);
+    IREE_ASSERT(entry->released_binding->state ==
+                IREE_HAL_STREAMING_IPC_MEMORY_IMPORT_STATE_DETACHING);
+    IREE_ASSERT(entry->import->open_count >=
+                entry->released_binding->open_count);
+    entry->import->open_count -= entry->released_binding->open_count;
+    entry->released_binding->open_count = 0;
+    iree_hal_streaming_ipc_memory_unlink_binding_locked(
+        entry->import, entry->released_binding);
+    entry->is_final_detach = entry->import->open_count == 0;
+    if (entry->is_final_detach) {
+      entry->remaining_bindings = entry->import->bindings;
+      entry->import->bindings = NULL;
+    }
+  }
+  iree_slim_mutex_unlock(&registry->mutex);
+
+  // Retire wrappers and backend attachments outside the registry mutex. Each
+  // non-final entry stays DETACHING until its removed wrapper is gone.
+  for (iree_host_size_t i = 0; i < release_count; ++i) {
+    iree_hal_streaming_ipc_memory_context_release_entry_t* entry =
+        &release_entries[i];
+    iree_hal_streaming_ipc_memory_release_binding(registry,
+                                                  entry->released_binding);
+    if (entry->is_final_detach) {
+      while (entry->remaining_bindings) {
+        iree_hal_streaming_ipc_memory_binding_t* binding =
+            entry->remaining_bindings;
+        entry->remaining_bindings = binding->next;
+        binding->next = NULL;
+        iree_hal_streaming_ipc_memory_release_binding(registry, binding);
+      }
+      iree_hal_streaming_ipc_memory_complete_detach(registry, entry->import);
+    } else {
+      iree_slim_mutex_lock(&registry->mutex);
+      IREE_ASSERT(entry->import->state ==
+                  IREE_HAL_STREAMING_IPC_MEMORY_IMPORT_STATE_DETACHING);
+      entry->import->state = IREE_HAL_STREAMING_IPC_MEMORY_IMPORT_STATE_READY;
+      iree_slim_mutex_unlock(&registry->mutex);
+      iree_notification_post(&registry->changed, IREE_ALL_WAITERS);
+    }
+  }
+  iree_allocator_free(registry->host_allocator, release_entries);
+  iree_hal_streaming_context_commit_ipc_import_retirement(context);
+  return iree_ok_status();
 }

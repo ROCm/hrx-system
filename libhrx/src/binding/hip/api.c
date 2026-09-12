@@ -4018,11 +4018,18 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
   // 2. Releasing the current context
   // 3. The context will be recreated lazily on next access
 
-  if (device->primary_context) {
+  iree_slim_mutex_lock(&device->primary_context_mutex);
+  iree_hal_streaming_context_t* primary_context = device->primary_context;
+  if (primary_context) {
     // Wait for all operations on the context to complete.
     iree_status_t status = iree_hal_streaming_context_wait_idle(
-        device->primary_context, iree_infinite_timeout());
+        primary_context, iree_infinite_timeout());
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_ipc_memory_release_context(
+          &device_registry->ipc_memory_registry, primary_context);
+    }
     if (!iree_status_is_ok(status)) {
+      iree_slim_mutex_unlock(&device->primary_context_mutex);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(
           iree_status_to_fixed_hip_result(status, hipErrorUnknown));
@@ -4031,19 +4038,12 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
     // Clear current context if it was the primary context (before release).
     iree_hal_streaming_context_t* current_context =
         iree_hal_streaming_context_current();
-    if (current_context == device->primary_context) {
+    if (current_context == primary_context) {
       iree_hal_streaming_context_set_current(NULL);
     }
 
-    // All allocations are released with the context — reset free memory.
-    iree_atomic_store(&device->free_memory, device->total_memory,
-                      iree_memory_order_relaxed);
-
-    // Lock to ensure thread safety during reset.
-    iree_slim_mutex_lock(&device->primary_context_mutex);
-
     // Release the old context.
-    iree_hal_streaming_context_release(device->primary_context);
+    iree_hal_streaming_context_release(primary_context);
     device->primary_context = NULL;
 
     // Reset reference count to 0.
@@ -4055,8 +4055,12 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
     hrx_mem_pool_release(device->default_mem_pool);
     device->default_mem_pool = NULL;
 
-    iree_slim_mutex_unlock(&device->primary_context_mutex);
+    // Publish reset accounting only after IPC mappings have been revoked and
+    // the context-owned allocation pools have been released.
+    iree_atomic_store(&device->free_memory, device->total_memory,
+                      iree_memory_order_relaxed);
   }
+  iree_slim_mutex_unlock(&device->primary_context_mutex);
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -4238,6 +4242,18 @@ HIPAPI hipError_t hipCtxDestroy(hipCtx_t ctx) {
     iree_status_ignore(status);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidContext);
+  }
+
+  // Revoke every IPC-memory binding before consuming the public context
+  // ownership. On failure both teardown transactions roll back so callers can
+  // retry with the same live handle and mappings.
+  status = iree_hal_streaming_ipc_memory_release_context(
+      &device_registry->ipc_memory_registry, retained_context);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_context_cancel_handle_destroy(retained_context);
+    iree_hal_streaming_context_release(retained_context);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(iree_status_to_fixed_hip_result(status, hipErrorUnknown));
   }
 
   iree_hal_streaming_context_commit_handle_destroy(retained_context);

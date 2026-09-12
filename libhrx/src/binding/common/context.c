@@ -134,6 +134,12 @@ static iree_status_t iree_hal_streaming_context_create_with_handle_state(
                     iree_memory_order_relaxed);
   context->host_allocator = host_allocator;
   iree_slim_mutex_initialize(&context->mutex);
+  iree_slim_mutex_initialize(&context->ipc_import_mutex);
+  iree_slim_mutex_initialize(&context->ipc_import_retirement_mutex);
+  iree_notification_initialize(&context->ipc_import_notification);
+  context->active_ipc_import_count = 0;
+  context->ipc_imports_retiring = false;
+  context->ipc_import_retirement_may_reopen = false;
   iree_slim_mutex_initialize(&context->pending_free_mutex);
 
   // Initialize global list pointers.
@@ -362,6 +368,11 @@ static void iree_hal_streaming_context_destroy(
   iree_hal_device_release(context->device);
 
   // Deinitialize synchronization.
+  IREE_ASSERT(context->active_ipc_import_count == 0,
+              "IPC imports must finish before context destruction");
+  iree_notification_deinitialize(&context->ipc_import_notification);
+  iree_slim_mutex_deinitialize(&context->ipc_import_retirement_mutex);
+  iree_slim_mutex_deinitialize(&context->ipc_import_mutex);
   iree_slim_mutex_deinitialize(&context->mutex);
 
   // Publish final destruction only after all context and device teardown is
@@ -503,6 +514,96 @@ void iree_hal_streaming_context_set_current(
   iree_hal_streaming_context_release(old_context);
 
   IREE_TRACE_ZONE_END(z0);
+}
+
+iree_status_t iree_hal_streaming_context_try_begin_ipc_import(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  iree_slim_mutex_lock(&context->ipc_import_mutex);
+  iree_status_t status = iree_ok_status();
+  if (IREE_UNLIKELY(context->ipc_imports_retiring)) {
+    status = iree_make_status(IREE_STATUS_ABORTED,
+                              "context is retiring from IPC imports");
+  } else if (IREE_UNLIKELY(context->active_ipc_import_count == UINT32_MAX)) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "active IPC import count overflow");
+  } else {
+    ++context->active_ipc_import_count;
+  }
+  iree_slim_mutex_unlock(&context->ipc_import_mutex);
+  return status;
+}
+
+void iree_hal_streaming_context_end_ipc_import(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  iree_slim_mutex_lock(&context->ipc_import_mutex);
+  IREE_ASSERT(context->active_ipc_import_count > 0,
+              "IPC import reservation underflow");
+  const bool became_idle = --context->active_ipc_import_count == 0;
+  iree_slim_mutex_unlock(&context->ipc_import_mutex);
+  if (became_idle) {
+    iree_notification_post(&context->ipc_import_notification, IREE_ALL_WAITERS);
+  }
+}
+
+void iree_hal_streaming_context_begin_ipc_import_retirement(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  iree_slim_mutex_lock(&context->ipc_import_retirement_mutex);
+  iree_slim_mutex_lock(&context->ipc_import_mutex);
+  const bool gate_changed = !context->ipc_imports_retiring;
+  context->ipc_imports_retiring = true;
+  context->ipc_import_retirement_may_reopen = gate_changed;
+  iree_slim_mutex_unlock(&context->ipc_import_mutex);
+  if (gate_changed) {
+    iree_notification_post(&context->ipc_import_notification, IREE_ALL_WAITERS);
+  }
+
+  for (;;) {
+    iree_slim_mutex_lock(&context->ipc_import_mutex);
+    if (context->active_ipc_import_count == 0) {
+      iree_slim_mutex_unlock(&context->ipc_import_mutex);
+      return;
+    }
+    const iree_wait_token_t wait_token =
+        iree_notification_prepare_wait(&context->ipc_import_notification);
+    iree_slim_mutex_unlock(&context->ipc_import_mutex);
+    (void)iree_notification_commit_wait(&context->ipc_import_notification,
+                                        wait_token, IREE_DURATION_ZERO,
+                                        IREE_TIME_INFINITE_FUTURE);
+  }
+}
+
+void iree_hal_streaming_context_commit_ipc_import_retirement(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  iree_slim_mutex_lock(&context->ipc_import_mutex);
+  IREE_ASSERT(context->ipc_imports_retiring,
+              "IPC import retirement was not active");
+  IREE_ASSERT(context->active_ipc_import_count == 0,
+              "cannot commit IPC retirement with active reservations");
+  context->ipc_import_retirement_may_reopen = false;
+  iree_slim_mutex_unlock(&context->ipc_import_mutex);
+  iree_slim_mutex_unlock(&context->ipc_import_retirement_mutex);
+}
+
+void iree_hal_streaming_context_cancel_ipc_import_retirement(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  iree_slim_mutex_lock(&context->ipc_import_mutex);
+  IREE_ASSERT(context->ipc_imports_retiring,
+              "IPC import retirement was not active");
+  IREE_ASSERT(context->active_ipc_import_count == 0,
+              "cannot reopen IPC imports with active reservations");
+  const bool gate_changed = context->ipc_import_retirement_may_reopen;
+  if (gate_changed) context->ipc_imports_retiring = false;
+  context->ipc_import_retirement_may_reopen = false;
+  iree_slim_mutex_unlock(&context->ipc_import_mutex);
+  if (gate_changed) {
+    iree_notification_post(&context->ipc_import_notification, IREE_ALL_WAITERS);
+  }
+  iree_slim_mutex_unlock(&context->ipc_import_retirement_mutex);
 }
 
 iree_status_t iree_hal_streaming_context_push(

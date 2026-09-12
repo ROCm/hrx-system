@@ -280,6 +280,21 @@ struct iree_hal_streaming_context_t {
   // Ownership state of the raw binding handle, guarded by |mutex|.
   iree_hal_streaming_context_handle_state_t handle_state;
 
+  // Serializes IPC-import admission and reservation accounting.
+  iree_slim_mutex_t ipc_import_mutex;
+  // Gives one cold-path retirement transaction exclusive ownership of the
+  // admission gate until it commits or aborts.
+  iree_slim_mutex_t ipc_import_retirement_mutex;
+  // Posted whenever IPC-import admission or the active count changes.
+  iree_notification_t ipc_import_notification;
+  // Number of IPC imports admitted but not yet completed or rolled back.
+  uint32_t active_ipc_import_count;
+  // True once context retirement has permanently closed IPC-import admission.
+  bool ipc_imports_retiring;
+  // True when the current retirement transaction closed admission and may
+  // reopen it if that transaction aborts.
+  bool ipc_import_retirement_may_reopen;
+
   // Host allocator.
   iree_allocator_t host_allocator;
 
@@ -1510,7 +1525,9 @@ iree_status_t iree_hal_streaming_device_retain_primary_context(
     iree_hal_streaming_context_t** out_context);
 
 // Releases one primary-context reference and decrements its device-level usage
-// count. Destroys the device-owned context when the count reaches zero.
+// count. The final release atomically drains context-owned IPC imports before
+// destroying the device-owned context. A failed drain preserves the reference
+// and usage count so the release can be retried.
 // Synchronization: context (waits for idle when destroying).
 iree_status_t iree_hal_streaming_device_release_primary_context(
     iree_hal_streaming_device_t* device);
