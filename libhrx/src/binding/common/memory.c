@@ -492,26 +492,25 @@ iree_status_t iree_hal_streaming_memory_lookup_range_across_contexts(
                             "HAL stream layer not initialized");
   }
 
-  bool found = false;
-  iree_slim_mutex_lock(&device_registry->context_list.mutex);
-  for (iree_hal_streaming_context_t* context =
-           device_registry->context_list.head;
-       context; context = context->context_list_entry.next) {
+  iree_hal_streaming_context_t* context =
+      iree_hal_streaming_context_list_retain_next(device_registry, NULL);
+  while (context) {
     iree_hal_streaming_buffer_ref_t candidate_ref;
     iree_status_t status = iree_hal_streaming_memory_lookup_range(
         context, device_ptr, size, &candidate_ref);
     if (iree_status_is_ok(status)) {
-      iree_hal_streaming_context_retain(context);
       *out_context = context;
       *out_ref = candidate_ref;
-      found = true;
       break;
     }
     iree_status_ignore(status);
+    iree_hal_streaming_context_t* next_context =
+        iree_hal_streaming_context_list_retain_next(device_registry, context);
+    iree_hal_streaming_context_release(context);
+    context = next_context;
   }
-  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
-  return found ? iree_ok_status()
-               : iree_status_from_code(IREE_STATUS_NOT_FOUND);
+  return *out_context ? iree_ok_status()
+                      : iree_status_from_code(IREE_STATUS_NOT_FOUND);
 }
 
 iree_status_t iree_hal_streaming_memory_allocate_device(
@@ -926,11 +925,16 @@ static iree_status_t iree_hal_streaming_memory_find_device_allocation_context(
   }
 
   bool found_invalid_pointer = false;
-  iree_slim_mutex_lock(&device_registry->context_list.mutex);
-  for (iree_hal_streaming_context_t* context =
-           device_registry->context_list.head;
-       context; context = context->context_list_entry.next) {
-    if (context == preferred_context) continue;
+  iree_hal_streaming_context_t* context =
+      iree_hal_streaming_context_list_retain_next(device_registry, NULL);
+  while (context) {
+    if (context == preferred_context) {
+      iree_hal_streaming_context_t* next_context =
+          iree_hal_streaming_context_list_retain_next(device_registry, context);
+      iree_hal_streaming_context_release(context);
+      context = next_context;
+      continue;
+    }
     wrapper = NULL;
     offset = 0;
     hrx_status_t find_status = hrx_buffer_table_find(
@@ -938,10 +942,10 @@ static iree_status_t iree_hal_streaming_memory_find_device_allocation_context(
     if (hrx_status_is_ok(find_status)) {
       if (iree_hal_streaming_buffer_is_device_freeable_base(wrapper, ptr,
                                                             offset)) {
-        iree_hal_streaming_context_retain(context);
         *out_context = context;
         *out_wrapper = wrapper;
         hrx_status_ignore(find_status);
+        context = NULL;
         break;
       }
       if (wrapper && wrapper->device_ptr == ptr && offset == 0) {
@@ -954,8 +958,12 @@ static iree_status_t iree_hal_streaming_memory_find_device_allocation_context(
       break;
     }
     hrx_status_ignore(find_status);
+    iree_hal_streaming_context_t* next_context =
+        iree_hal_streaming_context_list_retain_next(device_registry, context);
+    iree_hal_streaming_context_release(context);
+    context = next_context;
   }
-  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
+  iree_hal_streaming_context_release(context);
 
   if (*out_context) return iree_ok_status();
   if (found_invalid_pointer) {
@@ -1006,11 +1014,16 @@ static iree_status_t iree_hal_streaming_memory_find_host_allocation_context(
                             "HAL stream layer not initialized");
   }
 
-  iree_slim_mutex_lock(&device_registry->context_list.mutex);
-  for (iree_hal_streaming_context_t* context =
-           device_registry->context_list.head;
-       context; context = context->context_list_entry.next) {
-    if (context == preferred_context) continue;
+  iree_hal_streaming_context_t* context =
+      iree_hal_streaming_context_list_retain_next(device_registry, NULL);
+  while (context) {
+    if (context == preferred_context) {
+      iree_hal_streaming_context_t* next_context =
+          iree_hal_streaming_context_list_retain_next(device_registry, context);
+      iree_hal_streaming_context_release(context);
+      context = next_context;
+      continue;
+    }
     wrapper = NULL;
     offset = 0;
     hrx_status_t find_status =
@@ -1019,16 +1032,20 @@ static iree_status_t iree_hal_streaming_memory_find_host_allocation_context(
     if (hrx_status_is_ok(find_status)) {
       hrx_status_ignore(find_status);
       if (wrapper && wrapper->host_ptr) {
-        iree_hal_streaming_context_retain(context);
         *out_context = context;
         *out_wrapper = wrapper;
         *out_offset = offset;
+        context = NULL;
       }
       break;
     }
     hrx_status_ignore(find_status);
+    iree_hal_streaming_context_t* next_context =
+        iree_hal_streaming_context_list_retain_next(device_registry, context);
+    iree_hal_streaming_context_release(context);
+    context = next_context;
   }
-  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
+  iree_hal_streaming_context_release(context);
 
   return *out_context ? iree_ok_status()
                       : iree_status_from_code(IREE_STATUS_NOT_FOUND);
@@ -1164,12 +1181,11 @@ iree_status_t iree_hal_streaming_memory_release_completed_async_frees_from_pool(
                             "HAL stream layer not initialized");
   }
 
-  // Pool trimming is an explicit cold-path operation. Scan contexts here
-  // instead of imposing a process-wide registry on every allocation.
-  iree_slim_mutex_lock(&device_registry->context_list.mutex);
-  for (iree_hal_streaming_context_t* context =
-           device_registry->context_list.head;
-       context; context = context->context_list_entry.next) {
+  // Pool trimming is an explicit cold-path operation. Walk retained weak-list
+  // entries instead of imposing a process-wide registry on every allocation.
+  iree_hal_streaming_context_t* context =
+      iree_hal_streaming_context_list_retain_next(device_registry, NULL);
+  while (context) {
     iree_slim_mutex_lock(&context->pending_free_mutex);
     iree_hal_streaming_deferred_device_free_t** current =
         &context->pending_free_head;
@@ -1186,8 +1202,11 @@ iree_status_t iree_hal_streaming_memory_release_completed_async_frees_from_pool(
       }
     }
     iree_slim_mutex_unlock(&context->pending_free_mutex);
+    iree_hal_streaming_context_t* next_context =
+        iree_hal_streaming_context_list_retain_next(device_registry, context);
+    iree_hal_streaming_context_release(context);
+    context = next_context;
   }
-  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
 
   return iree_hal_streaming_pending_free_release_list(
       completed_frees, /*trim_to_release_threshold=*/false);

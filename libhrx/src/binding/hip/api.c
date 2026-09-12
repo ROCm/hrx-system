@@ -4220,12 +4220,20 @@ HIPAPI hipError_t hipCtxDestroy(hipCtx_t ctx) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Resolve the untrusted raw handle through the live registry before reading
-  // any context fields. This also claims the explicit public owner exactly
-  // once and rejects device-managed primary handles.
+  iree_hal_streaming_device_registry_t* device_registry =
+      iree_hal_streaming_device_registry();
+  if (!device_registry) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorNotInitialized);
+  }
+
+  // Resolve the untrusted raw handle against current registry membership before
+  // reading any context fields. This also claims the explicit public owner
+  // exactly once and rejects device-managed primary handles. Raw-handle use
+  // after a successful destroy remains outside the API lifetime contract.
   iree_hal_streaming_context_t* retained_context = NULL;
   iree_status_t status = iree_hal_streaming_context_begin_handle_destroy(
-      (iree_hal_streaming_context_t*)ctx, &retained_context);
+      device_registry, (iree_hal_streaming_context_t*)ctx, &retained_context);
   if (!iree_status_is_ok(status)) {
     iree_status_ignore(status);
     IREE_TRACE_ZONE_END(z0);

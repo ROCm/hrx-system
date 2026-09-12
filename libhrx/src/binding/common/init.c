@@ -427,19 +427,58 @@ static iree_status_t iree_hal_streaming_query_p2p_capabilities(
 // Context registration
 //===----------------------------------------------------------------------===//
 
-void iree_hal_streaming_register_context(
+// Unlinks |context| while |device_registry->context_list.mutex| is held.
+static bool iree_hal_streaming_context_list_unlink_locked(
+    iree_hal_streaming_device_registry_t* device_registry,
     iree_hal_streaming_context_t* context) {
-  if (!context) return;
+  const bool was_in_list =
+      (iree_hal_streaming_device_registry_t*)iree_atomic_load(
+          &context->context_registry, iree_memory_order_relaxed) ==
+          device_registry &&
+      (context == device_registry->context_list.head ||
+       context == device_registry->context_list.tail ||
+       context->context_list_entry.prev || context->context_list_entry.next);
+  if (!was_in_list) return false;
 
-  iree_hal_streaming_device_registry_t* device_registry =
-      iree_hal_streaming_device_registry();
-  if (!device_registry) return;
+  if (context->context_list_entry.prev) {
+    context->context_list_entry.prev->context_list_entry.next =
+        context->context_list_entry.next;
+  } else {
+    IREE_ASSERT(context == device_registry->context_list.head);
+    device_registry->context_list.head = context->context_list_entry.next;
+  }
+  if (context->context_list_entry.next) {
+    context->context_list_entry.next->context_list_entry.prev =
+        context->context_list_entry.prev;
+  } else {
+    IREE_ASSERT(context == device_registry->context_list.tail);
+    device_registry->context_list.tail = context->context_list_entry.prev;
+  }
+
+  context->context_list_entry.next = NULL;
+  context->context_list_entry.prev = NULL;
+  iree_atomic_store(&context->context_registry, (intptr_t)NULL,
+                    iree_memory_order_release);
+  return true;
+}
+
+void iree_hal_streaming_register_context(
+    iree_hal_streaming_device_registry_t* device_registry,
+    iree_hal_streaming_context_t* context) {
+  if (!device_registry || !context) return;
 
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_slim_mutex_lock(&device_registry->context_list.mutex);
+  IREE_ASSERT(iree_atomic_load(&context->context_registry,
+                               iree_memory_order_relaxed) == (intptr_t)NULL);
+  IREE_ASSERT(context->context_list_entry.prev == NULL);
+  IREE_ASSERT(context->context_list_entry.next == NULL);
 
-  // Add to tail of list.
+  // Publish weak membership only after the context is fully initialized. The
+  // creator's reference, not this list, keeps it alive during insertion.
+  iree_atomic_store(&context->context_registry, (intptr_t)device_registry,
+                    iree_memory_order_release);
   context->context_list_entry.prev = device_registry->context_list.tail;
   context->context_list_entry.next = NULL;
 
@@ -451,9 +490,6 @@ void iree_hal_streaming_register_context(
   }
   device_registry->context_list.tail = context;
 
-  // Retain for the global list.
-  iree_hal_streaming_context_retain(context);
-
   iree_slim_mutex_unlock(&device_registry->context_list.mutex);
   IREE_TRACE_ZONE_END(z0);
 }
@@ -463,53 +499,127 @@ void iree_hal_streaming_unregister_context(
   if (!context) return;
 
   iree_hal_streaming_device_registry_t* device_registry =
-      iree_hal_streaming_device_registry();
+      (iree_hal_streaming_device_registry_t*)iree_atomic_load(
+          &context->context_registry, iree_memory_order_acquire);
   if (!device_registry) return;
 
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_slim_mutex_lock(&device_registry->context_list.mutex);
 
-  // Check if the context is actually in the list.
-  // A context might not be in the list if it failed during initialization
-  // before it could be registered, or if this is called multiple times.
-  // A context is in the list if it's either the head/tail or has neighbors.
-  const bool was_in_list = context == device_registry->context_list.head ||
-                           context == device_registry->context_list.tail ||
-                           context->context_list_entry.prev ||
-                           context->context_list_entry.next;
-  if (was_in_list) {
-    // Remove from list.
-    if (context->context_list_entry.prev) {
-      context->context_list_entry.prev->context_list_entry.next =
-          context->context_list_entry.next;
-    } else if (context == device_registry->context_list.head) {
-      // Was head of list.
-      device_registry->context_list.head = context->context_list_entry.next;
-    }
-
-    if (context->context_list_entry.next) {
-      context->context_list_entry.next->context_list_entry.prev =
-          context->context_list_entry.prev;
-    } else if (context == device_registry->context_list.tail) {
-      // Was tail of list.
-      device_registry->context_list.tail = context->context_list_entry.prev;
-    }
-
-    // Clear list pointers.
-    context->context_list_entry.next = NULL;
-    context->context_list_entry.prev = NULL;
+  // Final destruction is the usual caller. A context may already be detached
+  // if creation failed before registration or global cleanup promoted it while
+  // it was still live.
+  if (iree_hal_streaming_context_list_unlink_locked(device_registry, context)) {
+    // Publish while holding the list mutex so a cleanup waiter that
+    // subsequently observes an empty list also observes all preceding context
+    // teardown.
+    iree_notification_post(&device_registry->context_list.changed,
+                           IREE_ALL_WAITERS);
   }
 
   iree_slim_mutex_unlock(&device_registry->context_list.mutex);
 
-  // Only release the global list reference if the context was actually in the
-  // list.
-  if (was_in_list) {
-    iree_hal_streaming_context_release(context);
-  }
-
   IREE_TRACE_ZONE_END(z0);
+}
+
+iree_hal_streaming_context_t*
+iree_hal_streaming_context_list_try_retain_registered(
+    iree_hal_streaming_device_registry_t* device_registry,
+    const iree_hal_streaming_context_t* handle) {
+  if (!device_registry || !handle) return NULL;
+
+  iree_hal_streaming_context_t* retained_context = NULL;
+  iree_slim_mutex_lock(&device_registry->context_list.mutex);
+  for (iree_hal_streaming_context_t* context =
+           device_registry->context_list.head;
+       context; context = context->context_list_entry.next) {
+    if (context == handle) {
+      if (iree_hal_streaming_context_try_retain(context)) {
+        retained_context = context;
+      }
+      break;
+    }
+  }
+  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
+  return retained_context;
+}
+
+iree_hal_streaming_context_t* iree_hal_streaming_context_list_retain_next(
+    iree_hal_streaming_device_registry_t* device_registry,
+    const iree_hal_streaming_context_t* previous_context) {
+  if (!device_registry) return NULL;
+
+  iree_hal_streaming_context_t* retained_context = NULL;
+  iree_slim_mutex_lock(&device_registry->context_list.mutex);
+  const iree_hal_streaming_device_registry_t* previous_registry =
+      previous_context
+          ? (iree_hal_streaming_device_registry_t*)iree_atomic_load(
+                &previous_context->context_registry, iree_memory_order_relaxed)
+          : NULL;
+  iree_hal_streaming_context_t* context =
+      previous_context && previous_registry == device_registry
+          ? previous_context->context_list_entry.next
+      : previous_context ? NULL
+                         : device_registry->context_list.head;
+  while (context) {
+    iree_hal_streaming_context_t* next = context->context_list_entry.next;
+    if (iree_hal_streaming_context_try_retain(context)) {
+      retained_context = context;
+      break;
+    }
+    context = next;
+  }
+  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
+  return retained_context;
+}
+
+iree_status_t iree_hal_streaming_context_list_drain(
+    iree_hal_streaming_device_registry_t* device_registry,
+    iree_timeout_t timeout) {
+  IREE_ASSERT_ARGUMENT(device_registry);
+  const iree_time_t deadline_ns = iree_timeout_as_deadline_ns(timeout);
+
+  for (;;) {
+    iree_slim_mutex_lock(&device_registry->context_list.mutex);
+    iree_hal_streaming_context_t* context = device_registry->context_list.head;
+    if (!context) {
+      iree_slim_mutex_unlock(&device_registry->context_list.mutex);
+      return iree_ok_status();
+    }
+
+    if (iree_hal_streaming_context_try_retain(context)) {
+      // Promotion must precede detachment: after membership is cleared, a final
+      // release no longer has to rendezvous with the list mutex before freeing.
+      const bool was_unlinked = iree_hal_streaming_context_list_unlink_locked(
+          device_registry, context);
+      IREE_ASSERT(was_unlinked);
+      (void)was_unlinked;
+      iree_notification_post(&device_registry->context_list.changed,
+                             IREE_ALL_WAITERS);
+      iree_slim_mutex_unlock(&device_registry->context_list.mutex);
+
+      iree_status_ignore(iree_hal_streaming_context_synchronize(context));
+      iree_hal_streaming_context_release(context);
+      continue;
+    }
+
+    // A zero-reference entry is owned by its final destructor. Keep its
+    // membership intact: the destructor will unlink only after all context and
+    // device teardown, then post |changed| before freeing the storage.
+    IREE_ASSERT_EQ(iree_atomic_ref_count_load(&context->ref_count), 0,
+                   "failed to promote a positive-reference context");
+    const iree_wait_token_t wait_token =
+        iree_notification_prepare_wait(&device_registry->context_list.changed);
+    iree_slim_mutex_unlock(&device_registry->context_list.mutex);
+    if (!iree_notification_commit_wait(&device_registry->context_list.changed,
+                                       wait_token, IREE_DURATION_ZERO,
+                                       deadline_ns)) {
+      return iree_make_status(
+          IREE_STATUS_DEADLINE_EXCEEDED,
+          "timed out waiting for final context destruction");
+    }
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -555,6 +665,7 @@ iree_status_t iree_hal_streaming_init_global(
 
   // Initialize context list.
   iree_slim_mutex_initialize(&device_registry->context_list.mutex);
+  iree_notification_initialize(&device_registry->context_list.changed);
   device_registry->context_list.head = NULL;
   device_registry->context_list.tail = NULL;
 
@@ -621,29 +732,22 @@ void iree_hal_streaming_cleanup_global(void) {
   // Clear the TLS current context first to avoid dangling references.
   iree_hal_streaming_context_set_current(NULL);
 
-  // Force destroy all remaining contexts from the global list.
-  iree_slim_mutex_lock(&device_registry->context_list.mutex);
-  iree_hal_streaming_context_t* context_head =
-      device_registry->context_list.head;
-  device_registry->context_list.head = NULL;
-  device_registry->context_list.tail = NULL;
-  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
-  while (context_head) {
-    iree_hal_streaming_context_t* context = context_head;
-    context_head = context->context_list_entry.next;
-    context->context_list_entry.next = NULL;
-    context->context_list_entry.prev = NULL;
-    iree_status_ignore(iree_hal_streaming_context_synchronize(context));
-    iree_hal_streaming_context_release(context);
-  }
+  // Drain one entry at a time without allocating. Live entries are retained
+  // before detachment; zero-reference entries remain linked until their final
+  // destructors finish and publish completion.
+  iree_status_ignore(iree_hal_streaming_context_list_drain(
+      device_registry, iree_infinite_timeout()));
 
   iree_slim_mutex_lock(&device_registry->mutex);
-  iree_slim_mutex_deinitialize(&device_registry->context_list.mutex);
 
   // Release all device resources.
   for (iree_host_size_t i = 0; i < device_registry->device_count; ++i) {
     iree_hal_streaming_deinitialize_device(&device_registry->devices[i]);
   }
+  // A device's final primary-context release may run its destructor. Drain
+  // detached every positive-reference entry, so it will not touch this mutex.
+  iree_notification_deinitialize(&device_registry->context_list.changed);
+  iree_slim_mutex_deinitialize(&device_registry->context_list.mutex);
 
   // Free P2P topology.
   iree_allocator_free(device_registry->host_allocator,

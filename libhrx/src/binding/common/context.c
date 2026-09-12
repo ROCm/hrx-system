@@ -137,6 +137,8 @@ static iree_status_t iree_hal_streaming_context_create_with_handle_state(
   iree_slim_mutex_initialize(&context->pending_free_mutex);
 
   // Initialize global list pointers.
+  iree_atomic_store(&context->context_registry, (intptr_t)NULL,
+                    iree_memory_order_relaxed);
   context->context_list_entry.next = NULL;
   context->context_list_entry.prev = NULL;
 
@@ -213,8 +215,9 @@ static iree_status_t iree_hal_streaming_context_create_with_handle_state(
   }
 
   if (iree_status_is_ok(status)) {
-    // Register with global list.
-    iree_hal_streaming_register_context(context);
+    // Register with the global weak context list when one is available.
+    iree_hal_streaming_register_context(iree_hal_streaming_device_registry(),
+                                        context);
     *out_context = context;
   } else {
     iree_hal_streaming_context_destroy(context);
@@ -244,9 +247,6 @@ iree_status_t iree_hal_streaming_context_create_primary(
 static void iree_hal_streaming_context_destroy(
     iree_hal_streaming_context_t* context) {
   IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Unregister from global list.
-  iree_hal_streaming_unregister_context(context);
 
   // Clean up peer contexts array.
   if (context->peer_contexts) {
@@ -364,8 +364,15 @@ static void iree_hal_streaming_context_destroy(
   // Deinitialize synchronization.
   iree_slim_mutex_deinitialize(&context->mutex);
 
-  // Free context memory.
+  // Publish final destruction only after all context and device teardown is
+  // complete. Weak-list readers hold the list mutex while traversing links and
+  // cannot retain this zero-reference context, so keeping it registered through
+  // teardown is safe and lets global cleanup join this destructor.
   const iree_allocator_t host_allocator = context->host_allocator;
+  iree_hal_streaming_unregister_context(context);
+
+  // Free context memory. No registry or device state is touched after the
+  // destructor-completion publication above.
   iree_allocator_free(host_allocator, context);
 
   IREE_TRACE_ZONE_END(z0);
@@ -393,38 +400,23 @@ bool iree_hal_streaming_context_try_retain(
 }
 
 iree_status_t iree_hal_streaming_context_begin_handle_destroy(
+    iree_hal_streaming_device_registry_t* device_registry,
     iree_hal_streaming_context_t* handle,
     iree_hal_streaming_context_t** out_context) {
+  IREE_ASSERT_ARGUMENT(device_registry);
   IREE_ASSERT_ARGUMENT(handle);
   IREE_ASSERT_ARGUMENT(out_context);
   *out_context = NULL;
 
-  iree_hal_streaming_device_registry_t* device_registry =
-      iree_hal_streaming_device_registry();
-  if (!device_registry) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "device registry not initialized");
-  }
-
-  // Compare the untrusted raw handle only as an address. The registry owns
-  // every listed context, and promotion while the list lock is held couples
-  // membership validation to the operation reference used below.
-  iree_hal_streaming_context_t* retained_context = NULL;
-  iree_slim_mutex_lock(&device_registry->context_list.mutex);
-  for (iree_hal_streaming_context_t* context =
-           device_registry->context_list.head;
-       context; context = context->context_list_entry.next) {
-    if (context == handle) {
-      if (iree_hal_streaming_context_try_retain(context)) {
-        retained_context = context;
-      }
-      break;
-    }
-  }
-  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
+  // Compare the untrusted raw handle only as an address. Promotion under the
+  // weak-list lock couples current membership validation to the operation
+  // reference used below without reviving a final-release context.
+  iree_hal_streaming_context_t* retained_context =
+      iree_hal_streaming_context_list_try_retain_registered(device_registry,
+                                                            handle);
   if (!retained_context) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "context handle is not live");
+                            "context handle is not currently registered");
   }
 
   iree_status_t status = iree_ok_status();
@@ -951,18 +943,20 @@ bool iree_hal_streaming_context_has_peer_contexts(
       iree_hal_streaming_device_registry();
   if (!device_registry) return false;
 
-  bool has_peer = false;
+  iree_hal_streaming_context_t* retained_peer = NULL;
   iree_slim_mutex_lock(&device_registry->context_list.mutex);
   for (iree_hal_streaming_context_t* candidate =
            device_registry->context_list.head;
        candidate; candidate = candidate->context_list_entry.next) {
-    if (candidate != context) {
-      has_peer = true;
+    if (candidate != context &&
+        iree_hal_streaming_context_try_retain(candidate)) {
+      retained_peer = candidate;
       break;
     }
   }
   iree_slim_mutex_unlock(&device_registry->context_list.mutex);
-  return has_peer;
+  iree_hal_streaming_context_release(retained_peer);
+  return retained_peer != NULL;
 }
 
 // Takes a retained snapshot while the caller holds |stream_list_mutex|.
@@ -1240,8 +1234,9 @@ iree_status_t iree_hal_streaming_context_flush_all(void) {
     for (iree_hal_streaming_context_t* context =
              device_registry->context_list.head;
          context; context = context->context_list_entry.next) {
-      contexts[index++] = context;
-      iree_hal_streaming_context_retain(context);
+      if (iree_hal_streaming_context_try_retain(context)) {
+        contexts[index++] = context;
+      }
     }
     context_count = index;
   }
@@ -1397,8 +1392,9 @@ iree_status_t iree_hal_streaming_context_synchronize_all(void) {
     for (iree_hal_streaming_context_t* context =
              device_registry->context_list.head;
          context; context = context->context_list_entry.next) {
-      contexts[index++] = context;
-      iree_hal_streaming_context_retain(context);
+      if (iree_hal_streaming_context_try_retain(context)) {
+        contexts[index++] = context;
+      }
     }
     context_count = index;
   }

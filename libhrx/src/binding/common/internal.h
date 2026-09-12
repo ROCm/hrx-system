@@ -48,8 +48,6 @@ typedef struct iree_hal_streaming_operation_timeline_t {
 typedef struct iree_hal_streaming_deferred_device_free_t
     iree_hal_streaming_deferred_device_free_t;
 typedef struct iree_hal_streaming_device_t iree_hal_streaming_device_t;
-typedef struct iree_hal_streaming_device_registry_t
-    iree_hal_streaming_device_registry_t;
 typedef struct iree_hal_streaming_event_t iree_hal_streaming_event_t;
 typedef struct iree_hal_streaming_global_symbol_registry_t
     iree_hal_streaming_global_symbol_registry_t;
@@ -305,9 +303,12 @@ struct iree_hal_streaming_context_t {
   // Serializes event record submission and |event_record_timeline| updates.
   iree_slim_mutex_t event_record_mutex;
 
-  // Global context list node pointers for cleanup tracking.
-  // These are used to link all contexts in a global list for proper cleanup.
-  // Guarded by the context list mutex.
+  // Device registry whose weak context list contains this context, or zero.
+  // Stored atomically because final release may begin before list detachment.
+  iree_atomic_intptr_t context_registry;
+
+  // Weak global context-list links used for lookup and cleanup tracking.
+  // Membership does not retain the context. Guarded by the context-list mutex.
   struct {
     iree_hal_streaming_context_t* next;
     iree_hal_streaming_context_t* prev;
@@ -472,10 +473,13 @@ typedef struct iree_hal_streaming_device_registry_t {
   iree_hal_streaming_device_t devices[IREE_HAL_STREAMING_MAX_DEVICES];
   iree_host_size_t device_count;
 
-  // Global context tracking for cleanup.
-  // All created contexts are tracked here to ensure proper cleanup.
+  // Weak tracking of registered contexts. A zero-reference context remains
+  // linked until its final destructor publishes completion. Callers retain an
+  // entry under |context_list.mutex| before using it after unlocking.
   struct {
     iree_slim_mutex_t mutex;
+    // Posted whenever an entry is unlinked.
+    iree_notification_t changed;
     iree_hal_streaming_context_t* head;
     iree_hal_streaming_context_t* tail;
   } context_list;
@@ -1378,7 +1382,10 @@ iree_status_t iree_hal_streaming_init_global(
     const iree_hal_device_create_params_extension_t* device_extensions,
     iree_allocator_t host_allocator);
 
-// Cleans up global state and releases all resources.
+// Cleans up global state and releases all resources. Callers must exclude new
+// runtime operations, context registration, and release of live context
+// references. A final destructor that has already decremented its reference
+// count to zero is joined internally.
 // Synchronization: all contexts (synchronizes all active contexts).
 void iree_hal_streaming_cleanup_global(void);
 
@@ -1386,11 +1393,43 @@ void iree_hal_streaming_cleanup_global(void);
 // Synchronization: none (read-only access).
 iree_hal_streaming_device_registry_t* iree_hal_streaming_device_registry(void);
 
-// Global context list management.
+// Global context-list management. Membership is weak and does not contribute a
+// context reference. |device_registry| may be NULL when creating standalone
+// contexts without a process-wide registry.
 // Synchronization: none (thread-safe internal locking).
-void iree_hal_streaming_register_context(iree_hal_streaming_context_t* context);
+void iree_hal_streaming_register_context(
+    iree_hal_streaming_device_registry_t* device_registry,
+    iree_hal_streaming_context_t* context);
 void iree_hal_streaming_unregister_context(
     iree_hal_streaming_context_t* context);
+
+// Synchronizes and detaches live entries until |device_registry|'s weak context
+// list is empty. Entries whose final release has begun remain linked while this
+// waits for their destructor-completion publication. |timeout| bounds only
+// waits for final destructors; context synchronization itself is unbounded.
+// New registrations and registry-backed runtime operations must be
+// caller-serialized with this operation; final context destruction may overlap.
+// Synchronization: all contexts (thread-safe against final destruction).
+iree_status_t iree_hal_streaming_context_list_drain(
+    iree_hal_streaming_device_registry_t* device_registry,
+    iree_timeout_t timeout);
+
+// Resolves |handle| by address against the current weak registry membership and
+// returns a retained context, or NULL if it is absent or its final release has
+// begun. The raw handle is never dereferenced before successful promotion.
+// Synchronization: none (thread-safe internal locking).
+iree_hal_streaming_context_t*
+iree_hal_streaming_context_list_try_retain_registered(
+    iree_hal_streaming_device_registry_t* device_registry,
+    const iree_hal_streaming_context_t* handle);
+
+// Returns the first live context after |previous_context| in the weak registry
+// list, retained for use after the list mutex is released. Pass NULL to begin
+// an iteration. A non-NULL predecessor must remain retained by the caller.
+// Synchronization: none (thread-safe internal locking).
+iree_hal_streaming_context_t* iree_hal_streaming_context_list_retain_next(
+    iree_hal_streaming_device_registry_t* device_registry,
+    const iree_hal_streaming_context_t* previous_context);
 
 //===----------------------------------------------------------------------===//
 // Device management
@@ -1635,7 +1674,8 @@ iree_status_t iree_hal_streaming_context_wait_event(
 iree_status_t iree_hal_streaming_context_allocate_capture_id(
     iree_hal_streaming_context_t* context, unsigned long long* out_capture_id);
 
-// Returns true when another context is present in the global context list.
+// Returns true when another live context can be retained from the global weak
+// context list.
 bool iree_hal_streaming_context_has_peer_contexts(
     iree_hal_streaming_context_t* context);
 
@@ -2058,7 +2098,7 @@ iree_status_t iree_hal_streaming_memory_lookup_range(
 // Looks up the context and buffer that contain the specified address range.
 // On success, |out_context| receives a retained context reference that the
 // caller must release.
-// Synchronization: global context-list lock during lookup.
+// Synchronization: retained weak-list traversal and per-context table lookup.
 iree_status_t iree_hal_streaming_memory_lookup_range_across_contexts(
     iree_hal_streaming_deviceptr_t device_ptr, iree_device_size_t size,
     iree_hal_streaming_context_t** out_context,
