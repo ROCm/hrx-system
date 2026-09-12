@@ -177,6 +177,7 @@ iree_runtime_cc_library(
     srcs = [
         "allocator.c",
         "allocator.h",
+        "allocator_ipc_memory.h",
         "aql_atomic.c",
         "aql_atomic.h",
         "aql_block_processor.c",
@@ -372,6 +373,29 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "ipc_memory",
+    srcs = [
+        "allocator_ipc_memory.h",
+        "ipc_memory.c",
+    ],
+    hdrs = ["ipc_memory.h"],
+    visibility = [
+        ":__pkg__",
+        "//libhrx/src/binding/hip:__pkg__",
+    ],
+    deps = [
+        ":access_policy",
+        ":amdgpu",
+        ":atomic_memory",
+        ":buffer",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+    ],
+)
+
 # Provided for tests and tools that may reach in.
 # These headers are not part of the public API and should not be depended on.
 iree_runtime_cc_library(
@@ -473,6 +497,25 @@ iree_runtime_cc_test(
         ":atomic_memory",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "ipc_memory_test",
+    size = "medium",
+    srcs = ["ipc_memory_test.cc"],
+    deps = [
+        ":amdgpu",
+        ":atomic_memory",
+        ":headers",
+        ":ipc_memory",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:topology",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

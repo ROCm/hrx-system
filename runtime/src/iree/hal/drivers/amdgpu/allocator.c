@@ -11,6 +11,7 @@
 
 #include "iree/base/internal/math.h"
 #include "iree/hal/drivers/amdgpu/access_policy.h"
+#include "iree/hal/drivers/amdgpu/allocator_ipc_memory.h"
 #include "iree/hal/drivers/amdgpu/atomic_memory.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
@@ -41,7 +42,8 @@ typedef struct iree_hal_amdgpu_allocator_memory_pool_t {
   // Source GPUs supporting each atomic width and coherence-domain cell.
   iree_hal_amdgpu_atomic_memory_source_masks_t atomic_memory_source_masks;
 
-  // Allocation sizes submitted to HSA are rounded up to this granule.
+  // HSA physical-backing granule used for validation; ordinary allocation
+  // requests are rounded up to this size.
   iree_device_size_t allocation_granule;
 
   // Base-pointer alignment guaranteed by HSA allocations from |memory_pool|.
@@ -244,6 +246,12 @@ typedef struct iree_hal_amdgpu_imported_device_release_data_t {
   iree_hal_buffer_release_callback_t caller_release_callback;
 } iree_hal_amdgpu_imported_device_release_data_t;
 
+typedef enum iree_hal_amdgpu_device_allocation_import_mode_e {
+  IREE_HAL_AMDGPU_DEVICE_ALLOCATION_IMPORT_MODE_EXTERNAL = 0,
+  IREE_HAL_AMDGPU_DEVICE_ALLOCATION_IMPORT_MODE_IPC_ATTACHMENT,
+  IREE_HAL_AMDGPU_DEVICE_ALLOCATION_IMPORT_MODE_IPC_ALIAS,
+} iree_hal_amdgpu_device_allocation_import_mode_t;
+
 typedef struct iree_hal_amdgpu_asan_allocation_release_data_t {
   // Unowned libhsa handle used to free the HSA memory pool allocation.
   const iree_hal_amdgpu_libhsa_t* libhsa;
@@ -254,12 +262,18 @@ typedef struct iree_hal_amdgpu_asan_allocation_release_data_t {
   // Base pointer returned from the HSA memory pool allocation.
   void* host_ptr;
 
-  // Full aligned allocation size published to ASAN shadow.
+  // Requested HSA allocation extent stored in the owning HAL buffer.
   iree_device_size_t allocation_size;
+
+  // Internal aligned physical extent published to ASAN shadow.
+  iree_device_size_t asan_mapped_size;
 
   // Host allocator used to release this thunk after buffer destruction.
   iree_allocator_t host_allocator;
 } iree_hal_amdgpu_asan_allocation_release_data_t;
+
+static void iree_hal_amdgpu_allocator_release_asan_allocation(
+    void* user_data, iree_hal_buffer_t* buffer);
 
 typedef struct iree_hal_amdgpu_pointer_range_t {
   // Base address at which GPU agents access the ROCr allocation.
@@ -280,8 +294,8 @@ typedef struct iree_hal_amdgpu_pointer_range_t {
   // Whether |allocation_flags| was present in the pointer-info result.
   bool allocation_flags_available;
 
-  // Physical GPU ordinal that owns the allocation.
-  uint32_t physical_device_ordinal;
+  // Physical GPU ordinal used for import policy and profiling attribution.
+  uint32_t policy_device_ordinal;
 } iree_hal_amdgpu_pointer_range_t;
 
 static const iree_hal_allocator_vtable_t iree_hal_amdgpu_allocator_vtable;
@@ -290,6 +304,20 @@ static iree_hal_amdgpu_allocator_t* iree_hal_amdgpu_allocator_cast(
     iree_hal_allocator_t* base_value) {
   IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_amdgpu_allocator_vtable);
   return (iree_hal_amdgpu_allocator_t*)base_value;
+}
+
+static iree_status_t iree_hal_amdgpu_allocator_cast_checked(
+    iree_hal_allocator_t* base_value,
+    iree_hal_amdgpu_allocator_t** out_allocator) {
+  *out_allocator = NULL;
+  if (IREE_UNLIKELY(!base_value || !iree_hal_resource_is(
+                                       (const iree_hal_resource_t*)base_value,
+                                       &iree_hal_amdgpu_allocator_vtable))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "allocator is not an AMDGPU allocator");
+  }
+  *out_allocator = (iree_hal_amdgpu_allocator_t*)base_value;
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_query_pool_properties(
@@ -448,7 +476,7 @@ iree_hal_amdgpu_allocator_select_imported_device_cells(
     const iree_hal_amdgpu_pointer_range_t* pointer_range) {
   const iree_hal_amdgpu_allocator_memory_pool_t* pool =
       iree_hal_amdgpu_allocator_match_imported_device_pool(
-          allocator, pointer_range->physical_device_ordinal,
+          allocator, pointer_range->policy_device_ordinal,
           pointer_range->global_flags);
   if (!pool) return IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE;
 
@@ -466,9 +494,10 @@ static iree_status_t iree_hal_amdgpu_allocator_query_device_pointer_range(
     const iree_hal_amdgpu_allocator_t* allocator,
     iree_hal_memory_type_t requested_memory_type,
     const iree_hal_external_buffer_t* external_buffer,
+    const iree_hal_amdgpu_allocator_placement_t* ipc_placement,
     iree_hal_amdgpu_pointer_range_t* out_range) {
   memset(out_range, 0, sizeof(*out_range));
-  out_range->physical_device_ordinal = UINT32_MAX;
+  out_range->policy_device_ordinal = UINT32_MAX;
 
   if (IREE_UNLIKELY(external_buffer->handle.device_allocation.ptr == 0)) {
     return iree_make_status(
@@ -511,6 +540,13 @@ static iree_status_t iree_hal_amdgpu_allocator_query_device_pointer_range(
     case HSA_EXT_POINTER_TYPE_HSA_VMEM:
     case HSA_EXT_POINTER_TYPE_IPC:
       break;
+    case HSA_EXT_POINTER_TYPE_GRAPHICS:
+      if (ipc_placement) break;
+      return iree_make_status(
+          IREE_STATUS_UNAVAILABLE,
+          "AMDGPU device allocation import does not support HSA pointer type "
+          "%d",
+          (int)pointer_info.type);
     case HSA_EXT_POINTER_TYPE_LOCKED:
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
@@ -556,8 +592,10 @@ static iree_status_t iree_hal_amdgpu_allocator_query_device_pointer_range(
   }
 
   iree_host_size_t owner_ordinal = 0;
-  if (IREE_UNLIKELY(!iree_hal_amdgpu_allocator_find_gpu_agent_ordinal(
-          allocator, pointer_info.agentOwner, &owner_ordinal))) {
+  if (ipc_placement) {
+    owner_ordinal = ipc_placement->physical_device_ordinal;
+  } else if (IREE_UNLIKELY(!iree_hal_amdgpu_allocator_find_gpu_agent_ordinal(
+                 allocator, pointer_info.agentOwner, &owner_ordinal))) {
     return iree_make_status(
         IREE_STATUS_PERMISSION_DENIED,
         "device allocation is owned by an HSA GPU agent outside the AMDGPU HAL "
@@ -624,7 +662,7 @@ static iree_status_t iree_hal_amdgpu_allocator_query_device_pointer_range(
   if (out_range->allocation_flags_available) {
     out_range->allocation_flags = pointer_info.alloc_flags;
   }
-  out_range->physical_device_ordinal = (uint32_t)owner_ordinal;
+  out_range->policy_device_ordinal = (uint32_t)owner_ordinal;
   return iree_ok_status();
 }
 
@@ -677,8 +715,9 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
 
   const iree_hal_amdgpu_allocator_memory_pool_t* memory_pool = NULL;
   iree_hal_memory_type_t memory_type = 0;
-  // Sharing hints do not affect HSA pool selection.
+  // Sharing hints do not affect HSA memory-pool selection.
   const iree_hal_buffer_usage_t sharing_usage =
+      IREE_HAL_BUFFER_USAGE_SHARING_EXPORT |
       IREE_HAL_BUFFER_USAGE_SHARING_REPLICATE |
       IREE_HAL_BUFFER_USAGE_SHARING_CONCURRENT |
       IREE_HAL_BUFFER_USAGE_SHARING_IMMUTABLE;
@@ -765,6 +804,165 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
       iree_hal_amdgpu_atomic_memory_select_device_cells(
           &memory_pool->atomic_memory_source_masks, physical_device_mask);
   return true;
+}
+
+iree_status_t iree_hal_amdgpu_allocator_query_ipc_memory_context(
+    iree_hal_allocator_t* base_allocator,
+    iree_hal_amdgpu_ipc_memory_allocator_context_t* out_context) {
+  IREE_ASSERT_ARGUMENT(out_context);
+  memset(out_context, 0, sizeof(*out_context));
+  iree_hal_amdgpu_allocator_t* allocator = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_cast_checked(base_allocator, &allocator));
+  *out_context = (iree_hal_amdgpu_ipc_memory_allocator_context_t){
+      .libhsa = allocator->libhsa,
+      .topology = allocator->topology,
+      .host_allocator = allocator->host_allocator,
+  };
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amdgpu_allocator_validate_ipc_memory_import_params(
+    iree_hal_allocator_t* base_allocator,
+    const iree_hal_buffer_params_t* params) {
+  iree_hal_amdgpu_allocator_t* allocator = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_cast_checked(base_allocator, &allocator));
+  iree_hal_buffer_params_t compat_params = *params;
+  iree_hal_amdgpu_allocator_placement_t memory_placement;
+  if (IREE_UNLIKELY(!iree_hal_amdgpu_allocator_resolve_placement(
+          allocator, &compat_params, /*allow_vmm_host_access=*/false,
+          &memory_placement))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "allocator cannot import IPC memory with the requested parameters");
+  }
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amdgpu_allocator_resolve_ipc_memory_export_pool(
+    iree_hal_allocator_t* base_allocator,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    hsa_amd_memory_pool_t* out_memory_pool) {
+  IREE_ASSERT_ARGUMENT(out_memory_pool);
+  *out_memory_pool = (hsa_amd_memory_pool_t){0};
+  iree_hal_amdgpu_allocator_t* allocator = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_cast_checked(base_allocator, &allocator));
+  iree_hal_queue_family_affinity_t normalized_affinity = 0;
+  iree_host_size_t physical_device_ordinal = 0;
+  if (IREE_UNLIKELY(!iree_hal_amdgpu_allocator_normalize_queue_family_affinity(
+                        allocator, queue_family_affinity, &normalized_affinity,
+                        /*out_physical_device_mask=*/NULL,
+                        &physical_device_ordinal) ||
+                    iree_math_count_ones_u64(normalized_affinity) != 1)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU IPC export source must select exactly one queue family");
+  }
+  *out_memory_pool =
+      allocator->memory_pools.device_coarse[physical_device_ordinal]
+          .memory_pool;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amdgpu_allocator_query_ipc_memory_export_range(
+    iree_hal_allocator_t* base_allocator, iree_hal_buffer_t* allocated_buffer,
+    uint64_t device_ptr, iree_device_size_t size,
+    iree_hal_amdgpu_ipc_memory_export_range_t* out_range) {
+  IREE_ASSERT_ARGUMENT(out_range);
+  memset(out_range, 0, sizeof(*out_range));
+  iree_hal_amdgpu_allocator_t* allocator = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_cast_checked(base_allocator, &allocator));
+
+  const iree_hal_memory_type_t memory_type =
+      iree_hal_buffer_memory_type(allocated_buffer);
+  iree_hal_buffer_release_callback_t direct_release_callback;
+  const bool is_direct_allocation =
+      iree_hal_amdgpu_buffer_query_release_callback(
+          allocated_buffer, /*release_fn=*/NULL, &direct_release_callback);
+  iree_hal_buffer_release_callback_t asan_release_callback;
+  const bool is_direct_asan_allocation =
+      iree_hal_amdgpu_buffer_query_release_callback(
+          allocated_buffer, iree_hal_amdgpu_allocator_release_asan_allocation,
+          &asan_release_callback);
+  if (IREE_UNLIKELY(
+          iree_hal_buffer_allocation_placement(allocated_buffer).device !=
+              (iree_hal_device_t*)allocator->logical_device ||
+          !iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL) ||
+          iree_any_bit_set(memory_type,
+                           IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+                               IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+                               IREE_HAL_MEMORY_TYPE_HOST_CACHED |
+                               IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED) ||
+          !iree_all_bits_set(iree_hal_buffer_allowed_usage(allocated_buffer),
+                             IREE_HAL_BUFFER_USAGE_SHARING_EXPORT) ||
+          (!is_direct_allocation && !is_direct_asan_allocation))) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "AMDGPU IPC export requires a dedicated cached device-coarse "
+        "allocator allocation");
+  }
+
+  void* allocation_ptr =
+      iree_hal_amdgpu_buffer_device_pointer(allocated_buffer);
+  const iree_device_size_t allocation_size =
+      iree_hal_buffer_allocation_size(allocated_buffer);
+  if (IREE_UNLIKELY(!allocation_ptr || allocation_size == 0)) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "AMDGPU IPC export requires a live allocator allocation");
+  }
+  if (is_direct_asan_allocation) {
+    const iree_hal_amdgpu_asan_allocation_release_data_t* release_data =
+        (const iree_hal_amdgpu_asan_allocation_release_data_t*)
+            asan_release_callback.user_data;
+    if (IREE_UNLIKELY(
+            !release_data || release_data->libhsa != allocator->libhsa ||
+            release_data->asan_state != &allocator->logical_device->asan ||
+            release_data->host_ptr != allocation_ptr ||
+            release_data->allocation_size != allocation_size)) {
+      return iree_make_status(
+          IREE_STATUS_UNAVAILABLE,
+          "AMDGPU IPC export requires allocator-owned ASAN metadata");
+    }
+  }
+
+  iree_hal_external_buffer_t external_buffer = {
+      .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+      .flags = IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE,
+      .size = size,
+  };
+  external_buffer.handle.device_allocation.ptr = device_ptr;
+  iree_hal_amdgpu_pointer_range_t pointer_range;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_allocator_query_device_pointer_range(
+      allocator, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL, &external_buffer,
+      /*ipc_placement=*/NULL, &pointer_range));
+  const uint32_t pool_class = pointer_range.global_flags &
+                              IREE_HAL_AMDGPU_ATOMIC_MEMORY_POOL_CLASS_FLAGS;
+  const iree_hal_amdgpu_allocator_memory_pool_t* device_coarse_pool =
+      &allocator->memory_pools
+           .device_coarse[pointer_range.policy_device_ordinal];
+  if (IREE_UNLIKELY(allocation_ptr != pointer_range.agent_base ||
+                    allocation_size != pointer_range.allocation_size ||
+                    !device_coarse_pool->memory_pool.handle ||
+                    pool_class !=
+                        HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED ||
+                    (pointer_range.allocation_flags_available &&
+                     iree_any_bit_set(pointer_range.allocation_flags,
+                                      HSA_AMD_MEMORY_POOL_UNCACHED_FLAG)))) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "AMDGPU IPC export requires a complete cached device-coarse "
+        "allocator allocation");
+  }
+  *out_range = (iree_hal_amdgpu_ipc_memory_export_range_t){
+      .agent_base = pointer_range.agent_base,
+      .allocation_size = pointer_range.allocation_size,
+      .global_flags = pointer_range.global_flags,
+  };
+  return iree_ok_status();
 }
 
 static bool iree_hal_amdgpu_allocator_supports_virtual_memory_internal(
@@ -1079,8 +1277,9 @@ static iree_status_t iree_hal_amdgpu_allocator_query_memory_heaps(
           allocator->topology->gpu_agent_count, &host_fine_max_allocation_size,
           &host_fine_min_alignment, &host_fine_atomic_operations);
 
-  // Sharing hints do not affect HSA pool selection.
+  // Sharing hints do not affect HSA memory-pool selection.
   const iree_hal_buffer_usage_t sharing_usage =
+      IREE_HAL_BUFFER_USAGE_SHARING_EXPORT |
       IREE_HAL_BUFFER_USAGE_SHARING_REPLICATE |
       IREE_HAL_BUFFER_USAGE_SHARING_CONCURRENT |
       IREE_HAL_BUFFER_USAGE_SHARING_IMMUTABLE;
@@ -1180,7 +1379,12 @@ iree_hal_amdgpu_allocator_query_buffer_compatibility_impl(
                                       &aligned_allocation_size)) {
     return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
   }
-  *allocation_size = aligned_allocation_size;
+  // ROCr preserves the requested extent of dedicated IPC allocations even
+  // when their physical backing is rounded internally. Keep that extent so a
+  // compatibility query cannot make allocator padding HIP-visible.
+  if (!iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_SHARING_EXPORT)) {
+    *allocation_size = aligned_allocation_size;
+  }
 
   const bool allocation_size_valid =
       aligned_allocation_size <= placement.memory_pool->max_allocation_size;
@@ -1449,7 +1653,7 @@ static void iree_hal_amdgpu_allocator_release_asan_allocation(
 
   iree_hal_amdgpu_asan_state_publish_released_range(
       data->asan_state, (uint64_t)(uintptr_t)data->host_ptr,
-      data->allocation_size);
+      data->asan_mapped_size);
   iree_hal_amdgpu_hsa_cleanup_assert_success(
       iree_hsa_amd_memory_pool_free_raw(data->libhsa, data->host_ptr));
   iree_allocator_free(data->host_allocator, data);
@@ -1515,8 +1719,15 @@ static iree_status_t iree_hal_amdgpu_allocator_allocate_buffer(
         (uint64_t)memory_placement.memory_pool->allocation_alignment);
   }
 
-  if (iree_hal_amdgpu_allocator_should_use_asan_pool(allocator,
-                                                     &memory_placement)) {
+  const bool is_sharing_export = iree_any_bit_set(
+      compat_params.usage, IREE_HAL_BUFFER_USAGE_SHARING_EXPORT);
+
+  // Exportable allocations must remain dedicated: an IPC token must name one
+  // ROCr allocation, so naming a pooled slab would expose unrelated objects.
+  // The direct path below still publishes the allocation to ASAN when
+  // instrumentation is enabled.
+  if (!is_sharing_export && iree_hal_amdgpu_allocator_should_use_asan_pool(
+                                allocator, &memory_placement)) {
     iree_status_t status = iree_hal_amdgpu_allocator_allocate_asan_pool_buffer(
         allocator, &memory_placement, compat_params, byte_length, out_buffer);
     if (iree_status_is_ok(status)) {
@@ -1528,27 +1739,33 @@ static iree_status_t iree_hal_amdgpu_allocator_allocate_buffer(
     return status;
   }
 
-  // Guard against 0-byte allocations and align to the HSA allocation granule.
+  // Guard against 0-byte allocations and validate the physical size ROCr may
+  // reserve after rounding to the HSA allocation granule. Dedicated IPC
+  // allocations retain the requested size passed to ROCr: that is the extent
+  // returned by pointer info and required by IPC create/attach. Other direct
+  // allocations retain their historical explicit rounding.
   if (allocation_size == 0) allocation_size = 4;
+  iree_device_size_t aligned_allocation_size = 0;
   if (!iree_device_size_checked_align(
           allocation_size, memory_placement.memory_pool->allocation_granule,
-          &allocation_size)) {
+          &aligned_allocation_size)) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "allocation size %" PRIdsz
                             " overflows HSA memory pool allocation granule",
                             allocation_size);
   }
-  if (IREE_UNLIKELY(allocation_size >
+  if (IREE_UNLIKELY(aligned_allocation_size >
                     memory_placement.memory_pool->max_allocation_size)) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "AMDGPU allocation size %" PRIu64
         " exceeds HSA memory pool max allocation size %" PRIu64,
-        (uint64_t)allocation_size,
+        (uint64_t)aligned_allocation_size,
         (uint64_t)memory_placement.memory_pool->max_allocation_size);
   }
+  if (!is_sharing_export) allocation_size = aligned_allocation_size;
 
   // Allocate directly from the resolved HSA memory pool.
   void* host_ptr = NULL;
@@ -1576,7 +1793,7 @@ static iree_status_t iree_hal_amdgpu_allocator_allocate_buffer(
           allocator, &memory_placement)) {
     status = iree_hal_amdgpu_asan_state_publish_allocated_range(
         &allocator->logical_device->asan, (uint64_t)(uintptr_t)host_ptr,
-        allocation_size, (uint64_t)(uintptr_t)host_ptr, byte_length);
+        aligned_allocation_size, (uint64_t)(uintptr_t)host_ptr, byte_length);
     asan_range_published = iree_status_is_ok(status);
   }
 
@@ -1591,6 +1808,7 @@ static iree_status_t iree_hal_amdgpu_allocator_allocate_buffer(
           .asan_state = &allocator->logical_device->asan,
           .host_ptr = host_ptr,
           .allocation_size = allocation_size,
+          .asan_mapped_size = aligned_allocation_size,
           .host_allocator = allocator->host_allocator,
       };
     }
@@ -1635,7 +1853,7 @@ static iree_status_t iree_hal_amdgpu_allocator_allocate_buffer(
       if (asan_range_published) {
         iree_hal_amdgpu_asan_state_publish_released_range(
             &allocator->logical_device->asan, (uint64_t)(uintptr_t)host_ptr,
-            allocation_size);
+            aligned_allocation_size);
       }
       if (host_ptr) {
         status = iree_status_join(
@@ -1732,10 +1950,19 @@ static void iree_hal_amdgpu_allocator_release_imported_device(
   IREE_TRACE_ZONE_END(z0);
 }
 
+// Distinct callback identity marks buffers backed by a live ROCr IPC
+// attachment. Alias import validates this marker before skipping per-agent
+// access setup for the already process-wide mapping.
+static void iree_hal_amdgpu_allocator_release_imported_ipc_device(
+    void* user_data, iree_hal_buffer_t* buffer) {
+  iree_hal_amdgpu_allocator_release_imported_device(user_data, buffer);
+}
+
 static iree_status_t iree_hal_amdgpu_allocator_import_device_allocation(
     iree_hal_amdgpu_allocator_t* allocator,
     const iree_hal_buffer_params_t* params,
     const iree_hal_external_buffer_t* external_buffer,
+    iree_hal_amdgpu_device_allocation_import_mode_t import_mode,
     iree_hal_buffer_release_callback_t release_callback,
     iree_hal_buffer_t** out_buffer) {
   // HSA pointer metadata does not expose the allocation cache policy. Do not
@@ -1791,14 +2018,19 @@ static iree_status_t iree_hal_amdgpu_allocator_import_device_allocation(
 #endif  // IREE_STATUS_MODE
   }
   iree_hal_amdgpu_pointer_range_t pointer_range;
+  const bool is_attached_ipc =
+      import_mode != IREE_HAL_AMDGPU_DEVICE_ALLOCATION_IMPORT_MODE_EXTERNAL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_allocator_query_device_pointer_range(
-      allocator, compat_params.type, external_buffer, &pointer_range));
+      allocator, compat_params.type, external_buffer,
+      is_attached_ipc ? &memory_placement : NULL, &pointer_range));
 
-  iree_hal_amdgpu_access_agent_list_t access_agents;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_allocator_resolve_access_agents(
-      allocator, compat_params.queue_family_affinity, &access_agents));
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_access_allow_agent_list(
-      allocator->libhsa, &access_agents, pointer_range.agent_base));
+  if (!is_attached_ipc) {
+    iree_hal_amdgpu_access_agent_list_t access_agents;
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_allocator_resolve_access_agents(
+        allocator, compat_params.queue_family_affinity, &access_agents));
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_access_allow_agent_list(
+        allocator->libhsa, &access_agents, pointer_range.agent_base));
+  }
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_asan_state_publish_imported_range(
       &allocator->logical_device->asan,
       external_buffer->handle.device_allocation.ptr, external_buffer->size));
@@ -1813,13 +2045,18 @@ static iree_status_t iree_hal_amdgpu_allocator_import_device_allocation(
   release_data->memory_type = pointer_range.memory_type;
   release_data->buffer_usage = compat_params.usage;
   release_data->profile_physical_device_ordinal =
-      pointer_range.physical_device_ordinal;
+      pointer_range.policy_device_ordinal;
   release_data->host_allocator = allocator->host_allocator;
   release_data->caller_release_callback = release_callback;
 
   iree_hal_buffer_t* buffer = NULL;
+  iree_hal_buffer_release_fn_t imported_release_fn =
+      import_mode ==
+              IREE_HAL_AMDGPU_DEVICE_ALLOCATION_IMPORT_MODE_IPC_ATTACHMENT
+          ? iree_hal_amdgpu_allocator_release_imported_ipc_device
+          : iree_hal_amdgpu_allocator_release_imported_device;
   iree_hal_buffer_release_callback_t imported_release_callback = {
-      .fn = iree_hal_amdgpu_allocator_release_imported_device,
+      .fn = imported_release_fn,
       .user_data = release_data,
   };
   const iree_hal_buffer_placement_t placement = {
@@ -1827,9 +2064,13 @@ static iree_status_t iree_hal_amdgpu_allocator_import_device_allocation(
       .queue_family_affinity = compat_params.queue_family_affinity,
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
+  // ROCr pointer info for an IPC mapping describes the allocation's pool class
+  // but not the exporting pool or the route from each destination GPU. A local
+  // pool of the same class therefore cannot establish atomic support.
   const iree_hal_amdgpu_atomic_memory_cell_flags_t atomic_memory_cells =
-      iree_hal_amdgpu_allocator_select_imported_device_cells(
-          allocator, &memory_placement, &pointer_range);
+      is_attached_ipc ? IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE
+                      : iree_hal_amdgpu_allocator_select_imported_device_cells(
+                            allocator, &memory_placement, &pointer_range);
   iree_status_t status = iree_hal_amdgpu_buffer_create(
       allocator->libhsa, placement, pointer_range.memory_type,
       compat_params.access, compat_params.usage, atomic_memory_cells,
@@ -1841,7 +2082,7 @@ static iree_status_t iree_hal_amdgpu_allocator_import_device_allocation(
     iree_hal_amdgpu_allocator_record_device_buffer_import(
         allocator, pointer_range.memory_type, compat_params.usage,
         (void*)(uintptr_t)external_buffer->handle.device_allocation.ptr,
-        external_buffer->size, pointer_range.physical_device_ordinal,
+        external_buffer->size, pointer_range.policy_device_ordinal,
         release_data);
     *out_buffer = buffer;
   } else {
@@ -1849,6 +2090,46 @@ static iree_status_t iree_hal_amdgpu_allocator_import_device_allocation(
     iree_hal_buffer_release(buffer);
   }
   return status;
+}
+
+iree_status_t iree_hal_amdgpu_allocator_wrap_attached_ipc_memory(
+    iree_hal_allocator_t* base_allocator,
+    const iree_hal_buffer_params_t* params,
+    const iree_hal_external_buffer_t* external_buffer, bool owns_attachment,
+    iree_hal_buffer_release_callback_t release_callback,
+    iree_hal_buffer_t** out_buffer) {
+  iree_hal_amdgpu_allocator_t* allocator = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_allocator_cast_checked(base_allocator, &allocator));
+  const iree_hal_amdgpu_device_allocation_import_mode_t import_mode =
+      owns_attachment
+          ? IREE_HAL_AMDGPU_DEVICE_ALLOCATION_IMPORT_MODE_IPC_ATTACHMENT
+          : IREE_HAL_AMDGPU_DEVICE_ALLOCATION_IMPORT_MODE_IPC_ALIAS;
+  return iree_hal_amdgpu_allocator_import_device_allocation(
+      allocator, params, external_buffer, import_mode, release_callback,
+      out_buffer);
+}
+
+bool iree_hal_amdgpu_allocator_query_ipc_memory_attachment(
+    iree_hal_buffer_t* buffer,
+    iree_hal_buffer_release_callback_t* out_release_callback) {
+  IREE_ASSERT_ARGUMENT(out_release_callback);
+  *out_release_callback = iree_hal_buffer_release_callback_null();
+  iree_hal_buffer_t* allocated_buffer =
+      iree_hal_buffer_allocated_buffer(buffer);
+  iree_hal_buffer_release_callback_t imported_release_callback;
+  if (!iree_hal_amdgpu_buffer_query_release_callback(
+          allocated_buffer,
+          iree_hal_amdgpu_allocator_release_imported_ipc_device,
+          &imported_release_callback)) {
+    return false;
+  }
+  iree_hal_amdgpu_imported_device_release_data_t* release_data =
+      (iree_hal_amdgpu_imported_device_release_data_t*)
+          imported_release_callback.user_data;
+  if (!release_data) return false;
+  *out_release_callback = release_data->caller_release_callback;
+  return true;
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_import_buffer(
@@ -1874,7 +2155,9 @@ static iree_status_t iree_hal_amdgpu_allocator_import_buffer(
       break;
     case IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION:
       return iree_hal_amdgpu_allocator_import_device_allocation(
-          allocator, params, external_buffer, release_callback, out_buffer);
+          allocator, params, external_buffer,
+          IREE_HAL_AMDGPU_DEVICE_ALLOCATION_IMPORT_MODE_EXTERNAL,
+          release_callback, out_buffer);
     case IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_FD:
     case IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_WIN32:
       return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -2044,7 +2327,6 @@ static iree_status_t iree_hal_amdgpu_allocator_export_buffer(
   }
   const iree_device_size_t byte_offset = iree_hal_buffer_byte_offset(buffer);
   const iree_device_size_t byte_length = iree_hal_buffer_byte_length(buffer);
-  void* view_ptr = (uint8_t*)base_ptr + byte_offset;
 
   memset(out_external_buffer, 0, sizeof(*out_external_buffer));
   out_external_buffer->flags = requested_flags;
@@ -2061,6 +2343,7 @@ static iree_status_t iree_hal_amdgpu_allocator_export_buffer(
             "AMDGPU buffer memory type is not supported for export as an "
             "external device allocation");
       }
+      void* view_ptr = (uint8_t*)base_ptr + byte_offset;
       out_external_buffer->handle.device_allocation.ptr =
           (uint64_t)(uintptr_t)view_ptr;
       return iree_ok_status();
@@ -2074,6 +2357,7 @@ static iree_status_t iree_hal_amdgpu_allocator_export_buffer(
             "AMDGPU buffer memory type is not supported for export as an "
             "external host allocation");
       }
+      void* view_ptr = (uint8_t*)base_ptr + byte_offset;
       out_external_buffer->handle.host_allocation.ptr = view_ptr;
       return iree_ok_status();
     }

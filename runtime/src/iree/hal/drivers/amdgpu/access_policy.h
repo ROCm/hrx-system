@@ -57,6 +57,20 @@ iree_status_t iree_hal_amdgpu_access_agent_list_resolve_memory_agents(
     iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_amdgpu_access_agent_list_t* out_agent_list);
 
+// Resolves the GPU agents to which an IPC memory mapping should be attached.
+//
+// Every selected queue-family agent must report access to
+// |exporting_memory_pool| and is listed first. Every other HSA-visible GPU with
+// access to that pool is then appended, including agents whose access must be
+// explicitly enabled. CPU agents and GPUs reporting that access is never
+// allowed are omitted. Agent or memory-pool query failures fail resolution.
+iree_status_t iree_hal_amdgpu_access_agent_list_resolve_ipc_memory_agents(
+    const iree_hal_amdgpu_libhsa_t* libhsa,
+    const iree_hal_amdgpu_topology_t* topology,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    hsa_amd_memory_pool_t exporting_memory_pool,
+    iree_hal_amdgpu_access_agent_list_t* out_agent_list);
+
 // Resolves the HSA agents selected by virtual-memory |access_scope|.
 //
 // DEVICE selects the GPU agents represented by |queue_family_affinity|, HOST

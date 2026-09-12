@@ -138,6 +138,15 @@ bool iree_hal_amdgpu_buffer_uses_release_callback(
     iree_hal_buffer_t* buffer,
     iree_hal_buffer_release_callback_t release_callback);
 
+// Returns the release callback when |buffer| is an unpooled AMDGPU buffer with
+// live backing storage using |release_fn| to release it. A null |release_fn|
+// identifies storage that the buffer will free directly through HSA. Returns
+// false and clears |out_release_callback| for other buffers or release
+// functions.
+bool iree_hal_amdgpu_buffer_query_release_callback(
+    iree_hal_buffer_t* buffer, iree_hal_buffer_release_fn_t release_fn,
+    iree_hal_buffer_release_callback_t* out_release_callback);
+
 // Disarms callback-owned storage that has already been released externally.
 //
 // |buffer| must be a direct AMDGPU buffer using exactly |release_callback|.

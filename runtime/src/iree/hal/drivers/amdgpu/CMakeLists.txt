@@ -229,6 +229,7 @@ iree_cc_library(
   SRCS
     "allocator.c"
     "allocator.h"
+    "allocator_ipc_memory.h"
     "aql_atomic.c"
     "aql_atomic.h"
     "aql_block_processor.c"
@@ -424,6 +425,28 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
+    ipc_memory
+  HDRS
+    "ipc_memory.h"
+  SRCS
+    "allocator_ipc_memory.h"
+    "ipc_memory.c"
+  DEPS
+    ::access_policy
+    ::amdgpu
+    ::atomic_memory
+    ::buffer
+    iree::base
+    iree::base::internal
+    iree::hal
+    iree::hal::drivers::amdgpu::util::libhsa
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
     headers
   HDRS
     "api.h"
@@ -525,6 +548,33 @@ iree_cc_test(
     ::atomic_memory
     iree::base
     iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    ipc_memory_test
+  SRCS
+    "ipc_memory_test.cc"
+  DEPS
+    ::amdgpu
+    ::atomic_memory
+    ::headers
+    ::ipc_memory
+    iree::base
+    iree::hal
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::amdgpu::util::libhsa
+    iree::hal::drivers::amdgpu::util::topology
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
