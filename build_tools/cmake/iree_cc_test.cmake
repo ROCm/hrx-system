@@ -18,6 +18,7 @@
 # SRCS: List of source files for the binary.
 # DATA: List of other targets and files required for this binary.
 # DEPS: List of other libraries to be linked in to the binary targets.
+# INCLUDES: Include directories to add to the test target.
 # COPTS: List of private compile options.
 # DEFINES: List of public defines.
 # LINKOPTS: List of link options.
@@ -65,7 +66,7 @@ function(iree_cc_test)
     _RULE
     ""
     "NAME;RESOURCE_GROUP"
-    "ARGS;SRCS;COPTS;DEFINES;LINKOPTS;DATA;DEPS;LABELS;GROUP;TIMEOUT;ENV;SANITIZER_SUPPRESSIONS"
+    "ARGS;SRCS;COPTS;DEFINES;LINKOPTS;DATA;DEPS;INCLUDES;LABELS;GROUP;TIMEOUT;ENV;SANITIZER_SUPPRESSIONS"
     ${ARGN}
   )
 
@@ -101,6 +102,13 @@ function(iree_cc_test)
   foreach(_SOURCE IN LISTS _RULE_SRCS)
     iree_generated_output_add_consumer("${_SOURCE}" "${_NAME}")
   endforeach()
+  # Wrap user specified INCLUDES in the $<BUILD_INTERFACE:> generator.
+  list(TRANSFORM _RULE_INCLUDES PREPEND "$<BUILD_INTERFACE:")
+  list(TRANSFORM _RULE_INCLUDES APPEND ">")
+  target_include_directories(${_NAME}
+    PUBLIC
+      ${_RULE_INCLUDES}
+  )
   target_include_directories(${_NAME} SYSTEM
     PUBLIC
       "$<BUILD_INTERFACE:${IREE_SOURCE_DIR}>"
