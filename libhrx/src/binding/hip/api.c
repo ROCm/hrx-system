@@ -32,6 +32,7 @@
 #include "binding/hip/execution_resource.h"
 #include "binding/hip/execution_resource_descriptor.h"
 #include "binding/hip/handle_registry.h"
+#include "binding/hip/ipc.h"
 #include "binding/hip/launch_params.h"
 #include "binding/hip/stream.h"
 #include "common/direct_transfer.h"
@@ -5266,9 +5267,16 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
   }
 
   iree_hal_streaming_buffer_t* buffer = NULL;
+  iree_hal_streaming_memory_flags_t allocation_flags =
+      IREE_HAL_STREAMING_MEMORY_FLAG_NONE;
+#if defined(IREE_HIP_HAS_AMDGPU_IPC)
+  const size_t allocation_size = size;
+  allocation_flags |= IREE_HAL_STREAMING_MEMORY_FLAG_SHARING_EXPORT;
+#else
   const size_t allocation_size = iree_max(size, (size_t)8);
+#endif  // IREE_HIP_HAS_AMDGPU_IPC
   iree_status_t status = iree_hal_streaming_memory_allocate_device(
-      context, allocation_size, /*flags=*/0, &buffer);
+      context, allocation_size, allocation_flags, &buffer);
   hipError_t result = iree_status_to_hip_result(status);
   if (result == hipSuccess) {
     buffer->logical_size = (iree_device_size_t)size;
@@ -9822,32 +9830,103 @@ HIPAPI hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc,
 }
 
 //===----------------------------------------------------------------------===//
-// IPC Memory Operations (not supported)
+// IPC Memory Operations
 //===----------------------------------------------------------------------===//
 
+// Maps the private distinctions produced after HIP memory-handle validation.
+static hipError_t iree_hip_ipc_memory_open_status_to_result(
+    iree_status_t status) {
+  if (iree_status_is_ok(status)) return hipSuccess;
+  const iree_status_code_t code = iree_status_code(status);
+  if (code == IREE_STATUS_ABORTED) {
+    iree_status_free(status);
+    return hipErrorContextIsDestroyed;
+  }
+  if (code == IREE_STATUS_NOT_FOUND || code == IREE_STATUS_ALREADY_EXISTS) {
+    iree_status_free(status);
+    return code == IREE_STATUS_NOT_FOUND ? hipErrorInvalidDevicePointer
+                                         : hipErrorInvalidResourceHandle;
+  }
+  return iree_status_to_hip_result(status);
+}
+
 // Gets an IPC memory handle for a device allocation.
-// Not supported - returns hipErrorNotSupported.
 HIPAPI hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr) {
-  (void)handle;
-  (void)devPtr;
+  IREE_TRACE_ZONE_BEGIN(z0);
+  if (!handle) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  memset(handle, 0, sizeof(*handle));
+  if (!devPtr) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+#if !defined(IREE_HIP_HAS_AMDGPU_IPC)
+  IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(hipErrorNotSupported);
+#else
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t result = iree_hip_ensure_context(&context);
+  if (result == hipSuccess) {
+    result = iree_hip_ipc_memory_export_status_to_result(
+        iree_hip_ipc_memory_export(context, devPtr, handle));
+  }
+  IREE_TRACE_ZONE_END(z0);
+  HIP_RETURN_ERROR(result);
+#endif  // IREE_HIP_HAS_AMDGPU_IPC
 }
 
 // Opens an IPC memory handle exported from another process.
-// Not supported - returns hipErrorNotSupported.
 HIPAPI hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle,
                                       unsigned int flags) {
-  (void)devPtr;
-  (void)handle;
-  (void)flags;
+  IREE_TRACE_ZONE_BEGIN(z0);
+  if (!devPtr) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  *devPtr = NULL;
+  if (flags != hipIpcMemLazyEnablePeerAccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+#if !defined(IREE_HIP_HAS_AMDGPU_IPC)
+  IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(hipErrorNotSupported);
+#else
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t result = iree_hip_ensure_context(&context);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
+  result = iree_hip_ipc_memory_open_status_to_result(
+      iree_hip_ipc_memory_import(context, handle, devPtr));
+  IREE_TRACE_ZONE_END(z0);
+  HIP_RETURN_ERROR(result);
+#endif  // IREE_HIP_HAS_AMDGPU_IPC
 }
 
 // Closes an IPC memory handle.
-// Not supported - returns hipErrorNotSupported.
 HIPAPI hipError_t hipIpcCloseMemHandle(void* devPtr) {
-  (void)devPtr;
+  IREE_TRACE_ZONE_BEGIN(z0);
+  if (!devPtr) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+#if !defined(IREE_HIP_HAS_AMDGPU_IPC)
+  IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(hipErrorNotSupported);
+#else
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t result = iree_hip_ensure_context(&context);
+  if (result == hipSuccess) {
+    result =
+        iree_status_to_hip_result(iree_hip_ipc_memory_close(context, devPtr));
+  }
+  IREE_TRACE_ZONE_END(z0);
+  HIP_RETURN_ERROR(result);
+#endif  // IREE_HIP_HAS_AMDGPU_IPC
 }
 
 // Gets an IPC event handle for an event.

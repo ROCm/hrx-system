@@ -579,13 +579,18 @@ typedef enum hipMemcpyKind {
   hipMemcpyDeviceToDeviceNoCU = 1024
 } hipMemcpyKind;
 
+#define HIP_IPC_HANDLE_SIZE 64
+
 typedef struct hipIpcEventHandle_st {
-  char reserved[64];
+  char reserved[HIP_IPC_HANDLE_SIZE];
 } hipIpcEventHandle_t;
 
 typedef struct hipIpcMemHandle_st {
-  char reserved[64];
+  char reserved[HIP_IPC_HANDLE_SIZE];
 } hipIpcMemHandle_t;
+
+// Accepted hipIpcOpenMemHandle flag for peer-access compatibility.
+#define hipIpcMemLazyEnablePeerAccess 0x01
 
 typedef struct hipUUID_st {
   unsigned char bytes[16];
@@ -1476,7 +1481,7 @@ HIPAPI hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize,
 HIPAPI hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr);
 HIPAPI hipError_t hipMemPtrGetInfo(void* ptr, size_t* size);
 
-// IPC memory operations (not supported - return error)
+// IPC operations. Event handle sharing is not yet supported.
 HIPAPI hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr);
 HIPAPI hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle,
                                       unsigned int flags);
