@@ -296,6 +296,7 @@ iree_cc_library(
     "error_state.c"
   DEPS
     iree::base
+    iree::base::internal
     libhrx_defs
   INCLUDES
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
@@ -577,6 +578,7 @@ iree_cc_test(
   NAME
     hip_device_contracts_api_test
   SRCS
+    "api.h"
     "hip_device_contracts_api_test.cc"
   DATA
     ::amdhip64
@@ -598,6 +600,7 @@ iree_cc_test(
   NAME
     hip_get_proc_address_test
   SRCS
+    "api.h"
     "hip_get_proc_address_test.cc"
   DATA
     ::amdhip64

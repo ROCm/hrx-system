@@ -252,7 +252,10 @@ hrx_cc_library(
         "error_state.h",
     ],
     includes = ["../.."],
-    deps = ["//runtime/src/iree/base"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
 )
 
 hrx_cc_library(
@@ -497,7 +500,10 @@ hrx_cc_test(
 
 hrx_cc_test(
     name = "hip_device_contracts_api_test",
-    srcs = ["hip_device_contracts_api_test.cc"],
+    srcs = [
+        "api.h",
+        "hip_device_contracts_api_test.cc",
+    ],
     data = [":amdhip64"],
     env = {
         "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
@@ -517,7 +523,10 @@ hrx_cc_test(
 
 hrx_cc_test(
     name = "hip_get_proc_address_test",
-    srcs = ["hip_get_proc_address_test.cc"],
+    srcs = [
+        "api.h",
+        "hip_get_proc_address_test.cc",
+    ],
     data = [":amdhip64"],
     env = {
         "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
