@@ -111,7 +111,9 @@ class HipDeviceContractsApiTest : public testing::Test {
     ASSERT_NE(nullptr, api_.get_last_error);
     ASSERT_NE(nullptr, api_.peek_at_last_error);
     ASSERT_EQ(hipSuccess, api_.init(/*flags=*/0));
-    ASSERT_EQ(hipSuccess, api_.get_last_error());
+    // Test cases share the runner thread but own independent last-error state.
+    (void)api_.get_last_error();
+    ASSERT_EQ(hipSuccess, api_.peek_at_last_error());
   }
 
   static void TearDownTestSuite() {
