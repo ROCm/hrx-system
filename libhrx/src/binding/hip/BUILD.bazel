@@ -35,12 +35,25 @@ _HIP_GPU_COMPATIBILITY = _LINUX_COMPATIBILITY + select({
 })
 
 hrx_cc_library(
+    name = "hip_dso_test_util",
+    testonly = True,
+    srcs = ["hip_dso_test_util.cc"],
+    hdrs = ["hip_dso_test_util.h"],
+    includes = ["../.."],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = ["//build_tools/bazel:dl"],
+)
+
+hrx_cc_library(
     name = "printf_format",
     srcs = ["printf_format.c"],
     hdrs = ["printf_format.h"],
     includes = ["../.."],
     target_compatible_with = _LINUX_COMPATIBILITY,
-    deps = ["//runtime/src/iree/base"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
 )
 
 hrx_cc_library(
@@ -231,6 +244,24 @@ hrx_cc_library(
     ],
 )
 
+hrx_cc_library(
+    name = "error_state",
+    srcs = ["error_state.c"],
+    hdrs = [
+        "api.h",
+        "error_state.h",
+    ],
+    includes = ["../.."],
+    deps = ["//runtime/src/iree/base"],
+)
+
+hrx_cc_library(
+    name = "device_properties",
+    srcs = ["device_properties.c"],
+    hdrs = ["device_properties.h"],
+    includes = ["../.."],
+)
+
 hrx_cc_shared_library(
     name = "amdhip64",
     srcs = [
@@ -262,6 +293,8 @@ hrx_cc_shared_library(
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
         ":blocking_printf_provider",
+        ":device_properties",
+        ":error_state",
         ":execution_context",
         ":execution_resource",
         ":execution_resource_descriptor",
@@ -381,8 +414,9 @@ hrx_cc_test(
         "iree-run-requirement=runtime.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
-    target_compatible_with = _LINUX_COMPATIBILITY,
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [
+        ":hip_dso_test_util",
         "//build_tools/bazel:dl",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -405,8 +439,9 @@ hrx_cc_test(
         "iree-run-requirement=runtime.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
-    target_compatible_with = _LINUX_COMPATIBILITY,
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [
+        ":hip_dso_test_util",
         "//build_tools/bazel:dl",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -430,8 +465,9 @@ hrx_cc_test(
         "iree-run-requirement=runtime.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
-    target_compatible_with = _LINUX_COMPATIBILITY,
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [
+        ":hip_dso_test_util",
         "//build_tools/bazel:dl",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -460,20 +496,41 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
-    name = "hip_get_proc_address_test",
-    srcs = ["hip_get_proc_address_test.cc"],
-    # The test dlopen()s the built libamdhip64 with RTLD_LOCAL to reproduce the
-    # consumer scenario (e.g. Triton). CMake injects the exact artifact path via
-    # HRX_TEST_LIBAMDHIP64_PATH; Bazel passes the shared object as test data.
+    name = "hip_device_contracts_api_test",
+    srcs = ["hip_device_contracts_api_test.cc"],
     data = [":amdhip64"],
     env = {
         "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
     },
-    target_compatible_with = _LINUX_COMPATIBILITY,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [
-        # The test itself calls dlopen()/dlsym()/dlclose(); link libdl so the
-        # executable resolves them (glibc that ships dl separately, ld.lld).
+        ":hip_dso_test_util",
+        "//build_tools/bazel:pthreads",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_get_proc_address_test",
+    srcs = ["hip_get_proc_address_test.cc"],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    deps = [
+        ":hip_dso_test_util",
         "//build_tools/bazel:dl",
+        "//build_tools/bazel:pthreads",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -489,8 +546,13 @@ hrx_cc_test(
         "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
     },
     sanitizer_suppressions = rocm_suppressions,
-    target_compatible_with = _LINUX_COMPATIBILITY,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [
+        ":hip_dso_test_util",
         ":launch_params",
         "//build_tools/bazel:dl",
         "//build_tools/bazel:pthreads",
@@ -558,6 +620,27 @@ hrx_cc_test(
     srcs = ["launch_params_test.cc"],
     deps = [
         ":launch_params",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "error_state_test",
+    srcs = ["error_state_test.cc"],
+    deps = [
+        ":error_state",
+        "//build_tools/bazel:pthreads",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "device_properties_test",
+    srcs = ["device_properties_test.cc"],
+    deps = [
+        ":device_properties",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

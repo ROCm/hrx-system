@@ -13,9 +13,27 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Publishes the result of a public HIP call to the calling thread's error
-// state and returns the same result.
+// Publishes |result| as the calling thread's last error. Illegal-address
+// failures are also latched process-wide so later HIP entry points and other
+// threads observe the fatal device state. Returns the effective result, which
+// is the process-wide fatal error once one has been latched.
 hipError_t iree_hip_error_state_publish(hipError_t result);
+
+// Returns the process-wide fatal device result, or hipSuccess when none has
+// been observed. This does not modify the calling thread's last-error state.
+hipError_t iree_hip_error_state_fatal_result(void);
+
+// Returns the process-fatal result when one is latched, otherwise returns the
+// calling thread's last error and clears non-fatal thread state.
+hipError_t iree_hip_error_state_get_and_clear(void);
+
+// Returns the process-fatal result when one is latched, otherwise returns the
+// calling thread's last error without clearing it.
+hipError_t iree_hip_error_state_peek(void);
+
+// Clears process and calling-thread state when the embedded runtime is fully
+// deinitialized and no device work remains.
+void iree_hip_error_state_reset(void);
 
 // Completes a public HIP API call through the shared error-state boundary.
 #define HIP_RETURN_ERROR(error)                   \

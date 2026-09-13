@@ -4,30 +4,16 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <dlfcn.h>
-
 #include <atomic>
 #include <cstdint>
-#include <cstdlib>
 #include <thread>
 
 #include "binding/hip/api.h"
+#include "binding/hip/hip_dso_test_util.h"
 #include "common/internal.h"
 #include "iree/testing/gtest.h"
 
 namespace {
-
-const char* CandidateLibPath() {
-  if (const char* env = std::getenv("HRX_TEST_LIBAMDHIP64");
-      env && *env != '\0') {
-    return env;
-  }
-#ifdef HRX_TEST_LIBAMDHIP64_PATH
-  return HRX_TEST_LIBAMDHIP64_PATH;
-#else
-  return nullptr;
-#endif
-}
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipHalDeinitFn = hipError_t (*)(void);
@@ -75,8 +61,6 @@ using HipGraphKernelNodeGetAttributeFn =
 // Owns an RTLD_LOCAL HIP runtime instance and the entry points exercised by
 // this test. All calls use the loaded library instead of a link-time runtime.
 struct HipRuntimeApi {
-  // Handle returned by dlopen for the HIP runtime instance.
-  void* library = nullptr;
   // Initializes the HIP runtime instance.
   HipInitFn init = nullptr;
   // Deinitializes the HIP runtime instance before unloading its DSO.
@@ -113,59 +97,42 @@ struct HipRuntimeApi {
   HipGraphKernelNodeGetAttributeFn graph_kernel_node_get_attribute = nullptr;
 };
 
-template <typename T>
-T ResolveHipSymbol(void* library, const char* name) {
-  return reinterpret_cast<T>(dlsym(library, name));
-}
-
 class HipLaunchValidationApiTest : public testing::Test {
  protected:
   void SetUp() override {
-    if (!api_.library) {
-      const char* library_path = CandidateLibPath();
-      ASSERT_NE(library_path, nullptr)
-          << "the build must provide the libamdhip64 artifact under test";
-      api_.library = dlopen(library_path, RTLD_LAZY | RTLD_LOCAL);
-      ASSERT_NE(api_.library, nullptr)
-          << "cannot dlopen " << library_path << ": " << dlerror();
-
-      api_.init = ResolveHipSymbol<HipInitFn>(api_.library, "hipInit");
-      api_.hal_deinit =
-          ResolveHipSymbol<HipHalDeinitFn>(api_.library, "hipHALDeinit");
-      api_.stream_create =
-          ResolveHipSymbol<HipStreamCreateFn>(api_.library, "hipStreamCreate");
-      api_.stream_destroy = ResolveHipSymbol<HipStreamDestroyFn>(
-          api_.library, "hipStreamDestroy");
-      api_.stream_get_id =
-          ResolveHipSymbol<HipStreamGetIdFn>(api_.library, "hipStreamGetId");
-      api_.launch_kernel =
-          ResolveHipSymbol<HipLaunchKernelFn>(api_.library, "hipLaunchKernel");
-      api_.ext_launch_kernel = ResolveHipSymbol<HipExtLaunchKernelFn>(
-          api_.library, "hipExtLaunchKernel");
-      api_.module_launch_kernel = ResolveHipSymbol<HipModuleLaunchKernelFn>(
-          api_.library, "hipModuleLaunchKernel");
-      api_.function_get_attribute = ResolveHipSymbol<HipFuncGetAttributeFn>(
-          api_.library, "hipFuncGetAttribute");
-      api_.function_set_attribute = ResolveHipSymbol<HipFuncSetAttributeFn>(
-          api_.library, "hipFuncSetAttribute");
-      api_.graph_create =
-          ResolveHipSymbol<HipGraphCreateFn>(api_.library, "hipGraphCreate");
-      api_.graph_destroy =
-          ResolveHipSymbol<HipGraphDestroyFn>(api_.library, "hipGraphDestroy");
-      api_.graph_add_kernel_node = ResolveHipSymbol<HipGraphAddKernelNodeFn>(
-          api_.library, "hipGraphAddKernelNode");
+    if (!dso_.is_open()) {
+      ASSERT_TRUE(dso_.Open()) << dso_.error();
+      api_.init = dso_.Resolve<HipInitFn>("hipInit");
+      api_.hal_deinit = dso_.Resolve<HipHalDeinitFn>("hipHALDeinit");
+      api_.stream_create = dso_.Resolve<HipStreamCreateFn>("hipStreamCreate");
+      api_.stream_destroy =
+          dso_.Resolve<HipStreamDestroyFn>("hipStreamDestroy");
+      api_.stream_get_id = dso_.Resolve<HipStreamGetIdFn>("hipStreamGetId");
+      api_.launch_kernel = dso_.Resolve<HipLaunchKernelFn>("hipLaunchKernel");
+      api_.ext_launch_kernel =
+          dso_.Resolve<HipExtLaunchKernelFn>("hipExtLaunchKernel");
+      api_.module_launch_kernel =
+          dso_.Resolve<HipModuleLaunchKernelFn>("hipModuleLaunchKernel");
+      api_.function_get_attribute =
+          dso_.Resolve<HipFuncGetAttributeFn>("hipFuncGetAttribute");
+      api_.function_set_attribute =
+          dso_.Resolve<HipFuncSetAttributeFn>("hipFuncSetAttribute");
+      api_.graph_create = dso_.Resolve<HipGraphCreateFn>("hipGraphCreate");
+      api_.graph_destroy = dso_.Resolve<HipGraphDestroyFn>("hipGraphDestroy");
+      api_.graph_add_kernel_node =
+          dso_.Resolve<HipGraphAddKernelNodeFn>("hipGraphAddKernelNode");
       api_.graph_kernel_node_get_params =
-          ResolveHipSymbol<HipGraphKernelNodeGetParamsFn>(
-              api_.library, "hipGraphKernelNodeGetParams");
+          dso_.Resolve<HipGraphKernelNodeGetParamsFn>(
+              "hipGraphKernelNodeGetParams");
       api_.graph_kernel_node_set_params =
-          ResolveHipSymbol<HipGraphKernelNodeSetParamsFn>(
-              api_.library, "hipGraphKernelNodeSetParams");
+          dso_.Resolve<HipGraphKernelNodeSetParamsFn>(
+              "hipGraphKernelNodeSetParams");
       api_.graph_kernel_node_set_attribute =
-          ResolveHipSymbol<HipGraphKernelNodeSetAttributeFn>(
-              api_.library, "hipGraphKernelNodeSetAttribute");
+          dso_.Resolve<HipGraphKernelNodeSetAttributeFn>(
+              "hipGraphKernelNodeSetAttribute");
       api_.graph_kernel_node_get_attribute =
-          ResolveHipSymbol<HipGraphKernelNodeGetAttributeFn>(
-              api_.library, "hipGraphKernelNodeGetAttribute");
+          dso_.Resolve<HipGraphKernelNodeGetAttributeFn>(
+              "hipGraphKernelNodeGetAttribute");
     }
 
     ASSERT_NE(nullptr, api_.init);
@@ -187,9 +154,7 @@ class HipLaunchValidationApiTest : public testing::Test {
     ASSERT_NE(nullptr, api_.graph_kernel_node_get_attribute);
 
     const hipError_t init_result = api_.init(/*flags=*/0);
-    if (init_result != hipSuccess) {
-      GTEST_SKIP() << "hipInit failed: " << init_result;
-    }
+    ASSERT_EQ(hipSuccess, init_result);
     ASSERT_EQ(hipSuccess, api_.stream_create(&stream_));
   }
 
@@ -204,21 +169,23 @@ class HipLaunchValidationApiTest : public testing::Test {
   }
 
   static void TearDownTestSuite() {
-    if (!api_.library) return;
-    void* library = api_.library;
+    if (!dso_.is_open()) return;
     ASSERT_NE(nullptr, api_.hal_deinit);
     EXPECT_EQ(hipSuccess, api_.hal_deinit());
     api_ = {};
-    EXPECT_EQ(0, dlclose(library));
+    EXPECT_TRUE(dso_.Close()) << dso_.error();
   }
 
   // Runtime entry points loaded once from the HIP shared object under test.
   static HipRuntimeApi api_;
+  // Exact DSO owner shared by every test in this fixture.
+  static hrx::hip::testing::HipDso dso_;
   // Stream supplied to immediate launch entry points.
   hipStream_t stream_ = nullptr;
 };
 
 HipRuntimeApi HipLaunchValidationApiTest::api_;
+hrx::hip::testing::HipDso HipLaunchValidationApiTest::dso_;
 
 TEST_F(HipLaunchValidationApiTest,
        FunctionDynamicSharedMemoryAttributeHonorsGenericCeiling) {
@@ -364,16 +331,16 @@ TEST_F(HipLaunchValidationApiTest, LaunchEntryPointsRejectDestroyedStreams) {
   ASSERT_EQ(hipSuccess, api_.stream_destroy(stream_));
   stream_ = nullptr;
 
-  EXPECT_EQ(hipErrorInvalidResourceHandle,
+  EXPECT_EQ(hipErrorInvalidValue,
             api_.launch_kernel(function, valid_dimension, valid_dimension,
                                /*arguments=*/nullptr,
                                /*shared_memory_bytes=*/0, stale_stream));
-  EXPECT_EQ(hipErrorInvalidResourceHandle,
+  EXPECT_EQ(hipErrorInvalidValue,
             api_.ext_launch_kernel(function, valid_dimension, valid_dimension,
                                    /*arguments=*/nullptr,
                                    /*shared_memory_bytes=*/0, stale_stream,
                                    nullptr, nullptr, /*flags=*/0));
-  EXPECT_EQ(hipErrorInvalidResourceHandle,
+  EXPECT_EQ(hipErrorContextIsDestroyed,
             api_.module_launch_kernel(
                 (hipFunction_t)function, /*grid_dim_x=*/1, /*grid_dim_y=*/1,
                 /*grid_dim_z=*/1, /*block_dim_x=*/1, /*block_dim_y=*/1,
