@@ -32,8 +32,8 @@ T ResolveHipSymbol(void* library, const char* name) {
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipGetDeviceFn = hipError_t (*)(int* device);
-using HipGetDevicePropertiesFn = hipError_t (*)(hipDeviceProp_t* properties,
-                                                int device);
+using HipGetDevicePropertiesR0600Fn =
+    hipError_t (*)(hipDeviceProp_t* properties, int device);
 using HipModuleLoadDataFn = hipError_t (*)(hipModule_t* module,
                                            const void* image);
 using HipModuleUnloadFn = hipError_t (*)(hipModule_t module);
@@ -68,8 +68,8 @@ class HipBlockingPrintfStressTest : public ::testing::Test {
     const auto get_device =
         ResolveHipSymbol<HipGetDeviceFn>(library_, "hipGetDevice");
     const auto get_device_properties =
-        ResolveHipSymbol<HipGetDevicePropertiesFn>(library_,
-                                                   "hipGetDeviceProperties");
+        ResolveHipSymbol<HipGetDevicePropertiesR0600Fn>(
+            library_, "hipGetDevicePropertiesR0600");
     module_load_data_ =
         ResolveHipSymbol<HipModuleLoadDataFn>(library_, "hipModuleLoadData");
     module_unload_ =

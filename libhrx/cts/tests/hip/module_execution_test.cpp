@@ -43,8 +43,8 @@ using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipGetDeviceFn = hipError_t (*)(int* device);
 using HipSetDeviceFn = hipError_t (*)(int device);
 using HipGetDeviceCountFn = hipError_t (*)(int* device_count);
-using HipGetDevicePropertiesFn = hipError_t (*)(hipDeviceProp_t* properties,
-                                                int device);
+using HipGetDevicePropertiesR0600Fn =
+    hipError_t (*)(hipDeviceProp_t* properties, int device);
 using HipModuleLoadDataFn = hipError_t (*)(hipModule_t* module,
                                            const void* image);
 using HipModuleUnloadFn = hipError_t (*)(hipModule_t module);
@@ -403,8 +403,9 @@ TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
   const auto init = ResolveHipSymbol<HipInitFn>(library, "hipInit");
   const auto get_device =
       ResolveHipSymbol<HipGetDeviceFn>(library, "hipGetDevice");
-  const auto get_device_properties = ResolveHipSymbol<HipGetDevicePropertiesFn>(
-      library, "hipGetDeviceProperties");
+  const auto get_device_properties =
+      ResolveHipSymbol<HipGetDevicePropertiesR0600Fn>(
+          library, "hipGetDevicePropertiesR0600");
   const auto module_load_data =
       ResolveHipSymbol<HipModuleLoadDataFn>(library, "hipModuleLoadData");
   const auto module_unload =
@@ -631,8 +632,9 @@ TEST(HipModuleExecutionTest,
       ResolveHipSymbol<HipSetDeviceFn>(library, "hipSetDevice");
   const auto get_device_count =
       ResolveHipSymbol<HipGetDeviceCountFn>(library, "hipGetDeviceCount");
-  const auto get_device_properties = ResolveHipSymbol<HipGetDevicePropertiesFn>(
-      library, "hipGetDeviceProperties");
+  const auto get_device_properties =
+      ResolveHipSymbol<HipGetDevicePropertiesR0600Fn>(
+          library, "hipGetDevicePropertiesR0600");
   const auto hip_malloc = ResolveHipSymbol<HipMallocFn>(library, "hipMalloc");
   const auto hip_free = ResolveHipSymbol<HipFreeFn>(library, "hipFree");
   const auto hip_memcpy = ResolveHipSymbol<HipMemcpyFn>(library, "hipMemcpy");
@@ -927,8 +929,9 @@ TEST(HipModuleExecutionTest, BlockingPrintfDirectAndGraphReplay) {
   const auto init = ResolveHipSymbol<HipInitFn>(library, "hipInit");
   const auto get_device =
       ResolveHipSymbol<HipGetDeviceFn>(library, "hipGetDevice");
-  const auto get_device_properties = ResolveHipSymbol<HipGetDevicePropertiesFn>(
-      library, "hipGetDeviceProperties");
+  const auto get_device_properties =
+      ResolveHipSymbol<HipGetDevicePropertiesR0600Fn>(
+          library, "hipGetDevicePropertiesR0600");
   const auto module_load_data =
       ResolveHipSymbol<HipModuleLoadDataFn>(library, "hipModuleLoadData");
   const auto module_unload =
@@ -1127,8 +1130,9 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
   const auto init = ResolveHipSymbol<HipInitFn>(library, "hipInit");
   const auto get_device =
       ResolveHipSymbol<HipGetDeviceFn>(library, "hipGetDevice");
-  const auto get_device_properties = ResolveHipSymbol<HipGetDevicePropertiesFn>(
-      library, "hipGetDeviceProperties");
+  const auto get_device_properties =
+      ResolveHipSymbol<HipGetDevicePropertiesR0600Fn>(
+          library, "hipGetDevicePropertiesR0600");
   const auto module_load_data =
       ResolveHipSymbol<HipModuleLoadDataFn>(library, "hipModuleLoadData");
   const auto module_unload =

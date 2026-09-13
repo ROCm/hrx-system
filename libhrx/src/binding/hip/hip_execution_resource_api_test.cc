@@ -32,8 +32,8 @@ const char* CandidateLibPath() {
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipGetDeviceFn = hipError_t (*)(int* device);
-using HipGetDevicePropertiesFn = hipError_t (*)(hipDeviceProp_t* properties,
-                                                int device);
+using HipGetDevicePropertiesR0600Fn =
+    hipError_t (*)(hipDeviceProp_t* properties, int device);
 using HipDeviceGetAttributeFn = hipError_t (*)(int* value,
                                                hipDeviceAttribute_t attribute,
                                                int device);
@@ -208,7 +208,7 @@ struct HipRuntimeApi {
   HipGetDeviceFn get_device = nullptr;
 
   // Queries the aggregate properties of one device.
-  HipGetDevicePropertiesFn get_device_properties = nullptr;
+  HipGetDevicePropertiesR0600Fn get_device_properties = nullptr;
 
   // Queries one property of one device.
   HipDeviceGetAttributeFn device_get_attribute = nullptr;
@@ -326,8 +326,9 @@ class HipExecutionResourceApiTest : public testing::Test {
       api_.init = ResolveHipSymbol<HipInitFn>(api_.library, "hipInit");
       api_.get_device =
           ResolveHipSymbol<HipGetDeviceFn>(api_.library, "hipGetDevice");
-      api_.get_device_properties = ResolveHipSymbol<HipGetDevicePropertiesFn>(
-          api_.library, "hipGetDeviceProperties");
+      api_.get_device_properties =
+          ResolveHipSymbol<HipGetDevicePropertiesR0600Fn>(
+              api_.library, "hipGetDevicePropertiesR0600");
       api_.device_get_attribute = ResolveHipSymbol<HipDeviceGetAttributeFn>(
           api_.library, "hipDeviceGetAttribute");
       api_.device_get_resource = ResolveHipSymbol<HipDeviceGetDevResourceFn>(
