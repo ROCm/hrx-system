@@ -81,6 +81,7 @@ hrx_cc_library(
         "memory.h",
         "module.h",
         "occupancy.h",
+        "peer.h",
         "stream.h",
         "tls.h",
     ],
@@ -126,6 +127,18 @@ hrx_cc_test(
     srcs = ["function_attributes_test.cc"],
     deps = [
         ":function_attributes",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "peer_test",
+    srcs = ["peer_test.cc"],
+    deps = [
+        ":common",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",

@@ -173,25 +173,6 @@ iree_status_t iree_hal_streaming_device_get_string_property(
   return iree_ok_status();
 }
 
-iree_hal_streaming_p2p_link_t* iree_hal_streaming_device_lookup_p2p_link(
-    iree_hal_streaming_device_ordinal_t src_device,
-    iree_hal_streaming_device_ordinal_t dst_device) {
-  iree_hal_streaming_device_registry_t* device_registry =
-      iree_hal_streaming_device_registry();
-  if (!device_registry || !device_registry->p2p_topology) {
-    return NULL;
-  }
-
-  const iree_host_size_t device_count = device_registry->device_count;
-  if (src_device >= device_count || dst_device >= device_count) {
-    return NULL;
-  }
-
-  // Links are stored in row-major order: [src][dst].
-  const iree_host_size_t link_index = src_device * device_count + dst_device;
-  return &device_registry->p2p_topology[link_index];
-}
-
 iree_status_t iree_hal_streaming_device_memory_info(
     iree_hal_streaming_device_ordinal_t ordinal,
     iree_device_size_t* out_free_memory, iree_device_size_t* out_total_memory) {
@@ -208,42 +189,6 @@ iree_status_t iree_hal_streaming_device_memory_info(
     *out_total_memory = device->total_memory;
   }
   return status;
-}
-
-iree_status_t iree_hal_streaming_device_can_access_peer(
-    iree_hal_streaming_device_ordinal_t device_ordinal,
-    iree_hal_streaming_device_ordinal_t peer_device_ordinal, bool* can_access) {
-  IREE_ASSERT_ARGUMENT(can_access);
-  IREE_TRACE_ZONE_BEGIN(z0);
-  *can_access = false;
-
-  iree_hal_streaming_device_registry_t* device_registry =
-      iree_hal_streaming_device_registry();
-  if (!device_registry) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                             "HAL stream layer not initialized"));
-  }
-
-  const iree_host_size_t device_count = device_registry->device_count;
-  if (device_ordinal >= device_count || peer_device_ordinal >= device_count) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                             "device ordinals out of range"));
-  }
-
-  // Look up P2P link in topology.
-  iree_hal_streaming_p2p_link_t* link =
-      iree_hal_streaming_device_lookup_p2p_link(device_ordinal,
-                                                peer_device_ordinal);
-  if (!link) {
-    *can_access = true;
-  } else {
-    *can_access = link->access_supported ? true : false;
-  }
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
 }
 
 iree_status_t iree_hal_streaming_device_set_primary_context_flags(

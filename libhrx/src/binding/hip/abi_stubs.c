@@ -721,16 +721,6 @@ HIPAPI hipError_t hipExtDisableLogging(void) { return hipErrorNotSupported; }
 
 HIPAPI hipError_t hipExtEnableLogging(void) { return hipErrorNotSupported; }
 
-HIPAPI hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2,
-                                               uint32_t* linktype,
-                                               uint32_t* hopcount) {
-  (void)device1;
-  (void)device2;
-  (void)linktype;
-  (void)hopcount;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size,
                                          size_t log_mask) {
   (void)log_level;

@@ -10,6 +10,7 @@
 
 #include "common/internal.h"
 #include "common/occupancy.h"
+#include "common/peer.h"
 
 //===----------------------------------------------------------------------===//
 // Flag translation functions
@@ -801,10 +802,11 @@ CUDAAPI CUresult cuDeviceGetP2PAttribute(int* value,
     return CUDA_ERROR_INVALID_VALUE;
   }
 
-  // Look up P2P link.
-  iree_hal_streaming_p2p_link_t* link =
-      iree_hal_streaming_device_lookup_p2p_link((int)srcDevice, (int)dstDevice);
-  if (!link) {
+  iree_hal_streaming_peer_properties_t properties;
+  iree_status_t status = iree_hal_streaming_device_query_peer_properties(
+      (iree_host_size_t)srcDevice, (iree_host_size_t)dstDevice, &properties);
+  if (!iree_status_is_ok(status)) {
+    iree_status_ignore(status);
     *value = 0;
     IREE_TRACE_ZONE_END(z0);
     return CUDA_ERROR_INVALID_DEVICE;
@@ -813,13 +815,13 @@ CUDAAPI CUresult cuDeviceGetP2PAttribute(int* value,
   // Map CUDA P2P attribute enum to the appropriate link field.
   switch (attrib) {
     case CU_DEVICE_P2P_ATTRIBUTE_ACCESS_SUPPORTED:
-      *value = link->access_supported ? 1 : 0;
+      *value = properties.access_supported ? 1 : 0;
       break;
     case CU_DEVICE_P2P_ATTRIBUTE_NATIVE_ATOMIC_SUPPORTED:
-      *value = link->native_atomic_supported ? 1 : 0;
+      *value = properties.native_atomic_supported ? 1 : 0;
       break;
     case CU_DEVICE_P2P_ATTRIBUTE_CUDA_ARRAY_ACCESS_SUPPORTED:
-      *value = link->cuda_array_access_supported ? 1 : 0;
+      *value = properties.array_access_supported ? 1 : 0;
       break;
     default:
       // Unsupported attribute.
