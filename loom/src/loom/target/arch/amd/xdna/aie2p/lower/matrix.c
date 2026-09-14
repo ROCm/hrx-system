@@ -58,8 +58,8 @@ typedef struct loom_aie2p_matrix_store_plan_t {
 } loom_aie2p_matrix_store_plan_t;
 
 typedef struct loom_aie2p_integer_matrix_mode_t {
-  // Descriptor key for each matrix operation kind.
-  iree_string_view_t descriptor_keys[LOOM_AIE2P_MATRIX_OPERATION_COUNT_];
+  // Generated descriptor ordinal for each matrix operation kind.
+  uint32_t descriptor_ordinals[LOOM_AIE2P_MATRIX_OPERATION_COUNT_];
   // Exact signedness and 8x8x8 B-mode control word.
   uint16_t control;
 } loom_aie2p_integer_matrix_mode_t;
@@ -68,65 +68,54 @@ static const loom_aie2p_integer_matrix_mode_t
     loom_aie2p_integer_matrix_modes[LOOM_AIE2P_MATRIX_NUMERIC_COUNT_] = {
         [LOOM_AIE2P_MATRIX_NUMERIC_S8S8] =
             {
-                .descriptor_keys =
+                .descriptor_ordinals =
                     {
-                        [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] = IREE_SVL(
-                            "amd.xdna.aie2p.matrix.multiply.s8s8.m8n8k8."
-                            "configured"),
-                        [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] = IREE_SVL(
-                            "amd.xdna.aie2p.matrix.accumulate.s8s8.m8n8k8."
-                            "configured"),
+                        [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] =
+                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_MULTIPLY_S8S8_M8N8K8_CONFIGURED,
+                        [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] =
+                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_ACCUMULATE_S8S8_M8N8K8_CONFIGURED,
                     },
                 .control = 776,
             },
         [LOOM_AIE2P_MATRIX_NUMERIC_U8S8] =
             {
-                .descriptor_keys =
+                .descriptor_ordinals =
                     {
-                        [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] = IREE_SVL(
-                            "amd.xdna.aie2p.matrix.multiply.u8s8.m8n8k8."
-                            "configured"),
-                        [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] = IREE_SVL(
-                            "amd.xdna.aie2p.matrix.accumulate.u8s8.m8n8k8."
-                            "configured"),
+                        [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] =
+                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_MULTIPLY_U8S8_M8N8K8_CONFIGURED,
+                        [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] =
+                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_ACCUMULATE_U8S8_M8N8K8_CONFIGURED,
                     },
                 .control = 264,
             },
         [LOOM_AIE2P_MATRIX_NUMERIC_S8U8] =
             {
-                .descriptor_keys =
+                .descriptor_ordinals =
                     {
-                        [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] = IREE_SVL(
-                            "amd.xdna.aie2p.matrix.multiply.s8u8.m8n8k8."
-                            "configured"),
-                        [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] = IREE_SVL(
-                            "amd.xdna.aie2p.matrix.accumulate.s8u8.m8n8k8."
-                            "configured"),
+                        [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] =
+                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_MULTIPLY_S8U8_M8N8K8_CONFIGURED,
+                        [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] =
+                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_ACCUMULATE_S8U8_M8N8K8_CONFIGURED,
                     },
                 .control = 520,
             },
         [LOOM_AIE2P_MATRIX_NUMERIC_U8U8] =
             {
-                .descriptor_keys =
+                .descriptor_ordinals =
                     {
-                        [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] = IREE_SVL(
-                            "amd.xdna.aie2p.matrix.multiply.u8u8.m8n8k8."
-                            "configured"),
-                        [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] = IREE_SVL(
-                            "amd.xdna.aie2p.matrix.accumulate.u8u8.m8n8k8."
-                            "configured"),
+                        [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] =
+                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_MULTIPLY_U8U8_M8N8K8_CONFIGURED,
+                        [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] =
+                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_ACCUMULATE_U8U8_M8N8K8_CONFIGURED,
                     },
                 .control = 8,
             },
 };
 
 static loom_low_lower_resolved_descriptor_t loom_aie2p_matrix_descriptor(
-    const loom_low_descriptor_set_t* descriptor_set, iree_string_view_t key) {
-  const uint32_t ordinal =
-      loom_low_descriptor_set_lookup_descriptor(descriptor_set, key);
+    const loom_low_descriptor_set_t* descriptor_set, uint32_t ordinal) {
   return (loom_low_lower_resolved_descriptor_t){
-      .descriptor =
-          loom_low_descriptor_set_descriptor_at(descriptor_set, ordinal),
+      .descriptor = &descriptor_set->descriptors[ordinal],
   };
 }
 
@@ -317,7 +306,7 @@ iree_status_t loom_aie2p_descriptor_matrix_query(
   out_result->selected_descriptor =
       loom_aie2p_matrix_descriptor(environment->descriptor_set,
                                    loom_aie2p_integer_matrix_modes[numeric_mode]
-                                       .descriptor_keys[operation])
+                                       .descriptor_ordinals[operation])
           .descriptor;
   return iree_ok_status();
 }
@@ -370,10 +359,10 @@ static iree_status_t loom_aie2p_select_matrix_mma(
       loom_low_lower_context_descriptor_set(context);
   *plan = (loom_aie2p_matrix_mma_plan_t){
       .control_constant = loom_aie2p_matrix_descriptor(
-          descriptor_set, IREE_SV("amd.xdna.aie2p.constant.i32.mova")),
+          descriptor_set, AIE2P_CORE_DESCRIPTOR_REF_CONSTANT_I32_MOVA),
       .operation_descriptor = loom_aie2p_matrix_descriptor(
           descriptor_set, loom_aie2p_integer_matrix_modes[numeric_mode]
-                              .descriptor_keys[operation]),
+                              .descriptor_ordinals[operation]),
       .operation = operation,
       .control = loom_aie2p_integer_matrix_modes[numeric_mode].control,
   };
@@ -431,7 +420,7 @@ static iree_status_t loom_aie2p_select_matrix_store(
       loom_low_lower_allocate_plan_data(context, sizeof(*plan), (void**)&plan));
   plan->store = loom_aie2p_matrix_descriptor(
       loom_low_lower_context_descriptor_set(context),
-      IREE_SV("amd.xdna.aie2p.store.accumulator.indexed.immediate"));
+      AIE2P_CORE_DESCRIPTOR_REF_STORE_ACCUMULATOR_INDEXED_IMMEDIATE);
   *out_plan =
       loom_low_lower_plan_make(LOOM_AIE2P_MATRIX_PLAN_STORE_I32_M8N8, plan);
   return iree_ok_status();
