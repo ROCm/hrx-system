@@ -837,6 +837,10 @@ hipError_t iree_hip_execution_context_record_event(
   hipExecutionCtx_t context =
       iree_hip_execution_context_resolve_live(context_handle);
   if (!context) return hipErrorInvalidValue;
+  if (IREE_UNLIKELY(event->ipc_event)) {
+    iree_hip_execution_context_release(context);
+    return hipErrorNotSupported;
+  }
 
   iree_hip_execution_context_stream_snapshot_t snapshot = {0};
   iree_slim_mutex_lock(&context->mutex);
@@ -883,6 +887,10 @@ hipError_t iree_hip_execution_context_wait_event(
   hipExecutionCtx_t context =
       iree_hip_execution_context_resolve_live(context_handle);
   if (!context) return hipErrorInvalidValue;
+  if (IREE_UNLIKELY(event->ipc_event)) {
+    iree_hip_execution_context_release(context);
+    return hipErrorNotSupported;
+  }
 
   iree_hal_streaming_event_capture_association_t capture_association;
   iree_hal_streaming_event_acquire_capture_association(event,

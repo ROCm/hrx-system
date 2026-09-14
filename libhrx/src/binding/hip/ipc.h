@@ -8,6 +8,7 @@
 #define LIBHRX_SRC_BINDING_HIP_IPC_H_
 
 #include "binding/hip/api.h"
+#include "common/ipc_event.h"
 #include "common/ipc_memory.h"
 
 #ifdef __cplusplus
@@ -47,6 +48,51 @@ iree_status_t iree_hip_ipc_memory_import(iree_hal_streaming_context_t* context,
 // preferring a reference opened by |context|.
 iree_status_t iree_hip_ipc_memory_close(iree_hal_streaming_context_t* context,
                                         void* device_ptr);
+
+// Returns true when this build has native AMDGPU IPC event support.
+bool iree_hip_ipc_event_supported(void);
+
+// Encodes the stock ROCm native event-handle wire representation. The output
+// is zeroed before validation and remains zero when encoding fails.
+iree_status_t iree_hip_ipc_event_handle_encode(
+    const uint8_t token[IREE_HAL_STREAMING_IPC_EVENT_TOKEN_SIZE],
+    int32_t creator_process_id, hipIpcEventHandle_t* out_handle);
+
+// Decodes the stock ROCm native event-handle wire representation. The output
+// is zeroed before validation and remains zero when decoding fails.
+iree_status_t iree_hip_ipc_event_handle_decode(
+    hipIpcEventHandle_t handle, int32_t current_process_id,
+    uint8_t out_token[IREE_HAL_STREAMING_IPC_EVENT_TOKEN_SIZE]);
+
+// Maps a status returned by record, query, synchronize, or wait without
+// changing the generic HIP status conversion used by unrelated entry points.
+hipError_t iree_hip_ipc_event_operation_status_to_result(iree_status_t status);
+
+// Maps native event export failures to the HIP API result contract.
+hipError_t iree_hip_ipc_event_export_status_to_result(iree_status_t status);
+
+// Maps native event import and admission failures to the HIP API result
+// contract.
+hipError_t iree_hip_ipc_event_open_status_to_result(iree_status_t status);
+
+// Attaches a lazy native IPC adapter to a locally created common event.
+iree_status_t iree_hip_ipc_event_attach_source(
+    iree_hal_streaming_event_t* event);
+
+// Exports a native HIP IPC event handle from |event|.
+iree_status_t iree_hip_ipc_event_export(iree_hal_streaming_event_t* event,
+                                        hipIpcEventHandle_t* out_handle);
+
+// Imports a native HIP IPC event handle into a newly allocated common event.
+// The caller must hold an IPC-import admission reservation on |context| until
+// the returned event is either registered or released.
+iree_status_t iree_hip_ipc_event_import(iree_hal_streaming_context_t* context,
+                                        hipIpcEventHandle_t handle,
+                                        iree_hal_streaming_event_t** out_event);
+
+// Drains and stops the lazy native IPC callback monitor. A later IPC event
+// operation may restart it.
+void iree_hip_ipc_event_shutdown(void);
 
 #ifdef __cplusplus
 }  // extern "C"

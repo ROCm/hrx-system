@@ -1328,7 +1328,8 @@ typedef struct hipGraphNodeParams {
 
 // Initialization
 HIPAPI hipError_t hipInit(unsigned int flags);
-// Deinitializes the embedded HRX runtime.
+// Deinitializes the embedded HRX runtime. No other HIP API call may be active
+// or begin until this call returns.
 HIPAPI hipError_t hipHALDeinit(void);
 // Sets the event sink used by the embedded HRX runtime. Must be called before
 // hipInit or after hipHALDeinit; otherwise returns hipErrorSetOnActiveProcess.
@@ -1481,7 +1482,7 @@ HIPAPI hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize,
 HIPAPI hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr);
 HIPAPI hipError_t hipMemPtrGetInfo(void* ptr, size_t* size);
 
-// IPC operations. Event handle sharing is not yet supported.
+// IPC operations.
 HIPAPI hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr);
 HIPAPI hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle,
                                       unsigned int flags);

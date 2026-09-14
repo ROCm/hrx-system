@@ -39,8 +39,8 @@ static_assert(
 static_assert(
     std::is_same_v<decltype(&hipIpcOpenEventHandle), IpcOpenEventHandleFn>);
 
-template <typename T>
-T ReadWireValue(const hipIpcMemHandle_t& handle, size_t byte_offset) {
+template <typename T, typename Handle>
+T ReadWireValue(const Handle& handle, size_t byte_offset) {
   T value = {};
   std::memcpy(&value, handle.reserved + byte_offset, sizeof(value));
   return value;
@@ -226,6 +226,175 @@ TEST(IpcMemoryResultTest, MapsExportFailures) {
   EXPECT_EQ(hipErrorInvalidValue,
             iree_hip_ipc_memory_export_status_to_result(
                 iree_status_from_code(IREE_STATUS_ABORTED)));
+}
+
+void MakeEventToken(uint8_t token[IREE_HAL_STREAMING_IPC_EVENT_TOKEN_SIZE]) {
+  for (size_t i = 0; i < IREE_HAL_STREAMING_IPC_EVENT_TOKEN_SIZE; ++i) {
+    token[i] = static_cast<uint8_t>(i * 11 + 5);
+  }
+}
+
+TEST(IpcEventWireTest, MatchesRocmTypeOneLayoutAndRoundTrips) {
+  uint8_t source_token[IREE_HAL_STREAMING_IPC_EVENT_TOKEN_SIZE];
+  MakeEventToken(source_token);
+  constexpr int32_t kCreatorProcessId = 12345;
+
+  hipIpcEventHandle_t handle;
+  std::memset(&handle, 0xA5, sizeof(handle));
+  IREE_ASSERT_OK(iree_hip_ipc_event_handle_encode(source_token,
+                                                  kCreatorProcessId, &handle));
+
+  EXPECT_EQ(1u, ReadWireValue<uint32_t>(handle, 0));
+  EXPECT_EQ(kCreatorProcessId, ReadWireValue<int32_t>(handle, 4));
+  EXPECT_EQ(
+      0, std::memcmp(handle.reserved + 8, source_token, sizeof(source_token)));
+  EXPECT_TRUE(IsZeroed(handle.reserved + 40, 24));
+
+  // Stock reserves the final 24 bytes. Import ignores them.
+  std::memset(handle.reserved + 40, 0x7B, 24);
+  uint8_t decoded_token[IREE_HAL_STREAMING_IPC_EVENT_TOKEN_SIZE];
+  std::memset(decoded_token, 0xA5, sizeof(decoded_token));
+  IREE_ASSERT_OK(iree_hip_ipc_event_handle_decode(
+      handle, /*current_process_id=*/54321, decoded_token));
+  EXPECT_EQ(0, std::memcmp(decoded_token, source_token, sizeof(source_token)));
+}
+
+TEST(IpcEventWireTest, TreatsRocrSignalTokenAsOpaque) {
+  uint8_t zero_token[IREE_HAL_STREAMING_IPC_EVENT_TOKEN_SIZE] = {};
+  hipIpcEventHandle_t handle;
+  std::memset(&handle, 0xA5, sizeof(handle));
+  IREE_ASSERT_OK(iree_hip_ipc_event_handle_encode(
+      zero_token, /*creator_process_id=*/123, &handle));
+  EXPECT_TRUE(IsZeroed(handle.reserved + 8, sizeof(zero_token)));
+  EXPECT_TRUE(IsZeroed(handle.reserved + 40, 24));
+
+  uint8_t decoded_token[IREE_HAL_STREAMING_IPC_EVENT_TOKEN_SIZE];
+  std::memset(decoded_token, 0xA5, sizeof(decoded_token));
+  IREE_ASSERT_OK(iree_hip_ipc_event_handle_decode(
+      handle, /*current_process_id=*/456, decoded_token));
+  EXPECT_TRUE(IsZeroed(decoded_token, sizeof(decoded_token)));
+}
+
+TEST(IpcEventWireTest, EncodeFailureClearsOutput) {
+  uint8_t token[IREE_HAL_STREAMING_IPC_EVENT_TOKEN_SIZE];
+  MakeEventToken(token);
+  hipIpcEventHandle_t handle;
+  std::memset(&handle, 0xA5, sizeof(handle));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hip_ipc_event_handle_encode(
+                            token, /*creator_process_id=*/0, &handle));
+  EXPECT_TRUE(IsZeroed(&handle, sizeof(handle)));
+}
+
+void ExpectEventDecodeFailure(hipIpcEventHandle_t handle, int32_t process_id,
+                              iree_status_code_t expected_code) {
+  uint8_t token[IREE_HAL_STREAMING_IPC_EVENT_TOKEN_SIZE];
+  std::memset(token, 0xA5, sizeof(token));
+  iree_status_t status =
+      iree_hip_ipc_event_handle_decode(handle, process_id, token);
+  EXPECT_EQ(expected_code, iree_status_code(status));
+  iree_status_free(status);
+  EXPECT_TRUE(IsZeroed(token, sizeof(token)));
+}
+
+TEST(IpcEventWireTest, RejectsMalformedAndSameProcessHandles) {
+  uint8_t source_token[IREE_HAL_STREAMING_IPC_EVENT_TOKEN_SIZE];
+  MakeEventToken(source_token);
+  constexpr int32_t kCreatorProcessId = 123;
+  hipIpcEventHandle_t handle = {};
+  IREE_ASSERT_OK(iree_hip_ipc_event_handle_encode(source_token,
+                                                  kCreatorProcessId, &handle));
+
+  hipIpcEventHandle_t malformed = handle;
+  constexpr uint32_t kEmulatedType = 0;
+  std::memcpy(malformed.reserved, &kEmulatedType, sizeof(kEmulatedType));
+  ExpectEventDecodeFailure(malformed, /*process_id=*/456,
+                           IREE_STATUS_INVALID_ARGUMENT);
+
+  malformed = handle;
+  constexpr uint32_t kUnknownType = 2;
+  std::memcpy(malformed.reserved, &kUnknownType, sizeof(kUnknownType));
+  ExpectEventDecodeFailure(malformed, /*process_id=*/456,
+                           IREE_STATUS_INVALID_ARGUMENT);
+
+  malformed = handle;
+  constexpr int32_t kInvalidProcessId = 0;
+  std::memcpy(malformed.reserved + 4, &kInvalidProcessId,
+              sizeof(kInvalidProcessId));
+  ExpectEventDecodeFailure(malformed, /*process_id=*/456,
+                           IREE_STATUS_INVALID_ARGUMENT);
+
+  ExpectEventDecodeFailure(handle, kCreatorProcessId,
+                           IREE_STATUS_PERMISSION_DENIED);
+}
+
+TEST(IpcEventResultTest, MapsOperationFailures) {
+  EXPECT_EQ(hipSuccess,
+            iree_hip_ipc_event_operation_status_to_result(iree_ok_status()));
+  EXPECT_EQ(hipErrorContextIsDestroyed,
+            iree_hip_ipc_event_operation_status_to_result(
+                iree_status_from_code(IREE_STATUS_ABORTED)));
+  EXPECT_EQ(hipErrorInvalidValue,
+            iree_hip_ipc_event_operation_status_to_result(
+                iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT)));
+  EXPECT_EQ(hipErrorOutOfMemory,
+            iree_hip_ipc_event_operation_status_to_result(
+                iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED)));
+  EXPECT_EQ(hipErrorNotFound,
+            iree_hip_ipc_event_operation_status_to_result(
+                iree_status_from_code(IREE_STATUS_NOT_FOUND)));
+  EXPECT_EQ(hipErrorInvalidContext,
+            iree_hip_ipc_event_operation_status_to_result(
+                iree_status_from_code(IREE_STATUS_PERMISSION_DENIED)));
+  EXPECT_EQ(hipErrorNotSupported,
+            iree_hip_ipc_event_operation_status_to_result(
+                iree_status_from_code(IREE_STATUS_UNIMPLEMENTED)));
+  EXPECT_EQ(hipErrorNotReady,
+            iree_hip_ipc_event_operation_status_to_result(
+                iree_status_from_code(IREE_STATUS_UNAVAILABLE)));
+  EXPECT_EQ(hipErrorNotInitialized,
+            iree_hip_ipc_event_operation_status_to_result(
+                iree_status_from_code(IREE_STATUS_FAILED_PRECONDITION)));
+  EXPECT_EQ(hipErrorUnknown, iree_hip_ipc_event_operation_status_to_result(
+                                 iree_status_from_code(IREE_STATUS_INTERNAL)));
+}
+
+TEST(IpcEventResultTest, MapsExportFailures) {
+  EXPECT_EQ(hipSuccess,
+            iree_hip_ipc_event_export_status_to_result(iree_ok_status()));
+  EXPECT_EQ(hipErrorOutOfMemory,
+            iree_hip_ipc_event_export_status_to_result(
+                iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED)));
+  EXPECT_EQ(hipErrorInvalidValue,
+            iree_hip_ipc_event_export_status_to_result(
+                iree_status_from_code(IREE_STATUS_UNIMPLEMENTED)));
+  EXPECT_EQ(hipErrorInvalidValue,
+            iree_hip_ipc_event_export_status_to_result(
+                iree_status_from_code(IREE_STATUS_ABORTED)));
+}
+
+TEST(IpcEventResultTest, MapsOpenAndAdmissionFailures) {
+  EXPECT_EQ(hipSuccess,
+            iree_hip_ipc_event_open_status_to_result(iree_ok_status()));
+  EXPECT_EQ(hipErrorContextIsDestroyed,
+            iree_hip_ipc_event_open_status_to_result(
+                iree_status_from_code(IREE_STATUS_ABORTED)));
+  EXPECT_EQ(hipErrorInvalidContext,
+            iree_hip_ipc_event_open_status_to_result(
+                iree_status_from_code(IREE_STATUS_PERMISSION_DENIED)));
+  EXPECT_EQ(hipErrorOutOfMemory,
+            iree_hip_ipc_event_open_status_to_result(
+                iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED)));
+  EXPECT_EQ(hipErrorNotSupported,
+            iree_hip_ipc_event_open_status_to_result(
+                iree_status_from_code(IREE_STATUS_UNIMPLEMENTED)));
+  EXPECT_EQ(hipErrorInvalidValue,
+            iree_hip_ipc_event_open_status_to_result(
+                iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT)));
+}
+
+TEST(IpcEventCapabilityTest, FeatureOffBuildReportsUnsupported) {
+  EXPECT_FALSE(iree_hip_ipc_event_supported());
 }
 
 }  // namespace

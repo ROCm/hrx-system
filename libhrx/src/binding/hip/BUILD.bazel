@@ -49,6 +49,8 @@ _AMDGPU_IPC_COPTS = iree_select({
 
 _AMDGPU_IPC_DEPS = iree_select({
     "//runtime/config/hal:driver_amdgpu": [
+        "//runtime/src/iree/hal/drivers/amdgpu:ipc_event",
+        "//runtime/src/iree/hal/drivers/amdgpu:ipc_event_monitor",
         "//runtime/src/iree/hal/drivers/amdgpu:ipc_memory",
     ],
     "//conditions:default": [],
@@ -474,10 +476,88 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "hip_ipc_event_api_test",
+    srcs = [
+        "api.h",
+        "hip_ipc_event_api_test.cc",
+    ],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    includes = [
+        "../..",
+        "../../../include",
+        "../../libhrx",
+    ],
+    sanitizer_suppressions = hsa_suppressions,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    deps = [
+        "//build_tools/bazel:dl",
+        "//build_tools/bazel:pthreads",
+        "//runtime/src/iree/testing:coordinated_test",
+        "//runtime/src/iree/testing:coordinated_test_main",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_ipc_event_deinit_api_test",
+    srcs = [
+        "api.h",
+        "hip_ipc_event_deinit_api_test.cc",
+    ],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    includes = [
+        "../..",
+        "../../../include",
+        "../../libhrx",
+    ],
+    sanitizer_suppressions = hsa_suppressions,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    deps = [
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "hip_ipc_memory_unsupported_api_test",
     srcs = [
         "api.h",
         "hip_ipc_memory_unsupported_api_test.cc",
+    ],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    includes = ["../.."],
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = _HIP_NO_AMDGPU_COMPATIBILITY,
+    deps = [
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_ipc_event_unsupported_api_test",
+    srcs = [
+        "api.h",
+        "hip_ipc_event_unsupported_api_test.cc",
     ],
     data = [":amdhip64"],
     env = {
@@ -504,6 +584,25 @@ iree_cc_test(
   SRCS
     "api.h"
     "hip_ipc_memory_unsupported_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+)
+iree_cc_test(
+  NAME
+    hip_ipc_event_unsupported_api_test
+  SRCS
+    "api.h"
+    "hip_ipc_event_unsupported_api_test.cc"
   DATA
     ::amdhip64
   DEPS

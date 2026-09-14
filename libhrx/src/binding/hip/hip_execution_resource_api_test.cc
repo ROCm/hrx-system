@@ -96,6 +96,7 @@ using HipStreamBeginCaptureFn = hipError_t (*)(hipStream_t stream,
                                                hipStreamCaptureMode mode);
 using HipStreamEndCaptureFn = hipError_t (*)(hipStream_t stream,
                                              hipGraph_t* graph);
+using HipGraphDestroyFn = hipError_t (*)(hipGraph_t graph);
 using HipStreamIsCapturingFn =
     hipError_t (*)(hipStream_t stream, hipStreamCaptureStatus* capture_status);
 using HipStreamDestroyFn = hipError_t (*)(hipStream_t stream);
@@ -291,6 +292,9 @@ struct HipRuntimeApi {
   // Ends graph capture on one stream.
   HipStreamEndCaptureFn stream_end_capture = nullptr;
 
+  // Destroys a captured graph.
+  HipGraphDestroyFn graph_destroy = nullptr;
+
   // Queries the graph capture state of one stream.
   HipStreamIsCapturingFn stream_is_capturing = nullptr;
 
@@ -402,6 +406,8 @@ class HipExecutionResourceApiTest : public testing::Test {
           api_.library, "hipStreamBeginCapture");
       api_.stream_end_capture = ResolveHipSymbol<HipStreamEndCaptureFn>(
           api_.library, "hipStreamEndCapture");
+      api_.graph_destroy =
+          ResolveHipSymbol<HipGraphDestroyFn>(api_.library, "hipGraphDestroy");
       api_.stream_is_capturing = ResolveHipSymbol<HipStreamIsCapturingFn>(
           api_.library, "hipStreamIsCapturing");
       api_.stream_destroy = ResolveHipSymbol<HipStreamDestroyFn>(
@@ -462,6 +468,7 @@ class HipExecutionResourceApiTest : public testing::Test {
     ASSERT_NE(api_.stream_get_priority, nullptr);
     ASSERT_NE(api_.stream_begin_capture, nullptr);
     ASSERT_NE(api_.stream_end_capture, nullptr);
+    ASSERT_NE(api_.graph_destroy, nullptr);
     ASSERT_NE(api_.stream_is_capturing, nullptr);
     ASSERT_NE(api_.stream_destroy, nullptr);
     ASSERT_NE(api_.launch_host_function, nullptr);
@@ -1069,6 +1076,61 @@ TEST_F(HipExecutionResourceApiTest,
   EXPECT_EQ(hipStreamCaptureStatusInvalidated, capture_status);
   EXPECT_EQ(hipErrorStreamCaptureInvalidated,
             api_.stream_end_capture(stream, nullptr));
+
+  // Ending a successful capture clears the stream's mutable capture ID. The
+  // event retains the immutable ID of the record's session, so an execution-
+  // context wait still identifies it as captured without reading zero.
+  ASSERT_EQ(hipSuccess,
+            api_.stream_begin_capture(stream, hipStreamCaptureModeGlobal));
+  ASSERT_EQ(hipSuccess, api_.event_record(event, stream));
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.stream_end_capture(stream, &graph));
+  ASSERT_NE(nullptr, graph);
+  EXPECT_EQ(hipErrorStreamCaptureUnsupported,
+            api_.context_wait_event(context, event));
+  EXPECT_EQ(hipSuccess, api_.graph_destroy(graph));
+}
+
+TEST_F(HipExecutionResourceApiTest,
+       IpcEventsRejectBeforeExecutionContextCaptureMutation) {
+  hipDevResource full_resource;
+  ASSERT_EQ(hipSuccess, api_.device_get_resource(device_, &full_resource,
+                                                 hipDevResourceTypeSm));
+  hipDevResourceDesc_t descriptor = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.generate_descriptor(&descriptor, &full_resource, 1));
+  hipExecutionCtx_t context = nullptr;
+  ASSERT_EQ(hipSuccess, api_.create_context(&context, descriptor, device_, 0));
+  ScopedExecutionContext context_guard(
+      context, ExecutionContextDeleter{api_.destroy_context});
+
+  hipStream_t stream = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.context_stream_create(&stream, context, hipStreamDefault,
+                                       /*priority=*/0));
+  ScopedStream stream_guard(stream, StreamDeleter{api_.stream_destroy});
+  hipEvent_t event = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.event_create_with_flags(
+                &event, hipEventInterprocess | hipEventDisableTiming));
+  ScopedEvent event_guard(event, EventDeleter{api_.event_destroy});
+
+  ASSERT_EQ(hipSuccess,
+            api_.stream_begin_capture(stream, hipStreamCaptureModeGlobal));
+  EXPECT_EQ(hipErrorNotSupported, api_.context_record_event(context, event));
+  hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
+  ASSERT_EQ(hipSuccess, api_.stream_is_capturing(stream, &capture_status));
+  EXPECT_EQ(hipStreamCaptureStatusActive, capture_status);
+
+  EXPECT_EQ(hipErrorNotSupported, api_.context_wait_event(context, event));
+  capture_status = hipStreamCaptureStatusNone;
+  ASSERT_EQ(hipSuccess, api_.stream_is_capturing(stream, &capture_status));
+  EXPECT_EQ(hipStreamCaptureStatusActive, capture_status);
+
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.stream_end_capture(stream, &graph));
+  ASSERT_NE(nullptr, graph);
+  EXPECT_EQ(hipSuccess, api_.graph_destroy(graph));
 }
 
 TEST_F(HipExecutionResourceApiTest, CreatesStreamsAtClampedHardwarePriorities) {
