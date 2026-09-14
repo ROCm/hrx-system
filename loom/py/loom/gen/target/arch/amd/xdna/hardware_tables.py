@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Generates one coherent native NPU2/Strix Halo hardware table family."""
+"""Generates one coherent native NPU2/Strix hardware table family."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ from loom.target.arch.amd.xdna.array.npu2 import (
     REGISTER_DATABASE_VERSION,
 )
 from loom.target.arch.amd.xdna.device.model import validate_device_profile
-from loom.target.arch.amd.xdna.device.strix_halo import DEVICE_PROFILES
+from loom.target.arch.amd.xdna.device.strix import DEVICE_PROFILES
 
 
 def _header() -> list[str]:
@@ -351,7 +351,6 @@ def emit_device_profiles() -> str:
                 f"        .minimum_partition_column_count = {profile.minimum_partition_column_count},",
                 f"        .firmware_protocol_major = {firmware.minimum_major},",
                 f"        .firmware_protocol_minor = {firmware.minimum_minor},",
-                f"        .firmware_device_revision = {firmware.device_revision},",
                 f"        .transaction_device_generation = {firmware.transaction_device_generation},",
                 f"        .native_elf_abi_major = {profile.native_elf_abi_major},",
                 f"        .native_elf_abi_minor = {profile.native_elf_abi_minor},",

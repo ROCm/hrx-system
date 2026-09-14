@@ -64,8 +64,6 @@ typedef struct loom_xdna_device_profile_t {
   uint8_t firmware_protocol_major;
   // Minimum supported firmware protocol minor version.
   uint8_t firmware_protocol_minor;
-  // Firmware-reported device revision identifier.
-  uint8_t firmware_device_revision;
   // Device-generation value serialized in transaction streams.
   uint8_t transaction_device_generation;
   // Native XDNA ELF ABI major version.

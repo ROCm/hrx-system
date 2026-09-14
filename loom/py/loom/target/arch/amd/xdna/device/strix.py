@@ -4,9 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Strix Halo XDNA deployment profile."""
+"""Strix-family XDNA deployment profiles."""
 
 from __future__ import annotations
+
+from dataclasses import replace
 
 from loom.target.arch.amd.xdna.array.model import Provenance
 from loom.target.arch.amd.xdna.array.npu2 import NPU2_ARRAY_FAMILY
@@ -18,8 +20,12 @@ from loom.target.arch.amd.xdna.device.model import (
     validate_device_profile,
 )
 
-# The XDNA driver revision maps PCI 17f0:11 to the npu5/Strix Halo profile.
+# The driver maps PCI 17f0:10 to npu4/Strix and 17f0:11 to npu5/Strix Halo.
+# Both use npu4_family.h's shared protocol, alignment, and context limits.
 XDNA_DRIVER_SOURCE_COMMIT = "c8471cb3bbff3621bbe72cf7c9b3278f6fc23dc2"
+
+# ASCII `STRIX`, padded to six bytes, followed by the identity revision.
+STRIX_PROFILE_ID = 0x5354524958000001
 
 # ASCII `SXHALO`, followed by the incompatible profile identity revision.
 STRIX_HALO_PROFILE_ID = 0x535848414C4F0001
@@ -42,7 +48,6 @@ STRIX_HALO_PROFILE = DeviceProfile(
         identity=NPU2_FIRMWARE_ABI_ID,
         minimum_major=6,
         minimum_minor=12,
-        device_revision=5,
         transaction_device_generation=4,
     ),
     native_elf_abi_major=1,
@@ -61,6 +66,15 @@ STRIX_HALO_PROFILE = DeviceProfile(
     ),
 )
 
-DEVICE_PROFILES = (STRIX_HALO_PROFILE,)
+STRIX_PROFILE = replace(
+    STRIX_HALO_PROFILE,
+    key="amd.xdna.strix.17f0_10",
+    identity=STRIX_PROFILE_ID,
+    display_name="NPU Strix",
+    pci=PciIdentity(vendor_id=0x1022, device_id=0x17F0, revision=0x10),
+)
 
-validate_device_profile(STRIX_HALO_PROFILE)
+DEVICE_PROFILES = (STRIX_HALO_PROFILE, STRIX_PROFILE)
+
+for profile in DEVICE_PROFILES:
+    validate_device_profile(profile)

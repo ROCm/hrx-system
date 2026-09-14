@@ -33,7 +33,6 @@ class FirmwareProtocol:
     identity: int
     minimum_major: int
     minimum_minor: int
-    device_revision: int
     transaction_device_generation: int
 
 
@@ -107,7 +106,6 @@ def validate_device_profile(profile: DeviceProfile) -> None:
         or firmware.identity > 0xFFFFFFFFFFFFFFFF
         or firmware.minimum_major <= 0
         or firmware.minimum_minor < 0
-        or firmware.device_revision <= 0
         or firmware.transaction_device_generation <= 0
     ):
         raise ValueError(f"{profile.key}: invalid firmware protocol")

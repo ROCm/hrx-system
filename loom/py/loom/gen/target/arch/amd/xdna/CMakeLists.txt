@@ -31,7 +31,7 @@ iree_py_library(
     loom::py::loom::target::arch::amd::xdna::array::model
     loom::py::loom::target::arch::amd::xdna::array::npu2
     loom::py::loom::target::arch::amd::xdna::device::model
-    loom::py::loom::target::arch::amd::xdna::device::strix_halo
+    loom::py::loom::target::arch::amd::xdna::device::strix
 )
 
 iree_py_test(

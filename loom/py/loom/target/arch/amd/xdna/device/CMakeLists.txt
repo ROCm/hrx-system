@@ -21,9 +21,9 @@ iree_py_library(
 
 iree_py_library(
   NAME
-    strix_halo
+    strix
   SRCS
-    "strix_halo.py"
+    "strix.py"
   DEPS
     loom::py::loom::target::arch::amd::xdna::device::model
     loom::py::loom::target::arch::amd::xdna::array::model
@@ -32,17 +32,17 @@ iree_py_library(
 
 iree_py_test(
   NAME
-    strix_halo_test
+    strix_test
   MAIN
     "../../../../../tools/pytest_style_runner.py"
   SRCS
-    "strix_halo_test.py"
+    "strix_test.py"
     "../../../../../tools/pytest_style_runner.py"
   ARGS
-    "loom.target.arch.amd.xdna.device.strix_halo_test"
+    "loom.target.arch.amd.xdna.device.strix_test"
   DEPS
     loom::py::loom::target::arch::amd::xdna::device::model
-    loom::py::loom::target::arch::amd::xdna::device::strix_halo
+    loom::py::loom::target::arch::amd::xdna::device::strix
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"

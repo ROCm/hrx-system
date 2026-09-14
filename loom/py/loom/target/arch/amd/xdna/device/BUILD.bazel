@@ -25,8 +25,8 @@ iree_py_library(
 )
 
 iree_py_library(
-    name = "strix_halo",
-    srcs = ["strix_halo.py"],
+    name = "strix",
+    srcs = ["strix.py"],
     visibility = [
         "//loom/py/loom/gen/target/arch/amd/xdna:__subpackages__",
         "//loom/py/loom/target/arch/amd/xdna:__subpackages__",
@@ -39,15 +39,15 @@ iree_py_library(
 )
 
 iree_py_test(
-    name = "strix_halo_test",
+    name = "strix_test",
     srcs = [
-        "strix_halo_test.py",
+        "strix_test.py",
         "//loom/py/loom/tools:pytest_style_runner.py",
     ],
-    args = ["loom.target.arch.amd.xdna.device.strix_halo_test"],
+    args = ["loom.target.arch.amd.xdna.device.strix_test"],
     main = "pytest_style_runner.py",
     deps = [
         ":model",
-        ":strix_halo",
+        ":strix",
     ],
 )
