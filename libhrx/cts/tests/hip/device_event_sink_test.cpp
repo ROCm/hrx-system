@@ -37,8 +37,8 @@ using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipHALDeinitFn = hipError_t (*)(void);
 using HipHRXSetDeviceEventSinkFn = hipError_t (*)(hrx_device_event_sink_t sink);
 using HipGetDeviceFn = hipError_t (*)(int* device);
-using HipGetDevicePropertiesFn = hipError_t (*)(hipDeviceProp_t* properties,
-                                                int device);
+using HipGetDevicePropertiesR0600Fn =
+    hipError_t (*)(hipDeviceProp_t* properties, int device);
 using HipModuleLoadDataFn = hipError_t (*)(hipModule_t* module,
                                            const void* image);
 using HipModuleUnloadFn = hipError_t (*)(hipModule_t module);
@@ -139,8 +139,9 @@ TEST(HipDeviceEventSinkTest, RedirectsBlockingPrintfAcrossRuntimeLifetimes) {
                                                    "hipHRXSetDeviceEventSink");
   const auto get_device =
       ResolveHipSymbol<HipGetDeviceFn>(library, "hipGetDevice");
-  const auto get_device_properties = ResolveHipSymbol<HipGetDevicePropertiesFn>(
-      library, "hipGetDeviceProperties");
+  const auto get_device_properties =
+      ResolveHipSymbol<HipGetDevicePropertiesR0600Fn>(
+          library, "hipGetDevicePropertiesR0600");
   const auto module_load_data =
       ResolveHipSymbol<HipModuleLoadDataFn>(library, "hipModuleLoadData");
   const auto module_unload =

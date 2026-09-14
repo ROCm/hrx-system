@@ -39,8 +39,8 @@ T ResolveHipSymbol(void* library, const char* name) {
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipGetDeviceFn = hipError_t (*)(int* device);
-using HipGetDevicePropertiesFn = hipError_t (*)(hipDeviceProp_t* properties,
-                                                int device);
+using HipGetDevicePropertiesR0600Fn =
+    hipError_t (*)(hipDeviceProp_t* properties, int device);
 using HipModuleLoadDataFn = hipError_t (*)(hipModule_t* module,
                                            const void* image);
 using HipModuleUnloadFn = hipError_t (*)(hipModule_t module);
@@ -159,8 +159,8 @@ class HipEventTimingTest : public ::testing::Test {
 
     init_ = ResolveHipSymbol<HipInitFn>(library_, "hipInit");
     get_device_ = ResolveHipSymbol<HipGetDeviceFn>(library_, "hipGetDevice");
-    get_device_properties_ = ResolveHipSymbol<HipGetDevicePropertiesFn>(
-        library_, "hipGetDeviceProperties");
+    get_device_properties_ = ResolveHipSymbol<HipGetDevicePropertiesR0600Fn>(
+        library_, "hipGetDevicePropertiesR0600");
     module_load_data_ =
         ResolveHipSymbol<HipModuleLoadDataFn>(library_, "hipModuleLoadData");
     module_unload_ =
@@ -363,7 +363,7 @@ class HipEventTimingTest : public ::testing::Test {
 
   inline static HipInitFn init_ = nullptr;
   inline static HipGetDeviceFn get_device_ = nullptr;
-  inline static HipGetDevicePropertiesFn get_device_properties_ = nullptr;
+  inline static HipGetDevicePropertiesR0600Fn get_device_properties_ = nullptr;
   inline static HipModuleLoadDataFn module_load_data_ = nullptr;
   inline static HipModuleUnloadFn module_unload_ = nullptr;
   inline static HipModuleGetFunctionFn module_get_function_ = nullptr;

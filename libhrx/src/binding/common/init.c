@@ -269,7 +269,7 @@ static iree_status_t iree_hal_streaming_initialize_device(
   // Initialize primary context flags with defaults.
   out_device->primary_context_flags.scheduling_mode =
       IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO;
-  out_device->primary_context_flags.map_host_memory = true;
+  out_device->primary_context_flags.map_host_memory = false;
   out_device->primary_context_flags.resize_local_mem_to_max = false;
 
   // Initialize primary context mutex for lazy initialization.
@@ -288,8 +288,7 @@ static iree_status_t iree_hal_streaming_initialize_device(
   }
 
   // Primary context is NOT created here - it will be created lazily on first
-  // access. This matches CUDA/HIP behavior where the primary context is not
-  // active after init.
+  // access. The HIP primary context is not active after init.
   out_device->primary_context = NULL;
 
   // Memory pools will be created when the primary context is created.

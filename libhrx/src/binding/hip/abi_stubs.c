@@ -8,8 +8,6 @@
 // These keep binaries linked against upstream libamdhip64 loadable while
 // preserving a loud unsupported result if one of these paths is executed.
 
-#include <dlfcn.h>
-#include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +18,13 @@
 #include "iree/base/threading/mutex.h"
 #include "libhrx/src/binding/hip/api.h"
 #include "libhrx/src/binding/hip/binding_internal.h"
+#include "libhrx/src/binding/hip/device_properties.h"
+#include "libhrx/src/binding/hip/error_state.h"
+
+// These names are the legacy R0000 DSO entry points. Source callers including
+// api.h use the R0600 aliases above instead.
+#undef hipChooseDevice
+#undef hipGetDeviceProperties
 
 // Local compatibility declarations for ABI entries not represented by the
 // core binding header. These keep the exported call boundaries type-correct.
@@ -39,8 +44,6 @@ typedef struct hipArrayMemoryRequirements {
   size_t alignment;
   size_t size;
 } hipArrayMemoryRequirements;
-typedef struct hipDeviceProp_tR0000 hipDeviceProp_tR0000;
-typedef hipDeviceProp_t hipDeviceProp_tR0600;
 typedef void* hipExternalMemory_t;
 typedef struct hipExternalMemoryBufferDesc_st hipExternalMemoryBufferDesc;
 typedef struct hipExternalMemoryHandleDesc_st hipExternalMemoryHandleDesc;
@@ -403,43 +406,6 @@ static hipError_t hrx_hip_spt_stream_or_explicit(hipStream_t stream,
   return hrx_hip_spt_default_stream(resolved_stream);
 }
 
-static hipError_t hrx_hip_spt_lookup(const char* symbol, void** function,
-                                     void* symbol_status) {
-  if (!symbol || !function) return hipErrorInvalidValue;
-
-  // Resolve against this library, not the process-global scope; see
-  // iree_hip_self_dl_handle(). Like hipGetProcAddress(), a consumer may dlopen
-  // us with RTLD_LOCAL, so a dlsym(dlopen(NULL), ...) lookup would spuriously
-  // fail. Fall back to the global scope only if the self-handle is unavailable.
-  void* handle = iree_hip_self_dl_handle();
-  bool close_handle = false;
-  if (!handle) {
-    handle = dlopen(NULL, RTLD_LAZY);
-    close_handle = handle != NULL;
-  }
-  if (!handle) {
-    *function = NULL;
-    if (symbol_status) *(int*)symbol_status = 1;
-    return hipErrorSharedObjectInitFailed;
-  }
-
-  char stream_per_thread_symbol[256];
-  void* found = NULL;
-  size_t symbol_length = strlen(symbol);
-  if (symbol_length < sizeof(stream_per_thread_symbol) - 4 &&
-      (symbol_length < 4 || strcmp(symbol + symbol_length - 4, "_spt") != 0)) {
-    snprintf(stream_per_thread_symbol, sizeof(stream_per_thread_symbol),
-             "%s_spt", symbol);
-    found = dlsym(handle, stream_per_thread_symbol);
-  }
-  if (!found) found = dlsym(handle, symbol);
-  if (close_handle) dlclose(handle);
-
-  *function = found;
-  if (symbol_status) *(int*)symbol_status = found ? 0 : 1;
-  return found ? hipSuccess : hipErrorNotFound;
-}
-
 typedef struct hrx_hip_stream_callback_thunk_t {
   hipStreamCallback_t callback;
   hipStream_t stream;
@@ -500,18 +466,159 @@ HIPAPI hipError_t hipBindTextureToMipmappedArray(
   return hipErrorNotSupported;
 }
 
+static void iree_hip_convert_device_properties_r0600_to_r0000(
+    const hipDeviceProp_tR0600* source, hipDeviceProp_tR0000* target) {
+  memset(target, 0, sizeof(*target));
+  memcpy(target->name, source->name, sizeof(target->name));
+  target->totalGlobalMem = source->totalGlobalMem;
+  target->sharedMemPerBlock = source->sharedMemPerBlock;
+  target->regsPerBlock = source->regsPerBlock;
+  target->warpSize = source->warpSize;
+  target->maxThreadsPerBlock = source->maxThreadsPerBlock;
+  memcpy(target->maxThreadsDim, source->maxThreadsDim,
+         sizeof(target->maxThreadsDim));
+  memcpy(target->maxGridSize, source->maxGridSize, sizeof(target->maxGridSize));
+  target->clockRate = source->clockRate;
+  target->memoryClockRate = source->memoryClockRate;
+  target->memoryBusWidth = source->memoryBusWidth;
+  target->totalConstMem = source->totalConstMem;
+  target->major = source->major;
+  target->minor = source->minor;
+  target->multiProcessorCount = source->multiProcessorCount;
+  target->l2CacheSize = source->l2CacheSize;
+  target->maxThreadsPerMultiProcessor = source->maxThreadsPerMultiProcessor;
+  target->computeMode = source->computeMode;
+  target->clockInstructionRate = source->clockInstructionRate;
+  target->arch = source->arch;
+  target->concurrentKernels = source->concurrentKernels;
+  target->pciDomainID = source->pciDomainID;
+  target->pciBusID = source->pciBusID;
+  target->pciDeviceID = source->pciDeviceID;
+  target->maxSharedMemoryPerMultiProcessor =
+      source->maxSharedMemoryPerMultiProcessor;
+  target->isMultiGpuBoard = source->isMultiGpuBoard;
+  target->canMapHostMemory = source->canMapHostMemory;
+  iree_hip_parse_gcn_arch_name(source->gcnArchName, &target->gcnArch);
+  memcpy(target->gcnArchName, source->gcnArchName, sizeof(target->gcnArchName));
+  target->integrated = source->integrated;
+  target->cooperativeLaunch = source->cooperativeLaunch;
+  target->cooperativeMultiDeviceLaunch = source->cooperativeMultiDeviceLaunch;
+  target->maxTexture1DLinear = source->maxTexture1DLinear;
+  target->maxTexture1D = source->maxTexture1D;
+  memcpy(target->maxTexture2D, source->maxTexture2D,
+         sizeof(target->maxTexture2D));
+  memcpy(target->maxTexture3D, source->maxTexture3D,
+         sizeof(target->maxTexture3D));
+  target->hdpMemFlushCntl = source->hdpMemFlushCntl;
+  target->hdpRegFlushCntl = source->hdpRegFlushCntl;
+  target->memPitch = source->memPitch;
+  target->textureAlignment = source->textureAlignment;
+  target->texturePitchAlignment = source->texturePitchAlignment;
+  target->kernelExecTimeoutEnabled = source->kernelExecTimeoutEnabled;
+  target->ECCEnabled = source->ECCEnabled;
+  target->tccDriver = source->tccDriver;
+  target->cooperativeMultiDeviceUnmatchedFunc =
+      source->cooperativeMultiDeviceUnmatchedFunc;
+  target->cooperativeMultiDeviceUnmatchedGridDim =
+      source->cooperativeMultiDeviceUnmatchedGridDim;
+  target->cooperativeMultiDeviceUnmatchedBlockDim =
+      source->cooperativeMultiDeviceUnmatchedBlockDim;
+  target->cooperativeMultiDeviceUnmatchedSharedMem =
+      source->cooperativeMultiDeviceUnmatchedSharedMem;
+  target->isLargeBar = source->isLargeBar;
+  target->asicRevision = source->asicRevision;
+  target->managedMemory = source->managedMemory;
+  target->directManagedMemAccessFromHost =
+      source->directManagedMemAccessFromHost;
+  target->concurrentManagedAccess = source->concurrentManagedAccess;
+  target->pageableMemoryAccess = source->pageableMemoryAccess;
+  target->pageableMemoryAccessUsesHostPageTables =
+      source->pageableMemoryAccessUsesHostPageTables;
+}
+
+static hipError_t iree_hip_choose_device_r0600(
+    int* device, const hipDeviceProp_tR0600* properties) {
+  if (!device || !properties) return hipErrorInvalidValue;
+
+  int device_count = 0;
+  hipError_t result = hipGetDeviceCount(&device_count);
+  if (result != hipSuccess) return result;
+
+  *device = 0;
+  unsigned int best_match_count = 0;
+  for (int i = 0; i < device_count; ++i) {
+    hipDeviceProp_t current = {0};
+    result = hipGetDevicePropertiesR0600(&current, i);
+    if (result != hipSuccess) return result;
+
+    unsigned int requested_count = 0;
+    unsigned int match_count = 0;
+#define HRX_HIP_MATCH_MINIMUM(field)                         \
+  do {                                                       \
+    if (properties->field != 0) {                            \
+      ++requested_count;                                     \
+      if (current.field >= properties->field) ++match_count; \
+    }                                                        \
+  } while (0)
+    HRX_HIP_MATCH_MINIMUM(major);
+    HRX_HIP_MATCH_MINIMUM(minor);
+    HRX_HIP_MATCH_MINIMUM(totalGlobalMem);
+    HRX_HIP_MATCH_MINIMUM(sharedMemPerBlock);
+    HRX_HIP_MATCH_MINIMUM(maxThreadsPerBlock);
+    HRX_HIP_MATCH_MINIMUM(totalConstMem);
+    HRX_HIP_MATCH_MINIMUM(multiProcessorCount);
+    HRX_HIP_MATCH_MINIMUM(maxThreadsPerMultiProcessor);
+    HRX_HIP_MATCH_MINIMUM(memoryClockRate);
+    HRX_HIP_MATCH_MINIMUM(memoryBusWidth);
+    HRX_HIP_MATCH_MINIMUM(l2CacheSize);
+    HRX_HIP_MATCH_MINIMUM(regsPerBlock);
+    HRX_HIP_MATCH_MINIMUM(maxSharedMemoryPerMultiProcessor);
+    HRX_HIP_MATCH_MINIMUM(warpSize);
+#undef HRX_HIP_MATCH_MINIMUM
+
+    if (requested_count == match_count && match_count > best_match_count) {
+      *device = i;
+      best_match_count = match_count;
+    }
+  }
+  return hipSuccess;
+}
+
 HIPAPI hipError_t hipChooseDeviceR0000(int* device,
                                        const hipDeviceProp_tR0000* properties) {
-  (void)device;
-  (void)properties;
-  return hipErrorNotSupported;
+  if (!device || !properties) {
+    return iree_hip_error_state_publish(hipErrorInvalidValue);
+  }
+  hipDeviceProp_tR0600 current_properties = {0};
+  current_properties.major = properties->major;
+  current_properties.minor = properties->minor;
+  current_properties.totalGlobalMem = properties->totalGlobalMem;
+  current_properties.sharedMemPerBlock = properties->sharedMemPerBlock;
+  current_properties.maxThreadsPerBlock = properties->maxThreadsPerBlock;
+  current_properties.totalConstMem = properties->totalConstMem;
+  current_properties.multiProcessorCount = properties->multiProcessorCount;
+  current_properties.maxThreadsPerMultiProcessor =
+      properties->maxThreadsPerMultiProcessor;
+  current_properties.memoryClockRate = properties->memoryClockRate;
+  current_properties.memoryBusWidth = properties->memoryBusWidth;
+  current_properties.l2CacheSize = properties->l2CacheSize;
+  current_properties.regsPerBlock = properties->regsPerBlock;
+  current_properties.maxSharedMemoryPerMultiProcessor =
+      properties->maxSharedMemoryPerMultiProcessor;
+  current_properties.warpSize = properties->warpSize;
+  return iree_hip_error_state_publish(
+      iree_hip_choose_device_r0600(device, &current_properties));
+}
+
+HIPAPI hipError_t hipChooseDevice(int* device,
+                                  const hipDeviceProp_tR0000* properties) {
+  return iree_hip_error_state_publish(hipChooseDeviceR0000(device, properties));
 }
 
 HIPAPI hipError_t hipChooseDeviceR0600(int* device,
                                        const hipDeviceProp_tR0600* properties) {
-  (void)device;
-  (void)properties;
-  return hipErrorNotSupported;
+  return iree_hip_error_state_publish(
+      iree_hip_choose_device_r0600(device, properties));
 }
 
 HIPAPI hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim,
@@ -594,10 +701,16 @@ HIPAPI hipError_t hipDestroyExternalSemaphore(hipExternalSemaphore_t extSem) {
 
 HIPAPI hipError_t hipDeviceComputeCapability(int* major, int* minor,
                                              hipDevice_t device) {
-  (void)major;
-  (void)minor;
-  (void)device;
-  return hipErrorNotSupported;
+  if (!major || !minor) {
+    return iree_hip_error_state_publish(hipErrorInvalidValue);
+  }
+  hipError_t result = hipDeviceGetAttribute(
+      major, hipDeviceAttributeComputeCapabilityMajor, device);
+  if (result == hipSuccess) {
+    result = hipDeviceGetAttribute(
+        minor, hipDeviceAttributeComputeCapabilityMinor, device);
+  }
+  return iree_hip_error_state_publish(result);
 }
 
 HIPAPI hipError_t hipDeviceGetTexture1DLinearMaxWidth(
@@ -724,11 +837,17 @@ HIPAPI hipError_t hipExtEnableLogging(void) { return hipErrorNotSupported; }
 HIPAPI hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2,
                                                uint32_t* linktype,
                                                uint32_t* hopcount) {
-  (void)device1;
-  (void)device2;
-  (void)linktype;
-  (void)hopcount;
-  return hipErrorNotSupported;
+  if (!linktype || !hopcount || device1 == device2 || device1 < 0 ||
+      device2 < 0) {
+    return iree_hip_error_state_publish(hipErrorInvalidValue);
+  }
+  int device_count = 0;
+  hipError_t result = hipGetDeviceCount(&device_count);
+  if (result != hipSuccess) return iree_hip_error_state_publish(result);
+  if (device1 >= device_count || device2 >= device_count) {
+    return iree_hip_error_state_publish(hipErrorInvalidDevice);
+  }
+  return iree_hip_error_state_publish(hipErrorNotSupported);
 }
 
 HIPAPI hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size,
@@ -745,19 +864,27 @@ HIPAPI hipError_t hipFreeMipmappedArray(hipMipmappedArray_t mipmappedArray) {
 
 HIPAPI hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop,
                                               int device) {
-  (void)prop;
-  (void)device;
-  return hipErrorNotSupported;
+  if (!prop) return iree_hip_error_state_publish(hipErrorInvalidValue);
+  hipDeviceProp_tR0600 current_properties = {0};
+  hipError_t result = hipGetDevicePropertiesR0600(&current_properties, device);
+  if (result != hipSuccess) return iree_hip_error_state_publish(result);
+  iree_hip_convert_device_properties_r0600_to_r0000(&current_properties, prop);
+  return iree_hip_error_state_publish(hipSuccess);
+}
+
+HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_tR0000* prop,
+                                         int device) {
+  return iree_hip_error_state_publish(
+      hipGetDevicePropertiesR0000(prop, device));
 }
 
 HIPAPI hipError_t hipGetDriverEntryPoint(
     const char* symbol, void** funcPtr, unsigned long long flags,
     hipDriverEntryPointQueryResult* status) {
-  (void)symbol;
-  (void)funcPtr;
-  (void)flags;
-  (void)status;
-  return hipErrorNotSupported;
+  hipError_t result =
+      iree_hip_driver_entry_point_lookup(symbol, funcPtr, flags, status);
+  if (result == hipErrorNotFound) result = hipErrorInvalidValue;
+  return iree_hip_error_state_publish(result);
 }
 
 HIPAPI hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr,
@@ -992,10 +1119,15 @@ HIPAPI hipError_t hipLaunchByPtr(const void* func) {
 
 HIPAPI hipError_t hipLaunchCooperativeKernelMultiDevice(
     hipLaunchParams* launchParamsList, int numDevices, unsigned int flags) {
+  int device_count = 0;
+  hipError_t init_result = hipGetDeviceCount(&device_count);
+  if (init_result != hipSuccess) {
+    return iree_hip_error_state_publish(init_result);
+  }
   (void)launchParamsList;
   (void)numDevices;
   (void)flags;
-  return hipErrorNotSupported;
+  return iree_hip_error_state_publish(hipErrorNotSupported);
 }
 
 HIPAPI hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config,
@@ -1583,12 +1715,6 @@ HIPAPI hipError_t hipProfilerStart(void) { return hipErrorNotSupported; }
 
 HIPAPI hipError_t hipProfilerStop(void) { return hipErrorNotSupported; }
 
-HIPAPI hipError_t hipSetValidDevices(int* device_arr, int len) {
-  (void)device_arr;
-  (void)len;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipSetupArgument(const void* arg, size_t size,
                                    size_t offset) {
   (void)arg;
@@ -1917,16 +2043,32 @@ HIPAPI hipError_t hipGetDriverEntryPoint_spt(const char* symbol,
                                              void** function,
                                              unsigned long long flags,
                                              void* status) {
-  (void)flags;
-  return hrx_hip_spt_lookup(symbol, function, status);
+  if (function) *function = NULL;
+  if (status) *(int*)status = 1;
+  uint64_t normalized_flags = 0;
+  hipError_t result =
+      iree_hip_normalize_spt_lookup_flags(flags, &normalized_flags);
+  if (result == hipSuccess) {
+    result = iree_hip_driver_entry_point_lookup(symbol, function,
+                                                normalized_flags, status);
+  }
+  if (result == hipErrorNotFound) result = hipErrorInvalidValue;
+  return iree_hip_error_state_publish(result);
 }
 
 HIPAPI hipError_t hipGetProcAddress_spt(const char* symbol, void** function,
                                         int hip_version, uint64_t flags,
                                         void* symbol_status) {
-  (void)hip_version;
-  (void)flags;
-  return hrx_hip_spt_lookup(symbol, function, symbol_status);
+  if (function) *function = NULL;
+  if (symbol_status) *(int*)symbol_status = 1;
+  uint64_t normalized_flags = 0;
+  hipError_t result =
+      iree_hip_normalize_spt_lookup_flags(flags, &normalized_flags);
+  if (result == hipSuccess) {
+    result = iree_hip_proc_address_lookup(symbol, function, hip_version,
+                                          normalized_flags, symbol_status);
+  }
+  return iree_hip_error_state_publish(result);
 }
 
 HIPAPI hipError_t hipLaunchCooperativeKernel_spt(const void* f, dim3 gridDim,

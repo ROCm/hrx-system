@@ -541,6 +541,9 @@ typedef enum hipLimit_t {
   hipLimitDevRuntimePendingLaunchCount = 0x04,
   hipLimitMaxL2FetchGranularity = 0x05,
   hipLimitPersistingL2CacheSize = 0x06,
+  hipExtLimitScratchMin = 0x1000,
+  hipExtLimitScratchMax = 0x1001,
+  hipExtLimitScratchCurrent = 0x1002,
   hipLimitRange
 } hipLimit_t;
 
@@ -632,6 +635,120 @@ typedef struct {
   // Dynamic parallelism.
   unsigned hasDynamicParallelism : 1;
 } hipDeviceArch_t;
+
+// Device properties used by the original public ABI entry points.
+typedef struct hipDeviceProp_tR0000 {
+  // Device name.
+  char name[256];
+  // Global memory size in bytes.
+  size_t totalGlobalMem;
+  // Workgroup-local memory size in bytes.
+  size_t sharedMemPerBlock;
+  // Registers available per workgroup.
+  int regsPerBlock;
+  // Hardware wavefront size.
+  int warpSize;
+  // Maximum invocations per workgroup.
+  int maxThreadsPerBlock;
+  // Maximum workgroup dimensions.
+  int maxThreadsDim[3];
+  // Maximum grid dimensions.
+  int maxGridSize[3];
+  // Maximum core clock rate in kHz.
+  int clockRate;
+  // Maximum memory clock rate in kHz.
+  int memoryClockRate;
+  // Global memory bus width in bits.
+  int memoryBusWidth;
+  // Constant memory size in bytes.
+  size_t totalConstMem;
+  // Major compute capability.
+  int major;
+  // Minor compute capability.
+  int minor;
+  // Number of execution units.
+  int multiProcessorCount;
+  // L2 cache size in bytes.
+  int l2CacheSize;
+  // Maximum resident invocations per execution unit.
+  int maxThreadsPerMultiProcessor;
+  // Device compute mode.
+  int computeMode;
+  // Device clock-instruction rate in kHz.
+  int clockInstructionRate;
+  // Architectural feature flags.
+  hipDeviceArch_t arch;
+  // Whether concurrent kernel execution is supported.
+  int concurrentKernels;
+  // PCI domain identifier.
+  int pciDomainID;
+  // PCI bus identifier.
+  int pciBusID;
+  // PCI device identifier.
+  int pciDeviceID;
+  // Maximum shared memory per execution unit in bytes.
+  size_t maxSharedMemoryPerMultiProcessor;
+  // Whether this device belongs to a multi-GPU board.
+  int isMultiGpuBoard;
+  // Whether host memory can be mapped.
+  int canMapHostMemory;
+  // Deprecated numeric architecture identifier.
+  int gcnArch;
+  // Architecture target identifier.
+  char gcnArchName[256];
+  // Whether the device shares memory with the host.
+  int integrated;
+  // Whether cooperative launch is supported.
+  int cooperativeLaunch;
+  // Whether multi-device cooperative launch is supported.
+  int cooperativeMultiDeviceLaunch;
+  // Maximum linear one-dimensional texture size.
+  int maxTexture1DLinear;
+  // Maximum one-dimensional texture size.
+  int maxTexture1D;
+  // Maximum two-dimensional texture dimensions.
+  int maxTexture2D[2];
+  // Maximum three-dimensional texture dimensions.
+  int maxTexture3D[3];
+  // HDP memory-flush register address, when available.
+  unsigned int* hdpMemFlushCntl;
+  // HDP register-flush address, when available.
+  unsigned int* hdpRegFlushCntl;
+  // Maximum memory-copy pitch in bytes.
+  size_t memPitch;
+  // Texture base-address alignment in bytes.
+  size_t textureAlignment;
+  // Texture pitch alignment in bytes.
+  size_t texturePitchAlignment;
+  // Whether kernels have an execution timeout.
+  int kernelExecTimeoutEnabled;
+  // Whether error-correcting memory is enabled.
+  int ECCEnabled;
+  // Whether the device uses a compute-only driver mode.
+  int tccDriver;
+  // Whether cooperative devices may use different functions.
+  int cooperativeMultiDeviceUnmatchedFunc;
+  // Whether cooperative devices may use different grid dimensions.
+  int cooperativeMultiDeviceUnmatchedGridDim;
+  // Whether cooperative devices may use different block dimensions.
+  int cooperativeMultiDeviceUnmatchedBlockDim;
+  // Whether cooperative devices may use different shared-memory sizes.
+  int cooperativeMultiDeviceUnmatchedSharedMem;
+  // Whether the entire device allocation is host-addressable.
+  int isLargeBar;
+  // Hardware revision identifier.
+  int asicRevision;
+  // Whether managed allocation is supported.
+  int managedMemory;
+  // Whether the host can directly access managed allocations.
+  int directManagedMemAccessFromHost;
+  // Whether managed memory supports concurrent host and device access.
+  int concurrentManagedAccess;
+  // Whether pageable host memory is directly accessible.
+  int pageableMemoryAccess;
+  // Whether pageable access uses host page tables.
+  int pageableMemoryAccessUsesHostPageTables;
+} hipDeviceProp_tR0000;
 
 typedef struct hipDeviceProp_t {
   // Device name.
@@ -866,6 +983,13 @@ typedef struct hipDeviceProp_t {
   // Revision of the GPU in this device.
   int asicRevision;
 } hipDeviceProp_t;
+
+// Current source ABI names resolve to the R0600 entry points. The unsuffixed
+// DSO symbols remain the original R0000 ABI for binaries built against older
+// headers.
+typedef hipDeviceProp_t hipDeviceProp_tR0600;
+#define hipGetDeviceProperties hipGetDevicePropertiesR0600
+#define hipChooseDevice hipChooseDeviceR0600
 
 typedef enum hipJitOption {
   hipJitOptionMaxRegisters = 0,
@@ -1338,6 +1462,8 @@ HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
 HIPAPI hipError_t hipGetDevice(int* device);
 HIPAPI hipError_t hipSetDevice(int device);
 HIPAPI hipError_t hipGetDeviceCount(int* count);
+HIPAPI hipError_t hipChooseDevice(int* device,
+                                  const hipDeviceProp_t* properties);
 HIPAPI hipError_t hipDeviceGet(hipDevice_t* device, int ordinal);
 HIPAPI hipError_t hipDeviceGetName(char* name, int len, hipDevice_t dev);
 HIPAPI hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t dev);
