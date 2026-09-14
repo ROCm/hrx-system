@@ -233,6 +233,12 @@ typedef struct iree_hal_amdgpu_logical_device_t {
   // + trailing identifier string storage
 } iree_hal_amdgpu_logical_device_t;
 
+// Checks that |base_device| is an AMDGPU logical device and returns its typed
+// representation. Returns IREE_STATUS_INVALID_ARGUMENT for another device type.
+iree_status_t iree_hal_amdgpu_logical_device_cast_checked(
+    iree_hal_device_t* base_device,
+    iree_hal_amdgpu_logical_device_t** out_logical_device);
+
 // Records an asynchronous child-subsystem failure on |logical_device|.
 // Consumes |status| and preserves only the first failure.
 void iree_hal_amdgpu_logical_device_error_handler(void* logical_device,

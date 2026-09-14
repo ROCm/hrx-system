@@ -556,6 +556,27 @@ iree_cc_library(
 endif()
 
 if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    ipc_event
+  HDRS
+    "ipc_event.h"
+  SRCS
+    "ipc_event.c"
+  DEPS
+    ::amdgpu
+    ::headers
+    ::ipc_event_monitor
+    iree::async
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::hal
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
     atomic_memory_test
@@ -585,6 +606,38 @@ iree_cc_test(
     "ipc_event_monitor_test_util.h"
   DEPS
     ::ipc_event_monitor
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    ipc_event_test
+  SRCS
+    "ipc_event_monitor_test_util.h"
+    "ipc_event_test.cc"
+    "ipc_event_test_util.h"
+  DEPS
+    ::amdgpu
+    ::headers
+    ::ipc_event
+    ::ipc_event_monitor
+    iree::async
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::amdgpu::util::libhsa
+    iree::hal::drivers::amdgpu::util::topology
+    iree::hal::testing::mock_device
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

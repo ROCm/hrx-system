@@ -506,6 +506,26 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "ipc_event",
+    srcs = ["ipc_event.c"],
+    hdrs = ["ipc_event.h"],
+    visibility = [
+        "//libhrx/src/binding/hip:__pkg__",
+        "//runtime/src/iree/hal/drivers/amdgpu:__pkg__",
+    ],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        ":ipc_event_monitor",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "atomic_memory_test",
     srcs = ["atomic_memory_test.cc"],
@@ -526,6 +546,31 @@ iree_runtime_cc_test(
     ],
     deps = [
         ":ipc_event_monitor",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "ipc_event_test",
+    srcs = [
+        "ipc_event_monitor_test_util.h",
+        "ipc_event_test.cc",
+        "ipc_event_test_util.h",
+    ],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        ":ipc_event",
+        ":ipc_event_monitor",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:topology",
+        "//runtime/src/iree/hal/testing:mock_device",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
