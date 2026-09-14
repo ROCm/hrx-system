@@ -173,6 +173,22 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "ipc_event_monitor",
+    srcs = ["ipc_event_monitor.c"],
+    hdrs = ["ipc_event_monitor.h"],
+    visibility = [
+        "//libhrx/src/binding/hip:__pkg__",
+        "//runtime/src/iree/hal/drivers/amdgpu:__pkg__",
+    ],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "amdgpu",
     srcs = [
         "allocator.c",
@@ -497,6 +513,19 @@ iree_runtime_cc_test(
         ":atomic_memory",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "ipc_event_monitor_test",
+    srcs = [
+        "ipc_event_monitor_test.cc",
+        "ipc_event_monitor_test_util.h",
+    ],
+    deps = [
+        ":ipc_event_monitor",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

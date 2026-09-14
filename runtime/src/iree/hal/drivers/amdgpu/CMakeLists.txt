@@ -223,6 +223,23 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
+    ipc_event_monitor
+  HDRS
+    "ipc_event_monitor.h"
+  SRCS
+    "ipc_event_monitor.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::base::threading::thread
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
     amdgpu
   HDRS
     "api.h"
@@ -548,6 +565,26 @@ iree_cc_test(
     ::atomic_memory
     iree::base
     iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    ipc_event_monitor_test
+  SRCS
+    "ipc_event_monitor_test.cc"
+    "ipc_event_monitor_test_util.h"
+  DEPS
+    ::ipc_event_monitor
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
