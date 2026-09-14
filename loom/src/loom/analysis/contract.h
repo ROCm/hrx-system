@@ -87,6 +87,8 @@ typedef enum loom_contract_numeric_type_e {
   LOOM_CONTRACT_NUMERIC_FP4 = 17,
   // The payload is interpreted as TF32 elements stored in f32 lanes.
   LOOM_CONTRACT_NUMERIC_TF32 = 18,
+  // Eight signed byte mantissas share one exponent in BFP16EBS8 storage.
+  LOOM_CONTRACT_NUMERIC_BFP16EBS8 = 19,
 } loom_contract_numeric_type_t;
 
 // Returns the logical element bit width of |numeric_type|, or 0 for UNKNOWN.

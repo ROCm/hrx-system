@@ -116,7 +116,8 @@ typedef enum loom_encoding_numeric_format_e {
   LOOM_ENCODING_NUMERIC_FORMAT_QUANT_I8 = 38,
   LOOM_ENCODING_NUMERIC_FORMAT_QUANT_I6 = 39,
   LOOM_ENCODING_NUMERIC_FORMAT_QUANT_I4 = 40,
-  LOOM_ENCODING_NUMERIC_FORMAT_COUNT_ = 41,
+  LOOM_ENCODING_NUMERIC_FORMAT_BFP16EBS8 = 41,
+  LOOM_ENCODING_NUMERIC_FORMAT_COUNT_ = 42,
 } loom_encoding_numeric_format_t;
 
 // Physical payload bit and field layout.

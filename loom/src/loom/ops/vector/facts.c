@@ -451,17 +451,13 @@ static bool loom_vector_fragment_fact_set_shape(
   return true;
 }
 
-static bool loom_vector_fragment_facts_match_except_role(
+static bool loom_vector_fragment_facts_match_contract_except_value_flags(
     loom_vector_fragment_fact_t lhs, loom_vector_fragment_fact_t rhs) {
-  lhs.role_flags = 0;
-  rhs.role_flags = 0;
-  return loom_vector_fragment_fact_equal(lhs, rhs);
-}
-
-static bool loom_vector_fragment_facts_match_contract_except_native_storage(
-    loom_vector_fragment_fact_t lhs, loom_vector_fragment_fact_t rhs) {
-  lhs.flags &= ~LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE;
-  rhs.flags &= ~LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE;
+  const loom_vector_fragment_fact_flags_t value_flags =
+      LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE |
+      LOOM_VECTOR_FRAGMENT_FACT_FLAG_ALL_ZERO;
+  lhs.flags &= ~value_flags;
+  rhs.flags &= ~value_flags;
   return loom_vector_fragment_fact_equal(lhs, rhs);
 }
 
@@ -471,8 +467,8 @@ static bool loom_vector_fragment_facts_have_compatible_native_storage(
     return false;
   }
   target.role_flags = source.role_flags;
-  return loom_vector_fragment_facts_match_contract_except_native_storage(
-      target, source);
+  return loom_vector_fragment_facts_match_contract_except_value_flags(target,
+                                                                      source);
 }
 
 static iree_status_t loom_vector_clone_equal_extension(
@@ -488,17 +484,14 @@ static iree_status_t loom_vector_clone_equal_extension(
 static iree_status_t loom_vector_make_accumulator_join_fragment(
     loom_fact_context_t* context, loom_vector_fragment_fact_t lhs,
     loom_vector_fragment_fact_t rhs, loom_value_facts_t* inout_facts) {
-  bool has_native_storage =
-      iree_all_bits_set(lhs.flags,
-                        LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE) &&
-      iree_all_bits_set(rhs.flags,
-                        LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE);
+  const loom_vector_fragment_fact_flags_t value_flags =
+      LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE |
+      LOOM_VECTOR_FRAGMENT_FACT_FLAG_ALL_ZERO;
+  const loom_vector_fragment_fact_flags_t common_flags =
+      lhs.flags & rhs.flags & value_flags;
   lhs.role_flags = LOOM_VECTOR_FRAGMENT_ROLE_FLAG_INIT |
                    LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RESULT;
-  lhs.flags &= ~LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE;
-  if (has_native_storage) {
-    lhs.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE;
-  }
+  lhs.flags = (lhs.flags & ~value_flags) | common_flags;
 
   loom_value_facts_t fragment_facts = loom_value_facts_unknown();
   IREE_RETURN_IF_ERROR(loom_vector_fragment_fact_make_value_facts(
@@ -1017,8 +1010,17 @@ iree_status_t loom_vector_fragment_facts(
   }
 
   loom_vector_fragment_fact_t data_fragment;
-  if (loom_vector_fragment_fact_query_value_facts(context, operand_facts[0],
-                                                  &data_fragment) &&
+  const bool has_data_fragment = loom_vector_fragment_fact_query_value_facts(
+      context, operand_facts[0], &data_fragment);
+  loom_value_facts_t element_facts;
+  if (loom_value_facts_query_all_equal_element(context, operand_facts[0],
+                                               &element_facts) &&
+      loom_value_facts_is_exact(element_facts) && element_facts.range_lo == 0) {
+    fact.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_ALL_ZERO;
+  } else if (has_data_fragment) {
+    fact.flags |= data_fragment.flags & LOOM_VECTOR_FRAGMENT_FACT_FLAG_ALL_ZERO;
+  }
+  if (has_data_fragment &&
       iree_all_bits_set(data_fragment.flags,
                         LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE) &&
       loom_vector_fragment_facts_have_compatible_native_storage(
@@ -1146,6 +1148,20 @@ iree_status_t loom_vector_load_facts(loom_fact_context_t* context,
   }
   return loom_value_facts_make_uniform_element(context, element_facts,
                                                &result_facts[0]);
+}
+
+iree_status_t loom_vector_encode_facts(loom_fact_context_t* context,
+                                       const loom_module_t* module,
+                                       const loom_op_t* op,
+                                       const loom_value_facts_t* operand_facts,
+                                       loom_value_facts_t* result_facts) {
+  (void)context;
+  (void)module;
+  (void)op;
+  // The schema interprets the produced bits. Retaining it on the payload lets
+  // type mapping consume that interpretation without finding the encode op.
+  result_facts[0] = operand_facts[1];
+  return iree_ok_status();
 }
 
 iree_status_t loom_vector_decode_facts(loom_fact_context_t* context,
@@ -4636,6 +4652,7 @@ iree_status_t loom_vector_mma_facts(loom_fact_context_t* context,
   init_fragment.role_flags = LOOM_VECTOR_FRAGMENT_ROLE_FLAG_INIT |
                              LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RESULT;
   init_fragment.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE;
+  init_fragment.flags &= ~LOOM_VECTOR_FRAGMENT_FACT_FLAG_ALL_ZERO;
   return loom_vector_fragment_fact_make_value_facts(context, init_fragment,
                                                     &result_facts[0]);
 }

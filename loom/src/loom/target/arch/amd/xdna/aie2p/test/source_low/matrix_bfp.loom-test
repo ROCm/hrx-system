@@ -1,0 +1,156 @@
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @matrix_bfp_cell(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xbf16>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<64xbf16>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<8x8xf32>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 8 : index
+  %lhs_value = vector.load %lhs_view[0] : view<64xbf16> -> vector<64xbf16>
+  %rhs_value = vector.load %rhs_view[0] : view<64xbf16> -> vector<64xbf16>
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %lhs_encoded = vector.encode %lhs_value using %schema : vector<64xbf16>, encoding<schema> -> vector<72xi8>
+  %rhs_encoded = vector.encode %rhs_value using %schema : vector<64xbf16>, encoding<schema> -> vector<72xi8>
+  %lhs_fragment = vector.fragment<lhs> %lhs_encoded shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %rhs_fragment = vector.fragment<rhs> %rhs_encoded shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %accumulator_init = vector.constant 0.0 : vector<64xf32>
+  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xf32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xf32>, view<8x8xf32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_bfp_cell() asm {
+  %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %32 = vlda.512.bf16x32 %lhs_view, 0
+  %33 = vlda.512.bf16x32 %lhs_view, 64
+  %35 = vlda.512.bf16x32 %rhs_view, 0
+  %36 = vlda.512.bf16x32 %rhs_view, 64
+  %39 = vconv.fp32.bf16 %32
+  %41 = vconv.fp32.bf16 %33
+  %42 = concat(%39, %41) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  set.rounding 12
+  %lhs_fragment = vconv.bfp16ebs8.fp32 %42
+  %45 = vconv.fp32.bf16 %35
+  %47 = vconv.fp32.bf16 %36
+  %48 = concat(%45, %47) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  set.rounding 12
+  %rhs_fragment = vconv.bfp16ebs8.fp32 %48
+  %51 = mova.i32 780
+  %product = mmul.bfp16ebs8.m8n8k8 %lhs_fragment, %rhs_fragment, %51
+  %53 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %53, %output_view, 0
+  %54 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %54, %output_view, 64
+  %55 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %55, %output_view, 128
+  %56 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %56, %output_view, 192
+  return
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @matrix_bfp_counted(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<7x64xbf16>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<7x64xbf16>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<8x8xf32>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 8 : index
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %begin = index.constant 0 : index
+  %end = index.constant 7 : index
+  %step = index.constant 1 : index
+  %accumulator_init = vector.constant 0.0 : vector<64xf32>
+  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xf32>
+  %product = scf.for %record = [%begin to %end step %step](%accumulator = %accumulator_fragment : vector<64xf32>) -> (vector<64xf32>) {
+    %lhs_value = vector.load %lhs_view[%record, 0] : view<7x64xbf16> -> vector<64xbf16>
+    %rhs_value = vector.load %rhs_view[%record, 0] : view<7x64xbf16> -> vector<64xbf16>
+    %lhs_encoded = vector.encode %lhs_value using %schema : vector<64xbf16>, encoding<schema> -> vector<72xi8>
+    %rhs_encoded = vector.encode %rhs_value using %schema : vector<64xbf16>, encoding<schema> -> vector<72xi8>
+    %lhs_fragment = vector.fragment<lhs> %lhs_encoded shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<72xi8>
+    %rhs_fragment = vector.fragment<rhs> %rhs_encoded shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<72xi8>
+    %next = vector.mma %lhs_fragment, %rhs_fragment, %accumulator : vector<72xi8>, vector<72xi8>, vector<64xf32>
+    scf.yield %next : vector<64xf32>
+  }
+  vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xf32>, view<8x8xf32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_bfp_counted() asm {
+  %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %begin = mov.short 0
+  %end = mov.short 7
+  %step = mov.short 1
+  %accumulator_fragment = acc.clear.f32x64
+  low.br ^_bb1(%begin: reg<aie2p.er>, %accumulator_fragment: reg<aie2p.mbms x4>)
+^_bb1(%record: reg<aie2p.er>, %accumulator: reg<aie2p.mbms x4>):
+  %74 = lt %record, %end
+  low.cond_br %74, ^_bb2, ^_bb3 : reg<aie2p.er>
+^_bb2:
+  %75 = mov.i32 7
+  %76 = lshl %record, %75
+  %77 = mov.address-index %76
+  %78 = vlda.512.bf16x32.index %lhs_view, %77
+  %79 = mov.static-byte-offset 64
+  %82 = add.rr %76, %79
+  %83 = mov.address-index %82
+  %84 = vlda.512.bf16x32.index %lhs_view, %83
+  %89 = vlda.512.bf16x32.index %rhs_view, %77
+  %93 = add.rr %76, %79
+  %94 = mov.address-index %93
+  %95 = vlda.512.bf16x32.index %rhs_view, %94
+  %98 = vconv.fp32.bf16 %78
+  %100 = vconv.fp32.bf16 %84
+  %101 = concat(%98, %100) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  set.rounding 12
+  %lhs_fragment = vconv.bfp16ebs8.fp32 %101
+  %104 = vconv.fp32.bf16 %89
+  %106 = vconv.fp32.bf16 %95
+  %107 = concat(%104, %106) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  set.rounding 12
+  %rhs_fragment = vconv.bfp16ebs8.fp32 %107
+  %109 = mova.i32 780
+  %next = mma.bfp16ebs8.m8n8k8 %accumulator, %lhs_fragment, %rhs_fragment, %109
+  %111 = add.rr %record, %step
+  low.br ^_bb1(%111: reg<aie2p.er>, %next: reg<aie2p.mbms x4>)
+^_bb3:
+  %112 = slice %accumulator[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %112, %output_view, 0
+  %113 = slice %accumulator[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %113, %output_view, 64
+  %114 = slice %accumulator[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %114, %output_view, 128
+  %115 = slice %accumulator[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %115, %output_view, 192
+  return
+}
+
+// ====
+
+// A conversion that preserves BF16 subnormals cannot use the flushing native
+// conversion. Keeping the format while changing its policy must be rejected.
+aie2p.target<core> @target
+
+func.def target(@target) @encode_preserve_subnormal(%input: vector<64xbf16>) -> (vector<72xi8>) {
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=nearest_even> : encoding<schema>
+  // ERROR@+1: TARGET/001 {op_name="vector.encode"}
+  %encoded = vector.encode %input using %schema : vector<64xbf16>, encoding<schema> -> vector<72xi8>
+  func.return %encoded : vector<72xi8>
+}

@@ -971,13 +971,13 @@ def _matrix_accumulator_zero_rule() -> DescriptorRule:
     )
 
 
-def _matrix_fragment_store_rule() -> RecipeRule:
+def _matrix_fragment_store_rule(element_type: str) -> RecipeRule:
     return RecipeRule(
         source_op=vector.vector_fragment_store,
         guards=(
             Guard.enum_attr_equals("role", "result"),
-            Guard.value_type("value", _I32_MATRIX_ACCUMULATOR),
-            Guard.value_type("view", TypePattern.view("i32", dims=(8, 8))),
+            Guard.value_type("value", Vector(element_type, lanes=64)),
+            Guard.value_type("view", TypePattern.view(element_type, dims=(8, 8))),
             Guard.operand_segment_count("indices", 0),
             Guard.i64_array_count("static_indices", 2),
             Guard.i64_array_elements_range("static_indices", 0, 0),

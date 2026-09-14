@@ -67,6 +67,10 @@ typedef uint64_t loom_value_fact_numeric_format_bits_t;
 #define LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I8 (UINT64_C(1) << 37)
 #define LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I6 (UINT64_C(1) << 38)
 #define LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I4 (UINT64_C(1) << 39)
+// Blocks of eight signed 8-bit mantissas sharing one unsigned 8-bit exponent.
+// Each finite value is mantissa * 2^(exponent - 133); exponent 255 denotes NaN.
+// Exponents are payload data, with storage order selected by the schema.
+#define LOOM_VALUE_FACT_NUMERIC_FORMAT_BFP16EBS8 (UINT64_C(1) << 40)
 #define LOOM_VALUE_FACT_NUMERIC_FORMAT_ALL                                    \
   (LOOM_VALUE_FACT_NUMERIC_FORMAT_F64 | LOOM_VALUE_FACT_NUMERIC_FORMAT_F32 |  \
    LOOM_VALUE_FACT_NUMERIC_FORMAT_TF32 | LOOM_VALUE_FACT_NUMERIC_FORMAT_F16 | \
@@ -96,7 +100,8 @@ typedef uint64_t loom_value_fact_numeric_format_bits_t;
    LOOM_VALUE_FACT_NUMERIC_FORMAT_CODEBOOK_INDEX |                            \
    LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I8 |                                  \
    LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I6 |                                  \
-   LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I4)
+   LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I4 |                                  \
+   LOOM_VALUE_FACT_NUMERIC_FORMAT_BFP16EBS8)
 
 typedef uint64_t loom_value_fact_numeric_format_flags_t;
 
@@ -117,6 +122,9 @@ enum loom_numeric_format_kind_e {
   LOOM_NUMERIC_FORMAT_KIND_TERNARY = 6,
   // Sign-only payload.
   LOOM_NUMERIC_FORMAT_KIND_SIGN_BIT = 7,
+  // Signed mantissas with an exponent shared by a fixed-size block. Finite
+  // block values can exceed the range of a directly represented scalar type.
+  LOOM_NUMERIC_FORMAT_KIND_BLOCK_FLOAT = 8,
 };
 typedef uint8_t loom_numeric_format_kind_t;
 
@@ -172,10 +180,10 @@ typedef struct loom_numeric_format_info_t {
   // Broad semantic payload category.
   loom_numeric_format_kind_t kind;
 
-  // Floating-point family, or NONE for non-floating-point formats.
+  // Scalar floating-point family, or NONE for other numeric representations.
   loom_numeric_float_family_t float_family;
 
-  // Encoded payload bit count.
+  // Per-element encoded payload bit count, excluding shared block fields.
   uint8_t storage_bit_count;
 
   // Encoded exponent bit count for floating-point formats.

@@ -12,13 +12,16 @@
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/vector/fragment.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
+#include "loom/target/arch/amd/xdna/aie2p/lower/encode.h"
 #include "loom/util/fact_table.h"
 
 typedef enum loom_aie2p_matrix_plan_kind_e {
-  LOOM_AIE2P_MATRIX_PLAN_MMA_I8_M8N8K8 = 0x100,
-  LOOM_AIE2P_MATRIX_PLAN_STORE_I32_M8N8 = 0x101,
+  LOOM_AIE2P_MATRIX_PLAN_MMA_M8N8K8 = 0x100,
+  LOOM_AIE2P_MATRIX_PLAN_STORE_32_M8N8 = 0x101,
+  LOOM_AIE2P_MATRIX_PLAN_ENCODE_BFP = 0x102,
 } loom_aie2p_matrix_plan_kind_t;
 
 typedef enum loom_aie2p_matrix_operation_e {
@@ -32,7 +35,8 @@ typedef enum loom_aie2p_matrix_numeric_mode_e {
   LOOM_AIE2P_MATRIX_NUMERIC_U8S8 = 1,
   LOOM_AIE2P_MATRIX_NUMERIC_S8U8 = 2,
   LOOM_AIE2P_MATRIX_NUMERIC_U8U8 = 3,
-  LOOM_AIE2P_MATRIX_NUMERIC_COUNT_ = 4,
+  LOOM_AIE2P_MATRIX_NUMERIC_BFP = 4,
+  LOOM_AIE2P_MATRIX_NUMERIC_COUNT_ = 5,
 } loom_aie2p_matrix_numeric_mode_t;
 
 typedef enum loom_aie2p_matrix_rejection_bit_e {
@@ -42,13 +46,13 @@ typedef enum loom_aie2p_matrix_rejection_bit_e {
 } loom_aie2p_matrix_rejection_bit_t;
 
 typedef struct loom_aie2p_matrix_mma_plan_t {
-  // Descriptor materializing the AIE integer matrix control word.
+  // Descriptor materializing the AIE matrix control word.
   loom_low_lower_resolved_descriptor_t control_constant;
-  // Native 8x8x8 integer matrix operation packet.
+  // Native 8x8x8 matrix operation packet.
   loom_low_lower_resolved_descriptor_t operation_descriptor;
   // Whether the packet starts or extends an accumulator.
   loom_aie2p_matrix_operation_t operation;
-  // Exact AIE integer matrix control word.
+  // Exact AIE matrix control word.
   uint16_t control;
 } loom_aie2p_matrix_mma_plan_t;
 
@@ -57,59 +61,69 @@ typedef struct loom_aie2p_matrix_store_plan_t {
   loom_low_lower_resolved_descriptor_t store;
 } loom_aie2p_matrix_store_plan_t;
 
-typedef struct loom_aie2p_integer_matrix_mode_t {
+typedef struct loom_aie2p_matrix_mode_t {
   // Generated descriptor ordinal for each matrix operation kind.
   uint32_t descriptor_ordinals[LOOM_AIE2P_MATRIX_OPERATION_COUNT_];
   // Exact signedness and 8x8x8 B-mode control word.
   uint16_t control;
-} loom_aie2p_integer_matrix_mode_t;
+} loom_aie2p_matrix_mode_t;
 
-static const loom_aie2p_integer_matrix_mode_t
-    loom_aie2p_integer_matrix_modes[LOOM_AIE2P_MATRIX_NUMERIC_COUNT_] = {
-        [LOOM_AIE2P_MATRIX_NUMERIC_S8S8] =
-            {
-                .descriptor_ordinals =
-                    {
-                        [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] =
-                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_MULTIPLY_S8S8_M8N8K8_CONFIGURED,
-                        [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] =
-                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_ACCUMULATE_S8S8_M8N8K8_CONFIGURED,
-                    },
-                .control = 776,
-            },
-        [LOOM_AIE2P_MATRIX_NUMERIC_U8S8] =
-            {
-                .descriptor_ordinals =
-                    {
-                        [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] =
-                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_MULTIPLY_U8S8_M8N8K8_CONFIGURED,
-                        [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] =
-                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_ACCUMULATE_U8S8_M8N8K8_CONFIGURED,
-                    },
-                .control = 264,
-            },
-        [LOOM_AIE2P_MATRIX_NUMERIC_S8U8] =
-            {
-                .descriptor_ordinals =
-                    {
-                        [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] =
-                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_MULTIPLY_S8U8_M8N8K8_CONFIGURED,
-                        [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] =
-                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_ACCUMULATE_S8U8_M8N8K8_CONFIGURED,
-                    },
-                .control = 520,
-            },
-        [LOOM_AIE2P_MATRIX_NUMERIC_U8U8] =
-            {
-                .descriptor_ordinals =
-                    {
-                        [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] =
-                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_MULTIPLY_U8U8_M8N8K8_CONFIGURED,
-                        [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] =
-                            AIE2P_CORE_DESCRIPTOR_REF_MATRIX_ACCUMULATE_U8U8_M8N8K8_CONFIGURED,
-                    },
-                .control = 8,
-            },
+static const loom_aie2p_matrix_mode_t loom_aie2p_matrix_modes[LOOM_AIE2P_MATRIX_NUMERIC_COUNT_] = {
+    [LOOM_AIE2P_MATRIX_NUMERIC_S8S8] =
+        {
+            .descriptor_ordinals =
+                {
+                    [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] =
+                        AIE2P_CORE_DESCRIPTOR_REF_MATRIX_MULTIPLY_S8S8_M8N8K8_CONFIGURED,
+                    [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] =
+                        AIE2P_CORE_DESCRIPTOR_REF_MATRIX_ACCUMULATE_S8S8_M8N8K8_CONFIGURED,
+                },
+            .control = 776,
+        },
+    [LOOM_AIE2P_MATRIX_NUMERIC_U8S8] =
+        {
+            .descriptor_ordinals =
+                {
+                    [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] =
+                        AIE2P_CORE_DESCRIPTOR_REF_MATRIX_MULTIPLY_U8S8_M8N8K8_CONFIGURED,
+                    [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] =
+                        AIE2P_CORE_DESCRIPTOR_REF_MATRIX_ACCUMULATE_U8S8_M8N8K8_CONFIGURED,
+                },
+            .control = 264,
+        },
+    [LOOM_AIE2P_MATRIX_NUMERIC_S8U8] =
+        {
+            .descriptor_ordinals =
+                {
+                    [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] =
+                        AIE2P_CORE_DESCRIPTOR_REF_MATRIX_MULTIPLY_S8U8_M8N8K8_CONFIGURED,
+                    [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] =
+                        AIE2P_CORE_DESCRIPTOR_REF_MATRIX_ACCUMULATE_S8U8_M8N8K8_CONFIGURED,
+                },
+            .control = 520,
+        },
+    [LOOM_AIE2P_MATRIX_NUMERIC_U8U8] =
+        {
+            .descriptor_ordinals =
+                {
+                    [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] =
+                        AIE2P_CORE_DESCRIPTOR_REF_MATRIX_MULTIPLY_U8U8_M8N8K8_CONFIGURED,
+                    [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] =
+                        AIE2P_CORE_DESCRIPTOR_REF_MATRIX_ACCUMULATE_U8U8_M8N8K8_CONFIGURED,
+                },
+            .control = 8,
+        },
+    [LOOM_AIE2P_MATRIX_NUMERIC_BFP] =
+        {
+            .descriptor_ordinals =
+                {
+                    [LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY] =
+                        AIE2P_CORE_DESCRIPTOR_REF_MATRIX_MULTIPLY_BFP16EBS8_M8N8K8,
+                    [LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE] =
+                        AIE2P_CORE_DESCRIPTOR_REF_MATRIX_ACCUMULATE_BFP16EBS8_M8N8K8,
+                },
+            .control = 780,
+        },
 };
 
 static loom_low_lower_resolved_descriptor_t loom_aie2p_matrix_descriptor(
@@ -122,6 +136,11 @@ static loom_low_lower_resolved_descriptor_t loom_aie2p_matrix_descriptor(
 static bool loom_aie2p_matrix_numeric_mode(
     loom_contract_numeric_type_t lhs, loom_contract_numeric_type_t rhs,
     loom_aie2p_matrix_numeric_mode_t* out_mode) {
+  if (lhs == LOOM_CONTRACT_NUMERIC_BFP16EBS8 &&
+      rhs == LOOM_CONTRACT_NUMERIC_BFP16EBS8) {
+    *out_mode = LOOM_AIE2P_MATRIX_NUMERIC_BFP;
+    return true;
+  }
   if ((lhs != LOOM_CONTRACT_NUMERIC_I8 && lhs != LOOM_CONTRACT_NUMERIC_U8) ||
       (rhs != LOOM_CONTRACT_NUMERIC_I8 && rhs != LOOM_CONTRACT_NUMERIC_U8)) {
     return false;
@@ -161,6 +180,12 @@ static bool loom_aie2p_matrix_encoded_operand_is_native_unscaled(
   interpretation.payload_packing = 0;
   interpretation.payload_register_count = 0;
   interpretation.payload_element_count = 0;
+  if (source_schema.element_format ==
+          LOOM_VALUE_FACT_NUMERIC_FORMAT_BFP16EBS8 &&
+      interpretation.rounding_policy ==
+          LOOM_VALUE_FACT_ROUNDING_POLICY_FLUSH_SUBNORMAL) {
+    interpretation.rounding_policy = 0;
+  }
   return source_schema.element_format != 0 &&
          source_schema.payload_packing ==
              LOOM_VALUE_FACT_PAYLOAD_PACKING_TARGET_FRAGMENT &&
@@ -176,8 +201,14 @@ static loom_aie2p_matrix_rejection_bit_t loom_aie2p_matrix_request_rejection(
       request->shape.block_count != 1 || request->k_group_size != 8) {
     return LOOM_AIE2P_MATRIX_REJECTION_SHAPE;
   }
+  const bool is_bfp =
+      request->lhs.numeric_type == LOOM_CONTRACT_NUMERIC_BFP16EBS8;
+  const loom_contract_numeric_type_t accumulator_type =
+      is_bfp ? LOOM_CONTRACT_NUMERIC_F32 : LOOM_CONTRACT_NUMERIC_I32;
+  const uint16_t operand_register_count = is_bfp ? 18 : 16;
   if (request->kind != LOOM_CONTRACT_KIND_MATRIX_MULTIPLY ||
-      request->arithmetic != LOOM_CONTRACT_ARITHMETIC_INTEGER_DOT ||
+      request->arithmetic != (is_bfp ? LOOM_CONTRACT_ARITHMETIC_MIXED_DOT
+                                     : LOOM_CONTRACT_ARITHMETIC_INTEGER_DOT) ||
       request->capability_class != LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX ||
       request->lhs.role != LOOM_CONTRACT_OPERAND_ROLE_LHS ||
       request->rhs.role != LOOM_CONTRACT_OPERAND_ROLE_RHS ||
@@ -186,10 +217,10 @@ static loom_aie2p_matrix_rejection_bit_t loom_aie2p_matrix_request_rejection(
       !loom_aie2p_matrix_numeric_mode(request->lhs.numeric_type,
                                       request->rhs.numeric_type,
                                       out_numeric_mode) ||
-      request->accumulator.numeric_type != LOOM_CONTRACT_NUMERIC_I32 ||
-      request->result.numeric_type != LOOM_CONTRACT_NUMERIC_I32 ||
-      request->lhs.payload_register_count != 16 ||
-      request->rhs.payload_register_count != 16 ||
+      request->accumulator.numeric_type != accumulator_type ||
+      request->result.numeric_type != accumulator_type ||
+      request->lhs.payload_register_count != operand_register_count ||
+      request->rhs.payload_register_count != operand_register_count ||
       request->accumulator.payload_register_count != 64 ||
       request->result.payload_register_count != 64 ||
       request->lhs.payload_element_count != 64 ||
@@ -230,24 +261,15 @@ static iree_string_view_t loom_aie2p_matrix_rejection_constraint(
 }
 
 static bool loom_aie2p_matrix_init_is_zero(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    const loom_op_t* source_op) {
-  const loom_value_t* init_value =
-      loom_module_value(module, loom_vector_mma_init(source_op));
-  if (loom_value_is_block_arg(init_value)) {
-    return false;
-  }
-  const loom_op_t* fragment_op = loom_value_def_op(init_value);
-  if (fragment_op == NULL || !loom_vector_fragment_isa(fragment_op)) {
-    return false;
-  }
-  loom_value_facts_t element_facts = loom_value_facts_unknown();
-  return loom_value_facts_query_all_equal_element(
+    const loom_value_fact_table_t* fact_table, const loom_op_t* source_op) {
+  loom_vector_fragment_fact_t fragment;
+  return loom_vector_fragment_fact_query_value_facts(
              &fact_table->context,
-             loom_value_fact_table_lookup(
-                 fact_table, loom_vector_fragment_data(fragment_op)),
-             &element_facts) &&
-         loom_value_facts_is_zero(element_facts);
+             loom_value_fact_table_lookup(fact_table,
+                                          loom_vector_mma_init(source_op)),
+             &fragment) &&
+         iree_any_bit_set(fragment.flags,
+                          LOOM_VECTOR_FRAGMENT_FACT_FLAG_ALL_ZERO);
 }
 
 static loom_contract_vector_mma_options_t loom_aie2p_matrix_options(void) {
@@ -298,15 +320,14 @@ iree_status_t loom_aie2p_descriptor_matrix_query(
   }
 
   const loom_aie2p_matrix_operation_t operation =
-      loom_aie2p_matrix_init_is_zero(environment->module,
-                                     environment->fact_table, source_op)
+      loom_aie2p_matrix_init_is_zero(environment->fact_table, source_op)
           ? LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY
           : LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE;
   out_result->outcome = LOOM_TARGET_CONTRACT_QUERY_LEGAL;
   out_result->selected_descriptor =
-      loom_aie2p_matrix_descriptor(environment->descriptor_set,
-                                   loom_aie2p_integer_matrix_modes[numeric_mode]
-                                       .descriptor_ordinals[operation])
+      loom_aie2p_matrix_descriptor(
+          environment->descriptor_set,
+          loom_aie2p_matrix_modes[numeric_mode].descriptor_ordinals[operation])
           .descriptor;
   return iree_ok_status();
 }
@@ -347,8 +368,7 @@ static iree_status_t loom_aie2p_select_matrix_mma(
   }
 
   const loom_aie2p_matrix_operation_t operation =
-      loom_aie2p_matrix_init_is_zero(loom_low_lower_context_module(context),
-                                     loom_low_lower_context_fact_table(context),
+      loom_aie2p_matrix_init_is_zero(loom_low_lower_context_fact_table(context),
                                      source_op)
           ? LOOM_AIE2P_MATRIX_OPERATION_MULTIPLY
           : LOOM_AIE2P_MATRIX_OPERATION_ACCUMULATE;
@@ -361,13 +381,12 @@ static iree_status_t loom_aie2p_select_matrix_mma(
       .control_constant = loom_aie2p_matrix_descriptor(
           descriptor_set, AIE2P_CORE_DESCRIPTOR_REF_CONSTANT_I32_MOVA),
       .operation_descriptor = loom_aie2p_matrix_descriptor(
-          descriptor_set, loom_aie2p_integer_matrix_modes[numeric_mode]
-                              .descriptor_ordinals[operation]),
+          descriptor_set,
+          loom_aie2p_matrix_modes[numeric_mode].descriptor_ordinals[operation]),
       .operation = operation,
-      .control = loom_aie2p_integer_matrix_modes[numeric_mode].control,
+      .control = loom_aie2p_matrix_modes[numeric_mode].control,
   };
-  *out_plan =
-      loom_low_lower_plan_make(LOOM_AIE2P_MATRIX_PLAN_MMA_I8_M8N8K8, plan);
+  *out_plan = loom_low_lower_plan_make(LOOM_AIE2P_MATRIX_PLAN_MMA_M8N8K8, plan);
   return iree_ok_status();
 }
 
@@ -376,15 +395,22 @@ static bool loom_aie2p_matrix_fragment_store_matches(
     const loom_op_t* source_op) {
   static const int64_t kValueShape[] = {64};
   static const int64_t kViewShape[] = {8, 8};
+  const loom_scalar_type_t element_type =
+      loom_type_element_type(loom_module_value_type(
+          module, loom_vector_fragment_store_value(source_op)));
+  if (element_type != LOOM_SCALAR_TYPE_I32 &&
+      element_type != LOOM_SCALAR_TYPE_F32) {
+    return false;
+  }
   if (loom_vector_fragment_store_role(source_op) != LOOM_VECTOR_ROLE_RESULT ||
       loom_vector_fragment_store_indices(source_op).count != 0 ||
       loom_vector_fragment_store_blocks_is_present(source_op) ||
       !loom_aie2p_matrix_source_type_is(
           module, loom_vector_fragment_store_value(source_op), LOOM_TYPE_VECTOR,
-          LOOM_SCALAR_TYPE_I32, 1, kValueShape) ||
+          element_type, 1, kValueShape) ||
       !loom_aie2p_matrix_source_type_is(
           module, loom_vector_fragment_store_view(source_op), LOOM_TYPE_VIEW,
-          LOOM_SCALAR_TYPE_I32, 2, kViewShape)) {
+          element_type, 2, kViewShape)) {
     return false;
   }
   const loom_i64_array_t static_indices = loom_attr_as_i64_array(
@@ -422,19 +448,26 @@ static iree_status_t loom_aie2p_select_matrix_store(
       loom_low_lower_context_descriptor_set(context),
       AIE2P_CORE_DESCRIPTOR_REF_STORE_ACCUMULATOR_INDEXED_IMMEDIATE);
   *out_plan =
-      loom_low_lower_plan_make(LOOM_AIE2P_MATRIX_PLAN_STORE_I32_M8N8, plan);
+      loom_low_lower_plan_make(LOOM_AIE2P_MATRIX_PLAN_STORE_32_M8N8, plan);
   return iree_ok_status();
 }
 
 bool loom_aie2p_matrix_plan_isa(loom_low_lower_plan_t plan) {
-  return plan.id == LOOM_AIE2P_MATRIX_PLAN_MMA_I8_M8N8K8 ||
-         plan.id == LOOM_AIE2P_MATRIX_PLAN_STORE_I32_M8N8;
+  return plan.id == LOOM_AIE2P_MATRIX_PLAN_ENCODE_BFP ||
+         plan.id == LOOM_AIE2P_MATRIX_PLAN_MMA_M8N8K8 ||
+         plan.id == LOOM_AIE2P_MATRIX_PLAN_STORE_32_M8N8;
 }
 
 iree_status_t loom_aie2p_select_matrix_plan(loom_low_lower_context_t* context,
                                             const loom_op_t* source_op,
                                             loom_low_lower_plan_t* out_plan) {
   *out_plan = loom_low_lower_plan_empty();
+  if (loom_vector_encode_isa(source_op) &&
+      loom_aie2p_encode_matches(context, source_op)) {
+    *out_plan =
+        loom_low_lower_plan_make(LOOM_AIE2P_MATRIX_PLAN_ENCODE_BFP, NULL);
+    return iree_ok_status();
+  }
   if (loom_vector_mma_isa(source_op)) {
     return loom_aie2p_select_matrix_mma(context, source_op, out_plan);
   }
@@ -448,7 +481,11 @@ void loom_aie2p_mark_matrix_plan_demands(loom_low_lower_context_t* context,
                                          const loom_op_t* source_op,
                                          loom_low_lower_plan_t plan) {
   switch ((loom_aie2p_matrix_plan_kind_t)plan.id) {
-    case LOOM_AIE2P_MATRIX_PLAN_MMA_I8_M8N8K8: {
+    case LOOM_AIE2P_MATRIX_PLAN_ENCODE_BFP:
+      loom_low_lower_require_source_value_storage(
+          context, loom_vector_encode_source(source_op));
+      return;
+    case LOOM_AIE2P_MATRIX_PLAN_MMA_M8N8K8: {
       const loom_aie2p_matrix_mma_plan_t* matrix_plan =
           (const loom_aie2p_matrix_mma_plan_t*)plan.target_data;
       loom_low_lower_require_source_value_storage(
@@ -461,7 +498,7 @@ void loom_aie2p_mark_matrix_plan_demands(loom_low_lower_context_t* context,
       }
       return;
     }
-    case LOOM_AIE2P_MATRIX_PLAN_STORE_I32_M8N8:
+    case LOOM_AIE2P_MATRIX_PLAN_STORE_32_M8N8:
       loom_low_lower_require_source_value_storage(
           context, loom_vector_fragment_store_value(source_op));
       loom_low_lower_require_source_value_storage(
@@ -478,7 +515,10 @@ void loom_aie2p_describe_matrix_plan(loom_low_lower_context_t* context,
   (void)source_op;
   *out_report = (loom_low_lower_plan_report_t){0};
   switch ((loom_aie2p_matrix_plan_kind_t)plan.id) {
-    case LOOM_AIE2P_MATRIX_PLAN_MMA_I8_M8N8K8: {
+    case LOOM_AIE2P_MATRIX_PLAN_ENCODE_BFP:
+      out_report->plan_key = IREE_SV("encode.bf16.bfp16ebs8");
+      return;
+    case LOOM_AIE2P_MATRIX_PLAN_MMA_M8N8K8: {
       const loom_aie2p_matrix_mma_plan_t* matrix_plan =
           (const loom_aie2p_matrix_mma_plan_t*)plan.target_data;
       out_report->plan_key = loom_low_descriptor_set_string(
@@ -486,8 +526,8 @@ void loom_aie2p_describe_matrix_plan(loom_low_lower_context_t* context,
           matrix_plan->operation_descriptor.descriptor->mnemonic_string_offset);
       return;
     }
-    case LOOM_AIE2P_MATRIX_PLAN_STORE_I32_M8N8:
-      out_report->plan_key = IREE_SV("matrix.fragment-store.i32.m8n8");
+    case LOOM_AIE2P_MATRIX_PLAN_STORE_32_M8N8:
+      out_report->plan_key = IREE_SV("matrix.fragment-store.32.m8n8");
       return;
   }
   IREE_ASSERT_UNREACHABLE("AIE2P matrix report has unknown plan kind");
@@ -587,11 +627,13 @@ iree_status_t loom_aie2p_emit_matrix_plan(loom_low_lower_context_t* context,
                                           const loom_op_t* source_op,
                                           loom_low_lower_plan_t plan) {
   switch ((loom_aie2p_matrix_plan_kind_t)plan.id) {
-    case LOOM_AIE2P_MATRIX_PLAN_MMA_I8_M8N8K8:
+    case LOOM_AIE2P_MATRIX_PLAN_ENCODE_BFP:
+      return loom_aie2p_emit_encode(context, source_op);
+    case LOOM_AIE2P_MATRIX_PLAN_MMA_M8N8K8:
       return loom_aie2p_emit_matrix_mma(
           context, source_op,
           (const loom_aie2p_matrix_mma_plan_t*)plan.target_data);
-    case LOOM_AIE2P_MATRIX_PLAN_STORE_I32_M8N8:
+    case LOOM_AIE2P_MATRIX_PLAN_STORE_32_M8N8:
       return loom_aie2p_emit_matrix_store(
           context, source_op,
           (const loom_aie2p_matrix_store_plan_t*)plan.target_data);

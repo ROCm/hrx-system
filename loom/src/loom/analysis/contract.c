@@ -152,6 +152,7 @@ uint16_t loom_contract_numeric_bit_width(
     case LOOM_CONTRACT_NUMERIC_U8:
     case LOOM_CONTRACT_NUMERIC_FP8:
     case LOOM_CONTRACT_NUMERIC_BF8:
+    case LOOM_CONTRACT_NUMERIC_BFP16EBS8:
       return 8;
     case LOOM_CONTRACT_NUMERIC_I16:
     case LOOM_CONTRACT_NUMERIC_U16:
@@ -353,6 +354,8 @@ iree_string_view_t loom_contract_numeric_type_name(
       return IREE_SV("f32");
     case LOOM_CONTRACT_NUMERIC_TF32:
       return IREE_SV("tf32");
+    case LOOM_CONTRACT_NUMERIC_BFP16EBS8:
+      return IREE_SV("bfp16ebs8");
     case LOOM_CONTRACT_NUMERIC_F64:
       return IREE_SV("f64");
     case LOOM_CONTRACT_NUMERIC_FP8:

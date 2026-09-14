@@ -684,6 +684,16 @@ static bool loom_low_lower_rule_value_storage_element_format(
   }
   const loom_value_id_t value_id = loom_low_lower_rule_source_value(
       match_context->module, rule_set, source_op, value_ref_index);
+  if (match_context->fact_table != NULL) {
+    loom_value_fact_encoding_summary_t summary = {0};
+    if (loom_value_facts_query_encoding_summary(
+            &match_context->fact_table->context,
+            loom_value_fact_table_lookup(match_context->fact_table, value_id),
+            &summary)) {
+      return summary.storage_schema.encoded_operand.element_format ==
+             expected_format;
+    }
+  }
   const loom_type_t type =
       loom_module_value_type(match_context->module, value_id);
   const loom_fact_context_t* fact_context =

@@ -62,9 +62,12 @@ from loom.target.contracts import (
     ContractCase,
     ContractFragment,
     DescriptorMatrixRule,
+    Guard,
+    RecipeRule,
     ValueAliasRule,
     ValueProject,
     ValueRef,
+    Vector,
 )
 
 
@@ -92,7 +95,18 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             source_op=vector.vector_mma,
             source="vector_mma",
         ),
-        core_rules._matrix_fragment_store_rule(),
+        *(core_rules._matrix_fragment_store_rule(t) for t in ("i32", "f32")),
+        RecipeRule(
+            source_op=vector.vector_encode,
+            guards=(
+                Guard.value_type("source", Vector("bf16", lanes=64)),
+                Guard.value_type("result", Vector("i8", lanes=72)),
+                Guard.operand_segment_count("auxiliary", 0),
+                Guard.value_storage_element_format(
+                    "schema", "LOOM_VALUE_FACT_NUMERIC_FORMAT_BFP16EBS8"
+                ),
+            ),
+        ),
         *AIE2P_PACKED_DOT_RULES,
         *AIE2P_REDUCTION_RULES,
         *AIE2P_STRUCTURAL_RULES,

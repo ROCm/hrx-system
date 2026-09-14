@@ -55,6 +55,7 @@ NUMERIC_FORMAT_KEYWORDS = (
     "quant_i8",
     "quant_i6",
     "quant_i4",
+    "bfp16ebs8",
 )
 
 

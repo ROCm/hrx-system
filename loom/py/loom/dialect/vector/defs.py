@@ -1220,6 +1220,7 @@ vector_encode = Op(
         ),
     ],
     verify="loom_vector_encode_verify",
+    facts="loom_vector_encode_facts",
     traits=[PURE, REFINABLE_RESULT_TYPE_REFS],
     format=[
         Ref("source"),

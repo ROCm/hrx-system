@@ -26,6 +26,12 @@ bool loom_contract_numeric_type_from_encoded_format(
     return false;
   }
   switch (info->kind) {
+    case LOOM_NUMERIC_FORMAT_KIND_BLOCK_FLOAT:
+      if (format == LOOM_VALUE_FACT_NUMERIC_FORMAT_BFP16EBS8) {
+        *out_numeric_type = LOOM_CONTRACT_NUMERIC_BFP16EBS8;
+        return true;
+      }
+      return false;
     case LOOM_NUMERIC_FORMAT_KIND_SIGNED_INTEGER:
       switch (info->storage_bit_count) {
         case 4:

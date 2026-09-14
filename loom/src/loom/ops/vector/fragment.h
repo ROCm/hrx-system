@@ -56,6 +56,8 @@ typedef enum loom_vector_fragment_fact_flag_bits_e {
   LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA_VALUE = 1u << 3,
   // The payload was prepared from an exact static source storage schema.
   LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SOURCE_STATIC_SCHEMA = 1u << 4,
+  // Every payload element is integer zero or floating-point positive zero.
+  LOOM_VECTOR_FRAGMENT_FACT_FLAG_ALL_ZERO = 1u << 5,
 } loom_vector_fragment_fact_flag_bits_t;
 
 typedef uint32_t loom_vector_fragment_fact_flags_t;

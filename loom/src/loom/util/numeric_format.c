@@ -9,7 +9,7 @@
 #include "iree/base/internal/math.h"
 
 enum {
-  LOOM_NUMERIC_FORMAT_INFO_COUNT = 40,
+  LOOM_NUMERIC_FORMAT_INFO_COUNT = 41,
 };
 
 #define LOOM_NUMERIC_FORMAT_FLOAT_FLAGS                                 \
@@ -248,6 +248,11 @@ static const loom_numeric_format_info_t
             38, LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I6, 6, -32),
         LOOM_NUMERIC_FORMAT_OFFSET_BINARY_ROW(
             39, LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I4, 4, -8),
+        LOOM_NUMERIC_FORMAT_INFO_ROW(
+            40, LOOM_VALUE_FACT_NUMERIC_FORMAT_BFP16EBS8,
+            LOOM_NUMERIC_FORMAT_KIND_BLOCK_FLOAT,
+            LOOM_NUMERIC_FLOAT_FAMILY_NONE, 8, 8, 8, LOOM_SCALAR_TYPE_NONE,
+            LOOM_NUMERIC_FORMAT_FINITE_NAN_UNSIGNED_ZERO_FLAGS),
 };
 static_assert(sizeof(loom_numeric_format_info_t) == 16,
               "numeric format rows must remain padding-free");

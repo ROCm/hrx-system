@@ -96,3 +96,12 @@ func.def @semantic_match_assumption(%schema: encoding<schema>) {
   test.use %schema2 : encoding<schema>
   func.return
 }
+
+// ====
+
+// Block-floating exponents are part of the encoded payload, not auxiliary SSA
+// scales. The numerical format and conversion policy survive serialization.
+func.def @block_float_schema() -> (encoding<schema>) {
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  func.return %schema : encoding<schema>
+}

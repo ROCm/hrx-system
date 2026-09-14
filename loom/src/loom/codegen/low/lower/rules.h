@@ -645,7 +645,8 @@ typedef enum loom_low_lower_guard_kind_e {
   // Source value facts must prove every integer element is >= every integer
   // element in the other source value facts.
   LOOM_LOW_LOWER_GUARD_VALUE_I64_RANGE_GE = 24,
-  // Source value type storage schema element format must match u64.
+  // Source value's retained schema or type storage element format must match
+  // u64.
   LOOM_LOW_LOWER_GUARD_VALUE_STORAGE_ELEMENT_FORMAT = 25,
   // Packed integer storage payload bits must equal source lane count times a
   // source i64 width attribute.

@@ -299,10 +299,12 @@ loom_cc_library(
   NAME
     lower
   HDRS
+    "lower/encode.h"
     "lower/lower.h"
     "lower/matrix.h"
     "lower/storage.h"
   SRCS
+    "lower/encode.c"
     "lower/matrix.c"
     "lower/registry.c"
     "lower/storage.c"
@@ -468,6 +470,7 @@ loom_check_test_suite(
     "test/source_low/fused_packet_memory.loom-test"
     "test/source_low/index_conversion.loom-test"
     "test/source_low/lookup_table.loom-test"
+    "test/source_low/matrix_bfp.loom-test"
     "test/source_low/matrix_multiply.loom-test"
     "test/source_low/memory_scalar_addressing.loom-test"
     "test/source_low/numeric_conversion_f16.loom-test"

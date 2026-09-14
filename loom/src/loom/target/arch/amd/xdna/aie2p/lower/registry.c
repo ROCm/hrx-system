@@ -10,6 +10,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/contracts/core.h"
 #include "loom/target/arch/amd/xdna/aie2p/contracts/core_lower_rules.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
+#include "loom/target/arch/amd/xdna/aie2p/lower/encode.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/matrix.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/storage.h"
@@ -111,6 +112,24 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
   }
   return loom_low_lower_emit_source_type_unsupported(
       context, source_op, IREE_SV("source"), source_type);
+}
+
+static iree_status_t loom_aie2p_map_value(void* user_data,
+                                          loom_low_lower_context_t* context,
+                                          const loom_op_t* source_op,
+                                          loom_value_id_t source_value_id,
+                                          loom_type_t source_type,
+                                          loom_type_t* out_low_type) {
+  if (loom_type_is_vector(source_type) && loom_type_rank(source_type) == 1 &&
+      loom_type_element_type(source_type) == LOOM_SCALAR_TYPE_I8 &&
+      loom_type_dim_static_size_at(source_type, 0) == 72 &&
+      loom_aie2p_value_has_bfp_storage(
+          loom_low_lower_context_fact_table(context), source_value_id)) {
+    return loom_low_lower_make_register_type(
+        context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MEXA, 1, out_low_type);
+  }
+  return loom_aie2p_map_type(user_data, context, source_op, source_type,
+                             out_low_type);
 }
 
 static iree_status_t loom_aie2p_map_argument(
@@ -216,6 +235,7 @@ static const loom_low_lower_policy_t kAie2pCoreLowLowerPolicy = {
             .user_data = NULL,
         },
     .map_type = {.fn = loom_aie2p_map_type, .user_data = NULL},
+    .map_value = {.fn = loom_aie2p_map_value, .user_data = NULL},
     .map_argument = {.fn = loom_aie2p_map_argument, .user_data = NULL},
     .rule_sets =
         {

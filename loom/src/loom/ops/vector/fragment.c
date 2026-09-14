@@ -86,10 +86,13 @@ loom_value_id_t loom_vector_fragment_fact_column_value(
   return fact.shape_value_ids[fact.shape_rank - 1];
 }
 
-static bool loom_vector_fragment_facts_match_contract_except_native_storage(
+static bool loom_vector_fragment_facts_match_contract_except_value_flags(
     loom_vector_fragment_fact_t lhs, loom_vector_fragment_fact_t rhs) {
-  lhs.flags &= ~LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE;
-  rhs.flags &= ~LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE;
+  const loom_vector_fragment_fact_flags_t value_flags =
+      LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE |
+      LOOM_VECTOR_FRAGMENT_FACT_FLAG_ALL_ZERO;
+  lhs.flags &= ~value_flags;
+  rhs.flags &= ~value_flags;
   return loom_vector_fragment_fact_equal(lhs, rhs);
 }
 
@@ -103,8 +106,7 @@ bool loom_vector_fragment_facts_match_accumulator_contract(
                    LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RESULT;
   rhs.role_flags = LOOM_VECTOR_FRAGMENT_ROLE_FLAG_INIT |
                    LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RESULT;
-  return loom_vector_fragment_facts_match_contract_except_native_storage(lhs,
-                                                                         rhs);
+  return loom_vector_fragment_facts_match_contract_except_value_flags(lhs, rhs);
 }
 
 iree_status_t loom_vector_fragment_fact_make_value_facts(
