@@ -1007,3 +1007,23 @@ low.func.def target<test.low.core>(@test_target) @explicit_physical_noncanonical
 
 // ----
 {"format":"loom.low.allocation.v0","function":"explicit_physical_noncanonical_slice","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":2,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":0,"name":"wide","type":"reg<test.explicit32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.explicit32"},"start_point":0,"end_point":1,"unit_count":2,"location":{"kind":"physical_register","base":4,"count":2}},{"index":1,"value":{"id":2,"name":"high","type":"reg<test.explicit32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.explicit32"},"start_point":1,"end_point":2,"unit_count":1,"location":{"kind":"physical_register","base":2,"count":1}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
+// RUN: emit low-allocation-json @loop_swaps_physical_tuples
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @loop_swaps_physical_tuples(%condition: reg<test.i32>, %first: reg<test.explicit32 x2>, %second: reg<test.explicit32 x2>) -> (reg<test.explicit32 x2>, reg<test.explicit32 x2>) asm {
+  low.br ^loop(%first: reg<test.explicit32 x2>, %second: reg<test.explicit32 x2>)
+^loop(%lhs: reg<test.explicit32 x2>, %rhs: reg<test.explicit32 x2>):
+  low.cond_br %condition, ^body, ^exit : reg<test.i32>
+^body:
+  // ERROR@+1: BACKEND/005 {function_name="loop_swaps_physical_tuples", value_class="test.explicit32", budget="4", peak="1", failure_code="parallel-move-no-scratch-unit"}
+  low.br ^loop(%rhs: reg<test.explicit32 x2>, %lhs: reg<test.explicit32 x2>)
+^exit:
+  return %lhs, %rhs
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"loop_swaps_physical_tuples","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":5,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":1,"name":"first","type":"reg<test.explicit32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.explicit32"},"start_point":0,"end_point":1,"unit_count":2,"location":{"kind":"physical_register","base":4,"count":2}},{"index":1,"value":{"id":2,"name":"second","type":"reg<test.explicit32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.explicit32"},"start_point":0,"end_point":1,"unit_count":2,"location":{"kind":"physical_register","base":5,"count":2}},{"index":2,"value":{"id":0,"name":"condition","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":6,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}},{"index":3,"value":{"id":5,"name":"lhs","type":"reg<test.explicit32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.explicit32"},"start_point":2,"end_point":7,"unit_count":2,"location":{"kind":"physical_register","base":4,"count":2}},{"index":4,"value":{"id":6,"name":"rhs","type":"reg<test.explicit32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.explicit32"},"start_point":2,"end_point":7,"unit_count":2,"location":{"kind":"physical_register","base":5,"count":2}}],"spill_plans":[],"copy_decisions":[],"remarks":[],"failure":{"code":"parallel-move-no-scratch-unit","blocking_kind":"unknown","value":null,"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.explicit32"},"start_point":null,"end_point":null,"required_units":1,"budget_units":4,"peak_live_units":1,"location":{"kind":"unassigned","base":null,"count":0},"conflict":null}}

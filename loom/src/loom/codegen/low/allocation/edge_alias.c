@@ -112,6 +112,10 @@ loom_low_allocation_edge_alias_destination_used_after_candidate_definition(
   const loom_value_t* candidate_value =
       loom_module_value(context->placement->module, candidate_value_id);
   if (loom_value_is_block_arg(candidate_value)) {
+    // Block arguments are defined simultaneously. A transfer on one incoming
+    // edge does not establish equal values in the destination block.
+    *out_used_after = loom_value_def_block(candidate_value) ==
+                      loom_value_def_block(destination_value);
     return iree_ok_status();
   }
   const loom_op_t* candidate_op = loom_value_def_op(candidate_value);
