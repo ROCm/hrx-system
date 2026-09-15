@@ -26,7 +26,68 @@ bazel_dep(name = "catch2", version = "3.13.0", dev_dependency = True)
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
 rocm_repository = use_repo_rule("//build_tools/third_party/rocm:repository.bzl", "rocm_repository")
+
+# Narrow syscall-header snapshots; no kernel or driver runtime is built.
+
+http_archive(
+    name = "libdrm_headers",
+    build_file = "//build_tools/third_party/linux_uapi:libdrm_headers.BUILD.bazel",
+    sha256 = "ac5e74d157830eb8bee44c6a6bf3ad49774ef0dd2a72bdad74a8f20308b52a95",
+    strip_prefix = "libdrm-2.4.134",
+    url = "https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz",
+)
+
+http_file(
+    name = "linux_kfd_ioctl_header",
+    downloaded_file_path = "linux/kfd_ioctl.h",
+    sha256 = "db48398039c14702df2b51b2461d80d36f7160479d45700b7e826051b1d2a997",
+    url = "https://raw.githubusercontent.com/torvalds/linux/f6e7b42bf05b2427fb8a7a1d1c387a86638bb413/include/uapi/linux/kfd_ioctl.h",
+)
+
+http_file(
+    name = "linux_kfd_sysfs_header",
+    downloaded_file_path = "linux/kfd_sysfs.h",
+    sha256 = "1f26e1ea4a679b80605a4da221bc55e9f570f94f8eeccc53fb826dd0a7dedb00",
+    url = "https://raw.githubusercontent.com/torvalds/linux/f6e7b42bf05b2427fb8a7a1d1c387a86638bb413/include/uapi/linux/kfd_sysfs.h",
+)
+
+http_file(
+    name = "linux_const_header",
+    downloaded_file_path = "linux/const.h",
+    sha256 = "806c87c44e0a1a267b996c669ef36faeec94fee46bc4513f0d332d2169718855",
+    url = "https://raw.githubusercontent.com/torvalds/linux/f6e7b42bf05b2427fb8a7a1d1c387a86638bb413/include/uapi/linux/const.h",
+)
+
+http_file(
+    name = "linux_stddef_header",
+    downloaded_file_path = "linux/stddef.h",
+    sha256 = "3703ea363b0f4d3b75a3a1f59b7daaa0b81f2e18cc459fedd6b1df331e8662b8",
+    url = "https://raw.githubusercontent.com/torvalds/linux/f6e7b42bf05b2427fb8a7a1d1c387a86638bb413/include/uapi/linux/stddef.h",
+)
+
+http_file(
+    name = "linux_xdna_header",
+    downloaded_file_path = "drm/amdxdna_accel.h",
+    sha256 = "30bb4087cfc051c9175de135c16e8c3af7d867e9789b803727369fcc7ef18765",
+    url = "https://raw.githubusercontent.com/amd/xdna-driver/025503bab93a2f347c07a878cf066c05d7662ae0/include/uapi/drm/amdxdna_accel.h",
+)
+
+http_file(
+    name = "amdf_wkmi_header",
+    downloaded_file_path = "wkmi.h",
+    sha256 = "9b76c44ae9898ec070bf10dee9564f24f33434d574b3c4bf6e0b707e6b6786f6",
+    url = "https://raw.githubusercontent.com/ROCm/rocm-systems/85196955cb4342c047f165d64c64c15a0aa5ab1c/shared/amdgpu-windows-interop/wkmi/wkmi.h",
+)
+
+http_file(
+    name = "amdf_wkmi_library",
+    downloaded_file_path = "wkmi.lib",
+    sha256 = "0264bd496f9f6ed71780e137a999963c6254bb2d592a8d3899d6b823c810f89f",
+    url = "https://therock-dvc.s3.amazonaws.com/rocm-systems/files/md5/5d/b2da7799ad342700df22f594012f70",
+)
 
 http_archive(
     name = "spirv_headers",

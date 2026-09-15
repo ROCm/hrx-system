@@ -1,0 +1,31 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//experimental/xdna:build_defs.bzl", "xdna_cc_benchmark")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+xdna_cc_benchmark(
+    name = "execution_benchmark",
+    srcs = [
+        "execution_benchmark.cc",
+        "//libamdf/cts/util:linked_provider.cc",
+    ],
+    deps = [
+        "//experimental/xdna:executable",
+        "//experimental/xdna:prepared_command",
+        "//libamdf:amdf",
+        "//libamdf:headers",
+        "//libamdf/cts/util:device_cache",
+        "//libamdf/cts/util:provider_headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/aie2p:npu2",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:mul_i32",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:mul_i32_npu4",
+    ],
+)

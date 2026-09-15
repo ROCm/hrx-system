@@ -155,6 +155,7 @@ active.""",
   python dev.py bazel configure
   python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON
   python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=pinned
+  python dev.py bazel configure -DAMDF_BUILD=ON
   python dev.py bazel configure -DLOOM_TARGET_AMDGPU=ON
   python dev.py bazel configure --importer-env tilelang
   python dev.py bazel configure --importer-env mlir
@@ -174,6 +175,7 @@ without adding frontend packages to the base module lock.""",
   python dev.py cmake configure -DCMAKE_BUILD_TYPE=Debug
   python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON -DLIBHRX_BUILD=OFF
   python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
+  python dev.py cmake configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
   python dev.py cmake configure --importer-env tilelang
   python dev.py cmake configure --importer-env mlir
   python dev.py --cmake-build-dir build/cmake-asan cmake configure -DIREE_ENABLE_ASAN=ON
@@ -597,6 +599,7 @@ such as `//runtime/src/iree/base/...`, not `:target`.
 iree-bazel-configure
 iree-bazel-configure -DIREE_HAL_DRIVER_AMDGPU=ON
 iree-bazel-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=pinned
+iree-bazel-configure -DAMDF_BUILD=ON
 iree-bazel-configure --//runtime/config/hal:drivers=amdgpu,task --repo_env=IREE_ROCM_PATH=/opt/rocm --repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned
 iree-bazel-build [targets...]
 iree-bazel-test [targets...]
@@ -631,6 +634,7 @@ iree-cmake-configure --fresh
 iree-cmake-configure --fresh -GNinja
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
+iree-cmake-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF
 iree-cmake-build hrx::hrx
 iree-cmake-test -R hrx

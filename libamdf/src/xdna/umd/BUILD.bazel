@@ -1,0 +1,64 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+amdf_cc_library(
+    name = "device",
+    hdrs = ["device.h"],
+    visibility = ["//libamdf/src/xdna:__subpackages__"],
+    deps = [
+        "//libamdf/src/platform",
+        "//libamdf/src/xdna:endpoint_profile",
+    ],
+)
+
+amdf_cc_library(
+    name = "context",
+    hdrs = ["context.h"],
+    visibility = ["//libamdf/src/xdna:__subpackages__"],
+    deps = [
+        ":device",
+        "//libamdf/src/xdna:endpoint_profile",
+    ],
+)
+
+amdf_cc_library(
+    name = "memory_profile",
+    hdrs = ["memory_profile.h"],
+    visibility = ["//libamdf/src/xdna:__subpackages__"],
+    deps = [
+        "//libamdf/src:memory_profile",
+        "//libamdf/src/platform",
+        "//libamdf/src/xdna:endpoint_profile",
+    ],
+)
+
+amdf_cc_library(
+    name = "memory",
+    hdrs = ["memory.h"],
+    visibility = ["//libamdf/src/xdna:__subpackages__"],
+    deps = [
+        "//libamdf/src:memory_pair",
+        "//libamdf/src:memory_profile",
+    ],
+)
+
+amdf_cc_library(
+    name = "kernel_queue",
+    hdrs = ["kernel_queue.h"],
+    visibility = ["//libamdf/src/xdna:__subpackages__"],
+    deps = [
+        ":context",
+        "//libamdf/src:wait",
+    ],
+)

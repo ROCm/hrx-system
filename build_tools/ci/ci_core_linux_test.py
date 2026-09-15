@@ -204,6 +204,7 @@ class CiCoreLinuxTest(unittest.TestCase):
         self.assertIn("-DIREE_BUILD_TESTS=ON", configure_cmd)
         self.assertIn("-DIREE_BUILD_BENCHMARKS=ON", configure_cmd)
         self.assertIn("-DLOOM_BUILD=ON", configure_cmd)
+        self.assertIn("-DAMDF_BUILD=OFF", configure_cmd)
         self.assertIn("-DLIBHRX_BUILD_CTS=ON", configure_cmd)
         self.assertIn("-DHRX_INSTALL_TESTS=ON", configure_cmd)
         self.assertIn("-DLIBHRX_BUILD_PASSTHROUGH=ON", configure_cmd)

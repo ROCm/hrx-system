@@ -54,6 +54,10 @@ build:windows-msvc --//build_tools/windows:compiler=msvc
 # Destinations are independent of compiler selection. Native builds infer their
 # destination; cross builds preserve the native host for code generators.
 build:windows-x86_64 --platforms=//build_tools/windows:windows_x86_64
+# Cross-building test artifacts does not require a Windows executor. Test
+# commands restore execution-platform qualification before running them.
+build:windows-x86_64 --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=false
+test:windows-x86_64 --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=true
 build:macos-arm64 --platforms=//build_tools/macos:macos_arm64
 build:macos-x86_64 --platforms=//build_tools/macos:macos_x86_64
 

@@ -215,9 +215,11 @@ function(iree_cc_library)
       PUBLIC
         $<TARGET_PROPERTY:${_NAME},INTERFACE_COMPILE_DEFINITIONS>
     )
+    # Dependency properties may contain build-only or conditional expressions.
+    # Evaluate them in the owning library's context before forwarding them.
     target_link_libraries(${_OBJECTS_NAME}
       PUBLIC
-        $<TARGET_PROPERTY:${_NAME},INTERFACE_LINK_LIBRARIES>
+        $<TARGET_GENEX_EVAL:${_NAME},$<TARGET_PROPERTY:${_NAME},INTERFACE_LINK_LIBRARIES>>
     )
 
     target_include_directories(${_NAME}

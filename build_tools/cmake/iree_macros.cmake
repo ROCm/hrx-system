@@ -596,6 +596,11 @@ function(iree_add_data_dependencies)
   set(_TARGET_DATA)
   foreach(_DATA_LABEL ${_RULE_DATA})
     set(_DATA_TARGET_NAME "${_DATA_LABEL}")
+    # Native test file locators can name a target's output before the target
+    # is declared. Preserve that dependency as a target, not a source file.
+    if(_DATA_TARGET_NAME MATCHES "^\\$<TARGET_FILE:([^>]+)>$")
+      set(_DATA_TARGET_NAME "${CMAKE_MATCH_1}")
+    endif()
     if(_DATA_TARGET_NAME MATCHES "^::")
       iree_package_ns(_DATA_PACKAGE_NS)
       string(REGEX REPLACE "^::" "${_DATA_PACKAGE_NS}::"

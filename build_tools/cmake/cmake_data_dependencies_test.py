@@ -76,6 +76,27 @@ class CMakeDataDependenciesTest(unittest.TestCase):
             )
             self.assertTrue(build_dir.joinpath("tool-built.marker").is_file())
 
+    def test_target_file_locator_builds_its_producer(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir) / "build"
+            configure_result = configure_fixture(build_dir)
+            self.assertEqual(configure_result.returncode, 0, configure_result.stdout)
+            build_result = subprocess.run(
+                [
+                    CMAKE_COMMAND,
+                    "--build",
+                    str(build_dir),
+                    "--target",
+                    "tool_path_consumer",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            self.assertEqual(build_result.returncode, 0, build_result.stdout)
+            self.assertTrue(build_dir.joinpath("tool-built.marker").is_file())
+
     def test_rejects_missing_target_with_consumer_context(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             build_dir = Path(temporary_dir) / "build"

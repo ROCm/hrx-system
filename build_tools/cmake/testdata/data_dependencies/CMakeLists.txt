@@ -38,6 +38,13 @@ if(NOT "${_TARGET_DATA}" STREQUAL "fixture::tool")
 endif()
 
 option(IREE_TEST_DECLARE_TOOL "Declare the later DATA tool target" ON)
+add_custom_target(tool_path_consumer)
+iree_add_data_dependencies(
+  NAME
+    tool_path_consumer
+  DATA
+    "$<TARGET_FILE:fixture::tool>"
+)
 if(IREE_TEST_DECLARE_TOOL)
   add_executable(data_tool tool.c)
   add_executable(fixture::tool ALIAS data_tool)

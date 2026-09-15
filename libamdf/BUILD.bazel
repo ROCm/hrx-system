@@ -1,0 +1,59 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//libamdf/build_tools/bazel:library.bzl", "amdf_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_cmake_extra_content(
+    content = """
+iree_setup_c_src_root(
+  PACKAGE_ROOT_PREFIX "libamdf"
+)
+set(IREE_IMPLICIT_DEFS_CC_DEPS)
+
+include("${PROJECT_SOURCE_DIR}/libamdf/build_tools/cmake/amdf_cts.cmake")
+include("${PROJECT_SOURCE_DIR}/libamdf/build_tools/cmake/amdf_library.cmake")
+include("${PROJECT_SOURCE_DIR}/libamdf/build_tools/cmake/amdf_package.cmake")
+include("${PROJECT_SOURCE_DIR}/libamdf/build_tools/cmake/amdf_windows_sidecar.cmake")
+""",
+)
+
+amdf_library(
+    name = "amdf",
+    hdrs = [
+        "include/amdf/amdf.h",
+        "include/amdf/api.h",
+        "include/amdf/base.h",
+        "include/amdf/gpu.h",
+        "include/amdf/memory.h",
+        "include/amdf/queue.h",
+        "include/amdf/xdna.h",
+    ],
+    components = ["//libamdf/src/provider"],
+    runtime_data = select({
+        "//libamdf/config/provider:wddm": [
+            "//libamdf/src/gpu/umd/wddm/wkmi:runtime",
+        ],
+        "//conditions:default": [],
+    }),
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    win_def_file = "//libamdf/build_tools/cmake:amdf_exports.def",
+)
+
+iree_cmake_extra_content(
+    content = "amdf_finalize_project()",
+    inline = True,
+)

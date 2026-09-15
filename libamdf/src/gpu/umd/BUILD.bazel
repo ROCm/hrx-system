@@ -1,0 +1,94 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+amdf_cc_library(
+    name = "instance",
+    hdrs = ["instance.h"],
+    visibility = [
+        "//libamdf/src/gpu:__subpackages__",
+        "//libamdf/src/provider:__pkg__",
+    ],
+)
+
+amdf_cc_library(
+    name = "device",
+    hdrs = ["device.h"],
+    visibility = ["//libamdf/src/gpu:__subpackages__"],
+    deps = [
+        ":instance",
+        "//libamdf/src/platform",
+    ],
+)
+
+amdf_cc_library(
+    name = "endpoint_profile",
+    hdrs = ["endpoint_profile.h"],
+    visibility = ["//libamdf/src/gpu:__subpackages__"],
+    deps = [
+        "//libamdf/src/gpu:endpoint_profile",
+        "//libamdf/src/platform",
+    ],
+)
+
+amdf_cc_library(
+    name = "memory",
+    hdrs = ["memory.h"],
+    visibility = ["//libamdf/src/gpu:__subpackages__"],
+    deps = [
+        "//libamdf/src:memory_pair",
+        "//libamdf/src:memory_profile",
+    ],
+)
+
+amdf_cc_library(
+    name = "kernel_queue",
+    hdrs = ["kernel_queue.h"],
+    visibility = ["//libamdf/src/gpu:__subpackages__"],
+    deps = [
+        ":device",
+        "//libamdf/src:wait",
+    ],
+)
+
+amdf_cc_library(
+    name = "user_queue",
+    hdrs = ["user_queue.h"],
+    visibility = ["//libamdf/src/gpu:__subpackages__"],
+    deps = [
+        ":device",
+        "//libamdf/src:wait",
+    ],
+)
+
+amdf_cc_library(
+    name = "umd",
+    target_compatible_with = ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//libamdf/src/gpu:__pkg__"],
+    deps = [
+        ":device",
+        ":endpoint_profile",
+        ":instance",
+        ":kernel_queue",
+        ":memory",
+        ":user_queue",
+    ] + select({
+        "@platforms//os:linux": ["//libamdf/src/gpu/umd/kfd"],
+        "@platforms//os:windows": ["//libamdf/src/gpu/umd/wddm"],
+        "//conditions:default": [],
+    }),
+)

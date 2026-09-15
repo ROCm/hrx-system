@@ -1,0 +1,115 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: CI IREE Bazel / Windows / AMD RDNA+XDNA
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".bazelrc"
+      - ".github/scripts/**"
+      - ".github/workflows/ci_iree_bazel_client_windows.yml"
+      - "BUILD.bazel"
+      - "BUILDING.md"
+      - "MODULE.*"
+      - "dev.py"
+      - "requirements-dev*"
+      - "build_tools/**"
+      - "runtime/**"
+      - "loom/**"
+      - "libamdf/**"
+      - "experimental/xdna/**"
+      - "third_party/**"
+  push:
+    branches: [main, main-staging]
+    paths:
+      - ".bazelrc"
+      - ".github/scripts/**"
+      - ".github/workflows/ci_iree_bazel_client_windows.yml"
+      - "BUILD.bazel"
+      - "BUILDING.md"
+      - "MODULE.*"
+      - "dev.py"
+      - "requirements-dev*"
+      - "build_tools/**"
+      - "runtime/**"
+      - "loom/**"
+      - "libamdf/**"
+      - "experimental/xdna/**"
+      - "third_party/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  client:
+    name: clang-cl
+    runs-on: windows-gfx1151-gpu-rocm
+    timeout-minutes: 45
+    env:
+      BAZEL_LLVM: ${{ github.workspace }}\build\iree-bazel-client\rocm-root\lib\llvm
+      HRX_ARTIFACT_SET: core
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}\build\iree-bazel-client\downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}\build\iree-bazel-client
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}\build\iree-bazel-client\rocm-root
+      IREE_CI_PYTHON: python
+      PIP_CACHE_DIR: ${{ github.workspace }}\build\iree-bazel-client\caches\pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Fetch host LLVM toolchain
+        shell: powershell
+        run: |
+          python -m pip install --upgrade boto3 zstandard
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python build_tools/ci/ci_core_windows.py fetch-rocm
+
+      - name: Install developer tools
+        shell: powershell
+        run: |
+          $bazelOutputRoot = (Join-Path $env:SystemDrive "b").Replace('\', '/')
+          "startup --output_user_root=$bazelOutputRoot" |
+            Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+          python dev.py bazel setup --venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "$PWD\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build and test the AMD client
+        id: client_ci
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_INSTALL=%%i"
+          if not defined VS_INSTALL exit /b 1
+          call "%VS_INSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if errorlevel 1 exit /b %errorlevel%
+          if not exist "%BAZEL_LLVM%\bin\clang-cl.exe" exit /b 1
+          if not exist "%BAZEL_LLVM%\bin\lld-link.exe" exit /b 1
+          if not exist "%BAZEL_LLVM%\bin\llvm-lib.exe" exit /b 1
+          set "CC=%BAZEL_LLVM%\bin\clang-cl.exe"
+          set "CXX=%BAZEL_LLVM%\bin\clang-cl.exe"
+          set "AR=%BAZEL_LLVM%\bin\llvm-lib.exe"
+          python build_tools/devtools/ci.py iree-bazel-amd-client --bazel-profile-dir "%RUNNER_TEMP%\bazel-profiles"
+
+      - name: Upload Bazel profiles
+        if: ${{ always() && steps.client_ci.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profiles-amd-client-windows-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}\bazel-profiles\*.profile.gz
+          if-no-files-found: error
+          compression-level: 0

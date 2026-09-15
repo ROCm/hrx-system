@@ -1,0 +1,33 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_c_embed_data(
+    name = "mul_i32",
+    testonly = True,
+    srcs = ["mul_i32.xdna"],
+    c_file_output = "mul_i32.c",
+    flatten = True,
+    h_file_output = "mul_i32.h",
+    identifier = "iree_hal_amd_xdna_test_mul_i32",
+)
+
+iree_c_embed_data(
+    name = "mul_i32_npu4",
+    testonly = True,
+    srcs = ["mul_i32_npu4.xdna"],
+    c_file_output = "mul_i32_npu4.c",
+    flatten = True,
+    h_file_output = "mul_i32_npu4.h",
+    identifier = "iree_hal_amd_xdna_test_mul_i32_npu4",
+)

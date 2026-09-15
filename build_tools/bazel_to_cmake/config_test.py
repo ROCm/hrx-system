@@ -556,6 +556,59 @@ loom_module(
             'IREE_HAL_DRIVER_WEBGPU AND IREE_ARCH STREQUAL "wasm_32"',
         )
 
+    def test_target_compatible_with_x86_64(self):
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=SimpleNamespace(body=""),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
+            build_dir="",
+        )
+
+        self.assertEqual(
+            functions._target_compatible_condition(["@platforms//cpu:x86_64"]),
+            'IREE_ARCH STREQUAL "x86_64"',
+        )
+
+    def test_target_compatible_with_parenthesizes_disjunctions(self):
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=SimpleNamespace(body=""),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
+            build_dir="",
+        )
+
+        self.assertEqual(
+            functions._target_compatible_condition(
+                [
+                    SimpleNamespace(cmake_condition="AMDF_BUILD"),
+                    SimpleNamespace(
+                        cmake_condition="AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA"
+                    ),
+                ]
+            ),
+            "AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA)",
+        )
+
+    def test_platform_select_deps_supports_named_target_blocks(self):
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=SimpleNamespace(body=""),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
+            build_dir="libamdf",
+        )
+
+        runtime_data = functions.select(
+            {
+                "@platforms//os:windows": ["//runtime/src/iree/base:base"],
+                "//conditions:default": [],
+            }
+        )
+        target_block, select_block = functions._convert_platform_select_deps(
+            "amdf_runtime_data", runtime_data, block_name="RUNTIME_DATA"
+        )
+
+        self.assertIn("  RUNTIME_DATA\n", target_block)
+        self.assertNotIn("  DEPS\n", target_block)
+        self.assertIn("${_amdf_runtime_data_platform_runtime_data}", target_block)
+        self.assertIn('if(CMAKE_SYSTEM_NAME STREQUAL "Windows")', select_block)
+
     def test_cc_binary_linkshared_emits_shared_library(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
@@ -976,6 +1029,29 @@ PACKAGE_POLICIES = [
         self.assertIn("iree_native_test(", converter.body)
         self.assertIn("endif()", converter.body)
 
+    def test_executable_test_preserves_resource_lock(self):
+        for resource_group in (None, "shared-device", "shared-storage"):
+            with self.subTest(resource_group=resource_group):
+                converter = SimpleNamespace(body="")
+                functions = bazel_to_cmake_converter.BuildFileFunctions(
+                    converter=converter,
+                    targets=bazel_to_cmake_targets.TargetConverter(
+                        repo_map={"@hrx": ""}
+                    ),
+                    build_dir="",
+                )
+                functions.iree_executable_test(
+                    name="invocation",
+                    src="//tools:runner",
+                    resource_group=resource_group,
+                )
+                if resource_group is None:
+                    self.assertNotIn("RESOURCE_GROUP", converter.body)
+                else:
+                    self.assertIn(
+                        "RESOURCE_GROUP\n    " + resource_group, converter.body
+                    )
+
     def test_native_test_converts_location_args_to_file_locators(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
@@ -1200,6 +1276,36 @@ iree_execution_test_suite(
         self.assertNotIn("DATA", converter.body)
         self.assertNotIn("@wasi_sdk", converter.body)
         self.assertNotIn("TARGET_FILE:pkg_@wasi_sdk", converter.body)
+
+    def test_cc_test_preserves_platform_link_options_and_locations(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
+            build_dir="/repo/pkg",
+            repo_root="/repo",
+        )
+        functions.cc_test(
+            name="native_test",
+            srcs=["native_test.cc"],
+            linkopts=["-Wl,--wrap=open"]
+            + functions.select(
+                {
+                    "@platforms//os:linux": [
+                        "-Wl,--version-script=$(location :exports.map)",
+                    ],
+                    "//conditions:default": [],
+                }
+            ),
+        )
+        self.assertIn("  LINKOPTS\n", converter.body)
+        self.assertIn('"-Wl,--wrap=open"', converter.body)
+        self.assertIn('CMAKE_SYSTEM_NAME STREQUAL "Linux"', converter.body)
+        self.assertIn(
+            "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map",
+            converter.body,
+        )
+        self.assertNotIn("$(location", converter.body)
 
     def test_cc_test_emits_sanitizer_suppressions(self):
         converter = SimpleNamespace(body="")

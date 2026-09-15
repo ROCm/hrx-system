@@ -1,0 +1,81 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+amdf_cc_library(
+    name = "platform",
+    hdrs = [
+        "endpoint.h",
+        "instance.h",
+    ],
+    visibility = [
+        "//libamdf/src:__subpackages__",
+    ],
+)
+
+amdf_cc_library(
+    name = "host_memory",
+    hdrs = ["host_memory.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+)
+
+amdf_cc_library(
+    name = "native_host_memory",
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//libamdf/src:__pkg__"],
+    deps = select({
+        "@platforms//os:linux": ["//libamdf/src/platform/linux:host_memory"],
+        "@platforms//os:windows": ["//libamdf/src/platform/windows:host_memory"],
+        "//conditions:default": [],
+    }),
+)
+
+amdf_cc_library(
+    name = "wait",
+    hdrs = ["wait.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+)
+
+amdf_cc_library(
+    name = "native_instance",
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//libamdf/src:__pkg__"],
+    deps = select({
+        "@platforms//os:linux": ["//libamdf/src/platform/linux:instance"],
+        "@platforms//os:windows": ["//libamdf/src/platform/windows:instance"],
+        "//conditions:default": [],
+    }),
+)
+
+amdf_cc_library(
+    name = "native_wait",
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//libamdf/src:__pkg__"],
+    deps = select({
+        "@platforms//os:linux": ["//libamdf/src/platform/linux:wait"],
+        "@platforms//os:windows": ["//libamdf/src/platform/windows:wait"],
+        "//conditions:default": [],
+    }),
+)

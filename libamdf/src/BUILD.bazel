@@ -1,0 +1,365 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+load("//libamdf/build_tools/bazel:cc_test.bzl", "amdf_cc_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+amdf_cc_library(
+    name = "atomics",
+    hdrs = ["atomics.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+)
+
+amdf_cc_library(
+    name = "allocator",
+    srcs = ["allocator.c"],
+    hdrs = ["allocator.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+)
+
+amdf_cc_test(
+    name = "allocator_test",
+    srcs = ["allocator_test.cc"],
+    deps = [
+        ":allocator",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_library(
+    name = "wait",
+    srcs = ["wait.c"],
+    hdrs = ["wait.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        "//libamdf/src/platform:native_wait",
+        "//libamdf/src/platform:wait",
+    ],
+)
+
+amdf_cc_library(
+    name = "child_tracker",
+    srcs = ["child_tracker.c"],
+    hdrs = ["child_tracker.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [":atomics"],
+)
+
+amdf_cc_library(
+    name = "structure",
+    srcs = ["structure.c"],
+    hdrs = ["structure.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+)
+
+amdf_cc_library(
+    name = "pci",
+    srcs = ["pci.c"],
+    hdrs = ["pci.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+)
+
+amdf_cc_library(
+    name = "instance",
+    srcs = ["instance.c"],
+    hdrs = ["instance.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":child_tracker",
+        ":memory_scope_state",
+        "//libamdf/src/platform",
+    ],
+)
+
+amdf_cc_test(
+    name = "instance_test",
+    srcs = ["instance_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":instance",
+        "//libamdf:amdf_static",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_library(
+    name = "endpoint",
+    srcs = ["endpoint.c"],
+    hdrs = ["endpoint.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":allocator",
+        ":child_tracker",
+        ":instance",
+        ":memory_profile",
+        ":memory_scope_state",
+        ":structure",
+        "//libamdf/src/platform",
+    ],
+)
+
+amdf_cc_library(
+    name = "device",
+    srcs = ["device.c"],
+    hdrs = ["device.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":allocator",
+        ":child_tracker",
+        ":endpoint",
+        ":instance",
+        ":memory_profile",
+        "//libamdf/src/platform",
+        "//libamdf/src/platform:native_instance",
+    ],
+)
+
+amdf_cc_library(
+    name = "memory_profile",
+    hdrs = ["memory_profile.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+)
+
+amdf_cc_library(
+    name = "memory_scope_state",
+    hdrs = ["memory_scope.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [":memory_profile"],
+)
+
+amdf_cc_library(
+    name = "memory_scope",
+    srcs = ["memory_scope.c"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":allocator",
+        ":device",
+        ":endpoint",
+        ":instance",
+        ":memory_profile",
+        ":memory_scope_state",
+        ":structure",
+        "//libamdf/src/platform",
+        "//libamdf/src/platform:native_instance",
+    ],
+)
+
+amdf_cc_library(
+    name = "memory_resource",
+    srcs = ["memory_resource.c"],
+    hdrs = ["memory_resource.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":allocator",
+        ":child_tracker",
+        ":memory_pair",
+    ],
+)
+
+amdf_cc_library(
+    name = "host_memory",
+    srcs = ["host_memory.c"],
+    hdrs = ["host_memory.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":allocator",
+        ":host_mapping",
+        ":memory_profile",
+        ":memory_resource",
+        "//libamdf/src/platform:host_memory",
+        "//libamdf/src/platform:native_host_memory",
+    ],
+)
+
+amdf_cc_library(
+    name = "memory",
+    srcs = ["memory.c"],
+    hdrs = ["memory.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":allocator",
+        ":child_tracker",
+        ":device",
+        ":host_mapping",
+        ":host_memory",
+        ":instance",
+        ":memory_pair",
+        ":memory_profile",
+        ":memory_resource",
+        ":memory_scope",
+        ":memory_scope_state",
+        ":structure",
+    ],
+)
+
+amdf_cc_library(
+    name = "memory_pair",
+    hdrs = ["memory_pair.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+)
+
+amdf_cc_test(
+    name = "memory_test",
+    srcs = [
+        "memory_construction_test.cc",
+        "memory_test.cc",
+        "memory_test_fixture.cc",
+        "memory_test_fixture.h",
+    ],
+    deps = [
+        ":allocator",
+        ":child_tracker",
+        ":device",
+        ":host_mapping",
+        ":instance",
+        ":memory",
+        ":memory_scope",
+        ":memory_scope_state",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ] + select({
+        "@platforms//os:linux": ["//libamdf/src/platform/linux"],
+        "@platforms//os:windows": ["//libamdf/src/platform/windows"],
+        "//conditions:default": [],
+    }),
+)
+
+amdf_cc_library(
+    name = "host_mapping",
+    srcs = ["host_mapping.c"],
+    hdrs = ["host_mapping.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":allocator",
+        ":memory_resource",
+        ":structure",
+    ],
+)
+
+amdf_cc_test(
+    name = "host_mapping_test",
+    srcs = ["host_mapping_test.cc"],
+    deps = [
+        ":host_mapping",
+        ":memory",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ] + select({
+        "@platforms//os:linux": ["//libamdf/src/platform/linux"],
+        "@platforms//os:windows": ["//libamdf/src/platform/windows"],
+        "//conditions:default": [],
+    }),
+)
+
+amdf_cc_library(
+    name = "kernel_queue",
+    srcs = ["kernel_queue.c"],
+    hdrs = ["kernel_queue.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":allocator",
+        ":device",
+        ":structure",
+    ],
+)
+
+amdf_cc_library(
+    name = "user_queue",
+    srcs = ["user_queue.c"],
+    hdrs = ["user_queue.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":allocator",
+        ":child_tracker",
+        ":device",
+        ":structure",
+    ],
+)
+
+amdf_cc_test(
+    name = "user_queue_test",
+    srcs = ["user_queue_test.cc"],
+    deps = [
+        ":allocator",
+        ":child_tracker",
+        ":device",
+        ":user_queue",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ] + select({
+        "@platforms//os:linux": ["//libamdf/src/platform/linux"],
+        "@platforms//os:windows": ["//libamdf/src/platform/windows"],
+        "//conditions:default": [],
+    }),
+)
+
+amdf_cc_library(
+    name = "core",
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//libamdf/src/provider:__pkg__"],
+    deps = [
+        ":device",
+        ":endpoint",
+        ":host_mapping",
+        ":instance",
+        ":kernel_queue",
+        ":memory",
+        ":pci",
+        ":structure",
+        ":user_queue",
+    ] + select({
+        "@platforms//os:linux": ["//libamdf/src/platform/linux"],
+        "@platforms//os:windows": ["//libamdf/src/platform/windows"],
+        "//conditions:default": [],
+    }),
+)
+
+amdf_cc_test(
+    name = "wait_test",
+    srcs = ["wait_test.cc"],
+    deps = [
+        ":wait",
+        "//libamdf/src/platform:wait",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "atomics_test",
+    srcs = ["atomics_test.cc"],
+    deps = [
+        ":atomics",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "pci_test",
+    srcs = ["pci_test.cc"],
+    deps = [
+        ":pci",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)

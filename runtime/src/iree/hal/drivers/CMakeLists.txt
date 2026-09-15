@@ -70,6 +70,9 @@ file(CONFIGURE OUTPUT "${_INIT_EXTERNAL_C_SRC}"
      CONTENT "${_INIT_EXTERNAL_TEMPLATE}")
 
 set(_INIT_INTERNAL_DEPS)
+if(AMDF_BUILD)
+  add_subdirectory(amd)
+endif()
 if(IREE_HAL_DRIVER_AMDGPU)
   add_subdirectory(amdgpu)
   list(APPEND _INIT_INTERNAL_DEPS iree::hal::drivers::amdgpu::registration)

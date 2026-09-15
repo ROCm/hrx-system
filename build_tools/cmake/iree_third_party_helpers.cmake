@@ -184,6 +184,65 @@ function(iree_populate_locked_fetch_content dep_name out_source_dir)
   set(${out_source_dir} "${${dep_name}_SOURCE_DIR}" PARENT_SCOPE)
 endfunction()
 
+function(iree_populate_locked_file dep_name out_file)
+  iree_dependency_require_pinned_source_allowed("${dep_name}")
+  iree_get_locked_dependency_property(_kind "${dep_name}" "KIND")
+  iree_get_locked_dependency_property(_urls "${dep_name}" "URLS")
+  iree_get_locked_dependency_property(_sha256 "${dep_name}" "SHA256")
+  iree_get_locked_dependency_property(
+    _downloaded_file_path
+    "${dep_name}"
+    "DOWNLOADED_FILE_PATH"
+  )
+  if(NOT _kind STREQUAL "http_file")
+    message(FATAL_ERROR
+      "${dep_name} is a ${_kind} dependency; expected http_file")
+  endif()
+  if(NOT _urls)
+    message(FATAL_ERROR "${dep_name} has no locked source URLs")
+  endif()
+  if(NOT _sha256)
+    message(FATAL_ERROR "${dep_name} has no locked SHA256")
+  endif()
+  if(NOT _downloaded_file_path OR
+     IS_ABSOLUTE "${_downloaded_file_path}" OR
+     _downloaded_file_path MATCHES "^[A-Za-z]:" OR
+     _downloaded_file_path MATCHES "\\\\" OR
+     _downloaded_file_path MATCHES "[/\\\\]$" OR
+     _downloaded_file_path MATCHES "(^|[/\\\\])\\.\\.([/\\\\]|$)")
+    message(FATAL_ERROR
+      "${dep_name} has invalid DOWNLOADED_FILE_PATH "
+      "'${_downloaded_file_path}'")
+  endif()
+
+  set(_download_root "${CMAKE_BINARY_DIR}/_deps/${dep_name}-src")
+  set(_download_file "${_download_root}/file/${_downloaded_file_path}")
+  cmake_path(GET _download_file PARENT_PATH _download_directory)
+  file(MAKE_DIRECTORY "${_download_directory}")
+
+  set(_download_errors)
+  foreach(_url IN LISTS _urls)
+    file(DOWNLOAD
+      "${_url}"
+      "${_download_file}"
+      EXPECTED_HASH "SHA256=${_sha256}"
+      STATUS _download_status
+      TLS_VERIFY ON
+    )
+    list(GET _download_status 0 _download_code)
+    if(_download_code EQUAL 0)
+      set(${out_file} "${_download_file}" PARENT_SCOPE)
+      return()
+    endif()
+    list(GET _download_status 1 _download_message)
+    list(APPEND _download_errors "${_url}: ${_download_message}")
+  endforeach()
+
+  list(JOIN _download_errors "\n  " _download_error_text)
+  message(FATAL_ERROR
+    "Failed to download ${dep_name}:\n  ${_download_error_text}")
+endfunction()
+
 function(iree_add_alias_interface alias_name)
   set(_deps ${ARGN})
   if(TARGET ${alias_name})

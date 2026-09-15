@@ -32,6 +32,7 @@ _TRAVERSED_ATTRS = [
     "implementation_deps",
     "runtime_deps",
     "src",
+    "srcs",
 ]
 
 def _validate_environment_name(name):

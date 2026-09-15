@@ -113,6 +113,7 @@ list(APPEND CMAKE_MODULE_PATH
 include("${CMAKE_CURRENT_LIST_DIR}/MODULE.cmake.lock")
 
 include("${CMAKE_CURRENT_LIST_DIR}/runtime/project.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/libamdf/project.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/libhrx/project.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/loom/project.cmake")
 
@@ -147,6 +148,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/rocm/headers.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/spirv_tools/spirv_tools.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/vulkan_headers/vulkan_headers.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/catch2/catch2.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/wkmi/wkmi.cmake")
 
 iree_setup_toolchain()
 hrx_configure_ipo()
@@ -166,6 +168,10 @@ if(IREE_HAL_DRIVER_AMDGPU)
 endif()
 if(IREE_HAL_DRIVER_VULKAN)
   iree_configure_vulkan_headers()
+endif()
+if(AMDF_BUILD AND WIN32 AND IREE_ARCH STREQUAL "x86_64" AND
+   (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+  iree_configure_amdf_wkmi()
 endif()
 if(IREE_BUILD_TESTS AND (IREE_HAL_DRIVER_VULKAN OR
     (LOOM_BUILD AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)))
@@ -192,7 +198,11 @@ endif()
 add_subdirectory(build_tools/cmake)
 add_subdirectory(build_tools/embed_data)
 add_subdirectory(build_tools/spirv)
+if(AMDF_BUILD)
+  add_subdirectory(libamdf)
+endif()
 add_subdirectory(runtime/src)
+add_subdirectory(experimental EXCLUDE_FROM_ALL)
 
 if(LOOM_BUILD)
   add_subdirectory(loom/py/loom)

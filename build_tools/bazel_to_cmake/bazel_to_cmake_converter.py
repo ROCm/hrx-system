@@ -42,6 +42,7 @@ _PLATFORM_CMAKE_SYSTEM_NAME = {
     "@platforms//os:windows": "Windows",
     # CPU architecture constraints.
     "@platforms//cpu:wasm32": "wasm_32",
+    "@platforms//cpu:x86_64": "x86_64",
 }
 
 _COMPILER_CMAKE_OPTIONS = {
@@ -349,7 +350,10 @@ class BuildFileFunctions(object):
                 _append_unique_condition(conditions, condition)
             else:
                 raise NotImplementedError(f"target_compatible_with: {label}")
-        return " AND ".join(conditions)
+        return " AND ".join(
+            f"({condition})" if " OR " in condition else condition
+            for condition in conditions
+        )
 
     def _emit_platform_guard_begin(self, target_compatible_with):
         """Emits platform guards for target_compatible_with."""
@@ -365,23 +369,28 @@ class BuildFileFunctions(object):
             self._converter.body = self._converter.body.rstrip("\n") + "\n"
             self._converter.body += "endif()\n\n"
 
-    def _convert_platform_select_deps(self, name, deps):
-        """Handles deps that may contain ConditionSelect entries.
+    def _convert_platform_select_deps(self, name, deps, block_name="DEPS"):
+        """Handles target lists that may contain ConditionSelect entries.
 
-        If deps is a plain list, returns (converted_deps_block, "").
+        If deps is a plain list, returns (converted_target_block, "").
         If deps is a MixedDeps or ConditionSelect, emits a CMake variable
         with if/elseif/else blocks before the target and returns
-        (converted_deps_block_with_variable, variable_block).
+        (converted_target_block_with_variable, variable_block).
         """
         if deps is None:
-            return self._convert_target_list_block("DEPS", None), ""
+            return self._convert_target_list_block(block_name, None), ""
         if isinstance(deps, ConditionSelect):
             deps = MixedDeps(unconditional=[], selects=[deps])
         if not isinstance(deps, MixedDeps):
-            return self._convert_target_list_block("DEPS", deps), ""
+            return self._convert_target_list_block(block_name, deps), ""
 
-        # Emit a CMake variable for the conditional deps.
-        var_name = f"_{self._cmake_variable_name(name)}_platform_deps"
+        # Preserve the established dependency variable name while giving other
+        # target blocks independent storage when one rule contains both.
+        variable_kind = "deps" if block_name == "DEPS" else block_name.lower()
+        var_name = (
+            f"_{self._cmake_variable_name(name)}_platform_"
+            f"{self._cmake_variable_name(variable_kind)}"
+        )
         var_block = f'set({var_name} "")\n'
 
         for ps in deps.selects:
@@ -411,14 +420,14 @@ class BuildFileFunctions(object):
                     var_block += f"  list(APPEND {var_name} {ct})\n"
             var_block += "endif()\n"
 
-        # Build the DEPS block: unconditional deps + the variable reference.
-        deps_block = self._convert_target_list_block("DEPS", deps.unconditional)
+        # Build the target block: unconditional targets + the variable reference.
+        deps_block = self._convert_target_list_block(block_name, deps.unconditional)
         # Append the variable reference to the deps block.
         if deps_block:
-            # Insert the variable ref before the closing of the DEPS block.
+            # Append the variable reference to the existing target block.
             deps_block = deps_block.rstrip("\n") + f"\n    ${{{var_name}}}\n"
         else:
-            deps_block = f"  DEPS\n    ${{{var_name}}}\n"
+            deps_block = f"  {block_name}\n    ${{{var_name}}}\n"
 
         return deps_block, var_block
 
@@ -1805,6 +1814,7 @@ class BuildFileFunctions(object):
         srcs=None,
         copts=None,
         defines=None,
+        linkopts=None,
         data=None,
         deps=None,
         timeout=None,
@@ -1836,6 +1846,9 @@ class BuildFileFunctions(object):
         defines_block, platform_defines_block = self._convert_platform_select_strings(
             name, "DEFINES", defines
         )
+        linkopts_block, platform_linkopts_block = self._convert_platform_select_strings(
+            name, "LINKOPTS", linkopts, expand_locations=True
+        )
         data_block = self._convert_target_list_block("DATA", data, omit_empty=True)
         deps_block, platform_deps_block = self._convert_platform_select_deps(name, deps)
         args_block = self._convert_string_list_block(
@@ -1865,6 +1878,8 @@ class BuildFileFunctions(object):
             self._converter.body += platform_defines_block
         if platform_deps_block:
             self._converter.body += platform_deps_block
+        if platform_linkopts_block:
+            self._converter.body += platform_linkopts_block
         self._converter.body += (
             f"iree_cc_test(\n"
             f"{name_block}"
@@ -1872,6 +1887,7 @@ class BuildFileFunctions(object):
             f"{srcs_block}"
             f"{copts_block}"
             f"{defines_block}"
+            f"{linkopts_block}"
             f"{data_block}"
             f"{deps_block}"
             f"{args_block}"
@@ -2778,6 +2794,7 @@ class BuildFileFunctions(object):
         env=None,
         sanitizer_suppressions=None,
         tags=None,
+        resource_group=None,
         timeout=None,
         target_compatible_with=None,
     ):
@@ -2794,6 +2811,9 @@ class BuildFileFunctions(object):
             "ENV", self._convert_native_test_env(env), sort=False
         )
         labels_block = self._convert_string_list_block("LABELS", tags)
+        resource_group_block = self._convert_string_arg_block(
+            "RESOURCE_GROUP", resource_group, quote=False
+        )
         sanitizer_suppressions_block = self._convert_sanitizer_suppressions_block(
             sanitizer_suppressions
         )
@@ -2808,6 +2828,7 @@ class BuildFileFunctions(object):
             f"{data_block}"
             f"{env_block}"
             f"{labels_block}"
+            f"{resource_group_block}"
             f"{sanitizer_suppressions_block}"
             f"{timeout_block}"
             f")\n\n"

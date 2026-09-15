@@ -1,0 +1,45 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+[amdf_cts_test_suite(
+    name = name,
+    srcs = [name + "_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//libamdf/cts/util:device_cache",
+        "//libamdf/cts/util:provider_headers",
+        "//third_party:google_test",
+    ],
+) for name in [
+    "allocator",
+    "discovery",
+    "memory",
+    "query",
+]]
+
+test_suite(
+    name = "core",
+    tests = [
+        ":allocator",
+        ":discovery",
+        ":memory",
+        ":query",
+    ],
+    visibility = ["//visibility:public"],
+)

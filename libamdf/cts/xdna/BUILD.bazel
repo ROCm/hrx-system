@@ -1,0 +1,61 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+amdf_cc_library(
+    name = "xdna_device_fixture",
+    testonly = True,
+    hdrs = ["xdna_device_fixture.h"],
+    visibility = [
+        "//experimental/xdna/cts:__pkg__",
+        "//libamdf/cts/xdna:__subpackages__",
+    ],
+    deps = [
+        "//libamdf/cts/util:device_cache",
+        "//libamdf/cts/util:provider_headers",
+        "//third_party:google_test",
+    ],
+)
+
+[amdf_cts_test_suite(
+    name = name,
+    srcs = [name + "_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":xdna_device_fixture",
+        "//libamdf/cts/util:device_cache",
+        "//libamdf/cts/util:provider_headers",
+        "//third_party:google_test",
+    ],
+) for name in [
+    "kernel_queue",
+    "memory",
+    "xdna_extension",
+]]
+
+test_suite(
+    name = "xdna",
+    tests = [
+        ":kernel_queue",
+        ":memory",
+        ":xdna_extension",
+        "//libamdf/cts/xdna/linux:memory",
+    ],
+    visibility = ["//visibility:public"],
+)

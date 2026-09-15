@@ -67,8 +67,9 @@ independent:
 | Linux or macOS | macOS x86-64 | `--config=macos-x86_64` |
 | macOS | Native, Xcode/Command Line Tools | None |
 
-Destination configs set only `--platforms`. Native builds infer their
-destination from the host, so adding a matching destination config is optional.
+Destination configs select `--platforms` independently of the compiler. Native
+builds infer their destination from the host, so adding a matching destination
+config is optional.
 For example, a native MSVC build needs only `--config=windows-msvc`; adding
 `--config=windows-x86_64` produces the same selection in either flag order.
 `windows-clang-cl` explicitly selects the default Windows compiler. MSVC requires
@@ -90,12 +91,16 @@ a specified execution environment; these local configurations do not define one.
 Cross-built executables run on their destination OS. Transfer the executable,
 dependent libraries, debug artifacts, and consumer runfiles to that host.
 Linux `bazel run` and `bazel test` cannot execute Windows or macOS binaries.
-Starlark test wrappers require a matching test execution platform even during
-build analysis; build their source binary targets when only producing artifacts.
-For example,
+The Windows destination preset permits building test wrappers without a Windows
+executor; `bazel test` retains execution-platform qualification. This separates
+artifact production from execution without registering a remote executor or
+changing the host toolchain used by generators.
+
+Other destination presets retain Bazel's requirement for a matching test
+execution platform even during wrapper build analysis. Their source binary
+targets can be built independently. For example,
 `//runtime/src/iree/hal/drivers/task/executable/elf:elf_module_test_binary`
-is the artifact target for the `:elf_module_test` wrapper. Destination selection
-does not configure a remote executor or test runner.
+is the artifact target for the `:elf_module_test` wrapper.
 
 ### Windows targets
 
@@ -352,6 +357,8 @@ python build_tools/devtools/ci.py iree-bazel-amdgpu --amdgpu-target gfx942 --kee
 python build_tools/devtools/ci.py iree-bazel-amdgpu-asan --amdgpu-target gfx942 --keep-going
 python build_tools/devtools/ci.py iree-bazel-amdgpu-tsan --amdgpu-target gfx942 --keep-going
 python build_tools/devtools/ci.py iree-bazel-amdgpu-ubsan --amdgpu-target gfx942 --keep-going
+python build_tools/devtools/ci.py iree-bazel-xdna-asan
+python build_tools/devtools/ci.py iree-bazel-amd-client-asan
 
 python build_tools/devtools/ci.py iree-cmake-cpu --keep-going
 python build_tools/devtools/ci.py iree-cmake-cpu-sanitizers --keep-going
@@ -359,6 +366,7 @@ python build_tools/devtools/ci.py iree-cmake-vulkan --keep-going
 python build_tools/devtools/ci.py iree-cmake-vulkan-sanitizers --keep-going
 python build_tools/devtools/ci.py iree-cmake-amdgpu --amdgpu-target gfx942 --keep-going
 python build_tools/devtools/ci.py iree-cmake-amdgpu-sanitizers --amdgpu-target gfx942 --keep-going
+python build_tools/devtools/ci.py iree-cmake-xdna-asan
 ```
 
 AMDGPU commands default to `gfx942`. `--amdgpu-target` accepts an exact target
@@ -366,6 +374,37 @@ or family selector and applies it to both the runtime HAL target set and Loom's
 `iree_hal`-derived compiler target set. Bazel AMDGPU commands build both source
 trees, then run the union of tests that require the AMDGPU HAL at build time or
 an AMD GPU at execution time.
+
+XDNA commands configure an XDNA-only libamdf and include its CTS and the
+experimental ELF execution consumers. They need the native XDNA driver and
+access to the assigned NPU, but not ROCr, XRT, or an AMDGPU device compiler.
+Both Bazel and CMake select the existing XDNA resource metadata and serialize
+native tests through the shared AMD resource group. The commands without the
+`-asan` suffix use the ordinary host configuration, including on Windows.
+These commands do not provision devices or assign a cross-job hardware lease;
+the runner supplies those before invoking them. A run that skips every native
+test is not hardware qualification.
+
+The Linux and Windows **AMD RDNA+XDNA** Bazel workflows exercise the native
+client configuration through `iree-bazel-amd-client[-asan]`. Both libamdf
+families are compiled, including their tests, while XDNA is the only admitted
+hardware test resource. The test phase runs libamdf's host-only coverage for
+both families and the XDNA CTS and ELF execution consumers. GPU hardware tests
+remain compiled but are excluded by their resource requirement. Build support
+and available execution resources are independent.
+
+The selected packages are `//libamdf/...` and `//experimental/xdna/...`.
+Common runtime code enters through the ELF consumers' dependencies. The
+ROCr-backed AMDGPU HAL and its Loom execution suites are not enabled; these
+jobs require neither ROCr nor a GPU target selector. CDNA, SPIR-V, LLVMIR,
+WASM, and optional importers are disabled, and the repository-wide CPU and
+libhrx suites are outside the test scope.
+
+Linux runs with ASAN on the gfx1150 NPU pool and requires access to the assigned
+`/dev/accel/accel0`; Windows runs natively with clang-cl on the gfx1151 pool.
+XDNA tests reuse their devices and the existing AMD test resource group. The
+runner supplies exclusive native device access. The unsuffixed command is the
+Windows reproduction form.
 
 AMDGPU Bazel sanitizer configurations are separate CI jobs so they build and
 test independently. Aggregate CPU Bazel and CMake commands remain available as
@@ -393,6 +432,10 @@ between Bazel and CMake.
 
 | Option | Values | CMake | Bazel portable | Bazel native |
 | --- | --- | --- | --- | --- |
+| `AMDF_BUILD` | `ON`, `OFF` | Enables the portable libamdf shared/static libraries, examples, and tests. Defaults to `OFF`, independently of HAL drivers. | Enables or disables the libamdf package scope. Defaults to `OFF`, independently of HAL drivers. | `--//libamdf/config:enabled=<bool>` |
+| `AMDF_FAMILY_RDNA` | `ON`, `OFF` | Admits RDNA implementation packages to libamdf. | Adds or removes `rdna` from the libamdf implementation-family scope. | `--//libamdf/config:families=<complete-family-list>` |
+| `AMDF_FAMILY_CDNA` | `ON`, `OFF` | Admits CDNA implementation packages to libamdf. | Adds or removes `cdna` from the libamdf implementation-family scope. | `--//libamdf/config:families=<complete-family-list>` |
+| `AMDF_FAMILY_XDNA` | `ON`, `OFF` | Admits XDNA implementation packages to libamdf. | Adds or removes `xdna` from the libamdf implementation-family scope. | `--//libamdf/config:families=<complete-family-list>` |
 | `IREE_HAL_DRIVER_AMDGPU` | `ON`, `OFF` | Builds the AMDGPU runtime HAL driver. | Adds or removes `amdgpu` from the runtime driver registry and recursive package scope. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_HAL_DRIVER_TASK` | `ON`, `OFF` | Builds the task runtime HAL driver. | Adds or removes `task` from the runtime driver registry. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_HAL_DRIVER_VULKAN` | `ON`, `OFF` | Builds the Vulkan runtime HAL driver. | Adds or removes `vulkan` from the runtime driver registry and recursive package scope. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
@@ -416,6 +459,22 @@ The portable spelling is shorter for common cases:
 ```bash
 python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON
 ```
+
+libamdf can also be built independently of the legacy AMDGPU HAL and ROCm
+dependency stack:
+
+```bash
+python dev.py bazel configure -DAMDF_BUILD=ON
+iree-bazel-test //libamdf/cts/...
+
+iree-cmake-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
+iree-cmake-build libamdf/all
+iree-cmake-test -R '^libamdf/'
+```
+
+The native family setting is a complete list. For example, an XDNA-only source
+configuration uses `--//libamdf/config:families=xdna`; the portable equivalent
+sets `AMDF_FAMILY_RDNA=OFF` and `AMDF_FAMILY_CDNA=OFF`.
 
 ### External HAL drivers
 

@@ -1,0 +1,3 @@
+LIBRARY amdf
+EXPORTS
+  amdf_query_api

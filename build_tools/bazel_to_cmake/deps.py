@@ -28,7 +28,7 @@ import sys
 import textwrap
 import urllib.error
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable
 
 DEFAULT_REGISTRY_URL = "https://bcr.bazel.build"
@@ -52,6 +52,7 @@ class Dependency:
     strip_prefix: str = ""
     source_url: str = ""
     build_file: str = ""
+    downloaded_file_path: str = ""
     patches: tuple[str, ...] = ()
     patch_args: tuple[str, ...] = ()
 
@@ -172,6 +173,10 @@ class ModuleParser:
             return lambda **kwargs: self._http_archive(
                 module_file, collect_source_deps, **kwargs
             )
+        if repo_rule_name == "http_file":
+            return lambda **kwargs: self._http_file(
+                module_file, collect_source_deps, **kwargs
+            )
         if repo_rule_name == "rocm_repository":
             return lambda **kwargs: self._rocm_repository(
                 module_file, collect_source_deps, **kwargs
@@ -230,6 +235,48 @@ class ModuleParser:
                 build_file=build_file,
                 patches=tuple(patches),
                 patch_args=tuple(patch_args),
+            )
+        )
+
+    def _http_file(
+        self,
+        module_file: Path,
+        collect_source_deps: bool,
+        **kwargs: Any,
+    ) -> None:
+        if not collect_source_deps:
+            return
+        _validate_known_fields(
+            kwargs,
+            context="http_file",
+            known_fields={
+                "downloaded_file_path",
+                "integrity",
+                "name",
+                "sha256",
+                "url",
+                "urls",
+            },
+        )
+        name = _required_string(kwargs, "name", "http_file")
+        urls = _urls_from_kwargs(kwargs, f"http_file({name})")
+        sha256 = _sha256_from_kwargs(kwargs, f"http_file({name})")
+        downloaded_file_path = _required_string(
+            kwargs, "downloaded_file_path", f"http_file({name})"
+        )
+        _validate_downloaded_file_path(downloaded_file_path, f"http_file({name})")
+        self.dependencies.append(
+            Dependency(
+                name=name,
+                kind="http_file",
+                owner=self._owner_for_module_file(module_file),
+                module_name=name,
+                repo_name=name,
+                version="",
+                dev_dependency=False,
+                urls=tuple(urls),
+                sha256=sha256,
+                downloaded_file_path=downloaded_file_path,
             )
         )
 
@@ -313,7 +360,7 @@ class LockResolver:
         self.existing_lock = existing_lock
 
     def resolve_for_update(self, dependency: Dependency) -> Dependency:
-        if dependency.kind in {"http_archive", "rocm_repository"}:
+        if dependency.kind in {"http_archive", "http_file", "rocm_repository"}:
             return dependency
         if dependency.kind != "bazel_dep":
             raise ValueError(f"unsupported dependency kind: {dependency.kind}")
@@ -331,7 +378,7 @@ class LockResolver:
         )
 
     def resolve_for_check(self, dependency: Dependency) -> Dependency:
-        if dependency.kind in {"http_archive", "rocm_repository"}:
+        if dependency.kind in {"http_archive", "http_file", "rocm_repository"}:
             return dependency
         if dependency.kind != "bazel_dep":
             raise ValueError(f"unsupported dependency kind: {dependency.kind}")
@@ -544,6 +591,13 @@ def render_cmake_lock(dependencies: Iterable[Dependency]) -> str:
         _append_cmake_scalar(lines, identifier, "SHA256", dependency.sha256)
         _append_cmake_scalar(lines, identifier, "STRIP_PREFIX", dependency.strip_prefix)
         _append_cmake_scalar(lines, identifier, "BUILD_FILE", dependency.build_file)
+        if dependency.kind == "http_file":
+            _append_cmake_scalar(
+                lines,
+                identifier,
+                "DOWNLOADED_FILE_PATH",
+                dependency.downloaded_file_path,
+            )
         _append_cmake_list(lines, identifier, "PATCHES", dependency.patches)
         _append_cmake_list(lines, identifier, "PATCH_ARGS", dependency.patch_args)
         lines.append("")
@@ -630,6 +684,21 @@ def _optional_string(kwargs: dict[str, Any], name: str, default: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{name} must be a string")
     return value
+
+
+def _validate_downloaded_file_path(value: str, context: str) -> None:
+    path = PurePosixPath(value)
+    if (
+        "\\" in value
+        or re.match(r"^[A-Za-z]:", value)
+        or path.is_absolute()
+        or ".." in path.parts
+        or value.endswith("/")
+        or not path.name
+    ):
+        raise ValueError(
+            f"{context} downloaded_file_path must remain inside its repository"
+        )
 
 
 def _optional_string_list(kwargs: dict[str, Any], name: str, context: str) -> list[str]:

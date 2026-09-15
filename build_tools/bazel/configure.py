@@ -22,6 +22,7 @@ LOOM_EXECUTE_SUBSTRATES = ("iree_hal",)
 LOOM_IMPORTERS = ("mlir", "tilelang")
 LOOM_TARGETS = ("amdgpu", "llvmir", "spirv", "vm", "wasm", "x86")
 LOOM_EMITTERS = ("amdgpu", "llvmir", "spirv", "wasm")
+AMDF_FAMILIES = ("rdna", "cdna", "xdna")
 HOST_DRIVERS = ("task",)
 DEFAULT_LOOM_EXECUTE = LOOM_EXECUTE_SUBSTRATES
 DEFAULT_LOOM_TARGETS = ("amdgpu", "llvmir", "spirv", "x86")
@@ -78,6 +79,11 @@ LOOM_IMPORT_DEFINES = {
     "LOOM_IMPORT_MLIR": "mlir",
     "LOOM_IMPORT_TILELANG": "tilelang",
 }
+AMDF_FAMILY_DEFINES = {
+    "AMDF_FAMILY_RDNA": "rdna",
+    "AMDF_FAMILY_CDNA": "cdna",
+    "AMDF_FAMILY_XDNA": "xdna",
+}
 REMOVED_OPTIONS = frozenset(
     ("--enable-driver", "--include-driver", "--exclude-driver", "--rocm-path")
 )
@@ -86,6 +92,8 @@ NATIVE_LOOM_TARGET_FLAG = "--//loom/config/target:enable"
 NATIVE_LOOM_EMIT_FLAG = "--//loom/config/emit:enable"
 NATIVE_LOOM_EXECUTE_FLAG = "--//loom/config/execute:enable"
 NATIVE_LOOM_IMPORT_FLAG = "--//loom/config/import:enable"
+NATIVE_AMDF_ENABLED_FLAG = "--//libamdf/config:enabled"
+NATIVE_AMDF_FAMILIES_FLAG = "--//libamdf/config:families"
 NATIVE_REPO_ENV_PREFIX = "--repo_env="
 TRUE_VALUES = frozenset(("1", "ON", "TRUE", "YES"))
 FALSE_VALUES = frozenset(("0", "OFF", "FALSE", "NO"))
@@ -116,6 +124,10 @@ class ConfigRequest:
     loom_target_source: str | None = None
     enabled_loom_emitters: set[str] = field(default_factory=set)
     enabled_loom_importers: set[str] = field(default_factory=set)
+    amdf_build: bool = False
+    amdf_build_source: str | None = None
+    enabled_amdf_families: set[str] = field(default_factory=lambda: set(AMDF_FAMILIES))
+    amdf_family_source: str | None = None
     rocm_path: str | None = None
 
     def set_driver(self, driver: str, enabled: bool) -> None:
@@ -256,6 +268,43 @@ class ConfigRequest:
         self.loom_import_source = "native"
         self.enabled_loom_importers = set(importers)
 
+    def set_amdf_build(self, enabled: bool, source: str) -> None:
+        if self.amdf_build_source is not None and self.amdf_build_source != source:
+            raise SystemExit(
+                "Do not mix portable -DAMDF_BUILD with the native "
+                f"{NATIVE_AMDF_ENABLED_FLAG}=... Bazel option."
+            )
+        self.amdf_build_source = source
+        self.amdf_build = enabled
+
+    def set_amdf_family(self, family: str, enabled: bool) -> None:
+        if self.amdf_family_source == "native":
+            raise SystemExit(
+                "Do not mix portable -DAMDF_FAMILY_* options with the native "
+                f"{NATIVE_AMDF_FAMILIES_FLAG}=... Bazel option."
+            )
+        self.amdf_family_source = "portable"
+        if enabled:
+            self.enabled_amdf_families.add(family)
+        else:
+            self.enabled_amdf_families.discard(family)
+
+    def set_amdf_family_list(self, families: set[str]) -> None:
+        if self.amdf_family_source == "portable":
+            raise SystemExit(
+                "Do not mix portable -DAMDF_FAMILY_* options with the native "
+                f"{NATIVE_AMDF_FAMILIES_FLAG}=... Bazel option."
+            )
+        unknown_families = families.difference(AMDF_FAMILIES)
+        if unknown_families:
+            raise SystemExit(
+                "Unknown libamdf family or families: {}".format(
+                    ", ".join(sorted(unknown_families))
+                )
+            )
+        self.amdf_family_source = "native"
+        self.enabled_amdf_families = set(families)
+
     def set_rocm_path(self, path: str) -> None:
         rocm_path = resolve_rocm_path(path)
         if self.rocm_path is not None and self.rocm_path != rocm_path:
@@ -379,6 +428,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
   python build_tools/bazel/configure.py -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
   python build_tools/bazel/configure.py -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_DEPENDENCY_MODE=pinned
   python build_tools/bazel/configure.py --//runtime/config/hal:drivers=amdgpu,task --repo_env=IREE_ROCM_PATH=/opt/rocm
+  python build_tools/bazel/configure.py -DAMDF_BUILD=ON -DAMDF_FAMILY_CDNA=OFF
   python build_tools/bazel/configure.py -DLOOM_TARGET_SPIRV=OFF
   python build_tools/bazel/configure.py -DLOOM_TARGET_AMDGPU=ON -DLOOM_EXECUTE_IREE_HAL=ON -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
   python build_tools/bazel/configure.py -DLOOM_TARGET_AMDGPU=ON -DLOOM_EMIT_LLVMIR=ON
@@ -483,6 +533,12 @@ def apply_define(request: ConfigRequest, define: str) -> None:
     if name in LOOM_IMPORT_DEFINES:
         request.set_loom_importer(LOOM_IMPORT_DEFINES[name], parse_bool(name, value))
         return
+    if name == "AMDF_BUILD":
+        request.set_amdf_build(parse_bool(name, value), "portable")
+        return
+    if name in AMDF_FAMILY_DEFINES:
+        request.set_amdf_family(AMDF_FAMILY_DEFINES[name], parse_bool(name, value))
+        return
     if name == "IREE_ROCM_PATH":
         request.set_rocm_path(value)
         return
@@ -539,6 +595,22 @@ def apply_native_bazel_arg(request: ConfigRequest, arg: str) -> None:
         return
     if arg == NATIVE_LOOM_IMPORT_FLAG:
         raise SystemExit(f"{NATIVE_LOOM_IMPORT_FLAG} must use --flag=value syntax.")
+    if arg.startswith(NATIVE_AMDF_ENABLED_FLAG + "="):
+        request.set_amdf_build(
+            parse_bool(
+                NATIVE_AMDF_ENABLED_FLAG,
+                arg.split("=", 1)[1],
+            ),
+            "native",
+        )
+        return
+    if arg == NATIVE_AMDF_ENABLED_FLAG:
+        raise SystemExit(f"{NATIVE_AMDF_ENABLED_FLAG} must use --flag=value syntax.")
+    if arg.startswith(NATIVE_AMDF_FAMILIES_FLAG + "="):
+        request.set_amdf_family_list(parse_string_list(arg.split("=", 1)[1]))
+        return
+    if arg == NATIVE_AMDF_FAMILIES_FLAG:
+        raise SystemExit(f"{NATIVE_AMDF_FAMILIES_FLAG} must use --flag=value syntax.")
     if arg.startswith(NATIVE_REPO_ENV_PREFIX):
         repo_env = arg[len(NATIVE_REPO_ENV_PREFIX) :]
         if "=" not in repo_env:
@@ -597,6 +669,10 @@ def ordered_loom_importer_set(values: set[str]) -> list[str]:
     return [importer for importer in LOOM_IMPORTERS if importer in values]
 
 
+def ordered_amdf_family_set(values: set[str]) -> list[str]:
+    return [family for family in AMDF_FAMILIES if family in values]
+
+
 def bazelrc_line(command: str, option: str) -> str:
     return f"{command} {shlex.quote(option)}"
 
@@ -643,6 +719,17 @@ def generate_config(args: argparse.Namespace) -> str:
             "build",
             "--//runtime/config/hal:drivers="
             + ",".join(ordered_driver_set(request.enabled_drivers)),
+        ),
+        "",
+        "# libamdf library and implementation-family scope.",
+        bazelrc_line(
+            "build",
+            "--//libamdf/config:enabled=" + str(request.amdf_build).lower(),
+        ),
+        bazelrc_line(
+            "build",
+            "--//libamdf/config:families="
+            + ",".join(ordered_amdf_family_set(request.enabled_amdf_families)),
         ),
         "",
         "# Source dependency mode.",

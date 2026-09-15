@@ -1,0 +1,132 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_library(
+    name = "native_image",
+    srcs = ["native_image.c"],
+    hdrs = ["native_image.h"],
+    deps = [
+        ":program_format",
+        ":target",
+        ":transaction",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "program_format",
+    srcs = ["program_format.c"],
+    hdrs = ["program_format.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image:format",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "npu2",
+    srcs = ["npu2.c"],
+    hdrs = ["npu2.h"],
+    deps = [
+        ":program_format",
+        ":target",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "target",
+    srcs = ["target.c"],
+    hdrs = ["target.h"],
+    deps = [
+        ":program_format",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image:validation",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "transaction",
+    srcs = ["transaction.c"],
+    hdrs = ["transaction.h"],
+    deps = [
+        ":program_format",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "native_image_test",
+    srcs = ["native_image_test.cc"],
+    deps = [
+        ":native_image",
+        ":npu2",
+        ":transaction",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:mul_i32",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testing:aie2p_image_fixture",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "npu2_test",
+    srcs = ["npu2_test.cc"],
+    deps = [
+        ":npu2",
+        ":program_format",
+        ":target",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "program_format_test",
+    srcs = ["program_format_test.cc"],
+    deps = [
+        ":program_format",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "target_test",
+    srcs = ["target_test.cc"],
+    deps = [
+        ":program_format",
+        ":target",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "transaction_test",
+    srcs = ["transaction_test.cc"],
+    deps = [
+        ":transaction",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

@@ -1,0 +1,30 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "string_list_flag")
+
+package(default_visibility = ["//visibility:public"])
+
+bool_flag(
+    name = "enabled",
+    build_setting_default = False,
+)
+
+SUPPORTED_FAMILIES = [
+    "rdna",
+    "cdna",
+    "xdna",
+]
+
+string_list_flag(
+    name = "families",
+    build_setting_default = SUPPORTED_FAMILIES,
+)
+
+config_setting(
+    name = "enabled_setting",
+    flag_values = {":enabled": "true"},
+)

@@ -1,0 +1,44 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+KFD_COMPATIBILITY = [
+    "@platforms//os:linux",
+    "@platforms//cpu:x86_64",
+]
+
+amdf_cc_library(
+    name = "pm4_queue",
+    srcs = ["pm4_queue.c"],
+    hdrs = ["pm4_queue.h"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    visibility = ["//libamdf/src/gpu/umd/kfd/target:__pkg__"],
+    deps = [
+        "//libamdf/src/gpu/umd/kfd:topology",
+        "//libamdf/src/gpu/umd/kfd/target:queue_plan",
+        "//third_party:linux_kfd_uapi",
+    ],
+)
+
+amdf_cc_library(
+    name = "sdma_queue",
+    srcs = ["sdma_queue.c"],
+    hdrs = ["sdma_queue.h"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    visibility = ["//libamdf/src/gpu/umd/kfd/target:__pkg__"],
+    deps = [
+        "//libamdf/src/gpu/umd/kfd:topology",
+        "//libamdf/src/gpu/umd/kfd/target:queue_plan",
+        "//third_party:linux_kfd_uapi",
+    ],
+)

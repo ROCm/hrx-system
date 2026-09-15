@@ -1,0 +1,139 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# CMake exposes the same locked headers through linux_uapi.cmake.
+# bazel-to-cmake: skip
+
+load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:private"])
+
+exports_files(["libdrm_headers.BUILD.bazel"])
+
+# Keep the platform sysroot's type and ioctl definitions. Only the driver
+# protocols and their source-level helper macros come from these snapshots.
+
+copy_file(
+    name = "_linux_drm_header",
+    src = "@libdrm_headers//:include/drm/drm.h",
+    out = "include/drm/drm.h",
+    tags = ["manual"],
+)
+
+copy_file(
+    name = "_linux_drm_mode_header",
+    src = "@libdrm_headers//:include/drm/drm_mode.h",
+    out = "include/drm/drm_mode.h",
+    tags = ["manual"],
+)
+
+copy_file(
+    name = "_linux_amdgpu_header",
+    src = "@libdrm_headers//:include/drm/amdgpu_drm.h",
+    out = "include/drm/amdgpu_drm.h",
+    tags = ["manual"],
+)
+
+copy_file(
+    name = "_linux_kfd_ioctl_header",
+    src = "@linux_kfd_ioctl_header//file:linux/kfd_ioctl.h",
+    out = "include/linux/kfd_ioctl.h",
+    tags = ["manual"],
+)
+
+copy_file(
+    name = "_linux_kfd_sysfs_header",
+    src = "@linux_kfd_sysfs_header//file:linux/kfd_sysfs.h",
+    out = "include/linux/kfd_sysfs.h",
+    tags = ["manual"],
+)
+
+copy_file(
+    name = "_linux_const_header",
+    src = "@linux_const_header//file:linux/const.h",
+    out = "include/linux/const.h",
+    tags = ["manual"],
+)
+
+copy_file(
+    name = "_linux_stddef_header",
+    src = "@linux_stddef_header//file:linux/stddef.h",
+    out = "include/linux/stddef.h",
+    tags = ["manual"],
+)
+
+copy_file(
+    name = "_linux_xdna_header",
+    src = "@linux_xdna_header//file:drm/amdxdna_accel.h",
+    out = "include/drm/amdxdna_accel.h",
+    tags = ["manual"],
+)
+
+copy_file(
+    name = "_linux_drm_header_libdrm",
+    src = "@libdrm_headers//:include/drm/drm.h",
+    out = "include/libdrm/drm.h",
+    tags = ["manual"],
+)
+
+copy_file(
+    name = "_linux_drm_mode_header_libdrm",
+    src = "@libdrm_headers//:include/drm/drm_mode.h",
+    out = "include/libdrm/drm_mode.h",
+    tags = ["manual"],
+)
+
+cc_library(
+    name = "linux_drm_uapi",
+    hdrs = [
+        ":_linux_drm_header",
+        ":_linux_drm_header_libdrm",
+        ":_linux_drm_mode_header",
+        ":_linux_drm_mode_header_libdrm",
+    ],
+    includes = ["include"],
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//third_party:__pkg__"],
+)
+
+cc_library(
+    name = "linux_amdgpu_uapi",
+    hdrs = [":_linux_amdgpu_header"],
+    includes = ["include"],
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//third_party:__pkg__"],
+    deps = [":linux_drm_uapi"],
+)
+
+cc_library(
+    name = "linux_kfd_uapi",
+    hdrs = [
+        ":_linux_kfd_ioctl_header",
+        ":_linux_kfd_sysfs_header",
+    ],
+    includes = ["include"],
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//third_party:__pkg__"],
+    deps = [":linux_drm_uapi"],
+)
+
+cc_library(
+    name = "linux_xdna_uapi",
+    hdrs = [
+        ":_linux_const_header",
+        ":_linux_stddef_header",
+        ":_linux_xdna_header",
+    ],
+    includes = ["include"],
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//third_party:__pkg__"],
+    deps = [":linux_drm_uapi"],
+)

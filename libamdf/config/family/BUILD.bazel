@@ -1,0 +1,29 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+[
+    config_setting(
+        name = family,
+        flag_values = {"//libamdf/config:families": family},
+    )
+    for family in [
+        "rdna",
+        "cdna",
+        "xdna",
+    ]
+]
+
+selects.config_setting_group(
+    name = "gpu",
+    match_any = [
+        ":rdna",
+        ":cdna",
+    ],
+)

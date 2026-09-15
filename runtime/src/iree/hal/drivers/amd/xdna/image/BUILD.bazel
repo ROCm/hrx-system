@@ -1,0 +1,178 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_library(
+    name = "directory",
+    srcs = ["directory.c"],
+    hdrs = ["directory.h"],
+    deps = [
+        ":format",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "format",
+    srcs = ["format.c"],
+    hdrs = ["format.h"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "image",
+    srcs = ["image.c"],
+    hdrs = ["image.h"],
+    deps = [
+        ":directory",
+        ":programs",
+        ":tables",
+        ":validation",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "programs",
+    srcs = ["programs.c"],
+    hdrs = ["programs.h"],
+    deps = [
+        ":directory",
+        ":format",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "tables",
+    srcs = ["tables.c"],
+    hdrs = ["tables.h"],
+    deps = [
+        ":directory",
+        ":format",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "validation",
+    srcs = ["validation.c"],
+    hdrs = ["validation.h"],
+    deps = [
+        ":directory",
+        ":format",
+        ":programs",
+        ":tables",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "corpus_test",
+    srcs = ["corpus_test.cc"],
+    deps = [
+        ":image",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/aie2p:program_format",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/aie2p:target",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:mul_i32",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testing:aie2p_image_fixture",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "directory_test",
+    srcs = ["directory_test.cc"],
+    deps = [
+        ":directory",
+        ":format",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testing:image_builder",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "format_test",
+    srcs = ["format_test.cc"],
+    deps = [
+        ":format",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "image_test",
+    srcs = ["image_test.cc"],
+    deps = [
+        ":image",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/aie2p:target",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testing:aie2p_image_fixture",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "programs_test",
+    srcs = ["programs_test.cc"],
+    deps = [
+        ":directory",
+        ":format",
+        ":programs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testing:image_builder",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "tables_test",
+    srcs = ["tables_test.cc"],
+    deps = [
+        ":directory",
+        ":format",
+        ":tables",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testing:image_builder",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "validation_test",
+    srcs = ["validation_test.cc"],
+    deps = [
+        ":directory",
+        ":format",
+        ":programs",
+        ":tables",
+        ":validation",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/aie2p:target",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testing:aie2p_image_fixture",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

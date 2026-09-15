@@ -23,6 +23,7 @@ on:
       - "build_tools/**"
       - "runtime/**"
       - "loom/**"
+      - "libamdf/**"
       - "third_party/**"
       - "tools/**"
   push:
@@ -43,6 +44,7 @@ on:
       - "build_tools/**"
       - "runtime/**"
       - "loom/**"
+      - "libamdf/**"
       - "third_party/**"
       - "tools/**"
 

@@ -47,6 +47,21 @@ class TargetConverter:
                 "//third_party:spirv_val": ["iree::third_party::spirv_val"],
                 "//third_party:vulkan_headers": ["iree::third_party::vulkan_headers"],
                 "//third_party:catch2": ["iree::third_party::catch2"],
+                "//third_party:amdf_wkmi": ["iree::third_party::amdf_wkmi"],
+                # Driver protocol headers are private build inputs, not
+                # dependencies of the installed libamdf static interface.
+                "//third_party:linux_drm_uapi": [
+                    "$<BUILD_LOCAL_INTERFACE:iree::third_party::linux_drm_uapi>"
+                ],
+                "//third_party:linux_amdgpu_uapi": [
+                    "$<BUILD_LOCAL_INTERFACE:iree::third_party::linux_amdgpu_uapi>"
+                ],
+                "//third_party:linux_kfd_uapi": [
+                    "$<BUILD_LOCAL_INTERFACE:iree::third_party::linux_kfd_uapi>"
+                ],
+                "//third_party:linux_xdna_uapi": [
+                    "$<BUILD_LOCAL_INTERFACE:iree::third_party::linux_xdna_uapi>"
+                ],
                 "@webgpu_headers": [],
                 # py_binary targets have no CMake equivalent.
                 # This is the only target bazel needs to execute the lit tests.

@@ -1,0 +1,230 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+load("//libamdf/build_tools/bazel:cc_test.bzl", "amdf_cc_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+DRM_COMPATIBILITY = [
+    "@platforms//os:linux",
+    "@platforms//cpu:x86_64",
+]
+
+amdf_cc_library(
+    name = "buffer",
+    srcs = ["buffer.c"],
+    hdrs = ["buffer.h"],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        "//libamdf/src/platform/linux:file",
+        "//third_party:linux_drm_uapi",
+        "//third_party:linux_xdna_uapi",
+    ],
+)
+
+amdf_cc_test(
+    name = "buffer_test",
+    srcs = ["buffer_test.cc"],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        ":buffer",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+        "//third_party:linux_xdna_uapi",
+    ],
+)
+
+amdf_cc_library(
+    name = "device_state",
+    hdrs = ["device.h"],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        ":buffer",
+        "//libamdf/src/xdna/umd:device",
+    ],
+)
+
+amdf_cc_library(
+    name = "context_state",
+    hdrs = ["context.h"],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        ":device_state",
+        "//libamdf/src:atomics",
+        "//libamdf/src/xdna/umd:context",
+        "//third_party:linux_xdna_uapi",
+    ],
+)
+
+amdf_cc_library(
+    name = "device",
+    srcs = ["device.c"],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        ":buffer",
+        ":device_state",
+        "//libamdf/src:allocator",
+        "//libamdf/src/platform/linux:endpoint",
+        "//libamdf/src/platform/linux:file",
+        "//libamdf/src/platform/linux:host_cache",
+        "//libamdf/src/xdna/umd:device",
+        "//third_party:linux_xdna_uapi",
+    ],
+)
+
+amdf_cc_library(
+    name = "context",
+    srcs = ["context.c"],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        ":context_state",
+        ":device_state",
+        "//libamdf/src:allocator",
+        "//libamdf/src/platform/linux:file",
+        "//libamdf/src/xdna/umd:context",
+        "//third_party:linux_xdna_uapi",
+    ],
+)
+
+amdf_cc_library(
+    name = "memory_profile",
+    srcs = ["memory_profile.c"],
+    hdrs = ["memory_profile.h"],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        "//libamdf/src:memory_profile",
+        "//libamdf/src/platform/linux:endpoint",
+        "//libamdf/src/xdna:endpoint_profile",
+        "//libamdf/src/xdna/umd:memory_profile",
+    ],
+)
+
+amdf_cc_library(
+    name = "memory",
+    srcs = ["memory.c"],
+    hdrs = ["memory.h"],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        ":buffer",
+        ":context_state",
+        ":device_state",
+        ":memory_profile",
+        "//libamdf/src:allocator",
+        "//libamdf/src/platform/linux:dma_buf",
+        "//libamdf/src/platform/linux:file",
+        "//libamdf/src/platform/linux:host_cache",
+        "//libamdf/src/xdna/umd:memory",
+        "//third_party:linux_xdna_uapi",
+    ],
+)
+
+amdf_cc_test(
+    name = "memory_test",
+    srcs = ["memory_test.cc"],
+    linkopts = ["-Wl,--wrap=ioctl"],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        ":device_state",
+        ":memory",
+        "//libamdf/src:allocator",
+        "//libamdf/src/xdna/umd:memory",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+        "//third_party:linux_drm_uapi",
+        "//third_party:linux_xdna_uapi",
+    ],
+)
+
+amdf_cc_library(
+    name = "kernel_queue",
+    srcs = ["kernel_queue.c"],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        ":buffer",
+        ":context_state",
+        ":device_state",
+        ":elf_packet",
+        "//libamdf/src:allocator",
+        "//libamdf/src:atomics",
+        "//libamdf/src:wait",
+        "//libamdf/src/platform:wait",
+        "//libamdf/src/platform/linux:file",
+        "//libamdf/src/platform/linux:host_cache",
+        "//libamdf/src/xdna/umd:kernel_queue",
+        "//third_party:linux_xdna_uapi",
+    ],
+)
+
+amdf_cc_library(
+    name = "drm",
+    target_compatible_with = DRM_COMPATIBILITY,
+    visibility = ["//libamdf/src/xdna:__pkg__"],
+    deps = [
+        ":context",
+        ":device",
+        ":kernel_queue",
+        ":memory",
+    ],
+)
+
+amdf_cc_test(
+    name = "kernel_queue_test",
+    srcs = ["kernel_queue_test.cc"],
+    linkopts = ["-Wl,--wrap=ioctl"],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        ":context_state",
+        ":elf_packet",
+        ":kernel_queue",
+        "//libamdf/src:allocator",
+        "//libamdf/src:atomics",
+        "//libamdf/src:wait",
+        "//libamdf/src/xdna/umd:kernel_queue",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+        "//third_party:linux_xdna_uapi",
+    ],
+)
+
+amdf_cc_test(
+    name = "device_test",
+    srcs = ["device_test.cc"],
+    resource_group = "iree-hal-drivers-amdgpu-tests",
+    tags = [
+        "iree-run-requirement=libamdf.resource.xdna",
+        "runtime-resource=amd-xdna",
+    ],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        ":context",
+        ":context_state",
+        ":device",
+        ":device_state",
+        ":memory",
+        "//libamdf/src:allocator",
+        "//libamdf/src/platform",
+        "//libamdf/src/platform/linux:endpoint",
+        "//libamdf/src/xdna:endpoint_profile",
+        "//libamdf/src/xdna/umd:context",
+        "//libamdf/src/xdna/umd:device",
+        "//libamdf/src/xdna/umd:memory",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+        "//third_party:linux_xdna_uapi",
+    ],
+)
+
+amdf_cc_library(
+    name = "elf_packet",
+    srcs = ["elf_packet.c"],
+    hdrs = ["elf_packet.h"],
+    target_compatible_with = DRM_COMPATIBILITY,
+)

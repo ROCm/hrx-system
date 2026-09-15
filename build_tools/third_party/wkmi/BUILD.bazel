@@ -1,0 +1,43 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# CMake imports this SDK through wkmi.cmake.
+# bazel-to-cmake: skip
+
+load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:private"])
+
+exports_files(["wkmi.cmake"])
+
+copy_file(
+    name = "header",
+    src = "@amdf_wkmi_header//file:wkmi.h",
+    out = "include/wkmi.h",
+)
+
+cc_import(
+    name = "archive",
+    static_library = "@amdf_wkmi_library//file:wkmi.lib",
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+)
+
+cc_library(
+    name = "wkmi",
+    hdrs = [":header"],
+    includes = ["include"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+    visibility = ["//third_party:__pkg__"],
+    deps = [":archive"],
+)

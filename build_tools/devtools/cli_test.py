@@ -59,9 +59,15 @@ class CliTest(unittest.TestCase):
         )
 
     def test_root_setup_can_add_optional_docs_toolchain(self):
-        args = cli.parse_arguments(["setup", "--docs"])
-
-        plan = args.handler(args)
+        with (
+            tempfile.TemporaryDirectory() as tool_root,
+            mock.patch(
+                "build_tools.devtools.setup.resolve_python_interpreter",
+                return_value=("python3.12",),
+            ),
+        ):
+            args = cli.parse_arguments(["--tool-root", tool_root, "setup", "--docs"])
+            plan = args.handler(args)
         description = normalized_plan_description(plan)
 
         self.assertIn("loom/docs/requirements.lock.txt", description)

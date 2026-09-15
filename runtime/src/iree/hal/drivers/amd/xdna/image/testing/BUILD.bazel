@@ -1,0 +1,38 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_library(
+    name = "aie2p_image_fixture",
+    testonly = True,
+    srcs = ["aie2p_image_fixture.cc"],
+    hdrs = ["aie2p_image_fixture.h"],
+    deps = [
+        ":image_builder",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/aie2p:program_format",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/aie2p:target",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "image_builder",
+    testonly = True,
+    srcs = ["image_builder.cc"],
+    hdrs = ["image_builder.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image:directory",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image:format",
+    ],
+)

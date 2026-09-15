@@ -1,0 +1,93 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+amdf_cc_library(
+    name = "gpu_device_fixture",
+    testonly = True,
+    hdrs = ["gpu_device_fixture.h"],
+    visibility = ["//libamdf/cts/gpu:__subpackages__"],
+    deps = [
+        "//libamdf/cts/util:device_cache",
+        "//libamdf/cts/util:provider_headers",
+        "//third_party:google_test",
+    ],
+)
+
+amdf_cc_library(
+    name = "user_queue_memory",
+    testonly = True,
+    srcs = ["user_queue_memory.cc"],
+    hdrs = ["user_queue_memory.h"],
+    target_compatible_with = ["@platforms//cpu:x86_64"],
+    deps = [
+        ":gpu_device_fixture",
+        "//third_party:google_test",
+    ],
+)
+
+[amdf_cts_test_suite(
+    name = name,
+    srcs = [name + "_test.cc"],
+    target_compatible_with = ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gpu_device_fixture",
+        "//libamdf/cts/util:device_cache",
+        "//libamdf/cts/util:provider_headers",
+        "//third_party:google_test",
+    ],
+) for name in [
+    "gpu_extension",
+    "kernel_queue",
+    "memory_group",
+    "memory_interop",
+]]
+
+[amdf_cts_test_suite(
+    name = name,
+    srcs = [name + "_test.cc"],
+    target_compatible_with = ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":user_queue_memory",
+        "//third_party:google_test",
+    ],
+) for name in [
+    "pm4_queue",
+    "sdma_queue",
+]]
+
+test_suite(
+    name = "gpu",
+    tests = [
+        ":gpu_extension",
+        ":kernel_queue",
+        ":memory_group",
+        ":memory_interop",
+        ":pm4_queue",
+        ":sdma_queue",
+        "//libamdf/cts/gpu/linux:memory",
+        "//libamdf/cts/gpu/windows:memory",
+    ],
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,357 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+load("//libamdf/build_tools/bazel:cc_test.bzl", "amdf_cc_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+KFD_COMPATIBILITY = [
+    "@platforms//os:linux",
+    "@platforms//cpu:x86_64",
+]
+
+amdf_cc_library(
+    name = "file",
+    hdrs = ["file.h"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        "//libamdf/src/platform/linux:file",
+        "//third_party:linux_kfd_uapi",
+    ],
+)
+
+amdf_cc_library(
+    name = "topology",
+    srcs = ["topology.c"],
+    hdrs = ["topology.h"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    visibility = ["//libamdf/src/gpu/umd/kfd:__subpackages__"],
+    deps = [
+        "//libamdf/src:allocator",
+        "//libamdf/src/gpu:endpoint_profile",
+        "//libamdf/src/platform",
+        "//libamdf/src/platform/linux:endpoint",
+        "//libamdf/src/platform/linux:file",
+        "//third_party:linux_amdgpu_uapi",
+        "//third_party:linux_kfd_uapi",
+    ],
+)
+
+amdf_cc_test(
+    name = "topology_test",
+    srcs = ["topology_test.cc"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":endpoint_profile",
+        ":topology",
+        "//libamdf/src:allocator",
+        "//libamdf/src/gpu/umd:endpoint_profile",
+        "//libamdf/src/platform/linux:endpoint",
+        "//libamdf/src/platform/linux:file",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_library(
+    name = "reset_monitor",
+    srcs = ["reset_monitor.c"],
+    hdrs = ["reset_monitor.h"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        "//libamdf/src:atomics",
+        "//libamdf/src/platform/linux:file",
+        "//third_party:linux_amdgpu_uapi",
+    ],
+)
+
+amdf_cc_test(
+    name = "reset_monitor_test",
+    srcs = ["reset_monitor_test.cc"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":reset_monitor",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_library(
+    name = "vm",
+    srcs = ["vm.c"],
+    hdrs = ["vm.h"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":topology",
+        "//libamdf/src/platform/linux:file",
+        "//third_party:linux_amdgpu_uapi",
+        "//third_party:linux_drm_uapi",
+        "//third_party:linux_kfd_uapi",
+    ],
+)
+
+amdf_cc_test(
+    name = "vm_test",
+    srcs = ["vm_test.cc"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":vm",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+        "//third_party:linux_amdgpu_uapi",
+        "//third_party:linux_drm_uapi",
+        "//third_party:linux_kfd_uapi",
+    ],
+)
+
+amdf_cc_library(
+    name = "instance",
+    srcs = ["instance.c"],
+    hdrs = ["instance.h"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":file",
+        ":topology",
+        ":vm",
+        "//libamdf/src:allocator",
+        "//libamdf/src/gpu/umd:instance",
+        "//libamdf/src/platform/linux:endpoint",
+    ],
+)
+
+amdf_cc_library(
+    name = "device_state",
+    hdrs = ["device.h"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":reset_monitor",
+        ":topology",
+        "//libamdf/src/gpu/umd:device",
+    ],
+)
+
+amdf_cc_test(
+    name = "instance_test",
+    srcs = ["instance_test.cc"],
+    linkopts = [
+        "-Wl,--wrap=open",
+        "-Wl,--wrap=close",
+        "-Wl,--wrap=ioctl",
+        "-Wl,--wrap=amdf_linux_endpoint_open_file",
+        "-Wl,--wrap=amdf_gpu_kfd_vm_acquire",
+        "-Wl,--wrap=amdf_gpu_kfd_vm_bootstrap_release",
+    ],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":instance",
+        ":vm",
+        "//libamdf/src:allocator",
+        "//libamdf/src/platform/linux:endpoint",
+        "//libamdf/src/platform/linux:file",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+        "//third_party:linux_amdgpu_uapi",
+        "//third_party:linux_kfd_uapi",
+    ],
+)
+
+amdf_cc_library(
+    name = "user_queue_native",
+    srcs = ["user_queue_native.c"],
+    hdrs = ["user_queue_native.h"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":buffer",
+        ":device_state",
+        ":reset_monitor",
+        "//libamdf/src/platform/linux:file",
+        "//third_party:linux_amdgpu_uapi",
+        "//third_party:linux_kfd_uapi",
+    ],
+)
+
+amdf_cc_test(
+    name = "user_queue_native_test",
+    srcs = ["user_queue_native_test.cc"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":user_queue_native",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_library(
+    name = "device",
+    srcs = ["device.c"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":device_state",
+        ":instance",
+        ":reset_monitor",
+        ":topology",
+        ":user_queue_native",
+        "//libamdf/src:allocator",
+        "//libamdf/src/gpu/umd/kfd/target:user_queue",
+        "//libamdf/src/platform/linux:endpoint",
+        "//libamdf/src/platform/linux:file",
+        "//libamdf/src/platform/linux:host_cache",
+    ],
+)
+
+amdf_cc_library(
+    name = "buffer",
+    srcs = ["buffer.c"],
+    hdrs = ["buffer.h"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    visibility = ["//libamdf/src/gpu/umd/kfd:__subpackages__"],
+    deps = [
+        ":device_state",
+        "//libamdf/src:allocator",
+        "//libamdf/src/platform/linux:file",
+        "//third_party:linux_kfd_uapi",
+    ],
+)
+
+amdf_cc_test(
+    name = "buffer_test",
+    srcs = ["buffer_test.cc"],
+    linkopts = ["-Wl,--wrap=ioctl"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":buffer",
+        ":device_state",
+        ":memory",
+        "//libamdf/src:allocator",
+        "//libamdf/src/gpu/umd:memory",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+        "//third_party:linux_kfd_uapi",
+    ],
+)
+
+amdf_cc_library(
+    name = "memory_profile",
+    srcs = ["memory_profile.c"],
+    hdrs = ["memory_profile.h"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":topology",
+        "//libamdf/src:memory_profile",
+    ],
+)
+
+amdf_cc_library(
+    name = "memory",
+    srcs = ["memory.c"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":buffer",
+        ":device_state",
+        ":memory_profile",
+        ":topology",
+        "//libamdf/src:allocator",
+        "//libamdf/src/gpu/umd:memory",
+        "//libamdf/src/platform/linux:dma_buf",
+        "//libamdf/src/platform/linux:file",
+        "//libamdf/src/platform/linux:host_cache",
+        "//third_party:linux_kfd_uapi",
+    ],
+)
+
+amdf_cc_test(
+    name = "memory_test",
+    srcs = ["memory_test.cc"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":device_state",
+        ":memory",
+        "//libamdf/src/gpu/umd:memory",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_library(
+    name = "endpoint_profile",
+    srcs = ["endpoint_profile.c"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":memory_profile",
+        ":topology",
+        "//libamdf/src:allocator",
+        "//libamdf/src/gpu:endpoint_profile",
+        "//libamdf/src/gpu/umd:endpoint_profile",
+        "//libamdf/src/gpu/umd/kfd/target:memory",
+        "//libamdf/src/gpu/umd/kfd/target:user_queue",
+        "//libamdf/src/platform/linux:endpoint",
+        "//libamdf/src/platform/linux:file",
+        "//libamdf/src/platform/linux:host_cache",
+    ],
+)
+
+amdf_cc_library(
+    name = "kernel_queue",
+    srcs = ["kernel_queue.c"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = ["//libamdf/src/gpu/umd:kernel_queue"],
+)
+
+amdf_cc_library(
+    name = "user_queue",
+    srcs = ["user_queue.c"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":buffer",
+        ":device_state",
+        ":user_queue_native",
+        "//libamdf/src:allocator",
+        "//libamdf/src:atomics",
+        "//libamdf/src/gpu/umd:user_queue",
+        "//libamdf/src/gpu/umd/kfd/target:user_queue",
+        "//libamdf/src/platform:wait",
+        "//libamdf/src/platform/linux:file",
+        "//third_party:linux_kfd_uapi",
+    ],
+)
+
+amdf_cc_test(
+    name = "user_queue_test",
+    srcs = ["user_queue_test.cc"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":device_state",
+        ":user_queue",
+        ":user_queue_native",
+        "//libamdf/src:allocator",
+        "//libamdf/src:atomics",
+        "//libamdf/src/gpu/umd:user_queue",
+        "//libamdf/src/gpu/umd/kfd/target:user_queue",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+        "//third_party:linux_kfd_uapi",
+    ],
+)
+
+amdf_cc_library(
+    name = "kfd",
+    target_compatible_with = KFD_COMPATIBILITY,
+    visibility = ["//libamdf/src/gpu/umd:__pkg__"],
+    deps = [
+        ":buffer",
+        ":device",
+        ":endpoint_profile",
+        ":instance",
+        ":kernel_queue",
+        ":memory",
+        ":user_queue",
+    ],
+)

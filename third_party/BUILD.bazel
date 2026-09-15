@@ -7,9 +7,10 @@
 # Public Bazel facade for source dependencies. Source declarations, locks, and
 # CMake adapters live under build_tools/third_party/. See
 # build_tools/third_party/README.md for dependency ownership and update policy.
+# CMake facades are supplied by the dependency-specific adapters.
+# bazel-to-cmake: skip
 
 load("@bazel_skylib//lib:selects.bzl", "selects")
-load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -29,6 +30,11 @@ package_group(
 )
 
 package_group(
+    name = "libamdf_users",
+    packages = ["//libamdf/..."],
+)
+
+package_group(
     name = "loom_users",
     packages = ["//loom/..."],
 )
@@ -37,6 +43,7 @@ package_group(
     name = "benchmark_users",
     packages = [
         "//build_tools/...",
+        "//libamdf/...",
         "//libhrx/...",
         "//loom/...",
         "//runtime/...",
@@ -47,6 +54,7 @@ package_group(
     name = "test_framework_users",
     packages = [
         "//build_tools/...",
+        "//libamdf/...",
         "//libhrx/...",
         "//loom/...",
         "//runtime/...",
@@ -84,20 +92,49 @@ alias(
 )
 
 alias(
+    name = "amdf_wkmi",
+    actual = "//build_tools/third_party/wkmi",
+    visibility = [":libamdf_users"],
+)
+
+alias(
+    name = "linux_drm_uapi",
+    actual = "//build_tools/third_party/linux_uapi:linux_drm_uapi",
+    tags = ["manual"],
+    visibility = [":libamdf_users"],
+)
+
+alias(
+    name = "linux_amdgpu_uapi",
+    actual = "//build_tools/third_party/linux_uapi:linux_amdgpu_uapi",
+    tags = ["manual"],
+    visibility = [":libamdf_users"],
+)
+
+alias(
+    name = "linux_kfd_uapi",
+    actual = "//build_tools/third_party/linux_uapi:linux_kfd_uapi",
+    tags = ["manual"],
+    visibility = [":libamdf_users"],
+)
+
+alias(
+    name = "linux_xdna_uapi",
+    actual = "//build_tools/third_party/linux_uapi:linux_xdna_uapi",
+    tags = ["manual"],
+    visibility = [":libamdf_users"],
+)
+
+alias(
     name = "libbacktrace",
     actual = "//build_tools/third_party/libbacktrace",
     visibility = [":runtime_users"],
 )
 
-cc_library(
+alias(
     name = "zstd",
-    hdrs = [
-        "@zstd//:lib/zstd.h",
-        "@zstd//:lib/zstd_errors.h",
-    ],
-    defines = ["IREE_HAVE_ZSTD=1"],
+    actual = "//build_tools/third_party/zstd",
     visibility = [":libhrx_users"],
-    deps = ["@zstd"],
 )
 
 filegroup(

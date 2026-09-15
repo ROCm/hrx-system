@@ -108,12 +108,12 @@ def _test_aspect_collects_data_through_label_flag(name, **kwargs):
     analysis_test(
         name = name,
         attr_values = {"timeout": "short"},
-        impl = _test_aspect_collects_data_through_label_flag_impl,
+        impl = _test_aspect_collects_bundle_impl,
         target = collector,
         **kwargs
     )
 
-def _test_aspect_collects_data_through_label_flag_impl(env, target):
+def _test_aspect_collects_bundle_impl(env, target):
     bindings = target[IreeDynamicLibraryBindingsInfo]
     if not bindings.has_bundles:
         env.fail("expected configured graph to contain a dynamic-library bundle")
@@ -122,6 +122,39 @@ def _test_aspect_collects_data_through_label_flag_impl(env, target):
     _expect_file_basename(env, files, "dynamic_library_dependency.so")
     env.expect.that_str(bindings.environment[_TEST_ENVIRONMENT_NAME].basename).equals(
         "dynamic_library_root.so",
+    )
+
+def _test_aspect_collects_bundle_through_filegroup(name, **kwargs):
+    bundle = name + "_bundle"
+    iree_dynamic_library_bundle(
+        name = bundle,
+        environment = {
+            ":dynamic_library_root.so": _TEST_ENVIRONMENT_NAME,
+        },
+        srcs = [
+            ":dynamic_library_dependency.so",
+            ":dynamic_library_root.so",
+        ],
+        tags = ["manual"],
+    )
+    runtime_files = name + "_runtime_files"
+    native.filegroup(
+        name = runtime_files,
+        srcs = [":" + bundle],
+        tags = ["manual"],
+    )
+    collector = name + "_subject"
+    _collect_bindings(
+        name = collector,
+        target = ":" + runtime_files,
+        tags = ["manual"],
+    )
+    analysis_test(
+        name = name,
+        attr_values = {"timeout": "short"},
+        impl = _test_aspect_collects_bundle_impl,
+        target = collector,
+        **kwargs
     )
 
 def _test_aspect_deduplicates_identical_bindings(name, **kwargs):
@@ -263,6 +296,7 @@ def dynamic_library_bundle_rules_test_suite(name):
         name = name,
         tests = [
             _test_bundle_is_runtime_only,
+            _test_aspect_collects_bundle_through_filegroup,
             _test_aspect_collects_data_through_label_flag,
             _test_aspect_deduplicates_identical_bindings,
             _test_aspect_distinguishes_graph_without_bundles,

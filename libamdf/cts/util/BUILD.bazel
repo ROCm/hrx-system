@@ -1,0 +1,102 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:select.bzl", "iree_select")
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+
+package(
+    default_visibility = [
+        "//experimental/xdna/benchmarks:__pkg__",
+        "//experimental/xdna/cts:__pkg__",
+        "//libamdf/benchmarks:__subpackages__",
+        "//libamdf/cts:__subpackages__",
+    ],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+amdf_cc_library(
+    name = "provider_headers",
+    testonly = True,
+    hdrs = ["provider.h"],
+    includes = [".."],
+)
+
+amdf_cc_library(
+    name = "device_cache",
+    testonly = True,
+    srcs = ["device_cache.cc"],
+    hdrs = ["device_cache.h"],
+    deps = [":provider_headers"],
+)
+
+amdf_cc_library(
+    name = "test_main",
+    testonly = True,
+    srcs = ["test_main.cc"],
+    deps = [
+        ":device_cache",
+        ":provider_headers",
+        "//third_party:google_test",
+    ],
+)
+
+amdf_cc_library(
+    name = "static_provider",
+    testonly = True,
+    srcs = ["linked_provider.cc"],
+    deps = [
+        ":provider_headers",
+        "//libamdf:amdf_static",
+    ],
+)
+
+amdf_cc_library(
+    name = "shared_provider",
+    testonly = True,
+    srcs = ["linked_provider.cc"],
+    deps = [
+        ":provider_headers",
+        "//libamdf:amdf",
+    ],
+)
+
+amdf_cc_library(
+    name = "linked_test_main",
+    testonly = True,
+    deps = [
+        ":static_provider",
+        ":test_main",
+    ],
+)
+
+amdf_cc_library(
+    name = "dynamic_provider_posix",
+    testonly = True,
+    srcs = ["dynamic_provider_posix.cc"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":provider_headers",
+        "//build_tools/bazel:dl",
+    ],
+)
+
+amdf_cc_library(
+    name = "dynamic_provider_win32",
+    testonly = True,
+    srcs = ["dynamic_provider_win32.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [":provider_headers"],
+)
+
+amdf_cc_library(
+    name = "dynamic_provider",
+    testonly = True,
+    deps = iree_select({
+        "@platforms//os:windows": [":dynamic_provider_win32"],
+        "//conditions:default": [":dynamic_provider_posix"],
+    }),
+)

@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "help describes the invocation contract",
+      "run": {"tool": "iree-xdna-run", "args": ["--help"]},
+      "stdout": {"contains": ["--image=", "--columns=", "--invocation_count=", "--binding_memory=", "--binding=", "--output="]},
+      "stderr": {"empty": true}
+    },
+    {
+      "name": "missing required options",
+      "run": {"tool": "iree-xdna-run"},
+      "exit": 1,
+      "stderr": {"contains": ["INVALID_ARGUMENT", "--columns in [1, 8]"]}
+    },
+    {
+      "name": "invalid invocation count is rejected before device creation",
+      "steps": [
+        {"write": {"path": "{tmp}/input.bin", "text": "abcd"}},
+        {
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": ["--image={tmp}/input.bin", "--columns=1", "--invocation_count=0"]
+          },
+          "exit": 1,
+          "stderr": {"contains": ["INVALID_ARGUMENT", "--invocation_count >= 1"], "not_contains": ["Creating", "AddressSanitizer", "LeakSanitizer"]}
+        }
+      ]
+    },
+    {
+      "name": "invalid binding memory is rejected before device creation",
+      "steps": [
+        {"write": {"path": "{tmp}/input.bin", "text": "abcd"}},
+        {
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": ["--image={tmp}/input.bin", "--columns=1", "--binding_memory=unknown"]
+          },
+          "exit": 1,
+          "stderr": {"contains": ["INVALID_ARGUMENT", "--binding_memory must be system or registered_host"], "not_contains": ["Creating", "AddressSanitizer", "LeakSanitizer"]}
+        }
+      ]
+    },
+    {
+      "name": "positional arguments are rejected",
+      "run": {"tool": "iree-xdna-run", "args": ["extra"]},
+      "exit": 1,
+      "stderr": {"contains": ["unexpected positional argument"]}
+    },
+    {
+      "name": "partial input loading releases host ownership",
+      "steps": [
+        {"write": {"path": "{tmp}/input.bin", "text": "abcd"}},
+        {
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": ["--image={tmp}/input.bin", "--columns=1", "--binding={tmp}/input.bin", "--binding={tmp}/missing.bin"]
+          },
+          "exit": 1,
+          "stderr": {"contains": ["NOT_FOUND", "missing.bin"], "not_contains": ["Creating", "AddressSanitizer", "LeakSanitizer"]}
+        }
+      ]
+    },
+    {
+      "name": "output ordinal is validated before device creation",
+      "steps": [
+        {"write": {"path": "{tmp}/input.bin", "text": "abcd"}},
+        {
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": ["--image={tmp}/input.bin", "--columns=1", "--binding={tmp}/input.bin", "--output=1={tmp}/output.bin"]
+          },
+          "exit": 1,
+          "stderr": {"contains": ["valid binding_ordinal=path"], "not_contains": ["Creating", "AddressSanitizer", "LeakSanitizer"]}
+        }
+      ]
+    },
+    {
+      "name": "duplicate outputs are rejected before device creation",
+      "steps": [
+        {"write": {"path": "{tmp}/input.bin", "text": "abcd"}},
+        {
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": ["--image={tmp}/input.bin", "--columns=1", "--binding={tmp}/input.bin", "--output=0={tmp}/first.bin", "--output=0={tmp}/second.bin"]
+          },
+          "exit": 1,
+          "stderr": {"contains": ["binding 0 has more than one output path"], "not_contains": ["Creating", "AddressSanitizer", "LeakSanitizer"]}
+        }
+      ]
+    }
+  ]
+}

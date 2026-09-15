@@ -1,0 +1,66 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+amdf_cc_library(
+    name = "provider",
+    srcs = [
+        "amdf.c",
+        "extension.c",
+        "instance.c",
+    ],
+    hdrs = ["extension.h"],
+    defines = select({
+        "//libamdf/config/provider:gpu": ["AMDF_HAVE_GPU=1"],
+        "//conditions:default": [],
+    }) + select({
+        "//libamdf/config/family:xdna": ["AMDF_HAVE_XDNA=1"],
+        "//conditions:default": [],
+    }),
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//libamdf:__pkg__"],
+    deps = [
+        "//libamdf/src:allocator",
+        "//libamdf/src:child_tracker",
+        "//libamdf/src:core",
+        "//libamdf/src:device",
+        "//libamdf/src:endpoint",
+        "//libamdf/src:host_mapping",
+        "//libamdf/src:instance",
+        "//libamdf/src:kernel_queue",
+        "//libamdf/src:memory",
+        "//libamdf/src:memory_scope",
+        "//libamdf/src:memory_scope_state",
+        "//libamdf/src:structure",
+        "//libamdf/src:user_queue",
+        "//libamdf/src/platform",
+    ] + select({
+        "//libamdf/config/provider:gpu": [
+            "//libamdf/src/gpu",
+            "//libamdf/src/gpu:extension",
+            "//libamdf/src/gpu/umd:instance",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//libamdf/config/family:xdna": [
+            "//libamdf/src/xdna",
+            "//libamdf/src/xdna:endpoint_profile",
+            "//libamdf/src/xdna:extension",
+        ],
+        "//conditions:default": [],
+    }),
+)

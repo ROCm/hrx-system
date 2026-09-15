@@ -1,0 +1,47 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//experimental/xdna:build_defs.bzl", "xdna_cc_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+[
+    xdna_cc_test(
+        name = "execution_test" + suffix,
+        srcs = ["execution_test.cc"],
+        args = ["--amdf_native_lifetime=" + lifetime],
+        target_compatible_with = select({
+            "@platforms//os:linux": [],
+            "@platforms//os:windows": [],
+            "//conditions:default": ["@platforms//:incompatible"],
+        }),
+        deps = [
+            "//experimental/xdna:executable",
+            "//experimental/xdna:prepared_command",
+            "//libamdf:amdf_static",
+            "//libamdf:headers",
+            "//libamdf/cts/util:device_cache",
+            "//libamdf/cts/util:linked_test_main",
+            "//libamdf/cts/util:provider_headers",
+            "//libamdf/cts/xdna:xdna_device_fixture",
+            "//runtime/src/iree/base",
+            "//runtime/src/iree/hal",
+            "//runtime/src/iree/hal/drivers/amd/xdna/image/aie2p:npu2",
+            "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:mul_i32",
+            "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:mul_i32_npu4",
+            "//runtime/src/iree/hal/drivers/amd/xdna/image/testing:aie2p_image_fixture",
+            "//runtime/src/iree/testing:gtest",
+        ],
+    )
+    for lifetime, suffix in [
+        ("process", ""),
+        ("instance", "_instance"),
+    ]
+]

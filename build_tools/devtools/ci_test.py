@@ -4,6 +4,30 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+# =============================================================================
+# TEST TOOL BEHAVIOR. DO NOT ADD CHANGE-DETECTOR TESTS.
+# =============================================================================
+# CI definitions are input data, not a specification to mirror in assertions.
+# Adding or changing a target, tag filter, platform, workflow, or other policy
+# data must not require adding or changing tests in this file. Changes to Python
+# behavior warrant tests; edits to the data consumed by that behavior do not.
+#
+# Do not assert that a configured list appears in the generated command, pin a
+# workflow's current text or matrix, or enumerate today's command definitions.
+# Reading expected values from ci_config instead of copying their literals is
+# still a change detector. Computing expectations with the same production
+# helper being exercised is not an independent behavioral check either.
+#
+# Exercise the tool's mechanisms with controlled inputs: argument validation,
+# quoting and escaping, user overrides, execution ordering, dry-run side effects,
+# failure propagation, and filesystem or subprocess behavior. Synthetic fixtures
+# describe those behaviors without reproducing the repository's policy tables.
+# Actual configured builds and test runs validate the selected product coverage.
+#
+# A useful test explains what the Python code does incorrectly when it fails,
+# not which declarative definition needs to be copied into an expected result.
+# =============================================================================
+
 from __future__ import annotations
 
 import contextlib
@@ -1644,8 +1668,6 @@ fi
             )
         )
         build_steps = [step for step in steps if step.name.startswith("Build IREE")]
-        for target in ci_config.AMDGPU_CMAKE_DRIVER_TARGETS:
-            self.assertTrue(any(target in step.argv for step in build_steps))
         resource_target = ci.cmake_runtime_resource_build_target(
             ci_config.AMDGPU_CTEST_RESOURCE_LABEL_REGEX
         )
@@ -1656,9 +1678,6 @@ fi
                 for step in build_steps
                 for arg in step.argv
             )
-        )
-        self.assertTrue(
-            any("-R '^iree/hal/drivers/amdgpu/'" in line for line in command_lines)
         )
         self.assertTrue(
             any(
@@ -1677,10 +1696,6 @@ fi
             if step.name == "Test IREE CMake AMDGPU package tests"
         )
         self.assertEqual(self.ctest_exclude_regexes(package_test), [])
-        self.assertEqual(
-            self.ctest_exclude_regexes(resource_test),
-            [ci.combine_ctest_regex("^iree/hal/drivers/amdgpu/")],
-        )
         self.assertIn(ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX, resource_test.argv)
 
     def test_cmake_amdgpu_device_binary_source_build_uses_fetched_rocm_root(self):
@@ -1746,8 +1761,6 @@ fi
             any("-DIREE_BUILD_BENCHMARKS=OFF" in line for line in command_lines)
         )
         build_steps = [step for step in steps if step.name.startswith("Build IREE")]
-        for target in ci_config.AMDGPU_CMAKE_DRIVER_TARGETS:
-            self.assertTrue(any(target in step.argv for step in build_steps))
         resource_target = ci.cmake_runtime_resource_build_target(
             ci_config.AMDGPU_CTEST_RESOURCE_LABEL_REGEX
         )

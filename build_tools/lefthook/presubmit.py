@@ -173,6 +173,16 @@ PROJECTS = (
         ),
     ),
     Project(
+        name="libamdf",
+        root="libamdf/",
+        script="libamdf/build_tools/presubmit.py",
+        presubmit_test_target="//libamdf/build_tools:presubmit_tests",
+        presubmit_test_dependencies=(
+            "build_tools/devtools/BUILD.bazel",
+            "build_tools/devtools/project_presubmit.py",
+        ),
+    ),
+    Project(
         name="libhrx",
         root="libhrx/",
         script="libhrx/build_tools/presubmit.py",

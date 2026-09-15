@@ -1,0 +1,201 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:dynamic_library_bundle.bzl", "iree_dynamic_library_bundle")
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_binary", "amdf_cc_library")
+load("//libamdf/build_tools/bazel:cc_test.bzl", "amdf_cc_test")
+load("//libamdf/build_tools/bazel:windows_sidecar.bzl", "amdf_windows_sidecar_library")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+amdf_cc_library(
+    name = "bridge_api",
+    hdrs = ["bridge_api.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+amdf_cc_library(
+    name = "adapter",
+    srcs = ["adapter.c"],
+    hdrs = ["adapter.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//libamdf/src/gpu/umd/wddm:__pkg__"],
+    deps = [
+        ":bridge_api",
+        ":loader",
+        "//libamdf/src/platform/windows:kmt_api",
+    ],
+)
+
+amdf_windows_sidecar_library(
+    name = "amdf_wkmi_bridge",
+    srcs = [
+        "adapter_state.cc",
+        "adapter_state.h",
+        "allocation.cc",
+        "allocation.h",
+        "bridge.cc",
+        "bridge_allocator.h",
+        "dxcore_loader_compatibility.cc",
+        "kernel_queue.cc",
+        "kernel_queue.h",
+    ],
+    linkopts = ["gdi32.lib"],
+    deps = [
+        ":bridge_api",
+        "//third_party:amdf_wkmi",
+    ],
+)
+
+amdf_cc_binary(
+    name = "fake_wkmi_bridge_test",
+    testonly = True,
+    srcs = ["fake_wkmi_bridge_test.cc"],
+    linkshared = True,
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+    visibility = ["//libamdf/src/gpu/umd/wddm:__pkg__"],
+    deps = [":bridge_api"],
+)
+
+amdf_cc_test(
+    name = "allocation_test",
+    srcs = [
+        "adapter_state.cc",
+        "adapter_state.h",
+        "allocation.cc",
+        "allocation.h",
+        "allocation_test.cc",
+        "bridge_allocator.h",
+    ],
+    copts = ["/MT"],
+    defines = [
+        "_DISABLE_STRING_ANNOTATION",
+        "_DISABLE_VECTOR_ANNOTATION",
+        "_ITERATOR_DEBUG_LEVEL=0",
+    ],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+    deps = [
+        ":bridge_api",
+        "//third_party:amdf_wkmi",
+    ],
+)
+
+amdf_cc_test(
+    name = "kernel_queue_test",
+    srcs = [
+        "adapter_state.cc",
+        "adapter_state.h",
+        "bridge_allocator.h",
+        "kernel_queue.cc",
+        "kernel_queue.h",
+        "kernel_queue_test.cc",
+    ],
+    copts = ["/MT"],
+    defines = [
+        "_DISABLE_STRING_ANNOTATION",
+        "_DISABLE_VECTOR_ANNOTATION",
+        "_ITERATOR_DEBUG_LEVEL=0",
+    ],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+    deps = [
+        ":bridge_api",
+        "//third_party:amdf_wkmi",
+    ],
+)
+
+iree_dynamic_library_bundle(
+    name = "runtime",
+    environment = {
+        ":amdf_wkmi_bridge": "AMDF_WKMI_BRIDGE_PATH",
+    },
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+    visibility = ["//libamdf:__pkg__"],
+)
+
+amdf_cc_library(
+    name = "endpoint_properties",
+    srcs = ["endpoint_properties.c"],
+    hdrs = ["endpoint_properties.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//libamdf/src/gpu/umd/wddm:__pkg__"],
+    deps = [
+        ":bridge_api",
+        "//libamdf/src/gpu:endpoint_profile",
+    ],
+)
+
+amdf_cc_library(
+    name = "loader",
+    srcs = ["loader.c"],
+    hdrs = ["loader.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//libamdf/src/gpu/umd/wddm:__pkg__"],
+    deps = [
+        ":bridge_api",
+        "//libamdf/src:allocator",
+        "//libamdf/src/platform/windows:kmt_api",
+    ],
+)
+
+amdf_cc_test(
+    name = "adapter_test",
+    srcs = ["adapter_test.cc"],
+    data = [":fake_wkmi_bridge_test"],
+    env = {
+        "AMDF_WKMI_BRIDGE_PATH": "$(location :fake_wkmi_bridge_test)",
+    },
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":adapter",
+        ":loader",
+        "//libamdf/src:allocator",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "endpoint_properties_test",
+    srcs = ["endpoint_properties_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":endpoint_properties",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "loader_test",
+    srcs = ["loader_test.cc"],
+    data = [":fake_wkmi_bridge_test"],
+    env = {
+        "AMDF_WKMI_BRIDGE_PATH": "$(location :fake_wkmi_bridge_test)",
+    },
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":loader",
+        "//libamdf/src:allocator",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)

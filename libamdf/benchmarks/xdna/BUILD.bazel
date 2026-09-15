@@ -1,0 +1,23 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc_benchmark.bzl", "amdf_cc_benchmark")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+amdf_cc_benchmark(
+    name = "memory_benchmark",
+    srcs = [
+        "main.cc",
+        "//libamdf/cts/util:linked_provider.cc",
+    ],
+    deps = [
+        "//libamdf:amdf",
+        "//libamdf/benchmarks:memory_benchmark",
+        "//libamdf/cts/util:provider_headers",
+    ],
+)

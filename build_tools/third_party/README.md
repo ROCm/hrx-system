@@ -53,6 +53,14 @@ visible only to `//runtime/...`, `//libhrx/...`, `//loom/...`, or shared testing
 infrastructure. That keeps updates centralized while preventing accidental
 cross-project dependency creep.
 
+`third_party/BUILD.bazel` contains facade policy: public aliases, visibility,
+feature selection, and empty targets for disabled dependencies. File copying,
+archive imports, compilation, and library construction belong in the owning
+`build_tools/third_party/<dependency>/BUILD.bazel` or external repository
+overlay. Repository-local implementation targets are visible to the facade,
+not directly to project consumers. Dependency-specific CMake adapters supply
+the equivalent targets without generating CMake from the facade.
+
 Repo code should not depend on `//build_tools/third_party/...` labels. Those
 packages are implementation details for dependency declarations, external
 repository overlay files, or CMake adapters. Checked-in BUILD files consume
@@ -84,6 +92,21 @@ http_archive(
     build_file = "//build_tools/third_party/spirv_tools:spirv_headers.BUILD.bazel",
     sha256 = "...",
     strip_prefix = "...",
+    url = "https://...",
+)
+```
+
+Use `http_file` for a versioned source input that is distributed as one file
+rather than an archive. Always name the downloaded file explicitly so Bazel and
+CMake expose the same path:
+
+```starlark
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_file(
+    name = "vendor_library",
+    downloaded_file_path = "vendor.lib",
+    sha256 = "...",
     url = "https://...",
 )
 ```
@@ -120,8 +143,9 @@ python build_tools/bazel_to_cmake/deps.py
 
 The update path may fetch BCR `source.json` files in order to translate a
 `bazel_dep()` module version into the exact archive URL, SHA256, and strip
-prefix CMake needs. Direct `http_archive` declarations are resolved without
-network access because the URL and hash are already in the Bazel fragment.
+prefix CMake needs. Direct `http_archive` and `http_file` declarations are
+resolved without network access because the URL and hash are already in the
+Bazel fragment.
 
 Root-repository patches and their explicit strip arguments are copied into the
 CMake lock. Pinned CMake fetches apply the same patch set with Git, and include
@@ -138,8 +162,8 @@ python build_tools/bazel_to_cmake/deps.py --check
 
 `--check` never makes network requests. It parses the same Bazel fragments,
 validates that every source dependency has a matching checked-in lock entry,
-checks `http_archive` URL/hash data exactly, and fails when a BCR dependency
-version changed without regenerating the lock.
+checks `http_archive` and `http_file` URL/hash data exactly, and fails when a
+BCR dependency version changed without regenerating the lock.
 
 ## CMake Adapters
 
@@ -217,8 +241,8 @@ or AMDGPU support prevents those dependencies from being discovered or fetched.
 ## Adding Or Updating A Dependency
 
 1. Add or update the source declaration in `build_tools/third_party/deps.MODULE.bazel`.
-2. Use `bazel_dep()` when the dependency exists in BCR; use `http_archive` when
-   it does not.
+2. Use `bazel_dep()` when the dependency exists in BCR, `http_archive` for an
+   archive outside BCR, or `http_file` for a single versioned input.
 3. Add or update the public Bazel facade in `third_party/BUILD.bazel`, with the
    narrowest package-group visibility that matches real consumers.
 4. Add or update the dependency-specific CMake adapter under

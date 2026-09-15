@@ -1,0 +1,323 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+load("//libamdf/build_tools/bazel:cc_test.bzl", "amdf_cc_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+MCDM_COMPATIBILITY = ["@platforms//os:windows"]
+
+amdf_cc_library(
+    name = "native_abi",
+    srcs = ["native_abi.c"],
+    hdrs = ["native_abi.h"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = ["//libamdf/src/platform/windows:kmt_api"],
+)
+
+amdf_cc_library(
+    name = "bootstrap_image",
+    srcs = ["npu5_legacy_bootstrap_image.c"],
+    hdrs = ["npu5_legacy_bootstrap_image.h"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+)
+
+amdf_cc_test(
+    name = "native_abi_test",
+    srcs = ["native_abi_test.cc"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":native_abi",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "native_abi_system_test",
+    srcs = ["native_abi_system_test.cc"],
+    resource_group = "iree-hal-drivers-amdgpu-tests",
+    tags = [
+        "iree-run-requirement=libamdf.resource.xdna",
+        "runtime-resource=amd-xdna",
+    ],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":native_abi",
+        "//libamdf/src:allocator",
+        "//libamdf/src/platform",
+        "//libamdf/src/platform/windows:endpoint",
+        "//libamdf/src/xdna:endpoint_profile",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_library(
+    name = "legacy_context",
+    srcs = ["legacy_context.c"],
+    hdrs = ["legacy_context.h"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":bootstrap_image",
+        ":native_abi",
+        "//libamdf/src:allocator",
+        "//libamdf/src/xdna:bootstrap",
+    ],
+)
+
+amdf_cc_library(
+    name = "device_state",
+    hdrs = ["device.h"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        "//libamdf/src/platform/windows:device_status",
+        "//libamdf/src/platform/windows:kmt_api",
+        "//libamdf/src/xdna/umd:device",
+    ],
+)
+
+amdf_cc_library(
+    name = "context_state",
+    hdrs = ["context.h"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":device_state",
+        ":native_abi",
+        "//libamdf/src/xdna/umd:context",
+    ],
+)
+
+amdf_cc_library(
+    name = "private_allocation",
+    srcs = ["private_allocation.c"],
+    hdrs = ["private_allocation.h"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":device_state",
+        "//libamdf/src/platform/windows:host_cache",
+    ],
+)
+
+amdf_cc_library(
+    name = "memory_profile",
+    srcs = ["memory_profile.c"],
+    hdrs = ["memory_profile.h"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        "//libamdf/src:memory_profile",
+        "//libamdf/src/platform/windows:endpoint",
+        "//libamdf/src/xdna:endpoint_profile",
+        "//libamdf/src/xdna/umd:memory_profile",
+    ],
+)
+
+amdf_cc_library(
+    name = "memory",
+    srcs = ["memory.c"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":context_state",
+        ":device_state",
+        ":kernel_execution",
+        ":memory_profile",
+        ":private_allocation",
+        "//libamdf/src:allocator",
+        "//libamdf/src/platform/windows:host_cache",
+        "//libamdf/src/xdna/umd:memory",
+    ],
+)
+
+amdf_cc_library(
+    name = "legacy_submission",
+    srcs = ["legacy_submission.c"],
+    hdrs = ["legacy_submission.h"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":private_allocation",
+        "//libamdf/src/xdna:transaction_interpreter",
+    ],
+)
+
+amdf_cc_library(
+    name = "kernel_execution",
+    srcs = ["kernel_execution.c"],
+    hdrs = ["kernel_execution.h"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":context_state",
+        ":device_state",
+        ":legacy_submission",
+        ":private_allocation",
+        "//libamdf/src:allocator",
+        "//libamdf/src:atomics",
+        "//libamdf/src:wait",
+        "//libamdf/src/platform:wait",
+        "//libamdf/src/xdna:transaction_interpreter",
+        "//libamdf/src/xdna/umd:context",
+    ],
+)
+
+amdf_cc_library(
+    name = "device",
+    srcs = ["device.c"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":device_state",
+        "//libamdf/src:allocator",
+        "//libamdf/src/platform/windows:endpoint",
+        "//libamdf/src/xdna/umd:device",
+    ],
+)
+
+amdf_cc_library(
+    name = "context",
+    srcs = ["context.c"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":context_state",
+        ":device_state",
+        ":kernel_execution",
+        ":legacy_context",
+        ":native_abi",
+        "//libamdf/src:allocator",
+        "//libamdf/src/xdna/umd:context",
+    ],
+)
+
+amdf_cc_library(
+    name = "kernel_queue",
+    srcs = ["kernel_queue.c"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":context_state",
+        ":device_state",
+        ":kernel_execution",
+        "//libamdf/src:allocator",
+        "//libamdf/src/xdna/umd:kernel_queue",
+    ],
+)
+
+amdf_cc_library(
+    name = "mcdm",
+    target_compatible_with = MCDM_COMPATIBILITY,
+    visibility = ["//libamdf/src/xdna:__pkg__"],
+    deps = [
+        ":context",
+        ":device",
+        ":kernel_queue",
+        ":memory",
+    ],
+)
+
+amdf_cc_test(
+    name = "device_test",
+    srcs = ["device_test.cc"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":context",
+        ":context_state",
+        ":device",
+        "//libamdf/src:allocator",
+        "//libamdf/src/platform/windows:endpoint",
+        "//libamdf/src/xdna:endpoint_profile",
+        "//libamdf/src/xdna/umd:context",
+        "//libamdf/src/xdna/umd:device",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "context_test",
+    srcs = ["context_test.cc"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":context",
+        ":context_state",
+        ":device_state",
+        "//libamdf/src:allocator",
+        "//libamdf/src/xdna:endpoint_profile",
+        "//libamdf/src/xdna/target/npu4:bootstrap",
+        "//libamdf/src/xdna/target/npu5:bootstrap",
+        "//libamdf/src/xdna/umd:context",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "legacy_context_test",
+    srcs = ["legacy_context_test.cc"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":legacy_context",
+        "//libamdf/src:allocator",
+        "//libamdf/src/xdna/target/npu4:bootstrap",
+        "//libamdf/src/xdna/target/npu5:bootstrap",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "legacy_submission_test",
+    srcs = ["legacy_submission_test.cc"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":legacy_submission",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "memory_test",
+    srcs = ["memory_test.cc"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":device_state",
+        ":memory",
+        "//libamdf/src:allocator",
+        "//libamdf/src/xdna/umd:memory",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "private_allocation_test",
+    srcs = ["private_allocation_test.cc"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":device_state",
+        ":private_allocation",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "kernel_execution_test",
+    srcs = ["kernel_execution_test.cc"],
+    target_compatible_with = MCDM_COMPATIBILITY,
+    deps = [
+        ":context_state",
+        ":device_state",
+        ":kernel_execution",
+        ":memory",
+        "//libamdf/src:allocator",
+        "//libamdf/src/xdna:endpoint_profile",
+        "//libamdf/src/xdna/umd:memory",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)

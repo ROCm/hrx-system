@@ -1107,6 +1107,14 @@ class PresubmitTest(unittest.TestCase):
                 ["//runtime/build_tools:presubmit_tests"],
             ),
             (
+                ["libamdf/build_tools/presubmit.py"],
+                ["//libamdf/build_tools:presubmit_tests"],
+            ),
+            (
+                ["libamdf/build_tools/BUILD.bazel"],
+                ["//libamdf/build_tools:presubmit_tests"],
+            ),
+            (
                 ["runtime/build_tools/bazel/cc.bzl"],
                 [],
             ),
@@ -1123,6 +1131,7 @@ class PresubmitTest(unittest.TestCase):
                 [
                     presubmit.DEVTOOLS_PRESUBMIT_TEST_TARGET,
                     "//runtime/build_tools:presubmit_tests",
+                    "//libamdf/build_tools:presubmit_tests",
                     "//loom/build_tools:presubmit_tests",
                 ],
             ),
@@ -1134,9 +1143,9 @@ class PresubmitTest(unittest.TestCase):
                     expected_targets,
                 )
 
-    def test_existing_project_scripts_include_loom(self):
-        self.assertIn(
-            "loom",
+    def test_existing_project_scripts_include_all_projects(self):
+        self.assertEqual(
+            {"libamdf", "libhrx", "loom", "runtime"},
             {project.name for project in presubmit.existing_project_scripts()},
         )
 

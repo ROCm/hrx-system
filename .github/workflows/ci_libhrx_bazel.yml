@@ -97,8 +97,8 @@ jobs:
 
       - name: Configure libhrx Bazel
         run: |
-          echo "python3 dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=\"${HRX_ROCM_ROOT}\" -DIREE_ROCM_DEPENDENCY_MODE=package"
-          python3 dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH="${HRX_ROCM_ROOT}" -DIREE_ROCM_DEPENDENCY_MODE=package
+          echo "python3 dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON -DAMDF_BUILD=OFF -DIREE_ROCM_PATH=\"${HRX_ROCM_ROOT}\" -DIREE_ROCM_DEPENDENCY_MODE=package"
+          python3 dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON -DAMDF_BUILD=OFF -DIREE_ROCM_PATH="${HRX_ROCM_ROOT}" -DIREE_ROCM_DEPENDENCY_MODE=package
 
       - name: Build libhrx
         run: |
