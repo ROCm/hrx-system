@@ -30,6 +30,7 @@ using HipDeviceGetByPCIBusIdFn = hipError_t (*)(int* device,
 using HipLaunchCooperativeKernelMultiDeviceFn = hipError_t (*)(
     hipLaunchParams* launch_params, int device_count, unsigned int flags);
 using HipGetLastErrorFn = hipError_t (*)(void);
+using HipExtGetLastErrorFn = hipError_t (*)(void);
 using HipPeekAtLastErrorFn = hipError_t (*)(void);
 
 struct HipRuntimeApi {
@@ -60,6 +61,8 @@ struct HipRuntimeApi {
       launch_cooperative_kernel_multi_device = nullptr;
   // Returns and clears the calling thread's last HIP error.
   HipGetLastErrorFn get_last_error = nullptr;
+  // Returns and clears the calling thread's most recent HIP call result.
+  HipExtGetLastErrorFn ext_get_last_error = nullptr;
   // Returns without clearing the calling thread's last HIP error.
   HipPeekAtLastErrorFn peek_at_last_error = nullptr;
 };
@@ -92,6 +95,8 @@ class HipDeviceContractsApiTest : public testing::Test {
           dso_.Resolve<HipLaunchCooperativeKernelMultiDeviceFn>(
               "hipLaunchCooperativeKernelMultiDevice");
       api_.get_last_error = dso_.Resolve<HipGetLastErrorFn>("hipGetLastError");
+      api_.ext_get_last_error =
+          dso_.Resolve<HipExtGetLastErrorFn>("hipExtGetLastError");
       api_.peek_at_last_error =
           dso_.Resolve<HipPeekAtLastErrorFn>("hipPeekAtLastError");
     }
@@ -109,10 +114,12 @@ class HipDeviceContractsApiTest : public testing::Test {
     ASSERT_NE(nullptr, api_.device_get_by_pci_bus_id);
     ASSERT_NE(nullptr, api_.launch_cooperative_kernel_multi_device);
     ASSERT_NE(nullptr, api_.get_last_error);
+    ASSERT_NE(nullptr, api_.ext_get_last_error);
     ASSERT_NE(nullptr, api_.peek_at_last_error);
     ASSERT_EQ(hipSuccess, api_.init(/*flags=*/0));
     // Test cases share the runner thread but own independent last-error state.
     (void)api_.get_last_error();
+    (void)api_.ext_get_last_error();
     ASSERT_EQ(hipSuccess, api_.peek_at_last_error());
   }
 
@@ -232,6 +239,24 @@ TEST_F(HipDeviceContractsApiTest, UnsupportedFunctionsPublishLastError) {
   EXPECT_EQ(hipErrorNotSupported,
             api_.launch_cooperative_kernel_multi_device(
                 /*launch_params=*/nullptr, /*device_count=*/0, /*flags=*/0));
+  EXPECT_EQ(hipErrorNotSupported, api_.peek_at_last_error());
+  EXPECT_EQ(hipErrorNotSupported, api_.get_last_error());
+}
+
+TEST_F(HipDeviceContractsApiTest, CommandAndOrdinaryErrorsRemainDistinct) {
+  ASSERT_EQ(hipSuccess, api_.get_last_error());
+  ASSERT_EQ(hipSuccess, api_.ext_get_last_error());
+
+  EXPECT_EQ(hipErrorNotSupported,
+            api_.launch_cooperative_kernel_multi_device(
+                /*launch_params=*/nullptr, /*device_count=*/0, /*flags=*/0));
+  EXPECT_EQ(hipErrorNotSupported, api_.ext_get_last_error());
+
+  int device_count = 0;
+  ASSERT_EQ(hipSuccess, api_.get_device_count(&device_count));
+  EXPECT_GT(device_count, 0);
+  EXPECT_EQ(hipSuccess, api_.ext_get_last_error());
+
   EXPECT_EQ(hipErrorNotSupported, api_.peek_at_last_error());
   EXPECT_EQ(hipErrorNotSupported, api_.get_last_error());
 }

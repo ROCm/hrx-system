@@ -22,18 +22,34 @@ class HipErrorStateTest : public testing::Test {
 TEST_F(HipErrorStateTest, NonFatalErrorsRemainThreadLocalAndClearable) {
   EXPECT_EQ(hipErrorInvalidValue,
             iree_hip_error_state_publish(hipErrorInvalidValue));
-  EXPECT_EQ(hipErrorInvalidValue, iree_hip_error_state_peek());
+  EXPECT_EQ(hipErrorInvalidValue, iree_hip_error_state_peek_last_error());
 
   std::atomic<hipError_t> other_thread_error{hipErrorUnknown};
   std::thread other_thread([&] {
-    other_thread_error.store(iree_hip_error_state_peek(),
+    other_thread_error.store(iree_hip_error_state_peek_last_error(),
                              std::memory_order_release);
   });
   other_thread.join();
 
   EXPECT_EQ(hipSuccess, other_thread_error.load(std::memory_order_acquire));
-  EXPECT_EQ(hipErrorInvalidValue, iree_hip_error_state_get_and_clear());
-  EXPECT_EQ(hipSuccess, iree_hip_error_state_peek());
+  EXPECT_EQ(hipErrorInvalidValue,
+            iree_hip_error_state_get_and_clear_last_error());
+  EXPECT_EQ(hipSuccess, iree_hip_error_state_peek_last_error());
+}
+
+TEST_F(HipErrorStateTest, CommandAndOrdinaryResultsHaveDistinctSemantics) {
+  EXPECT_EQ(hipErrorInvalidValue,
+            iree_hip_error_state_publish(hipErrorInvalidValue));
+  EXPECT_EQ(hipSuccess, iree_hip_error_state_publish(hipSuccess));
+
+  EXPECT_EQ(hipSuccess, iree_hip_error_state_get_and_clear_command_error());
+  EXPECT_EQ(hipErrorInvalidValue,
+            iree_hip_error_state_get_and_clear_last_error());
+
+  EXPECT_EQ(hipErrorNotReady, iree_hip_error_state_publish(hipErrorNotReady));
+  EXPECT_EQ(hipErrorNotReady,
+            iree_hip_error_state_get_and_clear_command_error());
+  EXPECT_EQ(hipSuccess, iree_hip_error_state_peek_last_error());
 }
 
 TEST_F(HipErrorStateTest, IllegalAddressIsProcessSharedAndSticky) {
@@ -44,10 +60,35 @@ TEST_F(HipErrorStateTest, IllegalAddressIsProcessSharedAndSticky) {
   observer.join();
 
   EXPECT_EQ(hipErrorIllegalAddress, iree_hip_error_state_fatal_result());
-  EXPECT_EQ(hipErrorIllegalAddress, iree_hip_error_state_peek());
+  EXPECT_EQ(hipErrorIllegalAddress, iree_hip_error_state_peek_last_error());
   EXPECT_EQ(hipErrorIllegalAddress, iree_hip_error_state_publish(hipSuccess));
-  EXPECT_EQ(hipErrorIllegalAddress, iree_hip_error_state_get_and_clear());
-  EXPECT_EQ(hipErrorIllegalAddress, iree_hip_error_state_peek());
+  EXPECT_EQ(hipErrorIllegalAddress,
+            iree_hip_error_state_get_and_clear_last_error());
+  EXPECT_EQ(hipErrorIllegalAddress, iree_hip_error_state_peek_last_error());
+}
+
+TEST_F(HipErrorStateTest, ResetInvalidatesOtherThreadsFatalState) {
+  std::atomic<int> phase{0};
+  std::atomic<hipError_t> after_reset{hipErrorUnknown};
+  std::thread observer([&] {
+    EXPECT_EQ(hipErrorIllegalAddress,
+              iree_hip_error_state_publish(hipErrorIllegalAddress));
+    phase.store(1, std::memory_order_release);
+    while (phase.load(std::memory_order_acquire) != 2) {
+      std::this_thread::yield();
+    }
+    after_reset.store(iree_hip_error_state_peek_last_error(),
+                      std::memory_order_release);
+  });
+
+  while (phase.load(std::memory_order_acquire) != 1) {
+    std::this_thread::yield();
+  }
+  iree_hip_error_state_reset();
+  phase.store(2, std::memory_order_release);
+  observer.join();
+
+  EXPECT_EQ(hipSuccess, after_reset.load(std::memory_order_acquire));
 }
 
 }  // namespace

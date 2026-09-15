@@ -13,23 +13,29 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Publishes |result| as the calling thread's last error. Illegal-address
-// failures are also latched process-wide so later HIP entry points and other
-// threads observe the fatal device state. Returns the effective result, which
-// is the process-wide fatal error once one has been latched.
+// Publishes the result of a public HIP call. Every result becomes the calling
+// thread's command result. Errors other than hipErrorNotReady also become the
+// thread's ordinary last error. Illegal-address failures are latched
+// process-wide so later HIP entry points and other threads observe the fatal
+// device state. Returns the effective result, which is the process-wide fatal
+// error once one has been latched.
 hipError_t iree_hip_error_state_publish(hipError_t result);
 
 // Returns the process-wide fatal device result, or hipSuccess when none has
 // been observed. This does not modify the calling thread's last-error state.
 hipError_t iree_hip_error_state_fatal_result(void);
 
-// Returns the process-fatal result when one is latched, otherwise returns the
-// calling thread's last error and clears non-fatal thread state.
-hipError_t iree_hip_error_state_get_and_clear(void);
+// Returns the process-fatal result when one is latched, otherwise returns and
+// clears the calling thread's ordinary last error.
+hipError_t iree_hip_error_state_get_and_clear_last_error(void);
+
+// Returns the process-fatal result when one is latched, otherwise returns and
+// clears the calling thread's most recent command result.
+hipError_t iree_hip_error_state_get_and_clear_command_error(void);
 
 // Returns the process-fatal result when one is latched, otherwise returns the
 // calling thread's last error without clearing it.
-hipError_t iree_hip_error_state_peek(void);
+hipError_t iree_hip_error_state_peek_last_error(void);
 
 // Clears process and calling-thread state when the embedded runtime is fully
 // deinitialized and no device work remains.
