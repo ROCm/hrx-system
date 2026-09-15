@@ -374,14 +374,83 @@ TEST(NativeWindowsMcdmContextPoolTest,
 
 TEST(NativeWindowsMcdmContextPoolTest,
      SizesCacheOneBelowArchitectureBudget) {
-  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(32),
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+                32, nullptr),
             31u);
-  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(6),
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+                6, nullptr),
             5u);
-  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(1),
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+                1, nullptr),
             1u);
-  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(0),
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+                0, nullptr),
             0u);
+}
+
+TEST(NativeWindowsMcdmContextPoolTest,
+     LeavesOneActiveSlotForAffectedDriverHardwareType) {
+  constexpr uint32_t kAffectedDriverRevisions[] = {280, 314, 329};
+  for (uint32_t revision : kAffectedDriverRevisions) {
+    SCOPED_TRACE(revision);
+    iree_hal_amdxdna_native_windows_driver_identity_t identity = {
+        true, 32, 0, 203, revision, true, 0};
+    EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+                  6, &identity),
+              5u);
+
+    identity.hardware_type = 1;
+    EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+                  32, &identity),
+              7u);
+
+    identity.hardware_type = 2;
+    EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+                  32, &identity),
+              15u);
+
+    identity.hardware_type = 3;
+    EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+                  32, &identity),
+              15u);
+
+    identity.hardware_type = 4;
+    EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+                  32, &identity),
+              15u);
+  }
+}
+
+TEST(NativeWindowsMcdmContextPoolTest,
+     LeavesOtherDriverAndHardwareIdentitiesUnchanged) {
+  iree_hal_amdxdna_native_windows_driver_identity_t identity = {
+      true, 32, 0, 203, 313, true, 3};
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+                32, &identity),
+            31u);
+
+  identity.driver_version_revision = 240;
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+                32, &identity),
+            31u);
+
+  identity.driver_version_revision = 314;
+  identity.has_hardware_type = false;
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+                32, &identity),
+            31u);
+
+  identity.has_hardware_type = true;
+  identity.driver_version_build = 20101;
+  identity.driver_version_revision = 3760;
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+                32, &identity),
+            31u);
+
+  identity.has_driver_version = false;
+  EXPECT_EQ(iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
+                32, &identity),
+            31u);
 }
 
 }  // namespace

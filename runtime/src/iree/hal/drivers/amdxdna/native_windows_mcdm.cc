@@ -370,6 +370,27 @@ void close_mcdm_adapter_handle(const mcdm::KmtApi& api,
   adapter->handle = 0;
 }
 
+uint32_t firmware_active_context_limit(uint32_t hardware_type) {
+  constexpr uint32_t kPhxLimit = 6;
+  constexpr uint32_t kStxLimit = 8;
+  constexpr uint32_t kStx2Limit = 16;
+  constexpr uint32_t kStxhLimit = 16;
+  constexpr uint32_t kKrk1Limit = 16;
+  switch (static_cast<mcdm::HardwareType>(hardware_type)) {
+    case mcdm::HardwareType::phx:
+      return kPhxLimit;
+    case mcdm::HardwareType::stx:
+      return kStxLimit;
+    case mcdm::HardwareType::stx2:
+      return kStx2Limit;
+    case mcdm::HardwareType::stxh:
+      return kStxhLimit;
+    case mcdm::HardwareType::krk1:
+      return kKrk1Limit;
+  }
+  return 0;
+}
+
 }  // namespace
 
 bool iree_hal_amdxdna_native_windows_nt_status_is_context_pool_exhausted(
@@ -383,11 +404,34 @@ bool iree_hal_amdxdna_native_windows_nt_status_is_context_pool_exhausted(
 }
 
 uint32_t iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
-    uint32_t architecture_budget) {
+    uint32_t virtual_context_budget,
+    const iree_hal_amdxdna_native_windows_driver_identity_t* identity) {
+  constexpr uint32_t kActiveContextHeadroom = 1;
+
+  // These drivers expose 32 virtual context slots on non-Phoenix parts, while
+  // their firmware-active limits are 8 on Strix and 16 on Strix B0, Strix
+  // Halo, and Krackan. Stay one below the active limit to avoid their older
+  // virtual-context suspend/resume path.
+  const bool is_affected_driver =
+      identity && identity->has_driver_version &&
+      identity->driver_version_major == 32 &&
+      identity->driver_version_minor == 0 &&
+      identity->driver_version_build == 203 &&
+      (identity->driver_version_revision == 280 ||
+       identity->driver_version_revision == 314 ||
+       identity->driver_version_revision == 329);
+  if (is_affected_driver && identity->has_hardware_type) {
+    const uint32_t firmware_active_limit =
+        firmware_active_context_limit(identity->hardware_type);
+    if (firmware_active_limit > kActiveContextHeadroom) {
+      return std::min(virtual_context_budget,
+                      firmware_active_limit - kActiveContextHeadroom);
+    }
+  }
   // One below the architecture table. See the header: XRS non-RT cap is
   // max_ctx - nreserved_rt_ctx, not a live reserved context.
-  return architecture_budget > 1 ? architecture_budget - 1
-                                 : architecture_budget;
+  return virtual_context_budget > 1 ? virtual_context_budget - 1
+                                    : virtual_context_budget;
 }
 
 struct iree_hal_amdxdna_native_device_t {
@@ -399,9 +443,9 @@ struct iree_hal_amdxdna_native_device_t {
   std::condition_variable pathb_context_cv;
   size_t pathb_active_submission_count = 0;
   iree_hal_amdxdna_native_context_t* pathb_active_context = nullptr;
-  // Concurrent hardware-context budget resolved once at device creation from
-  // PCI IDs (Windows MCDM has no sysfs arch query). 0 when unrecognized.
-  uint32_t hardware_context_budget = 0;
+  // Virtual-context budget resolved once at device creation from PCI IDs
+  // (Windows MCDM has no sysfs arch query). 0 when unrecognized.
+  uint32_t virtual_context_budget = 0;
   iree_hal_amdxdna_native_c_driver_stack_t driver_stack = {};
 };
 
@@ -2486,7 +2530,7 @@ iree_status_t iree_hal_amdxdna_native_device_create(
     }
   }
   if (device->driver_stack.has_pci_ids) {
-    device->hardware_context_budget =
+    device->virtual_context_budget =
         iree_hal_amdxdna_hardware_context_budget_for_pci(
             device->driver_stack.pci_vendor_id,
             device->driver_stack.pci_device_id,
@@ -2566,11 +2610,24 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
   caps.max_cached_chain_child_commands =
       kWindowsChainCacheChildCommandBudget;
   // Publish budget-1 so LRU evicts before CreateContext hits the XRS non-RT
-  // cap. 0xc01e0009 retry remains for destroy lag. See
+  // cap, except where an exact driver identity has a lower proven active
+  // context limit. 0xc01e0009 retry remains as a fallback. See
   // iree_hal_amdxdna_native_windows_hardware_context_cache_capacity.
+  const mcdm::DriverVersion& driver_version = device->device.driver_version;
+  const bool has_hardware_type =
+      device->device.mcdm_abi_diagnostics.identity_accepted;
+  const iree_hal_amdxdna_native_windows_driver_identity_t driver_identity = {
+      device->device.has_driver_version,
+      driver_version.major,
+      driver_version.minor,
+      driver_version.build,
+      driver_version.revision,
+      has_hardware_type,
+      device->device.mcdm_abi_diagnostics.hw_type,
+  };
   caps.max_hardware_contexts =
       iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
-          device->hardware_context_budget);
+          device->virtual_context_budget, &driver_identity);
   // Prepared commands and context images are independent KMT allocations, not
   // consumers of one bounded allocation domain.
   caps.max_shared_code_memory_bytes = 0;
