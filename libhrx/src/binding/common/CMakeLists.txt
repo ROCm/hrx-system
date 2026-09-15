@@ -11,6 +11,21 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    amdgpu_architecture
+  HDRS
+    "amdgpu_architecture.h"
+  SRCS
+    "amdgpu_architecture.c"
+  DEPS
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>"
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     execution_resource
   HDRS
     "execution_resource.h"
@@ -90,6 +105,7 @@ iree_cc_library(
     "stream_host_call.c"
     "tls.c"
   DEPS
+    ::amdgpu_architecture
     ::execution_resource
     ::function_attributes
     iree::async
@@ -112,6 +128,18 @@ iree_cc_library(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../libhrx>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    amdgpu_architecture_test
+  SRCS
+    "amdgpu_architecture_test.cc"
+  DEPS
+    ::amdgpu_architecture
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
 )
 
 iree_cc_test(

@@ -6,24 +6,15 @@
 
 #include "binding/hip/device_properties.h"
 
-#include <limits.h>
-#include <stddef.h>
-#include <string.h>
+#include "common/amdgpu_architecture.h"
 
 bool iree_hip_parse_gcn_arch_name(const char* name, int* out_architecture) {
-  if (!name || !out_architecture || strncmp(name, "gfx", 3) != 0) return false;
-
-  const char* digit = name + 3;
-  if (*digit < '0' || *digit > '9') return false;
-  int architecture = 0;
-  do {
-    const int value = *digit - '0';
-    if (architecture > (INT_MAX - value) / 10) return false;
-    architecture = architecture * 10 + value;
-    ++digit;
-  } while (*digit >= '0' && *digit <= '9');
-  if (*digit != '\0' && *digit != ':') return false;
-
-  *out_architecture = architecture;
+  if (!out_architecture) return false;
+  iree_hal_streaming_amdgpu_architecture_t architecture = {0};
+  if (!iree_hal_streaming_parse_amdgpu_architecture(name, &architecture)) {
+    return false;
+  }
+  *out_architecture = (int)(architecture.major * 100 + architecture.minor * 10 +
+                            architecture.stepping);
   return true;
 }

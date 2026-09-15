@@ -4,9 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <stdio.h>
 #include <string.h>
 
+#include "common/amdgpu_architecture.h"
 #include "common/internal.h"
 //===----------------------------------------------------------------------===//
 // Global state
@@ -67,40 +67,17 @@ static iree_status_t iree_hal_streaming_query_device_info(
   iree_status_t arch_status = hrx_to_iree_status(hrx_device_get_property(
       device->hrx_device, HRX_DEVICE_PROPERTY_ARCHITECTURE, arch_name,
       sizeof(arch_name)));
-  if (iree_status_is_ok(arch_status) && arch_name[0] != '\0') {
-    // Parse "gfxNNNN" to extract major.minor.
-    // gfx9xx -> major=9, minor=x (e.g., gfx942 -> 9.4)
-    // gfx10xx -> major=10, minor=x
-    // gfx11xx -> major=11, minor=x
-    int gfx_num = 0;
-    if (sscanf(arch_name, "gfx%d", &gfx_num) == 1) {
-      if (gfx_num >= 1000) {
-        device->compute_capability_major = gfx_num / 100;
-        device->compute_capability_minor = (gfx_num / 10) % 10;
-      } else if (gfx_num >= 900) {
-        device->compute_capability_major = gfx_num / 100;
-        device->compute_capability_minor = (gfx_num / 10) % 10;
-      } else {
-        device->compute_capability_major = 7;
-        device->compute_capability_minor = 5;
-      }
-    } else {
-      device->compute_capability_major = 7;
-      device->compute_capability_minor = 5;
-    }
-    // Store the architecture name for hipGetDeviceProperties.
-    size_t name_len = strlen(arch_name);
-    if (name_len >= sizeof(device->gcn_arch_name)) {
-      name_len = sizeof(device->gcn_arch_name) - 1;
-    }
-    memcpy(device->gcn_arch_name, arch_name, name_len);
-    device->gcn_arch_name[name_len] = '\0';
-  } else {
-    iree_status_ignore(arch_status);
-    device->compute_capability_major = 9;
-    device->compute_capability_minor = 4;
-    memcpy(device->gcn_arch_name, "gfx942", 7);
+  if (!iree_status_is_ok(arch_status)) return arch_status;
+  iree_hal_streaming_amdgpu_architecture_t architecture = {0};
+  if (!iree_hal_streaming_parse_amdgpu_architecture(arch_name, &architecture)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "device architecture '%s' is not a valid exact "
+                            "AMDGPU target identifier",
+                            arch_name);
   }
+  device->compute_capability_major = architecture.major;
+  device->compute_capability_minor = architecture.minor;
+  memcpy(device->gcn_arch_name, arch_name, strlen(arch_name) + 1);
 
   // Query total memory from the immutable HAL device spec.
   uint64_t total_memory = 0;

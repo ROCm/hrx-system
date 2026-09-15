@@ -186,6 +186,25 @@ TEST_F(HipGetProcAddressTest, MissingDriverSymbolsPublishDetailedFailure) {
   }
 }
 
+TEST_F(HipGetProcAddressTest, MissingProcSymbolsPublishDetailedFailure) {
+  const HipGetProcAddressFn lookups[] = {
+      api_.get_proc_address,
+      api_.get_proc_address_spt,
+  };
+  for (HipGetProcAddressFn lookup : lookups) {
+    ASSERT_EQ(hipSuccess, api_.get_last_error());
+    void* function = reinterpret_cast<void*>(uintptr_t{1});
+    int symbol_status = -1;
+    EXPECT_EQ(hipErrorInvalidValue,
+              lookup("hipSymbolThatDoesNotExist", &function,
+                     /*hip_version=*/600, kDefaultStream, &symbol_status));
+    EXPECT_EQ(nullptr, function);
+    EXPECT_EQ(1, symbol_status);
+    EXPECT_EQ(hipErrorInvalidValue, api_.peek_at_last_error());
+    EXPECT_EQ(hipErrorInvalidValue, api_.get_last_error());
+  }
+}
+
 TEST_F(HipGetProcAddressTest, NonFatalErrorsRemainThreadLocal) {
   hipError_t other_thread_result = hipSuccess;
   hipError_t other_thread_last_error = hipSuccess;

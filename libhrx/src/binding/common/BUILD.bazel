@@ -18,6 +18,13 @@ package(
 )
 
 hrx_cc_library(
+    name = "amdgpu_architecture",
+    srcs = ["amdgpu_architecture.c"],
+    hdrs = ["amdgpu_architecture.h"],
+    includes = [".."],
+)
+
+hrx_cc_library(
     name = "execution_resource",
     srcs = ["execution_resource.c"],
     hdrs = ["execution_resource.h"],
@@ -91,6 +98,7 @@ hrx_cc_library(
     ],
     textual_hdrs = ["//build_tools/amdgpu:elf_machine_map.inl"],
     deps = [
+        ":amdgpu_architecture",
         ":execution_resource",
         ":function_attributes",
         "//build_tools/bazel:pthreads",
@@ -105,6 +113,16 @@ hrx_cc_library(
         "//runtime/src/iree/hal/utils:resource_set",
         "//runtime/src/iree/io:file_handle",
         "//third_party:zstd",
+    ],
+)
+
+hrx_cc_test(
+    name = "amdgpu_architecture_test",
+    srcs = ["amdgpu_architecture_test.cc"],
+    deps = [
+        ":amdgpu_architecture",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

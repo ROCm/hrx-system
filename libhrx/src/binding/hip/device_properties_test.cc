@@ -19,6 +19,8 @@ TEST(HipDevicePropertiesTest, ParsesThreeAndFourDigitTargets) {
   EXPECT_TRUE(
       iree_hip_parse_gcn_arch_name("gfx1100:sramecc+:xnack-", &architecture));
   EXPECT_EQ(1100, architecture);
+  EXPECT_TRUE(iree_hip_parse_gcn_arch_name("gfx90a:xnack+", &architecture));
+  EXPECT_EQ(910, architecture);
 }
 
 TEST(HipDevicePropertiesTest, RejectsMalformedAndOutOfRangeTargets) {
@@ -28,6 +30,7 @@ TEST(HipDevicePropertiesTest, RejectsMalformedAndOutOfRangeTargets) {
   EXPECT_FALSE(iree_hip_parse_gcn_arch_name("gfx", &architecture));
   EXPECT_FALSE(iree_hip_parse_gcn_arch_name("gfx11x0", &architecture));
   EXPECT_FALSE(iree_hip_parse_gcn_arch_name("gfx2147483648", &architecture));
+  EXPECT_FALSE(iree_hip_parse_gcn_arch_name("gfx942:unknown+", &architecture));
   EXPECT_EQ(-1, architecture);
   EXPECT_FALSE(iree_hip_parse_gcn_arch_name("gfx942", nullptr));
 }

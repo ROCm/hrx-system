@@ -263,6 +263,7 @@ hrx_cc_library(
     srcs = ["device_properties.c"],
     hdrs = ["device_properties.h"],
     includes = ["../.."],
+    deps = ["//libhrx/src/binding/common:amdgpu_architecture"],
 )
 
 hrx_cc_shared_library(

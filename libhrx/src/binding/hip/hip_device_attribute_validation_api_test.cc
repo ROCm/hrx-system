@@ -168,6 +168,68 @@ TEST_F(HipDeviceAttributeValidationApiTest,
 }
 
 TEST_F(HipDeviceAttributeValidationApiTest,
+       CompleteDeviceAttributeSetReturnsValues) {
+  const int attributes[] = {
+      hipDeviceAttributeEccEnabled,
+      hipDeviceAttributeAsyncEngineCount,
+      hipDeviceAttributeComputeMode,
+      hipDeviceAttributeComputePreemptionSupported,
+      hipDeviceAttributeDeviceOverlap,
+      hipDeviceAttributeGlobalL1CacheSupported,
+      hipDeviceAttributeIntegrated,
+      hipDeviceAttributeIsMultiGpuBoard,
+      hipDeviceAttributeKernelExecTimeout,
+      hipDeviceAttributeLocalL1CacheSupported,
+      hipDeviceAttributeLuidDeviceNodeMask,
+      hipDeviceAttributeMultiGpuBoardGroupID,
+      hipDeviceAttributePageableMemoryAccess,
+      hipDeviceAttributePageableMemoryAccessUsesHostPageTables,
+      hipDeviceAttributeMaxRegistersPerMultiprocessor,
+      hipDeviceAttributeReservedSharedMemPerBlock,
+      hipDeviceAttributeSingleToDoublePrecisionPerfRatio,
+      hipDeviceAttributeSurfaceAlignment,
+      hipDeviceAttributeTccDriver,
+      hipDeviceAttributeTextureAlignment,
+      hipDeviceAttributeTexturePitchAlignment,
+      hipDeviceAttributeVirtualMemoryManagementSupported,
+      hipDeviceAttributeMemoryPoolSupportedHandleTypes,
+      hipDeviceAttributeHostNumaId,
+      hipDeviceAttributeDmaBufSupported,
+      hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported,
+      hipDeviceAttributeClockInstructionRate,
+      hipDeviceAttributeCooperativeMultiDeviceUnmatchedFunc,
+      hipDeviceAttributeCooperativeMultiDeviceUnmatchedGridDim,
+      hipDeviceAttributeCooperativeMultiDeviceUnmatchedBlockDim,
+      hipDeviceAttributeCooperativeMultiDeviceUnmatchedSharedMem,
+      hipDeviceAttributeAsicRevision,
+      hipDeviceAttributeMaxAvailableVgprsPerThread,
+      hipDeviceAttributePciChipId,
+      hipDeviceAttributeExpertSchedMode,
+      hipDeviceAttributeMaxDynDataPrefetchRegions,
+  };
+  for (int attribute : attributes) {
+    SCOPED_TRACE(attribute);
+    int attribute_value = kOutputSentinel;
+    EXPECT_EQ(hipSuccess,
+              GetDeviceAttribute(&attribute_value, attribute, /*device=*/0));
+    EXPECT_NE(kOutputSentinel, attribute_value);
+  }
+
+  const int pointer_attributes[] = {
+      hipDeviceAttributeHdpMemFlushCntl,
+      hipDeviceAttributeHdpRegFlushCntl,
+  };
+  for (int attribute : pointer_attributes) {
+    SCOPED_TRACE(attribute);
+    uintptr_t attribute_value = UINTPTR_MAX;
+    EXPECT_EQ(hipSuccess,
+              GetDeviceAttribute(reinterpret_cast<int*>(&attribute_value),
+                                 attribute, /*device=*/0));
+    EXPECT_EQ(0u, attribute_value);
+  }
+}
+
+TEST_F(HipDeviceAttributeValidationApiTest,
        NullOutputPrecedesDeviceAndAttributeValidation) {
   const int devices[] = {0, -1, device_count_, INT_MIN, INT_MAX};
   const int attributes[] = {
@@ -208,13 +270,9 @@ TEST_F(HipDeviceAttributeValidationApiTest,
 TEST_F(HipDeviceAttributeValidationApiTest,
        DeclaredButUnsupportedAttributesPreserveOutput) {
   const int attributes[] = {
-      hipDeviceAttributeLuid,
-      hipDeviceAttributeMaxThreadsDim,
-      hipDeviceAttributeUnused1,
-      hipDeviceAttributeUnused2,
-      hipDeviceAttributeAmdSpecificBegin,
-      hipDeviceAttributeUnused3,
-      hipDeviceAttributeUnused4,
+      hipDeviceAttributeLuid,    hipDeviceAttributeMaxThreadsDim,
+      hipDeviceAttributeUnused1, hipDeviceAttributeUnused2,
+      hipDeviceAttributeUnused3, hipDeviceAttributeUnused4,
       hipDeviceAttributeUnused5,
   };
   for (int attribute : attributes) {
@@ -232,10 +290,10 @@ TEST_F(HipDeviceAttributeValidationApiTest,
   const int attributes[] = {
       INT_MIN,
       -1,
-      93,
+      95,
       9998,
       hipDeviceAttributeCudaCompatibleEnd,
-      10021,
+      10023,
       19998,
       hipDeviceAttributeAmdSpecificEnd,
       20000,

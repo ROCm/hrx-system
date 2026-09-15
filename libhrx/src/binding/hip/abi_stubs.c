@@ -498,8 +498,13 @@ HIPAPI hipError_t hipBindTextureToMipmappedArray(
   HIP_RETURN_ERROR(hipErrorNotSupported);
 }
 
-static void iree_hip_convert_device_properties_r0600_to_r0000(
+static hipError_t iree_hip_convert_device_properties_r0600_to_r0000(
     const hipDeviceProp_tR0600* source, hipDeviceProp_tR0000* target) {
+  int legacy_architecture = 0;
+  if (!iree_hip_parse_gcn_arch_name(source->gcnArchName,
+                                    &legacy_architecture)) {
+    return hipErrorInvalidValue;
+  }
   memset(target, 0, sizeof(*target));
   memcpy(target->name, source->name, sizeof(target->name));
   target->totalGlobalMem = source->totalGlobalMem;
@@ -530,7 +535,7 @@ static void iree_hip_convert_device_properties_r0600_to_r0000(
       source->maxSharedMemoryPerMultiProcessor;
   target->isMultiGpuBoard = source->isMultiGpuBoard;
   target->canMapHostMemory = source->canMapHostMemory;
-  iree_hip_parse_gcn_arch_name(source->gcnArchName, &target->gcnArch);
+  target->gcnArch = legacy_architecture;
   memcpy(target->gcnArchName, source->gcnArchName, sizeof(target->gcnArchName));
   target->integrated = source->integrated;
   target->cooperativeLaunch = source->cooperativeLaunch;
@@ -566,6 +571,7 @@ static void iree_hip_convert_device_properties_r0600_to_r0000(
   target->pageableMemoryAccess = source->pageableMemoryAccess;
   target->pageableMemoryAccessUsesHostPageTables =
       source->pageableMemoryAccessUsesHostPageTables;
+  return hipSuccess;
 }
 
 static hipError_t iree_hip_choose_device_r0600(
@@ -904,8 +910,8 @@ HIPAPI hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop,
   hipDeviceProp_tR0600 current_properties = {0};
   hipError_t result = hipGetDevicePropertiesR0600(&current_properties, device);
   if (result != hipSuccess) HIP_RETURN_ERROR(result);
-  iree_hip_convert_device_properties_r0600_to_r0000(&current_properties, prop);
-  HIP_RETURN_ERROR(hipSuccess);
+  HIP_RETURN_ERROR(iree_hip_convert_device_properties_r0600_to_r0000(
+      &current_properties, prop));
 }
 
 HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_tR0000* prop,

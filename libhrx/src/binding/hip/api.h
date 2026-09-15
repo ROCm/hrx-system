@@ -407,6 +407,10 @@ typedef enum hipDeviceAttribute_t {
   hipDeviceAttributeMemoryPoolsSupported = 88,
   hipDeviceAttributeVirtualMemoryManagementSupported = 89,
   hipDeviceAttributeHostRegisterSupported = 90,
+  hipDeviceAttributeMemoryPoolSupportedHandleTypes = 91,
+  hipDeviceAttributeHostNumaId = 92,
+  hipDeviceAttributeDmaBufSupported = 93,
+  hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported = 94,
   hipDeviceAttributeCudaCompatibleEnd = 9999,
 
   // AMD-specific attributes (ROCm 7.x uses decimal 10000 base, not 0x10000)
@@ -432,6 +436,8 @@ typedef enum hipDeviceAttribute_t {
   hipDeviceAttributeNumberOfXccs = 10018,
   hipDeviceAttributeMaxAvailableVgprsPerThread = 10019,
   hipDeviceAttributePciChipId = 10020,
+  hipDeviceAttributeExpertSchedMode = 10021,
+  hipDeviceAttributeMaxDynDataPrefetchRegions = 10022,
   hipDeviceAttributeAmdSpecificEnd = 19999
 } hipDeviceAttribute_t;
 
@@ -546,9 +552,6 @@ typedef enum hipLimit_t {
   hipLimitDevRuntimePendingLaunchCount = 0x04,
   hipLimitMaxL2FetchGranularity = 0x05,
   hipLimitPersistingL2CacheSize = 0x06,
-  hipExtLimitScratchMin = 0x1000,
-  hipExtLimitScratchMax = 0x1001,
-  hipExtLimitScratchCurrent = 0x1002,
   hipLimitRange
 } hipLimit_t;
 

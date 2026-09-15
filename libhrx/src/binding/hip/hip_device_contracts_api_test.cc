@@ -315,14 +315,15 @@ TEST_F(HipDeviceContractsApiTest, LimitValidationCoversTheDeclaredDomain) {
             api_.device_get_limit(&value,
                                   static_cast<hipLimit_t>(hipLimitRange + 1)));
   EXPECT_EQ(SIZE_MAX, value);
-  EXPECT_EQ(hipErrorUnsupportedLimit,
-            api_.device_get_limit(&value, hipExtLimitScratchMin));
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.device_get_limit(&value, static_cast<hipLimit_t>(0x1000)));
   EXPECT_EQ(SIZE_MAX, value);
   EXPECT_EQ(hipErrorInvalidValue,
             api_.device_set_limit(static_cast<hipLimit_t>(hipLimitRange + 1),
                                   /*value=*/0));
-  EXPECT_EQ(hipErrorUnsupportedLimit,
-            api_.device_set_limit(hipExtLimitScratchCurrent, /*value=*/0));
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.device_set_limit(static_cast<hipLimit_t>(0x1002),
+                                  /*value=*/0));
 }
 
 TEST_F(HipDeviceContractsApiTest, UnsupportedFunctionsPublishLastError) {

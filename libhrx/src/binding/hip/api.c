@@ -934,11 +934,6 @@ static iree_hal_streaming_context_limit_t iree_hip_limit_to_internal(
       return IREE_HAL_STREAMING_CONTEXT_LIMIT_MAX_L2_FETCH_GRANULARITY;
     case hipLimitPersistingL2CacheSize:
       return IREE_HAL_STREAMING_CONTEXT_LIMIT_PERSISTING_L2_CACHE_SIZE;
-    case hipExtLimitScratchMin:
-    case hipExtLimitScratchMax:
-    case hipExtLimitScratchCurrent:
-      // The streaming context does not expose a mutable queue-scratch budget.
-      return (iree_hal_streaming_context_limit_t)-1;
     default:
       // Return an invalid value that will trigger error in internal API.
       return (iree_hal_streaming_context_limit_t)-1;
@@ -2314,14 +2309,8 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   }
   iree_hip_sanitize_device_name(prop->name);
 
-  iree_status_t arch_status = iree_hal_streaming_device_get_string_property(
-      (iree_hal_streaming_device_ordinal_t)device, "hal.device", "architecture",
-      prop->gcnArchName, sizeof(prop->gcnArchName));
-  if (!iree_status_is_ok(arch_status)) {
-    iree_status_ignore(arch_status);
-    // Fall back to empty name if device name query fails.
-    prop->gcnArchName[0] = '\0';
-  }
+  memcpy(prop->gcnArchName, device_obj->gcn_arch_name,
+         sizeof(device_obj->gcn_arch_name));
 
   const bool is_gfx1100 = strncmp(prop->gcnArchName, "gfx1100", 7) == 0;
   const bool is_gfx942 = strncmp(prop->gcnArchName, "gfx942", 6) == 0;
@@ -2401,6 +2390,9 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
     prop->pciBusID = physical_identity->pci.bus;
     prop->pciDeviceID = physical_identity->pci.device;
     prop->pciDomainID = physical_identity->pci.domain;
+  }
+  if (physical_identity) {
+    prop->asicRevision = (int)physical_identity->revision_id;
   }
   if (physical_identity &&
       iree_all_bits_set(physical_identity->flags,
@@ -2532,10 +2524,16 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
   const bool is_gfx1100 = strncmp(device_obj->gcn_arch_name, "gfx1100", 7) == 0;
   const bool is_gfx942 = strncmp(device_obj->gcn_arch_name, "gfx942", 6) == 0;
   switch (attr) {
+    case hipDeviceAttributeEccEnabled:
+      *value = 0;
+      break;
     case hipDeviceAttributeAccessPolicyMaxWindowSize:
       // A zero maximum advertises that persisting access-policy windows are
       // disabled.
       *value = 0;
+      break;
+    case hipDeviceAttributeAsyncEngineCount:
+      *value = 2;
       break;
     case hipDeviceAttributeMaxThreadsPerBlock:
       *value = device_obj->max_threads_per_block;
@@ -2567,7 +2565,17 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
     case hipDeviceAttributeCanUseHostPointerForRegisteredMem:
       *value = 1;
       break;
+    case hipDeviceAttributeComputeMode:
+    case hipDeviceAttributeComputePreemptionSupported:
+      *value = 0;
+      break;
     case hipDeviceAttributeConcurrentKernels:
+      *value = 1;
+      break;
+    case hipDeviceAttributeDeviceOverlap:
+      *value = 1;
+      break;
+    case hipDeviceAttributeGlobalL1CacheSupported:
       *value = 1;
       break;
     case hipDeviceAttributeHostNativeAtomicSupported:
@@ -2576,6 +2584,15 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       break;
     case hipDeviceAttributeMultiprocessorCount:
       *value = device_obj->multiprocessor_count;
+      break;
+    case hipDeviceAttributeIntegrated:
+    case hipDeviceAttributeIsMultiGpuBoard:
+    case hipDeviceAttributeKernelExecTimeout:
+    case hipDeviceAttributeLuidDeviceNodeMask:
+    case hipDeviceAttributeMultiGpuBoardGroupID:
+    case hipDeviceAttributePageableMemoryAccess:
+    case hipDeviceAttributePageableMemoryAccessUsesHostPageTables:
+      *value = 0;
       break;
     case hipDeviceAttributeComputeCapabilityMajor:
       *value = device_obj->compute_capability_major;
@@ -2588,6 +2605,9 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       break;
     case hipDeviceAttributeMaxRegistersPerBlock:
       *value = device_obj->max_registers_per_block;
+      break;
+    case hipDeviceAttributeMaxRegistersPerMultiprocessor:
+      *value = device_obj->max_registers_per_multiprocessor;
       break;
     case hipDeviceAttributeClockRate:
       *value = is_gfx942 ? 2100000 : (is_gfx1100 ? 1760000 : 1000000);  // kHz
@@ -2610,6 +2630,9 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
     case hipDeviceAttributeMaxSharedMemoryPerMultiprocessor:
       *value = device_obj->max_shared_memory_per_multiprocessor;
       break;
+    case hipDeviceAttributeLocalL1CacheSupported:
+      *value = 1;
+      break;
     case hipDeviceAttributeMaxPitch:
       *value = INT_MAX;
       break;
@@ -2623,6 +2646,18 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       break;
     case hipDeviceAttributeTotalConstantMemory:
       *value = 64 * 1024;
+      break;
+    case hipDeviceAttributeReservedSharedMemPerBlock:
+      *value = 0;
+      break;
+    case hipDeviceAttributeSingleToDoublePrecisionPerfRatio:
+      *value = 32;
+      break;
+    case hipDeviceAttributeSurfaceAlignment:
+    case hipDeviceAttributeTccDriver:
+    case hipDeviceAttributeTextureAlignment:
+    case hipDeviceAttributeTexturePitchAlignment:
+      *value = 0;
       break;
     case hipDeviceAttributePciBusId:
     case hipDeviceAttributePciDeviceId:
@@ -2655,6 +2690,13 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       break;
     case hipDeviceAttributeMemoryPoolsSupported:
       *value = iree_hip_memory_pools_supported() ? 1 : 0;
+      break;
+    case hipDeviceAttributeMemoryPoolSupportedHandleTypes:
+      // No cross-process memory-pool handle type is exposed by this binding.
+      *value = 0;
+      break;
+    case hipDeviceAttributeVirtualMemoryManagementSupported:
+      *value = 1;
       break;
     case hipDeviceAttributeConcurrentManagedAccess:
       *value = 1;
@@ -2708,6 +2750,56 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       break;
     case hipDeviceAttributeNumberOfXccs:
       *value = is_gfx942 ? 8 : (is_gfx1100 ? 1 : 0);
+      break;
+    case hipDeviceAttributeClockInstructionRate:
+      *value = is_gfx1100 ? 1000000 : 0;
+      break;
+    case hipDeviceAttributeHdpMemFlushCntl:
+    case hipDeviceAttributeHdpRegFlushCntl: {
+      // These attributes use the historical pointer-valued output ABI.
+      unsigned int* register_address = NULL;
+      memcpy(value, &register_address, sizeof(register_address));
+      break;
+    }
+    case hipDeviceAttributeCooperativeMultiDeviceUnmatchedFunc:
+    case hipDeviceAttributeCooperativeMultiDeviceUnmatchedGridDim:
+    case hipDeviceAttributeCooperativeMultiDeviceUnmatchedBlockDim:
+    case hipDeviceAttributeCooperativeMultiDeviceUnmatchedSharedMem:
+      *value = 0;
+      break;
+    case hipDeviceAttributeAsicRevision: {
+      const iree_hal_physical_device_identity_t* physical_identity =
+          iree_hip_physical_device_identity(device_obj);
+      *value = physical_identity ? (int)physical_identity->revision_id : 0;
+      break;
+    }
+    case hipDeviceAttributeMaxAvailableVgprsPerThread:
+      // The generic device specification does not currently expose a
+      // per-thread VGPR limit.
+      *value = 0;
+      break;
+    case hipDeviceAttributePciChipId: {
+      const iree_hal_physical_device_identity_t* physical_identity =
+          iree_hip_physical_device_identity(device_obj);
+      *value = physical_identity ? (int)physical_identity->device_id : 0;
+      break;
+    }
+    case hipDeviceAttributeHostNumaId: {
+      const iree_hal_physical_device_identity_t* physical_identity =
+          iree_hip_physical_device_identity(device_obj);
+      *value = physical_identity &&
+                       iree_all_bits_set(
+                           physical_identity->flags,
+                           IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NUMA_NODE)
+                   ? (int)physical_identity->numa.node_id
+                   : -1;
+      break;
+    }
+    case hipDeviceAttributeDmaBufSupported:
+    case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
+    case hipDeviceAttributeExpertSchedMode:
+    case hipDeviceAttributeMaxDynDataPrefetchRegions:
+      *value = 0;
       break;
     case hipDeviceAttributeMaxTexture1DWidth:
     case hipDeviceAttributeMaxTexture1DLinear:
