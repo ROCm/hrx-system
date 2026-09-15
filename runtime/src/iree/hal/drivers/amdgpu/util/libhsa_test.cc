@@ -37,6 +37,17 @@ TEST(LibHSATest, MissingRequiredSymbolsAreNotUnavailable) {
   iree_hal_amdgpu_libhsa_deinitialize(&libhsa);
 }
 
+TEST(LibHSATest, DeviceFailureStatusesPreserveCause) {
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
+                        iree_status_from_hsa_status(__FILE__, __LINE__,
+                                                    HSA_STATUS_ERROR_EXCEPTION,
+                                                    "exception", nullptr));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      iree_status_from_hsa_status(__FILE__, __LINE__, HSA_STATUS_ERROR_FATAL,
+                                  "fatal", nullptr));
+}
+
 // Tests that we can find, load, and unload HSA.
 // In ASAN builds it tests that we don't leak the library (though ROCR itself
 // leaks a bunch). If the library cannot be found then we skip the test so that

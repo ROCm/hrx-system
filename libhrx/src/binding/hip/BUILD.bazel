@@ -259,6 +259,19 @@ hrx_cc_library(
 )
 
 hrx_cc_library(
+    name = "status_conversion",
+    srcs = ["status_conversion.c"],
+    hdrs = [
+        "api.h",
+        "status_conversion.h",
+    ],
+    includes = ["../.."],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+hrx_cc_library(
     name = "device_properties",
     srcs = ["device_properties.c"],
     hdrs = ["device_properties.h"],
@@ -306,6 +319,7 @@ hrx_cc_shared_library(
         ":handle_registry",
         ":launch_params",
         ":spirv_linker_compiler",
+        ":status_conversion",
         ":stream",
         "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
@@ -641,6 +655,16 @@ hrx_cc_test(
     deps = [
         ":error_state",
         "//build_tools/bazel:pthreads",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "status_conversion_test",
+    srcs = ["status_conversion_test.cc"],
+    deps = [
+        ":status_conversion",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

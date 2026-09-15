@@ -1,0 +1,41 @@
+// Copyright 2026 The HRX Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "binding/hip/status_conversion.h"
+
+hipError_t iree_status_to_hip_result(iree_status_t status) {
+  if (iree_status_is_ok(status)) return hipSuccess;
+
+  const iree_status_code_t code = iree_status_consume_code(status);
+  switch (code) {
+    case IREE_STATUS_INVALID_ARGUMENT:
+    case IREE_STATUS_OUT_OF_RANGE:
+      return hipErrorInvalidValue;
+    case IREE_STATUS_RESOURCE_EXHAUSTED:
+      return hipErrorOutOfMemory;
+    case IREE_STATUS_NOT_FOUND:
+      return hipErrorNotFound;
+    case IREE_STATUS_PERMISSION_DENIED:
+      return hipErrorInvalidContext;
+    case IREE_STATUS_UNIMPLEMENTED:
+      return hipErrorNotSupported;
+    case IREE_STATUS_UNAVAILABLE:
+      return hipErrorNotReady;
+    case IREE_STATUS_FAILED_PRECONDITION:
+      return hipErrorNotInitialized;
+    // Device-side memory access faults are reported as data loss by HAL
+    // backends: the operation's data is no longer trustworthy and the device
+    // context cannot continue safely.
+    case IREE_STATUS_DATA_LOSS:
+      return hipErrorIllegalAddress;
+    // A device execution failure that is not attributable to a memory access
+    // aborts the submitted operation without identifying an illegal address.
+    case IREE_STATUS_ABORTED:
+      return hipErrorLaunchFailure;
+    default:
+      return hipErrorUnknown;
+  }
+}

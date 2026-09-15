@@ -35,6 +35,7 @@
 #include "binding/hip/function_handle.h"
 #include "binding/hip/handle_registry.h"
 #include "binding/hip/launch_params.h"
+#include "binding/hip/status_conversion.h"
 #include "binding/hip/stream.h"
 #include "common/direct_transfer.h"
 #include "common/graph.h"
@@ -185,7 +186,6 @@ typedef struct hrx_hip_batch_mem_op_node_params_t {
 } hrx_hip_batch_mem_op_node_params_t;
 
 static bool iree_hip_graph_handle_is_live(hipGraph_t graph);
-static hipError_t iree_status_to_hip_result(iree_status_t status);
 static hipError_t iree_hip_resolve_function_symbol(
     iree_hal_streaming_context_t* context, const void* function_address,
     iree_hal_streaming_symbol_t** out_symbol,
@@ -1112,39 +1112,6 @@ static hipError_t iree_hip_get_per_thread_stream_state(
 //===----------------------------------------------------------------------===//
 // Status conversion
 //===----------------------------------------------------------------------===//
-
-static hipError_t iree_status_to_hip_result(iree_status_t status) {
-  if (iree_status_is_ok(status)) {
-    return hipSuccess;
-  }
-
-  // Map IREE status codes to HIP error codes.
-  iree_status_code_t code = iree_status_code(status);
-  iree_status_free(status);
-
-  switch (code) {
-    case IREE_STATUS_INVALID_ARGUMENT:
-      return hipErrorInvalidValue;
-    case IREE_STATUS_OUT_OF_RANGE:
-      return hipErrorInvalidValue;
-    case IREE_STATUS_RESOURCE_EXHAUSTED:
-      return hipErrorOutOfMemory;
-    case IREE_STATUS_NOT_FOUND:
-      return hipErrorNotFound;
-    case IREE_STATUS_PERMISSION_DENIED:
-      return hipErrorInvalidContext;
-    case IREE_STATUS_UNIMPLEMENTED:
-      return hipErrorNotSupported;
-    case IREE_STATUS_UNAVAILABLE:
-      return hipErrorNotReady;
-    case IREE_STATUS_FAILED_PRECONDITION:
-      return hipErrorNotInitialized;
-    case IREE_STATUS_ABORTED:
-      return hipErrorIllegalAddress;
-    default:
-      return hipErrorUnknown;
-  }
-}
 
 hipError_t iree_hip_status_to_result(iree_status_t status) {
   return iree_status_to_hip_result(status);

@@ -115,7 +115,7 @@ static iree_status_t iree_hal_amdgpu_system_event_make_status(
   switch (event->event_type) {
     case HSA_AMD_GPU_MEMORY_FAULT_EVENT:
       return iree_make_status(
-          IREE_STATUS_ABORTED,
+          IREE_STATUS_DATA_LOSS,
           "AMDGPU memory access fault at device address 0x%016" PRIx64
           " (reason mask 0x%08" PRIx32 ")",
           event->memory_fault.virtual_address,
